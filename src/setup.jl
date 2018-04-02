@@ -6,6 +6,11 @@ export
     readcoordinates,
     Simulation
 
+struct Atomtype
+    σ::Float64
+    ϵ::Float64
+end
+
 struct Bondtype
     b0::Float64
     kb::Float64
@@ -25,10 +30,11 @@ end
 
 struct Forcefield
     name::String
+    atomtypes::Dict{String, Atomtype}
     bondtypes::Dict{String, Bondtype}
     angletypes::Dict{String, Angletype}
     dihedraltypes::Dict{String, Dihedraltype}
-    atomtypes::Dict{String, String}
+    atomnames::Dict{String, String}
 end
 
 struct Atom
@@ -64,6 +70,7 @@ struct Molecule
     bonds::Vector{Bond}
     angles::Vector{Angle}
     dihedrals::Vector{Dihedral}
+    nb_matrix::BitArray{2}
 end
 
 mutable struct Coordinates
@@ -103,10 +110,11 @@ end
 
 # Read a Gromacs topology flat file
 function readtopology(in_file::AbstractString)
+    atomtypes = Dict{String, Atomtype}()
     bondtypes = Dict{String, Bondtype}()
     angletypes = Dict{String, Angletype}()
     dihedraltypes = Dict{String, Dihedraltype}()
-    atomtypes = Dict{String, String}()
+    atomnames = Dict{String, String}()
     name = "?"
     atoms = Atom[]
     bonds = Bond[]
@@ -135,10 +143,11 @@ function readtopology(in_file::AbstractString)
             f2 = 4*f4 - parse(Float64, c[8])
             f1 = 3*f3 - 2*parse(Float64, c[7])
             dihedraltypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = Dihedraltype(f1, f2, f3, f4)
-        elseif current_field == "atomtypes"
-            atomtypes[c[1]] = c[2]
+        elseif current_field == "atomtypes" && length(c) >= 8
+            atomnames[c[1]] = c[2]
+            atomtypes[c[2]] = Atomtype(parse(Float64, c[7]), parse(Float64, c[8]))
         elseif current_field == "atoms"
-            push!(atoms, Atom(atomtypes[c[2]], c[5], parse(Int, c[3]), c[4], parse(Float64, c[7]), parse(Float64, c[8])))
+            push!(atoms, Atom(atomnames[c[2]], c[5], parse(Int, c[3]), c[4], parse(Float64, c[7]), parse(Float64, c[8])))
         elseif current_field == "bonds"
             push!(bonds, Bond(parse(Int, c[1]), parse(Int, c[2])))
         elseif current_field == "angles"
@@ -188,7 +197,30 @@ function readtopology(in_file::AbstractString)
             end
         end
     end
-    return Forcefield("OPLS", bondtypes, angletypes, dihedraltypes, atomtypes), Molecule(name, atoms, bonds, angles, retained_dihedrals)
+
+    # Calculate matrix of pairs eligible for non-bonded interactions
+    n_atoms = length(atoms)
+    nb_matrix = trues(n_atoms, n_atoms)
+    for i in 1:n_atoms
+        nb_matrix[i, i] = false
+    end
+    for b in bonds
+        nb_matrix[b.atom_i, b.atom_j] = false
+        nb_matrix[b.atom_j, b.atom_i] = false
+    end
+    for a in angles
+        # Assume bonding is already specified
+        nb_matrix[a.atom_i, a.atom_k] = false
+        nb_matrix[a.atom_k, a.atom_i] = false
+    end
+    for d in retained_dihedrals
+        # Assume bonding and angles are already specified
+        nb_matrix[d.atom_i, d.atom_l] = false
+        nb_matrix[d.atom_l, d.atom_i] = false
+    end
+
+    return Forcefield("OPLS", atomtypes, bondtypes, angletypes, dihedraltypes, atomnames),
+        Molecule(name, atoms, bonds, angles, retained_dihedrals, nb_matrix)
 end
 
 #=

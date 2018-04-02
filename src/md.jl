@@ -86,6 +86,19 @@ function forcedihedral(coords_one::Coordinates,
     return fa..., fb..., fc..., fd...
 end
 
+function forcelennardjones(coords_one::Coordinates,
+                coords_two::Coordinates,
+                atomtype_one::Atomtype,
+                atomtype_two::Atomtype)
+    σ = sqrt(atomtype_one.σ * atomtype_two.σ)
+    ϵ = sqrt(atomtype_one.ϵ * atomtype_two.ϵ)
+    ab = vector(coords_one, coords_two)
+    r = norm(ab)
+    fb = ((24 * ϵ) / (r^2)) * (2 * (σ / r)^12 - (σ / r)^6) * ab
+    fa = -fb
+    return fa..., fb...
+end
+
 function update_accelerations!(accels::Vector{Acceleration},
                 universe::Universe,
                 forcefield::Forcefield)
@@ -159,9 +172,18 @@ function update_accelerations!(accels::Vector{Acceleration},
     # Van der Waal's forces
     # Check non-bonded/angles
     for (i, a1) in enumerate(universe.molecule.atoms)
-        for (j, a2) in enumerate(universe.molecule.atoms)
-            if i != j
-
+        for j in 1:(i-1)
+            if universe.molecule.nb_matrix[i,j]
+                a2 = universe.molecule.atoms[j]
+                d1x, d1y, d1z, d2x, d2y, d2z = forcelennardjones(
+                    universe.coords[i], universe.coords[j],
+                    forcefield.atomtypes[a1.attype], forcefield.atomtypes[a2.attype])
+                accels[i].x += d1x
+                accels[i].y += d1y
+                accels[i].z += d1z
+                accels[j].x += d2x
+                accels[j].y += d2y
+                accels[j].z += d2z
             end
         end
     end
