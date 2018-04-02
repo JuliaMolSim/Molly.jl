@@ -2,6 +2,7 @@
 # See https://www.saylor.org/site/wp-content/uploads/2011/06/MA221-6.1.pdf for
 #   integration algorithm - used shorter second version
 # See https://udel.edu/~arthij/MD.pdf for information on forces
+# See https://arxiv.org/pdf/1401.1181.pdf for applying forces to atoms
 
 export
     simulate!
@@ -45,7 +46,29 @@ function forcebond(coords_one::Coordinates, coords_two::Coordinates, bondtype::B
     return f*dx, f*dy, f*dz, -f*dx, -f*dy, -f*dz
 end
 
-function update_accelerations!(accels::Vector{Acceleration}, universe::Universe, forcefield::Forcefield)
+vector(coords_one::Coordinates, coords_two::Coordinates) = [
+        coords_two.x - coords_one.x,
+        coords_two.y - coords_one.y,
+        coords_two.z - coords_one.z]
+
+function forceangle(coords_one::Coordinates,
+                coords_two::Coordinates,
+                coords_three::Coordinates,
+                angletype::Angletype)
+    ba = vector(coords_two, coords_one)
+    bc = vector(coords_two, coords_three)
+    pa = normalize(ba × (ba × bc))
+    pc = normalize(-bc × (ba × bc))
+    angle_term = -angletype.cth * (acos(dot(ba, bc) / (norm(ba) * norm(bc))) - angletype.th0)
+    fa = (angle_term / norm(ba)) * pa
+    fc = (angle_term / norm(bc)) * pc
+    fb = -fa - fc
+    return fa[1], fa[2], fa[3], fb[1], fb[2], fb[3], fc[1], fc[2], fc[3]
+end
+
+function update_accelerations!(accels::Vector{Acceleration},
+                universe::Universe,
+                forcefield::Forcefield)
     # Clear accelerations
     for i in 1:length(accels)
         accels[i].x = 0.0
@@ -54,13 +77,15 @@ function update_accelerations!(accels::Vector{Acceleration}, universe::Universe,
     end
 
     # Bond forces
+    atoms = universe.molecule.atoms
     for b in universe.molecule.bonds
-        if haskey(forcefield.bondtypes, "$(universe.molecule.atoms[b.atom_i].attype)/$(universe.molecule.atoms[b.atom_j].attype)")
-            bondtype = forcefield.bondtypes["$(universe.molecule.atoms[b.atom_i].attype)/$(universe.molecule.atoms[b.atom_j].attype)"]
+        if haskey(forcefield.bondtypes, "$(atoms[b.atom_i].attype)/$(atoms[b.atom_j].attype)")
+            bondtype = forcefield.bondtypes["$(atoms[b.atom_i].attype)/$(atoms[b.atom_j].attype)"]
         else
-            bondtype = forcefield.bondtypes["$(universe.molecule.atoms[b.atom_j].attype)/$(universe.molecule.atoms[b.atom_i].attype)"]
+            bondtype = forcefield.bondtypes["$(atoms[b.atom_j].attype)/$(atoms[b.atom_i].attype)"]
         end
-        d1x, d1y, d1z, d2x, d2y, d2z = forcebond(universe.coords[b.atom_i], universe.coords[b.atom_j], bondtype)
+        d1x, d1y, d1z, d2x, d2y, d2z = forcebond(
+                universe.coords[b.atom_i], universe.coords[b.atom_j], bondtype)
         accels[b.atom_i].x += d1x
         accels[b.atom_i].y += d1y
         accels[b.atom_i].z += d1z
@@ -71,7 +96,22 @@ function update_accelerations!(accels::Vector{Acceleration}, universe::Universe,
 
     # Angles forces
     for a in universe.molecule.angles
-
+        if haskey(forcefield.angletypes, "$(atoms[a.atom_i].attype)/$(atoms[a.atom_j].attype)/$(atoms[a.atom_k].attype)")
+            angletype = forcefield.angletypes["$(atoms[a.atom_i].attype)/$(atoms[a.atom_j].attype)/$(atoms[a.atom_k].attype)"]
+        else
+            angletype = forcefield.angletypes["$(atoms[a.atom_k].attype)/$(atoms[a.atom_j].attype)/$(atoms[a.atom_i].attype)"]
+        end
+        d1x, d1y, d1z, d2x, d2y, d2z, d3x, d3y, d3z = forceangle(
+                universe.coords[a.atom_i], universe.coords[a.atom_j], universe.coords[a.atom_k], angletype)
+        accels[a.atom_i].x += d1x
+        accels[a.atom_i].y += d1y
+        accels[a.atom_i].z += d1z
+        accels[a.atom_j].x += d2x
+        accels[a.atom_j].y += d2y
+        accels[a.atom_j].z += d2z
+        accels[a.atom_k].x += d3x
+        accels[a.atom_k].y += d3y
+        accels[a.atom_k].z += d3z
     end
 
     # Dihedral forces

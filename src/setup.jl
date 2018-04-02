@@ -124,7 +124,7 @@ function readtopology(in_file::AbstractString)
             if current_field == "bondtypes"
                 bondtypes["$(c[1])/$(c[2])"] = Bondtype(parse(Float64, c[4]), parse(Float64, c[5]))
             elseif current_field == "angletypes"
-                angletypes["$(c[1])/$(c[2])/$(c[3])"] = Angletype(parse(Float64, c[5]), parse(Float64, c[6]))
+                angletypes["$(c[1])/$(c[2])/$(c[3])"] = Angletype(deg2rad(parse(Float64, c[5])), parse(Float64, c[6]))
             elseif current_field == "dihedraltypes" && c[1] != "#define"
                 dihedraltypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = Dihedraltype([parse(Float64, i) for i in c[6:11]])
             elseif current_field == "atomtypes"
