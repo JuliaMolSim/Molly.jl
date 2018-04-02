@@ -17,7 +17,10 @@ struct Angletype
 end
 
 struct Dihedraltype
-    coeffs::Vector{Float64}
+    f1::Float64
+    f2::Float64
+    f3::Float64
+    f4::Float64
 end
 
 struct Forcefield
@@ -100,49 +103,92 @@ end
 
 # Read a Gromacs topology flat file
 function readtopology(in_file::AbstractString)
-    open(in_file) do f
-        bondtypes = Dict{String, Bondtype}()
-        angletypes = Dict{String, Angletype}()
-        dihedraltypes = Dict{String, Dihedraltype}()
-        atomtypes = Dict{String, String}()
-        name = "?"
-        atoms = Atom[]
-        bonds = Bond[]
-        angles = Angle[]
-        dihedrals = Dihedral[]
-        current_field = ""
-        for l in eachline(f)
-            sl = strip(l)
-            if length(sl) == 0 || startswith(sl, ';')
-                continue
+    bondtypes = Dict{String, Bondtype}()
+    angletypes = Dict{String, Angletype}()
+    dihedraltypes = Dict{String, Dihedraltype}()
+    atomtypes = Dict{String, String}()
+    name = "?"
+    atoms = Atom[]
+    bonds = Bond[]
+    angles = Angle[]
+    dihedrals = Dihedral[]
+    current_field = ""
+    for l in eachline(in_file)
+        sl = strip(l)
+        if length(sl) == 0 || startswith(sl, ';')
+            continue
+        end
+        if startswith(sl, '[') && endswith(sl, ']')
+            current_field = strip(sl[2:end-1])
+            continue
+        end
+        c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
+        if current_field == "bondtypes"
+            bondtypes["$(c[1])/$(c[2])"] = Bondtype(parse(Float64, c[4]), parse(Float64, c[5]))
+        elseif current_field == "angletypes"
+            # Convert th0 to radians
+            angletypes["$(c[1])/$(c[2])/$(c[3])"] = Angletype(deg2rad(parse(Float64, c[5])), parse(Float64, c[6]))
+        elseif current_field == "dihedraltypes" && c[1] != "#define"
+            # Convert back to OPLS types
+            f4 = parse(Float64, c[10]) / -4
+            f3 = parse(Float64, c[9]) / -2
+            f2 = 4*f4 - parse(Float64, c[8])
+            f1 = 3*f3 - 2*parse(Float64, c[7])
+            dihedraltypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = Dihedraltype(f1, f2, f3, f4)
+        elseif current_field == "atomtypes"
+            atomtypes[c[1]] = c[2]
+        elseif current_field == "atoms"
+            push!(atoms, Atom(atomtypes[c[2]], c[5], parse(Int, c[3]), c[4], parse(Float64, c[7]), parse(Float64, c[8])))
+        elseif current_field == "bonds"
+            push!(bonds, Bond(parse(Int, c[1]), parse(Int, c[2])))
+        elseif current_field == "angles"
+            push!(angles, Angle(parse(Int, c[1]), parse(Int, c[2]), parse(Int, c[3])))
+        elseif current_field == "dihedrals"
+            push!(dihedrals, Dihedral(parse(Int, c[1]), parse(Int, c[2]), parse(Int, c[3]), parse(Int, c[4])))
+        elseif current_field == "system"
+            name = rstrip(first(split(sl, ";", limit=2)))
+        end
+    end
+
+    # Add new dihedral types to match wildcards
+    retained_dihedrals = Dihedral[]
+    for d in dihedrals
+        at_types = [atoms[x].attype for x in [d.atom_i, d.atom_j, d.atom_k, d.atom_l]]
+        desired_key = join(at_types, "/")
+        if haskey(dihedraltypes, desired_key)
+            push!(retained_dihedrals, d)
+        else
+            best_score = 0
+            best_key = ""
+            for k in keys(dihedraltypes)
+                c = split(k, "/")
+                for a in (c, reverse(c))
+                    valid = true
+                    score = 0
+                    for (i, v) in enumerate(a)
+                        if v == at_types[i]
+                            score += 1
+                        elseif v != "X"
+                            valid = false
+                            break
+                        end
+                    end
+                    if valid && (score > best_score)
+                        best_score = score
+                        best_key = k
+                    end
+                end
             end
-            if startswith(sl, '[') && endswith(sl, ']')
-                current_field = strip(sl[2:end-1])
-                continue
-            end
-            c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
-            if current_field == "bondtypes"
-                bondtypes["$(c[1])/$(c[2])"] = Bondtype(parse(Float64, c[4]), parse(Float64, c[5]))
-            elseif current_field == "angletypes"
-                angletypes["$(c[1])/$(c[2])/$(c[3])"] = Angletype(deg2rad(parse(Float64, c[5])), parse(Float64, c[6]))
-            elseif current_field == "dihedraltypes" && c[1] != "#define"
-                dihedraltypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = Dihedraltype([parse(Float64, i) for i in c[6:11]])
-            elseif current_field == "atomtypes"
-                atomtypes[c[1]] = c[2]
-            elseif current_field == "atoms"
-                push!(atoms, Atom(atomtypes[c[2]], c[5], parse(Int, c[3]), c[4], parse(Float64, c[7]), parse(Float64, c[8])))
-            elseif current_field == "bonds"
-                push!(bonds, Bond(parse(Int, c[1]), parse(Int, c[2])))
-            elseif current_field == "angles"
-                push!(angles, Angle(parse(Int, c[1]), parse(Int, c[2]), parse(Int, c[3])))
-            elseif current_field == "dihedrals"
-                push!(dihedrals, Dihedral(parse(Int, c[1]), parse(Int, c[2]), parse(Int, c[3]), parse(Int, c[4])))
-            elseif current_field == "system"
-                name = rstrip(first(split(sl, ";", limit=2)))
+            if best_key == ""
+                #println("Could not assign proper dihedral for $desired_key")
+            else
+                #println("Assigned dihedral for $desired_key")
+                dihedraltypes[desired_key] = dihedraltypes[best_key]
+                push!(retained_dihedrals, d)
             end
         end
-        return Forcefield("OPLS", bondtypes, angletypes, dihedraltypes, atomtypes), Molecule(name, atoms, bonds, angles, dihedrals)
     end
+    return Forcefield("OPLS", bondtypes, angletypes, dihedraltypes, atomtypes), Molecule(name, atoms, bonds, angles, retained_dihedrals)
 end
 
 #=
@@ -161,7 +207,7 @@ atomtypes - done
 moleculetype - ignore for now
 atoms - done
 bonds - done
-pairs - TODO
+pairs - TODO, explicit non-bonded pairs
 angles - done
 dihedrals - done
 dihedrals - dupe

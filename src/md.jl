@@ -37,19 +37,18 @@ function update_velocities!(velocities::Vector{Velocity},
     return velocities
 end
 
-function forcebond(coords_one::Coordinates, coords_two::Coordinates, bondtype::Bondtype)
-    dx = coords_two.x-coords_one.x
-    dy = coords_two.y-coords_one.y
-    dz = coords_two.z-coords_one.z
-    r = sqrt(dx^2 + dy^2 + dz^2)
-    f = bondtype.kb * (r - bondtype.b0)
-    return f*dx, f*dy, f*dz, -f*dx, -f*dy, -f*dz
-end
-
 vector(coords_one::Coordinates, coords_two::Coordinates) = [
         coords_two.x - coords_one.x,
         coords_two.y - coords_one.y,
         coords_two.z - coords_one.z]
+
+function forcebond(coords_one::Coordinates, coords_two::Coordinates, bondtype::Bondtype)
+    ab = vector(coords_one, coords_two)
+    c = bondtype.kb * (norm(ab) - bondtype.b0)
+    fa = c*normalize(ab)
+    fb = -fa
+    return fa..., fb...
+end
 
 function forceangle(coords_one::Coordinates,
                 coords_two::Coordinates,
@@ -63,7 +62,28 @@ function forceangle(coords_one::Coordinates,
     fa = (angle_term / norm(ba)) * pa
     fc = (angle_term / norm(bc)) * pc
     fb = -fa - fc
-    return fa[1], fa[2], fa[3], fb[1], fb[2], fb[3], fc[1], fc[2], fc[3]
+    return fa..., fb..., fc...
+end
+
+function forcedihedral(coords_one::Coordinates,
+                coords_two::Coordinates,
+                coords_three::Coordinates,
+                coords_four::Coordinates,
+                dihedraltype::Dihedraltype)
+    ba = vector(coords_two, coords_one)
+    bc = vector(coords_two, coords_three)
+    dc = vector(coords_four, coords_three)
+    p1 = normalize(ba × bc)
+    p2 = normalize(-dc × -bc)
+    θ = atan2(dot((-ba × bc) × (bc × -dc), normalize(bc)), dot(-ba × bc, bc × -dc))
+    angle_term = 0.5*(dihedraltype.f1*sin(θ) - 2*dihedraltype.f2*sin(2*θ) + 3*dihedraltype.f3*sin(3*θ))
+    fa = (angle_term / (norm(ba) * sin(acos(dot(ba, bc) / (norm(ba) * norm(bc)))))) * p1
+    fd = (angle_term / (norm(dc) * sin(acos(dot(bc, dc) / (norm(bc) * norm(dc)))))) * p2
+    oc = 0.5 * bc
+    tc = -(oc × fd + 0.5 * (-dc × fd) + 0.5 * (ba × fa))
+    fc = (1 / dot(oc, oc)) * (tc × oc)
+    fb = -fa - fc -fd
+    return fa..., fb..., fc..., fd...
 end
 
 function update_accelerations!(accels::Vector{Acceleration},
@@ -85,7 +105,7 @@ function update_accelerations!(accels::Vector{Acceleration},
             bondtype = forcefield.bondtypes["$(atoms[b.atom_j].attype)/$(atoms[b.atom_i].attype)"]
         end
         d1x, d1y, d1z, d2x, d2y, d2z = forcebond(
-                universe.coords[b.atom_i], universe.coords[b.atom_j], bondtype)
+            universe.coords[b.atom_i], universe.coords[b.atom_j], bondtype)
         accels[b.atom_i].x += d1x
         accels[b.atom_i].y += d1y
         accels[b.atom_i].z += d1z
@@ -102,7 +122,7 @@ function update_accelerations!(accels::Vector{Acceleration},
             angletype = forcefield.angletypes["$(atoms[a.atom_k].attype)/$(atoms[a.atom_j].attype)/$(atoms[a.atom_i].attype)"]
         end
         d1x, d1y, d1z, d2x, d2y, d2z, d3x, d3y, d3z = forceangle(
-                universe.coords[a.atom_i], universe.coords[a.atom_j], universe.coords[a.atom_k], angletype)
+            universe.coords[a.atom_i], universe.coords[a.atom_j], universe.coords[a.atom_k], angletype)
         accels[a.atom_i].x += d1x
         accels[a.atom_i].y += d1y
         accels[a.atom_i].z += d1z
@@ -116,7 +136,21 @@ function update_accelerations!(accels::Vector{Acceleration},
 
     # Dihedral forces
     for d in universe.molecule.dihedrals
-
+        dihedraltype = forcefield.dihedraltypes["$(atoms[d.atom_i].attype)/$(atoms[d.atom_j].attype)/$(atoms[d.atom_k].attype)/$(atoms[d.atom_l].attype)"]
+        d1x, d1y, d1z, d2x, d2y, d2z, d3x, d3y, d3z, d4x, d4y, d4z = forcedihedral(
+            universe.coords[d.atom_i], universe.coords[d.atom_j], universe.coords[d.atom_k], universe.coords[d.atom_l], dihedraltype)
+        accels[d.atom_i].x += d1x
+        accels[d.atom_i].y += d1y
+        accels[d.atom_i].z += d1z
+        accels[d.atom_j].x += d2x
+        accels[d.atom_j].y += d2y
+        accels[d.atom_j].z += d2z
+        accels[d.atom_k].x += d3x
+        accels[d.atom_k].y += d3y
+        accels[d.atom_k].z += d3z
+        accels[d.atom_l].x += d4x
+        accels[d.atom_l].y += d4y
+        accels[d.atom_l].z += d4z
     end
 
     # Electrostatic forces
