@@ -45,6 +45,11 @@ vector(coords_one::Coordinates, coords_two::Coordinates) = [
         coords_two.y - coords_one.y,
         coords_two.z - coords_one.z]
 
+sqdist(coords_one::Coordinates, coords_two::Coordinates) =
+            (coords_two.x - coords_one.x) ^ 2 +
+            (coords_two.y - coords_one.y) ^ 2 +
+            (coords_two.z - coords_one.z) ^ 2
+
 function forcebond(coords_one::Coordinates, coords_two::Coordinates, bondtype::Bondtype)
     ab = vector(coords_one, coords_two)
     c = bondtype.kb * (norm(ab) - bondtype.b0)
@@ -98,8 +103,7 @@ function forcelennardjones(coords_one::Coordinates,
     ab = vector(coords_one, coords_two)
     r = norm(ab)
     fb = ((24 * ϵ) / (r^2)) * (2 * (σ / r)^12 - (σ / r)^6) * ab
-    fa = -fb
-    return fa..., fb...
+    return -fb[1], -fb[2], -fb[3], fb[1], fb[2], fb[3]
 end
 
 function forcecoulomb(coords_one::Coordinates,
@@ -108,8 +112,7 @@ function forcecoulomb(coords_one::Coordinates,
                 charge_two::Real)
     ab = vector(coords_one, coords_two)
     fb = (coulomb_const * charge_one * charge_two / (norm(ab)^3)) * ab
-    fa = -fb
-    return fa..., fb...
+    return -fb[1], -fb[2], -fb[3], fb[1], fb[2], fb[3]
 end
 
 function update_accelerations!(accels::Vector{Acceleration},
@@ -217,8 +220,7 @@ function update_neighbours!(universe::Universe)
     for i in 1:length(universe.coords)
         for j in 1:(i-1)
             if i > matrix_solvent_limit || universe.molecule.nb_matrix[i,j]
-                vec = vector(universe.coords[i], universe.coords[j])
-                universe.neighbour_list[i,j] = dot(vec, vec) < sqdist_cutoff
+                universe.neighbour_list[i,j] = sqdist(universe.coords[i], universe.coords[j]) < sqdist_cutoff
             else
                 universe.neighbour_list[i,j] = false
             end
