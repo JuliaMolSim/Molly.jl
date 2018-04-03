@@ -7,6 +7,8 @@
 export
     simulate!
 
+const coulomb_const = 138.935458
+
 mutable struct Acceleration
     x::Float64
     y::Float64
@@ -99,6 +101,16 @@ function forcelennardjones(coords_one::Coordinates,
     return fa..., fb...
 end
 
+function forcecoulomb(coords_one::Coordinates,
+                coords_two::Coordinates,
+                charge_one::Real,
+                charge_two::Real)
+    ab = vector(coords_one, coords_two)
+    fb = (coulomb_const * charge_one * charge_two / (norm(ab)^3)) * ab
+    fa = -fb
+    return fa..., fb...
+end
+
 function update_accelerations!(accels::Vector{Acceleration},
                 universe::Universe,
                 forcefield::Forcefield)
@@ -166,18 +178,28 @@ function update_accelerations!(accels::Vector{Acceleration},
         accels[d.atom_l].z += d4z
     end
 
-    # Electrostatic forces
-    # Check non-bonded/angles
-
-    # Van der Waal's forces
-    # Check non-bonded/angles
+    # Non-bonding matrix not present for solvent molecules
+    matrix_solvent_limit = size(universe.molecule.nb_matrix, 1)
     for (i, a1) in enumerate(universe.molecule.atoms)
+        println("Atom $i")
         for j in 1:(i-1)
-            if universe.molecule.nb_matrix[i,j]
+            if i > matrix_solvent_limit || universe.molecule.nb_matrix[i,j]
                 a2 = universe.molecule.atoms[j]
+
+                # Van der Waal's forces
                 d1x, d1y, d1z, d2x, d2y, d2z = forcelennardjones(
                     universe.coords[i], universe.coords[j],
                     forcefield.atomtypes[a1.attype], forcefield.atomtypes[a2.attype])
+                accels[i].x += d1x
+                accels[i].y += d1y
+                accels[i].z += d1z
+                accels[j].x += d2x
+                accels[j].y += d2y
+                accels[j].z += d2z
+
+                # Electrostatic forces
+                d1x, d1y, d1z, d2x, d2y, d2z = forcecoulomb(
+                    universe.coords[i], universe.coords[j], a1.charge, a2.charge)
                 accels[i].x += d1x
                 accels[i].y += d1y
                 accels[i].z += d1z

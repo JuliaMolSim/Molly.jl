@@ -2,11 +2,12 @@
 #   http://manual.gromacs.org/documentation/2016/user-guide/file-formats.html
 
 export
-    readtopology,
-    readcoordinates,
+    readinputs,
     Simulation
 
 struct Atomtype
+    mass::Float64
+    charge::Float64
     σ::Float64
     ϵ::Float64
 end
@@ -109,7 +110,8 @@ function Base.show(io::IO, s::Simulation)
 end
 
 # Read a Gromacs topology flat file
-function readtopology(in_file::AbstractString)
+function readinputs(top_file::AbstractString, coord_file::AbstractString)
+    # Read forcefield and topology file
     atomtypes = Dict{String, Atomtype}()
     bondtypes = Dict{String, Bondtype}()
     angletypes = Dict{String, Angletype}()
@@ -121,7 +123,7 @@ function readtopology(in_file::AbstractString)
     angles = Angle[]
     dihedrals = Dihedral[]
     current_field = ""
-    for l in eachline(in_file)
+    for l in eachline(top_file)
         sl = strip(l)
         if length(sl) == 0 || startswith(sl, ';')
             continue
@@ -145,7 +147,7 @@ function readtopology(in_file::AbstractString)
             dihedraltypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = Dihedraltype(f1, f2, f3, f4)
         elseif current_field == "atomtypes" && length(c) >= 8
             atomnames[c[1]] = c[2]
-            atomtypes[c[2]] = Atomtype(parse(Float64, c[7]), parse(Float64, c[8]))
+            atomtypes[c[2]] = Atomtype(parse(Float64, c[4]), parse(Float64, c[5]), parse(Float64, c[7]), parse(Float64, c[8]))
         elseif current_field == "atoms"
             push!(atoms, Atom(atomnames[c[2]], c[5], parse(Int, c[3]), c[4], parse(Float64, c[7]), parse(Float64, c[8])))
         elseif current_field == "bonds"
@@ -219,8 +221,28 @@ function readtopology(in_file::AbstractString)
         nb_matrix[d.atom_l, d.atom_i] = false
     end
 
+    # Read coordinate file and add solvent atoms
+    lines = readlines(coord_file)
+    coords = Coordinates[]
+    for (i, l) in enumerate(lines[3:end-1])
+        push!(coords, Coordinates(
+            parse(Float64, l[21:28]),
+            parse(Float64, l[29:36]),
+            parse(Float64, l[37:44])
+        ))
+
+        # This atom was not specified explicitly in the topology and is added here
+        if i > n_atoms
+            atname = strip(l[11:15])
+            attype = replace(atname, r"\d+", "")
+            push!(atoms, Atom(attype, atname, parse(Int, l[1:5]), strip(l[6:10]),
+                atomtypes[attype].charge, atomtypes[attype].mass))
+        end
+    end
+
     return Forcefield("OPLS", atomtypes, bondtypes, angletypes, dihedraltypes, atomnames),
-        Molecule(name, atoms, bonds, angles, retained_dihedrals, nb_matrix)
+        Molecule(name, atoms, bonds, angles, retained_dihedrals, nb_matrix),
+        coords
 end
 
 #=
@@ -246,19 +268,6 @@ dihedrals - dupe
 system - ignore for now
 molecules - ignore for now
 =#
-
-function readcoordinates(in_file::AbstractString)
-    lines = readlines(in_file)
-    coords = Coordinates[]
-    for l in lines[3:end-1]
-        push!(coords, Coordinates(
-            parse(Float64, l[21:28]),
-            parse(Float64, l[29:36]),
-            parse(Float64, l[37:44])
-        ))
-    end
-    return coords
-end
 
 function Velocity(starting_velocity::Real)
     θ = rand()*π
