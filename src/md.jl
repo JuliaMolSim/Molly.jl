@@ -8,6 +8,7 @@ export
     simulate!
 
 const coulomb_const = 138.935458
+const sqdist_cutoff = 100.0
 
 mutable struct Acceleration
     x::Float64
@@ -178,12 +179,9 @@ function update_accelerations!(accels::Vector{Acceleration},
         accels[d.atom_l].z += d4z
     end
 
-    # Non-bonding matrix not present for solvent molecules
-    matrix_solvent_limit = size(universe.molecule.nb_matrix, 1)
     for (i, a1) in enumerate(universe.molecule.atoms)
-        println("Atom $i")
         for j in 1:(i-1)
-            if i > matrix_solvent_limit || universe.molecule.nb_matrix[i,j]
+            if universe.neighbour_list[i,j]
                 a2 = universe.molecule.atoms[j]
 
                 # Van der Waal's forces
@@ -213,16 +211,37 @@ function update_accelerations!(accels::Vector{Acceleration},
     return accels
 end
 
+function update_neighbours!(universe::Universe)
+    # Non-bonding matrix not present for solvent molecules
+    matrix_solvent_limit = size(universe.molecule.nb_matrix, 1)
+    for i in 1:length(universe.coords)
+        for j in 1:(i-1)
+            if i > matrix_solvent_limit || universe.molecule.nb_matrix[i,j]
+                vec = vector(universe.coords[i], universe.coords[j])
+                universe.neighbour_list[i,j] = dot(vec, vec) < sqdist_cutoff
+            else
+                universe.neighbour_list[i,j] = false
+            end
+        end
+    end
+    return universe
+end
+
 empty_accelerations(n_atoms::Int) = [Acceleration(0.0, 0.0, 0.0) for i in 1:n_atoms]
 
 function simulate!(s::Simulation, n_steps::Int)
+    report("Starting simulation")
     n_atoms = length(s.universe.coords)
+    update_neighbours!(s.universe)
     a_t = update_accelerations!(empty_accelerations(n_atoms), s.universe, s.forcefield)
     a_t_dt = empty_accelerations(n_atoms)
     @showprogress for i in 1:n_steps
         update_coordinates!(s.universe.coords, s.universe.velocities, a_t, s.timestep)
         update_accelerations!(a_t_dt, s.universe, s.forcefield)
         update_velocities!(s.universe.velocities, a_t, a_t_dt, s.timestep)
+        if i % 10 == 0
+            update_neighbours!(s.universe)
+        end
         if i % 100 == 0#=
             pe = potential_energy(s.universe)
             ke = kinetic_energy(s.universe.velocities)
@@ -233,7 +252,6 @@ function simulate!(s::Simulation, n_steps::Int)
         end
         a_t = a_t_dt
         s.steps_made += 1
-        #i%10000==0 && println(s.universe.coords[1], s.universe.velocities[1], a_t[1])
     end
     return s
 end

@@ -91,6 +91,7 @@ struct Universe
     coords::Vector{Coordinates}
     velocities::Vector{Velocity}
     box_size::Float64
+    neighbour_list::BitArray{2}
 end
 
 mutable struct Simulation
@@ -108,6 +109,8 @@ end
 function Base.show(io::IO, s::Simulation)
     print("MD simulation with $(s.forcefield.name) forcefield, molecule $(s.universe.molecule.name), $(length(s.universe.coords)) atoms, $(s.steps_made) steps made")
 end
+
+report(msg) = println(msg)
 
 # Read a Gromacs topology flat file
 function readinputs(top_file::AbstractString, coord_file::AbstractString)
@@ -190,10 +193,8 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
                     end
                 end
             end
-            if best_key == ""
-                #println("Could not assign proper dihedral for $desired_key")
-            else
-                #println("Assigned dihedral for $desired_key")
+            # If a wildcard match is found, add a new specific dihedral type
+            if best_key != ""
                 dihedraltypes[desired_key] = dihedraltypes[best_key]
                 push!(retained_dihedrals, d)
             end
@@ -283,7 +284,8 @@ function Simulation(forcefield::Forcefield,
                 starting_velocity::Real,
                 timestep::Real,
                 n_steps::Real)
-    v = [Velocity(starting_velocity) for _ in coords]
-    u = Universe(molecule, coords, v, box_size)
+    n_atoms = length(coords)
+    v = [Velocity(starting_velocity) for _ in 1:n_atoms]
+    u = Universe(molecule, coords, v, box_size, falses(n_atoms, n_atoms))
     return Simulation(forcefield, u, timestep, n_steps, 0, [], [], [], [])
 end
