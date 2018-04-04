@@ -45,6 +45,8 @@ struct Atom
     resname::String
     charge::Float64
     mass::Float64
+    σ::Float64
+    ϵ::Float64
 end
 
 struct Bond
@@ -91,7 +93,7 @@ struct Universe
     coords::Vector{Coordinates}
     velocities::Vector{Velocity}
     box_size::Float64
-    neighbour_list::BitArray{2}
+    neighbour_list::Vector{Tuple{Int, Int}}
 end
 
 mutable struct Simulation
@@ -152,7 +154,8 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
             atomnames[c[1]] = c[2]
             atomtypes[c[2]] = Atomtype(parse(Float64, c[4]), parse(Float64, c[5]), parse(Float64, c[7]), parse(Float64, c[8]))
         elseif current_field == "atoms"
-            push!(atoms, Atom(atomnames[c[2]], c[5], parse(Int, c[3]), c[4], parse(Float64, c[7]), parse(Float64, c[8])))
+            attype = atomnames[c[2]]
+            push!(atoms, Atom(attype, c[5], parse(Int, c[3]), c[4], parse(Float64, c[7]), parse(Float64, c[8]), atomtypes[attype].σ, atomtypes[attype].ϵ))
         elseif current_field == "bonds"
             push!(bonds, Bond(parse(Int, c[1]), parse(Int, c[2])))
         elseif current_field == "angles"
@@ -237,7 +240,8 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
             atname = strip(l[11:15])
             attype = replace(atname, r"\d+", "")
             push!(atoms, Atom(attype, atname, parse(Int, l[1:5]), strip(l[6:10]),
-                atomtypes[attype].charge, atomtypes[attype].mass))
+                atomtypes[attype].charge, atomtypes[attype].mass,
+                atomtypes[attype].σ, atomtypes[attype].ϵ))
         end
     end
 
@@ -286,6 +290,6 @@ function Simulation(forcefield::Forcefield,
                 n_steps::Real)
     n_atoms = length(coords)
     v = [Velocity(starting_velocity) for _ in 1:n_atoms]
-    u = Universe(molecule, coords, v, box_size, falses(n_atoms, n_atoms))
+    u = Universe(molecule, coords, v, box_size, [])
     return Simulation(forcefield, u, timestep, n_steps, 0, [], [], [], [])
 end

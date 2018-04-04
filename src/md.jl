@@ -94,25 +94,29 @@ function forcedihedral(coords_one::Coordinates,
     return fa..., fb..., fc..., fd...
 end
 
-function forcelennardjones(coords_one::Coordinates,
+@fastmath @inbounds function forcelennardjones(coords_one::Coordinates,
                 coords_two::Coordinates,
-                atomtype_one::Atomtype,
-                atomtype_two::Atomtype)
-    σ = sqrt(atomtype_one.σ * atomtype_two.σ)
-    ϵ = sqrt(atomtype_one.ϵ * atomtype_two.ϵ)
-    ab = vector(coords_one, coords_two)
-    r = norm(ab)
-    fb = ((24 * ϵ) / (r^2)) * (2 * (σ / r)^12 - (σ / r)^6) * ab
-    return -fb[1], -fb[2], -fb[3], fb[1], fb[2], fb[3]
+                atom_one::Atom,
+                atom_two::Atom)
+    σ = sqrt(atom_one.σ * atom_two.σ)
+    ϵ = sqrt(atom_one.ϵ * atom_two.ϵ)
+    dx = coords_two.x - coords_one.x
+    dy = coords_two.y - coords_one.y
+    dz = coords_two.z - coords_one.z
+    r = sqrt(dx*dx + dy*dy + dz*dz)
+    f = ((24 * ϵ) / (r^2)) * (2 * (σ / r)^12 - (σ / r)^6)
+    return -f*dx, -f*dy, -f*dz, f*dx, f*dy, f*dz
 end
 
-function forcecoulomb(coords_one::Coordinates,
+@fastmath @inbounds function forcecoulomb(coords_one::Coordinates,
                 coords_two::Coordinates,
                 charge_one::Real,
                 charge_two::Real)
-    ab = vector(coords_one, coords_two)
-    fb = (coulomb_const * charge_one * charge_two / (norm(ab)^3)) * ab
-    return -fb[1], -fb[2], -fb[3], fb[1], fb[2], fb[3]
+    dx = coords_two.x - coords_one.x
+    dy = coords_two.y - coords_one.y
+    dz = coords_two.z - coords_one.z
+    f = (coulomb_const * charge_one * charge_two / ((dx*dx + dy*dy + dz*dz)^1.5))
+    return -f*dx, -f*dy, -f*dz, f*dx, f*dy, f*dz
 end
 
 function update_accelerations!(accels::Vector{Acceleration},
@@ -182,33 +186,30 @@ function update_accelerations!(accels::Vector{Acceleration},
         accels[d.atom_l].z += d4z
     end
 
-    for (i, a1) in enumerate(universe.molecule.atoms)
-        for j in 1:(i-1)
-            if universe.neighbour_list[i,j]
-                a2 = universe.molecule.atoms[j]
+    for (i, j) in universe.neighbour_list
+        #report("Atom $i")
+        a1 = universe.molecule.atoms[i]
+        a2 = universe.molecule.atoms[j]
 
-                # Van der Waal's forces
-                d1x, d1y, d1z, d2x, d2y, d2z = forcelennardjones(
-                    universe.coords[i], universe.coords[j],
-                    forcefield.atomtypes[a1.attype], forcefield.atomtypes[a2.attype])
-                accels[i].x += d1x
-                accels[i].y += d1y
-                accels[i].z += d1z
-                accels[j].x += d2x
-                accels[j].y += d2y
-                accels[j].z += d2z
+        # Van der Waal's forces
+        d1x, d1y, d1z, d2x, d2y, d2z = forcelennardjones(
+            universe.coords[i], universe.coords[j], a1, a2)
+        accels[i].x += d1x
+        accels[i].y += d1y
+        accels[i].z += d1z
+        accels[j].x += d2x
+        accels[j].y += d2y
+        accels[j].z += d2z
 
-                # Electrostatic forces
-                d1x, d1y, d1z, d2x, d2y, d2z = forcecoulomb(
-                    universe.coords[i], universe.coords[j], a1.charge, a2.charge)
-                accels[i].x += d1x
-                accels[i].y += d1y
-                accels[i].z += d1z
-                accels[j].x += d2x
-                accels[j].y += d2y
-                accels[j].z += d2z
-            end
-        end
+        # Electrostatic forces
+        d1x, d1y, d1z, d2x, d2y, d2z = forcecoulomb(
+            universe.coords[i], universe.coords[j], a1.charge, a2.charge)
+        accels[i].x += d1x
+        accels[i].y += d1y
+        accels[i].z += d1z
+        accels[j].x += d2x
+        accels[j].y += d2y
+        accels[j].z += d2z
     end
 
     return accels
@@ -217,12 +218,12 @@ end
 function update_neighbours!(universe::Universe)
     # Non-bonding matrix not present for solvent molecules
     matrix_solvent_limit = size(universe.molecule.nb_matrix, 1)
+    empty!(universe.neighbour_list)
     for i in 1:length(universe.coords)
         for j in 1:(i-1)
-            if i > matrix_solvent_limit || universe.molecule.nb_matrix[i,j]
-                universe.neighbour_list[i,j] = sqdist(universe.coords[i], universe.coords[j]) < sqdist_cutoff
-            else
-                universe.neighbour_list[i,j] = false
+            if (i > matrix_solvent_limit || universe.molecule.nb_matrix[i,j]) &&
+                    sqdist(universe.coords[i], universe.coords[j]) < sqdist_cutoff
+                push!(universe.neighbour_list, (i, j))
             end
         end
     end
