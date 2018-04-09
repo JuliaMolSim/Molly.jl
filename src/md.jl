@@ -8,7 +8,7 @@ export
     simulate!
 
 const coulomb_const = 138.935458
-const sqdist_cutoff = 100.0
+const sqdist_cutoff = 10.0 ^ 2
 
 mutable struct Acceleration
     x::Float64
@@ -66,7 +66,9 @@ function forceangle(coords_one::Coordinates,
     bc = vector(coords_two, coords_three)
     pa = normalize(ba × (ba × bc))
     pc = normalize(-bc × (ba × bc))
-    angle_term = -angletype.cth * (acos(dot(ba, bc) / (norm(ba) * norm(bc))) - angletype.th0)
+    # Sometimes domain error occurs for acos
+    acos_term = max(min(dot(ba, bc) / (norm(ba) * norm(bc)), 1.0), -1.0)
+    angle_term = -angletype.cth * (acos(acos_term) - angletype.th0)
     fa = (angle_term / norm(ba)) * pa
     fc = (angle_term / norm(bc)) * pc
     fb = -fa - fc

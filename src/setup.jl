@@ -242,6 +242,13 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
             push!(atoms, Atom(attype, atname, parse(Int, l[1:5]), strip(l[6:10]),
                 atomtypes[attype].charge, atomtypes[attype].mass,
                 atomtypes[attype].σ, atomtypes[attype].ϵ))
+
+            # Add O-H bonds and H-O-H angle in water
+            if atname == "OW"
+                push!(bonds, Bond(i, i+1))
+                push!(bonds, Bond(i, i+2))
+                push!(angles, Angle(i+1, i, i+2))
+            end
         end
     end
 
