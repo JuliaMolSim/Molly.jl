@@ -58,6 +58,9 @@ function forcebond(coords_one::Coordinates, coords_two::Coordinates, bondtype::B
     return fa..., fb...
 end
 
+# Sometimes domain error occurs for acos
+acosbound(x::Real) = acos(max(min(x, 1.0), -1.0))
+
 function forceangle(coords_one::Coordinates,
                 coords_two::Coordinates,
                 coords_three::Coordinates,
@@ -66,9 +69,7 @@ function forceangle(coords_one::Coordinates,
     bc = vector(coords_two, coords_three)
     pa = normalize(ba × (ba × bc))
     pc = normalize(-bc × (ba × bc))
-    # Sometimes domain error occurs for acos
-    acos_term = max(min(dot(ba, bc) / (norm(ba) * norm(bc)), 1.0), -1.0)
-    angle_term = -angletype.cth * (acos(acos_term) - angletype.th0)
+    angle_term = -angletype.cth * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - angletype.th0)
     fa = (angle_term / norm(ba)) * pa
     fc = (angle_term / norm(bc)) * pc
     fb = -fa - fc
@@ -87,8 +88,8 @@ function forcedihedral(coords_one::Coordinates,
     p2 = normalize(-dc × -bc)
     θ = atan2(dot((-ba × bc) × (bc × -dc), normalize(bc)), dot(-ba × bc, bc × -dc))
     angle_term = 0.5*(dihedraltype.f1*sin(θ) - 2*dihedraltype.f2*sin(2*θ) + 3*dihedraltype.f3*sin(3*θ))
-    fa = (angle_term / (norm(ba) * sin(acos(dot(ba, bc) / (norm(ba) * norm(bc)))))) * p1
-    fd = (angle_term / (norm(dc) * sin(acos(dot(bc, dc) / (norm(bc) * norm(dc)))))) * p2
+    fa = (angle_term / (norm(ba) * sin(acosbound(dot(ba, bc) / (norm(ba) * norm(bc)))))) * p1
+    fd = (angle_term / (norm(dc) * sin(acosbound(dot(bc, dc) / (norm(bc) * norm(dc)))))) * p2
     oc = 0.5 * bc
     tc = -(oc × fd + 0.5 * (-dc × fd) + 0.5 * (ba × fa))
     fc = (1 / dot(oc, oc)) * (tc × oc)
