@@ -106,8 +106,9 @@ end
     dx = coords_two.x - coords_one.x
     dy = coords_two.y - coords_one.y
     dz = coords_two.z - coords_one.z
-    r = sqrt(dx*dx + dy*dy + dz*dz)
-    f = ((24 * ϵ) / (r^2)) * (2 * (σ / r)^12 - (σ / r)^6)
+    r2 = dx*dx + dy*dy + dz*dz
+    six_term = (σ^2 / r2)^3
+    f = ((24 * ϵ) / (r2)) * (2 * six_term^2 - six_term)
     return -f*dx, -f*dy, -f*dz, f*dx, f*dy, f*dz
 end
 
@@ -118,7 +119,7 @@ end
     dx = coords_two.x - coords_one.x
     dy = coords_two.y - coords_one.y
     dz = coords_two.z - coords_one.z
-    f = (coulomb_const * charge_one * charge_two / ((dx*dx + dy*dy + dz*dz)^1.5))
+    f = (coulomb_const * charge_one * charge_two / sqrt((dx*dx + dy*dy + dz*dz)^3))
     return -f*dx, -f*dy, -f*dz, f*dx, f*dy, f*dz
 end
 

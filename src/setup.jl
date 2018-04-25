@@ -151,8 +151,9 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
             f1 = 3*f3 - 2*parse(Float64, c[7])
             dihedraltypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = Dihedraltype(f1, f2, f3, f4)
         elseif current_field == "atomtypes" && length(c) >= 8
-            atomnames[c[1]] = c[2]
-            atomtypes[c[2]] = Atomtype(parse(Float64, c[4]), parse(Float64, c[5]), parse(Float64, c[7]), parse(Float64, c[8]))
+            atomname = uppercase(c[2])
+            atomnames[c[1]] = atomname
+            atomtypes[atomname] = Atomtype(parse(Float64, c[4]), parse(Float64, c[5]), parse(Float64, c[7]), parse(Float64, c[8]))
         elseif current_field == "atoms"
             attype = atomnames[c[2]]
             push!(atoms, Atom(attype, c[5], parse(Int, c[3]), c[4], parse(Float64, c[7]), parse(Float64, c[8]), atomtypes[attype].σ, atomtypes[attype].ϵ))
