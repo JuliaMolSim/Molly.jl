@@ -253,9 +253,32 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
         end
     end
 
+    box_size = float(first(split(strip(lines[end]), r"\s+")))
+
     return Forcefield("OPLS", atomtypes, bondtypes, angletypes, dihedraltypes, atomnames),
         Molecule(name, atoms, bonds, angles, retained_dihedrals, nb_matrix),
-        coords
+        coords,
+        box_size
+end
+
+function Velocity(max_starting_velocity::Real)
+    θ = rand()*π
+    ϕ = rand()*2π
+    r = rand()*max_starting_velocity
+    return Velocity(r*sin(θ)*cos(ϕ), r*sin(θ)*sin(ϕ), r*cos(θ))
+end
+
+function Simulation(forcefield::Forcefield,
+                molecule::Molecule,
+                coords::Vector{Coordinates},
+                box_size::Real,
+                max_starting_velocity::Real,
+                timestep::Real,
+                n_steps::Real)
+    n_atoms = length(coords)
+    v = [Velocity(max_starting_velocity) for _ in 1:n_atoms]
+    u = Universe(molecule, coords, v, box_size, [])
+    return Simulation(forcefield, u, timestep, n_steps, 0, [], [], [], [])
 end
 
 #=
@@ -281,23 +304,3 @@ dihedrals - dupe
 system - ignore for now
 molecules - ignore for now
 =#
-
-function Velocity(starting_velocity::Real)
-    θ = rand()*π
-    ϕ = rand()*2π
-    r = rand()*starting_velocity
-    return Velocity(r*sin(θ)*cos(ϕ), r*sin(θ)*sin(ϕ), r*cos(θ))
-end
-
-function Simulation(forcefield::Forcefield,
-                molecule::Molecule,
-                coords::Vector{Coordinates},
-                box_size::Real,
-                starting_velocity::Real,
-                timestep::Real,
-                n_steps::Real)
-    n_atoms = length(coords)
-    v = [Velocity(starting_velocity) for _ in 1:n_atoms]
-    u = Universe(molecule, coords, v, box_size, [])
-    return Simulation(forcefield, u, timestep, n_steps, 0, [], [], [], [])
-end
