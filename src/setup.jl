@@ -102,19 +102,16 @@ mutable struct Simulation
     timestep::Float64
     n_steps::Int
     steps_made::Int
-    pes::Vector{Float64}
-    kes::Vector{Float64}
-    energies::Vector{Float64}
-    temps::Vector{Float64}
 end
 
 function Base.show(io::IO, s::Simulation)
     print("MD simulation with $(s.forcefield.name) forcefield, molecule $(s.universe.molecule.name), $(length(s.universe.coords)) atoms, $(s.steps_made) steps made")
 end
 
+# Placeholder if we want to introduce logging later on
 report(msg) = println(msg)
 
-# Read a Gromacs topology flat file
+# Read a Gromacs topology flat file, i.e. all includes collapsed into one file
 function readinputs(top_file::AbstractString, coord_file::AbstractString)
     # Read forcefield and topology file
     atomtypes = Dict{String, Atomtype}()
@@ -253,6 +250,7 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
         end
     end
 
+    # Bounding box for PBCs - box goes 0 to this value in 3 dimensions
     box_size = float(first(split(strip(lines[end]), r"\s+")))
 
     return Forcefield("OPLS", atomtypes, bondtypes, angletypes, dihedraltypes, atomnames),
@@ -278,29 +276,5 @@ function Simulation(forcefield::Forcefield,
     n_atoms = length(coords)
     v = [Velocity(max_starting_velocity) for _ in 1:n_atoms]
     u = Universe(molecule, coords, v, box_size, [])
-    return Simulation(forcefield, u, timestep, n_steps, 0, [], [], [], [])
+    return Simulation(forcefield, u, timestep, n_steps, 0)
 end
-
-#=
-defaults - ignore for now
-bondtypes - done
-constrainttypes - ignore for now
-angletypes - done
-dihedraltypes - done
-dihedraltypes - dupe
-bondtypes - dupe
-angletypes - dupe
-dihedraltypes - dupe
-
-atomtypes - done
-
-moleculetype - ignore for now
-atoms - done
-bonds - done
-pairs - TODO, explicit non-bonded pairs
-angles - done
-dihedrals - done
-dihedrals - dupe
-system - ignore for now
-molecules - ignore for now
-=#

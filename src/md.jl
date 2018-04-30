@@ -8,7 +8,7 @@ export
     simulate!
 
 const coulomb_const = 138.935458
-const sqdist_cutoff = 10.0 ^ 2
+const sqdist_cutoff = 10.0 ^ 2 # Neighbour list cutoff
 
 mutable struct Acceleration
     x::Float64
@@ -19,11 +19,20 @@ end
 function update_coordinates!(coords::Vector{Coordinates},
                     velocities::Vector{Velocity},
                     accels::Vector{Acceleration},
-                    timestep::Real)
+                    timestep::Real,
+                    box_size::Real)
     for (i, c) in enumerate(coords)
         c.x += velocities[i].x*timestep + 0.5*accels[i].x*timestep^2
+        while (c.x >= box_size) c.x -= box_size end
+        while (c.x < 0.0) c.x += box_size end
+
         c.y += velocities[i].y*timestep + 0.5*accels[i].y*timestep^2
+        while (c.y >= box_size) c.y -= box_size end
+        while (c.y < 0.0) c.y += box_size end
+
         c.z += velocities[i].z*timestep + 0.5*accels[i].z*timestep^2
+        while (c.z >= box_size) c.z -= box_size end
+        while (c.z < 0.0) c.z += box_size end
     end
     return coords
 end
@@ -40,18 +49,29 @@ function update_velocities!(velocities::Vector{Velocity},
     return velocities
 end
 
-vector(coords_one::Coordinates, coords_two::Coordinates) = [
-        coords_two.x - coords_one.x,
-        coords_two.y - coords_one.y,
-        coords_two.z - coords_one.z]
+function vector1D(c1::Real, c2::Real, box_size::Real)
+    if c1 < c2
+        return (c2 - c1) < (c1 - c2 + box_size) ? (c2 - c1) : (c2 - c1 - box_size)
+    else
+        return (c1 - c2) < (c2 - c1 + box_size) ? (c2 - c1) : (c2 - c1 + box_size)
+    end
+end
 
-sqdist(coords_one::Coordinates, coords_two::Coordinates) =
-            (coords_two.x - coords_one.x) ^ 2 +
-            (coords_two.y - coords_one.y) ^ 2 +
-            (coords_two.z - coords_one.z) ^ 2
+vector(coords_one::Coordinates, coords_two::Coordinates, box_size::Real) = [
+        vector1D(coords_one.x, coords_two.x, box_size),
+        vector1D(coords_one.y, coords_two.y, box_size),
+        vector1D(coords_one.z, coords_two.z, box_size)]
 
-function forcebond(coords_one::Coordinates, coords_two::Coordinates, bondtype::Bondtype)
-    ab = vector(coords_one, coords_two)
+sqdist(coords_one::Coordinates, coords_two::Coordinates, box_size::Real) =
+        vector1D(coords_one.x, coords_two.x, box_size) ^ 2 +
+        vector1D(coords_one.y, coords_two.y, box_size) ^ 2 +
+        vector1D(coords_one.z, coords_two.z, box_size) ^ 2
+
+function forcebond(coords_one::Coordinates,
+                coords_two::Coordinates,
+                bondtype::Bondtype,
+                box_size::Real)
+    ab = vector(coords_one, coords_two, box_size)
     c = bondtype.kb * (norm(ab) - bondtype.b0)
     fa = c*normalize(ab)
     fb = -fa
@@ -64,9 +84,10 @@ acosbound(x::Real) = acos(max(min(x, 1.0), -1.0))
 function forceangle(coords_one::Coordinates,
                 coords_two::Coordinates,
                 coords_three::Coordinates,
-                angletype::Angletype)
-    ba = vector(coords_two, coords_one)
-    bc = vector(coords_two, coords_three)
+                angletype::Angletype,
+                box_size::Real)
+    ba = vector(coords_two, coords_one, box_size)
+    bc = vector(coords_two, coords_three, box_size)
     pa = normalize(ba × (ba × bc))
     pc = normalize(-bc × (ba × bc))
     angle_term = -angletype.cth * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - angletype.th0)
@@ -80,10 +101,11 @@ function forcedihedral(coords_one::Coordinates,
                 coords_two::Coordinates,
                 coords_three::Coordinates,
                 coords_four::Coordinates,
-                dihedraltype::Dihedraltype)
-    ba = vector(coords_two, coords_one)
-    bc = vector(coords_two, coords_three)
-    dc = vector(coords_four, coords_three)
+                dihedraltype::Dihedraltype,
+                box_size::Real)
+    ba = vector(coords_two, coords_one, box_size)
+    bc = vector(coords_two, coords_three, box_size)
+    dc = vector(coords_four, coords_three, box_size)
     p1 = normalize(ba × bc)
     p2 = normalize(-dc × -bc)
     θ = atan2(dot((-ba × bc) × (bc × -dc), normalize(bc)), dot(-ba × bc, bc × -dc))
@@ -100,12 +122,13 @@ end
 @fastmath @inbounds function forcelennardjones(coords_one::Coordinates,
                 coords_two::Coordinates,
                 atom_one::Atom,
-                atom_two::Atom)
+                atom_two::Atom,
+                box_size::Real)
     σ = sqrt(atom_one.σ * atom_two.σ)
     ϵ = sqrt(atom_one.ϵ * atom_two.ϵ)
-    dx = coords_two.x - coords_one.x
-    dy = coords_two.y - coords_one.y
-    dz = coords_two.z - coords_one.z
+    dx = vector1D(coords_one.x, coords_two.x, box_size)
+    dy = vector1D(coords_one.y, coords_two.y, box_size)
+    dz = vector1D(coords_one.z, coords_two.z, box_size)
     r2 = dx*dx + dy*dy + dz*dz
     six_term = (σ^2 / r2)^3
     f = ((24 * ϵ) / (r2)) * (2 * six_term^2 - six_term)
@@ -115,10 +138,11 @@ end
 @fastmath @inbounds function forcecoulomb(coords_one::Coordinates,
                 coords_two::Coordinates,
                 charge_one::Real,
-                charge_two::Real)
-    dx = coords_two.x - coords_one.x
-    dy = coords_two.y - coords_one.y
-    dz = coords_two.z - coords_one.z
+                charge_two::Real,
+                box_size::Real)
+    dx = vector1D(coords_one.x, coords_two.x, box_size)
+    dy = vector1D(coords_one.y, coords_two.y, box_size)
+    dz = vector1D(coords_one.z, coords_two.z, box_size)
     f = (coulomb_const * charge_one * charge_two / sqrt((dx*dx + dy*dy + dz*dz)^3))
     return -f*dx, -f*dy, -f*dz, f*dx, f*dy, f*dz
 end
@@ -142,7 +166,8 @@ function update_accelerations!(accels::Vector{Acceleration},
             bondtype = forcefield.bondtypes["$(atoms[b.atom_j].attype)/$(atoms[b.atom_i].attype)"]
         end
         d1x, d1y, d1z, d2x, d2y, d2z = forcebond(
-            universe.coords[b.atom_i], universe.coords[b.atom_j], bondtype)
+            universe.coords[b.atom_i], universe.coords[b.atom_j],
+            bondtype, universe.box_size)
         accels[b.atom_i].x += d1x
         accels[b.atom_i].y += d1y
         accels[b.atom_i].z += d1z
@@ -159,7 +184,8 @@ function update_accelerations!(accels::Vector{Acceleration},
             angletype = forcefield.angletypes["$(atoms[a.atom_k].attype)/$(atoms[a.atom_j].attype)/$(atoms[a.atom_i].attype)"]
         end
         d1x, d1y, d1z, d2x, d2y, d2z, d3x, d3y, d3z = forceangle(
-            universe.coords[a.atom_i], universe.coords[a.atom_j], universe.coords[a.atom_k], angletype)
+            universe.coords[a.atom_i], universe.coords[a.atom_j],
+            universe.coords[a.atom_k], angletype, universe.box_size)
         accels[a.atom_i].x += d1x
         accels[a.atom_i].y += d1y
         accels[a.atom_i].z += d1z
@@ -175,7 +201,9 @@ function update_accelerations!(accels::Vector{Acceleration},
     for d in universe.molecule.dihedrals
         dihedraltype = forcefield.dihedraltypes["$(atoms[d.atom_i].attype)/$(atoms[d.atom_j].attype)/$(atoms[d.atom_k].attype)/$(atoms[d.atom_l].attype)"]
         d1x, d1y, d1z, d2x, d2y, d2z, d3x, d3y, d3z, d4x, d4y, d4z = forcedihedral(
-            universe.coords[d.atom_i], universe.coords[d.atom_j], universe.coords[d.atom_k], universe.coords[d.atom_l], dihedraltype)
+            universe.coords[d.atom_i], universe.coords[d.atom_j],
+            universe.coords[d.atom_k], universe.coords[d.atom_l],
+            dihedraltype, universe.box_size)
         accels[d.atom_i].x += d1x
         accels[d.atom_i].y += d1y
         accels[d.atom_i].z += d1z
@@ -191,13 +219,12 @@ function update_accelerations!(accels::Vector{Acceleration},
     end
 
     for (i, j) in universe.neighbour_list
-        #report("Atom $i")
         a1 = universe.molecule.atoms[i]
         a2 = universe.molecule.atoms[j]
 
         # Van der Waal's forces
         d1x, d1y, d1z, d2x, d2y, d2z = forcelennardjones(
-            universe.coords[i], universe.coords[j], a1, a2)
+            universe.coords[i], universe.coords[j], a1, a2, universe.box_size)
         accels[i].x += d1x
         accels[i].y += d1y
         accels[i].z += d1z
@@ -207,7 +234,7 @@ function update_accelerations!(accels::Vector{Acceleration},
 
         # Electrostatic forces
         d1x, d1y, d1z, d2x, d2y, d2z = forcecoulomb(
-            universe.coords[i], universe.coords[j], a1.charge, a2.charge)
+            universe.coords[i], universe.coords[j], a1.charge, a2.charge, universe.box_size)
         accels[i].x += d1x
         accels[i].y += d1y
         accels[i].z += d1z
@@ -226,7 +253,7 @@ function update_neighbours!(universe::Universe)
     for i in 1:length(universe.coords)
         for j in 1:(i-1)
             if (i > matrix_solvent_limit || universe.molecule.nb_matrix[i,j]) &&
-                    sqdist(universe.coords[i], universe.coords[j]) < sqdist_cutoff
+                    sqdist(universe.coords[i], universe.coords[j], universe.box_size) < sqdist_cutoff
                 push!(universe.neighbour_list, (i, j))
             end
         end
@@ -243,23 +270,17 @@ function simulate!(s::Simulation, n_steps::Int)
     a_t = update_accelerations!(empty_accelerations(n_atoms), s.universe, s.forcefield)
     a_t_dt = empty_accelerations(n_atoms)
     @showprogress for i in 1:n_steps
-        update_coordinates!(s.universe.coords, s.universe.velocities, a_t, s.timestep)
+        update_coordinates!(s.universe.coords, s.universe.velocities, a_t, s.timestep, s.universe.box_size)
         update_accelerations!(a_t_dt, s.universe, s.forcefield)
         update_velocities!(s.universe.velocities, a_t, a_t_dt, s.timestep)
+        # Update neighbour list every 10 steps
         if i % 10 == 0
             update_neighbours!(s.universe)
-        end
-        if i % 100 == 0#=
-            pe = potential_energy(s.universe)
-            ke = kinetic_energy(s.universe.velocities)
-            push!(s.pes, pe)
-            push!(s.kes, ke)
-            push!(s.energies, pe+ke)
-            push!(s.temps, temperature(ke, n_atoms))=#
         end
         a_t = a_t_dt
         s.steps_made += 1
     end
+    report("Simulation finished")
     return s
 end
 
