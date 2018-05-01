@@ -1,10 +1,11 @@
-# Read files and set up simulation. See
-#   http://manual.gromacs.org/documentation/2016/user-guide/file-formats.html
+# Read files and set up simulation
+# See http://manual.gromacs.org/documentation/2016/user-guide/file-formats.html
 
 export
     readinputs,
     Simulation
 
+"Gromacs atom type."
 struct Atomtype
     mass::Float64
     charge::Float64
@@ -12,16 +13,19 @@ struct Atomtype
     ϵ::Float64
 end
 
+"Gromacs bond type."
 struct Bondtype
     b0::Float64
     kb::Float64
 end
 
+"Gromacs angle type."
 struct Angletype
     th0::Float64
     cth::Float64
 end
 
+"Gromacs dihedral type."
 struct Dihedraltype
     f1::Float64
     f2::Float64
@@ -29,6 +33,7 @@ struct Dihedraltype
     f4::Float64
 end
 
+"Gromacs forcefield information."
 struct Forcefield
     name::String
     atomtypes::Dict{String, Atomtype}
@@ -38,6 +43,7 @@ struct Forcefield
     atomnames::Dict{String, String}
 end
 
+"An atom and its associated information."
 struct Atom
     attype::String
     name::String
@@ -49,17 +55,20 @@ struct Atom
     ϵ::Float64
 end
 
+"A bond between two atoms."
 struct Bond
     atom_i::Int
     atom_j::Int
 end
 
+"A bond angle between three atoms."
 struct Angle
     atom_i::Int
     atom_j::Int
     atom_k::Int
 end
 
+"A dihedral torsion angle between four atoms."
 struct Dihedral
     atom_i::Int
     atom_j::Int
@@ -67,6 +76,7 @@ struct Dihedral
     atom_l::Int
 end
 
+"A molecule."
 struct Molecule
     name::String
     atoms::Vector{Atom}
@@ -76,18 +86,21 @@ struct Molecule
     nb_matrix::BitArray{2}
 end
 
+"3D coordinates, e.g. for an atom, in nm."
 mutable struct Coordinates
     x::Float64
     y::Float64
     z::Float64
 end
 
+"3D velocity values, e.g. for an atom, in nm/ps."
 mutable struct Velocity
     x::Float64
     y::Float64
     z::Float64
 end
 
+"A universe of a molecule, its instantaneous data and the surrounding box."
 struct Universe
     molecule::Molecule
     coords::Vector{Coordinates}
@@ -96,6 +109,7 @@ struct Universe
     neighbour_list::Vector{Tuple{Int, Int}}
 end
 
+"A simulation of a `Universe`, a `Forcefield` and timing information."
 mutable struct Simulation
     forcefield::Forcefield
     universe::Universe
@@ -105,13 +119,16 @@ mutable struct Simulation
 end
 
 function Base.show(io::IO, s::Simulation)
-    print("MD simulation with $(s.forcefield.name) forcefield, molecule $(s.universe.molecule.name), $(length(s.universe.coords)) atoms, $(s.steps_made) steps made")
+    print("MD simulation with $(s.forcefield.name) forcefield, ",
+            "molecule $(s.universe.molecule.name), ",
+            "$(length(s.universe.coords)) atoms, ",
+            "$(s.steps_made) steps made")
 end
 
 # Placeholder if we want to introduce logging later on
 report(msg) = println(msg)
 
-# Read a Gromacs topology flat file, i.e. all includes collapsed into one file
+"Read a Gromacs topology flat file, i.e. all includes collapsed into one file."
 function readinputs(top_file::AbstractString, coord_file::AbstractString)
     # Read forcefield and topology file
     atomtypes = Dict{String, Atomtype}()
@@ -139,7 +156,8 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
             bondtypes["$(c[1])/$(c[2])"] = Bondtype(parse(Float64, c[4]), parse(Float64, c[5]))
         elseif current_field == "angletypes"
             # Convert th0 to radians
-            angletypes["$(c[1])/$(c[2])/$(c[3])"] = Angletype(deg2rad(parse(Float64, c[5])), parse(Float64, c[6]))
+            angletypes["$(c[1])/$(c[2])/$(c[3])"] = Angletype(deg2rad(
+                                parse(Float64, c[5])), parse(Float64, c[6]))
         elseif current_field == "dihedraltypes" && c[1] != "#define"
             # Convert back to OPLS types
             f4 = parse(Float64, c[10]) / -4
@@ -150,16 +168,19 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
         elseif current_field == "atomtypes" && length(c) >= 8
             atomname = uppercase(c[2])
             atomnames[c[1]] = atomname
-            atomtypes[atomname] = Atomtype(parse(Float64, c[4]), parse(Float64, c[5]), parse(Float64, c[7]), parse(Float64, c[8]))
+            atomtypes[atomname] = Atomtype(parse(Float64, c[4]), parse(Float64, c[5]),
+                        parse(Float64, c[7]), parse(Float64, c[8]))
         elseif current_field == "atoms"
             attype = atomnames[c[2]]
-            push!(atoms, Atom(attype, c[5], parse(Int, c[3]), c[4], parse(Float64, c[7]), parse(Float64, c[8]), atomtypes[attype].σ, atomtypes[attype].ϵ))
+            push!(atoms, Atom(attype, c[5], parse(Int, c[3]), c[4], parse(Float64, c[7]),
+                parse(Float64, c[8]), atomtypes[attype].σ, atomtypes[attype].ϵ))
         elseif current_field == "bonds"
             push!(bonds, Bond(parse(Int, c[1]), parse(Int, c[2])))
         elseif current_field == "angles"
             push!(angles, Angle(parse(Int, c[1]), parse(Int, c[2]), parse(Int, c[3])))
         elseif current_field == "dihedrals"
-            push!(dihedrals, Dihedral(parse(Int, c[1]), parse(Int, c[2]), parse(Int, c[3]), parse(Int, c[4])))
+            push!(dihedrals, Dihedral(parse(Int, c[1]), parse(Int, c[2]),
+                parse(Int, c[3]), parse(Int, c[4])))
         elseif current_field == "system"
             name = rstrip(first(split(sl, ";", limit=2)))
         end
@@ -259,6 +280,7 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
         box_size
 end
 
+# Generate a random 3D velocity with a maximum
 function Velocity(max_starting_velocity::Real)
     θ = rand()*π
     ϕ = rand()*2π

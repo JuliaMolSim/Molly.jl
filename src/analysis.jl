@@ -3,6 +3,7 @@
 export
     writepdb
 
+# Extension of method from BioStructures
 function writepdb(filepath::AbstractString, universe::Universe)
     open(filepath, "w") do output
         for (i, c) in enumerate(universe.coords)

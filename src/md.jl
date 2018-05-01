@@ -1,21 +1,27 @@
-# Molecular dynamics
+# Run molecular dynamics
 # See https://www.saylor.org/site/wp-content/uploads/2011/06/MA221-6.1.pdf for
 #   integration algorithm - used shorter second version
 # See https://udel.edu/~arthij/MD.pdf for information on forces
 # See https://arxiv.org/pdf/1401.1181.pdf for applying forces to atoms
+# See Gromacs manual for other aspects of forces
 
 export
     simulate!
 
+"The constant for Coulomb interaction, 1/(4*π*ϵ0)."
 const coulomb_const = 138.935458
-const sqdist_cutoff = 10.0 ^ 2 # Neighbour list cutoff
 
+"Square of the neighbour list cutoff in nm."
+const sqdist_cutoff = 10.0 ^ 2
+
+"3D acceleration values, e.g. for an atom, in nm/(ps^2)."
 mutable struct Acceleration
     x::Float64
     y::Float64
     z::Float64
 end
 
+"Update coordinates of all atoms and bound to the bounding box."
 function update_coordinates!(coords::Vector{Coordinates},
                     velocities::Vector{Velocity},
                     accels::Vector{Acceleration},
@@ -37,6 +43,7 @@ function update_coordinates!(coords::Vector{Coordinates},
     return coords
 end
 
+"Update velocities of all atoms using the accelerations."
 function update_velocities!(velocities::Vector{Velocity},
                     accels_t::Vector{Acceleration},
                     accels_t_dt::Vector{Acceleration},
@@ -49,6 +56,7 @@ function update_velocities!(velocities::Vector{Velocity},
     return velocities
 end
 
+"Vector between two coordinate values, accounting for the bounding box."
 function vector1D(c1::Real, c2::Real, box_size::Real)
     if c1 < c2
         return (c2 - c1) < (c1 - c2 + box_size) ? (c2 - c1) : (c2 - c1 - box_size)
@@ -57,16 +65,19 @@ function vector1D(c1::Real, c2::Real, box_size::Real)
     end
 end
 
+"3D vector between two `Coordinates`, accounting for the bounding box."
 vector(coords_one::Coordinates, coords_two::Coordinates, box_size::Real) = [
         vector1D(coords_one.x, coords_two.x, box_size),
         vector1D(coords_one.y, coords_two.y, box_size),
         vector1D(coords_one.z, coords_two.z, box_size)]
 
+"Square distance between two `Coordinates`, accounting for the bounding box."
 sqdist(coords_one::Coordinates, coords_two::Coordinates, box_size::Real) =
         vector1D(coords_one.x, coords_two.x, box_size) ^ 2 +
         vector1D(coords_one.y, coords_two.y, box_size) ^ 2 +
         vector1D(coords_one.z, coords_two.z, box_size) ^ 2
 
+"Force on each atom in a covalent bond."
 function forcebond(coords_one::Coordinates,
                 coords_two::Coordinates,
                 bondtype::Bondtype,
@@ -78,9 +89,10 @@ function forcebond(coords_one::Coordinates,
     return fa..., fb...
 end
 
-# Sometimes domain error occurs for acos
+# Sometimes domain error occurs for acos if the float is > 1.0 or < 1.0
 acosbound(x::Real) = acos(max(min(x, 1.0), -1.0))
 
+"Force on each atom in a bond angle."
 function forceangle(coords_one::Coordinates,
                 coords_two::Coordinates,
                 coords_three::Coordinates,
@@ -97,6 +109,7 @@ function forceangle(coords_one::Coordinates,
     return fa..., fb..., fc...
 end
 
+"Force on each atom in a dihedral torsion angle."
 function forcedihedral(coords_one::Coordinates,
                 coords_two::Coordinates,
                 coords_three::Coordinates,
@@ -119,6 +132,7 @@ function forcedihedral(coords_one::Coordinates,
     return fa..., fb..., fc..., fd...
 end
 
+"Force on each atom due to Lennard Jones attractive/repulsive potential."
 @fastmath @inbounds function forcelennardjones(coords_one::Coordinates,
                 coords_two::Coordinates,
                 atom_one::Atom,
@@ -131,10 +145,12 @@ end
     dz = vector1D(coords_one.z, coords_two.z, box_size)
     r2 = dx*dx + dy*dy + dz*dz
     six_term = (σ^2 / r2)^3
-    f = ((24 * ϵ) / (r2)) * (2 * six_term^2 - six_term)
+    # Limit this to 100 as a fudge to stop it exploding
+    f = min(((24 * ϵ) / (r2)) * (2 * six_term^2 - six_term), 100.0)
     return -f*dx, -f*dy, -f*dz, f*dx, f*dy, f*dz
 end
 
+"Force on each atom due to electrostatic Coulomb potential."
 @fastmath @inbounds function forcecoulomb(coords_one::Coordinates,
                 coords_two::Coordinates,
                 charge_one::Real,
@@ -147,6 +163,7 @@ end
     return -f*dx, -f*dy, -f*dz, f*dx, f*dy, f*dz
 end
 
+"Update accelerations of all atoms using the bonded and non-bonded forces."
 function update_accelerations!(accels::Vector{Acceleration},
                 universe::Universe,
                 forcefield::Forcefield)
@@ -157,7 +174,8 @@ function update_accelerations!(accels::Vector{Acceleration},
         accels[i].z = 0.0
     end
 
-    # Bond forces
+    # Bonded forces
+    # Covalent bond forces
     atoms = universe.molecule.atoms
     for b in universe.molecule.bonds
         if haskey(forcefield.bondtypes, "$(atoms[b.atom_i].attype)/$(atoms[b.atom_j].attype)")
@@ -176,7 +194,7 @@ function update_accelerations!(accels::Vector{Acceleration},
         accels[b.atom_j].z += d2z
     end
 
-    # Angles forces
+    # Angle forces
     for a in universe.molecule.angles
         if haskey(forcefield.angletypes, "$(atoms[a.atom_i].attype)/$(atoms[a.atom_j].attype)/$(atoms[a.atom_k].attype)")
             angletype = forcefield.angletypes["$(atoms[a.atom_i].attype)/$(atoms[a.atom_j].attype)/$(atoms[a.atom_k].attype)"]
@@ -218,11 +236,12 @@ function update_accelerations!(accels::Vector{Acceleration},
         accels[d.atom_l].z += d4z
     end
 
+    # Non-bonded forces
     for (i, j) in universe.neighbour_list
         a1 = universe.molecule.atoms[i]
         a2 = universe.molecule.atoms[j]
 
-        # Van der Waal's forces
+        # Lennard Jones forces
         d1x, d1y, d1z, d2x, d2y, d2z = forcelennardjones(
             universe.coords[i], universe.coords[j], a1, a2, universe.box_size)
         accels[i].x += d1x
@@ -246,6 +265,7 @@ function update_accelerations!(accels::Vector{Acceleration},
     return accels
 end
 
+"Update list of close atoms between which non-bonded forces are calculated."
 function update_neighbours!(universe::Universe)
     # Non-bonding matrix not present for solvent molecules
     matrix_solvent_limit = size(universe.molecule.nb_matrix, 1)
@@ -261,21 +281,26 @@ function update_neighbours!(universe::Universe)
     return universe
 end
 
+"Initialise empty `Acceleration`s."
 empty_accelerations(n_atoms::Int) = [Acceleration(0.0, 0.0, 0.0) for i in 1:n_atoms]
 
+"Simulate molecular dynamics."
 function simulate!(s::Simulation, n_steps::Int)
     report("Starting simulation")
     n_atoms = length(s.universe.coords)
     update_neighbours!(s.universe)
     a_t = update_accelerations!(empty_accelerations(n_atoms), s.universe, s.forcefield)
     a_t_dt = empty_accelerations(n_atoms)
+    writepdb("pdbs_5XER_2fs_snaps/snap_0.pdb", s.universe)
     @showprogress for i in 1:n_steps
-        update_coordinates!(s.universe.coords, s.universe.velocities, a_t, s.timestep, s.universe.box_size)
+        update_coordinates!(s.universe.coords, s.universe.velocities, a_t,
+                            s.timestep, s.universe.box_size)
         update_accelerations!(a_t_dt, s.universe, s.forcefield)
         update_velocities!(s.universe.velocities, a_t, a_t_dt, s.timestep)
         # Update neighbour list every 10 steps
         if i % 10 == 0
             update_neighbours!(s.universe)
+            writepdb("pdbs_5XER_2fs_snaps/snap_$(Int(i/10)).pdb", s.universe)
         end
         a_t = a_t_dt
         s.steps_made += 1
