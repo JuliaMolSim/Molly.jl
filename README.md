@@ -7,8 +7,8 @@ At the minute the package is a proof of concept for MD of proteins in Julia. It 
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.
 - Verlet leapfrog integration.
 - Explicit solvent.
-- Neighbour list to speed up calculation of non-bonded forces.
 - Periodic boundary conditions in a cubic box.
+- Neighbour list to speed up calculation of non-bonded forces.
 
 Features not yet implemented include:
 - Speed. Seriously, it's not fast yet.
@@ -29,7 +29,7 @@ using Molly
 
 max_starting_velocity = 0.1 # nm/ps
 timestep = 0.0002 # ps
-n_steps = 800
+n_steps = 5000
 
 forcefield, molecule, coords, box_size = readinputs(
             Pkg.dir("Molly", "data", "5XER", "gmx_top_ff.top"),
@@ -45,10 +45,11 @@ writepdb("end.pdb", s.universe)
 
 ## Video
 
-The above simulation run for 1 ps looks something like this when you output more PDB files and view it in VMD:
+The above 1 ps simulation looks something like this when you output more PDB files and view it in VMD:
+![MD simulation](data/5XER/sim_1ps.gif)
 
 ## Plans
 
-I plan to work on this in my spare time, but progress will be slow. MD could provide a nice use case for Julia - I think a reasonably featured and performant MD program could be written in less than 1,000 lines of code for example. Julia is also a nice language for trajectory analysis.
+I plan to work on this in my spare time, but progress will be slow. MD could provide a nice use case for Julia - I think a reasonably featured and performant MD program could be written in fewer than 1,000 lines of code for example. Julia is also a well-suited language for trajectory analysis.
 
 Contributions are very welcome but bear in mind that I will probably refactor significantly as the package develops.

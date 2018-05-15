@@ -84,6 +84,7 @@ struct Molecule
     angles::Vector{Angle}
     dihedrals::Vector{Dihedral}
     nb_matrix::BitArray{2}
+    nb_pairs::BitArray{2}
 end
 
 "3D coordinates, e.g. for an atom, in nm."
@@ -106,7 +107,7 @@ struct Universe
     coords::Vector{Coordinates}
     velocities::Vector{Velocity}
     box_size::Float64
-    neighbour_list::Vector{Tuple{Int, Int}}
+    neighbour_list::Vector{Tuple{Int, Int, Bool}} # i, j and whether they are 1-4 pairs (halved force)
 end
 
 "A simulation of a `Universe`, a `Forcefield` and timing information."
@@ -139,6 +140,7 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
     name = "?"
     atoms = Atom[]
     bonds = Bond[]
+    pairs = Tuple{Int, Int}[]
     angles = Angle[]
     dihedrals = Dihedral[]
     current_field = ""
@@ -168,14 +170,19 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
         elseif current_field == "atomtypes" && length(c) >= 8
             atomname = uppercase(c[2])
             atomnames[c[1]] = atomname
-            atomtypes[atomname] = Atomtype(parse(Float64, c[4]), parse(Float64, c[5]),
+            # Take the first version of each atom type only
+            if !haskey(atomtypes, atomname)
+                atomtypes[atomname] = Atomtype(parse(Float64, c[4]), parse(Float64, c[5]),
                         parse(Float64, c[7]), parse(Float64, c[8]))
+            end
         elseif current_field == "atoms"
             attype = atomnames[c[2]]
             push!(atoms, Atom(attype, c[5], parse(Int, c[3]), c[4], parse(Float64, c[7]),
                 parse(Float64, c[8]), atomtypes[attype].σ, atomtypes[attype].ϵ))
         elseif current_field == "bonds"
             push!(bonds, Bond(parse(Int, c[1]), parse(Int, c[2])))
+        elseif current_field == "pairs"
+            push!(pairs, (parse(Int, c[1]), parse(Int, c[2])))
         elseif current_field == "angles"
             push!(angles, Angle(parse(Int, c[1]), parse(Int, c[2]), parse(Int, c[3])))
         elseif current_field == "dihedrals"
@@ -223,8 +230,41 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
         end
     end
 
+    # Read coordinate file and add solvent atoms
+    lines = readlines(coord_file)
+    coords = Coordinates[]
+    for (i, l) in enumerate(lines[3:end-1])
+        push!(coords, Coordinates(
+            parse(Float64, l[21:28]),
+            parse(Float64, l[29:36]),
+            parse(Float64, l[37:44])
+        ))
+
+        # This atom was not specified explicitly in the topology and is added here
+        if i > length(atoms)
+            atname = strip(l[11:15])
+            attype = replace(atname, r"\d+", "")
+            temp_charge = atomtypes[attype].charge
+            if attype == "CL" # Temp hack to fix charges
+                temp_charge = -1.0
+            elseif attype == "OW" || attype == "HW"
+                temp_charge = 0.0 # Water charges set to 0 for now
+            end
+            push!(atoms, Atom(attype, atname, parse(Int, l[1:5]), strip(l[6:10]),
+                temp_charge, atomtypes[attype].mass,
+                atomtypes[attype].σ, atomtypes[attype].ϵ))
+
+            # Add O-H bonds and H-O-H angle in water
+            if atname == "OW"
+                push!(bonds, Bond(i, i+1))
+                push!(bonds, Bond(i, i+2))
+                push!(angles, Angle(i+1, i, i+2))
+            end
+        end
+    end
+
     # Calculate matrix of pairs eligible for non-bonded interactions
-    n_atoms = length(atoms)
+    n_atoms = length(coords)
     nb_matrix = trues(n_atoms, n_atoms)
     for i in 1:n_atoms
         nb_matrix[i, i] = false
@@ -238,44 +278,20 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
         nb_matrix[a.atom_i, a.atom_k] = false
         nb_matrix[a.atom_k, a.atom_i] = false
     end
-    for d in retained_dihedrals
-        # Assume bonding and angles are already specified
-        nb_matrix[d.atom_i, d.atom_l] = false
-        nb_matrix[d.atom_l, d.atom_i] = false
-    end
 
-    # Read coordinate file and add solvent atoms
-    lines = readlines(coord_file)
-    coords = Coordinates[]
-    for (i, l) in enumerate(lines[3:end-1])
-        push!(coords, Coordinates(
-            parse(Float64, l[21:28]),
-            parse(Float64, l[29:36]),
-            parse(Float64, l[37:44])
-        ))
-
-        # This atom was not specified explicitly in the topology and is added here
-        if i > n_atoms
-            atname = strip(l[11:15])
-            attype = replace(atname, r"\d+", "")
-            push!(atoms, Atom(attype, atname, parse(Int, l[1:5]), strip(l[6:10]),
-                atomtypes[attype].charge, atomtypes[attype].mass,
-                atomtypes[attype].σ, atomtypes[attype].ϵ))
-
-            # Add O-H bonds and H-O-H angle in water
-            if atname == "OW"
-                push!(bonds, Bond(i, i+1))
-                push!(bonds, Bond(i, i+2))
-                push!(angles, Angle(i+1, i, i+2))
-            end
-        end
+    # Calculate matrix of pairs eligible for halved non-bonded interactions
+    # This applies to specified pairs in the topology file, usually 1-4 bonded
+    nb_pairs = falses(n_atoms, n_atoms)
+    for (i, j) in pairs
+        nb_pairs[i, j] = true
+        nb_pairs[j, i] = true
     end
 
     # Bounding box for PBCs - box goes 0 to this value in 3 dimensions
     box_size = float(first(split(strip(lines[end]), r"\s+")))
 
     return Forcefield("OPLS", atomtypes, bondtypes, angletypes, dihedraltypes, atomnames),
-        Molecule(name, atoms, bonds, angles, retained_dihedrals, nb_matrix),
+        Molecule(name, atoms, bonds, angles, retained_dihedrals, nb_matrix, nb_pairs),
         coords,
         box_size
 end
