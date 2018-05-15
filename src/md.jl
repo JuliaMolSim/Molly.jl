@@ -11,7 +11,7 @@ export
 "The constant for Coulomb interaction, 1/(4*π*ϵ0*ϵr)."
 const coulomb_const = 138.935458 / 70.0 # Treat ϵr as 70 for now
 
-"Square of the neighbour list cutoff in nm."
+"Square of the neighbour list cutoff in nm^2."
 const sqdist_cutoff = 1.5 ^ 2
 
 "3D acceleration values, e.g. for an atom, in nm/(ps^2)."
@@ -266,6 +266,7 @@ function update_accelerations!(accels::Vector{Acceleration},
         # Lennard Jones forces
         d1x, d1y, d1z, d2x, d2y, d2z = forcelennardjones(
             universe.coords[i], universe.coords[j], a1, a2, universe.box_size)
+        # Non-bonded forces are halved if the pair is a specified non-bonded pair
         accels[i].x += d ? 0.5*d1x : d1x
         accels[i].y += d ? 0.5*d1y : d1y
         accels[i].z += d ? 0.5*d1z : d1z
@@ -336,4 +337,4 @@ function simulate!(s::Simulation, n_steps::Int)
     return s
 end
 
-simulate!(s::Simulation) = simulate!(s, s.n_steps-s.steps_made)
+simulate!(s::Simulation) = simulate!(s, s.n_steps - s.steps_made)
