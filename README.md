@@ -11,7 +11,7 @@ At the minute the package is a proof of concept for MD of proteins in Julia. It 
 - Neighbour list to speed up calculation of non-bonded forces.
 
 Features not yet implemented include:
-- Speed. Seriously, it's not fast yet.
+- Speed. Seriously, it's not fast yet. For reference most of the computational time in MD is spent in the force calculation, and most of that in calculation of non-bonded forces.
 - Force fields other than OPLS-AA.
 - Energy minimisation.
 - Canonical/grand-canonical ensembles etc.
