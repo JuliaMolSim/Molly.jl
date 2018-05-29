@@ -291,6 +291,13 @@ function update_accelerations!(accels::Vector{Acceleration},
     #print("LJ: $(round(temp_lj_sum, 2)), ")
     #print("Coulomb: $(round(temp_el_sum, 2)), ")
 
+    # Divide sum of forces my the atom mass to get acceleration
+    for i in 1:length(accels)
+        accels[i].x /= universe.molecule.atoms[i].mass
+        accels[i].y /= universe.molecule.atoms[i].mass
+        accels[i].z /= universe.molecule.atoms[i].mass
+    end
+
     return accels
 end
 
@@ -318,7 +325,7 @@ function simulate!(s::Simulation, n_steps::Int)
     update_neighbours!(s.universe)
     a_t = update_accelerations!(empty_accelerations(n_atoms), s.universe, s.forcefield)
     a_t_dt = empty_accelerations(n_atoms)
-    #out_prefix = "pdbs_5XER"
+    out_prefix = "pdbs_5XER"
     #writepdb("$out_prefix/snap_0.pdb", s.universe)
     @showprogress for i in 1:n_steps
         update_coordinates!(s.universe.coords, s.universe.velocities, a_t,

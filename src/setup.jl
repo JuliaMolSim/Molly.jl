@@ -247,8 +247,6 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
             temp_charge = atomtypes[attype].charge
             if attype == "CL" # Temp hack to fix charges
                 temp_charge = -1.0
-            elseif attype == "OW" || attype == "HW"
-                temp_charge = 0.0 # Water charges set to 0 for now
             end
             push!(atoms, Atom(attype, atname, parse(Int, l[1:5]), strip(l[6:10]),
                 temp_charge, atomtypes[attype].mass,
