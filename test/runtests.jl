@@ -1,5 +1,5 @@
 using Molly
-using Base.Test
+using Test
 
 max_starting_velocity = 0.1
 timestep = 0.0002

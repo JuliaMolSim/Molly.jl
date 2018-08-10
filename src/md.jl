@@ -121,7 +121,7 @@ function forcedihedral(coords_one::Coordinates,
     dc = vector(coords_four, coords_three, box_size)
     p1 = normalize(ba × bc)
     p2 = normalize(-dc × -bc)
-    θ = atan2(dot((-ba × bc) × (bc × -dc), normalize(bc)), dot(-ba × bc, bc × -dc))
+    θ = atan(dot((-ba × bc) × (bc × -dc), normalize(bc)), dot(-ba × bc, bc × -dc))
     angle_term = 0.5*(dihedraltype.f1*sin(θ) - 2*dihedraltype.f2*sin(2*θ) + 3*dihedraltype.f3*sin(3*θ))
     fa = (angle_term / (norm(ba) * sin(acosbound(dot(ba, bc) / (norm(ba) * norm(bc)))))) * p1
     fd = (angle_term / (norm(dc) * sin(acosbound(dot(bc, dc) / (norm(bc) * norm(dc)))))) * p2
