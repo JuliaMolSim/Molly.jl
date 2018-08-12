@@ -35,8 +35,8 @@ timestep = 0.0002 # ps
 n_steps = 5000
 
 forcefield, molecule, coords, box_size = readinputs(
-            Pkg.dir("Molly", "data", "5XER", "gmx_top_ff.top"),
-            Pkg.dir("Molly", "data", "5XER", "gmx_coords.gro"))
+            joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
+            joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"))
 
 s = Simulation(forcefield, molecule, coords, box_size,
             max_starting_velocity, timestep, n_steps)
