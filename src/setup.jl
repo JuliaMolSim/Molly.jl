@@ -243,7 +243,7 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
         # This atom was not specified explicitly in the topology and is added here
         if i > length(atoms)
             atname = strip(l[11:15])
-            attype = replace(atname, r"\d+", "")
+            attype = replace(atname, r"\d+" => "")
             temp_charge = atomtypes[attype].charge
             if attype == "CL" # Temp hack to fix charges
                 temp_charge = -1.0
@@ -286,7 +286,7 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
     end
 
     # Bounding box for PBCs - box goes 0 to this value in 3 dimensions
-    box_size = float(first(split(strip(lines[end]), r"\s+")))
+    box_size = parse(Float64, first(split(strip(lines[end]), r"\s+")))
 
     return Forcefield("OPLS", atomtypes, bondtypes, angletypes, dihedraltypes, atomnames),
         Molecule(name, atoms, bonds, angles, retained_dihedrals, nb_matrix, nb_pairs),
