@@ -88,14 +88,14 @@ struct Molecule
 end
 
 "3D coordinates, e.g. for an atom, in nm."
-mutable struct Coordinates
+mutable struct Coordinates <: FieldVector{3, Float64}
     x::Float64
     y::Float64
     z::Float64
 end
 
 "3D velocity values, e.g. for an atom, in nm/ps."
-mutable struct Velocity
+mutable struct Velocity <: FieldVector{3, Float64}
     x::Float64
     y::Float64
     z::Float64
