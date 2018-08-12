@@ -4,11 +4,11 @@ using LinearAlgebra: norm, normalize, dot, ×
 
 using StaticArrays
 using ProgressMeter
-using BioStructures
-import BioStructures.writepdb
+#using BioStructures
+#import BioStructures.writepdb
 
 include("setup.jl")
 include("md.jl")
-include("analysis.jl")
+#include("analysis.jl")
 
 end
