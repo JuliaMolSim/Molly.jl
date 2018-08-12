@@ -264,17 +264,19 @@ function update_accelerations!(accels::Vector{Acceleration},
         a2 = universe.molecule.atoms[j]
 
         # Lennard Jones forces
-        d1x, d1y, d1z, d2x, d2y, d2z = forcelennardjones(
-            universe.coords[i], universe.coords[j], a1, a2, universe.box_size)
-        # Non-bonded forces are halved if the pair is a specified non-bonded pair
-        accels[i].x += d ? 0.5*d1x : d1x
-        accels[i].y += d ? 0.5*d1y : d1y
-        accels[i].z += d ? 0.5*d1z : d1z
-        accels[j].x += d ? 0.5*d2x : d2x
-        accels[j].y += d ? 0.5*d2y : d2y
-        accels[j].z += d ? 0.5*d2z : d2z
-        #i == temp_atomid ? temp_lj_sum += d1x : nothing
-        #j == temp_atomid ? temp_lj_sum += d2x : nothing
+        if a1.σ > 0.0 && a2.σ > 0.0
+            d1x, d1y, d1z, d2x, d2y, d2z = forcelennardjones(
+                universe.coords[i], universe.coords[j], a1, a2, universe.box_size)
+            # Non-bonded forces are halved if the pair is a specified non-bonded pair
+            accels[i].x += d ? 0.5*d1x : d1x
+            accels[i].y += d ? 0.5*d1y : d1y
+            accels[i].z += d ? 0.5*d1z : d1z
+            accels[j].x += d ? 0.5*d2x : d2x
+            accels[j].y += d ? 0.5*d2y : d2y
+            accels[j].z += d ? 0.5*d2z : d2z
+            #i == temp_atomid ? temp_lj_sum += d1x : nothing
+            #j == temp_atomid ? temp_lj_sum += d2x : nothing
+        end
 
         # Electrostatic forces
         d1x, d1y, d1z, d2x, d2y, d2z = forcecoulomb(
