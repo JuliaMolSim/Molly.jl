@@ -36,7 +36,7 @@ n_steps = 5000
 
 forcefield, molecule, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
-            joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"))
+            joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
 
 s = Simulation(forcefield, molecule, coords, box_size,
             max_starting_velocity, timestep, n_steps)
