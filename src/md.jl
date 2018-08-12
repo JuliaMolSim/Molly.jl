@@ -318,10 +318,10 @@ function update_neighbours!(universe::Universe)
 end
 
 "Initialise empty `Acceleration`s."
-empty_accelerations(n_atoms::Int) = [Acceleration(0.0, 0.0, 0.0) for i in 1:n_atoms]
+empty_accelerations(n_atoms::Integer) = [Acceleration(0.0, 0.0, 0.0) for i in 1:n_atoms]
 
 "Simulate molecular dynamics."
-function simulate!(s::Simulation, n_steps::Int)
+function simulate!(s::Simulation, n_steps::Integer)
     report("Starting simulation")
     n_atoms = length(s.universe.coords)
     update_neighbours!(s.universe)
