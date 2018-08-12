@@ -2,6 +2,7 @@ module Molly
 
 using LinearAlgebra: norm, normalize, dot, ×
 
+using StaticArrays
 using ProgressMeter
 using BioStructures
 import BioStructures.writepdb

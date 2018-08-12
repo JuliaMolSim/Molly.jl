@@ -15,7 +15,7 @@ const coulomb_const = 138.935458 / 70.0 # Treat ϵr as 70 for now
 const sqdist_cutoff = 1.5 ^ 2
 
 "3D acceleration values, e.g. for an atom, in nm/(ps^2)."
-mutable struct Acceleration
+mutable struct Acceleration <: FieldVector{3, Float64}
     x::Float64
     y::Float64
     z::Float64
@@ -172,10 +172,8 @@ function update_accelerations!(accels::Vector{Acceleration},
                 universe::Universe,
                 forcefield::Forcefield)
     # Clear accelerations
-    for i in 1:length(accels)
-        accels[i].x = 0.0
-        accels[i].y = 0.0
-        accels[i].z = 0.0
+    for a in accels
+        fill!(a, 0.0)
     end
 
     # Bonded forces
