@@ -8,13 +8,13 @@ Much of science can be explained by the movement and interaction of molecules. M
 At the minute the package is a proof of concept for MD of proteins in Julia v1.0. It can read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD with given parameters. In theory it can do this for any regular protein. Implemented features include:
 - Bonded interactions - covalent bonds, bond angles, dihedral angles.
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.
-- Verlet leapfrog integration.
+- Velocity Verlet integration.
 - Explicit solvent.
 - Periodic boundary conditions in a cubic box.
 - Neighbour list to speed up calculation of non-bonded forces.
 
 Features not yet implemented include:
-- Speed. Seriously, it's not fast yet. For reference most of the computational time in MD is spent in the force calculation, and most of that in calculation of non-bonded forces.
+- Speed. Seriously, it's not fast yet - ~40x slower than GROMACS by some rough calculations. For reference most of the computational time in MD is spent in the force calculation, and most of that in calculation of non-bonded forces.
 - Force fields other than OPLS-AA.
 - Energy minimisation.
 - Canonical/grand-canonical ensembles etc.
