@@ -305,10 +305,12 @@ end
 function update_neighbours!(universe::Universe)
     empty!(universe.neighbour_list)
     for i in 1:length(universe.coords)
+        ci = universe.coords[i]
+        nbmi = universe.molecule.nb_matrix[:, i]
+        nbpi = universe.molecule.nb_pairs[:, i]
         for j in 1:(i-1)
-            if sqdist(universe.coords[i], universe.coords[j], universe.box_size) < sqdist_cutoff &&
-                    universe.molecule.nb_matrix[i, j]
-                push!(universe.neighbour_list, (i, j, universe.molecule.nb_pairs[i, j]))
+            if sqdist(ci, universe.coords[j], universe.box_size) < sqdist_cutoff && nbmi[j]
+                push!(universe.neighbour_list, (i, j, nbpi[j]))
             end
         end
     end
