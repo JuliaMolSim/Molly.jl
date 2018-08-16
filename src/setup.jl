@@ -294,23 +294,26 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
         box_size
 end
 
-# Generate a random 3D velocity with a maximum
-function Velocity(max_starting_velocity::Real)
-    θ = rand()*π
-    ϕ = rand()*2π
-    r = rand()*max_starting_velocity
-    return Velocity(r*sin(θ)*cos(ϕ), r*sin(θ)*sin(ϕ), r*cos(θ))
+# Generate a random velocity from the Maxwell-Boltzmann distribution
+function maxwellboltzmann(mass::Real, T::Real)
+    norm_dist = sum(rand(12)) - 6
+    return abs(norm_dist) * sqrt(T / mass)
+end
+
+# Generate a random 3D velocity from the Maxwell-Boltzmann distribution
+function Velocity(mass::Real, T::Real)
+    return Velocity([maxwellboltzmann(mass, T) for _ in 1:3]...)
 end
 
 function Simulation(forcefield::Forcefield,
                 molecule::Molecule,
                 coords::Vector{Coordinates},
                 box_size::Real,
-                max_starting_velocity::Real,
+                temperature::Real,
                 timestep::Real,
                 n_steps::Real)
     n_atoms = length(coords)
-    v = [Velocity(max_starting_velocity) for _ in 1:n_atoms]
+    v = [Velocity(molecule.atoms[i].mass, temperature) for i in 1:n_atoms]
     u = Universe(molecule, coords, v, box_size, [])
     return Simulation(forcefield, u, timestep, n_steps, 0)
 end

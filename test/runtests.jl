@@ -1,16 +1,16 @@
 using Molly
 using Test
 
-max_starting_velocity = 0.1
 timestep = 0.0002
+temperature = 298
 n_steps = 50
 
 forcefield, molecule, coords, box_size = readinputs(
             normpath(@__DIR__, "..", "data", "5XER", "gmx_top_ff.top"),
             normpath(@__DIR__, "..", "data", "5XER", "gmx_coords.gro"))
 
-s = Simulation(forcefield, molecule, coords, box_size,
-            max_starting_velocity, timestep, n_steps)
+s = Simulation(forcefield, molecule, coords, box_size, temperature,
+            timestep, n_steps)
 
 simulate!(s)
 
