@@ -56,6 +56,21 @@ function update_velocities!(velocities::Vector{Velocity},
     return velocities
 end
 
+"Rescale random velocities according to the Andersen thermostat."
+function rescale_velocities!(universe::Universe,
+                    timestep::Real;
+                    coupling_const::Real=0.1)
+    T = universe.temperature
+    for (i, v) in enumerate(universe.velocities)
+        if rand() < timestep / coupling_const
+            mass = universe.molecule.atoms[i].mass
+            v.x = maxwellboltzmann(mass, T)
+            v.y = maxwellboltzmann(mass, T)
+            v.z = maxwellboltzmann(mass, T)
+        end
+    end
+end
+
 "Vector between two coordinate values, accounting for the bounding box."
 function vector1D(c1::Real, c2::Real, box_size::Real)
     if c1 < c2
@@ -334,6 +349,7 @@ function simulate!(s::Simulation, n_steps::Integer)
                             s.timestep, s.universe.box_size)
         update_accelerations!(a_t_dt, s.universe, s.forcefield)
         update_velocities!(s.universe.velocities, a_t, a_t_dt, s.timestep)
+        rescale_velocities!(s.universe, s.timestep)
         # Update neighbour list every 10 steps
         if i % 10 == 0
             update_neighbours!(s.universe)

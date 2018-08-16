@@ -106,6 +106,7 @@ struct Universe
     molecule::Molecule
     coords::Vector{Coordinates}
     velocities::Vector{Velocity}
+    temperature::Float64
     box_size::Float64
     neighbour_list::Vector{Tuple{Int, Int, Bool}} # i, j and whether they are 1-4 pairs (halved force)
 end
@@ -302,7 +303,7 @@ end
 
 # Generate a random 3D velocity from the Maxwell-Boltzmann distribution
 function Velocity(mass::Real, T::Real)
-    return Velocity([maxwellboltzmann(mass, T) for _ in 1:3]...)
+    return Velocity([maxwellboltzmann(mass, T) for _ in 1:3])
 end
 
 function Simulation(forcefield::Forcefield,
@@ -314,6 +315,6 @@ function Simulation(forcefield::Forcefield,
                 n_steps::Real)
     n_atoms = length(coords)
     v = [Velocity(molecule.atoms[i].mass, temperature) for i in 1:n_atoms]
-    u = Universe(molecule, coords, v, box_size, [])
+    u = Universe(molecule, coords, v, temperature, box_size, [])
     return Simulation(forcefield, u, timestep, n_steps, 0)
 end
