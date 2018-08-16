@@ -11,8 +11,11 @@ export
 "The constant for Coulomb interaction, 1/(4*π*ϵ0*ϵr)."
 const coulomb_const = 138.935458 / 70.0 # Treat ϵr as 70 for now
 
-"Square of the neighbour list cutoff in nm^2."
-const sqdist_cutoff = 1.5 ^ 2
+"Square of the non-bonded interaction distance cutoff in nm^2."
+const sqdist_cutoff_nb = 1.0 ^ 2
+
+"Square of the neighbour list distance cutoff in nm^2."
+const sqdist_cutoff_nl = 1.5 ^ 2
 
 "3D acceleration values, e.g. for an atom, in nm/(ps^2)."
 mutable struct Acceleration <: FieldVector{3, Float64}
@@ -161,6 +164,9 @@ function forcelennardjones end
     dy = vector1D(coords_one.y, coords_two.y, box_size)
     dz = vector1D(coords_one.z, coords_two.z, box_size)
     r2 = dx*dx + dy*dy + dz*dz
+    if r2 > sqdist_cutoff_nb
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    end
     six_term = (σ^2 / r2)^3
     # Limit this to 100 as a fudge to stop it exploding
     f = min(((24 * ϵ) / (r2)) * (2 * six_term^2 - six_term), 100.0)
@@ -178,7 +184,11 @@ function forcecoulomb end
     dx = vector1D(coords_one.x, coords_two.x, box_size)
     dy = vector1D(coords_one.y, coords_two.y, box_size)
     dz = vector1D(coords_one.z, coords_two.z, box_size)
-    f = (coulomb_const * charge_one * charge_two) / sqrt((dx*dx + dy*dy + dz*dz)^3)
+    r2 = dx*dx + dy*dy + dz*dz
+    if r2 > sqdist_cutoff_nb
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    end
+    f = (coulomb_const * charge_one * charge_two) / sqrt(r2^3)
     return -f*dx, -f*dy, -f*dz, f*dx, f*dy, f*dz
 end
 
@@ -324,7 +334,7 @@ function update_neighbours!(universe::Universe)
         nbmi = universe.molecule.nb_matrix[:, i]
         nbpi = universe.molecule.nb_pairs[:, i]
         for j in 1:(i-1)
-            if sqdist(ci, universe.coords[j], universe.box_size) < sqdist_cutoff && nbmi[j]
+            if sqdist(ci, universe.coords[j], universe.box_size) < sqdist_cutoff_nl && nbmi[j]
                 push!(universe.neighbour_list, (i, j, nbpi[j]))
             end
         end
