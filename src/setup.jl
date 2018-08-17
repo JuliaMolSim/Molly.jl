@@ -118,6 +118,7 @@ mutable struct Simulation
     timestep::Float64
     n_steps::Int
     steps_made::Int
+    temperatures::Vector{Float64}
 end
 
 function Base.show(io::IO, s::Simulation)
@@ -316,5 +317,5 @@ function Simulation(forcefield::Forcefield,
     n_atoms = length(coords)
     v = [Velocity(molecule.atoms[i].mass, temperature) for i in 1:n_atoms]
     u = Universe(molecule, coords, v, temperature, box_size, [])
-    return Simulation(forcefield, u, timestep, n_steps, 0)
+    return Simulation(forcefield, u, timestep, n_steps, 0, [])
 end

@@ -8,6 +8,7 @@ Much of science can be explained by the movement and interaction of molecules. M
 At the minute the package is a proof of concept for MD of proteins in Julia v1.0. It can read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD with given parameters. In theory it can do this for any regular protein. Implemented features include:
 - Bonded interactions - covalent bonds, bond angles, dihedral angles.
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.
+- Andersen thermostat.
 - Velocity Verlet integration.
 - Explicit solvent.
 - Periodic boundary conditions in a cubic box.
@@ -17,7 +18,7 @@ Features not yet implemented include:
 - Speed. Seriously, it's not fast yet - ~35x slower than GROMACS by some rough calculations. For reference most of the computational time in MD is spent in the force calculation, and most of that in calculation of non-bonded forces.
 - Force fields other than OPLS-AA.
 - Energy minimisation.
-- Canonical/grand-canonical ensembles etc.
+- Other temperature or pressure coupling methods.
 - Protein preparation - solvent box, add hydrogens etc.
 - Trajectory/topology file format readers/writers.
 - Trajectory analysis.
@@ -30,20 +31,18 @@ Features not yet implemented include:
 ```julia
 using Molly
 
-max_starting_velocity = 0.1 # nm/ps
 timestep = 0.0002 # ps
+temperature = 298 # K
 n_steps = 5000
 
 forcefield, molecule, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
 
-s = Simulation(forcefield, molecule, coords, box_size,
-            max_starting_velocity, timestep, n_steps)
+s = Simulation(forcefield, molecule, coords, box_size, temperature,
+            timestep, n_steps)
 
-writepdb("start.pdb", s.universe)
 simulate!(s)
-writepdb("end.pdb", s.universe)
 ```
 
 ## Video

@@ -6,6 +6,7 @@
 # See Gromacs manual for other aspects of forces
 
 export
+    temperature,
     simulate!
 
 "The constant for Coulomb interaction, 1/(4*π*ϵ0*ϵr)."
@@ -342,6 +343,13 @@ function update_neighbours!(universe::Universe)
     return universe
 end
 
+"Calculate the temperature of a system from the kinetic energy of the atoms."
+function temperature(u::Universe)
+    ke = sum([a.mass * dot(u.velocities[i], u.velocities[i]) for (i, a) in enumerate(u.molecule.atoms)]) / 2
+    df = 3*length(u.velocities) - 3
+    return 2*ke / df
+end
+
 "Initialise empty `Acceleration`s."
 empty_accelerations(n_atoms::Integer) = [Acceleration(0.0, 0.0, 0.0) for i in 1:n_atoms]
 
@@ -365,6 +373,7 @@ function simulate!(s::Simulation, n_steps::Integer)
             update_neighbours!(s.universe)
             #writepdb("$out_prefix/snap_$(Int(i/10)).pdb", s.universe)
         end
+        push!(s.temperatures, temperature(s.universe))
         a_t = a_t_dt
         s.steps_made += 1
     end
