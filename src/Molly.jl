@@ -1,14 +1,13 @@
 module Molly
 
+using StaticArrays
 using ProgressMeter
-#using BioStructures
-#import BioStructures.writepdb
+using BioStructures
 
 using LinearAlgebra: norm, normalize, dot, ×
-using StaticArrays
 
 include("setup.jl")
 include("md.jl")
-#include("analysis.jl")
+include("analysis.jl")
 
 end

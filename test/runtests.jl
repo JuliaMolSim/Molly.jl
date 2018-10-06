@@ -14,5 +14,5 @@ s = Simulation(forcefield, molecule, coords, box_size, temperature,
 
 simulate!(s)
 
-#writepdb("test.pdb", s.universe)
-#rm("test.pdb")
+writepdb("test.pdb", s.universe)
+rm("test.pdb")
