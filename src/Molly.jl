@@ -3,6 +3,7 @@ module Molly
 using StaticArrays
 using ProgressMeter
 using BioStructures
+using Distributions
 
 using LinearAlgebra: norm, normalize, dot, ×
 
