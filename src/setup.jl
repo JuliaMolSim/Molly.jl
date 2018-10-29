@@ -298,8 +298,7 @@ end
 
 # Generate a random velocity from the Maxwell-Boltzmann distribution
 function maxwellboltzmann(mass::Real, T::Real)
-    norm_dist = sum(rand(12)) - 6
-    return abs(norm_dist) * sqrt(T / mass)
+    return rand(Normal(0.0, sqrt(8.3144598*T/mass)))
 end
 
 # Generate a random 3D velocity from the Maxwell-Boltzmann distribution
