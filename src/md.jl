@@ -16,7 +16,7 @@ const coulomb_const = 138.935458 / 70.0 # Treat ϵr as 70 for now
 const sqdist_cutoff_nb = 1.0 ^ 2
 
 "Square of the neighbour list distance cutoff in nm^2."
-const sqdist_cutoff_nl = 1.5 ^ 2
+const sqdist_cutoff_nl = 1.2 ^ 2
 
 "3D acceleration values, e.g. for an atom, in nm/(ps^2)."
 mutable struct Acceleration <: FieldVector{3, Float64}

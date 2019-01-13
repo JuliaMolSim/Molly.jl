@@ -16,7 +16,7 @@ At the minute the package is a proof of concept for MD of proteins in Julia v1.0
 - Neighbour list to speed up calculation of non-bonded forces.
 
 Features not yet implemented include:
-- Speed. Seriously, it's not fast yet - ~35x slower than GROMACS by some rough calculations. For reference most of the computational time in MD is spent in the force calculation, and most of that in calculation of non-bonded forces.
+- Speed. Seriously, it's not fast yet - ~20x slower than GROMACS by some rough calculations. For reference most of the computational time in MD is spent in the force calculation, and most of that in calculation of non-bonded forces.
 - Force fields other than OPLS-AA.
 - Energy minimisation.
 - Other temperature or pressure coupling methods.
@@ -55,4 +55,4 @@ The above 1 ps simulation looks something like this when you output more PDB fil
 
 I plan to work on this in my spare time, but progress will be slow. MD could provide a nice use case for Julia - I think a reasonably featured and performant MD program could be written in fewer than 1,000 lines of code for example. Julia is also a well-suited language for trajectory analysis.
 
-Contributions are very welcome but bear in mind that I will probably refactor significantly as the package develops.
+Contributions are very welcome - see the [roadmap issue](https://github.com/jgreener64/Molly.jl/issues/2) for more.
