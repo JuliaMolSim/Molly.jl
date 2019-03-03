@@ -1,36 +1,12 @@
 # Different ways to simulate molecules
 
 export
-    Simulator,
-    Simulation,
     update_coordinates!,
     update_velocities!,
     calc_accelerations!,
     empty_accelerations,
     VelocityVerlet,
     simulate!
-
-"A type of simulation to run, e.g. leap-frog integration or energy minimisation."
-abstract type Simulator end
-
-"The data associated with a molecular simulation."
-mutable struct Simulation
-    simulator::Simulator
-    atoms::Vector{Atom}
-    specific_inter_lists::Dict{String, Vector{T} where T <: SpecificInteraction}
-    general_inters::Dict{String, GeneralInteraction}
-    coords::Vector{Coordinates}
-    velocities::Vector{Velocity}
-    temperature::Float64
-    box_size::Float64
-    neighbour_list::Vector{Tuple{Int, Int}}
-    neighbour_finder::NeighbourFinder
-    thermostat::Thermostat
-    loggers::Vector{Logger}
-    timestep::Float64
-    n_steps::Int
-    n_steps_made::Int
-end
 
 "Update coordinates of all atoms and bound to the bounding box."
 function update_coordinates!(s::Simulation, accels::Vector{Acceleration})

@@ -1,14 +1,10 @@
 # Loggers to record properties throughout a simulation
 
 export
-    Logger,
     TemperatureLogger,
     log_property!,
     StructureWriter,
     writepdb
-
-"A way to record a property, e.g. the temperature, throughout a simulation."
-abstract type Logger end
 
 "Log the temperature throughout a simulation."
 struct TemperatureLogger <: Logger

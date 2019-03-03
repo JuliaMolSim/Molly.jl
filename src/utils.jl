@@ -1,18 +1,10 @@
 # General utils: neighbour finders, thermostats etc
 
 export
-    NeighbourFinder,
-    Thermostat,
     DistanceNeighbourFinder,
     find_neighbours!,
     AndersenThermostat,
     apply_thermostat!
-
-"A way to find near atoms to save on simulation time."
-abstract type NeighbourFinder end
-
-"A way to keep the temperature of a simulation constant."
-abstract type Thermostat end
 
 "Find close atoms by distance."
 struct DistanceNeighbourFinder <: NeighbourFinder

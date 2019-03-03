@@ -3,9 +3,6 @@
 # See Gromacs manual for other aspects of forces
 
 export
-    Interaction,
-    GeneralInteraction,
-    SpecificInteraction,
     LennardJones,
     Coulomb,
     Bond,
@@ -24,15 +21,6 @@ const coulomb_const = 138.935458 / 70.0 # Treat ϵr as 70 for now
 
 "The molar gas constant, R, in J/(mol*K)."
 const molar_gas_const = 8.3144598
-
-"An interaction between atoms that contributes to forces on the atoms."
-abstract type Interaction end
-
-"A general interaction that will apply to all atom pairs."
-abstract type GeneralInteraction <: Interaction end
-
-"A specific interaction between sets of specific atoms, e.g. a bond angle."
-abstract type SpecificInteraction <: Interaction end
 
 "The Lennard-Jones 6-12 interaction."
 struct LennardJones <: GeneralInteraction
