@@ -1,10 +1,11 @@
-# General utils: neighbour finders, thermostats etc
+# General utils - neighbour finders, thermostats etc
 
 export
     DistanceNeighbourFinder,
     find_neighbours!,
     AndersenThermostat,
-    apply_thermostat!
+    apply_thermostat!,
+    maxwellboltzmann
 
 "Find close atoms by distance."
 struct DistanceNeighbourFinder <: NeighbourFinder
@@ -40,6 +41,11 @@ function apply_thermostat!(s::Simulation, ::AndersenThermostat, coupling_const::
             v.z = maxwellboltzmann(mass, s.temperature)
         end
     end
+end
+
+"Generate a random velocity from the Maxwell-Boltzmann distribution."
+function maxwellboltzmann(mass::Real, T::Real)
+    return rand(Normal(0.0, sqrt(molar_gas_const * T / mass)))
 end
 
 "Calculate the temperature of a system from the kinetic energy of the atoms."

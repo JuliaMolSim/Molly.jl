@@ -9,7 +9,7 @@ using LinearAlgebra: norm, normalize, dot, ×
 
 include("types.jl")
 include("setup.jl")
-include("coords.jl")
+include("spatial.jl")
 include("forces.jl")
 include("simulators.jl")
 include("loggers.jl")

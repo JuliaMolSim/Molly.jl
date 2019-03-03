@@ -1,6 +1,10 @@
 # Types
 
 export
+    Atom,
+    Coordinates,
+    Velocity,
+    Acceleration,
     Interaction,
     GeneralInteraction,
     SpecificInteraction,
@@ -9,6 +13,44 @@ export
     Thermostat,
     Simulator,
     Simulation
+
+"An atom and its associated information."
+struct Atom
+    attype::String
+    name::String
+    resnum::Int
+    resname::String
+    charge::Float64
+    mass::Float64
+    σ::Float64
+    ϵ::Float64
+end
+
+"3D coordinates, e.g. for an atom, in nm."
+mutable struct Coordinates <: FieldVector{3, Float64}
+    x::Float64
+    y::Float64
+    z::Float64
+end
+
+"3D velocity values, e.g. for an atom, in nm/ps."
+mutable struct Velocity <: FieldVector{3, Float64}
+    x::Float64
+    y::Float64
+    z::Float64
+end
+
+# Generate a random 3D velocity from the Maxwell-Boltzmann distribution
+function Velocity(mass::Real, T::Real)
+    return Velocity([maxwellboltzmann(mass, T) for _ in 1:3])
+end
+
+"3D acceleration values, e.g. for an atom, in nm/(ps^2)."
+mutable struct Acceleration <: FieldVector{3, Float64}
+    x::Float64
+    y::Float64
+    z::Float64
+end
 
 "An interaction between atoms that contributes to forces on the atoms."
 abstract type Interaction end
