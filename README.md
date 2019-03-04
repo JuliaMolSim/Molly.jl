@@ -14,6 +14,7 @@ At the minute the package is a proof of concept for MD of proteins in Julia v1.0
 - Explicit solvent.
 - Periodic boundary conditions in a cubic box.
 - Neighbour list to speed up calculation of non-bonded forces.
+- Interface to allow arbitrary definition of new forces, thermostats etc.
 
 Features not yet implemented include:
 - Speed. Seriously, it's not fast yet - ~20x slower than GROMACS by some rough calculations. For reference most of the computational time in MD is spent in the force calculation, and most of that in calculation of non-bonded forces.

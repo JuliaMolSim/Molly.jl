@@ -29,12 +29,14 @@ function find_neighbours!(s::Simulation, ::DistanceNeighbourFinder)
 end
 
 "Rescale random velocities according to the Andersen thermostat."
-struct AndersenThermostat <: Thermostat end
+struct AndersenThermostat <: Thermostat 
+    coupling_const::Float64
+end
 
 "Apply a thermostat to modify a simulation."
-function apply_thermostat!(s::Simulation, ::AndersenThermostat, coupling_const::Real=0.1)
+function apply_thermostat!(s::Simulation, thermostat::AndersenThermostat)
     for (i, v) in enumerate(s.velocities)
-        if rand() < s.timestep / coupling_const
+        if rand() < s.timestep / thermostat.coupling_const
             mass = s.atoms[i].mass
             v.x = maxwellboltzmann(mass, s.temperature)
             v.y = maxwellboltzmann(mass, s.temperature)
