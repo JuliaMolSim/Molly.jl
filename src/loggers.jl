@@ -4,7 +4,7 @@ export
     TemperatureLogger,
     log_property!,
     StructureWriter,
-    writepdb
+    append_model
 
 "Log the temperature throughout a simulation."
 struct TemperatureLogger <: Logger
@@ -24,23 +24,23 @@ end
 "Write output structures to the PDB file format throughout a simulation."
 mutable struct StructureWriter <: Logger
     n_steps::Int
-    out_dir::String
+    filepath::String
     structure_n::Int
 end
 
-StructureWriter(n_steps::Integer, out_dir::AbstractString) = StructureWriter(
-        n_steps, out_dir, 1)
+StructureWriter(n_steps::Integer, filepath::AbstractString) = StructureWriter(
+        n_steps, filepath, 1)
 
 function log_property!(logger::StructureWriter, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
-        writepdb("$(logger.out_dir)/model_$(logger.structure_n).pdb", s)
+        append_model(logger, s)
         logger.structure_n += 1
     end
 end
 
-# Extension of method from BioStructures
-function BioStructures.writepdb(filepath::AbstractString, s::Simulation)
-    open(filepath, "w") do output
+function append_model(logger::StructureWriter, s::Simulation)
+    open(logger.filepath, "a") do output
+        println(output, "MODEL     ", lpad(logger.structure_n, 4))
         for (i, c) in enumerate(s.coords)
             at = s.atoms[i]
             at_rec = AtomRecord(
@@ -60,5 +60,6 @@ function BioStructures.writepdb(filepath::AbstractString, s::Simulation)
             )
             println(output, pdbline(at_rec))
         end
+        println(output, "ENDMDL")
     end
 end
