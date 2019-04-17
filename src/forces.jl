@@ -10,9 +10,6 @@ export
     Dihedral,
     update_accelerations!
 
-"Square of the neighbour list distance cutoff in nm^2."
-const sqdist_cutoff_nl = 1.2 ^ 2
-
 "Square of the non-bonded interaction distance cutoff in nm^2."
 const sqdist_cutoff_nb = 1.0 ^ 2
 

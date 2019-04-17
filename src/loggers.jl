@@ -3,6 +3,7 @@
 export
     TemperatureLogger,
     log_property!,
+    CoordinateLogger,
     StructureWriter,
     append_model
 
@@ -18,6 +19,20 @@ TemperatureLogger(n_steps::Integer) = TemperatureLogger(n_steps, [])
 function log_property!(logger::TemperatureLogger, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
         push!(logger.temperatures, temperature(s))
+    end
+end
+
+"Log the temperature throughout a simulation."
+struct CoordinateLogger <: Logger
+    n_steps::Int
+    coords::Vector{Vector{Coordinates}}
+end
+
+CoordinateLogger(n_steps::Integer) = CoordinateLogger(n_steps, [])
+
+function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)
+    if step_n % logger.n_steps == 0
+        push!(logger.coords, deepcopy(s.coords))
     end
 end
 
