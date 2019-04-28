@@ -88,7 +88,7 @@ struct VelocityVerlet <: Simulator end
 "Simulate molecular dynamics."
 function simulate!(s::Simulation, ::VelocityVerlet, n_steps::Integer)
     n_atoms = length(s.coords)
-    find_neighbours!(s, s.neighbour_finder)
+    find_neighbours!(s, s.neighbour_finder, 0)
     a_t = calc_accelerations!(empty_accelerations(n_atoms), s)
     a_t_dt = empty_accelerations(n_atoms)
     @showprogress for step_n in 1:n_steps
@@ -96,9 +96,7 @@ function simulate!(s::Simulation, ::VelocityVerlet, n_steps::Integer)
         calc_accelerations!(a_t_dt, s)
         update_velocities!(s, a_t, a_t_dt)
         apply_thermostat!(s, s.thermostat)
-        if step_n % s.neighbour_finder.n_steps == 0
-            find_neighbours!(s, s.neighbour_finder)
-        end
+        find_neighbours!(s, s.neighbour_finder, step_n)
         for logger in s.loggers
             log_property!(logger, s, step_n)
         end

@@ -103,7 +103,7 @@ function Simulation(;
                     temperature,
                     box_size,
                     neighbour_list=[],
-                    neighbour_finder,
+                    neighbour_finder=NoNeighbourFinder(),
                     thermostat=NoThermostat(),
                     loggers=[],
                     timestep,
