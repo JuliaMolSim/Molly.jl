@@ -74,7 +74,7 @@ end
 
 "Generate a random velocity from the Maxwell-Boltzmann distribution."
 function maxwellboltzmann(mass::Real, T::Real)
-    return rand(Normal(0.0, sqrt(molar_gas_const * T / mass)))
+    return rand(Normal(0.0, sqrt(T / mass)))
 end
 
 "Calculate the temperature of a system from the kinetic energy of the atoms."

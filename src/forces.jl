@@ -16,9 +16,6 @@ const sqdist_cutoff_nb = 1.0 ^ 2
 "The constant for Coulomb interaction, 1/(4*π*ϵ0*ϵr)."
 const coulomb_const = 138.935458 / 70.0 # Treat ϵr as 70 for now
 
-"The molar gas constant, R, in J/(mol*K)."
-const molar_gas_const = 8.3144598
-
 "The Lennard-Jones 6-12 interaction."
 struct LennardJones <: GeneralInteraction
     nl_only::Bool
