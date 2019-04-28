@@ -105,6 +105,7 @@ function simulate!(s::Simulation, ::VelocityVerlet, n_steps::Integer)
         a_t = a_t_dt
         s.n_steps_made += 1
     end
+    return s
 end
 
 function simulate!(s::Simulation, n_steps::Integer)

@@ -104,7 +104,7 @@ function Simulation(;
                     box_size,
                     neighbour_list=[],
                     neighbour_finder,
-                    thermostat,
+                    thermostat=NoThermostat(),
                     loggers=[],
                     timestep,
                     n_steps,

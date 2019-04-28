@@ -51,6 +51,11 @@ function apply_thermostat!(s::Simulation, thermostat::AndersenThermostat)
     end
 end
 
+"Placeholder thermostat that does nothing."
+struct NoThermostat <: Thermostat end
+
+function apply_thermostat!(::Simulation, ::NoThermostat) end
+
 "Generate a random velocity from the Maxwell-Boltzmann distribution."
 function maxwellboltzmann(mass::Real, T::Real)
     return rand(Normal(0.0, sqrt(molar_gas_const * T / mass)))
