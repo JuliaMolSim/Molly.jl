@@ -10,21 +10,18 @@ n_atoms = 100
 box_size = 2.0
 
 s = Simulation(
-    VelocityVerlet(),
-    [Atom("Ar", "Ar", i, "Ar", 0.0, 10.0, 0.3, 0.2) for i in 1:n_atoms],
-    Dict(),
-    Dict("LJ" => LennardJones(true)),
-    [Coordinates(rand(3) .* box_size) for _ in 1:n_atoms],
-    [Velocity(10.0, temperature) .* 0.01 for _ in 1:n_atoms],
-    temperature,
-    box_size,
-    [],
-    DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 4.0),
-    AndersenThermostat(10.0),
-    [TemperatureLogger(100), CoordinateLogger(100)],
-    timestep,
-    n_steps,
-    0
+    simulator=VelocityVerlet(),
+    atoms=[Atom("Ar", "Ar", i, "Ar", 0.0, 10.0, 0.3, 0.2) for i in 1:n_atoms],
+    general_inters=Dict("LJ" => LennardJones(true)),
+    coords=[Coordinates(rand(3) .* box_size) for _ in 1:n_atoms],
+    velocities=[Velocity(10.0, temperature) .* 0.01 for _ in 1:n_atoms],
+    temperature=temperature,
+    box_size=box_size,
+    neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 4.0),
+    thermostat=AndersenThermostat(10.0),
+    loggers=[TemperatureLogger(100), CoordinateLogger(100)],
+    timestep=timestep,
+    n_steps=n_steps
 )
 
 simulate!(s)
@@ -39,21 +36,19 @@ end
 bonds = [Bond((i * 2) - 1, i * 2, 0.1, 300_000) for i in 1:(n_atoms / 2)]
 
 s = Simulation(
-    VelocityVerlet(),
-    [Atom("H", "H", i, "H", 0.0, 10.0, 0.3, 0.2) for i in 1:n_atoms],
-    Dict("Bonds" => bonds),
-    Dict("LJ" => LennardJones(true)),
-    coords,
-    [Velocity(10.0, temperature) .* 0.01 for _ in 1:n_atoms],
-    temperature,
-    box_size,
-    [],
-    DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 4.0),
-    AndersenThermostat(10.0),
-    [TemperatureLogger(10), CoordinateLogger(10)],
-    timestep,
-    n_steps,
-    0
+    simulator=VelocityVerlet(),
+    atoms=[Atom("H", "H", i, "H", 0.0, 10.0, 0.3, 0.2) for i in 1:n_atoms],
+    specific_inter_lists=Dict("Bonds" => bonds),
+    general_inters=Dict("LJ" => LennardJones(true)),
+    coords=coords,
+    velocities=[Velocity(10.0, temperature) .* 0.01 for _ in 1:n_atoms],
+    temperature=temperature,
+    box_size=box_size,
+    neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 4.0),
+    thermostat=AndersenThermostat(10.0),
+    loggers=[TemperatureLogger(10), CoordinateLogger(10)],
+    timestep=timestep,
+    n_steps=n_steps
 )
 
 simulate!(s)
@@ -66,21 +61,19 @@ atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readi
             normpath(@__DIR__, "..", "data", "5XER", "gmx_coords.gro"))
 
 s = Simulation(
-    VelocityVerlet(),
-    atoms,
-    specific_inter_lists,
-    general_inters,
-    coords,
-    [Velocity(a.mass, temperature) .* 0.01 for a in atoms],
-    temperature,
-    box_size,
-    [],
-    DistanceNeighbourFinder(nb_matrix, 10),
-    AndersenThermostat(10.0),
-    [TemperatureLogger(10)],
-    timestep,
-    n_steps,
-    0
+    simulator=VelocityVerlet(),
+    atoms=atoms,
+    specific_inter_lists=specific_inter_lists,
+    general_inters=general_inters,
+    coords=coords,
+    velocities=[Velocity(a.mass, temperature) .* 0.01 for a in atoms],
+    temperature=temperature,
+    box_size=box_size,
+    neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
+    thermostat=AndersenThermostat(10.0),
+    loggers=[TemperatureLogger(10)],
+    timestep=timestep,
+    n_steps=n_steps
 )
 
 simulate!(s)

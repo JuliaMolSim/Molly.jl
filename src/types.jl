@@ -92,21 +92,23 @@ mutable struct Simulation
     n_steps_made::Int
 end
 
-function Simulation(;simulator::Simulator,
-                    atoms::Vector{Atom},
-                    specific_inter_lists::Dict{String, Vector{T} where T <: SpecificInteraction}=Dict(),
-                    general_inters::Dict{String, GeneralInteraction}=Dict(),
-                    coords::Vector{Coordinates},
-                    velocities::Vector{Velocity},
-                    temperature::Real,
-                    box_size::Real,
-                    neighbour_list::Vector{Tuple{Int, Int}}=[],
-                    neighbour_finder::NeighbourFinder,
-                    thermostat::Thermostat,
-                    loggers::Vector{Logger}=[],
-                    timestep::Real,
-                    n_steps::Integer,
-                    n_steps_made::Integer=0)
+# Keyword argument constructor
+function Simulation(;
+                    simulator,
+                    atoms,
+                    specific_inter_lists=Dict(),
+                    general_inters=Dict(),
+                    coords,
+                    velocities,
+                    temperature,
+                    box_size,
+                    neighbour_list=[],
+                    neighbour_finder,
+                    thermostat,
+                    loggers=[],
+                    timestep,
+                    n_steps,
+                    n_steps_made=0)
     return Simulation(simulator, atoms, specific_inter_lists,
                 general_inters, coords, velocities, temperature,
                 box_size, neighbour_list, neighbour_finder,
