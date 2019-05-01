@@ -26,6 +26,18 @@ struct Atom
     ϵ::Float64
 end
 
+function Atom(;
+            attype="",
+            name="",
+            resnum=0,
+            resname="",
+            charge=0.0,
+            mass=0.0,
+            σ=0.0,
+            ϵ=0.0)
+    return Atom(attype, name, resnum, resname, charge, mass, σ, ϵ)
+end
+
 "3D coordinates, e.g. for an atom, in nm."
 mutable struct Coordinates <: FieldVector{3, Float64}
     x::Float64
@@ -92,7 +104,6 @@ mutable struct Simulation
     n_steps_made::Int
 end
 
-# Keyword argument constructor
 function Simulation(;
                     simulator,
                     atoms,

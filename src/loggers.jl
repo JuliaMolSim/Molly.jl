@@ -22,7 +22,7 @@ function log_property!(logger::TemperatureLogger, s::Simulation, step_n::Integer
     end
 end
 
-"Log the temperature throughout a simulation."
+"Log the coordinates throughout a simulation."
 struct CoordinateLogger <: Logger
     n_steps::Int
     coords::Vector{Vector{Coordinates}}

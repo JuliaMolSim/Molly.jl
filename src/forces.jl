@@ -21,6 +21,8 @@ struct LennardJones <: GeneralInteraction
     nl_only::Bool
 end
 
+LennardJones() = LennardJones(false)
+
 "The Coulomb electrostatic interaction."
 struct Coulomb <: GeneralInteraction
     nl_only::Bool
