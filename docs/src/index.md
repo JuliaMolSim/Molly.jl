@@ -1,120 +1,111 @@
-# Molly.jl documentation
+# Molly.jl
 
-Molly takes a modular approach to molecular simulation.
-To run a simulation you create a `Simulation` object and run `simulate!` on it.
-The different components of the simulation can be used as defined by the package, or you can define your own versions.
+[![Travis build status](https://travis-ci.org/jgreener64/Molly.jl.svg?branch=master)](https://travis-ci.org/jgreener64/Molly.jl)
+[![AppVeyor build status](https://ci.appveyor.com/api/projects/status/8dl6lqavnhqigq4p?svg=true)](https://ci.appveyor.com/project/jgreener64/molly-jl)
+[![Coverage Status](https://coveralls.io/repos/github/jgreener64/Molly.jl/badge.svg?branch=master)](https://coveralls.io/github/jgreener64/Molly.jl?branch=master)
+[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://jgreener64.github.io/Molly.jl/dev)
 
-## Simulating an ideal gas
+Much of science can be explained by the movement and interaction of molecules.
+Molecular dynamics (MD) is a computational technique used to explore these phenomena, particularly for biological macromolecules.
+Molly.jl is a pure Julia implementation of MD.
 
-Let's look at the simulation of an ideal gas to start with.
-First, we'll need some atoms with the relevant parameters defined.
+At the minute the package is a proof of concept for MD in Julia v1.0.
+It can simulate a system of atoms with arbitrary interactions as defined by the user.
+It can also read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters.
+In theory it can do this for any regular protein.
+Implemented features include:
+- Interface to allow definition of new forces, thermostats etc.
+- Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.
+- Bonded interactions - covalent bonds, bond angles, dihedral angles.
+- Andersen thermostat.
+- Velocity Verlet integration.
+- Explicit solvent.
+- Periodic boundary conditions in a cubic box.
+- Neighbour list to speed up calculation of non-bonded forces.
+
+Features not yet implemented include:
+- Speed. Seriously, it's not fast yet - ~20x slower than GROMACS by some rough calculations. For reference most of the computational time in MD is spent in the force calculation, and most of that in calculation of non-bonded forces.
+- Force fields other than OPLS-AA.
+- Energy minimisation.
+- Other temperature or pressure coupling methods.
+- Protein preparation - solvent box, add hydrogens etc.
+- Trajectory/topology file format readers/writers.
+- Trajectory analysis.
+- Parallelisation.
+- GPU compatibility.
+- Unit tests.
+
+## Usage
+
+Simulation of an ideal gas:
 ```julia
 using Molly
 
 n_atoms = 100
-mass = 10.0
-atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]
-```
-Next, we'll need some starting coordinates and velocities.
-```julia
 box_size = 2.0 # nm
-coords = [Coordinates(rand(3) .* box_size) for i in 1:n_atoms]
-
 temperature = 298 # K
+mass = 10.0 # Relative atomic mass
+
+atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]
+coords = [Coordinates(rand(3) .* box_size) for i in 1:n_atoms]
 velocities = [Velocity(mass, temperature) for i in 1:n_atoms]
-```
-Now we can define our dictionary of general interactions, i.e. those between most or all atoms.
-Because we have defined the relevant parameters, we can use the built-in Lennard Jones type.
-```julia
 general_inters =  Dict("LJ" => LennardJones())
-```
-Finally, we can define and run the simulation.
-We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 100 steps.
-```julia
+
 s = Simulation(
-    simulator=VelocityVerlet(), # Use velocity Verlet integration
+    simulator=VelocityVerlet(),
     atoms=atoms,
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
     temperature=temperature,
     box_size=box_size,
-    thermostat=AndersenThermostat(1.0), # Coupling constant of 1.0
-    loggers=[TemperatureLogger(100), CoordinateLogger(100)],
+    thermostat=AndersenThermostat(1.0),
+    loggers=[TemperatureLogger(100)],
     timestep=0.002, # ps
     n_steps=100_000
 )
 
 simulate!(s)
 ```
-We can get a quick look at the simulation by plotting the coordinate logger.
-```julia
-using Plots
-pyplot(leg=false)
 
-@gif for coords in s.loggers[2]
-    plot(s.loggers[2], box_size)
-end
-```
-And can check the temperature by plotting the temperature logger.
+Simulation of a protein:
 ```julia
-plot(s.loggers[1])
-```
+using Molly
 
-## Simulating diatomic molecules
+timestep = 0.0002 # ps
+temperature = 298 # K
+n_steps = 5000
 
-If we want to define specific interactions between atoms, for example bonds, we can do.
-Using the same atom definitions as before, lets set up the coordinates so paired atoms are 1 Angstrom apart.
-```julia
-coords = Coordinates[]
-for i in 1:(n_atoms / 2)
-    c = rand(3) .* box_size
-    push!(coords, Coordinates(c))
-    push!(coords, Coordinates(c + [0.1, 0.0, 0.0]))
-end
+atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
+            joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
+            joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
 
-velocities = [Velocity(mass, temperature) for i in 1:n_atoms]
-```
-Now we can use the built-in bond type to place a harmonic constraint between paired atoms.
-The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.
-```julia
-bonds = [Bond((i * 2) - 1, i * 2, 0.1, 300_000) for i in 1:(n_atoms / 2)]
-
-specific_inter_lists = Dict("Bonds" => bonds)
-```
-This time, we are also going to use a neighbour list to speed up the Lennard Jones calculation.
-We can use the built-in distance neighbour finder.
-The arguments are the number of steps between each update and the cutoff in nm to be classed as a neighbour.
-```julia
-neighbour_finder = DistanceNeighbourFinder(10, 2.0)
-```
-Now we can simulate as before.
-```julia
 s = Simulation(
-    simulator=VelocityVerlet()
+    simulator=VelocityVerlet(),
     atoms=atoms,
     specific_inter_lists=specific_inter_lists,
-    general_inters=Dict("LJ" => LennardJones(true)), # true means we are using the neighbour list for this interaction
+    general_inters=general_inters,
     coords=coords,
-    velocities=velocities,
+    velocities=[Velocity(a.mass, temperature) for a in atoms],
     temperature=temperature,
     box_size=box_size,
-    neighbour_finder=neighbour_finder,
+    neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
     thermostat=AndersenThermostat(1.0),
-    loggers=[TemperatureLogger(100), CoordinateLogger(100)],
-    timestep=0.002,
-    n_steps=100_000
+    loggers=[TemperatureLogger(10), StructureWriter(10, "traj_5XER_1ps.pdb")],
+    timestep=timestep,
+    n_steps=n_steps
 )
 
 simulate!(s)
 ```
-This time when we view the trajectory we can add lines to show the bonds.
-```julia
-connections = [((i * 2) - 1, i * 2) for i in 1:Int(n_atoms / 2)]
 
-@gif for coords in s.loggers[2]
-    plot(s.loggers[2], box_size, connections=connections)
-end
-```
+The above 1 ps simulation looks something like this when you output more PDB files and view it in VMD:
+![MD simulation](../../data/5XER/sim_1ps.gif)
 
-## Simulating a protein in the OPLS-AA forcefield
+## Plans
+
+I plan to work on this in my spare time, but progress will be slow.
+MD could provide a nice use case for Julia - I think a reasonably featured and performant MD program could be written in fewer than 1,000 lines of code for example.
+Julia is also a well-suited language for trajectory analysis.
+
+Contributions are very welcome - see the [roadmap issue](https://github.com/jgreener64/Molly.jl/issues/2) for more.
