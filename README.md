@@ -9,7 +9,7 @@ Much of science can be explained by the movement and interaction of molecules.
 Molecular dynamics (MD) is a computational technique used to explore these phenomena, particularly for biological macromolecules.
 Molly.jl is a pure Julia implementation of MD.
 
-At the minute the package is a proof of concept for MD in Julia v1.0.
+At the minute the package is a proof of concept for MD in Julia.
 It can simulate a system of atoms with arbitrary interactions as defined by the user.
 It can also read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters.
 In theory it can do this for any regular protein.
@@ -25,7 +25,8 @@ Implemented features include:
 
 Features not yet implemented include:
 - Speed. Seriously, it's not fast yet - ~20x slower than GROMACS by some rough calculations. For reference most of the computational time in MD is spent in the force calculation, and most of that in calculation of non-bonded forces.
-- Force fields other than OPLS-AA.
+- Protein force fields other than OPLS-AA.
+- Water models.
 - Energy minimisation.
 - Other temperature or pressure coupling methods.
 - Protein preparation - solvent box, add hydrogens etc.
@@ -35,7 +36,15 @@ Features not yet implemented include:
 - GPU compatibility.
 - Unit tests.
 
+## Installation
+
+Julia v1.0 or later is required.
+Install from the Julia REPL.
+Enter the package mode by pressing `]` and run `add https://github.com/jgreener64/Molly.jl`.
+
 ## Usage
+
+Some examples are given here, see [the documentation](https://jgreener64.github.io/Molly.jl/dev) for more.
 
 Simulation of an ideal gas:
 ```julia
@@ -99,8 +108,8 @@ s = Simulation(
 simulate!(s)
 ```
 
-The above 1 ps simulation looks something like this when you output more PDB files and view it in VMD:
-![MD simulation](data/5XER/sim_1ps.gif)
+The above 1 ps simulation looks something like this when you output view it in VMD:
+![MD simulation](https://github.com/jgreener64/Molly.jl/raw/master/data/5XER/sim_1ps.gif)
 
 ## Plans
 
