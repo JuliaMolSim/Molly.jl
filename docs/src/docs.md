@@ -1,6 +1,6 @@
 # Molly.jl documentation
 
-*These docs are work in progress - not every step works yet*
+*These docs are work in progress*
 
 Molly takes a modular approach to molecular simulation.
 To run a simulation you create a `Simulation` object and run `simulate!` on it.
@@ -26,7 +26,7 @@ temperature = 298 # K
 velocities = [Velocity(mass, temperature) for i in 1:n_atoms]
 ```
 Now we can define our dictionary of general interactions, i.e. those between most or all atoms.
-Because we have defined the relevant parameters, we can use the built-in Lennard Jones type.
+Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard Jones type.
 ```julia
 general_inters =  Dict("LJ" => LennardJones())
 ```
@@ -49,24 +49,42 @@ s = Simulation(
 
 simulate!(s)
 ```
-We can get a quick look at the simulation by plotting the coordinate logger.
+We can get a quick look at the simulation by plotting the coordinate and temperature loggers (in the future ideally this will be one easy plot command using recipes).
 ```julia
 using Plots
 pyplot(leg=false)
 
-@gif for coords in s.loggers[2]
-    plot(s.loggers[2], box_size)
+coords = s.loggers[2].coords
+temps = s.loggers[1].temperatures
+
+splitcoords(coord) = [c[1] for c in coord], [c[2] for c in coord], [c[3] for c in coord]
+
+@gif for (i, coord) in enumerate(coords)
+    l = @layout [a b{0.7h}]
+    
+    cx, cy, cz = splitcoords(coord)
+    p = scatter(cx, cy, cz,
+        xlims=(0, box_size),
+        ylims=(0, box_size),
+        zlims=(0, box_size),
+        layout=l
+    )
+    
+    plot!(p[2],
+        temps[1:i],
+        xlabel="Frame",
+        ylabel="Temperature / K",
+        xlims=(1, i),
+        ylims=(0.0, maximum(temps[1:i]))
+    )
 end
 ```
-And can check the temperature by plotting the temperature logger.
-```julia
-plot(s.loggers[1])
-```
+![LJ simulation](images/sim_lj.gif)
 
 ## Simulating diatomic molecules
 
 If we want to define specific interactions between atoms, for example bonds, we can do.
-Using the same atom definitions as before, lets set up the coordinates so paired atoms are 1 Angstrom apart.
+Using the same atom definitions as before, let's set up the coordinates so that paired atoms are 1 Å apart.
 ```julia
 coords = Coordinates[]
 for i in 1:(n_atoms / 2)
@@ -86,14 +104,14 @@ specific_inter_lists = Dict("Bonds" => bonds)
 ```
 This time, we are also going to use a neighbour list to speed up the Lennard Jones calculation.
 We can use the built-in distance neighbour finder.
-The arguments are the number of steps between each update and the cutoff in nm to be classed as a neighbour. # Change so this is true
+The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff in nm to be classed as a neighbour.
 ```julia
-neighbour_finder = DistanceNeighbourFinder(10, 2.0)
+neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.2)
 ```
 Now we can simulate as before.
 ```julia
 s = Simulation(
-    simulator=VelocityVerlet()
+    simulator=VelocityVerlet(),
     atoms=atoms,
     specific_inter_lists=specific_inter_lists,
     general_inters=Dict("LJ" => LennardJones(true)), # true means we are using the neighbour list for this interaction
@@ -112,11 +130,50 @@ simulate!(s)
 ```
 This time when we view the trajectory we can add lines to show the bonds.
 ```julia
+using LinearAlgebra
+
+coords = s.loggers[2].coords
+temps = s.loggers[1].temperatures
+
 connections = [((i * 2) - 1, i * 2) for i in 1:Int(n_atoms / 2)]
 
-@gif for coords in s.loggers[2]
-    plot(s.loggers[2], box_size, connections=connections)
+@gif for (i, coord) in enumerate(coords)
+    l = @layout [a b{0.7h}]
+    
+    cx, cy, cz = splitcoords(coord)
+    p = scatter(cx, cy, cz,
+        xlims=(0, box_size),
+        ylims=(0, box_size),
+        zlims=(0, box_size),
+        layout=l
+    )
+    
+    for (a1, a2) in connections
+        if norm(coord[a1] - coord[a2]) < (box_size / 2)
+            plot!(p[1],
+                [cx[a1], cx[a2]],
+                [cy[a1], cy[a2]],
+                [cz[a1], cz[a2]],
+                linecolor="lightblue"
+            )
+        end
+    end
+    
+    plot!(p[2],
+        temps[1:i],
+        xlabel="Frame",
+        ylabel="Temperature / K",
+        xlims=(1, i),
+        ylims=(0.0, maximum(temps[1:i]))
+    )
 end
 ```
+![Diatomic simulation](images/sim_diatomic.gif)
 
 ## Simulating a protein in the OPLS-AA forcefield
+
+*In progress*
+
+## Defining your own forces
+
+*In progress*
