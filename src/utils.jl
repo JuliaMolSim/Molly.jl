@@ -13,12 +13,12 @@ export
 struct DistanceNeighbourFinder <: NeighbourFinder
     nb_matrix::BitArray{2}
     n_steps::Int
-    sqdist_cutoff::Float64
+    dist_cutoff::Float64
 end
 
 function DistanceNeighbourFinder(nb_matrix::BitArray{2},
                                 n_steps::Integer)
-    return DistanceNeighbourFinder(nb_matrix, n_steps, 1.2 ^ 2)
+    return DistanceNeighbourFinder(nb_matrix, n_steps, 1.2)
 end
 
 "Update list of close atoms between which non-bonded forces are calculated."
@@ -27,11 +27,12 @@ function find_neighbours!(s::Simulation,
                             step_n::Integer)
     if step_n % nf.n_steps == 0
         empty!(s.neighbour_list)
+        sqdist_cutoff = nf.dist_cutoff ^ 2
         for i in 1:length(s.coords)
             ci = s.coords[i]
             nbi = s.neighbour_finder.nb_matrix[:, i]
             for j in 1:(i - 1)
-                if sqdist(ci, s.coords[j], s.box_size) <= nf.sqdist_cutoff && nbi[j]
+                if sqdist(ci, s.coords[j], s.box_size) <= sqdist_cutoff && nbi[j]
                     push!(s.neighbour_list, (i, j))
                 end
             end
