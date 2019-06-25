@@ -66,7 +66,7 @@ function update_accelerations! end
                                             i::Integer,
                                             j::Integer)
     if s.atoms[i].σ == 0.0 || s.atoms[j].σ == 0.0
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        return
     end
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
     ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
@@ -75,7 +75,7 @@ function update_accelerations! end
     dz = vector1D(s.coords[i].z, s.coords[j].z, s.box_size)
     r2 = dx * dx + dy * dy + dz * dz
     if r2 > sqdist_cutoff_nb
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        return
     end
     six_term = (σ ^ 2 / r2) ^ 3
     # Limit this to 100 as a fudge to stop it exploding
@@ -98,7 +98,7 @@ end
     dz = vector1D(s.coords[i].z, s.coords[j].z, s.box_size)
     r2 = dx * dx + dy * dy + dz * dz
     if r2 > sqdist_cutoff_nb
-        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+        return
     end
     f = (coulomb_const * s.atoms[i].charge * s.atoms[j].charge) / sqrt(r2 ^ 3)
     accels[i].x += -f * dx
