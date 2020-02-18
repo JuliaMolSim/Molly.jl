@@ -10,9 +10,10 @@ Molecular dynamics (MD) is a computational technique used to explore these pheno
 Molly.jl is a pure Julia implementation of MD.
 
 At the minute the package is a proof of concept for MD in Julia.
+*It is not production ready.*
 It can simulate a system of atoms with arbitrary interactions as defined by the user.
 It can also read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters.
-In theory it can do this for any regular protein.
+In theory it can do this for any regular protein, but in practice this in untested.
 Implemented features include:
 - Interface to allow definition of new forces, thermostats etc.
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.
