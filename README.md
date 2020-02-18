@@ -10,7 +10,7 @@ Molecular dynamics (MD) is a computational technique used to explore these pheno
 Molly.jl is a pure Julia implementation of MD.
 
 At the minute the package is a proof of concept for MD in Julia.
-*It is not production ready.*
+**It is not production ready.**
 It can simulate a system of atoms with arbitrary interactions as defined by the user.
 It can also read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters.
 In theory it can do this for any regular protein, but in practice this in untested.
@@ -59,7 +59,7 @@ mass = 10.0 # Relative atomic mass
 atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]
 coords = [Coordinates(rand(3) .* box_size) for i in 1:n_atoms]
 velocities = [Velocity(mass, temperature) for i in 1:n_atoms]
-general_inters =  Dict("LJ" => LennardJones())
+general_inters = Dict("LJ" => LennardJones())
 
 s = Simulation(
     simulator=VelocityVerlet(),
