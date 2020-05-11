@@ -1,0 +1,24 @@
+name = "Molly"
+uuid = "aa0f7f06-fcc0-5ec4-a7f3-a573f33f9c4c"
+authors = ["Joe G Greener <jgreener@hotmail.co.uk>"]
+version = "0.0.1"
+
+[deps]
+BioStructures = "de9282ab-8554-53be-b2d6-f6c222edabfc"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
+[compat]
+BioStructures = "0.10"
+Distributions = "0.23"
+ProgressMeter = "1"
+StaticArrays = "0.12"
+julia = "1"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
