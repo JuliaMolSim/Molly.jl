@@ -84,6 +84,3 @@ function temperature(s::Simulation)
     df = 3 * length(s.coords) - 3
     return 2 * ke / df
 end
-
-# Placeholder if we want to change messaging later on
-report(msg...) = println(msg...)

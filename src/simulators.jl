@@ -107,9 +107,7 @@ function simulate!(s::Simulation, ::VelocityVerlet, n_steps::Integer)
 end
 
 function simulate!(s::Simulation, n_steps::Integer)
-    report("Starting simulation")
     simulate!(s, s.simulator, n_steps)
-    report("Simulation finished")
     return s
 end
 
