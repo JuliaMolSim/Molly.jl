@@ -116,6 +116,7 @@ The above 1 ps simulation looks something like this when you output view it in V
 
 I plan to work on this in my spare time, but progress will be slow.
 MD could provide a nice use case for Julia - I think a reasonably featured and performant MD program could be written in fewer than 1,000 lines of code for example.
+The development of auto-differentiation packages in Julia opens up interesting avenues for differentiable molecular simulations.
 Julia is also a well-suited language for trajectory analysis.
 
 Contributions are very welcome - see the [roadmap issue](https://github.com/jgreener64/Molly.jl/issues/2) for more.
