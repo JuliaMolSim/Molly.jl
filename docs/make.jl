@@ -7,6 +7,7 @@ makedocs(
         "Home"          => "index.md",
         "Documentation" => "docs.md"
     ],
+    authors="Joe G Greener"
 )
 
 deploydocs(

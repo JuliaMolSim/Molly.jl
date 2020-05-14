@@ -60,7 +60,7 @@ end
 "Update the accelerations in response to a given interation type."
 function update_accelerations! end
 
-@fastmath @inbounds function update_accelerations!(accels::Vector{Acceleration},
+@fastmath @inbounds function update_accelerations!(accels,
                                             inter::LennardJones,
                                             s::Simulation,
                                             i::Integer,
@@ -70,80 +70,71 @@ function update_accelerations! end
     end
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
     ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
-    dx = vector1D(s.coords[i].x, s.coords[j].x, s.box_size)
-    dy = vector1D(s.coords[i].y, s.coords[j].y, s.box_size)
-    dz = vector1D(s.coords[i].z, s.coords[j].z, s.box_size)
-    r2 = dx * dx + dy * dy + dz * dz
+    dr = vector1D.(s.coords[i], s.coords[j], s.box_size)
+    r2 = sum(abs2, dr)
     if r2 > sqdist_cutoff_nb
         return
     end
-    six_term = (σ ^ 2 / r2) ^ 3
+    invr2 = inv(r2)
+    six_term = (σ ^ 2 * invr2) ^ 3
     # Limit this to 100 as a fudge to stop it exploding
-    f = min(((24 * ϵ) / r2) * (2 * six_term ^ 2 - six_term), 100.0)
-    accels[i].x += -f * dx
-    accels[i].y += -f * dy
-    accels[i].z += -f * dz
-    accels[j].x += f * dx
-    accels[j].y += f * dy
-    accels[j].z += f * dz
+    f = min((24ϵ * invr2) * (2 * six_term ^ 2 - six_term), 100.0)
+    fdr = f * dr
+    accels[i] -= fdr
+    accels[j] += fdr
 end
 
-@fastmath @inbounds function update_accelerations!(accels::Vector{Acceleration},
+@fastmath @inbounds function update_accelerations!(accels,
                                             inter::Coulomb,
                                             s::Simulation,
                                             i::Integer,
                                             j::Integer)
-    dx = vector1D(s.coords[i].x, s.coords[j].x, s.box_size)
-    dy = vector1D(s.coords[i].y, s.coords[j].y, s.box_size)
-    dz = vector1D(s.coords[i].z, s.coords[j].z, s.box_size)
-    r2 = dx * dx + dy * dy + dz * dz
+    dr = vector1D.(s.coords[i], s.coords[j], s.box_size)
+    r2 = sum(abs2, dr)
     if r2 > sqdist_cutoff_nb
         return
     end
     f = (coulomb_const * s.atoms[i].charge * s.atoms[j].charge) / sqrt(r2 ^ 3)
-    accels[i].x += -f * dx
-    accels[i].y += -f * dy
-    accels[i].z += -f * dz
-    accels[j].x += f * dx
-    accels[j].y += f * dy
-    accels[j].z += f * dz
+    fdr = f * dr
+    accels[i] -= fdr
+    accels[j] += fdr
 end
 
-function update_accelerations!(accels::Vector{Acceleration},
+function update_accelerations!(accels,
                                 b::Bond,
                                 s::Simulation)
-    ab = vector(s.coords[b.i], s.coords[b.j], s.box_size)
+    ab = vector1D.(s.coords[b.i], s.coords[b.j], s.box_size)
     c = b.kb * (norm(ab) - b.b0)
     f = c * normalize(ab)
-    accels[b.i] .+= f
-    accels[b.j] .-= f
+    accels[b.i] += f
+    accels[b.j] -= f
 end
 
 # Sometimes domain error occurs for acos if the float is > 1.0 or < 1.0
 acosbound(x::Real) = acos(max(min(x, 1.0), -1.0))
 
-function update_accelerations!(accels::Vector{Acceleration},
+function update_accelerations!(accels,
                                 a::Angle,
                                 s::Simulation)
-    ba = vector(s.coords[a.j], s.coords[a.i], s.box_size)
-    bc = vector(s.coords[a.j], s.coords[a.k], s.box_size)
+    ba = vector1D.(s.coords[a.j], s.coords[a.i], s.box_size)
+    bc = vector1D.(s.coords[a.j], s.coords[a.k], s.box_size)
     pa = normalize(ba × (ba × bc))
     pc = normalize(-bc × (ba × bc))
     angle_term = -a.cth * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.th0)
     fa = (angle_term / norm(ba)) * pa
     fc = (angle_term / norm(bc)) * pc
     fb = -fa - fc
-    accels[a.i] .+= fa
-    accels[a.j] .+= fb
-    accels[a.k] .+= fc
+    accels[a.i] += fa
+    accels[a.j] += fb
+    accels[a.k] += fc
 end
 
-function update_accelerations!(accels::Vector{Acceleration},
+function update_accelerations!(accels,
                                 d::Dihedral,
                                 s::Simulation)
-    ba = vector(s.coords[d.j], s.coords[d.i], s.box_size)
-    bc = vector(s.coords[d.j], s.coords[d.k], s.box_size)
-    dc = vector(s.coords[d.l], s.coords[d.k], s.box_size)
+    ba = vector1D.(s.coords[d.j], s.coords[d.i], s.box_size)
+    bc = vector1D.(s.coords[d.j], s.coords[d.k], s.box_size)
+    dc = vector1D.(s.coords[d.l], s.coords[d.k], s.box_size)
     p1 = normalize(ba × bc)
     p2 = normalize(-dc × -bc)
     θ = atan(dot((-ba × bc) × (bc × -dc), normalize(bc)), dot(-ba × bc, bc × -dc))
@@ -155,8 +146,8 @@ function update_accelerations!(accels::Vector{Acceleration},
     tc = -(oc × f_d + 0.5 * (-dc × f_d) + 0.5 * (ba × fa))
     fc = (1 / dot(oc, oc)) * (tc × oc)
     fb = -fa - fc -f_d
-    accels[d.i] .+= fa
-    accels[d.j] .+= fb
-    accels[d.k] .+= fc
-    accels[d.l] .+= f_d
+    accels[d.i] += fa
+    accels[d.j] += fb
+    accels[d.k] += fc
+    accels[d.l] += f_d
 end

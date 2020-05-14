@@ -150,9 +150,9 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
 
     # Read coordinate file and add solvent atoms
     lines = readlines(coord_file)
-    coords = Coordinates[]
+    coords = SArray{Tuple{3}, Float64, 1, 3}[]
     for (i, l) in enumerate(lines[3:end-1])
-        push!(coords, Coordinates(
+        push!(coords, SVector(
             parse(Float64, l[21:28]),
             parse(Float64, l[29:36]),
             parse(Float64, l[37:44])

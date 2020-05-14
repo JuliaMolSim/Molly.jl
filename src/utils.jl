@@ -7,7 +7,9 @@ export
     AndersenThermostat,
     apply_thermostat!,
     NoThermostat,
-    maxwellboltzmann
+    velocity,
+    maxwellboltzmann,
+    temperature
 
 "Find close atoms by distance."
 struct DistanceNeighbourFinder <: NeighbourFinder
@@ -32,7 +34,10 @@ function find_neighbours!(s::Simulation,
             ci = s.coords[i]
             nbi = s.neighbour_finder.nb_matrix[:, i]
             for j in 1:(i - 1)
-                if sqdist(ci, s.coords[j], s.box_size) <= sqdist_cutoff && nbi[j]
+                r2 = vector1D(ci[1], s.coords[j][1], s.box_size) ^ 2 +
+                        vector1D(ci[2], s.coords[j][2], s.box_size) ^ 2 +
+                        vector1D(ci[3], s.coords[j][3], s.box_size) ^ 2
+                if r2 <= sqdist_cutoff && nbi[j]
                     push!(s.neighbour_list, (i, j))
                 end
             end
@@ -55,12 +60,10 @@ end
 
 "Apply a thermostat to modify a simulation."
 function apply_thermostat!(s::Simulation, thermostat::AndersenThermostat)
-    for (i, v) in enumerate(s.velocities)
+    for i in 1:length(s.velocities)
         if rand() < s.timestep / thermostat.coupling_const
             mass = s.atoms[i].mass
-            v.x = maxwellboltzmann(mass, s.temperature)
-            v.y = maxwellboltzmann(mass, s.temperature)
-            v.z = maxwellboltzmann(mass, s.temperature)
+            s.velocities[i] = velocity(mass, s.temperature)
         end
     end
     return s
@@ -71,6 +74,11 @@ struct NoThermostat <: Thermostat end
 
 function apply_thermostat!(s::Simulation, ::NoThermostat)
     return s
+end
+
+# Generate a random 3D velocity from the Maxwell-Boltzmann distribution
+function velocity(mass::Real, T::Real)
+    return SVector([maxwellboltzmann(mass, T) for i in 1:3]...)
 end
 
 "Generate a random velocity from the Maxwell-Boltzmann distribution."

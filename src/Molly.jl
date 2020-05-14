@@ -1,11 +1,13 @@
 module Molly
 
-using StaticArrays
+using Reexport
 using Distributions
 using ProgressMeter
 using BioStructures
 
-using LinearAlgebra: norm, normalize, dot, ×
+@reexport using StaticArrays
+
+using LinearAlgebra
 
 include("types.jl")
 include("setup.jl")

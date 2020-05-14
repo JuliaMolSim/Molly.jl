@@ -25,7 +25,7 @@ Implemented features include:
 - Neighbour list to speed up calculation of non-bonded forces.
 
 Features not yet implemented include:
-- Speed. Seriously, it's not fast yet - ~20x slower than GROMACS by some rough calculations. For reference most of the computational time in MD is spent in the force calculation, and most of that in calculation of non-bonded forces.
+- Speed. It's not heavily optimised yet. For reference most of the computational time in MD is spent in the force calculation, and most of that in calculation of non-bonded forces.
 - Protein force fields other than OPLS-AA.
 - Water models.
 - Energy minimisation.
@@ -57,8 +57,8 @@ temperature = 298 # K
 mass = 10.0 # Relative atomic mass
 
 atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]
-coords = [Coordinates(rand(3) .* box_size) for i in 1:n_atoms]
-velocities = [Velocity(mass, temperature) for i in 1:n_atoms]
+coords = [box_size .* SVector(rand(3)...) for i in 1:n_atoms]
+velocities = [velocity(mass, temperature) for i in 1:n_atoms]
 general_inters = Dict("LJ" => LennardJones())
 
 s = Simulation(
@@ -96,7 +96,7 @@ s = Simulation(
     specific_inter_lists=specific_inter_lists,
     general_inters=general_inters,
     coords=coords,
-    velocities=[Velocity(a.mass, temperature) for a in atoms],
+    velocities=[velocity(a.mass, temperature) for a in atoms],
     temperature=temperature,
     box_size=box_size,
     neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),

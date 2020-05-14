@@ -20,11 +20,12 @@ atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]
 Next, we'll need some starting coordinates and velocities.
 ```julia
 box_size = 2.0 # nm
-coords = [Coordinates(rand(3) .* box_size) for i in 1:n_atoms]
+coords = [box_size .* SVector(rand(3)...) for i in 1:n_atoms]
 
 temperature = 298 # K
-velocities = [Velocity(mass, temperature) for i in 1:n_atoms]
+velocities = [velocity(mass, temperature) for i in 1:n_atoms]
 ```
+The coordinates and velocities are stored as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
 Now we can define our dictionary of general interactions, i.e. those between most or all atoms.
 Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard Jones type.
 ```julia
@@ -52,7 +53,6 @@ simulate!(s)
 We can get a quick look at the simulation by plotting the coordinate and temperature loggers (in the future ideally this will be one easy plot command using recipes).
 ```julia
 using Plots
-pyplot(leg=false)
 
 coords = s.loggers[2].coords
 temps = s.loggers[1].temperatures
@@ -61,15 +61,16 @@ splitcoords(coord) = [c[1] for c in coord], [c[2] for c in coord], [c[3] for c i
 
 @gif for (i, coord) in enumerate(coords)
     l = @layout [a b{0.7h}]
-    
+
     cx, cy, cz = splitcoords(coord)
     p = scatter(cx, cy, cz,
         xlims=(0, box_size),
         ylims=(0, box_size),
         zlims=(0, box_size),
-        layout=l
+        layout=l,
+        legend=false
     )
-    
+
     plot!(p[2],
         temps[1:i],
         xlabel="Frame",
@@ -86,14 +87,14 @@ end
 If we want to define specific interactions between atoms, for example bonds, we can do.
 Using the same atom definitions as before, let's set up the coordinates so that paired atoms are 1 Å apart.
 ```julia
-coords = Coordinates[]
+coords = []
 for i in 1:(n_atoms / 2)
-    c = rand(3) .* box_size
-    push!(coords, Coordinates(c))
-    push!(coords, Coordinates(c + [0.1, 0.0, 0.0]))
+    c = box_size .* SVector(rand(3)...)
+    push!(coords, c)
+    push!(coords, c .+ [0.1, 0.0, 0.0])
 end
 
-velocities = [Velocity(mass, temperature) for i in 1:n_atoms]
+velocities = [velocity(mass, temperature) for i in 1:n_atoms]
 ```
 Now we can use the built-in bond type to place a harmonic constraint between paired atoms.
 The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.
@@ -139,15 +140,16 @@ connections = [((i * 2) - 1, i * 2) for i in 1:Int(n_atoms / 2)]
 
 @gif for (i, coord) in enumerate(coords)
     l = @layout [a b{0.7h}]
-    
+
     cx, cy, cz = splitcoords(coord)
     p = scatter(cx, cy, cz,
         xlims=(0, box_size),
         ylims=(0, box_size),
         zlims=(0, box_size),
-        layout=l
+        layout=l,
+        legend=false
     )
-    
+
     for (a1, a2) in connections
         if norm(coord[a1] - coord[a2]) < (box_size / 2)
             plot!(p[1],
@@ -158,7 +160,7 @@ connections = [((i * 2) - 1, i * 2) for i in 1:Int(n_atoms / 2)]
             )
         end
     end
-    
+
     plot!(p[2],
         temps[1:i],
         xlabel="Frame",

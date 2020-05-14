@@ -23,12 +23,13 @@ function log_property!(logger::TemperatureLogger, s::Simulation, step_n::Integer
 end
 
 "Log the coordinates throughout a simulation."
-struct CoordinateLogger <: Logger
+struct CoordinateLogger{T} <: Logger
     n_steps::Int
-    coords::Vector{Vector{Coordinates}}
+    coords::Vector{Vector{T}}
 end
 
-CoordinateLogger(n_steps::Integer) = CoordinateLogger(n_steps, [])
+CoordinateLogger(n_steps::Integer) = CoordinateLogger(n_steps,
+                                        Array{SArray{Tuple{3}, Float64, 1, 3}, 1}[])
 
 function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
@@ -67,7 +68,7 @@ function append_model(logger::StructureWriter, s::Simulation)
                 "A",
                 at.resnum,
                 ' ',
-                [10 * c.x, 10 * c.y, 10 * c.z],
+                [10 * c[1], 10 * c[2], 10 * c[3]],
                 1.0,
                 0.0,
                 "  ",
