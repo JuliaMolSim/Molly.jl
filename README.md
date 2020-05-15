@@ -3,7 +3,7 @@
 [![Travis build status](https://travis-ci.org/jgreener64/Molly.jl.svg?branch=master)](https://travis-ci.org/jgreener64/Molly.jl)
 [![AppVeyor build status](https://ci.appveyor.com/api/projects/status/8dl6lqavnhqigq4p?svg=true)](https://ci.appveyor.com/project/jgreener64/molly-jl)
 [![Coverage Status](https://coveralls.io/repos/github/jgreener64/Molly.jl/badge.svg?branch=master)](https://coveralls.io/github/jgreener64/Molly.jl?branch=master)
-[![Documentation](https://img.shields.io/badge/docs-dev-blue.svg)](https://jgreener64.github.io/Molly.jl/dev)
+[![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://jgreener64.github.io/Molly.jl/latest)
 
 Much of science can be explained by the movement and interaction of molecules.
 Molecular dynamics (MD) is a computational technique used to explore these phenomena, particularly for biological macromolecules.
