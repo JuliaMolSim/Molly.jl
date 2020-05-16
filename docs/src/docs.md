@@ -76,7 +76,8 @@ splitcoords(coord) = [c[1] for c in coord], [c[2] for c in coord], [c[3] for c i
         xlabel="Frame",
         ylabel="Temperature / K",
         xlims=(1, i),
-        ylims=(0.0, maximum(temps[1:i]))
+        ylims=(0.0, maximum(temps[1:i])),
+        legend=false
     )
 end
 ```
@@ -166,7 +167,8 @@ connections = [((i * 2) - 1, i * 2) for i in 1:Int(n_atoms / 2)]
         xlabel="Frame",
         ylabel="Temperature / K",
         xlims=(1, i),
-        ylims=(0.0, maximum(temps[1:i]))
+        ylims=(0.0, maximum(temps[1:i])),
+        legend=false
     )
 end
 ```

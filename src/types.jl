@@ -57,13 +57,13 @@ abstract type Thermostat end
 abstract type Simulator end
 
 "The data associated with a molecular simulation."
-struct Simulation
+struct Simulation{T}
     simulator::Simulator
     atoms::Vector{Atom}
     specific_inter_lists::Dict{String, Vector{S} where S <: SpecificInteraction}
     general_inters::Dict{String, GeneralInteraction}
-    coords::Array{SArray{Tuple{3}, Float64, 1, 3}, 1}
-    velocities::Array{SArray{Tuple{3}, Float64, 1, 3}, 1}
+    coords::T # Typically a vector of static vectors
+    velocities::T
     temperature::Float64
     box_size::Float64
     neighbour_list::Vector{Tuple{Int, Int}}
@@ -72,7 +72,7 @@ struct Simulation
     loggers::Vector{Logger}
     timestep::Float64
     n_steps::Int
-    n_steps_made::Vector{Int}
+    n_steps_made::Vector{Int} # This is a vector to keep the struct immutable
 end
 
 function Simulation(;
@@ -91,7 +91,7 @@ function Simulation(;
                     timestep,
                     n_steps,
                     n_steps_made=[0])
-    return Simulation(simulator, atoms, specific_inter_lists,
+    return Simulation{typeof(coords)}(simulator, atoms, specific_inter_lists,
                 general_inters, coords, velocities, temperature,
                 box_size, neighbour_list, neighbour_finder,
                 thermostat, loggers, timestep, n_steps,
