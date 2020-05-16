@@ -7,6 +7,7 @@ makedocs(
     pages = [
         "Home"         => "index.md",
         "Documentation"=> "docs.md",
+        "API"          => "api.md",
     ],
     authors = "Joe G Greener"
 )
