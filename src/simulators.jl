@@ -95,7 +95,7 @@ function simulate!(s::Simulation, ::VelocityVerlet, n_steps::Integer)
             log_property!(logger, s, step_n)
         end
         a_t = a_t_dt
-        s.n_steps_made += 1
+        s.n_steps_made[1] += 1
     end
     return s
 end
@@ -105,4 +105,4 @@ function simulate!(s::Simulation, n_steps::Integer)
     return s
 end
 
-simulate!(s::Simulation) = simulate!(s, s.n_steps - s.n_steps_made)
+simulate!(s::Simulation) = simulate!(s, s.n_steps - first(s.n_steps_made))

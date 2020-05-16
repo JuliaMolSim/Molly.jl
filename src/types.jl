@@ -57,7 +57,7 @@ abstract type Thermostat end
 abstract type Simulator end
 
 "The data associated with a molecular simulation."
-mutable struct Simulation
+struct Simulation
     simulator::Simulator
     atoms::Vector{Atom}
     specific_inter_lists::Dict{String, Vector{S} where S <: SpecificInteraction}
@@ -72,7 +72,7 @@ mutable struct Simulation
     loggers::Vector{Logger}
     timestep::Float64
     n_steps::Int
-    n_steps_made::Int
+    n_steps_made::Vector{Int}
 end
 
 function Simulation(;
@@ -90,7 +90,7 @@ function Simulation(;
                     loggers=[],
                     timestep,
                     n_steps,
-                    n_steps_made=0)
+                    n_steps_made=[0])
     return Simulation(simulator, atoms, specific_inter_lists,
                 general_inters, coords, velocities, temperature,
                 box_size, neighbour_list, neighbour_finder,
