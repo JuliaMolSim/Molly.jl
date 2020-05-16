@@ -34,9 +34,7 @@ function find_neighbours!(s::Simulation,
             ci = s.coords[i]
             nbi = s.neighbour_finder.nb_matrix[:, i]
             for j in 1:(i - 1)
-                r2 = vector1D(ci[1], s.coords[j][1], s.box_size) ^ 2 +
-                        vector1D(ci[2], s.coords[j][2], s.box_size) ^ 2 +
-                        vector1D(ci[3], s.coords[j][3], s.box_size) ^ 2
+                r2 = sum(abs2, vector1D.(ci, s.coords[j], s.box_size))
                 if r2 <= sqdist_cutoff && nbi[j]
                     push!(s.neighbour_list, (i, j))
                 end
@@ -60,10 +58,11 @@ end
 
 "Apply a thermostat to modify a simulation."
 function apply_thermostat!(s::Simulation, thermostat::AndersenThermostat)
+    dims = length(first(s.velocities))
     for i in 1:length(s.velocities)
         if rand() < s.timestep / thermostat.coupling_const
             mass = s.atoms[i].mass
-            s.velocities[i] = velocity(mass, s.temperature)
+            s.velocities[i] = velocity(mass, s.temperature; dims=dims)
         end
     end
     return s
@@ -76,12 +75,12 @@ function apply_thermostat!(s::Simulation, ::NoThermostat)
     return s
 end
 
-# Generate a random 3D velocity from the Maxwell-Boltzmann distribution
-function velocity(mass::Real, T::Real)
-    return SVector([maxwellboltzmann(mass, T) for i in 1:3]...)
+"Generate a random velocity from the Maxwell-Boltzmann distribution."
+function velocity(mass::Real, T::Real; dims::Integer=3)
+    return SVector([maxwellboltzmann(mass, T) for i in 1:dims]...)
 end
 
-"Generate a random velocity from the Maxwell-Boltzmann distribution."
+"Draw from the Maxwell-Boltzmann distribution."
 function maxwellboltzmann(mass::Real, T::Real)
     return rand(Normal(0.0, sqrt(T / mass)))
 end

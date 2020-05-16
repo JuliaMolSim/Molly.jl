@@ -1,4 +1,4 @@
-# Molly.jl documentation
+# Molly documentation
 
 *These docs are work in progress*
 
@@ -20,12 +20,13 @@ atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]
 Next, we'll need some starting coordinates and velocities.
 ```julia
 box_size = 2.0 # nm
-coords = [box_size .* SVector(rand(3)...) for i in 1:n_atoms]
+coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
 
 temperature = 298 # K
 velocities = [velocity(mass, temperature) for i in 1:n_atoms]
 ```
-The coordinates and velocities are stored as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
+We store the coordinates and velocities as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
+They can be of any number of dimensions.
 Now we can define our dictionary of general interactions, i.e. those between most or all atoms.
 Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard Jones type.
 ```julia
@@ -88,11 +89,9 @@ end
 If we want to define specific interactions between atoms, for example bonds, we can do.
 Using the same atom definitions as before, let's set up the coordinates so that paired atoms are 1 Å apart.
 ```julia
-coords = []
-for i in 1:(n_atoms / 2)
-    c = box_size .* SVector(rand(3)...)
-    push!(coords, c)
-    push!(coords, c .+ [0.1, 0.0, 0.0])
+coords = [box_size .* rand(SVector{3}) for i in 1:(n_atoms / 2)]
+for i in 1:length(coords)
+    push!(coords, coords[i] .+ [0.1, 0.0, 0.0])
 end
 
 velocities = [velocity(mass, temperature) for i in 1:n_atoms]

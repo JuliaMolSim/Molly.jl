@@ -28,8 +28,10 @@ struct CoordinateLogger{T} <: Logger
     coords::Vector{Vector{T}}
 end
 
-CoordinateLogger(n_steps::Integer) = CoordinateLogger(n_steps,
-                                        Array{SArray{Tuple{3}, Float64, 1, 3}, 1}[])
+function CoordinateLogger(n_steps::Integer; dims::Integer=3)
+    return CoordinateLogger(n_steps,
+                            Array{SArray{Tuple{dims}, Float64, 1, dims}, 1}[])
+end
 
 function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
@@ -37,7 +39,7 @@ function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)
     end
 end
 
-"Write output structures to the PDB file format throughout a simulation."
+"Write 3D output structures to the PDB file format throughout a simulation."
 mutable struct StructureWriter <: Logger
     n_steps::Int
     filepath::String
@@ -57,22 +59,11 @@ end
 function append_model(logger::StructureWriter, s::Simulation)
     open(logger.filepath, "a") do output
         println(output, "MODEL     ", lpad(logger.structure_n, 4))
-        for (i, c) in enumerate(s.coords)
+        for (i, coord) in enumerate(s.coords)
             at = s.atoms[i]
             at_rec = AtomRecord(
-                false,
-                i,
-                at.name,
-                ' ',
-                at.resname,
-                "A",
-                at.resnum,
-                ' ',
-                [10 * c[1], 10 * c[2], 10 * c[3]],
-                1.0,
-                0.0,
-                "  ",
-                "  "
+                false, i, at.name, ' ', at.resname, "A", at.resnum,
+                ' ', 10 .* coord, 1.0, 0.0, "  ", "  "
             )
             println(output, pdbline(at_rec))
         end

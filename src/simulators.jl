@@ -4,7 +4,6 @@ export
     update_coordinates!,
     update_velocities!,
     calc_accelerations,
-    empty_accelerations,
     VelocityVerlet,
     simulate!
 
@@ -40,7 +39,7 @@ end
 "Calculate accelerations of all atoms using the bonded and non-bonded forces."
 function calc_accelerations(s::Simulation)
     n_atoms = length(s.coords)
-    accels = empty_accelerations(n_atoms)
+    accels = zero(s.coords)
 
     # Loop over interactions and calculate the acceleration due to each
     for inter_list in values(s.specific_inter_lists)
@@ -71,9 +70,6 @@ function calc_accelerations(s::Simulation)
     return accels
 end
 
-"Initialise empty `Acceleration`s."
-empty_accelerations(n_atoms::Integer) = [SVector(0.0, 0.0, 0.0) for i in 1:n_atoms]
-
 "The velocity Verlet integrator."
 struct VelocityVerlet <: Simulator end
 
@@ -84,7 +80,7 @@ function simulate!(s::Simulation, ::VelocityVerlet, n_steps::Integer)
     n_atoms = length(s.coords)
     find_neighbours!(s, s.neighbour_finder, 0)
     a_t = calc_accelerations(s)
-    a_t_dt = empty_accelerations(n_atoms)
+    a_t_dt = zero(s.coords)
     @showprogress for step_n in 1:n_steps
         update_coordinates!(s, a_t)
         a_t_dt = calc_accelerations(s)

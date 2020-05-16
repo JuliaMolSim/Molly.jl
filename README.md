@@ -57,7 +57,7 @@ temperature = 298 # K
 mass = 10.0 # Relative atomic mass
 
 atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]
-coords = [box_size .* SVector(rand(3)...) for i in 1:n_atoms]
+coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
 velocities = [velocity(mass, temperature) for i in 1:n_atoms]
 general_inters = Dict("LJ" => LennardJones())
 
