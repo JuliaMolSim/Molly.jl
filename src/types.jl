@@ -12,27 +12,15 @@ export
     Simulation
 
 "An atom and its associated information."
-struct Atom
-    attype::String
-    name::String
-    resnum::Int
-    resname::String
-    charge::Float64
-    mass::Float64
-    σ::Float64
-    ϵ::Float64
-end
-
-function Atom(;
-            attype="",
-            name="",
-            resnum=0,
-            resname="",
-            charge=0.0,
-            mass=0.0,
-            σ=0.0,
-            ϵ=0.0)
-    return Atom(attype, name, resnum, resname, charge, mass, σ, ϵ)
+Base.@kwdef struct Atom
+    attype::String = ""
+    name::String = ""
+    resnum::Int = 0
+    resname::String = ""
+    charge::Float64 = 0.0
+    mass::Float64 = 0.0
+    σ::Float64 = 0.0
+    ϵ::Float64 = 0.0
 end
 
 "An interaction between atoms that contributes to forces on the atoms."
@@ -75,6 +63,7 @@ struct Simulation{T}
     n_steps_made::Vector{Int} # This is a vector to keep the struct immutable
 end
 
+# This constructor makes conversion more convenient with the parametric type
 function Simulation(;
                     simulator,
                     atoms,
