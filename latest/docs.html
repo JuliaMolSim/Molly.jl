@@ -21,7 +21,7 @@ velocities = [velocity(mass, temperature) for i in 1:n_atoms]</code></pre><p>We 
     n_steps=100_000
 )
 
-simulate!(s)</code></pre><p>We can get a quick look at the simulation by plotting the coordinate and temperature loggers (in the future ideally this will be one easy plot command using recipes).</p><pre><code class="language-julia">using Plots
+simulate!(s)</code></pre><p>By default the simulation is run in parallel on the <a href="https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1">number of threads</a> available to Julia, but this can be turned off by giving the keyword argument <code>parallel=false</code> to <code>simulate!</code>. We can get a quick look at the simulation by plotting the coordinate and temperature loggers (in the future ideally this will be one easy plot command using recipes).</p><pre><code class="language-julia">using Plots
 
 coords = s.loggers[2].coords
 temps = s.loggers[1].temperatures
