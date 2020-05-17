@@ -32,7 +32,7 @@ function find_neighbours!(s::Simulation,
         sqdist_cutoff = nf.dist_cutoff ^ 2
         for i in 1:length(s.coords)
             ci = s.coords[i]
-            nbi = s.neighbour_finder.nb_matrix[:, i]
+            nbi = nf.nb_matrix[:, i]
             for j in 1:(i - 1)
                 r2 = sum(abs2, vector1D.(ci, s.coords[j], s.box_size))
                 if r2 <= sqdist_cutoff && nbi[j]
