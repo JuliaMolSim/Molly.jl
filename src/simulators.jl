@@ -37,28 +37,51 @@ function update_velocities!(s::Simulation,
 end
 
 "Calculate accelerations of all atoms using the bonded and non-bonded forces."
-function calc_accelerations(s::Simulation)
+function calc_accelerations(s::Simulation; parallel::Bool=true)
     n_atoms = length(s.coords)
-    accels = zero(s.coords)
 
-    # Loop over interactions and calculate the acceleration due to each
-    for inter_list in values(s.specific_inter_lists)
-        for inter in inter_list
-            update_accelerations!(accels, inter, s)
+    if parallel && nthreads() > 1 && n_atoms > 100
+        accels_threads = [zero(s.coords) for i in 1:nthreads()]
+
+        # Loop over interactions and calculate the acceleration due to each
+        for inter in values(s.general_inters)
+            if inter.nl_only
+                @threads for ni in 1:length(s.neighbour_list)
+                    i, j = s.neighbour_list[ni]
+                    update_accelerations!(accels_threads[threadid()], inter, s, i, j)
+                end
+            else
+                @threads for i in 1:n_atoms
+                    for j in 1:(i - 1)
+                        update_accelerations!(accels_threads[threadid()], inter, s, i, j)
+                    end
+                end
+            end
+        end
+
+        accels = sum(accels_threads)
+    else
+        accels = zero(s.coords)
+
+        for inter in values(s.general_inters)
+            if inter.nl_only
+                for ni in 1:length(s.neighbour_list)
+                    i, j = s.neighbour_list[ni]
+                    update_accelerations!(accels, inter, s, i, j)
+                end
+            else
+                for i in 1:n_atoms
+                    for j in 1:(i - 1)
+                        update_accelerations!(accels, inter, s, i, j)
+                    end
+                end
+            end
         end
     end
 
-    for inter in values(s.general_inters)
-        if inter.nl_only
-            for (i, j) in s.neighbour_list
-                update_accelerations!(accels, inter, s, i, j)
-            end
-        else
-            for i in 1:n_atoms
-                for j in 1:(i - 1)
-                    update_accelerations!(accels, inter, s, i, j)
-                end
-            end
+    for inter_list in values(s.specific_inter_lists)
+        for inter in inter_list
+            update_accelerations!(accels, inter, s)
         end
     end
 
@@ -76,17 +99,20 @@ struct VelocityVerlet <: Simulator end
 # See https://www.saylor.org/site/wp-content/uploads/2011/06/MA221-6.1.pdf for
 #   integration algorithm - used shorter second version
 "Simulate molecular dynamics."
-function simulate!(s::Simulation, ::VelocityVerlet, n_steps::Integer)
+function simulate!(s::Simulation,
+                    ::VelocityVerlet,
+                    n_steps::Integer;
+                    parallel::Bool=true)
     n_atoms = length(s.coords)
-    find_neighbours!(s, s.neighbour_finder, 0)
-    a_t = calc_accelerations(s)
+    find_neighbours!(s, s.neighbour_finder, 0, parallel=parallel)
+    a_t = calc_accelerations(s, parallel=parallel)
     a_t_dt = zero(s.coords)
     @showprogress for step_n in 1:n_steps
         update_coordinates!(s, a_t)
-        a_t_dt = calc_accelerations(s)
+        a_t_dt = calc_accelerations(s, parallel=parallel)
         update_velocities!(s, a_t, a_t_dt)
         apply_thermostat!(s, s.thermostat)
-        find_neighbours!(s, s.neighbour_finder, step_n)
+        find_neighbours!(s, s.neighbour_finder, step_n, parallel=parallel)
         for logger in s.loggers
             log_property!(logger, s, step_n)
         end
@@ -96,9 +122,10 @@ function simulate!(s::Simulation, ::VelocityVerlet, n_steps::Integer)
     return s
 end
 
-function simulate!(s::Simulation, n_steps::Integer)
-    simulate!(s, s.simulator, n_steps)
-    return s
+function simulate!(s::Simulation, n_steps::Integer; parallel::Bool=true)
+    simulate!(s, s.simulator, n_steps, parallel=parallel)
 end
 
-simulate!(s::Simulation) = simulate!(s, s.n_steps - first(s.n_steps_made))
+function simulate!(s::Simulation; parallel::Bool=true)
+    simulate!(s, s.n_steps - first(s.n_steps_made), parallel=parallel)
+end

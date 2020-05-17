@@ -51,6 +51,7 @@ s = Simulation(
 
 simulate!(s)
 ```
+By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this can be turned off by giving the keyword argument `parallel=false` to `simulate!`.
 We can get a quick look at the simulation by plotting the coordinate and temperature loggers (in the future ideally this will be one easy plot command using recipes).
 ```julia
 using Plots

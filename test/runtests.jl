@@ -24,7 +24,7 @@ s = Simulation(
     n_steps=n_steps
 )
 
-simulate!(s)
+simulate!(s, parallel=false)
 
 # Ideal gas 3D
 n_atoms = 100
@@ -44,7 +44,7 @@ s = Simulation(
     n_steps=n_steps
 )
 
-simulate!(s)
+simulate!(s, parallel=false)
 
 # Molecules
 coords = [box_size .* rand(SVector{3}) for i in 1:(n_atoms / 2)]
@@ -69,7 +69,7 @@ s = Simulation(
     n_steps=n_steps
 )
 
-simulate!(s)
+simulate!(s, parallel=false)
 
 # Protein
 timestep = 0.0002
@@ -94,4 +94,4 @@ s = Simulation(
     n_steps=n_steps
 )
 
-simulate!(s)
+simulate!(s, parallel=false)

@@ -8,6 +8,7 @@ using BioStructures
 @reexport using StaticArrays
 
 using LinearAlgebra
+using Base.Threads
 
 include("types.jl")
 include("setup.jl")

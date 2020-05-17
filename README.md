@@ -23,9 +23,9 @@ Implemented features include:
 - Explicit solvent.
 - Periodic boundary conditions in a cubic box.
 - Neighbour list to speed up calculation of non-bonded forces.
+- Automatic multithreading.
 
 Features not yet implemented include:
-- Speed. It's not heavily optimised yet. For reference most of the computational time in MD is spent in the force calculation, and most of that in calculation of non-bonded forces.
 - Protein force fields other than OPLS-AA.
 - Water models.
 - Energy minimisation.
@@ -33,7 +33,6 @@ Features not yet implemented include:
 - Protein preparation - solvent box, add hydrogens etc.
 - Trajectory/topology file format readers/writers.
 - Trajectory analysis.
-- Parallelisation.
 - GPU compatibility.
 - Unit tests.
 
