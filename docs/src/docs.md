@@ -30,7 +30,7 @@ They can be of any number of dimensions.
 Now we can define our dictionary of general interactions, i.e. those between most or all atoms.
 Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard Jones type.
 ```julia
-general_inters =  Dict("LJ" => LennardJones())
+general_inters = Dict("LJ" => LennardJones())
 ```
 Finally, we can define and run the simulation.
 We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 100 steps.

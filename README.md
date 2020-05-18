@@ -44,7 +44,7 @@ Enter the package mode by pressing `]` and run `add https://github.com/jgreener6
 
 ## Usage
 
-Some examples are given here, see [the documentation](https://jgreener64.github.io/Molly.jl/dev) for more.
+Some examples are given here, see [the documentation](https://jgreener64.github.io/Molly.jl/latest) for more.
 
 Simulation of an ideal gas:
 ```julia
