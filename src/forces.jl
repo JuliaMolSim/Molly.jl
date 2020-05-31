@@ -70,7 +70,7 @@ function update_accelerations! end
     end
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
     ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
-    dr = vector1D.(s.coords[i], s.coords[j], s.box_size)
+    dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
     if r2 > sqdist_cutoff_nb
         return
@@ -89,7 +89,7 @@ end
                                             s::Simulation,
                                             i::Integer,
                                             j::Integer)
-    dr = vector1D.(s.coords[i], s.coords[j], s.box_size)
+    dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
     if r2 > sqdist_cutoff_nb
         return
@@ -103,7 +103,7 @@ end
 function update_accelerations!(accels,
                                 b::Bond,
                                 s::Simulation)
-    ab = vector1D.(s.coords[b.i], s.coords[b.j], s.box_size)
+    ab = vector(s.coords[b.i], s.coords[b.j], s.box_size)
     c = b.kb * (norm(ab) - b.b0)
     f = c * normalize(ab)
     accels[b.i] += f
@@ -116,8 +116,8 @@ acosbound(x::Real) = acos(max(min(x, 1.0), -1.0))
 function update_accelerations!(accels,
                                 a::Angle,
                                 s::Simulation)
-    ba = vector1D.(s.coords[a.j], s.coords[a.i], s.box_size)
-    bc = vector1D.(s.coords[a.j], s.coords[a.k], s.box_size)
+    ba = vector(s.coords[a.j], s.coords[a.i], s.box_size)
+    bc = vector(s.coords[a.j], s.coords[a.k], s.box_size)
     pa = normalize(ba × (ba × bc))
     pc = normalize(-bc × (ba × bc))
     angle_term = -a.cth * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.th0)
@@ -132,9 +132,9 @@ end
 function update_accelerations!(accels,
                                 d::Dihedral,
                                 s::Simulation)
-    ba = vector1D.(s.coords[d.j], s.coords[d.i], s.box_size)
-    bc = vector1D.(s.coords[d.j], s.coords[d.k], s.box_size)
-    dc = vector1D.(s.coords[d.l], s.coords[d.k], s.box_size)
+    ba = vector(s.coords[d.j], s.coords[d.i], s.box_size)
+    bc = vector(s.coords[d.j], s.coords[d.k], s.box_size)
+    dc = vector(s.coords[d.l], s.coords[d.k], s.box_size)
     p1 = normalize(ba × bc)
     p2 = normalize(-dc × -bc)
     θ = atan(dot((-ba × bc) × (bc × -dc), normalize(bc)), dot(-ba × bc, bc × -dc))
