@@ -51,7 +51,7 @@ coords = [box_size .* rand(SVector{3}) for i in 1:(n_atoms / 2)]
 for i in 1:length(coords)
     push!(coords, coords[i] .+ [0.1, 0.0, 0.0])
 end
-bonds = [Bond((i * 2) - 1, i * 2, 0.1, 300_000) for i in 1:(n_atoms / 2)]
+bonds = [Bond(i, Int(i + n_atoms / 2), 0.1, 300_000) for i in 1:(n_atoms / 2)]
 
 s = Simulation(
     simulator=VelocityVerlet(),
