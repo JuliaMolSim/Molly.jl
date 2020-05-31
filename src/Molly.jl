@@ -1,9 +1,10 @@
 module Molly
 
-using Reexport
-using Distributions
-using ProgressMeter
 using BioStructures
+using Distributions
+using KernelDensity
+using ProgressMeter
+using Reexport
 
 @reexport using StaticArrays
 
@@ -17,5 +18,6 @@ include("forces.jl")
 include("simulators.jl")
 include("loggers.jl")
 include("utils.jl")
+include("analysis.jl")
 
 end

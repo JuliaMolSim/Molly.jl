@@ -46,6 +46,8 @@ s = Simulation(
 
 simulate!(s, parallel=false)
 
+xs, ys = rdf(s.loggers[2].coords[end])
+
 # Molecules
 coords = [box_size .* rand(SVector{3}) for i in 1:(n_atoms / 2)]
 for i in 1:length(coords)
