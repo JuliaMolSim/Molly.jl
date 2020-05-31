@@ -48,8 +48,8 @@ abstract type Simulator end
 struct Simulation{T}
     simulator::Simulator
     atoms::Vector{Atom}
-    specific_inter_lists::Dict{String, Vector{S} where S <: SpecificInteraction}
-    general_inters::Dict{String, GeneralInteraction}
+    specific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}
+    general_inters::Dict{String, <:GeneralInteraction}
     coords::T # Typically a vector of static vectors
     velocities::T
     temperature::Float64
