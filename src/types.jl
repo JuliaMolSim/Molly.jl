@@ -47,7 +47,7 @@ abstract type Simulator end
 "The data associated with a molecular simulation."
 struct Simulation{T}
     simulator::Simulator
-    atoms::Vector{Atom}
+    atoms::Vector{<:Any}
     specific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}
     general_inters::Dict{String, <:GeneralInteraction}
     coords::T # Typically a vector of static vectors
