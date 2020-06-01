@@ -44,7 +44,8 @@ s = Simulation(
     temperature=temperature,
     box_size=box_size,
     thermostat=AndersenThermostat(1.0), # Coupling constant of 1.0
-    loggers=[TemperatureLogger(100), CoordinateLogger(100)],
+    loggers=Dict("temp" => TemperatureLogger(100),
+                    "coords" => CoordinateLogger(100)),
     timestep=0.002, # ps
     n_steps=100_000
 )
@@ -52,12 +53,12 @@ s = Simulation(
 simulate!(s)
 ```
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this can be turned off by giving the keyword argument `parallel=false` to `simulate!`.
-We can get a quick look at the simulation by plotting the coordinate and temperature loggers (in the future ideally this will be one easy plot command using recipes).
+We can get a quick look at the simulation by plotting the coordinate and temperature loggers (in the future ideally this will be one easy plot command using recipes, and may switch to use Makie.jl).
 ```julia
 using Plots
 
-coords = s.loggers[2].coords
-temps = s.loggers[1].temperatures
+coords = s.loggers["coords"].coords
+temps = s.loggers["temp"].temperatures
 
 splitcoords(coord) = [c[1] for c in coord], [c[2] for c in coord], [c[3] for c in coord]
 
@@ -123,7 +124,8 @@ s = Simulation(
     box_size=box_size,
     neighbour_finder=neighbour_finder,
     thermostat=AndersenThermostat(1.0),
-    loggers=[TemperatureLogger(100), CoordinateLogger(100)],
+    loggers=Dict("temp" => TemperatureLogger(100),
+                    "coords" => CoordinateLogger(100)),
     timestep=0.002,
     n_steps=100_000
 )
@@ -134,8 +136,8 @@ This time when we view the trajectory we can add lines to show the bonds.
 ```julia
 using LinearAlgebra
 
-coords = s.loggers[2].coords
-temps = s.loggers[1].temperatures
+coords = s.loggers["coords"].coords
+temps = s.loggers["temp"].temperatures
 
 connections = [(i, Int(i + n_atoms / 2)) for i in 1:Int(n_atoms / 2)]
 

@@ -113,7 +113,7 @@ function simulate!(s::Simulation,
         update_velocities!(s, a_t, a_t_dt)
         apply_thermostat!(s, s.thermostat)
         find_neighbours!(s, s.neighbour_finder, step_n, parallel=parallel)
-        for logger in s.loggers
+        for logger in values(s.loggers)
             log_property!(logger, s, step_n)
         end
         a_t = a_t_dt

@@ -57,7 +57,7 @@ struct Simulation{T}
     neighbour_list::Vector{Tuple{Int, Int}}
     neighbour_finder::NeighbourFinder
     thermostat::Thermostat
-    loggers::Vector{Logger}
+    loggers::Dict{String, <:Logger}
     timestep::Float64
     n_steps::Int
     n_steps_made::Vector{Int} # This is a vector to keep the struct immutable
@@ -76,7 +76,7 @@ function Simulation(;
                     neighbour_list=[],
                     neighbour_finder=NoNeighbourFinder(),
                     thermostat=NoThermostat(),
-                    loggers=[],
+                    loggers=Dict(),
                     timestep,
                     n_steps,
                     n_steps_made=[0])

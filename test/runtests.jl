@@ -19,7 +19,8 @@ s = Simulation(
     box_size=box_size,
     neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
     thermostat=AndersenThermostat(10.0),
-    loggers=[TemperatureLogger(100), CoordinateLogger(100, dims=2)],
+    loggers=Dict("temp" => TemperatureLogger(100),
+                    "coords" => CoordinateLogger(100, dims=2)),
     timestep=timestep,
     n_steps=n_steps
 )
@@ -39,14 +40,15 @@ s = Simulation(
     box_size=box_size,
     neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
     thermostat=AndersenThermostat(10.0),
-    loggers=[TemperatureLogger(100), CoordinateLogger(100)],
+    loggers=Dict("temp" => TemperatureLogger(100),
+                    "coords" => CoordinateLogger(100)),
     timestep=timestep,
     n_steps=n_steps
 )
 
 simulate!(s, parallel=false)
 
-final_coords = s.loggers[2].coords[end]
+final_coords = s.loggers["coords"].coords[end]
 displacements(final_coords, box_size)
 distances(final_coords, box_size)
 rdf(final_coords, box_size)
@@ -69,7 +71,8 @@ s = Simulation(
     box_size=box_size,
     neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
     thermostat=AndersenThermostat(10.0),
-    loggers=[TemperatureLogger(10), CoordinateLogger(10)],
+    loggers=Dict("temp" => TemperatureLogger(10),
+                    "coords" => CoordinateLogger(10)),
     timestep=timestep,
     n_steps=n_steps
 )
@@ -94,7 +97,7 @@ s = Simulation(
     box_size=box_size,
     neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
     thermostat=AndersenThermostat(10.0),
-    loggers=[TemperatureLogger(10)],
+    loggers=Dict("temp" => TemperatureLogger(10)),
     timestep=timestep,
     n_steps=n_steps
 )

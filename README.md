@@ -24,6 +24,7 @@ Implemented features include:
 - Periodic boundary conditions in a cubic box.
 - Neighbour list to speed up calculation of non-bonded forces.
 - Automatic multithreading.
+- Some analysis functions, e.g. RDF.
 
 Features not yet implemented include:
 - Protein force fields other than OPLS-AA.
@@ -32,7 +33,6 @@ Features not yet implemented include:
 - Other temperature or pressure coupling methods.
 - Protein preparation - solvent box, add hydrogens etc.
 - Trajectory/topology file format readers/writers.
-- Trajectory analysis.
 - GPU compatibility.
 - Unit tests.
 
@@ -69,7 +69,7 @@ s = Simulation(
     temperature=temperature,
     box_size=box_size,
     thermostat=AndersenThermostat(1.0),
-    loggers=[TemperatureLogger(100)],
+    loggers=Dict("temp" => TemperatureLogger(100)),
     timestep=0.002, # ps
     n_steps=100_000
 )
@@ -100,7 +100,8 @@ s = Simulation(
     box_size=box_size,
     neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
     thermostat=AndersenThermostat(1.0),
-    loggers=[TemperatureLogger(10), StructureWriter(10, "traj_5XER_1ps.pdb")],
+    loggers=Dict("temp" => TemperatureLogger(10),
+                    "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),
     timestep=timestep,
     n_steps=n_steps
 )
@@ -115,7 +116,7 @@ The above 1 ps simulation looks something like this when you output view it in V
 
 I plan to work on this in my spare time, but progress will be slow.
 MD could provide a nice use case for Julia - I think a reasonably featured and performant MD program could be written in fewer than 1,000 lines of code for example.
-The development of auto-differentiation packages in Julia opens up interesting avenues for differentiable molecular simulations.
+The development of auto-differentiation packages in Julia opens up interesting avenues for differentiable molecular simulations (there is an experimental branch on this repo).
 Julia is also a well-suited language for trajectory analysis.
 
 Contributions are very welcome - see the [roadmap issue](https://github.com/jgreener64/Molly.jl/issues/2) for more.
