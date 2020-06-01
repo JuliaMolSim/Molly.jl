@@ -16,15 +16,16 @@ velocities = [velocity(mass, temperature) for i in 1:n_atoms]</code></pre><p>We 
     temperature=temperature,
     box_size=box_size,
     thermostat=AndersenThermostat(1.0), # Coupling constant of 1.0
-    loggers=[TemperatureLogger(100), CoordinateLogger(100)],
+    loggers=Dict(&quot;temp&quot; =&gt; TemperatureLogger(100),
+                    &quot;coords&quot; =&gt; CoordinateLogger(100)),
     timestep=0.002, # ps
     n_steps=100_000
 )
 
-simulate!(s)</code></pre><p>By default the simulation is run in parallel on the <a href="https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1">number of threads</a> available to Julia, but this can be turned off by giving the keyword argument <code>parallel=false</code> to <code>simulate!</code>. We can get a quick look at the simulation by plotting the coordinate and temperature loggers (in the future ideally this will be one easy plot command using recipes).</p><pre><code class="language-julia">using Plots
+simulate!(s)</code></pre><p>By default the simulation is run in parallel on the <a href="https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1">number of threads</a> available to Julia, but this can be turned off by giving the keyword argument <code>parallel=false</code> to <code>simulate!</code>. We can get a quick look at the simulation by plotting the coordinate and temperature loggers (in the future ideally this will be one easy plot command using recipes, and may switch to use Makie.jl).</p><pre><code class="language-julia">using Plots
 
-coords = s.loggers[2].coords
-temps = s.loggers[1].temperatures
+coords = s.loggers[&quot;coords&quot;].coords
+temps = s.loggers[&quot;temp&quot;].temperatures
 
 splitcoords(coord) = [c[1] for c in coord], [c[2] for c in coord], [c[3] for c in coord]
 
@@ -66,15 +67,16 @@ specific_inter_lists = Dict(&quot;Bonds&quot; =&gt; bonds)</code></pre><p>This t
     box_size=box_size,
     neighbour_finder=neighbour_finder,
     thermostat=AndersenThermostat(1.0),
-    loggers=[TemperatureLogger(100), CoordinateLogger(100)],
+    loggers=Dict(&quot;temp&quot; =&gt; TemperatureLogger(100),
+                    &quot;coords&quot; =&gt; CoordinateLogger(100)),
     timestep=0.002,
     n_steps=100_000
 )
 
 simulate!(s)</code></pre><p>This time when we view the trajectory we can add lines to show the bonds.</p><pre><code class="language-julia">using LinearAlgebra
 
-coords = s.loggers[2].coords
-temps = s.loggers[1].temperatures
+coords = s.loggers[&quot;coords&quot;].coords
+temps = s.loggers[&quot;temp&quot;].temperatures
 
 connections = [(i, Int(i + n_atoms / 2)) for i in 1:Int(n_atoms / 2)]
 
