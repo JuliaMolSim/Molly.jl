@@ -13,7 +13,7 @@ var documenterSearchIndex = {"docs": [
     "page": "Home",
     "title": "Molly.jl",
     "category": "section",
-    "text": "(Image: Travis build status) (Image: AppVeyor build status) (Image: Coverage Status) (Image: Documentation)Much of science can be explained by the movement and interaction of molecules. Molecular dynamics (MD) is a computational technique used to explore these phenomena, particularly for biological macromolecules. Molly.jl is a pure Julia implementation of MD.At the minute the package is a proof of concept for MD in Julia. It is not production ready. It can simulate a system of atoms with arbitrary interactions as defined by the user. It can also read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested. Implemented features include:Interface to allow definition of new forces, thermostats etc.\nNon-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.\nBonded interactions - covalent bonds, bond angles, dihedral angles.\nAndersen thermostat.\nVelocity Verlet integration.\nExplicit solvent.\nPeriodic boundary conditions in a cubic box.\nNeighbour list to speed up calculation of non-bonded forces.\nAutomatic multithreading.\nSome analysis functions, e.g. RDF.Features not yet implemented include:Protein force fields other than OPLS-AA.\nWater models.\nEnergy minimisation.\nOther temperature or pressure coupling methods.\nProtein preparation - solvent box, add hydrogens etc.\nTrajectory/topology file format readers/writers.\nGPU compatibility.\nUnit tests."
+    "text": "(Image: Travis build status) (Image: AppVeyor build status) (Image: Coverage Status) (Image: Documentation)Much of science can be explained by the movement and interaction of molecules. Molecular dynamics (MD) is a computational technique used to explore these phenomena, particularly for biological macromolecules. Molly.jl is a pure Julia implementation of MD.At the minute the package is a proof of concept for MD in Julia. It is not production ready. It can simulate a system of atoms with arbitrary interactions as defined by the user. It can also read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested. Implemented features include:Interface to allow definition of new forces, thermostats etc.\nNon-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.\nBonded interactions - covalent bonds, bond angles, dihedral angles.\nAndersen thermostat.\nVelocity Verlet integration.\nExplicit solvent.\nPeriodic boundary conditions in a cubic box.\nNeighbour list to speed up calculation of non-bonded forces.\nAutomatic multithreading.\nSome analysis functions, e.g. RDF.\nRun with Float64 or Float32.Features not yet implemented include:Protein force fields other than OPLS-AA.\nWater models.\nEnergy minimisation.\nOther temperature or pressure coupling methods.\nProtein preparation - solvent box, add hydrogens etc.\nTrajectory/topology file format readers/writers.\nGPU compatibility.\nUnit tests."
 },
 
 {
@@ -69,7 +69,7 @@ var documenterSearchIndex = {"docs": [
     "page": "Documentation",
     "title": "Simulating diatomic molecules",
     "category": "section",
-    "text": "If we want to define specific interactions between atoms, for example bonds, we can do. Using the same atom definitions as before, let\'s set up the coordinates so that paired atoms are 1 Å apart.coords = [box_size .* rand(SVector{3}) for i in 1:(n_atoms / 2)]\nfor i in 1:length(coords)\n    push!(coords, coords[i] .+ [0.1, 0.0, 0.0])\nend\n\nvelocities = [velocity(mass, temperature) for i in 1:n_atoms]Now we can use the built-in bond type to place a harmonic constraint between paired atoms. The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.bonds = [Bond(i, Int(i + n_atoms / 2), 0.1, 300_000) for i in 1:(n_atoms / 2)]\n\nspecific_inter_lists = Dict(\"Bonds\" => bonds)This time, we are also going to use a neighbour list to speed up the Lennard Jones calculation. We can use the built-in distance neighbour finder. The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff in nm to be classed as a neighbour.neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.2)Now we can simulate as before.s = Simulation(\n    simulator=VelocityVerlet(),\n    atoms=atoms,\n    specific_inter_lists=specific_inter_lists,\n    general_inters=Dict(\"LJ\" => LennardJones(true)), # true means we are using the neighbour list for this interaction\n    coords=coords,\n    velocities=velocities,\n    temperature=temperature,\n    box_size=box_size,\n    neighbour_finder=neighbour_finder,\n    thermostat=AndersenThermostat(1.0),\n    loggers=Dict(\"temp\" => TemperatureLogger(100),\n                    \"coords\" => CoordinateLogger(100)),\n    timestep=0.002,\n    n_steps=100_000\n)\n\nsimulate!(s)This time when we view the trajectory we can add lines to show the bonds.using LinearAlgebra\n\ncoords = s.loggers[\"coords\"].coords\ntemps = s.loggers[\"temp\"].temperatures\n\nconnections = [(i, Int(i + n_atoms / 2)) for i in 1:Int(n_atoms / 2)]\n\n@gif for (i, coord) in enumerate(coords)\n    l = @layout [a b{0.7h}]\n\n    cx, cy, cz = splitcoords(coord)\n    p = scatter(cx, cy, cz,\n        xlims=(0, box_size),\n        ylims=(0, box_size),\n        zlims=(0, box_size),\n        layout=l,\n        legend=false\n    )\n\n    for (a1, a2) in connections\n        if norm(coord[a1] - coord[a2]) < (box_size / 2)\n            plot!(p[1],\n                [cx[a1], cx[a2]],\n                [cy[a1], cy[a2]],\n                [cz[a1], cz[a2]],\n                linecolor=\"lightblue\"\n            )\n        end\n    end\n\n    plot!(p[2],\n        temps[1:i],\n        xlabel=\"Frame\",\n        ylabel=\"Temperature / K\",\n        xlims=(1, i),\n        ylims=(0.0, maximum(temps[1:i])),\n        legend=false\n    )\nend(Image: Diatomic simulation)"
+    "text": "If we want to define specific interactions between atoms, for example bonds, we can do. Using the same atom definitions as before, let\'s set up the coordinates so that paired atoms are 1 Å apart.coords = [box_size .* rand(SVector{3}) for i in 1:(n_atoms / 2)]\nfor i in 1:length(coords)\n    push!(coords, coords[i] .+ [0.1, 0.0, 0.0])\nend\n\nvelocities = [velocity(mass, temperature) for i in 1:n_atoms]Now we can use the built-in bond type to place a harmonic constraint between paired atoms. The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.bonds = [Bond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]\n\nspecific_inter_lists = Dict(\"Bonds\" => bonds)This time, we are also going to use a neighbour list to speed up the Lennard Jones calculation. We can use the built-in distance neighbour finder. The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff in nm to be classed as a neighbour.neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.2)Now we can simulate as before.s = Simulation(\n    simulator=VelocityVerlet(),\n    atoms=atoms,\n    specific_inter_lists=specific_inter_lists,\n    general_inters=Dict(\"LJ\" => LennardJones(true)), # true means we are using the neighbour list for this interaction\n    coords=coords,\n    velocities=velocities,\n    temperature=temperature,\n    box_size=box_size,\n    neighbour_finder=neighbour_finder,\n    thermostat=AndersenThermostat(1.0),\n    loggers=Dict(\"temp\" => TemperatureLogger(100),\n                    \"coords\" => CoordinateLogger(100)),\n    timestep=0.002,\n    n_steps=100_000\n)\n\nsimulate!(s)This time when we view the trajectory we can add lines to show the bonds.using LinearAlgebra\n\ncoords = s.loggers[\"coords\"].coords\ntemps = s.loggers[\"temp\"].temperatures\n\nconnections = [(i, Int(i + n_atoms / 2)) for i in 1:Int(n_atoms / 2)]\n\n@gif for (i, coord) in enumerate(coords)\n    l = @layout [a b{0.7h}]\n\n    cx, cy, cz = splitcoords(coord)\n    p = scatter(cx, cy, cz,\n        xlims=(0, box_size),\n        ylims=(0, box_size),\n        zlims=(0, box_size),\n        layout=l,\n        legend=false\n    )\n\n    for (a1, a2) in connections\n        if norm(coord[a1] - coord[a2]) < (box_size / 2)\n            plot!(p[1],\n                [cx[a1], cx[a2]],\n                [cy[a1], cy[a2]],\n                [cz[a1], cz[a2]],\n                linecolor=\"lightblue\"\n            )\n        end\n    end\n\n    plot!(p[2],\n        temps[1:i],\n        xlabel=\"Frame\",\n        ylabel=\"Temperature / K\",\n        xlims=(1, i),\n        ylims=(0.0, maximum(temps[1:i])),\n        legend=false\n    )\nend(Image: Diatomic simulation)"
 },
 
 {
@@ -237,7 +237,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.NoNeighbourFinder",
     "category": "type",
-    "text": "Placeholder neighbour finder that does nothing.\n\n\n\n\n\n"
+    "text": "Placeholder neighbour finder that returns no neighbours.\n\n\n\n\n\n"
 },
 
 {
@@ -305,6 +305,14 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
+    "location": "api.html#Molly.accelerations-Tuple{Simulation,Any}",
+    "page": "API",
+    "title": "Molly.accelerations",
+    "category": "method",
+    "text": "Calculate accelerations of all atoms using the bonded and non-bonded forces.\n\n\n\n\n\n"
+},
+
+{
     "location": "api.html#Molly.apply_thermostat!-Tuple{Simulation,AndersenThermostat}",
     "page": "API",
     "title": "Molly.apply_thermostat!",
@@ -313,19 +321,19 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
-    "location": "api.html#Molly.calc_accelerations-Tuple{Simulation}",
+    "location": "api.html#Molly.find_neighbours-Tuple{Simulation,Any,DistanceNeighbourFinder,Integer}",
     "page": "API",
-    "title": "Molly.calc_accelerations",
+    "title": "Molly.find_neighbours",
     "category": "method",
-    "text": "Calculate accelerations of all atoms using the bonded and non-bonded forces.\n\n\n\n\n\n"
+    "text": "Update list of close atoms between which non-bonded forces are calculated.\n\n\n\n\n\n"
 },
 
 {
-    "location": "api.html#Molly.find_neighbours!-Tuple{Simulation,DistanceNeighbourFinder,Integer}",
+    "location": "api.html#Molly.force!",
     "page": "API",
-    "title": "Molly.find_neighbours!",
-    "category": "method",
-    "text": "Update list of close atoms between which non-bonded forces are calculated.\n\n\n\n\n\n"
+    "title": "Molly.force!",
+    "category": "function",
+    "text": "Update the force for an atom pair in response to a given interation type.\n\n\n\n\n\n"
 },
 
 {
@@ -337,7 +345,7 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
-    "location": "api.html#Molly.maxwellboltzmann-Tuple{Real,Real}",
+    "location": "api.html#Molly.maxwellboltzmann-Tuple{Type,Real,Real}",
     "page": "API",
     "title": "Molly.maxwellboltzmann",
     "category": "method",
@@ -345,7 +353,7 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
-    "location": "api.html#Molly.readinputs-Tuple{AbstractString,AbstractString}",
+    "location": "api.html#Molly.readinputs-Tuple{Type,AbstractString,AbstractString}",
     "page": "API",
     "title": "Molly.readinputs",
     "category": "method",
@@ -369,30 +377,6 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
-    "location": "api.html#Molly.update_accelerations!",
-    "page": "API",
-    "title": "Molly.update_accelerations!",
-    "category": "function",
-    "text": "Update the accelerations in response to a given interation type.\n\n\n\n\n\n"
-},
-
-{
-    "location": "api.html#Molly.update_coordinates!-Union{Tuple{T}, Tuple{Simulation,Array{T,1}}} where T",
-    "page": "API",
-    "title": "Molly.update_coordinates!",
-    "category": "method",
-    "text": "Update coordinates of all atoms and bound to the bounding box.\n\n\n\n\n\n"
-},
-
-{
-    "location": "api.html#Molly.update_velocities!-Union{Tuple{T}, Tuple{Simulation,Array{T,1},Array{T,1}}} where T",
-    "page": "API",
-    "title": "Molly.update_velocities!",
-    "category": "method",
-    "text": "Update velocities of all atoms using the accelerations.\n\n\n\n\n\n"
-},
-
-{
     "location": "api.html#Molly.vector-Tuple{Any,Any,Real}",
     "page": "API",
     "title": "Molly.vector",
@@ -409,7 +393,7 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
-    "location": "api.html#Molly.velocity-Tuple{Real,Real}",
+    "location": "api.html#Molly.velocity-Tuple{Type,Real,Real}",
     "page": "API",
     "title": "Molly.velocity",
     "category": "method",

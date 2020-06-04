@@ -54,7 +54,7 @@ for i in 1:length(coords)
     push!(coords, coords[i] .+ [0.1, 0.0, 0.0])
 end
 
-velocities = [velocity(mass, temperature) for i in 1:n_atoms]</code></pre><p>Now we can use the built-in bond type to place a harmonic constraint between paired atoms. The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.</p><pre><code class="language-julia">bonds = [Bond(i, Int(i + n_atoms / 2), 0.1, 300_000) for i in 1:(n_atoms / 2)]
+velocities = [velocity(mass, temperature) for i in 1:n_atoms]</code></pre><p>Now we can use the built-in bond type to place a harmonic constraint between paired atoms. The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.</p><pre><code class="language-julia">bonds = [Bond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]
 
 specific_inter_lists = Dict(&quot;Bonds&quot; =&gt; bonds)</code></pre><p>This time, we are also going to use a neighbour list to speed up the Lennard Jones calculation. We can use the built-in distance neighbour finder. The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff in nm to be classed as a neighbour.</p><pre><code class="language-julia">neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.2)</code></pre><p>Now we can simulate as before.</p><pre><code class="language-julia">s = Simulation(
     simulator=VelocityVerlet(),
