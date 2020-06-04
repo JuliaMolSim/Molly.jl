@@ -1,27 +1,15 @@
 # Types
 
 export
-    Atom,
     Interaction,
     GeneralInteraction,
     SpecificInteraction,
-    Logger,
-    NeighbourFinder,
-    Thermostat,
     Simulator,
+    Thermostat,
+    NeighbourFinder,
+    Logger,
+    Atom,
     Simulation
-
-"An atom and its associated information."
-Base.@kwdef struct Atom
-    attype::String = ""
-    name::String = ""
-    resnum::Int = 0
-    resname::String = ""
-    charge::Float64 = 0.0
-    mass::Float64 = 0.0
-    σ::Float64 = 0.0
-    ϵ::Float64 = 0.0
-end
 
 "An interaction between atoms that contributes to forces on the atoms."
 abstract type Interaction end
@@ -32,17 +20,43 @@ abstract type GeneralInteraction <: Interaction end
 "A specific interaction between sets of specific atoms, e.g. a bond angle."
 abstract type SpecificInteraction <: Interaction end
 
-"A way to record a property, e.g. the temperature, throughout a simulation."
-abstract type Logger end
-
-"A way to find near atoms to save on simulation time."
-abstract type NeighbourFinder end
+"A type of simulation to run, e.g. leap-frog integration or energy minimisation."
+abstract type Simulator end
 
 "A way to keep the temperature of a simulation constant."
 abstract type Thermostat end
 
-"A type of simulation to run, e.g. leap-frog integration or energy minimisation."
-abstract type Simulator end
+"A way to find near atoms to save on simulation time."
+abstract type NeighbourFinder end
+
+"A way to record a property, e.g. the temperature, throughout a simulation."
+abstract type Logger end
+
+"An atom and its associated information."
+struct Atom{T}
+    attype::String
+    name::String
+    resnum::Int
+    resname::String
+    charge::T
+    mass::T
+    σ::T
+    ϵ::T
+end
+
+# We define constructors rather than using Base.@kwdef as it makes conversion
+#   more convenient with the parametric type
+function Atom(;
+                attype="",
+                name="",
+                resnum=0,
+                resname="",
+                charge=0.0,
+                mass=0.0,
+                σ=0.0,
+                ϵ=0.0)
+    return Atom{typeof(charge)}(attype, name, resnum, resname, charge, mass, σ, ϵ)
+end
 
 "The data associated with a molecular simulation."
 struct Simulation{T}
@@ -62,7 +76,6 @@ struct Simulation{T}
     n_steps_made::Vector{Int} # This is a vector to keep the struct immutable
 end
 
-# This constructor makes conversion more convenient with the parametric type
 function Simulation(;
                     simulator,
                     atoms,

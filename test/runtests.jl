@@ -11,7 +11,8 @@ box_size = 2.0
 
 s = Simulation(
     simulator=VelocityVerlet(),
-    atoms=[Atom("Ar", "Ar", i, "Ar", 0.0, 10.0, 0.3, 0.2) for i in 1:n_atoms],
+    atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
+                mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
     general_inters=Dict("LJ" => LennardJones(true)),
     coords=[box_size .* rand(SVector{2}) for i in 1:n_atoms],
     velocities=[velocity(10.0, temperature, dims=2) .* 0.01 for i in 1:n_atoms],
@@ -32,7 +33,8 @@ n_atoms = 100
 
 s = Simulation(
     simulator=VelocityVerlet(),
-    atoms=[Atom("Ar", "Ar", i, "Ar", 0.0, 10.0, 0.3, 0.2) for i in 1:n_atoms],
+    atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
+                mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
     general_inters=Dict("LJ" => LennardJones(true)),
     coords=[box_size .* rand(SVector{3}) for i in 1:n_atoms],
     velocities=[velocity(10.0, temperature) .* 0.01 for i in 1:n_atoms],
@@ -62,7 +64,8 @@ bonds = [Bond(i, Int(i + n_atoms / 2), 0.1, 300_000) for i in 1:(n_atoms / 2)]
 
 s = Simulation(
     simulator=VelocityVerlet(),
-    atoms=[Atom("H", "H", i, "H", 0.0, 10.0, 0.3, 0.2) for i in 1:n_atoms],
+    atoms=[Atom(attype="H", name="H", resnum=i, resname="H", charge=0.0,
+                mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
     specific_inter_lists=Dict("Bonds" => bonds),
     general_inters=Dict("LJ" => LennardJones(true)),
     coords=coords,

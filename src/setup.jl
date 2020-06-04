@@ -90,9 +90,10 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
             end
         elseif current_field == "atoms"
             attype = atomnames[c[2]]
-            push!(atoms, Atom(attype, c[5], parse(Int, c[3]), c[4],
-                parse(Float64, c[7]), parse(Float64, c[8]), atomtypes[attype].σ,
-                atomtypes[attype].ϵ))
+            push!(atoms, Atom(attype=attype, name=c[5], resnum=parse(Int, c[3]),
+                resname=c[4], charge=parse(Float64, c[7]),
+                mass=parse(Float64, c[8]), σ=atomtypes[attype].σ,
+                ϵ=atomtypes[attype].ϵ))
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
             bondtype = bondtypes["$(atoms[i].attype)/$(atoms[j].attype)"]
@@ -166,9 +167,10 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
             if attype == "CL" # Temp hack to fix charges
                 temp_charge = -1.0
             end
-            push!(atoms, Atom(attype, atname, parse(Int, l[1:5]),
-                strip(l[6:10]), temp_charge, atomtypes[attype].mass,
-                atomtypes[attype].σ, atomtypes[attype].ϵ))
+            push!(atoms, Atom(attype=attype, name=atname,
+                resnum=parse(Int, l[1:5]), resname=strip(l[6:10]),
+                charge=temp_charge, mass=atomtypes[attype].mass,
+                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
 
             # Add O-H bonds and H-O-H angle in water
             if atname == "OW"
