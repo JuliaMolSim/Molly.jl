@@ -1,8 +1,6 @@
 # Different ways to simulate molecules
 
 export
-    update_coordinates!,
-    update_velocities!,
     calc_accelerations,
     VelocityVerlet,
     simulate!
@@ -15,25 +13,6 @@ function adjust_bounds(c::Real, box_size::Real)
         c += box_size
     end
     return c
-end
-
-"Update coordinates of all atoms and bound to the bounding box."
-function update_coordinates!(s::Simulation, accels::Vector{T}) where T
-    for i in 1:length(s.coords)
-        s.coords[i] += s.velocities[i] * s.timestep + 0.5 * accels[i] * s.timestep ^ 2
-        s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
-    end
-    return s.coords
-end
-
-"Update velocities of all atoms using the accelerations."
-function update_velocities!(s::Simulation,
-                    accels_t::Vector{T},
-                    accels_t_dt::Vector{T}) where T
-    for i in 1:length(s.velocities)
-        s.velocities[i] += 0.5 * (accels_t[i] + accels_t_dt[i]) * s.timestep
-    end
-    return s.velocities
 end
 
 "Calculate accelerations of all atoms using the bonded and non-bonded forces."
@@ -107,15 +86,27 @@ function simulate!(s::Simulation,
     find_neighbours!(s, s.neighbour_finder, 0, parallel=parallel)
     a_t = calc_accelerations(s, parallel=parallel)
     a_t_dt = zero(s.coords)
+
     @showprogress for step_n in 1:n_steps
-        update_coordinates!(s, a_t)
+        # Update coordinates
+        for i in 1:length(s.coords)
+            s.coords[i] += s.velocities[i] * s.timestep + 0.5 * a_t[i] * s.timestep ^ 2
+            s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
+        end
+
         a_t_dt = calc_accelerations(s, parallel=parallel)
-        update_velocities!(s, a_t, a_t_dt)
+
+        # Update velocities
+        for i in 1:length(s.velocities)
+            s.velocities[i] += 0.5 * (a_t[i] + a_t_dt[i]) * s.timestep
+        end
+
         apply_thermostat!(s, s.thermostat)
         find_neighbours!(s, s.neighbour_finder, step_n, parallel=parallel)
         for logger in values(s.loggers)
             log_property!(logger, s, step_n)
         end
+
         a_t = a_t_dt
         s.n_steps_made[1] += 1
     end
