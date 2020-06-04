@@ -1,7 +1,7 @@
 # Different ways to simulate molecules
 
 export
-    calc_accelerations,
+    accelerations,
     VelocityVerlet,
     simulate!
 
@@ -16,42 +16,42 @@ function adjust_bounds(c::Real, box_size::Real)
 end
 
 "Calculate accelerations of all atoms using the bonded and non-bonded forces."
-function calc_accelerations(s::Simulation, neighbours; parallel::Bool=true)
+function accelerations(s::Simulation, neighbours; parallel::Bool=true)
     n_atoms = length(s.coords)
 
     if parallel && nthreads() > 1 && n_atoms > 100
-        accels_threads = [zero(s.coords) for i in 1:nthreads()]
+        forces_threads = [zero(s.coords) for i in 1:nthreads()]
 
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.general_inters)
             if inter.nl_only
                 @threads for ni in 1:length(neighbours)
                     i, j = neighbours[ni]
-                    update_accelerations!(accels_threads[threadid()], inter, s, i, j)
+                    force!(forces_threads[threadid()], inter, s, i, j)
                 end
             else
                 @threads for i in 1:n_atoms
                     for j in 1:(i - 1)
-                        update_accelerations!(accels_threads[threadid()], inter, s, i, j)
+                        force!(forces_threads[threadid()], inter, s, i, j)
                     end
                 end
             end
         end
 
-        accels = sum(accels_threads)
+        forces = sum(forces_threads)
     else
-        accels = zero(s.coords)
+        forces = zero(s.coords)
 
         for inter in values(s.general_inters)
             if inter.nl_only
                 for ni in 1:length(neighbours)
                     i, j = neighbours[ni]
-                    update_accelerations!(accels, inter, s, i, j)
+                    force!(forces, inter, s, i, j)
                 end
             else
                 for i in 1:n_atoms
                     for j in 1:(i - 1)
-                        update_accelerations!(accels, inter, s, i, j)
+                        force!(forces, inter, s, i, j)
                     end
                 end
             end
@@ -60,16 +60,15 @@ function calc_accelerations(s::Simulation, neighbours; parallel::Bool=true)
 
     for inter_list in values(s.specific_inter_lists)
         for inter in inter_list
-            update_accelerations!(accels, inter, s)
+            force!(forces, inter, s)
         end
     end
 
-    # Divide sum of forces by the atom mass to get acceleration
     for i in 1:n_atoms
-        accels[i] /= s.atoms[i].mass
+        forces[i] /= s.atoms[i].mass
     end
 
-    return accels
+    return forces
 end
 
 "The velocity Verlet integrator."
@@ -85,21 +84,21 @@ function simulate!(s::Simulation,
     n_atoms = length(s.coords)
     neighbours = find_neighbours(s, nothing, s.neighbour_finder, 0,
                                     parallel=parallel)
-    a_t = calc_accelerations(s, neighbours, parallel=parallel)
-    a_t_dt = zero(s.coords)
+    accels_t = accelerations(s, neighbours, parallel=parallel)
+    accels_t_dt = zero(s.coords)
 
     @showprogress for step_n in 1:n_steps
         # Update coordinates
         for i in 1:length(s.coords)
-            s.coords[i] += s.velocities[i] * s.timestep + 0.5 * a_t[i] * s.timestep ^ 2
+            s.coords[i] += s.velocities[i] * s.timestep + 0.5 * accels_t[i] * s.timestep ^ 2
             s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
         end
 
-        a_t_dt = calc_accelerations(s, neighbours, parallel=parallel)
+        accels_t_dt = accelerations(s, neighbours, parallel=parallel)
 
         # Update velocities
         for i in 1:length(s.velocities)
-            s.velocities[i] += 0.5 * (a_t[i] + a_t_dt[i]) * s.timestep
+            s.velocities[i] += 0.5 * (accels_t[i] + accels_t_dt[i]) * s.timestep
         end
 
         apply_thermostat!(s, s.thermostat)
@@ -109,7 +108,7 @@ function simulate!(s::Simulation,
             log_property!(logger, s, step_n)
         end
 
-        a_t = a_t_dt
+        accels_t = accels_t_dt
         s.n_steps_made[1] += 1
     end
     return s

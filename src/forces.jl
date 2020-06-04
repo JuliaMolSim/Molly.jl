@@ -8,7 +8,7 @@ export
     Bond,
     Angle,
     Dihedral,
-    update_accelerations!
+    force!
 
 "Square of the non-bonded interaction distance cutoff in nm^2."
 const sqdist_cutoff_nb = 1.0 ^ 2
@@ -57,14 +57,14 @@ struct Dihedral <: SpecificInteraction
     f4::Float64
 end
 
-"Update the accelerations in response to a given interation type."
-function update_accelerations! end
+"Update the force for an atom pair in response to a given interation type."
+function force! end
 
-@fastmath @inbounds function update_accelerations!(accels,
-                                            inter::LennardJones,
-                                            s::Simulation,
-                                            i::Integer,
-                                            j::Integer)
+@fastmath @inbounds function force!(forces,
+                                    inter::LennardJones,
+                                    s::Simulation,
+                                    i::Integer,
+                                    j::Integer)
     if s.atoms[i].σ == 0.0 || s.atoms[j].σ == 0.0
         return
     end
@@ -80,15 +80,15 @@ function update_accelerations! end
     # Limit this to 100 as a fudge to stop it exploding
     f = min((24ϵ * invr2) * (2 * six_term ^ 2 - six_term), 100.0)
     fdr = f * dr
-    accels[i] -= fdr
-    accels[j] += fdr
+    forces[i] -= fdr
+    forces[j] += fdr
 end
 
-@fastmath @inbounds function update_accelerations!(accels,
-                                            inter::Coulomb,
-                                            s::Simulation,
-                                            i::Integer,
-                                            j::Integer)
+@fastmath @inbounds function force!(forces,
+                                    inter::Coulomb,
+                                    s::Simulation,
+                                    i::Integer,
+                                    j::Integer)
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
     if r2 > sqdist_cutoff_nb
@@ -96,26 +96,26 @@ end
     end
     f = (coulomb_const * s.atoms[i].charge * s.atoms[j].charge) / sqrt(r2 ^ 3)
     fdr = f * dr
-    accels[i] -= fdr
-    accels[j] += fdr
+    forces[i] -= fdr
+    forces[j] += fdr
 end
 
-function update_accelerations!(accels,
-                                b::Bond,
-                                s::Simulation)
+function force!(forces,
+                b::Bond,
+                s::Simulation)
     ab = vector(s.coords[b.i], s.coords[b.j], s.box_size)
     c = b.kb * (norm(ab) - b.b0)
     f = c * normalize(ab)
-    accels[b.i] += f
-    accels[b.j] -= f
+    forces[b.i] += f
+    forces[b.j] -= f
 end
 
 # Sometimes domain error occurs for acos if the float is > 1.0 or < 1.0
 acosbound(x::Real) = acos(max(min(x, 1.0), -1.0))
 
-function update_accelerations!(accels,
-                                a::Angle,
-                                s::Simulation)
+function force!(forces,
+                a::Angle,
+                s::Simulation)
     ba = vector(s.coords[a.j], s.coords[a.i], s.box_size)
     bc = vector(s.coords[a.j], s.coords[a.k], s.box_size)
     pa = normalize(ba × (ba × bc))
@@ -124,14 +124,14 @@ function update_accelerations!(accels,
     fa = (angle_term / norm(ba)) * pa
     fc = (angle_term / norm(bc)) * pc
     fb = -fa - fc
-    accels[a.i] += fa
-    accels[a.j] += fb
-    accels[a.k] += fc
+    forces[a.i] += fa
+    forces[a.j] += fb
+    forces[a.k] += fc
 end
 
-function update_accelerations!(accels,
-                                d::Dihedral,
-                                s::Simulation)
+function force!(forces,
+                d::Dihedral,
+                s::Simulation)
     ba = vector(s.coords[d.j], s.coords[d.i], s.box_size)
     bc = vector(s.coords[d.j], s.coords[d.k], s.box_size)
     dc = vector(s.coords[d.l], s.coords[d.k], s.box_size)
@@ -146,8 +146,8 @@ function update_accelerations!(accels,
     tc = -(oc × f_d + 0.5 * (-dc × f_d) + 0.5 * (ba × fa))
     fc = (1 / dot(oc, oc)) * (tc × oc)
     fb = -fa - fc -f_d
-    accels[d.i] += fa
-    accels[d.j] += fb
-    accels[d.k] += fc
-    accels[d.l] += f_d
+    forces[d.i] += fa
+    forces[d.j] += fb
+    forces[d.k] += fc
+    forces[d.l] += f_d
 end
