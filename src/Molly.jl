@@ -16,8 +16,9 @@ include("setup.jl")
 include("spatial.jl")
 include("forces.jl")
 include("simulators.jl")
+include("thermostats.jl")
+include("neighbours.jl")
 include("loggers.jl")
-include("utils.jl")
 include("analysis.jl")
 
 end
