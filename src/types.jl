@@ -59,19 +59,19 @@ function Atom(;
 end
 
 "The data associated with a molecular simulation."
-struct Simulation{T}
+struct Simulation{T, U}
     simulator::Simulator
     atoms::Vector{<:Any}
     specific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}
     general_inters::Dict{String, <:GeneralInteraction}
-    coords::T # Typically a vector of static vectors
-    velocities::T
-    temperature::Float64
-    box_size::Float64
+    coords::U # Typically a vector of static vectors
+    velocities::U
+    temperature::T
+    box_size::T
     neighbour_finder::NeighbourFinder
     thermostat::Thermostat
     loggers::Dict{String, <:Logger}
-    timestep::Float64
+    timestep::T
     n_steps::Int
     n_steps_made::Vector{Int} # This is a vector to keep the struct immutable
 end
@@ -91,8 +91,8 @@ function Simulation(;
                     timestep,
                     n_steps,
                     n_steps_made=[0])
-    return Simulation{typeof(coords)}(simulator, atoms, specific_inter_lists,
-                general_inters, coords, velocities, temperature, box_size,
-                neighbour_finder, thermostat, loggers, timestep, n_steps,
-                n_steps_made)
+    return Simulation{typeof(timestep), typeof(coords)}(simulator, atoms,
+                specific_inter_lists, general_inters, coords, velocities,
+                temperature, box_size, neighbour_finder, thermostat, loggers,
+                timestep, n_steps, n_steps_made)
 end
