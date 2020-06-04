@@ -16,7 +16,7 @@ function adjust_bounds(c::Real, box_size::Real)
 end
 
 "Calculate accelerations of all atoms using the bonded and non-bonded forces."
-function calc_accelerations(s::Simulation; parallel::Bool=true)
+function calc_accelerations(s::Simulation, neighbours; parallel::Bool=true)
     n_atoms = length(s.coords)
 
     if parallel && nthreads() > 1 && n_atoms > 100
@@ -25,8 +25,8 @@ function calc_accelerations(s::Simulation; parallel::Bool=true)
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.general_inters)
             if inter.nl_only
-                @threads for ni in 1:length(s.neighbour_list)
-                    i, j = s.neighbour_list[ni]
+                @threads for ni in 1:length(neighbours)
+                    i, j = neighbours[ni]
                     update_accelerations!(accels_threads[threadid()], inter, s, i, j)
                 end
             else
@@ -44,8 +44,8 @@ function calc_accelerations(s::Simulation; parallel::Bool=true)
 
         for inter in values(s.general_inters)
             if inter.nl_only
-                for ni in 1:length(s.neighbour_list)
-                    i, j = s.neighbour_list[ni]
+                for ni in 1:length(neighbours)
+                    i, j = neighbours[ni]
                     update_accelerations!(accels, inter, s, i, j)
                 end
             else
@@ -83,8 +83,9 @@ function simulate!(s::Simulation,
                     n_steps::Integer;
                     parallel::Bool=true)
     n_atoms = length(s.coords)
-    find_neighbours!(s, s.neighbour_finder, 0, parallel=parallel)
-    a_t = calc_accelerations(s, parallel=parallel)
+    neighbours = find_neighbours(s, nothing, s.neighbour_finder, 0,
+                                    parallel=parallel)
+    a_t = calc_accelerations(s, neighbours, parallel=parallel)
     a_t_dt = zero(s.coords)
 
     @showprogress for step_n in 1:n_steps
@@ -94,7 +95,7 @@ function simulate!(s::Simulation,
             s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
         end
 
-        a_t_dt = calc_accelerations(s, parallel=parallel)
+        a_t_dt = calc_accelerations(s, neighbours, parallel=parallel)
 
         # Update velocities
         for i in 1:length(s.velocities)
@@ -102,7 +103,8 @@ function simulate!(s::Simulation,
         end
 
         apply_thermostat!(s, s.thermostat)
-        find_neighbours!(s, s.neighbour_finder, step_n, parallel=parallel)
+        neighbours = find_neighbours(s, neighbours, s.neighbour_finder, step_n,
+                                        parallel=parallel)
         for logger in values(s.loggers)
             log_property!(logger, s, step_n)
         end

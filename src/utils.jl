@@ -2,7 +2,7 @@
 
 export
     DistanceNeighbourFinder,
-    find_neighbours!,
+    find_neighbours,
     NoNeighbourFinder,
     AndersenThermostat,
     apply_thermostat!,
@@ -24,12 +24,13 @@ function DistanceNeighbourFinder(nb_matrix::BitArray{2},
 end
 
 "Update list of close atoms between which non-bonded forces are calculated."
-function find_neighbours!(s::Simulation,
+function find_neighbours(s::Simulation,
+                            current_neighbours,
                             nf::DistanceNeighbourFinder,
                             step_n::Integer;
                             parallel::Bool=true)
     if step_n % nf.n_steps == 0
-        empty!(s.neighbour_list)
+        neighbours = Tuple{Int, Int}[]
         sqdist_cutoff = nf.dist_cutoff ^ 2
 
         if parallel && nthreads() > 1
@@ -48,7 +49,7 @@ function find_neighbours!(s::Simulation,
             end
 
             for nl in nl_threads
-                append!(s.neighbour_list, nl)
+                append!(neighbours, nl)
             end
         else
             for i in 1:length(s.coords)
@@ -57,20 +58,26 @@ function find_neighbours!(s::Simulation,
                 for j in 1:(i - 1)
                     r2 = sum(abs2, vector(ci, s.coords[j], s.box_size))
                     if r2 <= sqdist_cutoff && nbi[j]
-                        push!(s.neighbour_list, (i, j))
+                        push!(neighbours, (i, j))
                     end
                 end
             end
         end
+        return neighbours
+    else
+        return current_neighbours
     end
-    return s
 end
 
 "Placeholder neighbour finder that does nothing."
 struct NoNeighbourFinder <: NeighbourFinder end
 
-function find_neighbours!(s::Simulation, ::NoNeighbourFinder, ::Integer; kwargs...)
-    return s
+function find_neighbours(s::Simulation,
+                            current_neighbours,
+                            ::NoNeighbourFinder,
+                            ::Integer;
+                            kwargs...)
+    return Tuple{Int, Int}[]
 end
 
 "Rescale random velocities according to the Andersen thermostat."

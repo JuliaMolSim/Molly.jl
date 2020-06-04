@@ -54,7 +54,6 @@ struct Simulation{T}
     velocities::T
     temperature::Float64
     box_size::Float64
-    neighbour_list::Vector{Tuple{Int, Int}}
     neighbour_finder::NeighbourFinder
     thermostat::Thermostat
     loggers::Dict{String, <:Logger}
@@ -73,7 +72,6 @@ function Simulation(;
                     velocities,
                     temperature,
                     box_size,
-                    neighbour_list=[],
                     neighbour_finder=NoNeighbourFinder(),
                     thermostat=NoThermostat(),
                     loggers=Dict(),
@@ -81,8 +79,7 @@ function Simulation(;
                     n_steps,
                     n_steps_made=[0])
     return Simulation{typeof(coords)}(simulator, atoms, specific_inter_lists,
-                general_inters, coords, velocities, temperature,
-                box_size, neighbour_list, neighbour_finder,
-                thermostat, loggers, timestep, n_steps,
+                general_inters, coords, velocities, temperature, box_size,
+                neighbour_finder, thermostat, loggers, timestep, n_steps,
                 n_steps_made)
 end
