@@ -101,7 +101,7 @@ velocities = [velocity(mass, temperature) for i in 1:n_atoms]
 Now we can use the built-in bond type to place a harmonic constraint between paired atoms.
 The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.
 ```julia
-bonds = [Bond(i, Int(i + n_atoms / 2), 0.1, 300_000) for i in 1:(n_atoms / 2)]
+bonds = [Bond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]
 
 specific_inter_lists = Dict("Bonds" => bonds)
 ```

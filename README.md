@@ -25,6 +25,7 @@ Implemented features include:
 - Neighbour list to speed up calculation of non-bonded forces.
 - Automatic multithreading.
 - Some analysis functions, e.g. RDF.
+- Run with Float64 or Float32.
 
 Features not yet implemented include:
 - Protein force fields other than OPLS-AA.

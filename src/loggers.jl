@@ -8,12 +8,14 @@ export
     append_model
 
 "Log the temperature throughout a simulation."
-struct TemperatureLogger <: Logger
+struct TemperatureLogger{T} <: Logger
     n_steps::Int
-    temperatures::Vector{Float64}
+    temperatures::Vector{T}
 end
 
-TemperatureLogger(n_steps::Integer) = TemperatureLogger(n_steps, [])
+TemperatureLogger(T::Type, n_steps::Integer) = TemperatureLogger(n_steps, T[])
+
+TemperatureLogger(n_steps::Integer) = TemperatureLogger(Float64, n_steps)
 
 "Log a property thoughout a simulation."
 function log_property!(logger::TemperatureLogger, s::Simulation, step_n::Integer)

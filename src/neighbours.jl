@@ -17,10 +17,10 @@ function find_neighbours(s::Simulation,
 end
 
 "Find close atoms by distance."
-struct DistanceNeighbourFinder <: NeighbourFinder
+struct DistanceNeighbourFinder{T} <: NeighbourFinder
     nb_matrix::BitArray{2}
     n_steps::Int
-    dist_cutoff::Float64
+    dist_cutoff::T
 end
 
 function DistanceNeighbourFinder(nb_matrix::BitArray{2},

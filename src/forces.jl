@@ -29,32 +29,32 @@ struct Coulomb <: GeneralInteraction
 end
 
 "A bond between two atoms."
-struct Bond <: SpecificInteraction
+struct Bond{T} <: SpecificInteraction
     i::Int
     j::Int
-    b0::Float64
-    kb::Float64
+    b0::T
+    kb::T
 end
 
 "A bond angle between three atoms."
-struct Angle <: SpecificInteraction
+struct Angle{T} <: SpecificInteraction
     i::Int
     j::Int
     k::Int
-    th0::Float64
-    cth::Float64
+    th0::T
+    cth::T
 end
 
 "A dihedral torsion angle between four atoms."
-struct Dihedral <: SpecificInteraction
+struct Dihedral{T} <: SpecificInteraction
     i::Int
     j::Int
     k::Int
     l::Int
-    f1::Float64
-    f2::Float64
-    f3::Float64
-    f4::Float64
+    f1::T
+    f2::T
+    f3::T
+    f4::T
 end
 
 "Update the force for an atom pair in response to a given interation type."
@@ -65,7 +65,7 @@ function force! end
                                     s::Simulation,
                                     i::Integer,
                                     j::Integer)
-    if s.atoms[i].σ == 0.0 || s.atoms[j].σ == 0.0
+    if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
         return
     end
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
@@ -78,7 +78,7 @@ function force! end
     invr2 = inv(r2)
     six_term = (σ ^ 2 * invr2) ^ 3
     # Limit this to 100 as a fudge to stop it exploding
-    f = min((24ϵ * invr2) * (2 * six_term ^ 2 - six_term), 100.0)
+    f = min((24ϵ * invr2) * (2 * six_term ^ 2 - six_term), 100)
     fdr = f * dr
     forces[i] -= fdr
     forces[j] += fdr
@@ -110,8 +110,8 @@ function force!(forces,
     forces[b.j] -= f
 end
 
-# Sometimes domain error occurs for acos if the float is > 1.0 or < 1.0
-acosbound(x::Real) = acos(max(min(x, 1.0), -1.0))
+# Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
+acosbound(x::Real) = acos(clamp(x, -1, 1))
 
 function force!(forces,
                 a::Angle,
@@ -138,14 +138,14 @@ function force!(forces,
     p1 = normalize(ba × bc)
     p2 = normalize(-dc × -bc)
     θ = atan(dot((-ba × bc) × (bc × -dc), normalize(bc)), dot(-ba × bc, bc × -dc))
-    angle_term = 0.5*(d.f1*sin(θ) - 2*d.f2*sin(2*θ) + 3*d.f3*sin(3*θ))
+    angle_term = (d.f1*sin(θ) - 2*d.f2*sin(2*θ) + 3*d.f3*sin(3*θ)) / 2
     fa = (angle_term / (norm(ba) * sin(acosbound(dot(ba, bc) / (norm(ba) * norm(bc)))))) * p1
     # fd clashes with a function name
     f_d = (angle_term / (norm(dc) * sin(acosbound(dot(bc, dc) / (norm(bc) * norm(dc)))))) * p2
-    oc = 0.5 * bc
-    tc = -(oc × f_d + 0.5 * (-dc × f_d) + 0.5 * (ba × fa))
+    oc = bc / 2
+    tc = -(oc × f_d + (-dc × f_d) / 2 + (ba × fa) / 2)
     fc = (1 / dot(oc, oc)) * (tc × oc)
-    fb = -fa - fc -f_d
+    fb = -fa - fc - f_d
     forces[d.i] += fa
     forces[d.j] += fb
     forces[d.k] += fc

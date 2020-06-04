@@ -9,49 +9,51 @@ export
     readinputs
 
 "Gromacs atom type."
-struct Atomtype
-    mass::Float64
-    charge::Float64
-    σ::Float64
-    ϵ::Float64
+struct Atomtype{T}
+    mass::T
+    charge::T
+    σ::T
+    ϵ::T
 end
 
 "Gromacs bond type."
-struct Bondtype
-    b0::Float64
-    kb::Float64
+struct Bondtype{T}
+    b0::T
+    kb::T
 end
 
 "Gromacs angle type."
-struct Angletype
-    th0::Float64
-    cth::Float64
+struct Angletype{T}
+    th0::T
+    cth::T
 end
 
 "Gromacs dihedral type."
-struct Dihedraltype
-    f1::Float64
-    f2::Float64
-    f3::Float64
-    f4::Float64
+struct Dihedraltype{T}
+    f1::T
+    f2::T
+    f3::T
+    f4::T
 end
 
 "Read a Gromacs topology flat file, i.e. all includes collapsed into one file."
-function readinputs(top_file::AbstractString, coord_file::AbstractString)
+function readinputs(T::Type,
+                    top_file::AbstractString,
+                    coord_file::AbstractString)
     # Read forcefield and topology file
-    atomtypes = Dict{String, Atomtype}()
-    bondtypes = Dict{String, Bondtype}()
-    angletypes = Dict{String, Angletype}()
-    dihedraltypes = Dict{String, Dihedraltype}()
+    atomtypes = Dict{String, Atomtype{T}}()
+    bondtypes = Dict{String, Bondtype{T}}()
+    angletypes = Dict{String, Angletype{T}}()
+    dihedraltypes = Dict{String, Dihedraltype{T}}()
     atomnames = Dict{String, String}()
 
     name = "?"
-    atoms = Atom[]
-    bonds = Bond[]
+    atoms = Atom{T}[]
+    bonds = Bond{T}[]
     pairs = Tuple{Int, Int}[]
-    angles = Angle[]
+    angles = Angle{T}[]
     possible_dihedrals = Tuple{Int, Int, Int, Int}[]
-    dihedrals = Dihedral[]
+    dihedrals = Dihedral{T}[]
 
     current_field = ""
     for l in eachline(top_file)
@@ -65,34 +67,34 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
         end
         c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
         if current_field == "bondtypes"
-            bondtype = Bondtype(parse(Float64, c[4]), parse(Float64, c[5]))
+            bondtype = Bondtype(parse(T, c[4]), parse(T, c[5]))
             bondtypes["$(c[1])/$(c[2])"] = bondtype
             bondtypes["$(c[2])/$(c[1])"] = bondtype
         elseif current_field == "angletypes"
             # Convert th0 to radians
-            angletype = Angletype(deg2rad(parse(Float64, c[5])), parse(Float64, c[6]))
+            angletype = Angletype(deg2rad(parse(T, c[5])), parse(T, c[6]))
             angletypes["$(c[1])/$(c[2])/$(c[3])"] = angletype
             angletypes["$(c[3])/$(c[2])/$(c[1])"] = angletype
         elseif current_field == "dihedraltypes" && c[1] != "#define"
             # Convert back to OPLS types
-            f4 = parse(Float64, c[10]) / -4
-            f3 = parse(Float64, c[9]) / -2
-            f2 = 4 * f4 - parse(Float64, c[8])
-            f1 = 3 * f3 - 2 * parse(Float64, c[7])
+            f4 = parse(T, c[10]) / -4
+            f3 = parse(T, c[9]) / -2
+            f2 = 4 * f4 - parse(T, c[8])
+            f1 = 3 * f3 - 2 * parse(T, c[7])
             dihedraltypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = Dihedraltype(f1, f2, f3, f4)
         elseif current_field == "atomtypes" && length(c) >= 8
             atomname = uppercase(c[2])
             atomnames[c[1]] = atomname
             # Take the first version of each atom type only
             if !haskey(atomtypes, atomname)
-                atomtypes[atomname] = Atomtype(parse(Float64, c[4]), parse(Float64, c[5]),
-                        parse(Float64, c[7]), parse(Float64, c[8]))
+                atomtypes[atomname] = Atomtype(parse(T, c[4]), parse(T, c[5]),
+                        parse(T, c[7]), parse(T, c[8]))
             end
         elseif current_field == "atoms"
             attype = atomnames[c[2]]
             push!(atoms, Atom(attype=attype, name=c[5], resnum=parse(Int, c[3]),
-                resname=c[4], charge=parse(Float64, c[7]),
-                mass=parse(Float64, c[8]), σ=atomtypes[attype].σ,
+                resname=c[4], charge=parse(T, c[7]),
+                mass=parse(T, c[8]), σ=atomtypes[attype].σ,
                 ϵ=atomtypes[attype].ϵ))
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
@@ -151,12 +153,12 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
 
     # Read coordinate file and add solvent atoms
     lines = readlines(coord_file)
-    coords = SArray{Tuple{3}, Float64, 1, 3}[]
+    coords = SArray{Tuple{3}, T, 1, 3}[]
     for (i, l) in enumerate(lines[3:end-1])
         push!(coords, SVector(
-            parse(Float64, l[21:28]),
-            parse(Float64, l[29:36]),
-            parse(Float64, l[37:44])
+            parse(T, l[21:28]),
+            parse(T, l[29:36]),
+            parse(T, l[37:44])
         ))
 
         # Some atoms are not specified explicitly in the topology so are added here
@@ -165,7 +167,7 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
             attype = replace(atname, r"\d+" => "")
             temp_charge = atomtypes[attype].charge
             if attype == "CL" # Temp hack to fix charges
-                temp_charge = -1.0
+                temp_charge = T(-1.0)
             end
             push!(atoms, Atom(attype=attype, name=atname,
                 resnum=parse(Int, l[1:5]), resname=strip(l[6:10]),
@@ -202,17 +204,18 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
     # Calculate matrix of pairs eligible for halved non-bonded interactions
     # This applies to specified pairs in the topology file, usually 1-4 bonded
     #for (i, j) in pairs
-    #    nb_matrix[i, j] = 0.5
-    #    nb_matrix[j, i] = 0.5
+    #    nb_matrix[i, j] = T(0.5)
+    #    nb_matrix[j, i] = T(0.5)
     #end
 
     lj = LennardJones(true)
     coulomb = Coulomb(true)
 
     # Bounding box for PBCs - box goes 0 to this value in 3 dimensions
-    box_size = parse(Float64, first(split(strip(lines[end]), r"\s+")))
+    box_size = parse(T, first(split(strip(lines[end]), r"\s+")))
 
-    specific_inter_lists = Dict("Bonds" => bonds,
+    specific_inter_lists = Dict{String, Vector{SpecificInteraction}}(
+        "Bonds" => bonds,
         "Angles" => angles,
         "Dihedrals" => dihedrals)
 
@@ -221,4 +224,8 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString)
 
     return atoms, specific_inter_lists, general_inters,
             nb_matrix, coords, box_size
+end
+
+function readinputs(top_file::AbstractString, coord_file::AbstractString)
+    return readinputs(Float64, top_file, coord_file)
 end

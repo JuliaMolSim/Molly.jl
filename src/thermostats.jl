@@ -9,8 +9,8 @@ export
     temperature
 
 "Rescale random velocities according to the Andersen thermostat."
-struct AndersenThermostat <: Thermostat
-    coupling_const::Float64
+struct AndersenThermostat{T} <: Thermostat
+    coupling_const::T
 end
 
 "Apply a thermostat to modify a simulation."
@@ -33,13 +33,21 @@ function apply_thermostat!(s::Simulation, ::NoThermostat)
 end
 
 "Generate a random velocity from the Maxwell-Boltzmann distribution."
-function velocity(mass::Real, T::Real; dims::Integer=3)
-    return SVector([maxwellboltzmann(mass, T) for i in 1:dims]...)
+function velocity(T::Type, mass::Real, temperature::Real; dims::Integer=3)
+    return SVector([maxwellboltzmann(T, mass, temperature) for i in 1:dims]...)
+end
+
+function velocity(mass::Real, temperature::Real; dims::Integer=3)
+    return velocity(Float64, mass, temperature, dims=dims)
 end
 
 "Draw from the Maxwell-Boltzmann distribution."
-function maxwellboltzmann(mass::Real, T::Real)
-    return rand(Normal(0.0, sqrt(T / mass)))
+function maxwellboltzmann(T::Type, mass::Real, temperature::Real)
+    return rand(Normal(zero(T), sqrt(temperature / mass)))
+end
+
+function maxwellboltzmann(mass::Real, temperature::Real)
+    return maxwellboltzmann(Float64, mass, temperature)
 end
 
 "Calculate the temperature of a system from the kinetic energy of the atoms."

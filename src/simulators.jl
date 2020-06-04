@@ -9,7 +9,7 @@ function adjust_bounds(c::Real, box_size::Real)
     while c >= box_size
         c -= box_size
     end
-    while c < 0.0
+    while c < zero(c)
         c += box_size
     end
     return c
@@ -90,7 +90,7 @@ function simulate!(s::Simulation,
     @showprogress for step_n in 1:n_steps
         # Update coordinates
         for i in 1:length(s.coords)
-            s.coords[i] += s.velocities[i] * s.timestep + 0.5 * accels_t[i] * s.timestep ^ 2
+            s.coords[i] += s.velocities[i] * s.timestep + accels_t[i] * (s.timestep ^ 2) / 2
             s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
         end
 
@@ -98,7 +98,7 @@ function simulate!(s::Simulation,
 
         # Update velocities
         for i in 1:length(s.velocities)
-            s.velocities[i] += 0.5 * (accels_t[i] + accels_t_dt[i]) * s.timestep
+            s.velocities[i] += (accels_t[i] + accels_t_dt[i]) * s.timestep / 2
         end
 
         apply_thermostat!(s, s.thermostat)
