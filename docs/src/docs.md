@@ -26,7 +26,7 @@ temperature = 298 # K
 velocities = [velocity(mass, temperature) for i in 1:n_atoms]
 ```
 We store the coordinates and velocities as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
-They can be of any number of dimensions.
+They can be of any number of dimensions and of any number type, e.g. `Float64` or `Float32`.
 Now we can define our dictionary of general interactions, i.e. those between most or all atoms.
 Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard Jones type.
 ```julia
