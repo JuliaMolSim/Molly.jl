@@ -15,3 +15,13 @@ end
 
 "Displacement between two coordinate values, accounting for the bounding box."
 vector(c1, c2, box_size::Real) = vector1D.(c1, c2, box_size)
+
+function adjust_bounds(c::Real, box_size::Real)
+    while c >= box_size
+        c -= box_size
+    end
+    while c < zero(c)
+        c += box_size
+    end
+    return c
+end

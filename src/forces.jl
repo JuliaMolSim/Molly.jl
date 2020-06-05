@@ -94,7 +94,8 @@ end
     if r2 > sqdist_cutoff_nb
         return
     end
-    f = (coulomb_const * s.atoms[i].charge * s.atoms[j].charge) / sqrt(r2 ^ 3)
+    T = typeof(r2)
+    f = (T(coulomb_const) * s.atoms[i].charge * s.atoms[j].charge) / sqrt(r2 ^ 3)
     fdr = f * dr
     forces[i] -= fdr
     forces[j] += fdr

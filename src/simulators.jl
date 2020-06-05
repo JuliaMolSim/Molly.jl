@@ -5,16 +5,6 @@ export
     VelocityVerlet,
     simulate!
 
-function adjust_bounds(c::Real, box_size::Real)
-    while c >= box_size
-        c -= box_size
-    end
-    while c < zero(c)
-        c += box_size
-    end
-    return c
-end
-
 "Calculate accelerations of all atoms using the bonded and non-bonded forces."
 function accelerations(s::Simulation, neighbours; parallel::Bool=true)
     n_atoms = length(s.coords)
@@ -74,13 +64,13 @@ end
 "The velocity Verlet integrator."
 struct VelocityVerlet <: Simulator end
 
-# See https://www.saylor.org/site/wp-content/uploads/2011/06/MA221-6.1.pdf for
-#   integration algorithm - used shorter second version
-"Simulate molecular dynamics."
+"Run a simulation according to the rules of the given simulator."
 function simulate!(s::Simulation,
                     ::VelocityVerlet,
                     n_steps::Integer;
                     parallel::Bool=true)
+    # See https://www.saylor.org/site/wp-content/uploads/2011/06/MA221-6.1.pdf for
+    #   integration algorithm - used shorter second version
     n_atoms = length(s.coords)
     neighbours = find_neighbours(s, nothing, s.neighbour_finder, 0,
                                     parallel=parallel)
