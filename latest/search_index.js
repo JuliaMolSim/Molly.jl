@@ -13,7 +13,7 @@ var documenterSearchIndex = {"docs": [
     "page": "Home",
     "title": "Molly.jl",
     "category": "section",
-    "text": "(Image: Travis build status) (Image: AppVeyor build status) (Image: Coverage Status) (Image: Documentation)Much of science can be explained by the movement and interaction of molecules. Molecular dynamics (MD) is a computational technique used to explore these phenomena, particularly for biological macromolecules. Molly.jl is a pure Julia implementation of MD.At the minute the package is a proof of concept for MD in Julia. It is not production ready. It can simulate a system of atoms with arbitrary interactions as defined by the user. It can also read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested. Implemented features include:Interface to allow definition of new forces, thermostats etc.\nNon-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.\nBonded interactions - covalent bonds, bond angles, dihedral angles.\nAndersen thermostat.\nVelocity Verlet integration.\nExplicit solvent.\nPeriodic boundary conditions in a cubic box.\nNeighbour list to speed up calculation of non-bonded forces.\nAutomatic multithreading.\nSome analysis functions, e.g. RDF.\nRun with Float64 or Float32.Features not yet implemented include:Protein force fields other than OPLS-AA.\nWater models.\nEnergy minimisation.\nOther temperature or pressure coupling methods.\nProtein preparation - solvent box, add hydrogens etc.\nTrajectory/topology file format readers/writers.\nGPU compatibility.\nUnit tests."
+    "text": "(Image: Travis build status) (Image: AppVeyor build status) (Image: Coverage Status) (Image: Documentation)Much of science can be explained by the movement and interaction of molecules. Molecular dynamics (MD) is a computational technique used to explore these phenomena, particularly for biological macromolecules. Molly.jl is a pure Julia implementation of MD.At the minute the package is a proof of concept for MD in Julia. It is not production ready. It can simulate a system of atoms with arbitrary interactions as defined by the user. It can also read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested. Implemented features include:Interface to allow definition of new forces, thermostats etc.\nNon-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.\nBonded interactions - covalent bonds, bond angles, dihedral angles.\nAndersen thermostat.\nVelocity Verlet and velocity-free Verlet integration.\nExplicit solvent.\nPeriodic boundary conditions in a cubic box.\nNeighbour list to speed up calculation of non-bonded forces.\nAutomatic multithreading.\nSome analysis functions, e.g. RDF.\nRun with Float64 or Float32.Features not yet implemented include:Protein force fields other than OPLS-AA.\nWater models.\nEnergy minimisation.\nOther temperature or pressure coupling methods.\nProtein preparation - solvent box, add hydrogens etc.\nTrajectory/topology file format readers/writers.\nGPU compatibility.\nUnit tests."
 },
 
 {
@@ -57,11 +57,11 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
-    "location": "docs.html#Simulating-an-ideal-gas-1",
+    "location": "docs.html#Simulating-a-gas-1",
     "page": "Documentation",
-    "title": "Simulating an ideal gas",
+    "title": "Simulating a gas",
     "category": "section",
-    "text": "Let\'s look at the simulation of an ideal gas to start with. First, we\'ll need some atoms with the relevant parameters defined.using Molly\n\nn_atoms = 100\nmass = 10.0\natoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]Next, we\'ll need some starting coordinates and velocities.box_size = 2.0 # nm\ncoords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]\n\ntemperature = 298 # K\nvelocities = [velocity(mass, temperature) for i in 1:n_atoms]We store the coordinates and velocities as static arrays for performance. They can be of any number of dimensions and of any number type, e.g. Float64 or Float32. Now we can define our dictionary of general interactions, i.e. those between most or all atoms. Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard Jones type.general_inters = Dict(\"LJ\" => LennardJones())Finally, we can define and run the simulation. We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 100 steps.s = Simulation(\n    simulator=VelocityVerlet(), # Use velocity Verlet integration\n    atoms=atoms,\n    general_inters=general_inters,\n    coords=coords,\n    velocities=velocities,\n    temperature=temperature,\n    box_size=box_size,\n    thermostat=AndersenThermostat(1.0), # Coupling constant of 1.0\n    loggers=Dict(\"temp\" => TemperatureLogger(100),\n                    \"coords\" => CoordinateLogger(100)),\n    timestep=0.002, # ps\n    n_steps=100_000\n)\n\nsimulate!(s)By default the simulation is run in parallel on the number of threads available to Julia, but this can be turned off by giving the keyword argument parallel=false to simulate!. We can get a quick look at the simulation by plotting the coordinate and temperature loggers (in the future ideally this will be one easy plot command using recipes, and may switch to use Makie.jl).using Plots\n\ncoords = s.loggers[\"coords\"].coords\ntemps = s.loggers[\"temp\"].temperatures\n\nsplitcoords(coord) = [c[1] for c in coord], [c[2] for c in coord], [c[3] for c in coord]\n\n@gif for (i, coord) in enumerate(coords)\n    l = @layout [a b{0.7h}]\n\n    cx, cy, cz = splitcoords(coord)\n    p = scatter(cx, cy, cz,\n        xlims=(0, box_size),\n        ylims=(0, box_size),\n        zlims=(0, box_size),\n        layout=l,\n        legend=false\n    )\n\n    plot!(p[2],\n        temps[1:i],\n        xlabel=\"Frame\",\n        ylabel=\"Temperature / K\",\n        xlims=(1, i),\n        ylims=(0.0, maximum(temps[1:i])),\n        legend=false\n    )\nend(Image: LJ simulation)"
+    "text": "Let\'s look at the simulation of a gas acting under the Lennard-Jones potential to start with. First, we\'ll need some atoms with the relevant parameters defined.using Molly\n\nn_atoms = 100\nmass = 10.0\natoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]Next, we\'ll need some starting coordinates and velocities.box_size = 2.0 # nm\ncoords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]\n\ntemperature = 298 # K\nvelocities = [velocity(mass, temperature) for i in 1:n_atoms]We store the coordinates and velocities as static arrays for performance. They can be of any number of dimensions and of any number type, e.g. Float64 or Float32. Now we can define our dictionary of general interactions, i.e. those between most or all atoms. Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard Jones type.general_inters = Dict(\"LJ\" => LennardJones())Finally, we can define and run the simulation. We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 100 steps.s = Simulation(\n    simulator=VelocityVerlet(), # Use velocity Verlet integration\n    atoms=atoms,\n    general_inters=general_inters,\n    coords=coords,\n    velocities=velocities,\n    temperature=temperature,\n    box_size=box_size,\n    thermostat=AndersenThermostat(1.0), # Coupling constant of 1.0\n    loggers=Dict(\"temp\" => TemperatureLogger(100),\n                    \"coords\" => CoordinateLogger(100)),\n    timestep=0.002, # ps\n    n_steps=100_000\n)\n\nsimulate!(s)By default the simulation is run in parallel on the number of threads available to Julia, but this can be turned off by giving the keyword argument parallel=false to simulate!. We can get a quick look at the simulation by plotting the coordinate and temperature loggers (in the future ideally this will be one easy plot command using recipes, and may switch to use Makie.jl).using Plots\n\ncoords = s.loggers[\"coords\"].coords\ntemps = s.loggers[\"temp\"].temperatures\n\nsplitcoords(coord) = [c[1] for c in coord], [c[2] for c in coord], [c[3] for c in coord]\n\n@gif for (i, coord) in enumerate(coords)\n    l = @layout [a b{0.7h}]\n\n    cx, cy, cz = splitcoords(coord)\n    p = scatter(cx, cy, cz,\n        xlims=(0, box_size),\n        ylims=(0, box_size),\n        zlims=(0, box_size),\n        layout=l,\n        legend=false\n    )\n\n    plot!(p[2],\n        temps[1:i],\n        xlabel=\"Frame\",\n        ylabel=\"Temperature / K\",\n        xlims=(1, i),\n        ylims=(0.0, maximum(temps[1:i])),\n        legend=false\n    )\nend(Image: LJ simulation)"
 },
 
 {
@@ -125,7 +125,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.Atom",
     "category": "type",
-    "text": "An atom and its associated information.\n\n\n\n\n\n"
+    "text": "Atom(; <keyword arguments>)\n\nAn atom and its associated information. Properties unused in the simulation or in analysis can be left with their default values.\n\nArguments\n\nattype::AbstractString=\"\": the type of the atom.\nname::AbstractString=\"\": the name of the atom.\nresnum::Integer=0: the residue number if the atom is part of a polymer.\nresname::AbstractString=\"\": the residue name if the atom is part of a   polymer.\ncharge::T=0.0: the charge of the atom, used for electrostatic interactions.\nmass::T=0.0: the mass of the atom.\nσ::T=0.0: the Lennard-Jones finite distance at which the inter-particle   potential is zero.\nϵ::T=0.0: the Lennard-Jones depth of the potential well.\n\n\n\n\n\n"
 },
 
 {
@@ -249,11 +249,19 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
+    "location": "api.html#Molly.NoVelocityVerlet",
+    "page": "API",
+    "title": "Molly.NoVelocityVerlet",
+    "category": "type",
+    "text": "NoVelocityVerlet()\n\nThe velocity-free Verlet integrator, also known as the Störmer method. In this case the velocities given to the Simulator act as the previous step coordinates for the first step.\n\n\n\n\n\n"
+},
+
+{
     "location": "api.html#Molly.Simulation",
     "page": "API",
     "title": "Molly.Simulation",
     "category": "type",
-    "text": "The data associated with a molecular simulation.\n\n\n\n\n\n"
+    "text": "Simulation(; <keyword arguments>)\n\nThe data needed to define and run a molecular simulation. Properties unused in the simulation or in analysis can be left with their default values.\n\nArguments\n\nsimulator::Simulator: the type of simulation to run.\natoms::Vector{<:Any}: the atoms in the simulation.\nspecific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}=Dict():   the specific interactions in the simulation, i.e. interactions between   specific atoms such as bonds or angles.\ngeneral_inters::Dict{String, <:GeneralInteraction}=Dict(): the general   interactions in the simulation, i.e. interactions between all or most atoms   such as electrostatics.\ncoords::U: the coordinates of the atoms in the simulation. Typically a   Vector of SVectors of any dimension and type T, where T is Float64   or Float32.\nvelocities::U: the velocities of the atoms in the simulation, which should   be the same type as the coordinates. The meaning of the velocities depends   on the simulator used, e.g. for the NoVelocityVerlet simulator they   represent the previous step coordinates for the first step.\ntemperature::T=0.0: the temperature of the simulation.\nbox_size::T: the size of the cube in which the simulation takes place.\nneighbour_finder::NeighbourFinder=NoNeighbourFinder(): the neighbour finder   used to find close atoms and save on computation.\nthermostat::Thermostat=NoThermostat(): the thermostat which applies during   the simulation.\nloggers::Dict{String, <:Logger}=Dict(): the loggers that record properties   of interest during the simulation.\ntimestep::T: the timestep of the simulation.\nn_steps::Integer: the number of steps in the simulation.\nn_steps_made::Vector{Int}=[]: the number of steps already made during the   simulation. This is a Vector to allow the struct to be immutable.\n\n\n\n\n\n"
 },
 
 {
@@ -301,7 +309,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.VelocityVerlet",
     "category": "type",
-    "text": "The velocity Verlet integrator.\n\n\n\n\n\n"
+    "text": "VelocityVerlet()\n\nThe velocity Verlet integrator.\n\n\n\n\n\n"
 },
 
 {
@@ -309,7 +317,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.accelerations",
     "category": "method",
-    "text": "Calculate accelerations of all atoms using the bonded and non-bonded forces.\n\n\n\n\n\n"
+    "text": "accelerations(simulation, neighbours; parallel=true)\n\nCalculate accelerations of all atoms using the bonded and non-bonded forces.\n\n\n\n\n\n"
 },
 
 {
@@ -365,7 +373,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.simulate!",
     "category": "method",
-    "text": "Run a simulation according to the rules of the given simulator.\n\n\n\n\n\n"
+    "text": "simulate!(simulation; parallel=true)\nsimulate!(simulation, n_steps; parallel=true)\nsimulate!(simulation, simulator, n_steps; parallel=true)\n\nRun a simulation according to the rules of the given simulator.\n\n\n\n\n\n"
 },
 
 {
