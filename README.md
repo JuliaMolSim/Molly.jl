@@ -19,7 +19,7 @@ Implemented features include:
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.
 - Bonded interactions - covalent bonds, bond angles, dihedral angles.
 - Andersen thermostat.
-- Velocity Verlet integration.
+- Velocity Verlet and velocity-free Verlet integration.
 - Explicit solvent.
 - Periodic boundary conditions in a cubic box.
 - Neighbour list to speed up calculation of non-bonded forces.

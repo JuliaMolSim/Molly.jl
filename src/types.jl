@@ -32,7 +32,25 @@ abstract type NeighbourFinder end
 "A way to record a property, e.g. the temperature, throughout a simulation."
 abstract type Logger end
 
-"An atom and its associated information."
+"""
+    Atom(; <keyword arguments>)
+
+An atom and its associated information.
+Properties unused in the simulation or in analysis can be left with their
+default values.
+
+# Arguments
+- `attype::AbstractString=""`: the type of the atom.
+- `name::AbstractString=""`: the name of the atom.
+- `resnum::Integer=0`: the residue number if the atom is part of a polymer.
+- `resname::AbstractString=""`: the residue name if the atom is part of a
+    polymer.
+- `charge::T=0.0`: the charge of the atom, used for electrostatic interactions.
+- `mass::T=0.0`: the mass of the atom.
+- `σ::T=0.0`: the Lennard-Jones finite distance at which the inter-particle
+    potential is zero.
+- `ϵ::T=0.0`: the Lennard-Jones depth of the potential well.
+"""
 struct Atom{T}
     attype::String
     name::String
@@ -58,13 +76,48 @@ function Atom(;
     return Atom{typeof(charge)}(attype, name, resnum, resname, charge, mass, σ, ϵ)
 end
 
-"The data associated with a molecular simulation."
+"""
+    Simulation(; <keyword arguments>)
+
+The data needed to define and run a molecular simulation.
+Properties unused in the simulation or in analysis can be left with their
+default values.
+
+# Arguments
+- `simulator::Simulator`: the type of simulation to run.
+- `atoms::Vector{<:Any}`: the atoms in the simulation.
+- `specific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}=Dict()`:
+    the specific interactions in the simulation, i.e. interactions between
+    specific atoms such as bonds or angles.
+- `general_inters::Dict{String, <:GeneralInteraction}=Dict()`: the general
+    interactions in the simulation, i.e. interactions between all or most atoms
+    such as electrostatics.
+- `coords::U`: the coordinates of the atoms in the simulation. Typically a
+    `Vector` of `SVector`s of any dimension and type `T`, where `T` is `Float64`
+    or `Float32`.
+- `velocities::U`: the velocities of the atoms in the simulation, which should
+    be the same type as the coordinates. The meaning of the velocities depends
+    on the simulator used, e.g. for the `NoVelocityVerlet` simulator they
+    represent the previous step coordinates for the first step.
+- `temperature::T=0.0`: the temperature of the simulation.
+- `box_size::T`: the size of the cube in which the simulation takes place.
+- `neighbour_finder::NeighbourFinder=NoNeighbourFinder()`: the neighbour finder
+    used to find close atoms and save on computation.
+- `thermostat::Thermostat=NoThermostat()`: the thermostat which applies during
+    the simulation.
+- `loggers::Dict{String, <:Logger}=Dict()`: the loggers that record properties
+    of interest during the simulation.
+- `timestep::T`: the timestep of the simulation.
+- `n_steps::Integer`: the number of steps in the simulation.
+- `n_steps_made::Vector{Int}=[]`: the number of steps already made during the
+    simulation. This is a `Vector` to allow the `struct` to be immutable.
+"""
 struct Simulation{T, U}
     simulator::Simulator
     atoms::Vector{<:Any}
     specific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}
     general_inters::Dict{String, <:GeneralInteraction}
-    coords::U # Typically a vector of static vectors
+    coords::U
     velocities::U
     temperature::T
     box_size::T
@@ -73,7 +126,7 @@ struct Simulation{T, U}
     loggers::Dict{String, <:Logger}
     timestep::T
     n_steps::Int
-    n_steps_made::Vector{Int} # This is a vector to keep the struct immutable
+    n_steps_made::Vector{Int}
 end
 
 function Simulation(;
@@ -83,7 +136,7 @@ function Simulation(;
                     general_inters=Dict(),
                     coords,
                     velocities,
-                    temperature,
+                    temperature=0.0,
                     box_size,
                     neighbour_finder=NoNeighbourFinder(),
                     thermostat=NoThermostat(),
