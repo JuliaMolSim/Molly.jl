@@ -6,9 +6,9 @@ Molly takes a modular approach to molecular simulation.
 To run a simulation you create a `Simulation` object and run `simulate!` on it.
 The different components of the simulation can be used as defined by the package, or you can define your own versions.
 
-## Simulating an ideal gas
+## Simulating a gas
 
-Let's look at the simulation of an ideal gas to start with.
+Let's look at the simulation of a gas acting under the [Lennard-Jones](https://en.wikipedia.org/wiki/Lennard-Jones_potential) potential to start with.
 First, we'll need some atoms with the relevant parameters defined.
 ```julia
 using Molly

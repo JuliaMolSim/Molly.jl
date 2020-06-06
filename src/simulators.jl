@@ -3,9 +3,14 @@
 export
     accelerations,
     VelocityVerlet,
-    simulate!
+    simulate!,
+    NoVelocityVerlet
 
-"Calculate accelerations of all atoms using the bonded and non-bonded forces."
+"""
+    accelerations(simulation, neighbours; parallel=true)
+
+Calculate accelerations of all atoms using the bonded and non-bonded forces.
+"""
 function accelerations(s::Simulation, neighbours; parallel::Bool=true)
     n_atoms = length(s.coords)
 
@@ -61,10 +66,20 @@ function accelerations(s::Simulation, neighbours; parallel::Bool=true)
     return forces
 end
 
-"The velocity Verlet integrator."
+"""
+    VelocityVerlet()
+
+The velocity Verlet integrator.
+"""
 struct VelocityVerlet <: Simulator end
 
-"Run a simulation according to the rules of the given simulator."
+"""
+    simulate!(simulation; parallel=true)
+    simulate!(simulation, n_steps; parallel=true)
+    simulate!(simulation, simulator, n_steps; parallel=true)
+
+Run a simulation according to the rules of the given simulator.
+"""
 function simulate!(s::Simulation,
                     ::VelocityVerlet,
                     n_steps::Integer;
@@ -78,6 +93,10 @@ function simulate!(s::Simulation,
     accels_t_dt = zero(s.coords)
 
     @showprogress for step_n in 1:n_steps
+        for logger in values(s.loggers)
+            log_property!(logger, s, step_n)
+        end
+
         # Update coordinates
         for i in 1:length(s.coords)
             s.coords[i] += s.velocities[i] * s.timestep + accels_t[i] * (s.timestep ^ 2) / 2
@@ -94,11 +113,50 @@ function simulate!(s::Simulation,
         apply_thermostat!(s, s.thermostat)
         neighbours = find_neighbours(s, neighbours, s.neighbour_finder, step_n,
                                         parallel=parallel)
+
+        accels_t = accels_t_dt
+        s.n_steps_made[1] += 1
+    end
+    return s
+end
+
+"""
+    NoVelocityVerlet()
+
+The velocity-free Verlet integrator, also known as the Störmer method.
+In this case the `velocities` given to the `Simulator` act as the previous step
+coordinates for the first step.
+"""
+struct NoVelocityVerlet <: Simulator end
+
+function simulate!(s::Simulation,
+                    ::NoVelocityVerlet,
+                    n_steps::Integer;
+                    parallel::Bool=true)
+    n_atoms = length(s.coords)
+    neighbours = find_neighbours(s, nothing, s.neighbour_finder, 0,
+                                    parallel=parallel)
+    coords_last = s.velocities
+
+    @showprogress for step_n in 1:n_steps
         for logger in values(s.loggers)
             log_property!(logger, s, step_n)
         end
 
-        accels_t = accels_t_dt
+        accels_t = accelerations(s, neighbours, parallel=parallel)
+
+        # Update coordinates
+        coords_copy = s.coords
+        for i in 1:length(s.coords)
+            s.coords[i] = 2 * s.coords[i] - coords_last[i] + accels_t[i] * s.timestep ^ 2
+            s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
+        end
+        coords_last = coords_copy
+
+        apply_thermostat!(s, s.thermostat)
+        neighbours = find_neighbours(s, neighbours, s.neighbour_finder, step_n,
+                                        parallel=parallel)
+
         s.n_steps_made[1] += 1
     end
     return s
