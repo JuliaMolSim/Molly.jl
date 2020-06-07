@@ -5,6 +5,7 @@ using Distributions
 using KernelDensity
 using ProgressMeter
 using Reexport
+using Requires
 
 @reexport using StaticArrays
 
@@ -20,5 +21,9 @@ include("thermostats.jl")
 include("neighbours.jl")
 include("loggers.jl")
 include("analysis.jl")
+
+function __init__()
+    @require Makie="ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a" include("visualisation.jl")
+end
 
 end

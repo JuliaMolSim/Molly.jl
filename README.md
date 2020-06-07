@@ -26,6 +26,7 @@ Implemented features include:
 - Automatic multithreading.
 - Some analysis functions, e.g. RDF.
 - Run with Float64 or Float32.
+- Visualise simulations as animations.
 
 Features not yet implemented include:
 - Protein force fields other than OPLS-AA.
@@ -34,6 +35,7 @@ Features not yet implemented include:
 - Other temperature or pressure coupling methods.
 - Protein preparation - solvent box, add hydrogens etc.
 - Trajectory/topology file format readers/writers.
+- Quantum mechanical modelling.
 - GPU compatibility.
 - Unit tests.
 
