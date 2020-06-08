@@ -74,7 +74,7 @@ s = Simulation(
     thermostat=AndersenThermostat(1.0),
     loggers=Dict("temp" => TemperatureLogger(100)),
     timestep=0.002, # ps
-    n_steps=100_000
+    n_steps=10_000
 )
 
 simulate!(s)
@@ -86,7 +86,7 @@ using Molly
 
 timestep = 0.0002 # ps
 temperature = 298 # K
-n_steps = 5000
+n_steps = 5_000
 
 atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),

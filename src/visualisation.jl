@@ -12,7 +12,7 @@ function visualize(coord_logger,
                     framerate::Integer=30,
                     color=:purple,
                     connection_color=:orange,
-                    markersize=0.15,
+                    markersize=0.1,
                     linewidth=2.0,
                     transparency=true,
                     kwargs...)

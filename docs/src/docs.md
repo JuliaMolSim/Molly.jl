@@ -1,10 +1,11 @@
 # Molly documentation
 
-*These docs are work in progress*
-
 Molly takes a modular approach to molecular simulation.
-To run a simulation you create a `Simulation` object and run `simulate!` on it.
+To run a simulation you create a [`Simulation`](@ref) object and call [`simulate!`](@ref) on it.
 The different components of the simulation can be used as defined by the package, or you can define your own versions.
+An important principle of the package is that your custom components, particularly force functions, should be easy to define and just as performant as the in-built versions.
+
+For more information on specific types or functions, see the [Molly API](@ref) section or call `?function_name` in Julia.
 
 ## Simulating a gas
 
@@ -22,7 +23,7 @@ Next, we'll need some starting coordinates and velocities.
 box_size = 2.0 # nm
 coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
 
-temperature = 298 # K
+temperature = 100 # K
 velocities = [velocity(mass, temperature) for i in 1:n_atoms]
 ```
 We store the coordinates and velocities as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
@@ -33,7 +34,7 @@ Because we have defined the relevant parameters for the atoms, we can use the bu
 general_inters = Dict("LJ" => LennardJones())
 ```
 Finally, we can define and run the simulation.
-We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 100 steps.
+We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.
 ```julia
 s = Simulation(
     simulator=VelocityVerlet(), # Use velocity Verlet integration
@@ -44,45 +45,19 @@ s = Simulation(
     temperature=temperature,
     box_size=box_size,
     thermostat=AndersenThermostat(1.0), # Coupling constant of 1.0
-    loggers=Dict("temp" => TemperatureLogger(100),
-                    "coords" => CoordinateLogger(100)),
+    loggers=Dict("temp" => TemperatureLogger(10),
+                    "coords" => CoordinateLogger(10)),
     timestep=0.002, # ps
-    n_steps=100_000
+    n_steps=1_000
 )
 
 simulate!(s)
 ```
-By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this can be turned off by giving the keyword argument `parallel=false` to `simulate!`.
-We can get a quick look at the simulation by plotting the coordinate and temperature loggers (in the future ideally this will be one easy plot command using recipes, and may switch to use Makie.jl).
+By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this can be turned off by giving the keyword argument `parallel=false` to [`simulate!`](@ref).
+An animation of the stored coordinates using can be saved using [`visualize`](@ref), which is available when [Makie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
 ```julia
-using Plots
-
-coords = s.loggers["coords"].coords
-temps = s.loggers["temp"].temperatures
-
-splitcoords(coord) = [c[1] for c in coord], [c[2] for c in coord], [c[3] for c in coord]
-
-@gif for (i, coord) in enumerate(coords)
-    l = @layout [a b{0.7h}]
-
-    cx, cy, cz = splitcoords(coord)
-    p = scatter(cx, cy, cz,
-        xlims=(0, box_size),
-        ylims=(0, box_size),
-        zlims=(0, box_size),
-        layout=l,
-        legend=false
-    )
-
-    plot!(p[2],
-        temps[1:i],
-        xlabel="Frame",
-        ylabel="Temperature / K",
-        xlims=(1, i),
-        ylims=(0.0, maximum(temps[1:i])),
-        legend=false
-    )
-end
+using Makie
+visualize(s.loggers["coords"], box_size, "sim_lj.gif")
 ```
 ![LJ simulation](images/sim_lj.gif)
 
@@ -124,61 +99,53 @@ s = Simulation(
     box_size=box_size,
     neighbour_finder=neighbour_finder,
     thermostat=AndersenThermostat(1.0),
-    loggers=Dict("temp" => TemperatureLogger(100),
-                    "coords" => CoordinateLogger(100)),
+    loggers=Dict("temp" => TemperatureLogger(10),
+                    "coords" => CoordinateLogger(10)),
     timestep=0.002,
-    n_steps=100_000
+    n_steps=1_000
 )
 
 simulate!(s)
 ```
 This time when we view the trajectory we can add lines to show the bonds.
 ```julia
-using LinearAlgebra
-
-coords = s.loggers["coords"].coords
-temps = s.loggers["temp"].temperatures
-
-connections = [(i, Int(i + n_atoms / 2)) for i in 1:Int(n_atoms / 2)]
-
-@gif for (i, coord) in enumerate(coords)
-    l = @layout [a b{0.7h}]
-
-    cx, cy, cz = splitcoords(coord)
-    p = scatter(cx, cy, cz,
-        xlims=(0, box_size),
-        ylims=(0, box_size),
-        zlims=(0, box_size),
-        layout=l,
-        legend=false
-    )
-
-    for (a1, a2) in connections
-        if norm(coord[a1] - coord[a2]) < (box_size / 2)
-            plot!(p[1],
-                [cx[a1], cx[a2]],
-                [cy[a1], cy[a2]],
-                [cz[a1], cz[a2]],
-                linecolor="lightblue"
-            )
-        end
-    end
-
-    plot!(p[2],
-        temps[1:i],
-        xlabel="Frame",
-        ylabel="Temperature / K",
-        xlims=(1, i),
-        ylims=(0.0, maximum(temps[1:i])),
-        legend=false
-    )
-end
+visualize(s.loggers["coords"], box_size, "sim_diatomic.gif",
+            connections=[(i, Int(i + n_atoms / 2)) for i in 1:Int(n_atoms / 2)],
+            markersize=0.05, linewidth=5.0)
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
 
 ## Simulating a protein in the OPLS-AA forcefield
 
-*In progress*
+Molly has a rudimentary parser of Gromacs topology and coordinate files.
+Data for a protein can be read into the same data structures as above, and simulated in the same way.
+```julia
+atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
+            joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
+            joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
+
+temperature = 298
+
+s = Simulation(
+    simulator=VelocityVerlet(),
+    atoms=atoms,
+    specific_inter_lists=specific_inter_lists,
+    general_inters=general_inters,
+    coords=coords,
+    velocities=[velocity(a.mass, temperature) for a in atoms],
+    temperature=temperature,
+    box_size=box_size,
+    neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
+    thermostat=AndersenThermostat(1.0),
+    loggers=Dict("temp" => TemperatureLogger(10),
+                    "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),
+    timestep=0.0002,
+    n_steps=5_000
+)
+
+simulate!(s)
+```
+The [`StructureWriter`](@ref) records a PDB file of the trajectory.
 
 ## Defining your own forces
 
