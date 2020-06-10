@@ -16,7 +16,10 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 [compat]
 BioStructures = "0.10, 0.11"
 Distributions = "0.23"
+KernelDensity = "0.5"
 ProgressMeter = "1"
+Reexport = "0.2"
+Requires = "1"
 StaticArrays = "0.12"
 julia = "1"
 
