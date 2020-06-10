@@ -3,7 +3,8 @@
 export
     displacements,
     distances,
-    rdf
+    rdf,
+    visualize
 
 function displacements(coords, box_size::Real)
     n_atoms = length(coords)
@@ -22,3 +23,6 @@ function rdf(coords, box_size::Real; npoints::Integer=200)
     density_weighted = kd.density ./ (4π .* step(kd.x) .* kd.x .^ 2)
     return collect(kd.x), density_weighted
 end
+
+"Visualize a simulation."
+function visualize end
