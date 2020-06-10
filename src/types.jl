@@ -97,7 +97,7 @@ default values.
     or `Float32`.
 - `velocities::U`: the velocities of the atoms in the simulation, which should
     be the same type as the coordinates. The meaning of the velocities depends
-    on the simulator used, e.g. for the `NoVelocityVerlet` simulator they
+    on the simulator used, e.g. for the `VelocityFreeVerlet` simulator they
     represent the previous step coordinates for the first step.
 - `temperature::T=0.0`: the temperature of the simulation.
 - `box_size::T`: the size of the cube in which the simulation takes place.

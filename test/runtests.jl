@@ -62,7 +62,7 @@ end
     coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
 
     s = Simulation(
-        simulator=NoVelocityVerlet(),
+        simulator=VelocityFreeVerlet(),
         atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
                     mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
         general_inters=Dict("LJ" => LennardJones(true)),

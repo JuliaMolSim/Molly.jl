@@ -4,7 +4,7 @@ export
     accelerations,
     VelocityVerlet,
     simulate!,
-    NoVelocityVerlet
+    VelocityFreeVerlet
 
 """
     accelerations(simulation, neighbours; parallel=true)
@@ -121,16 +121,16 @@ function simulate!(s::Simulation,
 end
 
 """
-    NoVelocityVerlet()
+    VelocityFreeVerlet()
 
 The velocity-free Verlet integrator, also known as the Störmer method.
 In this case the `velocities` given to the `Simulator` act as the previous step
 coordinates for the first step.
 """
-struct NoVelocityVerlet <: Simulator end
+struct VelocityFreeVerlet <: Simulator end
 
 function simulate!(s::Simulation,
-                    ::NoVelocityVerlet,
+                    ::VelocityFreeVerlet,
                     n_steps::Integer;
                     parallel::Bool=true)
     n_atoms = length(s.coords)
