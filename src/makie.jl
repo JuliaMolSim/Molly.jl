@@ -3,8 +3,6 @@
 
 using .Makie
 
-export visualize
-
 function visualize(coord_logger,
                     box_size,
                     out_filepath::AbstractString;

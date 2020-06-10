@@ -5,6 +5,7 @@ To run a simulation you create a [`Simulation`](@ref) object and call [`simulate
 The different components of the simulation can be used as defined by the package, or you can define your own versions.
 An important principle of the package is that your custom components, particularly force functions, should be easy to define and just as performant as the in-built versions.
 
+This documentation will first introduce the main features of the package with some examples, then will give details on each component of a simulation.
 For more information on specific types or functions, see the [Molly API](@ref) section or call `?function_name` in Julia.
 
 ## Simulating a gas
@@ -57,6 +58,7 @@ By default the simulation is run in parallel on the [number of threads](https://
 An animation of the stored coordinates using can be saved using [`visualize`](@ref), which is available when [Makie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
 ```julia
 using Makie
+
 visualize(s.loggers["coords"], box_size, "sim_lj.gif")
 ```
 ![LJ simulation](images/sim_lj.gif)
@@ -117,8 +119,9 @@ visualize(s.loggers["coords"], box_size, "sim_diatomic.gif",
 
 ## Simulating a protein in the OPLS-AA forcefield
 
-Molly has a rudimentary parser of Gromacs topology and coordinate files.
-Data for a protein can be read into the same data structures as above, and simulated in the same way.
+Molly has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
+Data for a protein can be read into the same data structures as above and simulated in the same way.
+Currently, the OPLS-AA forcefield is implemented.
 ```julia
 atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
@@ -145,8 +148,28 @@ s = Simulation(
 
 simulate!(s)
 ```
-The [`StructureWriter`](@ref) records a PDB file of the trajectory.
 
-## Defining your own forces
+## Forces
 
-*In progress*
+The available force functions are:
+-
+
+## Simulators
+
+...
+
+## Thermostats
+
+...
+
+## Neighbour lists
+
+...
+
+## Loggers
+
+...
+
+## Analysis
+
+...
