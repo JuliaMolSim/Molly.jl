@@ -249,19 +249,11 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
-    "location": "api.html#Molly.NoVelocityVerlet",
-    "page": "API",
-    "title": "Molly.NoVelocityVerlet",
-    "category": "type",
-    "text": "NoVelocityVerlet()\n\nThe velocity-free Verlet integrator, also known as the Störmer method. In this case the velocities given to the Simulator act as the previous step coordinates for the first step.\n\n\n\n\n\n"
-},
-
-{
     "location": "api.html#Molly.Simulation",
     "page": "API",
     "title": "Molly.Simulation",
     "category": "type",
-    "text": "Simulation(; <keyword arguments>)\n\nThe data needed to define and run a molecular simulation. Properties unused in the simulation or in analysis can be left with their default values.\n\nArguments\n\nsimulator::Simulator: the type of simulation to run.\natoms::Vector{<:Any}: the atoms in the simulation.\nspecific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}=Dict():   the specific interactions in the simulation, i.e. interactions between   specific atoms such as bonds or angles.\ngeneral_inters::Dict{String, <:GeneralInteraction}=Dict(): the general   interactions in the simulation, i.e. interactions between all or most atoms   such as electrostatics.\ncoords::U: the coordinates of the atoms in the simulation. Typically a   Vector of SVectors of any dimension and type T, where T is Float64   or Float32.\nvelocities::U: the velocities of the atoms in the simulation, which should   be the same type as the coordinates. The meaning of the velocities depends   on the simulator used, e.g. for the NoVelocityVerlet simulator they   represent the previous step coordinates for the first step.\ntemperature::T=0.0: the temperature of the simulation.\nbox_size::T: the size of the cube in which the simulation takes place.\nneighbour_finder::NeighbourFinder=NoNeighbourFinder(): the neighbour finder   used to find close atoms and save on computation.\nthermostat::Thermostat=NoThermostat(): the thermostat which applies during   the simulation.\nloggers::Dict{String, <:Logger}=Dict(): the loggers that record properties   of interest during the simulation.\ntimestep::T: the timestep of the simulation.\nn_steps::Integer: the number of steps in the simulation.\nn_steps_made::Vector{Int}=[]: the number of steps already made during the   simulation. This is a Vector to allow the struct to be immutable.\n\n\n\n\n\n"
+    "text": "Simulation(; <keyword arguments>)\n\nThe data needed to define and run a molecular simulation. Properties unused in the simulation or in analysis can be left with their default values.\n\nArguments\n\nsimulator::Simulator: the type of simulation to run.\natoms::Vector{<:Any}: the atoms in the simulation.\nspecific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}=Dict():   the specific interactions in the simulation, i.e. interactions between   specific atoms such as bonds or angles.\ngeneral_inters::Dict{String, <:GeneralInteraction}=Dict(): the general   interactions in the simulation, i.e. interactions between all or most atoms   such as electrostatics.\ncoords::U: the coordinates of the atoms in the simulation. Typically a   Vector of SVectors of any dimension and type T, where T is Float64   or Float32.\nvelocities::U: the velocities of the atoms in the simulation, which should   be the same type as the coordinates. The meaning of the velocities depends   on the simulator used, e.g. for the VelocityFreeVerlet simulator they   represent the previous step coordinates for the first step.\ntemperature::T=0.0: the temperature of the simulation.\nbox_size::T: the size of the cube in which the simulation takes place.\nneighbour_finder::NeighbourFinder=NoNeighbourFinder(): the neighbour finder   used to find close atoms and save on computation.\nthermostat::Thermostat=NoThermostat(): the thermostat which applies during   the simulation.\nloggers::Dict{String, <:Logger}=Dict(): the loggers that record properties   of interest during the simulation.\ntimestep::T: the timestep of the simulation.\nn_steps::Integer: the number of steps in the simulation.\nn_steps_made::Vector{Int}=[]: the number of steps already made during the   simulation. This is a Vector to allow the struct to be immutable.\n\n\n\n\n\n"
 },
 
 {
@@ -302,6 +294,14 @@ var documenterSearchIndex = {"docs": [
     "title": "Molly.Thermostat",
     "category": "type",
     "text": "A way to keep the temperature of a simulation constant.\n\n\n\n\n\n"
+},
+
+{
+    "location": "api.html#Molly.VelocityFreeVerlet",
+    "page": "API",
+    "title": "Molly.VelocityFreeVerlet",
+    "category": "type",
+    "text": "VelocityFreeVerlet()\n\nThe velocity-free Verlet integrator, also known as the Störmer method. In this case the velocities given to the Simulator act as the previous step coordinates for the first step.\n\n\n\n\n\n"
 },
 
 {
@@ -409,11 +409,19 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
+    "location": "api.html#Molly.visualize",
+    "page": "API",
+    "title": "Molly.visualize",
+    "category": "function",
+    "text": "Visualize a simulation.\n\n\n\n\n\n"
+},
+
+{
     "location": "api.html#Molly-API-1",
     "page": "API",
     "title": "Molly API",
     "category": "section",
-    "text": "The API reference can be found here. Molly also re-exports StaticArrays.jl, making the likes of SVector available when you call using Molly.Order   = [:module, :type, :constant, :function, :macro]Modules = [Molly]\nPrivate = false\nOrder   = [:module, :type, :constant, :function, :macro]"
+    "text": "The API reference can be found here.Molly also re-exports StaticArrays.jl, making the likes of SVector available when you call using Molly.The visualize function is only available once you have called using Makie. Requires.jl is used to lazily load this code when Makie.jl is available, which reduces the dependencies of the package.Order   = [:module, :type, :constant, :function, :macro]Modules = [Molly]\nPrivate = false\nOrder   = [:module, :type, :constant, :function, :macro]"
 },
 
 ]}
