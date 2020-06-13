@@ -49,9 +49,9 @@ function readinputs(T::Type,
 
     name = "?"
     atoms = Atom{T}[]
-    bonds = Bond{T}[]
+    bonds = HarmonicBond{T}[]
     pairs = Tuple{Int, Int}[]
-    angles = Angle{T}[]
+    angles = HarmonicAngle{T}[]
     possible_dihedrals = Tuple{Int, Int, Int, Int}[]
     dihedrals = Dihedral{T}[]
 
@@ -99,13 +99,13 @@ function readinputs(T::Type,
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
             bondtype = bondtypes["$(atoms[i].attype)/$(atoms[j].attype)"]
-            push!(bonds, Bond(i, j, bondtype.b0, bondtype.kb))
+            push!(bonds, HarmonicBond(i, j, bondtype.b0, bondtype.kb))
         elseif current_field == "pairs"
             push!(pairs, (parse(Int, c[1]), parse(Int, c[2])))
         elseif current_field == "angles"
             i, j, k = parse.(Int, c[1:3])
             angletype = angletypes["$(atoms[i].attype)/$(atoms[j].attype)/$(atoms[k].attype)"]
-            push!(angles, Angle(i, j, k, angletype.th0, angletype.cth))
+            push!(angles, HarmonicAngle(i, j, k, angletype.th0, angletype.cth))
         elseif current_field == "dihedrals"
             i, j, k, l = parse.(Int, c[1:4])
             push!(possible_dihedrals, (i, j, k, l))
@@ -177,10 +177,10 @@ function readinputs(T::Type,
             # Add O-H bonds and H-O-H angle in water
             if atname == "OW"
                 bondtype = bondtypes["OW/HW"]
-                push!(bonds, Bond(i, i + 1, bondtype.b0, bondtype.kb))
-                push!(bonds, Bond(i, i + 2, bondtype.b0, bondtype.kb))
+                push!(bonds, HarmonicBond(i, i + 1, bondtype.b0, bondtype.kb))
+                push!(bonds, HarmonicBond(i, i + 2, bondtype.b0, bondtype.kb))
                 angletype = angletypes["HW/OW/HW"]
-                push!(angles, Angle(i + 1, i, i + 2, angletype.th0, angletype.cth))
+                push!(angles, HarmonicAngle(i + 1, i, i + 2, angletype.th0, angletype.cth))
             end
         end
     end

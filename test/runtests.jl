@@ -87,7 +87,7 @@ end
     for i in 1:length(coords)
         push!(coords, coords[i] .+ [0.1, 0.0, 0.0])
     end
-    bonds = [Bond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]
+    bonds = [HarmonicBond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]
 
     s = Simulation(
         simulator=VelocityVerlet(),

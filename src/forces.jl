@@ -5,8 +5,8 @@
 export
     LennardJones,
     Coulomb,
-    Bond,
-    Angle,
+    HarmonicBond,
+    HarmonicAngle,
     Dihedral,
     force!
 
@@ -28,8 +28,8 @@ struct Coulomb <: GeneralInteraction
     nl_only::Bool
 end
 
-"A bond between two atoms."
-struct Bond{T} <: SpecificInteraction
+"A harmonic bond between two atoms."
+struct HarmonicBond{T} <: SpecificInteraction
     i::Int
     j::Int
     b0::T
@@ -37,7 +37,7 @@ struct Bond{T} <: SpecificInteraction
 end
 
 "A bond angle between three atoms."
-struct Angle{T} <: SpecificInteraction
+struct HarmonicAngle{T} <: SpecificInteraction
     i::Int
     j::Int
     k::Int
@@ -102,7 +102,7 @@ end
 end
 
 function force!(forces,
-                b::Bond,
+                b::HarmonicBond,
                 s::Simulation)
     ab = vector(s.coords[b.i], s.coords[b.j], s.box_size)
     c = b.kb * (norm(ab) - b.b0)
@@ -115,7 +115,7 @@ end
 acosbound(x::Real) = acos(clamp(x, -1, 1))
 
 function force!(forces,
-                a::Angle,
+                a::HarmonicAngle,
                 s::Simulation)
     ba = vector(s.coords[a.j], s.coords[a.i], s.box_size)
     bc = vector(s.coords[a.j], s.coords[a.k], s.box_size)

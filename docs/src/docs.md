@@ -78,7 +78,7 @@ velocities = [velocity(mass, temperature) for i in 1:n_atoms]
 Now we can use the built-in bond type to place a harmonic constraint between paired atoms.
 The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.
 ```julia
-bonds = [Bond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]
+bonds = [HarmonicBond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]
 
 specific_inter_lists = Dict("Bonds" => bonds)
 ```
@@ -117,7 +117,7 @@ visualize(s.loggers["coords"], box_size, "sim_diatomic.gif",
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
 
-## Simulating a protein in the OPLS-AA forcefield
+## Simulating a protein
 
 Molly has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
 Data for a protein can be read into the same data structures as above and simulated in the same way.

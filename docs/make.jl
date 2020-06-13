@@ -5,9 +5,9 @@ makedocs(
     format = :html,
     sitename = "Molly.jl",
     pages = [
-        "Home"         => "index.md",
-        "Documentation"=> "docs.md",
-        "API"          => "api.md",
+        "Home"          => "index.md",
+        "Documentation" => "docs.md",
+        "API"           => "api.md",
     ],
     authors = "Joe G Greener"
 )
