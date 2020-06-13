@@ -151,8 +151,51 @@ simulate!(s)
 
 ## Forces
 
-The available force functions are:
--
+Forces define how different parts of the system interact.
+In Molly they are separated into two types.
+[`GeneralInteraction`](@ref)s are present between all or most atoms, and account for example for non-bonded terms.
+[`SpecificInteraction`](@ref)s are present between specific atoms, and account for example for bonded terms.
+
+The available general interactions are:
+- [`LennardJones`](@ref).
+- [`Coulomb`](@ref).
+
+The available specific interactions are:
+- [`HarmonicBond`](@ref).
+- [`HarmonicAngle`](@ref).
+- [`Torsion`](@ref).
+
+To define your own [`GeneralInteraction`](@ref), first define the `struct`:
+```julia
+struct MyGeneralInter <: GeneralInteraction
+    nl_only::Bool
+    # Any other properties
+end
+```
+The `nl_only` property is required and determines whether the neighbour list is used to omit distant atoms (`true`) or whether all atom pairs are always considered (`false`).
+Next, you need to define the [`force!`](@ref) function acting between a pair of atoms:
+```julia
+function force!(forces, inter::MyGeneralInter, s::Simulation, i::Integer, j::Integer)
+    dr = vector(s.coords[i], s.coords[j], s.box_size)
+
+    # Replace this with your force calculation
+    # A positive force causes the atoms to move together
+    f = 0.0
+
+    fdr = f * dr
+    forces[i] -= fdr
+    forces[j] += fdr
+end
+```
+If you need to obtain the vector from atom `i` to atom `j`, use the [`vector`](@ref) function.
+This gets the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
+The [`Simulation`](@ref) is available so atom properties or velocities can be accessed, e.g. `s.atoms[i].σ` or `s.velocities[i]`.
+This form of the function can also be used to define three-atom interactions by looping a third variable `k` up to `j` in the [`force!`](@ref) function.
+To use your custom force, add it to the dictionary of general interactions:
+```julia
+general_inters = Dict("MyGeneralInter" => MyGeneralInter(true))
+```
+Then create a [`Simulation`](@ref) as above.
 
 ## Simulators
 
