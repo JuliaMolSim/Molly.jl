@@ -85,7 +85,7 @@ var documenterSearchIndex = {"docs": [
     "page": "Documentation",
     "title": "Forces",
     "category": "section",
-    "text": "Forces define how different parts of the system interact. In Molly they are separated into two types. GeneralInteractions are present between all or most atoms, and account for example for non-bonded terms. SpecificInteractions are present between specific atoms, and account for example for bonded terms.The available general interactions are:LennardJones.\nCoulomb.The available specific interactions are:HarmonicBond.\nHarmonicAngle.\nTorsion.To define your own GeneralInteraction, first define the struct:struct MyGeneralInter <: GeneralInteraction\n    nl_only::Bool\n    # Any other properties\nendThe nl_only property is required and determines whether the neighbour list is used to omit distant atoms (true) or whether all atom pairs are always considered (false). Next, you need to define the force! function acting between a pair of atoms:function force!(forces, inter::MyGeneralInter, s::Simulation, i::Integer, j::Integer)\n    dr = vector(s.coords[i], s.coords[j], s.box_size)\n\n    # Replace this with your force calculation\n    # A positive force causes the atoms to move together\n    f = 0.0\n\n    fdr = f * normalize(dr)\n    forces[i] -= fdr\n    forces[j] += fdr\nendIf you need to obtain the vector from atom i to atom j, use the vector function. This gets the vector between the closest images of atoms i and j accounting for the periodic boundary conditions. The Simulation is available so atom properties or velocities can be accessed, e.g. s.atoms[i].σ or s.velocities[i]. This form of the function can also be used to define three-atom interactions by looping a third variable k up to j in the force! function. To use your custom force, add it to the dictionary of general interactions:general_inters = Dict(\"MyGeneralInter\" => MyGeneralInter(true))Then create a Simulation as above.To define your own SpecificInteraction, first define the struct:struct MySpecificInter <: SpecificInteraction\n    # Any number of atoms involved in the interaction\n    i::Int\n    j::Int\n    # Any other properties, e.g. a bond distance with the energy minimum\nendNext, you need to define the force! function:function force!(forces, inter::MySpecificInter, s::Simulation)\n    dr = vector(s.coords[inter.i], s.coords[inter.j], s.box_size)\n\n    # Replace this with your force calculation\n    # A positive force causes the atoms to move together\n    f = 0.0\n\n    fdr = f * normalize(dr)\n    forces[inter.i] += fdr\n    forces[inter.j] -= fdr\nendThe example here is between two atoms but can be adapted for any number of atoms. To use your custom force, add it to the dictionary of specific interaction lists:specific_inter_lists = Dict(\"MySpecificInter\" => [MySpecificInter(1, 2), MySpecificInter(3, 4)])"
+    "text": "Forces define how different parts of the system interact. In Molly they are separated into two types. GeneralInteractions are present between all or most atoms, and account for example for non-bonded terms. SpecificInteractions are present between specific atoms, and account for example for bonded terms.The available general interactions are:LennardJones.\nCoulomb.The available specific interactions are:HarmonicBond.\nHarmonicAngle.\nTorsion.To define your own GeneralInteraction, first define the struct:struct MyGeneralInter <: GeneralInteraction\n    nl_only::Bool\n    # Any other properties\nendThe nl_only property is required and determines whether the neighbour list is used to omit distant atoms (true) or whether all atom pairs are always considered (false). Next, you need to define the force! function acting between a pair of atoms. For example:function force!(forces, inter::MyGeneralInter, s::Simulation, i::Integer, j::Integer)\n    dr = vector(s.coords[i], s.coords[j], s.box_size)\n\n    # Replace this with your force calculation\n    # A positive force causes the atoms to move together\n    f = 0.0\n\n    fdr = f * normalize(dr)\n    forces[i] -= fdr\n    forces[j] += fdr\nendIf you need to obtain the vector from atom i to atom j, use the vector function. This gets the vector between the closest images of atoms i and j accounting for the periodic boundary conditions. The Simulation is available so atom properties or velocities can be accessed, e.g. s.atoms[i].σ or s.velocities[i]. This form of the function can also be used to define three-atom interactions by looping a third variable k up to j in the force! function. To use your custom force, add it to the dictionary of general interactions:general_inters = Dict(\"MyGeneralInter\" => MyGeneralInter(true))Then create and run a Simulation as above.To define your own SpecificInteraction, first define the struct:struct MySpecificInter <: SpecificInteraction\n    # Any number of atoms involved in the interaction\n    i::Int\n    j::Int\n    # Any other properties, e.g. a bond distance corresponding to the energy minimum\nendNext, you need to define the force! function. For example:function force!(forces, inter::MySpecificInter, s::Simulation)\n    dr = vector(s.coords[inter.i], s.coords[inter.j], s.box_size)\n\n    # Replace this with your force calculation\n    # A positive force causes the atoms to move together\n    f = 0.0\n\n    fdr = f * normalize(dr)\n    forces[inter.i] += fdr\n    forces[inter.j] -= fdr\nendThe example here is between two atoms but can be adapted for any number of atoms. To use your custom force, add it to the dictionary of specific interaction lists:specific_inter_lists = Dict(\"MySpecificInter\" => [MySpecificInter(1, 2), MySpecificInter(3, 4)])"
 },
 
 {
@@ -369,6 +369,22 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
+    "location": "api.html#Molly.displacements-Tuple{Any,Real}",
+    "page": "API",
+    "title": "Molly.displacements",
+    "category": "method",
+    "text": "displacements(coords, box_size)\n\nGet the pairwise vector displacements of a set of coordinates, accounting for the periodic boundary conditions.\n\n\n\n\n\n"
+},
+
+{
+    "location": "api.html#Molly.distances-Tuple{Any,Real}",
+    "page": "API",
+    "title": "Molly.distances",
+    "category": "method",
+    "text": "distances(coords, box_size)\n\nGet the pairwise distances of a set of coordinates, accounting for the periodic boundary conditions.\n\n\n\n\n\n"
+},
+
+{
     "location": "api.html#Molly.find_neighbours-Tuple{Simulation,Any,DistanceNeighbourFinder,Integer}",
     "page": "API",
     "title": "Molly.find_neighbours",
@@ -398,6 +414,14 @@ var documenterSearchIndex = {"docs": [
     "title": "Molly.maxwellboltzmann",
     "category": "method",
     "text": "Draw from the Maxwell-Boltzmann distribution.\n\n\n\n\n\n"
+},
+
+{
+    "location": "api.html#Molly.rdf-Tuple{Any,Real}",
+    "page": "API",
+    "title": "Molly.rdf",
+    "category": "method",
+    "text": "rdf(coords, box_size; npoints=200)\n\nGet the radial distribution function of a set of coordinates. This describes how density varies as a function of distance from each atom. Returns a list of distance bin centres and a list of the corresponding densities.\n\n\n\n\n\n"
 },
 
 {
