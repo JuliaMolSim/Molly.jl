@@ -182,7 +182,7 @@ function force!(forces, inter::MyGeneralInter, s::Simulation, i::Integer, j::Int
     # A positive force causes the atoms to move together
     f = 0.0
 
-    fdr = f * dr
+    fdr = f * normalize(dr)
     forces[i] -= fdr
     forces[j] += fdr
 end
@@ -196,6 +196,35 @@ To use your custom force, add it to the dictionary of general interactions:
 general_inters = Dict("MyGeneralInter" => MyGeneralInter(true))
 ```
 Then create a [`Simulation`](@ref) as above.
+
+To define your own [`SpecificInteraction`](@ref), first define the `struct`:
+```julia
+struct MySpecificInter <: SpecificInteraction
+    # Any number of atoms involved in the interaction
+    i::Int
+    j::Int
+    # Any other properties, e.g. a bond distance with the energy minimum
+end
+```
+Next, you need to define the [`force!`](@ref) function:
+```julia
+function force!(forces, inter::MySpecificInter, s::Simulation)
+    dr = vector(s.coords[inter.i], s.coords[inter.j], s.box_size)
+
+    # Replace this with your force calculation
+    # A positive force causes the atoms to move together
+    f = 0.0
+
+    fdr = f * normalize(dr)
+    forces[inter.i] += fdr
+    forces[inter.j] -= fdr
+end
+```
+The example here is between two atoms but can be adapted for any number of atoms.
+To use your custom force, add it to the dictionary of specific interaction lists:
+```julia
+specific_inter_lists = Dict("MySpecificInter" => [MySpecificInter(1, 2), MySpecificInter(3, 4)])
+```
 
 ## Simulators
 
