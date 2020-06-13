@@ -228,20 +228,37 @@ specific_inter_lists = Dict("MySpecificInter" => [MySpecificInter(1, 2), MySpeci
 
 ## Simulators
 
-...
+Simulators define what type of simulation is run.
+This could be anything from a simple energy minimisation to complicated replica exchange MD.
+The available simulators are:
+- [`VelocityVerlet`](@ref).
+- [`VelocityFreeVerlet`](@ref).
 
 ## Thermostats
 
-...
+Thermostats control the temperature over a simulation.
+The available thermostats are:
+- [`AndersenThermostat`](@ref).
 
-## Neighbour lists
+## Neighbour finders
 
-...
+Neighbour finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distance atoms to be omitted.
+The available neighbour finders are:
+- [`DistanceNeighbourFinder`](@ref).
 
 ## Loggers
 
-...
+Loggers record properties of the simulation to allow monitoring and analysis.
+The available loggers are:
+- [`TemperatureLogger`](@ref).
+- [`CoordinateLogger`](@ref).
+- [`StructureWriter`](@ref).
 
 ## Analysis
 
-...
+Molly contains some tools for analysing the results of simulations.
+The available analysis functions are:
+- [`visualize`](@ref).
+- [`rdf`](@ref).
+- [`distances`](@ref).
+- [`displacements`](@ref).
