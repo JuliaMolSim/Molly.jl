@@ -69,13 +69,13 @@ var documenterSearchIndex = {"docs": [
     "page": "Documentation",
     "title": "Simulating diatomic molecules",
     "category": "section",
-    "text": "If we want to define specific interactions between atoms, for example bonds, we can do. Using the same atom definitions as before, let\'s set up the coordinates so that paired atoms are 1 Å apart.coords = [box_size .* rand(SVector{3}) for i in 1:(n_atoms / 2)]\nfor i in 1:length(coords)\n    push!(coords, coords[i] .+ [0.1, 0.0, 0.0])\nend\n\nvelocities = [velocity(mass, temperature) for i in 1:n_atoms]Now we can use the built-in bond type to place a harmonic constraint between paired atoms. The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.bonds = [Bond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]\n\nspecific_inter_lists = Dict(\"Bonds\" => bonds)This time, we are also going to use a neighbour list to speed up the Lennard Jones calculation. We can use the built-in distance neighbour finder. The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff in nm to be classed as a neighbour.neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.2)Now we can simulate as before.s = Simulation(\n    simulator=VelocityVerlet(),\n    atoms=atoms,\n    specific_inter_lists=specific_inter_lists,\n    general_inters=Dict(\"LJ\" => LennardJones(true)), # true means we are using the neighbour list for this interaction\n    coords=coords,\n    velocities=velocities,\n    temperature=temperature,\n    box_size=box_size,\n    neighbour_finder=neighbour_finder,\n    thermostat=AndersenThermostat(1.0),\n    loggers=Dict(\"temp\" => TemperatureLogger(10),\n                    \"coords\" => CoordinateLogger(10)),\n    timestep=0.002,\n    n_steps=1_000\n)\n\nsimulate!(s)This time when we view the trajectory we can add lines to show the bonds.visualize(s.loggers[\"coords\"], box_size, \"sim_diatomic.gif\",\n            connections=[(i, Int(i + n_atoms / 2)) for i in 1:Int(n_atoms / 2)],\n            markersize=0.05, linewidth=5.0)(Image: Diatomic simulation)"
+    "text": "If we want to define specific interactions between atoms, for example bonds, we can do. Using the same atom definitions as before, let\'s set up the coordinates so that paired atoms are 1 Å apart.coords = [box_size .* rand(SVector{3}) for i in 1:(n_atoms / 2)]\nfor i in 1:length(coords)\n    push!(coords, coords[i] .+ [0.1, 0.0, 0.0])\nend\n\nvelocities = [velocity(mass, temperature) for i in 1:n_atoms]Now we can use the built-in bond type to place a harmonic constraint between paired atoms. The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.bonds = [HarmonicBond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]\n\nspecific_inter_lists = Dict(\"Bonds\" => bonds)This time, we are also going to use a neighbour list to speed up the Lennard Jones calculation. We can use the built-in distance neighbour finder. The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff in nm to be classed as a neighbour.neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.2)Now we can simulate as before.s = Simulation(\n    simulator=VelocityVerlet(),\n    atoms=atoms,\n    specific_inter_lists=specific_inter_lists,\n    general_inters=Dict(\"LJ\" => LennardJones(true)), # true means we are using the neighbour list for this interaction\n    coords=coords,\n    velocities=velocities,\n    temperature=temperature,\n    box_size=box_size,\n    neighbour_finder=neighbour_finder,\n    thermostat=AndersenThermostat(1.0),\n    loggers=Dict(\"temp\" => TemperatureLogger(10),\n                    \"coords\" => CoordinateLogger(10)),\n    timestep=0.002,\n    n_steps=1_000\n)\n\nsimulate!(s)This time when we view the trajectory we can add lines to show the bonds.visualize(s.loggers[\"coords\"], box_size, \"sim_diatomic.gif\",\n            connections=[(i, Int(i + n_atoms / 2)) for i in 1:Int(n_atoms / 2)],\n            markersize=0.05, linewidth=5.0)(Image: Diatomic simulation)"
 },
 
 {
-    "location": "docs.html#Simulating-a-protein-in-the-OPLS-AA-forcefield-1",
+    "location": "docs.html#Simulating-a-protein-1",
     "page": "Documentation",
-    "title": "Simulating a protein in the OPLS-AA forcefield",
+    "title": "Simulating a protein",
     "category": "section",
     "text": "Molly has a rudimentary parser of Gromacs topology and coordinate files. Data for a protein can be read into the same data structures as above and simulated in the same way. Currently, the OPLS-AA forcefield is implemented.atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(\n            joinpath(dirname(pathof(Molly)), \"..\", \"data\", \"5XER\", \"gmx_top_ff.top\"),\n            joinpath(dirname(pathof(Molly)), \"..\", \"data\", \"5XER\", \"gmx_coords.gro\"))\n\ntemperature = 298\n\ns = Simulation(\n    simulator=VelocityVerlet(),\n    atoms=atoms,\n    specific_inter_lists=specific_inter_lists,\n    general_inters=general_inters,\n    coords=coords,\n    velocities=[velocity(a.mass, temperature) for a in atoms],\n    temperature=temperature,\n    box_size=box_size,\n    neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),\n    thermostat=AndersenThermostat(1.0),\n    loggers=Dict(\"temp\" => TemperatureLogger(10),\n                    \"writer\" => StructureWriter(10, \"traj_5XER_1ps.pdb\")),\n    timestep=0.0002,\n    n_steps=5_000\n)\n\nsimulate!(s)"
 },
@@ -85,7 +85,7 @@ var documenterSearchIndex = {"docs": [
     "page": "Documentation",
     "title": "Forces",
     "category": "section",
-    "text": "The available force functions are:"
+    "text": "Forces define how different parts of the system interact. In Molly they are separated into two types. GeneralInteractions are present between all or most atoms, and account for example for non-bonded terms. SpecificInteractions are present between specific atoms, and account for example for bonded terms.The available general interactions are:LennardJones.\nCoulomb.The available specific interactions are:HarmonicBond.\nHarmonicAngle.\nTorsion.To define your own GeneralInteraction, first define the struct:struct MyGeneralInter <: GeneralInteraction\n    nl_only::Bool\n    # Any other properties\nendThe nl_only property is required and determines whether the neighbour list is used to omit distant atoms (true) or whether all atom pairs are always considered (false). Next, you need to define the force! function acting between a pair of atoms:function force!(forces, inter::MyGeneralInter, s::Simulation, i::Integer, j::Integer)\n    dr = vector(s.coords[i], s.coords[j], s.box_size)\n\n    # Replace this with your force calculation\n    # A positive force causes the atoms to move together\n    f = 0.0\n\n    fdr = f * normalize(dr)\n    forces[i] -= fdr\n    forces[j] += fdr\nendIf you need to obtain the vector from atom i to atom j, use the vector function. This gets the vector between the closest images of atoms i and j accounting for the periodic boundary conditions. The Simulation is available so atom properties or velocities can be accessed, e.g. s.atoms[i].σ or s.velocities[i]. This form of the function can also be used to define three-atom interactions by looping a third variable k up to j in the force! function. To use your custom force, add it to the dictionary of general interactions:general_inters = Dict(\"MyGeneralInter\" => MyGeneralInter(true))Then create a Simulation as above.To define your own SpecificInteraction, first define the struct:struct MySpecificInter <: SpecificInteraction\n    # Any number of atoms involved in the interaction\n    i::Int\n    j::Int\n    # Any other properties, e.g. a bond distance with the energy minimum\nendNext, you need to define the force! function:function force!(forces, inter::MySpecificInter, s::Simulation)\n    dr = vector(s.coords[inter.i], s.coords[inter.j], s.box_size)\n\n    # Replace this with your force calculation\n    # A positive force causes the atoms to move together\n    f = 0.0\n\n    fdr = f * normalize(dr)\n    forces[inter.i] += fdr\n    forces[inter.j] -= fdr\nendThe example here is between two atoms but can be adapted for any number of atoms. To use your custom force, add it to the dictionary of specific interaction lists:specific_inter_lists = Dict(\"MySpecificInter\" => [MySpecificInter(1, 2), MySpecificInter(3, 4)])"
 },
 
 {
@@ -93,7 +93,7 @@ var documenterSearchIndex = {"docs": [
     "page": "Documentation",
     "title": "Simulators",
     "category": "section",
-    "text": "..."
+    "text": "Simulators define what type of simulation is run. This could be anything from a simple energy minimisation to complicated replica exchange MD. The available simulators are:VelocityVerlet.\nVelocityFreeVerlet."
 },
 
 {
@@ -101,15 +101,15 @@ var documenterSearchIndex = {"docs": [
     "page": "Documentation",
     "title": "Thermostats",
     "category": "section",
-    "text": "..."
+    "text": "Thermostats control the temperature over a simulation. The available thermostats are:AndersenThermostat."
 },
 
 {
-    "location": "docs.html#Neighbour-lists-1",
+    "location": "docs.html#Neighbour-finders-1",
     "page": "Documentation",
-    "title": "Neighbour lists",
+    "title": "Neighbour finders",
     "category": "section",
-    "text": "..."
+    "text": "Neighbour finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distance atoms to be omitted. The available neighbour finders are:DistanceNeighbourFinder."
 },
 
 {
@@ -117,7 +117,7 @@ var documenterSearchIndex = {"docs": [
     "page": "Documentation",
     "title": "Loggers",
     "category": "section",
-    "text": "..."
+    "text": "Loggers record properties of the simulation to allow monitoring and analysis. The available loggers are:TemperatureLogger.\nCoordinateLogger.\nStructureWriter."
 },
 
 {
@@ -125,7 +125,7 @@ var documenterSearchIndex = {"docs": [
     "page": "Documentation",
     "title": "Analysis",
     "category": "section",
-    "text": "..."
+    "text": "Molly contains some tools for analysing the results of simulations. The available analysis functions are:visualize.\nrdf.\ndistances.\ndisplacements."
 },
 
 {
@@ -142,14 +142,6 @@ var documenterSearchIndex = {"docs": [
     "title": "Molly.AndersenThermostat",
     "category": "type",
     "text": "Rescale random velocities according to the Andersen thermostat.\n\n\n\n\n\n"
-},
-
-{
-    "location": "api.html#Molly.Angle",
-    "page": "API",
-    "title": "Molly.Angle",
-    "category": "type",
-    "text": "A bond angle between three atoms.\n\n\n\n\n\n"
 },
 
 {
@@ -174,14 +166,6 @@ var documenterSearchIndex = {"docs": [
     "title": "Molly.Atomtype",
     "category": "type",
     "text": "Gromacs atom type.\n\n\n\n\n\n"
-},
-
-{
-    "location": "api.html#Molly.Bond",
-    "page": "API",
-    "title": "Molly.Bond",
-    "category": "type",
-    "text": "A bond between two atoms.\n\n\n\n\n\n"
 },
 
 {
@@ -238,6 +222,22 @@ var documenterSearchIndex = {"docs": [
     "title": "Molly.GeneralInteraction",
     "category": "type",
     "text": "A general interaction that will apply to all atom pairs.\n\n\n\n\n\n"
+},
+
+{
+    "location": "api.html#Molly.HarmonicAngle",
+    "page": "API",
+    "title": "Molly.HarmonicAngle",
+    "category": "type",
+    "text": "A bond angle between three atoms.\n\n\n\n\n\n"
+},
+
+{
+    "location": "api.html#Molly.HarmonicBond",
+    "page": "API",
+    "title": "Molly.HarmonicBond",
+    "category": "type",
+    "text": "A harmonic bond between two atoms.\n\n\n\n\n\n"
 },
 
 {
