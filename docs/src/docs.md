@@ -173,7 +173,8 @@ struct MyGeneralInter <: GeneralInteraction
 end
 ```
 The `nl_only` property is required and determines whether the neighbour list is used to omit distant atoms (`true`) or whether all atom pairs are always considered (`false`).
-Next, you need to define the [`force!`](@ref) function acting between a pair of atoms:
+Next, you need to define the [`force!`](@ref) function acting between a pair of atoms.
+For example:
 ```julia
 function force!(forces, inter::MyGeneralInter, s::Simulation, i::Integer, j::Integer)
     dr = vector(s.coords[i], s.coords[j], s.box_size)
@@ -195,7 +196,7 @@ To use your custom force, add it to the dictionary of general interactions:
 ```julia
 general_inters = Dict("MyGeneralInter" => MyGeneralInter(true))
 ```
-Then create a [`Simulation`](@ref) as above.
+Then create and run a [`Simulation`](@ref) as above.
 
 To define your own [`SpecificInteraction`](@ref), first define the `struct`:
 ```julia
@@ -203,10 +204,11 @@ struct MySpecificInter <: SpecificInteraction
     # Any number of atoms involved in the interaction
     i::Int
     j::Int
-    # Any other properties, e.g. a bond distance with the energy minimum
+    # Any other properties, e.g. a bond distance corresponding to the energy minimum
 end
 ```
-Next, you need to define the [`force!`](@ref) function:
+Next, you need to define the [`force!`](@ref) function.
+For example:
 ```julia
 function force!(forces, inter::MySpecificInter, s::Simulation)
     dr = vector(s.coords[inter.i], s.coords[inter.j], s.box_size)
