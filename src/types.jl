@@ -85,17 +85,17 @@ default values.
 
 # Arguments
 - `simulator::Simulator`: the type of simulation to run.
-- `atoms::Vector{<:Any}`: the atoms in the simulation.
+- `atoms::Vector{A}`: the atoms in the simulation. Can be of any type.
 - `specific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}=Dict()`:
     the specific interactions in the simulation, i.e. interactions between
     specific atoms such as bonds or angles.
 - `general_inters::Dict{String, <:GeneralInteraction}=Dict()`: the general
     interactions in the simulation, i.e. interactions between all or most atoms
     such as electrostatics.
-- `coords::U`: the coordinates of the atoms in the simulation. Typically a
+- `coords::C`: the coordinates of the atoms in the simulation. Typically a
     `Vector` of `SVector`s of any dimension and type `T`, where `T` is `Float64`
     or `Float32`.
-- `velocities::U`: the velocities of the atoms in the simulation, which should
+- `velocities::C`: the velocities of the atoms in the simulation, which should
     be the same type as the coordinates. The meaning of the velocities depends
     on the simulator used, e.g. for the `VelocityFreeVerlet` simulator they
     represent the previous step coordinates for the first step.
@@ -112,13 +112,13 @@ default values.
 - `n_steps_made::Vector{Int}=[]`: the number of steps already made during the
     simulation. This is a `Vector` to allow the `struct` to be immutable.
 """
-struct Simulation{A, T, U}
+struct Simulation{T, A, C}
     simulator::Simulator
     atoms::Vector{A}
     specific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}
     general_inters::Dict{String, <:GeneralInteraction}
-    coords::U
-    velocities::U
+    coords::C
+    velocities::C
     temperature::T
     box_size::T
     neighbour_finder::NeighbourFinder
@@ -144,8 +144,8 @@ function Simulation(;
                     timestep,
                     n_steps,
                     n_steps_made=[0])
-    return Simulation{eltype(atoms), typeof(timestep), typeof(coords)}(simulator, atoms,
-                specific_inter_lists, general_inters, coords, velocities,
-                temperature, box_size, neighbour_finder, thermostat, loggers,
-                timestep, n_steps, n_steps_made)
+    return Simulation{typeof(timestep), eltype(atoms), typeof(coords)}(
+                simulator, atoms, specific_inter_lists, general_inters, coords,
+                velocities, temperature, box_size, neighbour_finder, thermostat,
+                loggers, timestep, n_steps, n_steps_made)
 end
