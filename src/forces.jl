@@ -82,6 +82,8 @@ function force! end
     fdr = f * dr
     forces[i] -= fdr
     forces[j] += fdr
+
+    return nothing
 end
 
 @fastmath @inbounds function force!(forces,
