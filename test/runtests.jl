@@ -160,5 +160,5 @@ end
         n_steps=n_steps
     )
 
-    simulate!(s, parallel=false)
+    @time simulate!(s, parallel=false)
 end

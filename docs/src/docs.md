@@ -186,6 +186,7 @@ function force!(forces, inter::MyGeneralInter, s::Simulation, i::Integer, j::Int
     fdr = f * normalize(dr)
     forces[i] -= fdr
     forces[j] += fdr
+    return forces
 end
 ```
 If you need to obtain the vector from atom `i` to atom `j`, use the [`vector`](@ref) function.
@@ -220,6 +221,7 @@ function force!(forces, inter::MySpecificInter, s::Simulation)
     fdr = f * normalize(dr)
     forces[inter.i] += fdr
     forces[inter.j] -= fdr
+    return forces
 end
 ```
 The example here is between two atoms but can be adapted for any number of atoms.

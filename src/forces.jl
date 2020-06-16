@@ -82,8 +82,7 @@ function force! end
     fdr = f * dr
     forces[i] -= fdr
     forces[j] += fdr
-
-    return nothing
+    return forces
 end
 
 @fastmath @inbounds function force!(forces,
@@ -101,6 +100,7 @@ end
     fdr = f * dr
     forces[i] -= fdr
     forces[j] += fdr
+    return forces
 end
 
 function force!(forces,
@@ -111,6 +111,7 @@ function force!(forces,
     f = c * normalize(ab)
     forces[b.i] += f
     forces[b.j] -= f
+    return forces
 end
 
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
@@ -130,6 +131,7 @@ function force!(forces,
     forces[a.i] += fa
     forces[a.j] += fb
     forces[a.k] += fc
+    return forces
 end
 
 function force!(forces,
@@ -153,4 +155,5 @@ function force!(forces,
     forces[d.j] += fb
     forces[d.k] += fc
     forces[d.l] += f_d
+    return forces
 end
