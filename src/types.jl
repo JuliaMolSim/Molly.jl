@@ -112,9 +112,9 @@ default values.
 - `n_steps_made::Vector{Int}=[]`: the number of steps already made during the
     simulation. This is a `Vector` to allow the `struct` to be immutable.
 """
-struct Simulation{T, U}
+struct Simulation{A, T, U}
     simulator::Simulator
-    atoms::Vector{<:Any}
+    atoms::Vector{A}
     specific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}
     general_inters::Dict{String, <:GeneralInteraction}
     coords::U
@@ -144,7 +144,7 @@ function Simulation(;
                     timestep,
                     n_steps,
                     n_steps_made=[0])
-    return Simulation{typeof(timestep), typeof(coords)}(simulator, atoms,
+    return Simulation{eltype(atoms), typeof(timestep), typeof(coords)}(simulator, atoms,
                 specific_inter_lists, general_inters, coords, velocities,
                 temperature, box_size, neighbour_finder, thermostat, loggers,
                 timestep, n_steps, n_steps_made)
