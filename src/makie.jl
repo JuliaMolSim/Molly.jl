@@ -7,6 +7,7 @@ function visualize(coord_logger,
                     box_size,
                     out_filepath::AbstractString;
                     connections=Tuple{Int, Int}[],
+                    trails::Integer=0,
                     framerate::Integer=30,
                     color=:purple,
                     connection_color=:orange,
@@ -57,11 +58,24 @@ function visualize(coord_logger,
     positions = Node(PointType.(coords_start))
     scatter!(scene, positions; color=color, markersize=markersize,
                 transparency=transparency, kwargs...)
+
+    trail_positions = []
+    for trail_i in 1:trails
+        push!(trail_positions, Node(PointType.(coords_start)))
+        col = parse.(Colorant, color)
+        alpha = 1 - (trail_i / (trails + 1))
+        alpha_col = RGBA.(red.(col), green.(col), blue.(col), alpha)
+        scatter!(scene, trail_positions[end]; color=alpha_col,
+                    markersize=markersize, transparency=transparency, kwargs...)
+    end
+
     xlims!(0.0, box_size)
     ylims!(0.0, box_size)
     zlims!(0.0, box_size)
 
-    record(scene, out_filepath, coord_logger.coords; framerate=framerate) do coords
+    record(scene, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
+        coords = coord_logger.coords[frame_i]
+
         for (ci, (i, j)) in enumerate(connections)
             if norm(coords[i] - coords[j]) < (box_size / 2)
                 if dims == 3
@@ -83,6 +97,10 @@ function visualize(coord_logger,
                 end
             end
         end
+
         positions[] = PointType.(coords)
+        for (trail_i, trail_position) in enumerate(trail_positions)
+            trail_position[] = PointType.(coord_logger.coords[max(frame_i - trail_i, 1)])
+        end
     end
 end

@@ -1,6 +1,7 @@
 module Molly
 
 using BioStructures
+using Colors
 using Distributions
 using KernelDensity
 using ProgressMeter
