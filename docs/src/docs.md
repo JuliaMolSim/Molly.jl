@@ -176,11 +176,11 @@ The `nl_only` property is required and determines whether the neighbour list is 
 Next, you need to define the [`force!`](@ref) function acting between a pair of atoms.
 For example:
 ```julia
-function force!(forces, inter::MyGeneralInter, s::Simulation, i::Integer, j::Integer)
+function Molly.force!(forces, inter::MyGeneralInter, s::Simulation, i::Integer, j::Integer)
     dr = vector(s.coords[i], s.coords[j], s.box_size)
 
     # Replace this with your force calculation
-    # A positive force causes the atoms to move together
+    # A positive force causes the atoms to move apart
     f = 0.0
 
     fdr = f * normalize(dr)
@@ -211,11 +211,11 @@ end
 Next, you need to define the [`force!`](@ref) function.
 For example:
 ```julia
-function force!(forces, inter::MySpecificInter, s::Simulation)
+function Molly.force!(forces, inter::MySpecificInter, s::Simulation)
     dr = vector(s.coords[inter.i], s.coords[inter.j], s.box_size)
 
     # Replace this with your force calculation
-    # A positive force causes the atoms to move together
+    # A positive force causes the atoms to move apart
     f = 0.0
 
     fdr = f * normalize(dr)
