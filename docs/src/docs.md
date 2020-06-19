@@ -3,7 +3,7 @@
 Molly takes a modular approach to molecular simulation.
 To run a simulation you create a [`Simulation`](@ref) object and call [`simulate!`](@ref) on it.
 The different components of the simulation can be used as defined by the package, or you can define your own versions.
-An important principle of the package is that your custom components, particularly force functions, should be easy to define and just as performant as the in-built versions.
+An important principle of the package is that your custom components, particularly force functions, should be easy to define and just as performant as the built-in versions.
 
 This documentation will first introduce the main features of the package with some examples, then will give details on each component of a simulation.
 For more information on specific types or functions, see the [Molly API](@ref) section or call `?function_name` in Julia.
@@ -117,6 +117,39 @@ visualize(s.loggers["coords"], box_size, "sim_diatomic.gif",
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
 
+## Simulating gravity
+
+Molly is geared primarily to molecular simulation, but can also be used to simulate other physical systems.
+Let's set up a gravitational simulation.
+This example also shows the use of `Float32` and a 2D simulation.
+```julia
+atoms = [Atom(mass=1.0f0), Atom(mass=1.0f0)]
+coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
+velocities = [SVector(0.0f0, 1.0f0), SVector(0.0f0, -1.0f0)]
+general_inters = Dict("gravity" => Gravity(false, 1.5f0))
+
+s = Simulation(
+    simulator=VelocityVerlet(),
+    atoms=atoms,
+    general_inters=general_inters,
+    coords=coords,
+    velocities=velocities,
+    box_size=1.0f0,
+    loggers=Dict("coords" => CoordinateLogger(10, dims=2)),
+    timestep=0.002f0,
+    n_steps=2000
+)
+
+simulate!(s)
+```
+When we view the simulation we can use some extra options:
+```julia
+visualize(s.loggers["coords"], 1.0f0, "sim_gravity.gif",
+            trails=4, framerate=15, color=[:orange, :lightgreen],
+            markersize=0.05)
+```
+![Gravity simulation](images/sim_gravity.gif)
+
 ## Simulating a protein
 
 Molly has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
@@ -169,7 +202,7 @@ To define your own [`GeneralInteraction`](@ref), first define the `struct`:
 ```julia
 struct MyGeneralInter <: GeneralInteraction
     nl_only::Bool
-    # Any other properties
+    # Any other properties, e.g. constants for the interaction
 end
 ```
 The `nl_only` property is required and determines whether the neighbour list is used to omit distant atoms (`true`) or whether all atom pairs are always considered (`false`).
@@ -193,6 +226,7 @@ If you need to obtain the vector from atom `i` to atom `j`, use the [`vector`](@
 This gets the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 The [`Simulation`](@ref) is available so atom properties or velocities can be accessed, e.g. `s.atoms[i].σ` or `s.velocities[i]`.
 This form of the function can also be used to define three-atom interactions by looping a third variable `k` up to `j` in the [`force!`](@ref) function.
+
 To use your custom force, add it to the dictionary of general interactions:
 ```julia
 general_inters = Dict("MyGeneralInter" => MyGeneralInter(true))

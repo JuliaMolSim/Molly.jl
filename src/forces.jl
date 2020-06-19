@@ -5,6 +5,7 @@
 export
     LennardJones,
     Coulomb,
+    Gravity,
     HarmonicBond,
     HarmonicAngle,
     Dihedral,
@@ -26,6 +27,12 @@ LennardJones() = LennardJones(false)
 "The Coulomb electrostatic interaction."
 struct Coulomb <: GeneralInteraction
     nl_only::Bool
+end
+
+"The gravitational interaction."
+struct Gravity{T} <: GeneralInteraction
+    nl_only::Bool
+    G::T
 end
 
 "A harmonic bond between two atoms."
@@ -98,6 +105,19 @@ end
     T = typeof(r2)
     f = (T(coulomb_const) * s.atoms[i].charge * s.atoms[j].charge) / sqrt(r2 ^ 3)
     fdr = f * dr
+    forces[i] -= fdr
+    forces[j] += fdr
+    return forces
+end
+
+function force!(forces,
+                inter::Gravity,
+                s::Simulation,
+                i::Integer,
+                j::Integer)
+    dr = vector(s.coords[i], s.coords[j], s.box_size)
+    f = -inter.G * s.atoms[i].mass * s.atoms[j].mass * inv(sum(abs2, dr))
+    fdr = f * normalize(dr)
     forces[i] -= fdr
     forces[j] += fdr
     return forces

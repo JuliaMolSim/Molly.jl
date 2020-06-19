@@ -112,7 +112,7 @@ s = Simulation(
 simulate!(s)
 ```
 
-The above 1 ps simulation looks something like this when you output view it in VMD:
+The above 1 ps simulation looks something like this when you view it in VMD:
 ![MD simulation](https://github.com/jgreener64/Molly.jl/raw/master/data/5XER/sim_1ps.gif)
 
 ## Plans
