@@ -13,7 +13,7 @@ makedocs(
 )
 
 deploydocs(
-    repo = "github.com/jgreener64/Molly.jl.git",
+    repo = "github.com/JuliaMolSim/Molly.jl.git",
     julia = "1.0",
     osname = "linux",
     target = "build",

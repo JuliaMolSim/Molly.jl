@@ -1,9 +1,9 @@
 # Molly.jl
 
-[![Travis build status](https://travis-ci.org/jgreener64/Molly.jl.svg?branch=master)](https://travis-ci.org/jgreener64/Molly.jl)
-[![AppVeyor build status](https://ci.appveyor.com/api/projects/status/8dl6lqavnhqigq4p?svg=true)](https://ci.appveyor.com/project/jgreener64/molly-jl)
-[![Coverage Status](https://coveralls.io/repos/github/jgreener64/Molly.jl/badge.svg?branch=master)](https://coveralls.io/github/jgreener64/Molly.jl?branch=master)
-[![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://jgreener64.github.io/Molly.jl/latest)
+[![Travis build status](https://travis-ci.org/JuliaMolSim/Molly.jl.svg?branch=master)](https://travis-ci.org/JuliaMolSim/Molly.jl)
+[![AppVeyor build status](https://ci.appveyor.com/api/projects/status/8dl6lqavnhqigq4p?svg=true)](https://ci.appveyor.com/project/JuliaMolSim/molly-jl)
+[![Coverage Status](https://coveralls.io/repos/github/JuliaMolSim/Molly.jl/badge.svg?branch=master)](https://coveralls.io/github/JuliaMolSim/Molly.jl?branch=master)
+[![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://JuliaMolSim.github.io/Molly.jl/latest)
 
 Much of science can be explained by the movement and interaction of molecules.
 Molecular dynamics (MD) is a computational technique used to explore these phenomena, particularly for biological macromolecules.
@@ -43,11 +43,11 @@ Features not yet implemented include:
 
 Julia v1.0 or later is required.
 Install from the Julia REPL.
-Enter the package mode by pressing `]` and run `add https://github.com/jgreener64/Molly.jl`.
+Enter the package mode by pressing `]` and run `add https://github.com/JuliaMolSim/Molly.jl`.
 
 ## Usage
 
-Some examples are given here, see [the documentation](https://jgreener64.github.io/Molly.jl/latest) for more.
+Some examples are given here, see [the documentation](https://JuliaMolSim.github.io/Molly.jl/latest) for more.
 
 Simulation of an ideal gas:
 ```julia
@@ -113,7 +113,7 @@ simulate!(s)
 ```
 
 The above 1 ps simulation looks something like this when you view it in VMD:
-![MD simulation](https://github.com/jgreener64/Molly.jl/raw/master/data/5XER/sim_1ps.gif)
+![MD simulation](https://github.com/JuliaMolSim/Molly.jl/raw/master/data/5XER/sim_1ps.gif)
 
 ## Plans
 
@@ -122,4 +122,4 @@ MD could provide a nice use case for Julia - I think a reasonably featured and p
 The development of auto-differentiation packages in Julia opens up interesting avenues for differentiable molecular simulations (there is an experimental branch on this repo).
 Julia is also a well-suited language for trajectory analysis.
 
-Contributions are very welcome - see the [roadmap issue](https://github.com/jgreener64/Molly.jl/issues/2) for more.
+Contributions are very welcome - see the [roadmap issue](https://github.com/JuliaMolSim/Molly.jl/issues/2) for more.

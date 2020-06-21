@@ -192,6 +192,7 @@ In Molly they are separated into two types.
 The available general interactions are:
 - [`LennardJones`](@ref).
 - [`Coulomb`](@ref).
+- [`Gravity`](@ref).
 
 The available specific interactions are:
 - [`HarmonicBond`](@ref).

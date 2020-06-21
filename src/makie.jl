@@ -69,9 +69,9 @@ function visualize(coord_logger,
                     markersize=markersize, transparency=transparency, kwargs...)
     end
 
-    xlims!(0.0, box_size)
-    ylims!(0.0, box_size)
-    zlims!(0.0, box_size)
+    xlims!(scene, 0.0, box_size)
+    ylims!(scene, 0.0, box_size)
+    zlims!(scene, 0.0, box_size)
 
     record(scene, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
         coords = coord_logger.coords[frame_i]
