@@ -15,8 +15,8 @@ It can simulate a system of atoms with arbitrary interactions as defined by the 
 It can also read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters.
 In theory it can do this for any regular protein, but in practice this is untested.
 Implemented features include:
-- Interface to allow definition of new forces, thermostats etc.
-- Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.
+- Interface to allow definition of new forces, thermostats, loggers etc.
+- Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential, gravitational potential, soft sphere potential.
 - Bonded interactions - covalent bonds, bond angles, torsion angles.
 - Andersen thermostat.
 - Velocity Verlet and velocity-free Verlet integration.
@@ -26,6 +26,7 @@ Implemented features include:
 - Automatic multithreading.
 - Some analysis functions, e.g. RDF.
 - Run with Float64 or Float32.
+- Physical agent-based modelling.
 - Visualise simulations as animations.
 
 Features not yet implemented include:
@@ -37,7 +38,7 @@ Features not yet implemented include:
 - Trajectory/topology file format readers/writers.
 - Quantum mechanical modelling.
 - GPU compatibility.
-- Unit tests.
+- High test coverage.
 
 ## Installation
 

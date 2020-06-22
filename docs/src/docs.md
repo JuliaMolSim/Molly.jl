@@ -182,6 +182,106 @@ s = Simulation(
 simulate!(s)
 ```
 
+## Agent-based modelling
+
+Agent-based modelling (ABM) is conceptually similar to molecular dynamics.
+Julia has [Agents.jl](https://juliadynamics.github.io/Agents.jl/stable/) for ABM, but Molly can also be used to simulate arbitrary agent-based systems in continuous space.
+Here we simulate a toy SIR model for disease spread.
+This example shows how atom properties can be mutable, i.e. change during the simulation, and includes custom forces and loggers (see below for more).
+```julia
+@enum Status susceptible infected recovered
+
+# Custom atom type
+mutable struct Person
+    status::Status
+    mass::Float64
+    σ::Float64
+    ϵ::Float64
+end
+
+# Custom GeneralInteraction
+struct SIRInteraction <: GeneralInteraction
+    nl_only::Bool
+    dist_infection::Float64
+    prob_infection::Float64
+    prob_recovery::Float64
+end
+
+# Custom force function
+function Molly.force!(forces, inter::SIRInteraction, s::Simulation, i::Integer, j::Integer)
+    if i == j
+        # Recover randomly
+        if s.atoms[i].status == infected && rand() < inter.prob_recovery
+            s.atoms[i].status = recovered
+        end
+    elseif (s.atoms[i].status == infected && s.atoms[j].status == susceptible) ||
+                (s.atoms[i].status == susceptible && s.atoms[j].status == infected)
+        # Infect close people randomly
+        dr = vector(s.coords[i], s.coords[j], s.box_size)
+        r2 = sum(abs2, dr)
+        if r2 < inter.dist_infection ^ 2 && rand() < inter.prob_infection
+            s.atoms[i].status = infected
+            s.atoms[j].status = infected
+        end
+    end
+    return forces
+end
+
+# Custom Logger
+struct SIRLogger <: Logger
+    n_steps::Int
+    fracs_sir::Vector{Vector{Float64}}
+end
+
+# Custom logging function
+function Molly.log_property!(logger::SIRLogger, s::Simulation, step_n::Integer)
+    if step_n % logger.n_steps == 0
+        counts_sir = [
+            count(p -> p.status == susceptible, s.atoms),
+            count(p -> p.status == infected   , s.atoms),
+            count(p -> p.status == recovered  , s.atoms)
+        ]
+        push!(logger.fracs_sir, counts_sir ./ length(s.atoms))
+    end
+end
+
+temperature = 0.01
+timestep = 0.02
+box_size = 10.0
+n_steps = 1_000
+n_people = 500
+n_starting = 2
+atoms = [Person(i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
+coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
+velocities = [velocity(1.0, temperature, dims=2) for i in 1:n_people]
+general_inters = Dict("LennardJones" => LennardJones(true),
+                        "SIR" => SIRInteraction(false, 0.5, 0.06, 0.01))
+
+s = Simulation(
+    simulator=VelocityVerlet(),
+    atoms=atoms,
+    general_inters=general_inters,
+    coords=coords,
+    velocities=velocities,
+    temperature=temperature,
+    box_size=box_size,
+    neighbour_finder=DistanceNeighbourFinder(trues(n_people, n_people), 10, 2.0),
+    thermostat=AndersenThermostat(5.0),
+    loggers=Dict("coords" => CoordinateLogger(10, dims=2),
+                    "SIR" => SIRLogger(10, [])),
+    timestep=timestep,
+    n_steps=n_steps
+)
+
+simulate!(s)
+
+visualize(s.loggers["coords"], box_size, "sim_agent.gif")
+```
+![Agent simulation](images/sim_agent.gif)
+
+We can use the logger to plot the fraction of people susceptible (blue), infected (orange) and recovered (green) over the course of the simulation:
+![Fraction SIR](images/fraction_sir.png)
+
 ## Forces
 
 Forces define how different parts of the system interact.
