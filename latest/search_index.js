@@ -13,7 +13,7 @@ var documenterSearchIndex = {"docs": [
     "page": "Home",
     "title": "Molly.jl",
     "category": "section",
-    "text": "(Image: Travis build status) (Image: AppVeyor build status) (Image: Coverage Status) (Image: Documentation)Much of science can be explained by the movement and interaction of molecules. Molecular dynamics (MD) is a computational technique used to explore these phenomena, particularly for biological macromolecules. Molly.jl is a pure Julia implementation of MD.At the minute the package is a proof of concept for MD in Julia. It is not production ready. It can simulate a system of atoms with arbitrary interactions as defined by the user. It can also read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested. Implemented features include:Interface to allow definition of new forces, thermostats etc.\nNon-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.\nBonded interactions - covalent bonds, bond angles, dihedral angles.\nAndersen thermostat.\nVelocity Verlet and velocity-free Verlet integration.\nExplicit solvent.\nPeriodic boundary conditions in a cubic box.\nNeighbour list to speed up calculation of non-bonded forces.\nAutomatic multithreading.\nSome analysis functions, e.g. RDF.\nRun with Float64 or Float32.\nVisualise simulations as animations.Features not yet implemented include:Protein force fields other than OPLS-AA.\nWater models.\nEnergy minimisation.\nOther temperature or pressure coupling methods.\nProtein preparation - solvent box, add hydrogens etc.\nTrajectory/topology file format readers/writers.\nQuantum mechanical modelling.\nGPU compatibility.\nUnit tests."
+    "text": "(Image: Travis build status) (Image: AppVeyor build status) (Image: Coverage Status) (Image: Documentation)Much of science can be explained by the movement and interaction of molecules. Molecular dynamics (MD) is a computational technique used to explore these phenomena, particularly for biological macromolecules. Molly.jl is a pure Julia implementation of MD.At the minute the package is a proof of concept for MD in Julia. It is not production ready. It can simulate a system of atoms with arbitrary interactions as defined by the user. It can also read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested. Implemented features include:Interface to allow definition of new forces, thermostats etc.\nNon-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.\nBonded interactions - covalent bonds, bond angles, torsion angles.\nAndersen thermostat.\nVelocity Verlet and velocity-free Verlet integration.\nExplicit solvent.\nPeriodic boundary conditions in a cubic box.\nNeighbour list to speed up calculation of non-bonded forces.\nAutomatic multithreading.\nSome analysis functions, e.g. RDF.\nRun with Float64 or Float32.\nVisualise simulations as animations.Features not yet implemented include:Protein force fields other than OPLS-AA.\nWater models.\nEnergy minimisation.\nOther temperature or pressure coupling methods.\nProtein preparation - solvent box, add hydrogens etc.\nTrajectory/topology file format readers/writers.\nQuantum mechanical modelling.\nGPU compatibility.\nUnit tests."
 },
 
 {
@@ -21,7 +21,7 @@ var documenterSearchIndex = {"docs": [
     "page": "Home",
     "title": "Installation",
     "category": "section",
-    "text": "Julia v1.0 or later is required. Install from the Julia REPL. Enter the package mode by pressing ] and run add https://github.com/JuliaMolSim/Molly.jl."
+    "text": "Julia v1.0 or later is required. Install from the Julia REPL. Enter the package mode by pressing ] and runadd https://github.com/JuliaMolSim/Molly.jl"
 },
 
 {
@@ -201,22 +201,6 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
-    "location": "api.html#Molly.Dihedral",
-    "page": "API",
-    "title": "Molly.Dihedral",
-    "category": "type",
-    "text": "A dihedral torsion angle between four atoms.\n\n\n\n\n\n"
-},
-
-{
-    "location": "api.html#Molly.Dihedraltype",
-    "page": "API",
-    "title": "Molly.Dihedraltype",
-    "category": "type",
-    "text": "Gromacs dihedral type.\n\n\n\n\n\n"
-},
-
-{
     "location": "api.html#Molly.DistanceNeighbourFinder",
     "page": "API",
     "title": "Molly.DistanceNeighbourFinder",
@@ -350,6 +334,22 @@ var documenterSearchIndex = {"docs": [
     "title": "Molly.Thermostat",
     "category": "type",
     "text": "A way to keep the temperature of a simulation constant.\n\n\n\n\n\n"
+},
+
+{
+    "location": "api.html#Molly.Torsion",
+    "page": "API",
+    "title": "Molly.Torsion",
+    "category": "type",
+    "text": "A dihedral torsion angle between four atoms.\n\n\n\n\n\n"
+},
+
+{
+    "location": "api.html#Molly.Torsiontype",
+    "page": "API",
+    "title": "Molly.Torsiontype",
+    "category": "type",
+    "text": "Gromacs torsion type.\n\n\n\n\n\n"
 },
 
 {
