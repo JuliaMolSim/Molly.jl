@@ -78,7 +78,7 @@ function force! end
                                     s::Simulation,
                                     i::Integer,
                                     j::Integer)
-    if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
+    if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ) || i == j
         return
     end
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
@@ -101,7 +101,7 @@ end
                                     s::Simulation,
                                     i::Integer,
                                     j::Integer)
-    if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
+    if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ) || i == j
         return
     end
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
@@ -124,11 +124,10 @@ end
                                     s::Simulation,
                                     i::Integer,
                                     j::Integer)
+    i == j && return
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
-    if r2 > sqdist_cutoff_nb
-        return
-    end
+    r2 > sqdist_cutoff_nb && return
     T = typeof(r2)
     f = (T(coulomb_const) * s.atoms[i].charge * s.atoms[j].charge) / sqrt(r2 ^ 3)
     fdr = f * dr
@@ -142,6 +141,7 @@ function force!(forces,
                 s::Simulation,
                 i::Integer,
                 j::Integer)
+    i == j && return
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     f = -inter.G * s.atoms[i].mass * s.atoms[j].mass * inv(sum(abs2, dr))
     fdr = f * normalize(dr)

@@ -26,7 +26,7 @@ function accelerations(s::Simulation, neighbours; parallel::Bool=true)
                 end
             else
                 @threads for i in 1:n_atoms
-                    for j in 1:(i - 1)
+                    for j in 1:i
                         force!(forces_threads[threadid()], inter, s, i, j)
                     end
                 end
@@ -45,7 +45,7 @@ function accelerations(s::Simulation, neighbours; parallel::Bool=true)
                 end
             else
                 for i in 1:n_atoms
-                    for j in 1:(i - 1)
+                    for j in 1:i
                         force!(forces, inter, s, i, j)
                     end
                 end
