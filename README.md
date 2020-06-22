@@ -17,7 +17,7 @@ In theory it can do this for any regular protein, but in practice this is untest
 Implemented features include:
 - Interface to allow definition of new forces, thermostats etc.
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential.
-- Bonded interactions - covalent bonds, bond angles, dihedral angles.
+- Bonded interactions - covalent bonds, bond angles, torsion angles.
 - Andersen thermostat.
 - Velocity Verlet and velocity-free Verlet integration.
 - Explicit solvent.
@@ -43,7 +43,10 @@ Features not yet implemented include:
 
 Julia v1.0 or later is required.
 Install from the Julia REPL.
-Enter the package mode by pressing `]` and run `add https://github.com/JuliaMolSim/Molly.jl`.
+Enter the package mode by pressing `]` and run
+```
+add https://github.com/JuliaMolSim/Molly.jl
+```
 
 ## Usage
 

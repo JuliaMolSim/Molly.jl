@@ -5,7 +5,7 @@ export
     Atomtype,
     Bondtype,
     Angletype,
-    Dihedraltype,
+    Torsiontype,
     readinputs
 
 "Gromacs atom type."
@@ -28,8 +28,8 @@ struct Angletype{T}
     cth::T
 end
 
-"Gromacs dihedral type."
-struct Dihedraltype{T}
+"Gromacs torsion type."
+struct Torsiontype{T}
     f1::T
     f2::T
     f3::T
@@ -44,7 +44,7 @@ function readinputs(T::Type,
     atomtypes = Dict{String, Atomtype{T}}()
     bondtypes = Dict{String, Bondtype{T}}()
     angletypes = Dict{String, Angletype{T}}()
-    dihedraltypes = Dict{String, Dihedraltype{T}}()
+    torsiontypes = Dict{String, Torsiontype{T}}()
     atomnames = Dict{String, String}()
 
     name = "?"
@@ -52,8 +52,8 @@ function readinputs(T::Type,
     bonds = HarmonicBond{T}[]
     pairs = Tuple{Int, Int}[]
     angles = HarmonicAngle{T}[]
-    possible_dihedrals = Tuple{Int, Int, Int, Int}[]
-    dihedrals = Dihedral{T}[]
+    possible_torsions = Tuple{Int, Int, Int, Int}[]
+    torsions = Torsion{T}[]
 
     current_field = ""
     for l in eachline(top_file)
@@ -75,13 +75,13 @@ function readinputs(T::Type,
             angletype = Angletype(deg2rad(parse(T, c[5])), parse(T, c[6]))
             angletypes["$(c[1])/$(c[2])/$(c[3])"] = angletype
             angletypes["$(c[3])/$(c[2])/$(c[1])"] = angletype
-        elseif current_field == "dihedraltypes" && c[1] != "#define"
+        elseif current_field == "torsiontypes" && c[1] != "#define"
             # Convert back to OPLS types
             f4 = parse(T, c[10]) / -4
             f3 = parse(T, c[9]) / -2
             f2 = 4 * f4 - parse(T, c[8])
             f1 = 3 * f3 - 2 * parse(T, c[7])
-            dihedraltypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = Dihedraltype(f1, f2, f3, f4)
+            torsiontypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = Torsiontype(f1, f2, f3, f4)
         elseif current_field == "atomtypes" && length(c) >= 8
             atomname = uppercase(c[2])
             atomnames[c[1]] = atomname
@@ -106,25 +106,25 @@ function readinputs(T::Type,
             i, j, k = parse.(Int, c[1:3])
             angletype = angletypes["$(atoms[i].attype)/$(atoms[j].attype)/$(atoms[k].attype)"]
             push!(angles, HarmonicAngle(i, j, k, angletype.th0, angletype.cth))
-        elseif current_field == "dihedrals"
+        elseif current_field == "torsions"
             i, j, k, l = parse.(Int, c[1:4])
-            push!(possible_dihedrals, (i, j, k, l))
+            push!(possible_torsions, (i, j, k, l))
         elseif current_field == "system"
             name = rstrip(first(split(sl, ";", limit=2)))
         end
     end
 
-    # Add dihedrals based on wildcard dihedral types
-    for inds in possible_dihedrals
+    # Add torsions based on wildcard torsion types
+    for inds in possible_torsions
         at_types = [atoms[x].attype for x in inds]
         desired_key = join(at_types, "/")
-        if haskey(dihedraltypes, desired_key)
-            d = dihedraltypes[desired_key]
-            push!(dihedrals, Dihedral(inds..., d.f1, d.f2, d.f3, d.f4))
+        if haskey(torsiontypes, desired_key)
+            d = torsiontypes[desired_key]
+            push!(torsions, Torsion(inds..., d.f1, d.f2, d.f3, d.f4))
         else
             best_score = 0
             best_key = ""
-            for k in keys(dihedraltypes)
+            for k in keys(torsiontypes)
                 c = split(k, "/")
                 for a in (c, reverse(c))
                     valid = true
@@ -143,10 +143,10 @@ function readinputs(T::Type,
                     end
                 end
             end
-            # If a wildcard match is found, add a new specific dihedral type
+            # If a wildcard match is found, add a new specific torsion type
             if best_key != ""
-                d = dihedraltypes[best_key]
-                push!(dihedrals, Dihedral(inds..., d.f1, d.f2, d.f3, d.f4))
+                d = torsiontypes[best_key]
+                push!(torsions, Torsion(inds..., d.f1, d.f2, d.f3, d.f4))
             end
         end
     end
@@ -217,7 +217,7 @@ function readinputs(T::Type,
     specific_inter_lists = Dict{String, Vector{SpecificInteraction}}(
         "Bonds" => bonds,
         "Angles" => angles,
-        "Dihedrals" => dihedrals)
+        "Torsions" => torsions)
 
     general_inters = Dict("LJ" => lj,
         "Coulomb" => coulomb)

@@ -8,7 +8,7 @@ export
     Gravity,
     HarmonicBond,
     HarmonicAngle,
-    Dihedral,
+    Torsion,
     force!
 
 "Square of the non-bonded interaction distance cutoff in nm^2."
@@ -53,7 +53,7 @@ struct HarmonicAngle{T} <: SpecificInteraction
 end
 
 "A dihedral torsion angle between four atoms."
-struct Dihedral{T} <: SpecificInteraction
+struct Torsion{T} <: SpecificInteraction
     i::Int
     j::Int
     k::Int
@@ -155,7 +155,7 @@ function force!(forces,
 end
 
 function force!(forces,
-                d::Dihedral,
+                d::Torsion,
                 s::Simulation)
     ba = vector(s.coords[d.j], s.coords[d.i], s.box_size)
     bc = vector(s.coords[d.j], s.coords[d.k], s.box_size)
