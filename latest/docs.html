@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Documentation · Molly.jl</title><link href="https://cdnjs.cloudflare.com/ajax/libs/normalize/4.2.0/normalize.min.css" rel="stylesheet" type="text/css"/><link href="https://fonts.googleapis.com/css?family=Lato|Roboto+Mono" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.6.3/css/font-awesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/default.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.2.0/require.min.js" data-main="assets/documenter.js"></script><script src="siteinfo.js"></script><script src="../versions.js"></script><link href="assets/documenter.css" rel="stylesheet" type="text/css"/></head><body><nav class="toc"><h1>Molly.jl</h1><select id="version-selector" onChange="window.location.href=this.value" style="visibility: hidden"></select><form class="search" id="search-form" action="search.html"><input id="search-query" name="q" type="text" placeholder="Search docs"/></form><ul><li><a class="toctext" href="index.html">Home</a></li><li class="current"><a class="toctext" href="docs.html">Documentation</a><ul class="internal"><li><a class="toctext" href="#Simulating-a-gas-1">Simulating a gas</a></li><li><a class="toctext" href="#Simulating-diatomic-molecules-1">Simulating diatomic molecules</a></li><li><a class="toctext" href="#Simulating-gravity-1">Simulating gravity</a></li><li><a class="toctext" href="#Simulating-a-protein-1">Simulating a protein</a></li><li><a class="toctext" href="#Forces-1">Forces</a></li><li><a class="toctext" href="#Simulators-1">Simulators</a></li><li><a class="toctext" href="#Thermostats-1">Thermostats</a></li><li><a class="toctext" href="#Neighbour-finders-1">Neighbour finders</a></li><li><a class="toctext" href="#Loggers-1">Loggers</a></li><li><a class="toctext" href="#Analysis-1">Analysis</a></li></ul></li><li><a class="toctext" href="api.html">API</a></li></ul></nav><article id="docs"><header><nav><ul><li><a href="docs.html">Documentation</a></li></ul><a class="edit-page" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/docs.md"><span class="fa"></span> Edit on GitHub</a></nav><hr/><div id="topbar"><span>Documentation</span><a class="fa fa-bars" href="#"></a></div></header><h1><a class="nav-anchor" id="Molly-documentation-1" href="#Molly-documentation-1">Molly documentation</a></h1><p>Molly takes a modular approach to molecular simulation. To run a simulation you create a <a href="api.html#Molly.Simulation"><code>Simulation</code></a> object and call <a href="api.html#Molly.simulate!-Tuple{Simulation,VelocityVerlet,Integer}"><code>simulate!</code></a> on it. The different components of the simulation can be used as defined by the package, or you can define your own versions. An important principle of the package is that your custom components, particularly force functions, should be easy to define and just as performant as the built-in versions.</p><p>This documentation will first introduce the main features of the package with some examples, then will give details on each component of a simulation. For more information on specific types or functions, see the <a href="api.html#Molly-API-1">Molly API</a> section or call <code>?function_name</code> in Julia.</p><h2><a class="nav-anchor" id="Simulating-a-gas-1" href="#Simulating-a-gas-1">Simulating a gas</a></h2><p>Let&#39;s look at the simulation of a gas acting under the <a href="https://en.wikipedia.org/wiki/Lennard-Jones_potential">Lennard-Jones</a> potential to start with. First, we&#39;ll need some atoms with the relevant parameters defined.</p><pre><code class="language-julia">using Molly
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Documentation · Molly.jl</title><link href="https://cdnjs.cloudflare.com/ajax/libs/normalize/4.2.0/normalize.min.css" rel="stylesheet" type="text/css"/><link href="https://fonts.googleapis.com/css?family=Lato|Roboto+Mono" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.6.3/css/font-awesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/default.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.2.0/require.min.js" data-main="assets/documenter.js"></script><script src="siteinfo.js"></script><script src="../versions.js"></script><link href="assets/documenter.css" rel="stylesheet" type="text/css"/></head><body><nav class="toc"><h1>Molly.jl</h1><select id="version-selector" onChange="window.location.href=this.value" style="visibility: hidden"></select><form class="search" id="search-form" action="search.html"><input id="search-query" name="q" type="text" placeholder="Search docs"/></form><ul><li><a class="toctext" href="index.html">Home</a></li><li class="current"><a class="toctext" href="docs.html">Documentation</a><ul class="internal"><li><a class="toctext" href="#Simulating-a-gas-1">Simulating a gas</a></li><li><a class="toctext" href="#Simulating-diatomic-molecules-1">Simulating diatomic molecules</a></li><li><a class="toctext" href="#Simulating-gravity-1">Simulating gravity</a></li><li><a class="toctext" href="#Simulating-a-protein-1">Simulating a protein</a></li><li><a class="toctext" href="#Agent-based-modelling-1">Agent-based modelling</a></li><li><a class="toctext" href="#Forces-1">Forces</a></li><li><a class="toctext" href="#Simulators-1">Simulators</a></li><li><a class="toctext" href="#Thermostats-1">Thermostats</a></li><li><a class="toctext" href="#Neighbour-finders-1">Neighbour finders</a></li><li><a class="toctext" href="#Loggers-1">Loggers</a></li><li><a class="toctext" href="#Analysis-1">Analysis</a></li></ul></li><li><a class="toctext" href="api.html">API</a></li></ul></nav><article id="docs"><header><nav><ul><li><a href="docs.html">Documentation</a></li></ul><a class="edit-page" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/docs.md"><span class="fa"></span> Edit on GitHub</a></nav><hr/><div id="topbar"><span>Documentation</span><a class="fa fa-bars" href="#"></a></div></header><h1><a class="nav-anchor" id="Molly-documentation-1" href="#Molly-documentation-1">Molly documentation</a></h1><p>Molly takes a modular approach to molecular simulation. To run a simulation you create a <a href="api.html#Molly.Simulation"><code>Simulation</code></a> object and call <a href="api.html#Molly.simulate!-Tuple{Simulation,VelocityVerlet,Integer}"><code>simulate!</code></a> on it. The different components of the simulation can be used as defined by the package, or you can define your own versions. An important principle of the package is that your custom components, particularly force functions, should be easy to define and just as performant as the built-in versions.</p><p>This documentation will first introduce the main features of the package with some examples, then will give details on each component of a simulation. For more information on specific types or functions, see the <a href="api.html#Molly-API-1">Molly API</a> section or call <code>?function_name</code> in Julia.</p><h2><a class="nav-anchor" id="Simulating-a-gas-1" href="#Simulating-a-gas-1">Simulating a gas</a></h2><p>Let&#39;s look at the simulation of a gas acting under the <a href="https://en.wikipedia.org/wiki/Lennard-Jones_potential">Lennard-Jones</a> potential to start with. First, we&#39;ll need some atoms with the relevant parameters defined.</p><pre><code class="language-julia">using Molly
 
 n_atoms = 100
 mass = 10.0
@@ -92,7 +92,93 @@ s = Simulation(
     n_steps=5_000
 )
 
-simulate!(s)</code></pre><h2><a class="nav-anchor" id="Forces-1" href="#Forces-1">Forces</a></h2><p>Forces define how different parts of the system interact. In Molly they are separated into two types. <a href="api.html#Molly.GeneralInteraction"><code>GeneralInteraction</code></a>s are present between all or most atoms, and account for example for non-bonded terms. <a href="api.html#Molly.SpecificInteraction"><code>SpecificInteraction</code></a>s are present between specific atoms, and account for example for bonded terms.</p><p>The available general interactions are:</p><ul><li><a href="api.html#Molly.LennardJones"><code>LennardJones</code></a>.</li><li><a href="api.html#Molly.Coulomb"><code>Coulomb</code></a>.</li><li><a href="api.html#Molly.Gravity"><code>Gravity</code></a>.</li></ul><p>The available specific interactions are:</p><ul><li><a href="api.html#Molly.HarmonicBond"><code>HarmonicBond</code></a>.</li><li><a href="api.html#Molly.HarmonicAngle"><code>HarmonicAngle</code></a>.</li><li><a href="api.html#Molly.Torsion"><code>Torsion</code></a>.</li></ul><p>To define your own <a href="api.html#Molly.GeneralInteraction"><code>GeneralInteraction</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyGeneralInter &lt;: GeneralInteraction
+simulate!(s)</code></pre><h2><a class="nav-anchor" id="Agent-based-modelling-1" href="#Agent-based-modelling-1">Agent-based modelling</a></h2><p>Agent-based modelling (ABM) is conceptually similar to molecular dynamics. Julia has <a href="https://juliadynamics.github.io/Agents.jl/stable/">Agents.jl</a> for ABM, but Molly can also be used to simulate arbitrary agent-based systems in continuous space. Here we simulate a toy SIR model for disease spread. This example shows how atom properties can be mutable, i.e. change during the simulation, and includes custom forces and loggers (see below for more).</p><pre><code class="language-julia">@enum Status susceptible infected recovered
+
+# Custom atom type
+mutable struct Person
+    status::Status
+    mass::Float64
+    σ::Float64
+    ϵ::Float64
+end
+
+# Custom GeneralInteraction
+struct SIRInteraction &lt;: GeneralInteraction
+    nl_only::Bool
+    dist_infection::Float64
+    prob_infection::Float64
+    prob_recovery::Float64
+end
+
+# Custom force function
+function Molly.force!(forces, inter::SIRInteraction, s::Simulation, i::Integer, j::Integer)
+    if i == j
+        # Recover randomly
+        if s.atoms[i].status == infected &amp;&amp; rand() &lt; inter.prob_recovery
+            s.atoms[i].status = recovered
+        end
+    elseif (s.atoms[i].status == infected &amp;&amp; s.atoms[j].status == susceptible) ||
+                (s.atoms[i].status == susceptible &amp;&amp; s.atoms[j].status == infected)
+        # Infect close people randomly
+        dr = vector(s.coords[i], s.coords[j], s.box_size)
+        r2 = sum(abs2, dr)
+        if r2 &lt; inter.dist_infection ^ 2 &amp;&amp; rand() &lt; inter.prob_infection
+            s.atoms[i].status = infected
+            s.atoms[j].status = infected
+        end
+    end
+    return forces
+end
+
+# Custom Logger
+struct SIRLogger &lt;: Logger
+    n_steps::Int
+    fracs_sir::Vector{Vector{Float64}}
+end
+
+# Custom logging function
+function Molly.log_property!(logger::SIRLogger, s::Simulation, step_n::Integer)
+    if step_n % logger.n_steps == 0
+        counts_sir = [
+            count(p -&gt; p.status == susceptible, s.atoms),
+            count(p -&gt; p.status == infected   , s.atoms),
+            count(p -&gt; p.status == recovered  , s.atoms)
+        ]
+        push!(logger.fracs_sir, counts_sir ./ length(s.atoms))
+    end
+end
+
+temperature = 0.01
+timestep = 0.02
+box_size = 10.0
+n_steps = 1_000
+n_people = 500
+n_starting = 2
+atoms = [Person(i &lt;= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
+coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
+velocities = [velocity(1.0, temperature, dims=2) for i in 1:n_people]
+general_inters = Dict(&quot;LennardJones&quot; =&gt; LennardJones(true),
+                        &quot;SIR&quot; =&gt; SIRInteraction(false, 0.5, 0.06, 0.01))
+
+s = Simulation(
+    simulator=VelocityVerlet(),
+    atoms=atoms,
+    general_inters=general_inters,
+    coords=coords,
+    velocities=velocities,
+    temperature=temperature,
+    box_size=box_size,
+    neighbour_finder=DistanceNeighbourFinder(trues(n_people, n_people), 10, 2.0),
+    thermostat=AndersenThermostat(5.0),
+    loggers=Dict(&quot;coords&quot; =&gt; CoordinateLogger(10, dims=2),
+                    &quot;SIR&quot; =&gt; SIRLogger(10, [])),
+    timestep=timestep,
+    n_steps=n_steps
+)
+
+simulate!(s)
+
+visualize(s.loggers[&quot;coords&quot;], box_size, &quot;sim_agent.gif&quot;)</code></pre><p><img src="images/sim_agent.gif" alt="Agent simulation"/></p><p>We can use the logger to plot the fraction of people susceptible (blue), infected (orange) and recovered (green) over the course of the simulation: <img src="images/fraction_sir.png" alt="Fraction SIR"/></p><h2><a class="nav-anchor" id="Forces-1" href="#Forces-1">Forces</a></h2><p>Forces define how different parts of the system interact. In Molly they are separated into two types. <a href="api.html#Molly.GeneralInteraction"><code>GeneralInteraction</code></a>s are present between all or most atoms, and account for example for non-bonded terms. <a href="api.html#Molly.SpecificInteraction"><code>SpecificInteraction</code></a>s are present between specific atoms, and account for example for bonded terms.</p><p>The available general interactions are:</p><ul><li><a href="api.html#Molly.LennardJones"><code>LennardJones</code></a>.</li><li><a href="api.html#Molly.SoftSphere"><code>SoftSphere</code></a>.</li><li><a href="api.html#Molly.Coulomb"><code>Coulomb</code></a>.</li><li><a href="api.html#Molly.Gravity"><code>Gravity</code></a>.</li></ul><p>The available specific interactions are:</p><ul><li><a href="api.html#Molly.HarmonicBond"><code>HarmonicBond</code></a>.</li><li><a href="api.html#Molly.HarmonicAngle"><code>HarmonicAngle</code></a>.</li><li><a href="api.html#Molly.Torsion"><code>Torsion</code></a>.</li></ul><p>To define your own <a href="api.html#Molly.GeneralInteraction"><code>GeneralInteraction</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyGeneralInter &lt;: GeneralInteraction
     nl_only::Bool
     # Any other properties, e.g. constants for the interaction
 end</code></pre><p>The <code>nl_only</code> property is required and determines whether the neighbour list is used to omit distant atoms (<code>true</code>) or whether all atom pairs are always considered (<code>false</code>). Next, you need to define the <a href="api.html#Molly.force!"><code>force!</code></a> function acting between a pair of atoms. For example:</p><pre><code class="language-julia">function Molly.force!(forces, inter::MyGeneralInter, s::Simulation, i::Integer, j::Integer)
