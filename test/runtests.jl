@@ -163,25 +163,31 @@ end
     @time simulate!(s, parallel=false)
 end
 
+@enum Status susceptible infected recovered
+
+# Custom atom type
+mutable struct Person
+    status::Status
+    mass::Float64
+    σ::Float64
+    ϵ::Float64
+end
+
+# Custom GeneralInteraction
+struct SIRInteraction <: GeneralInteraction
+    nl_only::Bool
+    dist_infection::Float64
+    prob_infection::Float64
+    prob_recovery::Float64
+end
+
+# Custom Logger
+struct SIRLogger <: Logger
+    n_steps::Int
+    fracs_sir::Vector{Vector{Float64}}
+end
+
 @testset "Agent-based modelling" begin
-    @enum Status susceptible infected recovered
-
-    # Custom atom type
-    mutable struct Person
-        status::Status
-        mass::Float64
-        σ::Float64
-        ϵ::Float64
-    end
-
-    # Custom GeneralInteraction
-    struct SIRInteraction <: GeneralInteraction
-        nl_only::Bool
-        dist_infection::Float64
-        prob_infection::Float64
-        prob_recovery::Float64
-    end
-
     # Custom force function
     function Molly.force!(forces, inter::SIRInteraction, s::Simulation, i::Integer, j::Integer)
         if i == j
@@ -200,12 +206,6 @@ end
             end
         end
         return forces
-    end
-
-    # Custom Logger
-    struct SIRLogger <: Logger
-        n_steps::Int
-        fracs_sir::Vector{Vector{Float64}}
     end
 
     # Custom logging function
