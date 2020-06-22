@@ -191,6 +191,7 @@ In Molly they are separated into two types.
 
 The available general interactions are:
 - [`LennardJones`](@ref).
+- [`SoftSphere`](@ref).
 - [`Coulomb`](@ref).
 - [`Gravity`](@ref).
 
