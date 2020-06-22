@@ -75,7 +75,7 @@ function readinputs(T::Type,
             angletype = Angletype(deg2rad(parse(T, c[5])), parse(T, c[6]))
             angletypes["$(c[1])/$(c[2])/$(c[3])"] = angletype
             angletypes["$(c[3])/$(c[2])/$(c[1])"] = angletype
-        elseif current_field == "torsiontypes" && c[1] != "#define"
+        elseif current_field == "dihedraltypes" && c[1] != "#define"
             # Convert back to OPLS types
             f4 = parse(T, c[10]) / -4
             f3 = parse(T, c[9]) / -2
@@ -106,7 +106,7 @@ function readinputs(T::Type,
             i, j, k = parse.(Int, c[1:3])
             angletype = angletypes["$(atoms[i].attype)/$(atoms[j].attype)/$(atoms[k].attype)"]
             push!(angles, HarmonicAngle(i, j, k, angletype.th0, angletype.cth))
-        elseif current_field == "torsions"
+        elseif current_field == "dihedrals"
             i, j, k, l = parse.(Int, c[1:4])
             push!(possible_torsions, (i, j, k, l))
         elseif current_field == "system"
