@@ -192,7 +192,7 @@ end</code></pre><p>The <code>nl_only</code> property is required and determines 
     forces[i] -= fdr
     forces[j] += fdr
     return forces
-end</code></pre><p>If you need to obtain the vector from atom <code>i</code> to atom <code>j</code>, use the <a href="api.html#Molly.vector-Tuple{Any,Any,Real}"><code>vector</code></a> function. This gets the vector between the closest images of atoms <code>i</code> and <code>j</code> accounting for the periodic boundary conditions. The <a href="api.html#Molly.Simulation"><code>Simulation</code></a> is available so atom properties or velocities can be accessed, e.g. <code>s.atoms[i].σ</code> or <code>s.velocities[i]</code>. This form of the function can also be used to define three-atom interactions by looping a third variable <code>k</code> up to <code>j</code> in the <a href="api.html#Molly.force!"><code>force!</code></a> function.</p><p>To use your custom force, add it to the dictionary of general interactions:</p><pre><code class="language-julia">general_inters = Dict(&quot;MyGeneralInter&quot; =&gt; MyGeneralInter(true))</code></pre><p>Then create and run a <a href="api.html#Molly.Simulation"><code>Simulation</code></a> as above.</p><p>To define your own <a href="api.html#Molly.SpecificInteraction"><code>SpecificInteraction</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MySpecificInter &lt;: SpecificInteraction
+end</code></pre><p>If you need to obtain the vector from atom <code>i</code> to atom <code>j</code>, use the <a href="api.html#Molly.vector-Tuple{Any,Any,Real}"><code>vector</code></a> function. This gets the vector between the closest images of atoms <code>i</code> and <code>j</code> accounting for the periodic boundary conditions. The <a href="api.html#Molly.Simulation"><code>Simulation</code></a> is available so atom properties or velocities can be accessed, e.g. <code>s.atoms[i].σ</code> or <code>s.velocities[i]</code>. This form of the function can also be used to define three-atom interactions by looping a third variable <code>k</code> up to <code>j</code> in the <a href="api.html#Molly.force!"><code>force!</code></a> function. Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.</p><p>To use your custom force, add it to the dictionary of general interactions:</p><pre><code class="language-julia">general_inters = Dict(&quot;MyGeneralInter&quot; =&gt; MyGeneralInter(true))</code></pre><p>Then create and run a <a href="api.html#Molly.Simulation"><code>Simulation</code></a> as above.</p><p>To define your own <a href="api.html#Molly.SpecificInteraction"><code>SpecificInteraction</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MySpecificInter &lt;: SpecificInteraction
     # Any number of atoms involved in the interaction
     i::Int
     j::Int
@@ -208,4 +208,47 @@ end</code></pre><p>Next, you need to define the <a href="api.html#Molly.force!">
     forces[inter.i] += fdr
     forces[inter.j] -= fdr
     return forces
-end</code></pre><p>The example here is between two atoms but can be adapted for any number of atoms. To use your custom force, add it to the dictionary of specific interaction lists:</p><pre><code class="language-julia">specific_inter_lists = Dict(&quot;MySpecificInter&quot; =&gt; [MySpecificInter(1, 2), MySpecificInter(3, 4)])</code></pre><h2><a class="nav-anchor" id="Simulators-1" href="#Simulators-1">Simulators</a></h2><p>Simulators define what type of simulation is run. This could be anything from a simple energy minimisation to complicated replica exchange MD. The available simulators are:</p><ul><li><a href="api.html#Molly.VelocityVerlet"><code>VelocityVerlet</code></a>.</li><li><a href="api.html#Molly.VelocityFreeVerlet"><code>VelocityFreeVerlet</code></a>.</li></ul><h2><a class="nav-anchor" id="Thermostats-1" href="#Thermostats-1">Thermostats</a></h2><p>Thermostats control the temperature over a simulation. The available thermostats are:</p><ul><li><a href="api.html#Molly.AndersenThermostat"><code>AndersenThermostat</code></a>.</li></ul><h2><a class="nav-anchor" id="Neighbour-finders-1" href="#Neighbour-finders-1">Neighbour finders</a></h2><p>Neighbour finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distance atoms to be omitted. The available neighbour finders are:</p><ul><li><a href="api.html#Molly.DistanceNeighbourFinder"><code>DistanceNeighbourFinder</code></a>.</li></ul><h2><a class="nav-anchor" id="Loggers-1" href="#Loggers-1">Loggers</a></h2><p>Loggers record properties of the simulation to allow monitoring and analysis. The available loggers are:</p><ul><li><a href="api.html#Molly.TemperatureLogger"><code>TemperatureLogger</code></a>.</li><li><a href="api.html#Molly.CoordinateLogger"><code>CoordinateLogger</code></a>.</li><li><a href="api.html#Molly.StructureWriter"><code>StructureWriter</code></a>.</li></ul><h2><a class="nav-anchor" id="Analysis-1" href="#Analysis-1">Analysis</a></h2><p>Molly contains some tools for analysing the results of simulations. The available analysis functions are:</p><ul><li><a href="api.html#Molly.visualize"><code>visualize</code></a>.</li><li><a href="api.html#Molly.rdf-Tuple{Any,Real}"><code>rdf</code></a>.</li><li><a href="api.html#Molly.distances-Tuple{Any,Real}"><code>distances</code></a>.</li><li><a href="api.html#Molly.displacements-Tuple{Any,Real}"><code>displacements</code></a>.</li></ul><footer><hr/><a class="previous" href="index.html"><span class="direction">Previous</span><span class="title">Home</span></a><a class="next" href="api.html"><span class="direction">Next</span><span class="title">API</span></a></footer></article></body></html>
+end</code></pre><p>The example here is between two atoms but can be adapted for any number of atoms. To use your custom force, add it to the dictionary of specific interaction lists:</p><pre><code class="language-julia">specific_inter_lists = Dict(&quot;MySpecificInter&quot; =&gt; [MySpecificInter(1, 2), MySpecificInter(3, 4)])</code></pre><h2><a class="nav-anchor" id="Simulators-1" href="#Simulators-1">Simulators</a></h2><p>Simulators define what type of simulation is run. This could be anything from a simple energy minimisation to complicated replica exchange MD. The available simulators are:</p><ul><li><a href="api.html#Molly.VelocityVerlet"><code>VelocityVerlet</code></a>.</li><li><a href="api.html#Molly.VelocityFreeVerlet"><code>VelocityFreeVerlet</code></a>.</li></ul><p>To define your own <a href="api.html#Molly.Simulator"><code>Simulator</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MySimulator &lt;: Simulator
+    # Any properties, e.g. an implicit solvent friction constant
+end</code></pre><p>Then, define the function that carries out the simulation. This example shows some of the helper functions you can use:</p><pre><code class="language-julia">function Molly.simulate!(s::Simulation,
+                            simulator::MySimulator,
+                            n_steps::Integer;
+                            parallel::Bool=true)
+    # Find neighbours like this
+    neighbours = find_neighbours(s, nothing, s.neighbour_finder, 0,
+                                    parallel=parallel)
+
+    # Show a progress bar like this, if you have imported ProgressMeter
+    @showprogress for step_n in 1:n_steps
+        # Apply the loggers like this
+        for logger in values(s.loggers)
+            log_property!(logger, s, step_n)
+        end
+
+        # Calculate accelerations like this
+        accels_t = accelerations(s, neighbours, parallel=parallel)
+
+        # Ensure coordinates stay within the simulation box like this
+        for i in 1:length(s.coords)
+            s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
+        end
+
+        # Apply the thermostat like this
+        apply_thermostat!(s, s.thermostat)
+
+        # Find new neighbours like this
+        neighbours = find_neighbours(s, neighbours, s.neighbour_finder, step_n,
+                                        parallel=parallel)
+
+        # Increment the step counter like this
+        s.n_steps_made[1] += 1
+    end
+    return s
+end</code></pre><h2><a class="nav-anchor" id="Thermostats-1" href="#Thermostats-1">Thermostats</a></h2><p>Thermostats control the temperature over a simulation. The available thermostats are:</p><ul><li><a href="api.html#Molly.AndersenThermostat"><code>AndersenThermostat</code></a>.</li></ul><h2><a class="nav-anchor" id="Neighbour-finders-1" href="#Neighbour-finders-1">Neighbour finders</a></h2><p>Neighbour finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distance atoms to be omitted. The available neighbour finders are:</p><ul><li><a href="api.html#Molly.DistanceNeighbourFinder"><code>DistanceNeighbourFinder</code></a>.</li></ul><h2><a class="nav-anchor" id="Loggers-1" href="#Loggers-1">Loggers</a></h2><p>Loggers record properties of the simulation to allow monitoring and analysis. The available loggers are:</p><ul><li><a href="api.html#Molly.TemperatureLogger"><code>TemperatureLogger</code></a>.</li><li><a href="api.html#Molly.CoordinateLogger"><code>CoordinateLogger</code></a>.</li><li><a href="api.html#Molly.StructureWriter"><code>StructureWriter</code></a>.</li></ul><p>To define your own <a href="api.html#Molly.Logger"><code>Logger</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyLogger &lt;: Logger
+    n_steps::Int
+    # Any other properties, e.g. an Array to record values during the trajectory
+end</code></pre><p>Then, define the logging function that is called every step by the simulator:</p><pre><code class="language-julia">function Molly.log_property!(logger::MyLogger, s::Simulation, step_n::Integer)
+    if step_n % logger.n_steps == 0
+        # Record some property or carry out some action
+    end
+end</code></pre><p>The use of <code>n_steps</code> is optional and is an example of how to record a property every n steps through the simulation. To use your custom logger, add it to the dictionary of loggers:</p><pre><code class="language-julia">loggers = Dict(&quot;mylogger&quot; =&gt; MyLogger(10))</code></pre><h2><a class="nav-anchor" id="Analysis-1" href="#Analysis-1">Analysis</a></h2><p>Molly contains some tools for analysing the results of simulations. The available analysis functions are:</p><ul><li><a href="api.html#Molly.visualize"><code>visualize</code></a>.</li><li><a href="api.html#Molly.rdf-Tuple{Any,Real}"><code>rdf</code></a>.</li><li><a href="api.html#Molly.distances-Tuple{Any,Real}"><code>distances</code></a>.</li><li><a href="api.html#Molly.displacements-Tuple{Any,Real}"><code>displacements</code></a>.</li></ul><footer><hr/><a class="previous" href="index.html"><span class="direction">Previous</span><span class="title">Home</span></a><a class="next" href="api.html"><span class="direction">Next</span><span class="title">API</span></a></footer></article></body></html>
