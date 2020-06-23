@@ -328,6 +328,7 @@ If you need to obtain the vector from atom `i` to atom `j`, use the [`vector`](@
 This gets the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 The [`Simulation`](@ref) is available so atom properties or velocities can be accessed, e.g. `s.atoms[i].σ` or `s.velocities[i]`.
 This form of the function can also be used to define three-atom interactions by looping a third variable `k` up to `j` in the [`force!`](@ref) function.
+Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
 
 To use your custom force, add it to the dictionary of general interactions:
 ```julia
@@ -374,6 +375,52 @@ The available simulators are:
 - [`VelocityVerlet`](@ref).
 - [`VelocityFreeVerlet`](@ref).
 
+To define your own [`Simulator`](@ref), first define the `struct`:
+```julia
+struct MySimulator <: Simulator
+    # Any properties, e.g. an implicit solvent friction constant
+end
+```
+Then, define the function that carries out the simulation.
+This example shows some of the helper functions you can use:
+```julia
+function Molly.simulate!(s::Simulation,
+                            simulator::MySimulator,
+                            n_steps::Integer;
+                            parallel::Bool=true)
+    # Find neighbours like this
+    neighbours = find_neighbours(s, nothing, s.neighbour_finder, 0,
+                                    parallel=parallel)
+
+    # Show a progress bar like this, if you have imported ProgressMeter
+    @showprogress for step_n in 1:n_steps
+        # Apply the loggers like this
+        for logger in values(s.loggers)
+            log_property!(logger, s, step_n)
+        end
+
+        # Calculate accelerations like this
+        accels_t = accelerations(s, neighbours, parallel=parallel)
+
+        # Ensure coordinates stay within the simulation box like this
+        for i in 1:length(s.coords)
+            s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
+        end
+
+        # Apply the thermostat like this
+        apply_thermostat!(s, s.thermostat)
+
+        # Find new neighbours like this
+        neighbours = find_neighbours(s, neighbours, s.neighbour_finder, step_n,
+                                        parallel=parallel)
+
+        # Increment the step counter like this
+        s.n_steps_made[1] += 1
+    end
+    return s
+end
+```
+
 ## Thermostats
 
 Thermostats control the temperature over a simulation.
@@ -393,6 +440,27 @@ The available loggers are:
 - [`TemperatureLogger`](@ref).
 - [`CoordinateLogger`](@ref).
 - [`StructureWriter`](@ref).
+
+To define your own [`Logger`](@ref), first define the `struct`:
+```julia
+struct MyLogger <: Logger
+    n_steps::Int
+    # Any other properties, e.g. an Array to record values during the trajectory
+end
+```
+Then, define the logging function that is called every step by the simulator:
+```julia
+function Molly.log_property!(logger::MyLogger, s::Simulation, step_n::Integer)
+    if step_n % logger.n_steps == 0
+        # Record some property or carry out some action
+    end
+end
+```
+The use of `n_steps` is optional and is an example of how to record a property every n steps through the simulation.
+To use your custom logger, add it to the dictionary of loggers:
+```julia
+loggers = Dict("mylogger" => MyLogger(10))
+```
 
 ## Analysis
 

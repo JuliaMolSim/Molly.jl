@@ -2,7 +2,8 @@
 
 export
     vector1D,
-    vector
+    vector,
+    adjust_bounds
 
 "Displacement between two 1D coordinate values, accounting for the bounding box."
 function vector1D(c1::Real, c2::Real, box_size::Real)
