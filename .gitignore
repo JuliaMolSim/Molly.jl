@@ -4,3 +4,4 @@
 docs/build
 nbs/*
 todo.txt
+/Manifest.toml
