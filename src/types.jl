@@ -86,10 +86,10 @@ default values.
 # Arguments
 - `simulator::Simulator`: the type of simulation to run.
 - `atoms::Vector{A}`: the atoms in the simulation. Can be of any type.
-- `specific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}=Dict()`:
+- `specific_inter_lists::SI=()`:
     the specific interactions in the simulation, i.e. interactions between
     specific atoms such as bonds or angles.
-- `general_inters::Dict{String, <:GeneralInteraction}=Dict()`: the general
+- `general_inters::GI=()`: the general
     interactions in the simulation, i.e. interactions between all or most atoms
     such as electrostatics.
 - `coords::C`: the coordinates of the atoms in the simulation. Typically a
@@ -112,11 +112,11 @@ default values.
 - `n_steps_made::Vector{Int}=[]`: the number of steps already made during the
     simulation. This is a `Vector` to allow the `struct` to be immutable.
 """
-struct Simulation{T, A, C}
+struct Simulation{T, A, C, GI, SI}
     simulator::Simulator
     atoms::Vector{A}
-    specific_inter_lists::Dict{String, Vector{<:SpecificInteraction}}
-    general_inters::Dict{String, <:GeneralInteraction}
+    specific_inter_lists::SI
+    general_inters::GI
     coords::C
     velocities::C
     temperature::T
@@ -132,8 +132,8 @@ end
 function Simulation(;
                     simulator,
                     atoms,
-                    specific_inter_lists=Dict(),
-                    general_inters=Dict{String, GeneralInteraction}(),
+                    specific_inter_lists=(),
+                    general_inters=(),
                     coords,
                     velocities,
                     temperature=0.0,
@@ -144,7 +144,12 @@ function Simulation(;
                     timestep,
                     n_steps,
                     n_steps_made=[0])
-    return Simulation{typeof(timestep), eltype(atoms), typeof(coords)}(
+    T = typeof(timestep)
+    A = eltype(atoms)
+    C = typeof(coords)
+    GI = typeof(general_inters)
+    SI = typeof(specific_inter_lists)
+    return Simulation{T, A, C, GI, SI}(
                 simulator, atoms, specific_inter_lists, general_inters, coords,
                 velocities, temperature, box_size, neighbour_finder, thermostat,
                 loggers, timestep, n_steps, n_steps_made)

@@ -214,13 +214,12 @@ function readinputs(T::Type,
     # Bounding box for PBCs - box goes 0 to this value in 3 dimensions
     box_size = parse(T, first(split(strip(lines[end]), r"\s+")))
 
-    specific_inter_lists = Dict{String, Vector{SpecificInteraction}}(
-        "Bonds" => bonds,
-        "Angles" => angles,
-        "Torsions" => torsions)
+    specific_inter_lists = (
+        bonds,
+        angles,
+        torsions)
 
-    general_inters = Dict("LJ" => lj,
-        "Coulomb" => coulomb)
+    general_inters = (lj, coulomb)
 
     return atoms, specific_inter_lists, general_inters,
             nb_matrix, coords, box_size
