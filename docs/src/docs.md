@@ -208,7 +208,10 @@ struct SIRInteraction <: GeneralInteraction
 end
 
 # Custom force function
-function Molly.force!(forces, inter::SIRInteraction, s::Simulation, i::Integer, j::Integer)
+function Molly.force!(forces, inter::SIRInteraction,
+                        s::Simulation,
+                        i::Integer,
+                        j::Integer)
     if i == j
         # Recover randomly
         if s.atoms[i].status == infected && rand() < inter.prob_recovery
@@ -310,7 +313,11 @@ The `nl_only` property is required and determines whether the neighbour list is 
 Next, you need to define the [`force!`](@ref) function acting between a pair of atoms.
 For example:
 ```julia
-function Molly.force!(forces, inter::MyGeneralInter, s::Simulation, i::Integer, j::Integer)
+function Molly.force!(forces,
+                        inter::MyGeneralInter,
+                        s::Simulation,
+                        i::Integer,
+                        j::Integer)
     dr = vector(s.coords[i], s.coords[j], s.box_size)
 
     # Replace this with your force calculation
@@ -320,7 +327,7 @@ function Molly.force!(forces, inter::MyGeneralInter, s::Simulation, i::Integer, 
     fdr = f * normalize(dr)
     forces[i] -= fdr
     forces[j] += fdr
-    return forces
+    return nothing
 end
 ```
 If you need to obtain the vector from atom `i` to atom `j`, use the [`vector`](@ref) function.
@@ -333,16 +340,12 @@ To use your custom force, add it to the list of general interactions:
 ```julia
 general_inters = (MyGeneralInter(true),)
 ```
-Note that you can also use named tuples instead of tuples if you want to
-acces interactions by name
+Then create and run a [`Simulation`](@ref) as above.
+Note that you can also use named tuples instead of tuples if you want to access interactions by name:
 ```julia
 general_inters = (MyGeneralInter = MyGeneralInter(true),)
 ```
-For performance reasons it is indicate to [avoid containers with abstract
-type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1),
-such as `Vector{GeneralInteraction}`.
-
-Then create and run a [`Simulation`](@ref) as above.
+For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{GeneralInteraction}`.
 
 To define your own [`SpecificInteraction`](@ref), first define the `struct`:
 ```julia
@@ -366,7 +369,7 @@ function Molly.force!(forces, inter::MySpecificInter, s::Simulation)
     fdr = f * normalize(dr)
     forces[inter.i] += fdr
     forces[inter.j] -= fdr
-    return forces
+    return nothing
 end
 ```
 The example here is between two atoms but can be adapted for any number of atoms.
