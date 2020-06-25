@@ -7,6 +7,7 @@ function visualize(coord_logger,
                     box_size,
                     out_filepath::AbstractString;
                     connections=Tuple{Int, Int}[],
+                    connection_frames=[trues(length(connections)) for i in coord_logger.coords],
                     trails::Integer=0,
                     framerate::Integer=30,
                     color=:purple,
@@ -27,8 +28,8 @@ function visualize(coord_logger,
 
     scene = Scene()
     connection_nodes = []
-    for (i, j) in connections
-        if norm(coords_start[i] - coords_start[j]) < (box_size / 2)
+    for (ci, (i, j)) in enumerate(connections)
+        if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < (box_size / 2)
             if dims == 3
                 push!(connection_nodes, Node(PointType.(
                         [coords_start[i][1], coords_start[j][1]],
@@ -77,7 +78,7 @@ function visualize(coord_logger,
         coords = coord_logger.coords[frame_i]
 
         for (ci, (i, j)) in enumerate(connections)
-            if norm(coords[i] - coords[j]) < (box_size / 2)
+            if connection_frames[frame_i][ci] && norm(coords[i] - coords[j]) < (box_size / 2)
                 if dims == 3
                     connection_nodes[ci][] = PointType.(
                                 [coords[i][1], coords[j][1]],
