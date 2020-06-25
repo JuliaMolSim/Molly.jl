@@ -7,7 +7,7 @@ atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]</code></pre><p>Next
 coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
 
 temperature = 100 # K
-velocities = [velocity(mass, temperature) for i in 1:n_atoms]</code></pre><p>We store the coordinates and velocities as <a href="https://github.com/JuliaArrays/StaticArrays.jl">static arrays</a> for performance. They can be of any number of dimensions and of any number type, e.g. <code>Float64</code> or <code>Float32</code>. Now we can define our dictionary of general interactions, i.e. those between most or all atoms. Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard Jones type.</p><pre><code class="language-julia">general_inters = Dict(&quot;LJ&quot; =&gt; LennardJones())</code></pre><p>Finally, we can define and run the simulation. We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.</p><pre><code class="language-julia">s = Simulation(
+velocities = [velocity(mass, temperature) for i in 1:n_atoms]</code></pre><p>We store the coordinates and velocities as <a href="https://github.com/JuliaArrays/StaticArrays.jl">static arrays</a> for performance. They can be of any number of dimensions and of any number type, e.g. <code>Float64</code> or <code>Float32</code>. Now we can define our general interactions, i.e. those between most or all atoms. Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard Jones type.</p><pre><code class="language-julia">general_inters = (LennardJones(),)</code></pre><p>Finally, we can define and run the simulation. We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.</p><pre><code class="language-julia">s = Simulation(
     simulator=VelocityVerlet(), # Use velocity Verlet integration
     atoms=atoms,
     general_inters=general_inters,
@@ -31,11 +31,11 @@ end
 
 velocities = [velocity(mass, temperature) for i in 1:n_atoms]</code></pre><p>Now we can use the built-in bond type to place a harmonic constraint between paired atoms. The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.</p><pre><code class="language-julia">bonds = [HarmonicBond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]
 
-specific_inter_lists = Dict(&quot;Bonds&quot; =&gt; bonds)</code></pre><p>This time, we are also going to use a neighbour list to speed up the Lennard Jones calculation. We can use the built-in distance neighbour finder. The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff in nm to be classed as a neighbour.</p><pre><code class="language-julia">neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.2)</code></pre><p>Now we can simulate as before.</p><pre><code class="language-julia">s = Simulation(
+specific_inter_lists = (bonds,)</code></pre><p>This time, we are also going to use a neighbour list to speed up the Lennard Jones calculation. We can use the built-in distance neighbour finder. The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff in nm to be classed as a neighbour.</p><pre><code class="language-julia">neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.2)</code></pre><p>Now we can simulate as before.</p><pre><code class="language-julia">s = Simulation(
     simulator=VelocityVerlet(),
     atoms=atoms,
     specific_inter_lists=specific_inter_lists,
-    general_inters=Dict(&quot;LJ&quot; =&gt; LennardJones(true)), # true means we are using the neighbour list for this interaction
+    general_inters=(LennardJones(true),), # true means we are using the neighbour list for this interaction
     coords=coords,
     velocities=velocities,
     temperature=temperature,
@@ -53,7 +53,7 @@ simulate!(s)</code></pre><p>This time when we view the trajectory we can add lin
             markersize=0.05, linewidth=5.0)</code></pre><p><img src="images/sim_diatomic.gif" alt="Diatomic simulation"/></p><h2><a class="nav-anchor" id="Simulating-gravity-1" href="#Simulating-gravity-1">Simulating gravity</a></h2><p>Molly is geared primarily to molecular simulation, but can also be used to simulate other physical systems. Let&#39;s set up a gravitational simulation. This example also shows the use of <code>Float32</code> and a 2D simulation.</p><pre><code class="language-julia">atoms = [Atom(mass=1.0f0), Atom(mass=1.0f0)]
 coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
 velocities = [SVector(0.0f0, 1.0f0), SVector(0.0f0, -1.0f0)]
-general_inters = Dict(&quot;gravity&quot; =&gt; Gravity(false, 1.5f0))
+general_inters = (Gravity(false, 1.5f0),)
 
 s = Simulation(
     simulator=VelocityVerlet(),
@@ -127,7 +127,7 @@ function Molly.force!(forces, inter::SIRInteraction, s::Simulation, i::Integer, 
             s.atoms[j].status = infected
         end
     end
-    return forces
+    return nothing
 end
 
 # Custom Logger
@@ -157,8 +157,7 @@ n_starting = 2
 atoms = [Person(i &lt;= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
 coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
 velocities = [velocity(1.0, temperature, dims=2) for i in 1:n_people]
-general_inters = Dict(&quot;LennardJones&quot; =&gt; LennardJones(true),
-                        &quot;SIR&quot; =&gt; SIRInteraction(false, 0.5, 0.06, 0.01))
+general_inters = (LennardJones = LennardJones(true), SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
 
 s = Simulation(
     simulator=VelocityVerlet(),
@@ -192,7 +191,7 @@ end</code></pre><p>The <code>nl_only</code> property is required and determines 
     forces[i] -= fdr
     forces[j] += fdr
     return forces
-end</code></pre><p>If you need to obtain the vector from atom <code>i</code> to atom <code>j</code>, use the <a href="api.html#Molly.vector-Tuple{Any,Any,Real}"><code>vector</code></a> function. This gets the vector between the closest images of atoms <code>i</code> and <code>j</code> accounting for the periodic boundary conditions. The <a href="api.html#Molly.Simulation"><code>Simulation</code></a> is available so atom properties or velocities can be accessed, e.g. <code>s.atoms[i].σ</code> or <code>s.velocities[i]</code>. This form of the function can also be used to define three-atom interactions by looping a third variable <code>k</code> up to <code>j</code> in the <a href="api.html#Molly.force!"><code>force!</code></a> function. Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.</p><p>To use your custom force, add it to the dictionary of general interactions:</p><pre><code class="language-julia">general_inters = Dict(&quot;MyGeneralInter&quot; =&gt; MyGeneralInter(true))</code></pre><p>Then create and run a <a href="api.html#Molly.Simulation"><code>Simulation</code></a> as above.</p><p>To define your own <a href="api.html#Molly.SpecificInteraction"><code>SpecificInteraction</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MySpecificInter &lt;: SpecificInteraction
+end</code></pre><p>If you need to obtain the vector from atom <code>i</code> to atom <code>j</code>, use the <a href="api.html#Molly.vector-Tuple{Any,Any,Real}"><code>vector</code></a> function. This gets the vector between the closest images of atoms <code>i</code> and <code>j</code> accounting for the periodic boundary conditions. The <a href="api.html#Molly.Simulation"><code>Simulation</code></a> is available so atom properties or velocities can be accessed, e.g. <code>s.atoms[i].σ</code> or <code>s.velocities[i]</code>. This form of the function can also be used to define three-atom interactions by looping a third variable <code>k</code> up to <code>j</code> in the <a href="api.html#Molly.force!"><code>force!</code></a> function. Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.</p><p>To use your custom force, add it to the list of general interactions:</p><pre><code class="language-julia">general_inters = (MyGeneralInter(true),)</code></pre><p>Note that you can also use named tuples instead of tuples if you want to acces interactions by name</p><pre><code class="language-julia">general_inters = (MyGeneralInter = MyGeneralInter(true),)</code></pre><p>For performance reasons it is indicate to <a href="https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1">avoid containers with abstract type parameters</a>, such as <code>Vector{GeneralInteraction}</code>.</p><p>Then create and run a <a href="api.html#Molly.Simulation"><code>Simulation</code></a> as above.</p><p>To define your own <a href="api.html#Molly.SpecificInteraction"><code>SpecificInteraction</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MySpecificInter &lt;: SpecificInteraction
     # Any number of atoms involved in the interaction
     i::Int
     j::Int
@@ -208,7 +207,7 @@ end</code></pre><p>Next, you need to define the <a href="api.html#Molly.force!">
     forces[inter.i] += fdr
     forces[inter.j] -= fdr
     return forces
-end</code></pre><p>The example here is between two atoms but can be adapted for any number of atoms. To use your custom force, add it to the dictionary of specific interaction lists:</p><pre><code class="language-julia">specific_inter_lists = Dict(&quot;MySpecificInter&quot; =&gt; [MySpecificInter(1, 2), MySpecificInter(3, 4)])</code></pre><h2><a class="nav-anchor" id="Simulators-1" href="#Simulators-1">Simulators</a></h2><p>Simulators define what type of simulation is run. This could be anything from a simple energy minimisation to complicated replica exchange MD. The available simulators are:</p><ul><li><a href="api.html#Molly.VelocityVerlet"><code>VelocityVerlet</code></a>.</li><li><a href="api.html#Molly.VelocityFreeVerlet"><code>VelocityFreeVerlet</code></a>.</li></ul><p>To define your own <a href="api.html#Molly.Simulator"><code>Simulator</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MySimulator &lt;: Simulator
+end</code></pre><p>The example here is between two atoms but can be adapted for any number of atoms. To use your custom force, add it to the specific interaction lists:</p><pre><code class="language-julia">specific_inter_lists = ([MySpecificInter(1, 2), MySpecificInter(3, 4)],)</code></pre><h2><a class="nav-anchor" id="Simulators-1" href="#Simulators-1">Simulators</a></h2><p>Simulators define what type of simulation is run. This could be anything from a simple energy minimisation to complicated replica exchange MD. The available simulators are:</p><ul><li><a href="api.html#Molly.VelocityVerlet"><code>VelocityVerlet</code></a>.</li><li><a href="api.html#Molly.VelocityFreeVerlet"><code>VelocityFreeVerlet</code></a>.</li></ul><p>To define your own <a href="api.html#Molly.Simulator"><code>Simulator</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MySimulator &lt;: Simulator
     # Any properties, e.g. an implicit solvent friction constant
 end</code></pre><p>Then, define the function that carries out the simulation. This example shows some of the helper functions you can use:</p><pre><code class="language-julia">function Molly.simulate!(s::Simulation,
                             simulator::MySimulator,
