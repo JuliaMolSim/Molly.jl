@@ -205,7 +205,7 @@ end
                 s.atoms[j].status = infected
             end
         end
-        return forces
+        return nothing
     end
 
     # Custom logging function
@@ -229,8 +229,8 @@ end
     atoms = [Person(i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
     coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
     velocities = [velocity(1.0, temperature, dims=2) for i in 1:n_people]
-    general_inters = Dict("LennardJones" => LennardJones(true),
-                            "SIR" => SIRInteraction(false, 0.5, 0.06, 0.01))
+    general_inters = (LennardJones = LennardJones(true),
+                            SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
 
     s = Simulation(
         simulator=VelocityVerlet(),
