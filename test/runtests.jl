@@ -13,7 +13,7 @@ box_size = 2.0
         simulator=VelocityVerlet(),
         atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
                     mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
-        general_inters=Dict("LJ" => LennardJones(true)),
+        general_inters=(LennardJones(true),),
         coords=[box_size .* rand(SVector{2}) for i in 1:n_atoms],
         velocities=[velocity(10.0, temperature, dims=2) .* 0.01 for i in 1:n_atoms],
         temperature=temperature,
@@ -36,7 +36,7 @@ end
         simulator=VelocityVerlet(),
         atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
                     mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
-        general_inters=Dict("LJ" => LennardJones(true)),
+        general_inters=(LennardJones(true),),
         coords=[box_size .* rand(SVector{3}) for i in 1:n_atoms],
         velocities=[velocity(10.0, temperature) .* 0.01 for i in 1:n_atoms],
         temperature=temperature,
@@ -65,7 +65,7 @@ end
         simulator=VelocityFreeVerlet(),
         atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
                     mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
-        general_inters=Dict("LJ" => LennardJones(true)),
+        general_inters=(LennardJones(true),),
         coords=coords,
         velocities=[c .+ 0.01 .* rand(SVector{3}) for c in coords],
         temperature=temperature,
@@ -93,8 +93,8 @@ end
         simulator=VelocityVerlet(),
         atoms=[Atom(attype="H", name="H", resnum=i, resname="H", charge=0.0,
                     mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
-        specific_inter_lists=Dict("Bonds" => bonds),
-        general_inters=Dict("LJ" => LennardJones(true)),
+        specific_inter_lists=(bonds,),
+        general_inters=(LennardJones(true),),
         coords=coords,
         velocities=[velocity(10.0, temperature) .* 0.01 for i in 1:n_atoms],
         temperature=temperature,
@@ -205,7 +205,7 @@ end
                 s.atoms[j].status = infected
             end
         end
-        return forces
+        return nothing
     end
 
     # Custom logging function
@@ -229,8 +229,8 @@ end
     atoms = [Person(i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
     coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
     velocities = [velocity(1.0, temperature, dims=2) for i in 1:n_people]
-    general_inters = Dict("LennardJones" => LennardJones(true),
-                            "SIR" => SIRInteraction(false, 0.5, 0.06, 0.01))
+    general_inters = (LennardJones = LennardJones(true),
+                            SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
 
     s = Simulation(
         simulator=VelocityVerlet(),
