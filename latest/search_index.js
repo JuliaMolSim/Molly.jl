@@ -53,7 +53,7 @@ var documenterSearchIndex = {"docs": [
     "page": "Documentation",
     "title": "Molly documentation",
     "category": "section",
-    "text": "Molly takes a modular approach to molecular simulation. To run a simulation you create a Simulation object and call simulate! on it. The different components of the simulation can be used as defined by the package, or you can define your own versions. An important principle of the package is that your custom components, particularly force functions, should be easy to define and just as performant as the built-in versions.This documentation will first introduce the main features of the package with some examples, then will give details on each component of a simulation. For more information on specific types or functions, see the Molly API section or call ?function_name in Julia."
+    "text": "Molly takes a modular approach to molecular simulation. To run a simulation you create a Simulation object and call simulate! on it. The different components of the simulation can be used as defined by the package, or you can define your own versions. An important principle of the package is that your custom components, particularly force functions, should be easy to define and just as performant as the built-in versions.This documentation will first introduce the main features of the package with some examples, then will give details on each component of a simulation. There are further examples in the Molly examples section. For more information on specific types or functions, see the Molly API section or call ?function_name in Julia."
 },
 
 {
@@ -142,6 +142,30 @@ var documenterSearchIndex = {"docs": [
     "title": "Analysis",
     "category": "section",
     "text": "Molly contains some tools for analysing the results of simulations. The available analysis functions are:visualize.\nrdf.\ndistances.\ndisplacements."
+},
+
+{
+    "location": "examples.html#",
+    "page": "Examples",
+    "title": "Examples",
+    "category": "page",
+    "text": ""
+},
+
+{
+    "location": "examples.html#Molly-examples-1",
+    "page": "Examples",
+    "title": "Molly examples",
+    "category": "section",
+    "text": "The best examples for learning how the package works are in the Molly documentation section. Here we give further examples, showing what you can do with the package. Each is a self-contained block of code. Made something cool yourself? Make a PR to add it to this page."
+},
+
+{
+    "location": "examples.html#Making-and-breaking-bonds-1",
+    "page": "Examples",
+    "title": "Making and breaking bonds",
+    "category": "section",
+    "text": "There is an example of mutable atom properties in the main docs, but what if you want to make and break bonds during the simulation? In this case you can use a GeneralInteraction to make, break and apply the bonds. The partners of the atom can be stored in the atom type. We make a Logger to record when the bonds are present, allowing us to visualize them with the connection_frames keyword argument to visualize (this can take a while to plot).using Molly\nusing Makie\nusing LinearAlgebra\n\nstruct BondableAtom\n    mass::Float64\n    σ::Float64\n    ϵ::Float64\n    partners::Set{Int}\nend\n\nstruct BondableInteraction <: GeneralInteraction\n    nl_only::Bool\n    prob_formation::Float64\n    prob_break::Float64\n    dist_formation::Float64\n    b0::Float64\n    kb::Float64\nend\n\nfunction Molly.force!(forces, inter::BondableInteraction, s, i, j)\n    i == j && return\n    dr = vector(s.coords[i], s.coords[j], s.box_size)\n    r2 = sum(abs2, dr)\n    if j in s.atoms[i].partners\n        # Apply the force of a harmonic bond\n        c = inter.kb * (norm(dr) - inter.b0)\n        fdr = c * normalize(dr)\n        forces[i] += fdr\n        forces[j] -= fdr\n        # Break bonds randomly\n        if rand() < inter.prob_break\n            delete!(s.atoms[i].partners, j)\n            delete!(s.atoms[j].partners, i)\n        end\n    # Make bonds between close atoms randomly\n    elseif r2 < inter.b0 * inter.dist_formation && rand() < inter.prob_formation\n        push!(s.atoms[i].partners, j)\n        push!(s.atoms[j].partners, i)\n    end\n    return nothing\nend\n\nstruct BondLogger <: Logger\n    n_steps::Int\n    bonds::Vector{BitVector}\nend\n\nfunction Molly.log_property!(logger::BondLogger, s, step_n)\n    if step_n % logger.n_steps == 0\n        bonds = BitVector()\n        for i in 1:length(s.coords)\n            for j in 1:(i - 1)\n                push!(bonds, j in s.atoms[i].partners)\n            end\n        end\n        push!(logger.bonds, bonds)\n    end\nend\n\ntemperature = 0.01\ntimestep = 0.02\nbox_size = 10.0\nn_steps = 2_000\nn_atoms = 200\n\natoms = [BondableAtom(1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]\ncoords = [box_size .* rand(SVector{2}) for i in 1:n_atoms]\nvelocities = [velocity(1.0, temperature, dims=2) for i in 1:n_atoms]\ngeneral_inters = (SoftSphere(true), BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0))\n\ns = Simulation(\n    simulator=VelocityVerlet(),\n    atoms=atoms,\n    general_inters=general_inters,\n    coords=coords,\n    velocities=velocities,\n    temperature=temperature,\n    box_size=box_size,\n    neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),\n    thermostat=AndersenThermostat(5.0),\n    loggers=Dict(\"coords\" => CoordinateLogger(20, dims=2),\n                    \"bonds\" => BondLogger(20, [])),\n    timestep=timestep,\n    n_steps=n_steps\n)\n\nsimulate!(s)\n\nconnections = Tuple{Int, Int}[]\nfor i in 1:length(s.coords)\n    for j in 1:(i - 1)\n        push!(connections, (i, j))\n    end\nend\n\nvisualize(s.loggers[\"coords\"],\n            box_size,\n            \"sim_mutbond.gif\",\n            connections=connections,\n            connection_frames=s.loggers[\"bonds\"].bonds)(Image: Mutable bond simulation)"
 },
 
 {
