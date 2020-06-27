@@ -181,7 +181,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.AndersenThermostat",
     "category": "type",
-    "text": "Rescale random velocities according to the Andersen thermostat.\n\n\n\n\n\n"
+    "text": "AndersenThermostat(coupling_const)\n\nRescale random velocities according to the Andersen thermostat.\n\n\n\n\n\n"
 },
 
 {
@@ -221,7 +221,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.CoordinateLogger",
     "category": "type",
-    "text": "Log the coordinates throughout a simulation.\n\n\n\n\n\n"
+    "text": "CoordinateLogger(n_steps; dims=3)\n\nLog the coordinates throughout a simulation.\n\n\n\n\n\n"
 },
 
 {
@@ -229,7 +229,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.Coulomb",
     "category": "type",
-    "text": "The Coulomb electrostatic interaction.\n\n\n\n\n\n"
+    "text": "Coulomb(nl_only)\n\nThe Coulomb electrostatic interaction.\n\n\n\n\n\n"
 },
 
 {
@@ -237,7 +237,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.DistanceNeighbourFinder",
     "category": "type",
-    "text": "Find close atoms by distance.\n\n\n\n\n\n"
+    "text": "DistanceNeighbourFinder(nb_matrix, n_steps, dist_cutoff)\nDistanceNeighbourFinder(nb_matrix, n_steps)\n\nFind close atoms by distance.\n\n\n\n\n\n"
 },
 
 {
@@ -245,7 +245,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.GeneralInteraction",
     "category": "type",
-    "text": "A general interaction that will apply to all atom pairs.\n\n\n\n\n\n"
+    "text": "A general interaction that will apply to all atom pairs. Custom general interactions should sub-type this type.\n\n\n\n\n\n"
 },
 
 {
@@ -253,7 +253,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.Gravity",
     "category": "type",
-    "text": "The gravitational interaction.\n\n\n\n\n\n"
+    "text": "Gravity(nl_only, G)\n\nThe gravitational interaction.\n\n\n\n\n\n"
 },
 
 {
@@ -261,7 +261,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.HarmonicAngle",
     "category": "type",
-    "text": "A bond angle between three atoms.\n\n\n\n\n\n"
+    "text": "HarmonicAngle(i, j, k, th0, cth)\n\nA bond angle between three atoms.\n\n\n\n\n\n"
 },
 
 {
@@ -269,7 +269,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.HarmonicBond",
     "category": "type",
-    "text": "A harmonic bond between two atoms.\n\n\n\n\n\n"
+    "text": "HarmonicBond(i, j, b0, kb)\n\nA harmonic bond between two atoms.\n\n\n\n\n\n"
 },
 
 {
@@ -285,7 +285,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.LennardJones",
     "category": "type",
-    "text": "The Lennard-Jones 6-12 interaction.\n\n\n\n\n\n"
+    "text": "LennardJones(nl_only)\n\nThe Lennard-Jones 6-12 interaction.\n\n\n\n\n\n"
 },
 
 {
@@ -293,7 +293,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.Logger",
     "category": "type",
-    "text": "A way to record a property, e.g. the temperature, throughout a simulation.\n\n\n\n\n\n"
+    "text": "A way to record a property, e.g. the temperature, throughout a simulation. Custom loggers should sub-type this type.\n\n\n\n\n\n"
 },
 
 {
@@ -301,7 +301,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.NeighbourFinder",
     "category": "type",
-    "text": "A way to find near atoms to save on simulation time.\n\n\n\n\n\n"
+    "text": "A way to find near atoms to save on simulation time. Custom neighbour finders should sub-type this type.\n\n\n\n\n\n"
 },
 
 {
@@ -309,7 +309,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.NoNeighbourFinder",
     "category": "type",
-    "text": "Placeholder neighbour finder that returns no neighbours.\n\n\n\n\n\n"
+    "text": "NoNeighbourFinder()\n\nPlaceholder neighbour finder that returns no neighbours. When using this neighbour finder, ensure that nl_only for the interactions is set to false.\n\n\n\n\n\n"
 },
 
 {
@@ -317,7 +317,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.NoThermostat",
     "category": "type",
-    "text": "Placeholder thermostat that does nothing.\n\n\n\n\n\n"
+    "text": "NoThermostat()\n\nPlaceholder thermostat that does nothing.\n\n\n\n\n\n"
 },
 
 {
@@ -325,7 +325,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.Simulation",
     "category": "type",
-    "text": "Simulation(; <keyword arguments>)\n\nThe data needed to define and run a molecular simulation. Properties unused in the simulation or in analysis can be left with their default values.\n\nArguments\n\nsimulator::Simulator: the type of simulation to run.\natoms::Vector{A}: the atoms in the simulation. Can be of any type.\nspecific_inter_lists::SI=():   the specific interactions in the simulation, i.e. interactions between   specific atoms such as bonds or angles.\ngeneral_inters::GI=(): the general   interactions in the simulation, i.e. interactions between all or most atoms   such as electrostatics.\ncoords::C: the coordinates of the atoms in the simulation. Typically a   Vector of SVectors of any dimension and type T, where T is Float64   or Float32.\nvelocities::C: the velocities of the atoms in the simulation, which should   be the same type as the coordinates. The meaning of the velocities depends   on the simulator used, e.g. for the VelocityFreeVerlet simulator they   represent the previous step coordinates for the first step.\ntemperature::T=0.0: the temperature of the simulation.\nbox_size::T: the size of the cube in which the simulation takes place.\nneighbour_finder::NeighbourFinder=NoNeighbourFinder(): the neighbour finder   used to find close atoms and save on computation.\nthermostat::Thermostat=NoThermostat(): the thermostat which applies during   the simulation.\nloggers::Dict{String, <:Logger}=Dict(): the loggers that record properties   of interest during the simulation.\ntimestep::T: the timestep of the simulation.\nn_steps::Integer: the number of steps in the simulation.\nn_steps_made::Vector{Int}=[]: the number of steps already made during the   simulation. This is a Vector to allow the struct to be immutable.\n\n\n\n\n\n"
+    "text": "Simulation(; <keyword arguments>)\n\nThe data needed to define and run a molecular simulation. Properties unused in the simulation or in analysis can be left with their default values.\n\nArguments\n\nsimulator::Simulator: the type of simulation to run.\natoms::Vector{A}: the atoms, or atom equivalents, in the simulation. Can be   of any type.\nspecific_inter_lists::SI=(): the specific interactions in the simulation,   i.e. interactions between specific atoms such as bonds or angles. Typically   a Tuple.\ngeneral_inters::GI=(): the general interactions in the simulation, i.e.   interactions between all or most atoms such as electrostatics. Typically a   Tuple.\ncoords::C: the coordinates of the atoms in the simulation. Typically a   Vector of SVectors of any dimension and type T, where T is Float64   or Float32.\nvelocities::C: the velocities of the atoms in the simulation, which should   be the same type as the coordinates. The meaning of the velocities depends   on the simulator used, e.g. for the VelocityFreeVerlet simulator they   represent the previous step coordinates for the first step.\ntemperature::T=0.0: the temperature of the simulation.\nbox_size::T: the size of the cube in which the simulation takes place.\nneighbour_finder::NeighbourFinder=NoNeighbourFinder(): the neighbour finder   used to find close atoms and save on computation.\nthermostat::Thermostat=NoThermostat(): the thermostat which applies during   the simulation.\nloggers::Dict{String, <:Logger}=Dict(): the loggers that record properties   of interest during the simulation.\ntimestep::T: the timestep of the simulation.\nn_steps::Integer: the number of steps in the simulation.\nn_steps_made::Vector{Int}=[]: the number of steps already made during the   simulation. This is a Vector to allow the struct to be immutable.\n\n\n\n\n\n"
 },
 
 {
@@ -333,7 +333,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.Simulator",
     "category": "type",
-    "text": "A type of simulation to run, e.g. leap-frog integration or energy minimisation.\n\n\n\n\n\n"
+    "text": "A type of simulation to run, e.g. leap-frog integration or energy minimisation. Custom simulators should sub-type this type.\n\n\n\n\n\n"
 },
 
 {
@@ -341,7 +341,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.SoftSphere",
     "category": "type",
-    "text": "The soft-sphere potential.\n\n\n\n\n\n"
+    "text": "SoftSphere(nl_only)\n\nThe soft-sphere potential.\n\n\n\n\n\n"
 },
 
 {
@@ -349,7 +349,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.SpecificInteraction",
     "category": "type",
-    "text": "A specific interaction between sets of specific atoms, e.g. a bond angle.\n\n\n\n\n\n"
+    "text": "A specific interaction between sets of specific atoms, e.g. a bond angle. Custom specific interactions should sub-type this type.\n\n\n\n\n\n"
 },
 
 {
@@ -357,7 +357,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.StructureWriter",
     "category": "type",
-    "text": "Write 3D output structures to the PDB file format throughout a simulation.\n\n\n\n\n\n"
+    "text": "StructureWriter(n_steps, filepath)\n\nWrite 3D output structures to the PDB file format throughout a simulation.\n\n\n\n\n\n"
 },
 
 {
@@ -365,7 +365,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.TemperatureLogger",
     "category": "type",
-    "text": "Log the temperature throughout a simulation.\n\n\n\n\n\n"
+    "text": "TemperatureLogger(n_steps)\nTemperatureLogger(T, n_steps)\n\nLog the temperature throughout a simulation.\n\n\n\n\n\n"
 },
 
 {
@@ -373,7 +373,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.Thermostat",
     "category": "type",
-    "text": "A way to keep the temperature of a simulation constant.\n\n\n\n\n\n"
+    "text": "A way to keep the temperature of a simulation constant. Custom thermostats should sub-type this type.\n\n\n\n\n\n"
 },
 
 {
@@ -381,7 +381,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.Torsion",
     "category": "type",
-    "text": "A dihedral torsion angle between four atoms.\n\n\n\n\n\n"
+    "text": "Torsion(i, j, k, l, f1, f2, f3, f4)\n\nA dihedral torsion angle between four atoms.\n\n\n\n\n\n"
 },
 
 {
@@ -413,15 +413,23 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.accelerations",
     "category": "method",
-    "text": "accelerations(simulation, neighbours; parallel=true)\n\nCalculate accelerations of all atoms using the bonded and non-bonded forces.\n\n\n\n\n\n"
+    "text": "accelerations(simulation, neighbours; parallel=true)\n\nCalculate the accelerations of all atoms using the general and specific interactions and Newton\'s second law.\n\n\n\n\n\n"
 },
 
 {
-    "location": "api.html#Molly.apply_thermostat!-Tuple{Simulation,AndersenThermostat}",
+    "location": "api.html#Molly.adjust_bounds-Tuple{Real,Real}",
+    "page": "API",
+    "title": "Molly.adjust_bounds",
+    "category": "method",
+    "text": "adjust_bounds(c, box_size)\n\nEnsure a coordinate is within the simulation box and return the coordinate.\n\n\n\n\n\n"
+},
+
+{
+    "location": "api.html#Molly.apply_thermostat!-Tuple{Simulation,NoThermostat}",
     "page": "API",
     "title": "Molly.apply_thermostat!",
     "category": "method",
-    "text": "Apply a thermostat to modify a simulation.\n\n\n\n\n\n"
+    "text": "apply_thermostat!(simulation, thermostat)\n\nApply a thermostat to modify a simulation. Custom thermostats should implement this function.\n\n\n\n\n\n"
 },
 
 {
@@ -441,11 +449,11 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
-    "location": "api.html#Molly.find_neighbours-Tuple{Simulation,Any,DistanceNeighbourFinder,Integer}",
+    "location": "api.html#Molly.find_neighbours-Tuple{Simulation,Any,NoNeighbourFinder,Integer}",
     "page": "API",
     "title": "Molly.find_neighbours",
     "category": "method",
-    "text": "Update list of close atoms between which non-bonded forces are calculated.\n\n\n\n\n\n"
+    "text": "find_neighbours(simulation, current_neighbours, neighbour_finder, step_n; parallel=true)\n\nObtain a list of close atoms in a system. Custom neighbour finders should implement this function.\n\n\n\n\n\n"
 },
 
 {
@@ -453,7 +461,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.force!",
     "category": "function",
-    "text": "Update the force for an atom pair in response to a given interation type.\n\n\n\n\n\n"
+    "text": "force!(forces, interaction, simulation, atom_i, atom_j)\n\nUpdate the force for an atom pair in response to a given interation type. Custom interaction types should implement this function.\n\n\n\n\n\n"
 },
 
 {
@@ -461,7 +469,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.log_property!",
     "category": "method",
-    "text": "Log a property thoughout a simulation.\n\n\n\n\n\n"
+    "text": "log_property!(logger, simulation, step_n)\n\nLog a property thoughout a simulation. Custom loggers should implement this function.\n\n\n\n\n\n"
 },
 
 {
@@ -469,7 +477,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.maxwellboltzmann",
     "category": "method",
-    "text": "Draw from the Maxwell-Boltzmann distribution.\n\n\n\n\n\n"
+    "text": "maxwellboltzmann(mass, temperature)\nmaxwellboltzmann(T, mass, temperature)\n\nDraw from the Maxwell-Boltzmann distribution.\n\n\n\n\n\n"
 },
 
 {
@@ -485,7 +493,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.readinputs",
     "category": "method",
-    "text": "Read a Gromacs topology flat file, i.e. all includes collapsed into one file.\n\n\n\n\n\n"
+    "text": "readinputs(topology_file, coordinate_file)\nreadinputs(T, topology_file, coordinate_file)\n\nRead a Gromacs topology flat file, i.e. all includes collapsed into one file, and a Gromacs coordinate file. Returns the atoms, specific interaction lists, general interaction lists, non-bonded matrix, coordinates and box size.\n\n\n\n\n\n"
 },
 
 {
@@ -493,7 +501,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.simulate!",
     "category": "method",
-    "text": "simulate!(simulation; parallel=true)\nsimulate!(simulation, n_steps; parallel=true)\nsimulate!(simulation, simulator, n_steps; parallel=true)\n\nRun a simulation according to the rules of the given simulator.\n\n\n\n\n\n"
+    "text": "simulate!(simulation; parallel=true)\nsimulate!(simulation, n_steps; parallel=true)\nsimulate!(simulation, simulator, n_steps; parallel=true)\n\nRun a simulation according to the rules of the given simulator. Custom simulators should implement this function.\n\n\n\n\n\n"
 },
 
 {
@@ -501,7 +509,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.temperature",
     "category": "method",
-    "text": "Calculate the temperature of a system from the kinetic energy of the atoms.\n\n\n\n\n\n"
+    "text": "temperature(simulation)\n\nCalculate the temperature of a system from the kinetic energy of the atoms.\n\n\n\n\n\n"
 },
 
 {
@@ -509,7 +517,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.vector",
     "category": "method",
-    "text": "Displacement between two coordinate values, accounting for the bounding box.\n\n\n\n\n\n"
+    "text": "vector(c1, c2, box_size)\n\nDisplacement between two coordinate values, accounting for the bounding box. The minimum image convention is used, so the displacement is to the closest version of the coordinates accounting for the periodic boundaries.\n\n\n\n\n\n"
 },
 
 {
@@ -517,7 +525,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.vector1D",
     "category": "method",
-    "text": "Displacement between two 1D coordinate values, accounting for the bounding box.\n\n\n\n\n\n"
+    "text": "vector1D(c1, c2, box_size)\n\nDisplacement between two 1D coordinate values, accounting for the bounding box. The minimum image convention is used, so the displacement is to the closest version of the coordinate accounting for the periodic boundaries.\n\n\n\n\n\n"
 },
 
 {
@@ -525,7 +533,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.velocity",
     "category": "method",
-    "text": "Generate a random velocity from the Maxwell-Boltzmann distribution.\n\n\n\n\n\n"
+    "text": "velocity(mass, temperature; dims=3)\nvelocity(T, mass, temperature; dims=3)\n\nGenerate a random velocity from the Maxwell-Boltzmann distribution.\n\n\n\n\n\n"
 },
 
 {
@@ -533,7 +541,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.visualize",
     "category": "function",
-    "text": "Visualize a simulation.\n\n\n\n\n\n"
+    "text": "visualize(coord_logger, box_size, out_filepath; <keyword arguments>)\n\nVisualize a simulation as an animation. This function is only available when Makie is imported. It can take a while to run, depending on the length and size of the simulation.\n\nArguments\n\nconnections=Tuple{Int, Int}[]: pairs of atoms indices to link with bonds.\nconnection_frames: the frames in which bonds are shown. Is a list of the   same length as the number of frames, where each item is a list of bools of   the same length as connections. Defaults to always true.\ntrails::Integer=0: the number of preceding frames to show as transparent   trails.\nframerate::Integer=30: the frame rate of the animation.\ncolor=:purple: the color of the atoms. Can be a single color or a list of   colors of the same length as the number of atoms.\nconnection_color=:orange: the color of the bonds. Can be a single color or a   list of colors of the same length as connections.\nmarkersize=0.1: the size of the atom markers.\nlinewidth=2.0: the width of the bond lines.\ntransparency=true: whether transparency is active on the plot.\nkwargs...: other keyword arguments are passed to the plotting function.\n\n\n\n\n\n"
 },
 
 {
