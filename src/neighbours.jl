@@ -5,9 +5,21 @@ export
     find_neighbours,
     DistanceNeighbourFinder
 
-"Placeholder neighbour finder that returns no neighbours."
+"""
+    NoNeighbourFinder()
+
+Placeholder neighbour finder that returns no neighbours.
+When using this neighbour finder, ensure that `nl_only` for the interactions is
+set to `false`.
+"""
 struct NoNeighbourFinder <: NeighbourFinder end
 
+"""
+    find_neighbours(simulation, current_neighbours, neighbour_finder, step_n; parallel=true)
+
+Obtain a list of close atoms in a system.
+Custom neighbour finders should implement this function.
+"""
 function find_neighbours(s::Simulation,
                             current_neighbours,
                             ::NoNeighbourFinder,
@@ -16,7 +28,12 @@ function find_neighbours(s::Simulation,
     return Tuple{Int, Int}[]
 end
 
-"Find close atoms by distance."
+"""
+    DistanceNeighbourFinder(nb_matrix, n_steps, dist_cutoff)
+    DistanceNeighbourFinder(nb_matrix, n_steps)
+
+Find close atoms by distance.
+"""
 struct DistanceNeighbourFinder{T} <: NeighbourFinder
     nb_matrix::BitArray{2}
     n_steps::Int
@@ -28,7 +45,6 @@ function DistanceNeighbourFinder(nb_matrix::BitArray{2},
     return DistanceNeighbourFinder(nb_matrix, n_steps, 1.2)
 end
 
-"Update list of close atoms between which non-bonded forces are calculated."
 function find_neighbours(s::Simulation,
                             current_neighbours,
                             nf::DistanceNeighbourFinder,

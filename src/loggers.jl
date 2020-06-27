@@ -4,10 +4,14 @@ export
     TemperatureLogger,
     log_property!,
     CoordinateLogger,
-    StructureWriter,
-    append_model
+    StructureWriter
 
-"Log the temperature throughout a simulation."
+"""
+    TemperatureLogger(n_steps)
+    TemperatureLogger(T, n_steps)
+
+Log the temperature throughout a simulation.
+"""
 struct TemperatureLogger{T} <: Logger
     n_steps::Int
     temperatures::Vector{T}
@@ -17,14 +21,23 @@ TemperatureLogger(T::Type, n_steps::Integer) = TemperatureLogger(n_steps, T[])
 
 TemperatureLogger(n_steps::Integer) = TemperatureLogger(Float64, n_steps)
 
-"Log a property thoughout a simulation."
+"""
+    log_property!(logger, simulation, step_n)
+
+Log a property thoughout a simulation.
+Custom loggers should implement this function.
+"""
 function log_property!(logger::TemperatureLogger, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
         push!(logger.temperatures, temperature(s))
     end
 end
 
-"Log the coordinates throughout a simulation."
+"""
+    CoordinateLogger(n_steps; dims=3)
+
+Log the coordinates throughout a simulation.
+"""
 struct CoordinateLogger{T} <: Logger
     n_steps::Int
     coords::Vector{Vector{T}}
@@ -41,7 +54,11 @@ function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)
     end
 end
 
-"Write 3D output structures to the PDB file format throughout a simulation."
+"""
+    StructureWriter(n_steps, filepath)
+
+Write 3D output structures to the PDB file format throughout a simulation.
+"""
 mutable struct StructureWriter <: Logger
     n_steps::Int
     filepath::String

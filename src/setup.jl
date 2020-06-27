@@ -36,7 +36,15 @@ struct Torsiontype{T}
     f4::T
 end
 
-"Read a Gromacs topology flat file, i.e. all includes collapsed into one file."
+"""
+    readinputs(topology_file, coordinate_file)
+    readinputs(T, topology_file, coordinate_file)
+
+Read a Gromacs topology flat file, i.e. all includes collapsed into one file,
+and a Gromacs coordinate file.
+Returns the atoms, specific interaction lists, general interaction lists,
+non-bonded matrix, coordinates and box size.
+"""
 function readinputs(T::Type,
                     top_file::AbstractString,
                     coord_file::AbstractString)

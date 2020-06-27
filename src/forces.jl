@@ -18,30 +18,50 @@ const sqdist_cutoff_nb = 1.0 ^ 2
 "The constant for Coulomb interaction, 1/(4*π*ϵ0*ϵr)."
 const coulomb_const = 138.935458 / 70.0 # Treat ϵr as 70 for now
 
-"The Lennard-Jones 6-12 interaction."
+"""
+    LennardJones(nl_only)
+
+The Lennard-Jones 6-12 interaction.
+"""
 struct LennardJones <: GeneralInteraction
     nl_only::Bool
 end
 
 LennardJones() = LennardJones(false)
 
-"The soft-sphere potential."
+"""
+    SoftSphere(nl_only)
+
+The soft-sphere potential.
+"""
 struct SoftSphere <: GeneralInteraction
     nl_only::Bool
 end
 
-"The Coulomb electrostatic interaction."
+"""
+    Coulomb(nl_only)
+
+The Coulomb electrostatic interaction.
+"""
 struct Coulomb <: GeneralInteraction
     nl_only::Bool
 end
 
-"The gravitational interaction."
+"""
+    Gravity(nl_only, G)
+
+The gravitational interaction.
+"""
 struct Gravity{T} <: GeneralInteraction
     nl_only::Bool
     G::T
 end
 
-"A harmonic bond between two atoms."
+"""
+    HarmonicBond(i, j, b0, kb)
+
+A harmonic bond between two atoms.
+"""
 struct HarmonicBond{T} <: SpecificInteraction
     i::Int
     j::Int
@@ -49,7 +69,11 @@ struct HarmonicBond{T} <: SpecificInteraction
     kb::T
 end
 
-"A bond angle between three atoms."
+"""
+    HarmonicAngle(i, j, k, th0, cth)
+
+A bond angle between three atoms.
+"""
 struct HarmonicAngle{T} <: SpecificInteraction
     i::Int
     j::Int
@@ -58,7 +82,11 @@ struct HarmonicAngle{T} <: SpecificInteraction
     cth::T
 end
 
-"A dihedral torsion angle between four atoms."
+"""
+    Torsion(i, j, k, l, f1, f2, f3, f4)
+
+A dihedral torsion angle between four atoms.
+"""
 struct Torsion{T} <: SpecificInteraction
     i::Int
     j::Int
@@ -70,7 +98,12 @@ struct Torsion{T} <: SpecificInteraction
     f4::T
 end
 
-"Update the force for an atom pair in response to a given interation type."
+"""
+    force!(forces, interaction, simulation, atom_i, atom_j)
+
+Update the force for an atom pair in response to a given interation type.
+Custom interaction types should implement this function.
+"""
 function force! end
 
 @fastmath @inbounds function force!(forces,

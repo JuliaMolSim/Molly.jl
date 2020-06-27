@@ -14,22 +14,40 @@ export
 "An interaction between atoms that contributes to forces on the atoms."
 abstract type Interaction end
 
-"A general interaction that will apply to all atom pairs."
+"""
+A general interaction that will apply to all atom pairs.
+Custom general interactions should sub-type this type.
+"""
 abstract type GeneralInteraction <: Interaction end
 
-"A specific interaction between sets of specific atoms, e.g. a bond angle."
+"""
+A specific interaction between sets of specific atoms, e.g. a bond angle.
+Custom specific interactions should sub-type this type.
+"""
 abstract type SpecificInteraction <: Interaction end
 
-"A type of simulation to run, e.g. leap-frog integration or energy minimisation."
+"""
+A type of simulation to run, e.g. leap-frog integration or energy minimisation.
+Custom simulators should sub-type this type.
+"""
 abstract type Simulator end
 
-"A way to keep the temperature of a simulation constant."
+"""
+A way to keep the temperature of a simulation constant.
+Custom thermostats should sub-type this type.
+"""
 abstract type Thermostat end
 
-"A way to find near atoms to save on simulation time."
+"""
+A way to find near atoms to save on simulation time.
+Custom neighbour finders should sub-type this type.
+"""
 abstract type NeighbourFinder end
 
-"A way to record a property, e.g. the temperature, throughout a simulation."
+"""
+A way to record a property, e.g. the temperature, throughout a simulation.
+Custom loggers should sub-type this type.
+"""
 abstract type Logger end
 
 """
@@ -85,13 +103,14 @@ default values.
 
 # Arguments
 - `simulator::Simulator`: the type of simulation to run.
-- `atoms::Vector{A}`: the atoms in the simulation. Can be of any type.
-- `specific_inter_lists::SI=()`:
-    the specific interactions in the simulation, i.e. interactions between
-    specific atoms such as bonds or angles.
-- `general_inters::GI=()`: the general
-    interactions in the simulation, i.e. interactions between all or most atoms
-    such as electrostatics.
+- `atoms::Vector{A}`: the atoms, or atom equivalents, in the simulation. Can be
+    of any type.
+- `specific_inter_lists::SI=()`: the specific interactions in the simulation,
+    i.e. interactions between specific atoms such as bonds or angles. Typically
+    a `Tuple`.
+- `general_inters::GI=()`: the general interactions in the simulation, i.e.
+    interactions between all or most atoms such as electrostatics. Typically a
+    `Tuple`.
 - `coords::C`: the coordinates of the atoms in the simulation. Typically a
     `Vector` of `SVector`s of any dimension and type `T`, where `T` is `Float64`
     or `Float32`.

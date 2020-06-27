@@ -9,7 +9,8 @@ export
 """
     accelerations(simulation, neighbours; parallel=true)
 
-Calculate accelerations of all atoms using the bonded and non-bonded forces.
+Calculate the accelerations of all atoms using the general and specific
+interactions and Newton's second law.
 """
 function accelerations(s::Simulation, neighbours; parallel::Bool=true)
     n_atoms = length(s.coords)
@@ -79,6 +80,7 @@ struct VelocityVerlet <: Simulator end
     simulate!(simulation, simulator, n_steps; parallel=true)
 
 Run a simulation according to the rules of the given simulator.
+Custom simulators should implement this function.
 """
 function simulate!(s::Simulation,
                     ::VelocityVerlet,
