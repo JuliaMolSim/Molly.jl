@@ -54,7 +54,7 @@ It can take a while to run, depending on the length and size of the simulation.
 # Arguments
 - `connections=Tuple{Int, Int}[]`: pairs of atoms indices to link with bonds.
 - `connection_frames`: the frames in which bonds are shown. Is a list of the
-    same length as the number of frames, where each item is a list of `bool`s of
+    same length as the number of frames, where each item is a list of `Bool`s of
     the same length as `connections`. Defaults to always `true`.
 - `trails::Integer=0`: the number of preceding frames to show as transparent
     trails.

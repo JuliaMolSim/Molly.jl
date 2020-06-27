@@ -8,7 +8,11 @@ export
     Torsiontype,
     readinputs
 
-"Gromacs atom type."
+"""
+    Atomtype(mass, charge, σ, ϵ)
+
+Gromacs atom type.
+"""
 struct Atomtype{T}
     mass::T
     charge::T
@@ -16,19 +20,31 @@ struct Atomtype{T}
     ϵ::T
 end
 
-"Gromacs bond type."
+"""
+    Bondtype(b0, kb)
+
+Gromacs bond type.
+"""
 struct Bondtype{T}
     b0::T
     kb::T
 end
 
-"Gromacs angle type."
+"""
+    Angletype(th0, cth)
+
+Gromacs angle type.
+"""
 struct Angletype{T}
     th0::T
     cth::T
 end
 
-"Gromacs torsion type."
+"""
+    Torsiontype(f1, f2, f3, f4)
+
+Gromacs torsion type.
+"""
 struct Torsiontype{T}
     f1::T
     f2::T
