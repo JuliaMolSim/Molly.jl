@@ -21,6 +21,12 @@ TemperatureLogger(T::Type, n_steps::Integer) = TemperatureLogger(n_steps, T[])
 
 TemperatureLogger(n_steps::Integer) = TemperatureLogger(DefaultFloat, n_steps)
 
+function Base.show(io::IO, tl::TemperatureLogger)
+    print(io, "TemperatureLogger{", eltype(tl.temperatures), "} with n_steps ",
+                tl.n_steps, ", ", length(tl.temperatures),
+                " temperatures recorded")
+end
+
 """
     log_property!(logger, simulation, step_n)
 
@@ -52,6 +58,12 @@ function CoordinateLogger(n_steps::Integer; dims::Integer=3)
     return CoordinateLogger(DefaultFloat, n_steps, dims=dims)
 end
 
+function Base.show(io::IO, cl::CoordinateLogger)
+    print(io, "CoordinateLogger{", eltype(eltype(cl.coords)), "} with n_steps ",
+                cl.n_steps, ", ", length(cl.coords), " frames recorded for ",
+                length(first(cl.coords)), " atoms")
+end
+
 function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
         push!(logger.coords, deepcopy(s.coords))
@@ -71,6 +83,11 @@ end
 
 StructureWriter(n_steps::Integer, filepath::AbstractString) = StructureWriter(
         n_steps, filepath, 1)
+
+function Base.show(io::IO, sw::StructureWriter)
+    print(io, "StructureWriter with n_steps ", sw.n_steps, ", filepath \"",
+                sw.filepath, "\", ", sw.structure_n, " frames written")
+end
 
 function log_property!(logger::StructureWriter, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0

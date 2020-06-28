@@ -96,6 +96,12 @@ function Atom(;
     return Atom{typeof(charge)}(attype, name, resnum, resname, charge, mass, σ, ϵ)
 end
 
+function Base.show(io::IO, a::Atom)
+    print(io, "Atom{", typeof(a.charge), "} with name \"", a.name,
+                "\", type \"", a.attype, "\", charge=", a.charge, ", mass=",
+                a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
+end
+
 """
     Simulation(; <keyword arguments>)
 
@@ -174,4 +180,10 @@ function Simulation(;
                 simulator, atoms, specific_inter_lists, general_inters, coords,
                 velocities, temperature, box_size, neighbour_finder, thermostat,
                 loggers, timestep, n_steps, n_steps_made)
+end
+
+function Base.show(io::IO, s::Simulation)
+    print(io, "Simulation with ", length(s.coords), " atoms, ",
+                typeof(s.simulator), " simulator, ", s.timestep, " timestep, ",
+                s.n_steps, " steps, ", first(s.n_steps_made), " steps made")
 end
