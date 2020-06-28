@@ -30,75 +30,6 @@ end
 LennardJones() = LennardJones(false)
 
 """
-    SoftSphere(nl_only)
-
-The soft-sphere potential.
-"""
-struct SoftSphere <: GeneralInteraction
-    nl_only::Bool
-end
-
-"""
-    Coulomb(nl_only)
-
-The Coulomb electrostatic interaction.
-"""
-struct Coulomb <: GeneralInteraction
-    nl_only::Bool
-end
-
-"""
-    Gravity(nl_only, G)
-
-The gravitational interaction.
-"""
-struct Gravity{T} <: GeneralInteraction
-    nl_only::Bool
-    G::T
-end
-
-"""
-    HarmonicBond(i, j, b0, kb)
-
-A harmonic bond between two atoms.
-"""
-struct HarmonicBond{T} <: SpecificInteraction
-    i::Int
-    j::Int
-    b0::T
-    kb::T
-end
-
-"""
-    HarmonicAngle(i, j, k, th0, cth)
-
-A bond angle between three atoms.
-"""
-struct HarmonicAngle{T} <: SpecificInteraction
-    i::Int
-    j::Int
-    k::Int
-    th0::T
-    cth::T
-end
-
-"""
-    Torsion(i, j, k, l, f1, f2, f3, f4)
-
-A dihedral torsion angle between four atoms.
-"""
-struct Torsion{T} <: SpecificInteraction
-    i::Int
-    j::Int
-    k::Int
-    l::Int
-    f1::T
-    f2::T
-    f3::T
-    f4::T
-end
-
-"""
     force!(forces, interaction, simulation, atom_i, atom_j)
 
 Update the force for an atom pair in response to a given interation type.
@@ -129,6 +60,15 @@ function force! end
     return nothing
 end
 
+"""
+    SoftSphere(nl_only)
+
+The soft-sphere potential.
+"""
+struct SoftSphere <: GeneralInteraction
+    nl_only::Bool
+end
+
 @fastmath @inbounds function force!(forces,
                                     inter::SoftSphere,
                                     s::Simulation,
@@ -152,6 +92,15 @@ end
     return nothing
 end
 
+"""
+    Coulomb(nl_only)
+
+The Coulomb electrostatic interaction.
+"""
+struct Coulomb <: GeneralInteraction
+    nl_only::Bool
+end
+
 @fastmath @inbounds function force!(forces,
                                     inter::Coulomb,
                                     s::Simulation,
@@ -169,6 +118,16 @@ end
     return nothing
 end
 
+"""
+    Gravity(nl_only, G)
+
+The gravitational interaction.
+"""
+struct Gravity{T} <: GeneralInteraction
+    nl_only::Bool
+    G::T
+end
+
 function force!(forces,
                 inter::Gravity,
                 s::Simulation,
@@ -183,6 +142,18 @@ function force!(forces,
     return nothing
 end
 
+"""
+    HarmonicBond(i, j, b0, kb)
+
+A harmonic bond between two atoms.
+"""
+struct HarmonicBond{T} <: SpecificInteraction
+    i::Int
+    j::Int
+    b0::T
+    kb::T
+end
+
 function force!(forces,
                 b::HarmonicBond,
                 s::Simulation)
@@ -192,6 +163,19 @@ function force!(forces,
     forces[b.i] += f
     forces[b.j] -= f
     return nothing
+end
+
+"""
+    HarmonicAngle(i, j, k, th0, cth)
+
+A bond angle between three atoms.
+"""
+struct HarmonicAngle{T} <: SpecificInteraction
+    i::Int
+    j::Int
+    k::Int
+    th0::T
+    cth::T
 end
 
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
@@ -212,6 +196,22 @@ function force!(forces,
     forces[a.j] += fb
     forces[a.k] += fc
     return nothing
+end
+
+"""
+    Torsion(i, j, k, l, f1, f2, f3, f4)
+
+A dihedral torsion angle between four atoms.
+"""
+struct Torsion{T} <: SpecificInteraction
+    i::Int
+    j::Int
+    k::Int
+    l::Int
+    f1::T
+    f2::T
+    f3::T
+    f4::T
 end
 
 function force!(forces,
