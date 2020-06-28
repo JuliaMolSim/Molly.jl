@@ -1,6 +1,20 @@
 using Molly
 using Test
 
+@testset "Spatial" begin
+    @test vector1D(4.0, 6.0, 10.0) ==  2.0
+    @test vector1D(1.0, 9.0, 10.0) == -2.0
+    @test vector1D(6.0, 4.0, 10.0) == -2.0
+    @test vector1D(9.0, 1.0, 10.0) ==  2.0
+
+    @test vector(SVector(4.0, 1.0, 6.0),
+                    SVector(6.0, 9.0, 4.0), 10.0) == SVector(2.0, -2.0, -2.0)
+
+    @test adjust_bounds(8.0 , 10.0) == 8.0
+    @test adjust_bounds(12.0, 10.0) == 2.0
+    @test adjust_bounds(-2.0, 10.0) == 8.0
+end
+
 temperature = 298
 timestep = 0.002
 n_steps = 1_000
@@ -25,6 +39,8 @@ box_size = 2.0
         timestep=timestep,
         n_steps=n_steps
     )
+
+    show(devnull, s)
 
     @time simulate!(s, parallel=false)
 end
@@ -51,7 +67,9 @@ end
 
     @time simulate!(s, parallel=false)
 
-    final_coords = s.loggers["coords"].coords[end]
+    final_coords = last(s.loggers["coords"].coords)
+    @test minimum(minimum.(final_coords)) > 0.0
+    @test maximum(maximum.(final_coords)) < box_size
     displacements(final_coords, box_size)
     distances(final_coords, box_size)
     rdf(final_coords, box_size)
@@ -116,6 +134,15 @@ end
     atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
                 normpath(@__DIR__, "..", "data", "5XER", "gmx_top_ff.top"),
                 normpath(@__DIR__, "..", "data", "5XER", "gmx_coords.gro"))
+
+    true_n_atoms = 5191
+    @test length(atoms) == true_n_atoms
+    @test length(coords) == true_n_atoms
+    @test size(nb_matrix) == (true_n_atoms, true_n_atoms)
+    @test length(specific_inter_lists) == 3
+    @test length(general_inters) == 2
+    @test box_size == 3.7146
+    show(devnull, first(atoms))
 
     s = Simulation(
         simulator=VelocityVerlet(),

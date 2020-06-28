@@ -86,7 +86,7 @@ StructureWriter(n_steps::Integer, filepath::AbstractString) = StructureWriter(
 
 function Base.show(io::IO, sw::StructureWriter)
     print(io, "StructureWriter with n_steps ", sw.n_steps, ", filepath \"",
-                sw.filepath, "\", ", sw.structure_n, " frames written")
+                sw.filepath, "\", ", sw.structure_n - 1, " frames written")
 end
 
 function log_property!(logger::StructureWriter, s::Simulation, step_n::Integer)
