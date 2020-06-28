@@ -62,7 +62,7 @@ s = Simulation(
     coords=coords,
     velocities=velocities,
     box_size=1.0f0,
-    loggers=Dict(&quot;coords&quot; =&gt; CoordinateLogger(10, dims=2)),
+    loggers=Dict(&quot;coords&quot; =&gt; CoordinateLogger(Float32, 10, dims=2)),
     timestep=0.002f0,
     n_steps=2000
 )
@@ -250,11 +250,32 @@ end</code></pre><p>Then, define the function that carries out the simulation. Th
         s.n_steps_made[1] += 1
     end
     return s
-end</code></pre><h2><a class="nav-anchor" id="Thermostats-1" href="#Thermostats-1">Thermostats</a></h2><p>Thermostats control the temperature over a simulation. The available thermostats are:</p><ul><li><a href="api.html#Molly.AndersenThermostat"><code>AndersenThermostat</code></a>.</li></ul><h2><a class="nav-anchor" id="Neighbour-finders-1" href="#Neighbour-finders-1">Neighbour finders</a></h2><p>Neighbour finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distance atoms to be omitted. The available neighbour finders are:</p><ul><li><a href="api.html#Molly.DistanceNeighbourFinder"><code>DistanceNeighbourFinder</code></a>.</li></ul><h2><a class="nav-anchor" id="Loggers-1" href="#Loggers-1">Loggers</a></h2><p>Loggers record properties of the simulation to allow monitoring and analysis. The available loggers are:</p><ul><li><a href="api.html#Molly.TemperatureLogger"><code>TemperatureLogger</code></a>.</li><li><a href="api.html#Molly.CoordinateLogger"><code>CoordinateLogger</code></a>.</li><li><a href="api.html#Molly.StructureWriter"><code>StructureWriter</code></a>.</li></ul><p>To define your own <a href="api.html#Molly.Logger"><code>Logger</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyLogger &lt;: Logger
+end</code></pre><h2><a class="nav-anchor" id="Thermostats-1" href="#Thermostats-1">Thermostats</a></h2><p>Thermostats control the temperature over a simulation. The available thermostats are:</p><ul><li><a href="api.html#Molly.AndersenThermostat"><code>AndersenThermostat</code></a>.</li></ul><p>To define your own <a href="@ref"><code>Thermostats</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyThermostat &lt;: Thermostat
+    # Any properties, e.g. a coupling constant
+end</code></pre><p>Then, define the function that implements the thermostat every timestep:</p><pre><code class="language-julia">function apply_thermostat!(s::Simulation, thermostat::MyThermostat)
+    # Do something to the simulation, e.g. scale the velocities
+    return s
+end</code></pre><p>The functions <a href="api.html#Molly.velocity-Tuple{Type,Real,Real}"><code>velocity</code></a>, <a href="api.html#Molly.maxwellboltzmann-Tuple{Type,Real,Real}"><code>maxwellboltzmann</code></a> and <a href="api.html#Molly.temperature-Tuple{Simulation}"><code>temperature</code></a> may be useful here. To use your custom thermostat, give it as the <code>thermostat</code> argument when creating the <a href="api.html#Molly.Simulation"><code>Simulation</code></a>.</p><h2><a class="nav-anchor" id="Neighbour-finders-1" href="#Neighbour-finders-1">Neighbour finders</a></h2><p>Neighbour finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted. The available neighbour finders are:</p><ul><li><a href="api.html#Molly.DistanceNeighbourFinder"><code>DistanceNeighbourFinder</code></a>.</li></ul><p>To define your own <a href="api.html#Molly.NeighbourFinder"><code>NeighbourFinder</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyNeighbourFinder &lt;: NeighbourFinder
+    nb_matrix::BitArray{2}
+    n_steps::Int
+    # Any other properties, e.g. a distance cutoff
+end</code></pre><p>An example of useful properties is used here: a matrix indicating atom pairs eligible for non-bonded interactions, and a value determining how many timesteps occur between each evaluation of the neighbour finder. Then, define the neighbour finding function that is called every step by the simulator:</p><pre><code class="language-julia">function find_neighbours(s::Simulation,
+                            current_neighbours,
+                            nf::MyNeighbourFinder,
+                            step_n::Integer;
+                            parallel::Bool=true)
+    if step_n % nf.n_steps == 0
+        neighbours = Tuple{Int, Int}[]
+        # Add to neighbours
+        return neighbours
+    else
+        return current_neighbours
+    end
+end</code></pre><h2><a class="nav-anchor" id="Loggers-1" href="#Loggers-1">Loggers</a></h2><p>Loggers record properties of the simulation to allow monitoring and analysis. The available loggers are:</p><ul><li><a href="api.html#Molly.TemperatureLogger"><code>TemperatureLogger</code></a>.</li><li><a href="api.html#Molly.CoordinateLogger"><code>CoordinateLogger</code></a>.</li><li><a href="api.html#Molly.StructureWriter"><code>StructureWriter</code></a>.</li></ul><p>To define your own <a href="api.html#Molly.Logger"><code>Logger</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyLogger &lt;: Logger
     n_steps::Int
     # Any other properties, e.g. an Array to record values during the trajectory
 end</code></pre><p>Then, define the logging function that is called every step by the simulator:</p><pre><code class="language-julia">function Molly.log_property!(logger::MyLogger, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end
-end</code></pre><p>The use of <code>n_steps</code> is optional and is an example of how to record a property every n steps through the simulation. To use your custom logger, add it to the dictionary of loggers:</p><pre><code class="language-julia">loggers = Dict(&quot;mylogger&quot; =&gt; MyLogger(10))</code></pre><h2><a class="nav-anchor" id="Analysis-1" href="#Analysis-1">Analysis</a></h2><p>Molly contains some tools for analysing the results of simulations. The available analysis functions are:</p><ul><li><a href="api.html#Molly.visualize"><code>visualize</code></a>.</li><li><a href="api.html#Molly.rdf-Tuple{Any,Real}"><code>rdf</code></a>.</li><li><a href="api.html#Molly.distances-Tuple{Any,Real}"><code>distances</code></a>.</li><li><a href="api.html#Molly.displacements-Tuple{Any,Real}"><code>displacements</code></a>.</li></ul><footer><hr/><a class="previous" href="index.html"><span class="direction">Previous</span><span class="title">Home</span></a><a class="next" href="examples.html"><span class="direction">Next</span><span class="title">Examples</span></a></footer></article></body></html>
+end</code></pre><p>The use of <code>n_steps</code> is optional and is an example of how to record a property every n steps through the simulation. To use your custom logger, add it to the dictionary of loggers:</p><pre><code class="language-julia">loggers = Dict(&quot;mylogger&quot; =&gt; MyLogger(10))</code></pre><h2><a class="nav-anchor" id="Analysis-1" href="#Analysis-1">Analysis</a></h2><p>Molly contains some tools for analysing the results of simulations. The available analysis functions are:</p><ul><li><a href="api.html#Molly.visualize"><code>visualize</code></a>.</li><li><a href="api.html#Molly.rdf-Tuple{Any,Real}"><code>rdf</code></a>.</li><li><a href="api.html#Molly.distances-Tuple{Any,Real}"><code>distances</code></a>.</li><li><a href="api.html#Molly.displacements-Tuple{Any,Real}"><code>displacements</code></a>.</li></ul><p>Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.</p><footer><hr/><a class="previous" href="index.html"><span class="direction">Previous</span><span class="title">Home</span></a><a class="next" href="examples.html"><span class="direction">Next</span><span class="title">Examples</span></a></footer></article></body></html>
