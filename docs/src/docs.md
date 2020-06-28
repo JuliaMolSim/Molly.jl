@@ -457,9 +457,35 @@ To use your custom thermostat, give it as the `thermostat` argument when creatin
 
 ## Neighbour finders
 
-Neighbour finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distance atoms to be omitted.
+Neighbour finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
 The available neighbour finders are:
 - [`DistanceNeighbourFinder`](@ref).
+
+To define your own [`NeighbourFinder`](@ref), first define the `struct`:
+```julia
+struct MyNeighbourFinder <: NeighbourFinder
+    nb_matrix::BitArray{2}
+    n_steps::Int
+    # Any other properties, e.g. a distance cutoff
+end
+```
+An example of useful properties is used here: a matrix indicating atom pairs eligible for non-bonded interactions, and a value determining how many timesteps occur between each evaluation of the neighbour finder.
+Then, define the neighbour finding function that is called every step by the simulator:
+```julia
+function find_neighbours(s::Simulation,
+                            current_neighbours,
+                            nf::MyNeighbourFinder,
+                            step_n::Integer;
+                            parallel::Bool=true)
+    if step_n % nf.n_steps == 0
+        neighbours = Tuple{Int, Int}[]
+        # Add to neighbours
+        return neighbours
+    else
+        return current_neighbours
+    end
+end
+```
 
 ## Loggers
 
@@ -498,3 +524,5 @@ The available analysis functions are:
 - [`rdf`](@ref).
 - [`distances`](@ref).
 - [`displacements`](@ref).
+
+Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.
