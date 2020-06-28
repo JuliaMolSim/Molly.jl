@@ -189,7 +189,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.Angletype",
     "category": "type",
-    "text": "Gromacs angle type.\n\n\n\n\n\n"
+    "text": "Angletype(th0, cth)\n\nGromacs angle type.\n\n\n\n\n\n"
 },
 
 {
@@ -205,7 +205,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.Atomtype",
     "category": "type",
-    "text": "Gromacs atom type.\n\n\n\n\n\n"
+    "text": "Atomtype(mass, charge, σ, ϵ)\n\nGromacs atom type.\n\n\n\n\n\n"
 },
 
 {
@@ -213,7 +213,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.Bondtype",
     "category": "type",
-    "text": "Gromacs bond type.\n\n\n\n\n\n"
+    "text": "Bondtype(b0, kb)\n\nGromacs bond type.\n\n\n\n\n\n"
 },
 
 {
@@ -389,7 +389,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.Torsiontype",
     "category": "type",
-    "text": "Gromacs torsion type.\n\n\n\n\n\n"
+    "text": "Torsiontype(f1, f2, f3, f4)\n\nGromacs torsion type.\n\n\n\n\n\n"
 },
 
 {
@@ -541,7 +541,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.visualize",
     "category": "function",
-    "text": "visualize(coord_logger, box_size, out_filepath; <keyword arguments>)\n\nVisualize a simulation as an animation. This function is only available when Makie is imported. It can take a while to run, depending on the length and size of the simulation.\n\nArguments\n\nconnections=Tuple{Int, Int}[]: pairs of atoms indices to link with bonds.\nconnection_frames: the frames in which bonds are shown. Is a list of the   same length as the number of frames, where each item is a list of bools of   the same length as connections. Defaults to always true.\ntrails::Integer=0: the number of preceding frames to show as transparent   trails.\nframerate::Integer=30: the frame rate of the animation.\ncolor=:purple: the color of the atoms. Can be a single color or a list of   colors of the same length as the number of atoms.\nconnection_color=:orange: the color of the bonds. Can be a single color or a   list of colors of the same length as connections.\nmarkersize=0.1: the size of the atom markers.\nlinewidth=2.0: the width of the bond lines.\ntransparency=true: whether transparency is active on the plot.\nkwargs...: other keyword arguments are passed to the plotting function.\n\n\n\n\n\n"
+    "text": "visualize(coord_logger, box_size, out_filepath; <keyword arguments>)\n\nVisualize a simulation as an animation. This function is only available when Makie is imported. It can take a while to run, depending on the length and size of the simulation.\n\nArguments\n\nconnections=Tuple{Int, Int}[]: pairs of atoms indices to link with bonds.\nconnection_frames: the frames in which bonds are shown. Is a list of the   same length as the number of frames, where each item is a list of Bools of   the same length as connections. Defaults to always true.\ntrails::Integer=0: the number of preceding frames to show as transparent   trails.\nframerate::Integer=30: the frame rate of the animation.\ncolor=:purple: the color of the atoms. Can be a single color or a list of   colors of the same length as the number of atoms.\nconnection_color=:orange: the color of the bonds. Can be a single color or a   list of colors of the same length as connections.\nmarkersize=0.1: the size of the atom markers.\nlinewidth=2.0: the width of the bond lines.\ntransparency=true: whether transparency is active on the plot.\nkwargs...: other keyword arguments are passed to the plotting function.\n\n\n\n\n\n"
 },
 
 {
