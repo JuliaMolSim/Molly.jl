@@ -19,7 +19,7 @@ end
 
 TemperatureLogger(T::Type, n_steps::Integer) = TemperatureLogger(n_steps, T[])
 
-TemperatureLogger(n_steps::Integer) = TemperatureLogger(Float64, n_steps)
+TemperatureLogger(n_steps::Integer) = TemperatureLogger(DefaultFloat, n_steps)
 
 """
     log_property!(logger, simulation, step_n)
@@ -45,7 +45,7 @@ end
 
 function CoordinateLogger(n_steps::Integer; dims::Integer=3)
     return CoordinateLogger(n_steps,
-                            Array{SArray{Tuple{dims}, Float64, 1, dims}, 1}[])
+                            Array{SArray{Tuple{dims}, DefaultFloat, 1, dims}, 1}[])
 end
 
 function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)

@@ -11,6 +11,8 @@ export
     Atom,
     Simulation
 
+const DefaultFloat = Float64
+
 "An interaction between atoms that contributes to forces on the atoms."
 abstract type Interaction end
 
@@ -112,8 +114,8 @@ default values.
     interactions between all or most atoms such as electrostatics. Typically a
     `Tuple`.
 - `coords::C`: the coordinates of the atoms in the simulation. Typically a
-    `Vector` of `SVector`s of any dimension and type `T`, where `T` is `Float64`
-    or `Float32`.
+    `Vector` of `SVector`s of any dimension and type `T`, where `T` is an
+    `AbstractFloat` type.
 - `velocities::C`: the velocities of the atoms in the simulation, which should
     be the same type as the coordinates. The meaning of the velocities depends
     on the simulator used, e.g. for the `VelocityFreeVerlet` simulator they

@@ -56,7 +56,7 @@ function velocity(T::Type, mass::Real, temperature::Real; dims::Integer=3)
 end
 
 function velocity(mass::Real, temperature::Real; dims::Integer=3)
-    return velocity(Float64, mass, temperature, dims=dims)
+    return velocity(DefaultFloat, mass, temperature, dims=dims)
 end
 
 """
@@ -70,7 +70,7 @@ function maxwellboltzmann(T::Type, mass::Real, temperature::Real)
 end
 
 function maxwellboltzmann(mass::Real, temperature::Real)
-    return maxwellboltzmann(Float64, mass, temperature)
+    return maxwellboltzmann(DefaultFloat, mass, temperature)
 end
 
 """

@@ -246,5 +246,5 @@ function readinputs(T::Type,
 end
 
 function readinputs(top_file::AbstractString, coord_file::AbstractString)
-    return readinputs(Float64, top_file, coord_file)
+    return readinputs(DefaultFloat, top_file, coord_file)
 end
