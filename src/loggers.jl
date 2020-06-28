@@ -43,9 +43,13 @@ struct CoordinateLogger{T} <: Logger
     coords::Vector{Vector{T}}
 end
 
-function CoordinateLogger(n_steps::Integer; dims::Integer=3)
+function CoordinateLogger(T, n_steps::Integer; dims::Integer=3)
     return CoordinateLogger(n_steps,
-                            Array{SArray{Tuple{dims}, DefaultFloat, 1, dims}, 1}[])
+                            Array{SArray{Tuple{dims}, T, 1, dims}, 1}[])
+end
+
+function CoordinateLogger(n_steps::Integer; dims::Integer=3)
+    return CoordinateLogger(DefaultFloat, n_steps, dims=dims)
 end
 
 function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)

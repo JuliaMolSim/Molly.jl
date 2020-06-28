@@ -136,7 +136,7 @@ s = Simulation(
     coords=coords,
     velocities=velocities,
     box_size=1.0f0,
-    loggers=Dict("coords" => CoordinateLogger(10, dims=2)),
+    loggers=Dict("coords" => CoordinateLogger(Float32, 10, dims=2)),
     timestep=0.002f0,
     n_steps=2000
 )

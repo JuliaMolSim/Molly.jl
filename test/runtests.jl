@@ -155,7 +155,8 @@ end
         box_size=box_size,
         neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10, 1.2f0),
         thermostat=AndersenThermostat(10.0f0),
-        loggers=Dict("temp" => TemperatureLogger(10)),
+        loggers=Dict("temp" => TemperatureLogger(Float32, 10),
+                        "coords" => CoordinateLogger(Float32, 10)),
         timestep=timestep,
         n_steps=n_steps
     )
