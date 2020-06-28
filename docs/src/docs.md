@@ -439,6 +439,22 @@ Thermostats control the temperature over a simulation.
 The available thermostats are:
 - [`AndersenThermostat`](@ref).
 
+To define your own [`Thermostats`](@ref), first define the `struct`:
+```julia
+struct MyThermostat <: Thermostat
+    # Any properties, e.g. a coupling constant
+end
+```
+Then, define the function that implements the thermostat every timestep:
+```julia
+function apply_thermostat!(s::Simulation, thermostat::MyThermostat)
+    # Do something to the simulation, e.g. scale the velocities
+    return s
+end
+```
+The functions [`velocity`](@ref), [`maxwellboltzmann`](@ref) and [`temperature`](@ref) may be useful here.
+To use your custom thermostat, give it as the `thermostat` argument when creating the [`Simulation`](@ref).
+
 ## Neighbour finders
 
 Neighbour finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distance atoms to be omitted.
