@@ -6,16 +6,15 @@
 [![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://JuliaMolSim.github.io/Molly.jl/latest)
 
 Much of science can be explained by the movement and interaction of molecules.
-Molecular dynamics (MD) is a computational technique used to explore these phenomena, particularly for biological macromolecules.
-Molly.jl is a pure Julia package for MD and for molecular simulation more broadly.
+Molecular dynamics (MD) is a computational technique used to explore these phenomena, from noble gases to biological macromolecules.
+Molly.jl is a pure Julia package for MD, and for the simulation of physical systems more broadly.
 
 At the minute the package is a proof of concept for MD in Julia.
 **It is not production ready.**
 It can simulate a system of atoms with arbitrary interactions as defined by the user.
-It can also read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters.
-In theory it can do this for any regular protein, but in practice this is untested.
 Implemented features include:
-- Interface to allow definition of new forces, thermostats, loggers etc.
+- Interface to allow definition of new forces, simulators, thermostats, neighbour finders, loggers etc.
+- Read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested.
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential, gravitational potential, soft sphere potential.
 - Bonded interactions - covalent bonds, bond angles, torsion angles.
 - Andersen thermostat.
@@ -34,6 +33,7 @@ Features not yet implemented include:
 - Water models.
 - Energy minimisation.
 - Other temperature or pressure coupling methods.
+- Cell-based neighbour list.
 - Protein preparation - solvent box, add hydrogens etc.
 - Trajectory/topology file format readers/writers.
 - Quantum mechanical modelling.
@@ -51,7 +51,7 @@ add https://github.com/JuliaMolSim/Molly.jl
 
 ## Usage
 
-Some examples are given here, see [the documentation](https://JuliaMolSim.github.io/Molly.jl/latest) for more.
+Some examples are given here, see [the documentation](https://JuliaMolSim.github.io/Molly.jl/latest) for more on how to use the package.
 
 Simulation of an ideal gas:
 ```julia
