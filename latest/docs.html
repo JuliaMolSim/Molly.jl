@@ -6,14 +6,14 @@ mass = 10.0
 atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]</code></pre><p>Next, we&#39;ll need some starting coordinates and velocities.</p><pre><code class="language-julia">box_size = 2.0 # nm
 coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
 
-temperature = 100 # K
-velocities = [velocity(mass, temperature) for i in 1:n_atoms]</code></pre><p>We store the coordinates and velocities as <a href="https://github.com/JuliaArrays/StaticArrays.jl">static arrays</a> for performance. They can be of any number of dimensions and of any number type, e.g. <code>Float64</code> or <code>Float32</code>. Now we can define our general interactions, i.e. those between most or all atoms. Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard Jones type.</p><pre><code class="language-julia">general_inters = (LennardJones(),)</code></pre><p>Finally, we can define and run the simulation. We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.</p><pre><code class="language-julia">s = Simulation(
+temp = 100 # K
+velocities = [velocity(mass, temp) for i in 1:n_atoms]</code></pre><p>We store the coordinates and velocities as <a href="https://github.com/JuliaArrays/StaticArrays.jl">static arrays</a> for performance. They can be of any number of dimensions and of any number type, e.g. <code>Float64</code> or <code>Float32</code>. Now we can define our general interactions, i.e. those between most or all atoms. Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard Jones type.</p><pre><code class="language-julia">general_inters = (LennardJones(),)</code></pre><p>Finally, we can define and run the simulation. We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.</p><pre><code class="language-julia">s = Simulation(
     simulator=VelocityVerlet(), # Use velocity Verlet integration
     atoms=atoms,
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
-    temperature=temperature,
+    temperature=temp,
     box_size=box_size,
     thermostat=AndersenThermostat(1.0), # Coupling constant of 1.0
     loggers=Dict(&quot;temp&quot; =&gt; TemperatureLogger(10),
@@ -29,7 +29,7 @@ for i in 1:length(coords)
     push!(coords, coords[i] .+ [0.1, 0.0, 0.0])
 end
 
-velocities = [velocity(mass, temperature) for i in 1:n_atoms]</code></pre><p>Now we can use the built-in bond type to place a harmonic constraint between paired atoms. The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.</p><pre><code class="language-julia">bonds = [HarmonicBond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]
+velocities = [velocity(mass, temp) for i in 1:n_atoms]</code></pre><p>Now we can use the built-in bond type to place a harmonic constraint between paired atoms. The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.</p><pre><code class="language-julia">bonds = [HarmonicBond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]
 
 specific_inter_lists = (bonds,)</code></pre><p>This time, we are also going to use a neighbour list to speed up the Lennard Jones calculation. We can use the built-in distance neighbour finder. The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff in nm to be classed as a neighbour.</p><pre><code class="language-julia">neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.2)</code></pre><p>Now we can simulate as before.</p><pre><code class="language-julia">s = Simulation(
     simulator=VelocityVerlet(),
@@ -38,7 +38,7 @@ specific_inter_lists = (bonds,)</code></pre><p>This time, we are also going to u
     general_inters=(LennardJones(true),), # true means we are using the neighbour list for this interaction
     coords=coords,
     velocities=velocities,
-    temperature=temperature,
+    temperature=temp,
     box_size=box_size,
     neighbour_finder=neighbour_finder,
     thermostat=AndersenThermostat(1.0),
@@ -73,7 +73,7 @@ simulate!(s)</code></pre><p>When we view the simulation we can use some extra op
             joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_top_ff.top&quot;),
             joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_coords.gro&quot;))
 
-temperature = 298
+temp = 298
 
 s = Simulation(
     simulator=VelocityVerlet(),
@@ -81,8 +81,8 @@ s = Simulation(
     specific_inter_lists=specific_inter_lists,
     general_inters=general_inters,
     coords=coords,
-    velocities=[velocity(a.mass, temperature) for a in atoms],
-    temperature=temperature,
+    velocities=[velocity(a.mass, temp) for a in atoms],
+    temperature=temp,
     box_size=box_size,
     neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
     thermostat=AndersenThermostat(1.0),
@@ -151,7 +151,7 @@ function Molly.log_property!(logger::SIRLogger, s::Simulation, step_n::Integer)
     end
 end
 
-temperature = 0.01
+temp = 0.01
 timestep = 0.02
 box_size = 10.0
 n_steps = 1_000
@@ -159,7 +159,7 @@ n_people = 500
 n_starting = 2
 atoms = [Person(i &lt;= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
 coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
-velocities = [velocity(1.0, temperature, dims=2) for i in 1:n_people]
+velocities = [velocity(1.0, temp, dims=2) for i in 1:n_people]
 general_inters = (LennardJones = LennardJones(true), SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
 
 s = Simulation(
@@ -168,7 +168,7 @@ s = Simulation(
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
-    temperature=temperature,
+    temperature=temp,
     box_size=box_size,
     neighbour_finder=DistanceNeighbourFinder(trues(n_people, n_people), 10, 2.0),
     thermostat=AndersenThermostat(5.0),
