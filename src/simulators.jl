@@ -15,7 +15,7 @@ interactions and Newton's second law.
 function accelerations(s::Simulation, neighbours; parallel::Bool=true)
     n_atoms = length(s.coords)
 
-    if parallel && nthreads() > 1 && n_atoms > 100
+    if parallel && nthreads() > 1 && n_atoms >= 100
         forces_threads = [zero(s.coords) for i in 1:nthreads()]
 
         # Loop over interactions and calculate the acceleration due to each

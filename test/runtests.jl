@@ -1,7 +1,14 @@
 using Molly
 
+using Base.Threads
 using Statistics
 using Test
+
+if nthreads() == 1
+    @warn "The parallel tests will not be run as Julia is running on 1 thread"
+else
+    @info "The parallel tests will be run as Julia is running on $(nthreads()) threads"
+end
 
 @testset "Spatial" begin
     @test vector1D(4.0, 6.0, 10.0) ==  2.0
@@ -25,6 +32,10 @@ using Test
     )
     @test find_neighbours(s, nothing, s.neighbour_finder, 0,
                             parallel=false) == [(2, 1)]
+    if nthreads() > 1
+        @test find_neighbours(s, nothing, s.neighbour_finder, 0,
+                                parallel=true) == [(2, 1)]
+    end
 end
 
 temperature = 298
@@ -59,8 +70,9 @@ end
 
 @testset "Lennard-Jones gas" begin
     n_atoms = 100
+    parallel_list = nthreads() > 1 ? (false, true) : (false,)
 
-    for parallel in (false, true)
+    for parallel in parallel_list
         s = Simulation(
             simulator=VelocityVerlet(),
             atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
@@ -78,10 +90,7 @@ end
             n_steps=n_steps
         )
 
-        @time simulate!(s, parallel=true)
-
-        final_temp = mean(s.loggers["temp"].temperatures[(end - 10):end])
-        @test temperature - 30 < final_temp < temperature + 30
+        @time simulate!(s, parallel=parallel)
 
         final_coords = last(s.loggers["coords"].coords)
         @test minimum(minimum.(final_coords)) > 0.0

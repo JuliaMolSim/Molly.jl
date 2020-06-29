@@ -10,8 +10,8 @@ using Requires
 
 @reexport using StaticArrays
 
-using LinearAlgebra
 using Base.Threads
+using LinearAlgebra
 
 include("types.jl")
 include("setup.jl")
