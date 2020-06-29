@@ -122,10 +122,10 @@ default values.
 - `coords::C`: the coordinates of the atoms in the simulation. Typically a
     `Vector` of `SVector`s of any dimension and type `T`, where `T` is an
     `AbstractFloat` type.
-- `velocities::C`: the velocities of the atoms in the simulation, which should
-    be the same type as the coordinates. The meaning of the velocities depends
-    on the simulator used, e.g. for the `VelocityFreeVerlet` simulator they
-    represent the previous step coordinates for the first step.
+- `velocities::C=zero(coords)`: the velocities of the atoms in the simulation,
+    which should be the same type as the coordinates. The meaning of the
+    velocities depends on the simulator used, e.g. for the `VelocityFreeVerlet`
+    simulator they represent the previous step coordinates for the first step.
 - `temperature::T=0.0`: the temperature of the simulation.
 - `box_size::T`: the size of the cube in which the simulation takes place.
 - `neighbour_finder::NeighbourFinder=NoNeighbourFinder()`: the neighbour finder
@@ -134,8 +134,8 @@ default values.
     the simulation.
 - `loggers::Dict{String, <:Logger}=Dict()`: the loggers that record properties
     of interest during the simulation.
-- `timestep::T`: the timestep of the simulation.
-- `n_steps::Integer`: the number of steps in the simulation.
+- `timestep::T=0.0`: the timestep of the simulation.
+- `n_steps::Integer=0`: the number of steps in the simulation.
 - `n_steps_made::Vector{Int}=[]`: the number of steps already made during the
     simulation. This is a `Vector` to allow the `struct` to be immutable.
 """
@@ -162,14 +162,14 @@ function Simulation(;
                     specific_inter_lists=(),
                     general_inters=(),
                     coords,
-                    velocities,
+                    velocities=zero(coords),
                     temperature=0.0,
                     box_size,
                     neighbour_finder=NoNeighbourFinder(),
                     thermostat=NoThermostat(),
                     loggers=Dict{String, Logger}(),
-                    timestep,
-                    n_steps,
+                    timestep=0.0,
+                    n_steps=0,
                     n_steps_made=[0])
     T = typeof(timestep)
     A = eltype(atoms)
