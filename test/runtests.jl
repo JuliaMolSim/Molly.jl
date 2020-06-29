@@ -1,4 +1,6 @@
 using Molly
+
+using Statistics
 using Test
 
 @testset "Spatial" begin
@@ -58,31 +60,36 @@ end
 @testset "Lennard-Jones gas" begin
     n_atoms = 100
 
-    s = Simulation(
-        simulator=VelocityVerlet(),
-        atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
-                    mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
-        general_inters=(LennardJones(true),),
-        coords=[box_size .* rand(SVector{3}) for i in 1:n_atoms],
-        velocities=[velocity(10.0, temperature) .* 0.01 for i in 1:n_atoms],
-        temperature=temperature,
-        box_size=box_size,
-        neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
-        thermostat=AndersenThermostat(10.0),
-        loggers=Dict("temp" => TemperatureLogger(100),
-                        "coords" => CoordinateLogger(100)),
-        timestep=timestep,
-        n_steps=n_steps
-    )
+    for parallel in (false, true)
+        s = Simulation(
+            simulator=VelocityVerlet(),
+            atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
+                        mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
+            general_inters=(LennardJones(true),),
+            coords=[box_size .* rand(SVector{3}) for i in 1:n_atoms],
+            velocities=[velocity(10.0, temperature) .* 0.01 for i in 1:n_atoms],
+            temperature=temperature,
+            box_size=box_size,
+            neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
+            thermostat=AndersenThermostat(10.0),
+            loggers=Dict("temp" => TemperatureLogger(100),
+                            "coords" => CoordinateLogger(100)),
+            timestep=timestep,
+            n_steps=n_steps
+        )
 
-    @time simulate!(s, parallel=false)
+        @time simulate!(s, parallel=true)
 
-    final_coords = last(s.loggers["coords"].coords)
-    @test minimum(minimum.(final_coords)) > 0.0
-    @test maximum(maximum.(final_coords)) < box_size
-    displacements(final_coords, box_size)
-    distances(final_coords, box_size)
-    rdf(final_coords, box_size)
+        final_temp = mean(s.loggers["temp"].temperatures[(end - 10):end])
+        @test temperature - 30 < final_temp < temperature + 30
+
+        final_coords = last(s.loggers["coords"].coords)
+        @test minimum(minimum.(final_coords)) > 0.0
+        @test maximum(maximum.(final_coords)) < box_size
+        displacements(final_coords, box_size)
+        distances(final_coords, box_size)
+        rdf(final_coords, box_size)
+    end
 end
 
 @testset "Lennard-Jones gas velocity-free" begin
