@@ -38,7 +38,7 @@ end
     end
 end
 
-temperature = 298
+temp = 298
 timestep = 0.002
 n_steps = 20_000
 box_size = 2.0
@@ -52,8 +52,8 @@ box_size = 2.0
                     mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
         general_inters=(LennardJones(true),),
         coords=[box_size .* rand(SVector{2}) for i in 1:n_atoms],
-        velocities=[velocity(10.0, temperature, dims=2) .* 0.01 for i in 1:n_atoms],
-        temperature=temperature,
+        velocities=[velocity(10.0, temp, dims=2) .* 0.01 for i in 1:n_atoms],
+        temperature=temp,
         box_size=box_size,
         neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
         thermostat=AndersenThermostat(10.0),
@@ -79,8 +79,8 @@ end
                         mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
             general_inters=(LennardJones(true),),
             coords=[box_size .* rand(SVector{3}) for i in 1:n_atoms],
-            velocities=[velocity(10.0, temperature) .* 0.01 for i in 1:n_atoms],
-            temperature=temperature,
+            velocities=[velocity(10.0, temp) .* 0.01 for i in 1:n_atoms],
+            temperature=temp,
             box_size=box_size,
             neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
             thermostat=AndersenThermostat(10.0),
@@ -112,7 +112,7 @@ end
         general_inters=(LennardJones(true),),
         coords=coords,
         velocities=[c .+ 0.01 .* rand(SVector{3}) for c in coords],
-        temperature=temperature,
+        temperature=temp,
         box_size=box_size,
         neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
         thermostat=AndersenThermostat(10.0),
@@ -140,8 +140,8 @@ end
         specific_inter_lists=(bonds,),
         general_inters=(LennardJones(true),),
         coords=coords,
-        velocities=[velocity(10.0, temperature) .* 0.01 for i in 1:n_atoms],
-        temperature=temperature,
+        velocities=[velocity(10.0, temp) .* 0.01 for i in 1:n_atoms],
+        temperature=temp,
         box_size=box_size,
         neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
         thermostat=AndersenThermostat(10.0),
@@ -176,8 +176,8 @@ end
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
         coords=coords,
-        velocities=[velocity(a.mass, temperature) .* 0.01 for a in atoms],
-        temperature=temperature,
+        velocities=[velocity(a.mass, temp) .* 0.01 for a in atoms],
+        temperature=temp,
         box_size=box_size,
         neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
         thermostat=AndersenThermostat(10.0),
@@ -203,8 +203,8 @@ end
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
         coords=coords,
-        velocities=[velocity(Float32, a.mass, temperature) .* 0.01f0 for a in atoms],
-        temperature=Float32(temperature),
+        velocities=[velocity(Float32, a.mass, temp) .* 0.01f0 for a in atoms],
+        temperature=Float32(temp),
         box_size=box_size,
         neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10, 1.2f0),
         thermostat=AndersenThermostat(10.0f0),
@@ -274,7 +274,7 @@ end
         end
     end
 
-    temperature = 0.01
+    temp = 0.01
     timestep = 0.02
     box_size = 10.0
     n_steps = 1_000
@@ -282,7 +282,7 @@ end
     n_starting = 2
     atoms = [Person(i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
     coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
-    velocities = [velocity(1.0, temperature, dims=2) for i in 1:n_people]
+    velocities = [velocity(1.0, temp, dims=2) for i in 1:n_people]
     general_inters = (LennardJones = LennardJones(true),
                             SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
 
@@ -292,7 +292,7 @@ end
         general_inters=general_inters,
         coords=coords,
         velocities=velocities,
-        temperature=temperature,
+        temperature=temp,
         box_size=box_size,
         neighbour_finder=DistanceNeighbourFinder(trues(n_people, n_people), 10, 2.0),
         thermostat=AndersenThermostat(5.0),

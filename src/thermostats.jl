@@ -51,12 +51,12 @@ end
 
 Generate a random velocity from the Maxwell-Boltzmann distribution.
 """
-function velocity(T::Type, mass::Real, temperature::Real; dims::Integer=3)
-    return SVector([maxwellboltzmann(T, mass, temperature) for i in 1:dims]...)
+function velocity(T::Type, mass::Real, temp::Real; dims::Integer=3)
+    return SVector([maxwellboltzmann(T, mass, temp) for i in 1:dims]...)
 end
 
-function velocity(mass::Real, temperature::Real; dims::Integer=3)
-    return velocity(DefaultFloat, mass, temperature, dims=dims)
+function velocity(mass::Real, temp::Real; dims::Integer=3)
+    return velocity(DefaultFloat, mass, temp, dims=dims)
 end
 
 """
@@ -65,12 +65,12 @@ end
 
 Draw from the Maxwell-Boltzmann distribution.
 """
-function maxwellboltzmann(T::Type, mass::Real, temperature::Real)
-    return rand(Normal(zero(T), sqrt(temperature / mass)))
+function maxwellboltzmann(T::Type, mass::Real, temp::Real)
+    return rand(Normal(zero(T), sqrt(temp / mass)))
 end
 
-function maxwellboltzmann(mass::Real, temperature::Real)
-    return maxwellboltzmann(DefaultFloat, mass, temperature)
+function maxwellboltzmann(mass::Real, temp::Real)
+    return maxwellboltzmann(DefaultFloat, mass, temp)
 end
 
 """

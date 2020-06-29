@@ -59,12 +59,12 @@ using Molly
 
 n_atoms = 100
 box_size = 2.0 # nm
-temperature = 298 # K
+temp = 298 # K
 mass = 10.0 # Relative atomic mass
 
 atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]
 coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
-velocities = [velocity(mass, temperature) for i in 1:n_atoms]
+velocities = [velocity(mass, temp) for i in 1:n_atoms]
 general_inters = (LennardJones(),)
 
 s = Simulation(
@@ -73,7 +73,7 @@ s = Simulation(
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
-    temperature=temperature,
+    temperature=temp,
     box_size=box_size,
     thermostat=AndersenThermostat(1.0),
     loggers=Dict("temp" => TemperatureLogger(100)),
@@ -89,7 +89,7 @@ Simulation of a protein:
 using Molly
 
 timestep = 0.0002 # ps
-temperature = 298 # K
+temp = 298 # K
 n_steps = 5_000
 
 atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
@@ -102,8 +102,8 @@ s = Simulation(
     specific_inter_lists=specific_inter_lists,
     general_inters=general_inters,
     coords=coords,
-    velocities=[velocity(a.mass, temperature) for a in atoms],
-    temperature=temperature,
+    velocities=[velocity(a.mass, temp) for a in atoms],
+    temperature=temp,
     box_size=box_size,
     neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
     thermostat=AndersenThermostat(1.0),

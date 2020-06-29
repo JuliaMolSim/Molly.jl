@@ -25,8 +25,8 @@ Next, we'll need some starting coordinates and velocities.
 box_size = 2.0 # nm
 coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
 
-temperature = 100 # K
-velocities = [velocity(mass, temperature) for i in 1:n_atoms]
+temp = 100 # K
+velocities = [velocity(mass, temp) for i in 1:n_atoms]
 ```
 We store the coordinates and velocities as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
 They can be of any number of dimensions and of any number type, e.g. `Float64` or `Float32`.
@@ -44,7 +44,7 @@ s = Simulation(
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
-    temperature=temperature,
+    temperature=temp,
     box_size=box_size,
     thermostat=AndersenThermostat(1.0), # Coupling constant of 1.0
     loggers=Dict("temp" => TemperatureLogger(10),
@@ -74,7 +74,7 @@ for i in 1:length(coords)
     push!(coords, coords[i] .+ [0.1, 0.0, 0.0])
 end
 
-velocities = [velocity(mass, temperature) for i in 1:n_atoms]
+velocities = [velocity(mass, temp) for i in 1:n_atoms]
 ```
 Now we can use the built-in bond type to place a harmonic constraint between paired atoms.
 The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.
@@ -98,7 +98,7 @@ s = Simulation(
     general_inters=(LennardJones(true),), # true means we are using the neighbour list for this interaction
     coords=coords,
     velocities=velocities,
-    temperature=temperature,
+    temperature=temp,
     box_size=box_size,
     neighbour_finder=neighbour_finder,
     thermostat=AndersenThermostat(1.0),
@@ -161,7 +161,7 @@ atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readi
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
 
-temperature = 298
+temp = 298
 
 s = Simulation(
     simulator=VelocityVerlet(),
@@ -169,8 +169,8 @@ s = Simulation(
     specific_inter_lists=specific_inter_lists,
     general_inters=general_inters,
     coords=coords,
-    velocities=[velocity(a.mass, temperature) for a in atoms],
-    temperature=temperature,
+    velocities=[velocity(a.mass, temp) for a in atoms],
+    temperature=temp,
     box_size=box_size,
     neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
     thermostat=AndersenThermostat(1.0),
@@ -249,7 +249,7 @@ function Molly.log_property!(logger::SIRLogger, s::Simulation, step_n::Integer)
     end
 end
 
-temperature = 0.01
+temp = 0.01
 timestep = 0.02
 box_size = 10.0
 n_steps = 1_000
@@ -257,7 +257,7 @@ n_people = 500
 n_starting = 2
 atoms = [Person(i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
 coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
-velocities = [velocity(1.0, temperature, dims=2) for i in 1:n_people]
+velocities = [velocity(1.0, temp, dims=2) for i in 1:n_people]
 general_inters = (LennardJones = LennardJones(true), SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
 
 s = Simulation(
@@ -266,7 +266,7 @@ s = Simulation(
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
-    temperature=temperature,
+    temperature=temp,
     box_size=box_size,
     neighbour_finder=DistanceNeighbourFinder(trues(n_people, n_people), 10, 2.0),
     thermostat=AndersenThermostat(5.0),
