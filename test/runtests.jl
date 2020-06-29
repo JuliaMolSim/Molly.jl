@@ -13,11 +13,21 @@ using Test
     @test adjust_bounds(8.0 , 10.0) == 8.0
     @test adjust_bounds(12.0, 10.0) == 2.0
     @test adjust_bounds(-2.0, 10.0) == 8.0
+
+    s = Simulation(
+        simulator=VelocityVerlet(),
+        atoms=[Atom(), Atom(), Atom()],
+        coords=[SVector(1.0, 1.0, 1.0), SVector(2.0, 2.0, 2.0), SVector(5.0, 5.0, 5.0)],
+        box_size=10.0,
+        neighbour_finder=DistanceNeighbourFinder(trues(3, 3), 10, 2.0)
+    )
+    @test find_neighbours(s, nothing, s.neighbour_finder, 0,
+                            parallel=false) == [(2, 1)]
 end
 
 temperature = 298
 timestep = 0.002
-n_steps = 1_000
+n_steps = 20_000
 box_size = 2.0
 
 @testset "Lennard-Jones gas 2D" begin

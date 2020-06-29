@@ -7,7 +7,7 @@
 
 Much of science can be explained by the movement and interaction of molecules.
 Molecular dynamics (MD) is a computational technique used to explore these phenomena, particularly for biological macromolecules.
-Molly.jl is a pure Julia implementation of MD.
+Molly.jl is a pure Julia package for MD and for molecular simulation more broadly.
 
 At the minute the package is a proof of concept for MD in Julia.
 **It is not production ready.**
