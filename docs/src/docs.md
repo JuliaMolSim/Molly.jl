@@ -59,7 +59,6 @@ By default the simulation is run in parallel on the [number of threads](https://
 An animation of the stored coordinates using can be saved using [`visualize`](@ref), which is available when [Makie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
 ```julia
 using Makie
-
 visualize(s.loggers["coords"], box_size, "sim_lj.gif")
 ```
 ![LJ simulation](images/sim_lj.gif)
@@ -156,6 +155,7 @@ visualize(s.loggers["coords"], 1.0f0, "sim_gravity.gif",
 Molly has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
 Data for a protein can be read into the same data structures as above and simulated in the same way.
 Currently, the OPLS-AA forcefield is implemented.
+Here a [`StructureWriter`](@ref) is used to write the trajectory as a PDB file.
 ```julia
 atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
@@ -432,6 +432,7 @@ function Molly.simulate!(s::Simulation,
     return s
 end
 ```
+To use your custom simulator, give it as the `simulator` argument when creating the [`Simulation`](@ref).
 
 ## Thermostats
 
@@ -439,7 +440,7 @@ Thermostats control the temperature over a simulation.
 The available thermostats are:
 - [`AndersenThermostat`](@ref).
 
-To define your own [`Thermostats`](@ref), first define the `struct`:
+To define your own [`Thermostat`](@ref), first define the `struct`:
 ```julia
 struct MyThermostat <: Thermostat
     # Any properties, e.g. a coupling constant
@@ -469,7 +470,7 @@ struct MyNeighbourFinder <: NeighbourFinder
     # Any other properties, e.g. a distance cutoff
 end
 ```
-An example of useful properties is used here: a matrix indicating atom pairs eligible for non-bonded interactions, and a value determining how many timesteps occur between each evaluation of the neighbour finder.
+Examples of two useful properties are given here: a matrix indicating atom pairs eligible for non-bonded interactions, and a value determining how many timesteps occur between each evaluation of the neighbour finder.
 Then, define the neighbour finding function that is called every step by the simulator:
 ```julia
 function find_neighbours(s::Simulation,
@@ -486,6 +487,7 @@ function find_neighbours(s::Simulation,
     end
 end
 ```
+To use your custom neighbour finder, give it as the `neighbour_finder` argument when creating the [`Simulation`](@ref).
 
 ## Loggers
 

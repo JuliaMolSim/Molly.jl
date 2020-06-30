@@ -26,7 +26,8 @@ end
     s = Simulation(
         simulator=VelocityVerlet(),
         atoms=[Atom(), Atom(), Atom()],
-        coords=[SVector(1.0, 1.0, 1.0), SVector(2.0, 2.0, 2.0), SVector(5.0, 5.0, 5.0)],
+        coords=[SVector(1.0, 1.0, 1.0), SVector(2.0, 2.0, 2.0),
+                SVector(5.0, 5.0, 5.0)],
         box_size=10.0,
         neighbour_finder=DistanceNeighbourFinder(trues(3, 3), 10, 2.0)
     )

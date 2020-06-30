@@ -53,7 +53,7 @@ add https://github.com/JuliaMolSim/Molly.jl
 
 Some examples are given here, see [the documentation](https://JuliaMolSim.github.io/Molly.jl/latest) for more on how to use the package.
 
-Simulation of an ideal gas:
+Simulation of a Lennard-Jones gas:
 ```julia
 using Molly
 
@@ -116,7 +116,7 @@ s = Simulation(
 simulate!(s)
 ```
 
-The above 1 ps simulation looks something like this when you view it in VMD:
+The above 1 ps simulation looks something like this when you view it in [VMD](https://www.ks.uiuc.edu/Research/vmd):
 ![MD simulation](https://github.com/JuliaMolSim/Molly.jl/raw/master/data/5XER/sim_1ps.gif)
 
 ## Plans

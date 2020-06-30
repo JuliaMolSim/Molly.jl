@@ -4,13 +4,13 @@
 
 export
     LennardJones,
+    force!,
     SoftSphere,
     Coulomb,
     Gravity,
     HarmonicBond,
     HarmonicAngle,
-    Torsion,
-    force!
+    Torsion
 
 "Square of the non-bonded interaction distance cutoff in nm^2."
 const sqdist_cutoff_nb = 1.0 ^ 2

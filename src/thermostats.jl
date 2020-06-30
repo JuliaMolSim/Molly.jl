@@ -1,9 +1,9 @@
 # Thermostats
 
 export
-    AndersenThermostat,
-    apply_thermostat!,
     NoThermostat,
+    apply_thermostat!,
+    AndersenThermostat,
     velocity,
     maxwellboltzmann,
     temperature
