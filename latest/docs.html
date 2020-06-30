@@ -23,7 +23,6 @@ velocities = [velocity(mass, temp) for i in 1:n_atoms]</code></pre><p>We store t
 )
 
 simulate!(s)</code></pre><p>By default the simulation is run in parallel on the <a href="https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1">number of threads</a> available to Julia, but this can be turned off by giving the keyword argument <code>parallel=false</code> to <a href="api.html#Molly.simulate!-Tuple{Simulation,VelocityVerlet,Integer}"><code>simulate!</code></a>. An animation of the stored coordinates using can be saved using <a href="api.html#Molly.visualize"><code>visualize</code></a>, which is available when <a href="https://github.com/JuliaPlots/Makie.jl">Makie.jl</a> is imported.</p><pre><code class="language-julia">using Makie
-
 visualize(s.loggers[&quot;coords&quot;], box_size, &quot;sim_lj.gif&quot;)</code></pre><p><img src="images/sim_lj.gif" alt="LJ simulation"/></p><h2><a class="nav-anchor" id="Simulating-diatomic-molecules-1" href="#Simulating-diatomic-molecules-1">Simulating diatomic molecules</a></h2><p>If we want to define specific interactions between atoms, for example bonds, we can do. Using the same atom definitions as before, let&#39;s set up the coordinates so that paired atoms are 1 Å apart.</p><pre><code class="language-julia">coords = [box_size .* rand(SVector{3}) for i in 1:(n_atoms / 2)]
 for i in 1:length(coords)
     push!(coords, coords[i] .+ [0.1, 0.0, 0.0])
@@ -69,7 +68,7 @@ s = Simulation(
 
 simulate!(s)</code></pre><p>When we view the simulation we can use some extra options:</p><pre><code class="language-julia">visualize(s.loggers[&quot;coords&quot;], 1.0f0, &quot;sim_gravity.gif&quot;,
             trails=4, framerate=15, color=[:orange, :lightgreen],
-            markersize=0.05)</code></pre><p><img src="images/sim_gravity.gif" alt="Gravity simulation"/></p><h2><a class="nav-anchor" id="Simulating-a-protein-1" href="#Simulating-a-protein-1">Simulating a protein</a></h2><p>Molly has a rudimentary parser of <a href="http://www.gromacs.org">Gromacs</a> topology and coordinate files. Data for a protein can be read into the same data structures as above and simulated in the same way. Currently, the OPLS-AA forcefield is implemented.</p><pre><code class="language-julia">atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
+            markersize=0.05)</code></pre><p><img src="images/sim_gravity.gif" alt="Gravity simulation"/></p><h2><a class="nav-anchor" id="Simulating-a-protein-1" href="#Simulating-a-protein-1">Simulating a protein</a></h2><p>Molly has a rudimentary parser of <a href="http://www.gromacs.org">Gromacs</a> topology and coordinate files. Data for a protein can be read into the same data structures as above and simulated in the same way. Currently, the OPLS-AA forcefield is implemented. Here a <a href="api.html#Molly.StructureWriter"><code>StructureWriter</code></a> is used to write the trajectory as a PDB file.</p><pre><code class="language-julia">atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_top_ff.top&quot;),
             joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_coords.gro&quot;))
 
@@ -250,7 +249,7 @@ end</code></pre><p>Then, define the function that carries out the simulation. Th
         s.n_steps_made[1] += 1
     end
     return s
-end</code></pre><h2><a class="nav-anchor" id="Thermostats-1" href="#Thermostats-1">Thermostats</a></h2><p>Thermostats control the temperature over a simulation. The available thermostats are:</p><ul><li><a href="api.html#Molly.AndersenThermostat"><code>AndersenThermostat</code></a>.</li></ul><p>To define your own <a href="@ref"><code>Thermostats</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyThermostat &lt;: Thermostat
+end</code></pre><p>To use your custom simulator, give it as the <code>simulator</code> argument when creating the <a href="api.html#Molly.Simulation"><code>Simulation</code></a>.</p><h2><a class="nav-anchor" id="Thermostats-1" href="#Thermostats-1">Thermostats</a></h2><p>Thermostats control the temperature over a simulation. The available thermostats are:</p><ul><li><a href="api.html#Molly.AndersenThermostat"><code>AndersenThermostat</code></a>.</li></ul><p>To define your own <a href="api.html#Molly.Thermostat"><code>Thermostat</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyThermostat &lt;: Thermostat
     # Any properties, e.g. a coupling constant
 end</code></pre><p>Then, define the function that implements the thermostat every timestep:</p><pre><code class="language-julia">function apply_thermostat!(s::Simulation, thermostat::MyThermostat)
     # Do something to the simulation, e.g. scale the velocities
@@ -259,7 +258,7 @@ end</code></pre><p>The functions <a href="api.html#Molly.velocity-Tuple{Type,Rea
     nb_matrix::BitArray{2}
     n_steps::Int
     # Any other properties, e.g. a distance cutoff
-end</code></pre><p>An example of useful properties is used here: a matrix indicating atom pairs eligible for non-bonded interactions, and a value determining how many timesteps occur between each evaluation of the neighbour finder. Then, define the neighbour finding function that is called every step by the simulator:</p><pre><code class="language-julia">function find_neighbours(s::Simulation,
+end</code></pre><p>Examples of two useful properties are given here: a matrix indicating atom pairs eligible for non-bonded interactions, and a value determining how many timesteps occur between each evaluation of the neighbour finder. Then, define the neighbour finding function that is called every step by the simulator:</p><pre><code class="language-julia">function find_neighbours(s::Simulation,
                             current_neighbours,
                             nf::MyNeighbourFinder,
                             step_n::Integer;
@@ -271,7 +270,7 @@ end</code></pre><p>An example of useful properties is used here: a matrix indica
     else
         return current_neighbours
     end
-end</code></pre><h2><a class="nav-anchor" id="Loggers-1" href="#Loggers-1">Loggers</a></h2><p>Loggers record properties of the simulation to allow monitoring and analysis. The available loggers are:</p><ul><li><a href="api.html#Molly.TemperatureLogger"><code>TemperatureLogger</code></a>.</li><li><a href="api.html#Molly.CoordinateLogger"><code>CoordinateLogger</code></a>.</li><li><a href="api.html#Molly.StructureWriter"><code>StructureWriter</code></a>.</li></ul><p>To define your own <a href="api.html#Molly.Logger"><code>Logger</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyLogger &lt;: Logger
+end</code></pre><p>To use your custom neighbour finder, give it as the <code>neighbour_finder</code> argument when creating the <a href="api.html#Molly.Simulation"><code>Simulation</code></a>.</p><h2><a class="nav-anchor" id="Loggers-1" href="#Loggers-1">Loggers</a></h2><p>Loggers record properties of the simulation to allow monitoring and analysis. The available loggers are:</p><ul><li><a href="api.html#Molly.TemperatureLogger"><code>TemperatureLogger</code></a>.</li><li><a href="api.html#Molly.CoordinateLogger"><code>CoordinateLogger</code></a>.</li><li><a href="api.html#Molly.StructureWriter"><code>StructureWriter</code></a>.</li></ul><p>To define your own <a href="api.html#Molly.Logger"><code>Logger</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyLogger &lt;: Logger
     n_steps::Int
     # Any other properties, e.g. an Array to record values during the trajectory
 end</code></pre><p>Then, define the logging function that is called every step by the simulator:</p><pre><code class="language-julia">function Molly.log_property!(logger::MyLogger, s::Simulation, step_n::Integer)
