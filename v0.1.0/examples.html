@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Examples · Molly.jl</title><link href="https://cdnjs.cloudflare.com/ajax/libs/normalize/4.2.0/normalize.min.css" rel="stylesheet" type="text/css"/><link href="https://fonts.googleapis.com/css?family=Lato|Roboto+Mono" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.6.3/css/font-awesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.12.0/styles/default.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.2.0/require.min.js" data-main="assets/documenter.js"></script><script src="siteinfo.js"></script><script src="../versions.js"></script><link href="assets/documenter.css" rel="stylesheet" type="text/css"/></head><body><nav class="toc"><h1>Molly.jl</h1><select id="version-selector" onChange="window.location.href=this.value" style="visibility: hidden"></select><form class="search" id="search-form" action="search.html"><input id="search-query" name="q" type="text" placeholder="Search docs"/></form><ul><li><a class="toctext" href="index.html">Home</a></li><li><a class="toctext" href="docs.html">Documentation</a></li><li class="current"><a class="toctext" href="examples.html">Examples</a><ul class="internal"><li><a class="toctext" href="#Making-and-breaking-bonds-1">Making and breaking bonds</a></li></ul></li><li><a class="toctext" href="api.html">API</a></li></ul></nav><article id="docs"><header><nav><ul><li><a href="examples.html">Examples</a></li></ul><a class="edit-page" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/examples.md"><span class="fa"></span> Edit on GitHub</a></nav><hr/><div id="topbar"><span>Examples</span><a class="fa fa-bars" href="#"></a></div></header><h1><a class="nav-anchor" id="Molly-examples-1" href="#Molly-examples-1">Molly examples</a></h1><p>The best examples for learning how the package works are in the <a href="docs.html#Molly-documentation-1">Molly documentation</a> section. Here we give further examples, showing what you can do with the package. Each is a self-contained block of code. Made something cool yourself? Make a PR to add it to this page.</p><h2><a class="nav-anchor" id="Making-and-breaking-bonds-1" href="#Making-and-breaking-bonds-1">Making and breaking bonds</a></h2><p>There is an example of mutable atom properties in the main docs, but what if you want to make and break bonds during the simulation? In this case you can use a <code>GeneralInteraction</code> to make, break and apply the bonds. The partners of the atom can be stored in the atom type. We make a <code>Logger</code> to record when the bonds are present, allowing us to visualize them with the <code>connection_frames</code> keyword argument to <code>visualize</code> (this can take a while to plot).</p><pre><code class="language-julia">using Molly
+using Makie
+using LinearAlgebra
+
+struct BondableAtom
+    mass::Float64
+    σ::Float64
+    ϵ::Float64
+    partners::Set{Int}
+end
+
+struct BondableInteraction &lt;: GeneralInteraction
+    nl_only::Bool
+    prob_formation::Float64
+    prob_break::Float64
+    dist_formation::Float64
+    b0::Float64
+    kb::Float64
+end
+
+function Molly.force!(forces, inter::BondableInteraction, s, i, j)
+    i == j &amp;&amp; return
+    dr = vector(s.coords[i], s.coords[j], s.box_size)
+    r2 = sum(abs2, dr)
+    if j in s.atoms[i].partners
+        # Apply the force of a harmonic bond
+        c = inter.kb * (norm(dr) - inter.b0)
+        fdr = c * normalize(dr)
+        forces[i] += fdr
+        forces[j] -= fdr
+        # Break bonds randomly
+        if rand() &lt; inter.prob_break
+            delete!(s.atoms[i].partners, j)
+            delete!(s.atoms[j].partners, i)
+        end
+    # Make bonds between close atoms randomly
+    elseif r2 &lt; inter.b0 * inter.dist_formation &amp;&amp; rand() &lt; inter.prob_formation
+        push!(s.atoms[i].partners, j)
+        push!(s.atoms[j].partners, i)
+    end
+    return nothing
+end
+
+struct BondLogger &lt;: Logger
+    n_steps::Int
+    bonds::Vector{BitVector}
+end
+
+function Molly.log_property!(logger::BondLogger, s, step_n)
+    if step_n % logger.n_steps == 0
+        bonds = BitVector()
+        for i in 1:length(s.coords)
+            for j in 1:(i - 1)
+                push!(bonds, j in s.atoms[i].partners)
+            end
+        end
+        push!(logger.bonds, bonds)
+    end
+end
+
+temperature = 0.01
+timestep = 0.02
+box_size = 10.0
+n_steps = 2_000
+n_atoms = 200
+
+atoms = [BondableAtom(1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
+coords = [box_size .* rand(SVector{2}) for i in 1:n_atoms]
+velocities = [velocity(1.0, temperature, dims=2) for i in 1:n_atoms]
+general_inters = (SoftSphere(true), BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0))
+
+s = Simulation(
+    simulator=VelocityVerlet(),
+    atoms=atoms,
+    general_inters=general_inters,
+    coords=coords,
+    velocities=velocities,
+    temperature=temperature,
+    box_size=box_size,
+    neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
+    thermostat=AndersenThermostat(5.0),
+    loggers=Dict(&quot;coords&quot; =&gt; CoordinateLogger(20, dims=2),
+                    &quot;bonds&quot; =&gt; BondLogger(20, [])),
+    timestep=timestep,
+    n_steps=n_steps
+)
+
+simulate!(s)
+
+connections = Tuple{Int, Int}[]
+for i in 1:length(s.coords)
+    for j in 1:(i - 1)
+        push!(connections, (i, j))
+    end
+end
+
+visualize(s.loggers[&quot;coords&quot;],
+            box_size,
+            &quot;sim_mutbond.gif&quot;,
+            connections=connections,
+            connection_frames=s.loggers[&quot;bonds&quot;].bonds)</code></pre><p><img src="images/sim_mutbond.gif" alt="Mutable bond simulation"/></p><footer><hr/><a class="previous" href="docs.html"><span class="direction">Previous</span><span class="title">Documentation</span></a><a class="next" href="api.html"><span class="direction">Next</span><span class="title">API</span></a></footer></article></body></html>
