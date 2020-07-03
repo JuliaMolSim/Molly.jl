@@ -2,8 +2,11 @@
 
 [![Travis build status](https://travis-ci.org/JuliaMolSim/Molly.jl.svg?branch=master)](https://travis-ci.org/JuliaMolSim/Molly.jl)
 [![AppVeyor build status](https://ci.appveyor.com/api/projects/status/fc9qjhs9pfema614?svg=true)](https://ci.appveyor.com/project/jgreener64/molly-jl-yaoyb)
-[![Coverage Status](https://coveralls.io/repos/github/JuliaMolSim/Molly.jl/badge.svg?branch=master)](https://coveralls.io/github/JuliaMolSim/Molly.jl?branch=master)
-[![Documentation](https://img.shields.io/badge/docs-latest-blue.svg)](https://JuliaMolSim.github.io/Molly.jl/latest)
+[![Coverage status](https://coveralls.io/repos/github/JuliaMolSim/Molly.jl/badge.svg?branch=master)](https://coveralls.io/github/JuliaMolSim/Molly.jl?branch=master)
+[![Latest release](https://img.shields.io/github/release/JuliaMolSim/Molly.jl.svg)](https://github.com/JuliaMolSim/Molly.jl/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/JuliaMolSim/Molly.jl/blob/master/LICENSE.md)
+[![Documentation stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://JuliaMolSim.github.io/Molly.jl/stable)
+[![Documentation latest](https://img.shields.io/badge/docs-latest-blue.svg)](https://JuliaMolSim.github.io/Molly.jl/latest)
 
 Much of science can be explained by the movement and interaction of molecules.
 Molecular dynamics (MD) is a computational technique used to explore these phenomena, from noble gases to biological macromolecules.
@@ -44,14 +47,11 @@ Features not yet implemented include:
 
 Julia v1.0 or later is required.
 Install from the Julia REPL.
-Enter the package mode by pressing `]` and run
-```
-add https://github.com/JuliaMolSim/Molly.jl
-```
+Enter the package mode by pressing `]` and run `add Molly`.
 
 ## Usage
 
-Some examples are given here, see [the documentation](https://JuliaMolSim.github.io/Molly.jl/latest) for more on how to use the package.
+Some examples are given here, see [the documentation](https://JuliaMolSim.github.io/Molly.jl/stable) for more on how to use the package.
 
 Simulation of a Lennard-Jones gas:
 ```julia
