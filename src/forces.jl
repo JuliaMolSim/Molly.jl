@@ -23,11 +23,14 @@ const coulomb_const = 138.935458 / 70.0 # Treat ϵr as 70 for now
 
 The Lennard-Jones 6-12 interaction.
 """
-struct LennardJones <: GeneralInteraction
+struct LennardJones{C, T} <: GeneralInteraction
+    cutoff::C
     nl_only::Bool
+    sqdist_cutoff_nb::T
+    inv_sqdist_cutoff::T
 end
 
-LennardJones() = LennardJones(false)
+LennardJones() = LennardJones(ShiftCutoff(true), false, 1.0, 1.0)
 
 """
     force!(forces, interaction, simulation, atom_i, atom_j)
@@ -38,22 +41,29 @@ Custom interaction types should implement this function.
 function force! end
 
 @fastmath @inbounds function force!(forces,
-                                    inter::LennardJones,
+                                    inter::LennardJones{ShiftCutoff},
                                     s::Simulation,
                                     i::Integer,
                                     j::Integer)
-    if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ) || i == j
+    i == j && return
+    dr = vector(s.coords[i], s.coords[j], s.box_size)
+    r2 = sum(abs2, dr)
+    sqdist_cutoff_nb = inter.sqdist_cutoff_nb
+    r2 > sqdist_cutoff_nb && return
+
+    if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
         return
     end
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
     ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
-    dr = vector(s.coords[i], s.coords[j], s.box_size)
-    r2 = sum(abs2, dr)
-    r2 > sqdist_cutoff_nb && return
+
     invr2 = inv(r2)
     six_term = (σ ^ 2 * invr2) ^ 3
-    # Limit this to 100 as a fudge to stop it exploding
-    f = min((24ϵ * invr2) * (2 * six_term ^ 2 - six_term), 100)
+    f = (24ϵ * invr2) * (2 * six_term ^ 2 - six_term)
+    if inter.cutoff.limit_force
+        # Limit this to 100 as a fudge to stop it exploding
+        f = min(f, 100)
+    end
     fdr = f * dr
     forces[i] -= fdr
     forces[j] += fdr

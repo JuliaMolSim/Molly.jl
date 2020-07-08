@@ -28,6 +28,8 @@ Custom specific interactions should sub-type this type.
 """
 abstract type SpecificInteraction <: Interaction end
 
+abstract type AbstractCutoff end
+
 """
 A type of simulation to run, e.g. leap-frog integration or energy minimisation.
 Custom simulators should sub-type this type.

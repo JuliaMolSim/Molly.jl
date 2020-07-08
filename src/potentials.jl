@@ -2,7 +2,8 @@
                                     s::Simulation,
                                     i::Integer,
                                     j::Integer)
-    T = eltype(s.atoms[i]) # this is not Unitful compatible
+    T = eltype(s.coords[i]) # this is not Unitful compatible
+    sqdist_cutoff_nb = inter.sqdist_cutoff_nb
     i == j && return zero(T)
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
