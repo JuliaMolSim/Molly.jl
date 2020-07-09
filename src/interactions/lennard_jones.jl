@@ -16,6 +16,12 @@ LennardJones() = LennardJones(ShiftCutoff(true),
                               1.0
 )
 
+LennardJones(nl_only) = LennardJones(ShiftCutoff(true),
+                              nl_only,
+                              1.0,
+                              1.0
+)
+
 @fastmath @inbounds function force!(forces,
                                     inter::LennardJones{ShiftCutoff},
                                     s::Simulation,
