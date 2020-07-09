@@ -4,8 +4,9 @@ function potential_energy(s::Simulation)
 
     for inter in values(s.general_inters)
         if inter.nl_only
-            @inbounds for ni in 1:length(s.neighbours)
-                i, j = s.neighbours[ni]
+            neighbours = s.neighbours
+            @inbounds for ni in 1:length(neighbours)
+                i, j = neighbours[ni]
                 potential += potential_energy(inter, s, i, j)
             end
         else

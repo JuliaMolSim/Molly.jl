@@ -150,6 +150,7 @@ struct Simulation{T, A, C, GI, SI}
     velocities::C
     temperature::T
     box_size::T
+    neighbours::Vector{Tuple{Int, Int}}
     neighbour_finder::NeighbourFinder
     thermostat::Thermostat
     loggers::Dict{String, <:Logger}
@@ -167,6 +168,7 @@ function Simulation(;
                     velocities=zero(coords),
                     temperature=0.0,
                     box_size,
+                    neighbours=Tuple{Int, Int}[],
                     neighbour_finder=NoNeighbourFinder(),
                     thermostat=NoThermostat(),
                     loggers=Dict{String, Logger}(),
@@ -180,8 +182,8 @@ function Simulation(;
     SI = typeof(specific_inter_lists)
     return Simulation{T, A, C, GI, SI}(
                 simulator, atoms, specific_inter_lists, general_inters, coords,
-                velocities, temperature, box_size, neighbour_finder, thermostat,
-                loggers, timestep, n_steps, n_steps_made)
+                velocities, temperature, box_size, neighbours, neighbour_finder,
+                thermostat, loggers, timestep, n_steps, n_steps_made)
 end
 
 function Base.show(io::IO, s::Simulation)
