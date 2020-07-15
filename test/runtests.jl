@@ -59,7 +59,7 @@ box_size = 2.0
         neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
         thermostat=AndersenThermostat(10.0),
         loggers=Dict("temp" => TemperatureLogger(100),
-                        "coords" => CoordinateLogger(100, dims=2)),
+                     "coords" => CoordinateLogger(100, dims=2)),
         timestep=timestep,
         n_steps=n_steps
     )
@@ -86,11 +86,13 @@ end
             neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
             thermostat=AndersenThermostat(10.0),
             loggers=Dict("temp" => TemperatureLogger(100),
-                            "coords" => CoordinateLogger(100)),
+                         "coords" => CoordinateLogger(100),
+                         "energy" => EnergyLogger(100)),
             timestep=timestep,
             n_steps=n_steps
         )
 
+        E0 = energy(s)
         @time simulate!(s, parallel=parallel)
 
         final_coords = last(s.loggers["coords"].coords)
@@ -99,6 +101,8 @@ end
         displacements(final_coords, box_size)
         distances(final_coords, box_size)
         rdf(final_coords, box_size)
+        ΔE = energy(s) - E0
+        @test ΔE < 1e-2
     end
 end
 
@@ -118,7 +122,7 @@ end
         neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
         thermostat=AndersenThermostat(10.0),
         loggers=Dict("temp" => TemperatureLogger(100),
-                        "coords" => CoordinateLogger(100)),
+                     "coords" => CoordinateLogger(100)),
         timestep=timestep,
         n_steps=n_steps
     )
