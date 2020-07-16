@@ -95,7 +95,7 @@ function potential_energy(s::Simulation)
             end
         else
             for i in 1:n_atoms
-                for j in 1:i
+                for j in i+1:n_atoms
                     potential += potential_energy(inter, s, i, j)
                 end
             end
