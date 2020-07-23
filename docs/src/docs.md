@@ -1,13 +1,14 @@
 # Molly documentation
 
+This documentation will first introduce the main features of the package with some examples, then will give details on each component of a simulation.
+There are further examples in the [Molly examples](@ref) section.
+For more information on specific types or functions, see the [Molly API](@ref) section or call `?function_name` in Julia.
+The [Differentiable simulation with Molly](@ref) section describes taking gradients through simulations.
+
 Molly takes a modular approach to molecular simulation.
 To run a simulation you create a [`Simulation`](@ref) object and call [`simulate!`](@ref) on it.
 The different components of the simulation can be used as defined by the package, or you can define your own versions.
 An important principle of the package is that your custom components, particularly force functions, should be easy to define and just as performant as the built-in versions.
-
-This documentation will first introduce the main features of the package with some examples, then will give details on each component of a simulation.
-There are further examples in the [Molly examples](@ref) section.
-For more information on specific types or functions, see the [Molly API](@ref) section or call `?function_name` in Julia.
 
 ## Simulating a gas
 
