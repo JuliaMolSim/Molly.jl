@@ -363,7 +363,7 @@ function loss()
 end
 ```
 Before training the result looks like this:
-![Logo before](images/logo_before.png)
+![Logo before](images/logo_before.gif)
 ```julia
 function train()
     n_epochs = 20
@@ -402,7 +402,7 @@ Epoch 19  |  Dist end  0.977  |  Loss  0.023
 Epoch 20  |  Dist end  0.971  |  Loss  0.029
 ```
 After training it looks much better:
-![Logo after](images/logo_after.png)
+![Logo after](images/logo_after.gif)
 You could replace the simple network here with a much more complicated model and it would theoretically be able to train, even if it might prove practically difficult (see discussion below).
 
 ## Molecular loss functions
