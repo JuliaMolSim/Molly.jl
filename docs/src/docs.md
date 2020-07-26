@@ -298,6 +298,7 @@ The available general interactions are:
 - [`SoftSphere`](@ref).
 - [`Coulomb`](@ref).
 - [`Gravity`](@ref).
+- [`LennardJones`](@ref).
 
 The available specific interactions are:
 - [`HarmonicBond`](@ref).
