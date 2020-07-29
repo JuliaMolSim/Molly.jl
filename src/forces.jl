@@ -237,3 +237,46 @@ function force!(forces,
     forces[d.l] += f_d
     return nothing
 end
+
+"""
+    Mie(m,n,nl_only)
+
+The Mie generalized interaction.
+Mie force with m = 6, n = 12 is equivalent to Lennard Jones potential
+"""
+struct Mie{T<:Real} <: GeneralInteraction
+    m::T
+    n::T
+    mn::T #this is to save on computation
+    nl_only::Bool
+end
+
+Mie(m,n) = Mie(m,n,(n/(n-m))*(n/m)^(m/(n-m)),false)
+
+@fastmath @inbounds function force!(forces,
+    inter::Mie{T},
+    s::Simulation,
+    i::Integer,
+    j::Integer) where T
+    if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ) || i == j
+    return
+    end
+    m = inter.m
+    n = inter.n
+    σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
+    ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
+    dr = vector(s.coords[i], s.coords[j], s.box_size)
+    rr = norm(dr)
+    abs2(rr) > sqdist_cutoff_nb && return
+    #derivative obtained via wolfram
+    const_mn = inter.mn*ϵ/rr
+    σ_r = σ/rr
+    f= m*(σ_r)^m - n*(σ_r)^n
+    f = f*const_mn
+    # Limit this to 100 as a fudge to stop it exploding
+    f = min(f, 100)
+    fdr = f * dr
+    forces[i] -= fdr
+    forces[j] += fdr
+    return nothing
+end
