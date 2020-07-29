@@ -353,6 +353,14 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
+    "location": "api.html#Molly.Mie",
+    "page": "API",
+    "title": "Molly.Mie",
+    "category": "type",
+    "text": "Mie(m, n, nl_only)\n\nThe Mie generalized interaction. When m equals 6 and n equals 12 this is equivalent to the Lennard Jones interaction.\n\n\n\n\n\n"
+},
+
+{
     "location": "api.html#Molly.NeighbourFinder",
     "page": "API",
     "title": "Molly.NeighbourFinder",
@@ -397,7 +405,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.SoftSphere",
     "category": "type",
-    "text": "SoftSphere(nl_only)\n\nThe soft-sphere potential.\n\n\n\n\n\n"
+    "text": "SoftSphere(nl_only)\n\nThe soft-sphere interaction.\n\n\n\n\n\n"
 },
 
 {
