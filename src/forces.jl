@@ -129,7 +129,7 @@ Mie(m, n) = Mie(m, n, false)
     σ_r = σ / r
     f = m * σ_r ^ m - n * σ_r ^ n
     # Limit this to 100 as a fudge to stop it exploding
-    f = min(f * const_mn, 100)
+    f = min(-f * const_mn / r, 100)
     fdr = f * dr
     forces[i] -= fdr
     forces[j] += fdr
