@@ -22,7 +22,7 @@ LennardJones(nl_only) = LennardJones(ShiftCutoff(true),
                               1/9.0
 )
 
-@fastmath @inbounds function force!(forces,
+@inline @inbounds function force!(forces,
                                     inter::LennardJones{ShiftCutoff},
                                     s::Simulation,
                                     i::Integer,
