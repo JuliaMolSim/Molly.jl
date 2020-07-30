@@ -3,7 +3,7 @@
 
 The Lennard-Jones 6-12 interaction.
 """
-struct LennardJones{C, T} <: GeneralInteraction
+struct LennardJones{T, C} <: GeneralInteraction
     cutoff::C
     nl_only::Bool
     sqdist_cutoff_coeff::T

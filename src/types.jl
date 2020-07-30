@@ -4,6 +4,7 @@ export
     Interaction,
     GeneralInteraction,
     SpecificInteraction,
+    AbstractCutoff,
     Simulator,
     Thermostat,
     NeighbourFinder,
@@ -28,6 +29,10 @@ Custom specific interactions should sub-type this type.
 """
 abstract type SpecificInteraction <: Interaction end
 
+"""
+A general type of cutoff encoding the approximation used for a potential.
+Interactions can be parametrized by the cutoff behavior.
+"""
 abstract type AbstractCutoff end
 
 """

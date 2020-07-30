@@ -78,7 +78,7 @@ Log the energy of the system throughout a simulation.
 """
 struct EnergyLogger{T} <: Logger
     n_steps::Int
-    energy::Vector{T}
+    energies::Vector{T}
 end
 
 EnergyLogger(T::Type, n_steps::Integer) = EnergyLogger(n_steps, T[])
