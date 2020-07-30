@@ -88,13 +88,13 @@ function EnergyLogger(n_steps::Integer)
 end
 
 function Base.show(io::IO, el::EnergyLogger)
-    print(io, "EnergyLogger{", eltype(el.energy), "} with n_steps ",
-                el.n_steps, ", ", length(el.energy), " energies recorded")
+    print(io, "EnergyLogger{", eltype(el.energies), "} with n_steps ",
+                el.n_steps, ", ", length(el.energies), " energies recorded")
 end
 
 function log_property!(logger::EnergyLogger, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
-        push!(logger.energy, energy(s))
+        push!(logger.energies, energy(s))
     end
 end
 

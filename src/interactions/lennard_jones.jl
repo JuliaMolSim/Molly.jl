@@ -23,10 +23,10 @@ LennardJones(nl_only) = LennardJones(ShiftCutoff(true),
 )
 
 @inline @inbounds function force!(forces,
-                                    inter::LennardJones{ShiftCutoff},
+                                    inter::LennardJones{T, ShiftCutoff},
                                     s::Simulation,
                                     i::Integer,
-                                    j::Integer)
+                                    j::Integer) where T
     i == j && return
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
