@@ -75,9 +75,8 @@ end
     
     invr2 = inv(r2)
     six_term = (σ2 * invr2) ^ 3
-    # @show (r2,six_term) (i,j)
 
-    return 4ϵ * (six_term ^ 2 - six_term) #- cutoff_energy(inter, σ, ϵ)
+    return 4ϵ * (six_term ^ 2 - six_term) - cutoff_energy(inter, σ, ϵ)
 end
 
 function cutoff_energy(inter::LennardJones, σ, ϵ)
