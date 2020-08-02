@@ -119,27 +119,27 @@ end
             atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
                         mass=m, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
             general_inters=(LennardJones(),),
-            coords=[box_size .* rand(SVector{3}) for i in 1:n_atoms],
+            coords=placeatoms(n_atoms, box_size, 0.6),
             velocities=[velocity(10.0, temp) .* 0.01 for i in 1:n_atoms],
             temperature=temp,
             box_size=box_size,
             loggers=Dict("coords" => CoordinateLogger(100),
-                         "energy" => EnergyLogger(100)),
+                        "energy" => EnergyLogger(100)),
             timestep=timestep,
             n_steps=n_steps
         )
 
         E0 = energy(s)
-        @time simulate!(s, parallel=parallel)
+        @time simulate!(s, parallel=true)
 
         ΔE = energy(s) - E0
-        @test abs(ΔE) < 1e-2
+        @test abs(ΔE) < 2e-2
 
         Es = s.loggers["energy"].energies
         maxΔE = maximum(abs.(Es .- E0))
-        @test maxΔE < 1e-2
+        @test maxΔE < 2e-2
 
-        @test abs(Es[end] - Es[1]) < 1e-2
+        @test abs(Es[end] - Es[1]) < 2e-2
         @test std(Es.-Es[1])/n_atoms < timestep^2
 
         final_coords = last(s.loggers["coords"].coords)

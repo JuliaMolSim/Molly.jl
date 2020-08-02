@@ -6,6 +6,7 @@ export
     Bondtype,
     Angletype,
     Torsiontype,
+    placeatoms,
     readinputs
 
 """
@@ -50,6 +51,25 @@ struct Torsiontype{T}
     f2::T
     f3::T
     f4::T
+end
+
+function placeatoms(n_atoms, box_size, min_dist)
+    min_dist_sq = min_dist ^ 2
+    coords = SArray{Tuple{3}, Float64, 1, 3}[]
+    while length(coords) < n_atoms
+        new_coord = rand(SVector{3}) .* box_size
+        okay = true
+        for coord in coords
+            if sum(abs2, vector(coord, new_coord, box_size)) < min_dist_sq
+                okay = false
+                break
+            end
+        end
+        if okay
+            push!(coords, new_coord)
+        end
+    end
+    return coords
 end
 
 """
