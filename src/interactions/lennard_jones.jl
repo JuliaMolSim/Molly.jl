@@ -30,13 +30,10 @@ LennardJones(nl_only) = LennardJones(ShiftCutoff(true),
     i == j && return
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
-    
-    if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
-        return
-    end
+
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
     ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
-    
+
     σ2 = σ^2
     sqdist_cutoff = inter.sqdist_cutoff_coeff * σ2
     r2 > sqdist_cutoff && return
