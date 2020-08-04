@@ -4,30 +4,52 @@ struct NoCutoff <: AbstractCutoff end
 
 cutoff_points(::Type{NoCutoff}) = 0
 
-struct ShiftedPotentialCutoff{T} <: AbstractCutoff
-    min_force::T
+struct ShiftedPotentialCutoff{F, T} <: AbstractCutoff
+    min_force::F
+    cutoff_dist::T
+    sqdist_cutoff::T
+    inv_sqdist_cutoff::T
 end
 
-cutoff_points(::Type{ShiftedPotentialCutoff{T}}) where T = 1
+ShiftedPotentialCutoff(cutoff_dist) = ShiftedPotentialCutoff(
+    100,
+    cutoff_dist,
+    cutoff_dist^2,
+    inv(cutoff_dist),
+)
 
-struct ShiftedForceCutoff{L, T} <: AbstractCutoff
-    min_force::T
+cutoff_points(::Type{ShiftedPotentialCutoff{F, T}}) where {F, T} = 1
+
+struct ShiftedForceCutoff{F, T} <: AbstractCutoff
+    min_force::F
+    cutoff_dist::T
+    sqdist_cutoff::T
+    inv_sqdist_cutoff::T
 end
 
-cutoff_points(::Type{ShiftedForceCutoff}) = 1
+ShiftedForceCutoff(cutoff_dist) = ShiftedForceCutoff(
+    100,
+    cutoff_dist,
+    cutoff_dist^2,
+    inv(cutoff_dist),
+)
 
-function force_cutoff(cutoff::ShiftedPotentialCutoff{T}, r2, inter, params) where T
-    invr2 = inv(r2)
-    f = force(inter, invr2, params)
+cutoff_points(::Type{ShiftedForceCutoff{F, T}}) where {F, T} = 1
+
+force_cutoff(::NoCutoff, r2, inter, params) = force(inter, r2, inv(r2), params)
+potential_cutoff(::NoCutoff, r2, inter, params) = potential(inter, r2, inv(r2), params)
+
+function force_cutoff(cutoff::ShiftedPotentialCutoff{F}, r2, inter, params) where F
+    f = force(inter, r2, inv(r2), params)
 
     if @generated
         quote
-            if !(T === Nothing)
+            if !(F === Nothing)
                 f = min(f, cutoff.min_force)
             end
         end
     else
-        if !(T === Nothing)
+        if !(F === Nothing)
             f = min(f, cutoff.min_force)
         end
     end
@@ -35,23 +57,22 @@ function force_cutoff(cutoff::ShiftedPotentialCutoff{T}, r2, inter, params) wher
     return f
 end
 
-function potential_cutoff(::ShiftedPotentialCutoff, r2, inter, params)
-    invr2 = inv(r2)
-    potential(inter, invr2, params) - potential(inter, inter.inv_sqdist_cutoff, params)
+function potential_cutoff(cutoff::ShiftedPotentialCutoff, r2, inter, params)
+    potential(inter, r2, inv(r2), params) - potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
 end
 
-function force_cutoff(::ShiftedForceCutoff{T}, r2, inter, params) where T
+function force_cutoff(cutoff::ShiftedForceCutoff{F}, r2, inter, params) where F
     invr2 = inv(r2)
-    f = force(inter, invr2, params) - force(inter, inter.inv_sqdist_cutoff, params)
+    f = force(inter, r2, invr2, params) - force(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
 
     if @generated
         quote
-            if !(T === Nothing)
+            if !(F === Nothing)
                 f = min(f, cutoff.min_force)
             end
         end
     else
-        if !(T === Nothing)
+        if !(F === Nothing)
             f = min(f, cutoff.min_force)
         end
     end
@@ -59,9 +80,12 @@ function force_cutoff(::ShiftedForceCutoff{T}, r2, inter, params) where T
     return f
 end
 
-function potential_cutoff(::ShiftedForceCutoff{false}, r2, inter, params)
-    # implement generic fallback
-end
+@fastmath function potential_cutoff(cutoff::ShiftedForceCutoff, r2, inter, params)
+    invr2 = inv(r2)
+    r = √r2
+    rc = cutoff.cutoff_dist
+    fc = force(inter, cutoff.inv_sqdist_cutoff, params)
 
-force_cutoff(::NoCutoff, r2, inter, params) = force(inter, inv(r2), params)
-potential_cutoff(::NoCutoff, r2, inter, params) = potential(inter, inv(r2), params)
+    potential(inter, r2, invr2, params) - (r - rc) * fc -
+        potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
+end
