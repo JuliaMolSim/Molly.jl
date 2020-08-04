@@ -49,7 +49,11 @@ LennardJones(nl_only=false) =
     params = (σ2, ϵ)
 
     if @generated
-        if cutoff_points(C) == 1
+        if cutoff_points(C) == 0
+            quote
+                f = force(inter, r2, inv(r2), params)
+            end
+        elseif cutoff_points(C) == 1
             quote
                 sqdist_cutoff = cutoff.sqdist_cutoff * σ2
                 r2 > sqdist_cutoff && return
@@ -71,7 +75,9 @@ LennardJones(nl_only=false) =
             end
         end
     else
-        if cutoff_points(C) == 1
+        if cutoff_points(C) == 0
+            f = force(inter, r2, inv(r2), params)
+        elseif cutoff_points(C) == 1
             sqdist_cutoff = cutoff.sqdist_cutoff * σ2
             r2 > sqdist_cutoff && return
 
@@ -134,7 +140,11 @@ end
     params = (σ2, ϵ)
 
     if @generated
-        if cutoff_points(C) == 1
+        if cutoff_points(C) == 0
+            quote
+                potential(inter, r2, inv(r2), params)
+            end
+        elseif cutoff_points(C) == 1
             quote
                 sqdist_cutoff = cutoff.sqdist_cutoff * σ2
                 r2 > sqdist_cutoff && return zero(U)
@@ -153,7 +163,9 @@ end
             end
         end
     else
-        if cutoff_points(C) == 1
+        if cutoff_points(C) == 0
+            potential(inter, r2, inv(r2), params)
+        elseif cutoff_points(C) == 1
             sqdist_cutoff = cutoff.sqdist_cutoff * σ2
             r2 > sqdist_cutoff && return zero(U)
 
