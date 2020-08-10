@@ -30,6 +30,7 @@ Implemented features include:
 - Run with Float64 or Float32.
 - Physical agent-based modelling.
 - Visualise simulations as animations.
+- Differentiable molecular simulation on an experimental branch - see the [relevant docs](https://juliamolsim.github.io/Molly.jl/latest/differentiable.html).
 
 Features not yet implemented include:
 - Protein force fields other than OPLS-AA.
@@ -119,11 +120,6 @@ simulate!(s)
 The above 1 ps simulation looks something like this when you view it in [VMD](https://www.ks.uiuc.edu/Research/vmd):
 ![MD simulation](https://github.com/JuliaMolSim/Molly.jl/raw/master/data/5XER/sim_1ps.gif)
 
-## Plans
-
-I plan to work on this in my spare time, but progress will be slow.
-MD could provide a nice use case for Julia - I think a reasonably featured and performant MD program could be written in fewer than 1,000 lines of code for example.
-The development of auto-differentiation packages in Julia opens up interesting avenues for differentiable molecular simulations (there is an experimental branch on this repo).
-Julia is also a well-suited language for trajectory analysis.
+## Contributing
 
 Contributions are very welcome - see the [roadmap issue](https://github.com/JuliaMolSim/Molly.jl/issues/2) for more.

@@ -5,10 +5,11 @@ makedocs(
     format = :html,
     sitename = "Molly.jl",
     pages = [
-        "Home"          => "index.md",
-        "Documentation" => "docs.md",
-        "Examples"      => "examples.md",
-        "API"           => "api.md",
+        "Home"                      => "index.md",
+        "Documentation"             => "docs.md",
+        "Differentiable simulation" => "differentiable.md",
+        "Examples"                  => "examples.md",
+        "API"                       => "api.md",
     ],
     authors = "Joe G Greener"
 )
