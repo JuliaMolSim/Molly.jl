@@ -27,18 +27,8 @@ LennardJones(nl_only=false) =
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
 
-    if @generated
-        if !S
-            quote
-                if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
-                    return
-                end
-            end
-        end
-    else
-        if !S && iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
-            return
-        end
+    if !S && iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
+        return
     end
 
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
@@ -48,51 +38,23 @@ LennardJones(nl_only=false) =
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    if @generated
-        if cutoff_points(C) == 0
-            quote
-                f = force(inter, r2, inv(r2), params)
-            end
-        elseif cutoff_points(C) == 1
-            quote
-                sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-                r2 > sqdist_cutoff && return
+    if cutoff_points(C) == 0
+        f = force(inter, r2, inv(r2), params)
+    elseif cutoff_points(C) == 1
+        sqdist_cutoff = cutoff.sqdist_cutoff * σ2
+        r2 > sqdist_cutoff && return
 
-                f = force_cutoff(cutoff, r2, inter, params)
-            end
-        elseif cutoff_points(C) == 2
-            quote
-                sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-                activation_dist = cutoff.activation_dist * σ2
+        f = force_cutoff(cutoff, r2, inter, params)
+    elseif cutoff_points(C) == 2
+        sqdist_cutoff = cutoff.sqdist_cutoff * σ2
+        activation_dist = cutoff.activation_dist * σ2
 
-                r2 > sqdist_cutoff && return
-
-                if r2 < activation_dist
-                    f = force(inter, r2, inv(r2), params)
-                else
-                    f = force_cutoff(cutoff, r2, inter, params)
-                end
-            end
-        end
-    else
-        if cutoff_points(C) == 0
+        r2 > sqdist_cutoff && return
+        
+        if r2 < activation_dist
             f = force(inter, r2, inv(r2), params)
-        elseif cutoff_points(C) == 1
-            sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-            r2 > sqdist_cutoff && return
-
+        else
             f = force_cutoff(cutoff, r2, inter, params)
-        elseif cutoff_points(C) == 2
-            sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-            activation_dist = cutoff.activation_dist * σ2
-
-            r2 > sqdist_cutoff && return
-            
-            if r2 < activation_dist
-                f = force(inter, r2, inv(r2), params)
-            else
-                f = force_cutoff(cutoff, r2, inter, params)
-            end
         end
     end
 
@@ -118,18 +80,8 @@ end
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
 
-    if @generated
-        if !S
-            quote
-                if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
-                    return zero(U)
-                end
-            end
-        end
-    else
-        if !S && iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
-            return zero(U)
-        end
+    if !S && iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
+        return zero(U)
     end
 
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
@@ -139,45 +91,20 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    if @generated
-        if cutoff_points(C) == 0
-            quote
-                potential(inter, r2, inv(r2), params)
-            end
-        elseif cutoff_points(C) == 1
-            quote
-                sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-                r2 > sqdist_cutoff && return zero(U)
+    if cutoff_points(C) == 0
+        potential(inter, r2, inv(r2), params)
+    elseif cutoff_points(C) == 1
+        sqdist_cutoff = cutoff.sqdist_cutoff * σ2
+        r2 > sqdist_cutoff && return zero(U)
 
-                potential_cutoff(cutoff, r2, inter, params)
-            end
-        elseif cutoff_points(C) == 2
-            quote
-                r2 > sqdist_cutoff && return zero(U)
-            
-                if r2 < activation_dist
-                    potential(inter, r2, inv(r2), params)
-                else
-                    potential_cutoff(cutoff, r2, inter, params)
-                end
-            end
-        end
-    else
-        if cutoff_points(C) == 0
+        potential_cutoff(cutoff, r2, inter, params)
+    elseif cutoff_points(C) == 2
+        r2 > sqdist_cutoff && return zero(U)
+        
+        if r2 < activation_dist
             potential(inter, r2, inv(r2), params)
-        elseif cutoff_points(C) == 1
-            sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-            r2 > sqdist_cutoff && return zero(U)
-
+        else
             potential_cutoff(cutoff, r2, inter, params)
-        elseif cutoff_points(C) == 2
-            r2 > sqdist_cutoff && return zero(U)
-            
-            if r2 < activation_dist
-                potential(inter, r2, inv(r2), params)
-            else
-                potential_cutoff(cutoff, r2, inter, params)
-            end
         end
     end
 end

@@ -36,51 +36,23 @@ Coulomb(nl_only=false) = Coulomb(
 
     params = (coulomb_const, qi, qj)
     
-    if @generated
-        if cutoff_points(C) == 0
-            quote
-                f = force(inter, r2, inv(r2), params)
-            end
-        elseif cutoff_points(C) == 1
-            quote
-                sqdist_cutoff = cutoff.sqdist_cutoff
-                r2 > sqdist_cutoff && return
+    if cutoff_points(C) == 0
+        f = force(inter, r2, inv(r2), params)
+    elseif cutoff_points(C) == 1
+        sqdist_cutoff = cutoff.sqdist_cutoff
+        r2 > sqdist_cutoff && return
 
-                f = force_cutoff(cutoff, r2, inter, params)
-            end
-        elseif cutoff_points(C) == 2
-            quote
-                sqdist_cutoff = cutoff.sqdist_cutoff
-                activation_dist = cutoff.activation_dist
+        f = force_cutoff(cutoff, r2, inter, params)
+    elseif cutoff_points(C) == 2
+        sqdist_cutoff = cutoff.sqdist_cutoff
+        activation_dist = cutoff.activation_dist
 
-                r2 > sqdist_cutoff && return
-
-                if r2 < activation_dist
-                    f = force(inter, r2, inv(r2), params)
-                else
-                    f = force_cutoff(cutoff, r2, inter, params)
-                end
-            end
-        end
-    else
-        if cutoff_points(C) == 0
+        r2 > sqdist_cutoff && return
+        
+        if r2 < activation_dist
             f = force(inter, r2, inv(r2), params)
-        elseif cutoff_points(C) == 1
-            sqdist_cutoff = cutoff.sqdist_cutoff
-            r2 > sqdist_cutoff && return
-
+        else
             f = force_cutoff(cutoff, r2, inter, params)
-        elseif cutoff_points(C) == 2
-            sqdist_cutoff = cutoff.sqdist_cutoff
-            activation_dist = cutoff.activation_dist
-
-            r2 > sqdist_cutoff && return
-            
-            if r2 < activation_dist
-                f = force(inter, r2, inv(r2), params)
-            else
-                f = force_cutoff(cutoff, r2, inter, params)
-            end
         end
     end
 
@@ -111,45 +83,20 @@ end
     qj = s.atoms[j].charge
     params = (coulomb_const, qi, qj)
 
-    if @generated
-        if cutoff_points(C) == 0
-            quote
-                potential(inter, r2, inv(r2), params)
-            end
-        elseif cutoff_points(C) == 1
-            quote
-                sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-                r2 > sqdist_cutoff && return zero(U)
+    if cutoff_points(C) == 0
+        potential(inter, r2, inv(r2), params)
+    elseif cutoff_points(C) == 1
+        sqdist_cutoff = cutoff.sqdist_cutoff * σ2
+        r2 > sqdist_cutoff && return zero(U)
 
-                potential_cutoff(cutoff, r2, inter, params)
-            end
-        elseif cutoff_points(C) == 2
-            quote
-                r2 > sqdist_cutoff && return zero(U)
-            
-                if r2 < activation_dist
-                    potential(inter, r2, inv(r2), params)
-                else
-                    potential_cutoff(cutoff, r2, inter, params)
-                end
-            end
-        end
-    else
-        if cutoff_points(C) == 0
+        potential_cutoff(cutoff, r2, inter, params)
+    elseif cutoff_points(C) == 2
+        r2 > sqdist_cutoff && return zero(U)
+        
+        if r2 < activation_dist
             potential(inter, r2, inv(r2), params)
-        elseif cutoff_points(C) == 1
-            sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-            r2 > sqdist_cutoff && return zero(U)
-
+        else
             potential_cutoff(cutoff, r2, inter, params)
-        elseif cutoff_points(C) == 2
-            r2 > sqdist_cutoff && return zero(U)
-            
-            if r2 < activation_dist
-                potential(inter, r2, inv(r2), params)
-            else
-                potential_cutoff(cutoff, r2, inter, params)
-            end
         end
     end
 end
