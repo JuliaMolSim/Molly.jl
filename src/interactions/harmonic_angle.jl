@@ -14,9 +14,9 @@ end
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
 acosbound(x::Real) = acos(clamp(x, -1, 1))
 
-function force!(forces,
-                a::HarmonicAngle,
-                s::Simulation)
+@inline @inbounds function force!(forces,
+                                  a::HarmonicAngle,
+                                  s::Simulation)
     ba = vector(s.coords[a.j], s.coords[a.i], s.box_size)
     bc = vector(s.coords[a.j], s.coords[a.k], s.box_size)
     pa = normalize(ba × (ba × bc))
@@ -29,4 +29,14 @@ function force!(forces,
     forces[a.j] += fb
     forces[a.k] += fc
     return nothing
+end
+
+@inline @inbounds function potential_energy(a::HarmonicAngle,
+                                            s::Simulation)
+    ba = vector(s.coords[a.j], s.coords[a.i], s.box_size)
+    bc = vector(s.coords[a.j], s.coords[a.k], s.box_size)
+    pa = normalize(ba × (ba × bc))
+    pc = normalize(-bc × (ba × bc))
+    
+    a.cth / 2 * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.th0)^2
 end

@@ -10,13 +10,20 @@ struct HarmonicBond{T} <: SpecificInteraction
     kb::T
 end
 
-function force!(forces,
-                b::HarmonicBond,
-                s::Simulation)
+@inline @inbounds function force!(forces,
+                                  b::HarmonicBond,
+                                  s::Simulation)
     ab = vector(s.coords[b.i], s.coords[b.j], s.box_size)
     c = b.kb * (norm(ab) - b.b0)
     f = c * normalize(ab)
     forces[b.i] += f
     forces[b.j] -= f
     return nothing
+end
+
+@inline @inbounds function potential_energy(b::HarmonicBond,
+                                            s::Simulation)
+    dr = vector(s.coords[b.i], s.coords[b.j], s.box_size)
+    r = norm(dr)
+    b.kb / 2 * (r - b.b0) ^ 2
 end
