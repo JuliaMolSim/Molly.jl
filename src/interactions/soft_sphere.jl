@@ -108,7 +108,7 @@ end
     end
 end
 
-@fastmath function potential(::LennardJones, r2, invr2, (σ2, ϵ))
+@fastmath function potential(::SoftSphere, r2, invr2, (σ2, ϵ))
     six_term = (σ2 * invr2) ^ 3
     
     return 4ϵ * (six_term ^ 2)
