@@ -14,9 +14,9 @@ struct Torsion{T} <: SpecificInteraction
     f4::T
 end
 
-function force!(forces,
-                d::Torsion,
-                s::Simulation)
+@inline @inbounds function force!(forces,
+                                  d::Torsion,
+                                  s::Simulation)
     ba = vector(s.coords[d.j], s.coords[d.i], s.box_size)
     bc = vector(s.coords[d.j], s.coords[d.k], s.box_size)
     dc = vector(s.coords[d.l], s.coords[d.k], s.box_size)
@@ -36,4 +36,15 @@ function force!(forces,
     forces[d.k] += fc
     forces[d.l] += f_d
     return nothing
+end
+
+@inline @inbounds function potential_energy(d::Torsion,
+                                            s::Simulation)
+    ba = vector(s.coords[d.j], s.coords[d.i], s.box_size)
+    bc = vector(s.coords[d.j], s.coords[d.k], s.box_size)
+    dc = vector(s.coords[d.l], s.coords[d.k], s.box_size)
+
+    θ = atan(dot((-ba × bc) × (bc × -dc), normalize(bc)), dot(-ba × bc, bc × -dc))
+
+    (d.f1 * (1 + cos(θ)) + d.f2 * (1 - cos(2θ)) + d.f3 * (1 + cos(3θ)) + d.f4) / 2
 end
