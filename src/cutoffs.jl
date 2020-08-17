@@ -5,7 +5,7 @@ struct NoCutoff <: AbstractCutoff end
 cutoff_points(::Type{NoCutoff}) = 0
 
 struct ShiftedPotentialCutoff{F, T} <: AbstractCutoff
-    min_force::F
+    max_force::F
     cutoff_dist::T
     sqdist_cutoff::T
     inv_sqdist_cutoff::T
@@ -21,7 +21,7 @@ ShiftedPotentialCutoff(cutoff_dist) = ShiftedPotentialCutoff(
 cutoff_points(::Type{ShiftedPotentialCutoff{F, T}}) where {F, T} = 1
 
 struct ShiftedForceCutoff{F, T} <: AbstractCutoff
-    min_force::F
+    max_force::F
     cutoff_dist::T
     sqdist_cutoff::T
     inv_sqdist_cutoff::T
@@ -45,12 +45,12 @@ function force_cutoff(cutoff::ShiftedPotentialCutoff{F}, r2, inter, params) wher
     if @generated
         quote
             if !(F === Nothing)
-                f = min(f, cutoff.min_force)
+                f = min(f, cutoff.max_force)
             end
         end
     else
         if !(F === Nothing)
-            f = min(f, cutoff.min_force)
+            f = min(f, cutoff.max_force)
         end
     end
 
@@ -68,12 +68,12 @@ function force_cutoff(cutoff::ShiftedForceCutoff{F}, r2, inter, params) where F
     if @generated
         quote
             if !(F === Nothing)
-                f = min(f, cutoff.min_force)
+                f = min(f, cutoff.max_force)
             end
         end
     else
         if !(F === Nothing)
-            f = min(f, cutoff.min_force)
+            f = min(f, cutoff.max_force)
         end
     end
 
