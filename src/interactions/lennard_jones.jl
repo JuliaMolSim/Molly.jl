@@ -114,14 +114,3 @@ end
     
     return 4ϵ * (six_term ^ 2 - six_term)
 end
-
-@fastmath function potential_cutoff(cutoff::ShiftedForceCutoff,
-                                    r2, inter::LennardJones, (σ2, ϵ))
-    invr2 = inv(r2)
-    r = √r2
-    rc = √(cutoff.sqdist_cutoff * σ2)
-    fc = force(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, (σ2, ϵ))
-
-    potential(inter, r2, invr2, (σ2, ϵ)) - (r - rc) * fc -
-        potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, (σ2, ϵ))
-end

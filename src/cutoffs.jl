@@ -84,7 +84,7 @@ end
     invr2 = inv(r2)
     r = √r2
     rc = cutoff.cutoff_dist
-    fc = force(inter, cutoff.inv_sqdist_cutoff, params)
+    fc = force(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
 
     potential(inter, r2, invr2, params) - (r - rc) * fc -
         potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
