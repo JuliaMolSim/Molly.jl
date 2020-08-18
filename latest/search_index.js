@@ -233,6 +233,14 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
+    "location": "api.html#Molly.AbstractCutoff",
+    "page": "API",
+    "title": "Molly.AbstractCutoff",
+    "category": "type",
+    "text": "A general type of cutoff encoding the approximation used for a potential. Interactions can be parametrized by the cutoff behavior.\n\n\n\n\n\n"
+},
+
+{
     "location": "api.html#Molly.AndersenThermostat",
     "page": "API",
     "title": "Molly.AndersenThermostat",
@@ -297,6 +305,14 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
+    "location": "api.html#Molly.EnergyLogger",
+    "page": "API",
+    "title": "Molly.EnergyLogger",
+    "category": "type",
+    "text": "EnergyLogger(n_steps)\n\nLog the energy of the system throughout a simulation.\n\n\n\n\n\n"
+},
+
+{
     "location": "api.html#Molly.GeneralInteraction",
     "page": "API",
     "title": "Molly.GeneralInteraction",
@@ -353,14 +369,6 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
-    "location": "api.html#Molly.Mie",
-    "page": "API",
-    "title": "Molly.Mie",
-    "category": "type",
-    "text": "Mie(m, n, nl_only)\n\nThe Mie generalized interaction. When m equals 6 and n equals 12 this is equivalent to the Lennard Jones interaction.\n\n\n\n\n\n"
-},
-
-{
     "location": "api.html#Molly.NeighbourFinder",
     "page": "API",
     "title": "Molly.NeighbourFinder",
@@ -405,7 +413,7 @@ var documenterSearchIndex = {"docs": [
     "page": "API",
     "title": "Molly.SoftSphere",
     "category": "type",
-    "text": "SoftSphere(nl_only)\n\nThe soft-sphere interaction.\n\n\n\n\n\n"
+    "text": "SoftSphere(nl_only)\n\nThe soft-sphere potential.\n\n\n\n\n\n"
 },
 
 {
@@ -473,11 +481,11 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
-    "location": "api.html#Molly.accelerations-Tuple{Simulation,Any}",
+    "location": "api.html#Molly.accelerations-Tuple{Simulation}",
     "page": "API",
     "title": "Molly.accelerations",
     "category": "method",
-    "text": "accelerations(simulation, neighbours; parallel=true)\n\nCalculate the accelerations of all atoms using the general and specific interactions and Newton\'s second law.\n\n\n\n\n\n"
+    "text": "accelerations(simulation; parallel=true)\n\nCalculate the accelerations of all atoms using the general and specific interactions and Newton\'s second law.\n\n\n\n\n\n"
 },
 
 {
@@ -513,11 +521,19 @@ var documenterSearchIndex = {"docs": [
 },
 
 {
-    "location": "api.html#Molly.find_neighbours-Tuple{Simulation,Any,NoNeighbourFinder,Integer}",
+    "location": "api.html#Molly.energy-Tuple{Any}",
     "page": "API",
-    "title": "Molly.find_neighbours",
+    "title": "Molly.energy",
     "category": "method",
-    "text": "find_neighbours(simulation, current_neighbours, neighbour_finder, step_n; parallel=true)\n\nObtain a list of close atoms in a system. Custom neighbour finders should implement this function.\n\n\n\n\n\n"
+    "text": "energy(s)\n\nCompute the total energy of the system.\n\n\n\n\n\n"
+},
+
+{
+    "location": "api.html#Molly.find_neighbours!-Tuple{Simulation,NoNeighbourFinder,Integer}",
+    "page": "API",
+    "title": "Molly.find_neighbours!",
+    "category": "method",
+    "text": "find_neighbours!(simulation, neighbour_finder, step_n; parallel=true)\n\nObtain a list of close atoms in a system. Custom neighbour finders should implement this function.\n\n\n\n\n\n"
 },
 
 {
