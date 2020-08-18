@@ -4,6 +4,7 @@ export
     TemperatureLogger,
     log_property!,
     CoordinateLogger,
+    EnergyLogger,
     StructureWriter
 
 """
@@ -67,6 +68,33 @@ end
 function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
         push!(logger.coords, deepcopy(s.coords))
+    end
+end
+
+"""
+    EnergyLogger(n_steps)
+
+Log the energy of the system throughout a simulation.
+"""
+struct EnergyLogger{T} <: Logger
+    n_steps::Int
+    energies::Vector{T}
+end
+
+EnergyLogger(T::Type, n_steps::Integer) = EnergyLogger(n_steps, T[])
+
+function EnergyLogger(n_steps::Integer)
+    return EnergyLogger(DefaultFloat, n_steps)
+end
+
+function Base.show(io::IO, el::EnergyLogger)
+    print(io, "EnergyLogger{", eltype(el.energies), "} with n_steps ",
+                el.n_steps, ", ", length(el.energies), " energies recorded")
+end
+
+function log_property!(logger::EnergyLogger, s::Simulation, step_n::Integer)
+    if step_n % logger.n_steps == 0
+        push!(logger.energies, energy(s))
     end
 end
 

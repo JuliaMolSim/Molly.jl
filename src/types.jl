@@ -4,6 +4,7 @@ export
     Interaction,
     GeneralInteraction,
     SpecificInteraction,
+    AbstractCutoff,
     Simulator,
     Thermostat,
     NeighbourFinder,
@@ -27,6 +28,12 @@ A specific interaction between sets of specific atoms, e.g. a bond angle.
 Custom specific interactions should sub-type this type.
 """
 abstract type SpecificInteraction <: Interaction end
+
+"""
+A general type of cutoff encoding the approximation used for a potential.
+Interactions can be parametrized by the cutoff behavior.
+"""
+abstract type AbstractCutoff end
 
 """
 A type of simulation to run, e.g. leap-frog integration or energy minimisation.
@@ -148,6 +155,7 @@ struct Simulation{T, A, C, GI, SI}
     velocities::C
     temperature::T
     box_size::T
+    neighbours::Vector{Tuple{Int, Int}}
     neighbour_finder::NeighbourFinder
     thermostat::Thermostat
     loggers::Dict{String, <:Logger}
@@ -165,6 +173,7 @@ function Simulation(;
                     velocities=zero(coords),
                     temperature=0.0,
                     box_size,
+                    neighbours=Tuple{Int, Int}[],
                     neighbour_finder=NoNeighbourFinder(),
                     thermostat=NoThermostat(),
                     loggers=Dict{String, Logger}(),
@@ -178,8 +187,8 @@ function Simulation(;
     SI = typeof(specific_inter_lists)
     return Simulation{T, A, C, GI, SI}(
                 simulator, atoms, specific_inter_lists, general_inters, coords,
-                velocities, temperature, box_size, neighbour_finder, thermostat,
-                loggers, timestep, n_steps, n_steps_made)
+                velocities, temperature, box_size, neighbours, neighbour_finder,
+                thermostat, loggers, timestep, n_steps, n_steps_made)
 end
 
 function Base.show(io::IO, s::Simulation)

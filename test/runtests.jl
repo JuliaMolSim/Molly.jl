@@ -31,11 +31,11 @@ end
         box_size=10.0,
         neighbour_finder=DistanceNeighbourFinder(trues(3, 3), 10, 2.0)
     )
-    @test find_neighbours(s, nothing, s.neighbour_finder, 0,
-                            parallel=false) == [(2, 1)]
+    find_neighbours!(s, s.neighbour_finder, 0, parallel=false)
+    @test s.neighbours == [(2, 1)]
     if nthreads() > 1
-        @test find_neighbours(s, nothing, s.neighbour_finder, 0,
-                                parallel=true) == [(2, 1)]
+        find_neighbours!(s, s.neighbour_finder, 0, parallel=true)
+        @test s.neighbours == [(2, 1)]
     end
 end
 
@@ -59,7 +59,7 @@ box_size = 2.0
         neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
         thermostat=AndersenThermostat(10.0),
         loggers=Dict("temp" => TemperatureLogger(100),
-                        "coords" => CoordinateLogger(100, dims=2)),
+                     "coords" => CoordinateLogger(100, dims=2)),
         timestep=timestep,
         n_steps=n_steps
     )
@@ -86,7 +86,8 @@ end
             neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
             thermostat=AndersenThermostat(10.0),
             loggers=Dict("temp" => TemperatureLogger(100),
-                            "coords" => CoordinateLogger(100)),
+                         "coords" => CoordinateLogger(100),
+                         "energy" => EnergyLogger(100)),
             timestep=timestep,
             n_steps=n_steps
         )
@@ -118,7 +119,7 @@ end
         neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
         thermostat=AndersenThermostat(10.0),
         loggers=Dict("temp" => TemperatureLogger(100),
-                        "coords" => CoordinateLogger(100)),
+                     "coords" => CoordinateLogger(100)),
         timestep=timestep,
         n_steps=n_steps
     )

@@ -14,6 +14,7 @@ using Base.Threads
 using LinearAlgebra
 
 include("types.jl")
+include("cutoffs.jl")
 include("setup.jl")
 include("spatial.jl")
 include("forces.jl")

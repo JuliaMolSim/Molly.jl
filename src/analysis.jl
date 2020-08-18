@@ -4,7 +4,8 @@ export
     visualize,
     displacements,
     distances,
-    rdf
+    rdf,
+    energy
 
 """
     visualize(coord_logger, box_size, out_filepath; <keyword arguments>)
@@ -68,4 +69,44 @@ function rdf(coords, box_size::Real; npoints::Integer=200)
     kd = kde(dists_vec, npoints=npoints)
     density_weighted = kd.density ./ (4π .* step(kd.x) .* kd.x .^ 2)
     return collect(kd.x), density_weighted
+end
+
+"""
+    energy(s)
+
+Compute the total energy of the system.
+"""
+energy(s) = kinetic_energy(s) + potential_energy(s)
+
+function kinetic_energy(s::Simulation)
+    sum(i->s.atoms[i].mass*dot(s.velocities[i], s.velocities[i])/2, axes(s.atoms, 1))
+end
+    
+function potential_energy(s::Simulation)
+    n_atoms = length(s.coords)
+    potential = zero(eltype(eltype(s.coords)))
+
+    for inter in values(s.general_inters)
+        if inter.nl_only
+            neighbours = s.neighbours
+            @inbounds for ni in 1:length(neighbours)
+                i, j = neighbours[ni]
+                potential += potential_energy(inter, s, i, j)
+            end
+        else
+            for i in 1:n_atoms
+                for j in i+1:n_atoms
+                    potential += potential_energy(inter, s, i, j)
+                end
+            end
+        end
+    end
+
+    for inter_list in values(s.specific_inter_lists)
+        for inter in inter_list
+            potential += potential_energy(inter, s)
+        end
+    end
+
+    return potential
 end

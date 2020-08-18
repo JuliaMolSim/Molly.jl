@@ -29,6 +29,11 @@ version of the coordinates accounting for the periodic boundaries.
 """
 vector(c1, c2, box_size::Real) = vector1D.(c1, c2, box_size)
 
+@generated function vector(c1::SVector{N}, c2::SVector{N}, box_size::Real) where N
+    quote
+        Base.Cartesian.@ncall $N SVector{$N} i->vector1D(c1[i], c2[i], box_size)
+    end
+end
 """
     adjust_bounds(c, box_size)
 
