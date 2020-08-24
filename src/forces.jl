@@ -23,7 +23,7 @@ Custom interaction types should implement this function.
 function force! end
 
 @inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer)
-    fdr = force(inter, s, i, j)
+    fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], i, j, s.box_size)
     forces[i] -= fdr
     forces[j] += fdr
     return nothing
