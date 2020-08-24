@@ -55,7 +55,7 @@ function simulate!(s::Simulation,
         accels_t = accels_t_dt
         s.n_steps_made[1] += 1
     end
-    return s
+    return s.coords
 end
 
 """
@@ -97,7 +97,7 @@ function simulate!(s::Simulation,
 
         s.n_steps_made[1] += 1
     end
-    return s
+    return s.coords
 end
 
 function simulate!(s::Simulation, n_steps::Integer; parallel::Bool=true)
