@@ -2,11 +2,13 @@ module Molly
 
 using BioStructures
 using Colors
+using CUDA # TODO remove once CUDA.jl updated
 using Distributions
 using KernelDensity
 using ProgressMeter
 using Reexport
 using Requires
+using Zygote
 
 @reexport using StaticArrays
 

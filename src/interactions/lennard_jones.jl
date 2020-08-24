@@ -22,10 +22,8 @@ LennardJones(nl_only=false) =
                                  coord_j,
                                  atom_i,
                                  atom_j,
-                                 i::Integer,
-                                 j::Integer,
                                  box_size) where {S, C}
-    i == j && return zero(coord_i) # TODO: get rid of this check
+    coord_i == coord_j && return zero(coord_i) # TODO: get rid of this check
     dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 

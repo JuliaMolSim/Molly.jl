@@ -23,7 +23,7 @@ Custom interaction types should implement this function.
 function force! end
 
 @inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer)
-    fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], i, j, s.box_size)
+    fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
     forces[i] -= fdr
     forces[j] += fdr
     return nothing
@@ -90,6 +90,30 @@ function accelerations(s::Simulation; parallel::Bool=true)
     end
 
     return forces
+end
+
+function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, atoms_js)
+    n_atoms = length(coords)
+    forces = zero(coords)
+
+    for inter in values(s.general_inters)
+        if inter.nl_only
+            forces -= reshape(sum(force.((inter,), coords_is, coords_js, atoms_is, atoms_js,
+                                            s.box_size), dims=2), n_atoms)
+        else
+            forces -= reshape(sum(force.((inter,), coords_is, coords_js, atoms_is, atoms_js,
+                                            s.box_size), dims=2), n_atoms)
+        end
+    end
+
+    for inter_list in values(s.specific_inter_lists)
+        sparse_forces = force.((coords,), inter_list, (s,))
+        sparse_vecs = SparseVector.(n_atoms, getindex.(sparse_forces, 1),
+                                    getindex.(sparse_forces, 2))
+        forces += Array(sum(sparse_vecs))
+    end
+
+    return forces #./ getproperty.(s.atoms, :mass) # TODO doesn't work on GPU
 end
 
 include("interactions/lennard_jones.jl")

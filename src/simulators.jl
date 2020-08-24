@@ -58,6 +58,52 @@ function simulate!(s::Simulation{false},
     return s.coords
 end
 
+function simulate!(s::Simulation{true},
+                    ::VelocityVerlet,
+                    n_steps::Integer;
+                    parallel::Bool=true)
+    n_atoms = length(s.coords)
+    is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
+    js = permutedims(is, (2, 1))
+    coords, velocities = s.coords, s.velocities
+    #=coords_is = cu(view(coords, is)) # TODO remove once CUDA.jl updated
+    coords_js = cu(view(coords, js))
+    atoms_is = cu(view(s.atoms, is))
+    atoms_js = cu(view(s.atoms, js))=#
+    coords_is = view(coords, is)
+    coords_js = view(coords, js)
+    atoms_is = view(s.atoms, is)
+    atoms_js = view(s.atoms, js)
+    find_neighbours!(s, s.neighbour_finder, 0)
+    accels_t = accelerations(s, coords, coords_is, coords_js, atoms_is, atoms_js)
+    accels_t_dt = zero(s.coords)
+
+    for step_n in 1:n_steps
+        Zygote.ignore() do
+            s.coords[1:end] = coords[1:end]
+            s.velocities[1:end] = velocities[1:end]
+            for logger in values(s.loggers)
+                log_property!(logger, s, step_n)
+            end
+        end
+
+        # TODO dots here required to match numbers (???) but won't be differentiable
+        coords += velocities * s.timestep + (accels_t * s.timestep ^ 2) / 2
+        coords = adjust_bounds_vec.(coords, s.box_size)
+        accels_t_dt = accelerations(s, coords, coords_is, coords_js, atoms_is, atoms_js)
+        velocities += (accels_t + accels_t_dt) * s.timestep / 2
+
+        velocities = apply_thermostat!(velocities, s, s.thermostat)
+        find_neighbours!(s, s.neighbour_finder, 0)
+
+        accels_t = accels_t_dt
+        Zygote.ignore() do
+            s.n_steps_made[1] += 1
+        end
+    end
+    return coords
+end
+
 """
     VelocityFreeVerlet()
 
