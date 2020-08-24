@@ -20,7 +20,7 @@ struct VelocityVerlet <: Simulator end
 Run a simulation according to the rules of the given simulator.
 Custom simulators should implement this function.
 """
-function simulate!(s::Simulation,
+function simulate!(s::Simulation{false},
                     ::VelocityVerlet,
                     n_steps::Integer;
                     parallel::Bool=true)
@@ -49,7 +49,7 @@ function simulate!(s::Simulation,
             s.velocities[i] += (accels_t[i] + accels_t_dt[i]) * s.timestep / 2
         end
 
-        apply_thermostat!(s, s.thermostat)
+        apply_thermostat!(s.velocities, s, s.thermostat)
         find_neighbours!(s, s.neighbour_finder, step_n, parallel=parallel)
 
         accels_t = accels_t_dt
@@ -72,8 +72,7 @@ function simulate!(s::Simulation,
                     n_steps::Integer;
                     parallel::Bool=true)
     n_atoms = length(s.coords)
-    find_neighbours!(s, s.neighbour_finder, 0,
-                                    parallel=parallel)
+    find_neighbours!(s, s.neighbour_finder, 0, parallel=parallel)
     coords_last = s.velocities
 
     @showprogress for step_n in 1:n_steps
@@ -91,9 +90,8 @@ function simulate!(s::Simulation,
         end
         coords_last = coords_copy
 
-        apply_thermostat!(s, s.thermostat)
-        find_neighbours!(s, s.neighbour_finder, step_n,
-                                        parallel=parallel)
+        apply_thermostat!(coords_last, s, s.thermostat)
+        find_neighbours!(s, s.neighbour_finder, step_n, parallel=parallel)
 
         s.n_steps_made[1] += 1
     end

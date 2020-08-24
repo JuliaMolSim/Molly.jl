@@ -146,7 +146,7 @@ default values.
 - `n_steps_made::Vector{Int}=[]`: the number of steps already made during the
     simulation. This is a `Vector` to allow the `struct` to be immutable.
 """
-struct Simulation{T, A, C, GI, SI}
+struct Simulation{D, T, A, C, GI, SI}
     simulator::Simulator
     atoms::Vector{A}
     specific_inter_lists::SI
@@ -164,6 +164,8 @@ struct Simulation{T, A, C, GI, SI}
     n_steps_made::Vector{Int}
 end
 
+Simulation{D}(args...) where {D, T, A, C, GI, SI} = Simulation{D, T, A, C, GI, SI}(args...)
+
 function Simulation(;
                     simulator,
                     atoms,
@@ -179,13 +181,15 @@ function Simulation(;
                     loggers=Dict{String, Logger}(),
                     timestep=0.0,
                     n_steps=0,
-                    n_steps_made=[0])
+                    n_steps_made=[0],
+                    # Guess whether we are on the GPU without depending on CUDA.jl
+                    gpu_diff_safe=startswith(string(typeof(coords)), "CuArray"))
     T = typeof(timestep)
     A = eltype(atoms)
     C = typeof(coords)
     GI = typeof(general_inters)
     SI = typeof(specific_inter_lists)
-    return Simulation{T, A, C, GI, SI}(
+    return Simulation{gpu_diff_safe, T, A, C, GI, SI}(
                 simulator, atoms, specific_inter_lists, general_inters, coords,
                 velocities, temperature, box_size, neighbours, neighbour_finder,
                 thermostat, loggers, timestep, n_steps, n_steps_made)
