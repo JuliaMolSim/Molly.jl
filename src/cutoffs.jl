@@ -36,11 +36,11 @@ ShiftedForceCutoff(cutoff_dist) = ShiftedForceCutoff(
 
 cutoff_points(::Type{ShiftedForceCutoff{F, T}}) where {F, T} = 1
 
-force_cutoff(::NoCutoff, r2, inter, params) = force(inter, r2, inv(r2), params)
+force_cutoff(::NoCutoff, r2, inter, params) = force_nocutoff(inter, r2, inv(r2), params)
 potential_cutoff(::NoCutoff, r2, inter, params) = potential(inter, r2, inv(r2), params)
 
 function force_cutoff(cutoff::ShiftedPotentialCutoff{F}, r2, inter, params) where F
-    f = force(inter, r2, inv(r2), params)
+    f = force_nocutoff(inter, r2, inv(r2), params)
 
     if @generated
         quote
@@ -63,7 +63,8 @@ end
 
 function force_cutoff(cutoff::ShiftedForceCutoff{F}, r2, inter, params) where F
     invr2 = inv(r2)
-    f = force(inter, r2, invr2, params) - force(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
+    f = force_nocutoff(inter, r2, invr2, params) - force_nocutoff(
+                                inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
 
     if @generated
         quote
@@ -84,7 +85,7 @@ end
     invr2 = inv(r2)
     r = √r2
     rc = cutoff.cutoff_dist
-    fc = force(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
+    fc = force_nocutoff(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
 
     potential(inter, r2, invr2, params) - (r - rc) * fc -
         potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)

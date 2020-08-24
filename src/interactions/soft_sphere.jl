@@ -8,7 +8,7 @@ struct SoftSphere{S, C} <: GeneralInteraction
     nl_only::Bool
 end
 
-SoftSphere{S}(cutoff, nl_only) where S = 
+SoftSphere{S}(cutoff, nl_only) where S =
     SoftSphere{S, typeof(cutoff)}(cutoff, nl_only)
 
 SoftSphere(cutoff, nl_only) =
@@ -38,7 +38,7 @@ SoftSphere(nl_only=false) =
     params = (σ2, ϵ)
 
     if cutoff_points(C) == 0
-        f = force(inter, r2, inv(r2), params)
+        f = force_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
         r2 > sqdist_cutoff && return
@@ -49,9 +49,9 @@ SoftSphere(nl_only=false) =
         activation_dist = cutoff.activation_dist * σ2
 
         r2 > sqdist_cutoff && return
-        
+
         if r2 < activation_dist
-            f = force(inter, r2, inv(r2), params)
+            f = force_nocutoff(inter, r2, inv(r2), params)
         else
             f = force_cutoff(cutoff, r2, inter, params)
         end
@@ -63,9 +63,9 @@ SoftSphere(nl_only=false) =
     return nothing
 end
 
-@fastmath function force(::SoftSphere, r2, invr2, (σ2, ϵ))
+@fastmath function force_nocutoff(::SoftSphere, r2, invr2, (σ2, ϵ))
     six_term = (σ2 * invr2) ^ 3
-    
+
     return (24ϵ * invr2) * 2 * six_term ^ 2
 end
 
@@ -85,7 +85,7 @@ end
 
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
     ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
-    
+
     cutoff = inter.cutoff
     σ2 = σ^2
     params = (σ2, ϵ)
@@ -99,7 +99,7 @@ end
         potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         r2 > sqdist_cutoff && return zero(U)
-        
+
         if r2 < activation_dist
             potential(inter, r2, inv(r2), params)
         else
@@ -110,6 +110,6 @@ end
 
 @fastmath function potential(::SoftSphere, r2, invr2, (σ2, ϵ))
     six_term = (σ2 * invr2) ^ 3
-    
+
     return 4ϵ * (six_term ^ 2)
 end

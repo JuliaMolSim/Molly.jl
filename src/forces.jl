@@ -22,6 +22,13 @@ Custom interaction types should implement this function.
 """
 function force! end
 
+@inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer)
+    fdr = force(inter, s, i, j)
+    forces[i] -= fdr
+    forces[j] += fdr
+    return nothing
+end
+
 """
     accelerations(simulation; parallel=true)
 

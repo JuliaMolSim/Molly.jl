@@ -20,14 +20,14 @@ end
     mi, mj = s.atoms[i].mass, s.atoms[j].mass
     params = (inter.G, mi, mj)
 
-    f = force(inter, r2, inv(r2), params)
+    f = force_nocutoff(inter, r2, inv(r2), params)
     fdr = f * dr
     forces[i] -= fdr
     forces[j] += fdr
     return nothing
 end
 
-@fastmath function force(::Gravity, r2, invr2, (G, mi, mj))
+@fastmath function force_nocutoff(::Gravity, r2, invr2, (G, mi, mj))
     (G * mi * mj) / √(r2 ^ 3)
 end
 
@@ -40,7 +40,7 @@ end
 
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
-    
+
     mi, mj = s.atoms[i].mass, s.atoms[j].mass
     params = (inter.G, mi, mj)
 

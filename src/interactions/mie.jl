@@ -30,7 +30,7 @@ Mie(m, n) = Mie(m, n, false)
 
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
     ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
-    
+
     cutoff = inter.cutoff
     m = inter.m
     n = inter.n
@@ -40,7 +40,7 @@ Mie(m, n) = Mie(m, n, false)
     params = (m, n, σ_r, const_mn)
 
     if cutoff_points(C) == 0
-        f = force(inter, r2, inv(r2), params)
+        f = force_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
         r2 > sqdist_cutoff && return
@@ -51,9 +51,9 @@ Mie(m, n) = Mie(m, n, false)
         activation_dist = cutoff.activation_dist * σ2
 
         r2 > sqdist_cutoff && return
-        
+
         if r2 < activation_dist
-            f = force(inter, r2, inv(r2), params)
+            f = force_nocutoff(inter, r2, inv(r2), params)
         else
             f = force_cutoff(cutoff, r2, inter, params)
         end
@@ -65,7 +65,7 @@ Mie(m, n) = Mie(m, n, false)
     return nothing
 end
 
-@fastmath function force(::Mie, r2, invr2, (m, n, σ_r, const_mn))
+@fastmath function force_nocutoff(::Mie, r2, invr2, (m, n, σ_r, const_mn))
     return -const_mn / r2 * (m * σ_r ^ m - n * σ_r ^ n)
 end
 
@@ -85,7 +85,7 @@ end
 
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
     ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
-    
+
     cutoff = inter.cutoff
     m = inter.m
     n = inter.n
@@ -102,7 +102,7 @@ end
         potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         r2 > sqdist_cutoff && return zero(U)
-        
+
         if r2 < activation_dist
             potential(inter, r2, inv(r2), params)
         else
