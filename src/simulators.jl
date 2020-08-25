@@ -83,9 +83,9 @@ function simulate!(s::Simulation{true},
             end
         end
 
-        # TODO dots here required to match numbers (???) but won't be differentiable
-        coords += velocities * s.timestep + (accels_t * s.timestep ^ 2) / 2
-        coords = adjust_bounds_vec.(coords, s.box_size)
+        # In-place updates here required to work with views
+        coords .+= velocities * s.timestep + (accels_t * s.timestep ^ 2) / 2
+        coords .= adjust_bounds_vec.(coords, s.box_size)
         accels_t_dt = accelerations(s, coords, coords_is, coords_js, atoms_is, atoms_js)
         velocities += (accels_t + accels_t_dt) * s.timestep / 2
 
