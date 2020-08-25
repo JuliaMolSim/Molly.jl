@@ -66,10 +66,6 @@ function simulate!(s::Simulation{true},
     is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
     js = permutedims(is, (2, 1))
     coords, velocities = s.coords, s.velocities
-    #=coords_is = cu(view(coords, is)) # TODO remove once CUDA.jl updated
-    coords_js = cu(view(coords, js))
-    atoms_is = cu(view(s.atoms, is))
-    atoms_js = cu(view(s.atoms, js))=#
     coords_is = view(coords, is)
     coords_js = view(coords, js)
     atoms_is = view(s.atoms, is)

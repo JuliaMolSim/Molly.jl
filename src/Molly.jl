@@ -2,7 +2,6 @@ module Molly
 
 using BioStructures
 using Colors
-using CUDA # TODO remove once CUDA.jl updated
 using Distributions
 using KernelDensity
 using ProgressMeter
