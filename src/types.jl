@@ -148,7 +148,7 @@ default values.
 """
 struct Simulation{D, T, A, C, GI, SI}
     simulator::Simulator
-    atoms::Vector{A}
+    atoms::A
     specific_inter_lists::SI
     general_inters::GI
     coords::C
@@ -185,7 +185,7 @@ function Simulation(;
                     # Guess whether we are on the GPU without depending on CUDA.jl
                     gpu_diff_safe=startswith(string(typeof(coords)), "CuArray"))
     T = typeof(timestep)
-    A = eltype(atoms)
+    A = typeof(atoms)
     C = typeof(coords)
     GI = typeof(general_inters)
     SI = typeof(specific_inter_lists)

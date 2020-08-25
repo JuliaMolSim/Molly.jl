@@ -113,7 +113,8 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
         forces += Array(sum(sparse_vecs))
     end
 
-    return forces #./ getproperty.(s.atoms, :mass) # TODO doesn't work on GPU
+    mass_i = findfirst(x -> x == :mass, fieldnames(eltype(atoms_is)))
+    return forces ./ getfield.(s.atoms, mass_i)
 end
 
 include("interactions/lennard_jones.jl")
