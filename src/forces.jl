@@ -80,9 +80,10 @@ function accelerations(s::Simulation; parallel::Bool=true)
     end
 
     for inter_list in values(s.specific_inter_lists)
-        for inter in inter_list
-            force!(forces, inter, s)
-        end
+        sparse_forces = force.(inter_list, (s.coords,), (s,))
+        sparse_vecs = SparseVector.(n_atoms, getindex.(sparse_forces, 1),
+                                    getindex.(sparse_forces, 2))
+        forces += Array(sum(sparse_vecs))
     end
 
     for i in 1:n_atoms
@@ -106,11 +107,14 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
         end
     end
 
+    coords_type = typeof(coords)
     for inter_list in values(s.specific_inter_lists)
-        sparse_forces = force.((coords,), inter_list, (s,))
+        # Take coords off the GPU if they are on there
+        sparse_forces = force.(inter_list, (convert(Array, coords),), (s,))
         sparse_vecs = SparseVector.(n_atoms, getindex.(sparse_forces, 1),
                                     getindex.(sparse_forces, 2))
-        forces += Array(sum(sparse_vecs))
+        # Move back to GPU if required
+        forces += convert(coords_type, sum(sparse_vecs))
     end
 
     mass_i = findfirst(x -> x == :mass, fieldnames(eltype(atoms_is)))

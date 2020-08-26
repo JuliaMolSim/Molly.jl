@@ -13,6 +13,7 @@ using Zygote
 
 using Base.Threads
 using LinearAlgebra
+using SparseArrays
 
 include("types.jl")
 include("cutoffs.jl")
