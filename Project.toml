@@ -14,7 +14,6 @@ Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 Requires = "ae029012-a4dd-5104-9daa-d747884805df"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
-Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
 BioStructures = "0.10, 0.11"

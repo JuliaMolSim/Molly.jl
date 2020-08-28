@@ -75,28 +75,24 @@ function simulate!(s::Simulation{true},
     accels_t_dt = zero(s.coords)
 
     for step_n in 1:n_steps
-        Zygote.ignore() do
-            s.coords[1:end] = coords[1:end]
-            s.velocities[1:end] = velocities[1:end]
-            for logger in values(s.loggers)
-                log_property!(logger, s, step_n)
-            end
+        for logger in values(s.loggers)
+            log_property!(logger, s, step_n)
         end
 
         # In-place updates here required to work with views
-        coords .+= velocities * s.timestep + (accels_t * s.timestep ^ 2) / 2
+        coords .+= velocities .* s.timestep .+ (accels_t .* s.timestep ^ 2) ./ 2
         coords .= adjust_bounds_vec.(coords, s.box_size)
         accels_t_dt = accelerations(s, coords, coords_is, coords_js, atoms_is, atoms_js)
-        velocities += (accels_t + accels_t_dt) * s.timestep / 2
+        velocities .+= (accels_t .+ accels_t_dt) .* s.timestep / 2
 
         velocities = apply_thermostat!(velocities, s, s.thermostat)
         find_neighbours!(s, s.neighbour_finder, 0)
 
         accels_t = accels_t_dt
-        Zygote.ignore() do
-            s.n_steps_made[1] += 1
-        end
+        s.n_steps_made[1] += 1
     end
+    s.coords[1:end] = coords[1:end]
+    s.velocities[1:end] = velocities[1:end]
     return coords
 end
 
