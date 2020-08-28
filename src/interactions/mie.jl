@@ -14,22 +14,23 @@ end
 Mie(m, n, nl_only) = Mie(m, n, nl_only, convert(typeof(m), (n / (n - m)) * (n / m) ^ (m / (n - m))))
 Mie(m, n) = Mie(m, n, false)
 
-@fastmath @inbounds function force!(forces,
-                                    inter::Mie,
-                                    s::Simulation,
-                                    i::Integer,
-                                    j::Integer)
-    i == j && return    # TODO: get rid of this check
-    dr = vector(s.coords[i], s.coords[j], s.box_size)
+@fastmath @inbounds function force(inter::Mie,
+                                    coord_i,
+                                    coord_j,
+                                    atom_i,
+                                    atom_j,
+                                    box_size)
+    coord_i == coord_j && return zero(coord_i)
+    dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
     r = √r2
 
-    if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
-        return
+    if iszero(atom_i.σ) || iszero(atom_j.σ)
+        return zero(coord_i)
     end
 
-    σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
-    ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
+    σ = sqrt(atom_i.σ * atom_j.σ)
+    ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
 
     cutoff = inter.cutoff
     m = inter.m
@@ -43,14 +44,14 @@ Mie(m, n) = Mie(m, n, false)
         f = force_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return
+        r2 > sqdist_cutoff && return zero(coord_i)
 
         f = force_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
         activation_dist = cutoff.activation_dist * σ2
 
-        r2 > sqdist_cutoff && return
+        r2 > sqdist_cutoff && return zero(coord_i)
 
         if r2 < activation_dist
             f = force_nocutoff(inter, r2, inv(r2), params)
@@ -59,10 +60,7 @@ Mie(m, n) = Mie(m, n, false)
         end
     end
 
-    fdr = f * dr
-    forces[i] -= fdr
-    forces[j] += fdr
-    return nothing
+    return f * dr
 end
 
 @fastmath function force_nocutoff(::Mie, r2, invr2, (m, n, σ_r, const_mn))

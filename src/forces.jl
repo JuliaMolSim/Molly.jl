@@ -3,7 +3,7 @@
 # See Gromacs manual for other aspects of forces
 
 export
-    force!,
+    force,
     accelerations,
     LennardJones,
     SoftSphere,
@@ -13,14 +13,6 @@ export
     HarmonicBond,
     HarmonicAngle,
     Torsion
-
-"""
-    force!(forces, interaction, simulation, atom_i, atom_j)
-
-Update the force for an atom pair in response to a given interation type.
-Custom interaction types should implement this function.
-"""
-function force! end
 
 @inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer)
     fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
@@ -120,6 +112,14 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
     mass_i = findfirst(x -> x == :mass, fieldnames(eltype(atoms_is)))
     return forces ./ getfield.(s.atoms, mass_i)
 end
+
+"""
+    force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
+
+Calculate the force between a pair of atoms due to a given interation type.
+Custom interaction types should implement this function.
+"""
+function force end
 
 include("interactions/lennard_jones.jl")
 include("interactions/coulomb.jl")

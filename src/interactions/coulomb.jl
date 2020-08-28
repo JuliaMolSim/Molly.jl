@@ -21,18 +21,19 @@ Coulomb(nl_only=false) = Coulomb(
     138.935458 / 70.0 # Treat ϵr as 70 for now
 )
 
-@inline @inbounds function force!(forces,
-                                    inter::Coulomb{C},
-                                    s::Simulation,
-                                    i::Integer,
-                                    j::Integer) where C
-    i == j && return
-    dr = vector(s.coords[i], s.coords[j], s.box_size)
+@inline @inbounds function force(inter::Coulomb{C},
+                                    coord_i,
+                                    coord_j,
+                                    atom_i,
+                                    atom_j,
+                                    box_size) where C
+    coord_i == coord_j && return zero(coord_i)
+    dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
-    qi, qj = s.atoms[i].charge, s.atoms[j].charge
+    qi, qj = atom_i.charge, atom_j.charge
 
     params = (coulomb_const, qi, qj)
 
@@ -40,14 +41,14 @@ Coulomb(nl_only=false) = Coulomb(
         f = force_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff
-        r2 > sqdist_cutoff && return
+        r2 > sqdist_cutoff && return zero(coord_i)
 
         f = force_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         sqdist_cutoff = cutoff.sqdist_cutoff
         activation_dist = cutoff.activation_dist
 
-        r2 > sqdist_cutoff && return
+        r2 > sqdist_cutoff && return zero(coord_i)
 
         if r2 < activation_dist
             f = force_nocutoff(inter, r2, inv(r2), params)
@@ -56,10 +57,7 @@ Coulomb(nl_only=false) = Coulomb(
         end
     end
 
-    fdr = f * dr
-    forces[i] -= fdr
-    forces[j] += fdr
-    return nothing
+    return f * dr
 end
 
 @fastmath function force_nocutoff(::Coulomb, r2, invr2, (coulomb_const, qi, qj))

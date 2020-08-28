@@ -18,11 +18,11 @@ LennardJones(nl_only=false) =
     LennardJones(ShiftedPotentialCutoff(3.0), nl_only)
 
 @inline @inbounds function force(inter::LennardJones{S, C},
-                                 coord_i,
-                                 coord_j,
-                                 atom_i,
-                                 atom_j,
-                                 box_size) where {S, C}
+                                    coord_i,
+                                    coord_j,
+                                    atom_i,
+                                    atom_j,
+                                    box_size) where {S, C}
     coord_i == coord_j && return zero(coord_i) # TODO: get rid of this check
     dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)

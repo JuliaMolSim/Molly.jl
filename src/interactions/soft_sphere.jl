@@ -17,21 +17,22 @@ SoftSphere(cutoff, nl_only) =
 SoftSphere(nl_only=false) =
     SoftSphere(ShiftedPotentialCutoff(3.0), nl_only)
 
-@inline @inbounds function force!(forces,
-                                    inter::SoftSphere,
-                                    s::Simulation,
-                                    i::Integer,
-                                    j::Integer)
-    i == j && return
-    dr = vector(s.coords[i], s.coords[j], s.box_size)
+@inline @inbounds function force(inter::SoftSphere,
+                                    coord_i,
+                                    coord_j,
+                                    atom_i,
+                                    atom_j,
+                                    box_size)
+    coord_i == coord_j && return zero(coord_i)
+    dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 
-    if !S && iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
-        return
+    if !S && iszero(atom_i.σ) || iszero(atom_j.σ)
+        return zero(coord_i)
     end
 
-    σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
-    ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
+    σ = sqrt(atom_i.σ * atom_j.σ)
+    ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
 
     cutoff = inter.cutoff
     σ2 = σ^2
@@ -41,14 +42,14 @@ SoftSphere(nl_only=false) =
         f = force_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return
+        r2 > sqdist_cutoff && return zero(coord_i)
 
         f = force_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
         activation_dist = cutoff.activation_dist * σ2
 
-        r2 > sqdist_cutoff && return
+        r2 > sqdist_cutoff && return zero(coord_i)
 
         if r2 < activation_dist
             f = force_nocutoff(inter, r2, inv(r2), params)
@@ -57,10 +58,7 @@ SoftSphere(nl_only=false) =
         end
     end
 
-    fdr = f * dr
-    forces[i] -= fdr
-    forces[j] += fdr
-    return nothing
+    return f * dr
 end
 
 @fastmath function force_nocutoff(::SoftSphere, r2, invr2, (σ2, ϵ))
