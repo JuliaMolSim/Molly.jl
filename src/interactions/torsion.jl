@@ -31,7 +31,7 @@ end
     tc = -(oc × f_d + (-dc × f_d) / 2 + (ba × fa) / 2)
     fc = (1 / dot(oc, oc)) * (tc × oc)
     fb = -fa - fc - f_d
-    return [d.i, d.j, d.k, d.l], [fa, fb, fc, fd]
+    return [d.i, d.j, d.k, d.l], [fa, fb, fc, f_d]
 end
 
 @inline @inbounds function potential_energy(d::Torsion,
