@@ -10,6 +10,7 @@ export
     NeighbourFinder,
     Logger,
     Atom,
+    AtomMin,
     Simulation
 
 const DefaultFloat = Float64
@@ -65,6 +66,7 @@ abstract type Logger end
 An atom and its associated information.
 Properties unused in the simulation or in analysis can be left with their
 default values.
+This type cannot be used on the GPU as it is not `isbits` - use `AtomMin` instead.
 
 # Arguments
 - `attype::AbstractString=""`: the type of the atom.
@@ -106,6 +108,42 @@ end
 function Base.show(io::IO, a::Atom)
     print(io, "Atom{", typeof(a.charge), "} with name \"", a.name,
                 "\", type \"", a.attype, "\", charge=", a.charge, ", mass=",
+                a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
+end
+
+"""
+    AtomMin(; <keyword arguments>)
+
+An atom and minimal information required for simulation.
+Properties unused in the simulation or in analysis can be left with their
+default values.
+This type is `isbits` and can be used on the GPU - use `Atom` in other contexts to store
+more information.
+
+# Arguments
+- `charge::T=0.0`: the charge of the atom, used for electrostatic interactions.
+- `mass::T=0.0`: the mass of the atom.
+- `σ::T=0.0`: the Lennard-Jones finite distance at which the inter-particle
+    potential is zero.
+- `ϵ::T=0.0`: the Lennard-Jones depth of the potential well.
+"""
+struct AtomMin{T}
+    charge::T
+    mass::T
+    σ::T
+    ϵ::T
+end
+
+function AtomMin(;
+                charge=0.0,
+                mass=0.0,
+                σ=0.0,
+                ϵ=0.0)
+    return AtomMin{typeof(charge)}(charge, mass, σ, ϵ)
+end
+
+function Base.show(io::IO, a::AtomMin)
+    print(io, "AtomMin{", typeof(a.charge), "} with charge=", a.charge, ", mass=",
                 a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
 end
 

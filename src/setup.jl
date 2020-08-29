@@ -73,17 +73,20 @@ function placeatoms(n_atoms, box_size, min_dist)
 end
 
 """
-    readinputs(topology_file, coordinate_file)
-    readinputs(T, topology_file, coordinate_file)
+    readinputs(topology_file, coordinate_file; atom_min=false)
+    readinputs(T, topology_file, coordinate_file; atom_min=false)
 
 Read a Gromacs topology flat file, i.e. all includes collapsed into one file,
 and a Gromacs coordinate file.
 Returns the atoms, specific interaction lists, general interaction lists,
 non-bonded matrix, coordinates and box size.
+`atom_min` determines whether the returned atoms consist of the GPU-compatible
+`AtomMin` or the more verbose but GPU-incompatible `Atom`.
 """
 function readinputs(T::Type,
                     top_file::AbstractString,
-                    coord_file::AbstractString)
+                    coord_file::AbstractString;
+                    atom_min::Bool=false)
     # Read forcefield and topology file
     atomtypes = Dict{String, Atomtype{T}}()
     bondtypes = Dict{String, Bondtype{T}}()
@@ -260,6 +263,10 @@ function readinputs(T::Type,
 
     specific_inter_lists = (bonds, angles, torsions)
     general_inters = (lj, coulomb)
+
+    if atom_min
+        atoms = [AtomMin(charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
+    end
 
     return atoms, specific_inter_lists, general_inters,
             nb_matrix, coords, box_size
