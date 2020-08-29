@@ -62,7 +62,7 @@ end
 function Base.show(io::IO, cl::CoordinateLogger)
     print(io, "CoordinateLogger{", eltype(eltype(cl.coords)), "} with n_steps ",
                 cl.n_steps, ", ", length(cl.coords), " frames recorded for ",
-                length(first(cl.coords)), " atoms")
+                length(cl.coords) > 0 ? length(first(cl.coords)) : "?", " atoms")
 end
 
 function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)
