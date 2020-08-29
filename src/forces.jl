@@ -106,7 +106,7 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
         ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
         sparse_vec = SparseVector(n_atoms, reduce(vcat, ge1), reduce(vcat, ge2))
         # Move back to GPU if required
-        forces += convert(typeof(coords), sparse_vec)
+        forces += convert(typeof(coords), Array(sparse_vec))
     end
 
     mass_i = findfirst(x -> x == :mass, fieldnames(eltype(atoms_is)))
