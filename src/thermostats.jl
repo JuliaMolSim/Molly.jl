@@ -78,8 +78,16 @@ end
 
 Calculate the temperature of a system from the kinetic energy of the atoms.
 """
-function temperature(s::Simulation)
+function temperature(s::Simulation{false})
     ke = sum([a.mass * dot(s.velocities[i], s.velocities[i]) for (i, a) in enumerate(s.atoms)]) / 2
+    df = 3 * length(s.coords) - 3
+    return 2 * ke / df
+end
+
+function temperature(s::Simulation{true})
+    mass_i = findfirst(x -> x == :mass, fieldnames(eltype(s.atoms)))
+    masses = getfield.(s.atoms, mass_i)
+    ke = sum(masses .* sum.(abs2, s.velocities)) / 2
     df = 3 * length(s.coords) - 3
     return 2 * ke / df
 end
