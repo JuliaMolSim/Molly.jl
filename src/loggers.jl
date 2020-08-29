@@ -128,13 +128,15 @@ function append_model(logger::StructureWriter, s::Simulation)
     open(logger.filepath, "a") do output
         println(output, "MODEL     ", lpad(logger.structure_n, 4))
         for (i, coord) in enumerate(s.coords)
-            at = s.atoms[i]
-            at_rec = AtomRecord(
-                false, i, at.name, ' ', at.resname, "A", at.resnum,
-                ' ', 10 .* coord, 1.0, 0.0, "  ", "  "
-            )
+            at_rec = atomrecord(s.atoms[i], i, coord)
             println(output, pdbline(at_rec))
         end
         println(output, "ENDMDL")
     end
 end
+
+atomrecord(at::Atom   , i, coord) = AtomRecord(false, i, at.name, ' ', at.resname, "A", at.resnum,
+                                                ' ', 10 .* coord, 1.0, 0.0, "  ", "  ")
+
+atomrecord(at::AtomMin, i, coord) = AtomRecord(false, i, "??"   , ' ', "???"     , "A", 0        ,
+                                                ' ', 10 .* coord, 1.0, 0.0, "  ", "  ")
