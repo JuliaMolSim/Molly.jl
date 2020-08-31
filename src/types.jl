@@ -220,8 +220,7 @@ function Simulation(;
                     timestep=0.0,
                     n_steps=0,
                     n_steps_made=[0],
-                    # Guess whether we are on the GPU without depending on CUDA.jl
-                    gpu_diff_safe=startswith(string(typeof(coords)), "CuArray"))
+                    gpu_diff_safe=isa(coords, CuArray))
     T = typeof(timestep)
     A = typeof(atoms)
     C = typeof(coords)

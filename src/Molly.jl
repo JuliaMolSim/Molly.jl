@@ -2,6 +2,7 @@ module Molly
 
 using BioStructures
 using Colors
+using CUDA
 using Distributions
 using KernelDensity
 using ProgressMeter
