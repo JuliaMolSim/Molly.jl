@@ -23,7 +23,6 @@ LennardJones(nl_only=false) =
                                     atom_i,
                                     atom_j,
                                     box_size) where {S, C}
-    coord_i == coord_j && return zero(coord_i) # TODO: get rid of this check
     dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 

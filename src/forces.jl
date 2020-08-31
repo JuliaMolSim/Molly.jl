@@ -21,6 +21,14 @@ export
     return nothing
 end
 
+@inline @inbounds function force(inter, coord_i, coord_j, atom_i, atom_j, box_size, self_interaction)
+    if isone(self_interaction)
+        return zero(coord_i)
+    else
+        return force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
+    end
+end
+
 """
     accelerations(simulation; parallel=true)
 
@@ -43,7 +51,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
                 end
             else
                 @threads for i in 1:n_atoms
-                    for j in 1:i
+                    for j in 1:(i - 1)
                         force!(forces_threads[threadid()], inter, s, i, j)
                     end
                 end
@@ -63,7 +71,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
                 end
             else
                 for i in 1:n_atoms
-                    for j in 1:i
+                    for j in 1:(i - 1)
                         force!(forces, inter, s, i, j)
                     end
                 end
@@ -85,17 +93,17 @@ function accelerations(s::Simulation; parallel::Bool=true)
     return forces
 end
 
-function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, atoms_js)
+function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
     n_atoms = length(coords)
     forces = zero(coords)
 
     for inter in values(s.general_inters)
         if inter.nl_only
             forces -= reshape(sum(force.((inter,), coords_is, coords_js, atoms_is, atoms_js,
-                                            s.box_size), dims=2), n_atoms)
+                                            s.box_size, self_interactions), dims=2), n_atoms)
         else
             forces -= reshape(sum(force.((inter,), coords_is, coords_js, atoms_is, atoms_js,
-                                            s.box_size), dims=2), n_atoms)
+                                            s.box_size, self_interactions), dims=2), n_atoms)
         end
     end
 

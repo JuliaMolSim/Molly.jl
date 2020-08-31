@@ -23,7 +23,6 @@ SoftSphere(nl_only=false) =
                                     atom_i,
                                     atom_j,
                                     box_size)
-    coord_i == coord_j && return zero(coord_i)
     dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 

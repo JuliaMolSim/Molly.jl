@@ -70,7 +70,12 @@ function simulate!(s::Simulation{true},
     atoms_is = view(s.atoms, is)
     atoms_js = view(s.atoms, js)
     find_neighbours!(s, s.neighbour_finder, 0)
-    accels_t = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js)
+    if isa(s.coords, CuArray)
+        self_interactions = CuArray(Diagonal(ones(typeof(s.timestep), n_atoms)))
+    else
+        self_interactions = Array(Diagonal(ones(typeof(s.timestep), n_atoms)))
+    end
+    accels_t = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
     accels_t_dt = zero(s.coords)
 
     for step_n in 1:n_steps
@@ -81,7 +86,7 @@ function simulate!(s::Simulation{true},
         # In-place updates here required to work with views
         s.coords .+= s.velocities .* s.timestep .+ (accels_t .* s.timestep ^ 2) ./ 2
         s.coords .= adjust_bounds_vec.(s.coords, s.box_size)
-        accels_t_dt = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js)
+        accels_t_dt = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
         s.velocities .+= (accels_t .+ accels_t_dt) .* s.timestep / 2
 
         s.velocities .= apply_thermostat!(s.velocities, s, s.thermostat)
