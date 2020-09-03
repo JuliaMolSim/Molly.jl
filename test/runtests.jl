@@ -143,7 +143,7 @@ end
     for i in 1:length(coords)
         push!(coords, coords[i] .+ [0.1, 0.0, 0.0])
     end
-    bonds = [HarmonicBond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]
+    bonds = [HarmonicBond(i, i + (n_atoms ÷ 2), 0.1, 300_000.0) for i in 1:(n_atoms ÷ 2)]
 
     s = Simulation(
         simulator=VelocityVerlet(),
@@ -193,7 +193,9 @@ end
         box_size=box_size,
         neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
         thermostat=AndersenThermostat(10.0),
-        loggers=Dict("temp" => TemperatureLogger(10)),
+        loggers=Dict("temp" => TemperatureLogger(10),
+                        "coords" => CoordinateLogger(10),
+                        "energy" => EnergyLogger(10)),
         timestep=timestep,
         n_steps=n_steps
     )
@@ -221,12 +223,41 @@ end
         neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10, 1.2f0),
         thermostat=AndersenThermostat(10.0f0),
         loggers=Dict("temp" => TemperatureLogger(Float32, 10),
-                        "coords" => CoordinateLogger(Float32, 10)),
+                        "coords" => CoordinateLogger(Float32, 10),
+                        "energy" => EnergyLogger(Float32, 10)),
         timestep=timestep,
         n_steps=n_steps
     )
 
     @time simulate!(s, parallel=false)
+end
+
+@testset "General interactions" begin
+    n_atoms = 100
+    #general_inter_types = (LennardJones(true), SoftSphere(true), Mie(5, 10, true), Coulomb(true),
+    general_inter_types = (LennardJones(true), SoftSphere(true), Coulomb(true),
+                            Gravity(10.0, true))
+
+    for gi in general_inter_types
+        s = Simulation(
+            simulator=VelocityVerlet(),
+            atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0, σ=0.2, ϵ=0.2) for i in 1:n_atoms],
+            general_inters=(gi,),
+            coords=placeatoms(n_atoms, box_size, 0.2),
+            velocities=[velocity(10.0, temp) .* 0.01 for i in 1:n_atoms],
+            temperature=temp,
+            box_size=box_size,
+            neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
+            thermostat=AndersenThermostat(10.0),
+            loggers=Dict("temp" => TemperatureLogger(100),
+                         "coords" => CoordinateLogger(100),
+                         "energy" => EnergyLogger(100)),
+            timestep=timestep,
+            n_steps=n_steps
+        )
+
+        @time simulate!(s)
+    end
 end
 
 @enum Status susceptible infected recovered
