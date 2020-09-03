@@ -74,7 +74,6 @@ end
     r2 = sum(abs2, dr)
 
     cutoff = inter.cutoff
-    sqdist_cutoff = cutoff.sqdist_cutoff
     coulomb_const = inter.coulomb_const
     qi = s.atoms[i].charge
     qj = s.atoms[j].charge
@@ -88,7 +87,7 @@ end
 
         potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > sqdist_cutoff && return zero(U)
+        r2 > cutoff.sqdist_cutoff && return zero(U)
 
         if r2 < activation_dist
             potential(inter, r2, inv(r2), params)
@@ -98,6 +97,6 @@ end
     end
 end
 
-@fastmath function potential(::Coulomb, r2, invr2, (oulomb_const, qi, qj))
+@fastmath function potential(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
     (coulomb_const * qi * qj) * √invr2
 end

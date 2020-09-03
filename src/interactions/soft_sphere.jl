@@ -17,12 +17,12 @@ SoftSphere(cutoff, nl_only) =
 SoftSphere(nl_only=false) =
     SoftSphere(ShiftedPotentialCutoff(3.0), nl_only)
 
-@inline @inbounds function force(inter::SoftSphere,
+@inline @inbounds function force(inter::SoftSphere{S, C},
                                     coord_i,
                                     coord_j,
                                     atom_i,
                                     atom_j,
-                                    box_size)
+                                    box_size) where {S, C}
     dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 
@@ -66,10 +66,10 @@ end
     return (24ϵ * invr2) * 2 * six_term ^ 2
 end
 
-@inbounds function potential_energy(inter::SoftSphere,
+@inbounds function potential_energy(inter::SoftSphere{S, C},
                                     s::Simulation,
                                     i::Integer,
-                                    j::Integer)
+                                    j::Integer) where {S, C}
     U = eltype(s.coords[i]) # this is not Unitful compatible
     i == j && return zero(T)
 

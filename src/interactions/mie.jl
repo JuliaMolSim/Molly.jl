@@ -31,7 +31,6 @@ Mie(m, n) = Mie(m, n, false)
     σ = sqrt(atom_i.σ * atom_j.σ)
     ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
 
-    cutoff = inter.cutoff
     m = inter.m
     n = inter.n
     # Derivative obtained via wolfram
@@ -39,26 +38,7 @@ Mie(m, n) = Mie(m, n, false)
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)
 
-    if cutoff_points(C) == 0
-        f = force_nocutoff(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return zero(coord_i)
-
-        f = force_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        activation_dist = cutoff.activation_dist * σ2
-
-        r2 > sqdist_cutoff && return zero(coord_i)
-
-        if r2 < activation_dist
-            f = force_nocutoff(inter, r2, inv(r2), params)
-        else
-            f = force_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    f = force_nocutoff(inter, r2, inv(r2), params)
     return f * dr
 end
 
@@ -75,6 +55,7 @@ end
 
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
+    r = √r2
 
     if iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
         return zero(U)
@@ -83,29 +64,13 @@ end
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
     ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
 
-    cutoff = inter.cutoff
     m = inter.m
     n = inter.n
     const_mn = inter.mn_fac * ϵ
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)
 
-    if cutoff_points(C) == 0
-        potential(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return zero(U)
-
-        potential_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > sqdist_cutoff && return zero(U)
-
-        if r2 < activation_dist
-            potential(inter, r2, inv(r2), params)
-        else
-            potential_cutoff(cutoff, r2, inter, params)
-        end
-    end
+    return potential(inter, r2, inv(r2), params)
 end
 
 @fastmath function potential(::Mie, r2, invr2, (m, n, σ_r, const_mn))

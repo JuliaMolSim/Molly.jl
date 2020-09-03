@@ -4,9 +4,11 @@
 The gravitational interaction.
 """
 struct Gravity{T} <: GeneralInteraction
-    nl_only::Bool
     G::T
+    nl_only::Bool
 end
+
+Gravity(G::Real) = Gravity(G, false)
 
 @inline @inbounds function force(inter::Gravity,
                                     coord_i,
