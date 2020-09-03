@@ -14,12 +14,13 @@ export
     HarmonicAngle,
     Torsion
 
-@inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer)
-    fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
-    forces[i] -= fdr
-    forces[j] += fdr
-    return nothing
-end
+"""
+    force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
+
+Calculate the force between a pair of atoms due to a given interation type.
+Custom interaction types should implement this function.
+"""
+function force end
 
 # Allow 2D broadcasting whilst eliminating the diagonal corresponding to self interaction
 @inline @inbounds function force(inter, coord_i, coord_j, atom_i, atom_j, box_size, self_interaction)
@@ -28,6 +29,13 @@ end
     else
         return force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
     end
+end
+
+@inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer)
+    fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
+    forces[i] -= fdr
+    forces[j] += fdr
+    return nothing
 end
 
 """
@@ -121,14 +129,6 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
     mass_i = findfirst(x -> x == :mass, fieldnames(eltype(atoms_is)))
     return forces ./ getfield.(s.atoms, mass_i)
 end
-
-"""
-    force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
-
-Calculate the force between a pair of atoms due to a given interation type.
-Custom interaction types should implement this function.
-"""
-function force end
 
 include("interactions/lennard_jones.jl")
 include("interactions/soft_sphere.jl")

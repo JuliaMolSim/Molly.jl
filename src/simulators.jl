@@ -83,7 +83,7 @@ function simulate!(s::Simulation{true},
             log_property!(logger, s, step_n)
         end
 
-        # In-place updates here required to work with views
+        # In-place updates here required to work with views but are not Zygote-compatible
         s.coords .+= s.velocities .* s.timestep .+ (accels_t .* s.timestep ^ 2) ./ 2
         s.coords .= adjust_bounds_vec.(s.coords, s.box_size)
         accels_t_dt = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
