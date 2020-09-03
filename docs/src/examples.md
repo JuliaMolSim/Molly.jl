@@ -33,27 +33,33 @@ struct BondableInteraction <: GeneralInteraction
     kb::Float64
 end
 
-function Molly.force!(forces, inter::BondableInteraction, s, i, j)
-    i == j && return
-    dr = vector(s.coords[i], s.coords[j], s.box_size)
-    r2 = sum(abs2, dr)
-    if j in s.atoms[i].partners
-        # Apply the force of a harmonic bond
-        c = inter.kb * (norm(dr) - inter.b0)
-        fdr = c * normalize(dr)
-        forces[i] += fdr
-        forces[j] -= fdr
-        # Break bonds randomly
+function Molly.force(inter::BondableInteraction,
+                        coord_i,
+                        coord_j,
+                        atom_i,
+                        atom_j,
+                        box_size)
+    # Break bonds randomly
+    if j in atom_i.partners
         if rand() < inter.prob_break
-            delete!(s.atoms[i].partners, j)
-            delete!(s.atoms[j].partners, i)
+            delete!(atom_i.partners, j)
+            delete!(atom_j.partners, i)
         end
     # Make bonds between close atoms randomly
     elseif r2 < inter.b0 * inter.dist_formation && rand() < inter.prob_formation
-        push!(s.atoms[i].partners, j)
-        push!(s.atoms[j].partners, i)
+        push!(atom_i.partners, j)
+        push!(atom_j.partners, i)
     end
-    return nothing
+    # Apply the force of a harmonic bond
+    if j in atom_i.partners
+        dr = vector(coord_i, coord_j, box_size)
+        r2 = sum(abs2, dr)
+        c = inter.kb * (norm(dr) - inter.b0)
+        fdr = -c * normalize(dr)
+        return fdr
+    else
+        return zero(coord_i)
+    end
 end
 
 struct BondLogger <: Logger

@@ -21,6 +21,7 @@ export
     return nothing
 end
 
+# Allow 2D broadcasting whilst eliminating the diagonal corresponding to self interaction
 @inline @inbounds function force(inter, coord_i, coord_j, atom_i, atom_j, box_size, self_interaction)
     if isone(self_interaction)
         return zero(coord_i)
@@ -130,9 +131,10 @@ Custom interaction types should implement this function.
 function force end
 
 include("interactions/lennard_jones.jl")
+include("interactions/soft_sphere.jl")
+include("interactions/mie.jl")
 include("interactions/coulomb.jl")
 include("interactions/gravity.jl")
-include("interactions/soft_sphere.jl")
 include("interactions/harmonic_bond.jl")
 include("interactions/harmonic_angle.jl")
 include("interactions/torsion.jl")

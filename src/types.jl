@@ -102,7 +102,7 @@ function Atom(;
                 mass=0.0,
                 σ=0.0,
                 ϵ=0.0)
-    return Atom{typeof(charge)}(attype, name, resnum, resname, charge, mass, σ, ϵ)
+    return Atom{typeof(mass)}(attype, name, resnum, resname, charge, mass, σ, ϵ)
 end
 
 function Base.show(io::IO, a::Atom)
@@ -139,7 +139,7 @@ function AtomMin(;
                 mass=0.0,
                 σ=0.0,
                 ϵ=0.0)
-    return AtomMin{typeof(charge)}(charge, mass, σ, ϵ)
+    return AtomMin{typeof(mass)}(charge, mass, σ, ϵ)
 end
 
 function Base.show(io::IO, a::AtomMin)

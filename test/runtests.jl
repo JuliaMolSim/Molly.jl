@@ -1,13 +1,23 @@
 using Molly
+using CUDA
 
 using Base.Threads
 using Statistics
 using Test
 
-if nthreads() == 1
-    @warn "The parallel tests will not be run as Julia is running on 1 thread"
-else
+@warn "This file does not include all the tests for Molly.jl due to CI time limits, " *
+        "see the test directory for more"
+
+if nthreads() > 1
     @info "The parallel tests will be run as Julia is running on $(nthreads()) threads"
+else
+    @warn "The parallel tests will not be run as Julia is running on 1 thread"
+end
+
+if CUDA.functional()
+    @info "The GPU tests will be run as CUDA is available"
+else
+    @warn "The GPU tests will not be run as CUDA is not available"
 end
 
 @testset "Spatial" begin

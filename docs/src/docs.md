@@ -64,6 +64,43 @@ visualize(s.loggers["coords"], box_size, "sim_lj.gif")
 ```
 ![LJ simulation](images/sim_lj.gif)
 
+## GPU acceleration
+
+To run simulations on the GPU you will need to have a CUDA-compatible device and to have [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) installed.
+Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
+Currently, running on the GPU requires using the [`AtomMin`](@ref) type, which is `isbits`, or another `isbits` type for the atoms.
+Neighbour lists and thermostats are not currently implemented for the GPU.
+This example also shows setting up a simulation to run with `Float32`, which is a good idea for GPUs.
+```julia
+using Molly
+using CUDA
+
+n_atoms = 100
+mass = 10.0f0
+box_size = 2.0f0
+temp = 100.0f0
+atoms = cu([AtomMin(mass=mass, σ=0.3f0, ϵ=0.2f0) for i in 1:n_atoms])
+coords = cu([box_size .* SVector{3}(rand(Float32, 3)) for i in 1:n_atoms])
+velocities = cu([velocity(Float32, mass, temp) for i in 1:n_atoms])
+
+s = Simulation(
+    simulator=VelocityVerlet(),
+    atoms=atoms,
+    general_inters=(LennardJones(),),
+    coords=coords,
+    velocities=velocities,
+    temperature=temp,
+    box_size=box_size,
+    thermostat=NoThermostat(),
+    loggers=Dict("temp" => TemperatureLogger(Float32, 10),
+                    "coords" => CoordinateLogger(Float32, 10)),
+    timestep=0.002f0,
+    n_steps=1_000
+)
+
+simulate!(s)
+```
+
 ## Simulating diatomic molecules
 
 If we want to define specific interactions between atoms, for example bonds, we can do.
@@ -85,7 +122,7 @@ specific_inter_lists = (bonds,)
 ```
 This time, we are also going to use a neighbour list to speed up the Lennard Jones calculation.
 We can use the built-in distance neighbour finder.
-The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff in nm to be classed as a neighbour.
+The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff to be classed as a neighbour.
 ```julia
 neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.2)
 ```
@@ -195,6 +232,7 @@ This example shows how atom properties can be mutable, i.e. change during the si
 
 # Custom atom type
 mutable struct Person
+    i::Int64
     status::Status
     mass::Float64
     σ::Float64
@@ -210,26 +248,30 @@ struct SIRInteraction <: GeneralInteraction
 end
 
 # Custom force function
-function Molly.force!(forces, inter::SIRInteraction,
-                        s::Simulation,
-                        i::Integer,
-                        j::Integer)
-    if i == j
-        # Recover randomly
-        if s.atoms[i].status == infected && rand() < inter.prob_recovery
-            s.atoms[i].status = recovered
-        end
-    elseif (s.atoms[i].status == infected && s.atoms[j].status == susceptible) ||
-                (s.atoms[i].status == susceptible && s.atoms[j].status == infected)
+function Molly.force(inter::SIRInteraction,
+                        coord_i,
+                        coord_j,
+                        atom_i,
+                        atom_j,
+                        box_size)
+    if (atom_i.status == infected && atom_j.status == susceptible) ||
+                (atom_i.status == susceptible && atom_j.status == infected)
         # Infect close people randomly
-        dr = vector(s.coords[i], s.coords[j], s.box_size)
+        dr = vector(coord_i, coord_j, box_size)
         r2 = sum(abs2, dr)
         if r2 < inter.dist_infection ^ 2 && rand() < inter.prob_infection
-            s.atoms[i].status = infected
-            s.atoms[j].status = infected
+            atom_i.status = infected
+            atom_j.status = infected
         end
     end
-    return nothing
+    # Workaround to obtain a self-interaction
+    if atom_i.i == (atom_j.i + 1)
+        # Recover randomly
+        if atom_i.status == infected && rand() < inter.prob_recovery
+            atom_i.status = recovered
+        end
+    end
+    return zero(coord_i)
 end
 
 # Custom Logger
@@ -256,7 +298,7 @@ box_size = 10.0
 n_steps = 1_000
 n_people = 500
 n_starting = 2
-atoms = [Person(i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
+atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
 coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
 velocities = [velocity(1.0, temp, dims=2) for i in 1:n_people]
 general_inters = (LennardJones = LennardJones(true), SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
@@ -296,9 +338,9 @@ In Molly they are separated into two types.
 The available general interactions are:
 - [`LennardJones`](@ref).
 - [`SoftSphere`](@ref).
+- [`Mie`](@ref).
 - [`Coulomb`](@ref).
 - [`Gravity`](@ref).
-- [`Mie`](@ref).
 
 The available specific interactions are:
 - [`HarmonicBond`](@ref).
@@ -309,34 +351,34 @@ To define your own [`GeneralInteraction`](@ref), first define the `struct`:
 ```julia
 struct MyGeneralInter <: GeneralInteraction
     nl_only::Bool
-    # Any other properties, e.g. constants for the interaction
+    # Any other properties, e.g. constants for the interaction or cutoff parameters
 end
 ```
 The `nl_only` property is required and determines whether the neighbour list is used to omit distant atoms (`true`) or whether all atom pairs are always considered (`false`).
-Next, you need to define the [`force!`](@ref) function acting between a pair of atoms.
+Next, you need to define the [`force`](@ref) function acting between a pair of atoms.
+This has a set series of arguments.
 For example:
 ```julia
-function Molly.force!(forces,
-                        inter::MyGeneralInter,
-                        s::Simulation,
-                        i::Integer,
-                        j::Integer)
-    dr = vector(s.coords[i], s.coords[j], s.box_size)
+function Molly.force(inter::MyGeneralInter,
+                        coord_i,
+                        coord_j,
+                        atom_i,
+                        atom_j,
+                        box_size)
+    dr = vector(coord_i, coord_j, box_size)
 
     # Replace this with your force calculation
     # A positive force causes the atoms to move apart
     f = 0.0
 
+    # Obtain a vector for the force
     fdr = f * normalize(dr)
-    forces[i] -= fdr
-    forces[j] += fdr
-    return nothing
+    return fdr
 end
 ```
 If you need to obtain the vector from atom `i` to atom `j`, use the [`vector`](@ref) function.
 This gets the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
-The [`Simulation`](@ref) is available so atom properties or velocities can be accessed, e.g. `s.atoms[i].σ` or `s.velocities[i]`.
-This form of the function can also be used to define three-atom interactions by looping a third variable `k` up to `j` in the [`force!`](@ref) function.
+Atom properties can be accessed, e.g. `atom_i.σ`.
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
 
 To use your custom force, add it to the list of general interactions:
@@ -359,27 +401,27 @@ struct MySpecificInter <: SpecificInteraction
     # Any other properties, e.g. a bond distance corresponding to the energy minimum
 end
 ```
-Next, you need to define the [`force!`](@ref) function.
+Next, you need to define the [`force`](@ref) function.
 For example:
 ```julia
-function Molly.force!(forces, inter::MySpecificInter, s::Simulation)
-    dr = vector(s.coords[inter.i], s.coords[inter.j], s.box_size)
+function Molly.force(inter::MySpecificInter, coords, s::Simulation)
+    dr = vector(coords[inter.i], coords[inter.j], s.box_size)
 
     # Replace this with your force calculation
     # A positive force causes the atoms to move apart
     f = 0.0
 
     fdr = f * normalize(dr)
-    forces[inter.i] += fdr
-    forces[inter.j] -= fdr
-    return nothing
+    return [inter.i, inter.j], [-fdr, fdr]
 end
 ```
+The return values are a list of the atom indices and a list of the vector forces.
 The example here is between two atoms but can be adapted for any number of atoms.
 To use your custom force, add it to the specific interaction lists:
 ```julia
 specific_inter_lists = ([MySpecificInter(1, 2), MySpecificInter(3, 4)],)
 ```
+Specific interactions are always run on the CPU (with the results moved to the GPU if required), which is why we can index into `coords` and access `s` without harming performance.
 
 ## Simulators
 
@@ -435,6 +477,13 @@ function Molly.simulate!(s::Simulation,
 end
 ```
 To use your custom simulator, give it as the `simulator` argument when creating the [`Simulation`](@ref).
+
+Under the hood there are two implementations of common simulators: an in-place version geared towards CPUs, and an out-of-place version geared towards GPUs and differentiable simulation.
+You can define different versions of a simulator for in-place and out-of-place simulations by dispatching on `Simulation{false}` or `Simulation{true}` respectively.
+This also applies to thermostats and neighbour lists.
+The above example is more similar to the in-place version; see the source code for an example of the out-of-place version.
+
+The implementation to use is guessed when you call [`Simulation`](@ref) based on whether `coords` is a `CuArray`, but can be given explicitly with the `gpu_diff_safe` argument.
 
 ## Thermostats
 
