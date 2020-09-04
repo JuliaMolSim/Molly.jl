@@ -234,11 +234,10 @@ end
 
 @testset "General interactions" begin
     n_atoms = 100
-    #general_inter_types = (LennardJones(true), SoftSphere(true), Mie(5, 10, true), Coulomb(true),
-    general_inter_types = (LennardJones(true), SoftSphere(true), Coulomb(true),
-                            Gravity(10.0, true),
-                            LennardJones(false), SoftSphere(false), Coulomb(false),
-                            Gravity(10.0, false))
+    general_inter_types = (
+        LennardJones(true ), SoftSphere(true ), Mie(5, 10, true ), Coulomb(true ), Gravity(10.0, true ),
+        LennardJones(false), SoftSphere(false), Mie(5, 10, false), Coulomb(false), Gravity(10.0, false),
+    )
 
     for gi in general_inter_types
         if gi.nl_only
