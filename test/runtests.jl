@@ -236,9 +236,17 @@ end
     n_atoms = 100
     #general_inter_types = (LennardJones(true), SoftSphere(true), Mie(5, 10, true), Coulomb(true),
     general_inter_types = (LennardJones(true), SoftSphere(true), Coulomb(true),
-                            Gravity(10.0, true))
+                            Gravity(10.0, true),
+                            LennardJones(false), SoftSphere(false), Coulomb(false),
+                            Gravity(10.0, false))
 
     for gi in general_inter_types
+        if gi.nl_only
+            neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.5)
+        else
+            neighbour_finder = NoNeighbourFinder()
+        end
+
         s = Simulation(
             simulator=VelocityVerlet(),
             atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0, σ=0.2, ϵ=0.2) for i in 1:n_atoms],
@@ -247,7 +255,7 @@ end
             velocities=[velocity(10.0, temp) .* 0.01 for i in 1:n_atoms],
             temperature=temp,
             box_size=box_size,
-            neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
+            neighbour_finder=neighbour_finder,
             thermostat=AndersenThermostat(10.0),
             loggers=Dict("temp" => TemperatureLogger(100),
                          "coords" => CoordinateLogger(100),
