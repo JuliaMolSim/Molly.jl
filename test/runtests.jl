@@ -284,6 +284,115 @@ struct SIRLogger <: Logger
     fracs_sir::Vector{Vector{Float64}}
 end
 
+@testset "Different implementations" begin
+    function placediatomics(n_molecules, box_size, min_dist, bond_length)
+        min_dist_sq = min_dist ^ 2
+        coords = SArray{Tuple{3}, Float64, 1, 3}[]
+        while length(coords) < (n_molecules * 2)
+            new_coord_a = rand(SVector{3}) .* box_size
+            new_coord_b = copy(new_coord_a) + SVector{3}([bond_length, 0.0, 0.0])
+            okay = new_coord_b[1] <= box_size
+            for coord in coords
+                if sum(abs2, vector(coord, new_coord_a, box_size)) < min_dist_sq ||
+                        sum(abs2, vector(coord, new_coord_b, box_size)) < min_dist_sq
+                    okay = false
+                    break
+                end
+            end
+            if okay
+                push!(coords, new_coord_a)
+                push!(coords, new_coord_b)
+            end
+        end
+        return coords
+    end
+
+    n_atoms = 400
+    mass = 10.0
+    box_size = 6.0
+    temp = 1.0
+    starting_coords = placediatomics(n_atoms ÷ 2, box_size, 0.2, 0.2)
+    starting_velocities = [velocity(mass, temp) for i in 1:n_atoms]
+    starting_coords_f32 = [Float32.(c) for c in starting_coords]
+    starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
+
+    function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::Bool)
+        n_atoms = 400
+        n_steps = 200
+        mass = f32 ? 10.0f0 : 10.0
+        box_size = f32 ? 6.0f0 : 6.0
+        timestep = f32 ? 0.02f0 : 0.02
+        temp = f32 ? 1.0f0 : 1.0
+        simulator = VelocityVerlet()
+        thermostat = NoThermostat()
+        bonds = [HarmonicBond((i * 2) - 1, i * 2, f32 ? 0.2f0 : 0.2, f32 ? 10_000.0f0 : 10_000.0) for i in 1:(n_atoms ÷ 2)]
+        specific_inter_lists = (bonds,)
+
+        neighbour_finder = NoNeighbourFinder()
+        general_inters = (LennardJones(false),)
+        if nl
+            neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, f32 ? 1.5f0 : 1.5)
+            general_inters = (LennardJones(true),)
+        end
+
+        if gpu
+            coords = cu(deepcopy(f32 ? starting_coords_f32 : starting_coords))
+            velocities = cu(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
+            atoms = cu([AtomMin(f32 ? 0.0f0 : 0.0, mass, f32 ? 0.2f0 : 0.2, f32 ? 0.2f0 : 0.2) for i in 1:n_atoms])
+        else
+            coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
+            velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
+            atoms = [Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=f32 ? 0.0f0 : 0.0,
+                            mass=mass, σ=f32 ? 0.2f0 : 0.2, ϵ=f32 ? 0.2f0 : 0.2) for i in 1:n_atoms]
+        end
+
+        s = Simulation(
+            simulator=simulator,
+            atoms=atoms,
+            specific_inter_lists=specific_inter_lists,
+            general_inters=general_inters,
+            coords=coords,
+            velocities=velocities,
+            temperature=temp,
+            box_size=box_size,
+            neighbour_finder=neighbour_finder,
+            thermostat=thermostat,
+            timestep=timestep,
+            n_steps=n_steps,
+            gpu_diff_safe=gpu_diff_safe
+        )
+
+        c = simulate!(s, parallel=parallel)
+        return c
+    end
+
+    runs = [
+        ("in-place"        , [false, false, false, false, false]),
+        ("in-place NL"     , [true , false, false, false, false]),
+        ("in-place f32"    , [false, false, false, true , false]),
+        ("out-of-place"    , [false, false, true , false, false]),
+        ("out-of-place f32", [false, false, true , true , false]),
+    ]
+    if nthreads() > 1
+        push!(runs, ("in-place parallel"   , [false, true , false, false, false]))
+        push!(runs, ("in-place NL parallel", [true , true , false, false, false]))
+    end
+    if CUDA.functional()
+        push!(runs, ("out-of-place gpu"    , [false, false, true , false, true ]))
+        push!(runs, ("out-of-place gpu f32", [false, false, true , true , true ]))
+    end
+
+    final_coords_ref = runsim(runs[1][2]...)
+    for (name, args) in runs
+        final_coords = runsim(args...)
+        final_coords_f64 = [Float64.(c) for c in final_coords]
+        diff = sum(sum(map(x -> abs.(x), final_coords_f64 .- final_coords_ref))) / (3 * n_atoms)
+        # Check all simulations give the same result to within some error
+        @info "$(rpad(name, 20)) - difference per coordinate $diff"
+        @test diff < 1e-4
+    end
+end
+
 @testset "Agent-based modelling" begin
     # Custom force function
     function Molly.force!(forces, inter::SIRInteraction, s::Simulation, i::Integer, j::Integer)
