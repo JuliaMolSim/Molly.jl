@@ -10,6 +10,7 @@ export
     NeighbourFinder,
     Logger,
     Atom,
+    AtomMin,
     Simulation
 
 const DefaultFloat = Float64
@@ -65,6 +66,7 @@ abstract type Logger end
 An atom and its associated information.
 Properties unused in the simulation or in analysis can be left with their
 default values.
+This type cannot be used on the GPU as it is not `isbits` - use `AtomMin` instead.
 
 # Arguments
 - `attype::AbstractString=""`: the type of the atom.
@@ -100,12 +102,48 @@ function Atom(;
                 mass=0.0,
                 σ=0.0,
                 ϵ=0.0)
-    return Atom{typeof(charge)}(attype, name, resnum, resname, charge, mass, σ, ϵ)
+    return Atom{typeof(mass)}(attype, name, resnum, resname, charge, mass, σ, ϵ)
 end
 
 function Base.show(io::IO, a::Atom)
     print(io, "Atom{", typeof(a.charge), "} with name \"", a.name,
                 "\", type \"", a.attype, "\", charge=", a.charge, ", mass=",
+                a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
+end
+
+"""
+    AtomMin(; <keyword arguments>)
+
+An atom and minimal information required for simulation.
+Properties unused in the simulation or in analysis can be left with their
+default values.
+This type is `isbits` and can be used on the GPU - use `Atom` in other contexts to store
+more information.
+
+# Arguments
+- `charge::T=0.0`: the charge of the atom, used for electrostatic interactions.
+- `mass::T=0.0`: the mass of the atom.
+- `σ::T=0.0`: the Lennard-Jones finite distance at which the inter-particle
+    potential is zero.
+- `ϵ::T=0.0`: the Lennard-Jones depth of the potential well.
+"""
+struct AtomMin{T}
+    charge::T
+    mass::T
+    σ::T
+    ϵ::T
+end
+
+function AtomMin(;
+                charge=0.0,
+                mass=0.0,
+                σ=0.0,
+                ϵ=0.0)
+    return AtomMin{typeof(mass)}(charge, mass, σ, ϵ)
+end
+
+function Base.show(io::IO, a::AtomMin)
+    print(io, "AtomMin{", typeof(a.charge), "} with charge=", a.charge, ", mass=",
                 a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
 end
 
@@ -146,9 +184,9 @@ default values.
 - `n_steps_made::Vector{Int}=[]`: the number of steps already made during the
     simulation. This is a `Vector` to allow the `struct` to be immutable.
 """
-struct Simulation{T, A, C, GI, SI}
+struct Simulation{D, T, A, C, GI, SI}
     simulator::Simulator
-    atoms::Vector{A}
+    atoms::A
     specific_inter_lists::SI
     general_inters::GI
     coords::C
@@ -163,6 +201,8 @@ struct Simulation{T, A, C, GI, SI}
     n_steps::Int
     n_steps_made::Vector{Int}
 end
+
+Simulation{D}(args...) where {D, T, A, C, GI, SI} = Simulation{D, T, A, C, GI, SI}(args...)
 
 function Simulation(;
                     simulator,
@@ -179,13 +219,14 @@ function Simulation(;
                     loggers=Dict{String, Logger}(),
                     timestep=0.0,
                     n_steps=0,
-                    n_steps_made=[0])
+                    n_steps_made=[0],
+                    gpu_diff_safe=isa(coords, CuArray))
     T = typeof(timestep)
-    A = eltype(atoms)
+    A = typeof(atoms)
     C = typeof(coords)
     GI = typeof(general_inters)
     SI = typeof(specific_inter_lists)
-    return Simulation{T, A, C, GI, SI}(
+    return Simulation{gpu_diff_safe, T, A, C, GI, SI}(
                 simulator, atoms, specific_inter_lists, general_inters, coords,
                 velocities, temperature, box_size, neighbours, neighbour_finder,
                 thermostat, loggers, timestep, n_steps, n_steps_made)

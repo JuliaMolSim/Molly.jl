@@ -2,6 +2,7 @@ module Molly
 
 using BioStructures
 using Colors
+using CUDA
 using Distributions
 using KernelDensity
 using ProgressMeter
@@ -12,6 +13,7 @@ using Requires
 
 using Base.Threads
 using LinearAlgebra
+using SparseArrays
 
 include("types.jl")
 include("cutoffs.jl")

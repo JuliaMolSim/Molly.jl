@@ -20,7 +20,7 @@ struct VelocityVerlet <: Simulator end
 Run a simulation according to the rules of the given simulator.
 Custom simulators should implement this function.
 """
-function simulate!(s::Simulation,
+function simulate!(s::Simulation{false},
                     ::VelocityVerlet,
                     n_steps::Integer;
                     parallel::Bool=true)
@@ -49,13 +49,53 @@ function simulate!(s::Simulation,
             s.velocities[i] += (accels_t[i] + accels_t_dt[i]) * s.timestep / 2
         end
 
-        apply_thermostat!(s, s.thermostat)
+        apply_thermostat!(s.velocities, s, s.thermostat)
         find_neighbours!(s, s.neighbour_finder, step_n, parallel=parallel)
 
         accels_t = accels_t_dt
         s.n_steps_made[1] += 1
     end
-    return s
+    return s.coords
+end
+
+function simulate!(s::Simulation{true},
+                    ::VelocityVerlet,
+                    n_steps::Integer;
+                    parallel::Bool=true)
+    n_atoms = length(s.coords)
+    is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
+    js = permutedims(is, (2, 1))
+    coords_is = view(s.coords, is)
+    coords_js = view(s.coords, js)
+    atoms_is = view(s.atoms, is)
+    atoms_js = view(s.atoms, js)
+    find_neighbours!(s, s.neighbour_finder, 0)
+    if isa(s.coords, CuArray)
+        self_interactions = CuArray(Diagonal(ones(typeof(s.timestep), n_atoms)))
+    else
+        self_interactions = Array(Diagonal(ones(typeof(s.timestep), n_atoms)))
+    end
+    accels_t = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
+    accels_t_dt = zero(s.coords)
+
+    for step_n in 1:n_steps
+        for logger in values(s.loggers)
+            log_property!(logger, s, step_n)
+        end
+
+        # In-place updates here required to work with views but are not Zygote-compatible
+        s.coords .+= s.velocities .* s.timestep .+ (accels_t .* s.timestep ^ 2) ./ 2
+        s.coords .= adjust_bounds_vec.(s.coords, s.box_size)
+        accels_t_dt = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
+        s.velocities .+= (accels_t .+ accels_t_dt) .* s.timestep / 2
+
+        s.velocities .= apply_thermostat!(s.velocities, s, s.thermostat)
+        find_neighbours!(s, s.neighbour_finder, 0)
+
+        accels_t = accels_t_dt
+        s.n_steps_made[1] += 1
+    end
+    return s.coords
 end
 
 """
@@ -72,8 +112,7 @@ function simulate!(s::Simulation,
                     n_steps::Integer;
                     parallel::Bool=true)
     n_atoms = length(s.coords)
-    find_neighbours!(s, s.neighbour_finder, 0,
-                                    parallel=parallel)
+    find_neighbours!(s, s.neighbour_finder, 0, parallel=parallel)
     coords_last = s.velocities
 
     @showprogress for step_n in 1:n_steps
@@ -91,13 +130,12 @@ function simulate!(s::Simulation,
         end
         coords_last = coords_copy
 
-        apply_thermostat!(s, s.thermostat)
-        find_neighbours!(s, s.neighbour_finder, step_n,
-                                        parallel=parallel)
+        apply_thermostat!(coords_last, s, s.thermostat)
+        find_neighbours!(s, s.neighbour_finder, step_n, parallel=parallel)
 
         s.n_steps_made[1] += 1
     end
-    return s
+    return s.coords
 end
 
 function simulate!(s::Simulation, n_steps::Integer; parallel::Bool=true)

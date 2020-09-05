@@ -21,8 +21,8 @@ struct NoThermostat <: Thermostat end
 Apply a thermostat to modify a simulation.
 Custom thermostats should implement this function.
 """
-function apply_thermostat!(s::Simulation, ::NoThermostat)
-    return s
+function apply_thermostat!(velocities, s::Simulation, ::NoThermostat)
+    return velocities
 end
 
 """
@@ -34,15 +34,15 @@ struct AndersenThermostat{T} <: Thermostat
     coupling_const::T
 end
 
-function apply_thermostat!(s::Simulation, thermostat::AndersenThermostat)
-    dims = length(first(s.velocities))
-    for i in 1:length(s.velocities)
+function apply_thermostat!(velocities, s::Simulation, thermostat::AndersenThermostat)
+    dims = length(first(velocities))
+    for i in 1:length(velocities)
         if rand() < s.timestep / thermostat.coupling_const
             mass = s.atoms[i].mass
-            s.velocities[i] = velocity(mass, s.temperature; dims=dims)
+            velocities[i] = velocity(mass, s.temperature; dims=dims)
         end
     end
-    return s
+    return velocities
 end
 
 """
@@ -78,8 +78,16 @@ end
 
 Calculate the temperature of a system from the kinetic energy of the atoms.
 """
-function temperature(s::Simulation)
+function temperature(s::Simulation{false})
     ke = sum([a.mass * dot(s.velocities[i], s.velocities[i]) for (i, a) in enumerate(s.atoms)]) / 2
+    df = 3 * length(s.coords) - 3
+    return 2 * ke / df
+end
+
+function temperature(s::Simulation{true})
+    mass_i = findfirst(x -> x == :mass, fieldnames(eltype(s.atoms)))
+    masses = getfield.(s.atoms, mass_i)
+    ke = sum(masses .* sum.(abs2, s.velocities)) / 2
     df = 3 * length(s.coords) - 3
     return 2 * ke / df
 end

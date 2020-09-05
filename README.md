@@ -18,7 +18,7 @@ It can simulate a system of atoms with arbitrary interactions as defined by the 
 Implemented features include:
 - Interface to allow definition of new forces, simulators, thermostats, neighbour finders, loggers etc.
 - Read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested.
-- Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential, gravitational potential, soft sphere potential.
+- Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential, gravitational potential, soft sphere potential, Mie potential.
 - Bonded interactions - covalent bonds, bond angles, torsion angles.
 - Andersen thermostat.
 - Velocity Verlet and velocity-free Verlet integration.
@@ -26,8 +26,9 @@ Implemented features include:
 - Periodic boundary conditions in a cubic box.
 - Neighbour list to speed up calculation of non-bonded forces.
 - Automatic multithreading.
-- Some analysis functions, e.g. RDF.
+- GPU acceleration on CUDA-enabled devices.
 - Run with Float64 or Float32.
+- Some analysis functions, e.g. RDF.
 - Physical agent-based modelling.
 - Visualise simulations as animations.
 - Differentiable molecular simulation on an experimental branch - see the [relevant docs](https://juliamolsim.github.io/Molly.jl/latest/differentiable.html).
@@ -41,12 +42,11 @@ Features not yet implemented include:
 - Protein preparation - solvent box, add hydrogens etc.
 - Trajectory/topology file format readers/writers.
 - Quantum mechanical modelling.
-- GPU compatibility.
 - High test coverage.
 
 ## Installation
 
-Julia v1.0 or later is required.
+Julia v1.3 or later is required.
 Install from the Julia REPL.
 Enter the package mode by pressing `]` and run `add Molly`.
 

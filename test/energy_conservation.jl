@@ -1,6 +1,7 @@
 using Molly
 
 using Base.Threads
+using Statistics
 using Test
 
 @testset "Lennard-Jones gas energy conservation" begin

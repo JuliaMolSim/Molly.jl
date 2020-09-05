@@ -9,7 +9,7 @@ The concept of using automatic differentiation to obtain exact gradients through
 There are some projects that explore differentiable molecular simulations, such as [Jax, M.D.](https://github.com/google/jax-md) and [DiffTaichi](https://github.com/yuanming-hu/difftaichi), or you can write your own algorithms in something like [PyTorch](https://pytorch.org).
 However Julia provides a strong suite of autodiff tools, with [Zygote.jl](https://github.com/FluxML/Zygote.jl) allowing source-to-source transformations for much of the language.
 The [differentiable](https://github.com/JuliaMolSim/Molly.jl/tree/differentiable) branch of Molly lets you use the power of Zygote to obtain gradients through molecular simulations.
-It is not yet merged because it is experimental, untested, slow, liable to change, has a slightly different API to the main package, and only works for some parts of the main package.
+It is not yet merged because it is experimental, untested, slow, liable to change, and only works for some parts of the main package.
 
 With those caveats in mind, it provides a neat way to run differentiable simulations using the same abstractions as the main package.
 In particular, you can define general and specific interactions, letting you move away from N-body simulations and describe molecular systems.
@@ -147,12 +147,6 @@ Epoch 20  |  σ  0.457  |  Mean min sep expected  0.513  |  Mean min sep end  0.
 The final value we get is 0.457, close to the theoretical value of 0.445 if all atoms have a neighbour at the minimum pairwise energy distance.
 The RDF looks as follows, with the purple line corresponding to the desired distance to the closest neighbour.
 ![LJ RDF](images/rdf_lj.png)
-
-At this point it is worth pointing out the API differences to the main package.
-[`force!`](@ref) functions are replaced by `force` functions that return the force vectors, rather than modifying arrays in place.
-`force` functions are defined for a few of the current available interactions, and there is an example of a custom function in the neural network example below.
-A [`Simulator`](@ref) returns the final coordinates to allow them to be used in the loss function.
-Hopefully the two APIs will be unified soon.
 
 ## Specific interactions
 
@@ -307,6 +301,7 @@ struct NNBond <: SpecificInteraction
     j::Int
 end
 
+# This method of defining the force is outdated compared to the master branch
 function Molly.force(coords, b::NNBond, s::Simulation)
     ab = vector(coords[b.i], coords[b.j], s.box_size)
     dist = Float32(norm(ab))
