@@ -20,6 +20,8 @@ else
     @warn "The GPU tests will not be run as CUDA is not available"
 end
 
+CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
+
 @testset "Spatial" begin
     @test vector1D(4.0, 6.0, 10.0) ==  2.0
     @test vector1D(1.0, 9.0, 10.0) == -2.0
@@ -239,7 +241,7 @@ end
         LennardJones(false), SoftSphere(false), Mie(5, 10, false), Coulomb(false), Gravity(10.0, false),
     )
 
-    for gi in general_inter_types
+    @testset "$gi" for gi in general_inter_types
         if gi.nl_only
             neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.5)
         else
@@ -389,9 +391,9 @@ end
         push!(runs, ("out-of-place gpu f32", [false, false, true , true , true ]))
     end
 
-    final_coords_ref = runsim(runs[1][2]...)
+    final_coords_ref = Array(runsim(runs[1][2]...))
     for (name, args) in runs
-        final_coords = runsim(args...)
+        final_coords = Array(runsim(args...))
         final_coords_f64 = [Float64.(c) for c in final_coords]
         diff = sum(sum(map(x -> abs.(x), final_coords_f64 .- final_coords_ref))) / (3 * n_atoms)
         # Check all simulations give the same result to within some error
