@@ -2,7 +2,6 @@ using Documenter
 using Molly
 
 makedocs(
-    format = :html,
     sitename = "Molly.jl",
     pages = [
         "Home"                      => "index.md",
@@ -10,15 +9,7 @@ makedocs(
         "Differentiable simulation" => "differentiable.md",
         "Examples"                  => "examples.md",
         "API"                       => "api.md",
-    ],
-    authors = "Joe G Greener"
+    ]
 )
 
-deploydocs(
-    repo = "github.com/JuliaMolSim/Molly.jl.git",
-    julia = "1.0",
-    osname = "linux",
-    target = "build",
-    deps = nothing,
-    make = nothing
-)
+deploydocs(repo="github.com/JuliaMolSim/Molly.jl.git")
