@@ -31,7 +31,7 @@ Implemented features include:
 - Some analysis functions, e.g. RDF.
 - Physical agent-based modelling.
 - Visualise simulations as animations.
-- Differentiable molecular simulation on an experimental branch - see the [relevant docs](https://juliamolsim.github.io/Molly.jl/dev/differentiable.html).
+- Differentiable molecular simulation on an experimental branch - see the [relevant docs](https://juliamolsim.github.io/Molly.jl/dev/differentiable).
 
 Features not yet implemented include:
 - Protein force fields other than OPLS-AA.
