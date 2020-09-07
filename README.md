@@ -6,7 +6,7 @@
 [![Latest release](https://img.shields.io/github/release/JuliaMolSim/Molly.jl.svg)](https://github.com/JuliaMolSim/Molly.jl/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/JuliaMolSim/Molly.jl/blob/master/LICENSE.md)
 [![Documentation stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://JuliaMolSim.github.io/Molly.jl/stable)
-[![Documentation latest](https://img.shields.io/badge/docs-latest-blue.svg)](https://JuliaMolSim.github.io/Molly.jl/latest)
+[![Documentation dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://JuliaMolSim.github.io/Molly.jl/dev)
 
 Much of science can be explained by the movement and interaction of molecules.
 Molecular dynamics (MD) is a computational technique used to explore these phenomena, from noble gases to biological macromolecules.
@@ -31,7 +31,7 @@ Implemented features include:
 - Some analysis functions, e.g. RDF.
 - Physical agent-based modelling.
 - Visualise simulations as animations.
-- Differentiable molecular simulation on an experimental branch - see the [relevant docs](https://juliamolsim.github.io/Molly.jl/latest/differentiable.html).
+- Differentiable molecular simulation on an experimental branch - see the [relevant docs](https://juliamolsim.github.io/Molly.jl/dev/differentiable.html).
 
 Features not yet implemented include:
 - Protein force fields other than OPLS-AA.
