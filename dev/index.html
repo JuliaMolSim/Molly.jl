@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Home · Molly.jl</title><link href="https://fonts.googleapis.com/css?family=Lato|Roboto+Mono" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.11.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.11.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.11.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.11.1/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="assets/documenter.js"></script><script src="siteinfo.js"></script><script src="../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/documenter-dark.css" data-theme-name="documenter-dark"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit">Molly.jl</span></div><form class="docs-search" action="search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li class="is-active"><a class="tocitem" href>Home</a><ul class="internal"><li><a class="tocitem" href="#Installation"><span>Installation</span></a></li><li><a class="tocitem" href="#Usage"><span>Usage</span></a></li><li><a class="tocitem" href="#Contributing"><span>Contributing</span></a></li></ul></li><li><a class="tocitem" href="docs/">Documentation</a></li><li><a class="tocitem" href="differentiable/">Differentiable simulation</a></li><li><a class="tocitem" href="examples/">Examples</a></li><li><a class="tocitem" href="api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Home</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Home</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/README.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="Molly.jl"><a class="docs-heading-anchor" href="#Molly.jl">Molly.jl</a><a id="Molly.jl-1"></a><a class="docs-heading-anchor-permalink" href="#Molly.jl" title="Permalink"></a></h1><p><a href="https://travis-ci.org/JuliaMolSim/Molly.jl"><img src="https://travis-ci.org/JuliaMolSim/Molly.jl.svg?branch=master" alt="Travis build status"/></a> <a href="https://ci.appveyor.com/project/jgreener64/molly-jl-yaoyb"><img src="https://ci.appveyor.com/api/projects/status/fc9qjhs9pfema614?svg=true" alt="AppVeyor build status"/></a> <a href="https://coveralls.io/github/JuliaMolSim/Molly.jl?branch=master"><img src="https://coveralls.io/repos/github/JuliaMolSim/Molly.jl/badge.svg?branch=master" alt="Coverage status"/></a> <a href="https://github.com/JuliaMolSim/Molly.jl/releases/latest"><img src="https://img.shields.io/github/release/JuliaMolSim/Molly.jl.svg" alt="Latest release"/></a> <a href="https://github.com/JuliaMolSim/Molly.jl/blob/master/LICENSE.md"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a> <a href="https://JuliaMolSim.github.io/Molly.jl/stable"><img src="https://img.shields.io/badge/docs-stable-blue.svg" alt="Documentation stable"/></a> <a href="https://JuliaMolSim.github.io/Molly.jl/latest"><img src="https://img.shields.io/badge/docs-latest-blue.svg" alt="Documentation latest"/></a></p><p>Much of science can be explained by the movement and interaction of molecules. Molecular dynamics (MD) is a computational technique used to explore these phenomena, from noble gases to biological macromolecules. Molly.jl is a pure Julia package for MD, and for the simulation of physical systems more broadly.</p><p>At the minute the package is a proof of concept for MD in Julia. <strong>It is not production ready.</strong> It can simulate a system of atoms with arbitrary interactions as defined by the user. Implemented features include:</p><ul><li>Interface to allow definition of new forces, simulators, thermostats, neighbour finders, loggers etc.</li><li>Read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested.</li><li>Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential, gravitational potential, soft sphere potential, Mie potential.</li><li>Bonded interactions - covalent bonds, bond angles, torsion angles.</li><li>Andersen thermostat.</li><li>Velocity Verlet and velocity-free Verlet integration.</li><li>Explicit solvent.</li><li>Periodic boundary conditions in a cubic box.</li><li>Neighbour list to speed up calculation of non-bonded forces.</li><li>Automatic multithreading.</li><li>GPU acceleration on CUDA-enabled devices.</li><li>Run with Float64 or Float32.</li><li>Some analysis functions, e.g. RDF.</li><li>Physical agent-based modelling.</li><li>Visualise simulations as animations.</li><li>Differentiable molecular simulation on an experimental branch - see the <a href="https://juliamolsim.github.io/Molly.jl/latest/differentiable.html">relevant docs</a>.</li></ul><p>Features not yet implemented include:</p><ul><li>Protein force fields other than OPLS-AA.</li><li>Water models.</li><li>Energy minimisation.</li><li>Other temperature or pressure coupling methods.</li><li>Cell-based neighbour list.</li><li>Protein preparation - solvent box, add hydrogens etc.</li><li>Trajectory/topology file format readers/writers.</li><li>Quantum mechanical modelling.</li><li>High test coverage.</li></ul><h2 id="Installation"><a class="docs-heading-anchor" href="#Installation">Installation</a><a id="Installation-1"></a><a class="docs-heading-anchor-permalink" href="#Installation" title="Permalink"></a></h2><p>Julia v1.3 or later is required. Install from the Julia REPL. Enter the package mode by pressing <code>]</code> and run <code>add Molly</code>.</p><h2 id="Usage"><a class="docs-heading-anchor" href="#Usage">Usage</a><a id="Usage-1"></a><a class="docs-heading-anchor-permalink" href="#Usage" title="Permalink"></a></h2><p>Some examples are given here, see <a href="https://JuliaMolSim.github.io/Molly.jl/stable">the documentation</a> for more on how to use the package.</p><p>Simulation of a Lennard-Jones gas:</p><pre><code class="language-julia">using Molly
+
+n_atoms = 100
+box_size = 2.0 # nm
+temp = 298 # K
+mass = 10.0 # Relative atomic mass
+
+atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]
+coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
+velocities = [velocity(mass, temp) for i in 1:n_atoms]
+general_inters = (LennardJones(),)
+
+s = Simulation(
+    simulator=VelocityVerlet(),
+    atoms=atoms,
+    general_inters=general_inters,
+    coords=coords,
+    velocities=velocities,
+    temperature=temp,
+    box_size=box_size,
+    thermostat=AndersenThermostat(1.0),
+    loggers=Dict(&quot;temp&quot; =&gt; TemperatureLogger(100)),
+    timestep=0.002, # ps
+    n_steps=10_000
+)
+
+simulate!(s)</code></pre><p>Simulation of a protein:</p><pre><code class="language-julia">using Molly
+
+timestep = 0.0002 # ps
+temp = 298 # K
+n_steps = 5_000
+
+atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
+            joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_top_ff.top&quot;),
+            joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_coords.gro&quot;))
+
+s = Simulation(
+    simulator=VelocityVerlet(),
+    atoms=atoms,
+    specific_inter_lists=specific_inter_lists,
+    general_inters=general_inters,
+    coords=coords,
+    velocities=[velocity(a.mass, temp) for a in atoms],
+    temperature=temp,
+    box_size=box_size,
+    neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
+    thermostat=AndersenThermostat(1.0),
+    loggers=Dict(&quot;temp&quot; =&gt; TemperatureLogger(10),
+                    &quot;writer&quot; =&gt; StructureWriter(10, &quot;traj_5XER_1ps.pdb&quot;)),
+    timestep=timestep,
+    n_steps=n_steps
+)
+
+simulate!(s)</code></pre><p>The above 1 ps simulation looks something like this when you view it in <a href="https://www.ks.uiuc.edu/Research/vmd">VMD</a>: <img src="https://github.com/JuliaMolSim/Molly.jl/raw/master/data/5XER/sim_1ps.gif" alt="MD simulation"/></p><h2 id="Contributing"><a class="docs-heading-anchor" href="#Contributing">Contributing</a><a id="Contributing-1"></a><a class="docs-heading-anchor-permalink" href="#Contributing" title="Permalink"></a></h2><p>Contributions are very welcome - see the <a href="https://github.com/JuliaMolSim/Molly.jl/issues/2">roadmap issue</a> for more.</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="docs/">Documentation »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Monday 7 September 2020 18:19">Monday 7 September 2020</span>. Using Julia version 1.5.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
