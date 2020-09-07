@@ -125,7 +125,7 @@ function simulate!(s::Simulation,
         # Update coordinates
         coords_copy = s.coords
         for i in 1:length(s.coords)
-            s.coords[i] = 2 * s.coords[i] - coords_last[i] + accels_t[i] * s.timestep ^ 2
+            s.coords[i] = s.coords[i] + vector(coords_last[i], s.coords[i], s.box_size) + accels_t[i] * s.timestep ^ 2
             s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
         end
         coords_last = coords_copy
