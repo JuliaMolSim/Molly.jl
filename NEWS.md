@@ -1,5 +1,18 @@
 # Molly.jl release notes
 
+## v0.2.0 - Sep 2020
+
+- Shifted potential and shifted force cutoff approaches for non-bonded interactions are introduced.
+- An `EnergyLogger` is added and the potential energy for existing interactions defined.
+- Simulations can now be run with the `CuArray` type from CUDA.jl, allowing GPU acceleration.
+- The in-place `force!` functions are changed to out-of-place `force` functions with different arguments.
+- The i-i self-interaction is no longer computed for `force` functions.
+- The Mie potential is added.
+- The list of neighbours is now stored in the `Simulation` type.
+- Documentation is added for experimental differentiable molecular simulation.
+- Optimisations are implemented throughout the package.
+- Support for Julia versions before 1.3 is dropped.
+
 ## v0.1.0 - Jun 2020
 
 Initial release of Molly.jl, a Julia package for molecular simulation.

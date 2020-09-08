@@ -547,6 +547,7 @@ Loggers record properties of the simulation to allow monitoring and analysis.
 The available loggers are:
 - [`TemperatureLogger`](@ref).
 - [`CoordinateLogger`](@ref).
+- [`EnergyLogger`](@ref).
 - [`StructureWriter`](@ref).
 
 To define your own [`Logger`](@ref), first define the `struct`:

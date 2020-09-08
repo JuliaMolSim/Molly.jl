@@ -46,8 +46,8 @@ Features not yet implemented include:
 
 ## Installation
 
-Julia v1.3 or later is required.
-Install from the Julia REPL.
+[Julia](https://julialang.org/downloads) v1.3 or later is required.
+Install Molly from the Julia REPL.
 Enter the package mode by pressing `]` and run `add Molly`.
 
 ## Usage
