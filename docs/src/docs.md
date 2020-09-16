@@ -423,6 +423,67 @@ specific_inter_lists = ([MySpecificInter(1, 2), MySpecificInter(3, 4)],)
 ```
 Specific interactions are always run on the CPU (with the results moved to the GPU if required), which is why we can index into `coords` and access `s` without harming performance.
 
+## Cutoffs
+
+The total potential energy of a system is given as a sum of the individual inter-particle potentials
+```math
+V(\vec{r}_1, \dotsc, \vec{r}_N) = \sum_{i<j}V_{ij}(r_{ij})
+```
+
+The forces acting on the particles are given by
+```math
+\vec{F}_i = -\sum_j \frac{dV_{ij}(r_{ij})}{dr_{ij}}\frac{\vec{r}_{ij}}{r_{ij}}
+```
+
+In the case of the Lennard-Jones potential, the inter-particle potential is given by
+```math
+V_{ij}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]
+```
+and the forces are given by
+```math
+\begin{aligned}
+\vec{F}_i &= 24\varepsilon_{ij} \left(2\frac{\sigma_{ij}^{12}}{r_{ij}^{13}} - \frac{\sigma_{ij}^6}{r_{ij}^{7}}\right) \frac{\vec{r}_{ij}}{r_{ij}} \\
+&= \frac{24\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}^{6}}{r_{ij}^{6}}\right)^2 -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \vec{r}_{ij}
+\end{aligned}
+```
+
+As the potential, and thus also the force decreases rapidly with the distance, in almost every implementation of the Lennard-Jones force calculation there is a cutoff radius beyond which the force is set to 0.
+
+While this sounds like a very sensible approach, it introduces a discontinuity in the force function and it requires us to also modify the potential, as beyond the cutoff radius the force would be 0, but the derivative of the unmodified potential is not. One way to truncate the potential is to shift the potential by its cutoff value.
+```math
+\begin{aligned}
+\vec{F}_{SP}(\vec{r}) &= \begin{cases}
+\vec{F}(\vec{r}), r < r_c \\
+0, r > r_c
+\end{cases} \\
+V_{SP}(r) &= \begin{cases}
+V(r) - V(r_c), r \le r_c \\
+0, r > r_c
+\end{cases}
+\end{aligned}
+```
+
+This way the potential function is continuous and the relation between forces and potentials is satisfied. This truncation method is called shifted potential cutoff.
+
+Another option is to shift the force in order to make it continuous
+```math
+\begin{aligned}
+F_{SF}(r) &= \begin{cases}
+F(r) - F(r_c), r \le r_c \\
+0, r > r_c
+\end{cases} \\
+V_{SF}(r) &= \begin{cases}
+V(r) - (r-r_c) V'(r_c) - V(r_c), r \le r_c \\
+0, r > r_c
+\end{cases}
+\end{aligned}
+```
+This requires a more complicated change in the potential in order to satisfy the relation between them. This method is called the shifted force cutoff. The continuity of the force is desirable as it may give better energy conservation properties as shown in [Toxvaerd 2011](http://aip.scitation.org/doi/10.1063/1.3558787).
+
+There are also more complicated truncation methods that interpolate between the original potential and 0, but we will consider those two for the moment.
+
+The truncation approximations that we use can significantly alter the qualitative features of the simulation as shown in many articles in the molecular dynamics literature ([Fitzner 2017](https://aip.scitation.org/doi/full/10.1063/1.4997698), [van der Spoel 2006](https://pubs.acs.org/doi/10.1021/ct0502256) and others).
+
 ## Simulators
 
 Simulators define what type of simulation is run.
