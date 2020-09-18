@@ -330,8 +330,12 @@ We can use the logger to plot the fraction of people susceptible (blue), infecte
 
 ## Forces
 
-Forces define how different parts of the system interact.
-In Molly they are separated into two types.
+Forces define how different parts of the system interact. The force on each particle in the system is derived from the potential corresponding to the interaction.
+```math
+\vec{F}_i = -\sum_j \frac{dV_{ij}(r_{ij})}{dr_{ij}}\frac{\vec{r}_{ij}}{r_{ij}}
+```
+
+In Molly there are two types of interactions.
 [`GeneralInteraction`](@ref)s are present between all or most atoms, and account for example for non-bonded terms.
 [`SpecificInteraction`](@ref)s are present between specific atoms, and account for example for bonded terms.
 
@@ -483,6 +487,11 @@ This requires a more complicated change in the potential in order to satisfy the
 There are also more complicated truncation methods that interpolate between the original potential and 0, but we will consider those two for the moment.
 
 The truncation approximations that we use can significantly alter the qualitative features of the simulation as shown in many articles in the molecular dynamics literature ([Fitzner 2017](https://aip.scitation.org/doi/full/10.1063/1.4997698), [van der Spoel 2006](https://pubs.acs.org/doi/10.1021/ct0502256) and others).
+
+### Implementation
+
+Since the truncation algorithm is independent of the interaction for which is used, each interaction is defined without including cutoffs.
+The corresponding interaction `struct` has a `cutoff` field which is then used via dispatch to apply the chosen cutoff.
 
 ## Simulators
 
