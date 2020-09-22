@@ -3,6 +3,9 @@ using Molly
 
 makedocs(
     sitename = "Molly.jl",
+    format = Documenter.HTML(
+        prettyurls = get(ENV, "CI", nothing) == "true"
+    ),
     pages = [
         "Home"                      => "index.md",
         "Documentation"             => "docs.md",
@@ -12,4 +15,7 @@ makedocs(
     ]
 )
 
-deploydocs(repo="github.com/JuliaMolSim/Molly.jl.git")
+deploydocs(
+    repo="github.com/JuliaMolSim/Molly.jl.git",
+    push_preview = true
+)
