@@ -1,7 +1,6 @@
 # Molly.jl
 
-[![Travis build status](https://travis-ci.org/JuliaMolSim/Molly.jl.svg?branch=master)](https://travis-ci.org/JuliaMolSim/Molly.jl)
-[![AppVeyor build status](https://ci.appveyor.com/api/projects/status/fc9qjhs9pfema614?svg=true)](https://ci.appveyor.com/project/jgreener64/molly-jl-yaoyb)
+[![Build status](https://github.com/JuliaMolSim/Molly.jl/workflows/CI/badge.svg)](https://github.com/JuliaMolSim/Molly.jl/actions)
 [![Coverage status](https://coveralls.io/repos/github/JuliaMolSim/Molly.jl/badge.svg?branch=master)](https://coveralls.io/github/JuliaMolSim/Molly.jl?branch=master)
 [![Latest release](https://img.shields.io/github/release/JuliaMolSim/Molly.jl.svg)](https://github.com/JuliaMolSim/Molly.jl/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/JuliaMolSim/Molly.jl/blob/master/LICENSE.md)
