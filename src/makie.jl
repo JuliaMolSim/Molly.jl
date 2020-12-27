@@ -74,7 +74,7 @@ function visualize(coord_logger,
     ylims!(scene, 0.0, box_size)
     zlims!(scene, 0.0, box_size)
 
-    record(scene, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
+    Makie.record(scene, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
         coords = coord_logger.coords[frame_i]
 
         for (ci, (i, j)) in enumerate(connections)
