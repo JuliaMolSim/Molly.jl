@@ -1,5 +1,11 @@
 # Molly.jl release notes
 
+## v0.2.1 - Dec 2020
+
+- Documentation is added for cutoffs.
+- Compatibility bounds are updated for various packages, including requiring CUDA.jl version 2.
+- Support for Julia versions before 1.5 is dropped.
+
 ## v0.2.0 - Sep 2020
 
 - Shifted potential and shifted force cutoff approaches for non-bonded interactions are introduced.
