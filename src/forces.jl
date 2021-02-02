@@ -12,7 +12,8 @@ export
     Gravity,
     HarmonicBond,
     HarmonicAngle,
-    Torsion
+    Torsion,
+    FinnisSinclair
 
 """
     force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
@@ -92,7 +93,11 @@ function accelerations(s::Simulation; parallel::Bool=true)
         sparse_forces = force.(inter_list, (s.coords,), (s,))
         ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
         sparse_vec = SparseVector(n_atoms, reduce(vcat, ge1), reduce(vcat, ge2))
-        forces += Array(sparse_vec)
+        if typeof(inter_list[1]) <: GlueInteraction
+            forces += Array([SVector{3}(v) for v in sparse_vec])
+        else
+            forces += Array(sparse_vec)
+        end
     end
 
     for i in 1:n_atoms
@@ -134,3 +139,4 @@ include("interactions/gravity.jl")
 include("interactions/harmonic_bond.jl")
 include("interactions/harmonic_angle.jl")
 include("interactions/torsion.jl")
+include("interactions/glue_fs.jl")
