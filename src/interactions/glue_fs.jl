@@ -29,23 +29,37 @@ function glue_potential(r::T, β::T, d::T)::T where T<:Real
 end
 
 """
+    pair_potential_derivative(r, c, c₀, c₁, c₂)
+
+Derivative of the pair potential.
 """
 function pair_potential_derivative(r::T, c::T, c₀::T, c₁::T, c₂::T)::T where T<:Real
     return (r > c) ? 0 : 2 * (r - c) * (c₀ + c₁*r + c₂*r^2) + (r - c)^2 * (c₁ + 2*c₂*r)
 end
 
 """
+    glue_energy_derivative(ρ, A)
+
+Energy derivative given glue density.
 """
 function glue_energy_derivative(ρ::Float64, A::Float64)::Float64
    return A/2 * ρ^-1.5 
 end
 
 """
+    glue_potential_derivative(r, β, d)
+
+Derivative of the glue density function.
 """
 function glue_potential_derivative(r::T, β::T, d::T)::T where T<:Real
     return r > d ? 0 : 2*(r-d) + 3*β*(r-d)^2/d
 end
 
+"""
+    get_pair_params(element1, element2, inter)
+
+Convenience function to generate element pair and return relevant model parameters. 
+"""
 function get_pair_params(element1::String, element2::String, inter::FinnisSinclair)
     pair = string(sort([element1, element2])...)
     return inter.params[inter.element_pair_map[pair],:]
@@ -122,12 +136,18 @@ end
 end
 
 """
+    pair_potential(r, c, c₀, c₁, c₂)
+
+Energy contribution directly from atom pair distances. 
 """
 function pair_potential(r::T, c::T, c₀::T, c₁::T, c₂::T)::T where T<:Real
     return (r > c) ? 0 : (r - c)^2 * (c₀ + c₁*r + c₂*r^2)
 end
 
 """
+    glue_energy(ρ, A)
+
+Energy based on the glue density .
 """
 function glue_energy(ρ::Float64, A::Float64)::Float64
    return -A * √ρ 
