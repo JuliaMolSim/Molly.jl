@@ -1,5 +1,9 @@
 # Molly.jl release notes
 
+## v0.2.2 - Feb 2021
+
+- The `TreeNeighbourFinder` is added for faster distance neighbour finding using NearestNeighbors.jl.
+
 ## v0.2.1 - Dec 2020
 
 - Documentation is added for cutoffs.
