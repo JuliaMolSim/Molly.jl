@@ -35,19 +35,21 @@ CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
     @test adjust_bounds(12.0, 10.0) == 2.0
     @test adjust_bounds(-2.0, 10.0) == 8.0
 
-    s = Simulation(
-        simulator=VelocityVerlet(),
-        atoms=[Atom(), Atom(), Atom()],
-        coords=[SVector(1.0, 1.0, 1.0), SVector(2.0, 2.0, 2.0),
-                SVector(5.0, 5.0, 5.0)],
-        box_size=10.0,
-        neighbour_finder=DistanceNeighbourFinder(trues(3, 3), 10, 2.0)
-    )
-    find_neighbours!(s, s.neighbour_finder, 0, parallel=false)
-    @test s.neighbours == [(2, 1)]
-    if nthreads() > 1
-        find_neighbours!(s, s.neighbour_finder, 0, parallel=true)
+    for neighbour_finder in (DistanceNeighbourFinder, TreeNeighbourFinder)
+        s = Simulation(
+            simulator=VelocityVerlet(),
+            atoms=[Atom(), Atom(), Atom()],
+            coords=[SVector(1.0, 1.0, 1.0), SVector(2.0, 2.0, 2.0),
+                    SVector(5.0, 5.0, 5.0)],
+            box_size=10.0,
+            neighbour_finder=neighbour_finder(trues(3, 3), 10, 2.0)
+        )
+        find_neighbours!(s, s.neighbour_finder, 0, parallel=false)
         @test s.neighbours == [(2, 1)]
+        if nthreads() > 1
+            find_neighbours!(s, s.neighbour_finder, 0, parallel=true)
+            @test s.neighbours == [(2, 1)]
+        end
     end
 end
 
