@@ -104,6 +104,12 @@ end
             n_steps=n_steps
         )
 
+        nf_tree = TreeNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0)
+        find_neighbours!(s, s.neighbour_finder, 0; parallel=parallel)
+        ref = copy(s.neighbours)
+        find_neighbours!(s, nf_tree, 0; parallel=parallel)
+        @test s.neighbours == ref
+
         @time simulate!(s, parallel=parallel)
 
         final_coords = last(s.loggers["coords"].coords)

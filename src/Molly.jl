@@ -3,8 +3,10 @@ module Molly
 using BioStructures
 using Colors
 using CUDA
+using Distances
 using Distributions
 using KernelDensity
+using NearestNeighbors
 using ProgressMeter
 using Reexport
 using Requires

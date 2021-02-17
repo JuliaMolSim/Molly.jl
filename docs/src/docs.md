@@ -583,6 +583,7 @@ To use your custom thermostat, give it as the `thermostat` argument when creatin
 Neighbour finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
 The available neighbour finders are:
 - [`DistanceNeighbourFinder`](@ref).
+- [`TreeNeighbourFinder`](@ref).
 
 To define your own [`NeighbourFinder`](@ref), first define the `struct`:
 ```julia
