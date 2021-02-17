@@ -4,7 +4,7 @@ export
     NoNeighbourFinder,
     find_neighbours!,
     DistanceNeighbourFinder,
-    DistanceNeighbourFinderTree
+    TreeNeighbourFinder
 
 """
     NoNeighbourFinder()
@@ -89,24 +89,24 @@ end
 
 
 """
-    DistanceNeighbourFinderTree(nb_matrix, n_steps, dist_cutoff)
-    DistanceNeighbourFinderTree(nb_matrix, n_steps)
+    TreeNeighbourFinder(nb_matrix, n_steps, dist_cutoff)
+    TreeNeighbourFinder(nb_matrix, n_steps)
 
 Find close atoms by distance (using a tree search).
 """
-struct DistanceNeighbourFinderTree{T} <: NeighbourFinder
+struct TreeNeighbourFinder{T} <: NeighbourFinder
     nb_matrix::BitArray{2}
     n_steps::Int
     dist_cutoff::T
 end
 
-function DistanceNeighbourFinderTree(nb_matrix::BitArray{2},
+function TreeNeighbourFinder(nb_matrix::BitArray{2},
                                  n_steps::Integer)
-    return DistanceNeighbourFinderTree(nb_matrix, n_steps, 1.2)
+    return TreeNeighbourFinder(nb_matrix, n_steps, 1.2)
 end
 
 function find_neighbours!(s::Simulation,
-                          nf::DistanceNeighbourFinderTree,
+                          nf::TreeNeighbourFinder,
                           step_n::Integer;
                           parallel::Bool=true)
     !iszero(step_n % nf.n_steps) && return
