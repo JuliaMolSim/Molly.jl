@@ -154,7 +154,7 @@ function GlueDensityLogger(n_steps::Integer)
     return GlueDensityLogger(DefaultFloat, n_steps)
 end
 
-function Base.show(io::IO, cl::CoordinateLogger)
+function Base.show(io::IO, cl::GlueDensityLogger)
     print(io, "GlueDensityLogger{", eltype(eltype(cl.glue_densities)), "} with n_steps ",
                 cl.n_steps, ", ", length(cl.glue_densities), " frames recorded for ",
                 length(cl.glue_densities) > 0 ? length(first(cl.glue_densities)) : "?", " atoms")
