@@ -53,6 +53,11 @@ function accelerations(s::Simulation; parallel::Bool=true)
 
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.general_inters)
+            
+            if typeof(inter) <: GlueInteraction
+                update_glue_densities!(inter, s.coords, s)
+            end
+            
             if inter.nl_only
                 neighbours = s.neighbours
                 @threads for ni in 1:length(neighbours)
@@ -73,6 +78,11 @@ function accelerations(s::Simulation; parallel::Bool=true)
         forces = zero(s.coords)
 
         for inter in values(s.general_inters)
+            
+            if typeof(inter) <: GlueInteraction
+                update_glue_densities!(inter, s.coords, s)
+            end
+            
             if inter.nl_only
                 neighbours = s.neighbours
                 for ni in 1:length(neighbours)
@@ -93,16 +103,19 @@ function accelerations(s::Simulation; parallel::Bool=true)
         sparse_forces = force.(inter_list, (s.coords,), (s,))
         ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
         sparse_vec = SparseVector(n_atoms, reduce(vcat, ge1), reduce(vcat, ge2))
-        if typeof(inter_list[1]) <: GlueInteraction
-            forces += Array([SVector{3}(v) for v in sparse_vec])
-        else
-            forces += Array(sparse_vec)
-        end
+#         if typeof(inter_list[1]) <: GlueInteraction
+#             sparse_vec = [SVector{3}(v) for v in sparse_vec]            
+#         end
+#         println("\nsparse_vec \n", sparse_vec)
+        forces += Array(sparse_vec)
     end
 
     for i in 1:n_atoms
         forces[i] /= s.atoms[i].mass
+        s.forces[i] = forces[i]
     end
+    
+#     println("\nforces \n", forces)
 
     return forces
 end
