@@ -87,6 +87,11 @@ function potential_energy(s::Simulation)
     potential = zero(eltype(eltype(s.coords)))
 
     for inter in values(s.general_inters)
+        if typeof(inter) <: GlueInteraction
+            for i in 1:n_atoms
+                potential += potential_energy(inter, s, i)
+            end
+        end
         if inter.nl_only
             neighbours = s.neighbours
             @inbounds for ni in 1:length(neighbours)
