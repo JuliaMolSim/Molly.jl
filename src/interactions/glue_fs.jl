@@ -122,9 +122,8 @@ function update_glue_densities!(
         pij = get_pair_params(el_i,el_j,inter) 
         
         # computing distance
-        r_vec = vector(s.coords[i], s.coords[j], s.box_size) .* inter.f
-        r2 = sum(abs2, r_vec)
-        r = sqrt(r2)
+        dr = vector(s.coords[i], s.coords[j], s.box_size) .* inter.f
+        r = norm(dr)
         
         # updating glue densities
         s.glue_densities[i] += glue(r, pj.β, pj.d)
@@ -134,7 +133,7 @@ function update_glue_densities!(
 end
 
 @inline @inbounds function force!(forces, inter::FinnisSinclair, s::Simulation, i::Integer, j::Integer)
-    fdr = force(inter, s, i, j)
+    fdr = force(inter, s, i, j) .* inter.f
     forces[i] -= fdr
     forces[j] += fdr
     return nothing
@@ -151,20 +150,19 @@ end
     pij = get_pair_params(element_i, element_j, inter)
 
     # distance i -> j
-    r_vec = vector(s.coords[i], s.coords[j], s.box_size) .* inter.f
-    r2 = sum(abs2, r_vec)
-    r = sqrt(r2)
-    dr = r_vec / r
+    dr = vector(s.coords[i], s.coords[j], s.box_size) .* inter.f
+    r = norm(dr)
+    dr = normalize(dr)
 
     # pair contribution
-    f_pair = ∂Upair_∂r(r, pij.c, pij.c₀, pij.c₁, pij.c₂)
+    f_pair = - ∂Upair_∂r(r, pij.c, pij.c₀, pij.c₁, pij.c₂)
 
     # glue contribution
     dudρ_i = ∂Uglue_∂ρ(s.glue_densities[i], pi.A)
     dudρ_j = ∂Uglue_∂ρ(s.glue_densities[j], pj.A)
     dΦdr_i = ∂glue_∂r(r, pi.β, pi.d)
     dΦdr_j = ∂glue_∂r(r, pj.β, pj.d)
-    f_glue = (dudρ_j * dΦdr_i + dudρ_i * dΦdr_j)
+    f_glue = - (dudρ_j * dΦdr_i + dudρ_i * dΦdr_j)
 
     # total force contribution
     f = f_pair + f_glue
@@ -208,9 +206,10 @@ end
 
 @inline @inbounds function potential_energy(inter::FinnisSinclair, s::Simulation, i, j)
     # logger - general inters - computes the pair energy part only for a single atom pair
-    r_vec = vector(s.coords[i], s.coords[j], s.box_size) .* inter.f
-    r2 = sum(abs2, r_vec)
-    r = sqrt(r2)
+    dr = vector(s.coords[i], s.coords[j], s.box_size) .* inter.f
+    r = norm(dr)
+    # r2 = sum(abs2, r_vec)
+    # r = sqrt(r2)
     pij = get_pair_params(s.atoms[i].name, s.atoms[j].name, inter)
     # u = Upair(r, pij.c, pij.c₀, pij.c₁, pij.c₂)
     # println("Upair ", u)
@@ -218,6 +217,7 @@ end
     return Upair(r, pij.c, pij.c₀, pij.c₁, pij.c₂)
 end
 
+#=
 @inline @inbounds function force_old(
         inter::FinnisSinclair, 
         coords, 
@@ -335,3 +335,5 @@ end
     e_glue = sum(es_glue)
     return e_pair + e_glue 
 end
+
+=#
