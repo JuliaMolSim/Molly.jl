@@ -103,10 +103,6 @@ function accelerations(s::Simulation; parallel::Bool=true)
         sparse_forces = force.(inter_list, (s.coords,), (s,))
         ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
         sparse_vec = SparseVector(n_atoms, reduce(vcat, ge1), reduce(vcat, ge2))
-#         if typeof(inter_list[1]) <: GlueInteraction
-#             sparse_vec = [SVector{3}(v) for v in sparse_vec]            
-#         end
-#         println("\nsparse_vec \n", sparse_vec)
         forces += Array(sparse_vec)
     end
 
@@ -115,8 +111,6 @@ function accelerations(s::Simulation; parallel::Bool=true)
         s.forces[i] = forces[i]
     end
     
-#     println("\nforces \n", forces)
-
     return forces
 end
 
