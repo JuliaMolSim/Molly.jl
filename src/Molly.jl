@@ -16,6 +16,7 @@ using Requires
 using Base.Threads
 using LinearAlgebra
 using SparseArrays
+using ForwardDiff
 
 include("types.jl")
 include("cutoffs.jl")
