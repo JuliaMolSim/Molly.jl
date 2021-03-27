@@ -84,7 +84,6 @@ end
 The core component of the Finnis-Sinclair type GlueInteraction. 
 Used to calculate contribution to the glue value of an atom, based on 
 its neighbouring atoms.
-f is a fudge factor to help translate a Å model to a nm model.
 """
 function glue(r, β, d)
     return r > d ? 0 : (r-d)^2 + β*(r-d)^3/d
@@ -128,7 +127,6 @@ end
     ∂Upair_∂r(r, c, c₀, c₁, c₂, f=10.)
 
 Derivative of the pair potential.
-f is a fudge factor to help translate a Å model to a nm model.
 """
 ∂Upair_∂r(r, c, c₀,c₁, c₂) = ForwardDiff.derivative(r -> Upair(r,c,c₀,c₁,c₂), r)
 
