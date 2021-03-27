@@ -18,10 +18,9 @@ struct FinnisSinclair <: GlueInteraction
     nl_only::Bool
     element_pair_map::Dict
     params::DataFrame
+    kb::Real
 end
 
-
-kb = 8.617333262145e-5 # eV/K
 
 """
     get_finnissinclair1984(nl_only)
@@ -68,8 +67,8 @@ function get_finnissinclair1984(nl_only::Bool)
         "Fe" => 2.8665
     )
 
-    
-    fs84 = FinnisSinclair(nl_only, element_pair_map, df)
+    kb = 8.617333262145e-5 # eV/K
+    fs84 = FinnisSinclair(nl_only, element_pair_map, df, kb)
     
     reference_energies = DataFrame(
         element_pair = element_pairings,
@@ -96,7 +95,7 @@ end
 
 Derivative of the glue density function.
 """
-∂glue_∂r(r, β, d) = ForwardDiff.derivative(r -> glue(r,β,d), r)
+∂glue_∂r(r, β, d) = 2*(r-d) + 3*β*(r-d)^2/d
 
 """
     Uglue(ρ, A)
@@ -113,7 +112,8 @@ end
 
 Energy derivative given glue density.
 """
-∂Uglue_∂ρ(ρ,A) = ForwardDiff.derivative(ρ -> Uglue(ρ,A), ρ)
+∂Uglue_∂ρ(ρ,A) = - A / (2 * √ρ)
+
 
 """
     Upair(r, c, c₀, c₁, c₂; f=10.)
