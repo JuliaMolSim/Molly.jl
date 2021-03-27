@@ -138,7 +138,7 @@ end
 
 Derivative of the pair potential.
 """
-∂Upair_∂r(r, c, c₀,c₁, c₂) = ForwardDiff.derivative(r -> Upair(r,c,c₀,c₁,c₂), r)
+∂Upair_∂r(r, c, c₀,c₁, c₂) = (r > c) ? 0 : 2*(r - c) * (c₀ + c₁*r + c₂*r^2) + (r - c)^2 * (c₁ + 2*c₂*r)
 
 """
     update_glue_densities!(inter, coords, s, parallel)
