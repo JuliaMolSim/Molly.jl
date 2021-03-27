@@ -8,16 +8,31 @@ SpecificInteraction.
 """
 abstract type GlueInteraction <: SpecificInteraction end
 
+struct FinnisSinclairPair
+    # container for two element interaction -> c c0 c1 c2
+    c::Real
+    c₀::Real
+    c₁::Real
+    c₂::Real
+end
+
+struct FinnisSinclairSingle
+    # container for single element stuff: glue density, glue energy -> A
+    A::Real
+    β::Real
+    d::Real
+end
+
 """
-    FinnisSinclairInteraction(nl_only,element_pair_map,params)
+    FinnisSinclairInteraction(nl_only,pairs,singles,kb)
 
 The Finnis-Sinclair interaction. This interaction expects units to be of 
 these https://lammps.sandia.gov/doc/units.html units (eV, Å, K, ps and so on).
 """
 struct FinnisSinclair <: GlueInteraction
     nl_only::Bool
-    element_pair_map::Dict
-    params::DataFrame
+    pairs::Dict{String,FinnisSinclairPair}
+    singles::Dict{String,FinnisSinclairSingle}
     kb::Real
 end
 
@@ -30,31 +45,26 @@ Finnis and Sinclair 1984 parameterization: https://doi.org/10.1080/0141861840824
 function get_finnissinclair1984(nl_only::Bool)
     
     elements = ["V", "Nb", "Ta", "Cr", "Mo", "W", "Fe"]
-    element_pairings = [string(el, el) for el in elements]
-    element_pair_map = Dict(pair => i for (i,pair) in enumerate(element_pairings))
     
-    df = DataFrame(
-        element_pair = element_pairings,
-        d = [3.692767, 3.915354, 4.076980, 3.915720, 
-            4.114825, 4.400224, 3.699579],
-        # (Å)
-        A = [2.010637, 3.013789, 2.591061, 1.453418, 
-            1.887117, 1.896373, 1.889846],
-        # (eV)
-        β = [0, 0, 0, 1.8, 0, 0, 1.8],
-        # (1)
-        c = [3.8, 4.2, 4.2, 2.9, 3.25, 3.25, 3.4],
-        # (Å)
-        c₀ = [-0.8816318, -1.5640104, 1.2157373, 29.1429813, 
-            43.4475218, 47.1346499, 1.2110601],
-        # (1)
-        c₁ = [1.4907756, 2.0055779, 0.0271471, -23.3975027, 
-            -31.9332978, -33.7665655, -0.7510840],
-        # (1)
-        c₂ = [-0.3976370, -0.4663764, -0.1217350, 4.7578297, 
-            6.0804249, 6.2541999, 0.1380773],
-        # (1)
-    )
+    d = [3.692767, 3.915354, 4.076980, 3.915720, 
+        4.114825, 4.400224, 3.699579] # (Å)
+    A = [2.010637, 3.013789, 2.591061, 1.453418, 
+        1.887117, 1.896373, 1.889846] # (eV)
+    β = [0, 0, 0, 1.8, 0, 0, 1.8] # (1)
+    c = [3.8, 4.2, 4.2, 2.9, 3.25, 3.25, 3.4] # (Å)
+    c₀ = [-0.8816318, -1.5640104, 1.2157373, 29.1429813, 
+        43.4475218, 47.1346499, 1.2110601] # (1)
+    c₁ = [1.4907756, 2.0055779, 0.0271471, -23.3975027, 
+        -31.9332978, -33.7665655, -0.7510840] # (1)
+    c₂ = [-0.3976370, -0.4663764, -0.1217350, 4.7578297, 
+        6.0804249, 6.2541999, 0.1380773] # (1)
+
+    fs_singles = Dict()
+    fs_pairs = Dict()
+    for (i,el) in enumerate(elements)
+        fs_singles[el] = FinnisSinclairSingle(A[i],β[i],d[i])
+        fs_pairs[string(el,el)] = FinnisSinclairPair(c[i],c₀[i],c₁[i],c₂[i])
+    end 
 
     masses = Dict("V" => 50.9415, "Nb" => 92.9064, "Ta" => 180.9479,
                   "Cr" => 51.996, "Mo" => 95.94, "W" => 183.85,
@@ -68,13 +78,13 @@ function get_finnissinclair1984(nl_only::Bool)
     )
 
     kb = 8.617333262145e-5 # eV/K
-    fs84 = FinnisSinclair(nl_only, element_pair_map, df, kb)
+    fs84 = FinnisSinclair(nl_only, fs_pairs, fs_singles, kb)
     
-    reference_energies = DataFrame(
-        element_pair = element_pairings,
-        u = [5.31, 7.57, 8.1, 4.1, 6.82, 8.9, 4.28],
-        u_vac = [1.92, 2.64, 3.13, 1.97, 2.58, 3.71, 1.77]
-    )
+    u = [5.31, 7.57, 8.1, 4.1, 6.82, 8.9, 4.28] # eV/atom
+    u_vac = [1.92, 2.64, 3.13, 1.97, 2.58, 3.71, 1.77] # eV/atom
+    
+    reference_energies = Dict(el=>Dict("u"=>u[i], "u_vac"=>u_vac[i])
+                              for (i,el) in enumerate(elements))
     return fs84, elements, masses, bcc_lattice_constants, reference_energies 
 end
 
@@ -94,7 +104,7 @@ end
 
 Derivative of the glue density function.
 """
-∂glue_∂r(r, β, d) = 2*(r-d) + 3*β*(r-d)^2/d
+∂glue_∂r(r, β, d) = r > d ? 0 : 2*(r-d) + 3*β*(r-d)^2/d
 
 """
     Uglue(ρ, A)
@@ -131,16 +141,6 @@ Derivative of the pair potential.
 ∂Upair_∂r(r, c, c₀,c₁, c₂) = ForwardDiff.derivative(r -> Upair(r,c,c₀,c₁,c₂), r)
 
 """
-    get_pair_params(element1, element2, inter)
-
-Convenience function to generate element pair and return relevant model parameters. 
-"""
-function get_pair_params(element1::String, element2::String, inter::FinnisSinclair)
-    pair = string(sort([element1, element2])...)
-    return inter.params[inter.element_pair_map[pair],:]
-end
-
-"""
     update_glue_densities!(inter, coords, s, parallel)
 
 Convenience function to update the densities before the forces are computed in serial/parallel.
@@ -164,9 +164,9 @@ function update_glue_densities!(
         # collecting parameters
         el_i = s.atoms[i].name
         el_j = s.atoms[j].name
-        pi = get_pair_params(el_i,el_i,inter) 
-        pj = get_pair_params(el_j,el_j,inter) 
-        pij = get_pair_params(el_i,el_j,inter) 
+        pi = inter.singles[el_i] 
+        pj = inter.singles[el_j] 
+        pij = inter.pairs[string(el_i,el_j)] 
         
         # computing distance
         dr = vector(s.coords[i], s.coords[j], s.box_size)
@@ -189,12 +189,12 @@ end
 @inline @inbounds function force(inter::FinnisSinclair, s::Simulation, i::Integer, j::Integer)
     
     # parameters
-    element_i = s.atoms[i].name
-    element_j = s.atoms[j].name
-    element_pair = string(sort([element_i, element_j])...)
-    pi = get_pair_params(element_i, element_i, inter) 
-    pj = get_pair_params(element_j, element_j, inter)
-    pij = get_pair_params(element_i, element_j, inter)
+    el_i = s.atoms[i].name
+    el_j = s.atoms[j].name
+    el_ij = string(el_i,el_j)
+    pi = inter.singles[el_i] 
+    pj = inter.singles[el_j] 
+    pij = inter.pairs[el_ij]
 
     # distance i -> j
     dr = vector(s.coords[i], s.coords[j], s.box_size)
@@ -225,15 +225,14 @@ end
     if no_glue
         update_glue_densities!(inter, s.coords, s, parallel=false)
     end
-        
-    A = get_pair_params(s.atoms[i].name, s.atoms[i].name, inter).A
-    return Uglue(s.glue_densities[i], A)
+    
+    return Uglue(s.glue_densities[i], inter.singles[s.atoms[i].name].A)
 end
 
 @inline @inbounds function potential_energy(inter::FinnisSinclair, s::Simulation, i, j)
     # logger - general inters - computes the pair energy part only for a single atom pair
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r = norm(dr)
-    pij = get_pair_params(s.atoms[i].name, s.atoms[j].name, inter)
+    pij = inter.pairs[string(s.atoms[i].name, s.atoms[j].name)]
     return Upair(r, pij.c, pij.c₀, pij.c₁, pij.c₂)
 end
