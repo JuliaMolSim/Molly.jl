@@ -85,7 +85,7 @@ end
 
 function ForceLogger(T, n_steps::Integer; dims::Integer=3)
     return ForceLogger(n_steps,
-                            Array{SArray{Tuple{dims}, T, 1, dims}, 1}[])
+                       Vector{SVector{dims}}[])
 end
 
 function ForceLogger(n_steps::Integer; dims::Integer=3)
