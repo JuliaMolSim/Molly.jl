@@ -1,7 +1,6 @@
 using Molly
 using Test
 using Crystal
-using DataFrames
 
 fs_inter, elements, masses, bcc_lattice_constants, reference_energies = Molly.get_finnissinclair1984(true)
 
