@@ -7,7 +7,7 @@ export
     AbstractCutoff,
     Simulator,
     Thermostat,
-    NeighbourFinder,
+    NeighborFinder,
     Logger,
     Atom,
     AtomMin,
@@ -50,9 +50,9 @@ abstract type Thermostat end
 
 """
 A way to find near atoms to save on simulation time.
-Custom neighbour finders should sub-type this type.
+Custom neighbor finders should sub-type this type.
 """
-abstract type NeighbourFinder end
+abstract type NeighborFinder end
 
 """
 A way to record a property, e.g. the temperature, throughout a simulation.
@@ -173,7 +173,7 @@ default values.
     simulator they represent the previous step coordinates for the first step.
 - `temperature::T=0.0`: the temperature of the simulation.
 - `box_size::T`: the size of the cube in which the simulation takes place.
-- `neighbour_finder::NeighbourFinder=NoNeighbourFinder()`: the neighbour finder
+- `neighbor_finder::NeighborFinder=NoNeighborFinder()`: the neighbor finder
     used to find close atoms and save on computation.
 - `thermostat::Thermostat=NoThermostat()`: the thermostat which applies during
     the simulation.
@@ -193,8 +193,8 @@ struct Simulation{D, T, A, C, GI, SI}
     velocities::C
     temperature::T
     box_size::T
-    neighbours::Vector{Tuple{Int, Int}}
-    neighbour_finder::NeighbourFinder
+    neighbors::Vector{Tuple{Int, Int}}
+    neighbor_finder::NeighborFinder
     thermostat::Thermostat
     loggers::Dict{String, <:Logger}
     timestep::T
@@ -213,8 +213,8 @@ function Simulation(;
                     velocities=zero(coords),
                     temperature=0.0,
                     box_size,
-                    neighbours=Tuple{Int, Int}[],
-                    neighbour_finder=NoNeighbourFinder(),
+                    neighbors=Tuple{Int, Int}[],
+                    neighbor_finder=NoNeighborFinder(),
                     thermostat=NoThermostat(),
                     loggers=Dict{String, Logger}(),
                     timestep=0.0,
@@ -228,7 +228,7 @@ function Simulation(;
     SI = typeof(specific_inter_lists)
     return Simulation{gpu_diff_safe, T, A, C, GI, SI}(
                 simulator, atoms, specific_inter_lists, general_inters, coords,
-                velocities, temperature, box_size, neighbours, neighbour_finder,
+                velocities, temperature, box_size, neighbors, neighbor_finder,
                 thermostat, loggers, timestep, n_steps, n_steps_made)
 end
 

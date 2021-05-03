@@ -1,58 +1,58 @@
-# Neighbour finders
+# Neighbor finders
 
 export
-    NoNeighbourFinder,
-    find_neighbours!,
-    DistanceNeighbourFinder,
-    TreeNeighbourFinder
+    NoNeighborFinder,
+    find_neighbors!,
+    DistanceNeighborFinder,
+    TreeNeighborFinder
 
 """
-    NoNeighbourFinder()
+    NoNeighborFinder()
 
-Placeholder neighbour finder that returns no neighbours.
-When using this neighbour finder, ensure that `nl_only` for the interactions is
+Placeholder neighbor finder that returns no neighbors.
+When using this neighbor finder, ensure that `nl_only` for the interactions is
 set to `false`.
 """
-struct NoNeighbourFinder <: NeighbourFinder end
+struct NoNeighborFinder <: NeighborFinder end
 
 """
-    find_neighbours!(simulation, neighbour_finder, step_n; parallel=true)
+    find_neighbors!(simulation, neighbor_finder, step_n; parallel=true)
 
 Obtain a list of close atoms in a system.
-Custom neighbour finders should implement this function.
+Custom neighbor finders should implement this function.
 """
-function find_neighbours!(s::Simulation,
-                            ::NoNeighbourFinder,
+function find_neighbors!(s::Simulation,
+                            ::NoNeighborFinder,
                             ::Integer;
                             kwargs...)
     return
 end
 
 """
-    DistanceNeighbourFinder(nb_matrix, n_steps, dist_cutoff)
-    DistanceNeighbourFinder(nb_matrix, n_steps)
+    DistanceNeighborFinder(nb_matrix, n_steps, dist_cutoff)
+    DistanceNeighborFinder(nb_matrix, n_steps)
 
 Find close atoms by distance.
 """
-struct DistanceNeighbourFinder{T} <: NeighbourFinder
+struct DistanceNeighborFinder{T} <: NeighborFinder
     nb_matrix::BitArray{2}
     n_steps::Int
     dist_cutoff::T
 end
 
-function DistanceNeighbourFinder(nb_matrix::BitArray{2},
+function DistanceNeighborFinder(nb_matrix::BitArray{2},
                                  n_steps::Integer)
-    return DistanceNeighbourFinder(nb_matrix, n_steps, 1.2)
+    return DistanceNeighborFinder(nb_matrix, n_steps, 1.2)
 end
 
-function find_neighbours!(s::Simulation,
-                            nf::DistanceNeighbourFinder,
+function find_neighbors!(s::Simulation,
+                            nf::DistanceNeighborFinder,
                             step_n::Integer;
                             parallel::Bool=true)
     !iszero(step_n % nf.n_steps) && return
 
-    neighbours = s.neighbours
-    empty!(neighbours)
+    neighbors = s.neighbors
+    empty!(neighbors)
     sqdist_cutoff = nf.dist_cutoff ^ 2
 
     if parallel && nthreads() > 1
@@ -71,7 +71,7 @@ function find_neighbours!(s::Simulation,
         end
 
         for nl in nl_threads
-            append!(neighbours, nl)
+            append!(neighbors, nl)
         end
     else
         for i in 1:length(s.coords)
@@ -80,7 +80,7 @@ function find_neighbours!(s::Simulation,
             for j in 1:(i - 1)
                 r2 = sum(abs2, vector(ci, s.coords[j], s.box_size))
                 if r2 <= sqdist_cutoff && nbi[j]
-                    push!(neighbours, (i, j))
+                    push!(neighbors, (i, j))
                 end
             end
         end
@@ -89,30 +89,30 @@ end
 
 
 """
-    TreeNeighbourFinder(nb_matrix, n_steps, dist_cutoff)
-    TreeNeighbourFinder(nb_matrix, n_steps)
+    TreeNeighborFinder(nb_matrix, n_steps, dist_cutoff)
+    TreeNeighborFinder(nb_matrix, n_steps)
 
 Find close atoms by distance (using a tree search).
 """
-struct TreeNeighbourFinder{T} <: NeighbourFinder
+struct TreeNeighborFinder{T} <: NeighborFinder
     nb_matrix::BitArray{2}
     n_steps::Int
     dist_cutoff::T
 end
 
-function TreeNeighbourFinder(nb_matrix::BitArray{2},
+function TreeNeighborFinder(nb_matrix::BitArray{2},
                                  n_steps::Integer)
-    return TreeNeighbourFinder(nb_matrix, n_steps, 1.2)
+    return TreeNeighborFinder(nb_matrix, n_steps, 1.2)
 end
 
-function find_neighbours!(s::Simulation,
-                          nf::TreeNeighbourFinder,
+function find_neighbors!(s::Simulation,
+                          nf::TreeNeighborFinder,
                           step_n::Integer;
                           parallel::Bool=true)
     !iszero(step_n % nf.n_steps) && return
 
-    neighbours = s.neighbours
-    empty!(neighbours)
+    neighbors = s.neighbors
+    empty!(neighbors)
 
     bv = SVector{3}(s.box_size, s.box_size, s.box_size)
     btree = BallTree(s.coords, PeriodicEuclidean(bv))
@@ -133,7 +133,7 @@ function find_neighbours!(s::Simulation,
         end
 
         for nl in nl_threads
-            append!(neighbours, nl)
+            append!(neighbors, nl)
         end
     else
         for i in 1:length(s.coords)
@@ -142,7 +142,7 @@ function find_neighbours!(s::Simulation,
             idxs = inrange(btree, ci, nf.dist_cutoff, true)
             for j in idxs
                 if nbi[j] && i > j
-                    push!(neighbours, (i, j))
+                    push!(neighbors, (i, j))
                 end
             end
         end

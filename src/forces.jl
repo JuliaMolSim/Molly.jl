@@ -53,9 +53,9 @@ function accelerations(s::Simulation; parallel::Bool=true)
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.general_inters)
             if inter.nl_only
-                neighbours = s.neighbours
-                @threads for ni in 1:length(neighbours)
-                    i, j = neighbours[ni]
+                neighbors = s.neighbors
+                @threads for ni in 1:length(neighbors)
+                    i, j = neighbors[ni]
                     force!(forces_threads[threadid()], inter, s, i, j)
                 end
             else
@@ -73,9 +73,9 @@ function accelerations(s::Simulation; parallel::Bool=true)
 
         for inter in values(s.general_inters)
             if inter.nl_only
-                neighbours = s.neighbours
-                for ni in 1:length(neighbours)
-                    i, j = neighbours[ni]
+                neighbors = s.neighbors
+                for ni in 1:length(neighbors)
+                    i, j = neighbors[ni]
                     force!(forces, inter, s, i, j)
                 end
             else
@@ -107,7 +107,7 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
     forces = zero(coords)
 
     for inter in values(s.general_inters)
-        # Currently the neighbour list is not used for this implementation
+        # Currently the neighbor list is not used for this implementation
         forces -= reshape(sum(force.((inter,), coords_is, coords_js, atoms_is, atoms_js,
                                         s.box_size, self_interactions), dims=2), n_atoms)
     end

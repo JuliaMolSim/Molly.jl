@@ -27,7 +27,7 @@ function simulate!(s::Simulation{false},
     # See https://www.saylor.org/site/wp-content/uploads/2011/06/MA221-6.1.pdf for
     #   integration algorithm - used shorter second version
     n_atoms = length(s.coords)
-    find_neighbours!(s, s.neighbour_finder, 0, parallel=parallel)
+    find_neighbors!(s, s.neighbor_finder, 0, parallel=parallel)
     accels_t = accelerations(s, parallel=parallel)
     accels_t_dt = zero(s.coords)
 
@@ -50,7 +50,7 @@ function simulate!(s::Simulation{false},
         end
 
         apply_thermostat!(s.velocities, s, s.thermostat)
-        find_neighbours!(s, s.neighbour_finder, step_n, parallel=parallel)
+        find_neighbors!(s, s.neighbor_finder, step_n, parallel=parallel)
 
         accels_t = accels_t_dt
         s.n_steps_made[1] += 1
@@ -69,7 +69,7 @@ function simulate!(s::Simulation{true},
     coords_js = view(s.coords, js)
     atoms_is = view(s.atoms, is)
     atoms_js = view(s.atoms, js)
-    find_neighbours!(s, s.neighbour_finder, 0)
+    find_neighbors!(s, s.neighbor_finder, 0)
     if isa(s.coords, CuArray)
         self_interactions = CuArray(Diagonal(ones(typeof(s.timestep), n_atoms)))
     else
@@ -90,7 +90,7 @@ function simulate!(s::Simulation{true},
         s.velocities .+= (accels_t .+ accels_t_dt) .* s.timestep / 2
 
         s.velocities .= apply_thermostat!(s.velocities, s, s.thermostat)
-        find_neighbours!(s, s.neighbour_finder, 0)
+        find_neighbors!(s, s.neighbor_finder, 0)
 
         accels_t = accels_t_dt
         s.n_steps_made[1] += 1
@@ -112,7 +112,7 @@ function simulate!(s::Simulation,
                     n_steps::Integer;
                     parallel::Bool=true)
     n_atoms = length(s.coords)
-    find_neighbours!(s, s.neighbour_finder, 0, parallel=parallel)
+    find_neighbors!(s, s.neighbor_finder, 0, parallel=parallel)
     coords_last = s.velocities
 
     @showprogress for step_n in 1:n_steps
@@ -131,7 +131,7 @@ function simulate!(s::Simulation,
         coords_last = coords_copy
 
         apply_thermostat!(coords_last, s, s.thermostat)
-        find_neighbours!(s, s.neighbour_finder, step_n, parallel=parallel)
+        find_neighbors!(s, s.neighbor_finder, step_n, parallel=parallel)
 
         s.n_steps_made[1] += 1
     end

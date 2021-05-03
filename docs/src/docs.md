@@ -69,7 +69,7 @@ visualize(s.loggers["coords"], box_size, "sim_lj.gif")
 To run simulations on the GPU you will need to have a CUDA-compatible device and to have [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) installed.
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
 Currently, running on the GPU requires using the [`AtomMin`](@ref) type, which is `isbits`, or another `isbits` type for the atoms.
-Neighbour lists and thermostats are not currently implemented for the GPU.
+Neighbor lists and thermostats are not currently implemented for the GPU.
 This example also shows setting up a simulation to run with `Float32`, which is a good idea for GPUs.
 ```julia
 using Molly
@@ -120,11 +120,11 @@ bonds = [HarmonicBond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_
 
 specific_inter_lists = (bonds,)
 ```
-This time, we are also going to use a neighbour list to speed up the Lennard Jones calculation.
-We can use the built-in distance neighbour finder.
-The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff to be classed as a neighbour.
+This time, we are also going to use a neighbor list to speed up the Lennard Jones calculation.
+We can use the built-in distance neighbor finder.
+The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff to be classed as a neighbor.
 ```julia
-neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.2)
+neighbor_finder = DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 1.2)
 ```
 Now we can simulate as before.
 ```julia
@@ -132,12 +132,12 @@ s = Simulation(
     simulator=VelocityVerlet(),
     atoms=atoms,
     specific_inter_lists=specific_inter_lists,
-    general_inters=(LennardJones(true),), # true means we are using the neighbour list for this interaction
+    general_inters=(LennardJones(true),), # true means we are using the neighbor list for this interaction
     coords=coords,
     velocities=velocities,
     temperature=temp,
     box_size=box_size,
-    neighbour_finder=neighbour_finder,
+    neighbor_finder=neighbor_finder,
     thermostat=AndersenThermostat(1.0),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "coords" => CoordinateLogger(10)),
@@ -210,7 +210,7 @@ s = Simulation(
     velocities=[velocity(a.mass, temp) for a in atoms],
     temperature=temp,
     box_size=box_size,
-    neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
+    neighbor_finder=DistanceNeighborFinder(nb_matrix, 10),
     thermostat=AndersenThermostat(1.0),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),
@@ -311,7 +311,7 @@ s = Simulation(
     velocities=velocities,
     temperature=temp,
     box_size=box_size,
-    neighbour_finder=DistanceNeighbourFinder(trues(n_people, n_people), 10, 2.0),
+    neighbor_finder=DistanceNeighborFinder(trues(n_people, n_people), 10, 2.0),
     thermostat=AndersenThermostat(5.0),
     loggers=Dict("coords" => CoordinateLogger(10, dims=2),
                     "SIR" => SIRLogger(10, [])),
@@ -358,7 +358,7 @@ struct MyGeneralInter <: GeneralInteraction
     # Any other properties, e.g. constants for the interaction or cutoff parameters
 end
 ```
-The `nl_only` property is required and determines whether the neighbour list is used to omit distant atoms (`true`) or whether all atom pairs are always considered (`false`).
+The `nl_only` property is required and determines whether the neighbor list is used to omit distant atoms (`true`) or whether all atom pairs are always considered (`false`).
 Next, you need to define the [`force`](@ref) function acting between a pair of atoms.
 This has a set series of arguments.
 For example:
@@ -514,8 +514,8 @@ function Molly.simulate!(s::Simulation,
                             simulator::MySimulator,
                             n_steps::Integer;
                             parallel::Bool=true)
-    # Find neighbours like this
-    neighbours = find_neighbours(s, nothing, s.neighbour_finder, 0,
+    # Find neighbors like this
+    neighbors = find_neighbors(s, nothing, s.neighbor_finder, 0,
                                     parallel=parallel)
 
     # Show a progress bar like this, if you have imported ProgressMeter
@@ -526,7 +526,7 @@ function Molly.simulate!(s::Simulation,
         end
 
         # Calculate accelerations like this
-        accels_t = accelerations(s, neighbours, parallel=parallel)
+        accels_t = accelerations(s, neighbors, parallel=parallel)
 
         # Ensure coordinates stay within the simulation box like this
         for i in 1:length(s.coords)
@@ -536,8 +536,8 @@ function Molly.simulate!(s::Simulation,
         # Apply the thermostat like this
         apply_thermostat!(s, s.thermostat)
 
-        # Find new neighbours like this
-        neighbours = find_neighbours(s, neighbours, s.neighbour_finder, step_n,
+        # Find new neighbors like this
+        neighbors = find_neighbors(s, neighbors, s.neighbor_finder, step_n,
                                         parallel=parallel)
 
         # Increment the step counter like this
@@ -550,7 +550,7 @@ To use your custom simulator, give it as the `simulator` argument when creating 
 
 Under the hood there are two implementations of common simulators: an in-place version geared towards CPUs, and an out-of-place version geared towards GPUs and differentiable simulation.
 You can define different versions of a simulator for in-place and out-of-place simulations by dispatching on `Simulation{false}` or `Simulation{true}` respectively.
-This also applies to thermostats and neighbour lists.
+This also applies to thermostats and neighbor lists.
 You do not have to define two versions though: you may only intend to use the simulation one way, or the out-of-place version may be performant in all cases.
 The above example is more similar to the in-place version; see the source code for an example of the out-of-place version.
 
@@ -578,39 +578,39 @@ end
 The functions [`velocity`](@ref), [`maxwellboltzmann`](@ref) and [`temperature`](@ref) may be useful here.
 To use your custom thermostat, give it as the `thermostat` argument when creating the [`Simulation`](@ref).
 
-## Neighbour finders
+## Neighbor finders
 
-Neighbour finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
-The available neighbour finders are:
-- [`DistanceNeighbourFinder`](@ref).
-- [`TreeNeighbourFinder`](@ref).
+Neighbor finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
+The available neighbor finders are:
+- [`DistanceNeighborFinder`](@ref).
+- [`TreeNeighborFinder`](@ref).
 
-To define your own [`NeighbourFinder`](@ref), first define the `struct`:
+To define your own [`NeighborFinder`](@ref), first define the `struct`:
 ```julia
-struct MyNeighbourFinder <: NeighbourFinder
+struct MyNeighborFinder <: NeighborFinder
     nb_matrix::BitArray{2}
     n_steps::Int
     # Any other properties, e.g. a distance cutoff
 end
 ```
-Examples of two useful properties are given here: a matrix indicating atom pairs eligible for non-bonded interactions, and a value determining how many timesteps occur between each evaluation of the neighbour finder.
-Then, define the neighbour finding function that is called every step by the simulator:
+Examples of two useful properties are given here: a matrix indicating atom pairs eligible for non-bonded interactions, and a value determining how many timesteps occur between each evaluation of the neighbor finder.
+Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
-function find_neighbours(s::Simulation,
-                            current_neighbours,
-                            nf::MyNeighbourFinder,
+function find_neighbors(s::Simulation,
+                            current_neighbors,
+                            nf::MyNeighborFinder,
                             step_n::Integer;
                             parallel::Bool=true)
     if step_n % nf.n_steps == 0
-        neighbours = Tuple{Int, Int}[]
-        # Add to neighbours
-        return neighbours
+        neighbors = Tuple{Int, Int}[]
+        # Add to neighbors
+        return neighbors
     else
-        return current_neighbours
+        return current_neighbors
     end
 end
 ```
-To use your custom neighbour finder, give it as the `neighbour_finder` argument when creating the [`Simulation`](@ref).
+To use your custom neighbor finder, give it as the `neighbor_finder` argument when creating the [`Simulation`](@ref).
 
 ## Loggers
 
