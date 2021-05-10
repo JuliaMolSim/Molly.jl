@@ -1,9 +1,9 @@
 [deps]
-Crystal = "3c6eccdf-2a89-4c24-a1d4-ff210daa8476"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 Molly = "aa0f7f06-fcc0-5ec4-a7f3-a573f33f9c4c"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+SingleCrystal = "3c6eccdf-2a89-4c24-a1d4-ff210daa8476"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [compat]
