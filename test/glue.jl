@@ -1,6 +1,6 @@
 using Molly
 using Test
-using Crystal
+using SingleCrystal
 
 function forces_are_zero(forces; dims=3)
     return all([isapprox(f, zero(rand(3)), atol=1e-4) for f in forces])
@@ -23,23 +23,23 @@ function vacancy_formation_energy_as_expected(s, s_vac, ref)
     return isapprox(u_vac_form, ref["u_vac"], atol=7e-2)
 end
 
+make_atom(name,mass) = Atom(name=name,mass=mass)
+
 function run_bcc(element::String, fs_inter, a::Real; T::Real=.01, 
         nx::Integer=3, ny::Integer=3, nz::Integer=3, vac::Bool=false)
 
     masses = Dict("V" => 50.9415, "Nb" => 92.9064, "Ta" => 180.9479,
         "Cr" => 51.996, "Mo" => 95.94, "W" => 183.85,
         "Fe" => 55.847)
-
-    elements = [element for _ in 1:2]
-    el2atom_map = Dict(element => Atom(name=element, mass=masses[element]))
-    unitcell = Crystal.make_bcc_unitcell(elements, a, el2atom_map)
-    supercell = Crystal.make_supercell(unitcell, nx=nx, ny=ny, nz=nz)
+    
+    unitcell = SingleCrystal.make_bcc_unitcell(element, a, make_atom)
+    supercell = SingleCrystal.make_supercell(unitcell, nx=nx, ny=ny, nz=nz)
     
     if vac
         # introducing a vacancy
-        supercell = Crystal.add_vacancies(supercell, ixs=[1])
+        supercell = SingleCrystal.add_vacancies(supercell, ixs=[1])
     end
-    n_atoms = length(supercell.coords)
+    n_atoms = length(supercell.positions)
     
     velocities = [velocity(atom.mass, T, dims=3) for atom in supercell.atoms]
     nb_matrix = trues(n_atoms,n_atoms)
@@ -57,7 +57,7 @@ function run_bcc(element::String, fs_inter, a::Real; T::Real=.01,
         simulator=VelocityVerlet(), 
         atoms=supercell.atoms,  
         general_inters=(fs_inter,),
-        coords=[SVector{3}(v) for v in supercell.coords],  
+        coords=[SVector{3}(v) for v in supercell.positions],  
         velocities=velocities,
         temperature=T, 
         box_size=supercell.edge_lengths[1], 
@@ -86,7 +86,7 @@ end
             @testset "reasonable glue" begin
                 @test glue_remains_reasonable(s.loggers["glue"].glue_densities[1],
                     s.loggers["glue"].glue_densities[end])
-            end
+         end
             @testset "checking groundstate" begin
                 @test groundstate_energy_as_expected(s, reference_energies[element])
             end
