@@ -89,7 +89,7 @@ function get_finnissinclair1984(nl_only::Bool)
 end
 
 """
-    glue(r,β,d; f=10.)
+    glue(r,β,d)
 
 The core component of the Finnis-Sinclair type GlueInteraction. 
 Used to calculate contribution to the glue value of an atom, based on 
@@ -100,7 +100,7 @@ function glue(r, β, d)
 end
 
 """
-    ∂glue_∂r(r, β, d; f=10.)
+    ∂glue_∂r(r, β, d)
 
 Derivative of the glue density function.
 """
@@ -125,16 +125,16 @@ Energy derivative given glue density.
 
 
 """
-    Upair(r, c, c₀, c₁, c₂; f=10.)
+    Upair(r, c, c₀, c₁, c₂)
 
-Energy contribution directly from atom pair distances. f is a fudge factor to help translate a Å model to a nm model. 
+Energy contribution directly from atom pair distances.  
 """
 function Upair(r, c, c₀, c₁, c₂) 
     return (r > c) ? 0 : (r - c)^2 * (c₀ + c₁*r + c₂*r^2)
 end
 
 """
-    ∂Upair_∂r(r, c, c₀, c₁, c₂, f=10.)
+    ∂Upair_∂r(r, c, c₀, c₁, c₂)
 
 Derivative of the pair potential.
 """

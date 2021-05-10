@@ -110,7 +110,6 @@ function accelerations(s::Simulation; parallel::Bool=true)
         forces[i] /= s.atoms[i].mass
         s.forces[i] = forces[i]
     end
-    
     return forces
 end
 
