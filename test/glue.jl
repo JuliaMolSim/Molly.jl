@@ -51,7 +51,7 @@ function run_bcc(element::String, fs_inter, a::Real; T::Real=.01,
         "energy" => EnergyLogger(1)
     )
 
-    nf = DistanceNeighbourFinder(nb_matrix, 1, dist_cutoff)
+    nf = DistanceNeighborFinder(nb_matrix, 1, dist_cutoff)
     
     s = Simulation(
         simulator=VelocityVerlet(), 
@@ -63,7 +63,7 @@ function run_bcc(element::String, fs_inter, a::Real; T::Real=.01,
         box_size=supercell.edge_lengths[1], 
         timestep=.002,
         n_steps=100,
-        neighbour_finder=nf,
+        neighbor_finder=nf,
         loggers=loggers,
     )
     simulate!(s)
