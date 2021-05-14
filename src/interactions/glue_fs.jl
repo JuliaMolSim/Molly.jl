@@ -164,7 +164,7 @@ function update_glue_densities!(
     end
     
     # updating glue densities
-    for (i,j) in s.neighbours
+    for (i,j) in s.neighbors
 
         # collecting parameters
         el_i = s.atoms[i].name
