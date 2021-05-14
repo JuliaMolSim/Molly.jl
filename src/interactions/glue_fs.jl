@@ -8,20 +8,24 @@ SpecificInteraction.
 """
 abstract type GlueInteraction <: SpecificInteraction end
 
-struct FinnisSinclairPair
+struct FinnisSinclairPair{T<:Real}
     # container for two element interaction -> c c0 c1 c2
-    c::Real
-    c₀::Real
-    c₁::Real
-    c₂::Real
+    c::T
+    c₀::T
+    c₁::T
+    c₂::T
 end
 
-struct FinnisSinclairSingle
+FinnisSinclairPair(c,c₀,c₁,c₂) = FinnisSinclairPair{typeof(c₀)}(c,c₀,c₁,c₂)
+
+struct FinnisSinclairSingle{T<:Real}
     # container for single element stuff: glue density, glue energy -> A
-    A::Real
-    β::Real
-    d::Real
+    A::T
+    β::T
+    d::T
 end
+
+FinnisSinclairSingle(A,β,d) = FinnisSinclairPair{typeof(A)}(A,β,d)
 
 """
     FinnisSinclairInteraction(nl_only,pairs,singles,kb)
@@ -29,13 +33,14 @@ end
 The Finnis-Sinclair interaction. This interaction expects units to be of 
 these https://lammps.sandia.gov/doc/units.html units (eV, Å, K, ps and so on).
 """
-struct FinnisSinclair <: GlueInteraction
+struct FinnisSinclair{T<:Real} <: GlueInteraction
     nl_only::Bool
-    pairs::Dict{String,FinnisSinclairPair}
-    singles::Dict{String,FinnisSinclairSingle}
-    kb::Real
+    pairs::Dict{String,FinnisSinclairPair{T}}
+    singles::Dict{String,FinnisSinclairSingle{T}}
+    kb::T
 end
 
+FinnisSinclair(nl_only, pairs, singles, kb) = FinnisSinclair{typeof(kb)}(nl_only, pairs, singles, kb)
 
 """
     get_finnissinclair1984(nl_only)
