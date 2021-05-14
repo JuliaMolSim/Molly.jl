@@ -24,7 +24,7 @@ include("spatial.jl")
 include("forces.jl")
 include("simulators.jl")
 include("thermostats.jl")
-include("neighbours.jl")
+include("neighbors.jl")
 include("loggers.jl")
 include("analysis.jl")
 

@@ -39,20 +39,20 @@ end
     @test adjust_bounds(12.0, 10.0) == 2.0
     @test adjust_bounds(-2.0, 10.0) == 8.0
 
-    for neighbour_finder in (DistanceNeighbourFinder, TreeNeighbourFinder)
+    for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder)
         s = Simulation(
             simulator=VelocityVerlet(),
             atoms=[Atom(), Atom(), Atom()],
             coords=[SVector(1.0, 1.0, 1.0), SVector(2.0, 2.0, 2.0),
                     SVector(5.0, 5.0, 5.0)],
             box_size=10.0,
-            neighbour_finder=neighbour_finder(trues(3, 3), 10, 2.0)
+            neighbor_finder=neighbor_finder(trues(3, 3), 10, 2.0)
         )
-        find_neighbours!(s, s.neighbour_finder, 0, parallel=false)
-        @test s.neighbours == [(2, 1)]
+        find_neighbors!(s, s.neighbor_finder, 0, parallel=false)
+        @test s.neighbors == [(2, 1)]
         if nthreads() > 1
-            find_neighbours!(s, s.neighbour_finder, 0, parallel=true)
-            @test s.neighbours == [(2, 1)]
+            find_neighbors!(s, s.neighbor_finder, 0, parallel=true)
+            @test s.neighbors == [(2, 1)]
         end
     end
 end
@@ -74,7 +74,7 @@ box_size = 2.0
         velocities=[velocity(10.0, temp, dims=2) .* 0.01 for i in 1:n_atoms],
         temperature=temp,
         box_size=box_size,
-        neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
+        neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0),
         thermostat=AndersenThermostat(10.0),
         loggers=Dict("temp" => TemperatureLogger(100),
                      "coords" => CoordinateLogger(100, dims=2)),
@@ -101,7 +101,7 @@ end
             velocities=[velocity(10.0, temp) .* 0.01 for i in 1:n_atoms],
             temperature=temp,
             box_size=box_size,
-            neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
+            neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0),
             thermostat=AndersenThermostat(10.0),
             loggers=Dict("temp" => TemperatureLogger(100),
                          "coords" => CoordinateLogger(100),
@@ -110,11 +110,11 @@ end
             n_steps=n_steps
         )
 
-        nf_tree = TreeNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0)
-        find_neighbours!(s, s.neighbour_finder, 0; parallel=parallel)
-        ref = copy(s.neighbours)
-        find_neighbours!(s, nf_tree, 0; parallel=parallel)
-        @test s.neighbours == ref
+        nf_tree = TreeNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0)
+        find_neighbors!(s, s.neighbor_finder, 0; parallel=parallel)
+        ref = copy(s.neighbors)
+        find_neighbors!(s, nf_tree, 0; parallel=parallel)
+        @test s.neighbors == ref
 
         @time simulate!(s, parallel=parallel)
 
@@ -140,7 +140,7 @@ end
         velocities=[c .+ 0.01 .* rand(SVector{3}) for c in coords],
         temperature=temp,
         box_size=box_size,
-        neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
+        neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0),
         thermostat=AndersenThermostat(10.0),
         loggers=Dict("temp" => TemperatureLogger(100),
                      "coords" => CoordinateLogger(100)),
@@ -169,7 +169,7 @@ end
         velocities=[velocity(10.0, temp) .* 0.01 for i in 1:n_atoms],
         temperature=temp,
         box_size=box_size,
-        neighbour_finder=DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 2.0),
+        neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0),
         thermostat=AndersenThermostat(10.0),
         loggers=Dict("temp" => TemperatureLogger(10),
                         "coords" => CoordinateLogger(10)),
@@ -205,7 +205,7 @@ end
         velocities=[velocity(a.mass, temp) .* 0.01 for a in atoms],
         temperature=temp,
         box_size=box_size,
-        neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
+        neighbor_finder=DistanceNeighborFinder(nb_matrix, 10),
         thermostat=AndersenThermostat(10.0),
         loggers=Dict("temp" => TemperatureLogger(10),
                         "coords" => CoordinateLogger(10),
@@ -234,7 +234,7 @@ end
         velocities=[velocity(Float32, a.mass, temp) .* 0.01f0 for a in atoms],
         temperature=Float32(temp),
         box_size=box_size,
-        neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10, 1.2f0),
+        neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.2f0),
         thermostat=AndersenThermostat(10.0f0),
         loggers=Dict("temp" => TemperatureLogger(Float32, 10),
                         "coords" => CoordinateLogger(Float32, 10),
@@ -255,9 +255,9 @@ end
 
     @testset "$gi" for gi in general_inter_types
         if gi.nl_only
-            neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, 1.5)
+            neighbor_finder = DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 1.5)
         else
-            neighbour_finder = NoNeighbourFinder()
+            neighbor_finder = NoNeighborFinder()
         end
 
         s = Simulation(
@@ -268,7 +268,7 @@ end
             velocities=[velocity(10.0, temp) .* 0.01 for i in 1:n_atoms],
             temperature=temp,
             box_size=box_size,
-            neighbour_finder=neighbour_finder,
+            neighbor_finder=neighbor_finder,
             thermostat=AndersenThermostat(10.0),
             loggers=Dict("temp" => TemperatureLogger(100),
                          "coords" => CoordinateLogger(100),
@@ -349,10 +349,10 @@ end
         bonds = [HarmonicBond((i * 2) - 1, i * 2, f32 ? 0.2f0 : 0.2, f32 ? 10_000.0f0 : 10_000.0) for i in 1:(n_atoms ÷ 2)]
         specific_inter_lists = (bonds,)
 
-        neighbour_finder = NoNeighbourFinder()
+        neighbor_finder = NoNeighborFinder()
         general_inters = (LennardJones(false),)
         if nl
-            neighbour_finder = DistanceNeighbourFinder(trues(n_atoms, n_atoms), 10, f32 ? 1.5f0 : 1.5)
+            neighbor_finder = DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, f32 ? 1.5f0 : 1.5)
             general_inters = (LennardJones(true),)
         end
 
@@ -376,7 +376,7 @@ end
             velocities=velocities,
             temperature=temp,
             box_size=box_size,
-            neighbour_finder=neighbour_finder,
+            neighbor_finder=neighbor_finder,
             thermostat=thermostat,
             timestep=timestep,
             n_steps=n_steps,
@@ -467,7 +467,7 @@ end
         velocities=velocities,
         temperature=temp,
         box_size=box_size,
-        neighbour_finder=DistanceNeighbourFinder(trues(n_people, n_people), 10, 2.0),
+        neighbor_finder=DistanceNeighborFinder(trues(n_people, n_people), 10, 2.0),
         thermostat=AndersenThermostat(5.0),
         loggers=Dict("coords" => CoordinateLogger(10, dims=2),
                         "SIR" => SIRLogger(10, [])),

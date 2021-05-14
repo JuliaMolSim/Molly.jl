@@ -15,7 +15,7 @@ At the minute the package is a proof of concept for MD in Julia.
 **It is not production ready.**
 It can simulate a system of atoms with arbitrary interactions as defined by the user.
 Implemented features include:
-- Interface to allow definition of new forces, simulators, thermostats, neighbour finders, loggers etc.
+- Interface to allow definition of new forces, simulators, thermostats, neighbor finders, loggers etc.
 - Read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested.
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential, gravitational potential, soft sphere potential, Mie potential.
 - Bonded interactions - covalent bonds, bond angles, torsion angles.
@@ -23,7 +23,7 @@ Implemented features include:
 - Velocity Verlet and velocity-free Verlet integration.
 - Explicit solvent.
 - Periodic boundary conditions in a cubic box.
-- Neighbour list to speed up calculation of non-bonded forces.
+- Neighbor list to speed up calculation of non-bonded forces.
 - Automatic multithreading.
 - GPU acceleration on CUDA-enabled devices.
 - Run with Float64 or Float32.
@@ -37,7 +37,7 @@ Features not yet implemented include:
 - Water models.
 - Energy minimisation.
 - Other temperature or pressure coupling methods.
-- Cell-based neighbour list.
+- Cell-based neighbor list.
 - Protein preparation - solvent box, add hydrogens etc.
 - Trajectory/topology file format readers/writers.
 - Quantum mechanical modelling.
@@ -105,7 +105,7 @@ s = Simulation(
     velocities=[velocity(a.mass, temp) for a in atoms],
     temperature=temp,
     box_size=box_size,
-    neighbour_finder=DistanceNeighbourFinder(nb_matrix, 10),
+    neighbor_finder=DistanceNeighborFinder(nb_matrix, 10),
     thermostat=AndersenThermostat(1.0),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),

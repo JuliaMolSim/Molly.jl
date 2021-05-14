@@ -14,14 +14,14 @@ It is not yet merged because it is experimental, untested, slow, liable to chang
 With those caveats in mind, it provides a neat way to run differentiable simulations using the same abstractions as the main package.
 In particular, you can define general and specific interactions, letting you move away from N-body simulations and describe molecular systems.
 This is possible with something like a PyTorch tensor, but the force functions quickly get complicated to write.
-It also lets you use neighbour lists and periodic boundary conditions, or add neural networks to your simulations.
+It also lets you use neighbor lists and periodic boundary conditions, or add neural networks to your simulations.
 
 ## General interactions
 
 First, we show how taking gradients through a simulation can be used to optimise an atom property in a [Lennard-Jones](https://en.wikipedia.org/wiki/Lennard-Jones_potential) gas.
 In this type of simulation each atom has a σ value that determines how close it likes to get to other atoms.
-We are going to find the σ value that results in a desired distance of each atom to its closest neighbour.
-First we need a function to obtain the mean distance of each atom to its closest neighbour:
+We are going to find the σ value that results in a desired distance of each atom to its closest neighbor.
+First we need a function to obtain the mean distance of each atom to its closest neighbor:
 ```julia
 using Molly
 
@@ -59,7 +59,7 @@ box_size = 3.0
 timestep = 0.05
 temp = 3.0
 simulator = VelocityVerlet()
-neighbour_finder = DistanceNeighbourFinder(ones(n_atoms, n_atoms), 10, 1.5)
+neighbor_finder = DistanceNeighborFinder(ones(n_atoms, n_atoms), 10, 1.5)
 thermostat = FrictionThermostat(0.95)
 general_inters = (LennardJones(true),)
 specific_inter_lists = ()
@@ -79,7 +79,7 @@ function loss(σ)
         velocities=velocities,
         temperature=temp,
         box_size=box_size,
-        neighbour_finder=neighbour_finder,
+        neighbor_finder=neighbor_finder,
         thermostat=thermostat,
         loggers=loggers,
         timestep=timestep,
@@ -144,8 +144,8 @@ Epoch 18  |  σ  0.457  |  Mean min sep expected  0.513  |  Mean min sep end  0.
 Epoch 19  |  σ  0.468  |  Mean min sep expected  0.525  |  Mean min sep end  0.505  |  Loss  0.005  |  Grad  1.033
 Epoch 20  |  σ  0.457  |  Mean min sep expected  0.513  |  Mean min sep end  0.494  |  Loss  0.006  |  Grad -1.044
 ```
-The final value we get is 0.457, close to the theoretical value of 0.445 if all atoms have a neighbour at the minimum pairwise energy distance.
-The RDF looks as follows, with the purple line corresponding to the desired distance to the closest neighbour.
+The final value we get is 0.457, close to the theoretical value of 0.445 if all atoms have a neighbor at the minimum pairwise energy distance.
+The RDF looks as follows, with the purple line corresponding to the desired distance to the closest neighbor.
 ![LJ RDF](images/rdf_lj.png)
 
 ## Specific interactions
@@ -166,7 +166,7 @@ box_size = 3.0
 timestep = 0.05
 temp = 0.0
 integrator = VelocityVerlet()
-neighbour_finder = NoNeighbourFinder()
+neighbor_finder = NoNeighborFinder()
 thermostat = FrictionThermostat(0.6)
 general_inters = (LennardJones(false),)
 coords = [
@@ -193,7 +193,7 @@ function loss(θ)
         velocities=velocities,
         temperature=temp,
         box_size=box_size,
-        neighbour_finder=neighbour_finder,
+        neighbor_finder=neighbor_finder,
         thermostat=thermostat,
         loggers=loggers,
         timestep=timestep,
@@ -315,7 +315,7 @@ box_size = 5.0f0
 timestep = 0.02f0
 temp = 0.0f0
 integrator = VelocityVerlet()
-neighbour_finder = NoNeighbourFinder()
+neighbor_finder = NoNeighborFinder()
 thermostat = FrictionThermostat(0.98f0)
 general_inters = (LennardJones(false),) # Ignored due to atom parameters
 coords = [SVector(2.3f0, 2.07f0), SVector(2.5f0, 2.93f0), SVector(2.7f0, 2.07f0)]
@@ -337,7 +337,7 @@ function loss()
         velocities=velocities,
         temperature=temp,
         box_size=box_size,
-        neighbour_finder=neighbour_finder,
+        neighbor_finder=neighbor_finder,
         thermostat=thermostat,
         loggers=loggers,
         timestep=timestep,
