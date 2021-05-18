@@ -91,7 +91,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
     for inter_list in values(s.specific_inter_lists)
         sparse_forces = force.(inter_list, (s.coords,), (s,))
         ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
-        sparse_vec = SparseVector(n_atoms, reduce(vcat, ge1), reduce(vcat, ge2))
+        sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
         forces += Array(sparse_vec)
     end
 
@@ -117,7 +117,7 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
         coords_cpu = Array(coords)
         sparse_forces = force.(inter_list, (coords_cpu,), (s,))
         ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
-        sparse_vec = SparseVector(n_atoms, reduce(vcat, ge1), reduce(vcat, ge2))
+        sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
         # Move back to GPU if required
         forces += convert(typeof(coords), Array(sparse_vec))
     end
