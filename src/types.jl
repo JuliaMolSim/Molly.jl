@@ -181,8 +181,8 @@ default values.
     of interest during the simulation.
 - `timestep::T=0.0`: the timestep of the simulation.
 - `n_steps::Integer=0`: the number of steps in the simulation.
-- `n_steps_made::Vector{Int}=[]`: the number of steps already made during the
-    simulation. This is a `Vector` to allow the `struct` to be immutable.
+- `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
+    `isa(coords, CuArray)`.
 """
 struct Simulation{D, T, A, C, GI, SI}
     simulator::Simulator
