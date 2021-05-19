@@ -1,5 +1,12 @@
 # Molly.jl release notes
 
+## v0.3.0 - May 2021
+
+- The spelling of "neighbour" is changed to "neighbor" throughout the package. This affects `NoNeighborFinder`, `DistanceNeighborFinder`, `TreeNeighborFinder`, `find_neighbors!` and the `neighbor_finder` argument to `Simulation`.
+- Torsion angle force calculation is improved.
+- A bug in force calculation for specific interactions is fixed.
+- Support for Julia versions before 1.6 is dropped.
+
 ## v0.2.2 - Feb 2021
 
 - The `TreeNeighbourFinder` is added for faster distance neighbour finding using NearestNeighbors.jl.

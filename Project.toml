@@ -1,7 +1,7 @@
 name = "Molly"
 uuid = "aa0f7f06-fcc0-5ec4-a7f3-a573f33f9c4c"
 authors = ["Joe G Greener <jgreener@hotmail.co.uk>"]
-version = "0.2.2"
+version = "0.3.0"
 
 [deps]
 BioStructures = "de9282ab-8554-53be-b2d6-f6c222edabfc"

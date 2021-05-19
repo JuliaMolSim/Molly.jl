@@ -515,7 +515,7 @@ function Molly.simulate!(s::Simulation,
                             n_steps::Integer;
                             parallel::Bool=true)
     # Find neighbors like this
-    neighbors = find_neighbors(s, nothing, s.neighbor_finder, 0,
+    neighbors = find_neighbors!(s, nothing, s.neighbor_finder, 0,
                                     parallel=parallel)
 
     # Show a progress bar like this, if you have imported ProgressMeter
@@ -537,7 +537,7 @@ function Molly.simulate!(s::Simulation,
         apply_thermostat!(s, s.thermostat)
 
         # Find new neighbors like this
-        neighbors = find_neighbors(s, neighbors, s.neighbor_finder, step_n,
+        neighbors = find_neighbors!(s, neighbors, s.neighbor_finder, step_n,
                                         parallel=parallel)
 
         # Increment the step counter like this
@@ -596,7 +596,7 @@ end
 Examples of two useful properties are given here: a matrix indicating atom pairs eligible for non-bonded interactions, and a value determining how many timesteps occur between each evaluation of the neighbor finder.
 Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
-function find_neighbors(s::Simulation,
+function find_neighbors!(s::Simulation,
                             current_neighbors,
                             nf::MyNeighborFinder,
                             step_n::Integer;
