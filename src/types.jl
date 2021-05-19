@@ -80,15 +80,15 @@ This type cannot be used on the GPU as it is not `isbits` - use `AtomMin` instea
     potential is zero.
 - `ϵ::T=0.0`: the Lennard-Jones depth of the potential well.
 """
-struct Atom{T}
+struct Atom{C, M, S, E}
     attype::String
     name::String
     resnum::Int
     resname::String
-    charge::T
-    mass::T
-    σ::T
-    ϵ::T
+    charge::C
+    mass::M
+    σ::S
+    ϵ::E
 end
 
 # We define constructors rather than using Base.@kwdef as it makes conversion
@@ -102,7 +102,8 @@ function Atom(;
                 mass=0.0,
                 σ=0.0,
                 ϵ=0.0)
-    return Atom{typeof(mass)}(attype, name, resnum, resname, charge, mass, σ, ϵ)
+    return Atom{typeof(charge), typeof(mass), typeof(σ), typeof(ϵ)}(
+                attype, name, resnum, resname, charge, mass, σ, ϵ)
 end
 
 function Base.show(io::IO, a::Atom)
@@ -184,25 +185,25 @@ default values.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-struct Simulation{D, T, A, C, GI, SI}
+struct Simulation{D, T, A, C, V, GI, SI, B, S}
     simulator::Simulator
     atoms::A
     specific_inter_lists::SI
     general_inters::GI
     coords::C
-    velocities::C
+    velocities::V
     temperature::T
-    box_size::T
+    box_size::B
     neighbors::Vector{Tuple{Int, Int}}
     neighbor_finder::NeighborFinder
     thermostat::Thermostat
     loggers::Dict{String, <:Logger}
-    timestep::T
+    timestep::S
     n_steps::Int
     n_steps_made::Vector{Int}
 end
 
-Simulation{D}(args...) where {D, T, A, C, GI, SI} = Simulation{D, T, A, C, GI, SI}(args...)
+Simulation{D}(args...) where {D, T, A, C, V, GI, SI, B, S} = Simulation{D, T, A, C, V, GI, SI, B, S}(args...)
 
 function Simulation(;
                     simulator,
@@ -221,12 +222,15 @@ function Simulation(;
                     n_steps=0,
                     n_steps_made=[0],
                     gpu_diff_safe=isa(coords, CuArray))
-    T = typeof(timestep)
+    T = typeof(temperature)
     A = typeof(atoms)
     C = typeof(coords)
+    V = typeof(velocities)
     GI = typeof(general_inters)
     SI = typeof(specific_inter_lists)
-    return Simulation{gpu_diff_safe, T, A, C, GI, SI}(
+    B = typeof(box_size)
+    S = typeof(timestep)
+    return Simulation{gpu_diff_safe, T, A, C, V, GI, SI, B, S}(
                 simulator, atoms, specific_inter_lists, general_inters, coords,
                 velocities, temperature, box_size, neighbors, neighbor_finder,
                 thermostat, loggers, timestep, n_steps, n_steps_made)
