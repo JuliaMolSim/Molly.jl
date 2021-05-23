@@ -10,6 +10,7 @@ using NearestNeighbors
 using ProgressMeter
 using Reexport
 using Requires
+using Unitful
 
 @reexport using StaticArrays
 

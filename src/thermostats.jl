@@ -85,8 +85,7 @@ function temperature(s::Simulation{false})
 end
 
 function temperature(s::Simulation{true})
-    mass_i = findfirst(x -> x == :mass, fieldnames(eltype(s.atoms)))
-    masses = getfield.(s.atoms, mass_i)
+    masses = mass.(s.atoms)
     ke = sum(masses .* sum.(abs2, s.velocities)) / 2
     df = 3 * length(s.coords) - 3
     return 2 * ke / df

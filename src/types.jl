@@ -102,14 +102,12 @@ function Atom(;
                 mass=0.0,
                 σ=0.0,
                 ϵ=0.0)
-    return Atom{typeof(charge), typeof(mass), typeof(σ), typeof(ϵ)}(
-                attype, name, resnum, resname, charge, mass, σ, ϵ)
+    return Atom(attype, name, resnum, resname, charge, mass, σ, ϵ)
 end
 
 function Base.show(io::IO, a::Atom)
-    print(io, "Atom{", typeof(a.charge), "} with name \"", a.name,
-                "\", type \"", a.attype, "\", charge=", a.charge, ", mass=",
-                a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
+    print(io, "Atom with name \"", a.name, "\", type \"", a.attype, "\", charge=", a.charge,
+            ", mass=", a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
 end
 
 """

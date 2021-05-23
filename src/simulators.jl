@@ -29,7 +29,7 @@ function simulate!(s::Simulation{false},
     n_atoms = length(s.coords)
     find_neighbors!(s, s.neighbor_finder, 0, parallel=parallel)
     accels_t = accelerations(s, parallel=parallel)
-    accels_t_dt = zero(s.coords)
+    accels_t_dt = zero(accels_t)
 
     @showprogress for step_n in 1:n_steps
         for logger in values(s.loggers)
@@ -38,7 +38,7 @@ function simulate!(s::Simulation{false},
 
         # Update coordinates
         for i in 1:length(s.coords)
-            s.coords[i] += s.velocities[i] * s.timestep + accels_t[i] * (s.timestep ^ 2) / 2
+            s.coords[i] += s.velocities[i] * s.timestep + (accels_t[i] / Unitful.Na) * (s.timestep ^ 2) / 2
             s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
         end
 
@@ -46,7 +46,7 @@ function simulate!(s::Simulation{false},
 
         # Update velocities
         for i in 1:length(s.velocities)
-            s.velocities[i] += (accels_t[i] + accels_t_dt[i]) * s.timestep / 2
+            s.velocities[i] += ((accels_t[i] + accels_t_dt[i]) / Unitful.Na) * s.timestep / 2
         end
 
         apply_thermostat!(s.velocities, s, s.thermostat)

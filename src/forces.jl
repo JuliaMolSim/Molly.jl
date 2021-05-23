@@ -38,6 +38,8 @@ end
     return nothing
 end
 
+mass(atom::Atom) = atom.mass
+
 """
     accelerations(simulation; parallel=true)
 
@@ -48,7 +50,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
     n_atoms = length(s.coords)
 
     if parallel && nthreads() > 1 && n_atoms >= 100
-        forces_threads = [zero(s.coords) for i in 1:nthreads()]
+        forces_threads = [forces = ustrip.(zero(s.coords))u"kJ / (mol * nm)" for i in 1:nthreads()]
 
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.general_inters)
@@ -69,7 +71,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
 
         forces = sum(forces_threads)
     else
-        forces = zero(s.coords)
+        forces = ustrip.(zero(s.coords))u"kJ / (mol * nm)"
 
         for inter in values(s.general_inters)
             if inter.nl_only
@@ -95,11 +97,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
         forces += Array(sparse_vec)
     end
 
-    for i in 1:n_atoms
-        forces[i] /= s.atoms[i].mass
-    end
-
-    return forces
+    return forces ./ mass.(s.atoms)
 end
 
 function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
@@ -122,8 +120,7 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
         forces += convert(typeof(coords), Array(sparse_vec))
     end
 
-    mass_i = findfirst(x -> x == :mass, fieldnames(eltype(atoms_is)))
-    return forces ./ getfield.(s.atoms, mass_i)
+    return forces ./ mass.(s.atoms)
 end
 
 include("interactions/lennard_jones.jl")
