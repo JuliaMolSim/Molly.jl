@@ -3,11 +3,11 @@
 
 A harmonic bond between two atoms.
 """
-struct HarmonicBond{T} <: SpecificInteraction
+struct HarmonicBond{D, K} <: SpecificInteraction
     i::Int
     j::Int
-    b0::T
-    kb::T
+    b0::D
+    kb::K
 end
 
 @inline @inbounds function force(b::HarmonicBond,
@@ -23,5 +23,5 @@ end
                                             s::Simulation)
     dr = vector(s.coords[b.i], s.coords[b.j], s.box_size)
     r = norm(dr)
-    b.kb / 2 * (r - b.b0) ^ 2
+    return (b.kb / 2) * (r - b.b0) ^ 2
 end

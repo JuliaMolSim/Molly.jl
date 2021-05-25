@@ -3,12 +3,12 @@
 
 A bond angle between three atoms.
 """
-struct HarmonicAngle{T} <: SpecificInteraction
+struct HarmonicAngle{D, K} <: SpecificInteraction
     i::Int
     j::Int
     k::Int
-    th0::T
-    cth::T
+    th0::D
+    cth::K
 end
 
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
@@ -32,8 +32,5 @@ end
                                             s::Simulation)
     ba = vector(s.coords[a.j], s.coords[a.i], s.box_size)
     bc = vector(s.coords[a.j], s.coords[a.k], s.box_size)
-    pa = normalize(ba × (ba × bc))
-    pc = normalize(-bc × (ba × bc))
-
-    a.cth / 2 * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.th0)^2
+    return (a.cth / 2) * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.th0)^2
 end

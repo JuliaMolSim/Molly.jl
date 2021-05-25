@@ -22,7 +22,10 @@ end
     cd = vector(coords[d.k], coords[d.l], s.box_size)
     cross_ab_bc = ab × bc
     cross_bc_cd = bc × cd
-    θ = atan(dot(cross_ab_bc × cross_bc_cd, normalize(bc)), dot(cross_ab_bc, cross_bc_cd))
+    θ = atan(
+        ustrip(dot(cross_ab_bc × cross_bc_cd, normalize(bc))),
+        ustrip(dot(cross_ab_bc, cross_bc_cd)),
+    )
     angle_term = (d.f1*sin(θ) - 2*d.f2*sin(2*θ) + 3*d.f3*sin(3*θ)) / 2
     fa = angle_term * normalize(-cross_ab_bc) / norm(ab)
     # fd clashes with a function name
@@ -42,6 +45,9 @@ end
     cd = vector(s.coords[d.k], s.coords[d.l], s.box_size)
     cross_ab_bc = ab × bc
     cross_bc_cd = bc × cd
-    θ = atan(dot(cross_ab_bc × cross_bc_cd, normalize(bc)), dot(cross_ab_bc, cross_bc_cd))
+    θ = atan(
+        ustrip(dot(cross_ab_bc × cross_bc_cd, normalize(bc))),
+        ustrip(dot(cross_ab_bc, cross_bc_cd)),
+    )
     return (d.f1 * (1 + cos(θ)) + d.f2 * (1 - cos(2θ)) + d.f3 * (1 + cos(3θ)) + d.f4) / 2
 end
