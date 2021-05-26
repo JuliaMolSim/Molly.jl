@@ -19,7 +19,7 @@ SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
-BioStructures = "0.10, 0.11"
+BioStructures = "0.10, 0.11, 1"
 CUDA = "3"
 Colors = "0.10, 0.11, 0.12"
 Distances = "0.10"
