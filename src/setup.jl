@@ -10,15 +10,15 @@ export
     readinputs
 
 """
-    Atomtype(mass, charge, σ, ϵ)
+    Atomtype(charge, mass, σ, ϵ)
 
 Gromacs atom type.
 """
-struct Atomtype{T}
-    mass::T
-    charge::T
-    σ::T
-    ϵ::T
+struct Atomtype{C, M, S, E}
+    charge::C
+    mass::M
+    σ::S
+    ϵ::E
 end
 
 """
@@ -26,9 +26,9 @@ end
 
 Gromacs bond type.
 """
-struct Bondtype{T}
-    b0::T
-    kb::T
+struct Bondtype{D, K}
+    b0::D
+    kb::K
 end
 
 """
@@ -36,9 +36,9 @@ end
 
 Gromacs angle type.
 """
-struct Angletype{T}
-    th0::T
-    cth::T
+struct Angletype{D, K}
+    th0::D
+    cth::K
 end
 
 """
@@ -60,9 +60,9 @@ end
 Obtain `n_atoms` 3D coordinates in a cube of length `box_size` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
 """
-function placeatoms(T::Type, n_atoms::Integer, box_size::Real, min_dist::Real)
+function placeatoms(T::Type, n_atoms::Integer, box_size, min_dist)
     min_dist_sq = min_dist ^ 2
-    coords = SArray{Tuple{3}, T, 1, 3}[]
+    coords = SArray[]
     while length(coords) < n_atoms
         new_coord = SVector{3}(rand(T, 3)) .* box_size
         okay = true
@@ -76,10 +76,10 @@ function placeatoms(T::Type, n_atoms::Integer, box_size::Real, min_dist::Real)
             push!(coords, new_coord)
         end
     end
-    return coords
+    return [coords...]
 end
 
-function placeatoms(n_atoms::Integer, box_size::Real, min_dist::Real)
+function placeatoms(n_atoms::Integer, box_size, min_dist)
     return placeatoms(DefaultFloat, n_atoms, box_size, min_dist)
 end
 
@@ -97,21 +97,22 @@ non-bonded matrix, coordinates and box size.
 function readinputs(T::Type,
                     top_file::AbstractString,
                     coord_file::AbstractString;
-                    atom_min::Bool=false)
+                    atom_min::Bool=false,
+                    units::Bool=false)
     # Read forcefield and topology file
-    atomtypes = Dict{String, Atomtype{T}}()
-    bondtypes = Dict{String, Bondtype{T}}()
-    angletypes = Dict{String, Angletype{T}}()
+    atomtypes = Dict{String, Atomtype}()
+    bondtypes = Dict{String, Bondtype}()
+    angletypes = Dict{String, Angletype}()
     torsiontypes = Dict{String, Torsiontype{T}}()
     atomnames = Dict{String, String}()
 
     name = "?"
-    atoms = Atom{T}[]
-    bonds = HarmonicBond{T}[]
+    atoms = Atom[]
+    bonds = HarmonicBond[]
     pairs = Tuple{Int, Int}[]
-    angles = HarmonicAngle{T}[]
+    angles = HarmonicAngle[]
     possible_torsions = Tuple{Int, Int, Int, Int}[]
-    torsions = Torsion{T}[]
+    torsions = Torsion[]
 
     current_field = ""
     for l in eachline(top_file)
@@ -125,12 +126,20 @@ function readinputs(T::Type,
         end
         c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
         if current_field == "bondtypes"
-            bondtype = Bondtype(parse(T, c[4]), parse(T, c[5]))
+            if units
+                bondtype = Bondtype(parse(T, c[4])u"nm", parse(T, c[5])u"kJ / (mol * nm^2)")
+            else
+                bondtype = Bondtype(parse(T, c[4]), parse(T, c[5]))
+            end
             bondtypes["$(c[1])/$(c[2])"] = bondtype
             bondtypes["$(c[2])/$(c[1])"] = bondtype
         elseif current_field == "angletypes"
             # Convert th0 to radians
-            angletype = Angletype(deg2rad(parse(T, c[5])), parse(T, c[6]))
+            if units
+                angletype = Angletype(deg2rad(parse(T, c[5])), parse(T, c[6])u"kJ / mol")
+            else
+                angletype = Angletype(deg2rad(parse(T, c[5])), parse(T, c[6]))
+            end
             angletypes["$(c[1])/$(c[2])/$(c[3])"] = angletype
             angletypes["$(c[3])/$(c[2])/$(c[1])"] = angletype
         elseif current_field == "dihedraltypes" && c[1] != "#define"
@@ -145,15 +154,27 @@ function readinputs(T::Type,
             atomnames[c[1]] = atomname
             # Take the first version of each atom type only
             if !haskey(atomtypes, atomname)
-                atomtypes[atomname] = Atomtype(parse(T, c[4]), parse(T, c[5]),
-                        parse(T, c[7]), parse(T, c[8]))
+                if units
+                    atomtypes[atomname] = Atomtype(parse(T, c[5]) * T(1u"q"),
+                            parse(T, c[4])u"u", parse(T, c[7])u"nm", parse(T, c[8])u"kJ / mol")
+                else
+                    atomtypes[atomname] = Atomtype(parse(T, c[5]), parse(T, c[4]),
+                            parse(T, c[7]), parse(T, c[8]))
+                end
             end
         elseif current_field == "atoms"
             attype = atomnames[c[2]]
-            push!(atoms, Atom(attype=attype, name=c[5], resnum=parse(Int, c[3]),
-                resname=c[4], charge=parse(T, c[7]),
-                mass=parse(T, c[8]), σ=atomtypes[attype].σ,
-                ϵ=atomtypes[attype].ϵ))
+            if units
+                push!(atoms, Atom(attype=attype, name=String(c[5]), resnum=parse(Int, c[3]),
+                    resname=String(c[4]), charge=parse(T, c[7]) * T(1u"q"),
+                    mass=parse(T, c[8])u"u", σ=(atomtypes[attype].σ)u"nm",
+                    ϵ=(atomtypes[attype].ϵ)u"kJ / mol"))
+            else
+                push!(atoms, Atom(attype=attype, name=String(c[5]), resnum=parse(Int, c[3]),
+                    resname=String(c[4]), charge=parse(T, c[7]),
+                    mass=parse(T, c[8]), σ=atomtypes[attype].σ,
+                    ϵ=atomtypes[attype].ϵ))
+            end
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
             bondtype = bondtypes["$(atoms[i].attype)/$(atoms[j].attype)"]
@@ -211,13 +232,14 @@ function readinputs(T::Type,
 
     # Read coordinate file and add solvent atoms
     lines = readlines(coord_file)
-    coords = SArray{Tuple{3}, T, 1, 3}[]
+    coords = SArray[]
     for (i, l) in enumerate(lines[3:end-1])
-        push!(coords, SVector(
-            parse(T, l[21:28]),
-            parse(T, l[29:36]),
-            parse(T, l[37:44])
-        ))
+        coord = SVector(parse(T, l[21:28]), parse(T, l[29:36]), parse(T, l[37:44]))
+        if units
+            push!(coords, (coord)u"nm")
+        else
+            push!(coords, coord)
+        end
 
         # Some atoms are not specified explicitly in the topology so are added here
         if i > length(atoms)
@@ -227,8 +249,8 @@ function readinputs(T::Type,
             if attype == "CL" # Temp hack to fix charges
                 temp_charge = T(-1.0)
             end
-            push!(atoms, Atom(attype=attype, name=atname,
-                resnum=parse(Int, l[1:5]), resname=strip(l[6:10]),
+            push!(atoms, Atom(attype=attype, name=String(atname),
+                resnum=parse(Int, l[1:5]), resname=String(strip(l[6:10])),
                 charge=temp_charge, mass=atomtypes[attype].mass,
                 σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
 
@@ -267,22 +289,30 @@ function readinputs(T::Type,
     #end
 
     lj = LennardJones(true)
-    coulomb = Coulomb(true)
+    if units
+        coulomb = Coulomb(NoCutoff(), true, T(138.935458u"kJ * nm / (mol * q^2)" / 70.0))
+    else
+        coulomb = Coulomb(NoCutoff(), true, T(138.935458 / 70.0))
+    end
 
     # Bounding box for PBCs - box goes 0 to this value in 3 dimensions
-    box_size = parse(T, first(split(strip(lines[end]), r"\s+")))
+    box_size_val = parse(T, first(split(strip(lines[end]), r"\s+")))
+    box_size = units ? (box_size_val)u"nm" : box_size_val
 
-    specific_inter_lists = (bonds, angles, torsions)
+    # Ensure array types are concrete
+    specific_inter_lists = ([bonds...], [angles...], [torsions...])
     general_inters = (lj, coulomb)
 
     if atom_min
         atoms = [AtomMin(charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
+    else
+        atoms = [atoms...]
     end
 
     return atoms, specific_inter_lists, general_inters,
-            nb_matrix, coords, box_size
+            nb_matrix, [coords...], box_size
 end
 
-function readinputs(top_file::AbstractString, coord_file::AbstractString)
-    return readinputs(DefaultFloat, top_file, coord_file)
+function readinputs(top_file::AbstractString, coord_file::AbstractString; kwargs...)
+    return readinputs(DefaultFloat, top_file, coord_file; kwargs...)
 end

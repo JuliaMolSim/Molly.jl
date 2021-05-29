@@ -74,11 +74,11 @@ This type cannot be used on the GPU as it is not `isbits` - use `AtomMin` instea
 - `resnum::Integer=0`: the residue number if the atom is part of a polymer.
 - `resname::AbstractString=""`: the residue name if the atom is part of a
     polymer.
-- `charge::T=0.0`: the charge of the atom, used for electrostatic interactions.
-- `mass::T=0.0`: the mass of the atom.
-- `σ::T=0.0`: the Lennard-Jones finite distance at which the inter-particle
+- `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
+- `mass::M=0.0`: the mass of the atom.
+- `σ::S=0.0`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
-- `ϵ::T=0.0`: the Lennard-Jones depth of the potential well.
+- `ϵ::E=0.0`: the Lennard-Jones depth of the potential well.
 """
 struct Atom{C, M, S, E}
     attype::String
@@ -120,17 +120,17 @@ This type is `isbits` and can be used on the GPU - use `Atom` in other contexts 
 more information.
 
 # Arguments
-- `charge::T=0.0`: the charge of the atom, used for electrostatic interactions.
-- `mass::T=0.0`: the mass of the atom.
-- `σ::T=0.0`: the Lennard-Jones finite distance at which the inter-particle
+- `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
+- `mass::M=0.0`: the mass of the atom.
+- `σ::S=0.0`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
-- `ϵ::T=0.0`: the Lennard-Jones depth of the potential well.
+- `ϵ::E=0.0`: the Lennard-Jones depth of the potential well.
 """
-struct AtomMin{T}
-    charge::T
-    mass::T
-    σ::T
-    ϵ::T
+struct AtomMin{C, M, S, E}
+    charge::C
+    mass::M
+    σ::S
+    ϵ::E
 end
 
 function AtomMin(;
@@ -138,12 +138,11 @@ function AtomMin(;
                 mass=0.0,
                 σ=0.0,
                 ϵ=0.0)
-    return AtomMin{typeof(mass)}(charge, mass, σ, ϵ)
+    return AtomMin(charge, mass, σ, ϵ)
 end
 
 function Base.show(io::IO, a::AtomMin)
-    print(io, "AtomMin{", typeof(a.charge), "} with charge=", a.charge, ", mass=",
-                a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
+    print(io, "AtomMin with charge=", a.charge, ", mass=", a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
 end
 
 """
@@ -155,7 +154,7 @@ default values.
 
 # Arguments
 - `simulator::Simulator`: the type of simulation to run.
-- `atoms::Vector{A}`: the atoms, or atom equivalents, in the simulation. Can be
+- `atoms::A`: the atoms, or atom equivalents, in the simulation. Can be
     of any type.
 - `specific_inter_lists::SI=()`: the specific interactions in the simulation,
     i.e. interactions between specific atoms such as bonds or angles. Typically
@@ -166,19 +165,19 @@ default values.
 - `coords::C`: the coordinates of the atoms in the simulation. Typically a
     `Vector` of `SVector`s of any dimension and type `T`, where `T` is an
     `AbstractFloat` type.
-- `velocities::C=zero(coords)`: the velocities of the atoms in the simulation,
+- `velocities::V=zero(coords)`: the velocities of the atoms in the simulation,
     which should be the same type as the coordinates. The meaning of the
     velocities depends on the simulator used, e.g. for the `VelocityFreeVerlet`
     simulator they represent the previous step coordinates for the first step.
 - `temperature::T=0.0`: the temperature of the simulation.
-- `box_size::T`: the size of the cube in which the simulation takes place.
+- `box_size::B`: the size of the cube in which the simulation takes place.
 - `neighbor_finder::NeighborFinder=NoNeighborFinder()`: the neighbor finder
     used to find close atoms and save on computation.
 - `thermostat::Thermostat=NoThermostat()`: the thermostat which applies during
     the simulation.
 - `loggers::Dict{String, <:Logger}=Dict()`: the loggers that record properties
     of interest during the simulation.
-- `timestep::T=0.0`: the timestep of the simulation.
+- `timestep::S=0.0`: the timestep of the simulation.
 - `n_steps::Integer=0`: the number of steps in the simulation.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
