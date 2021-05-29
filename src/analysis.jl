@@ -84,7 +84,7 @@ end
     
 function potential_energy(s::Simulation)
     n_atoms = length(s.coords)
-    potential = zero(eltype(eltype(s.coords)))
+    potential = zero(ustrip(s.timestep))u"kJ / mol"
 
     for inter in values(s.general_inters)
         if inter.nl_only
