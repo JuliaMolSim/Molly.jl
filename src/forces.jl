@@ -32,7 +32,7 @@ function force end
 end
 
 @inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer)
-    fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
+    fdr = ustrip(force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size))
     forces[i] -= fdr
     forces[j] += fdr
     return nothing
@@ -50,7 +50,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
     n_atoms = length(s.coords)
 
     if parallel && nthreads() > 1 && n_atoms >= 100
-        forces_threads = [forces = ustrip.(zero(s.coords))u"kJ / (mol * nm)" for i in 1:nthreads()]
+        forces_threads = [ustrip.(zero(s.coords)) for i in 1:nthreads()]
 
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.general_inters)
@@ -71,7 +71,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
 
         forces = sum(forces_threads)
     else
-        forces = ustrip.(zero(s.coords))u"kJ / (mol * nm)"
+        forces = ustrip.(zero(s.coords))
 
         for inter in values(s.general_inters)
             if inter.nl_only
@@ -94,10 +94,10 @@ function accelerations(s::Simulation; parallel::Bool=true)
         sparse_forces = force.(inter_list, (s.coords,), (s,))
         ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
         sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
-        forces += Array(sparse_vec)
+        forces += ustrip.(Array(sparse_vec))
     end
 
-    return forces ./ mass.(s.atoms)
+    return (forces)u"kJ / (mol * nm)" ./ mass.(s.atoms)
 end
 
 function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
