@@ -5,6 +5,15 @@ export
     VelocityVerlet,
     VelocityFreeVerlet
 
+# Forces are often expressed per mol but this dimension needs removing for use in the integrator
+function removemolar(x)
+    if dimension(x) == u"𝐋 / (𝐍 * 𝐓^2)"
+        return x / Unitful.Na
+    else
+        return x
+    end
+end
+
 """
     VelocityVerlet()
 
@@ -38,7 +47,7 @@ function simulate!(s::Simulation{false},
 
         # Update coordinates
         for i in 1:length(s.coords)
-            s.coords[i] += s.velocities[i] * s.timestep + (accels_t[i] / Unitful.Na) * (s.timestep ^ 2) / 2
+            s.coords[i] += s.velocities[i] * s.timestep + removemolar.(accels_t[i]) * (s.timestep ^ 2) / 2
             s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
         end
 
@@ -46,7 +55,7 @@ function simulate!(s::Simulation{false},
 
         # Update velocities
         for i in 1:length(s.velocities)
-            s.velocities[i] += ((accels_t[i] + accels_t_dt[i]) / Unitful.Na) * s.timestep / 2
+            s.velocities[i] += removemolar.(accels_t[i] + accels_t_dt[i]) * s.timestep / 2
         end
 
         apply_thermostat!(s.velocities, s, s.thermostat)

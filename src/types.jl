@@ -203,7 +203,7 @@ end
 Simulation{D}(args...) where {D, T, A, C, V, GI, SI, B, S} = Simulation{D, T, A, C, V, GI, SI, B, S}(args...)
 
 function Simulation(;
-                    simulator,
+                    simulator=VelocityVerlet(),
                     atoms,
                     specific_inter_lists=(),
                     general_inters=(),

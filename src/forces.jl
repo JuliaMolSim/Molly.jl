@@ -32,7 +32,7 @@ function force end
 end
 
 @inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer)
-    fdr = ustrip(force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size))
+    fdr = ustrip.(force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size))
     forces[i] -= fdr
     forces[j] += fdr
     return nothing
