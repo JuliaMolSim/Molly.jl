@@ -84,8 +84,8 @@ function placeatoms(n_atoms::Integer, box_size, min_dist)
 end
 
 """
-    readinputs(topology_file, coordinate_file; atom_min=false)
-    readinputs(T, topology_file, coordinate_file; atom_min=false)
+    readinputs(topology_file, coordinate_file; atom_min=false, units=true)
+    readinputs(T, topology_file, coordinate_file; atom_min=false, units=true)
 
 Read a Gromacs topology flat file, i.e. all includes collapsed into one file,
 and a Gromacs coordinate file.
@@ -93,12 +93,13 @@ Returns the atoms, specific interaction lists, general interaction lists,
 non-bonded matrix, coordinates and box size.
 `atom_min` determines whether the returned atoms consist of the GPU-compatible
 `AtomMin` or the more verbose but GPU-incompatible `Atom`.
+`units` determines whether the returned values have units.
 """
 function readinputs(T::Type,
                     top_file::AbstractString,
                     coord_file::AbstractString;
                     atom_min::Bool=false,
-                    units::Bool=false)
+                    units::Bool=true)
     # Read forcefield and topology file
     atomtypes = Dict{String, Atomtype}()
     bondtypes = Dict{String, Bondtype}()
@@ -114,6 +115,14 @@ function readinputs(T::Type,
     possible_torsions = Tuple{Int, Int, Int, Int}[]
     torsions = Torsion[]
 
+    if units
+        force_units = u"kJ * mol^-1 * nm^-1"
+        energy_units = u"kJ * mol^-1"
+    else
+        force_units = NoUnits
+        energy_units = NoUnits
+    end
+
     current_field = ""
     for l in eachline(top_file)
         sl = strip(l)
@@ -127,7 +136,7 @@ function readinputs(T::Type,
         c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
         if current_field == "bondtypes"
             if units
-                bondtype = Bondtype(parse(T, c[4])u"nm", parse(T, c[5])u"kJ / (mol * nm^2)")
+                bondtype = Bondtype(parse(T, c[4])u"nm", parse(T, c[5])u"kJ * mol^-1 * nm^-2")
             else
                 bondtype = Bondtype(parse(T, c[4]), parse(T, c[5]))
             end
@@ -136,7 +145,7 @@ function readinputs(T::Type,
         elseif current_field == "angletypes"
             # Convert th0 to radians
             if units
-                angletype = Angletype(deg2rad(parse(T, c[5])), parse(T, c[6])u"kJ / mol")
+                angletype = Angletype(deg2rad(parse(T, c[5])), parse(T, c[6])u"kJ * mol^-1")
             else
                 angletype = Angletype(deg2rad(parse(T, c[5])), parse(T, c[6]))
             end
@@ -156,7 +165,7 @@ function readinputs(T::Type,
             if !haskey(atomtypes, atomname)
                 if units
                     atomtypes[atomname] = Atomtype(parse(T, c[5]) * T(1u"q"),
-                            parse(T, c[4])u"u", parse(T, c[7])u"nm", parse(T, c[8])u"kJ / mol")
+                            parse(T, c[4])u"u", parse(T, c[7])u"nm", parse(T, c[8])u"kJ * mol^-1")
                 else
                     atomtypes[atomname] = Atomtype(parse(T, c[5]), parse(T, c[4]),
                             parse(T, c[7]), parse(T, c[8]))
@@ -168,7 +177,7 @@ function readinputs(T::Type,
                 push!(atoms, Atom(attype=attype, name=String(c[5]), resnum=parse(Int, c[3]),
                     resname=String(c[4]), charge=parse(T, c[7]) * T(1u"q"),
                     mass=parse(T, c[8])u"u", σ=(atomtypes[attype].σ)u"nm",
-                    ϵ=(atomtypes[attype].ϵ)u"kJ / mol"))
+                    ϵ=(atomtypes[attype].ϵ)u"kJ * mol^-1"))
             else
                 push!(atoms, Atom(attype=attype, name=String(c[5]), resnum=parse(Int, c[3]),
                     resname=String(c[4]), charge=parse(T, c[7]),
@@ -178,13 +187,15 @@ function readinputs(T::Type,
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
             bondtype = bondtypes["$(atoms[i].attype)/$(atoms[j].attype)"]
-            push!(bonds, HarmonicBond(i, j, bondtype.b0, bondtype.kb))
+            push!(bonds, HarmonicBond(i=i, j=j, b0=bondtype.b0, kb=bondtype.kb,
+                                        force_units=force_units, energy_units=energy_units))
         elseif current_field == "pairs"
             push!(pairs, (parse(Int, c[1]), parse(Int, c[2])))
         elseif current_field == "angles"
             i, j, k = parse.(Int, c[1:3])
             angletype = angletypes["$(atoms[i].attype)/$(atoms[j].attype)/$(atoms[k].attype)"]
-            push!(angles, HarmonicAngle(i, j, k, angletype.th0, angletype.cth))
+            push!(angles, HarmonicAngle(i=i, j=j, k=k, th0=angletype.th0, cth=angletype.cth,
+                                        force_units=force_units, energy_units=energy_units))
         elseif current_field == "dihedrals"
             i, j, k, l = parse.(Int, c[1:4])
             push!(possible_torsions, (i, j, k, l))
@@ -199,7 +210,9 @@ function readinputs(T::Type,
         desired_key = join(at_types, "/")
         if haskey(torsiontypes, desired_key)
             d = torsiontypes[desired_key]
-            push!(torsions, Torsion(inds..., d.f1, d.f2, d.f3, d.f4))
+            push!(torsions, Torsion(i=inds[1], j=inds[2], k=inds[3], l=inds[4],
+                                    f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4,
+                                    force_units=force_units, energy_units=energy_units))
         else
             best_score = 0
             best_key = ""
@@ -225,7 +238,9 @@ function readinputs(T::Type,
             # If a wildcard match is found, add a new specific torsion type
             if best_key != ""
                 d = torsiontypes[best_key]
-                push!(torsions, Torsion(inds..., d.f1, d.f2, d.f3, d.f4))
+                push!(torsions, Torsion(i=inds[1], j=inds[2], k=inds[3], l=inds[4],
+                                        f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4,
+                                        force_units=force_units, energy_units=energy_units))
             end
         end
     end
@@ -257,10 +272,14 @@ function readinputs(T::Type,
             # Add O-H bonds and H-O-H angle in water
             if atname == "OW"
                 bondtype = bondtypes["OW/HW"]
-                push!(bonds, HarmonicBond(i, i + 1, bondtype.b0, bondtype.kb))
-                push!(bonds, HarmonicBond(i, i + 2, bondtype.b0, bondtype.kb))
+                push!(bonds, HarmonicBond(i=i, j=(i + 1), b0=bondtype.b0, kb=bondtype.kb,
+                                            force_units=force_units, energy_units=energy_units))
+                push!(bonds, HarmonicBond(i=i, j=(i + 2), b0=bondtype.b0, kb=bondtype.kb,
+                                            force_units=force_units, energy_units=energy_units))
                 angletype = angletypes["HW/OW/HW"]
-                push!(angles, HarmonicAngle(i + 1, i, i + 2, angletype.th0, angletype.cth))
+                push!(angles, HarmonicAngle(i=(i + 1), j=i, k=(i + 2), th0=angletype.th0,
+                                            cth=angletype.cth, force_units=force_units,
+                                            energy_units=energy_units))
             end
         end
     end
@@ -288,11 +307,13 @@ function readinputs(T::Type,
     #    nb_matrix[j, i] = T(0.5)
     #end
 
-    lj = LennardJones(true)
+    lj = LennardJones(nl_only=true, force_units=force_units, energy_units=energy_units)
     if units
-        coulomb = Coulomb(NoCutoff(), true, T(138.935458u"kJ * nm / (mol * q^2)" / 70.0))
+        coulomb = Coulomb(coulomb_const=T((138.935458 / 70.0)u"kJ * mol^-1 * nm * q^-2"),
+                            nl_only=true, force_units=force_units, energy_units=energy_units)
     else
-        coulomb = Coulomb(NoCutoff(), true, T(138.935458 / 70.0))
+        coulomb = Coulomb(coulomb_const=T(138.935458 / 70.0), nl_only=true, force_units=force_units,
+                            energy_units=energy_units)
     end
 
     # Bounding box for PBCs - box goes 0 to this value in 3 dimensions

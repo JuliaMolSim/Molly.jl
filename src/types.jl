@@ -182,7 +182,7 @@ default values.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-struct Simulation{D, T, A, C, V, GI, SI, B, S}
+struct Simulation{D, T, A, C, V, GI, SI, B, S, F, E}
     simulator::Simulator
     atoms::A
     specific_inter_lists::SI
@@ -198,9 +198,14 @@ struct Simulation{D, T, A, C, V, GI, SI, B, S}
     timestep::S
     n_steps::Int
     n_steps_made::Vector{Int}
+    force_units::F
+    energy_units::E
 end
 
-Simulation{D}(args...) where {D, T, A, C, V, GI, SI, B, S} = Simulation{D, T, A, C, V, GI, SI, B, S}(args...)
+Simulation{D}(args...) where {D, T, A, C, V, GI, SI, B, S, F, E} = Simulation{D, T, A, C, V, GI, SI, B, S, F, E}(args...)
+
+forceunits(inter::Interaction) = inter.force_units
+energyunits(inter::Interaction) = inter.energy_units
 
 function Simulation(;
                     simulator=VelocityVerlet(),
@@ -219,6 +224,28 @@ function Simulation(;
                     n_steps=0,
                     n_steps_made=[0],
                     gpu_diff_safe=isa(coords, CuArray))
+    if length(general_inters) == 0 && length(specific_inter_lists) == 0
+        error("Either general interactions or specific interactions must be provided")
+    end
+
+    force_unit_list = [forceunits.(general_inters)...]
+    for inter in specific_inter_lists
+        append!(force_unit_list, forceunits.(inter))
+    end
+    if length(Set(force_unit_list)) > 1
+        error("More than one force unit found in interactions: ", join(Set(force_unit_list), ", "))
+    end
+    force_units = first(force_unit_list)
+
+    energy_unit_list = [energyunits.(general_inters)...]
+    for inter in specific_inter_lists
+        append!(energy_unit_list, energyunits.(inter))
+    end
+    if length(Set(energy_unit_list)) > 1
+        error("More than one energy unit found in interactions: ", join(Set(energy_unit_list), ", "))
+    end
+    energy_units = first(energy_unit_list)
+
     T = typeof(temperature)
     A = typeof(atoms)
     C = typeof(coords)
@@ -227,10 +254,13 @@ function Simulation(;
     SI = typeof(specific_inter_lists)
     B = typeof(box_size)
     S = typeof(timestep)
-    return Simulation{gpu_diff_safe, T, A, C, V, GI, SI, B, S}(
+    F = typeof(force_units)
+    E = typeof(energy_units)
+    return Simulation{gpu_diff_safe, T, A, C, V, GI, SI, B, S, F, E}(
                 simulator, atoms, specific_inter_lists, general_inters, coords,
                 velocities, temperature, box_size, neighbors, neighbor_finder,
-                thermostat, loggers, timestep, n_steps, n_steps_made)
+                thermostat, loggers, timestep, n_steps, n_steps_made,
+                force_units, energy_units)
 end
 
 function Base.show(io::IO, s::Simulation)

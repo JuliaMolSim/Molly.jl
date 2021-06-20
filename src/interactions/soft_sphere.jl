@@ -1,21 +1,27 @@
 """
-    SoftSphere(nl_only)
+    SoftSphere(; cutoff, nl_only, force_units, energy_units)
 
 The soft-sphere potential.
 """
-struct SoftSphere{S, C} <: GeneralInteraction
+struct SoftSphere{S, C, F, E} <: GeneralInteraction
     cutoff::C
     nl_only::Bool
+    force_units::F
+    energy_units::E
 end
 
-SoftSphere{S}(cutoff, nl_only) where S =
-    SoftSphere{S, typeof(cutoff)}(cutoff, nl_only)
+SoftSphere{S}(cutoff, nl_only, force_units, energy_units) where S =
+    SoftSphere{S, typeof(cutoff), typeof(force_units), typeof(energy_units)}(
+        cutoff, nl_only, force_units, energy_units)
 
-SoftSphere(cutoff, nl_only) =
-    SoftSphere{false, typeof(cutoff)}(cutoff, nl_only)
-
-SoftSphere(nl_only=false) =
-    SoftSphere(ShiftedPotentialCutoff(3.0), nl_only)
+function SoftSphere(;
+                    cutoff=NoCutoff(),
+                    nl_only=false,
+                    force_units=u"kJ * mol^-1 * nm^-1",
+                    energy_units=u"kJ * mol^-1")
+    return SoftSphere{false, typeof(cutoff), typeof(force_units), typeof(energy_units)}(
+        cutoff, nl_only, force_units, energy_units)
+end
 
 @inline @inbounds function force(inter::SoftSphere{S, C},
                                     coord_i,
@@ -27,7 +33,7 @@ SoftSphere(nl_only=false) =
     r2 = sum(abs2, dr)
 
     if !S && iszero(atom_i.σ) || iszero(atom_j.σ)
-        return zero(coord_i)
+        return ustrip.(zero(coord_i)) * inter.force_units
     end
 
     σ = sqrt(atom_i.σ * atom_j.σ)
@@ -41,14 +47,14 @@ SoftSphere(nl_only=false) =
         f = force_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return zero(coord_i)
+        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         f = force_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
         activation_dist = cutoff.activation_dist * σ2
 
-        r2 > sqdist_cutoff && return zero(coord_i)
+        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         if r2 < activation_dist
             f = force_nocutoff(inter, r2, inv(r2), params)
@@ -70,14 +76,14 @@ end
                                     s::Simulation,
                                     i::Integer,
                                     j::Integer) where {S, C}
-    U = eltype(s.coords[i]) # this is not Unitful compatible
-    i == j && return zero(T)
+    zero_energy = ustrip(zero(s.timestep)) * inter.energy_units
+    i == j && return zero_energy
 
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
 
     if !S && iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
-        return zero(U)
+        return zero_energy
     end
 
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
@@ -91,11 +97,11 @@ end
         potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return zero(U)
+        r2 > sqdist_cutoff && return zero_energy
 
         potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > sqdist_cutoff && return zero(U)
+        r2 > sqdist_cutoff && return zero_energy
 
         if r2 < activation_dist
             potential(inter, r2, inv(r2), params)

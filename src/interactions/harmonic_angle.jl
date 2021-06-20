@@ -1,14 +1,28 @@
 """
-    HarmonicAngle(i, j, k, th0, cth)
+    HarmonicAngle(; i, j, k, th0, cth, force_units, energy_units)
 
 A bond angle between three atoms.
 """
-struct HarmonicAngle{D, K} <: SpecificInteraction
+struct HarmonicAngle{D, K, F, E} <: SpecificInteraction
     i::Int
     j::Int
     k::Int
     th0::D
     cth::K
+    force_units::F
+    energy_units::E
+end
+
+function HarmonicAngle(;
+                        i,
+                        j,
+                        k,
+                        th0,
+                        cth,
+                        force_units=u"kJ * mol^-1 * nm^-1",
+                        energy_units=u"kJ * mol^-1")
+    return HarmonicAngle{typeof(th0), typeof(cth), typeof(force_units), typeof(energy_units)}(
+        i, j, k, th0, cth, force_units, energy_units)
 end
 
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0

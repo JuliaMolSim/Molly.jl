@@ -7,7 +7,7 @@ export
 
 # Forces are often expressed per mol but this dimension needs removing for use in the integrator
 function removemolar(x)
-    if dimension(x) == u"𝐋 / (𝐍 * 𝐓^2)"
+    if dimension(x) == u"𝐋 * 𝐍^-1 * 𝐓^-2"
         return x / Unitful.Na
     else
         return x

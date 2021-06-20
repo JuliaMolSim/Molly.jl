@@ -1,25 +1,34 @@
 """
-    Mie(m, n, nl_only)
+    Mie(; m, n, cutoff, nl_only, force_units, energy_units)
 
 The Mie generalized interaction.
-When `m` equals 6 and `n` equals 12 this is equivalent to the Lennard Jones interaction.
+When `m` equals 6 and `n` equals 12 this is equivalent to the Lennard-Jones interaction.
 """
-struct Mie{S, C, T} <: GeneralInteraction
+struct Mie{S, C, T, F, E} <: GeneralInteraction
     m::T
     n::T
     cutoff::C
     nl_only::Bool
+    force_units::F
+    energy_units::E
     mn_fac::T
 end
 
-Mie{S}(m, n, cutoff, nl_only, mn_fac) where S =
-    Mie{S, typeof(cutoff), typeof(m)}(m, n, cutoff, nl_only, mn_fac)
+Mie{S}(m, n, cutoff, nl_only, force_units, energy_units, mn_fac) where S =
+    Mie{S, typeof(cutoff), typeof(m), typeof(force_units), typeof(energy_units)}(
+        m, n, cutoff, nl_only, force_units, energy_units, mn_fac)
 
-Mie(m, n, cutoff, nl_only, mn_fac) =
-    Mie{false, typeof(cutoff), typeof(m)}(m, n, cutoff, nl_only, mn_fac)
-
-Mie(m, n, nl_only=false) = Mie(m, n, ShiftedPotentialCutoff(3.0), nl_only,
-                                convert(typeof(m), (n / (n - m)) * (n / m) ^ (m / (n - m))))
+function Mie(;
+                m,
+                n,
+                cutoff=NoCutoff(),
+                nl_only=false,
+                force_units=u"kJ * mol^-1 * nm^-1",
+                energy_units=u"kJ * mol^-1")
+    mn_fac = convert(typeof(m), (n / (n - m)) * (n / m) ^ (m / (n - m)))
+    return Mie{false, typeof(cutoff), typeof(m), typeof(force_units), typeof(energy_units)}(
+        m, n, cutoff, nl_only, force_units, energy_units, mn_fac)
+end
 
 @fastmath @inbounds function force(inter::Mie{S, C, T},
                                     coord_i,
@@ -32,7 +41,7 @@ Mie(m, n, nl_only=false) = Mie(m, n, ShiftedPotentialCutoff(3.0), nl_only,
     r = √r2
 
     if !S && iszero(atom_i.σ) || iszero(atom_j.σ)
-        return zero(coord_i)
+        return ustrip.(zero(coord_i)) * inter.force_units
     end
 
     σ = sqrt(atom_i.σ * atom_j.σ)
@@ -51,14 +60,14 @@ Mie(m, n, nl_only=false) = Mie(m, n, ShiftedPotentialCutoff(3.0), nl_only,
         f = force_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return zero(coord_i)
+        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         f = force_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
         activation_dist = cutoff.activation_dist * σ2
 
-        r2 > sqdist_cutoff && return zero(coord_i)
+        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         if r2 < activation_dist
             f = force_nocutoff(inter, r2, inv(r2), params)
@@ -78,15 +87,15 @@ end
                                             s::Simulation,
                                             i::Integer,
                                             j::Integer) where {S, C, T}
-    U = eltype(s.coords[i]) # this is not Unitful compatible
-    i == j && return zero(T)
+    zero_energy = ustrip(zero(s.timestep)) * inter.energy_units
+    i == j && return zero_energy
 
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
     r = √r2
 
     if !S && iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
-        return zero(U)
+        return zero_energy
     end
 
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
@@ -104,11 +113,11 @@ end
         potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return zero(U)
+        r2 > sqdist_cutoff && return zero_energy
 
         potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > sqdist_cutoff && return zero(U)
+        r2 > sqdist_cutoff && return zero_energy
 
         if r2 < activation_dist
             potential(inter, r2, inv(r2), params)

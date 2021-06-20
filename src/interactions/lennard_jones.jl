@@ -1,5 +1,5 @@
 @doc raw"""
-    LennardJones(nl_only)
+    LennardJones(; cutoff, nl_only, force_units, energy_units)
 
 The Lennard-Jones 6-12 interaction. The potential is given by
 ```math
@@ -13,19 +13,25 @@ and the force on each atom by
 \end{aligned}
 ```
 """
-struct LennardJones{S, C} <: GeneralInteraction
+struct LennardJones{S, C, F, E} <: GeneralInteraction
     cutoff::C
     nl_only::Bool
+    force_units::F
+    energy_units::E
 end
 
-LennardJones{S}(cutoff, nl_only) where S =
-    LennardJones{S, typeof(cutoff)}(cutoff, nl_only)
+LennardJones{S}(cutoff, nl_only, force_units, energy_units) where S =
+    LennardJones{S, typeof(cutoff), typeof(force_units), typeof(energy_units)}(
+        cutoff, nl_only, force_units, energy_units)
 
-LennardJones(cutoff, nl_only) =
-    LennardJones{false, typeof(cutoff)}(cutoff, nl_only)
-
-LennardJones(nl_only=false) =
-    LennardJones(ShiftedPotentialCutoff(3.0), nl_only)
+function LennardJones(;
+                        cutoff=NoCutoff(),
+                        nl_only=false,
+                        force_units=u"kJ * mol^-1 * nm^-1",
+                        energy_units=u"kJ * mol^-1")
+    return LennardJones{false, typeof(cutoff), typeof(force_units), typeof(energy_units)}(
+        cutoff, nl_only, force_units, energy_units)
+end
 
 @inline @inbounds function force(inter::LennardJones{S, C},
                                     coord_i,
@@ -37,7 +43,7 @@ LennardJones(nl_only=false) =
     r2 = sum(abs2, dr)
 
     if !S && iszero(atom_i.σ) || iszero(atom_j.σ)
-        return zero(coord_i)
+        return ustrip.(zero(coord_i)) * inter.force_units
     end
 
     σ = sqrt(atom_i.σ * atom_j.σ)
@@ -51,14 +57,14 @@ LennardJones(nl_only=false) =
         f = force_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return zero(coord_i)
+        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         f = force_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
         activation_dist = cutoff.activation_dist * σ2
 
-        r2 > sqdist_cutoff && return zero(coord_i)
+        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         if r2 < activation_dist
             f = force_nocutoff(inter, r2, inv(r2), params)
@@ -80,14 +86,14 @@ end
                                             s::Simulation,
                                             i::Integer,
                                             j::Integer) where {S, C}
-    U = eltype(s.coords[i]) # this is not Unitful compatible
-    i == j && return zero(U)
+    zero_energy = ustrip(zero(s.timestep)) * inter.energy_units
+    i == j && return zero_energy
 
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
 
     if !S && iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
-        return zero(U)
+        return zero_energy
     end
 
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
@@ -101,11 +107,11 @@ end
         potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return zero(U)
+        r2 > sqdist_cutoff && return zero_energy
 
         potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > sqdist_cutoff && return zero(U)
+        r2 > sqdist_cutoff && return zero_energy
 
         if r2 < activation_dist
             potential(inter, r2, inv(r2), params)

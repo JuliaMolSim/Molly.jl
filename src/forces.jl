@@ -97,7 +97,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
         forces += ustrip.(Array(sparse_vec))
     end
 
-    return (forces)u"kJ / (mol * nm)" ./ mass.(s.atoms)
+    return forces * s.force_units ./ mass.(s.atoms)
 end
 
 function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)

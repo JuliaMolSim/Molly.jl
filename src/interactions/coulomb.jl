@@ -1,25 +1,25 @@
 """
-    Coulomb(nl_only)
+    Coulomb(; coulomb_const, cutoff, nl_only, force_units, energy_units)
 
 The Coulomb electrostatic interaction.
 """
-struct Coulomb{C, T} <: GeneralInteraction
+struct Coulomb{C, T, F, E} <: GeneralInteraction
+    coulomb_const::T
     cutoff::C
     nl_only::Bool
-    coulomb_const::T
+    force_units::F
+    energy_units::E
 end
 
-Coulomb(cutoff, nl_only) = Coulomb(
-    cutoff,
-    nl_only,
-    138.935458 / 70.0 # Treat ϵr as 70 for now
-)
-
-Coulomb(nl_only=false) = Coulomb(
-    NoCutoff(),
-    nl_only,
-    138.935458 / 70.0 # Treat ϵr as 70 for now
-)
+function Coulomb(;
+                    coulomb_const=(138.935458 / 70.0)u"kJ * mol^-1 * nm * q^-2", # Treat ϵr as 70 for now
+                    cutoff=NoCutoff(),
+                    nl_only=false,
+                    force_units=u"kJ * mol^-1 * nm^-1",
+                    energy_units=u"kJ * mol^-1")
+    return Coulomb{typeof(cutoff), typeof(coulomb_const), typeof(force_units), typeof(energy_units)}(
+        coulomb_const, cutoff, nl_only, force_units, energy_units)
+end
 
 @inline @inbounds function force(inter::Coulomb{C},
                                     coord_i,
@@ -40,14 +40,14 @@ Coulomb(nl_only=false) = Coulomb(
         f = force_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff
-        r2 > sqdist_cutoff && return zero(coord_i)
+        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         f = force_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         sqdist_cutoff = cutoff.sqdist_cutoff
         activation_dist = cutoff.activation_dist
 
-        r2 > sqdist_cutoff && return zero(coord_i)
+        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         if r2 < activation_dist
             f = force_nocutoff(inter, r2, inv(r2), params)
@@ -67,8 +67,8 @@ end
                                     s::Simulation,
                                     i::Integer,
                                     j::Integer) where C
-    U = eltype(s.coords[i]) # this is not Unitful compatible
-    i == j && return zero(U)
+    zero_energy = ustrip(zero(s.timestep)) * inter.energy_units
+    i == j && return zero_energy
 
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
@@ -83,11 +83,11 @@ end
         potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return zero(U)
+        r2 > sqdist_cutoff && return zero_energy
 
         potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return zero(U)
+        r2 > cutoff.sqdist_cutoff && return zero_energy
 
         if r2 < activation_dist
             potential(inter, r2, inv(r2), params)

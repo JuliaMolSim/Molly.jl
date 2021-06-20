@@ -1,9 +1,9 @@
 """
-    Torsion(i, j, k, l, f1, f2, f3, f4)
+    Torsion(; i, j, k, l, f1, f2, f3, f4, force_units, energy_units)
 
 A dihedral torsion angle between four atoms.
 """
-struct Torsion{T} <: SpecificInteraction
+struct Torsion{T, F, E} <: SpecificInteraction
     i::Int
     j::Int
     k::Int
@@ -12,6 +12,23 @@ struct Torsion{T} <: SpecificInteraction
     f2::T
     f3::T
     f4::T
+    force_units::F
+    energy_units::E
+end
+
+function Torsion(;
+                    i,
+                    j,
+                    k,
+                    l,
+                    f1,
+                    f2,
+                    f3,
+                    f4,
+                    force_units=u"kJ * mol^-1 * nm^-1",
+                    energy_units=u"kJ * mol^-1")
+    return Torsion{typeof(f1), typeof(force_units), typeof(energy_units)}(
+        i, j, k, l, f1, f2, f3, f4, force_units, energy_units)
 end
 
 @inline @inbounds function force(d::Torsion,
