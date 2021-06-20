@@ -14,6 +14,8 @@ function removemolar(x)
     end
 end
 
+removemolarvec(v) = removemolar.(v)
+
 """
     VelocityVerlet()
 
@@ -80,12 +82,12 @@ function simulate!(s::Simulation{true},
     atoms_js = view(s.atoms, js)
     find_neighbors!(s, s.neighbor_finder, 0)
     if isa(s.coords, CuArray)
-        self_interactions = CuArray(Diagonal(ones(typeof(s.timestep), n_atoms)))
+        self_interactions = CuArray(Diagonal(ones(typeof(ustrip(s.timestep)), n_atoms)))
     else
-        self_interactions = Array(Diagonal(ones(typeof(s.timestep), n_atoms)))
+        self_interactions = Array(Diagonal(ones(typeof(ustrip(s.timestep)), n_atoms)))
     end
     accels_t = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
-    accels_t_dt = zero(s.coords)
+    accels_t_dt = zero(accels_t)
 
     for step_n in 1:n_steps
         for logger in values(s.loggers)
@@ -93,10 +95,10 @@ function simulate!(s::Simulation{true},
         end
 
         # In-place updates here required to work with views but are not Zygote-compatible
-        s.coords .+= s.velocities .* s.timestep .+ (accels_t .* s.timestep ^ 2) ./ 2
+        s.coords .+= s.velocities .* s.timestep .+ (removemolarvec.(accels_t) .* s.timestep ^ 2) ./ 2
         s.coords .= adjust_bounds_vec.(s.coords, s.box_size)
         accels_t_dt = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
-        s.velocities .+= (accels_t .+ accels_t_dt) .* s.timestep / 2
+        s.velocities .+= removemolarvec.(accels_t .+ accels_t_dt) .* s.timestep / 2
 
         s.velocities .= apply_thermostat!(s.velocities, s, s.thermostat)
         find_neighbors!(s, s.neighbor_finder, 0)
@@ -134,7 +136,7 @@ function simulate!(s::Simulation,
         # Update coordinates
         coords_copy = s.coords
         for i in 1:length(s.coords)
-            s.coords[i] = s.coords[i] + vector(coords_last[i], s.coords[i], s.box_size) + accels_t[i] * s.timestep ^ 2
+            s.coords[i] = s.coords[i] + vector(coords_last[i], s.coords[i], s.box_size) + removemolar.(accels_t[i]) * s.timestep ^ 2
             s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
         end
         coords_last = coords_copy

@@ -25,9 +25,9 @@ function force end
 # Allow 2D broadcasting whilst eliminating the diagonal corresponding to self interaction
 @inline @inbounds function force(inter, coord_i, coord_j, atom_i, atom_j, box_size, self_interaction)
     if isone(self_interaction)
-        return zero(coord_i)
+        return ustrip.(zero(coord_i))
     else
-        return force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
+        return ustrip.(force(inter, coord_i, coord_j, atom_i, atom_j, box_size))
     end
 end
 
@@ -102,7 +102,7 @@ end
 
 function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
     n_atoms = length(coords)
-    forces = zero(coords)
+    forces = ustrip.(zero(coords))
 
     for inter in values(s.general_inters)
         # Currently the neighbor list is not used for this implementation
@@ -117,10 +117,10 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
         ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
         sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
         # Move back to GPU if required
-        forces += convert(typeof(coords), Array(sparse_vec))
+        forces += convert(typeof(forces), ustrip.(Array(sparse_vec)))
     end
 
-    return forces ./ mass.(s.atoms)
+    return forces * s.force_units ./ mass.(s.atoms)
 end
 
 include("interactions/lennard_jones.jl")
