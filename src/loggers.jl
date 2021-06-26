@@ -20,7 +20,7 @@ end
 
 TemperatureLogger(T::Type, n_steps::Integer) = TemperatureLogger(n_steps, T[])
 
-TemperatureLogger(n_steps::Integer) = TemperatureLogger(DefaultFloat, n_steps)
+TemperatureLogger(n_steps::Integer) = TemperatureLogger(typeof(one(DefaultFloat)u"K"), n_steps)
 
 function Base.show(io::IO, tl::TemperatureLogger)
     print(io, "TemperatureLogger{", eltype(tl.temperatures), "} with n_steps ",
@@ -56,7 +56,7 @@ function CoordinateLogger(T, n_steps::Integer; dims::Integer=3)
 end
 
 function CoordinateLogger(n_steps::Integer; dims::Integer=3)
-    return CoordinateLogger(DefaultFloat, n_steps; dims=dims)
+    return CoordinateLogger(typeof(one(DefaultFloat)u"nm"), n_steps; dims=dims)
 end
 
 function Base.show(io::IO, cl::CoordinateLogger)
@@ -84,7 +84,7 @@ end
 EnergyLogger(T::Type, n_steps::Integer) = EnergyLogger(n_steps, T[])
 
 function EnergyLogger(n_steps::Integer)
-    return EnergyLogger(DefaultFloat, n_steps)
+    return EnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
 end
 
 function Base.show(io::IO, el::EnergyLogger)
@@ -128,7 +128,12 @@ function append_model(logger::StructureWriter, s::Simulation)
     open(logger.filepath, "a") do output
         println(output, "MODEL     ", lpad(logger.structure_n, 4))
         for (i, coord) in enumerate(s.coords)
-            at_rec = atomrecord(s.atoms[i], i, coord)
+            if unit(first(coord)) == NoUnits
+                coord_convert = 10 .* coord
+            else
+                coord_convert = ustrip.(uconvert.(u"Å", coord))
+            end
+            at_rec = atomrecord(s.atoms[i], i, coord_convert)
             println(output, pdbline(at_rec))
         end
         println(output, "ENDMDL")
@@ -136,7 +141,7 @@ function append_model(logger::StructureWriter, s::Simulation)
 end
 
 atomrecord(at::Atom   , i, coord) = AtomRecord(false, i, at.name, ' ', at.resname, "A", at.resnum,
-                                                ' ', 10 .* coord, 1.0, 0.0, "  ", "  ")
+                                                ' ', coord, 1.0, 0.0, "  ", "  ")
 
 atomrecord(at::AtomMin, i, coord) = AtomRecord(false, i, "??"   , ' ', "???"     , "A", 0        ,
-                                                ' ', 10 .* coord, 1.0, 0.0, "  ", "  ")
+                                                ' ', coord, 1.0, 0.0, "  ", "  ")
