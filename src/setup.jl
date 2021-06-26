@@ -55,13 +55,13 @@ end
 
 """
     placeatoms(n_atoms, box_size, min_dist)
-    placeatoms(T, n_atoms, box_size, min_dist)
 
 Obtain `n_atoms` 3D coordinates in a cube of length `box_size` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
 """
-function placeatoms(T::Type, n_atoms::Integer, box_size, min_dist)
+function placeatoms(n_atoms::Integer, box_size, min_dist)
     min_dist_sq = min_dist ^ 2
+    T = typeof(ustrip(box_size))
     coords = SArray[]
     while length(coords) < n_atoms
         new_coord = SVector{3}(rand(T, 3)) .* box_size
@@ -77,10 +77,6 @@ function placeatoms(T::Type, n_atoms::Integer, box_size, min_dist)
         end
     end
     return [coords...]
-end
-
-function placeatoms(n_atoms::Integer, box_size, min_dist)
-    return placeatoms(DefaultFloat, n_atoms, box_size, min_dist)
 end
 
 """

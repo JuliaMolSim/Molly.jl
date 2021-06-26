@@ -47,32 +47,23 @@ end
 
 """
     velocity(mass, temperature; dims=3)
-    velocity(T, mass, temperature; dims=3)
 
 Generate a random velocity from the Maxwell-Boltzmann distribution.
 """
-function velocity(T::Type, mass, temp; dims::Integer=3)
-    return SVector([maxwellboltzmann(T, mass, temp) for i in 1:dims]...)
-end
-
 function velocity(mass, temp; dims::Integer=3)
-    return velocity(DefaultFloat, mass, temp; dims=dims)
+    return SVector([maxwellboltzmann(mass, temp) for i in 1:dims]...)
 end
 
 """
     maxwellboltzmann(mass, temperature)
-    maxwellboltzmann(T, mass, temperature)
 
-Draw from the Maxwell-Boltzmann distribution.
+Draw a speed along one dimension in accordance with the Maxwell-Boltzmann distribution.
 """
-function maxwellboltzmann(T::Type, mass, temp)
+function maxwellboltzmann(mass, temp)
+    T = typeof(ustrip(temp))
     k = unit(temp) == NoUnits ? one(T) : uconvert(u"u * nm^2 * ps^-2 * K^-1", T(Unitful.k))
     σ = sqrt(k * temp / mass)
     return rand(Normal(zero(T), T(ustrip(σ)))) * unit(σ)
-end
-
-function maxwellboltzmann(mass, temp)
-    return maxwellboltzmann(DefaultFloat, mass, temp)
 end
 
 """

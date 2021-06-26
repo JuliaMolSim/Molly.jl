@@ -227,7 +227,7 @@ end
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
         coords=coords,
-        velocities=[velocity(Float32, a.mass, temp) .* 0.01f0 for a in atoms],
+        velocities=[velocity(a.mass, Float32(temp)) .* 0.01f0 for a in atoms],
         temperature=Float32(temp),
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.2f0),

@@ -81,7 +81,7 @@ box_size = 2.0f0
 temp = 100.0f0
 atoms = cu([AtomMin(mass=mass, σ=0.3f0, ϵ=0.2f0) for i in 1:n_atoms])
 coords = cu([box_size .* SVector{3}(rand(Float32, 3)) for i in 1:n_atoms])
-velocities = cu([velocity(Float32, mass, temp) for i in 1:n_atoms])
+velocities = cu([velocity(mass, temp) for i in 1:n_atoms])
 
 s = Simulation(
     simulator=VelocityVerlet(),
