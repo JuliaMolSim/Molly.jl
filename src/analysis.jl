@@ -39,7 +39,7 @@ function visualize end
 Get the pairwise vector displacements of a set of coordinates, accounting for
 the periodic boundary conditions.
 """
-function displacements(coords, box_size::Real)
+function displacements(coords, box_size)
     n_atoms = length(coords)
     coords_rep = repeat(reshape(coords, n_atoms, 1), 1, n_atoms)
     diffs = vector.(coords_rep, permutedims(coords_rep, (2, 1)), box_size)
@@ -52,7 +52,7 @@ end
 Get the pairwise distances of a set of coordinates, accounting for the periodic
 boundary conditions.
 """
-distances(coords, box_size::Real) = norm.(displacements(coords, box_size))
+distances(coords, box_size) = norm.(displacements(coords, box_size))
 
 """
     rdf(coords, box_size; npoints=200)
