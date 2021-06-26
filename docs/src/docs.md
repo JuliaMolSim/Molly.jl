@@ -173,7 +173,7 @@ s = Simulation(
     coords=coords,
     velocities=velocities,
     box_size=1.0f0,
-    loggers=Dict("coords" => CoordinateLogger(Float32, 10, dims=2)),
+    loggers=Dict("coords" => CoordinateLogger(Float32, 10; dims=2)),
     timestep=0.002f0,
     n_steps=2000
 )
@@ -300,7 +300,7 @@ n_people = 500
 n_starting = 2
 atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
 coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
-velocities = [velocity(1.0, temp, dims=2) for i in 1:n_people]
+velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
 general_inters = (LennardJones = LennardJones(true), SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
 
 s = Simulation(
@@ -313,7 +313,7 @@ s = Simulation(
     box_size=box_size,
     neighbor_finder=DistanceNeighborFinder(trues(n_people, n_people), 10, 2.0),
     thermostat=AndersenThermostat(5.0),
-    loggers=Dict("coords" => CoordinateLogger(10, dims=2),
+    loggers=Dict("coords" => CoordinateLogger(10; dims=2),
                     "SIR" => SIRLogger(10, [])),
     timestep=timestep,
     n_steps=n_steps

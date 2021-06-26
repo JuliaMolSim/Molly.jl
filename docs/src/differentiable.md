@@ -174,11 +174,11 @@ coords = [
         SVector(0.8, 2.25, 1.5), SVector(1.5, 2.20, 1.5), SVector(2.3, 2.25, 1.5)]
 n_atoms = length(coords)
 n_dims = length(first(coords))
-velocities = [velocity(mass, temp, dims=n_dims) for i in coords]
+velocities = [velocity(mass, temp; dims=n_dims) for i in coords]
 
 function loss(θ)
     atoms = [Atom("", "", 0, "", 0.0, mass, 0.0, 0.0) for i in 1:n_atoms]
-    loggers = Dict("coords" => CoordinateLogger(2, dims=n_dims))
+    loggers = Dict("coords" => CoordinateLogger(2; dims=n_dims))
     specific_inter_lists = ([
             HarmonicBond(1, 2, 0.7, 100.0), HarmonicBond(2, 3, 0.7, 100.0),
             HarmonicBond(4, 5, 0.7, 100.0), HarmonicBond(5, 6, 0.7, 100.0)], [
@@ -222,7 +222,7 @@ function train()
         coords = [
             SVector(0.8, 0.75, 1.5), SVector(1.5, 0.74, 1.5), SVector(2.3, 0.75, 1.5),
             SVector(0.8, 2.25, 1.5), SVector(1.5, 2.24, 1.5), SVector(2.3, 2.25, 1.5)]
-        velocities = [velocity(mass, temp, dims=n_dims) for i in 1:n_atoms]
+        velocities = [velocity(mass, temp; dims=n_dims) for i in 1:n_atoms]
         grad = gradient(loss, θlearn)[1]
         printfmt("Grad {:6.3f}\n", round(grad, digits=2))
         θlearn -= grad * 5e-3
@@ -266,7 +266,7 @@ for θ in θs
     coords = [
         SVector(0.8, 0.75, 1.5), SVector(1.5, 0.74, 1.5), SVector(2.3, 0.75, 1.5),
         SVector(0.8, 2.25, 1.5), SVector(1.5, 2.24, 1.5), SVector(2.3, 2.25, 1.5)]
-    velocities = [velocity(mass, temp, dims=n_dims) for i in 1:n_atoms]
+    velocities = [velocity(mass, temp; dims=n_dims) for i in 1:n_atoms]
     push!(grads, gradient(loss, deg2rad(θ))[1])
 end
 ```
@@ -325,7 +325,7 @@ velocities = zero(coords)
 
 function loss()
     atoms = [Atom("", "", 0, "", 0.0f0, mass, 0.0f0, 0.0f0) for i in 1:n_atoms]
-    loggers = Dict("coords" => CoordinateLogger(10, dims=n_dims))
+    loggers = Dict("coords" => CoordinateLogger(10; dims=n_dims))
     specific_inter_lists = ([NNBond(1, 3)],)
 
     s = Simulation(

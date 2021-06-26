@@ -87,7 +87,7 @@ n_atoms = 200
 
 atoms = [BondableAtom(1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = [box_size .* rand(SVector{2}) for i in 1:n_atoms]
-velocities = [velocity(1.0, temperature, dims=2) for i in 1:n_atoms]
+velocities = [velocity(1.0, temperature; dims=2) for i in 1:n_atoms]
 general_inters = (SoftSphere(true), BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0))
 
 s = Simulation(
@@ -100,7 +100,7 @@ s = Simulation(
     box_size=box_size,
     neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0),
     thermostat=AndersenThermostat(5.0),
-    loggers=Dict("coords" => CoordinateLogger(20, dims=2),
+    loggers=Dict("coords" => CoordinateLogger(20; dims=2),
                     "bonds" => BondLogger(20, [])),
     timestep=timestep,
     n_steps=n_steps
