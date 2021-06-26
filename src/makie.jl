@@ -32,13 +32,13 @@ function visualize(coord_logger,
         if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < (box_size / 2)
             if dims == 3
                 push!(connection_nodes, Node(PointType.(
-                        [coords_start[i][1], coords_start[j][1]],
-                        [coords_start[i][2], coords_start[j][2]],
-                        [coords_start[i][3], coords_start[j][3]])))
+                        ustrip.([coords_start[i][1], coords_start[j][1]]),
+                        ustrip.([coords_start[i][2], coords_start[j][2]]),
+                        ustrip.([coords_start[i][3], coords_start[j][3]]))))
             elseif dims == 2
                 push!(connection_nodes, Node(PointType.(
-                        [coords_start[i][1], coords_start[j][1]],
-                        [coords_start[i][2], coords_start[j][2]])))
+                        ustrip.([coords_start[i][1], coords_start[j][1]]),
+                        ustrip.([coords_start[i][2], coords_start[j][2]]))))
             end
         else
             if dims == 3
@@ -56,13 +56,13 @@ function visualize(coord_logger,
                 transparency=transparency)
     end
 
-    positions = Node(PointType.(coords_start))
+    positions = Node(PointType.(ustrip.(coords_start)))
     scatter!(scene, positions; color=color, markersize=markersize,
                 transparency=transparency, kwargs...)
 
     trail_positions = []
     for trail_i in 1:trails
-        push!(trail_positions, Node(PointType.(coords_start)))
+        push!(trail_positions, Node(PointType.(ustrip.(coords_start))))
         col = parse.(Colorant, color)
         alpha = 1 - (trail_i / (trails + 1))
         alpha_col = RGBA.(red.(col), green.(col), blue.(col), alpha)
@@ -70,9 +70,9 @@ function visualize(coord_logger,
                     markersize=markersize, transparency=transparency, kwargs...)
     end
 
-    xlims!(scene, 0.0, box_size)
-    ylims!(scene, 0.0, box_size)
-    zlims!(scene, 0.0, box_size)
+    xlims!(scene, 0.0, ustrip(box_size))
+    ylims!(scene, 0.0, ustrip(box_size))
+    zlims!(scene, 0.0, ustrip(box_size))
 
     Makie.record(scene, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
         coords = coord_logger.coords[frame_i]
@@ -81,13 +81,13 @@ function visualize(coord_logger,
             if connection_frames[frame_i][ci] && norm(coords[i] - coords[j]) < (box_size / 2)
                 if dims == 3
                     connection_nodes[ci][] = PointType.(
-                                [coords[i][1], coords[j][1]],
-                                [coords[i][2], coords[j][2]],
-                                [coords[i][3], coords[j][3]])
+                                ustrip.([coords[i][1], coords[j][1]]),
+                                ustrip.([coords[i][2], coords[j][2]]),
+                                ustrip.([coords[i][3], coords[j][3]]))
                 elseif dims == 2
                     connection_nodes[ci][] = PointType.(
-                                [coords[i][1], coords[j][1]],
-                                [coords[i][2], coords[j][2]])
+                                ustrip.([coords[i][1], coords[j][1]]),
+                                ustrip.([coords[i][2], coords[j][2]]))
                 end
             else
                 if dims == 3
@@ -99,9 +99,9 @@ function visualize(coord_logger,
             end
         end
 
-        positions[] = PointType.(coords)
+        positions[] = PointType.(ustrip.(coords))
         for (trail_i, trail_position) in enumerate(trail_positions)
-            trail_position[] = PointType.(coord_logger.coords[max(frame_i - trail_i, 1)])
+            trail_position[] = PointType.(ustrip.(coord_logger.coords[max(frame_i - trail_i, 1)]))
         end
     end
 end
