@@ -86,7 +86,8 @@ function kinetic_energy(s::Simulation)
     ke = sum(i -> s.atoms[i].mass * dot(s.velocities[i], s.velocities[i]) / 2, axes(s.atoms, 1))
     # Convert energy to per mol if required
     if dimension(s.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        return uconvert(s.energy_units, ke * Unitful.Na)
+        T = typeof(ustrip(ke))
+        return uconvert(s.energy_units, ke * T(Unitful.Na))
     else
         return uconvert(s.energy_units, ke)
     end
