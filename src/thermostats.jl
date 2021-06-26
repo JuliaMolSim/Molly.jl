@@ -56,7 +56,7 @@ function velocity(T::Type, mass, temp; dims::Integer=3)
 end
 
 function velocity(mass, temp; dims::Integer=3)
-    return velocity(DefaultFloat, mass, temp, dims=dims)
+    return velocity(DefaultFloat, mass, temp; dims=dims)
 end
 
 """

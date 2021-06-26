@@ -56,7 +56,7 @@ function CoordinateLogger(T, n_steps::Integer; dims::Integer=3)
 end
 
 function CoordinateLogger(n_steps::Integer; dims::Integer=3)
-    return CoordinateLogger(DefaultFloat, n_steps, dims=dims)
+    return CoordinateLogger(DefaultFloat, n_steps; dims=dims)
 end
 
 function Base.show(io::IO, cl::CoordinateLogger)

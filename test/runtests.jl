@@ -67,13 +67,13 @@ box_size = 2.0
                     mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
         general_inters=(LennardJones(true),),
         coords=[box_size .* rand(SVector{2}) for i in 1:n_atoms],
-        velocities=[velocity(10.0, temp, dims=2) .* 0.01 for i in 1:n_atoms],
+        velocities=[velocity(10.0, temp; dims=2) .* 0.01 for i in 1:n_atoms],
         temperature=temp,
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0),
         thermostat=AndersenThermostat(10.0),
         loggers=Dict("temp" => TemperatureLogger(100),
-                     "coords" => CoordinateLogger(100, dims=2)),
+                     "coords" => CoordinateLogger(100; dims=2)),
         timestep=timestep,
         n_steps=n_steps
     )
@@ -451,7 +451,7 @@ end
     n_starting = 2
     atoms = [Person(i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
     coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
-    velocities = [velocity(1.0, temp, dims=2) for i in 1:n_people]
+    velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
     general_inters = (LennardJones = LennardJones(true),
                             SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
 
@@ -465,7 +465,7 @@ end
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(trues(n_people, n_people), 10, 2.0),
         thermostat=AndersenThermostat(5.0),
-        loggers=Dict("coords" => CoordinateLogger(10, dims=2),
+        loggers=Dict("coords" => CoordinateLogger(10; dims=2),
                         "SIR" => SIRLogger(10, [])),
         timestep=timestep,
         n_steps=n_steps
