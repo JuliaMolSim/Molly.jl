@@ -66,7 +66,9 @@ end
 Draw from the Maxwell-Boltzmann distribution.
 """
 function maxwellboltzmann(T::Type, mass, temp)
-    return rand(Normal(zero(T), sqrt(temp / mass)))
+    k = unit(temp) == NoUnits ? one(T) : uconvert(u"u * nm^2 * ps^-2 * K^-1", T(Unitful.k))
+    σ = sqrt(k * temp / mass)
+    return rand(Normal(zero(T), T(ustrip(σ)))) * unit(σ)
 end
 
 function maxwellboltzmann(mass, temp)
@@ -81,12 +83,15 @@ Calculate the temperature of a system from the kinetic energy of the atoms.
 function temperature(s::Simulation{false})
     ke = sum([a.mass * dot(s.velocities[i], s.velocities[i]) for (i, a) in enumerate(s.atoms)]) / 2
     df = 3 * length(s.coords) - 3
-    return 2 * ke / df
+    T = typeof(ustrip(ke))
+    k = unit(ke) == NoUnits ? one(T) : uconvert(u"K^-1" * unit(ke), T(Unitful.k))
+    return 2 * ke / (df * k)
 end
 
 function temperature(s::Simulation{true})
-    masses = mass.(s.atoms)
-    ke = sum(masses .* sum.(abs2, s.velocities)) / 2
+    ke = sum(mass.(s.atoms) .* sum.(abs2, s.velocities)) / 2
     df = 3 * length(s.coords) - 3
-    return 2 * ke / df
+    T = typeof(ustrip(ke))
+    k = unit(ke) == NoUnits ? one(T) : uconvert(u"K^-1" * unit(ke), T(Unitful.k))
+    return 2 * ke / (df * k)
 end
