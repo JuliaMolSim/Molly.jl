@@ -70,9 +70,11 @@ function visualize(coord_logger,
                     markersize=markersize, transparency=transparency, kwargs...)
     end
 
-    xlims!(scene, 0.0, ustrip(box_size))
-    ylims!(scene, 0.0, ustrip(box_size))
-    zlims!(scene, 0.0, ustrip(box_size))
+    dist_unit = unit(first(first(coords_start)))
+    box_size_conv = ustrip(dist_unit, box_size)
+    xlims!(scene, 0.0, box_size_conv)
+    ylims!(scene, 0.0, box_size_conv)
+    zlims!(scene, 0.0, box_size_conv)
 
     Makie.record(scene, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
         coords = coord_logger.coords[frame_i]
