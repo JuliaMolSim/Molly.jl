@@ -101,17 +101,20 @@ function find_neighbors!(s::Simulation,
     neighbors = s.neighbors
     empty!(neighbors)
 
-    bv = SVector{3}(s.box_size, s.box_size, s.box_size)
-    btree = BallTree(s.coords, PeriodicEuclidean(bv))
+    dist_unit = unit(first(first(s.coords)))
+    box_size = ustrip(dist_unit, s.box_size)
+    bv = SVector{3}(box_size, box_size, box_size)
+    btree = BallTree(ustrip.(s.coords), PeriodicEuclidean(bv))
+    dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
 
     if parallel && nthreads() > 1
         nl_threads = [Tuple{Int, Int}[] for i in 1:nthreads()]
 
         @threads for i in 1:length(s.coords)
             nl = nl_threads[threadid()]
-            ci = s.coords[i]
+            ci = ustrip.(s.coords[i])
             nbi = nf.nb_matrix[:, i]
-            idxs = inrange(btree, ci, nf.dist_cutoff, true)
+            idxs = inrange(btree, ci, dist_cutoff, true)
             for j in idxs
                 if nbi[j] && i > j
                     push!(nl, (i, j))
@@ -124,9 +127,9 @@ function find_neighbors!(s::Simulation,
         end
     else
         for i in 1:length(s.coords)
-            ci = s.coords[i]
+            ci = ustrip.(s.coords[i])
             nbi = nf.nb_matrix[:, i]
-            idxs = inrange(btree, ci, nf.dist_cutoff, true)
+            idxs = inrange(btree, ci, dist_cutoff, true)
             for j in idxs
                 if nbi[j] && i > j
                     push!(neighbors, (i, j))
