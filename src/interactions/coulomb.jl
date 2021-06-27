@@ -39,17 +39,13 @@ end
     if cutoff_points(C) == 0
         f = force_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        sqdist_cutoff = cutoff.sqdist_cutoff
-        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
 
         f = force_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        sqdist_cutoff = cutoff.sqdist_cutoff
-        activation_dist = cutoff.activation_dist
+        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
 
-        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
-
-        if r2 < activation_dist
+        if r2 < cutoff.activation_dist
             f = force_nocutoff(inter, r2, inv(r2), params)
         else
             f = force_cutoff(cutoff, r2, inter, params)
@@ -79,14 +75,13 @@ end
     if cutoff_points(C) == 0
         potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return ustrip(zero(s.timestep)) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(s.timestep)) * inter.energy_unit
 
         potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         r2 > cutoff.sqdist_cutoff && return ustrip(zero(s.timestep)) * inter.energy_unit
 
-        if r2 < activation_dist
+        if r2 < cutoff.activation_dist
             potential(inter, r2, inv(r2), params)
         else
             potential_cutoff(cutoff, r2, inter, params)

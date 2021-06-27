@@ -27,7 +27,7 @@ struct ShiftedPotentialCutoff{F, D, S, I} <: AbstractCutoff
 end
 
 function ShiftedPotentialCutoff(; cutoff_dist, max_force=nothing)
-    return ShiftedPotentialCutoff(max_force, cutoff_dist, cutoff_dist ^ 2, inv(cutoff_dist))
+    return ShiftedPotentialCutoff(max_force, cutoff_dist, cutoff_dist ^ 2, inv(cutoff_dist ^ 2))
 end
 
 cutoff_points(::Type{ShiftedPotentialCutoff{F, D, S, I}}) where {F, D, S, I} = 1
@@ -45,7 +45,7 @@ struct ShiftedForceCutoff{F, D, S, I} <: AbstractCutoff
 end
 
 function ShiftedForceCutoff(; cutoff_dist, max_force=nothing)
-    return ShiftedForceCutoff(max_force, cutoff_dist, cutoff_dist ^ 2, inv(cutoff_dist))
+    return ShiftedForceCutoff(max_force, cutoff_dist, cutoff_dist ^ 2, inv(cutoff_dist ^ 2))
 end
 
 cutoff_points(::Type{ShiftedForceCutoff{F, D, S, I}}) where {F, D, S, I} = 1
@@ -99,7 +99,7 @@ end
     invr2 = inv(r2)
     r = √r2
     rc = cutoff.cutoff_dist
-    fc = force_nocutoff(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
+    fc = force_nocutoff(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params) * r
 
     potential(inter, r2, invr2, params) - (r - rc) * fc -
         potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
