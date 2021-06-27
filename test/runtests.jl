@@ -81,6 +81,13 @@ box_size = 2.0
     show(devnull, s)
 
     @time simulate!(s, parallel=false)
+
+    final_coords = last(s.loggers["coords"].coords)
+    @test minimum(minimum.(final_coords)) > 0.0
+    @test maximum(maximum.(final_coords)) < box_size
+    displacements(final_coords, box_size)
+    distances(final_coords, box_size)
+    rdf(final_coords, box_size)
 end
 
 @testset "Lennard-Jones gas" begin
