@@ -183,15 +183,13 @@ function readinputs(T::Type,
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
             bondtype = bondtypes["$(atoms[i].attype)/$(atoms[j].attype)"]
-            push!(bonds, HarmonicBond(i=i, j=j, b0=bondtype.b0, kb=bondtype.kb,
-                                        force_units=force_units, energy_units=energy_units))
+            push!(bonds, HarmonicBond(i=i, j=j, b0=bondtype.b0, kb=bondtype.kb))
         elseif current_field == "pairs"
             push!(pairs, (parse(Int, c[1]), parse(Int, c[2])))
         elseif current_field == "angles"
             i, j, k = parse.(Int, c[1:3])
             angletype = angletypes["$(atoms[i].attype)/$(atoms[j].attype)/$(atoms[k].attype)"]
-            push!(angles, HarmonicAngle(i=i, j=j, k=k, th0=angletype.th0, cth=angletype.cth,
-                                        force_units=force_units, energy_units=energy_units))
+            push!(angles, HarmonicAngle(i=i, j=j, k=k, th0=angletype.th0, cth=angletype.cth))
         elseif current_field == "dihedrals"
             i, j, k, l = parse.(Int, c[1:4])
             push!(possible_torsions, (i, j, k, l))
@@ -207,8 +205,7 @@ function readinputs(T::Type,
         if haskey(torsiontypes, desired_key)
             d = torsiontypes[desired_key]
             push!(torsions, Torsion(i=inds[1], j=inds[2], k=inds[3], l=inds[4],
-                                    f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4,
-                                    force_units=force_units, energy_units=energy_units))
+                                    f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
         else
             best_score = 0
             best_key = ""
@@ -235,8 +232,7 @@ function readinputs(T::Type,
             if best_key != ""
                 d = torsiontypes[best_key]
                 push!(torsions, Torsion(i=inds[1], j=inds[2], k=inds[3], l=inds[4],
-                                        f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4,
-                                        force_units=force_units, energy_units=energy_units))
+                                        f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
             end
         end
     end
@@ -268,14 +264,11 @@ function readinputs(T::Type,
             # Add O-H bonds and H-O-H angle in water
             if atname == "OW"
                 bondtype = bondtypes["OW/HW"]
-                push!(bonds, HarmonicBond(i=i, j=(i + 1), b0=bondtype.b0, kb=bondtype.kb,
-                                            force_units=force_units, energy_units=energy_units))
-                push!(bonds, HarmonicBond(i=i, j=(i + 2), b0=bondtype.b0, kb=bondtype.kb,
-                                            force_units=force_units, energy_units=energy_units))
+                push!(bonds, HarmonicBond(i=i, j=(i + 1), b0=bondtype.b0, kb=bondtype.kb))
+                push!(bonds, HarmonicBond(i=i, j=(i + 2), b0=bondtype.b0, kb=bondtype.kb))
                 angletype = angletypes["HW/OW/HW"]
                 push!(angles, HarmonicAngle(i=(i + 1), j=i, k=(i + 2), th0=angletype.th0,
-                                            cth=angletype.cth, force_units=force_units,
-                                            energy_units=energy_units))
+                                            cth=angletype.cth))
             end
         end
     end

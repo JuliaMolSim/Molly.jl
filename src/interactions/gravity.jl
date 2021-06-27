@@ -1,23 +1,14 @@
 """
-    Gravity(; G, nl_only, force_units, energy_units)
+    Gravity(; G, nl_only)
 
 The gravitational interaction.
 """
-struct Gravity{T, F, E} <: GeneralInteraction
+struct Gravity{T} <: GeneralInteraction
     G::T
     nl_only::Bool
-    force_units::F
-    energy_units::E
 end
 
-function Gravity(;
-                    G=Unitful.G,
-                    nl_only=false,
-                    force_units=u"kg * m * s^-2",
-                    energy_units=u"kg * m^2 * s^-2")
-    return Gravity{typeof(G), typeof(force_units), typeof(energy_units)}(
-        G, nl_only, force_units, energy_units)
-end
+Gravity(; G=Unitful.G, nl_only=false) = Gravity{typeof(G)}(G, nl_only)
 
 @inline @inbounds function force(inter::Gravity,
                                     coord_i,

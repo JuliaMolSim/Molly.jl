@@ -1,27 +1,16 @@
 """
-    HarmonicBond(; i, j, b0, kb, force_units, energy_units)
+    HarmonicBond(; i, j, b0, kb)
 
 A harmonic bond between two atoms.
 """
-struct HarmonicBond{D, K, F, E} <: SpecificInteraction
+struct HarmonicBond{D, K} <: SpecificInteraction
     i::Int
     j::Int
     b0::D
     kb::K
-    force_units::F
-    energy_units::E
 end
 
-function HarmonicBond(;
-                        i,
-                        j,
-                        b0,
-                        kb,
-                        force_units=u"kJ * mol^-1 * nm^-1",
-                        energy_units=u"kJ * mol^-1")
-    return HarmonicBond{typeof(b0), typeof(kb), typeof(force_units), typeof(energy_units)}(
-        i, j, b0, kb, force_units, energy_units)
-end
+HarmonicBond(; i, j, b0, kb) = HarmonicBond{typeof(b0), typeof(kb)}(i, j, b0, kb)
 
 @inline @inbounds function force(b::HarmonicBond,
                 coords,
