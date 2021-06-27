@@ -124,5 +124,5 @@ function potential_energy(s::Simulation)
         end
     end
 
-    return potential
+    return uconvert(s.energy_units, potential)
 end

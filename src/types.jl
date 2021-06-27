@@ -179,6 +179,9 @@ default values.
     of interest during the simulation.
 - `timestep::S=0.0`: the timestep of the simulation.
 - `n_steps::Integer=0`: the number of steps in the simulation.
+- `force_units::F=u"kJ * mol^-1 * nm^-1"`: the unit of force used in the
+    simulation.
+- `energy_units::E=u"kJ * mol^-1"`: the unit of energy used in the simulation.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
@@ -204,9 +207,6 @@ end
 
 Simulation{D}(args...) where {D, T, A, C, V, GI, SI, B, S, F, E} = Simulation{D, T, A, C, V, GI, SI, B, S, F, E}(args...)
 
-forceunits(inter::Interaction) = inter.force_units
-energyunits(inter::Interaction) = inter.energy_units
-
 function Simulation(;
                     simulator=VelocityVerlet(),
                     atoms,
@@ -223,28 +223,12 @@ function Simulation(;
                     timestep=0.0,
                     n_steps=0,
                     n_steps_made=[0],
+                    force_units=u"kJ * mol^-1 * nm^-1",
+                    energy_units=u"kJ * mol^-1",
                     gpu_diff_safe=isa(coords, CuArray))
     if length(general_inters) == 0 && length(specific_inter_lists) == 0
         error("Either general interactions or specific interactions must be provided")
     end
-
-    force_unit_list = [forceunits.(general_inters)...]
-    for inter in specific_inter_lists
-        append!(force_unit_list, forceunits.(inter))
-    end
-    if length(Set(force_unit_list)) > 1
-        error("More than one force unit found in interactions: ", join(Set(force_unit_list), ", "))
-    end
-    force_units = first(force_unit_list)
-
-    energy_unit_list = [energyunits.(general_inters)...]
-    for inter in specific_inter_lists
-        append!(energy_unit_list, energyunits.(inter))
-    end
-    if length(Set(energy_unit_list)) > 1
-        error("More than one energy unit found in interactions: ", join(Set(energy_unit_list), ", "))
-    end
-    energy_units = first(energy_unit_list)
 
     T = typeof(temperature)
     A = typeof(atoms)
