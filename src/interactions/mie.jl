@@ -87,15 +87,12 @@ end
                                             s::Simulation,
                                             i::Integer,
                                             j::Integer) where {S, C, T}
-    zero_energy = ustrip(zero(s.timestep)) * inter.energy_unit
-    i == j && return zero_energy
-
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
     r = √r2
 
     if !S && iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
-        return zero_energy
+        return ustrip(zero(s.timestep)) * inter.energy_unit
     end
 
     σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
@@ -113,11 +110,11 @@ end
         potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return zero_energy
+        r2 > sqdist_cutoff && return ustrip(zero(s.timestep)) * inter.energy_unit
 
         potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > sqdist_cutoff && return zero_energy
+        r2 > sqdist_cutoff && return ustrip(zero(s.timestep)) * inter.energy_unit
 
         if r2 < activation_dist
             potential(inter, r2, inv(r2), params)

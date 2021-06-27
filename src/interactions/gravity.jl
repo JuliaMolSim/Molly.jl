@@ -34,8 +34,6 @@ end
                                     s::Simulation,
                                     i::Integer,
                                     j::Integer)
-    i == j && return ustrip(zero(s.timestep)) * inter.energy_units
-
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
 
