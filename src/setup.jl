@@ -112,11 +112,11 @@ function readinputs(T::Type,
     torsions = Torsion[]
 
     if units
-        force_units = u"kJ * mol^-1 * nm^-1"
-        energy_units = u"kJ * mol^-1"
+        force_unit = u"kJ * mol^-1 * nm^-1"
+        energy_unit = u"kJ * mol^-1"
     else
-        force_units = NoUnits
-        energy_units = NoUnits
+        force_unit = NoUnits
+        energy_unit = NoUnits
     end
 
     current_field = ""
@@ -296,13 +296,13 @@ function readinputs(T::Type,
     #    nb_matrix[j, i] = T(0.5)
     #end
 
-    lj = LennardJones(nl_only=true, force_units=force_units, energy_units=energy_units)
+    lj = LennardJones(nl_only=true, force_unit=force_unit, energy_unit=energy_unit)
     if units
         coulomb = Coulomb(coulomb_const=T((138.935458 / 70.0)u"kJ * mol^-1 * nm * q^-2"),
-                            nl_only=true, force_units=force_units, energy_units=energy_units)
+                            nl_only=true, force_unit=force_unit, energy_unit=energy_unit)
     else
-        coulomb = Coulomb(coulomb_const=T(138.935458 / 70.0), nl_only=true, force_units=force_units,
-                            energy_units=energy_units)
+        coulomb = Coulomb(coulomb_const=T(138.935458 / 70.0), nl_only=true, force_unit=force_unit,
+                            energy_unit=energy_unit)
     end
 
     # Bounding box for PBCs - box goes 0 to this value in 3 dimensions

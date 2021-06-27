@@ -179,9 +179,9 @@ default values.
     of interest during the simulation.
 - `timestep::S=0.0`: the timestep of the simulation.
 - `n_steps::Integer=0`: the number of steps in the simulation.
-- `force_units::F=u"kJ * mol^-1 * nm^-1"`: the unit of force used in the
+- `force_unit::F=u"kJ * mol^-1 * nm^-1"`: the unit of force used in the
     simulation.
-- `energy_units::E=u"kJ * mol^-1"`: the unit of energy used in the simulation.
+- `energy_unit::E=u"kJ * mol^-1"`: the unit of energy used in the simulation.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
@@ -201,8 +201,8 @@ struct Simulation{D, T, A, C, V, GI, SI, B, S, F, E}
     timestep::S
     n_steps::Int
     n_steps_made::Vector{Int}
-    force_units::F
-    energy_units::E
+    force_unit::F
+    energy_unit::E
 end
 
 Simulation{D}(args...) where {D, T, A, C, V, GI, SI, B, S, F, E} = Simulation{D, T, A, C, V, GI, SI, B, S, F, E}(args...)
@@ -223,8 +223,8 @@ function Simulation(;
                     timestep=0.0,
                     n_steps=0,
                     n_steps_made=[0],
-                    force_units=u"kJ * mol^-1 * nm^-1",
-                    energy_units=u"kJ * mol^-1",
+                    force_unit=u"kJ * mol^-1 * nm^-1",
+                    energy_unit=u"kJ * mol^-1",
                     gpu_diff_safe=isa(coords, CuArray))
     if length(general_inters) == 0 && length(specific_inter_lists) == 0
         error("Either general interactions or specific interactions must be provided")
@@ -238,13 +238,13 @@ function Simulation(;
     SI = typeof(specific_inter_lists)
     B = typeof(box_size)
     S = typeof(timestep)
-    F = typeof(force_units)
-    E = typeof(energy_units)
+    F = typeof(force_unit)
+    E = typeof(energy_unit)
     return Simulation{gpu_diff_safe, T, A, C, V, GI, SI, B, S, F, E}(
                 simulator, atoms, specific_inter_lists, general_inters, coords,
                 velocities, temperature, box_size, neighbors, neighbor_finder,
                 thermostat, loggers, timestep, n_steps, n_steps_made,
-                force_units, energy_units)
+                force_unit, energy_unit)
 end
 
 function Base.show(io::IO, s::Simulation)

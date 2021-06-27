@@ -90,17 +90,17 @@ energy(s) = kinetic_energy(s) + potential_energy(s)
 function kinetic_energy(s::Simulation)
     ke = sum(i -> s.atoms[i].mass * dot(s.velocities[i], s.velocities[i]) / 2, axes(s.atoms, 1))
     # Convert energy to per mol if required
-    if dimension(s.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+    if dimension(s.energy_unit) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         T = typeof(ustrip(ke))
-        return uconvert(s.energy_units, ke * T(Unitful.Na))
+        return uconvert(s.energy_unit, ke * T(Unitful.Na))
     else
-        return uconvert(s.energy_units, ke)
+        return uconvert(s.energy_unit, ke)
     end
 end
 
 function potential_energy(s::Simulation)
     n_atoms = length(s.coords)
-    potential = zero(ustrip(s.timestep)) * s.energy_units
+    potential = zero(ustrip(s.timestep)) * s.energy_unit
 
     for inter in values(s.general_inters)
         if inter.nl_only
@@ -124,5 +124,5 @@ function potential_energy(s::Simulation)
         end
     end
 
-    return uconvert(s.energy_units, potential)
+    return uconvert(s.energy_unit, potential)
 end

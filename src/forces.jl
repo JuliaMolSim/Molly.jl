@@ -69,12 +69,12 @@ function accelerations(s::Simulation; parallel::Bool=true)
                 neighbors = s.neighbors
                 @threads for ni in 1:length(neighbors)
                     i, j = neighbors[ni]
-                    force!(forces_threads[threadid()], inter, s, i, j, s.force_units)
+                    force!(forces_threads[threadid()], inter, s, i, j, s.force_unit)
                 end
             else
                 @threads for i in 1:n_atoms
                     for j in 1:(i - 1)
-                        force!(forces_threads[threadid()], inter, s, i, j, s.force_units)
+                        force!(forces_threads[threadid()], inter, s, i, j, s.force_unit)
                     end
                 end
             end
@@ -89,12 +89,12 @@ function accelerations(s::Simulation; parallel::Bool=true)
                 neighbors = s.neighbors
                 for ni in 1:length(neighbors)
                     i, j = neighbors[ni]
-                    force!(forces, inter, s, i, j, s.force_units)
+                    force!(forces, inter, s, i, j, s.force_unit)
                 end
             else
                 for i in 1:n_atoms
                     for j in 1:(i - 1)
-                        force!(forces, inter, s, i, j, s.force_units)
+                        force!(forces, inter, s, i, j, s.force_unit)
                     end
                 end
             end
@@ -104,12 +104,12 @@ function accelerations(s::Simulation; parallel::Bool=true)
     for inter_list in values(s.specific_inter_lists)
         sparse_forces = force.(inter_list, (s.coords,), (s,))
         ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
-        checkforcetype(first(first(ge2)), s.force_units)
+        checkforcetype(first(first(ge2)), s.force_unit)
         sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
         forces += ustrip.(Array(sparse_vec))
     end
 
-    return forces * s.force_units ./ mass.(s.atoms)
+    return forces * s.force_unit ./ mass.(s.atoms)
 end
 
 function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
@@ -119,7 +119,7 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
     for inter in values(s.general_inters)
         # Currently the neighbor list is not used for this implementation
         forces -= reshape(sum(force.((inter,), coords_is, coords_js, atoms_is, atoms_js,
-                                        s.box_size, self_interactions, s.force_units);
+                                        s.box_size, self_interactions, s.force_unit);
                                         dims=2), n_atoms)
     end
 
@@ -128,13 +128,13 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
         coords_cpu = Array(coords)
         sparse_forces = force.(inter_list, (coords_cpu,), (s,))
         ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
-        checkforcetype(first(first(ge2)), s.force_units)
+        checkforcetype(first(first(ge2)), s.force_unit)
         sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
         # Move back to GPU if required
         forces += convert(typeof(forces), ustrip.(Array(sparse_vec)))
     end
 
-    return forces * s.force_units ./ mass.(s.atoms)
+    return forces * s.force_unit ./ mass.(s.atoms)
 end
 
 include("interactions/lennard_jones.jl")

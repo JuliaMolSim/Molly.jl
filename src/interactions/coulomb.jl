@@ -1,5 +1,5 @@
 """
-    Coulomb(; coulomb_const, cutoff, nl_only, force_units, energy_units)
+    Coulomb(; coulomb_const, cutoff, nl_only, force_unit, energy_unit)
 
 The Coulomb electrostatic interaction.
 """
@@ -7,18 +7,18 @@ struct Coulomb{C, T, F, E} <: GeneralInteraction
     coulomb_const::T
     cutoff::C
     nl_only::Bool
-    force_units::F
-    energy_units::E
+    force_unit::F
+    energy_unit::E
 end
 
 function Coulomb(;
                     coulomb_const=(138.935458 / 70.0)u"kJ * mol^-1 * nm * q^-2", # Treat ϵr as 70 for now
                     cutoff=NoCutoff(),
                     nl_only=false,
-                    force_units=u"kJ * mol^-1 * nm^-1",
-                    energy_units=u"kJ * mol^-1")
-    return Coulomb{typeof(cutoff), typeof(coulomb_const), typeof(force_units), typeof(energy_units)}(
-        coulomb_const, cutoff, nl_only, force_units, energy_units)
+                    force_unit=u"kJ * mol^-1 * nm^-1",
+                    energy_unit=u"kJ * mol^-1")
+    return Coulomb{typeof(cutoff), typeof(coulomb_const), typeof(force_unit), typeof(energy_unit)}(
+        coulomb_const, cutoff, nl_only, force_unit, energy_unit)
 end
 
 @inline @inbounds function force(inter::Coulomb{C},
@@ -40,14 +40,14 @@ end
         f = force_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff
-        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
+        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
 
         f = force_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         sqdist_cutoff = cutoff.sqdist_cutoff
         activation_dist = cutoff.activation_dist
 
-        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
+        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
 
         if r2 < activation_dist
             f = force_nocutoff(inter, r2, inv(r2), params)
@@ -67,7 +67,7 @@ end
                                     s::Simulation,
                                     i::Integer,
                                     j::Integer) where C
-    zero_energy = ustrip(zero(s.timestep)) * inter.energy_units
+    zero_energy = ustrip(zero(s.timestep)) * inter.energy_unit
     i == j && return zero_energy
 
     dr = vector(s.coords[i], s.coords[j], s.box_size)

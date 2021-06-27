@@ -1,5 +1,5 @@
 """
-    Mie(; m, n, cutoff, nl_only, force_units, energy_units)
+    Mie(; m, n, cutoff, nl_only, force_unit, energy_unit)
 
 The Mie generalized interaction.
 When `m` equals 6 and `n` equals 12 this is equivalent to the Lennard-Jones interaction.
@@ -9,25 +9,25 @@ struct Mie{S, C, T, F, E} <: GeneralInteraction
     n::T
     cutoff::C
     nl_only::Bool
-    force_units::F
-    energy_units::E
+    force_unit::F
+    energy_unit::E
     mn_fac::T
 end
 
-Mie{S}(m, n, cutoff, nl_only, force_units, energy_units, mn_fac) where S =
-    Mie{S, typeof(cutoff), typeof(m), typeof(force_units), typeof(energy_units)}(
-        m, n, cutoff, nl_only, force_units, energy_units, mn_fac)
+Mie{S}(m, n, cutoff, nl_only, force_unit, energy_unit, mn_fac) where S =
+    Mie{S, typeof(cutoff), typeof(m), typeof(force_unit), typeof(energy_unit)}(
+        m, n, cutoff, nl_only, force_unit, energy_unit, mn_fac)
 
 function Mie(;
                 m,
                 n,
                 cutoff=NoCutoff(),
                 nl_only=false,
-                force_units=u"kJ * mol^-1 * nm^-1",
-                energy_units=u"kJ * mol^-1")
+                force_unit=u"kJ * mol^-1 * nm^-1",
+                energy_unit=u"kJ * mol^-1")
     mn_fac = convert(typeof(m), (n / (n - m)) * (n / m) ^ (m / (n - m)))
-    return Mie{false, typeof(cutoff), typeof(m), typeof(force_units), typeof(energy_units)}(
-        m, n, cutoff, nl_only, force_units, energy_units, mn_fac)
+    return Mie{false, typeof(cutoff), typeof(m), typeof(force_unit), typeof(energy_unit)}(
+        m, n, cutoff, nl_only, force_unit, energy_unit, mn_fac)
 end
 
 @fastmath @inbounds function force(inter::Mie{S, C, T},
@@ -41,7 +41,7 @@ end
     r = √r2
 
     if !S && iszero(atom_i.σ) || iszero(atom_j.σ)
-        return ustrip.(zero(coord_i)) * inter.force_units
+        return ustrip.(zero(coord_i)) * inter.force_unit
     end
 
     σ = sqrt(atom_i.σ * atom_j.σ)
@@ -60,14 +60,14 @@ end
         f = force_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
-        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
+        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
 
         f = force_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         sqdist_cutoff = cutoff.sqdist_cutoff * σ2
         activation_dist = cutoff.activation_dist * σ2
 
-        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
+        r2 > sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
 
         if r2 < activation_dist
             f = force_nocutoff(inter, r2, inv(r2), params)
@@ -87,7 +87,7 @@ end
                                             s::Simulation,
                                             i::Integer,
                                             j::Integer) where {S, C, T}
-    zero_energy = ustrip(zero(s.timestep)) * inter.energy_units
+    zero_energy = ustrip(zero(s.timestep)) * inter.energy_unit
     i == j && return zero_energy
 
     dr = vector(s.coords[i], s.coords[j], s.box_size)
