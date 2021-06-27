@@ -105,7 +105,7 @@ s = Simulation(
     velocities=[velocity(a.mass, temp) for a in atoms],
     temperature=temp,
     box_size=box_size,
-    neighbor_finder=DistanceNeighborFinder(nb_matrix, 10),
+    neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.2),
     thermostat=AndersenThermostat(1.0),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),

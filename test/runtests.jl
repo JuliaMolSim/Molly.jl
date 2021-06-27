@@ -201,7 +201,7 @@ end
         velocities=[velocity(a.mass, temp) .* 0.01 for a in atoms],
         temperature=temp,
         box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(nb_matrix, 10),
+        neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.2),
         thermostat=AndersenThermostat(10.0),
         loggers=Dict("temp" => TemperatureLogger(10),
                         "coords" => CoordinateLogger(10),
