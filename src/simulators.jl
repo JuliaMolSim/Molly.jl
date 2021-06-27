@@ -39,8 +39,8 @@ function simulate!(s::Simulation{false},
     # See https://www.saylor.org/site/wp-content/uploads/2011/06/MA221-6.1.pdf for
     #   integration algorithm - used shorter second version
     n_atoms = length(s.coords)
-    find_neighbors!(s, s.neighbor_finder, 0, parallel=parallel)
-    accels_t = accelerations(s, parallel=parallel)
+    find_neighbors!(s, s.neighbor_finder, 0; parallel=parallel)
+    accels_t = accelerations(s; parallel=parallel)
     accels_t_dt = zero(accels_t)
 
     @showprogress for step_n in 1:n_steps
@@ -54,7 +54,7 @@ function simulate!(s::Simulation{false},
             s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
         end
 
-        accels_t_dt = accelerations(s, parallel=parallel)
+        accels_t_dt = accelerations(s; parallel=parallel)
 
         # Update velocities
         for i in 1:length(s.velocities)
@@ -62,7 +62,7 @@ function simulate!(s::Simulation{false},
         end
 
         apply_thermostat!(s.velocities, s, s.thermostat)
-        find_neighbors!(s, s.neighbor_finder, step_n, parallel=parallel)
+        find_neighbors!(s, s.neighbor_finder, step_n; parallel=parallel)
 
         accels_t = accels_t_dt
         s.n_steps_made[1] += 1
@@ -124,7 +124,7 @@ function simulate!(s::Simulation,
                     n_steps::Integer;
                     parallel::Bool=true)
     n_atoms = length(s.coords)
-    find_neighbors!(s, s.neighbor_finder, 0, parallel=parallel)
+    find_neighbors!(s, s.neighbor_finder, 0; parallel=parallel)
     coords_last = s.velocities
 
     @showprogress for step_n in 1:n_steps
@@ -132,7 +132,7 @@ function simulate!(s::Simulation,
             log_property!(logger, s, step_n)
         end
 
-        accels_t = accelerations(s, parallel=parallel)
+        accels_t = accelerations(s; parallel=parallel)
 
         # Update coordinates
         coords_copy = s.coords
@@ -143,7 +143,7 @@ function simulate!(s::Simulation,
         coords_last = coords_copy
 
         apply_thermostat!(coords_last, s, s.thermostat)
-        find_neighbors!(s, s.neighbor_finder, step_n, parallel=parallel)
+        find_neighbors!(s, s.neighbor_finder, step_n; parallel=parallel)
 
         s.n_steps_made[1] += 1
     end
@@ -151,9 +151,9 @@ function simulate!(s::Simulation,
 end
 
 function simulate!(s::Simulation, n_steps::Integer; parallel::Bool=true)
-    simulate!(s, s.simulator, n_steps, parallel=parallel)
+    simulate!(s, s.simulator, n_steps; parallel=parallel)
 end
 
 function simulate!(s::Simulation; parallel::Bool=true)
-    simulate!(s, s.n_steps - first(s.n_steps_made), parallel=parallel)
+    simulate!(s, s.n_steps - first(s.n_steps_made); parallel=parallel)
 end
