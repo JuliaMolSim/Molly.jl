@@ -34,19 +34,12 @@ vector(c1, c2, box_size) = vector1D.(c1, c2, box_size)
         Base.Cartesian.@ncall $N SVector{$N} i->vector1D(c1[i], c2[i], box_size)
     end
 end
+
 """
     adjust_bounds(c, box_size)
 
 Ensure a coordinate is within the simulation box and return the coordinate.
 """
-function adjust_bounds(c, box_size)
-    while c >= box_size
-        c -= box_size
-    end
-    while c < zero(c)
-        c += box_size
-    end
-    return c
-end
+adjust_bounds(c, box_size) = c - floor(c / box_size) * box_size
 
 adjust_bounds_vec(v, bs) = adjust_bounds.(v, bs)
