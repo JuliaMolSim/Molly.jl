@@ -40,13 +40,7 @@ end
 Ensure a coordinate is within the simulation box and return the coordinate.
 """
 function adjust_bounds(c::Real, box_size::Real)
-    while c >= box_size
-        c -= box_size
-    end
-    while c < zero(c)
-        c += box_size
-    end
-    return c
+    return c - floor(c / box_size) * box_size
 end
 
 adjust_bounds_vec(v, bs) = adjust_bounds.(v, bs)
