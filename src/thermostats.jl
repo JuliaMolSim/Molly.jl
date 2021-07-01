@@ -4,6 +4,7 @@ export
     NoThermostat,
     apply_thermostat!,
     AndersenThermostat,
+    LangevinThermostat,
     velocity,
     maxwellboltzmann,
     temperature
@@ -43,6 +44,27 @@ function apply_thermostat!(velocities, s::Simulation, thermostat::AndersenThermo
         end
     end
     return velocities
+end
+
+"""
+    LangevinThermostat(gamma)
+
+Modify velocities according to the Langevin thermostat.
+"""
+struct LangevinThermostat{T} <: Thermostat
+    gamma::T
+end
+
+function apply_thermostat!(s::Simulation, thermostat::LangevinThermostat)
+    dims = length(first(s.velocities))
+    dt =  s.timestep
+    a = exp(-gamma*dt)
+    b = (1.0 - exp(-2*gamma*dt))^0.5
+    for i in 1:length(s.velocities)
+        mass = s.atoms[i].mass
+        s.velocities[i] = a * s.velocities[i] + b (s.temperature*/mass) ^ 0.5 * randn(0,1,dims)
+    end
+    return s
 end
 
 """
