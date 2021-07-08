@@ -22,6 +22,10 @@ end
 
 CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
 
+@testset "glue.jl" begin
+    include("glue.jl")
+end
+
 @testset "Spatial" begin
     @test vector1D(4.0, 6.0, 10.0) ==  2.0
     @test vector1D(1.0, 9.0, 10.0) == -2.0

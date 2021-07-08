@@ -184,7 +184,7 @@ default values.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-struct Simulation{D, T, A, C, GI, SI}
+struct Simulation{D, T, A, C, GI, SI, GL}
     simulator::Simulator
     atoms::A
     specific_inter_lists::SI
@@ -200,9 +200,11 @@ struct Simulation{D, T, A, C, GI, SI}
     timestep::T
     n_steps::Int
     n_steps_made::Vector{Int}
+    glue_densities::GL
+    forces::C
 end
 
-Simulation{D}(args...) where {D, T, A, C, GI, SI} = Simulation{D, T, A, C, GI, SI}(args...)
+Simulation{D}(args...) where {D, T, A, C, GI, SI, GL} = Simulation{D, T, A, C, GI, SI, GL}(args...)
 
 function Simulation(;
                     simulator,
@@ -226,10 +228,14 @@ function Simulation(;
     C = typeof(coords)
     GI = typeof(general_inters)
     SI = typeof(specific_inter_lists)
-    return Simulation{gpu_diff_safe, T, A, C, GI, SI}(
+    glue_densities = zeros(length(atoms))
+    forces = [zero(v) for v in coords]
+    GL = typeof(glue_densities)
+    return Simulation{gpu_diff_safe, T, A, C, GI, SI, GL}(
                 simulator, atoms, specific_inter_lists, general_inters, coords,
                 velocities, temperature, box_size, neighbors, neighbor_finder,
-                thermostat, loggers, timestep, n_steps, n_steps_made)
+                thermostat, loggers, timestep, n_steps, n_steps_made, glue_densities,
+                forces)
 end
 
 function Base.show(io::IO, s::Simulation)

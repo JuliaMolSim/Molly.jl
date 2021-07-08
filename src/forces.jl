@@ -12,7 +12,8 @@ export
     Gravity,
     HarmonicBond,
     HarmonicAngle,
-    Torsion
+    Torsion,
+    FinnisSinclair
 
 """
     force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
@@ -52,6 +53,11 @@ function accelerations(s::Simulation; parallel::Bool=true)
 
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.general_inters)
+            
+            if typeof(inter) <: GlueInteraction
+                update_glue_densities!(inter, s.coords, s)
+            end
+            
             if inter.nl_only
                 neighbors = s.neighbors
                 @threads for ni in 1:length(neighbors)
@@ -72,6 +78,11 @@ function accelerations(s::Simulation; parallel::Bool=true)
         forces = zero(s.coords)
 
         for inter in values(s.general_inters)
+            
+            if typeof(inter) <: GlueInteraction
+                update_glue_densities!(inter, s.coords, s)
+            end
+            
             if inter.nl_only
                 neighbors = s.neighbors
                 for ni in 1:length(neighbors)
@@ -97,8 +108,8 @@ function accelerations(s::Simulation; parallel::Bool=true)
 
     for i in 1:n_atoms
         forces[i] /= s.atoms[i].mass
+        s.forces[i] = forces[i]
     end
-
     return forces
 end
 
@@ -134,3 +145,4 @@ include("interactions/gravity.jl")
 include("interactions/harmonic_bond.jl")
 include("interactions/harmonic_angle.jl")
 include("interactions/torsion.jl")
+include("interactions/glue_fs.jl")

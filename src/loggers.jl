@@ -5,8 +5,10 @@ export
     log_property!,
     CoordinateLogger,
     EnergyLogger,
-    StructureWriter
-
+    StructureWriter,
+    GlueDensityLogger,
+    VelocityLogger,
+    ForceLogger
 """
     TemperatureLogger(n_steps)
     TemperatureLogger(T, n_steps)
@@ -68,6 +70,99 @@ end
 function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
         push!(logger.coords, deepcopy(s.coords))
+    end
+end
+
+"""
+    ForceLogger(n_steps; dims=3)
+
+Log the forces throughout a simulation.
+"""
+struct ForceLogger{T} <: Logger
+    n_steps::Int
+    forces::Vector{Vector{T}}
+end
+
+function ForceLogger(T, n_steps::Integer; dims::Integer=3)
+    return ForceLogger(n_steps,
+                       Vector{SVector{dims}}[])
+end
+
+function ForceLogger(n_steps::Integer; dims::Integer=3)
+    return ForceLogger(DefaultFloat, n_steps, dims=dims)
+end
+
+function Base.show(io::IO, cl::ForceLogger)
+    print(io, "ForceLogger{", eltype(eltype(cl.forces)), "} with n_steps ",
+                cl.n_steps, ", ", length(cl.forces), " frames recorded for ",
+                length(cl.forces) > 0 ? length(first(cl.forces)) : "?", " atoms")
+end
+
+function log_property!(logger::ForceLogger, s::Simulation, step_n::Integer)
+    if step_n % logger.n_steps == 0
+        push!(logger.forces, deepcopy(s.forces))
+    end
+end
+
+"""
+    VelocityLogger(n_steps; dims=3)
+
+Log the velocities throughout a simulation.
+"""
+struct VelocityLogger{T} <: Logger
+    n_steps::Int
+    velocities::Vector{Vector{T}}
+end
+
+function VelocityLogger(T, n_steps::Integer; dims::Integer=3)
+    return VelocityLogger(n_steps,
+                            Array{SArray{Tuple{dims}, T, 1, dims}, 1}[])
+end
+
+function VelocityLogger(n_steps::Integer; dims::Integer=3)
+    return VelocityLogger(DefaultFloat, n_steps, dims=dims)
+end
+
+function Base.show(io::IO, cl::VelocityLogger)
+    print(io, "VelocityLogger{", eltype(eltype(cl.velocities)), "} with n_steps ",
+                cl.n_steps, ", ", length(cl.velocities), " frames recorded for ",
+                length(cl.velocities) > 0 ? length(first(cl.velocities)) : "?", " atoms")
+end
+
+function log_property!(logger::VelocityLogger, s::Simulation, step_n::Integer)
+    if step_n % logger.n_steps == 0
+        push!(logger.velocities, deepcopy(s.velocities))
+    end
+end
+
+"""
+    GlueDensityLogger(n_steps)
+
+Log the glue densities throughout a simulation.
+"""
+struct GlueDensityLogger{T} <: Logger
+    n_steps::Int
+    glue_densities::Vector{Vector{T}}
+end
+
+function GlueDensityLogger(T, n_steps::Integer)
+    return GlueDensityLogger(n_steps,
+                            Array{T, 1}[])
+end
+
+function GlueDensityLogger(n_steps::Integer)
+    return GlueDensityLogger(DefaultFloat, n_steps)
+end
+
+function Base.show(io::IO, cl::GlueDensityLogger)
+    print(io, "GlueDensityLogger{", eltype(eltype(cl.glue_densities)), "} with n_steps ",
+                cl.n_steps, ", ", length(cl.glue_densities), " frames recorded for ",
+                length(cl.glue_densities) > 0 ? length(first(cl.glue_densities)) : "?", " atoms")
+end
+
+function log_property!(logger::GlueDensityLogger, s::Simulation, step_n::Integer)
+    if step_n % logger.n_steps == 0
+        push!(logger.glue_densities, deepcopy(s.glue_densities))
     end
 end
 
