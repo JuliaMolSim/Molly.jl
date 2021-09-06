@@ -50,6 +50,7 @@ end
 end
 
 mass(atom::Atom) = atom.mass
+mass(atom::AtomMin) = atom.mass
 
 """
     accelerations(simulation; parallel=true)
@@ -109,12 +110,14 @@ function accelerations(s::Simulation; parallel::Bool=true)
         forces += ustrip.(Array(sparse_vec))
     end
 
-    return forces * s.force_unit ./ mass.(s.atoms)
+    return (forces * s.force_unit) ./ mass.(s.atoms)
 end
+
+ustripvec(x) = ustrip.(x)
 
 function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
     n_atoms = length(coords)
-    forces = ustrip.(zero(coords))
+    forces = ustripvec.(zero(coords))
 
     for inter in values(s.general_inters)
         # Currently the neighbor list is not used for this implementation
@@ -134,7 +137,7 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
         forces += convert(typeof(forces), ustrip.(Array(sparse_vec)))
     end
 
-    return forces * s.force_unit ./ mass.(s.atoms)
+    return (forces * s.force_unit) ./ mass.(s.atoms)
 end
 
 include("interactions/lennard_jones.jl")
