@@ -7,15 +7,14 @@ export
 
 # Forces are often expressed per mol but this dimension needs removing for use in the integrator
 function removemolar(x)
-    if dimension(x) == u"𝐋 * 𝐍^-1 * 𝐓^-2"
-        T = typeof(ustrip(x))
+    fx = first(x)
+    if dimension(fx) == u"𝐋 * 𝐍^-1 * 𝐓^-2"
+        T = typeof(ustrip(fx))
         return x / T(Unitful.Na)
     else
         return x
     end
 end
-
-removemolarvec(v) = removemolar.(v)
 
 """
     VelocityVerlet()
@@ -50,7 +49,7 @@ function simulate!(s::Simulation{false},
 
         # Update coordinates
         for i in 1:length(s.coords)
-            s.coords[i] += s.velocities[i] * s.timestep + removemolar.(accels_t[i]) * (s.timestep ^ 2) / 2
+            s.coords[i] += s.velocities[i] * s.timestep + removemolar(accels_t[i]) * (s.timestep ^ 2) / 2
             s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
         end
 
@@ -58,7 +57,7 @@ function simulate!(s::Simulation{false},
 
         # Update velocities
         for i in 1:length(s.velocities)
-            s.velocities[i] += removemolar.(accels_t[i] + accels_t_dt[i]) * s.timestep / 2
+            s.velocities[i] += removemolar(accels_t[i] + accels_t_dt[i]) * s.timestep / 2
         end
 
         apply_thermostat!(s.velocities, s, s.thermostat)
@@ -96,10 +95,10 @@ function simulate!(s::Simulation{true},
         end
 
         # In-place updates here required to work with views but are not Zygote-compatible
-        s.coords .+= s.velocities .* s.timestep .+ (removemolarvec.(accels_t) .* s.timestep ^ 2) ./ 2
+        s.coords .+= s.velocities .* s.timestep .+ (removemolar.(accels_t) .* s.timestep ^ 2) ./ 2
         s.coords .= adjust_bounds_vec.(s.coords, s.box_size)
         accels_t_dt = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
-        s.velocities .+= removemolarvec.(accels_t .+ accels_t_dt) .* s.timestep / 2
+        s.velocities .+= removemolar.(accels_t .+ accels_t_dt) .* s.timestep / 2
 
         s.velocities .= apply_thermostat!(s.velocities, s, s.thermostat)
         find_neighbors!(s, s.neighbor_finder, 0)
@@ -137,7 +136,7 @@ function simulate!(s::Simulation,
         # Update coordinates
         coords_copy = s.coords
         for i in 1:length(s.coords)
-            s.coords[i] = s.coords[i] + vector(coords_last[i], s.coords[i], s.box_size) + removemolar.(accels_t[i]) * s.timestep ^ 2
+            s.coords[i] = s.coords[i] + vector(coords_last[i], s.coords[i], s.box_size) + removemolar(accels_t[i]) * s.timestep ^ 2
             s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
         end
         coords_last = coords_copy
