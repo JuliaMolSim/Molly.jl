@@ -60,7 +60,7 @@ end
 Draw a speed along one dimension in accordance with the Maxwell-Boltzmann distribution.
 """
 function maxwellboltzmann(mass, temp)
-    T = typeof(ustrip(temp))
+    T = typeof(convert(AbstractFloat, ustrip(temp)))
     k = unit(temp) == NoUnits ? one(T) : uconvert(u"u * nm^2 * ps^-2 * K^-1", T(Unitful.k))
     σ = sqrt(k * temp / mass)
     return rand(Normal(zero(T), T(ustrip(σ)))) * unit(σ)
