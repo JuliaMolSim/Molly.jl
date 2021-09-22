@@ -57,25 +57,25 @@ end
     params = (m, n, σ_r, const_mn)
 
     if cutoff_points(C) == 0
-        f = force_nocutoff(inter, r2, inv(r2), params)
+        f = force_divr_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
 
-        f = force_cutoff(cutoff, r2, inter, params)
+        f = force_divr_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
 
         if r2 < cutoff.activation_dist
-            f = force_nocutoff(inter, r2, inv(r2), params)
+            f = force_divr_nocutoff(inter, r2, inv(r2), params)
         else
-            f = force_cutoff(cutoff, r2, inter, params)
+            f = force_divr_cutoff(cutoff, r2, inter, params)
         end
     end
 
     return f * dr
 end
 
-@fastmath function force_nocutoff(::Mie, r2, invr2, (m, n, σ_r, const_mn))
+@fastmath function force_divr_nocutoff(::Mie, r2, invr2, (m, n, σ_r, const_mn))
     return -const_mn / r2 * (m * σ_r ^ m - n * σ_r ^ n)
 end
 

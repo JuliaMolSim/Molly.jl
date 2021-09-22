@@ -44,25 +44,25 @@ end
     params = (σ2, ϵ)
 
     if cutoff_points(C) == 0
-        f = force_nocutoff(inter, r2, inv(r2), params)
+        f = force_divr_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
 
-        f = force_cutoff(cutoff, r2, inter, params)
+        f = force_divr_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
 
         if r2 < cutoff.activation_dist
-            f = force_nocutoff(inter, r2, inv(r2), params)
+            f = force_divr_nocutoff(inter, r2, inv(r2), params)
         else
-            f = force_cutoff(cutoff, r2, inter, params)
+            f = force_divr_cutoff(cutoff, r2, inter, params)
         end
     end
 
     return f * dr
 end
 
-@fastmath function force_nocutoff(::SoftSphere, r2, invr2, (σ2, ϵ))
+@fastmath function force_divr_nocutoff(::SoftSphere, r2, invr2, (σ2, ϵ))
     six_term = (σ2 * invr2) ^ 3
 
     return (24ϵ * invr2) * 2 * six_term ^ 2
