@@ -3,5 +3,4 @@
 *.jl.mem
 docs/build
 nbs/*
-todo.txt
 /Manifest.toml
