@@ -98,10 +98,10 @@ function Atom(;
                 name="",
                 resnum=0,
                 resname="",
-                charge=0.0,
-                mass=0.0,
-                σ=0.0,
-                ϵ=0.0)
+                charge=0.0u"q",
+                mass=0.0u"u",
+                σ=0.0u"nm",
+                ϵ=0.0u"kJ / mol")
     return Atom(attype, name, resnum, resname, charge, mass, σ, ϵ)
 end
 
@@ -134,10 +134,10 @@ struct AtomMin{C, M, S, E}
 end
 
 function AtomMin(;
-                charge=0.0,
-                mass=0.0,
-                σ=0.0,
-                ϵ=0.0)
+                charge=0.0u"q",
+                mass=0.0u"u",
+                σ=0.0u"nm",
+                ϵ=0.0u"kJ / mol")
     return AtomMin(charge, mass, σ, ϵ)
 end
 
@@ -226,10 +226,6 @@ function Simulation(;
                     force_unit=u"kJ * mol^-1 * nm^-1",
                     energy_unit=u"kJ * mol^-1",
                     gpu_diff_safe=isa(coords, CuArray))
-    if length(general_inters) == 0 && length(specific_inter_lists) == 0
-        error("Either general interactions or specific interactions must be provided")
-    end
-
     T = typeof(temperature)
     A = typeof(atoms)
     C = typeof(coords)
