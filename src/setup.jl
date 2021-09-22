@@ -296,13 +296,16 @@ function readinputs(T::Type,
     #    nb_matrix[j, i] = T(0.5)
     #end
 
-    lj = LennardJones(nl_only=true, force_unit=force_unit, energy_unit=energy_unit)
+    lj = LennardJones(cutoff=ShiftedPotentialCutoff(1.2u"nm"), nl_only=true,
+                        force_unit=force_unit, energy_unit=energy_unit)
     if units
         coulomb = Coulomb(coulomb_const=T((138.935458 / 70.0)u"kJ * mol^-1 * nm * q^-2"),
-                            nl_only=true, force_unit=force_unit, energy_unit=energy_unit)
+                            cutoff=ShiftedPotentialCutoff(1.2u"nm"), nl_only=true,
+                            force_unit=force_unit, energy_unit=energy_unit)
     else
-        coulomb = Coulomb(coulomb_const=T(138.935458 / 70.0), nl_only=true, force_unit=force_unit,
-                            energy_unit=energy_unit)
+        coulomb = Coulomb(coulomb_const=T(138.935458 / 70.0),
+                            cutoff=ShiftedPotentialCutoff(1.2u"nm"), nl_only=true,
+                            force_unit=force_unit, energy_unit=energy_unit)
     end
 
     # Bounding box for PBCs - box goes 0 to this value in 3 dimensions
