@@ -100,7 +100,7 @@ function readinputs(T::Type,
     atomtypes = Dict{String, Atomtype}()
     bondtypes = Dict{String, Bondtype}()
     angletypes = Dict{String, Angletype}()
-    torsiontypes = Dict{String, Torsiontype{T}}()
+    torsiontypes = Dict{String, Torsiontype}()
     atomnames = Dict{String, String}()
 
     name = "?"
@@ -153,7 +153,13 @@ function readinputs(T::Type,
             f3 = parse(T, c[9]) / -2
             f2 = 4 * f4 - parse(T, c[8])
             f1 = 3 * f3 - 2 * parse(T, c[7])
-            torsiontypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = Torsiontype(f1, f2, f3, f4)
+            if units
+                torsiontype = Torsiontype((f1)u"kJ * mol^-1", (f2)u"kJ * mol^-1",
+                                            (f3)u"kJ * mol^-1", (f4)u"kJ * mol^-1")
+            else
+                torsiontype = Torsiontype(f1, f2, f3, f4)
+            end
+            torsiontypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = torsiontype
         elseif current_field == "atomtypes" && length(c) >= 8
             atomname = uppercase(c[2])
             atomnames[c[1]] = atomname
@@ -170,16 +176,15 @@ function readinputs(T::Type,
         elseif current_field == "atoms"
             attype = atomnames[c[2]]
             if units
-                push!(atoms, Atom(attype=attype, name=String(c[5]), resnum=parse(Int, c[3]),
-                    resname=String(c[4]), charge=parse(T, c[7]) * T(1u"q"),
-                    mass=parse(T, c[8])u"u", σ=(atomtypes[attype].σ)u"nm",
-                    ϵ=(atomtypes[attype].ϵ)u"kJ * mol^-1"))
+                charge = parse(T, c[7]) * T(1u"q")
+                mass = parse(T, c[8])u"u"
             else
-                push!(atoms, Atom(attype=attype, name=String(c[5]), resnum=parse(Int, c[3]),
-                    resname=String(c[4]), charge=parse(T, c[7]),
-                    mass=parse(T, c[8]), σ=atomtypes[attype].σ,
-                    ϵ=atomtypes[attype].ϵ))
+                charge = parse(T, c[7])
+                mass = parse(T, c[8])
             end
+            push!(atoms, Atom(attype=attype, name=String(c[5]), resnum=parse(Int, c[3]),
+                    resname=String(c[4]), charge=charge, mass=mass,
+                    σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
             bondtype = bondtypes["$(atoms[i].attype)/$(atoms[j].attype)"]
@@ -254,12 +259,16 @@ function readinputs(T::Type,
             attype = replace(atname, r"\d+" => "")
             temp_charge = atomtypes[attype].charge
             if attype == "CL" # Temp hack to fix charges
-                temp_charge = T(-1.0)
+                if units
+                    temp_charge = T(-1u"q")
+                else
+                    temp_charge = T(-1.0)
+                end
             end
             push!(atoms, Atom(attype=attype, name=String(atname),
-                resnum=parse(Int, l[1:5]), resname=String(strip(l[6:10])),
-                charge=temp_charge, mass=atomtypes[attype].mass,
-                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
+                    resnum=parse(Int, l[1:5]), resname=String(strip(l[6:10])),
+                    charge=temp_charge, mass=atomtypes[attype].mass,
+                    σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
 
             # Add O-H bonds and H-O-H angle in water
             if atname == "OW"
@@ -296,15 +305,15 @@ function readinputs(T::Type,
     #    nb_matrix[j, i] = T(0.5)
     #end
 
-    lj = LennardJones(cutoff=ShiftedPotentialCutoff(1.2u"nm"), nl_only=true,
+    lj = LennardJones(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
                         force_unit=force_unit, energy_unit=energy_unit)
     if units
         coulomb = Coulomb(coulomb_const=T((138.935458 / 70.0)u"kJ * mol^-1 * nm * q^-2"),
-                            cutoff=ShiftedPotentialCutoff(1.2u"nm"), nl_only=true,
+                            cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
                             force_unit=force_unit, energy_unit=energy_unit)
     else
         coulomb = Coulomb(coulomb_const=T(138.935458 / 70.0),
-                            cutoff=ShiftedPotentialCutoff(1.2u"nm"), nl_only=true,
+                            cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
                             force_unit=force_unit, energy_unit=energy_unit)
     end
 
