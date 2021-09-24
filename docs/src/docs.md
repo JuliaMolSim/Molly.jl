@@ -239,6 +239,8 @@ mutable struct Person
     ϵ::Float64
 end
 
+Molly.mass(person::Person) = person.mass
+
 # Custom GeneralInteraction
 struct SIRInteraction <: GeneralInteraction
     nl_only::Bool

@@ -4,6 +4,7 @@
 
 export
     force,
+    mass,
     accelerations,
     LennardJones,
     SoftSphere,
