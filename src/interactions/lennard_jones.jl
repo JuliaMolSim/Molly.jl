@@ -1,5 +1,5 @@
 @doc raw"""
-    LennardJones(; cutoff, nl_only, force_unit, energy_unit)
+    LennardJones(; cutoff, nl_only, force_unit, energy_unit, skip_shortcut)
 
 The Lennard-Jones 6-12 interaction. The potential is given by
 ```math
@@ -20,16 +20,13 @@ struct LennardJones{S, C, F, E} <: GeneralInteraction
     energy_unit::E
 end
 
-LennardJones{S}(cutoff, nl_only, force_unit, energy_unit) where S =
-    LennardJones{S, typeof(cutoff), typeof(force_unit), typeof(energy_unit)}(
-        cutoff, nl_only, force_unit, energy_unit)
-
 function LennardJones(;
                         cutoff=NoCutoff(),
                         nl_only=false,
                         force_unit=u"kJ * mol^-1 * nm^-1",
-                        energy_unit=u"kJ * mol^-1")
-    return LennardJones{false, typeof(cutoff), typeof(force_unit), typeof(energy_unit)}(
+                        energy_unit=u"kJ * mol^-1",
+                        skip_shortcut=false)
+    return LennardJones{skip_shortcut, typeof(cutoff), typeof(force_unit), typeof(energy_unit)}(
         cutoff, nl_only, force_unit, energy_unit)
 end
 

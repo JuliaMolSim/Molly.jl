@@ -1,5 +1,5 @@
 """
-    SoftSphere(; cutoff, nl_only, force_unit, energy_unit)
+    SoftSphere(; cutoff, nl_only, force_unit, energy_unit, skip_shortcut)
 
 The soft-sphere potential.
 """
@@ -10,16 +10,13 @@ struct SoftSphere{S, C, F, E} <: GeneralInteraction
     energy_unit::E
 end
 
-SoftSphere{S}(cutoff, nl_only, force_unit, energy_unit) where S =
-    SoftSphere{S, typeof(cutoff), typeof(force_unit), typeof(energy_unit)}(
-        cutoff, nl_only, force_unit, energy_unit)
-
 function SoftSphere(;
                     cutoff=NoCutoff(),
                     nl_only=false,
                     force_unit=u"kJ * mol^-1 * nm^-1",
-                    energy_unit=u"kJ * mol^-1")
-    return SoftSphere{false, typeof(cutoff), typeof(force_unit), typeof(energy_unit)}(
+                    energy_unit=u"kJ * mol^-1",
+                    skip_shortcut=false)
+    return SoftSphere{skip_shortcut, typeof(cutoff), typeof(force_unit), typeof(energy_unit)}(
         cutoff, nl_only, force_unit, energy_unit)
 end
 
