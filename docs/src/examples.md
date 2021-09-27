@@ -15,14 +15,18 @@ We make a `Logger` to record when the bonds are present, allowing us to visualiz
 ```julia
 using Molly
 using Makie
+using Unitful
 using LinearAlgebra
 
 struct BondableAtom
+    i::Int64
     mass::Float64
     σ::Float64
     ϵ::Float64
     partners::Set{Int}
 end
+
+Molly.mass(ba::BondableAtom) = ba.mass
 
 struct BondableInteraction <: GeneralInteraction
     nl_only::Bool
@@ -40,20 +44,19 @@ function Molly.force(inter::BondableInteraction,
                         atom_j,
                         box_size)
     # Break bonds randomly
-    if j in atom_i.partners
-        if rand() < inter.prob_break
-            delete!(atom_i.partners, j)
-            delete!(atom_j.partners, i)
-        end
+    if atom_j.i in atom_i.partners && rand() < inter.prob_break
+        delete!(atom_i.partners, atom_j.i)
+        delete!(atom_j.partners, atom_j.i)
+    end
     # Make bonds between close atoms randomly
-    elseif r2 < inter.b0 * inter.dist_formation && rand() < inter.prob_formation
-        push!(atom_i.partners, j)
-        push!(atom_j.partners, i)
+    dr = vector(coord_i, coord_j, box_size)
+    r2 = sum(abs2, dr)
+    if r2 < inter.b0 * inter.dist_formation && rand() < inter.prob_formation
+        push!(atom_i.partners, atom_j.i)
+        push!(atom_j.partners, atom_j.i)
     end
     # Apply the force of a harmonic bond
-    if j in atom_i.partners
-        dr = vector(coord_i, coord_j, box_size)
-        r2 = sum(abs2, dr)
+    if atom_j.i in atom_i.partners
         c = inter.kb * (norm(dr) - inter.b0)
         fdr = -c * normalize(dr)
         return fdr
@@ -85,10 +88,10 @@ box_size = 10.0
 n_steps = 2_000
 n_atoms = 200
 
-atoms = [BondableAtom(1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
-coords = [box_size .* rand(SVector{2}) for i in 1:n_atoms]
+atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
+coords = placeatoms(n_atoms, box_size, 0.1; dims=2)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
-general_inters = (SoftSphere(true), BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0))
+general_inters = (SoftSphere(nl_only=true), BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0))
 
 s = Simulation(
     simulator=VelocityVerlet(),
@@ -100,10 +103,12 @@ s = Simulation(
     box_size=box_size,
     neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0),
     thermostat=AndersenThermostat(5.0),
-    loggers=Dict("coords" => CoordinateLogger(20; dims=2),
+    loggers=Dict("coords" => CoordinateLogger(Float64, 20; dims=2),
                     "bonds" => BondLogger(20, [])),
     timestep=timestep,
-    n_steps=n_steps
+    n_steps=n_steps,
+    force_unit=NoUnits,
+    energy_unit=NoUnits,
 )
 
 simulate!(s)

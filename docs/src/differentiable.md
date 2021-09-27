@@ -3,6 +3,9 @@
 !!! note
     This section can be read as a standalone introduction to differentiable simulation with Molly, but makes more sense in the context of the [Molly documentation](@ref).
 
+!!! note
+    The examples on this page have somewhat diverged from the main branch and will hopefully be updated soon.
+
 In the last few years, the deep learning revolution has broadened to include the paradigm of [differentiable programming](https://en.wikipedia.org/wiki/Differentiable_programming).
 The concept of using automatic differentiation to obtain exact gradients through physical simulations has many interesting applications, including parameterising forcefields and training neural networks to describe atom potentials.
 

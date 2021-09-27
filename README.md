@@ -25,6 +25,7 @@ Implemented features include:
 - Periodic boundary conditions in a cubic box.
 - Neighbor list to speed up calculation of non-bonded forces.
 - Automatic multithreading.
+- [Unitful](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
 - GPU acceleration on CUDA-enabled devices.
 - Run with Float64 or Float32.
 - Some analysis functions, e.g. RDF.
@@ -51,7 +52,7 @@ Enter the package mode by pressing `]` and run `add Molly`.
 
 ## Usage
 
-Some examples are given here, see [the documentation](https://JuliaMolSim.github.io/Molly.jl/stable) for more on how to use the package.
+Some examples are given here, see [the documentation](https://juliamolsim.github.io/Molly.jl/stable/docs) for more on how to use the package.
 
 Simulation of a Lennard-Jones gas:
 ```julia
