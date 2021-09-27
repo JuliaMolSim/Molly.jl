@@ -86,7 +86,7 @@ function loss(σ)
         thermostat=thermostat,
         loggers=loggers,
         timestep=timestep,
-        n_steps=n_steps
+        n_steps=n_steps,
     )
 
     mms_start = meanminseparation(coords, box_size)
@@ -200,7 +200,7 @@ function loss(θ)
         thermostat=thermostat,
         loggers=loggers,
         timestep=timestep,
-        n_steps=n_steps
+        n_steps=n_steps,
     )
 
     final_coords = simulate!(s)
@@ -344,7 +344,7 @@ function loss()
         thermostat=thermostat,
         loggers=loggers,
         timestep=timestep,
-        n_steps=n_steps
+        n_steps=n_steps,
     )
 
     final_coords = simulate!(s)

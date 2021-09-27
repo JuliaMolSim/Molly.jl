@@ -18,15 +18,17 @@ First, we'll need some atoms with the relevant parameters defined.
 using Molly
 
 n_atoms = 100
-mass = 10.0
-atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]
+mass = 10.0u"u"
+atoms = [Atom(mass=mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 ```
+See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) docs for more information on the unit annotations.
+Molly re-exports Unitful.jl and [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) since they are usually required to run simulations.
 Next, we'll need some starting coordinates and velocities.
 ```julia
-box_size = 2.0 # nm
-coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
+box_size = 2.0u"nm"
+coords = placeatoms(n_atoms, box_size, 0.3u"nm") # Random placement without clashing
 
-temp = 100 # K
+temp = 100u"K"
 velocities = [velocity(mass, temp) for i in 1:n_atoms]
 ```
 We store the coordinates and velocities as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
@@ -47,11 +49,11 @@ s = Simulation(
     velocities=velocities,
     temperature=temp,
     box_size=box_size,
-    thermostat=AndersenThermostat(1.0), # Coupling constant of 1.0
+    thermostat=AndersenThermostat(1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "coords" => CoordinateLogger(10)),
-    timestep=0.002, # ps
-    n_steps=1_000
+    timestep=0.002u"ps",
+    n_steps=1_000,
 )
 
 simulate!(s)
@@ -76,11 +78,11 @@ using Molly
 using CUDA
 
 n_atoms = 100
-mass = 10.0f0
-box_size = 2.0f0
-temp = 100.0f0
-atoms = cu([AtomMin(mass=mass, σ=0.3f0, ϵ=0.2f0) for i in 1:n_atoms])
-coords = cu([box_size .* SVector{3}(rand(Float32, 3)) for i in 1:n_atoms])
+mass = 10.0f0u"u"
+box_size = 2.0f0u"nm"
+temp = 100.0f0u"K"
+atoms = cu([AtomMin(mass=mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
+coords = cu(placeatoms(n_atoms, box_size, 0.3u"nm"))
 velocities = cu([velocity(mass, temp) for i in 1:n_atoms])
 
 s = Simulation(
@@ -92,10 +94,10 @@ s = Simulation(
     temperature=temp,
     box_size=box_size,
     thermostat=NoThermostat(),
-    loggers=Dict("temp" => TemperatureLogger(Float32, 10),
-                    "coords" => CoordinateLogger(Float32, 10)),
+    loggers=Dict("temp" => TemperatureLogger(typeof(1.0f0u"K"), 10),
+                    "coords" => CoordinateLogger(typeof(box_size), 10)),
     timestep=0.002f0,
-    n_steps=1_000
+    n_steps=1_000,
 )
 
 simulate!(s)
@@ -104,11 +106,11 @@ simulate!(s)
 ## Simulating diatomic molecules
 
 If we want to define specific interactions between atoms, for example bonds, we can do.
-Using the same atom definitions as before, let's set up the coordinates so that paired atoms are 1 Å apart.
+Using the same definitions as the first example, let's set up the coordinates so that paired atoms are 1 Å apart.
 ```julia
-coords = [box_size .* rand(SVector{3}) for i in 1:(n_atoms / 2)]
+coords = placeatoms(n_atoms ÷ 2, box_size, 0.3u"nm")
 for i in 1:length(coords)
-    push!(coords, coords[i] .+ [0.1, 0.0, 0.0])
+    push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
 end
 
 velocities = [velocity(mass, temp) for i in 1:n_atoms]
@@ -116,7 +118,7 @@ velocities = [velocity(mass, temp) for i in 1:n_atoms]
 Now we can use the built-in bond type to place a harmonic constraint between paired atoms.
 The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.
 ```julia
-bonds = [HarmonicBond(i, Int(i + n_atoms / 2), 0.1, 300_000.0) for i in 1:Int(n_atoms / 2)]
+bonds = [HarmonicBond(i=i, j=(i + n_atoms ÷ 2), b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)]
 
 specific_inter_lists = (bonds,)
 ```
@@ -124,7 +126,14 @@ This time, we are also going to use a neighbor list to speed up the Lennard Jone
 We can use the built-in distance neighbor finder.
 The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff to be classed as a neighbor.
 ```julia
-neighbor_finder = DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 1.2)
+# All pairs apart from bonded pairs are eligible to interact
+nb_matrix = trues(n_atoms, n_atoms)
+for i in 1:(n_atoms ÷ 2)
+    nb_matrix[i, i + (n_atoms ÷ 2)] = false
+    nb_matrix[i + (n_atoms ÷ 2), i] = false
+end
+
+neighbor_finder = DistanceNeighborFinder(nb_matrix, 10, 1.5u"nm")
 ```
 Now we can simulate as before.
 ```julia
@@ -132,17 +141,17 @@ s = Simulation(
     simulator=VelocityVerlet(),
     atoms=atoms,
     specific_inter_lists=specific_inter_lists,
-    general_inters=(LennardJones(true),), # true means we are using the neighbor list for this interaction
+    general_inters=(LennardJones(nl_only=true),),
     coords=coords,
     velocities=velocities,
     temperature=temp,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    thermostat=AndersenThermostat(1.0),
+    thermostat=AndersenThermostat(1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "coords" => CoordinateLogger(10)),
-    timestep=0.002,
-    n_steps=1_000
+    timestep=0.002u"ps",
+    n_steps=1_000,
 )
 
 simulate!(s)
@@ -150,7 +159,7 @@ simulate!(s)
 This time when we view the trajectory we can add lines to show the bonds.
 ```julia
 visualize(s.loggers["coords"], box_size, "sim_diatomic.gif",
-            connections=[(i, Int(i + n_atoms / 2)) for i in 1:Int(n_atoms / 2)],
+            connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
             markersize=0.05, linewidth=5.0)
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
@@ -159,12 +168,12 @@ visualize(s.loggers["coords"], box_size, "sim_diatomic.gif",
 
 Molly is geared primarily to molecular simulation, but can also be used to simulate other physical systems.
 Let's set up a gravitational simulation.
-This example also shows the use of `Float32` and a 2D simulation.
+This example also shows the use of `Float32`, a 2D simulation and no specified units.
 ```julia
 atoms = [Atom(mass=1.0f0), Atom(mass=1.0f0)]
 coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
 velocities = [SVector(0.0f0, 1.0f0), SVector(0.0f0, -1.0f0)]
-general_inters = (Gravity(false, 1.5f0),)
+general_inters = (Gravity(nl_only=false, G=1.5f0),)
 
 s = Simulation(
     simulator=VelocityVerlet(),
@@ -175,7 +184,9 @@ s = Simulation(
     box_size=1.0f0,
     loggers=Dict("coords" => CoordinateLogger(Float32, 10; dims=2)),
     timestep=0.002f0,
-    n_steps=2000
+    n_steps=2_000,
+    force_unit=NoUnits,
+    energy_unit=NoUnits,
 )
 
 simulate!(s)
@@ -199,7 +210,7 @@ atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readi
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
 
-temp = 298
+temp = 298u"K"
 
 s = Simulation(
     simulator=VelocityVerlet(),
@@ -210,12 +221,12 @@ s = Simulation(
     velocities=[velocity(a.mass, temp) for a in atoms],
     temperature=temp,
     box_size=box_size,
-    neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.2),
-    thermostat=AndersenThermostat(1.0),
+    neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.5u"nm"),
+    thermostat=AndersenThermostat(1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),
-    timestep=0.0002,
-    n_steps=5_000
+    timestep=0.0002u"ps",
+    n_steps=5_000,
 )
 
 simulate!(s)
@@ -301,9 +312,9 @@ n_steps = 1_000
 n_people = 500
 n_starting = 2
 atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
-coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
+coords = placeatoms(n_people, box_size, 0.1; dims=2)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
-general_inters = (LennardJones = LennardJones(true), SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
+general_inters = (LennardJones = LennardJones(nl_only=true), SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
 
 s = Simulation(
     simulator=VelocityVerlet(),
@@ -315,10 +326,12 @@ s = Simulation(
     box_size=box_size,
     neighbor_finder=DistanceNeighborFinder(trues(n_people, n_people), 10, 2.0),
     thermostat=AndersenThermostat(5.0),
-    loggers=Dict("coords" => CoordinateLogger(10; dims=2),
+    loggers=Dict("coords" => CoordinateLogger(Float64, 10; dims=2),
                     "SIR" => SIRLogger(10, [])),
     timestep=timestep,
-    n_steps=n_steps
+    n_steps=n_steps,
+    force_unit=NoUnits,
+    energy_unit=NoUnits,
 )
 
 simulate!(s)
@@ -329,6 +342,15 @@ visualize(s.loggers["coords"], box_size, "sim_agent.gif")
 
 We can use the logger to plot the fraction of people susceptible (blue), infected (orange) and recovered (green) over the course of the simulation:
 ![Fraction SIR](images/fraction_sir.png)
+
+## Units
+
+Molly is fairly opinionated about using [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) units as shown above: you don't have to use them, but it is better if you do.
+Whilst you occasionally may run into friction with dimension mismatches, using units has the major advantages of catching whole classes of errors and letting you physically interpret the numbers in your system.
+The performance overhead of using units is minimal.
+
+All your interaction types need to return the same units of force and energy or the simulation will not run.
+By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_unit` and `energy_unit` arguments to [`Simulation`](@ref).
 
 ## Forces
 
@@ -517,7 +539,7 @@ function Molly.simulate!(s::Simulation,
                             n_steps::Integer;
                             parallel::Bool=true)
     # Find neighbors like this
-    neighbors = find_neighbors!(s, nothing, s.neighbor_finder, 0,
+    neighbors = find_neighbors!(s, nothing, s.neighbor_finder, 0;
                                     parallel=parallel)
 
     # Show a progress bar like this, if you have imported ProgressMeter
@@ -528,7 +550,7 @@ function Molly.simulate!(s::Simulation,
         end
 
         # Calculate accelerations like this
-        accels_t = accelerations(s, neighbors, parallel=parallel)
+        accels_t = accelerations(s, neighbors; parallel=parallel)
 
         # Ensure coordinates stay within the simulation box like this
         for i in 1:length(s.coords)
@@ -539,7 +561,7 @@ function Molly.simulate!(s::Simulation,
         apply_thermostat!(s, s.thermostat)
 
         # Find new neighbors like this
-        neighbors = find_neighbors!(s, neighbors, s.neighbor_finder, step_n,
+        neighbors = find_neighbors!(s, neighbors, s.neighbor_finder, step_n;
                                         parallel=parallel)
 
         # Increment the step counter like this

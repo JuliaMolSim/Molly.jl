@@ -25,7 +25,7 @@ Implemented features include:
 - Periodic boundary conditions in a cubic box.
 - Neighbor list to speed up calculation of non-bonded forces.
 - Automatic multithreading.
-- [Unitful](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
+- [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
 - GPU acceleration on CUDA-enabled devices.
 - Run with Float64 or Float32.
 - Some analysis functions, e.g. RDF.
@@ -59,12 +59,12 @@ Simulation of a Lennard-Jones gas:
 using Molly
 
 n_atoms = 100
-box_size = 2.0 # nm
-temp = 298 # K
-mass = 10.0 # Relative atomic mass
+box_size = 2.0u"nm"
+temp = 298u"K"
+mass = 10.0u"u"
 
-atoms = [Atom(mass=mass, σ=0.3, ϵ=0.2) for i in 1:n_atoms]
-coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
+atoms = [Atom(mass=mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+coords = placeatoms(n_atoms, box_size, 0.3u"nm")
 velocities = [velocity(mass, temp) for i in 1:n_atoms]
 general_inters = (LennardJones(),)
 
@@ -76,10 +76,10 @@ s = Simulation(
     velocities=velocities,
     temperature=temp,
     box_size=box_size,
-    thermostat=AndersenThermostat(1.0),
+    thermostat=AndersenThermostat(1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(100)),
-    timestep=0.002, # ps
-    n_steps=10_000
+    timestep=0.002u"ps",
+    n_steps=10_000,
 )
 
 simulate!(s)
@@ -89,8 +89,8 @@ Simulation of a protein:
 ```julia
 using Molly
 
-timestep = 0.0002 # ps
-temp = 298 # K
+timestep = 0.0002u"ps"
+temp = 298u"K"
 n_steps = 5_000
 
 atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
@@ -106,12 +106,12 @@ s = Simulation(
     velocities=[velocity(a.mass, temp) for a in atoms],
     temperature=temp,
     box_size=box_size,
-    neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.2),
-    thermostat=AndersenThermostat(1.0),
+    neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.5u"nm"),
+    thermostat=AndersenThermostat(1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),
     timestep=timestep,
-    n_steps=n_steps
+    n_steps=n_steps,
 )
 
 simulate!(s)
