@@ -13,6 +13,7 @@ using Requires
 using Unitful
 
 @reexport using StaticArrays
+@reexport using Unitful
 
 using Base.Threads
 using LinearAlgebra

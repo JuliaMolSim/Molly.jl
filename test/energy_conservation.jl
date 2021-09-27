@@ -1,5 +1,4 @@
 using Molly
-using Unitful
 
 using Base.Threads
 using Statistics

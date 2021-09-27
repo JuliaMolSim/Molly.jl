@@ -15,7 +15,6 @@ We make a `Logger` to record when the bonds are present, allowing us to visualiz
 ```julia
 using Molly
 using Makie
-using Unitful
 using LinearAlgebra
 
 struct BondableAtom

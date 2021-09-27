@@ -1,6 +1,5 @@
 using Molly
 using CUDA
-using Unitful
 
 using Base.Threads
 using Statistics
@@ -549,7 +548,7 @@ end
     n_people = 500
     n_starting = 2
     atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
-    coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
+    coords = placeatoms(n_people, box_size, 0.1; dims=2)
     velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
     general_inters = (LennardJones = LennardJones(nl_only=true),
                         SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
