@@ -79,7 +79,7 @@ function Molly.log_property!(logger::BondLogger, s, step_n)
     end
 end
 
-temperature = 0.01
+temp = 0.01
 timestep = 0.02
 box_size = 10.0
 n_steps = 2_000
@@ -87,7 +87,7 @@ n_atoms = 200
 
 atoms = [BondableAtom(1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = [box_size .* rand(SVector{2}) for i in 1:n_atoms]
-velocities = [velocity(1.0, temperature; dims=2) for i in 1:n_atoms]
+velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 general_inters = (SoftSphere(true), BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0))
 
 s = Simulation(
@@ -96,7 +96,7 @@ s = Simulation(
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
-    temperature=temperature,
+    temperature=temp,
     box_size=box_size,
     neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0),
     thermostat=AndersenThermostat(5.0),

@@ -66,7 +66,7 @@ CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
     end
 end
 
-temperature = 298u"K"
+temp = 298u"K"
 timestep = 0.002u"ps"
 n_steps = 20_000
 box_size = 2.0u"nm"
@@ -80,8 +80,8 @@ box_size = 2.0u"nm"
                     mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ / mol") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=placeatoms(n_atoms, box_size, 0.3u"nm"; dims=2),
-        velocities=[velocity(10.0u"u", temperature; dims=2) .* 0.01 for i in 1:n_atoms],
-        temperature=temperature,
+        velocities=[velocity(10.0u"u", temp; dims=2) .* 0.01 for i in 1:n_atoms],
+        temperature=temp,
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0u"nm"),
         thermostat=AndersenThermostat(10.0u"ps"),
@@ -114,8 +114,8 @@ end
                         mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ / mol") for i in 1:n_atoms],
             general_inters=(LennardJones(nl_only=true),),
             coords=placeatoms(n_atoms, box_size, 0.3u"nm"),
-            velocities=[velocity(10.0u"u", temperature) .* 0.01 for i in 1:n_atoms],
-            temperature=temperature,
+            velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
+            temperature=temp,
             box_size=box_size,
             neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0u"nm"),
             thermostat=AndersenThermostat(10.0u"ps"),
@@ -154,7 +154,7 @@ end
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=[c .+ 0.01 .* rand(SVector{3})u"nm" for c in coords],
-        temperature=temperature,
+        temperature=temp,
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0u"nm"),
         thermostat=NoThermostat(),
@@ -186,8 +186,8 @@ end
         specific_inter_lists=(bonds,),
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
-        velocities=[velocity(10.0u"u", temperature) .* 0.01 for i in 1:n_atoms],
-        temperature=temperature,
+        velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
+        temperature=temp,
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 2.0u"nm"),
         thermostat=AndersenThermostat(10.0u"ps"),
@@ -222,8 +222,8 @@ end
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
         coords=coords,
-        velocities=[velocity(a.mass, temperature) .* 0.01 for a in atoms],
-        temperature=temperature,
+        velocities=[velocity(a.mass, temp) .* 0.01 for a in atoms],
+        temperature=temp,
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.5u"nm"),
         thermostat=AndersenThermostat(10.0u"ps"),
@@ -251,8 +251,8 @@ end
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
         coords=coords,
-        velocities=[velocity(a.mass, Float32(temperature)) .* 0.01f0 for a in atoms],
-        temperature=Float32(temperature),
+        velocities=[velocity(a.mass, Float32(temp)) .* 0.01f0 for a in atoms],
+        temperature=Float32(temp),
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.5f0u"nm"),
         thermostat=AndersenThermostat(10.0f0u"ps"),
@@ -292,8 +292,8 @@ end
                         ϵ=0.2u"kJ / mol") for i in 1:n_atoms],
             general_inters=(gi,),
             coords=placeatoms(n_atoms, box_size, 0.2u"nm"),
-            velocities=[velocity(10.0u"u", temperature) .* 0.01 for i in 1:n_atoms],
-            temperature=temperature,
+            velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
+            temperature=temp,
             box_size=box_size,
             neighbor_finder=neighbor_finder,
             thermostat=AndersenThermostat(10.0u"ps"),
@@ -334,9 +334,9 @@ end
     n_atoms = 400
     mass = 10.0u"u"
     box_size = 6.0u"nm"
-    temperature = 1.0u"K"
+    temp = 1.0u"K"
     starting_coords = placediatomics(n_atoms ÷ 2, box_size, 0.2u"nm", 0.2u"nm")
-    starting_velocities = [velocity(mass, temperature) for i in 1:n_atoms]
+    starting_velocities = [velocity(mass, temp) for i in 1:n_atoms]
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
@@ -380,7 +380,7 @@ end
             general_inters=general_inters,
             coords=coords,
             velocities=velocities,
-            temperature=temperature,
+            temperature=temp,
             box_size=box_size,
             neighbor_finder=neighbor_finder,
             thermostat=thermostat,
@@ -482,7 +482,7 @@ end
         end
     end
 
-    temperature = 0.01
+    temp = 0.01
     timestep = 0.02
     box_size = 10.0
     n_steps = 1_000
@@ -490,7 +490,7 @@ end
     n_starting = 2
     atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
     coords = [box_size .* rand(SVector{2}) for i in 1:n_people]
-    velocities = [velocity(1.0, temperature; dims=2) for i in 1:n_people]
+    velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
     general_inters = (LennardJones = LennardJones(nl_only=true),
                         SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
 
@@ -500,7 +500,7 @@ end
         general_inters=general_inters,
         coords=coords,
         velocities=velocities,
-        temperature=temperature,
+        temperature=temp,
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(trues(n_people, n_people), 10, 2.0),
         thermostat=AndersenThermostat(5.0),
