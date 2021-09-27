@@ -96,7 +96,7 @@ s = Simulation(
     thermostat=NoThermostat(),
     loggers=Dict("temp" => TemperatureLogger(typeof(1.0f0u"K"), 10),
                     "coords" => CoordinateLogger(typeof(box_size), 10)),
-    timestep=0.002f0,
+    timestep=0.002f0u"ps",
     n_steps=1_000,
 )
 
