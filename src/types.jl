@@ -19,7 +19,7 @@ const DefaultFloat = Float64
 abstract type Interaction end
 
 """
-A general interaction that will apply to all atom pairs.
+A general interaction that will apply to all or most atom pairs.
 Custom general interactions should sub-type this type.
 """
 abstract type GeneralInteraction <: Interaction end
@@ -32,7 +32,7 @@ abstract type SpecificInteraction <: Interaction end
 
 """
 A general type of cutoff encoding the approximation used for a potential.
-Interactions can be parametrized by the cutoff behavior.
+Interactions can be parameterized by the cutoff behavior.
 """
 abstract type AbstractCutoff end
 
@@ -74,11 +74,11 @@ This type cannot be used on the GPU as it is not `isbits` - use `AtomMin` instea
 - `resnum::Integer=0`: the residue number if the atom is part of a polymer.
 - `resname::AbstractString=""`: the residue name if the atom is part of a
     polymer.
-- `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
-- `mass::M=0.0`: the mass of the atom.
-- `σ::S=0.0`: the Lennard-Jones finite distance at which the inter-particle
+- `charge::C=0.0u"q"`: the charge of the atom, used for electrostatic interactions.
+- `mass::M=0.0u"u"`: the mass of the atom.
+- `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
-- `ϵ::E=0.0`: the Lennard-Jones depth of the potential well.
+- `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
 """
 struct Atom{C, M, S, E}
     attype::String
@@ -101,7 +101,7 @@ function Atom(;
                 charge=0.0u"q",
                 mass=0.0u"u",
                 σ=0.0u"nm",
-                ϵ=0.0u"kJ / mol")
+                ϵ=0.0u"kJ * mol^-1")
     return Atom(attype, name, resnum, resname, charge, mass, σ, ϵ)
 end
 
@@ -120,11 +120,11 @@ This type is `isbits` and can be used on the GPU - use `Atom` in other contexts 
 more information.
 
 # Arguments
-- `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
-- `mass::M=0.0`: the mass of the atom.
-- `σ::S=0.0`: the Lennard-Jones finite distance at which the inter-particle
+- `charge::C=0.0u"q"`: the charge of the atom, used for electrostatic interactions.
+- `mass::M=0.0u"u"`: the mass of the atom.
+- `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
-- `ϵ::E=0.0`: the Lennard-Jones depth of the potential well.
+- `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
 """
 struct AtomMin{C, M, S, E}
     charge::C
@@ -137,7 +137,7 @@ function AtomMin(;
                 charge=0.0u"q",
                 mass=0.0u"u",
                 σ=0.0u"nm",
-                ϵ=0.0u"kJ / mol")
+                ϵ=0.0u"kJ * mol^-1")
     return AtomMin(charge, mass, σ, ϵ)
 end
 

@@ -54,7 +54,7 @@ struct Torsiontype{T}
 end
 
 """
-    placeatoms(n_atoms, box_size, min_dist)
+    placeatoms(n_atoms, box_size, min_dist; dims=3)
 
 Obtain `n_atoms` 3D coordinates in a cube of length `box_size` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.

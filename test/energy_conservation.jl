@@ -26,7 +26,7 @@ using Test
             s = Simulation(
                 simulator=VelocityVerlet(),
                 atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0u"q",
-                            mass=mass, σ=0.3u"nm", ϵ=0.2u"kJ / mol") for i in 1:n_atoms],
+                            mass=mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
                 general_inters=(lj_potential,),
                 coords=placeatoms(n_atoms, box_size, 0.6u"nm"),
                 velocities=[velocity(mass, temp) for i in 1:n_atoms],
@@ -42,13 +42,13 @@ using Test
             @time simulate!(s; parallel=parallel)
 
             ΔE = energy(s) - E0
-            @test abs(ΔE) < 2e-2u"kJ / mol"
+            @test abs(ΔE) < 2e-2u"kJ * mol^-1"
 
             Es = s.loggers["energy"].energies
             maxΔE = maximum(abs.(Es .- E0))
-            @test maxΔE < 2e-2u"kJ / mol"
+            @test maxΔE < 2e-2u"kJ * mol^-1"
 
-            @test abs(Es[end] - Es[1]) < 2e-2u"kJ / mol"
+            @test abs(Es[end] - Es[1]) < 2e-2u"kJ * mol^-1"
 
             final_coords = last(s.loggers["coords"].coords)
             @test minimum(minimum.(final_coords)) > 0.0u"nm"

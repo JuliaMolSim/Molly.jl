@@ -77,7 +77,7 @@ box_size = 2.0u"nm"
     s = Simulation(
         simulator=VelocityVerlet(),
         atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0u"q",
-                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ / mol") for i in 1:n_atoms],
+                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=placeatoms(n_atoms, box_size, 0.3u"nm"; dims=2),
         velocities=[velocity(10.0u"u", temp; dims=2) .* 0.01 for i in 1:n_atoms],
@@ -111,7 +111,7 @@ end
         s = Simulation(
             simulator=VelocityVerlet(),
             atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0u"q",
-                        mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ / mol") for i in 1:n_atoms],
+                        mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             general_inters=(LennardJones(nl_only=true),),
             coords=placeatoms(n_atoms, box_size, 0.3u"nm"),
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
@@ -150,7 +150,7 @@ end
     s = Simulation(
         simulator=VelocityFreeVerlet(),
         atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0u"q",
-                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ / mol") for i in 1:n_atoms],
+                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=[c .+ 0.01 .* rand(SVector{3})u"nm" for c in coords],
@@ -182,7 +182,7 @@ end
     s = Simulation(
         simulator=VelocityVerlet(),
         atoms=[Atom(attype="H", name="H", resnum=i, resname="H", charge=0.0u"q",
-                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ / mol") for i in 1:n_atoms],
+                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         specific_inter_lists=(bonds,),
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
@@ -289,7 +289,7 @@ end
         s = Simulation(
             simulator=VelocityVerlet(),
             atoms=[Atom(charge=i % 2 == 0 ? -1.0u"q" : 1.0u"q", mass=10.0u"u", σ=0.2u"nm",
-                        ϵ=0.2u"kJ / mol") for i in 1:n_atoms],
+                        ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             general_inters=(gi,),
             coords=placeatoms(n_atoms, box_size, 0.2u"nm"),
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
@@ -317,7 +317,7 @@ end
     s = Simulation(
         simulator=VelocityVerlet(),
         atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0u"q",
-                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ / mol") for i in 1:n_atoms],
+                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=velocities,
@@ -425,12 +425,12 @@ end
             coords = cu(deepcopy(f32 ? starting_coords_f32 : starting_coords))
             velocities = cu(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
             atoms = cu([AtomMin(charge=f32 ? 0.0f0u"q" : 0.0u"q", mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                                ϵ=f32 ? 0.2f0u"kJ / mol" : 0.2u"kJ / mol") for i in 1:n_atoms])
+                                ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
         else
             coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
             velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
             atoms = [Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=f32 ? 0.0f0u"q" : 0.0u"q",
-                            mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm", ϵ=f32 ? 0.2f0u"kJ / mol" : 0.2u"kJ / mol") for i in 1:n_atoms]
+                            mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm", ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
         end
 
         s = Simulation(

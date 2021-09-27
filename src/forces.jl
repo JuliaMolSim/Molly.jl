@@ -50,6 +50,11 @@ end
     return nothing
 end
 
+"""
+    mass(atom)
+
+The mass of an atom.
+"""
 mass(atom::Atom) = atom.mass
 mass(atom::AtomMin) = atom.mass
 
