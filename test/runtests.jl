@@ -308,6 +308,66 @@ end
     end
 end
 
+@testset "Units" begin
+    n_atoms = 100
+    coords = placeatoms(n_atoms, box_size, 0.3u"nm")
+    velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
+    n_steps = 2_000 # Does diverge for longer simulations or higher velocities
+
+    s = Simulation(
+        simulator=VelocityVerlet(),
+        atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0u"q",
+                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ / mol") for i in 1:n_atoms],
+        general_inters=(LennardJones(nl_only=true),),
+        coords=coords,
+        velocities=velocities,
+        temperature=temp,
+        box_size=box_size,
+        neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0u"nm"),
+        thermostat=NoThermostat(),
+        loggers=Dict("temp" => TemperatureLogger(100),
+                     "coords" => CoordinateLogger(100),
+                     "energy" => EnergyLogger(100)),
+        timestep=timestep,
+        n_steps=n_steps,
+    )
+
+    s_nounits = Simulation(
+        simulator=VelocityVerlet(),
+        atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
+                    mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
+        general_inters=(LennardJones(nl_only=true),),
+        coords=ustrip.(coords),
+        velocities=ustrip.(velocities),
+        temperature=ustrip(temp),
+        box_size=ustrip(box_size),
+        neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0),
+        thermostat=NoThermostat(),
+        loggers=Dict("temp" => TemperatureLogger(Float64, 100),
+                     "coords" => CoordinateLogger(Float64, 100),
+                     "energy" => EnergyLogger(Float64, 100)),
+        timestep=ustrip(timestep),
+        n_steps=n_steps,
+        force_unit=NoUnits,
+        energy_unit=NoUnits,
+    )
+
+    find_neighbors!(s, s.neighbor_finder, 0; parallel=false)
+    find_neighbors!(s_nounits, s_nounits.neighbor_finder, 0; parallel=false)
+    accel_diff = ustrip.(accelerations(s)) .- accelerations(s_nounits)
+    @test iszero(accel_diff)
+
+    simulate!(s; parallel=false)
+    simulate!(s_nounits; parallel=false)
+
+    coords_diff = ustrip.(s.loggers["coords"].coords[end]) .- s_nounits.loggers["coords"].coords[end]
+    @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8
+
+    final_energy = s.loggers["energy"].energies[end]
+    final_energy_nounits = s_nounits.loggers["energy"].energies[end]
+    @test isapprox(ustrip(final_energy), final_energy_nounits, atol=5e-4)
+end
+
 @testset "Different implementations" begin
     function placediatomics(n_molecules::Integer, box_size, min_dist, bond_length)
         min_dist_sq = min_dist ^ 2
