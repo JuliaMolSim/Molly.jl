@@ -4,11 +4,14 @@ using Makie
 using LinearAlgebra
 
 struct BondableAtom
+    i::Int64
     mass::Float64
     σ::Float64
     ϵ::Float64
     partners::Set{Int}
 end
+
+Molly.mass(ba::BondableAtom) = ba.mass
 
 struct BondableInteraction &lt;: GeneralInteraction
     nl_only::Bool
@@ -26,20 +29,19 @@ function Molly.force(inter::BondableInteraction,
                         atom_j,
                         box_size)
     # Break bonds randomly
-    if j in atom_i.partners
-        if rand() &lt; inter.prob_break
-            delete!(atom_i.partners, j)
-            delete!(atom_j.partners, i)
-        end
+    if atom_j.i in atom_i.partners &amp;&amp; rand() &lt; inter.prob_break
+        delete!(atom_i.partners, atom_j.i)
+        delete!(atom_j.partners, atom_j.i)
+    end
     # Make bonds between close atoms randomly
-    elseif r2 &lt; inter.b0 * inter.dist_formation &amp;&amp; rand() &lt; inter.prob_formation
-        push!(atom_i.partners, j)
-        push!(atom_j.partners, i)
+    dr = vector(coord_i, coord_j, box_size)
+    r2 = sum(abs2, dr)
+    if r2 &lt; inter.b0 * inter.dist_formation &amp;&amp; rand() &lt; inter.prob_formation
+        push!(atom_i.partners, atom_j.i)
+        push!(atom_j.partners, atom_j.i)
     end
     # Apply the force of a harmonic bond
-    if j in atom_i.partners
-        dr = vector(coord_i, coord_j, box_size)
-        r2 = sum(abs2, dr)
+    if atom_j.i in atom_i.partners
         c = inter.kb * (norm(dr) - inter.b0)
         fdr = -c * normalize(dr)
         return fdr
@@ -65,16 +67,16 @@ function Molly.log_property!(logger::BondLogger, s, step_n)
     end
 end
 
-temperature = 0.01
+temp = 0.01
 timestep = 0.02
 box_size = 10.0
 n_steps = 2_000
 n_atoms = 200
 
-atoms = [BondableAtom(1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
-coords = [box_size .* rand(SVector{2}) for i in 1:n_atoms]
-velocities = [velocity(1.0, temperature, dims=2) for i in 1:n_atoms]
-general_inters = (SoftSphere(true), BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0))
+atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
+coords = placeatoms(n_atoms, box_size, 0.1; dims=2)
+velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
+general_inters = (SoftSphere(nl_only=true), BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0))
 
 s = Simulation(
     simulator=VelocityVerlet(),
@@ -82,14 +84,16 @@ s = Simulation(
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
-    temperature=temperature,
+    temperature=temp,
     box_size=box_size,
     neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0),
     thermostat=AndersenThermostat(5.0),
-    loggers=Dict(&quot;coords&quot; =&gt; CoordinateLogger(20, dims=2),
+    loggers=Dict(&quot;coords&quot; =&gt; CoordinateLogger(Float64, 20; dims=2),
                     &quot;bonds&quot; =&gt; BondLogger(20, [])),
     timestep=timestep,
-    n_steps=n_steps
+    n_steps=n_steps,
+    force_unit=NoUnits,
+    energy_unit=NoUnits,
 )
 
 simulate!(s)
@@ -105,4 +109,4 @@ visualize(s.loggers[&quot;coords&quot;],
             box_size,
             &quot;sim_mutbond.gif&quot;,
             connections=connections,
-            connection_frames=s.loggers[&quot;bonds&quot;].bonds)</code></pre><p><img src="../images/sim_mutbond.gif" alt="Mutable bond simulation"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Monday 28 June 2021 10:27">Monday 28 June 2021</span>. Using Julia version 1.6.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+            connection_frames=s.loggers[&quot;bonds&quot;].bonds)</code></pre><p><img src="../images/sim_mutbond.gif" alt="Mutable bond simulation"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Monday 27 September 2021 17:40">Monday 27 September 2021</span>. Using Julia version 1.6.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
