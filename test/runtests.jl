@@ -1,4 +1,5 @@
 using Molly
+using Aqua
 using CUDA
 
 using Base.Threads
@@ -21,6 +22,9 @@ else
 end
 
 CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
+
+# Some failures due to dependencies but there is an unbound args error for Simulation
+Aqua.test_all(Molly; ambiguities=(recursive=false), unbound_args=false, undefined_exports=false)
 
 @testset "Spatial" begin
     @test vector1D(4.0, 6.0, 10.0) ==  2.0
