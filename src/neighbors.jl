@@ -104,7 +104,7 @@ function find_neighbors!(s::Simulation,
     dist_unit = unit(first(first(s.coords)))
     box_size = ustrip(dist_unit, s.box_size)
     bv = SVector{3}(box_size, box_size, box_size)
-    btree = BallTree(ustrip.(s.coords), PeriodicEuclidean(bv))
+    btree = BallTree(ustripvec.(s.coords), PeriodicEuclidean(bv))
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
 
     if parallel && nthreads() > 1

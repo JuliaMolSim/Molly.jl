@@ -58,6 +58,8 @@ The mass of an atom.
 mass(atom::Atom) = atom.mass
 mass(atom::AtomMin) = atom.mass
 
+ustripvec(x) = ustrip.(x)
+
 """
     accelerations(simulation; parallel=true)
 
@@ -68,7 +70,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
     n_atoms = length(s.coords)
 
     if parallel && nthreads() > 1 && n_atoms >= 100
-        forces_threads = [ustrip.(zero(s.coords)) for i in 1:nthreads()]
+        forces_threads = [ustripvec.(zero(s.coords)) for i in 1:nthreads()]
 
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.general_inters)
@@ -89,7 +91,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
 
         forces = sum(forces_threads)
     else
-        forces = ustrip.(zero(s.coords))
+        forces = ustripvec.(zero(s.coords))
 
         for inter in values(s.general_inters)
             if inter.nl_only
@@ -113,13 +115,11 @@ function accelerations(s::Simulation; parallel::Bool=true)
         ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
         checkforcetype(first(first(ge2)), s.force_unit)
         sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
-        forces += ustrip.(Array(sparse_vec))
+        forces += ustripvec.(Array(sparse_vec))
     end
 
     return (forces * s.force_unit) ./ mass.(s.atoms)
 end
-
-ustripvec(x) = ustrip.(x)
 
 function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
     n_atoms = length(coords)
@@ -140,7 +140,7 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
         checkforcetype(first(first(ge2)), s.force_unit)
         sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
         # Move back to GPU if required
-        forces += convert(typeof(forces), ustrip.(Array(sparse_vec)))
+        forces += convert(typeof(forces), ustripvec.(Array(sparse_vec)))
     end
 
     return (forces * s.force_unit) ./ mass.(s.atoms)

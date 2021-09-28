@@ -15,9 +15,9 @@ else
 end
 
 if CUDA.functional()
-    @info "The GPU tests will be run as CUDA is available"
+    @info "The GPU tests will be run as a CUDA-enabled device is available"
 else
-    @warn "The GPU tests will not be run as CUDA is not available"
+    @warn "The GPU tests will not be run as a CUDA-enabled device is not available"
 end
 
 CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
@@ -336,8 +336,8 @@ end
         atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
                     mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
-        coords=ustrip.(coords),
-        velocities=ustrip.(velocities),
+        coords=Molly.ustripvec.(coords),
+        velocities=Molly.ustripvec.(velocities),
         temperature=ustrip(temp),
         box_size=ustrip(box_size),
         neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0),
@@ -353,13 +353,13 @@ end
 
     find_neighbors!(s, s.neighbor_finder, 0; parallel=false)
     find_neighbors!(s_nounits, s_nounits.neighbor_finder, 0; parallel=false)
-    accel_diff = ustrip.(accelerations(s)) .- accelerations(s_nounits)
+    accel_diff = Molly.ustripvec.(accelerations(s)) .- accelerations(s_nounits)
     @test iszero(accel_diff)
 
     simulate!(s; parallel=false)
     simulate!(s_nounits; parallel=false)
 
-    coords_diff = ustrip.(s.loggers["coords"].coords[end]) .- s_nounits.loggers["coords"].coords[end]
+    coords_diff = Molly.ustripvec.(s.loggers["coords"].coords[end]) .- s_nounits.loggers["coords"].coords[end]
     @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8
 
     final_energy = s.loggers["energy"].energies[end]

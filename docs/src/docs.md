@@ -40,6 +40,7 @@ general_inters = (LennardJones(),)
 ```
 Finally, we can define and run the simulation.
 We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.
+Periodic boundary conditions are used in a cubic box.
 ```julia
 s = Simulation(
     simulator=VelocityVerlet(), # Use velocity Verlet integration
