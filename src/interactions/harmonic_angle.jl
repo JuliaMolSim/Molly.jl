@@ -21,8 +21,13 @@ acosbound(x::Real) = acos(clamp(x, -1, 1))
                                   s::Simulation)
     ba = vector(coords[a.j], coords[a.i], s.box_size)
     bc = vector(coords[a.j], coords[a.k], s.box_size)
-    pa = normalize(ba × (ba × bc))
-    pc = normalize(-bc × (ba × bc))
+    cross_ba_bc = ba × bc
+    if iszero(cross_ba_bc)
+        fz = ustrip.(zero(coords[a.i])) * s.force_unit
+        return [a.i, a.j, a.k], [fz, fz, fz]
+    end
+    pa = normalize(ba × cross_ba_bc)
+    pc = normalize(-bc × cross_ba_bc)
     angle_term = -a.cth * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.th0)
     fa = (angle_term / norm(ba)) * pa
     fc = (angle_term / norm(bc)) * pc
