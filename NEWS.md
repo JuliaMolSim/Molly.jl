@@ -1,5 +1,11 @@
 # Molly.jl release notes
 
+## v0.4.0 - Sep 2021
+
+- Unitful.jl support is added and recommended for use, meaning numbers have physical meaning and many errors are caught. More type parameters have been added to various types to allow this. It is still possible to run simulations without units by specifying the `force_unit` and `energy_unit` arguments to `Simulation`.
+- Interaction constructors with keyword arguments are added or improved.
+- The maximum force for non-bonded interactions is removed.
+
 ## v0.3.0 - May 2021
 
 - The spelling of "neighbour" is changed to "neighbor" throughout the package. This affects `NoNeighborFinder`, `DistanceNeighborFinder`, `TreeNeighborFinder`, `find_neighbors!` and the `neighbor_finder` argument to `Simulation`.
