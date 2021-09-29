@@ -427,28 +427,6 @@ end
 end
 
 @testset "Different implementations" begin
-    function placediatomics(n_molecules::Integer, box_size, min_dist, bond_length)
-        min_dist_sq = min_dist ^ 2
-        coords = SArray[]
-        while length(coords) < (n_molecules * 2)
-            new_coord_a = rand(SVector{3}) .* box_size
-            new_coord_b = copy(new_coord_a) + SVector{3}([bond_length, zero(bond_length), zero(bond_length)])
-            okay = new_coord_b[1] <= box_size
-            for coord in coords
-                if sum(abs2, vector(coord, new_coord_a, box_size)) < min_dist_sq ||
-                        sum(abs2, vector(coord, new_coord_b, box_size)) < min_dist_sq
-                    okay = false
-                    break
-                end
-            end
-            if okay
-                push!(coords, new_coord_a)
-                push!(coords, new_coord_b)
-            end
-        end
-        return [coords...]
-    end
-
     n_atoms = 400
     mass = 10.0u"u"
     box_size = 6.0u"nm"

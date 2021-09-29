@@ -7,6 +7,7 @@ export
     Angletype,
     Torsiontype,
     placeatoms,
+    placediatomics,
     readinputs
 
 """
@@ -74,6 +75,37 @@ function placeatoms(n_atoms::Integer, box_size, min_dist; dims::Integer=3)
         end
         if okay
             push!(coords, new_coord)
+        end
+    end
+    return [coords...]
+end
+
+"""
+    placediatomics(n_molecules, box_size, min_dist, bond_length; dims=3)
+
+Obtain 3D coordinates for `n_molecules` diatomics in a cube of length `box_size`
+where no two points are closer than `min_dist` and the bond length is `bond_length`,
+accounting for periodic boundary conditions.
+"""
+function placediatomics(n_molecules::Integer, box_size, min_dist, bond_length; dims::Integer=3)
+    min_dist_sq = min_dist ^ 2
+    T = typeof(convert(AbstractFloat, ustrip(box_size)))
+    coords = SArray[]
+    while length(coords) < (n_molecules * 2)
+        new_coord_a = SVector{dims}(rand(T, dims)) .* box_size
+        shift = SVector{dims}([bond_length, [zero(bond_length) for d in 1:(dims - 1)]...])
+        new_coord_b = copy(new_coord_a) + shift
+        okay = new_coord_b[1] <= box_size
+        for coord in coords
+            if sum(abs2, vector(coord, new_coord_a, box_size)) < min_dist_sq ||
+                    sum(abs2, vector(coord, new_coord_b, box_size)) < min_dist_sq
+                okay = false
+                break
+            end
+        end
+        if okay
+            push!(coords, new_coord_a)
+            push!(coords, new_coord_b)
         end
     end
     return [coords...]
