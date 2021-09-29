@@ -10,7 +10,6 @@ export
     NeighborFinder,
     Logger,
     Atom,
-    AtomMin,
     Simulation
 
 const DefaultFloat = Float64
@@ -66,83 +65,36 @@ abstract type Logger end
 An atom and its associated information.
 Properties unused in the simulation or in analysis can be left with their
 default values.
-This type cannot be used on the GPU as it is not `isbits` - use `AtomMin` instead.
+The types used should be bits types if the GPU is going to be used.
 
 # Arguments
-- `attype::AbstractString=""`: the type of the atom.
-- `name::AbstractString=""`: the name of the atom.
-- `resnum::Integer=0`: the residue number if the atom is part of a polymer.
-- `resname::AbstractString=""`: the residue name if the atom is part of a
-    polymer.
+- `attype::T=0`: the type of the atom.
 - `charge::C=0.0u"q"`: the charge of the atom, used for electrostatic interactions.
 - `mass::M=0.0u"u"`: the mass of the atom.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
 """
-struct Atom{C, M, S, E}
-    attype::String
-    name::String
-    resnum::Int
-    resname::String
+struct Atom{T, C, M, S, E}
+    attype::T
     charge::C
     mass::M
     σ::S
     ϵ::E
 end
 
-# We define constructors rather than using Base.@kwdef as it makes conversion
-#   more convenient with the parametric type
 function Atom(;
-                attype="",
-                name="",
-                resnum=0,
-                resname="",
+                attype=0,
                 charge=0.0u"q",
                 mass=0.0u"u",
                 σ=0.0u"nm",
                 ϵ=0.0u"kJ * mol^-1")
-    return Atom(attype, name, resnum, resname, charge, mass, σ, ϵ)
+    return Atom(attype, charge, mass, σ, ϵ)
 end
 
 function Base.show(io::IO, a::Atom)
-    print(io, "Atom with name \"", a.name, "\", type \"", a.attype, "\", charge=", a.charge,
+    print(io, "Atom with type ", a.attype, ", charge=", a.charge,
             ", mass=", a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
-end
-
-"""
-    AtomMin(; <keyword arguments>)
-
-An atom and minimal information required for simulation.
-Properties unused in the simulation or in analysis can be left with their
-default values.
-This type is `isbits` and can be used on the GPU - use `Atom` in other contexts to store
-more information.
-
-# Arguments
-- `charge::C=0.0u"q"`: the charge of the atom, used for electrostatic interactions.
-- `mass::M=0.0u"u"`: the mass of the atom.
-- `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
-    potential is zero.
-- `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
-"""
-struct AtomMin{C, M, S, E}
-    charge::C
-    mass::M
-    σ::S
-    ϵ::E
-end
-
-function AtomMin(;
-                charge=0.0u"q",
-                mass=0.0u"u",
-                σ=0.0u"nm",
-                ϵ=0.0u"kJ * mol^-1")
-    return AtomMin(charge, mass, σ, ϵ)
-end
-
-function Base.show(io::IO, a::AtomMin)
-    print(io, "AtomMin with charge=", a.charge, ", mass=", a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
 end
 
 """

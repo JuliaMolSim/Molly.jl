@@ -24,8 +24,7 @@ using Test
         @testset "$lj_potential" for lj_potential in lj_potentials
             s = Simulation(
                 simulator=VelocityVerlet(),
-                atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0u"q",
-                            mass=mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+                atoms=[Atom(charge=0.0u"q", mass=mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
                 general_inters=(lj_potential,),
                 coords=placeatoms(n_atoms, box_size, 0.6u"nm"),
                 velocities=[velocity(mass, temp) for i in 1:n_atoms],

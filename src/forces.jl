@@ -56,7 +56,6 @@ end
 The mass of an atom.
 """
 mass(atom::Atom) = atom.mass
-mass(atom::AtomMin) = atom.mass
 
 ustripvec(x) = ustrip.(x)
 

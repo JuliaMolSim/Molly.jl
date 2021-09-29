@@ -71,7 +71,6 @@ visualize(s.loggers["coords"], box_size, "sim_lj.gif")
 
 To run simulations on the GPU you will need to have a CUDA-compatible device and to have [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) installed.
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
-Currently, running on the GPU requires using the [`AtomMin`](@ref) type, which is `isbits`, or another `isbits` type for the atoms.
 Neighbor lists and thermostats are not currently implemented for the GPU.
 This example also shows setting up a simulation to run with `Float32`, which is a good idea for GPUs.
 ```julia
@@ -82,7 +81,7 @@ n_atoms = 100
 mass = 10.0f0u"u"
 box_size = 2.0f0u"nm"
 temp = 100.0f0u"K"
-atoms = cu([AtomMin(mass=mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
+atoms = cu([Atom(mass=mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
 coords = cu(placeatoms(n_atoms, box_size, 0.3u"nm"))
 velocities = cu([velocity(mass, temp) for i in 1:n_atoms])
 

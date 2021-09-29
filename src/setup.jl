@@ -80,21 +80,18 @@ function placeatoms(n_atoms::Integer, box_size, min_dist; dims::Integer=3)
 end
 
 """
-    readinputs(topology_file, coordinate_file; atom_min=false, units=true)
-    readinputs(T, topology_file, coordinate_file; atom_min=false, units=true)
+    readinputs(topology_file, coordinate_file; units=true)
+    readinputs(T, topology_file, coordinate_file; units=true)
 
 Read a Gromacs topology flat file, i.e. all includes collapsed into one file,
 and a Gromacs coordinate file.
 Returns the atoms, specific interaction lists, general interaction lists,
 non-bonded matrix, coordinates and box size.
-`atom_min` determines whether the returned atoms consist of the GPU-compatible
-`AtomMin` or the more verbose but GPU-incompatible `Atom`.
 `units` determines whether the returned values have units.
 """
 function readinputs(T::Type,
                     top_file::AbstractString,
                     coord_file::AbstractString;
-                    atom_min::Bool=false,
                     units::Bool=true)
     # Read forcefield and topology file
     atomtypes = Dict{String, Atomtype}()
@@ -182,8 +179,7 @@ function readinputs(T::Type,
                 charge = parse(T, c[7])
                 mass = parse(T, c[8])
             end
-            push!(atoms, Atom(attype=attype, name=String(c[5]), resnum=parse(Int, c[3]),
-                    resname=String(c[4]), charge=charge, mass=mass,
+            push!(atoms, Atom(attype=attype, charge=charge, mass=mass,
                     σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
@@ -265,9 +261,7 @@ function readinputs(T::Type,
                     temp_charge = T(-1.0)
                 end
             end
-            push!(atoms, Atom(attype=attype, name=String(atname),
-                    resnum=parse(Int, l[1:5]), resname=String(strip(l[6:10])),
-                    charge=temp_charge, mass=atomtypes[attype].mass,
+            push!(atoms, Atom(attype=attype, charge=temp_charge, mass=atomtypes[attype].mass,
                     σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
 
             # Add O-H bonds and H-O-H angle in water
@@ -325,11 +319,8 @@ function readinputs(T::Type,
     specific_inter_lists = ([bonds...], [angles...], [torsions...])
     general_inters = (lj, coulomb)
 
-    if atom_min
-        atoms = [AtomMin(charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
-    else
-        atoms = [atoms...]
-    end
+    # Convert atom types to integers so they are bits types
+    atoms = [Atom(attype=0, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
 
     return atoms, specific_inter_lists, general_inters,
             nb_matrix, [coords...], box_size

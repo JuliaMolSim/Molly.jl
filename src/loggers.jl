@@ -129,7 +129,7 @@ function append_model(logger::StructureWriter, s::Simulation)
         println(output, "MODEL     ", lpad(logger.structure_n, 4))
         for (i, coord) in enumerate(s.coords)
             if unit(first(coord)) == NoUnits
-                coord_convert = 10 .* coord
+                coord_convert = 10 .* coord # If not told, assume coordinates are in nm
             else
                 coord_convert = ustrip.(uconvert.(u"Å", coord))
             end
@@ -140,8 +140,5 @@ function append_model(logger::StructureWriter, s::Simulation)
     end
 end
 
-atomrecord(at::Atom   , i, coord) = AtomRecord(false, i, at.name, ' ', at.resname, "A", at.resnum,
-                                                ' ', coord, 1.0, 0.0, "  ", "  ")
-
-atomrecord(at::AtomMin, i, coord) = AtomRecord(false, i, "??"   , ' ', "???"     , "A", 0        ,
+atomrecord(at::Atom, i, coord) = AtomRecord(false, i, "??"   , ' ', "???"     , "A", 0        ,
                                                 ' ', coord, 1.0, 0.0, "  ", "  ")

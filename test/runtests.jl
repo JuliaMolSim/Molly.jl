@@ -79,8 +79,7 @@ box_size = 2.0u"nm"
 
     s = Simulation(
         simulator=VelocityVerlet(),
-        atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0u"q",
-                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0u"q", mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=placeatoms(n_atoms, box_size, 0.3u"nm"; dims=2),
         velocities=[velocity(10.0u"u", temp; dims=2) .* 0.01 for i in 1:n_atoms],
@@ -113,8 +112,7 @@ end
     for parallel in parallel_list
         s = Simulation(
             simulator=VelocityVerlet(),
-            atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0u"q",
-                        mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+            atoms=[Atom(charge=0.0u"q", mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             general_inters=(LennardJones(nl_only=true),),
             coords=placeatoms(n_atoms, box_size, 0.3u"nm"),
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
@@ -152,8 +150,7 @@ end
 
     s = Simulation(
         simulator=VelocityFreeVerlet(),
-        atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0u"q",
-                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0u"q", mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=[c .+ 0.01 .* rand(SVector{3})u"nm" for c in coords],
@@ -184,8 +181,7 @@ end
 
     s = Simulation(
         simulator=VelocityVerlet(),
-        atoms=[Atom(attype="H", name="H", resnum=i, resname="H", charge=0.0u"q",
-                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0u"q", mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         specific_inter_lists=(bonds,),
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
@@ -319,8 +315,7 @@ end
 
     s = Simulation(
         simulator=VelocityVerlet(),
-        atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0u"q",
-                    mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0u"q", mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=velocities,
@@ -337,8 +332,7 @@ end
 
     s_nounits = Simulation(
         simulator=VelocityVerlet(),
-        atoms=[Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=0.0,
-                    mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=Molly.ustripvec.(coords),
         velocities=Molly.ustripvec.(velocities),
@@ -427,13 +421,13 @@ end
         if gpu
             coords = cu(deepcopy(f32 ? starting_coords_f32 : starting_coords))
             velocities = cu(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-            atoms = cu([AtomMin(charge=f32 ? 0.0f0u"q" : 0.0u"q", mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+            atoms = cu([Atom(charge=f32 ? 0.0f0u"q" : 0.0u"q", mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                                 ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
         else
             coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
             velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
-            atoms = [Atom(attype="Ar", name="Ar", resnum=i, resname="Ar", charge=f32 ? 0.0f0u"q" : 0.0u"q",
-                            mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm", ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
+            atoms = [Atom(charge=f32 ? 0.0f0u"q" : 0.0u"q", mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+                            ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
         end
 
         s = Simulation(
