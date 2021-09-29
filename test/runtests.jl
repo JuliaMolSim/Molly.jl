@@ -464,7 +464,7 @@ end
         mass = f32 ? 10.0f0u"u" : 10.0u"u"
         box_size = f32 ? 6.0f0u"nm" : 6.0u"nm"
         timestep = f32 ? 0.02f0u"ps" : 0.02u"ps"
-        temperature = f32 ? 1.0f0u"K" : 1.0u"K"
+        temp = f32 ? 1.0f0u"K" : 1.0u"K"
         simulator = VelocityVerlet()
         thermostat = NoThermostat()
         b0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
