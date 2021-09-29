@@ -26,6 +26,67 @@ CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
 # Some failures due to dependencies but there is an unbound args error for Simulation
 Aqua.test_all(Molly; ambiguities=(recursive=false), unbound_args=false, undefined_exports=false)
 
+@testset "Interactions" begin
+    c1 = SVector(1.0, 1.0, 1.0)u"nm"
+    c2 = SVector(1.3, 1.0, 1.0)u"nm"
+    c3 = SVector(1.4, 1.0, 1.0)u"nm"
+    a1 = Atom(charge=1.0u"q", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    box_size = 2.0u"nm"
+    coords = [c1, c2, c3]
+    s = Simulation(atoms=[a1, a1, a1], coords=coords, box_size=box_size)
+
+    @test isapprox(force(LennardJones(), c1, c2, a1, a1, box_size),
+                    SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+                    atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(force(LennardJones(), c1, c3, a1, a1, box_size),
+                    SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+                    atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(Molly.potential_energy(LennardJones(), s, 1, 2),
+                    0.0u"kJ * mol^-1",
+                    atol=1e-9u"kJ * mol^-1")
+    @test isapprox(Molly.potential_energy(LennardJones(), s, 1, 3),
+                    -0.1170417309u"kJ * mol^-1",
+                    atol=1e-9u"kJ * mol^-1")
+
+    @test isapprox(force(Coulomb(), c1, c2, a1, a1, box_size),
+                    SVector(1543.727311, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+                    atol=1e-5u"kJ * mol^-1 * nm^-1")
+    @test isapprox(force(Coulomb(), c1, c3, a1, a1, box_size),
+                    SVector(868.3466125, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+                    atol=1e-5u"kJ * mol^-1 * nm^-1")
+    @test isapprox(Molly.potential_energy(Coulomb(), s, 1, 2),
+                    463.1181933u"kJ * mol^-1",
+                    atol=1e-5u"kJ * mol^-1")
+    @test isapprox(Molly.potential_energy(Coulomb(), s, 1, 3),
+                    347.338645u"kJ * mol^-1",
+                    atol=1e-5u"kJ * mol^-1")
+    
+    b1 = HarmonicBond(i=1, j=2, b0=0.2u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2")
+    b2 = HarmonicBond(i=1, j=3, b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
+    inds, fs = force(b1, coords, s)
+    @test inds == [1, 2]
+    @test isapprox(fs[1],
+                    SVector(30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+                    atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(fs[2],
+                    SVector(-30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+                    atol=1e-9u"kJ * mol^-1 * nm^-1")
+    inds, fs = force(b2, coords, s)
+    @test inds == [1, 3]
+    @test isapprox(fs[1],
+                    SVector(-20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+                    atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(fs[2],
+                    SVector(20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+                    atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(Molly.potential_energy(b1, s),
+                    1500.0u"kJ * mol^-1",
+                    atol=1e-9u"kJ * mol^-1")
+    @test isapprox(Molly.potential_energy(b2, s),
+                    2000.0u"kJ * mol^-1",
+                    atol=1e-9u"kJ * mol^-1")
+end
+
 @testset "Spatial" begin
     @test vector1D(4.0, 6.0, 10.0) ==  2.0
     @test vector1D(1.0, 9.0, 10.0) == -2.0

@@ -12,7 +12,7 @@ struct Coulomb{C, T, F, E} <: GeneralInteraction
 end
 
 function Coulomb(;
-                    coulomb_const=(138.935458 / 70.0)u"kJ * mol^-1 * nm * q^-2", # Treat ϵr as 70 for now
+                    coulomb_const=138.935458u"kJ * mol^-1 * nm * q^-2", # 1 / 4πϵ0
                     cutoff=NoCutoff(),
                     nl_only=false,
                     force_unit=u"kJ * mol^-1 * nm^-1",
