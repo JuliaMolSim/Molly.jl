@@ -2,5 +2,7 @@
 *.jl.*.cov
 *.jl.mem
 docs/build
-nbs/*
 /Manifest.toml
+nbs/*
+benchmark/tune.json
+benchmark/results
