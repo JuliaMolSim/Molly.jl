@@ -1,6 +1,7 @@
 using Molly
 using Aqua
 using CUDA
+using GLMakie
 
 using Base.Threads
 using Statistics
@@ -25,6 +26,8 @@ CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
 
 # Some failures due to dependencies but there is an unbound args error for Simulation
 Aqua.test_all(Molly; ambiguities=(recursive=false), unbound_args=false, undefined_exports=false)
+
+tempfp = tempname(cleanup=true) * ".mp4"
 
 @testset "Interactions" begin
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
@@ -164,6 +167,8 @@ box_size = 2.0u"nm"
     displacements(final_coords, box_size)
     distances(final_coords, box_size)
     rdf(final_coords, box_size)
+
+    visualize(s.loggers["coords"], box_size, tempfp)
 end
 
 @testset "Lennard-Jones gas" begin
@@ -202,6 +207,8 @@ end
         displacements(final_coords, box_size)
         distances(final_coords, box_size)
         rdf(final_coords, box_size)
+
+        visualize(s.loggers["coords"], box_size, tempfp)
     end
 end
 
@@ -258,6 +265,10 @@ end
     )
 
     @time simulate!(s; parallel=false)
+
+    visualize(s.loggers["coords"], box_size, tempfp;
+                connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
+                trails=2)
 end
 
 @testset "Peptide" begin
@@ -451,10 +462,11 @@ end
         specific_inter_lists = (bonds,)
 
         neighbor_finder = NoNeighborFinder()
-        general_inters = (LennardJones(nl_only=false),)
+        cutoff = ShiftedPotentialCutoff(1.2u"nm")
+        general_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
         if nl
             neighbor_finder = DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, f32 ? 1.5f0u"nm" : 1.5u"nm")
-            general_inters = (LennardJones(nl_only=true),)
+            general_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
         end
 
         if gpu
