@@ -124,13 +124,13 @@ specific_inter_lists = (bonds,)
 ```
 This time, we are also going to use a neighbor list to speed up the Lennard Jones calculation.
 We can use the built-in distance neighbor finder.
-The arguments are a 2D array of eligible interactions, the number of steps between each update and the cutoff to be classed as a neighbor.
+The arguments are a 2D array of interaction weightings, the number of steps between each update and the cutoff to be classed as a neighbor.
 ```julia
 # All pairs apart from bonded pairs are eligible to interact
-nb_matrix = trues(n_atoms, n_atoms)
+nb_matrix = ones(n_atoms, n_atoms)
 for i in 1:(n_atoms ÷ 2)
-    nb_matrix[i, i + (n_atoms ÷ 2)] = false
-    nb_matrix[i + (n_atoms ÷ 2), i] = false
+    nb_matrix[i, i + (n_atoms ÷ 2)] = 0.0
+    nb_matrix[i + (n_atoms ÷ 2), i] = 0.0
 end
 
 neighbor_finder = DistanceNeighborFinder(nb_matrix, 10, 1.5u"nm")
@@ -322,7 +322,7 @@ s = Simulation(
     velocities=velocities,
     temperature=temp,
     box_size=box_size,
-    neighbor_finder=DistanceNeighborFinder(trues(n_people, n_people), 10, 2.0),
+    neighbor_finder=DistanceNeighborFinder(ones(n_people, n_people), 10, 2.0),
     thermostat=AndersenThermostat(5.0),
     loggers=Dict("coords" => CoordinateLogger(Float64, 10; dims=2),
                     "SIR" => SIRLogger(10, [])),
@@ -611,25 +611,22 @@ The available neighbor finders are:
 To define your own [`NeighborFinder`](@ref), first define the `struct`:
 ```julia
 struct MyNeighborFinder <: NeighborFinder
-    nb_matrix::BitArray{2}
+    nb_matrix::Array{Float64, 2}
     n_steps::Int
     # Any other properties, e.g. a distance cutoff
 end
 ```
-Examples of two useful properties are given here: a matrix indicating atom pairs eligible for non-bonded interactions, and a value determining how many timesteps occur between each evaluation of the neighbor finder.
+Examples of two useful properties are given here: a matrix indicating weightings on atom pairs for non-bonded interactions (such as 0.0 for bonded atoms and 0.5 for 1-4 atoms), and a value determining how many timesteps occur between each evaluation of the neighbor finder.
 Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
 function find_neighbors!(s::Simulation,
-                            current_neighbors,
                             nf::MyNeighborFinder,
                             step_n::Integer;
                             parallel::Bool=true)
     if step_n % nf.n_steps == 0
-        neighbors = Tuple{Int, Int}[]
+        neighbors = Tuple{Int, Int, Float64}[] # atom i, atom j and weighting
         # Add to neighbors
         return neighbors
-    else
-        return current_neighbors
     end
 end
 ```

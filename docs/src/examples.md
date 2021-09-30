@@ -100,7 +100,7 @@ s = Simulation(
     velocities=velocities,
     temperature=temp,
     box_size=box_size,
-    neighbor_finder=DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, 2.0),
+    neighbor_finder=DistanceNeighborFinder(ones(n_atoms, n_atoms), 10, 2.0),
     thermostat=AndersenThermostat(5.0),
     loggers=Dict("coords" => CoordinateLogger(Float64, 20; dims=2),
                     "bonds" => BondLogger(20, [])),
