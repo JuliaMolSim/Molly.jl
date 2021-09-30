@@ -14,7 +14,7 @@ The partners of the atom can be stored in the atom type.
 We make a `Logger` to record when the bonds are present, allowing us to visualize them with the `connection_frames` keyword argument to `visualize` (this can take a while to plot).
 ```julia
 using Molly
-using Makie
+using GLMakie
 using LinearAlgebra
 
 struct BondableAtom
@@ -121,8 +121,9 @@ end
 
 visualize(s.loggers["coords"],
             box_size,
-            "sim_mutbond.gif",
+            "sim_mutbond.mp4";
             connections=connections,
-            connection_frames=s.loggers["bonds"].bonds)
+            connection_frames=s.loggers["bonds"].bonds,
+            markersize=10.0)
 ```
 ![Mutable bond simulation](images/sim_mutbond.gif)

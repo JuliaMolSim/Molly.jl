@@ -1,7 +1,7 @@
 # Visualize simulations
-# This file is only loaded when Makie is imported
+# This file is only loaded when GLMakie is imported
 
-using .Makie
+using .GLMakie
 
 function visualize(coord_logger,
                     box_size,
@@ -12,21 +12,25 @@ function visualize(coord_logger,
                     framerate::Integer=30,
                     color=:purple,
                     connection_color=:orange,
-                    markersize=0.1,
+                    markersize=20.0,
                     linewidth=2.0,
                     transparency=true,
                     kwargs...)
     coords_start = first(coord_logger.coords)
     dims = length(first(coords_start))
     if dims == 3
-        PointType = Point3f0
+        PointType = Point3f
     elseif dims == 2
-        PointType = Point2f0
+        PointType = Point2f
     else
         throw(ArgumentError("Found $dims dimensions but can only visualize 2 or 3 dimensions"))
     end
 
     scene = Scene()
+    positions = Node(PointType.(ustripvec.(coords_start)))
+    scatter!(scene, positions; color=color, markersize=markersize,
+                transparency=transparency, kwargs...)
+
     connection_nodes = []
     for (ci, (i, j)) in enumerate(connections)
         if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < (box_size / 2)
@@ -56,13 +60,9 @@ function visualize(coord_logger,
                 transparency=transparency)
     end
 
-    positions = Node(PointType.(ustrip.(coords_start)))
-    scatter!(scene, positions; color=color, markersize=markersize,
-                transparency=transparency, kwargs...)
-
     trail_positions = []
     for trail_i in 1:trails
-        push!(trail_positions, Node(PointType.(ustrip.(coords_start))))
+        push!(trail_positions, Node(PointType.(ustripvec.(coords_start))))
         col = parse.(Colorant, color)
         alpha = 1 - (trail_i / (trails + 1))
         alpha_col = RGBA.(red.(col), green.(col), blue.(col), alpha)
@@ -76,7 +76,7 @@ function visualize(coord_logger,
     ylims!(scene, 0.0, box_size_conv)
     zlims!(scene, 0.0, box_size_conv)
 
-    Makie.record(scene, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
+    GLMakie.record(scene, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
         coords = coord_logger.coords[frame_i]
 
         for (ci, (i, j)) in enumerate(connections)
@@ -101,9 +101,9 @@ function visualize(coord_logger,
             end
         end
 
-        positions[] = PointType.(ustrip.(coords))
+        positions[] = PointType.(ustripvec.(coords))
         for (trail_i, trail_position) in enumerate(trail_positions)
-            trail_position[] = PointType.(ustrip.(coord_logger.coords[max(frame_i - trail_i, 1)]))
+            trail_position[] = PointType.(ustripvec.(coord_logger.coords[max(frame_i - trail_i, 1)]))
         end
     end
 end

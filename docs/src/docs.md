@@ -60,10 +60,10 @@ s = Simulation(
 simulate!(s)
 ```
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this can be turned off by giving the keyword argument `parallel=false` to [`simulate!`](@ref).
-An animation of the stored coordinates using can be saved using [`visualize`](@ref), which is available when [Makie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
+An animation of the stored coordinates using can be saved using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
 ```julia
-using Makie
-visualize(s.loggers["coords"], box_size, "sim_lj.gif")
+using GLMakie
+visualize(s.loggers["coords"], box_size, "sim_lj.mp4")
 ```
 ![LJ simulation](images/sim_lj.gif)
 
@@ -158,9 +158,8 @@ simulate!(s)
 ```
 This time when we view the trajectory we can add lines to show the bonds.
 ```julia
-visualize(s.loggers["coords"], box_size, "sim_diatomic.gif",
-            connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
-            markersize=0.05, linewidth=5.0)
+visualize(s.loggers["coords"], box_size, "sim_diatomic.mp4";
+            connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)])
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
 
@@ -193,9 +192,8 @@ simulate!(s)
 ```
 When we view the simulation we can use some extra options:
 ```julia
-visualize(s.loggers["coords"], 1.0f0, "sim_gravity.gif",
-            trails=4, framerate=15, color=[:orange, :lightgreen],
-            markersize=0.05)
+visualize(s.loggers["coords"], 1.0f0, "sim_gravity.mp4";
+            trails=4, framerate=15, color=[:orange, :lightgreen])
 ```
 ![Gravity simulation](images/sim_gravity.gif)
 
@@ -336,7 +334,7 @@ s = Simulation(
 
 simulate!(s)
 
-visualize(s.loggers["coords"], box_size, "sim_agent.gif")
+visualize(s.loggers["coords"], box_size, "sim_agent.mp4"; markersize=10.0)
 ```
 ![Agent simulation](images/sim_agent.gif)
 

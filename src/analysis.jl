@@ -11,7 +11,7 @@ export
     visualize(coord_logger, box_size, out_filepath; <keyword arguments>)
 
 Visualize a simulation as an animation.
-This function is only available when Makie is imported.
+This function is only available when GLMakie is imported.
 It can take a while to run, depending on the length and size of the simulation.
 
 # Arguments
@@ -26,7 +26,7 @@ It can take a while to run, depending on the length and size of the simulation.
     colors of the same length as the number of atoms.
 - `connection_color=:orange`: the color of the bonds. Can be a single color or a
     list of colors of the same length as `connections`.
-- `markersize=0.1`: the size of the atom markers.
+- `markersize=20.0`: the size of the atom markers.
 - `linewidth=2.0`: the width of the bond lines.
 - `transparency=true`: whether transparency is active on the plot.
 - `kwargs...`: other keyword arguments are passed to the plotting function.
