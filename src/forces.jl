@@ -41,6 +41,15 @@ function force end
     end
 end
 
+@inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer, force_type, weight)
+    fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size) * weight
+    checkforcetype(fdr, force_type)
+    fdr_ustrip = ustrip.(fdr)
+    forces[i] -= fdr_ustrip
+    forces[j] += fdr_ustrip
+    return nothing
+end
+
 @inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer, force_type)
     fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
     checkforcetype(fdr, force_type)
@@ -76,8 +85,8 @@ function accelerations(s::Simulation; parallel::Bool=true)
             if inter.nl_only
                 neighbors = s.neighbors
                 @threads for ni in 1:length(neighbors)
-                    i, j = neighbors[ni]
-                    force!(forces_threads[threadid()], inter, s, i, j, s.force_unit)
+                    i, j, w = neighbors[ni]
+                    force!(forces_threads[threadid()], inter, s, i, j, s.force_unit, w)
                 end
             else
                 @threads for i in 1:n_atoms
@@ -96,8 +105,8 @@ function accelerations(s::Simulation; parallel::Bool=true)
             if inter.nl_only
                 neighbors = s.neighbors
                 for ni in 1:length(neighbors)
-                    i, j = neighbors[ni]
-                    force!(forces, inter, s, i, j, s.force_unit)
+                    i, j, w = neighbors[ni]
+                    force!(forces, inter, s, i, j, s.force_unit, w)
                 end
             else
                 for i in 1:n_atoms

@@ -310,26 +310,26 @@ function readinputs(T::Type,
 
     # Calculate matrix of pairs eligible for non-bonded interactions
     n_atoms = length(coords)
-    nb_matrix = trues(n_atoms, n_atoms)
+    nb_matrix = ones(T, n_atoms, n_atoms)
     for i in 1:n_atoms
-        nb_matrix[i, i] = false
+        nb_matrix[i, i] = zero(T)
     end
     for b in bonds
-        nb_matrix[b.i, b.j] = false
-        nb_matrix[b.j, b.i] = false
+        nb_matrix[b.i, b.j] = zero(T)
+        nb_matrix[b.j, b.i] = zero(T)
     end
     for a in angles
         # Assume bonding is already specified
-        nb_matrix[a.i, a.k] = false
-        nb_matrix[a.k, a.i] = false
+        nb_matrix[a.i, a.k] = zero(T)
+        nb_matrix[a.k, a.i] = zero(T)
     end
 
     # Calculate matrix of pairs eligible for halved non-bonded interactions
     # This applies to specified pairs in the topology file, usually 1-4 bonded
-    #for (i, j) in pairs
-    #    nb_matrix[i, j] = T(0.5)
-    #    nb_matrix[j, i] = T(0.5)
-    #end
+    for (i, j) in pairs
+        nb_matrix[i, j] = T(0.5)
+        nb_matrix[j, i] = T(0.5)
+    end
 
     lj = LennardJones(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
                         force_unit=force_unit, energy_unit=energy_unit)
