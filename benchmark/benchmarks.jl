@@ -1,7 +1,6 @@
 # Benchmark suite for Molly
 # Run with something like:
-#   using Molly
-#   using PkgBenchmark
+#   using Molly, PkgBenchmark
 #   results = benchmarkpkg(Molly, BenchmarkConfig(env=Dict("JULIA_NUM_THREADS" => 16)))
 #   export_markdown(out_file, results)
 
@@ -74,10 +73,11 @@ function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::B
     specific_inter_lists = (bonds,)
 
     neighbor_finder = NoNeighborFinder()
-    general_inters = (LennardJones(nl_only=false),)
+    cutoff = ShiftedPotentialCutoff(1.2u"nm")
+    general_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
     if nl
         neighbor_finder = DistanceNeighborFinder(trues(n_atoms, n_atoms), 10, f32 ? 1.5f0u"nm" : 1.5u"nm")
-        general_inters = (LennardJones(nl_only=true),)
+        general_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
     end
 
     if gpu
@@ -129,5 +129,6 @@ if CUDA.functional()
 end
 
 for (name, args) in runs
+    runsim(args...) # Run once for setup
     SUITE["simulation"][name] = @benchmarkable runsim($(args[1]), $(args[2]), $(args[3]), $(args[4]), $(args[5]))
 end
