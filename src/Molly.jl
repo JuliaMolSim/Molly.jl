@@ -5,6 +5,7 @@ using Colors
 using CUDA
 using Distances
 using Distributions
+using EzXML
 using KernelDensity
 using NearestNeighbors
 using ProgressMeter

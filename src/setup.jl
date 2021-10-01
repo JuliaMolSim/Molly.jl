@@ -365,3 +365,152 @@ end
 function readinputs(top_file::AbstractString, coord_file::AbstractString; kwargs...)
     return readinputs(DefaultFloat, top_file, coord_file; kwargs...)
 end
+
+#
+struct OpenMMAtomtype{M, S, E}
+    class::String
+    element::String
+    mass::M
+    σ::S
+    ϵ::E
+end
+
+#
+struct OpenMMResiduetype{C}
+    name::String
+    types::Dict{String, String}
+    charges::Dict{String, C}
+end
+
+#
+struct OpenMMTorsiontype{T, E}
+    proper::Bool
+    periodicities::Vector{Int}
+    phases::Vector{T}
+    ks::Vector{E}
+end
+
+#
+struct OpenMMForceField{T, M, D, E, C}
+    atom_types::Dict{String, OpenMMAtomtype{M, D, E}}
+    residue_types::Dict{String, OpenMMResiduetype{C}}
+    bond_types::Dict{Tuple{String, String}, Bondtype{D, E}}
+    angle_types::Dict{Tuple{String, String, String}, Angletype{T, E}}
+    torsion_types::Dict{Tuple{String, String, String, String}, OpenMMTorsiontype{T, E}}
+    torsion_order::String
+    weight_14_coulomb::T
+    weight_14_lj::T
+end
+
+#
+function readopenmmxml(T::Type, ff_files::AbstractString...)
+    atom_types = Dict{String, OpenMMAtomtype}()
+    residue_types = Dict{String, OpenMMResiduetype}()
+    bond_types = Dict{Tuple{String, String}, Bondtype}()
+    angle_types = Dict{Tuple{String, String, String}, Angletype}()
+    torsion_types = Dict{Tuple{String, String, String, String}, OpenMMTorsiontype}()
+    torsion_order = ""
+    weight_14_coulomb = one(T)
+    weight_14_lj = one(T)
+
+    for ff_file in ff_files
+        ff_xml = parsexml(read(ff_file))
+        ff = root(ff_xml)
+        for entry in eachelement(ff)
+            entry_name = entry.name
+            if entry_name == "AtomTypes"
+                for atom_type in eachelement(entry)
+                    class = atom_type["class"]
+                    element = atom_type["element"]
+                    mass = parse(T, atom_type["mass"])u"u"
+                    σ = T(-1u"nm") # Updated later
+                    ϵ = T(-1u"kJ * mol^-1") # Updated later
+                    atom_types[class] = OpenMMAtomtype(class, element, mass, σ, ϵ)
+                end
+            elseif entry_name == "Residues"
+                for residue in eachelement(entry)
+                    name = residue["name"]
+                    types = Dict{String, String}()
+                    charges = Dict{String, typeof(T(1u"q"))}()
+                    for atom_or_bond in eachelement(residue)
+                        if atom_or_bond.name == "Atom"
+                            atom_name = atom_or_bond["name"]
+                            types[atom_name] = atom_or_bond["type"]
+                            charges[atom_name] = parse(T, atom_or_bond["charge"])u"q"
+                        end
+                    end
+                    residue_types[name] = OpenMMResiduetype(name, types, charges)
+                end
+            elseif entry_name == "HarmonicBondForce"
+                for bond in eachelement(entry)
+                    atom_type_1 = bond["type1"]
+                    atom_type_2 = bond["type2"]
+                    b0 = parse(T, bond["length"])u"nm"
+                    kb = parse(T, bond["k"])u"kJ * mol^-1"
+                    bond_types[(atom_type_1, atom_type_2)] = Bondtype(b0, kb)
+                end
+            elseif entry_name == "HarmonicAngleForce"
+                for angle in eachelement(entry)
+                    atom_type_1 = angle["type1"]
+                    atom_type_2 = angle["type2"]
+                    atom_type_3 = angle["type3"]
+                    th0 = parse(T, angle["angle"])
+                    k = parse(T, angle["k"])u"kJ * mol^-1"
+                    angle_types[(atom_type_1, atom_type_2, atom_type_3)] = Angletype(th0, k)
+                end
+            elseif entry_name == "PeriodicTorsionForce"
+                torsion_order = entry["ordering"]
+                for torsion in eachelement(entry)
+                    proper = torsion.name == "Proper"
+                    atom_type_1 = torsion["type1"]
+                    atom_type_2 = torsion["type2"]
+                    atom_type_3 = torsion["type3"]
+                    atom_type_4 = torsion["type4"]
+                    periodicities = Int64[]
+                    phases = T[]
+                    ks = typeof(T(1u"kJ * mol^-1"))[]
+                    phase_i = 1
+                    phase_present = true
+                    while phase_present
+                        push!(periodicities, parse(Int64, torsion["periodicity$phase_i"]))
+                        push!(phases, parse(T, torsion["phase$phase_i"]))
+                        push!(ks, parse(T, torsion["k$phase_i"])u"kJ * mol^-1")
+                        phase_i += 1
+                        phase_present = haskey(torsion, "periodicity$phase_i")
+                    end
+                    torsion_type = OpenMMTorsiontype(proper, periodicities, phases, ks)
+                    torsion_types[(atom_type_1, atom_type_2, atom_type_3, atom_type_4)] = torsion_type
+                end
+            elseif entry_name == "NonbondedForce"
+                weight_14_coulomb = parse(T, entry["coulomb14scale"])
+                weight_14_lj = parse(T, entry["lj14scale"])
+                for atom_or_attr in eachelement(entry)
+                    if atom_or_attr.name == "Atom"
+                        atom_type = atom_or_attr["type"]
+                        # Update previous atom types
+                        partial_type = atom_types[atom_type]
+                        σ = parse(T, atom_or_attr["sigma"])u"nm"
+                        ϵ = parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1"
+                        complete_type = OpenMMAtomtype(partial_type.class, partial_type.element,
+                                                        partial_type.mass, σ, ϵ)
+                        atom_types[atom_type] = complete_type
+                    end
+                end
+            end
+        end
+    end
+
+    # Check all atoms were updated
+    for atom_type in values(atom_types)
+        if atom_type.σ < zero(T)u"nm"
+            error("Atom of class ", atom_type.class, " has not had σ or ϵ set")
+        end
+    end
+
+    M = typeof(T(1u"u"))
+    D = typeof(T(1u"nm"))
+    E = typeof(T(1u"kJ * mol^-1"))
+    C = typeof(T(1u"q"))
+    return OpenMMForceField{T, M, D, E, C}(atom_types, residue_types, bond_types, angle_types,
+                torsion_types, torsion_order, weight_14_coulomb, weight_14_lj)
+end
