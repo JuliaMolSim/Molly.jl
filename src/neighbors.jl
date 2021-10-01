@@ -29,14 +29,23 @@ function find_neighbors!(s::Simulation,
 end
 
 """
-    DistanceNeighborFinder(nb_matrix, n_steps, dist_cutoff)
+    DistanceNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff)
 
 Find close atoms by distance.
 """
-struct DistanceNeighborFinder{W, D} <: NeighborFinder
-    nb_matrix::Array{W, 2}
+struct DistanceNeighborFinder{D} <: NeighborFinder
+    nb_matrix::BitArray{2}
+    matrix_14::BitArray{2}
     n_steps::Int
     dist_cutoff::D
+end
+
+function DistanceNeighborFinder(;
+                                nb_matrix,
+                                matrix_14=falses(size(nb_matrix)),
+                                n_steps=10,
+                                dist_cutoff)
+    return DistanceNeighborFinder{typeof(dist_cutoff)}(nb_matrix, matrix_14, n_steps, dist_cutoff)
 end
 
 function find_neighbors!(s::Simulation,
@@ -50,16 +59,17 @@ function find_neighbors!(s::Simulation,
     sqdist_cutoff = nf.dist_cutoff ^ 2
 
     if parallel && nthreads() > 1
-        nl_threads = [Tuple{Int, Int, eltype(nf.nb_matrix)}[] for i in 1:nthreads()]
+        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:nthreads()]
 
         @threads for i in 1:length(s.coords)
             nl = nl_threads[threadid()]
             ci = s.coords[i]
             nbi = @view nf.nb_matrix[:, i]
+            w14i = @view nf.matrix_14[:, i]
             for j in 1:(i - 1)
                 r2 = sum(abs2, vector(ci, s.coords[j], s.box_size))
-                if r2 <= sqdist_cutoff && !iszero(nbi[j])
-                    push!(nl, (i, j, nbi[j]))
+                if r2 <= sqdist_cutoff && nbi[j]
+                    push!(nl, (i, j, w14i[j]))
                 end
             end
         end
@@ -71,10 +81,11 @@ function find_neighbors!(s::Simulation,
         for i in 1:length(s.coords)
             ci = s.coords[i]
             nbi = @view nf.nb_matrix[:, i]
+            w14i = @view nf.matrix_14[:, i]
             for j in 1:(i - 1)
                 r2 = sum(abs2, vector(ci, s.coords[j], s.box_size))
-                if r2 <= sqdist_cutoff && !iszero(nbi[j])
-                    push!(neighbors, (i, j, nbi[j]))
+                if r2 <= sqdist_cutoff && nbi[j]
+                    push!(neighbors, (i, j, w14i[j]))
                 end
             end
         end
@@ -82,14 +93,23 @@ function find_neighbors!(s::Simulation,
 end
 
 """
-    TreeNeighborFinder(nb_matrix, n_steps, dist_cutoff)
+    TreeNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff)
 
 Find close atoms by distance using a tree search.
 """
-struct TreeNeighborFinder{W, D} <: NeighborFinder
-    nb_matrix::Array{W, 2}
+struct TreeNeighborFinder{D} <: NeighborFinder
+    nb_matrix::BitArray{2}
+    matrix_14::BitArray{2}
     n_steps::Int
     dist_cutoff::D
+end
+
+function TreeNeighborFinder(;
+                            nb_matrix,
+                            matrix_14=falses(size(nb_matrix)),
+                            n_steps=10,
+                            dist_cutoff)
+    return TreeNeighborFinder{typeof(dist_cutoff)}(nb_matrix, matrix_14, n_steps, dist_cutoff)
 end
 
 function find_neighbors!(s::Simulation,
@@ -108,16 +128,17 @@ function find_neighbors!(s::Simulation,
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
 
     if parallel && nthreads() > 1
-        nl_threads = [Tuple{Int, Int, eltype(nf.nb_matrix)}[] for i in 1:nthreads()]
+        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:nthreads()]
 
         @threads for i in 1:length(s.coords)
             nl = nl_threads[threadid()]
             ci = ustrip.(s.coords[i])
             nbi = @view nf.nb_matrix[:, i]
+            w14i = @view nf.matrix_14[:, i]
             idxs = inrange(btree, ci, dist_cutoff, true)
             for j in idxs
-                if !iszero(nbi[j]) && i > j
-                    push!(nl, (i, j, nbi[j]))
+                if nbi[j] && i > j
+                    push!(nl, (i, j, w14i[j]))
                 end
             end
         end
@@ -129,10 +150,11 @@ function find_neighbors!(s::Simulation,
         for i in 1:length(s.coords)
             ci = ustrip.(s.coords[i])
             nbi = @view nf.nb_matrix[:, i]
+            w14i = @view nf.matrix_14[:, i]
             idxs = inrange(btree, ci, dist_cutoff, true)
             for j in idxs
-                if !iszero(nbi[j]) && i > j
-                    push!(neighbors, (i, j, nbi[j]))
+                if nbi[j] && i > j
+                    push!(neighbors, (i, j, w14i[j]))
                 end
             end
         end

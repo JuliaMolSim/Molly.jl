@@ -91,6 +91,7 @@ atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = placeatoms(n_atoms, box_size, 0.1; dims=2)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 general_inters = (SoftSphere(nl_only=true), BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0))
+neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0)
 
 s = Simulation(
     simulator=VelocityVerlet(),
@@ -100,7 +101,7 @@ s = Simulation(
     velocities=velocities,
     temperature=temp,
     box_size=box_size,
-    neighbor_finder=DistanceNeighborFinder(ones(n_atoms, n_atoms), 10, 2.0),
+    neighbor_finder=neighbor_finder,
     thermostat=AndersenThermostat(5.0),
     loggers=Dict("coords" => CoordinateLogger(Float64, 20; dims=2),
                     "bonds" => BondLogger(20, [])),

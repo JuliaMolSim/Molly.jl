@@ -127,13 +127,13 @@ We can use the built-in distance neighbor finder.
 The arguments are a 2D array of interaction weightings, the number of steps between each update and the cutoff to be classed as a neighbor.
 ```julia
 # All pairs apart from bonded pairs are eligible to interact
-nb_matrix = ones(n_atoms, n_atoms)
+nb_matrix = trues(n_atoms, n_atoms)
 for i in 1:(n_atoms ÷ 2)
-    nb_matrix[i, i + (n_atoms ÷ 2)] = 0.0
-    nb_matrix[i + (n_atoms ÷ 2), i] = 0.0
+    nb_matrix[i, i + (n_atoms ÷ 2)] = false
+    nb_matrix[i + (n_atoms ÷ 2), i] = false
 end
 
-neighbor_finder = DistanceNeighborFinder(nb_matrix, 10, 1.5u"nm")
+neighbor_finder = DistanceNeighborFinder(nb_matrix=nb_matrix, n_steps=10, dist_cutoff=1.5u"nm")
 ```
 Now we can simulate as before.
 ```julia
@@ -204,7 +204,7 @@ Data for a protein can be read into the same data structures as above and simula
 Currently, the OPLS-AA forcefield is implemented.
 Here a [`StructureWriter`](@ref) is used to write the trajectory as a PDB file.
 ```julia
-atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
+atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
 
@@ -219,7 +219,7 @@ s = Simulation(
     velocities=[velocity(a.mass, temp) for a in atoms],
     temperature=temp,
     box_size=box_size,
-    neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.5u"nm"),
+    neighbor_finder=neighbor_finder,
     thermostat=AndersenThermostat(1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),
@@ -313,6 +313,7 @@ atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for
 coords = placeatoms(n_people, box_size, 0.1; dims=2)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
 general_inters = (LennardJones = LennardJones(nl_only=true), SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
+neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_people, n_people), n_steps=10, dist_cutoff=2.0)
 
 s = Simulation(
     simulator=VelocityVerlet(),
@@ -322,7 +323,7 @@ s = Simulation(
     velocities=velocities,
     temperature=temp,
     box_size=box_size,
-    neighbor_finder=DistanceNeighborFinder(ones(n_people, n_people), 10, 2.0),
+    neighbor_finder=neighbor_finder,
     thermostat=AndersenThermostat(5.0),
     loggers=Dict("coords" => CoordinateLogger(Float64, 10; dims=2),
                     "SIR" => SIRLogger(10, [])),

@@ -1,12 +1,13 @@
 """
-    Coulomb(; coulomb_const, cutoff, nl_only, force_unit, energy_unit)
+    Coulomb(; coulomb_const, cutoff, nl_only, weight_14, force_unit, energy_unit)
 
 The Coulomb electrostatic interaction.
 """
-struct Coulomb{C, T, F, E} <: GeneralInteraction
+struct Coulomb{C, T, W, F, E} <: GeneralInteraction
     coulomb_const::T
     cutoff::C
     nl_only::Bool
+    weight_14::W
     force_unit::F
     energy_unit::E
 end
@@ -15,10 +16,11 @@ function Coulomb(;
                     coulomb_const=138.935458u"kJ * mol^-1 * nm * q^-2", # 1 / 4πϵ0
                     cutoff=NoCutoff(),
                     nl_only=false,
+                    weight_14=1.0,
                     force_unit=u"kJ * mol^-1 * nm^-1",
                     energy_unit=u"kJ * mol^-1")
-    return Coulomb{typeof(cutoff), typeof(coulomb_const), typeof(force_unit), typeof(energy_unit)}(
-        coulomb_const, cutoff, nl_only, force_unit, energy_unit)
+    return Coulomb{typeof(cutoff), typeof(coulomb_const), typeof(weight_14), typeof(force_unit), typeof(energy_unit)}(
+        coulomb_const, cutoff, nl_only, weight_14, force_unit, energy_unit)
 end
 
 @inline @inbounds function force(inter::Coulomb{C},

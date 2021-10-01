@@ -130,13 +130,13 @@ end
             coords=[SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm",
                     SVector(5.0, 5.0, 5.0)u"nm"],
             box_size=10.0u"nm",
-            neighbor_finder=neighbor_finder(ones(3, 3), 10, 2.0u"nm")
+            neighbor_finder=neighbor_finder(nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
         )
         find_neighbors!(s, s.neighbor_finder, 0; parallel=false)
-        @test s.neighbors == [(2, 1, 1.0)]
+        @test s.neighbors == [(2, 1, false)]
         if nthreads() > 1
             find_neighbors!(s, s.neighbor_finder, 0; parallel=true)
-            @test s.neighbors == [(2, 1, 1.0)]
+            @test s.neighbors == [(2, 1, false)]
         end
     end
 end
@@ -157,7 +157,7 @@ box_size = 2.0u"nm"
         velocities=[velocity(10.0u"u", temp; dims=2) .* 0.01 for i in 1:n_atoms],
         temperature=temp,
         box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(ones(n_atoms, n_atoms), 10, 2.0u"nm"),
+        neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
         thermostat=AndersenThermostat(10.0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(100),
                      "coords" => CoordinateLogger(100; dims=2)),
@@ -192,16 +192,17 @@ end
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             temperature=temp,
             box_size=box_size,
-            neighbor_finder=DistanceNeighborFinder(ones(n_atoms, n_atoms), 10, 2.0u"nm"),
+            neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
             thermostat=AndersenThermostat(10.0u"ps"),
             loggers=Dict("temp" => TemperatureLogger(100),
                          "coords" => CoordinateLogger(100),
-                         "energy" => EnergyLogger(100)),
+                         "energy" => EnergyLogger(100),
+                         "writer" => StructureWriter(100, temp_fp_pdb)),
             timestep=timestep,
             n_steps=n_steps,
         )
 
-        nf_tree = TreeNeighborFinder(ones(n_atoms, n_atoms), 10, 2.0u"nm")
+        nf_tree = TreeNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
         find_neighbors!(s, s.neighbor_finder, 0; parallel=parallel)
         ref = copy(s.neighbors)
         find_neighbors!(s, nf_tree, 0; parallel=parallel)
@@ -232,7 +233,7 @@ end
         velocities=[c .+ 0.01 .* rand(SVector{3})u"nm" for c in coords],
         temperature=temp,
         box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(ones(n_atoms, n_atoms), 10, 2.0u"nm"),
+        neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
         thermostat=NoThermostat(),
         loggers=Dict("coords" => CoordinateLogger(100)),
         timestep=timestep,
@@ -249,10 +250,10 @@ end
         push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
     end
     bonds = [HarmonicBond(i=i, j=(i + (n_atoms ÷ 2)), b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)]
-    nb_matrix = ones(n_atoms, n_atoms)
+    nb_matrix = trues(n_atoms, n_atoms)
     for i in 1:(n_atoms ÷ 2)
-        nb_matrix[i, i + (n_atoms ÷ 2)] = 0.0
-        nb_matrix[i + (n_atoms ÷ 2), i] = 0.0
+        nb_matrix[i, i + (n_atoms ÷ 2)] = false
+        nb_matrix[i + (n_atoms ÷ 2), i] = false
     end
 
     s = Simulation(
@@ -264,7 +265,7 @@ end
         velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
         temperature=temp,
         box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 2.0u"nm"),
+        neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
         thermostat=AndersenThermostat(10.0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(10),
                         "coords" => CoordinateLogger(10)),
@@ -284,14 +285,15 @@ end
 @testset "Peptide" begin
     timestep = 0.0002u"ps"
     n_steps = 100
-    atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
+    atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
                 normpath(@__DIR__, "..", "data", "5XER", "gmx_top_ff.top"),
                 normpath(@__DIR__, "..", "data", "5XER", "gmx_coords.gro"))
 
     true_n_atoms = 5191
     @test length(atoms) == true_n_atoms
     @test length(coords) == true_n_atoms
-    @test size(nb_matrix) == (true_n_atoms, true_n_atoms)
+    @test size(neighbor_finder.nb_matrix) == (true_n_atoms, true_n_atoms)
+    @test size(neighbor_finder.matrix_14) == (true_n_atoms, true_n_atoms)
     @test length(specific_inter_lists) == 3
     @test length(general_inters) == 2
     @test box_size == 3.7146u"nm"
@@ -306,7 +308,7 @@ end
         velocities=[velocity(a.mass, temp) .* 0.01 for a in atoms],
         temperature=temp,
         box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.5u"nm"),
+        neighbor_finder=neighbor_finder,
         thermostat=AndersenThermostat(10.0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(10),
                         "coords" => CoordinateLogger(10),
@@ -321,7 +323,7 @@ end
 @testset "Float32" begin
     timestep = 0.0002f0u"ps"
     n_steps = 100
-    atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
+    atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
                 Float32,
                 normpath(@__DIR__, "..", "data", "5XER", "gmx_top_ff.top"),
                 normpath(@__DIR__, "..", "data", "5XER", "gmx_coords.gro"))
@@ -335,7 +337,7 @@ end
         velocities=[velocity(a.mass, Float32(temp)) .* 0.01f0 for a in atoms],
         temperature=Float32(temp),
         box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.5f0u"nm"),
+        neighbor_finder=neighbor_finder,
         thermostat=AndersenThermostat(10.0f0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(typeof(1.0f0u"K"), 10),
                         "coords" => CoordinateLogger(typeof(box_size), 10),
@@ -362,7 +364,8 @@ end
 
     @testset "$gi" for gi in general_inter_types
         if gi.nl_only
-            neighbor_finder = DistanceNeighborFinder(ones(n_atoms, n_atoms), 10, 1.5u"nm")
+            neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,
+                                                        dist_cutoff=1.5u"nm")
         else
             neighbor_finder = NoNeighborFinder()
         end
@@ -403,7 +406,7 @@ end
         velocities=velocities,
         temperature=temp,
         box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(ones(n_atoms, n_atoms), 10, 2.0u"nm"),
+        neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
         thermostat=NoThermostat(),
         loggers=Dict("temp" => TemperatureLogger(100),
                      "coords" => CoordinateLogger(100),
@@ -420,7 +423,7 @@ end
         velocities=Molly.ustripvec.(velocities),
         temperature=ustrip(temp),
         box_size=ustrip(box_size),
-        neighbor_finder=DistanceNeighborFinder(ones(n_atoms, n_atoms), 10, 2.0),
+        neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0),
         thermostat=NoThermostat(),
         loggers=Dict("temp" => TemperatureLogger(Float64, 100),
                      "coords" => CoordinateLogger(Float64, 100),
@@ -475,8 +478,8 @@ end
         cutoff = ShiftedPotentialCutoff(1.2u"nm")
         general_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
         if nl
-            nb_matrix = ones(f32 ? Float32 : Float64, n_atoms, n_atoms)
-            neighbor_finder = DistanceNeighborFinder(nb_matrix, 10, f32 ? 1.5f0u"nm" : 1.5u"nm")
+            neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,
+                                                        dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm")
             general_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
         end
 
@@ -612,6 +615,7 @@ end
     velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
     general_inters = (LennardJones = LennardJones(nl_only=true),
                         SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
+    neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_people, n_people), n_steps=10, dist_cutoff=2.0)
 
     s = Simulation(
         simulator=VelocityVerlet(),
@@ -621,7 +625,7 @@ end
         velocities=velocities,
         temperature=temp,
         box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(ones(n_people, n_people), 10, 2.0),
+        neighbor_finder=neighbor_finder,
         thermostat=AndersenThermostat(5.0),
         loggers=Dict("coords" => CoordinateLogger(Float64, 10; dims=2),
                         "SIR" => SIRLogger(10, [])),

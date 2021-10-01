@@ -93,7 +93,7 @@ timestep = 0.0002u"ps"
 temp = 298u"K"
 n_steps = 5_000
 
-atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
+atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
 
@@ -106,7 +106,7 @@ s = Simulation(
     velocities=[velocity(a.mass, temp) for a in atoms],
     temperature=temp,
     box_size=box_size,
-    neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.5u"nm"),
+    neighbor_finder=neighbor_finder,
     thermostat=AndersenThermostat(1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),

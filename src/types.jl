@@ -137,7 +137,7 @@ default values.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-struct Simulation{D, T, A, C, V, GI, SI, B, W, S, F, E}
+struct Simulation{D, T, A, C, V, GI, SI, B, S, F, E}
     simulator::Simulator
     atoms::A
     specific_inter_lists::SI
@@ -146,7 +146,7 @@ struct Simulation{D, T, A, C, V, GI, SI, B, W, S, F, E}
     velocities::V
     temperature::T
     box_size::B
-    neighbors::Vector{Tuple{Int, Int, W}}
+    neighbors::Vector{Tuple{Int, Int, Bool}}
     neighbor_finder::NeighborFinder
     thermostat::Thermostat
     loggers::Dict{String, <:Logger}
@@ -157,7 +157,7 @@ struct Simulation{D, T, A, C, V, GI, SI, B, W, S, F, E}
     energy_unit::E
 end
 
-Simulation{D}(args...) where {D, T, A, C, V, GI, SI, B, W, S, F, E} = Simulation{D, T, A, C, V, GI, SI, B, W, S, F, E}(args...)
+Simulation{D}(args...) where {D, T, A, C, V, GI, SI, B, S, F, E} = Simulation{D, T, A, C, V, GI, SI, B, S, F, E}(args...)
 
 function Simulation(;
                     simulator=VelocityVerlet(),
@@ -168,6 +168,7 @@ function Simulation(;
                     velocities=zero(coords),
                     temperature=0.0,
                     box_size,
+                    neighbors=Tuple{Int, Int, Bool}[],
                     neighbor_finder=NoNeighborFinder(),
                     thermostat=NoThermostat(),
                     loggers=Dict{String, Logger}(),
@@ -184,12 +185,10 @@ function Simulation(;
     GI = typeof(general_inters)
     SI = typeof(specific_inter_lists)
     B = typeof(box_size)
-    W = typeof(ustrip(box_size))
     S = typeof(timestep)
     F = typeof(force_unit)
     E = typeof(energy_unit)
-    neighbors = Tuple{Int, Int, W}[]
-    return Simulation{gpu_diff_safe, T, A, C, V, GI, SI, B, W, S, F, E}(
+    return Simulation{gpu_diff_safe, T, A, C, V, GI, SI, B, S, F, E}(
                 simulator, atoms, specific_inter_lists, general_inters, coords,
                 velocities, temperature, box_size, neighbors, neighbor_finder,
                 thermostat, loggers, timestep, n_steps, n_steps_made,

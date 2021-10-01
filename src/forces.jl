@@ -41,19 +41,14 @@ function force end
     end
 end
 
-@inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer, force_type, weight)
-    fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size) * weight
-    checkforcetype(fdr, force_type)
-    fdr_ustrip = ustrip.(fdr)
-    forces[i] -= fdr_ustrip
-    forces[j] += fdr_ustrip
-    return nothing
-end
-
-@inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer, force_type)
+@inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer, force_type, weight_14::Bool=false)
     fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
     checkforcetype(fdr, force_type)
-    fdr_ustrip = ustrip.(fdr)
+    if weight_14
+        fdr_ustrip = ustrip.(fdr) * inter.weight_14
+    else
+        fdr_ustrip = ustrip.(fdr)
+    end
     forces[i] -= fdr_ustrip
     forces[j] += fdr_ustrip
     return nothing

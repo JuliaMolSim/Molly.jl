@@ -310,36 +310,37 @@ function readinputs(T::Type,
 
     # Calculate matrix of pairs eligible for non-bonded interactions
     n_atoms = length(coords)
-    nb_matrix = ones(T, n_atoms, n_atoms)
+    nb_matrix = trues(n_atoms, n_atoms)
     for i in 1:n_atoms
-        nb_matrix[i, i] = zero(T)
+        nb_matrix[i, i] = false
     end
     for b in bonds
-        nb_matrix[b.i, b.j] = zero(T)
-        nb_matrix[b.j, b.i] = zero(T)
+        nb_matrix[b.i, b.j] = false
+        nb_matrix[b.j, b.i] = false
     end
     for a in angles
         # Assume bonding is already specified
-        nb_matrix[a.i, a.k] = zero(T)
-        nb_matrix[a.k, a.i] = zero(T)
+        nb_matrix[a.i, a.k] = false
+        nb_matrix[a.k, a.i] = false
     end
 
     # Calculate matrix of pairs eligible for halved non-bonded interactions
     # This applies to specified pairs in the topology file, usually 1-4 bonded
+    matrix_14 = falses(n_atoms, n_atoms)
     for (i, j) in pairs
-        nb_matrix[i, j] = T(0.5)
-        nb_matrix[j, i] = T(0.5)
+        matrix_14[i, j] = true
+        matrix_14[j, i] = true
     end
 
-    lj = LennardJones(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
+    lj = LennardJones(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true, weight_14=T(0.5),
                         force_unit=force_unit, energy_unit=energy_unit)
     if units
         coulomb = Coulomb(coulomb_const=T((138.935458 / 70.0)u"kJ * mol^-1 * nm * q^-2"),
-                            cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
+                            cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true, weight_14=T(0.5),
                             force_unit=force_unit, energy_unit=energy_unit)
     else
         coulomb = Coulomb(coulomb_const=T(138.935458 / 70.0),
-                            cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
+                            cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true, weight_14=T(0.5),
                             force_unit=force_unit, energy_unit=energy_unit)
     end
 
@@ -354,8 +355,11 @@ function readinputs(T::Type,
     # Convert atom types to integers so they are bits types
     atoms = [Atom(attype=0, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
 
+    neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
+                                            dist_cutoff=units ? T(1.5)u"nm" : T(1.5))
+
     return atoms, specific_inter_lists, general_inters,
-            nb_matrix, [coords...], box_size
+            neighbor_finder, [coords...], box_size
 end
 
 function readinputs(top_file::AbstractString, coord_file::AbstractString; kwargs...)
