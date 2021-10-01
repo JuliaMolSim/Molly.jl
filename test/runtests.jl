@@ -1,5 +1,6 @@
 using Molly
 using Aqua
+import BioStructures # Imported to avoid clashing names
 using CUDA
 
 using Base.Threads
@@ -35,7 +36,8 @@ CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
 # Some failures due to dependencies but there is an unbound args error for Simulation
 Aqua.test_all(Molly; ambiguities=(recursive=false), unbound_args=false, undefined_exports=false)
 
-tempfp = tempname(cleanup=true) * ".mp4"
+temp_fp_pdb = tempname(cleanup=true) * ".pdb"
+temp_fp_viz = tempname(cleanup=true) * ".mp4"
 
 @testset "Interactions" begin
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
@@ -176,7 +178,7 @@ box_size = 2.0u"nm"
     distances(final_coords, box_size)
     rdf(final_coords, box_size)
 
-    run_visualize_tests && visualize(s.loggers["coords"], box_size, tempfp)
+    run_visualize_tests && visualize(s.loggers["coords"], box_size, temp_fp_viz)
 end
 
 @testset "Lennard-Jones gas" begin
@@ -217,7 +219,12 @@ end
         distances(final_coords, box_size)
         rdf(final_coords, box_size)
 
-        run_visualize_tests && visualize(s.loggers["coords"], box_size, tempfp)
+        traj = read(temp_fp_pdb, BioStructures.PDB)
+        rm(temp_fp_pdb)
+        @test BioStructures.countmodels(traj) == 200
+        @test BioStructures.countatoms(first(traj)) == 100
+
+        run_visualize_tests && visualize(s.loggers["coords"], box_size, temp_fp_viz)
     end
 end
 
@@ -276,7 +283,7 @@ end
     @time simulate!(s; parallel=false)
 
     if run_visualize_tests
-        visualize(s.loggers["coords"], box_size, tempfp;
+        visualize(s.loggers["coords"], box_size, temp_fp_viz;
                     connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
                     trails=2)
     end
@@ -312,12 +319,18 @@ end
         thermostat=AndersenThermostat(10.0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(10),
                         "coords" => CoordinateLogger(10),
-                        "energy" => EnergyLogger(10)),
+                        "energy" => EnergyLogger(10),
+                        "writer" => StructureWriter(10, temp_fp_pdb)),
         timestep=timestep,
         n_steps=n_steps,
     )
 
     @time simulate!(s; parallel=false)
+
+    traj = read(temp_fp_pdb, BioStructures.PDB)
+    rm(temp_fp_pdb)
+    @test BioStructures.countmodels(traj) == 10
+    @test BioStructures.countatoms(first(traj)) == 5191
 end
 
 @testset "Float32" begin
