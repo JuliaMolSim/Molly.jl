@@ -1,6 +1,7 @@
 module Molly
 
 using BioStructures
+using Chemfiles
 using Colors
 using CUDA
 using Distances

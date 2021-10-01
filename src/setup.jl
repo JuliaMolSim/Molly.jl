@@ -335,12 +335,10 @@ function readinputs(T::Type,
     lj = LennardJones(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true, weight_14=T(0.5),
                         force_unit=force_unit, energy_unit=energy_unit)
     if units
-        coulomb = Coulomb(coulomb_const=T((138.935458 / 70.0)u"kJ * mol^-1 * nm * q^-2"),
-                            cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true, weight_14=T(0.5),
+        coulomb = Coulomb(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true, weight_14=T(0.5),
                             force_unit=force_unit, energy_unit=energy_unit)
     else
-        coulomb = Coulomb(coulomb_const=T(138.935458 / 70.0),
-                            cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true, weight_14=T(0.5),
+        coulomb = Coulomb(cutoff=ShiftedPotentialCutoff(T(1.2)), nl_only=true, weight_14=T(0.5),
                             force_unit=force_unit, energy_unit=energy_unit)
     end
 
@@ -513,4 +511,32 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
     C = typeof(T(1u"q"))
     return OpenMMForceField{T, M, D, E, C}(atom_types, residue_types, bond_types, angle_types,
                 torsion_types, torsion_order, weight_14_coulomb, weight_14_lj)
+end
+
+function setupsystem(coord_file::AbstractString, force_field)
+    T = typeof(force_field.weight_14_coulomb)
+
+    trajectory = Trajectory(coord_file)
+    frame = read(trajectory)
+    top = Topology(frame)
+
+    atoms = Atom[]
+    bonds = HarmonicBond[]
+    pairs = Tuple{Int, Int}[]
+    angles = HarmonicAngle[]
+    torsions = Torsion[]
+
+    specific_inter_lists = ([bonds...], [angles...], [torsions...])
+
+    lj = LennardJones(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
+                        weight_14=force_field.weight_14_lj)
+    coulomb = Coulomb(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
+                        weight_14=force_field.weight_14_coulomb)
+    general_inters = (lj, coulomb)
+
+    neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
+                                            dist_cutoff=T(1.5)u"nm")
+
+    return atoms, specific_inter_lists, general_inters,
+            neighbor_finder, coords, box_size
 end
