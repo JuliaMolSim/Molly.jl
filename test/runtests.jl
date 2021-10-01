@@ -1,7 +1,6 @@
 using Molly
 using Aqua
 using CUDA
-using GLMakie
 
 using Base.Threads
 using Statistics
@@ -9,6 +8,15 @@ using Test
 
 @warn "This file does not include all the tests for Molly.jl due to CI time limits, " *
         "see the test directory for more"
+
+run_visualize_tests = false # GLMakie doesn't work on CI
+
+if run_visualize_tests
+    using GLMakie
+    @info "The visualization tests will be run as run_visualize_tests is set to true"
+else
+    @warn "The visualization tests will not be run as run_visualize_tests is set to false"
+end
 
 if nthreads() > 1
     @info "The parallel tests will be run as Julia is running on $(nthreads()) threads"
@@ -168,7 +176,7 @@ box_size = 2.0u"nm"
     distances(final_coords, box_size)
     rdf(final_coords, box_size)
 
-    visualize(s.loggers["coords"], box_size, tempfp)
+    run_visualize_tests && visualize(s.loggers["coords"], box_size, tempfp)
 end
 
 @testset "Lennard-Jones gas" begin
@@ -208,7 +216,7 @@ end
         distances(final_coords, box_size)
         rdf(final_coords, box_size)
 
-        visualize(s.loggers["coords"], box_size, tempfp)
+        run_visualize_tests && visualize(s.loggers["coords"], box_size, tempfp)
     end
 end
 
@@ -266,9 +274,11 @@ end
 
     @time simulate!(s; parallel=false)
 
-    visualize(s.loggers["coords"], box_size, tempfp;
-                connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
-                trails=2)
+    if run_visualize_tests
+        visualize(s.loggers["coords"], box_size, tempfp;
+                    connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
+                    trails=2)
+    end
 end
 
 @testset "Peptide" begin
