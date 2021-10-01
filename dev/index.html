@@ -31,7 +31,7 @@ timestep = 0.0002u&quot;ps&quot;
 temp = 298u&quot;K&quot;
 n_steps = 5_000
 
-atoms, specific_inter_lists, general_inters, nb_matrix, coords, box_size = readinputs(
+atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_top_ff.top&quot;),
             joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_coords.gro&quot;))
 
@@ -44,7 +44,7 @@ s = Simulation(
     velocities=[velocity(a.mass, temp) for a in atoms],
     temperature=temp,
     box_size=box_size,
-    neighbor_finder=DistanceNeighborFinder(nb_matrix, 10, 1.5u&quot;nm&quot;),
+    neighbor_finder=neighbor_finder,
     thermostat=AndersenThermostat(1.0u&quot;ps&quot;),
     loggers=Dict(&quot;temp&quot; =&gt; TemperatureLogger(10),
                     &quot;writer&quot; =&gt; StructureWriter(10, &quot;traj_5XER_1ps.pdb&quot;)),
@@ -52,4 +52,4 @@ s = Simulation(
     n_steps=n_steps,
 )
 
-simulate!(s)</code></pre><p>The above 1 ps simulation looks something like this when you view it in <a href="https://www.ks.uiuc.edu/Research/vmd">VMD</a>: <img src="https://github.com/JuliaMolSim/Molly.jl/raw/master/data/5XER/sim_1ps.gif" alt="MD simulation"/></p><h2 id="Contributing"><a class="docs-heading-anchor" href="#Contributing">Contributing</a><a id="Contributing-1"></a><a class="docs-heading-anchor-permalink" href="#Contributing" title="Permalink"></a></h2><p>Contributions are very welcome - see the <a href="https://github.com/JuliaMolSim/Molly.jl/issues/2">roadmap issue</a> for more.</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="docs/">Documentation »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Friday 1 October 2021 10:21">Friday 1 October 2021</span>. Using Julia version 1.6.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+simulate!(s)</code></pre><p>The above 1 ps simulation looks something like this when you view it in <a href="https://www.ks.uiuc.edu/Research/vmd">VMD</a>: <img src="https://github.com/JuliaMolSim/Molly.jl/raw/master/data/5XER/sim_1ps.gif" alt="MD simulation"/></p><h2 id="Contributing"><a class="docs-heading-anchor" href="#Contributing">Contributing</a><a id="Contributing-1"></a><a class="docs-heading-anchor-permalink" href="#Contributing" title="Permalink"></a></h2><p>Contributions are very welcome - see the <a href="https://github.com/JuliaMolSim/Molly.jl/issues/2">roadmap issue</a> for more.</p></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="docs/">Documentation »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Friday 1 October 2021 13:53">Friday 1 October 2021</span>. Using Julia version 1.6.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
