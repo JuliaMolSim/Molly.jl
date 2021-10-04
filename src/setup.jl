@@ -431,6 +431,7 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
                     types = Dict{String, String}()
                     charges = Dict{String, typeof(T(1u"q"))}()
                     for atom_or_bond in eachelement(residue)
+                        # Ignore bonds because they are specified elsewhere
                         if atom_or_bond.name == "Atom"
                             atom_name = atom_or_bond["name"]
                             types[atom_name] = atom_or_bond["type"]
@@ -513,9 +514,25 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
                 torsion_types, torsion_order, weight_14_coulomb, weight_14_lj)
 end
 
+# Return the residue name with N or C added for terminal residues
+# Assumes no missing residue numbers
+function residuename(res, res_num_to_standard::Dict)
+    res_num = id(res)
+    res_name = Chemfiles.name(res)
+    if res_num_to_standard[res_num]
+        if res_num == 1 || !res_num_to_standard[res_num - 1]
+            res_name = "N" * res_name
+        elseif res_num == length(res_num_to_standard) || !res_num_to_standard[res_num + 1]
+            res_name = "C" * res_name
+        end
+    end
+    return res_name
+end
+
 function setupsystem(coord_file::AbstractString, force_field)
     T = typeof(force_field.weight_14_coulomb)
 
+    # Chemfiles uses zero-based indexing, be careful
     trajectory = Trajectory(coord_file)
     frame = read(trajectory)
     top = Topology(frame)
@@ -526,6 +543,63 @@ function setupsystem(coord_file::AbstractString, force_field)
     angles = HarmonicAngle[]
     torsions = Torsion[]
 
+    res_num_to_standard = Dict{Int64, Bool}()
+    for ri in 1:count_residues(top)
+        res = Chemfiles.Residue(top, ri - 1)
+        res_num = id(res)
+        res_name = Chemfiles.name(res)
+        res_num_to_standard[res_num] = res_name in keys(threeletter_to_aa)
+    end
+
+    for ai in 1:size(top)
+        atom_name = Chemfiles.name(Chemfiles.Atom(top, ai - 1))
+        res_name = residuename(residue_for_atom(top, ai - 1), res_num_to_standard)
+        type = force_field.residue_types[res_name].types[atom_name]
+        charge = force_field.residue_types[res_name].charges[atom_name]
+        at = force_field.atom_types[type]
+        push!(atoms, Atom(attype=type, charge=charge, mass=at.mass, σ=at.σ, ϵ=at.ϵ))
+    end
+
+    for (a1z, a2z) in eachcol(Int64.(Chemfiles.bonds(top)))
+        atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
+        atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
+        res_name_1 = residuename(residue_for_atom(top, a1z), res_num_to_standard)
+        res_name_2 = residuename(residue_for_atom(top, a2z), res_num_to_standard)
+        atom_type_1 = force_field.residue_types[res_name_1].types[atom_name_1]
+        atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
+        if haskey(force_field.bond_types, (atom_type_1, atom_type_2))
+            bond_type = force_field.bond_types[(atom_type_1, atom_type_2)]
+        else
+            bond_type = force_field.bond_types[(atom_type_2, atom_type_1)]
+        end
+        push!(bonds, HarmonicBond(i=(a1z + 1), j=(a2z + 1), b0=bond_type.b0, kb=bond_type.kb))
+    end
+
+    for (a1z, a2z, a3z) in eachcol(Int64.(Chemfiles.angles(top)))
+        atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
+        atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
+        atom_name_3 = Chemfiles.name(Chemfiles.Atom(top, a3z))
+        res_name_1 = residuename(residue_for_atom(top, a1z), res_num_to_standard)
+        res_name_2 = residuename(residue_for_atom(top, a2z), res_num_to_standard)
+        res_name_3 = residuename(residue_for_atom(top, a3z), res_num_to_standard)
+        atom_type_1 = force_field.residue_types[res_name_1].types[atom_name_1]
+        atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
+        atom_type_3 = force_field.residue_types[res_name_3].types[atom_name_3]
+        if haskey(force_field.angle_types, (atom_type_1, atom_type_2, atom_type_3))
+            angle_type = force_field.angle_types[(atom_type_1, atom_type_2, atom_type_3)]
+        else
+            angle_type = force_field.angle_types[(atom_type_3, atom_type_2, atom_type_1)]
+        end
+        push!(angles, HarmonicAngle(i=(a1z + 1), j=(a2z + 1), k=(a3z + 1), th0=angle_type.th0, cth=angle_type.cth))
+    end
+
+    # Convert from Å
+    coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(positions(frame))]
+
+    # Convert from Å
+    # Switch this to 3D
+    box_size = T(lengths(UnitCell(frame))[1]u"nm" / 10.0)
+
     specific_inter_lists = ([bonds...], [angles...], [torsions...])
 
     lj = LennardJones(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
@@ -534,9 +608,10 @@ function setupsystem(coord_file::AbstractString, force_field)
                         weight_14=force_field.weight_14_coulomb)
     general_inters = (lj, coulomb)
 
-    neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-                                            dist_cutoff=T(1.5)u"nm")
+    #neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
+    #                                        dist_cutoff=T(1.5)u"nm")
 
+    # isbits atoms
     return atoms, specific_inter_lists, general_inters,
-            neighbor_finder, coords, box_size
+            coords, box_size#neighbor_finder, coords, box_size
 end
