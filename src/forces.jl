@@ -1,6 +1,6 @@
 # See https://udel.edu/~arthij/MD.pdf for information on forces
 # See https://arxiv.org/pdf/1401.1181.pdf for applying forces to atoms
-# See Gromacs manual for other aspects of forces
+# See OpenMM documentation and Gromacs manual for other aspects of forces
 
 export
     force,
@@ -13,6 +13,7 @@ export
     Gravity,
     HarmonicBond,
     HarmonicAngle,
+    PeriodicTorsion,
     RBTorsion
 
 function checkforcetype(fdr, force_type)
@@ -156,4 +157,5 @@ include("interactions/coulomb.jl")
 include("interactions/gravity.jl")
 include("interactions/harmonic_bond.jl")
 include("interactions/harmonic_angle.jl")
+include("interactions/periodic_torsion.jl")
 include("interactions/rb_torsion.jl")
