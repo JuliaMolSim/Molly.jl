@@ -307,7 +307,6 @@ function readinputs(T::Type,
             end
         end
     end
-    coords = adjust_bounds_vec.([coords...], box_size)
 
     # Calculate matrix of pairs eligible for non-bonded interactions
     n_atoms = length(coords)
@@ -346,6 +345,7 @@ function readinputs(T::Type,
     # Bounding box for PBCs - box goes 0 to this value in 3 dimensions
     box_size_val = parse(T, first(split(strip(lines[end]), r"\s+")))
     box_size = units ? (box_size_val)u"nm" : box_size_val
+    coords = adjust_bounds_vec.([coords...], box_size)
 
     # Ensure array types are concrete
     specific_inter_lists = ([bonds...], [angles...], [torsions...])
@@ -390,10 +390,10 @@ struct PeriodicTorsionType{T, E}
 end
 
 #
-struct OpenMMForceField{T, M, D, E, C}
+struct OpenMMForceField{T, M, D, E, C, K}
     atom_types::Dict{String, OpenMMAtomType{M, D, E}}
     residue_types::Dict{String, OpenMMResiduetype{C}}
-    bond_types::Dict{Tuple{String, String}, BondType{D, E}}
+    bond_types::Dict{Tuple{String, String}, BondType{D, K}}
     angle_types::Dict{Tuple{String, String, String}, AngleType{T, E}}
     torsion_types::Dict{Tuple{String, String, String, String}, PeriodicTorsionType{T, E}}
     torsion_order::String
@@ -446,7 +446,7 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
                     atom_type_1 = bond["type1"]
                     atom_type_2 = bond["type2"]
                     b0 = parse(T, bond["length"])u"nm"
-                    kb = parse(T, bond["k"])u"kJ * mol^-1"
+                    kb = parse(T, bond["k"])u"kJ * mol^-1 * nm^-2"
                     bond_types[(atom_type_1, atom_type_2)] = BondType(b0, kb)
                 end
             elseif entry_name == "HarmonicAngleForce"
@@ -511,7 +511,8 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
     D = typeof(T(1u"nm"))
     E = typeof(T(1u"kJ * mol^-1"))
     C = typeof(T(1u"q"))
-    return OpenMMForceField{T, M, D, E, C}(atom_types, residue_types, bond_types, angle_types,
+    K = typeof(T(1u"kJ * mol^-1 * nm^-2"))
+    return OpenMMForceField{T, M, D, E, C, K}(atom_types, residue_types, bond_types, angle_types,
                 torsion_types, torsion_order, weight_14_coulomb, weight_14_lj)
 end
 
