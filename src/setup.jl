@@ -307,6 +307,7 @@ function readinputs(T::Type,
             end
         end
     end
+    coords = adjust_bounds_vec.([coords...], box_size)
 
     # Calculate matrix of pairs eligible for non-bonded interactions
     n_atoms = length(coords)
@@ -357,7 +358,7 @@ function readinputs(T::Type,
                                             dist_cutoff=units ? T(1.5)u"nm" : T(1.5))
 
     return atoms, specific_inter_lists, general_inters,
-            neighbor_finder, [coords...], box_size
+            neighbor_finder, coords, box_size
 end
 
 function readinputs(top_file::AbstractString, coord_file::AbstractString; kwargs...)
@@ -465,13 +466,13 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
                     atom_type_2 = torsion["type2"]
                     atom_type_3 = torsion["type3"]
                     atom_type_4 = torsion["type4"]
-                    periodicities = Int64[]
+                    periodicities = Int[]
                     phases = T[]
                     ks = typeof(T(1u"kJ * mol^-1"))[]
                     phase_i = 1
                     phase_present = true
                     while phase_present
-                        push!(periodicities, parse(Int64, torsion["periodicity$phase_i"]))
+                        push!(periodicities, parse(Int, torsion["periodicity$phase_i"]))
                         push!(phases, parse(T, torsion["phase$phase_i"]))
                         push!(ks, parse(T, torsion["k$phase_i"])u"kJ * mol^-1")
                         phase_i += 1
@@ -536,14 +537,17 @@ function setupsystem(coord_file::AbstractString, force_field)
     trajectory = Trajectory(coord_file)
     frame = read(trajectory)
     top = Topology(frame)
+    n_atoms = size(top)
 
     atoms = Atom[]
     bonds = HarmonicBond[]
-    pairs = Tuple{Int, Int}[]
     angles = HarmonicAngle[]
-    torsions = RBTorsion[] # Change
+    torsions = PeriodicTorsion[]
+    impropers = PeriodicTorsion[]
+    nb_matrix = trues(n_atoms, n_atoms)
+    matrix_14 = falses(n_atoms, n_atoms)
 
-    res_num_to_standard = Dict{Int64, Bool}()
+    res_num_to_standard = Dict{Int, Bool}()
     for ri in 1:count_residues(top)
         res = Chemfiles.Residue(top, ri - 1)
         res_num = id(res)
@@ -551,16 +555,17 @@ function setupsystem(coord_file::AbstractString, force_field)
         res_num_to_standard[res_num] = res_name in keys(threeletter_to_aa)
     end
 
-    for ai in 1:size(top)
+    for ai in 1:n_atoms
         atom_name = Chemfiles.name(Chemfiles.Atom(top, ai - 1))
         res_name = residuename(residue_for_atom(top, ai - 1), res_num_to_standard)
         type = force_field.residue_types[res_name].types[atom_name]
         charge = force_field.residue_types[res_name].charges[atom_name]
         at = force_field.atom_types[type]
         push!(atoms, Atom(attype=type, charge=charge, mass=at.mass, σ=at.σ, ϵ=at.ϵ))
+        nb_matrix[ai, ai] = false
     end
 
-    for (a1z, a2z) in eachcol(Int64.(Chemfiles.bonds(top)))
+    for (a1z, a2z) in eachcol(Int.(Chemfiles.bonds(top)))
         atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
         atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
         res_name_1 = residuename(residue_for_atom(top, a1z), res_num_to_standard)
@@ -573,9 +578,11 @@ function setupsystem(coord_file::AbstractString, force_field)
             bond_type = force_field.bond_types[(atom_type_2, atom_type_1)]
         end
         push!(bonds, HarmonicBond(i=(a1z + 1), j=(a2z + 1), b0=bond_type.b0, kb=bond_type.kb))
+        nb_matrix[a1z + 1, a2z + 1] = false
+        nb_matrix[a2z + 1, a1z + 1] = false
     end
 
-    for (a1z, a2z, a3z) in eachcol(Int64.(Chemfiles.angles(top)))
+    for (a1z, a2z, a3z) in eachcol(Int.(Chemfiles.angles(top)))
         atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
         atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
         atom_name_3 = Chemfiles.name(Chemfiles.Atom(top, a3z))
@@ -591,16 +598,62 @@ function setupsystem(coord_file::AbstractString, force_field)
             angle_type = force_field.angle_types[(atom_type_3, atom_type_2, atom_type_1)]
         end
         push!(angles, HarmonicAngle(i=(a1z + 1), j=(a2z + 1), k=(a3z + 1), th0=angle_type.th0, cth=angle_type.cth))
+        nb_matrix[a1z + 1, a3z + 1] = false
+        nb_matrix[a3z + 1, a1z + 1] = false
     end
 
-    # Convert from Å
-    coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(positions(frame))]
+    for (a1z, a2z, a3z, a4z) in eachcol(Int.(Chemfiles.dihedrals(top)))
+        atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
+        atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
+        atom_name_3 = Chemfiles.name(Chemfiles.Atom(top, a3z))
+        atom_name_4 = Chemfiles.name(Chemfiles.Atom(top, a4z))
+        res_name_1 = residuename(residue_for_atom(top, a1z), res_num_to_standard)
+        res_name_2 = residuename(residue_for_atom(top, a2z), res_num_to_standard)
+        res_name_3 = residuename(residue_for_atom(top, a3z), res_num_to_standard)
+        res_name_4 = residuename(residue_for_atom(top, a4z), res_num_to_standard)
+        atom_type_1 = force_field.residue_types[res_name_1].types[atom_name_1]
+        atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
+        atom_type_3 = force_field.residue_types[res_name_3].types[atom_name_3]
+        atom_type_4 = force_field.residue_types[res_name_4].types[atom_name_4]
+        if haskey(force_field.torsion_types, (atom_type_1, atom_type_2, atom_type_3, atom_type_4))
+            torsion_type = force_field.torsion_types[(atom_type_1, atom_type_2, atom_type_3, atom_type_4)]
+        elseif haskey(force_field.torsion_types, (atom_type_4, atom_type_3, atom_type_2, atom_type_1))
+            torsion_type = force_field.torsion_types[(atom_type_4, atom_type_3, atom_type_2, atom_type_1)]
+        else
+            # Search wildcard entries
+            best_score = -1
+            best_key = ("", "", "", "")
+            atom_types = (atom_type_1, atom_type_2, atom_type_3, atom_type_4)
+            for k in keys(force_field.torsion_types)
+                if force_field.torsion_types[k].proper
+                    for ke in (k, reverse(k))
+                        valid = true
+                        score = 0
+                        for (i, v) in enumerate(ke)
+                            if v == atom_types[i]
+                                score += 1
+                            elseif v != ""
+                                valid = false
+                                break
+                            end
+                        end
+                        if valid && (score > best_score)
+                            best_score = score
+                            best_key = k
+                        end
+                    end
+                end
+            end
+            torsion_type = force_field.torsion_types[best_key]
+        end
+        push!(torsions, PeriodicTorsion(i=(a1z + 1), j=(a2z + 1), k=(a3z + 1), l=(a4z + 1),
+                                        periodicities=torsion_type.periodicities,
+                                        phases=torsion_type.phases, ks=torsion_type.ks))
+        matrix_14[a1z + 1, a4z + 1] = true
+        matrix_14[a4z + 1, a1z + 1] = true
+    end
 
-    # Convert from Å
-    # Switch this to 3D
-    box_size = T(lengths(UnitCell(frame))[1]u"nm" / 10.0)
-
-    specific_inter_lists = ([bonds...], [angles...], [torsions...])
+    specific_inter_lists = ([bonds...], [angles...], [torsions...], [impropers...])
 
     lj = LennardJones(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
                         weight_14=force_field.weight_14_lj)
@@ -608,10 +661,18 @@ function setupsystem(coord_file::AbstractString, force_field)
                         weight_14=force_field.weight_14_coulomb)
     general_inters = (lj, coulomb)
 
-    #neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-    #                                        dist_cutoff=T(1.5)u"nm")
+    # Convert from Å
+    # Switch this to 3D
+    box_size = T(lengths(UnitCell(frame))[1]u"nm" / 10.0)
+
+    # Convert from Å
+    coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(positions(frame))]
+    coords = adjust_bounds_vec.(coords, box_size)
+
+    neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
+                                            dist_cutoff=T(1.5)u"nm")
 
     # isbits atoms
     return atoms, specific_inter_lists, general_inters,
-            coords, box_size#neighbor_finder, coords, box_size
+            neighbor_finder, coords, box_size
 end
