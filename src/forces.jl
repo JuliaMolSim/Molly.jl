@@ -13,7 +13,7 @@ export
     Gravity,
     HarmonicBond,
     HarmonicAngle,
-    Torsion
+    RBTorsion
 
 function checkforcetype(fdr, force_type)
     if unit(first(fdr)) != force_type
@@ -156,4 +156,4 @@ include("interactions/coulomb.jl")
 include("interactions/gravity.jl")
 include("interactions/harmonic_bond.jl")
 include("interactions/harmonic_angle.jl")
-include("interactions/torsion.jl")
+include("interactions/rb_torsion.jl")

@@ -373,7 +373,7 @@ The available general interactions are:
 The available specific interactions are:
 - [`HarmonicBond`](@ref).
 - [`HarmonicAngle`](@ref).
-- [`Torsion`](@ref).
+- [`RBTorsion`](@ref).
 
 To define your own [`GeneralInteraction`](@ref), first define the `struct`:
 ```julia

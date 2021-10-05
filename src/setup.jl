@@ -2,20 +2,20 @@
 # See http://manual.gromacs.org/documentation/2016/user-guide/file-formats.html
 
 export
-    Atomtype,
-    Bondtype,
-    Angletype,
-    Torsiontype,
+    AtomType,
+    BondType,
+    AngleType,
+    RBTorsionType,
     placeatoms,
     placediatomics,
     readinputs
 
 """
-    Atomtype(charge, mass, σ, ϵ)
+    AtomType(charge, mass, σ, ϵ)
 
-Gromacs atom type.
+An atom type.
 """
-struct Atomtype{C, M, S, E}
+struct AtomType{C, M, S, E}
     charge::C
     mass::M
     σ::S
@@ -23,31 +23,31 @@ struct Atomtype{C, M, S, E}
 end
 
 """
-    Bondtype(b0, kb)
+    BondType(b0, kb)
 
-Gromacs bond type.
+A bond type.
 """
-struct Bondtype{D, K}
+struct BondType{D, K}
     b0::D
     kb::K
 end
 
 """
-    Angletype(th0, cth)
+    AngleType(th0, cth)
 
-Gromacs angle type.
+An angle type.
 """
-struct Angletype{D, K}
+struct AngleType{D, K}
     th0::D
     cth::K
 end
 
 """
-    Torsiontype(f1, f2, f3, f4)
+    RBTorsionType(f1, f2, f3, f4)
 
-Gromacs torsion type.
+A Ryckaert-Bellemans torsion type.
 """
-struct Torsiontype{T}
+struct RBTorsionType{T}
     f1::T
     f2::T
     f3::T
@@ -126,10 +126,10 @@ function readinputs(T::Type,
                     coord_file::AbstractString;
                     units::Bool=true)
     # Read forcefield and topology file
-    atomtypes = Dict{String, Atomtype}()
-    bondtypes = Dict{String, Bondtype}()
-    angletypes = Dict{String, Angletype}()
-    torsiontypes = Dict{String, Torsiontype}()
+    atomtypes = Dict{String, AtomType}()
+    bondtypes = Dict{String, BondType}()
+    angletypes = Dict{String, AngleType}()
+    torsiontypes = Dict{String, RBTorsionType}()
     atomnames = Dict{String, String}()
 
     name = "?"
@@ -138,7 +138,7 @@ function readinputs(T::Type,
     pairs = Tuple{Int, Int}[]
     angles = HarmonicAngle[]
     possible_torsions = Tuple{Int, Int, Int, Int}[]
-    torsions = Torsion[]
+    torsions = RBTorsion[]
 
     if units
         force_unit = u"kJ * mol^-1 * nm^-1"
@@ -161,18 +161,18 @@ function readinputs(T::Type,
         c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
         if current_field == "bondtypes"
             if units
-                bondtype = Bondtype(parse(T, c[4])u"nm", parse(T, c[5])u"kJ * mol^-1 * nm^-2")
+                bondtype = BondType(parse(T, c[4])u"nm", parse(T, c[5])u"kJ * mol^-1 * nm^-2")
             else
-                bondtype = Bondtype(parse(T, c[4]), parse(T, c[5]))
+                bondtype = BondType(parse(T, c[4]), parse(T, c[5]))
             end
             bondtypes["$(c[1])/$(c[2])"] = bondtype
             bondtypes["$(c[2])/$(c[1])"] = bondtype
         elseif current_field == "angletypes"
             # Convert th0 to radians
             if units
-                angletype = Angletype(deg2rad(parse(T, c[5])), parse(T, c[6])u"kJ * mol^-1")
+                angletype = AngleType(deg2rad(parse(T, c[5])), parse(T, c[6])u"kJ * mol^-1")
             else
-                angletype = Angletype(deg2rad(parse(T, c[5])), parse(T, c[6]))
+                angletype = AngleType(deg2rad(parse(T, c[5])), parse(T, c[6]))
             end
             angletypes["$(c[1])/$(c[2])/$(c[3])"] = angletype
             angletypes["$(c[3])/$(c[2])/$(c[1])"] = angletype
@@ -183,10 +183,10 @@ function readinputs(T::Type,
             f2 = 4 * f4 - parse(T, c[8])
             f1 = 3 * f3 - 2 * parse(T, c[7])
             if units
-                torsiontype = Torsiontype((f1)u"kJ * mol^-1", (f2)u"kJ * mol^-1",
+                torsiontype = RBTorsionType((f1)u"kJ * mol^-1", (f2)u"kJ * mol^-1",
                                             (f3)u"kJ * mol^-1", (f4)u"kJ * mol^-1")
             else
-                torsiontype = Torsiontype(f1, f2, f3, f4)
+                torsiontype = RBTorsionType(f1, f2, f3, f4)
             end
             torsiontypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = torsiontype
         elseif current_field == "atomtypes" && length(c) >= 8
@@ -195,10 +195,10 @@ function readinputs(T::Type,
             # Take the first version of each atom type only
             if !haskey(atomtypes, atomname)
                 if units
-                    atomtypes[atomname] = Atomtype(parse(T, c[5]) * T(1u"q"),
+                    atomtypes[atomname] = AtomType(parse(T, c[5]) * T(1u"q"),
                             parse(T, c[4])u"u", parse(T, c[7])u"nm", parse(T, c[8])u"kJ * mol^-1")
                 else
-                    atomtypes[atomname] = Atomtype(parse(T, c[5]), parse(T, c[4]),
+                    atomtypes[atomname] = AtomType(parse(T, c[5]), parse(T, c[4]),
                             parse(T, c[7]), parse(T, c[8]))
                 end
             end
@@ -237,8 +237,8 @@ function readinputs(T::Type,
         desired_key = join(at_types, "/")
         if haskey(torsiontypes, desired_key)
             d = torsiontypes[desired_key]
-            push!(torsions, Torsion(i=inds[1], j=inds[2], k=inds[3], l=inds[4],
-                                    f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
+            push!(torsions, RBTorsion(i=inds[1], j=inds[2], k=inds[3], l=inds[4],
+                                        f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
         else
             best_score = 0
             best_key = ""
@@ -264,8 +264,8 @@ function readinputs(T::Type,
             # If a wildcard match is found, add a new specific torsion type
             if best_key != ""
                 d = torsiontypes[best_key]
-                push!(torsions, Torsion(i=inds[1], j=inds[2], k=inds[3], l=inds[4],
-                                        f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
+                push!(torsions, RBTorsion(i=inds[1], j=inds[2], k=inds[3], l=inds[4],
+                                            f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
             end
         end
     end
@@ -365,7 +365,7 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString; kwargs
 end
 
 #
-struct OpenMMAtomtype{M, S, E}
+struct OpenMMAtomType{M, S, E}
     class::String
     element::String
     mass::M
@@ -381,7 +381,7 @@ struct OpenMMResiduetype{C}
 end
 
 #
-struct OpenMMTorsiontype{T, E}
+struct PeriodicTorsionType{T, E}
     proper::Bool
     periodicities::Vector{Int}
     phases::Vector{T}
@@ -390,11 +390,11 @@ end
 
 #
 struct OpenMMForceField{T, M, D, E, C}
-    atom_types::Dict{String, OpenMMAtomtype{M, D, E}}
+    atom_types::Dict{String, OpenMMAtomType{M, D, E}}
     residue_types::Dict{String, OpenMMResiduetype{C}}
-    bond_types::Dict{Tuple{String, String}, Bondtype{D, E}}
-    angle_types::Dict{Tuple{String, String, String}, Angletype{T, E}}
-    torsion_types::Dict{Tuple{String, String, String, String}, OpenMMTorsiontype{T, E}}
+    bond_types::Dict{Tuple{String, String}, BondType{D, E}}
+    angle_types::Dict{Tuple{String, String, String}, AngleType{T, E}}
+    torsion_types::Dict{Tuple{String, String, String, String}, PeriodicTorsionType{T, E}}
     torsion_order::String
     weight_14_coulomb::T
     weight_14_lj::T
@@ -402,11 +402,11 @@ end
 
 #
 function readopenmmxml(T::Type, ff_files::AbstractString...)
-    atom_types = Dict{String, OpenMMAtomtype}()
+    atom_types = Dict{String, OpenMMAtomType}()
     residue_types = Dict{String, OpenMMResiduetype}()
-    bond_types = Dict{Tuple{String, String}, Bondtype}()
-    angle_types = Dict{Tuple{String, String, String}, Angletype}()
-    torsion_types = Dict{Tuple{String, String, String, String}, OpenMMTorsiontype}()
+    bond_types = Dict{Tuple{String, String}, BondType}()
+    angle_types = Dict{Tuple{String, String, String}, AngleType}()
+    torsion_types = Dict{Tuple{String, String, String, String}, PeriodicTorsionType}()
     torsion_order = ""
     weight_14_coulomb = one(T)
     weight_14_lj = one(T)
@@ -423,7 +423,7 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
                     mass = parse(T, atom_type["mass"])u"u"
                     σ = T(-1u"nm") # Updated later
                     ϵ = T(-1u"kJ * mol^-1") # Updated later
-                    atom_types[class] = OpenMMAtomtype(class, element, mass, σ, ϵ)
+                    atom_types[class] = OpenMMAtomType(class, element, mass, σ, ϵ)
                 end
             elseif entry_name == "Residues"
                 for residue in eachelement(entry)
@@ -446,7 +446,7 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
                     atom_type_2 = bond["type2"]
                     b0 = parse(T, bond["length"])u"nm"
                     kb = parse(T, bond["k"])u"kJ * mol^-1"
-                    bond_types[(atom_type_1, atom_type_2)] = Bondtype(b0, kb)
+                    bond_types[(atom_type_1, atom_type_2)] = BondType(b0, kb)
                 end
             elseif entry_name == "HarmonicAngleForce"
                 for angle in eachelement(entry)
@@ -455,7 +455,7 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
                     atom_type_3 = angle["type3"]
                     th0 = parse(T, angle["angle"])
                     k = parse(T, angle["k"])u"kJ * mol^-1"
-                    angle_types[(atom_type_1, atom_type_2, atom_type_3)] = Angletype(th0, k)
+                    angle_types[(atom_type_1, atom_type_2, atom_type_3)] = AngleType(th0, k)
                 end
             elseif entry_name == "PeriodicTorsionForce"
                 torsion_order = entry["ordering"]
@@ -477,7 +477,7 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
                         phase_i += 1
                         phase_present = haskey(torsion, "periodicity$phase_i")
                     end
-                    torsion_type = OpenMMTorsiontype(proper, periodicities, phases, ks)
+                    torsion_type = PeriodicTorsionType(proper, periodicities, phases, ks)
                     torsion_types[(atom_type_1, atom_type_2, atom_type_3, atom_type_4)] = torsion_type
                 end
             elseif entry_name == "NonbondedForce"
@@ -490,7 +490,7 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
                         partial_type = atom_types[atom_type]
                         σ = parse(T, atom_or_attr["sigma"])u"nm"
                         ϵ = parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1"
-                        complete_type = OpenMMAtomtype(partial_type.class, partial_type.element,
+                        complete_type = OpenMMAtomType(partial_type.class, partial_type.element,
                                                         partial_type.mass, σ, ϵ)
                         atom_types[atom_type] = complete_type
                     end
@@ -541,7 +541,7 @@ function setupsystem(coord_file::AbstractString, force_field)
     bonds = HarmonicBond[]
     pairs = Tuple{Int, Int}[]
     angles = HarmonicAngle[]
-    torsions = Torsion[]
+    torsions = RBTorsion[] # Change
 
     res_num_to_standard = Dict{Int64, Bool}()
     for ri in 1:count_residues(top)

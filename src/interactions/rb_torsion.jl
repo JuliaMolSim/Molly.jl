@@ -1,9 +1,9 @@
 """
-    Torsion(; i, j, k, l, f1, f2, f3, f4)
+    RBTorsion(; i, j, k, l, f1, f2, f3, f4)
 
-A dihedral torsion angle between four atoms.
+A Ryckaert-Bellemans torsion angle between four atoms.
 """
-struct Torsion{T} <: SpecificInteraction
+struct RBTorsion{T} <: SpecificInteraction
     i::Int
     j::Int
     k::Int
@@ -14,9 +14,9 @@ struct Torsion{T} <: SpecificInteraction
     f4::T
 end
 
-Torsion(; i, j, k, l, f1, f2, f3, f4) = Torsion{typeof(f1)}(i, j, k, l, f1, f2, f3, f4)
+RBTorsion(; i, j, k, l, f1, f2, f3, f4) = RBTorsion{typeof(f1)}(i, j, k, l, f1, f2, f3, f4)
 
-@inline @inbounds function force(d::Torsion,
+@inline @inbounds function force(d::RBTorsion,
                                   coords,
                                   s::Simulation)
     ab = vector(coords[d.i], coords[d.j], s.box_size)
@@ -40,7 +40,7 @@ Torsion(; i, j, k, l, f1, f2, f3, f4) = Torsion{typeof(f1)}(i, j, k, l, f1, f2, 
     return [d.i, d.j, d.k, d.l], [fa, fb, fc, f_d]
 end
 
-@inline @inbounds function potential_energy(d::Torsion,
+@inline @inbounds function potential_energy(d::RBTorsion,
                                             s::Simulation)
     ab = vector(s.coords[d.i], s.coords[d.j], s.box_size)
     bc = vector(s.coords[d.j], s.coords[d.k], s.box_size)
