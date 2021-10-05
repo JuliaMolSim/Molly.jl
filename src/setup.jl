@@ -615,15 +615,15 @@ function setupsystem(coord_file::AbstractString, force_field)
         atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
         atom_type_3 = force_field.residue_types[res_name_3].types[atom_name_3]
         atom_type_4 = force_field.residue_types[res_name_4].types[atom_name_4]
-        if haskey(force_field.torsion_types, (atom_type_1, atom_type_2, atom_type_3, atom_type_4))
-            torsion_type = force_field.torsion_types[(atom_type_1, atom_type_2, atom_type_3, atom_type_4)]
-        elseif haskey(force_field.torsion_types, (atom_type_4, atom_type_3, atom_type_2, atom_type_1))
-            torsion_type = force_field.torsion_types[(atom_type_4, atom_type_3, atom_type_2, atom_type_1)]
+        atom_types = (atom_type_1, atom_type_2, atom_type_3, atom_type_4)
+        if haskey(force_field.torsion_types, atom_types) && force_field.torsion_types[atom_types].proper
+            torsion_type = force_field.torsion_types[atom_types]
+        elseif haskey(force_field.torsion_types, reverse(atom_types)) && force_field.torsion_types[reverse(atom_types)].proper
+            torsion_type = force_field.torsion_types[reverse(atom_types)]
         else
             # Search wildcard entries
             best_score = -1
             best_key = ("", "", "", "")
-            atom_types = (atom_type_1, atom_type_2, atom_type_3, atom_type_4)
             for k in keys(force_field.torsion_types)
                 if force_field.torsion_types[k].proper
                     for ke in (k, reverse(k))
@@ -651,6 +651,52 @@ function setupsystem(coord_file::AbstractString, force_field)
                                         phases=torsion_type.phases, ks=torsion_type.ks))
         matrix_14[a1z + 1, a4z + 1] = true
         matrix_14[a4z + 1, a1z + 1] = true
+    end
+
+    # Note the order here - Chemfiles puts the central atom second
+    for (a2z, a1z, a3z, a4z) in eachcol(Int.(Chemfiles.impropers(top)))
+        atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
+        atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
+        atom_name_3 = Chemfiles.name(Chemfiles.Atom(top, a3z))
+        atom_name_4 = Chemfiles.name(Chemfiles.Atom(top, a4z))
+        res_name_1 = residuename(residue_for_atom(top, a1z), res_num_to_standard)
+        res_name_2 = residuename(residue_for_atom(top, a2z), res_num_to_standard)
+        res_name_3 = residuename(residue_for_atom(top, a3z), res_num_to_standard)
+        res_name_4 = residuename(residue_for_atom(top, a4z), res_num_to_standard)
+        atom_type_1 = force_field.residue_types[res_name_1].types[atom_name_1]
+        atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
+        atom_type_3 = force_field.residue_types[res_name_3].types[atom_name_3]
+        atom_type_4 = force_field.residue_types[res_name_4].types[atom_name_4]
+        atom_types_no1 = (atom_type_2, atom_type_3, atom_type_4)
+        best_score = -1
+        best_key = ("", "", "", "")
+        for k in keys(force_field.torsion_types)
+            if !force_field.torsion_types[k].proper && (k[1] == atom_type_1 || k[1] == "")
+                for ke2 in permutations(atom_types_no1)
+                    valid = true
+                    score = k[1] == atom_type_1 ? 1 : 0
+                    for (i, v) in enumerate(ke2)
+                        if v == atom_types_no1[i]
+                            score += 1
+                        elseif v != ""
+                            valid = false
+                            break
+                        end
+                    end
+                    if valid && (score > best_score)
+                        best_score = score
+                        best_key = k
+                    end
+                end
+            end
+        end
+        # Not all possible impropers are defined
+        if best_score != -1
+            torsion_type = force_field.torsion_types[best_key]
+            push!(impropers, PeriodicTorsion(i=(a1z + 1), j=(a2z + 1), k=(a3z + 1), l=(a4z + 1),
+                                                periodicities=torsion_type.periodicities,
+                                                phases=torsion_type.phases, ks=torsion_type.ks))
+        end
     end
 
     specific_inter_lists = ([bonds...], [angles...], [torsions...], [impropers...])

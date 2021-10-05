@@ -3,6 +3,7 @@ module Molly
 using BioStructures
 using Chemfiles
 using Colors
+using Combinatorics
 using CUDA
 using Distances
 using Distributions
