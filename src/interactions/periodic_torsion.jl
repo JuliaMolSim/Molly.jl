@@ -29,7 +29,7 @@ PeriodicTorsion(; i, j, k, l, periodicities, phases, ks) = PeriodicTorsion{eltyp
         ustrip(dot(cross_ab_bc, cross_bc_cd)),
     )
     fs = sum(zip(d.periodicities, d.phases, d.ks)) do (periodicity, phase, k)
-        angle_term = -k * periodicity * sin((periodicity * θ) - phase)
+        angle_term = k * periodicity * sin((periodicity * θ) - phase)
         fa = angle_term * normalize(-cross_ab_bc) / norm(ab)
         # fd clashes with a function name
         f_d = angle_term * normalize(cross_bc_cd) / norm(cd)
