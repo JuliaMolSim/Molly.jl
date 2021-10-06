@@ -122,7 +122,7 @@ default values.
     velocities depends on the simulator used, e.g. for the `VelocityFreeVerlet`
     simulator they represent the previous step coordinates for the first step.
 - `temperature::T=0.0`: the temperature of the simulation.
-- `box_size::B`: the size of the cube in which the simulation takes place.
+- `box_size::B`: the size of the box in which the simulation takes place.
 - `neighbor_finder::NeighborFinder=NoNeighborFinder()`: the neighbor finder
     used to find close atoms and save on computation.
 - `thermostat::Thermostat=NoThermostat()`: the thermostat which applies during

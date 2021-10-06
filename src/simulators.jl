@@ -96,7 +96,7 @@ function simulate!(s::Simulation{true},
 
         # In-place updates here required to work with views but are not Zygote-compatible
         s.coords .+= s.velocities .* s.timestep .+ (removemolar.(accels_t) .* s.timestep ^ 2) ./ 2
-        s.coords .= adjust_bounds_vec.(s.coords, s.box_size)
+        s.coords .= adjust_bounds_vec.(s.coords, (s.box_size,))
         accels_t_dt = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
         s.velocities .+= removemolar.(accels_t .+ accels_t_dt) .* s.timestep / 2
 

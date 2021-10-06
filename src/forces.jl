@@ -132,7 +132,7 @@ function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, at
     for inter in values(s.general_inters)
         # Currently the neighbor list is not used for this implementation
         forces -= reshape(sum(force.((inter,), coords_is, coords_js, atoms_is, atoms_js,
-                                        s.box_size, self_interactions, s.force_unit);
+                                        (s.box_size,), self_interactions, s.force_unit);
                                         dims=2), n_atoms)
     end
 

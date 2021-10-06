@@ -42,7 +42,7 @@ the periodic boundary conditions.
 function displacements(coords, box_size)
     n_atoms = length(coords)
     coords_rep = repeat(reshape(coords, n_atoms, 1), 1, n_atoms)
-    diffs = vector.(coords_rep, permutedims(coords_rep, (2, 1)), box_size)
+    diffs = vector.(coords_rep, permutedims(coords_rep, (2, 1)), (box_size,))
     return diffs
 end
 
@@ -69,7 +69,7 @@ function rdf(coords, box_size; npoints::Integer=200)
     dists_vec = [dists[i, j] for i in 1:n_atoms, j in 1:n_atoms if j > i]
     dist_unit = unit(first(dists_vec))
     kd = kde(ustrip.(dists_vec), npoints=npoints)
-    ρ = n_atoms / box_size ^ dims
+    ρ = n_atoms / reduce(*, box_size)
     if dims == 3
         normalizing_factor = 4π .* ρ .* step(kd.x) .* kd.x .^ 2 .* dist_unit .^ 3
     elseif dims == 2

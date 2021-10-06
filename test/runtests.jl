@@ -44,7 +44,7 @@ temp_fp_viz = tempname(cleanup=true) * ".mp4"
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
     c3 = SVector(1.4, 1.0, 1.0)u"nm"
     a1 = Atom(charge=1.0u"q", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
-    box_size = 2.0u"nm"
+    box_size = SVector(2.0, 2.0, 2.0)u"nm"
     coords = [c1, c2, c3]
     s = Simulation(atoms=[a1, a1, a1], coords=coords, box_size=box_size)
 
@@ -110,12 +110,14 @@ end
     @test vector1D(1.0u"m" , 9.0u"m" , 10.0u"m" ) == -2.0u"m"
     @test_throws Unitful.DimensionError vector1D(6.0u"nm", 4.0u"nm", 10.0)
 
-    @test vector(SVector(4.0, 1.0, 6.0),
-                    SVector(6.0, 9.0, 4.0), 10.0) == SVector(2.0, -2.0, -2.0)
-    @test vector(SVector(4.0, 1.0),
-                    SVector(6.0, 9.0), 10.0) == SVector(2.0, -2.0)
-    @test vector(SVector(4.0, 1.0, 6.0)u"nm",
-                    SVector(6.0, 9.0, 4.0)u"nm", 10.0u"nm") == SVector(2.0, -2.0, -2.0)u"nm"
+    @test vector(SVector(4.0, 1.0, 6.0), SVector(6.0, 9.0, 4.0),
+                    SVector(10.0, 10.0, 10.0)) == SVector(2.0, -2.0, -2.0)
+    @test vector(SVector(4.0, 1.0, 1.0), SVector(6.0, 4.0, 3.0),
+                    SVector(10.0, 5.0, 3.5)) == SVector(2.0, -2.0, -1.5)
+    @test vector(SVector(4.0, 1.0), SVector(6.0, 9.0),
+                    SVector(10.0, 10.0)) == SVector(2.0, -2.0)
+    @test vector(SVector(4.0, 1.0, 6.0)u"nm", SVector(6.0, 9.0, 4.0)u"nm",
+                    SVector(10.0, 10.0, 10.0)u"nm") == SVector(2.0, -2.0, -2.0)u"nm"
 
     @test adjust_bounds(8.0 , 10.0) == 8.0
     @test adjust_bounds(12.0, 10.0) == 2.0
@@ -131,7 +133,7 @@ end
             atoms=[Atom(), Atom(), Atom()],
             coords=[SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm",
                     SVector(5.0, 5.0, 5.0)u"nm"],
-            box_size=10.0u"nm",
+            box_size=SVector(10.0, 10.0, 10.0)u"nm",
             neighbor_finder=neighbor_finder(nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
         )
         find_neighbors!(s, s.neighbor_finder, 0; parallel=false)
@@ -143,13 +145,12 @@ end
     end
 end
 
-temp = 298u"K"
-timestep = 0.002u"ps"
-n_steps = 20_000
-box_size = 2.0u"nm"
-
 @testset "Lennard-Jones gas 2D" begin
     n_atoms = 10
+    n_steps = 20_000
+    temp = 298.0u"K"
+    timestep = 0.002u"ps"
+    box_size = SVector(2.0, 2.0)u"nm"
 
     s = Simulation(
         simulator=VelocityVerlet(),
@@ -172,8 +173,8 @@ box_size = 2.0u"nm"
     @time simulate!(s; parallel=false)
 
     final_coords = last(s.loggers["coords"].coords)
-    @test minimum(minimum.(final_coords)) > 0.0u"nm"
-    @test maximum(maximum.(final_coords)) < box_size
+    @test all(all(c .> 0.0u"nm") for c in final_coords)
+    @test all(all(c .< box_size) for c in final_coords)
     displacements(final_coords, box_size)
     distances(final_coords, box_size)
     rdf(final_coords, box_size)
@@ -183,6 +184,10 @@ end
 
 @testset "Lennard-Jones gas" begin
     n_atoms = 100
+    n_steps = 20_000
+    temp = 298.0u"K"
+    timestep = 0.002u"ps"
+    box_size = SVector(2.0, 2.0, 2.0)u"nm"
     parallel_list = nthreads() > 1 ? (false, true) : (false,)
 
     for parallel in parallel_list
@@ -213,8 +218,8 @@ end
         @time simulate!(s; parallel=parallel)
 
         final_coords = last(s.loggers["coords"].coords)
-        @test minimum(minimum.(final_coords)) > 0.0u"nm"
-        @test maximum(maximum.(final_coords)) < box_size
+        @test all(all(c .> 0.0u"nm") for c in final_coords)
+        @test all(all(c .< box_size) for c in final_coords)
         displacements(final_coords, box_size)
         distances(final_coords, box_size)
         rdf(final_coords, box_size)
@@ -230,6 +235,10 @@ end
 
 @testset "Lennard-Jones gas velocity-free" begin
     n_atoms = 100
+    n_steps = 20_000
+    temp = 298.0u"K"
+    timestep = 0.002u"ps"
+    box_size = SVector(2.0, 2.0, 2.0)u"nm"
     coords = placeatoms(n_atoms, box_size, 0.3u"nm")
 
     s = Simulation(
@@ -252,6 +261,10 @@ end
 
 @testset "Diatomic molecules" begin
     n_atoms = 100
+    n_steps = 20_000
+    temp = 298.0u"K"
+    timestep = 0.002u"ps"
+    box_size = SVector(2.0, 2.0, 2.0)u"nm"
     coords = placeatoms(n_atoms ÷ 2, box_size, 0.3u"nm")
     for i in 1:length(coords)
         push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
@@ -290,8 +303,9 @@ end
 end
 
 @testset "Peptide" begin
-    timestep = 0.0002u"ps"
     n_steps = 100
+    temp = 298.0u"K"
+    timestep = 0.0002u"ps"
     atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
                 normpath(@__DIR__, "..", "data", "5XER", "gmx_top_ff.top"),
                 normpath(@__DIR__, "..", "data", "5XER", "gmx_coords.gro"))
@@ -303,7 +317,7 @@ end
     @test size(neighbor_finder.matrix_14) == (true_n_atoms, true_n_atoms)
     @test length(specific_inter_lists) == 3
     @test length(general_inters) == 2
-    @test box_size == 3.7146u"nm"
+    @test box_size == SVector(3.7146, 3.7146, 3.7146)u"nm"
     show(devnull, first(atoms))
 
     s = Simulation(
@@ -334,8 +348,9 @@ end
 end
 
 @testset "Float32" begin
-    timestep = 0.0002f0u"ps"
     n_steps = 100
+    temp = 298.0f0u"K"
+    timestep = 0.0002f0u"ps"
     atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
                 Float32,
                 normpath(@__DIR__, "..", "data", "5XER", "gmx_top_ff.top"),
@@ -348,12 +363,12 @@ end
         general_inters=general_inters,
         coords=coords,
         velocities=[velocity(a.mass, Float32(temp)) .* 0.01f0 for a in atoms],
-        temperature=Float32(temp),
+        temperature=temp,
         box_size=box_size,
         neighbor_finder=neighbor_finder,
         thermostat=AndersenThermostat(10.0f0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(typeof(1.0f0u"K"), 10),
-                        "coords" => CoordinateLogger(typeof(box_size), 10),
+                        "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10),
                         "energy" => EnergyLogger(typeof(1.0f0u"kJ * mol^-1"), 10)),
         timestep=timestep,
         n_steps=n_steps,
@@ -364,6 +379,10 @@ end
 
 @testset "General interactions" begin
     n_atoms = 100
+    n_steps = 20_000
+    temp = 298.0u"K"
+    timestep = 0.002u"ps"
+    box_size = SVector(2.0, 2.0, 2.0)u"nm"
     G = 10.0u"kJ * nm / (u^2 * mol)"
     general_inter_types = (
         LennardJones(nl_only=true), LennardJones(nl_only=false),
@@ -407,9 +426,12 @@ end
 
 @testset "Units" begin
     n_atoms = 100
+    n_steps = 2_000 # Does diverge for longer simulations or higher velocities
+    temp = 298.0u"K"
+    timestep = 0.002u"ps"
+    box_size = SVector(2.0, 2.0, 2.0)u"nm"
     coords = placeatoms(n_atoms, box_size, 0.3u"nm")
     velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
-    n_steps = 2_000 # Does diverge for longer simulations or higher velocities
 
     s = Simulation(
         simulator=VelocityVerlet(),
@@ -435,7 +457,7 @@ end
         coords=Molly.ustripvec.(coords),
         velocities=Molly.ustripvec.(velocities),
         temperature=ustrip(temp),
-        box_size=ustrip(box_size),
+        box_size=ustrip.(box_size),
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0),
         thermostat=NoThermostat(),
         loggers=Dict("temp" => TemperatureLogger(Float64, 100),
@@ -466,7 +488,7 @@ end
 @testset "Different implementations" begin
     n_atoms = 400
     mass = 10.0u"u"
-    box_size = 6.0u"nm"
+    box_size = SVector(6.0, 6.0, 6.0)u"nm"
     temp = 1.0u"K"
     starting_coords = placediatomics(n_atoms ÷ 2, box_size, 0.2u"nm", 0.2u"nm")
     starting_velocities = [velocity(mass, temp) for i in 1:n_atoms]
@@ -477,7 +499,7 @@ end
         n_atoms = 400
         n_steps = 200
         mass = f32 ? 10.0f0u"u" : 10.0u"u"
-        box_size = f32 ? 6.0f0u"nm" : 6.0u"nm"
+        box_size = f32 ? SVector(6.0f0, 6.0f0, 6.0f0)u"nm" : SVector(6.0, 6.0, 6.0)u"nm"
         timestep = f32 ? 0.02f0u"ps" : 0.02u"ps"
         temp = f32 ? 1.0f0u"K" : 1.0u"K"
         simulator = VelocityVerlet()
@@ -619,7 +641,7 @@ end
 
     temp = 0.01
     timestep = 0.02
-    box_size = 10.0
+    box_size = SVector(10.0, 10.0)
     n_steps = 1_000
     n_people = 500
     n_starting = 2

@@ -57,12 +57,12 @@ end
 """
     placeatoms(n_atoms, box_size, min_dist; dims=3)
 
-Obtain `n_atoms` 3D coordinates in a cube of length `box_size` where no two
+Obtain `n_atoms` 3D coordinates in a box with sides `box_size` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
 """
 function placeatoms(n_atoms::Integer, box_size, min_dist; dims::Integer=3)
     min_dist_sq = min_dist ^ 2
-    T = typeof(convert(AbstractFloat, ustrip(box_size)))
+    T = typeof(convert(AbstractFloat, ustrip(first(box_size))))
     coords = SArray[]
     while length(coords) < n_atoms
         new_coord = SVector{dims}(rand(T, dims)) .* box_size
@@ -83,19 +83,19 @@ end
 """
     placediatomics(n_molecules, box_size, min_dist, bond_length; dims=3)
 
-Obtain 3D coordinates for `n_molecules` diatomics in a cube of length `box_size`
+Obtain 3D coordinates for `n_molecules` diatomics in a box with sides `box_size`
 where no two points are closer than `min_dist` and the bond length is `bond_length`,
 accounting for periodic boundary conditions.
 """
 function placediatomics(n_molecules::Integer, box_size, min_dist, bond_length; dims::Integer=3)
     min_dist_sq = min_dist ^ 2
-    T = typeof(convert(AbstractFloat, ustrip(box_size)))
+    T = typeof(convert(AbstractFloat, ustrip(first(box_size))))
     coords = SArray[]
     while length(coords) < (n_molecules * 2)
         new_coord_a = SVector{dims}(rand(T, dims)) .* box_size
         shift = SVector{dims}([bond_length, [zero(bond_length) for d in 1:(dims - 1)]...])
         new_coord_b = copy(new_coord_a) + shift
-        okay = new_coord_b[1] <= box_size
+        okay = new_coord_b[1] <= box_size[1]
         for coord in coords
             if sum(abs2, vector(coord, new_coord_a, box_size)) < min_dist_sq ||
                     sum(abs2, vector(coord, new_coord_b, box_size)) < min_dist_sq
@@ -342,10 +342,10 @@ function readinputs(T::Type,
                             force_unit=force_unit, energy_unit=energy_unit)
     end
 
-    # Bounding box for PBCs - box goes 0 to this value in 3 dimensions
-    box_size_val = parse(T, first(split(strip(lines[end]), r"\s+")))
-    box_size = units ? (box_size_val)u"nm" : box_size_val
-    coords = adjust_bounds_vec.([coords...], box_size)
+    # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
+    box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
+    box_size = units ? (box_size_vals)u"nm" : box_size_vals
+    coords = adjust_bounds_vec.([coords...], (box_size,))
 
     # Ensure array types are concrete
     specific_inter_lists = ([bonds...], [angles...], [torsions...])
@@ -708,13 +708,13 @@ function setupsystem(coord_file::AbstractString, force_field)
                         weight_14=force_field.weight_14_coulomb)
     general_inters = (lj, coulomb)
 
+    # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     # Convert from Å
-    # Switch this to 3D
-    box_size = T(lengths(UnitCell(frame))[1]u"nm" / 10.0)
+    box_size = SVector{3}(T.(lengths(UnitCell(frame))u"nm" / 10.0))
 
     # Convert from Å
     coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(positions(frame))]
-    coords = adjust_bounds_vec.(coords, box_size)
+    coords = adjust_bounds_vec.(coords, (box_size,))
 
     neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
                                             dist_cutoff=T(1.5)u"nm")

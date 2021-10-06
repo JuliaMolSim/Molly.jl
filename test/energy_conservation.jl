@@ -8,7 +8,7 @@ using Test
     temp = 1.0u"K"
     timestep = 0.005u"ps"
     n_steps = 10_000
-    box_size = 50.0u"nm"
+    box_size = SVector(50.0, 50.0, 50.0)u"nm"
     n_atoms = 2_000
     mass = 40.0u"u"
 
@@ -49,8 +49,8 @@ using Test
             @test abs(Es[end] - Es[1]) < 2e-2u"kJ * mol^-1"
 
             final_coords = last(s.loggers["coords"].coords)
-            @test minimum(minimum.(final_coords)) > 0.0u"nm"
-            @test maximum(maximum.(final_coords)) < box_size
+            @test all(all(c .> 0.0u"nm") for c in final_coords)
+            @test all(all(c .< box_size) for c in final_coords)
         end
     end
 end

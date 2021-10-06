@@ -83,7 +83,7 @@ end
 
 temp = 0.01
 timestep = 0.02
-box_size = 10.0
+box_size = SVector(10.0, 10.0)
 n_steps = 2_000
 n_atoms = 200
 

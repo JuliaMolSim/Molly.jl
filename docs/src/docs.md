@@ -25,7 +25,7 @@ See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) docs for more 
 Molly re-exports Unitful.jl and [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) since they are usually required to run simulations.
 Next, we'll need some starting coordinates and velocities.
 ```julia
-box_size = 2.0u"nm"
+box_size = SVector(2.0, 2.0, 2.0)u"nm"
 coords = placeatoms(n_atoms, box_size, 0.3u"nm") # Random placement without clashing
 
 temp = 100u"K"
@@ -40,7 +40,7 @@ general_inters = (LennardJones(),)
 ```
 Finally, we can define and run the simulation.
 We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.
-Periodic boundary conditions are used in a cubic box.
+Periodic boundary conditions are used with the box we defined earlier.
 ```julia
 s = Simulation(
     simulator=VelocityVerlet(), # Use velocity Verlet integration
@@ -79,7 +79,7 @@ using CUDA
 
 n_atoms = 100
 mass = 10.0f0u"u"
-box_size = 2.0f0u"nm"
+box_size = SVector(2.0f0, 2.0f0, 2.0f0)u"nm"
 temp = 100.0f0u"K"
 atoms = cu([Atom(mass=mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
 coords = cu(placeatoms(n_atoms, box_size, 0.3u"nm"))
@@ -95,7 +95,7 @@ s = Simulation(
     box_size=box_size,
     thermostat=NoThermostat(),
     loggers=Dict("temp" => TemperatureLogger(typeof(1.0f0u"K"), 10),
-                    "coords" => CoordinateLogger(typeof(box_size), 10)),
+                    "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10)),
     timestep=0.002f0u"ps",
     n_steps=1_000,
 )
@@ -180,7 +180,7 @@ s = Simulation(
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
-    box_size=1.0f0,
+    box_size=SVector(1.0f0, 1.0f0),
     loggers=Dict("coords" => CoordinateLogger(Float32, 10; dims=2)),
     timestep=0.002f0,
     n_steps=2_000,
@@ -305,7 +305,7 @@ end
 
 temp = 0.01
 timestep = 0.02
-box_size = 10.0
+box_size = SVector(10.0, 10.0)
 n_steps = 1_000
 n_people = 500
 n_starting = 2

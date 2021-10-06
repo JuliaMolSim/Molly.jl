@@ -122,8 +122,7 @@ function find_neighbors!(s::Simulation,
     empty!(neighbors)
 
     dist_unit = unit(first(first(s.coords)))
-    box_size = ustrip(dist_unit, s.box_size)
-    bv = SVector{3}(box_size, box_size, box_size)
+    bv = ustrip.(dist_unit, s.box_size)
     btree = BallTree(ustripvec.(s.coords), PeriodicEuclidean(bv))
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
 

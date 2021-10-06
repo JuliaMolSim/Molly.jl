@@ -140,5 +140,5 @@ function append_model(logger::StructureWriter, s::Simulation)
     end
 end
 
-atomrecord(at::Atom, i, coord) = AtomRecord(false, i, "??", ' ', "???", "A", 1, ' ',
+atomrecord(at::Atom, i, coord) = AtomRecord(false, i, "??", ' ', "???", "A", i, ' ',
                                             coord, 1.0, 0.0, "  ", "  ")

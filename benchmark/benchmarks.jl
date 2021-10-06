@@ -34,7 +34,7 @@ const SUITE = BenchmarkGroup(
 c1 = SVector(1.0, 1.0, 1.0)u"nm"
 c2 = SVector(1.4, 1.0, 1.0)u"nm"
 a1 = Atom(charge=1.0u"q", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
-box_size = 2.0u"nm"
+box_size = SVector(2.0, 2.0, 2.0)u"nm"
 coords = [c1, c2]
 s = Simulation(atoms=[a1, a1], coords=coords, box_size=box_size)
 b1 = HarmonicBond(i=1, j=2, b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
@@ -47,11 +47,11 @@ SUITE["interactions"]["HarmonicBond force" ] = @benchmarkable force($(b1), $(coo
 SUITE["interactions"]["HarmonicBond energy"] = @benchmarkable Molly.potential_energy($(b1), $(s))
 
 SUITE["spatial"]["vector1D"] = @benchmarkable vector1D($(4.0u"nm"), $(6.0u"nm"), $(10.0u"nm"))
-SUITE["spatial"]["vector"  ] = @benchmarkable vector($(SVector(4.0, 1.0, 6.0)u"nm"), $(SVector(6.0, 9.0, 4.0)u"nm"), $(10.0u"nm"))
+SUITE["spatial"]["vector"  ] = @benchmarkable vector($(SVector(4.0, 1.0, 1.0)u"nm"), $(SVector(6.0, 4.0, 3.0)u"nm"), $(SVector(10.0, 5.0, 3.5)u"nm"))
 
 n_atoms = 400
 mass = 10.0u"u"
-box_size = 6.0u"nm"
+box_size = SVector(6.0, 6.0, 6.0)u"nm"
 temp = 1.0u"K"
 starting_coords = placediatomics(n_atoms ÷ 2, box_size, 0.2u"nm", 0.2u"nm")
 starting_velocities = [velocity(mass, temp) for i in 1:n_atoms]
@@ -62,7 +62,7 @@ function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::B
     n_atoms = 400
     n_steps = 200
     mass = f32 ? 10.0f0u"u" : 10.0u"u"
-    box_size = f32 ? 6.0f0u"nm" : 6.0u"nm"
+    box_size = f32 ? SVector(6.0f0, 6.0f0, 6.0f0)u"nm" : SVector(6.0, 6.0, 6.0)u"nm"
     timestep = f32 ? 0.02f0u"ps" : 0.02u"ps"
     temp = f32 ? 1.0f0u"K" : 1.0u"K"
     simulator = VelocityVerlet()
