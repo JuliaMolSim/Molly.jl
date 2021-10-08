@@ -379,6 +379,7 @@ struct OpenMMResiduetype{C}
     name::String
     types::Dict{String, String}
     charges::Dict{String, C}
+    indices::Dict{String, Int}
 end
 
 #
@@ -431,15 +432,19 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
                     name = residue["name"]
                     types = Dict{String, String}()
                     charges = Dict{String, typeof(T(1u"q"))}()
+                    indices = Dict{String, Int}()
+                    index = 1
                     for atom_or_bond in eachelement(residue)
                         # Ignore bonds because they are specified elsewhere
                         if atom_or_bond.name == "Atom"
                             atom_name = atom_or_bond["name"]
                             types[atom_name] = atom_or_bond["type"]
                             charges[atom_name] = parse(T, atom_or_bond["charge"])u"q"
+                            indices[atom_name] = index
+                            index += 1
                         end
                     end
-                    residue_types[name] = OpenMMResiduetype(name, types, charges)
+                    residue_types[name] = OpenMMResiduetype(name, types, charges, indices)
                 end
             elseif entry_name == "HarmonicBondForce"
                 for bond in eachelement(entry)
@@ -638,7 +643,7 @@ function setupsystem(coord_file::AbstractString, force_field)
                                 break
                             end
                         end
-                        if valid && (score > best_score)
+                        if valid && (score >= best_score)
                             best_score = score
                             best_key = k
                         end
@@ -656,14 +661,25 @@ function setupsystem(coord_file::AbstractString, force_field)
 
     # Note the order here - Chemfiles puts the central atom second
     for (a2z, a1z, a3z, a4z) in eachcol(Int.(Chemfiles.impropers(top)))
+        inds_no1 = (a2z, a3z, a4z)
+        atom_names = [Chemfiles.name(Chemfiles.Atom(top, a)) for a in inds_no1]
+        res_names = [residuename(residue_for_atom(top, a), res_num_to_standard) for a in inds_no1]
+        atom_types = [force_field.residue_types[res_names[i]].types[atom_names[i]] for i in 1:3]
+        # Amber sorts atoms alphabetically with hydrogen last
+        if force_field.torsion_order == "amber"
+            order = sortperm([t[1] == 'H' ? 'z' * t : t for t in atom_types])
+        else
+            order = [1, 2, 3]
+        end
+        a2z, a3z, a4z = [inds_no1[i] for i in order]
         atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
-        atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
-        atom_name_3 = Chemfiles.name(Chemfiles.Atom(top, a3z))
-        atom_name_4 = Chemfiles.name(Chemfiles.Atom(top, a4z))
+        atom_name_2 = atom_names[order[1]]
+        atom_name_3 = atom_names[order[2]]
+        atom_name_4 = atom_names[order[3]]
         res_name_1 = residuename(residue_for_atom(top, a1z), res_num_to_standard)
-        res_name_2 = residuename(residue_for_atom(top, a2z), res_num_to_standard)
-        res_name_3 = residuename(residue_for_atom(top, a3z), res_num_to_standard)
-        res_name_4 = residuename(residue_for_atom(top, a4z), res_num_to_standard)
+        res_name_2 = res_names[order[1]]
+        res_name_3 = res_names[order[2]]
+        res_name_4 = res_names[order[3]]
         atom_type_1 = force_field.residue_types[res_name_1].types[atom_name_1]
         atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
         atom_type_3 = force_field.residue_types[res_name_3].types[atom_name_3]
@@ -671,9 +687,10 @@ function setupsystem(coord_file::AbstractString, force_field)
         atom_types_no1 = (atom_type_2, atom_type_3, atom_type_4)
         best_score = -1
         best_key = ("", "", "", "")
+        best_key_perm = ("", "", "", "")
         for k in keys(force_field.torsion_types)
             if !force_field.torsion_types[k].proper && (k[1] == atom_type_1 || k[1] == "")
-                for ke2 in permutations(atom_types_no1)
+                for ke2 in permutations(k[2:end])
                     valid = true
                     score = k[1] == atom_type_1 ? 1 : 0
                     for (i, v) in enumerate(ke2)
@@ -684,9 +701,10 @@ function setupsystem(coord_file::AbstractString, force_field)
                             break
                         end
                     end
-                    if valid && (score > best_score)
+                    if valid && (score == 4 || best_score == -1)
                         best_score = score
                         best_key = k
+                        best_key_perm = (k[1], ke2[1], ke2[2], ke2[3])
                     end
                 end
             end
@@ -694,7 +712,50 @@ function setupsystem(coord_file::AbstractString, force_field)
         # Not all possible impropers are defined
         if best_score != -1
             torsion_type = force_field.torsion_types[best_key]
-            push!(impropers, PeriodicTorsion(i=(a1z + 1), j=(a2z + 1), k=(a3z + 1), l=(a4z + 1),
+            a1, a2, a3, a4 = a1z + 1, a2z + 1, a3z + 1, a4z + 1
+            # Follow Amber assignment rules from OpenMM
+            if force_field.torsion_order == "amber"
+                r2 = id(residue_for_atom(top, a2z))
+                r3 = id(residue_for_atom(top, a3z))
+                r4 = id(residue_for_atom(top, a4z))
+                ta2 = force_field.residue_types[res_name_2].indices[atom_name_2]
+                ta3 = force_field.residue_types[res_name_3].indices[atom_name_3]
+                ta4 = force_field.residue_types[res_name_4].indices[atom_name_4]
+                e2 = force_field.atom_types[atom_type_2].element
+                e3 = force_field.atom_types[atom_type_3].element
+                e4 = force_field.atom_types[atom_type_4].element
+                t2, t3, t4 = atom_type_2, atom_type_3, atom_type_4
+                if !("" in best_key_perm)
+                    if t2 == t4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                        a2, a4 = a4, a2
+                        r2, r4 = r4, r2
+                        ta2, ta4 = ta4, ta2
+                    end
+                    if t3 == t4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                        a3, a4 = a4, a3
+                        r3, r4 = r4, r3
+                        ta3, ta4 = ta4, ta3
+                    end
+                    if t2 == t3 && (r2 > r3 || (r2 == r3 && ta2 > ta3))
+                        a2, a3 = a3, a2
+                    end
+                else
+                    if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                        a2, a4 = a4, a2
+                        r2, r4 = r4, r2
+                        ta2, ta4 = ta4, ta2
+                    end
+                    if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                        a3, a4 = a4, a3
+                        r3, r4 = r4, r3
+                        ta3, ta4 = ta4, ta3
+                    end
+                    if r2 > r3 || (r2 == r3 && ta2 > ta3)
+                        a2, a3 = a3, a2
+                    end
+                end
+            end
+            push!(impropers, PeriodicTorsion(i=a2, j=a3, k=a1, l=a4,
                                                 periodicities=torsion_type.periodicities,
                                                 phases=torsion_type.phases, ks=torsion_type.ks))
         end
