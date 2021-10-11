@@ -1,5 +1,5 @@
 @doc raw"""
-    LennardJones(; cutoff, nl_only, weight_14, force_unit, energy_unit, skip_shortcut)
+    LennardJones(; cutoff, nl_only, lorentz_mixing, weight_14, force_unit, energy_unit, skip_shortcut)
 
 The Lennard-Jones 6-12 interaction. The potential is given by
 ```math
@@ -16,6 +16,7 @@ and the force on each atom by
 struct LennardJones{S, C, W, F, E} <: GeneralInteraction
     cutoff::C
     nl_only::Bool
+    lorentz_mixing::Bool
     weight_14::W
     force_unit::F
     energy_unit::E
@@ -24,12 +25,13 @@ end
 function LennardJones(;
                         cutoff=NoCutoff(),
                         nl_only=false,
+                        lorentz_mixing=true,
                         weight_14=1.0,
                         force_unit=u"kJ * mol^-1 * nm^-1",
                         energy_unit=u"kJ * mol^-1",
                         skip_shortcut=false)
     return LennardJones{skip_shortcut, typeof(cutoff), typeof(weight_14), typeof(force_unit), typeof(energy_unit)}(
-        cutoff, nl_only, weight_14, force_unit, energy_unit)
+        cutoff, nl_only, lorentz_mixing, weight_14, force_unit, energy_unit)
 end
 
 @inline @inbounds function force(inter::LennardJones{S, C},
@@ -45,7 +47,9 @@ end
         return ustrip.(zero(coord_i)) * inter.force_unit
     end
 
-    σ = sqrt(atom_i.σ * atom_j.σ)
+    # Lorentz-Berthelot mixing rules use the arithmetic average for σ
+    # Otherwise use the geometric average
+    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
     ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
 
     cutoff = inter.cutoff

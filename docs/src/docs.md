@@ -373,6 +373,7 @@ The available general interactions are:
 The available specific interactions are:
 - [`HarmonicBond`](@ref).
 - [`HarmonicAngle`](@ref).
+- [`PeriodicTorsion`](@ref).
 - [`RBTorsion`](@ref).
 
 To define your own [`GeneralInteraction`](@ref), first define the `struct`:
@@ -477,7 +478,7 @@ and the forces are given by
 
 As the potential, and thus also the force decreases rapidly with the distance, in almost every implementation of the Lennard-Jones force calculation there is a cutoff radius beyond which the force is set to 0.
 
-While this sounds like a very sensible approach, it introduces a discontinuity in the force function and it requires us to also modify the potential, as beyond the cutoff radius the force would be 0, but the derivative of the unmodified potential is not. One way to truncate the potential is to shift the potential by its cutoff value.
+While this is often a sensible approach, it introduces a discontinuity in the force function and it requires us to also modify the potential, as beyond the cutoff radius the force would be 0, but the derivative of the unmodified potential is not. One way to truncate the potential is to shift the potential by its cutoff value.
 ```math
 \begin{aligned}
 \vec{F}_{SP}(\vec{r}) &= \begin{cases}
@@ -516,6 +517,9 @@ The truncation approximations that we use can significantly alter the qualitativ
 
 Since the truncation algorithm is independent of the interaction for which is used, each interaction is defined without including cutoffs.
 The corresponding interaction `struct` has a `cutoff` field which is then used via dispatch to apply the chosen cutoff.
+The available cutoffs are:
+- [`ShiftedPotentialCutoff`](@ref).
+- [`ShiftedForceCutoff`](@ref).
 
 ## Simulators
 
