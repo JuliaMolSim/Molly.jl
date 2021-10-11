@@ -92,7 +92,7 @@ end
         return ustrip(zero(s.timestep)) * inter.energy_unit
     end
 
-    σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
+    σ = inter.lorentz_mixing ? (s.atoms[i].σ + s.atoms[j].σ) / 2 : sqrt(s.atoms[i].σ * s.atoms[j].σ)
     ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
 
     cutoff = inter.cutoff
