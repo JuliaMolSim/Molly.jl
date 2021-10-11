@@ -2,6 +2,7 @@
 
 export
     NoCutoff,
+    DistanceCutoff,
     ShiftedPotentialCutoff,
     ShiftedForceCutoff
 
@@ -13,6 +14,23 @@ Placeholder cutoff that does not alter forces or potentials.
 struct NoCutoff <: AbstractCutoff end
 
 cutoff_points(::Type{NoCutoff}) = 0
+
+"""
+    DistanceCutoff(cutoff_dist)
+
+Cutoff that sets the potential and force to be zero past a specified cutoff point.
+"""
+struct DistanceCutoff{D, S, I} <: AbstractCutoff
+    cutoff_dist::D
+    sqdist_cutoff::S
+    inv_sqdist_cutoff::I
+end
+
+function DistanceCutoff(cutoff_dist)
+    return DistanceCutoff(cutoff_dist, cutoff_dist ^ 2, inv(cutoff_dist ^ 2))
+end
+
+cutoff_points(::Type{DistanceCutoff{D, S, I}}) where {D, S, I} = 1
 
 """
     ShiftedPotentialCutoff(cutoff_dist)
@@ -50,6 +68,9 @@ cutoff_points(::Type{ShiftedForceCutoff{D, S, I}}) where {D, S, I} = 1
 
 force_divr_cutoff(::NoCutoff, r2, inter, params) = force_divr_nocutoff(inter, r2, inv(r2), params)
 potential_cutoff(::NoCutoff, r2, inter, params) = potential(inter, r2, inv(r2), params)
+
+force_divr_cutoff(::DistanceCutoff, r2, inter, params) = force_divr_nocutoff(inter, r2, inv(r2), params)
+potential_cutoff(::DistanceCutoff, r2, inter, params) = potential(inter, r2, inv(r2), params)
 
 force_divr_cutoff(::ShiftedPotentialCutoff, r2, inter, params) = force_divr_nocutoff(inter, r2, inv(r2), params)
 

@@ -518,6 +518,7 @@ The truncation approximations that we use can significantly alter the qualitativ
 Since the truncation algorithm is independent of the interaction for which is used, each interaction is defined without including cutoffs.
 The corresponding interaction `struct` has a `cutoff` field which is then used via dispatch to apply the chosen cutoff.
 The available cutoffs are:
+- [`DistanceCutoff`](@ref).
 - [`ShiftedPotentialCutoff`](@ref).
 - [`ShiftedForceCutoff`](@ref).
 

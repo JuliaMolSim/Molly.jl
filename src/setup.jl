@@ -124,7 +124,8 @@ non-bonded matrix, coordinates and box size.
 function readinputs(T::Type,
                     top_file::AbstractString,
                     coord_file::AbstractString;
-                    units::Bool=true)
+                    units::Bool=true,
+                    cutoff_dist=1.0u"nm")
     # Read forcefield and topology file
     atomtypes = Dict{String, AtomType}()
     bondtypes = Dict{String, BondType}()
@@ -332,15 +333,10 @@ function readinputs(T::Type,
         matrix_14[j, i] = true
     end
 
-    lj = LennardJones(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true, weight_14=T(0.5),
+    lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true, weight_14=T(0.5),
                         force_unit=force_unit, energy_unit=energy_unit)
-    if units
-        coulomb = Coulomb(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true, weight_14=T(0.5),
-                            force_unit=force_unit, energy_unit=energy_unit)
-    else
-        coulomb = Coulomb(cutoff=ShiftedPotentialCutoff(T(1.2)), nl_only=true, weight_14=T(0.5),
-                            force_unit=force_unit, energy_unit=energy_unit)
-    end
+    coulomb = Coulomb(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true, weight_14=T(0.5),
+                        force_unit=force_unit, energy_unit=energy_unit)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
@@ -536,7 +532,7 @@ function residuename(res, res_num_to_standard::Dict)
     return res_name
 end
 
-function setupsystem(coord_file::AbstractString, force_field)
+function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"nm")
     T = typeof(force_field.weight_14_coulomb)
 
     # Chemfiles uses zero-based indexing, be careful
@@ -763,9 +759,9 @@ function setupsystem(coord_file::AbstractString, force_field)
 
     specific_inter_lists = ([bonds...], [angles...], [torsions...], [impropers...])
 
-    lj = LennardJones(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
+    lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true,
                         weight_14=force_field.weight_14_lj)
-    coulomb = Coulomb(cutoff=ShiftedPotentialCutoff(T(1.2)u"nm"), nl_only=true,
+    coulomb = Coulomb(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true,
                         weight_14=force_field.weight_14_coulomb)
     general_inters = (lj, coulomb)
 

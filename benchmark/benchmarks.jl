@@ -73,7 +73,7 @@ function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::B
     specific_inter_lists = (bonds,)
 
     neighbor_finder = NoNeighborFinder()
-    cutoff = ShiftedPotentialCutoff(1.2u"nm")
+    cutoff = DistanceCutoff(1.0u"nm")
     general_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
     if nl
         neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,

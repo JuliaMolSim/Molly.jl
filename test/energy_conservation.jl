@@ -14,10 +14,9 @@ using Test
 
     parallel_list = nthreads() > 1 ? (false, true) : (false,)
     lj_potentials = (
-        LennardJones(cutoff=ShiftedPotentialCutoff(3.0u"nm"), nl_only=false, skip_shortcut=false),
-        LennardJones(cutoff=ShiftedPotentialCutoff(3.0u"nm"), nl_only=false, skip_shortcut=true ),
-        LennardJones(cutoff=ShiftedForceCutoff(    3.0u"nm"), nl_only=false, skip_shortcut=false),
-        LennardJones(cutoff=ShiftedForceCutoff(    3.0u"nm"), nl_only=false, skip_shortcut=true ),
+        LennardJones(cutoff=DistanceCutoff(        3.0u"nm"), nl_only=false),
+        LennardJones(cutoff=ShiftedPotentialCutoff(3.0u"nm"), nl_only=false),
+        LennardJones(cutoff=ShiftedForceCutoff(    3.0u"nm"), nl_only=false),
     )
 
     for parallel in parallel_list

@@ -386,8 +386,9 @@ end
     G = 10.0u"kJ * nm / (u^2 * mol)"
     general_inter_types = (
         LennardJones(nl_only=true), LennardJones(nl_only=false),
-        LennardJones(cutoff=ShiftedPotentialCutoff(1.2u"nm"), nl_only=true),
-        LennardJones(cutoff=ShiftedForceCutoff(1.2u"nm"), nl_only=true),
+        LennardJones(cutoff=DistanceCutoff(1.0u"nm"), nl_only=true),
+        LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), nl_only=true),
+        LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm"), nl_only=true),
         SoftSphere(nl_only=true), SoftSphere(nl_only=false),
         Mie(m=5, n=10, nl_only=true), Mie(m=5, n=10, nl_only=false),
         Coulomb(nl_only=true), Coulomb(nl_only=false),
@@ -510,7 +511,7 @@ end
         specific_inter_lists = (bonds,)
 
         neighbor_finder = NoNeighborFinder()
-        cutoff = ShiftedPotentialCutoff(1.2u"nm")
+        cutoff = DistanceCutoff(1.0u"nm")
         general_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
         if nl
             neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,
