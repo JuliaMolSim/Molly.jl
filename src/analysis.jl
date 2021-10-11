@@ -106,8 +106,12 @@ function potential_energy(s::Simulation)
         if inter.nl_only
             neighbors = s.neighbors
             @inbounds for ni in 1:length(neighbors)
-                i, j = neighbors[ni]
-                potential += potential_energy(inter, s, i, j)
+                i, j, weight_14 = neighbors[ni]
+                if weight_14
+                    potential += potential_energy(inter, s, i, j) * inter.weight_14
+                else
+                    potential += potential_energy(inter, s, i, j)
+                end
             end
         else
             for i in 1:n_atoms
