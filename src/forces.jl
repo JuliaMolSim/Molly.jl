@@ -10,6 +10,7 @@ export
     SoftSphere,
     Mie,
     Coulomb,
+    CoulombReactionField,
     Gravity,
     HarmonicBond,
     HarmonicAngle,
@@ -154,6 +155,7 @@ include("interactions/lennard_jones.jl")
 include("interactions/soft_sphere.jl")
 include("interactions/mie.jl")
 include("interactions/coulomb.jl")
+include("interactions/coulomb_reaction_field.jl")
 include("interactions/gravity.jl")
 include("interactions/harmonic_bond.jl")
 include("interactions/harmonic_angle.jl")

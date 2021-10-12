@@ -126,7 +126,7 @@ function readinputs(T::Type,
                     coord_file::AbstractString;
                     units::Bool=true,
                     cutoff_dist=1.0u"nm")
-    # Read forcefield and topology file
+    # Read force field and topology file
     atomtypes = Dict{String, AtomType}()
     bondtypes = Dict{String, BondType}()
     angletypes = Dict{String, AngleType}()
@@ -335,8 +335,8 @@ function readinputs(T::Type,
 
     lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true, weight_14=T(0.5),
                         force_unit=force_unit, energy_unit=energy_unit)
-    coulomb = Coulomb(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true, weight_14=T(0.5),
-                        force_unit=force_unit, energy_unit=energy_unit)
+    coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), nl_only=true, weight_14=T(0.5),
+                                        force_unit=force_unit, energy_unit=energy_unit)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
@@ -345,7 +345,7 @@ function readinputs(T::Type,
 
     # Ensure array types are concrete
     specific_inter_lists = ([bonds...], [angles...], [torsions...])
-    general_inters = (lj, coulomb)
+    general_inters = (lj, coulomb_rf)
 
     # Convert atom types to integers so they are bits types
     atoms = [Atom(attype=0, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
@@ -518,7 +518,7 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
 end
 
 # Return the residue name with N or C added for terminal residues
-# Assumes no missing residue numbers
+# Assumes no missing residue numbers, won't work with multiple chains
 function residuename(res, res_num_to_standard::Dict)
     res_num = id(res)
     res_name = Chemfiles.name(res)
@@ -761,9 +761,9 @@ function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"n
 
     lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true,
                         weight_14=force_field.weight_14_lj)
-    coulomb = Coulomb(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true,
-                        weight_14=force_field.weight_14_coulomb)
-    general_inters = (lj, coulomb)
+    coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), nl_only=true,
+                                        weight_14=force_field.weight_14_coulomb)
+    general_inters = (lj, coulomb_rf)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     # Convert from Å

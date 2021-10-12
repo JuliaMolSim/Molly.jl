@@ -201,7 +201,7 @@ visualize(s.loggers["coords"], 1.0f0, "sim_gravity.mp4";
 
 Molly has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
 Data for a protein can be read into the same data structures as above and simulated in the same way.
-Currently, the OPLS-AA forcefield is implemented.
+Currently, the OPLS-AA force field is implemented.
 Here a [`StructureWriter`](@ref) is used to write the trajectory as a PDB file.
 ```julia
 atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
@@ -368,6 +368,7 @@ The available general interactions are:
 - [`SoftSphere`](@ref).
 - [`Mie`](@ref).
 - [`Coulomb`](@ref).
+- [`CoulombReactionField`](@ref).
 - [`Gravity`](@ref).
 
 The available specific interactions are:

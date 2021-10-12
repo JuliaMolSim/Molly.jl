@@ -16,7 +16,7 @@ At the minute the package is a proof of concept for MD in Julia.
 It can simulate a system of atoms with arbitrary interactions as defined by the user.
 Implemented features include:
 - Interface to allow definition of new forces, simulators, thermostats, neighbor finders, loggers etc.
-- Read in pre-computed Gromacs topology and coordinate files with the OPLS-AA forcefield and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested.
+- Read in pre-computed Gromacs topology and coordinate files with the OPLS-AA force field and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested.
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential, gravitational potential, soft sphere potential, Mie potential.
 - Bonded interactions - covalent bonds, bond angles, torsion angles.
 - Andersen thermostat.

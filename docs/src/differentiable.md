@@ -7,7 +7,7 @@
     The examples on this page have somewhat diverged from the main branch and will hopefully be updated soon.
 
 In the last few years, the deep learning revolution has broadened to include the paradigm of [differentiable programming](https://en.wikipedia.org/wiki/Differentiable_programming).
-The concept of using automatic differentiation to obtain exact gradients through physical simulations has many interesting applications, including parameterising forcefields and training neural networks to describe atom potentials.
+The concept of using automatic differentiation to obtain exact gradients through physical simulations has many interesting applications, including parameterising force fields and training neural networks to describe atom potentials.
 
 There are some projects that explore differentiable molecular simulations, such as [Jax, M.D.](https://github.com/google/jax-md) and [DiffTaichi](https://github.com/yuanming-hu/difftaichi), or you can write your own algorithms in something like [PyTorch](https://pytorch.org).
 However Julia provides a strong suite of autodiff tools, with [Zygote.jl](https://github.com/FluxML/Zygote.jl) allowing source-to-source transformations for much of the language.
@@ -418,7 +418,7 @@ Here are some ideas for loss functions suitable for differentiable molecular sim
 - The energy of the system.
 - The temperature of the system.
 - Some measure of phase change or a critical point.
-- A combination of the above, for example to obtain a forcefield relevant to both ordered and disordered proteins.
+- A combination of the above, for example to obtain a force field relevant to both ordered and disordered proteins.
 Some of these are currently not possible in Molly as the loggers are ignored for gradient purposes, but this will hopefully change when Zygote gets mutation support.
 
 ## Tips and tricks
