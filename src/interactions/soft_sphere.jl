@@ -1,11 +1,12 @@
 """
-    SoftSphere(; cutoff, nl_only, force_unit, energy_unit, skip_shortcut)
+    SoftSphere(; cutoff, nl_only, lorentz_mixing, force_unit, energy_unit, skip_shortcut)
 
 The soft-sphere potential.
 """
 struct SoftSphere{S, C, F, E} <: GeneralInteraction
     cutoff::C
     nl_only::Bool
+    lorentz_mixing::Bool
     force_unit::F
     energy_unit::E
 end
@@ -13,11 +14,12 @@ end
 function SoftSphere(;
                     cutoff=NoCutoff(),
                     nl_only=false,
+                    lorentz_mixing=true,
                     force_unit=u"kJ * mol^-1 * nm^-1",
                     energy_unit=u"kJ * mol^-1",
                     skip_shortcut=false)
     return SoftSphere{skip_shortcut, typeof(cutoff), typeof(force_unit), typeof(energy_unit)}(
-        cutoff, nl_only, force_unit, energy_unit)
+        cutoff, nl_only, lorentz_mixing, force_unit, energy_unit)
 end
 
 @inline @inbounds function force(inter::SoftSphere{S, C},
@@ -33,7 +35,9 @@ end
         return ustrip.(zero(coord_i)) * inter.force_unit
     end
 
-    σ = sqrt(atom_i.σ * atom_j.σ)
+    # Lorentz-Berthelot mixing rules use the arithmetic average for σ
+    # Otherwise use the geometric average
+    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
     ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
 
     cutoff = inter.cutoff
@@ -76,7 +80,7 @@ end
         return ustrip(zero(s.timestep)) * inter.energy_unit
     end
 
-    σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
+    σ = inter.lorentz_mixing ? (s.atoms[i].σ + s.atoms[j].σ) / 2 : sqrt(s.atoms[i].σ * s.atoms[j].σ)
     ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
 
     cutoff = inter.cutoff

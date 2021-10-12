@@ -1,5 +1,5 @@
 """
-    Mie(; m, n, cutoff, nl_only, force_unit, energy_unit, skip_shortcut)
+    Mie(; m, n, cutoff, nl_only, lorentz_mixing, force_unit, energy_unit, skip_shortcut)
 
 The Mie generalized interaction.
 When `m` equals 6 and `n` equals 12 this is equivalent to the Lennard-Jones interaction.
@@ -9,6 +9,7 @@ struct Mie{S, C, T, F, E} <: GeneralInteraction
     n::T
     cutoff::C
     nl_only::Bool
+    lorentz_mixing::Bool
     force_unit::F
     energy_unit::E
     mn_fac::T
@@ -19,12 +20,13 @@ function Mie(;
                 n,
                 cutoff=NoCutoff(),
                 nl_only=false,
+                lorentz_mixing=true,
                 force_unit=u"kJ * mol^-1 * nm^-1",
                 energy_unit=u"kJ * mol^-1",
                 skip_shortcut=false)
     mn_fac = convert(typeof(m), (n / (n - m)) * (n / m) ^ (m / (n - m)))
     return Mie{skip_shortcut, typeof(cutoff), typeof(m), typeof(force_unit), typeof(energy_unit)}(
-        m, n, cutoff, nl_only, force_unit, energy_unit, mn_fac)
+        m, n, cutoff, nl_only, lorentz_mixing, force_unit, energy_unit, mn_fac)
 end
 
 @fastmath @inbounds function force(inter::Mie{S, C, T},
@@ -41,7 +43,9 @@ end
         return ustrip.(zero(coord_i)) * inter.force_unit
     end
 
-    σ = sqrt(atom_i.σ * atom_j.σ)
+    # Lorentz-Berthelot mixing rules use the arithmetic average for σ
+    # Otherwise use the geometric average
+    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
     ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
 
     cutoff = inter.cutoff
@@ -88,7 +92,7 @@ end
         return ustrip(zero(s.timestep)) * inter.energy_unit
     end
 
-    σ = sqrt(s.atoms[i].σ * s.atoms[j].σ)
+    σ = inter.lorentz_mixing ? (s.atoms[i].σ + s.atoms[j].σ) / 2 : sqrt(s.atoms[i].σ * s.atoms[j].σ)
     ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
 
     cutoff = inter.cutoff
