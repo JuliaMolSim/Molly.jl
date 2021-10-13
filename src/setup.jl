@@ -549,12 +549,64 @@ function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"n
     nb_matrix = trues(n_atoms, n_atoms)
     matrix_14 = falses(n_atoms, n_atoms)
 
+    top_bonds     = Vector{Int}[is for is in eachcol(Int.(Chemfiles.bonds(    top)))]
+    top_angles    = Vector{Int}[is for is in eachcol(Int.(Chemfiles.angles(   top)))]
+    top_torsions  = Vector{Int}[is for is in eachcol(Int.(Chemfiles.dihedrals(top)))]
+    top_impropers = Vector{Int}[is for is in eachcol(Int.(Chemfiles.impropers(top)))]
+
     res_num_to_standard = Dict{Int, Bool}()
     for ri in 1:count_residues(top)
         res = Chemfiles.Residue(top, ri - 1)
         res_num = id(res)
         res_name = Chemfiles.name(res)
-        res_num_to_standard[res_num] = res_name in keys(threeletter_to_aa)
+        standard_res = res_name in keys(threeletter_to_aa)
+        res_num_to_standard[res_num] = standard_res
+
+        if standard_res && residuename(res, res_num_to_standard) == "N" * res_name
+            # Add missing N-terminal amide bonds, angles and torsions
+            # See https://github.com/chemfiles/chemfiles/issues/429
+            atom_inds_zero = Int.(Chemfiles.atoms(res))
+            atom_names = Chemfiles.name.(Chemfiles.Atom.((top,), atom_inds_zero))
+            nterm_atom_names = ("N", "H1", "H2", "H3", "CA", "CB", "HA", "HA2", "HA3", "C")
+            ai_N, ai_H1, ai_H2, ai_H3, ai_CA, ai_CB, ai_HA, ai_HA2, ai_HA3, ai_C = [findfirst(isequal(an), atom_names) for an in nterm_atom_names]
+            if !isnothing(ai_H1)
+                push!(top_bonds, [atom_inds_zero[ai_N], atom_inds_zero[ai_H1]])
+                push!(top_angles, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_CA]])
+                push!(top_angles, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_H2]])
+                push!(top_torsions, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_C]])
+                if !isnothing(ai_CB)
+                    push!(top_torsions, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_CB]])
+                    push!(top_torsions, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_HA]])
+                else
+                    push!(top_torsions, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_HA2]])
+                    push!(top_torsions, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_HA3]])
+                end
+            end
+            if !isnothing(ai_H3)
+                push!(top_bonds, [atom_inds_zero[ai_N], atom_inds_zero[ai_H3]])
+                push!(top_angles, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_CA]])
+                push!(top_angles, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_H2]])
+                push!(top_torsions, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_C]])
+                if !isnothing(ai_CB)
+                    push!(top_torsions, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_CB]])
+                    push!(top_torsions, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_HA]])
+                else
+                    push!(top_torsions, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_HA2]])
+                    push!(top_torsions, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_HA3]])
+                end
+            end
+            if !isnothing(ai_H1) && !isnothing(ai_H3)
+                push!(top_angles, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_H3]])
+            end
+        elseif res_name == "HOH"
+            # Add missing water bonds and angles
+            atom_inds_zero = Int.(Chemfiles.atoms(res))
+            atom_names = Chemfiles.name.(Chemfiles.Atom.((top,), atom_inds_zero))
+            ai_O, ai_H1, ai_H2 = [findfirst(isequal(an), atom_names) for an in ("O", "H1", "H2")]
+            push!(top_bonds, [atom_inds_zero[ai_O], atom_inds_zero[ai_H1]])
+            push!(top_bonds, [atom_inds_zero[ai_O], atom_inds_zero[ai_H2]])
+            push!(top_angles, [atom_inds_zero[ai_H1], atom_inds_zero[ai_O], atom_inds_zero[ai_H2]])
+        end
     end
 
     for ai in 1:n_atoms
@@ -567,7 +619,7 @@ function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"n
         nb_matrix[ai, ai] = false
     end
 
-    for (a1z, a2z) in eachcol(Int.(Chemfiles.bonds(top)))
+    for (a1z, a2z) in top_bonds
         atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
         atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
         res_name_1 = residuename(residue_for_atom(top, a1z), res_num_to_standard)
@@ -584,7 +636,7 @@ function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"n
         nb_matrix[a2z + 1, a1z + 1] = false
     end
 
-    for (a1z, a2z, a3z) in eachcol(Int.(Chemfiles.angles(top)))
+    for (a1z, a2z, a3z) in top_angles
         atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
         atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
         atom_name_3 = Chemfiles.name(Chemfiles.Atom(top, a3z))
@@ -604,7 +656,7 @@ function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"n
         nb_matrix[a3z + 1, a1z + 1] = false
     end
 
-    for (a1z, a2z, a3z, a4z) in eachcol(Int.(Chemfiles.dihedrals(top)))
+    for (a1z, a2z, a3z, a4z) in top_torsions
         atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
         atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
         atom_name_3 = Chemfiles.name(Chemfiles.Atom(top, a3z))
@@ -656,7 +708,7 @@ function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"n
     end
 
     # Note the order here - Chemfiles puts the central atom second
-    for (a2z, a1z, a3z, a4z) in eachcol(Int.(Chemfiles.impropers(top)))
+    for (a2z, a1z, a3z, a4z) in top_impropers
         inds_no1 = (a2z, a3z, a4z)
         atom_names = [Chemfiles.name(Chemfiles.Atom(top, a)) for a in inds_no1]
         res_names = [residuename(residue_for_atom(top, a), res_num_to_standard) for a in inds_no1]

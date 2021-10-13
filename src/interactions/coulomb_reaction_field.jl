@@ -19,7 +19,7 @@ end
 
 function CoulombReactionField(;
                     cutoff_dist,
-                    solvent_dielectric=78.5,
+                    solvent_dielectric=78.3,
                     nl_only=false,
                     weight_14=1.0,
                     coulomb_const=coulombconst,
