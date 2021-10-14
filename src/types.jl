@@ -68,6 +68,7 @@ default values.
 The types used should be bits types if the GPU is going to be used.
 
 # Arguments
+- `index::Int`: the index of the atom in the system.
 - `attype::T=0`: the type of the atom.
 - `charge::C=0.0u"q"`: the charge of the atom, used for electrostatic interactions.
 - `mass::M=0.0u"u"`: the mass of the atom.
@@ -76,6 +77,7 @@ The types used should be bits types if the GPU is going to be used.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
 """
 struct Atom{T, C, M, S, E}
+    index::Int
     attype::T
     charge::C
     mass::M
@@ -84,16 +86,17 @@ struct Atom{T, C, M, S, E}
 end
 
 function Atom(;
+                index=0,
                 attype=0,
                 charge=0.0u"q",
                 mass=0.0u"u",
                 σ=0.0u"nm",
                 ϵ=0.0u"kJ * mol^-1")
-    return Atom(attype, charge, mass, σ, ϵ)
+    return Atom(index, attype, charge, mass, σ, ϵ)
 end
 
 function Base.show(io::IO, a::Atom)
-    print(io, "Atom with type ", a.attype, ", charge=", a.charge,
+    print(io, "Atom with index ", a.index, ", type ", a.attype, ", charge=", a.charge,
             ", mass=", a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
 end
 

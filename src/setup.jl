@@ -212,7 +212,8 @@ function readinputs(T::Type,
                 charge = parse(T, c[7])
                 mass = parse(T, c[8])
             end
-            push!(atoms, Atom(attype=attype, charge=charge, mass=mass,
+            atom_index = length(atoms) + 1
+            push!(atoms, Atom(index=atom_index, attype=attype, charge=charge, mass=mass,
                     σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
@@ -294,8 +295,9 @@ function readinputs(T::Type,
                     temp_charge = T(-1.0)
                 end
             end
-            push!(atoms, Atom(attype=attype, charge=temp_charge, mass=atomtypes[attype].mass,
-                    σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
+            atom_index = length(atoms) + 1
+            push!(atoms, Atom(index=atom_index, attype=attype, charge=temp_charge,
+                    mass=atomtypes[attype].mass, σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
 
             # Add O-H bonds and H-O-H angle in water
             if atname == "OW"
@@ -335,8 +337,8 @@ function readinputs(T::Type,
 
     lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true, weight_14=T(0.5),
                         force_unit=force_unit, energy_unit=energy_unit)
-    coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), nl_only=true, weight_14=T(0.5),
-                                        force_unit=force_unit, energy_unit=energy_unit)
+    coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), matrix_14=matrix_14, nl_only=true,
+                                        weight_14=T(0.5), force_unit=force_unit, energy_unit=energy_unit)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
@@ -348,7 +350,7 @@ function readinputs(T::Type,
     general_inters = (lj, coulomb_rf)
 
     # Convert atom types to integers so they are bits types
-    atoms = [Atom(attype=0, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
+    atoms = [Atom(index=a.index, attype=0, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
 
     neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
                                             dist_cutoff=units ? T(1.5)u"nm" : T(1.5))
@@ -615,7 +617,7 @@ function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"n
         type = force_field.residue_types[res_name].types[atom_name]
         charge = force_field.residue_types[res_name].charges[atom_name]
         at = force_field.atom_types[type]
-        push!(atoms, Atom(attype=type, charge=charge, mass=at.mass, σ=at.σ, ϵ=at.ϵ))
+        push!(atoms, Atom(index=ai, attype=type, charge=charge, mass=at.mass, σ=at.σ, ϵ=at.ϵ))
         nb_matrix[ai, ai] = false
     end
 
@@ -813,7 +815,7 @@ function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"n
 
     lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true,
                         weight_14=force_field.weight_14_lj)
-    coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), nl_only=true,
+    coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), matrix_14=matrix_14, nl_only=true,
                                         weight_14=force_field.weight_14_coulomb)
     general_inters = (lj, coulomb_rf)
 
