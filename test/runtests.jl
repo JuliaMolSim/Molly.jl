@@ -592,8 +592,10 @@ end
     atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = Molly.setupsystem(
         joinpath(data_dir, "6mrr_equil.pdb"), ff)
 
-    for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul")
-        if inter == "lj"
+    for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul", "all")
+        if inter == "all"
+            gin = general_inters
+        elseif inter == "lj"
             gin = general_inters[1:1]
         elseif inter == "coul"
             gin = general_inters[2:2]
@@ -601,7 +603,9 @@ end
             gin = ()
         end
     
-        if inter == "bond"
+        if inter == "all"
+            sils = specific_inter_lists
+        elseif inter == "bond"
             sils = specific_inter_lists[1:1]
         elseif inter == "angle"
             sils = specific_inter_lists[2:2]

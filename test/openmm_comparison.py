@@ -13,12 +13,18 @@ pdb_file = os.path.join(data_dir, "6mrr_equil.pdb")
 
 platform = Platform.getPlatformByName("Reference")
 
-for inter in ["bond", "angle", "proptor", "improptor", "lj", "coul"]:
+for inter in ["bond", "angle", "proptor", "improptor", "lj", "coul", "all"]:
     pdb = PDBFile(pdb_file)
-    force_field = ForceField(
-        os.path.join(ff_dir, f"ff99SBildn_{inter}_only.xml"),
-        os.path.join(ff_dir, f"tip3p_standard_{inter}_only.xml")
-    )
+    if inter == "all":
+        force_field = ForceField(
+            os.path.join(ff_dir, f"ff99SBildn.xml"),
+            os.path.join(ff_dir, f"tip3p_standard.xml"),
+        )
+    else:
+        force_field = ForceField(
+            os.path.join(ff_dir, f"ff99SBildn_{inter}_only.xml"),
+            os.path.join(ff_dir, f"tip3p_standard_{inter}_only.xml"),
+        )
 
     system = force_field.createSystem(pdb.topology, nonbondedMethod=CutoffPeriodic,
                                         nonbondedCutoff=1*nanometer, constraints=None,
