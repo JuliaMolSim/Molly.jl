@@ -8,7 +8,12 @@ export
     RBTorsionType,
     placeatoms,
     placediatomics,
-    readinputs
+    readinputs,
+    OpenMMAtomType,
+    OpenMMResidueType,
+    PeriodicTorsionType,
+    OpenMMForceField,
+    setupsystem
 
 """
     AtomType(charge, mass, σ, ϵ)
@@ -118,7 +123,7 @@ end
 Read a Gromacs topology flat file, i.e. all includes collapsed into one file,
 and a Gromacs coordinate file.
 Returns the atoms, specific interaction lists, general interaction lists,
-non-bonded matrix, coordinates and box size.
+neighbor finder, coordinates and box size.
 `units` determines whether the returned values have units.
 """
 function readinputs(T::Type,
@@ -363,7 +368,11 @@ function readinputs(top_file::AbstractString, coord_file::AbstractString; kwargs
     return readinputs(DefaultFloat, top_file, coord_file; kwargs...)
 end
 
-#
+"""
+    OpenMMAtomType(class, element, mass, σ, ϵ)
+
+An OpenMM atom type.
+"""
 struct OpenMMAtomType{M, S, E}
     class::String
     element::String
@@ -372,7 +381,11 @@ struct OpenMMAtomType{M, S, E}
     ϵ::E
 end
 
-#
+"""
+    OpenMMResiduetype(name, types, charges, indices)
+
+An OpenMM residue type.
+"""
 struct OpenMMResiduetype{C}
     name::String
     types::Dict{String, String}
@@ -380,7 +393,11 @@ struct OpenMMResiduetype{C}
     indices::Dict{String, Int}
 end
 
-#
+"""
+    PeriodicTorsionType(proper, periodicities, phases, ks)
+
+A periodic torsion type.
+"""
 struct PeriodicTorsionType{T, E}
     proper::Bool
     periodicities::Vector{Int}
@@ -388,7 +405,17 @@ struct PeriodicTorsionType{T, E}
     ks::Vector{E}
 end
 
-#
+"""
+    OpenMMForceField(ff_files...)
+    OpenMMForceField(T, ff_files...)
+    OpenMMForceField(atom_types, residue_types, bond_types, angle_types,
+                        torsion_types, torsion_order, weight_14_coulomb,
+                        weight_14_lj)
+
+An OpenMM force field.
+Read one or more OpenMM force field XML files by passing them to the
+constructor.
+"""
 struct OpenMMForceField{T, M, D, E, C, K}
     atom_types::Dict{String, OpenMMAtomType{M, D, E}}
     residue_types::Dict{String, OpenMMResiduetype{C}}
@@ -400,8 +427,7 @@ struct OpenMMForceField{T, M, D, E, C, K}
     weight_14_lj::T
 end
 
-#
-function readopenmmxml(T::Type, ff_files::AbstractString...)
+function OpenMMForceField(T::Type, ff_files::AbstractString...)
     atom_types = Dict{String, OpenMMAtomType}()
     residue_types = Dict{String, OpenMMResiduetype}()
     bond_types = Dict{Tuple{String, String}, BondType}()
@@ -519,6 +545,8 @@ function readopenmmxml(T::Type, ff_files::AbstractString...)
                 torsion_types, torsion_order, weight_14_coulomb, weight_14_lj)
 end
 
+OpenMMForceField(ff_files::AbstractString...) = OpenMMForceField(DefaultFloat, ff_files...)
+
 # Return the residue name with N or C added for terminal residues
 # Assumes no missing residue numbers, won't work with multiple chains
 function residuename(res, res_num_to_standard::Dict)
@@ -534,6 +562,14 @@ function residuename(res, res_num_to_standard::Dict)
     return res_name
 end
 
+"""
+    setupsystem(coord_file, force_field; cutoff_dist=1.0u"nm")
+
+Read a coordinate file and apply a force field to it.
+Any file format readable by Chemfiles can be given.
+Returns the atoms, specific interaction lists, general interaction lists,
+neighbor finder, coordinates and box size.
+"""
 function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"nm")
     T = typeof(force_field.weight_14_coulomb)
 
@@ -830,7 +866,6 @@ function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"n
     neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
                                             dist_cutoff=T(1.5)u"nm")
 
-    # isbits atoms
     return atoms, specific_inter_lists, general_inters,
             neighbor_finder, coords, box_size
 end
