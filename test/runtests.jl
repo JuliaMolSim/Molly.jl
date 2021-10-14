@@ -4,6 +4,7 @@ import BioStructures # Imported to avoid clashing names
 using CUDA
 
 using Base.Threads
+using DelimitedFiles
 using Statistics
 using Test
 
@@ -35,6 +36,8 @@ CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
 
 # Some failures due to dependencies but there is an unbound args error for Simulation
 Aqua.test_all(Molly; ambiguities=(recursive=false), unbound_args=false, undefined_exports=false)
+
+data_dir = normpath(@__DIR__, "..", "data")
 
 temp_fp_pdb = tempname(cleanup=true) * ".pdb"
 temp_fp_viz = tempname(cleanup=true) * ".mp4"
@@ -307,8 +310,8 @@ end
     temp = 298.0u"K"
     timestep = 0.0002u"ps"
     atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
-                normpath(@__DIR__, "..", "data", "5XER", "gmx_top_ff.top"),
-                normpath(@__DIR__, "..", "data", "5XER", "gmx_coords.gro"))
+                joinpath(data_dir, "5XER", "gmx_top_ff.top"),
+                joinpath(data_dir, "5XER", "gmx_coords.gro"))
 
     true_n_atoms = 5191
     @test length(atoms) == true_n_atoms
@@ -353,8 +356,8 @@ end
     timestep = 0.0002f0u"ps"
     atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
                 Float32,
-                normpath(@__DIR__, "..", "data", "5XER", "gmx_top_ff.top"),
-                normpath(@__DIR__, "..", "data", "5XER", "gmx_coords.gro"))
+                joinpath(data_dir, "5XER", "gmx_top_ff.top"),
+                joinpath(data_dir, "5XER", "gmx_coords.gro"))
 
     s = Simulation(
         simulator=VelocityVerlet(),
@@ -577,6 +580,58 @@ end
         # Check all simulations give the same result to within some error
         @info "$(rpad(name, 20)) - difference per coordinate $diff"
         @test diff < 1e-4u"nm"
+    end
+end
+
+@testset "OpenMM protein comparison" begin
+    ff_dir = joinpath(data_dir, "force_fields")
+    openmm_dir = joinpath(data_dir, "openmm_6mrr")
+
+    ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+
+    atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = Molly.setupsystem(
+        joinpath(data_dir, "6mrr_equil.pdb"), ff)
+
+    for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul")
+        if inter == "lj"
+            gin = general_inters[1:1]
+        elseif inter == "coul"
+            gin = general_inters[2:2]
+        else
+            gin = ()
+        end
+    
+        if inter == "bond"
+            sils = specific_inter_lists[1:1]
+        elseif inter == "angle"
+            sils = specific_inter_lists[2:2]
+        elseif inter == "proptor"
+            sils = specific_inter_lists[3:3]
+        elseif inter == "improptor"
+            sils = specific_inter_lists[4:4]
+        else
+            sils = ()
+        end
+    
+        s = Simulation(
+            atoms=atoms,
+            specific_inter_lists=sils,
+            general_inters=gin,
+            coords=coords,
+            box_size=box_size,
+            neighbor_finder=neighbor_finder,
+        )
+        find_neighbors!(s, s.neighbor_finder, 0)
+    
+        forces_molly = Molly.ustripvec.(accelerations(s; parallel=false) .* mass.(atoms))
+        forces_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "forces_$(inter)_only.txt"))))
+        # All force terms on all atoms must match at some threshold
+        @test !any(d -> any(abs.(d) .> 1e-6), forces_molly .- forces_openmm)
+
+        E_molly = ustrip(Molly.potential_energy(s))
+        E_openmm = readdlm(joinpath(openmm_dir, "energy_$(inter)_only.txt"))[1]
+        # Energy must match at some threshold
+        @test E_molly - E_openmm < 1e-5
     end
 end
 
