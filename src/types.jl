@@ -86,7 +86,7 @@ struct Atom{T, C, M, S, E}
 end
 
 function Atom(;
-                index=0,
+                index=1,
                 attype=0,
                 charge=0.0u"q",
                 mass=0.0u"u",
