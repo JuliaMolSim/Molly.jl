@@ -386,7 +386,7 @@ end
     temp = 298.0u"K"
     timestep = 0.002u"ps"
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
-    G = 10.0u"kJ * nm / (u^2 * mol)"
+    G = 10.0u"kJ * nm * u^-2 * mol^-1"
     general_inter_types = (
         LennardJones(nl_only=true), LennardJones(nl_only=false),
         LennardJones(cutoff=DistanceCutoff(1.0u"nm"), nl_only=true),
@@ -637,6 +637,31 @@ end
         # Energy must match at some threshold
         @test E_molly - E_openmm < 1e-5
     end
+
+    # Run a short simulation with all interactions
+    n_steps = 1
+    timestep = 0.0005u"ps"
+    velocities = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
+
+    s = Simulation(
+        simulator=VelocityVerlet(),
+        atoms=atoms,
+        specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
+        coords=coords,
+        velocities=velocities,
+        box_size=box_size,
+        neighbor_finder=neighbor_finder,
+        timestep=timestep,
+        n_steps=n_steps,
+    )
+
+    simulate!(s; parallel=false)
+
+    coords_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "coordinates_$(n_steps)steps.txt"))))u"nm"
+    vels_openmm   = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_$(n_steps)steps.txt" ))))u"nm * ps^-1"
+
+    # ...
 end
 
 @enum Status susceptible infected recovered
