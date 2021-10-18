@@ -9,6 +9,7 @@ using BenchmarkTools
 using CUDA
 
 using Base.Threads
+using DelimitedFiles
 
 if nthreads() > 1
     @info "The parallel benchmarks will be run as Julia is running on $(nthreads()) threads"
@@ -29,6 +30,7 @@ const SUITE = BenchmarkGroup(
     "interactions" => BenchmarkGroup(),
     "spatial"      => BenchmarkGroup(),
     "simulation"   => BenchmarkGroup(),
+    "protein"      => BenchmarkGroup(),
 )
 
 c1 = SVector(1.0, 1.0, 1.0)u"nm"
@@ -133,3 +135,31 @@ for (name, args) in runs
     runsim(args...) # Run once for setup
     SUITE["simulation"][name] = @benchmarkable runsim($(args[1]), $(args[2]), $(args[3]), $(args[4]), $(args[5]))
 end
+
+data_dir = normpath(@__DIR__, "..", "data")
+ff_dir = joinpath(data_dir, "force_fields")
+openmm_dir = joinpath(data_dir, "openmm_6mrr")
+
+ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+
+atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
+    joinpath(data_dir, "6mrr_equil.pdb"), ff)
+
+n_steps = 25
+timestep = 0.0005u"ps"
+velocities = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
+
+s = Simulation(
+    simulator=VelocityVerlet(),
+    atoms=atoms,
+    specific_inter_lists=specific_inter_lists,
+    general_inters=general_inters,
+    coords=coords,
+    velocities=velocities,
+    box_size=box_size,
+    neighbor_finder=neighbor_finder,
+    timestep=timestep,
+)
+
+simulate!(s, n_steps; parallel=true)
+SUITE["protein"]["in-place NL parallel"] = @benchmarkable simulate!($(s), $(n_steps); parallel=true)
