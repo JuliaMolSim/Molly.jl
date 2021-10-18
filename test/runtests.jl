@@ -589,7 +589,7 @@ end
 
     ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
 
-    atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = Molly.setupsystem(
+    atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
         joinpath(data_dir, "6mrr_equil.pdb"), ff)
 
     for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul", "all")

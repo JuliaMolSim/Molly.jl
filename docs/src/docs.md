@@ -18,8 +18,8 @@ First, we'll need some atoms with the relevant parameters defined.
 using Molly
 
 n_atoms = 100
-mass = 10.0u"u"
-atoms = [Atom(mass=mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+atom_mass = 10.0u"u"
+atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 ```
 See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) docs for more information on the unit annotations.
 Molly re-exports Unitful.jl and [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) since they are usually required to run simulations.
@@ -29,7 +29,7 @@ box_size = SVector(2.0, 2.0, 2.0)u"nm"
 coords = placeatoms(n_atoms, box_size, 0.3u"nm") # Random placement without clashing
 
 temp = 100u"K"
-velocities = [velocity(mass, temp) for i in 1:n_atoms]
+velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 ```
 We store the coordinates and velocities as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
 They can be of any number of dimensions and of any number type, e.g. `Float64` or `Float32`.
@@ -78,12 +78,12 @@ using Molly
 using CUDA
 
 n_atoms = 100
-mass = 10.0f0u"u"
+atom_mass = 10.0f0u"u"
 box_size = SVector(2.0f0, 2.0f0, 2.0f0)u"nm"
 temp = 100.0f0u"K"
-atoms = cu([Atom(mass=mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
+atoms = cu([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
 coords = cu(placeatoms(n_atoms, box_size, 0.3u"nm"))
-velocities = cu([velocity(mass, temp) for i in 1:n_atoms])
+velocities = cu([velocity(atom_mass, temp) for i in 1:n_atoms])
 
 s = Simulation(
     simulator=VelocityVerlet(),
@@ -113,7 +113,7 @@ for i in 1:length(coords)
     push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
 end
 
-velocities = [velocity(mass, temp) for i in 1:n_atoms]
+velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 ```
 Now we can use the built-in bond type to place a harmonic constraint between paired atoms.
 The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.
@@ -199,10 +199,35 @@ visualize(s.loggers["coords"], 1.0f0, "sim_gravity.mp4";
 
 ## Simulating a protein
 
-Molly has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
-Data for a protein can be read into the same data structures as above and simulated in the same way.
-Currently, the OPLS-AA force field is implemented.
+The recommended way to simulate a macromolecular simulation is to read in a force field in OpenMM XML format and read in a coordinate file in a format [supported by Chemfiles.jl](https://chemfiles.org/chemfiles/latest/formats.html).
+This sets up a system in the same data structures as above and is simulated in the same way.
 Here a [`StructureWriter`](@ref) is used to write the trajectory as a PDB file.
+
+```julia
+ff = OpenMMForceField("ff99SBildn.xml", "tip3p_standard.xml", "his.xml")
+
+atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
+    "6mrr_equil.pdb", ff)
+
+s = Simulation(
+    simulator=VelocityVerlet(),
+    atoms=atoms,
+    specific_inter_lists=specific_inter_lists,
+    general_inters=general_inters,
+    coords=coords,
+    velocities=[velocity(a.mass, 298u"K") for a in atoms],
+    box_size=box_size,
+    neighbor_finder=neighbor_finder,
+    loggers=Dict("energy" => EnergyLogger(10),
+                    "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),
+    timestep=0.0005u"ps",
+    n_steps=5_000,
+)
+
+simulate!(s; parallel=true)
+```
+
+Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
 ```julia
 atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),

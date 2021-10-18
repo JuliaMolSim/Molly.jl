@@ -16,7 +16,7 @@ At the minute the package is a proof of concept for MD in Julia.
 It can simulate a system of atoms with arbitrary interactions as defined by the user.
 Implemented features include:
 - Interface to allow definition of new forces, simulators, thermostats, neighbor finders, loggers etc.
-- Read in pre-computed Gromacs topology and coordinate files with the OPLS-AA force field and run MD on proteins with given parameters. In theory it can do this for any regular protein, but in practice this is untested.
+- Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also some support for Gromacs files.
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential, gravitational potential, soft sphere potential, Mie potential.
 - Bonded interactions - covalent bonds, bond angles, torsion angles.
 - Andersen thermostat.
@@ -34,8 +34,6 @@ Implemented features include:
 - Differentiable molecular simulation on an experimental branch - see the [relevant docs](https://juliamolsim.github.io/Molly.jl/dev/differentiable).
 
 Features not yet implemented include:
-- Protein force fields other than OPLS-AA.
-- Water models.
 - Energy minimisation.
 - Other temperature or pressure coupling methods.
 - Cell-based neighbor list.
@@ -61,11 +59,11 @@ using Molly
 n_atoms = 100
 box_size = SVector(2.0, 2.0, 2.0)u"nm"
 temp = 298u"K"
-mass = 10.0u"u"
+atom_mass = 10.0u"u"
 
-atoms = [Atom(mass=mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 coords = placeatoms(n_atoms, box_size, 0.3u"nm")
-velocities = [velocity(mass, temp) for i in 1:n_atoms]
+velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 general_inters = (LennardJones(),)
 
 s = Simulation(
