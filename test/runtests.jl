@@ -493,18 +493,18 @@ end
 
 @testset "Different implementations" begin
     n_atoms = 400
-    mass = 10.0u"u"
+    atom_mass = 10.0u"u"
     box_size = SVector(6.0, 6.0, 6.0)u"nm"
     temp = 1.0u"K"
     starting_coords = placediatomics(n_atoms ÷ 2, box_size, 0.2u"nm", 0.2u"nm")
-    starting_velocities = [velocity(mass, temp) for i in 1:n_atoms]
+    starting_velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
     function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::Bool)
         n_atoms = 400
         n_steps = 200
-        mass = f32 ? 10.0f0u"u" : 10.0u"u"
+        atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
         box_size = f32 ? SVector(6.0f0, 6.0f0, 6.0f0)u"nm" : SVector(6.0, 6.0, 6.0)u"nm"
         timestep = f32 ? 0.02f0u"ps" : 0.02u"ps"
         temp = f32 ? 1.0f0u"K" : 1.0u"K"
@@ -527,12 +527,12 @@ end
         if gpu
             coords = cu(deepcopy(f32 ? starting_coords_f32 : starting_coords))
             velocities = cu(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-            atoms = cu([Atom(charge=f32 ? 0.0f0u"q" : 0.0u"q", mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+            atoms = cu([Atom(charge=f32 ? 0.0f0u"q" : 0.0u"q", mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                                 ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
         else
             coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
             velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
-            atoms = [Atom(charge=f32 ? 0.0f0u"q" : 0.0u"q", mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+            atoms = [Atom(charge=f32 ? 0.0f0u"q" : 0.0u"q", mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                             ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
         end
 
@@ -639,7 +639,7 @@ end
     end
 
     # Run a short simulation with all interactions
-    n_steps = 1
+    n_steps = 100
     timestep = 0.0005u"ps"
     velocities = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
 
@@ -656,12 +656,16 @@ end
         n_steps=n_steps,
     )
 
-    simulate!(s; parallel=false)
+    simulate!(s; parallel=true)
 
     coords_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "coordinates_$(n_steps)steps.txt"))))u"nm"
     vels_openmm   = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_$(n_steps)steps.txt" ))))u"nm * ps^-1"
 
-    # ...
+    coords_diff = s.coords .- Molly.adjust_bounds_vec.(coords_openmm, (s.box_size,))
+    vels_diff = s.velocities .- vels_openmm
+    # Coordinates and velocities at end must match at some threshold
+    @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
+    @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 end
 
 @enum Status susceptible infected recovered

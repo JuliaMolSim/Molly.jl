@@ -10,7 +10,7 @@ using Test
     n_steps = 10_000
     box_size = SVector(50.0, 50.0, 50.0)u"nm"
     n_atoms = 2_000
-    mass = 40.0u"u"
+    atom_mass = 40.0u"u"
 
     parallel_list = nthreads() > 1 ? (false, true) : (false,)
     lj_potentials = (
@@ -23,10 +23,10 @@ using Test
         @testset "$lj_potential" for lj_potential in lj_potentials
             s = Simulation(
                 simulator=VelocityVerlet(),
-                atoms=[Atom(charge=0.0u"q", mass=mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+                atoms=[Atom(charge=0.0u"q", mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
                 general_inters=(lj_potential,),
                 coords=placeatoms(n_atoms, box_size, 0.6u"nm"),
-                velocities=[velocity(mass, temp) for i in 1:n_atoms],
+                velocities=[velocity(atom_mass, temp) for i in 1:n_atoms],
                 temperature=temp,
                 box_size=box_size,
                 loggers=Dict("coords" => CoordinateLogger(100),

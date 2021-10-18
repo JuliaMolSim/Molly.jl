@@ -866,6 +866,6 @@ function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"n
     neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
                                             dist_cutoff=T(1.5)u"nm")
 
-    return atoms, specific_inter_lists, general_inters,
+    return [atoms...], specific_inter_lists, general_inters,
             neighbor_finder, coords, box_size
 end

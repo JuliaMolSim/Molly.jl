@@ -16,6 +16,18 @@ platform = Platform.getPlatformByName("Reference")
 n_steps = 100
 time_step = 0.0005*picoseconds
 
+class VelocityVerletIntegrator(CustomIntegrator):
+    def __init__(self, time_step):
+        super(VelocityVerletIntegrator, self).__init__(time_step)
+        self.addPerDofVariable("x1", 0)
+        self.addUpdateContextState()
+        self.addComputePerDof("v", "v+0.5*dt*f/m")
+        self.addComputePerDof("x", "x+dt*v")
+        self.addComputePerDof("x1", "x")
+        self.addConstrainPositions()
+        self.addComputePerDof("v", "v+0.5*dt*f/m+(x-x1)/dt")
+        self.addConstrainVelocities()
+
 for inter in ["bond", "angle", "proptor", "improptor", "lj", "coul", "all"]:
     pdb = PDBFile(pdb_file)
     if inter == "all":
@@ -33,7 +45,7 @@ for inter in ["bond", "angle", "proptor", "improptor", "lj", "coul", "all"]:
                                         nonbondedCutoff=1*nanometer, constraints=None,
                                         rigidWater=False, removeCMMotion=False,
                                         switchDistance=None, useDispersionCorrection=False)
-    integrator = VerletIntegrator(time_step)
+    integrator = VelocityVerletIntegrator(time_step)
     simulation = Simulation(pdb.topology, system, integrator, platform)
     simulation.context.setPositions(pdb.positions)
 
