@@ -348,7 +348,7 @@ function readinputs(T::Type,
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
     box_size = units ? (box_size_vals)u"nm" : box_size_vals
-    coords = adjust_bounds_vec.([coords...], (box_size,))
+    coords = wrapcoordsvec.([coords...], (box_size,))
 
     # Ensure array types are concrete
     specific_inter_lists = ([bonds...], [angles...], [torsions...])
@@ -861,7 +861,7 @@ function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"n
 
     # Convert from Å
     coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(positions(frame))]
-    coords = adjust_bounds_vec.(coords, (box_size,))
+    coords = wrapcoordsvec.(coords, (box_size,))
 
     neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
                                             dist_cutoff=T(1.5)u"nm")

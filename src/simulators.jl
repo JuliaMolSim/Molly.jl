@@ -50,7 +50,7 @@ function simulate!(s::Simulation{false},
         # Update coordinates
         for i in 1:length(s.coords)
             s.coords[i] += s.velocities[i] * s.timestep + removemolar(accels_t[i]) * (s.timestep ^ 2) / 2
-            s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
+            s.coords[i] = wrapcoords.(s.coords[i], s.box_size)
         end
 
         accels_t_dt = accelerations(s; parallel=parallel)
@@ -96,7 +96,7 @@ function simulate!(s::Simulation{true},
 
         # In-place updates here required to work with views but are not Zygote-compatible
         s.coords .+= s.velocities .* s.timestep .+ (removemolar.(accels_t) .* s.timestep ^ 2) ./ 2
-        s.coords .= adjust_bounds_vec.(s.coords, (s.box_size,))
+        s.coords .= wrapcoordsvec.(s.coords, (s.box_size,))
         accels_t_dt = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
         s.velocities .+= removemolar.(accels_t .+ accels_t_dt) .* s.timestep / 2
 
@@ -137,7 +137,7 @@ function simulate!(s::Simulation,
         coords_copy = s.coords
         for i in 1:length(s.coords)
             s.coords[i] = s.coords[i] + vector(coords_last[i], s.coords[i], s.box_size) + removemolar(accels_t[i]) * s.timestep ^ 2
-            s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
+            s.coords[i] = wrapcoords.(s.coords[i], s.box_size)
         end
         coords_last = coords_copy
 

@@ -3,7 +3,8 @@
 export
     vector1D,
     vector,
-    adjust_bounds
+    wrapcoords,
+    wrapcoordsvec
 
 """
     vector1D(c1, c2, side_length)
@@ -37,10 +38,15 @@ vector(c1, c2, box_size) = vector1D.(c1, c2, box_size)
 end
 
 """
-    adjust_bounds(c, side_length)
+    wrapcoords(c, side_length)
+
+Ensure a 1D coordinate is within the simulation box and return the coordinate.
+"""
+wrapcoords(c, side_length) = c - floor(c / side_length) * side_length
+
+"""
+    wrapcoordsvec(c, box_size)
 
 Ensure a coordinate is within the simulation box and return the coordinate.
 """
-adjust_bounds(c, side_length) = c - floor(c / side_length) * side_length
-
-adjust_bounds_vec(v, bs) = adjust_bounds.(v, bs)
+wrapcoordsvec(v, box_size) = wrapcoords.(v, box_size)

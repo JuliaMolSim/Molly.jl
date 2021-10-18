@@ -122,13 +122,13 @@ end
     @test vector(SVector(4.0, 1.0, 6.0)u"nm", SVector(6.0, 9.0, 4.0)u"nm",
                     SVector(10.0, 10.0, 10.0)u"nm") == SVector(2.0, -2.0, -2.0)u"nm"
 
-    @test adjust_bounds(8.0 , 10.0) == 8.0
-    @test adjust_bounds(12.0, 10.0) == 2.0
-    @test adjust_bounds(-2.0, 10.0) == 8.0
+    @test wrapcoords(8.0 , 10.0) == 8.0
+    @test wrapcoords(12.0, 10.0) == 2.0
+    @test wrapcoords(-2.0, 10.0) == 8.0
 
-    @test adjust_bounds(8.0u"nm" , 10.0u"nm") == 8.0u"nm"
-    @test adjust_bounds(12.0u"m" , 10.0u"m" ) == 2.0u"m"
-    @test_throws ErrorException adjust_bounds(-2.0u"nm", 10.0)
+    @test wrapcoords(8.0u"nm" , 10.0u"nm") == 8.0u"nm"
+    @test wrapcoords(12.0u"m" , 10.0u"m" ) == 2.0u"m"
+    @test_throws ErrorException wrapcoords(-2.0u"nm", 10.0)
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder)
         s = Simulation(
@@ -661,7 +661,7 @@ end
     coords_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "coordinates_$(n_steps)steps.txt"))))u"nm"
     vels_openmm   = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_$(n_steps)steps.txt" ))))u"nm * ps^-1"
 
-    coords_diff = s.coords .- Molly.adjust_bounds_vec.(coords_openmm, (s.box_size,))
+    coords_diff = s.coords .- wrapcoordsvec.(coords_openmm, (s.box_size,))
     vels_diff = s.velocities .- vels_openmm
     # Coordinates and velocities at end must match at some threshold
     @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"

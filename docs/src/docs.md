@@ -585,7 +585,7 @@ function Molly.simulate!(s::Simulation,
 
         # Ensure coordinates stay within the simulation box like this
         for i in 1:length(s.coords)
-            s.coords[i] = adjust_bounds.(s.coords[i], s.box_size)
+            s.coords[i] = wrapcoords.(s.coords[i], s.box_size)
         end
 
         # Apply the thermostat like this
