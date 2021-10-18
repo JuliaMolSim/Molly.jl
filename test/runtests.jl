@@ -460,8 +460,8 @@ end
         simulator=VelocityVerlet(),
         atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
-        coords=Molly.ustripvec.(coords),
-        velocities=Molly.ustripvec.(velocities),
+        coords=ustripvec.(coords),
+        velocities=ustripvec.(velocities),
         temperature=ustrip(temp),
         box_size=ustrip.(box_size),
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0),
@@ -477,13 +477,13 @@ end
 
     find_neighbors!(s, s.neighbor_finder, 0; parallel=false)
     find_neighbors!(s_nounits, s_nounits.neighbor_finder, 0; parallel=false)
-    accel_diff = Molly.ustripvec.(accelerations(s)) .- accelerations(s_nounits)
+    accel_diff = ustripvec.(accelerations(s)) .- accelerations(s_nounits)
     @test iszero(accel_diff)
 
     simulate!(s; parallel=false)
     simulate!(s_nounits; parallel=false)
 
-    coords_diff = Molly.ustripvec.(s.loggers["coords"].coords[end]) .- s_nounits.loggers["coords"].coords[end]
+    coords_diff = ustripvec.(s.loggers["coords"].coords[end]) .- s_nounits.loggers["coords"].coords[end]
     @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8
 
     final_energy = s.loggers["energy"].energies[end]
@@ -627,7 +627,7 @@ end
         )
         find_neighbors!(s, s.neighbor_finder, 0)
     
-        forces_molly = Molly.ustripvec.(accelerations(s; parallel=false) .* mass.(atoms))
+        forces_molly = ustripvec.(accelerations(s; parallel=false) .* mass.(atoms))
         forces_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "forces_$(inter)_only.txt"))))
         # All force terms on all atoms must match at some threshold
         @test !any(d -> any(abs.(d) .> 1e-6), forces_molly .- forces_openmm)

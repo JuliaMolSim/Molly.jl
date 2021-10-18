@@ -3,8 +3,9 @@
 # See OpenMM documentation and Gromacs manual for other aspects of forces
 
 export
-    force,
     mass,
+    ustripvec,
+    force,
     accelerations,
     LennardJones,
     SoftSphere,
@@ -16,6 +17,20 @@ export
     HarmonicAngle,
     PeriodicTorsion,
     RBTorsion
+
+"""
+    mass(atom)
+
+The mass of an atom.
+"""
+mass(atom::Atom) = atom.mass
+
+"""
+    ustripvec(x)
+
+Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustripvec.(coords)`.
+"""
+ustripvec(x) = ustrip.(x)
 
 function checkforcetype(fdr, force_type)
     if unit(first(fdr)) != force_type
@@ -55,15 +70,6 @@ end
     forces[j] += fdr_ustrip
     return nothing
 end
-
-"""
-    mass(atom)
-
-The mass of an atom.
-"""
-mass(atom::Atom) = atom.mass
-
-ustripvec(x) = ustrip.(x)
 
 """
     accelerations(simulation; parallel=true)
