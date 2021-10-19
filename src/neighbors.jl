@@ -181,23 +181,41 @@ function CellListNeighborFinder(;
     return CellListNeighborFinder{typeof(dist_cutoff)}(nb_matrix, matrix_14, n_steps, dist_cutoff)
 end
 
-function find_neighbors!(s::Simulation,
-                            nf::CellListNeighborFinder,
-                            step_n::Integer;
-                            parallel::Bool=true)
+function push_pair!(pairs, i, j, nb_matrix, matrix_14)
+    if nb_matrix[i, j]
+        push!(pairs, (i, j, matrix_14[i, j]))
+    end
+    return pairs
+end
+
+# This is only called in the parallel case
+function reduce_pairs(pairs, pairs_threaded)
+    for i in 1:nthreads()
+        append!(pairs, pairs_threaded[i])
+    end
+    return pairs
+end
+
+function Molly.find_neighbors!(s::Simulation,
+                                nf::CellListNeighborFinder,
+                                step_n::Integer;
+                                parallel::Bool=true)
     !iszero(step_n % nf.n_steps) && return
 
     neighbors = s.neighbors
     empty!(neighbors)
 
     dist_unit = unit(first(first(s.coords)))
+    box_size_conv = ustrip.(dist_unit, s.box_size)
     dist_cutoff_conv = ustrip(dist_unit, nf.dist_cutoff)
 
-    pair_list = CellListMap.neighbourlist(ustripvec.(s.coords), dist_cutoff_conv)
+    box = CellListMap.Box(box_size_conv, dist_cutoff_conv; T=typeof(dist_cutoff_conv), lcell=1)
+    cl = CellList(ustripvec.(s.coords), box; parallel=parallel)
 
-    for (i, j, d) in pair_list
-        if nf.nb_matrix[i, j]
-            push!(neighbors, (i, j, nf.matrix_14[i, j]))
-        end
-    end
+    neighbors = map_pairwise!(
+        (x, y, i, j, d2, pairs) -> push_pair!(pairs, i, j, nf.nb_matrix, nf.matrix_14),
+        neighbors, box, cl;
+        reduce=reduce_pairs,
+        parallel=parallel,
+    )
 end

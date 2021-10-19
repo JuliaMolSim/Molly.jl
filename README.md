@@ -36,7 +36,6 @@ Implemented features include:
 Features not yet implemented include:
 - Energy minimisation.
 - Other temperature or pressure coupling methods.
-- Cell-based neighbor list.
 - Protein preparation - solvent box, add hydrogens etc.
 - Trajectory/topology file format readers/writers.
 - Quantum mechanical modelling.

@@ -637,18 +637,20 @@ To use your custom thermostat, give it as the `thermostat` argument when creatin
 
 Neighbor finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
 The available neighbor finders are:
-- [`DistanceNeighborFinder`](@ref).
+- [`CellListNeighborFinder`](@ref).
 - [`TreeNeighborFinder`](@ref).
+- [`DistanceNeighborFinder`](@ref).
 
 To define your own [`NeighborFinder`](@ref), first define the `struct`:
 ```julia
 struct MyNeighborFinder <: NeighborFinder
-    nb_matrix::Array{Float64, 2}
+    nb_matrix::BitArray{2}
+    matrix_14::BitArray{2}
     n_steps::Int
     # Any other properties, e.g. a distance cutoff
 end
 ```
-Examples of two useful properties are given here: a matrix indicating weightings on atom pairs for non-bonded interactions (such as 0.0 for bonded atoms and 0.5 for 1-4 atoms), and a value determining how many timesteps occur between each evaluation of the neighbor finder.
+Examples of three useful properties are given here: a matrix indicating atom pairs eligible for non-bonded interactions, a matrix indicating atoms in a 1-4 bonding arrangement, and a value determining how many time steps occur between each evaluation of the neighbor finder.
 Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
 function find_neighbors!(s::Simulation,
@@ -656,9 +658,9 @@ function find_neighbors!(s::Simulation,
                             step_n::Integer;
                             parallel::Bool=true)
     if step_n % nf.n_steps == 0
-        neighbors = Tuple{Int, Int, Float64}[] # atom i, atom j and weighting
-        # Add to neighbors
-        return neighbors
+        empty!(s.neighbors)
+        # Add to neighbors, for example
+        push!(s.neighbors, (1, 2, false)) # atom i, atom j and whether they are in a 1-4 bonding arrangement
     end
 end
 ```

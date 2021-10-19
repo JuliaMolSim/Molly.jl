@@ -130,7 +130,8 @@ function readinputs(T::Type,
                     top_file::AbstractString,
                     coord_file::AbstractString;
                     units::Bool=true,
-                    cutoff_dist=1.0u"nm")
+                    cutoff_dist=1.0u"nm",
+                    nl_dist=1.2u"nm")
     # Read force field and topology file
     atomtypes = Dict{String, AtomType}()
     bondtypes = Dict{String, BondType}()
@@ -357,8 +358,8 @@ function readinputs(T::Type,
     # Convert atom types to integers so they are bits types
     atoms = [Atom(index=a.index, attype=0, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
 
-    neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-                                            dist_cutoff=units ? T(1.5)u"nm" : T(1.5))
+    neighbor_finder = CellListNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
+                                                dist_cutoff=units ? T(nl_dist) : T(ustrip(nl_dist)))
 
     return atoms, specific_inter_lists, general_inters,
             neighbor_finder, coords, box_size
@@ -570,7 +571,10 @@ Any file format readable by Chemfiles can be given.
 Returns the atoms, specific interaction lists, general interaction lists,
 neighbor finder, coordinates and box size.
 """
-function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"nm")
+function setupsystem(coord_file::AbstractString,
+                        force_field;
+                        cutoff_dist=1.0u"nm",
+                        nl_dist=1.2u"nm")
     T = typeof(force_field.weight_14_coulomb)
 
     # Chemfiles uses zero-based indexing, be careful
@@ -863,8 +867,8 @@ function setupsystem(coord_file::AbstractString, force_field; cutoff_dist=1.0u"n
     coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(positions(frame))]
     coords = wrapcoordsvec.(coords, (box_size,))
 
-    neighbor_finder = TreeNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-                                            dist_cutoff=T(1.5)u"nm")
+    neighbor_finder = CellListNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14,
+                                                n_steps=10, dist_cutoff=T(nl_dist))
 
     return [atoms...], specific_inter_lists, general_inters,
             neighbor_finder, coords, box_size
