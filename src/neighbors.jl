@@ -4,7 +4,8 @@ export
     NoNeighborFinder,
     find_neighbors!,
     DistanceNeighborFinder,
-    TreeNeighborFinder
+    TreeNeighborFinder,
+    CellListNeighborFinder
 
 """
     NoNeighborFinder()
@@ -156,6 +157,47 @@ function find_neighbors!(s::Simulation,
                     push!(neighbors, (i, j, w14i[j]))
                 end
             end
+        end
+    end
+end
+
+"""
+    CellListNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff)
+
+Find close atoms using a cell list provided by CellListMap.jl.
+"""
+struct CellListNeighborFinder{D} <: NeighborFinder
+    nb_matrix::BitArray{2}
+    matrix_14::BitArray{2}
+    n_steps::Int
+    dist_cutoff::D
+end
+
+function CellListNeighborFinder(;
+                                nb_matrix,
+                                matrix_14=falses(size(nb_matrix)),
+                                n_steps=10,
+                                dist_cutoff)
+    return CellListNeighborFinder{typeof(dist_cutoff)}(nb_matrix, matrix_14, n_steps, dist_cutoff)
+end
+
+function find_neighbors!(s::Simulation,
+                            nf::CellListNeighborFinder,
+                            step_n::Integer;
+                            parallel::Bool=true)
+    !iszero(step_n % nf.n_steps) && return
+
+    neighbors = s.neighbors
+    empty!(neighbors)
+
+    dist_unit = unit(first(first(s.coords)))
+    dist_cutoff_conv = ustrip(dist_unit, nf.dist_cutoff)
+
+    pair_list = CellListMap.neighbourlist(ustripvec.(s.coords), dist_cutoff_conv)
+
+    for (i, j, d) in pair_list
+        if nf.nb_matrix[i, j]
+            push!(neighbors, (i, j, nf.matrix_14[i, j]))
         end
     end
 end

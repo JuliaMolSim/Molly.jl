@@ -1,6 +1,7 @@
 module Molly
 
 using BioStructures
+using CellListMap
 using Chemfiles
 using Colors
 using Combinatorics
