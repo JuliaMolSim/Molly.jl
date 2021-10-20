@@ -2,7 +2,6 @@
 # See http://manual.gromacs.org/documentation/2016/user-guide/file-formats.html
 
 export
-    AtomType,
     BondType,
     AngleType,
     RBTorsionType,
@@ -14,18 +13,6 @@ export
     PeriodicTorsionType,
     OpenMMForceField,
     setupsystem
-
-"""
-    AtomType(charge, mass, σ, ϵ)
-
-An atom type.
-"""
-struct AtomType{C, M, S, E}
-    charge::C
-    mass::M
-    σ::S
-    ϵ::E
-end
 
 """
     BondType(b0, kb)
@@ -133,7 +120,7 @@ function readinputs(T::Type,
                     cutoff_dist=1.0u"nm",
                     nl_dist=1.2u"nm")
     # Read force field and topology file
-    atomtypes = Dict{String, AtomType}()
+    atomtypes = Dict{String, Atom}()
     bondtypes = Dict{String, BondType}()
     angletypes = Dict{String, AngleType}()
     torsiontypes = Dict{String, RBTorsionType}()
@@ -203,11 +190,11 @@ function readinputs(T::Type,
             # Take the first version of each atom type only
             if !haskey(atomtypes, atomname)
                 if units
-                    atomtypes[atomname] = AtomType(parse(T, c[5]) * T(1u"q"),
-                            parse(T, c[4])u"u", parse(T, c[7])u"nm", parse(T, c[8])u"kJ * mol^-1")
+                    atomtypes[atomname] = Atom(charge=parse(T, c[5]) * T(1u"q"),
+                            mass=parse(T, c[4])u"u", σ=parse(T, c[7])u"nm", ϵ=parse(T, c[8])u"kJ * mol^-1")
                 else
-                    atomtypes[atomname] = AtomType(parse(T, c[5]), parse(T, c[4]),
-                            parse(T, c[7]), parse(T, c[8]))
+                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4]),
+                            σ=parse(T, c[7]), ϵ=parse(T, c[8]))
                 end
             end
         elseif current_field == "atoms"
