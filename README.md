@@ -97,6 +97,7 @@ atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords
 s = Simulation(
     simulator=VelocityVerlet(),
     atoms=atoms,
+    atoms_data=atoms_data,
     specific_inter_lists=specific_inter_lists,
     general_inters=general_inters,
     coords=coords,

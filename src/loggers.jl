@@ -99,18 +99,20 @@ function log_property!(logger::EnergyLogger, s::Simulation, step_n::Integer)
 end
 
 """
-    StructureWriter(n_steps, filepath)
+    StructureWriter(n_steps, filepath, excluded_res=String[])
 
 Write 3D output structures to the PDB file format throughout a simulation.
 """
 mutable struct StructureWriter <: Logger
     n_steps::Int
     filepath::String
+    excluded_res::Set{String}
     structure_n::Int
 end
 
-StructureWriter(n_steps::Integer, filepath::AbstractString) = StructureWriter(
-        n_steps, filepath, 1)
+function StructureWriter(n_steps::Integer, filepath::AbstractString, excluded_res=String[])
+    return StructureWriter(n_steps, filepath, Set(excluded_res), 1)
+end
 
 function Base.show(io::IO, sw::StructureWriter)
     print(io, "StructureWriter with n_steps ", sw.n_steps, ", filepath \"",
@@ -119,6 +121,10 @@ end
 
 function log_property!(logger::StructureWriter, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
+        if length(s.atoms) != length(s.atoms_data)
+            error("Number of atoms is ", length(s.atoms), " but number of atom data entries is ",
+                    length(s.atoms_data))
+        end
         append_model(logger, s)
         logger.structure_n += 1
     end
@@ -128,17 +134,22 @@ function append_model(logger::StructureWriter, s::Simulation)
     open(logger.filepath, "a") do output
         println(output, "MODEL     ", lpad(logger.structure_n, 4))
         for (i, coord) in enumerate(s.coords)
+            atom_data = s.atoms_data[i]
             if unit(first(coord)) == NoUnits
                 coord_convert = 10 .* coord # If not told, assume coordinates are in nm
             else
                 coord_convert = ustrip.(u"Å", coord)
             end
-            at_rec = atomrecord(s.atoms[i], i, coord_convert)
-            println(output, pdbline(at_rec))
+            if !(atom_data.res_name in logger.excluded_res)
+                at_rec = atomrecord(atom_data, i, coord_convert)
+                println(output, pdbline(at_rec))
+            end
         end
         println(output, "ENDMDL")
     end
 end
 
-atomrecord(at::Atom, i, coord) = AtomRecord(false, i, "??", ' ', "???", "A", i, ' ',
-                                            coord, 1.0, 0.0, "  ", "  ")
+atomrecord(at_data, i, coord) = AtomRecord(
+    false, i, at_data.atom_name, ' ', at_data.res_name, "A",
+    at_data.res_number, ' ', coord, 1.0, 0.0, "  ", "  "
+)

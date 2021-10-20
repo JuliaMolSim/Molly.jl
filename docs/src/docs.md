@@ -212,6 +212,7 @@ atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords
 s = Simulation(
     simulator=VelocityVerlet(),
     atoms=atoms,
+    atoms_data=atoms_data,
     specific_inter_lists=specific_inter_lists,
     general_inters=general_inters,
     coords=coords,
@@ -219,7 +220,7 @@ s = Simulation(
     box_size=box_size,
     neighbor_finder=neighbor_finder,
     loggers=Dict("energy" => EnergyLogger(10),
-                    "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),
+                    "writer" => StructureWriter(10, "traj_5XER_1ps.pdb", ["HOH"])),
     timestep=0.0005u"ps",
     n_steps=5_000,
 )
@@ -238,6 +239,7 @@ temp = 298u"K"
 s = Simulation(
     simulator=VelocityVerlet(),
     atoms=atoms,
+    atoms_data=atoms_data,
     specific_inter_lists=specific_inter_lists,
     general_inters=general_inters,
     coords=coords,

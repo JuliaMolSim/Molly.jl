@@ -131,6 +131,8 @@ default values.
 - `simulator::Simulator`: the type of simulation to run.
 - `atoms::A`: the atoms, or atom equivalents, in the simulation. Can be
     of any type.
+- `atoms_data::AD`: data associated with the atoms, allowing the atoms to be
+    bits types and hence work on the GPU.
 - `specific_inter_lists::SI=()`: the specific interactions in the simulation,
     i.e. interactions between specific atoms such as bonds or angles. Typically
     a `Tuple`.
@@ -160,9 +162,10 @@ default values.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-struct Simulation{D, T, A, C, V, GI, SI, B, S, F, E}
+struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E}
     simulator::Simulator
     atoms::A
+    atoms_data::AD
     specific_inter_lists::SI
     general_inters::GI
     coords::C
@@ -180,11 +183,12 @@ struct Simulation{D, T, A, C, V, GI, SI, B, S, F, E}
     energy_unit::E
 end
 
-Simulation{D}(args...) where {D, T, A, C, V, GI, SI, B, S, F, E} = Simulation{D, T, A, C, V, GI, SI, B, S, F, E}(args...)
+Simulation{D}(args...) where {D, T, A, AD, C, V, GI, SI, B, S, F, E} = Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E}(args...)
 
 function Simulation(;
                     simulator=VelocityVerlet(),
                     atoms,
+                    atoms_data=[],
                     specific_inter_lists=(),
                     general_inters=(),
                     coords,
@@ -203,6 +207,7 @@ function Simulation(;
                     gpu_diff_safe=isa(coords, CuArray))
     T = typeof(temperature)
     A = typeof(atoms)
+    AD = typeof(atoms_data)
     C = typeof(coords)
     V = typeof(velocities)
     GI = typeof(general_inters)
@@ -211,11 +216,11 @@ function Simulation(;
     S = typeof(timestep)
     F = typeof(force_unit)
     E = typeof(energy_unit)
-    return Simulation{gpu_diff_safe, T, A, C, V, GI, SI, B, S, F, E}(
-                simulator, atoms, specific_inter_lists, general_inters, coords,
-                velocities, temperature, box_size, neighbors, neighbor_finder,
-                thermostat, loggers, timestep, n_steps, n_steps_made,
-                force_unit, energy_unit)
+    return Simulation{gpu_diff_safe, T, A, AD, C, V, GI, SI, B, S, F, E}(
+                simulator, atoms, atoms_data, specific_inter_lists, general_inters,
+                coords, velocities, temperature, box_size, neighbors, neighbor_finder,
+                thermostat, loggers, timestep, n_steps, n_steps_made, force_unit,
+                energy_unit)
 end
 
 function Base.show(io::IO, s::Simulation)

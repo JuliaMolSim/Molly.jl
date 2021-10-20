@@ -197,6 +197,7 @@ end
         s = Simulation(
             simulator=VelocityVerlet(),
             atoms=[Atom(charge=0.0u"q", mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+            atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR") for i in 1:n_atoms],
             general_inters=(LennardJones(nl_only=true),),
             coords=placeatoms(n_atoms, box_size, 0.3u"nm"),
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
@@ -326,6 +327,7 @@ end
     s = Simulation(
         simulator=VelocityVerlet(),
         atoms=atoms,
+        atoms_data=atoms_data,
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
         coords=coords,
