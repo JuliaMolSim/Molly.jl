@@ -1,5 +1,21 @@
 # Molly.jl release notes
 
+## v0.5.0 - Oct 2021
+
+- Readers are added for OpenMM XML force field files and coordinate files supported by Chemfiles.jl. Forces, energies and the results of a short simulation exactly match the OpenMM reference implementation for a standard protein in the a99SB-ILDN force field.
+- A cell neighbor list is added using CellListMap.jl.
+- `CoulombReactionField` is added to calculate long-range electrostatic interactions.
+- The `PeriodicTorsion` interaction is added and the previous Ryckaert-Bellemans `Torsion` is renamed to `RBTorsion`.
+- Support for weighting non-bonded interactions between atoms in a 1-4 interaction is added.
+- The box size is changed from one value to three, allowing a larger variety of periodic box shapes.
+- Support for different mixing rules is added for the Lennard-Jones interaction, with the default being Lorentz-Bertelot mixing.
+- A simple `DistanceCutoff` is added.
+- Excluded residue names can now be defined for a `StructureWriter`.
+- The `placediatomics` and `ustripvec` functions are added.
+- The `AtomMin` type is removed, with `Atom` now being a bits type and `AtomData` used to store atom data.
+- Visualisation now uses GLMakie.jl.
+- `adjust_bounds` is renamed to `wrapcoords`.
+
 ## v0.4.0 - Sep 2021
 
 - Unitful.jl support is added and recommended for use, meaning numbers have physical meaning and many errors are caught. More type parameters have been added to various types to allow this. It is still possible to run simulations without units by specifying the `force_unit` and `energy_unit` arguments to `Simulation`.
