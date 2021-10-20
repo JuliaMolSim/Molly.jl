@@ -309,7 +309,7 @@ end
     n_steps = 100
     temp = 298.0u"K"
     timestep = 0.0002u"ps"
-    atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
+    atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
                 joinpath(data_dir, "5XER", "gmx_top_ff.top"),
                 joinpath(data_dir, "5XER", "gmx_coords.gro"))
 
@@ -354,7 +354,7 @@ end
     n_steps = 100
     temp = 298.0f0u"K"
     timestep = 0.0002f0u"ps"
-    atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
+    atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
                 Float32,
                 joinpath(data_dir, "5XER", "gmx_top_ff.top"),
                 joinpath(data_dir, "5XER", "gmx_coords.gro"))
@@ -589,7 +589,7 @@ end
 
     ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
 
-    atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
+    atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
         joinpath(data_dir, "6mrr_equil.pdb"), ff)
 
     for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul", "all")

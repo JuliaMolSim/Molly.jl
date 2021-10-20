@@ -10,6 +10,7 @@ export
     NeighborFinder,
     Logger,
     Atom,
+    AtomData,
     Simulation
 
 const DefaultFloat = Float64
@@ -69,16 +70,14 @@ The types used should be bits types if the GPU is going to be used.
 
 # Arguments
 - `index::Int`: the index of the atom in the system.
-- `attype::T=0`: the type of the atom.
 - `charge::C=0.0u"q"`: the charge of the atom, used for electrostatic interactions.
 - `mass::M=0.0u"u"`: the mass of the atom.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
 """
-struct Atom{T, C, M, S, E}
+struct Atom{C, M, S, E}
     index::Int
-    attype::T
     charge::C
     mass::M
     σ::S
@@ -87,17 +86,38 @@ end
 
 function Atom(;
                 index=1,
-                attype=0,
                 charge=0.0u"q",
                 mass=0.0u"u",
                 σ=0.0u"nm",
                 ϵ=0.0u"kJ * mol^-1")
-    return Atom(index, attype, charge, mass, σ, ϵ)
+    return Atom(index, charge, mass, σ, ϵ)
 end
 
 function Base.show(io::IO, a::Atom)
-    print(io, "Atom with index ", a.index, ", type ", a.attype, ", charge=", a.charge,
+    print(io, "Atom with index ", a.index, ", charge=", a.charge,
             ", mass=", a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
+end
+
+"""
+    AtomData(atom_type, atom_name, res_number, res_name)
+
+Data associated with an atom.
+Storing this separately allows the atom types to be bits types and hence
+work on the GPU.
+"""
+struct AtomData
+    atom_type::String
+    atom_name::String
+    res_number::Int
+    res_name::String
+end
+
+function AtomData(;
+                    atom_type="?",
+                    atom_name="?",
+                    res_number=1,
+                    res_name="???")
+    return AtomData(atom_type, atom_name, res_number, res_name)
 end
 
 """

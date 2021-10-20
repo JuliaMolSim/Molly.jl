@@ -142,7 +142,7 @@ openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
 ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
 
-atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
+atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
     joinpath(data_dir, "6mrr_equil.pdb"), ff)
 
 n_steps = 25

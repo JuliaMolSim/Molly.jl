@@ -90,7 +90,7 @@ timestep = 0.0002u"ps"
 temp = 298u"K"
 n_steps = 5_000
 
-atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
+atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
 

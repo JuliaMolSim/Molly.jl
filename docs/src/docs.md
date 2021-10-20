@@ -206,7 +206,7 @@ Here a [`StructureWriter`](@ref) is used to write the trajectory as a PDB file.
 ```julia
 ff = OpenMMForceField("ff99SBildn.xml", "tip3p_standard.xml", "his.xml")
 
-atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
+atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
     "6mrr_equil.pdb", ff)
 
 s = Simulation(
@@ -229,7 +229,7 @@ simulate!(s; parallel=true)
 
 Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
 ```julia
-atoms, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
+atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
 

@@ -141,6 +141,7 @@ function readinputs(T::Type,
 
     name = "?"
     atoms = Atom[]
+    atoms_data = AtomData[]
     bonds = HarmonicBond[]
     pairs = Tuple{Int, Int}[]
     angles = HarmonicAngle[]
@@ -219,17 +220,19 @@ function readinputs(T::Type,
                 mass = parse(T, c[8])
             end
             atom_index = length(atoms) + 1
-            push!(atoms, Atom(index=atom_index, attype=attype, charge=charge, mass=mass,
-                    σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
+            push!(atoms, Atom(index=atom_index, charge=charge, mass=mass,
+                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
+            push!(atoms_data, AtomData(atom_type=attype, atom_name=c[5], res_number=parse(Int, c[3]),
+                                        res_name=c[4]))
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
-            bondtype = bondtypes["$(atoms[i].attype)/$(atoms[j].attype)"]
+            bondtype = bondtypes["$(atoms_data[i].atom_type)/$(atoms_data[j].atom_type)"]
             push!(bonds, HarmonicBond(i=i, j=j, b0=bondtype.b0, kb=bondtype.kb))
         elseif current_field == "pairs"
             push!(pairs, (parse(Int, c[1]), parse(Int, c[2])))
         elseif current_field == "angles"
             i, j, k = parse.(Int, c[1:3])
-            angletype = angletypes["$(atoms[i].attype)/$(atoms[j].attype)/$(atoms[k].attype)"]
+            angletype = angletypes["$(atoms_data[i].atom_type)/$(atoms_data[j].atom_type)/$(atoms_data[k].atom_type)"]
             push!(angles, HarmonicAngle(i=i, j=j, k=k, th0=angletype.th0, cth=angletype.cth))
         elseif current_field == "dihedrals"
             i, j, k, l = parse.(Int, c[1:4])
@@ -241,7 +244,7 @@ function readinputs(T::Type,
 
     # Add torsions based on wildcard torsion types
     for inds in possible_torsions
-        at_types = [atoms[x].attype for x in inds]
+        at_types = [atoms_data[x].atom_type for x in inds]
         desired_key = join(at_types, "/")
         if haskey(torsiontypes, desired_key)
             d = torsiontypes[desired_key]
@@ -302,8 +305,10 @@ function readinputs(T::Type,
                 end
             end
             atom_index = length(atoms) + 1
-            push!(atoms, Atom(index=atom_index, attype=attype, charge=temp_charge,
-                    mass=atomtypes[attype].mass, σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
+            push!(atoms, Atom(index=atom_index, charge=temp_charge, mass=atomtypes[attype].mass,
+                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
+            push!(atoms_data, AtomData(atom_type=attype, atom_name=atname, res_number=parse(Int, l[1:5]),
+                                        res_name=strip(l[6:10])))
 
             # Add O-H bonds and H-O-H angle in water
             if atname == "OW"
@@ -355,13 +360,12 @@ function readinputs(T::Type,
     specific_inter_lists = ([bonds...], [angles...], [torsions...])
     general_inters = (lj, coulomb_rf)
 
-    # Convert atom types to integers so they are bits types
-    atoms = [Atom(index=a.index, attype=0, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
+    atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
 
     neighbor_finder = CellListNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
                                                 dist_cutoff=units ? T(nl_dist) : T(ustrip(nl_dist)))
 
-    return atoms, specific_inter_lists, general_inters,
+    return atoms, atoms_data, specific_inter_lists, general_inters,
             neighbor_finder, coords, box_size
 end
 
@@ -584,6 +588,7 @@ function setupsystem(coord_file::AbstractString,
     n_atoms = size(top)
 
     atoms = Atom[]
+    atoms_data = AtomData[]
     bonds = HarmonicBond[]
     angles = HarmonicAngle[]
     torsions = PeriodicTorsion[]
@@ -653,11 +658,14 @@ function setupsystem(coord_file::AbstractString,
 
     for ai in 1:n_atoms
         atom_name = Chemfiles.name(Chemfiles.Atom(top, ai - 1))
-        res_name = residuename(residue_for_atom(top, ai - 1), res_num_to_standard)
+        res = residue_for_atom(top, ai - 1)
+        res_name = residuename(res, res_num_to_standard)
         type = force_field.residue_types[res_name].types[atom_name]
         charge = force_field.residue_types[res_name].charges[atom_name]
         at = force_field.atom_types[type]
-        push!(atoms, Atom(index=ai, attype=type, charge=charge, mass=at.mass, σ=at.σ, ϵ=at.ϵ))
+        push!(atoms, Atom(index=ai, charge=charge, mass=at.mass, σ=at.σ, ϵ=at.ϵ))
+        push!(atoms_data, AtomData(atom_type=type, atom_name=atom_name, res_number=id(res),
+                                    res_name=Chemfiles.name(res)))
         nb_matrix[ai, ai] = false
     end
 
@@ -870,6 +878,6 @@ function setupsystem(coord_file::AbstractString,
     neighbor_finder = CellListNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14,
                                                 n_steps=10, dist_cutoff=T(nl_dist))
 
-    return [atoms...], specific_inter_lists, general_inters,
+    return [atoms...], atoms_data, specific_inter_lists, general_inters,
             neighbor_finder, coords, box_size
 end
