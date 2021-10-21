@@ -110,14 +110,16 @@ struct AtomData
     atom_name::String
     res_number::Int
     res_name::String
+    element::String
 end
 
 function AtomData(;
                     atom_type="?",
                     atom_name="?",
                     res_number=1,
-                    res_name="???")
-    return AtomData(atom_type, atom_name, res_number, res_name)
+                    res_name="???",
+                    element="?")
+    return AtomData(atom_type, atom_name, res_number, res_name, element)
 end
 
 #
