@@ -223,7 +223,7 @@ end
 """
 ```
 Molly.find_neighbors!(s::Simulation,
-                      nf::CellListNeighborFinder,
+                      nf::CellListMapNeighborFinder,
                       step_n::Integer;
                       parallel::Bool=true)
 ```

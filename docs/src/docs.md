@@ -639,7 +639,7 @@ To use your custom thermostat, give it as the `thermostat` argument when creatin
 
 Neighbor finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
 The available neighbor finders are:
-- [`CellListNeighborFinder`](@ref).
+- [`CellListMapNeighborFinder`](@ref).
 - [`TreeNeighborFinder`](@ref).
 - [`DistanceNeighborFinder`](@ref).
 
