@@ -652,7 +652,7 @@ function setupsystem(coord_file::AbstractString,
         at = force_field.atom_types[type]
         push!(atoms, Atom(index=ai, charge=charge, mass=at.mass, σ=at.σ, ϵ=at.ϵ))
         push!(atoms_data, AtomData(atom_type=type, atom_name=atom_name, res_number=id(res),
-                                    res_name=Chemfiles.name(res)))
+                                    res_name=Chemfiles.name(res), element=at.element))
         nb_matrix[ai, ai] = false
     end
 

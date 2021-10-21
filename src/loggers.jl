@@ -151,5 +151,6 @@ end
 
 atomrecord(at_data, i, coord) = AtomRecord(
     false, i, at_data.atom_name, ' ', at_data.res_name, "A",
-    at_data.res_number, ' ', coord, 1.0, 0.0, "  ", "  "
+    at_data.res_number, ' ', coord, 1.0, 0.0,
+    at_data.element == "?" ? "  " : at_data.element, "  "
 )
