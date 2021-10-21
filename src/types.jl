@@ -120,6 +120,32 @@ function AtomData(;
     return AtomData(atom_type, atom_name, res_number, res_name)
 end
 
+#
+# Structure to contain preallocated neighbor lists
+#
+mutable struct NeighborList
+    n::Int # Number of neighbors in list (n <= length(list))
+    list::Vector{Tuple{Int, Int, Bool}}
+end
+import Base: empty!, push!, append!
+function empty!(nl::NeighborList)
+    nl.n = 0
+    empty!(nl.list)
+end
+function push!(nl::NeighborList,element)
+    nl.n += 1
+    if nl.n > length(nl.list)
+        push!(nl.list,element)
+    else
+        nl.list[nl.n] = element
+    end
+end
+function append!(nl::NeighborList,nl_app::NeighborList)
+    for i in 1:nl_app.n
+        push!(nl,nl_app[i])
+    end
+end
+
 """
     Simulation(; <keyword arguments>)
 
@@ -172,7 +198,7 @@ struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E}
     velocities::V
     temperature::T
     box_size::B
-    neighbors::Vector{Tuple{Int, Int, Bool}}
+    neighbors::NeighborList
     neighbor_finder::NeighborFinder
     thermostat::Thermostat
     loggers::Dict{String, <:Logger}
@@ -195,7 +221,7 @@ function Simulation(;
                     velocities=zero(coords),
                     temperature=0.0u"K",
                     box_size,
-                    neighbors=Tuple{Int, Int, Bool}[],
+                    neighbors=NeighborList(0,Tuple{Int, Int, Bool}[]),
                     neighbor_finder=NoNeighborFinder(),
                     thermostat=NoThermostat(),
                     loggers=Dict{String, Logger}(),

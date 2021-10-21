@@ -23,9 +23,9 @@ Obtain a list of close atoms in a system.
 Custom neighbor finders should implement this function.
 """
 function find_neighbors!(s::Simulation,
-                            ::NoNeighborFinder,
-                            ::Integer;
-                            kwargs...)
+                         ::NoNeighborFinder,
+                         ::Integer;
+                         kwargs...)
     return
 end
 
@@ -50,13 +50,14 @@ function DistanceNeighborFinder(;
 end
 
 function find_neighbors!(s::Simulation,
-                            nf::DistanceNeighborFinder,
-                            step_n::Integer;
-                            parallel::Bool=true)
+                         nf::DistanceNeighborFinder,
+                         step_n::Integer;
+                         parallel::Bool=true)
     !iszero(step_n % nf.n_steps) && return
 
     neighbors = s.neighbors
     empty!(neighbors)
+
     sqdist_cutoff = nf.dist_cutoff ^ 2
 
     if parallel && nthreads() > 1
@@ -114,13 +115,13 @@ function TreeNeighborFinder(;
 end
 
 function find_neighbors!(s::Simulation,
-                          nf::TreeNeighborFinder,
-                          step_n::Integer;
-                          parallel::Bool=true)
+                         nf::TreeNeighborFinder,
+                         step_n::Integer;
+                         parallel::Bool=true)
     !iszero(step_n % nf.n_steps) && return
 
     neighbors = s.neighbors
-    empty!(neighbors)
+    empty!(neihgbors)
 
     dist_unit = unit(first(first(s.coords)))
     bv = ustrip.(dist_unit, s.box_size)
@@ -161,61 +162,105 @@ function find_neighbors!(s::Simulation,
     end
 end
 
+#
+# Find neighbor lists using CellListMap.jl
+#
 """
-    CellListNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff)
+    CellListMapNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff)
 
-Find close atoms using a cell list provided by CellListMap.jl.
+Find close atoms by distance, and store auxiliary arrays for in-place threading.
 """
-struct CellListNeighborFinder{D} <: NeighborFinder
+mutable struct CellListMapNeighborFinder{D,N} <: NeighborFinder
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int
     dist_cutoff::D
+    # auxiliary arrays for multi-threaded in-place updating of the lists
+    cl::CellListMap.CellList{N,D}
+    aux::CellListMap.AuxThreaded{N,D}
+    neighbors_threaded::Vector{NeighborList}
 end
 
-function CellListNeighborFinder(;
-                                nb_matrix,
-                                matrix_14=falses(size(nb_matrix)),
-                                n_steps=10,
-                                dist_cutoff)
-    return CellListNeighborFinder{typeof(dist_cutoff)}(nb_matrix, matrix_14, n_steps, dist_cutoff)
+function CellListMapNeighborFinder(;
+    nb_matrix,
+    matrix_14=falses(size(nb_matrix)),
+    n_steps=10,
+    dist_cutoff)
+    cl = CellList([[0.,0.,0.]],Box([10.,10.,10.],1.)) # will be overwritten
+    return CellListMapNeighborFinder{typeof(dist_cutoff),3}(
+        nb_matrix, matrix_14, n_steps, dist_cutoff,
+        cl, CellListMap.AuxThreaded(cl), 
+        [ Vector{NeighborList}(undef,0) for _ in 1:nthreads() ] 
+    )
 end
 
-function push_pair!(pairs, i, j, nb_matrix, matrix_14)
+"""
+
+```
+push_pair!(neighbor::NeighborList, i, j, nb_matrix, matrix_14)
+```
+
+Add pair to pair list. If the buffer size is large enough, update element, otherwise
+push new element to `neighbor.list`
+
+"""
+function push_pair!(neighbors::NeighborList, i, j, nb_matrix, matrix_14)
     if nb_matrix[i, j]
-        push!(pairs, (i, j, matrix_14[i, j]))
+        push!(neighbors,(i, j, matrix_14[i, j]))
     end
-    return pairs
+    return neighbors
 end
 
 # This is only called in the parallel case
-function reduce_pairs(pairs, pairs_threaded)
+function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{NeighborList})
+    neighbors.n = 0
     for i in 1:nthreads()
-        append!(pairs, pairs_threaded[i])
+        append!(neighbors,neighbors_threaded[i])
     end
-    return pairs
+    return neighbors
 end
 
+"""
+```
+Molly.find_neighbors!(s::Simulation,
+                      nf::CellListNeighborFinder,
+                      step_n::Integer;
+                      parallel::Bool=true)
+```
+
+Find neighbors using `CellListMap`, without in-place updating. Should be called only
+the first time the cell lists are built. Modifies the *mutable* `nf` structure.
+
+"""
 function Molly.find_neighbors!(s::Simulation,
-                                nf::CellListNeighborFinder,
-                                step_n::Integer;
-                                parallel::Bool=true)
+                               nf::CellListMapNeighborFinder,
+                               step_n::Integer;
+                               parallel::Bool=true)
     !iszero(step_n % nf.n_steps) && return
 
     neighbors = s.neighbors
-    empty!(neighbors)
+    aux = nf.aux
+    cl = nf.cl
+    neighbors_threaded = nf.neighbors_threaded
+
+    neighbors.n = 0
 
     dist_unit = unit(first(first(s.coords)))
     box_size_conv = ustrip.(dist_unit, s.box_size)
     dist_cutoff_conv = ustrip(dist_unit, nf.dist_cutoff)
 
     box = CellListMap.Box(box_size_conv, dist_cutoff_conv; T=typeof(dist_cutoff_conv), lcell=1)
-    cl = CellList(ustripvec.(s.coords), box; parallel=parallel)
+    cl = UpdateCellList!(ustripvec.(s.coords), box, cl, aux; parallel=parallel)
 
-    neighbors = map_pairwise!(
+    map_pairwise!(
         (x, y, i, j, d2, pairs) -> push_pair!(pairs, i, j, nf.nb_matrix, nf.matrix_14),
         neighbors, box, cl;
         reduce=reduce_pairs,
+        output_threaded=neighbors_threaded,
         parallel=parallel,
     )
+
+    nf.cl = cl
+    nf.aux = aux
+    return neighbors
 end
