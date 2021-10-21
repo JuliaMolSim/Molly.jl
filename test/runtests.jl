@@ -130,7 +130,7 @@ end
     @test wrapcoords(12.0u"m" , 10.0u"m" ) == 2.0u"m"
     @test_throws ErrorException wrapcoords(-2.0u"nm", 10.0)
 
-    for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListNeighborFinder)
+    for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
         s = Simulation(
             simulator=VelocityVerlet(),
             atoms=[Atom(), Atom(), Atom()],
@@ -140,10 +140,10 @@ end
             neighbor_finder=neighbor_finder(nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
         )
         find_neighbors!(s, s.neighbor_finder, 0; parallel=false)
-        @test s.neighbors == [(2, 1, false)] || s.neighbors == [(1, 2, false)]
+        @test s.neighbors.list == [(2, 1, false)] || s.neighbors.list == [(1, 2, false)]
         if nthreads() > 1
             find_neighbors!(s, s.neighbor_finder, 0; parallel=true)
-            @test s.neighbors == [(2, 1, false)] || s.neighbors == [(1, 2, false)]
+            @test s.neighbors.list == [(2, 1, false)] || s.neighbors.list == [(1, 2, false)]
         end
     end
 end
@@ -215,9 +215,9 @@ end
 
         nf_tree = TreeNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
         find_neighbors!(s, s.neighbor_finder, 0; parallel=parallel)
-        ref = copy(s.neighbors)
+        ref = copy(s.neighbors.list)
         find_neighbors!(s, nf_tree, 0; parallel=parallel)
-        @test s.neighbors == ref
+        @test s.neighbors.list == ref
 
         @time simulate!(s; parallel=parallel)
 

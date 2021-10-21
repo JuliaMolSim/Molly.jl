@@ -5,7 +5,7 @@ export
     find_neighbors!,
     DistanceNeighborFinder,
     TreeNeighborFinder,
-    CellListNeighborFinder
+    CellListMapNeighborFinder
 
 """
     NoNeighborFinder()
@@ -121,7 +121,7 @@ function find_neighbors!(s::Simulation,
     !iszero(step_n % nf.n_steps) && return
 
     neighbors = s.neighbors
-    empty!(neihgbors)
+    empty!(neighbors)
 
     dist_unit = unit(first(first(s.coords)))
     bv = ustrip.(dist_unit, s.box_size)
@@ -170,14 +170,14 @@ end
 
 Find close atoms by distance, and store auxiliary arrays for in-place threading.
 """
-mutable struct CellListMapNeighborFinder{D,N} <: NeighborFinder
+mutable struct CellListMapNeighborFinder{D,N,T} <: NeighborFinder
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int
     dist_cutoff::D
     # auxiliary arrays for multi-threaded in-place updating of the lists
-    cl::CellListMap.CellList{N,D}
-    aux::CellListMap.AuxThreaded{N,D}
+    cl::CellListMap.CellList{N,T}
+    aux::CellListMap.AuxThreaded{N,T}
     neighbors_threaded::Vector{NeighborList}
 end
 
@@ -185,12 +185,12 @@ function CellListMapNeighborFinder(;
     nb_matrix,
     matrix_14=falses(size(nb_matrix)),
     n_steps=10,
-    dist_cutoff)
+    dist_cutoff::D) where D
     cl = CellList([[0.,0.,0.]],Box([10.,10.,10.],1.)) # will be overwritten
-    return CellListMapNeighborFinder{typeof(dist_cutoff),3}(
+    return CellListMapNeighborFinder{D,3,Float64}(
         nb_matrix, matrix_14, n_steps, dist_cutoff,
         cl, CellListMap.AuxThreaded(cl), 
-        [ Vector{NeighborList}(undef,0) for _ in 1:nthreads() ] 
+        [ NeighborList(0,[(0,0,false)]) for _ in 1:nthreads() ] 
     )
 end
 

@@ -123,16 +123,16 @@ end
 #
 # Structure to contain preallocated neighbor lists
 #
-mutable struct NeighborList
+mutable struct NeighborList{T<:Integer}
     n::Int # Number of neighbors in list (n <= length(list))
-    list::Vector{Tuple{Int, Int, Bool}}
+    list::Vector{Tuple{T, T, Bool}}
 end
 import Base: empty!, push!, append!
 function empty!(nl::NeighborList)
     nl.n = 0
     empty!(nl.list)
 end
-function push!(nl::NeighborList,element)
+function push!(nl::NeighborList,element::Tuple{T,T,Bool}) where T<:Integer
     nl.n += 1
     if nl.n > length(nl.list)
         push!(nl.list,element)
@@ -140,11 +140,14 @@ function push!(nl::NeighborList,element)
         nl.list[nl.n] = element
     end
 end
-function append!(nl::NeighborList,nl_app::NeighborList)
-    for i in 1:nl_app.n
-        push!(nl,nl_app[i])
+function append!(nl::NeighborList,list::AbstractVector{Tuple{T,T,Bool}}) where T<:Integer
+    for element in list
+        push!(nl,element)
     end
 end
+append!(nl::NeighborList,nl_app::NeighborList) = 
+    append!(nl,@view(nl_app.list[1:nl_app.n]))
+
 
 """
     Simulation(; <keyword arguments>)
