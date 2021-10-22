@@ -68,9 +68,9 @@ function ccma_matrix(atoms, atoms_data, bonds, angles, coords, box_size)
                 if isnothing(angle_constraint_ind)
                     # If the angle is unconstrained, use the equilibrium angle of the harmonic force term
                     angle_force_ind = findfirst(angles) do a
-                        (other_ind_i, shared_ind, other_ind_j) in ((a.i, a.j, a.k), (a.k, a.j, a.i))
+                        (sort_other_ind_1, shared_ind, sort_other_ind_2) in ((a.i, a.j, a.k), (a.k, a.j, a.i))
                     end
-                    isnothing(angle_force_ind) && error("No angle term found for atoms ", (other_ind_i, shared_ind, other_ind_j))
+                    isnothing(angle_force_ind) && error("No angle term found for atoms ", (sort_other_ind_1, shared_ind, sort_other_ind_2))
                     cos_θ = cos(angles[angle_force_ind].th0)
                 else
                     # If the angle is constrained, use the actual constrained angle
@@ -89,7 +89,7 @@ function ccma_matrix(atoms, atoms_data, bonds, angles, coords, box_size)
 end
 
 function applyconstraints(inv_K, atoms, coords, box_size, bond_constraints,
-                            tolerance=1e-5u"nm", max_n_iters=150)
+                            tolerance=1e-5, max_n_iters=150)
     n_constraints = length(bond_constraints)
     vecs_start = [vector(coords[bc.i], coords[bc.j], box_size) for bc in bond_constraints]
 
@@ -98,20 +98,32 @@ function applyconstraints(inv_K, atoms, coords, box_size, bond_constraints,
 
     for iter_i in 1:max_n_iters
         n_converged = 0
-        deltas = eltype(coords)[]
-        for (bond_constraint, vec_start) in zip(bond_constraints, vecs_start)
-            dr = vector(coords[i], coords[j], box_size)
+        deltas = typeof(mass(first(atoms)))[]
+        for (bc, vec_start) in zip(bond_constraints, vecs_start)
+            dr = vector(coords[bc.i], coords[bc.j], box_size)
             r2 = sum(abs2, dr)
-            diff = r2 - bond_constraint.distance ^ 2
+            diff = bc.distance ^ 2 - r2
             rrpr = dot(dr, vec_start)
-            push!(delatas, bond_constraint.reduced_mass * diff / rrpr)
-            if r2 >= (lower_tol * bond_constraint.distance ^ 2) && r2 <= (upper_tol * bond_constraint.distance ^ 2)
+            push!(deltas, bc.reduced_mass * diff / rrpr)
+            if r2 >= (lower_tol * bc.distance ^ 2) && r2 <= (upper_tol * bc.distance ^ 2)
                 n_converged += 1
             end
         end
 
+        println(n_converged)
         if n_converged == n_constraints
             break
         end
+
+        deltas = [sum(mv * dv for (mv, dv) in zip(inv_K[i, :], deltas)) for i in 1:n_constraints]
+        deltas = Array(inv_K) * deltas # Slow
+
+        for (bc, vec_start, delta) in zip(bond_constraints, vecs_start, deltas)
+            dr = vec_start * delta
+            coords[bc.i] += dr / mass(atoms[bc.i])
+            coords[bc.j] -= dr / mass(atoms[bc.j])
+        end
     end
+
+    return coords
 end
