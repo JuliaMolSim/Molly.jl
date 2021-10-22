@@ -231,10 +231,10 @@ function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{Neighb
     return neighbors
 end
 
-# Add method to strip_coordinate from cell list map to pass the 
+# Add method to strip_value from cell list map to pass the 
 # coordinates with units without having to reallocate the vector 
 # requires CellListMap >= 0.54 
-CellListMap.strip_coordinate(x::Unitful.Quantity) = Unitful.ustrip(x)
+CellListMap.strip_value(x::Unitful.Quantity) = Unitful.ustrip(x)
 
 """
 ```
