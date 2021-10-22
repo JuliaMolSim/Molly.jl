@@ -186,8 +186,12 @@ function CellListMapNeighborFinder(;
     matrix_14=falses(size(nb_matrix)),
     n_steps=10,
     dist_cutoff::D) where D
-    cl = CellList([[0.,0.,0.]],Box([10.,10.,10.],1.)) # will be overwritten
-    return CellListMapNeighborFinder{D,3,Float64}(
+    T = typeof(ustrip(dist_cutoff))
+    cl = CellList(
+        [zeros(SVector{3,T})],
+        Box([10*one(T),10*one(T),10*one(T)],one(T))
+    ) # will be overwritten
+    return CellListMapNeighborFinder{D,3,T}(
         nb_matrix, matrix_14, n_steps, dist_cutoff,
         cl, CellListMap.AuxThreaded(cl), 
         [ NeighborList(0,[(0,0,false)]) for _ in 1:nthreads() ] 
