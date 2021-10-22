@@ -180,6 +180,12 @@ mutable struct CellListMapNeighborFinder{D,N,T} <: NeighborFinder
     aux::CellListMap.AuxThreaded{N,T}
     neighbors_threaded::Vector{NeighborList}
 end
+function Base.show(io::IO,::MIME"text/plain",neighbor_finder::NeighborFinder)
+    println(io,typeof(neighbor_finder))
+    println(io,"  Size of nb_matrix = " , size(neighbor_finder.nb_matrix))
+    println(io,"  n_steps = " , neighbor_finder.n_steps)
+    print(io,"  dist_cutoff = ", neighbor_finder.dist_cutoff)
+end
 
 function CellListMapNeighborFinder(;
     nb_matrix,
@@ -188,8 +194,9 @@ function CellListMapNeighborFinder(;
     dist_cutoff::D) where D
     T = typeof(ustrip(dist_cutoff))
     cl = CellList(
-        [zeros(SVector{3,T})],
-        Box([10*one(T),10*one(T),10*one(T)],one(T))
+        [ zeros(SVector{3,T}) for _ in 1:size(nb_matrix,1) ],
+        Box([10*one(T),10*one(T),10*one(T)],one(T);T=T),
+        parallel=true
     ) # will be overwritten
     return CellListMapNeighborFinder{D,3,T}(
         nb_matrix, matrix_14, n_steps, dist_cutoff,
@@ -224,6 +231,11 @@ function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{Neighb
     return neighbors
 end
 
+# Add method to strip_coordinate from cell list map to pass the 
+# coordinates with units without having to reallocate the vector 
+# requires CellListMap >= 0.54 
+CellListMap.strip_coordinate(x::Unitful.Quantity) = Unitful.ustrip(x)
+
 """
 ```
 Molly.find_neighbors!(s::Simulation,
@@ -242,29 +254,31 @@ function Molly.find_neighbors!(s::Simulation,
                                parallel::Bool=true)
     !iszero(step_n % nf.n_steps) && return
 
-    neighbors = s.neighbors
     aux = nf.aux
     cl = nf.cl
-    neighbors_threaded = nf.neighbors_threaded
 
+    neighbors = s.neighbors
     neighbors.n = 0
+    neighbors_threaded = nf.neighbors_threaded
+    for i in 1:nthreads()
+        neighbors_threaded[i].n = 0
+    end
 
     dist_unit = unit(first(first(s.coords)))
     box_size_conv = ustrip.(dist_unit, s.box_size)
     dist_cutoff_conv = ustrip(dist_unit, nf.dist_cutoff)
 
     box = CellListMap.Box(box_size_conv, dist_cutoff_conv; T=typeof(dist_cutoff_conv), lcell=1)
-    cl = UpdateCellList!(ustripvec.(s.coords), box, cl, aux; parallel=parallel)
+    cl = UpdateCellList!(s.coords, box, cl, aux; parallel=parallel)
 
     map_pairwise!(
         (x, y, i, j, d2, pairs) -> push_pair!(pairs, i, j, nf.nb_matrix, nf.matrix_14),
         neighbors, box, cl;
         reduce=reduce_pairs,
         output_threaded=neighbors_threaded,
-        parallel=parallel,
+        parallel=parallel
     )
 
     nf.cl = cl
-    nf.aux = aux
     return neighbors
 end

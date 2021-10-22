@@ -132,7 +132,7 @@ end
 import Base: empty!, push!, append!
 function empty!(nl::NeighborList)
     nl.n = 0
-    empty!(nl.list)
+    return nl
 end
 function push!(nl::NeighborList,element::Tuple{T,T,Bool}) where T<:Integer
     nl.n += 1
@@ -141,14 +141,15 @@ function push!(nl::NeighborList,element::Tuple{T,T,Bool}) where T<:Integer
     else
         nl.list[nl.n] = element
     end
+    return nl
 end
 function append!(nl::NeighborList,list::AbstractVector{Tuple{T,T,Bool}}) where T<:Integer
     for element in list
         push!(nl,element)
     end
+    return nl
 end
-append!(nl::NeighborList,nl_app::NeighborList) = 
-    append!(nl,@view(nl_app.list[1:nl_app.n]))
+append!(nl::NeighborList,nl_app::NeighborList) = append!(nl,@view(nl_app.list[1:nl_app.n]))
 
 
 """
@@ -193,7 +194,7 @@ default values.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E}
+struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E, NL, NF}
     simulator::Simulator
     atoms::A
     atoms_data::AD
@@ -203,8 +204,8 @@ struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E}
     velocities::V
     temperature::T
     box_size::B
-    neighbors::NeighborList
-    neighbor_finder::NeighborFinder
+    neighbors::NL
+    neighbor_finder::NF
     thermostat::Thermostat
     loggers::Dict{String, <:Logger}
     timestep::S
@@ -214,7 +215,8 @@ struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E}
     energy_unit::E
 end
 
-Simulation{D}(args...) where {D, T, A, AD, C, V, GI, SI, B, S, F, E} = Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E}(args...)
+Simulation{D}(args...) where {D, T, A, AD, C, V, GI, SI, B, S, F, E, NL, NF} = 
+    Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E, NL, NF}(args...)
 
 function Simulation(;
                     simulator=VelocityVerlet(),
@@ -247,7 +249,9 @@ function Simulation(;
     S = typeof(timestep)
     F = typeof(force_unit)
     E = typeof(energy_unit)
-    return Simulation{gpu_diff_safe, T, A, AD, C, V, GI, SI, B, S, F, E}(
+    NL = typeof(neighbors)
+    NF = typeof(neighbor_finder)
+    return Simulation{gpu_diff_safe, T, A, AD, C, V, GI, SI, B, S, F, E, NL, NF}(
                 simulator, atoms, atoms_data, specific_inter_lists, general_inters,
                 coords, velocities, temperature, box_size, neighbors, neighbor_finder,
                 thermostat, loggers, timestep, n_steps, n_steps_made, force_unit,
