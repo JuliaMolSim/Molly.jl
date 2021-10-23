@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Differentiable simulation · Molly.jl</title><link href="https://fonts.googleapis.com/css?family=Lato|Roboto+Mono" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.11.1/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit">Molly.jl</span></div><form class="docs-search" action="../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../docs/">Documentation</a></li><li class="is-active"><a class="tocitem" href>Differentiable simulation</a><ul class="internal"><li><a class="tocitem" href="#General-interactions"><span>General interactions</span></a></li><li><a class="tocitem" href="#Specific-interactions"><span>Specific interactions</span></a></li><li><a class="tocitem" href="#Neural-network-potentials"><span>Neural network potentials</span></a></li><li><a class="tocitem" href="#Molecular-loss-functions"><span>Molecular loss functions</span></a></li><li><a class="tocitem" href="#Tips-and-tricks"><span>Tips and tricks</span></a></li></ul></li><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Differentiable simulation</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Differentiable simulation</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/differentiable.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="Differentiable-simulation-with-Molly"><a class="docs-heading-anchor" href="#Differentiable-simulation-with-Molly">Differentiable simulation with Molly</a><a id="Differentiable-simulation-with-Molly-1"></a><a class="docs-heading-anchor-permalink" href="#Differentiable-simulation-with-Molly" title="Permalink"></a></h1><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>This section can be read as a standalone introduction to differentiable simulation with Molly, but makes more sense in the context of the <a href="../docs/#Molly-documentation">Molly documentation</a>.</p></div></div><div class="admonition is-info"><header class="admonition-header">Note</header><div class="admonition-body"><p>The examples on this page have somewhat diverged from the main branch and will hopefully be updated soon.</p></div></div><p>In the last few years, the deep learning revolution has broadened to include the paradigm of <a href="https://en.wikipedia.org/wiki/Differentiable_programming">differentiable programming</a>. The concept of using automatic differentiation to obtain exact gradients through physical simulations has many interesting applications, including parameterising force fields and training neural networks to describe atom potentials.</p><p>There are some projects that explore differentiable molecular simulations, such as <a href="https://github.com/google/jax-md">Jax, M.D.</a> and <a href="https://github.com/yuanming-hu/difftaichi">DiffTaichi</a>, or you can write your own algorithms in something like <a href="https://pytorch.org">PyTorch</a>. However Julia provides a strong suite of autodiff tools, with <a href="https://github.com/FluxML/Zygote.jl">Zygote.jl</a> allowing source-to-source transformations for much of the language. The <a href="https://github.com/JuliaMolSim/Molly.jl/tree/differentiable">differentiable</a> branch of Molly lets you use the power of Zygote to obtain gradients through molecular simulations. It is not yet merged because it is experimental, untested, slow, liable to change, and only works for some parts of the main package.</p><p>With those caveats in mind, it provides a neat way to run differentiable simulations using the same abstractions as the main package. In particular, you can define general and specific interactions, letting you move away from N-body simulations and describe molecular systems. This is possible with something like a PyTorch tensor, but the force functions quickly get complicated to write. It also lets you use neighbor lists and periodic boundary conditions, or add neural networks to your simulations.</p><h2 id="General-interactions"><a class="docs-heading-anchor" href="#General-interactions">General interactions</a><a id="General-interactions-1"></a><a class="docs-heading-anchor-permalink" href="#General-interactions" title="Permalink"></a></h2><p>First, we show how taking gradients through a simulation can be used to optimise an atom property in a <a href="https://en.wikipedia.org/wiki/Lennard-Jones_potential">Lennard-Jones</a> gas. In this type of simulation each atom has a σ value that determines how close it likes to get to other atoms. We are going to find the σ value that results in a desired distance of each atom to its closest neighbor. First we need a function to obtain the mean distance of each atom to its closest neighbor:</p><pre><code class="language-julia">using Molly
+
+function meanminseparation(final_coords, box_size)
+    n_atoms = length(final_coords)
+    sum_dists = 0.0
+    for i in 1:n_atoms
+        min_dist = 100.0
+        for j in 1:n_atoms
+            i == j &amp;&amp; continue
+            dist = sqrt(sum(abs2, vector(final_coords[i], final_coords[j], box_size)))
+            min_dist = min(dist, min_dist)
+        end
+        sum_dists += min_dist
+    end
+    return sum_dists / n_atoms
+end</code></pre><p>Now we can set up and run the simulation in a similar way to that described in the <a href="../docs/#Molly-documentation">Molly documentation</a>. The difference is that we wrap the simulation in a <code>loss</code> function. This returns a single value that we want to obtain gradients with respect to, in this case the value of the above function at the end of the simulation. The <code>Zygote.ignore()</code> block allows us to ignore code for the purposes of obtaining gradients; you could add the <a href="../api/#Molly.visualize"><code>visualize</code></a> function there for example.</p><pre><code class="language-julia">using Zygote
+using Format
+
+dist_true = 0.5
+scale_σ_to_dist = 2 ^ (1 / 6)
+σtrue = dist_true / scale_σ_to_dist
+
+n_atoms = 50
+n_steps = 250
+mass = 10.0
+box_size = 3.0
+timestep = 0.05
+temp = 3.0
+simulator = VelocityVerlet()
+neighbor_finder = DistanceNeighborFinder(ones(n_atoms, n_atoms), 10, 1.5)
+thermostat = FrictionThermostat(0.95)
+general_inters = (LennardJones(true),)
+specific_inter_lists = ()
+coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
+velocities = [velocity(mass, temp) for i in 1:n_atoms]
+
+function loss(σ)
+    atoms = [Atom(&quot;&quot;, &quot;&quot;, 0, &quot;&quot;, 0.0, mass, σ, 0.2) for i in 1:n_atoms]
+    loggers = Dict(&quot;coords&quot; =&gt; CoordinateLogger(1))
+
+    s = Simulation(
+        simulator=simulator,
+        atoms=atoms,
+        specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
+        coords=coords,
+        velocities=velocities,
+        temperature=temp,
+        box_size=box_size,
+        neighbor_finder=neighbor_finder,
+        thermostat=thermostat,
+        loggers=loggers,
+        timestep=timestep,
+        n_steps=n_steps,
+    )
+
+    mms_start = meanminseparation(coords, box_size)
+    final_coords = simulate!(s)
+    mms_end = meanminseparation(final_coords, box_size)
+    loss_val = abs(mms_end - dist_true)
+
+    Zygote.ignore() do
+        printfmt(&quot;σ {:6.3f}  |  Mean min sep expected {:6.3f}  |  Mean min sep end {:6.3f}  |  Loss {:6.3f}  |  &quot;,
+                    σ, σ * (2 ^ (1 / 6)), mms_end, loss_val)
+    end
+
+    return loss_val
+end</code></pre><p>We use a simple friction thermostat that downscales velocities each step to avoid exploding gradients (see discussion below). Now we can obtain the gradient of <code>loss</code> with respect to the atom property <code>σ</code>.</p><pre><code class="language-julia">grad = gradient(loss, σtrue)[1]</code></pre><p>We can use this gradient in a training loop to optimise <code>σ</code>, starting from an arbitrary value.</p><pre><code class="language-julia">function train()
+    σlearn = 0.60 / scale_σ_to_dist
+    n_epochs = 20
+
+    for epoch_n in 1:n_epochs
+        printfmt(&quot;Epoch {:&gt;2}  |  &quot;, epoch_n)
+        coords = [box_size .* rand(SVector{3}) for i in 1:n_atoms]
+        velocities = [velocity(mass, temp) for i in 1:n_atoms]
+        grad = gradient(loss, σlearn)[1]
+        printfmt(&quot;Grad {:6.3f}\n&quot;, grad)
+        σlearn -= grad * 1e-2
+    end
+end
+
+train()</code></pre><pre><code class="language-none">Epoch  1  |  σ  0.535  |  Mean min sep expected  0.600  |  Mean min sep end  0.594  |  Loss  0.094  |  Grad -2.702
+Epoch  2  |  σ  0.562  |  Mean min sep expected  0.630  |  Mean min sep end  0.617  |  Loss  0.117  |  Grad  0.871
+Epoch  3  |  σ  0.553  |  Mean min sep expected  0.621  |  Mean min sep end  0.605  |  Loss  0.105  |  Grad  1.110
+Epoch  4  |  σ  0.542  |  Mean min sep expected  0.608  |  Mean min sep end  0.591  |  Loss  0.091  |  Grad  0.970
+Epoch  5  |  σ  0.532  |  Mean min sep expected  0.597  |  Mean min sep end  0.578  |  Loss  0.078  |  Grad  1.058
+Epoch  6  |  σ  0.521  |  Mean min sep expected  0.585  |  Mean min sep end  0.567  |  Loss  0.067  |  Grad  1.157
+Epoch  7  |  σ  0.510  |  Mean min sep expected  0.572  |  Mean min sep end  0.555  |  Loss  0.055  |  Grad  1.035
+Epoch  8  |  σ  0.500  |  Mean min sep expected  0.561  |  Mean min sep end  0.543  |  Loss  0.043  |  Grad  1.052
+Epoch  9  |  σ  0.489  |  Mean min sep expected  0.549  |  Mean min sep end  0.529  |  Loss  0.029  |  Grad  1.082
+Epoch 10  |  σ  0.478  |  Mean min sep expected  0.537  |  Mean min sep end  0.517  |  Loss  0.017  |  Grad  1.109
+Epoch 11  |  σ  0.467  |  Mean min sep expected  0.524  |  Mean min sep end  0.504  |  Loss  0.004  |  Grad  1.036
+Epoch 12  |  σ  0.457  |  Mean min sep expected  0.513  |  Mean min sep end  0.493  |  Loss  0.007  |  Grad -1.018
+Epoch 13  |  σ  0.467  |  Mean min sep expected  0.524  |  Mean min sep end  0.504  |  Loss  0.004  |  Grad  1.031
+Epoch 14  |  σ  0.457  |  Mean min sep expected  0.513  |  Mean min sep end  0.493  |  Loss  0.007  |  Grad -1.054
+Epoch 15  |  σ  0.467  |  Mean min sep expected  0.524  |  Mean min sep end  0.504  |  Loss  0.004  |  Grad  1.033
+Epoch 16  |  σ  0.457  |  Mean min sep expected  0.513  |  Mean min sep end  0.493  |  Loss  0.007  |  Grad -1.058
+Epoch 17  |  σ  0.467  |  Mean min sep expected  0.525  |  Mean min sep end  0.504  |  Loss  0.004  |  Grad  1.034
+Epoch 18  |  σ  0.457  |  Mean min sep expected  0.513  |  Mean min sep end  0.493  |  Loss  0.007  |  Grad -1.061
+Epoch 19  |  σ  0.468  |  Mean min sep expected  0.525  |  Mean min sep end  0.505  |  Loss  0.005  |  Grad  1.033
+Epoch 20  |  σ  0.457  |  Mean min sep expected  0.513  |  Mean min sep end  0.494  |  Loss  0.006  |  Grad -1.044</code></pre><p>The final value we get is 0.457, close to the theoretical value of 0.445 if all atoms have a neighbor at the minimum pairwise energy distance. The RDF looks as follows, with the purple line corresponding to the desired distance to the closest neighbor. <img src="../images/rdf_lj.png" alt="LJ RDF"/></p><h2 id="Specific-interactions"><a class="docs-heading-anchor" href="#Specific-interactions">Specific interactions</a><a id="Specific-interactions-1"></a><a class="docs-heading-anchor-permalink" href="#Specific-interactions" title="Permalink"></a></h2><p>Next we look at obtaining gradients through simulations with specific interactions, e.g. bonds or angles between specified atoms. We will simulate two triatomic molecules and search for a minimum energy bond angle that gives a desired distance between the atoms at the end of the simulation.</p><pre><code class="language-julia">using Molly
+using Zygote
+using Format
+using LinearAlgebra
+
+dist_true = 1.0
+
+n_steps = 150
+mass = 10.0
+box_size = 3.0
+timestep = 0.05
+temp = 0.0
+integrator = VelocityVerlet()
+neighbor_finder = NoNeighborFinder()
+thermostat = FrictionThermostat(0.6)
+general_inters = (LennardJones(false),)
+coords = [
+        SVector(0.8, 0.75, 1.5), SVector(1.5, 0.70, 1.5), SVector(2.3, 0.75, 1.5),
+        SVector(0.8, 2.25, 1.5), SVector(1.5, 2.20, 1.5), SVector(2.3, 2.25, 1.5)]
+n_atoms = length(coords)
+n_dims = length(first(coords))
+velocities = [velocity(mass, temp; dims=n_dims) for i in coords]
+
+function loss(θ)
+    atoms = [Atom(&quot;&quot;, &quot;&quot;, 0, &quot;&quot;, 0.0, mass, 0.0, 0.0) for i in 1:n_atoms]
+    loggers = Dict(&quot;coords&quot; =&gt; CoordinateLogger(2; dims=n_dims))
+    specific_inter_lists = ([
+            HarmonicBond(1, 2, 0.7, 100.0), HarmonicBond(2, 3, 0.7, 100.0),
+            HarmonicBond(4, 5, 0.7, 100.0), HarmonicBond(5, 6, 0.7, 100.0)], [
+            HarmonicAngle(1, 2, 3, θ, 10.0), HarmonicAngle(4, 5, 6, θ, 10.0)])
+
+    s = Simulation(
+        simulator=integrator,
+        atoms=atoms,
+        specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
+        coords=coords,
+        velocities=velocities,
+        temperature=temp,
+        box_size=box_size,
+        neighbor_finder=neighbor_finder,
+        thermostat=thermostat,
+        loggers=loggers,
+        timestep=timestep,
+        n_steps=n_steps,
+    )
+
+    final_coords = simulate!(s)
+    dist_end = 0.5 * (norm(vector(final_coords[1], final_coords[3], box_size)) +
+                        norm(vector(final_coords[4], final_coords[6], box_size)))
+    loss_val = abs(dist_end - dist_true) + 0.0 * sum(sum(final_coords))
+
+    Zygote.ignore() do
+        printfmt(&quot;θ {:5.1f}°  |  Final dist {:4.2f}  |  Loss {:5.3f}  |  &quot;,
+                    rad2deg(θ), dist_end, loss_val)
+    end
+
+    return loss_val
+end
+
+function train()
+    θlearn = deg2rad(110.0)
+    n_epochs = 20
+
+    for epoch_n in 1:n_epochs
+        printfmt(&quot;Epoch {:&gt;2}  |  &quot;, epoch_n)
+        coords = [
+            SVector(0.8, 0.75, 1.5), SVector(1.5, 0.74, 1.5), SVector(2.3, 0.75, 1.5),
+            SVector(0.8, 2.25, 1.5), SVector(1.5, 2.24, 1.5), SVector(2.3, 2.25, 1.5)]
+        velocities = [velocity(mass, temp; dims=n_dims) for i in 1:n_atoms]
+        grad = gradient(loss, θlearn)[1]
+        printfmt(&quot;Grad {:6.3f}\n&quot;, round(grad, digits=2))
+        θlearn -= grad * 5e-3
+    end
+end
+
+train()</code></pre><pre><code class="language-none">Epoch  1  |  θ 110.0°  |  Final dist 1.15  |  Loss 0.147  |  Grad  3.080
+Epoch  2  |  θ 109.1°  |  Final dist 1.14  |  Loss 0.141  |  Grad  3.400
+Epoch  3  |  θ 108.1°  |  Final dist 1.13  |  Loss 0.134  |  Grad  3.570
+Epoch  4  |  θ 107.1°  |  Final dist 1.13  |  Loss 0.126  |  Grad  3.750
+Epoch  5  |  θ 106.0°  |  Final dist 1.12  |  Loss 0.119  |  Grad  3.950
+Epoch  6  |  θ 104.9°  |  Final dist 1.11  |  Loss 0.110  |  Grad  4.150
+Epoch  7  |  θ 103.7°  |  Final dist 1.10  |  Loss 0.101  |  Grad  4.370
+Epoch  8  |  θ 102.5°  |  Final dist 1.09  |  Loss 0.092  |  Grad  4.600
+Epoch  9  |  θ 101.2°  |  Final dist 1.08  |  Loss 0.082  |  Grad  4.840
+Epoch 10  |  θ  99.8°  |  Final dist 1.07  |  Loss 0.071  |  Grad  5.090
+Epoch 11  |  θ  98.3°  |  Final dist 1.06  |  Loss 0.059  |  Grad  5.340
+Epoch 12  |  θ  96.8°  |  Final dist 1.05  |  Loss 0.047  |  Grad  5.590
+Epoch 13  |  θ  95.2°  |  Final dist 1.03  |  Loss 0.034  |  Grad  5.840
+Epoch 14  |  θ  93.5°  |  Final dist 1.02  |  Loss 0.020  |  Grad  6.070
+Epoch 15  |  θ  91.8°  |  Final dist 1.01  |  Loss 0.005  |  Grad  6.290
+Epoch 16  |  θ  90.0°  |  Final dist 0.99  |  Loss 0.010  |  Grad -6.480
+Epoch 17  |  θ  91.8°  |  Final dist 1.01  |  Loss 0.005  |  Grad  6.350
+Epoch 18  |  θ  90.0°  |  Final dist 0.99  |  Loss 0.010  |  Grad -6.480
+Epoch 19  |  θ  91.9°  |  Final dist 1.01  |  Loss 0.006  |  Grad  6.340
+Epoch 20  |  θ  90.0°  |  Final dist 0.99  |  Loss 0.009  |  Grad -6.480</code></pre><p>The final value we get is 90.0°, close to the theoretical value of 91.2° which is obtainable from trigonometry. The final simulation looks like this: <img src="../images/sim_angle.gif" alt="Angle simulation"/> In the presence of other forces this value would not be so trivially obtainable. We can record the gradients for different values of <code>θ</code>:</p><pre><code class="language-julia">θs = collect(0:3:180)[2:end]
+grads = Float64[]
+
+for θ in θs
+    coords = [
+        SVector(0.8, 0.75, 1.5), SVector(1.5, 0.74, 1.5), SVector(2.3, 0.75, 1.5),
+        SVector(0.8, 2.25, 1.5), SVector(1.5, 2.24, 1.5), SVector(2.3, 2.25, 1.5)]
+    velocities = [velocity(mass, temp; dims=n_dims) for i in 1:n_atoms]
+    push!(grads, gradient(loss, deg2rad(θ))[1])
+end</code></pre><p>The plot of these shows that the gradient has the expected sign either side of the correct value. <img src="../images/grad_angle.png" alt="Angle gradient"/></p><h2 id="Neural-network-potentials"><a class="docs-heading-anchor" href="#Neural-network-potentials">Neural network potentials</a><a id="Neural-network-potentials-1"></a><a class="docs-heading-anchor-permalink" href="#Neural-network-potentials" title="Permalink"></a></h2><p>Since gradients can be computed with Zygote, <a href="https://fluxml.ai">Flux</a> models can also be incorporated into simulations. Here we show a neural network in the force function, though they can also be used in other parts of the simulation. This example also shows how gradients for multiple parameters can be obtained, in this case the parameters of the neural network. The jump from single to multiple parameters is important because single parameters can be easily optimised using other approaches, whereas differentiable simulation is well-placed to optimise many parameters simultaneously.</p><p>We set up three pseudo-atoms and train a network to imitate the Julia logo by moving the bottom two atoms:</p><pre><code class="language-julia">using Molly
+using Zygote
+using Flux
+using Format
+using LinearAlgebra
+
+dist_true = 1.0f0
+
+model = Chain(
+    Dense(1, 5, relu),
+    Dense(5, 1, tanh)
+)
+ps = params(model)
+
+struct NNBond &lt;: SpecificInteraction
+    i::Int
+    j::Int
+end
+
+# This method of defining the force is outdated compared to the master branch
+function Molly.force(coords, b::NNBond, s::Simulation)
+    ab = vector(coords[b.i], coords[b.j], s.box_size)
+    dist = Float32(norm(ab))
+    f = model([dist])[1] * normalize(ab)
+    return [b.i, b.j], [f, -f]
+end
+
+n_steps = 400
+mass = 10.0f0
+box_size = 5.0f0
+timestep = 0.02f0
+temp = 0.0f0
+integrator = VelocityVerlet()
+neighbor_finder = NoNeighborFinder()
+thermostat = FrictionThermostat(0.98f0)
+general_inters = (LennardJones(false),) # Ignored due to atom parameters
+coords = [SVector(2.3f0, 2.07f0), SVector(2.5f0, 2.93f0), SVector(2.7f0, 2.07f0)]
+n_atoms = length(coords)
+n_dims = length(first(coords))
+velocities = zero(coords)
+
+function loss()
+    atoms = [Atom(&quot;&quot;, &quot;&quot;, 0, &quot;&quot;, 0.0f0, mass, 0.0f0, 0.0f0) for i in 1:n_atoms]
+    loggers = Dict(&quot;coords&quot; =&gt; CoordinateLogger(10; dims=n_dims))
+    specific_inter_lists = ([NNBond(1, 3)],)
+
+    s = Simulation(
+        simulator=integrator,
+        atoms=atoms,
+        specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
+        coords=coords,
+        velocities=velocities,
+        temperature=temp,
+        box_size=box_size,
+        neighbor_finder=neighbor_finder,
+        thermostat=thermostat,
+        loggers=loggers,
+        timestep=timestep,
+        n_steps=n_steps,
+    )
+
+    final_coords = simulate!(s)
+    dist_end = (norm(vector(final_coords[1], final_coords[2], box_size)) +
+                norm(vector(final_coords[2], final_coords[3], box_size)) +
+                norm(vector(final_coords[3], final_coords[1], box_size))) / 3
+    loss_val = abs(dist_end - dist_true)
+
+    Zygote.ignore() do
+        printfmt(&quot;Dist end {:6.3f}  |  Loss {:6.3f}\n&quot;, dist_end, loss_val)
+    end
+
+    return loss_val
+end</code></pre><p>Before training the result looks like this: <img src="../images/logo_before.gif" alt="Logo before"/></p><pre><code class="language-julia">function train()
+    n_epochs = 20
+    opt = ADAM(0.02, (0.9, 0.999))
+
+    for epoch_n in 1:n_epochs
+        coords = [SVector(2.3f0, 2.07f0), SVector(2.5f0, 2.93f0), SVector(2.7f0, 2.07f0)]
+        velocities = zero(coords)
+        printfmt(&quot;Epoch {:&gt;2}  |  &quot;, epoch_n)
+        Flux.train!(loss, ps, ((),), opt)
+    end
+end
+
+train()</code></pre><pre><code class="language-none">Epoch  1  |  Dist end  0.675  |  Loss  0.325
+Epoch  2  |  Dist end  0.715  |  Loss  0.285
+Epoch  3  |  Dist end  0.756  |  Loss  0.244
+Epoch  4  |  Dist end  0.793  |  Loss  0.207
+Epoch  5  |  Dist end  0.832  |  Loss  0.168
+Epoch  6  |  Dist end  0.874  |  Loss  0.126
+Epoch  7  |  Dist end  0.918  |  Loss  0.082
+Epoch  8  |  Dist end  0.963  |  Loss  0.037
+Epoch  9  |  Dist end  1.008  |  Loss  0.008
+Epoch 10  |  Dist end  1.036  |  Loss  0.036
+Epoch 11  |  Dist end  1.052  |  Loss  0.052
+Epoch 12  |  Dist end  1.060  |  Loss  0.060
+Epoch 13  |  Dist end  1.060  |  Loss  0.060
+Epoch 14  |  Dist end  1.054  |  Loss  0.054
+Epoch 15  |  Dist end  1.044  |  Loss  0.044
+Epoch 16  |  Dist end  1.029  |  Loss  0.029
+Epoch 17  |  Dist end  1.011  |  Loss  0.011
+Epoch 18  |  Dist end  0.990  |  Loss  0.010
+Epoch 19  |  Dist end  0.977  |  Loss  0.023
+Epoch 20  |  Dist end  0.971  |  Loss  0.029</code></pre><p>After training it looks much better: <img src="../images/logo_after.gif" alt="Logo after"/> You could replace the simple network here with a much more complicated model and it would theoretically be able to train, even if it might prove practically difficult (see discussion below).</p><h2 id="Molecular-loss-functions"><a class="docs-heading-anchor" href="#Molecular-loss-functions">Molecular loss functions</a><a id="Molecular-loss-functions-1"></a><a class="docs-heading-anchor-permalink" href="#Molecular-loss-functions" title="Permalink"></a></h2><p>Ultimately, you need some objective function in order to calculate the gradient for each parameter. Here are some ideas for loss functions suitable for differentiable molecular simulations:</p><ul><li>The distance between atoms at the end of the simulation compared to some reference state. This loss is used in the examples given here, is physically reasonable, and has obvious bounds.</li><li>The distance between atoms throughout the simulation.</li><li>The radial distribution function of atoms.</li><li>RMSD between atoms and a reference state - this would be suitable for macromolecules.</li><li>dRMSD, the distance between a distance map and a reference distance map.</li><li>The flexibility of a set of atoms over the simulation.</li><li>Supramolecular geometry, for example assembly of molecules into straight fibres.</li><li>The correlation of different velocities over the simulation.</li><li>The energy of the system.</li><li>The temperature of the system.</li><li>Some measure of phase change or a critical point.</li><li>A combination of the above, for example to obtain a force field relevant to both ordered and disordered proteins.</li></ul><p>Some of these are currently not possible in Molly as the loggers are ignored for gradient purposes, but this will hopefully change when Zygote gets mutation support.</p><h2 id="Tips-and-tricks"><a class="docs-heading-anchor" href="#Tips-and-tricks">Tips and tricks</a><a id="Tips-and-tricks-1"></a><a class="docs-heading-anchor-permalink" href="#Tips-and-tricks" title="Permalink"></a></h2><ul><li>Exploding gradients prove a problem when using the velocity Verlet integrator in the NVE ensemble. This is why a thermostat that downscales velocities was used in the above examples - presumably it decays the gradients to the level required for learning. It is likely that the development of suitable simulation strategies and thermostats will be necessary to unlock the potential of differentiable simulation.</li><li>Do you <em>really</em> need a neural network to describe your potential? Think about learning a smaller number of physically-meaningful parameters before you put in a large neural network and expect it to learn. Whilst it is true that neural networks are universal function approximators, it does not follow that you will be able to train one by differentiating through  a long simulation. A 1000-step simulation with a 10-layer network at each step is analogous to training a 10,000 layer network (with shared weights).</li><li>Forward mode autodiff holds much promise for differentiable simulation, provided the number of parameters is small, because the memory requirement is constant in the number of simulation steps.</li></ul></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../docs/">« Documentation</a><a class="docs-footer-nextpage" href="../examples/">Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Saturday 23 October 2021 01:14">Saturday 23 October 2021</span>. Using Julia version 1.6.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
