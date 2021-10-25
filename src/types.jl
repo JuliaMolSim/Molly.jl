@@ -129,12 +129,11 @@ mutable struct NeighborList{T<:Integer}
     n::Int # Number of neighbors in list (n <= length(list))
     list::Vector{Tuple{T, T, Bool}}
 end
-import Base: empty!, push!, append!
-function empty!(nl::NeighborList)
+function Base.empty!(nl::NeighborList)
     nl.n = 0
     return nl
 end
-function push!(nl::NeighborList,element::Tuple{T,T,Bool}) where T<:Integer
+function Base.push!(nl::NeighborList,element::Tuple{T,T,Bool}) where T<:Integer
     nl.n += 1
     if nl.n > length(nl.list)
         push!(nl.list,element)
@@ -143,13 +142,13 @@ function push!(nl::NeighborList,element::Tuple{T,T,Bool}) where T<:Integer
     end
     return nl
 end
-function append!(nl::NeighborList,list::AbstractVector{Tuple{T,T,Bool}}) where T<:Integer
+function Base.append!(nl::NeighborList,list::AbstractVector{Tuple{T,T,Bool}}) where T<:Integer
     for element in list
         push!(nl,element)
     end
     return nl
 end
-append!(nl::NeighborList,nl_app::NeighborList) = append!(nl,@view(nl_app.list[1:nl_app.n]))
+Base.append!(nl::NeighborList,nl_app::NeighborList) = append!(nl,@view(nl_app.list[1:nl_app.n]))
 
 
 """
