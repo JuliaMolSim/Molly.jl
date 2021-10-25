@@ -204,7 +204,6 @@ function CellListMapNeighborFinder(;
     # If very few particles are used, use the minimum box side that is accepted
     # for this cutoff
     side = max(2*cutoff,side)
-    @show side, cutoff
     cl = CellList(
         [ side*rand(SVector{3,T}) for _ in 1:np ],
         Box(side*ones(SVector{3,T}),cutoff;T=T),
