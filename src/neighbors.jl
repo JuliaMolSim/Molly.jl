@@ -192,7 +192,8 @@ function CellListMapNeighborFinder(;
     matrix_14=falses(size(nb_matrix)),
     n_steps=10,
     dist_cutoff::D) where D
-    T = typeof(ustrip(dist_cutoff))
+    cutoff = ustrip(dist_cutoff)
+    T = typeof(cutoff)
     # Ideally one would want the coordinates of the particles and box size of the
     # initial system to properly initalize the cell lists here. 
     # Number of particles
@@ -200,9 +201,13 @@ function CellListMapNeighborFinder(;
     # guess box side from number of particles, just to provide a reasonable estimate 
     # of the side of the cell lists: water has roughly 100 atoms per nm^3
     side = (T(ustrip(uconvert(unit(dist_cutoff^3),np * 0.01u"nm^3"))))^(1/3)
+    # If very few particles are used, use the minimum box side that is accepted
+    # for this cutoff
+    side = max(2*cutoff,side)
+    @show side, cutoff
     cl = CellList(
         [ side*rand(SVector{3,T}) for _ in 1:np ],
-        Box(side*ones(SVector{3,T}),one(T);T=T),
+        Box(side*ones(SVector{3,T}),cutoff;T=T),
         parallel=true
     ) # will be overwritten
     return CellListMapNeighborFinder{D,3,T}(
