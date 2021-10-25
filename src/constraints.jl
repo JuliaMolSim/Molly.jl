@@ -108,11 +108,17 @@ function CCMAConstraints(atoms, atoms_data, bonds, angles, coords, box_size; cut
 end
 
 #
-function applyconstraints(constraints, atoms, coords, box_size; tolerance=1e-5, max_n_iters=150)
+function applyconstraints(coords_prev,
+                            coords_or_vels,
+                            constraints,
+                            atoms,
+                            box_size;
+                            tolerance=1e-5,
+                            max_n_iters=150)
     bond_constraints = constraints.bond_constraints
     inv_K = constraints.inv_K
     n_constraints = length(bond_constraints)
-    vecs_start = [vector(coords[bc.j], coords[bc.i], box_size) for bc in bond_constraints]
+    vecs_start = [vector(coords_prev[bc.j], coords_prev[bc.i], box_size) for bc in bond_constraints]
 
     lower_tol = 1.0 - 2 * tolerance + tolerance ^ 2
     upper_tol = 1.0 + 2 * tolerance + tolerance ^ 2
@@ -121,7 +127,7 @@ function applyconstraints(constraints, atoms, coords, box_size; tolerance=1e-5, 
         n_converged = 0
         deltas = typeof(mass(first(atoms)))[]
         for (bc, vec_start) in zip(bond_constraints, vecs_start)
-            dr = vector(coords[bc.j], coords[bc.i], box_size)
+            dr = vector(coords_or_vels[bc.j], coords_or_vels[bc.i], box_size)
             r2 = sum(abs2, dr)
             diff = bc.distance ^ 2 - r2
             rrpr = dot(dr, vec_start)
@@ -139,10 +145,10 @@ function applyconstraints(constraints, atoms, coords, box_size; tolerance=1e-5, 
 
         for (bc, vec_start, delta) in zip(bond_constraints, vecs_start, deltas)
             dr = vec_start * delta
-            coords[bc.i] += dr / mass(atoms[bc.i])
-            coords[bc.j] -= dr / mass(atoms[bc.j])
+            coords_or_vels[bc.i] += dr / mass(atoms[bc.i])
+            coords_or_vels[bc.j] -= dr / mass(atoms[bc.j])
         end
     end
 
-    return coords
+    return coords_or_vels
 end
