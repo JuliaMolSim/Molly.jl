@@ -2,7 +2,8 @@
 
 export BondConstraint,
     CCMAConstraints,
-    applyconstraints
+    constraincoordinates!,
+    constrainvelocities!
 
 """
     BondConstraint(i, j, distance, reduced_mass)
@@ -108,32 +109,52 @@ function CCMAConstraints(atoms, atoms_data, bonds, angles, coords, box_size; cut
 end
 
 #
-function applyconstraints(coords_prev,
-                            coords_or_vels,
+constraincoordinates!(coords, coords_prev, constraints, atoms, box_size; kwargs...) = applyconstraints!(
+    coords, coords_prev, constraints, atoms, box_size, false; kwargs...)
+
+#
+constrainvelocities!( vels  , coords_prev, constraints, atoms, box_size; kwargs...) = applyconstraints!(
+    vels  , coords_prev, constraints, atoms, box_size, true ; kwargs...)
+
+function applyconstraints!(coords_or_vels,
+                            coords_prev,
                             constraints,
                             atoms,
-                            box_size;
+                            box_size,
+                            constraining_velocities;
                             tolerance=1e-5,
                             max_n_iters=150)
     bond_constraints = constraints.bond_constraints
     inv_K = constraints.inv_K
     n_constraints = length(bond_constraints)
     vecs_start = [vector(coords_prev[bc.j], coords_prev[bc.i], box_size) for bc in bond_constraints]
+    r2s_start = sum.(abs2, vecs_start)
 
     lower_tol = 1.0 - 2 * tolerance + tolerance ^ 2
     upper_tol = 1.0 + 2 * tolerance + tolerance ^ 2
+    T = typeof(mass(first(atoms)) * first(first(coords_or_vels)) / first(first(coords_prev)))
 
     for iter_i in 1:max_n_iters
         n_converged = 0
-        deltas = typeof(mass(first(atoms)))[]
-        for (bc, vec_start) in zip(bond_constraints, vecs_start)
-            dr = vector(coords_or_vels[bc.j], coords_or_vels[bc.i], box_size)
-            r2 = sum(abs2, dr)
-            diff = bc.distance ^ 2 - r2
-            rrpr = dot(dr, vec_start)
-            push!(deltas, bc.reduced_mass * diff / rrpr)
-            if r2 >= (lower_tol * bc.distance ^ 2) && r2 <= (upper_tol * bc.distance ^ 2)
-                n_converged += 1
+        deltas = T[]
+        for (bc, vec_start, r2_start) in zip(bond_constraints, vecs_start, r2s_start)
+            if constraining_velocities
+                dr = coords_or_vels[bc.i] - coords_or_vels[bc.j]
+                rrpr = dot(dr, vec_start)
+                delta = -2 * bc.reduced_mass * rrpr / r2_start
+                push!(deltas, delta)
+                if abs(delta) <= (tolerance)u"u * ps^-1"
+                    n_converged += 1
+                end
+            else
+                dr = vector(coords_or_vels[bc.j], coords_or_vels[bc.i], box_size)
+                rrpr = dot(dr, vec_start)
+                r2 = sum(abs2, dr)
+                diff = bc.distance ^ 2 - r2
+                push!(deltas, bc.reduced_mass * diff / rrpr)
+                if r2 >= (lower_tol * bc.distance ^ 2) && r2 <= (upper_tol * bc.distance ^ 2)
+                    n_converged += 1
+                end
             end
         end
 
