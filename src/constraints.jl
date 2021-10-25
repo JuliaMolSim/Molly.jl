@@ -1,8 +1,14 @@
 # Bond and angle constraints
 
-export BondConstraint
+export BondConstraint,
+    CCMAConstraints,
+    applyconstraints
 
-#
+"""
+    BondConstraint(i, j, distance, reduced_mass)
+
+A constraint that required two atoms to be a certain distance apart.
+"""
 struct BondConstraint{D, M}
     i::Int
     j::Int
@@ -10,9 +16,20 @@ struct BondConstraint{D, M}
     reduced_mass::M
 end
 
-# Constant Constraint Matrix Approximation method
-# See Eastman and Pande 2010
-function ccma_matrix(atoms, atoms_data, bonds, angles, coords, box_size)
+"""
+    CCMAConstraints(atoms, atoms_data, bonds, angles, coords, box_size)
+    CCMAConstraints(bond_constraints, inv_K)
+
+A set of bond and angle constraints to be constrained using the Constraint
+Matrix Approximation method.
+See Eastman and Pande 2010.
+"""
+struct CCMAConstraints{B, M}
+    bond_constraints::Vector{B}
+    inv_K::M
+end
+
+function CCMAConstraints(atoms, atoms_data, bonds, angles, coords, box_size; cutoff=0.01)
     T = Float64
     elements = [at.element for at in atoms_data]
     masses = mass.(atoms)
@@ -84,14 +101,18 @@ function ccma_matrix(atoms, atoms_data, bonds, angles, coords, box_size)
         end
     end
 
-    inv_K = qr(K).Q
-    return [bond_constraints...], inv_K
+    bond_constraints = [bond_constraints...]
+    inv_K = inv(Array(K)) # Could do this with QR
+    inv_K = sparse((abs.(inv_K) .> cutoff) .* inv_K)
+    return CCMAConstraints(bond_constraints, inv_K)
 end
 
-function applyconstraints(inv_K, atoms, coords, box_size, bond_constraints,
-                            tolerance=1e-5, max_n_iters=150)
+#
+function applyconstraints(constraints, atoms, coords, box_size; tolerance=1e-5, max_n_iters=150)
+    bond_constraints = constraints.bond_constraints
+    inv_K = constraints.inv_K
     n_constraints = length(bond_constraints)
-    vecs_start = [vector(coords[bc.i], coords[bc.j], box_size) for bc in bond_constraints]
+    vecs_start = [vector(coords[bc.j], coords[bc.i], box_size) for bc in bond_constraints]
 
     lower_tol = 1.0 - 2 * tolerance + tolerance ^ 2
     upper_tol = 1.0 + 2 * tolerance + tolerance ^ 2
@@ -100,7 +121,7 @@ function applyconstraints(inv_K, atoms, coords, box_size, bond_constraints,
         n_converged = 0
         deltas = typeof(mass(first(atoms)))[]
         for (bc, vec_start) in zip(bond_constraints, vecs_start)
-            dr = vector(coords[bc.i], coords[bc.j], box_size)
+            dr = vector(coords[bc.j], coords[bc.i], box_size)
             r2 = sum(abs2, dr)
             diff = bc.distance ^ 2 - r2
             rrpr = dot(dr, vec_start)
@@ -110,13 +131,11 @@ function applyconstraints(inv_K, atoms, coords, box_size, bond_constraints,
             end
         end
 
-        println(n_converged)
         if n_converged == n_constraints
             break
         end
 
-        deltas = [sum(mv * dv for (mv, dv) in zip(inv_K[i, :], deltas)) for i in 1:n_constraints]
-        deltas = Array(inv_K) * deltas # Slow
+        deltas = inv_K * deltas
 
         for (bc, vec_start, delta) in zip(bond_constraints, vecs_start, deltas)
             dr = vec_start * delta
