@@ -349,7 +349,7 @@ function readinputs(T::Type,
 
     atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
 
-    neighbor_finder = CellListNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
+    neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
                                                 dist_cutoff=units ? T(nl_dist) : T(ustrip(nl_dist)))
 
     return atoms, atoms_data, specific_inter_lists, general_inters,
@@ -862,7 +862,7 @@ function setupsystem(coord_file::AbstractString,
     coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(positions(frame))]
     coords = wrapcoordsvec.(coords, (box_size,))
 
-    neighbor_finder = CellListNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14,
+    neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14,
                                                 n_steps=10, dist_cutoff=T(nl_dist))
 
     return [atoms...], atoms_data, specific_inter_lists, general_inters,

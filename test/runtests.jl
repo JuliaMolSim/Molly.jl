@@ -130,7 +130,7 @@ end
     @test wrapcoords(12.0u"m" , 10.0u"m" ) == 2.0u"m"
     @test_throws ErrorException wrapcoords(-2.0u"nm", 10.0)
 
-    for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListNeighborFinder)
+    for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
         s = Simulation(
             simulator=VelocityVerlet(),
             atoms=[Atom(), Atom(), Atom()],
@@ -140,12 +140,33 @@ end
             neighbor_finder=neighbor_finder(nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
         )
         find_neighbors!(s, s.neighbor_finder, 0; parallel=false)
-        @test s.neighbors == [(2, 1, false)] || s.neighbors == [(1, 2, false)]
+        @test s.neighbors.list == [(2, 1, false)] || s.neighbors.list == [(1, 2, false)]
         if nthreads() > 1
             find_neighbors!(s, s.neighbor_finder, 0; parallel=true)
-            @test s.neighbors == [(2, 1, false)] || s.neighbors == [(1, 2, false)]
+            @test s.neighbors.list == [(2, 1, false)] || s.neighbors.list == [(1, 2, false)]
         end
     end
+
+    # Test passing the box_size and coordinates as keyword arguments to CellListMapNeighborFinder
+    coords=[SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm",SVector(5.0, 5.0, 5.0)u"nm"]
+    box_size=SVector(10.0, 10.0, 10.0)u"nm"
+    neighbor_finder=CellListMapNeighborFinder(
+        nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm",
+        x0=coords, unit_cell=box_size
+    )
+    s = Simulation(
+        simulator=VelocityVerlet(),
+        atoms=[Atom(), Atom(), Atom()],
+        coords=coords, box_size=box_size,
+        neighbor_finder=neighbor_finder
+    )
+    find_neighbors!(s, s.neighbor_finder, 0; parallel=false)
+    @test s.neighbors.list == [(2, 1, false)] || s.neighbors.list == [(1, 2, false)]
+    if nthreads() > 1
+        find_neighbors!(s, s.neighbor_finder, 0; parallel=true)
+        @test s.neighbors.list == [(2, 1, false)] || s.neighbors.list == [(1, 2, false)]
+    end
+
 end
 
 @testset "Lennard-Jones gas 2D" begin
@@ -215,9 +236,9 @@ end
 
         nf_tree = TreeNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
         find_neighbors!(s, s.neighbor_finder, 0; parallel=parallel)
-        ref = copy(s.neighbors)
+        ref = copy(s.neighbors.list)
         find_neighbors!(s, nf_tree, 0; parallel=parallel)
-        @test s.neighbors == ref
+        @test s.neighbors.list == ref
 
         @time simulate!(s; parallel=parallel)
 

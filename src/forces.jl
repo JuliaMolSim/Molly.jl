@@ -87,8 +87,8 @@ function accelerations(s::Simulation; parallel::Bool=true)
         for inter in values(s.general_inters)
             if inter.nl_only
                 neighbors = s.neighbors
-                @threads for ni in 1:length(neighbors)
-                    i, j, w = neighbors[ni]
+                @threads for ni in 1:neighbors.n
+                    i, j, w = neighbors.list[ni]
                     force!(forces_threads[threadid()], inter, s, i, j, s.force_unit, w)
                 end
             else
@@ -107,8 +107,8 @@ function accelerations(s::Simulation; parallel::Bool=true)
         for inter in values(s.general_inters)
             if inter.nl_only
                 neighbors = s.neighbors
-                for ni in 1:length(neighbors)
-                    i, j, w = neighbors[ni]
+                for ni in 1:neighbors.n
+                    i, j, w = neighbors.list[ni]
                     force!(forces, inter, s, i, j, s.force_unit, w)
                 end
             else

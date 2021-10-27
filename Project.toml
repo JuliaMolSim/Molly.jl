@@ -26,7 +26,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 [compat]
 BioStructures = "0.10, 0.11, 1"
 CUDA = "3"
-CellListMap = "0.5"
+CellListMap = "0.6"
 Chemfiles = "0.10"
 Colors = "0.10, 0.11, 0.12"
 Combinatorics = "1"

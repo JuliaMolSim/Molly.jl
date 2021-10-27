@@ -122,6 +122,35 @@ function AtomData(;
     return AtomData(atom_type, atom_name, res_number, res_name, element)
 end
 
+#
+# Structure to contain preallocated neighbor lists
+#
+mutable struct NeighborList{T<:Integer}
+    n::Int # Number of neighbors in list (n <= length(list))
+    list::Vector{Tuple{T, T, Bool}}
+end
+function Base.empty!(nl::NeighborList)
+    nl.n = 0
+    return nl
+end
+function Base.push!(nl::NeighborList,element::Tuple{T,T,Bool}) where T<:Integer
+    nl.n += 1
+    if nl.n > length(nl.list)
+        push!(nl.list,element)
+    else
+        nl.list[nl.n] = element
+    end
+    return nl
+end
+function Base.append!(nl::NeighborList,list::AbstractVector{Tuple{T,T,Bool}}) where T<:Integer
+    for element in list
+        push!(nl,element)
+    end
+    return nl
+end
+Base.append!(nl::NeighborList,nl_app::NeighborList) = append!(nl,@view(nl_app.list[1:nl_app.n]))
+
+
 """
     Simulation(; <keyword arguments>)
 
@@ -164,7 +193,7 @@ default values.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E}
+struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E, NL, NF}
     simulator::Simulator
     atoms::A
     atoms_data::AD
@@ -174,8 +203,8 @@ struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E}
     velocities::V
     temperature::T
     box_size::B
-    neighbors::Vector{Tuple{Int, Int, Bool}}
-    neighbor_finder::NeighborFinder
+    neighbors::NL
+    neighbor_finder::NF
     thermostat::Thermostat
     loggers::Dict{String, <:Logger}
     timestep::S
@@ -185,7 +214,8 @@ struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E}
     energy_unit::E
 end
 
-Simulation{D}(args...) where {D, T, A, AD, C, V, GI, SI, B, S, F, E} = Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E}(args...)
+Simulation{D}(args...) where {D, T, A, AD, C, V, GI, SI, B, S, F, E, NL, NF} = 
+    Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E, NL, NF}(args...)
 
 function Simulation(;
                     simulator=VelocityVerlet(),
@@ -197,7 +227,7 @@ function Simulation(;
                     velocities=zero(coords),
                     temperature=0.0u"K",
                     box_size,
-                    neighbors=Tuple{Int, Int, Bool}[],
+                    neighbors=NeighborList(0,Tuple{Int, Int, Bool}[]),
                     neighbor_finder=NoNeighborFinder(),
                     thermostat=NoThermostat(),
                     loggers=Dict{String, Logger}(),
@@ -218,7 +248,9 @@ function Simulation(;
     S = typeof(timestep)
     F = typeof(force_unit)
     E = typeof(energy_unit)
-    return Simulation{gpu_diff_safe, T, A, AD, C, V, GI, SI, B, S, F, E}(
+    NL = typeof(neighbors)
+    NF = typeof(neighbor_finder)
+    return Simulation{gpu_diff_safe, T, A, AD, C, V, GI, SI, B, S, F, E, NL, NF}(
                 simulator, atoms, atoms_data, specific_inter_lists, general_inters,
                 coords, velocities, temperature, box_size, neighbors, neighbor_finder,
                 thermostat, loggers, timestep, n_steps, n_steps_made, force_unit,
