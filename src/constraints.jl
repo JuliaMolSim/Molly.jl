@@ -1,16 +1,17 @@
 # Bond and angle constraints
 
-export BondConstraint,
+export DistanceConstraint,
+    AngleConstraint,
     CCMAConstraints,
     constraincoordinates!,
     constrainvelocities!
 
 """
-    BondConstraint(i, j, distance, reduced_mass)
+    DistanceConstraint(i, j, distance, reduced_mass)
 
-A constraint that required two atoms to be a certain distance apart.
+A constraint that requires two atoms to be a certain distance apart.
 """
-struct BondConstraint{D, M}
+struct DistanceConstraint{D, M}
     i::Int
     j::Int
     distance::D
@@ -18,15 +19,30 @@ struct BondConstraint{D, M}
 end
 
 """
+    AngleConstraint(i, j, k, angle)
+
+A constraint that requires three atoms to have a certain bond angle.
+"""
+struct AngleConstraint{T}
+    i::Int
+    j::Int
+    k::Int
+    angle::T
+end
+
+"""
     CCMAConstraints(atoms, atoms_data, bonds, angles, coords, box_size)
-    CCMAConstraints(bond_constraints, inv_K)
+    CCMAConstraints(bond_constraints, angle_constraints,
+                    combined_constraints, inv_K)
 
 A set of bond and angle constraints to be constrained using the Constraint
 Matrix Approximation method.
 See Eastman and Pande 2010.
 """
-struct CCMAConstraints{B, M}
+struct CCMAConstraints{B, A, M}
     bond_constraints::Vector{B}
+    angle_constraints::Vector{A}
+    combined_constraints::Vector{B}
     inv_K::M
 end
 
@@ -35,17 +51,19 @@ function CCMAConstraints(atoms, atoms_data, bonds, angles, coords, box_size; cut
     elements = [at.element for at in atoms_data]
     masses = mass.(atoms)
 
-    bond_constraints = BondConstraint[]
-    angle_constraints = Tuple{Int, Int, Int}[]
+    bond_constraints = DistanceConstraint[]
+    angle_constraints = AngleConstraint[]
 
     for bond in bonds
         if elements[bond.i] == "H" || elements[bond.j] == "H"
             i, j = sort([bond.i, bond.j])
             dist = norm(vector(coords[i], coords[j], box_size))
             reduced_mass = inv(2 * (inv(masses[i]) + inv(masses[j])))
-            push!(bond_constraints, BondConstraint(i, j, dist, reduced_mass))
+            push!(bond_constraints, DistanceConstraint(i, j, dist, reduced_mass))
         end
     end
+
+    combined_constraints = [bond_constraints...]
 
     for angle in angles
         n_hydrogen = 0
@@ -57,44 +75,83 @@ function CCMAConstraints(atoms, atoms_data, bonds, angles, coords, box_size; cut
         end
         if n_hydrogen == 2 || (n_hydrogen == 1 && elements[angle.j] == "O")
             i, k = sort([angle.i, angle.k])
-            push!(angle_constraints, (i, angle.j, k))
+            d1 = norm(vector(coords[angle.j], coords[i], box_size))
+            d2 = norm(vector(coords[angle.j], coords[k], box_size))
+            dist = norm(vector(coords[i], coords[k], box_size))
+            θ = acos((d1 * d1 + d2 * d2 - dist * dist) / (2 * d1 * d2))
+            push!(angle_constraints, AngleConstraint(i, angle.j, k, θ))
+            reduced_mass = inv(2 * (inv(masses[i]) + inv(masses[k])))
+            push!(combined_constraints, DistanceConstraint(i, k, dist, reduced_mass))
         end
     end
 
-    n_constraints = length(bond_constraints)
+    # Remove a constraint from atoms constrained to 3 or more others
+    # This is a quick way to avoid a non-singular inverse matrix due to an over-constrained system
+    constraints_per_atom = zeros(Int, length(atoms))
+    for (ai, ad) in enumerate(atoms_data)
+        # Doesn't converge for larger angles
+        if (ad.atom_name in ("NH1", "NH2") && ad.res_name == "ARG") || (ad.atom_name == "ND2" && ad.res_name == "ASN")
+            constraints_per_atom[ai] += 1
+        end
+    end
+    for c in combined_constraints
+        constraints_per_atom[c.i] += 1
+        constraints_per_atom[c.j] += 1
+    end
+    constraints_to_remove = falses(length(combined_constraints))
+    for (ci, c) in enumerate(combined_constraints)
+        if constraints_per_atom[c.i] >= 3
+            constraints_to_remove[ci] = true
+            constraints_per_atom[c.i] = 0
+        end
+        if constraints_per_atom[c.j] >= 3
+            constraints_to_remove[ci] = true
+            constraints_per_atom[c.j] = 0
+        end
+    end
+    combined_constraints = [combined_constraints[ci] for ci in 1:length(combined_constraints) if !constraints_to_remove[ci]]
+
+    n_constraints = length(combined_constraints)
     K = spzeros(T, n_constraints, n_constraints)
     for ci in 1:n_constraints
         for cj in 1:n_constraints
-            cj_inds = (bond_constraints[cj].i, bond_constraints[cj].j)
+            cj_inds = (combined_constraints[cj].i, combined_constraints[cj].j)
             if ci == cj
                 K[ci, ci] = one(T)
-            elseif bond_constraints[ci].i in cj_inds || bond_constraints[ci].j in cj_inds
-                if bond_constraints[ci].i in cj_inds
-                    shared_ind = bond_constraints[ci].i
-                    other_ind_i = bond_constraints[ci].j
+            elseif combined_constraints[ci].i in cj_inds || combined_constraints[ci].j in cj_inds
+                if combined_constraints[ci].i in cj_inds
+                    shared_ind = combined_constraints[ci].i
+                    other_ind_i = combined_constraints[ci].j
                 else
-                    shared_ind = bond_constraints[ci].j
-                    other_ind_i = bond_constraints[ci].i
+                    shared_ind = combined_constraints[ci].j
+                    other_ind_i = combined_constraints[ci].i
                 end
-                if shared_ind == bond_constraints[cj].i
-                    other_ind_j = bond_constraints[cj].j
+                if shared_ind == combined_constraints[cj].i
+                    other_ind_j = combined_constraints[cj].j
                 else
-                    other_ind_j = bond_constraints[cj].i
+                    other_ind_j = combined_constraints[cj].i
                 end
                 sort_other_ind_1, sort_other_ind_2 = sort([other_ind_i, other_ind_j])
-                angle_constraint_ind = findfirst(isequal((sort_other_ind_1, shared_ind, sort_other_ind_2)), angle_constraints)
-                if isnothing(angle_constraint_ind)
-                    # If the angle is unconstrained, use the equilibrium angle of the harmonic force term
-                    angle_force_ind = findfirst(angles) do a
-                        (sort_other_ind_1, shared_ind, sort_other_ind_2) in ((a.i, a.j, a.k), (a.k, a.j, a.i))
+                triangle_ind = findfirst(combined_constraints) do c
+                    c.i == sort_other_ind_1 && c.j == sort_other_ind_2
+                end                                            
+                angle_force_ind = findfirst(angles) do a
+                    (sort_other_ind_1, shared_ind, sort_other_ind_2) in ((a.i, a.j, a.k), (a.k, a.j, a.i))
+                end
+                if isnothing(triangle_ind)
+                    if !isnothing(angle_force_ind)
+                        cos_θ = cos(angles[angle_force_ind].th0)
+                    else
+                        d1 = combined_constraints[ci].distance
+                        d2 = combined_constraints[cj].distance
+                        d3 = norm(vector(coords[sort_other_ind_1], coords[sort_other_ind_2], box_size))
+                        cos_θ = (d1 * d1 + d2 * d2 - d3 * d3) / (2 * d1 * d2)
                     end
-                    isnothing(angle_force_ind) && error("No angle term found for atoms ", (sort_other_ind_1, shared_ind, sort_other_ind_2))
-                    cos_θ = cos(angles[angle_force_ind].th0)
                 else
-                    # If the angle is constrained, use the actual constrained angle
-                    ba = vector(coords[shared_ind], coords[other_ind_i], box_size)
-                    bc = vector(coords[shared_ind], coords[other_ind_j], box_size)
-                    cos_θ = dot(ba, bc) / (norm(ba) * norm(bc))
+                    d1 = combined_constraints[ci].distance
+                    d2 = combined_constraints[cj].distance
+                    d3 = combined_constraints[triangle_ind].distance
+                    cos_θ = (d1 * d1 + d2 * d2 - d3 * d3) / (2 * d1 * d2)
                 end
                 mass_term = inv(masses[shared_ind]) / (inv(masses[shared_ind]) + inv(masses[other_ind_i]))
                 K[ci, cj] = mass_term * cos_θ
@@ -102,10 +159,9 @@ function CCMAConstraints(atoms, atoms_data, bonds, angles, coords, box_size; cut
         end
     end
 
-    bond_constraints = [bond_constraints...]
-    inv_K = inv(Array(K)) # Could do this with QR
+    inv_K = inv(Array(K))
     inv_K = sparse((abs.(inv_K) .> cutoff) .* inv_K)
-    return CCMAConstraints(bond_constraints, inv_K)
+    return CCMAConstraints([bond_constraints...], [angle_constraints...], combined_constraints, inv_K)
 end
 
 #
@@ -123,36 +179,37 @@ function applyconstraints!(coords_or_vels,
                             box_size,
                             constraining_velocities;
                             tolerance=1e-5,
+                            vel_tolerance=1e-5u"u * ps^-1",
                             max_n_iters=150)
-    bond_constraints = constraints.bond_constraints
+    dist_constraints = constraints.combined_constraints
     inv_K = constraints.inv_K
-    n_constraints = length(bond_constraints)
-    vecs_start = [vector(coords_prev[bc.j], coords_prev[bc.i], box_size) for bc in bond_constraints]
+    n_constraints = length(dist_constraints)
+    vecs_start = [vector(coords_prev[dc.j], coords_prev[dc.i], box_size) for dc in dist_constraints]
     r2s_start = sum.(abs2, vecs_start)
 
-    lower_tol = 1.0 - 2 * tolerance + tolerance ^ 2
-    upper_tol = 1.0 + 2 * tolerance + tolerance ^ 2
+    lower_tol = 1 - 2 * tolerance + tolerance ^ 2
+    upper_tol = 1 + 2 * tolerance + tolerance ^ 2
     T = typeof(mass(first(atoms)) * first(first(coords_or_vels)) / first(first(coords_prev)))
 
     for iter_i in 1:max_n_iters
         n_converged = 0
         deltas = T[]
-        for (bc, vec_start, r2_start) in zip(bond_constraints, vecs_start, r2s_start)
+        for (dc, vec_start, r2_start) in zip(dist_constraints, vecs_start, r2s_start)
             if constraining_velocities
-                dr = coords_or_vels[bc.i] - coords_or_vels[bc.j]
+                dr = coords_or_vels[dc.i] - coords_or_vels[dc.j]
                 rrpr = dot(dr, vec_start)
-                delta = -2 * bc.reduced_mass * rrpr / r2_start
+                delta = -2 * dc.reduced_mass * rrpr / r2_start
                 push!(deltas, delta)
-                if abs(delta) <= (tolerance)u"u * ps^-1"
+                if abs(delta) <= vel_tolerance
                     n_converged += 1
                 end
             else
-                dr = vector(coords_or_vels[bc.j], coords_or_vels[bc.i], box_size)
+                dr = vector(coords_or_vels[dc.j], coords_or_vels[dc.i], box_size)
                 rrpr = dot(dr, vec_start)
                 r2 = sum(abs2, dr)
-                diff = bc.distance ^ 2 - r2
-                push!(deltas, bc.reduced_mass * diff / rrpr)
-                if r2 >= (lower_tol * bc.distance ^ 2) && r2 <= (upper_tol * bc.distance ^ 2)
+                diff = dc.distance ^ 2 - r2
+                push!(deltas, dc.reduced_mass * diff / rrpr)
+                if r2 >= (lower_tol * dc.distance ^ 2) && r2 <= (upper_tol * dc.distance ^ 2)
                     n_converged += 1
                 end
             end
@@ -164,10 +221,10 @@ function applyconstraints!(coords_or_vels,
 
         deltas = inv_K * deltas
 
-        for (bc, vec_start, delta) in zip(bond_constraints, vecs_start, deltas)
+        for (dc, vec_start, delta) in zip(dist_constraints, vecs_start, deltas)
             dr = vec_start * delta
-            coords_or_vels[bc.i] += dr / mass(atoms[bc.i])
-            coords_or_vels[bc.j] -= dr / mass(atoms[bc.j])
+            coords_or_vels[dc.i] += dr / mass(atoms[dc.i])
+            coords_or_vels[dc.j] -= dr / mass(atoms[dc.j])
         end
     end
 
