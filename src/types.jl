@@ -227,7 +227,7 @@ function Simulation(;
                     velocities=zero(coords),
                     temperature=0.0u"K",
                     box_size,
-                    neighbors=NeighborList(0,Tuple{Int, Int, Bool}[]),
+                    neighbors=NeighborList(0, Tuple{Int, Int, Bool}[]),
                     neighbor_finder=NoNeighborFinder(),
                     thermostat=NoThermostat(),
                     loggers=Dict{String, Logger}(),

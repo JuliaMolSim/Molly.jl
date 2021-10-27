@@ -162,15 +162,13 @@ function find_neighbors!(s::Simulation,
     end
 end
 
-#
 # Find neighbor lists using CellListMap.jl
-#
 """
 
     CellListMapNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff, x0, unit_cell)
 
 Find close atoms by distance, and store auxiliary arrays for in-place threading. `x0` and `unit_cell` 
-are optional initial coordinates and system unit cell, that improve the first approximation of the
+are optional initial coordinates and system unit cell that improve the first approximation of the
 cell list structure. The unit cell can be provided as a three-component vector of box sides on each
 direction, in which case the unit cell is considered `OrthorhombicCell`, or as a unit cell matrix,
 in which case the cell is considered a general `TriclinicCell` by the cell list algorithm.
@@ -205,25 +203,26 @@ CellListMapNeighborFinder{Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋,
 ```
 
 """
-mutable struct CellListMapNeighborFinder{D,N,T} <: NeighborFinder
+mutable struct CellListMapNeighborFinder{D, N, T} <: NeighborFinder
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int
     dist_cutoff::D
     # auxiliary arrays for multi-threaded in-place updating of the lists
-    cl::CellListMap.CellList{N,T}
-    aux::CellListMap.AuxThreaded{N,T}
+    cl::CellListMap.CellList{N, T}
+    aux::CellListMap.AuxThreaded{N, T}
     neighbors_threaded::Vector{NeighborList}
 end
-function Base.show(io::IO,::MIME"text/plain",neighbor_finder::NeighborFinder)
-    println(io,typeof(neighbor_finder))
+
+function Base.show(io::IO, neighbor_finder::NeighborFinder)
+    println(io, typeof(neighbor_finder))
     println(io,"  Size of nb_matrix = " , size(neighbor_finder.nb_matrix))
     println(io,"  n_steps = " , neighbor_finder.n_steps)
     print(io,"  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end
 
 # This function sets up the box structure for CellListMap. It uses the unit cell
-# if it is given, or guesses a box size from the number of particules, assuming 
+# if it is given, or guesses a box size from the number of particles, assuming 
 # that the atomic density is similar to that of liquid water at ambient conditions.
 function CellListMapNeighborFinder(;
                                    nb_matrix,
@@ -232,36 +231,34 @@ function CellListMapNeighborFinder(;
                                    dist_cutoff::D,
                                    x0=nothing,
                                    unit_cell=nothing) where D
-    cutoff =  ustrip(dist_cutoff)
+    cutoff = ustrip(dist_cutoff)
     T = typeof(cutoff)
-    np = size(nb_matrix,1)
+    np = size(nb_matrix, 1)
     if isnothing(unit_cell)
-        side = T(ustrip(uconvert(unit(dist_cutoff^3),np * 0.01u"nm^3")))^(1/3)
-        side = max(side,2*cutoff)
-        box = Box(side*ones(SVector{3,T}),cutoff;T=T)
+        side = T(ustrip(uconvert(unit(dist_cutoff ^ 3), np * 0.01u"nm^3"))) ^ (1 / 3)
+        side = max(side, 2 * cutoff)
+        box = CellListMap.Box(side * ones(SVector{3, T}), cutoff; T=T)
     else
-        box = Box(unit_cell, cutoff; T=T)
+        box = CellListMap.Box(unit_cell, cutoff; T=T)
     end
     if isnothing(x0)
-        x = [ box.unit_cell_max .* rand(SVector{3,T}) for _ in 1:np ]
+        x = [box.unit_cell_max .* rand(SVector{3, T}) for _ in 1:np]
     else
         x = x0
     end
     # Construct the cell list for the first time, to allocate 
-    cl = CellList(x, box, parallel=true)
-    return CellListMapNeighborFinder{D,3,T}(
+    cl = CellList(x, box; parallel=true)
+    return CellListMapNeighborFinder{D, 3, T}(
         nb_matrix, matrix_14, n_steps, dist_cutoff,
         cl, CellListMap.AuxThreaded(cl), 
-        [ NeighborList(0,[(0,0,false)]) for _ in 1:nthreads() ])
+        [NeighborList(0, [(0, 0, false)]) for _ in 1:nthreads()])
 end
 
 """
-
     push_pair!(neighbor::NeighborList, i, j, nb_matrix, matrix_14)
 
 Add pair to pair list. If the buffer size is large enough, update element, otherwise
-push new element to `neighbor.list`
-
+push new element to `neighbor.list`.
 """
 function push_pair!(neighbors::NeighborList, i, j, nb_matrix, matrix_14)
     if nb_matrix[i, j]
@@ -274,7 +271,7 @@ end
 function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{NeighborList})
     neighbors.n = 0
     for i in 1:nthreads()
-        append!(neighbors,neighbors_threaded[i])
+        append!(neighbors, neighbors_threaded[i])
     end
     return neighbors
 end
@@ -284,15 +281,13 @@ end
 CellListMap.strip_value(x::Unitful.Quantity) = Unitful.ustrip(x)
 
 """
-
-    Molly.find_neighbors!(s::Simulation,
-                          nf::CellListMapNeighborFinder,
-                          step_n::Integer;
-                          parallel::Bool=true)
+    find_neighbors!(s::Simulation,
+                    nf::CellListMapNeighborFinder,
+                    step_n::Integer;
+                    parallel::Bool=true)
 
 Find neighbors using `CellListMap`, without in-place updating. Should be called only
-the first time the cell lists are built. Modifies the *mutable* `nf` structure.
-
+the first time the cell lists are built. Modifies the mutable `nf` structure.
 """
 function Molly.find_neighbors!(s::Simulation,
                                nf::CellListMapNeighborFinder,
