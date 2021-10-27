@@ -262,7 +262,7 @@ push new element to `neighbor.list`.
 """
 function push_pair!(neighbors::NeighborList, i, j, nb_matrix, matrix_14)
     if nb_matrix[i, j]
-        push!(neighbors,(i, j, matrix_14[i, j]))
+        push!(neighbors, (Int(i), Int(j), matrix_14[i, j]))
     end
     return neighbors
 end

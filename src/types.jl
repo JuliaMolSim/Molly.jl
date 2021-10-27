@@ -122,33 +122,35 @@ function AtomData(;
     return AtomData(atom_type, atom_name, res_number, res_name, element)
 end
 
-#
 # Structure to contain preallocated neighbor lists
-#
-mutable struct NeighborList{T<:Integer}
+mutable struct NeighborList
     n::Int # Number of neighbors in list (n <= length(list))
-    list::Vector{Tuple{T, T, Bool}}
+    list::Vector{Tuple{Int, Int, Bool}}
 end
+
 function Base.empty!(nl::NeighborList)
     nl.n = 0
     return nl
 end
-function Base.push!(nl::NeighborList,element::Tuple{T,T,Bool}) where T<:Integer
+
+function Base.push!(nl::NeighborList, element::Tuple{Int, Int, Bool})
     nl.n += 1
     if nl.n > length(nl.list)
-        push!(nl.list,element)
+        push!(nl.list, element)
     else
         nl.list[nl.n] = element
     end
     return nl
 end
-function Base.append!(nl::NeighborList,list::AbstractVector{Tuple{T,T,Bool}}) where T<:Integer
+
+function Base.append!(nl::NeighborList, list::AbstractVector{Tuple{Int, Int, Bool}})
     for element in list
-        push!(nl,element)
+        push!(nl, element)
     end
     return nl
 end
-Base.append!(nl::NeighborList,nl_app::NeighborList) = append!(nl,@view(nl_app.list[1:nl_app.n]))
+
+Base.append!(nl::NeighborList, nl_app::NeighborList) = append!(nl, @view(nl_app.list[1:nl_app.n]))
 
 
 """
