@@ -85,16 +85,16 @@ function CCMAConstraints(atoms, atoms_data, bonds, angles, coords, box_size; cut
         end
     end
 
-    # Remove a constraint from atoms constrained to 3 or more others
+    # Remove a constraint from atoms bonded to 3 or more others
     # This is a quick way to avoid a non-singular inverse matrix due to an over-constrained system
     constraints_per_atom = zeros(Int, length(atoms))
     for (ai, ad) in enumerate(atoms_data)
-        # Doesn't converge for larger angles
+        # Doesn't converge for larger angles so exclude these for now
         if (ad.atom_name in ("NH1", "NH2") && ad.res_name == "ARG") || (ad.atom_name == "ND2" && ad.res_name == "ASN")
             constraints_per_atom[ai] += 1
         end
     end
-    for c in combined_constraints
+    for c in bond_constraints
         constraints_per_atom[c.i] += 1
         constraints_per_atom[c.j] += 1
     end
