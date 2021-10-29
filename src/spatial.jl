@@ -37,6 +37,8 @@ vector(c1, c2, box_size) = vector1D.(c1, c2, box_size)
     end
 end
 
+sqdistance(i, j, coords, box_size) = sum(abs2, vector(coords[i], coords[j], box_size))
+
 """
     wrapcoords(c, side_length)
 

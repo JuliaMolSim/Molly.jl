@@ -4,6 +4,7 @@ export
     NoNeighborFinder,
     find_neighbors!,
     DistanceNeighborFinder,
+    DistanceNeighborFinderVec,
     TreeNeighborFinder,
     CellListMapNeighborFinder
 
@@ -92,6 +93,56 @@ function find_neighbors!(s::Simulation,
             end
         end
     end
+end
+
+"""
+    DistanceNeighborFinderVec(; nb_matrix, matrix_14, n_steps, dist_cutoff)
+
+Find close atoms by distance.
+"""
+struct DistanceNeighborFinderVec{D, B, I} <: NeighborFinder
+    nb_matrix::B
+    matrix_14::B
+    n_steps::Int
+    dist_cutoff::D
+    is::I
+    js::I
+end
+
+function DistanceNeighborFinderVec(;
+                                nb_matrix,
+                                matrix_14=falses(size(nb_matrix)),
+                                n_steps=10,
+                                dist_cutoff)
+    n_atoms = size(nb_matrix, 1)
+    if isa(nb_matrix, CuArray)
+        is = cu(hcat([collect(1:n_atoms) for i in 1:n_atoms]...))
+        js = cu(permutedims(is, (2, 1)))
+    else
+        is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
+        js = permutedims(is, (2, 1))
+    end
+    return DistanceNeighborFinderVec{typeof(dist_cutoff), typeof(nb_matrix), typeof(is)}(
+            nb_matrix, matrix_14, n_steps, dist_cutoff, is, js)
+end
+
+function find_neighbors!(s::Simulation,
+                         nf::DistanceNeighborFinderVec,
+                         step_n::Integer,
+                         nbsi=nothing,
+                         nbsj=nothing;
+                         parallel::Bool=true)
+    !iszero(step_n % nf.n_steps) && return nbsi, nbsj
+
+    sqdist_cutoff = nf.dist_cutoff ^ 2
+    sqdists = sqdistance.(nf.is, nf.js, (s.coords,), (s.box_size,))
+
+    close = sqdists .< sqdist_cutoff
+    eligible = tril(close .* nf.nb_matrix, -1)
+
+    fa = findall(!iszero, eligible)
+    #return getindex.(fa, 1), getindex.(fa, 2)
+    return Array(getindex.(fa, 1)), Array(getindex.(fa, 2))
 end
 
 """

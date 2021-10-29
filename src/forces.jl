@@ -47,15 +47,10 @@ Custom interaction types should implement this function.
 """
 function force end
 
-# Allow 2D broadcasting whilst eliminating the diagonal corresponding to self interaction
-@inline @inbounds function force(inter, coord_i, coord_j, atom_i, atom_j, box_size, self_interaction, force_type)
-    if isone(self_interaction)
-        return ustrip.(zero(coord_i))
-    else
-        fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
-        checkforcetype(fdr, force_type)
-        return ustrip.(fdr)
-    end
+@inline @inbounds function force(inter, coord_i, coord_j, atom_i, atom_j, box_size, force_type)
+    fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
+    checkforcetype(fdr, force_type)
+    return ustrip.(fdr)
 end
 
 @inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer, force_type, weight_14::Bool=false)
@@ -132,15 +127,32 @@ function accelerations(s::Simulation; parallel::Bool=true)
     return (forces * s.force_unit) ./ mass.(s.atoms)
 end
 
-function accelerations(s::Simulation, coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
+countlower(nbs, i) = sum(x -> x < i, nbs) + 1
+
+function accelerations(s::Simulation, coords, atoms, nbsi, nbsj)
     n_atoms = length(coords)
     forces = ustripvec.(zero(coords))
 
+    coords_is = view(coords, nbsi)
+    coords_js = view(coords, nbsj)
+    atoms_is = view(atoms, nbsi)
+    atoms_js = view(atoms, nbsj)
+
+    #col_ptr_m1 = countlower.((nbsi,), 1:n_atoms)
+    #col_ptr = vcat(cu(col_ptr_m1), cu([length(nbsi) + 1]))
+
     for inter in values(s.general_inters)
-        # Currently the neighbor list is not used for this implementation
-        forces -= reshape(sum(force.((inter,), coords_is, coords_js, atoms_is, atoms_js,
-                                        (s.box_size,), self_interactions, s.force_unit);
-                                        dims=2), n_atoms)
+        fs = force.((inter,), coords_is, coords_js, atoms_is, atoms_js, (s.box_size,), s.force_unit)
+        #if isa(fs, CuArray)
+            #sp = CUSPARSE.CuSparseMatrixCSC(col_ptr, nbsi, fs, (n_atoms, n_atoms))
+            # Fix nbsi ordering in NL
+            # Actually this should not be required at all if the sparse constructor works, same path for both
+        #else
+        #    sp = sparse(nbsi, nbsj, fs, n_atoms, n_atoms)
+        #end
+        sp = sparse(nbsi, nbsj, Array(fs), n_atoms, n_atoms)
+        spsum = reshape(reduce(+, sp; dims=2), n_atoms) - reshape(reduce(+, sp; dims=1), n_atoms)
+        forces -= convert(typeof(forces), spsum)
     end
 
     for inter_list in values(s.specific_inter_lists)

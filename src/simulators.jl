@@ -74,19 +74,8 @@ function simulate!(s::Simulation{true},
                     n_steps::Integer;
                     parallel::Bool=true)
     n_atoms = length(s.coords)
-    is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
-    js = permutedims(is, (2, 1))
-    coords_is = view(s.coords, is)
-    coords_js = view(s.coords, js)
-    atoms_is = view(s.atoms, is)
-    atoms_js = view(s.atoms, js)
-    find_neighbors!(s, s.neighbor_finder, 0)
-    if isa(s.coords, CuArray)
-        self_interactions = CuArray(Diagonal(ones(typeof(ustrip(s.timestep)), n_atoms)))
-    else
-        self_interactions = Array(Diagonal(ones(typeof(ustrip(s.timestep)), n_atoms)))
-    end
-    accels_t = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
+    nbsi, nbsj = find_neighbors!(s, s.neighbor_finder, 0)
+    accels_t = accelerations(s, s.coords, s.atoms, nbsi, nbsj)
     accels_t_dt = zero(accels_t)
 
     for step_n in 1:n_steps
@@ -97,11 +86,12 @@ function simulate!(s::Simulation{true},
         # In-place updates here required to work with views but are not Zygote-compatible
         s.coords .+= s.velocities .* s.timestep .+ (removemolar.(accels_t) .* s.timestep ^ 2) ./ 2
         s.coords .= wrapcoordsvec.(s.coords, (s.box_size,))
-        accels_t_dt = accelerations(s, s.coords, coords_is, coords_js, atoms_is, atoms_js, self_interactions)
+        accels_t_dt = accelerations(s, s.coords, s.atoms, nbsi, nbsj)
         s.velocities .+= removemolar.(accels_t .+ accels_t_dt) .* s.timestep / 2
 
         s.velocities .= apply_thermostat!(s.velocities, s, s.thermostat)
-        find_neighbors!(s, s.neighbor_finder, 0)
+
+        nbsi, nbsj = find_neighbors!(s, s.neighbor_finder, 0, nbsi, nbsj)
 
         accels_t = accels_t_dt
         s.n_steps_made[1] += 1

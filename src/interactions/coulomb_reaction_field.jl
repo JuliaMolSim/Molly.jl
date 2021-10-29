@@ -20,10 +20,12 @@ struct CoulombReactionField{D, S, W, T, F, E, D2, K, R} <: GeneralInteraction
     crf_14::R
 end
 
+const solventdielectric = 78.3
+
 function CoulombReactionField(;
                     cutoff_dist,
                     matrix_14,
-                    solvent_dielectric=78.3,
+                    solvent_dielectric=solventdielectric,
                     nl_only=false,
                     weight_14=1.0,
                     coulomb_const=coulombconst,
