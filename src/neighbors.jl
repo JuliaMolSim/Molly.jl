@@ -140,9 +140,8 @@ function find_neighbors!(s::Simulation,
     close = sqdists .< sqdist_cutoff
     eligible = tril(close .* nf.nb_matrix, -1)
 
-    fa = findall(!iszero, eligible)
-    #return getindex.(fa, 1), getindex.(fa, 2)
-    return Array(getindex.(fa, 1)), Array(getindex.(fa, 2))
+    fa = Array(findall(!iszero, eligible))
+    return getindex.(fa, 1), getindex.(fa, 2)
 end
 
 """

@@ -91,7 +91,7 @@ function simulate!(s::Simulation{true},
 
         s.velocities .= apply_thermostat!(s.velocities, s, s.thermostat)
 
-        nbsi, nbsj = find_neighbors!(s, s.neighbor_finder, 0, nbsi, nbsj)
+        nbsi, nbsj = find_neighbors!(s, s.neighbor_finder, step_n, nbsi, nbsj)
 
         accels_t = accels_t_dt
         s.n_steps_made[1] += 1

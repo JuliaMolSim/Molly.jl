@@ -133,23 +133,13 @@ function accelerations(s::Simulation, coords, atoms, nbsi, nbsj)
     n_atoms = length(coords)
     forces = ustripvec.(zero(coords))
 
-    coords_is = view(coords, nbsi)
-    coords_js = view(coords, nbsj)
-    atoms_is = view(atoms, nbsi)
-    atoms_js = view(atoms, nbsj)
-
-    #col_ptr_m1 = countlower.((nbsi,), 1:n_atoms)
-    #col_ptr = vcat(cu(col_ptr_m1), cu([length(nbsi) + 1]))
+    coords_is = @view coords[nbsi]
+    coords_js = @view coords[nbsj]
+    atoms_is = @view atoms[nbsi]
+    atoms_js = @view atoms[nbsj]
 
     for inter in values(s.general_inters)
         fs = force.((inter,), coords_is, coords_js, atoms_is, atoms_js, (s.box_size,), s.force_unit)
-        #if isa(fs, CuArray)
-            #sp = CUSPARSE.CuSparseMatrixCSC(col_ptr, nbsi, fs, (n_atoms, n_atoms))
-            # Fix nbsi ordering in NL
-            # Actually this should not be required at all if the sparse constructor works, same path for both
-        #else
-        #    sp = sparse(nbsi, nbsj, fs, n_atoms, n_atoms)
-        #end
         sp = sparse(nbsi, nbsj, Array(fs), n_atoms, n_atoms)
         spsum = reshape(reduce(+, sp; dims=2), n_atoms) - reshape(reduce(+, sp; dims=1), n_atoms)
         forces -= convert(typeof(forces), spsum)
