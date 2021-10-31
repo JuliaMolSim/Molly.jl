@@ -127,9 +127,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
     return (forces * s.force_unit) ./ mass.(s.atoms)
 end
 
-countlower(nbs, i) = sum(x -> x < i, nbs) + 1
-
-function accelerations(s::Simulation, coords, atoms, nbsi, nbsj)
+function accelerations(s::Simulation, coords, atoms, nbsi, nbsj, nb_inds)
     n_atoms = length(coords)
     forces = ustripvec.(zero(coords))
 
@@ -140,9 +138,12 @@ function accelerations(s::Simulation, coords, atoms, nbsi, nbsj)
 
     for inter in values(s.general_inters)
         fs = force.((inter,), coords_is, coords_js, atoms_is, atoms_js, (s.box_size,), s.force_unit)
-        sp = sparse(nbsi, nbsj, Array(fs), n_atoms, n_atoms)
-        spsum = reshape(reduce(+, sp; dims=2), n_atoms) - reshape(reduce(+, sp; dims=1), n_atoms)
-        forces -= convert(typeof(forces), spsum)
+        zf = zero(@view fs[1:1])
+        afs_ip = accumulate!(+, fs, fs)
+        afs = vcat(zf, afs_ip)
+        afs_inds = @view afs[nb_inds]
+        afs_inds_i1 = vcat(zf, @view afs_inds[1:(end - 1)])
+        forces -= afs_inds .- afs_inds_i1
     end
 
     for inter_list in values(s.specific_inter_lists)

@@ -126,22 +126,48 @@ function DistanceNeighborFinderVec(;
             nb_matrix, matrix_14, n_steps, dist_cutoff, is, js)
 end
 
+function findindices(nbs_ord, n_atoms)
+    inds = zeros(Int, n_atoms)
+    atom_i = 1
+    for (nb_i, nb_ai) in enumerate(nbs_ord)
+        while nb_ai > atom_i
+            inds[atom_i] = nb_i
+            atom_i += 1
+        end
+    end
+    while (n_atoms + 1) > atom_i
+        inds[atom_i] = length(nbs_ord) + 1
+        atom_i += 1
+    end
+    return inds
+end
+
 function find_neighbors!(s::Simulation,
                          nf::DistanceNeighborFinderVec,
                          step_n::Integer,
                          nbsi=nothing,
-                         nbsj=nothing;
+                         nbsj=nothing,
+                         nb_inds=nothing;
                          parallel::Bool=true)
-    !iszero(step_n % nf.n_steps) && return nbsi, nbsj
+    !iszero(step_n % nf.n_steps) && return nbsi, nbsj, nb_inds
 
+    n_atoms = length(s.coords)
     sqdist_cutoff = nf.dist_cutoff ^ 2
     sqdists = sqdistance.(nf.is, nf.js, (s.coords,), (s.box_size,))
 
     close = sqdists .< sqdist_cutoff
-    eligible = tril(close .* nf.nb_matrix, -1)
+    close_nb = close .* nf.nb_matrix
+    eligible = tril(close_nb, -1) + triu(close_nb, 1)
 
     fa = Array(findall(!iszero, eligible))
-    return getindex.(fa, 1), getindex.(fa, 2)
+    nbsi = getindex.(fa, 1)
+    nbsj = getindex.(fa, 2)
+    order = sortperm(nbsi)
+    nbsi_ord, nbs_j_ord = nbsi[order], nbsj[order]
+
+    nb_inds = findindices(nbsi_ord, n_atoms)
+
+    return nbsi_ord, nbs_j_ord, nb_inds
 end
 
 """
