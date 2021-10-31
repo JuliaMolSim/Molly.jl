@@ -131,18 +131,13 @@ function accelerations(s::Simulation, coords, atoms, nbsi, nbsj, nb_inds)
     n_atoms = length(coords)
     forces = ustripvec.(zero(coords))
 
-    coords_is = @view coords[nbsi]
-    coords_js = @view coords[nbsj]
-    atoms_is = @view atoms[nbsi]
-    atoms_js = @view atoms[nbsj]
-
-    for inter in values(s.general_inters)
-        fs = force.((inter,), coords_is, coords_js, atoms_is, atoms_js, (s.box_size,), s.force_unit)
-        zf = zero(@view fs[1:1])
+    @views for inter in values(s.general_inters)
+        fs = force.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi], atoms[nbsj], (s.box_size,), s.force_unit)
+        zf = zero(fs[1:1])
         afs_ip = accumulate!(+, fs, fs)
         afs = vcat(zf, afs_ip)
-        afs_inds = @view afs[nb_inds]
-        afs_inds_i1 = vcat(zf, @view afs_inds[1:(end - 1)])
+        afs_inds = afs[nb_inds]
+        afs_inds_i1 = vcat(zf, afs_inds[1:(end - 1)])
         forces -= afs_inds .- afs_inds_i1
     end
 
