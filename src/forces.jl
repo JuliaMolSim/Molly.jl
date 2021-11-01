@@ -32,9 +32,9 @@ Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustripvec.(coords)`
 """
 ustripvec(x) = ustrip.(x)
 
-function checkforcetype(fdr, force_type)
-    if unit(first(fdr)) != force_type
-        error("Simulation force type is ", force_type,
+function checkforcetype(fdr, force_unit)
+    if unit(first(fdr)) != force_unit
+        error("Simulation force type is ", force_unit,
                 " but encountered force type ", unit(first(fdr)))
     end
 end
@@ -47,15 +47,30 @@ Custom interaction types should implement this function.
 """
 function force end
 
-@inline @inbounds function force(inter, coord_i, coord_j, atom_i, atom_j, box_size, force_type)
-    fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
-    checkforcetype(fdr, force_type)
-    return ustrip.(fdr)
+@views @inbounds function force(inter, coords, atoms, nbsi, nbsj, nb_inds, box_size, force_unit, weights_14)
+    fs = force.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi], atoms[nbsj],
+                (box_size,), force_unit, weights_14)
+    zf = zero(fs[1:1])
+    afs_ip = accumulate!(+, fs, fs)
+    afs = vcat(zf, afs_ip)
+    afs_inds = afs[nb_inds]
+    afs_inds_i1 = vcat(zf, afs_inds[1:(end - 1)])
+    return afs_inds_i1 .- afs_inds
 end
 
-@inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer, force_type, weight_14::Bool=false)
+@inline @inbounds function force(inter, coord_i, coord_j, atom_i, atom_j, box_size, force_unit, weight_14)
+    fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
+    checkforcetype(fdr, force_unit)
+    if weight_14
+        return ustrip.(fdr) * inter.weight_14
+    else
+        return ustrip.(fdr)
+    end
+end
+
+@inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer, force_unit, weight_14::Bool=false)
     fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
-    checkforcetype(fdr, force_type)
+    checkforcetype(fdr, force_unit)
     if weight_14
         fdr_ustrip = ustrip.(fdr) * inter.weight_14
     else
@@ -127,18 +142,13 @@ function accelerations(s::Simulation; parallel::Bool=true)
     return (forces * s.force_unit) ./ mass.(s.atoms)
 end
 
-function accelerations(s::Simulation, coords, atoms, nbsi, nbsj, nb_inds)
+function accelerations(s::Simulation, coords, atoms, nbsi, nbsj, nb_inds, weights_14)
     n_atoms = length(coords)
     forces = ustripvec.(zero(coords))
 
-    @views for inter in values(s.general_inters)
-        fs = force.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi], atoms[nbsj], (s.box_size,), s.force_unit)
-        zf = zero(fs[1:1])
-        afs_ip = accumulate!(+, fs, fs)
-        afs = vcat(zf, afs_ip)
-        afs_inds = afs[nb_inds]
-        afs_inds_i1 = vcat(zf, afs_inds[1:(end - 1)])
-        forces -= afs_inds .- afs_inds_i1
+    for inter in values(s.general_inters)
+        forces += force(inter, coords, atoms, nbsi, nbsj, nb_inds, s.box_size,
+                        s.force_unit, weights_14)
     end
 
     for inter_list in values(s.specific_inter_lists)

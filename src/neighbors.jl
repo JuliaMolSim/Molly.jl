@@ -130,12 +130,12 @@ function findindices(nbs_ord, n_atoms)
     inds = zeros(Int, n_atoms)
     atom_i = 1
     for (nb_i, nb_ai) in enumerate(nbs_ord)
-        while nb_ai > atom_i
+        while atom_i < nb_ai
             inds[atom_i] = nb_i
             atom_i += 1
         end
     end
-    while (n_atoms + 1) > atom_i
+    while atom_i < (n_atoms + 1)
         inds[atom_i] = length(nbs_ord) + 1
         atom_i += 1
     end
@@ -147,9 +147,10 @@ function find_neighbors!(s::Simulation,
                          step_n::Integer,
                          nbsi=nothing,
                          nbsj=nothing,
-                         nb_inds=nothing;
+                         nb_inds=nothing,
+                         weights_14=nothing;
                          parallel::Bool=true)
-    !iszero(step_n % nf.n_steps) && return nbsi, nbsj, nb_inds
+    !iszero(step_n % nf.n_steps) && return nbsi, nbsj, nb_inds, weights_14
 
     n_atoms = length(s.coords)
     sqdist_cutoff = nf.dist_cutoff ^ 2
@@ -162,12 +163,13 @@ function find_neighbors!(s::Simulation,
     fa = Array(findall(!iszero, eligible))
     nbsi = getindex.(fa, 1)
     nbsj = getindex.(fa, 2)
+    weights_14 = nf.matrix_14[fa]
     order = sortperm(nbsi)
-    nbsi_ord, nbs_j_ord = nbsi[order], nbsj[order]
+    nbsi_ord, nbs_j_ord, weights_14_ord = nbsi[order], nbsj[order], weights_14[order]
 
     nb_inds = findindices(nbsi_ord, n_atoms)
 
-    return nbsi_ord, nbs_j_ord, nb_inds
+    return nbsi_ord, nbs_j_ord, nb_inds, weights_14_ord
 end
 
 """
