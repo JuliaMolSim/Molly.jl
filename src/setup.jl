@@ -336,9 +336,8 @@ function readinputs(T::Type,
 
     lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true, weight_14=T(0.5),
                         force_unit=force_unit, energy_unit=energy_unit)
-    coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), matrix_14=matrix_14,
-                                        solvent_dielectric=T(solventdielectric), nl_only=true,
-                                        weight_14=T(0.5), coulomb_const=T(coulombconst),
+    coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), solvent_dielectric=T(solventdielectric),
+                                        nl_only=true, weight_14=T(0.5), coulomb_const=T(coulombconst),
                                         force_unit=force_unit, energy_unit=energy_unit)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
@@ -862,9 +861,8 @@ function setupsystem(coord_file::AbstractString,
 
     lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true,
                         weight_14=force_field.weight_14_lj)
-    coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), matrix_14=matrix_14,
-                                        solvent_dielectric=T(solventdielectric), nl_only=true,
-                                        weight_14=force_field.weight_14_coulomb,
+    coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), solvent_dielectric=T(solventdielectric),
+                                        nl_only=true, weight_14=force_field.weight_14_coulomb,
                                         coulomb_const=T(coulombconst))
     general_inters = (lj, coulomb_rf)
 

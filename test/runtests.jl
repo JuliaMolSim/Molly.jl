@@ -417,8 +417,8 @@ end
         SoftSphere(nl_only=true), SoftSphere(nl_only=false),
         Mie(m=5, n=10, nl_only=true), Mie(m=5, n=10, nl_only=false),
         Coulomb(nl_only=true), Coulomb(nl_only=false),
-        CoulombReactionField(cutoff_dist=1.0u"nm", matrix_14=falses(n_atoms, n_atoms), nl_only=true),
-        CoulombReactionField(cutoff_dist=1.0u"nm", matrix_14=falses(n_atoms, n_atoms), nl_only=false),
+        CoulombReactionField(cutoff_dist=1.0u"nm", nl_only=true),
+        CoulombReactionField(cutoff_dist=1.0u"nm", nl_only=false),
         Gravity(G=G, nl_only=true), Gravity(G=G, nl_only=false),
     )
 

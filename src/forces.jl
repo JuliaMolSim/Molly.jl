@@ -151,7 +151,7 @@ function accelerations(s::Simulation, coords, atoms, neighbors)
 
     general_inters = values(s.general_inters)
     nbsi, nbsj = neighbors.nbsi, neighbors.nbsj
-    @views if length(general_inters) > 0
+    @views if length(general_inters) > 0 && length(nbsi) > 0
         nb_forces = force.((first(general_inters),), coords[nbsi], coords[nbsj], atoms[nbsi],
                             atoms[nbsj], (s.box_size,), s.force_unit, neighbors.weights_14)
         for inter in general_inters[2:end]
