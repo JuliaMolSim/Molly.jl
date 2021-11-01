@@ -155,7 +155,7 @@ function find_neighbors!(s::Simulation,
 
     close = sqdists .< sqdist_cutoff
     close_nb = close .* nf.nb_matrix
-    eligible = tril(close_nb, -1) + triu(close_nb, 1)
+    eligible = tril(close_nb, -1)
 
     fa = Array(findall(!iszero, eligible))
     nbsi = getindex.(fa, 1)

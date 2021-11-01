@@ -75,11 +75,16 @@ end
     fs = force.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi], atoms[nbsj],
                 (box_size,), force_unit, neighbors.weights_14)
     zf = zero(fs[1:1])
-    afs_ip = accumulate!(+, fs, fs)
-    afs = vcat(zf, afs_ip)
-    afs_inds = afs[neighbors.atom_bounds_i]
-    afs_inds_i1 = vcat(zf, afs_inds[1:(end - 1)])
-    return afs_inds_i1 .- afs_inds
+
+    fs_accum_pad_i = vcat(zf, accumulate(+, fs))
+    fs_accum_bounds_i = fs_accum_pad_i[neighbors.atom_bounds_i]
+    fs_accum_bounds_offset_i = vcat(zf, fs_accum_bounds_i[1:(end - 1)])
+
+    fs_accum_pad_j = vcat(zf, accumulate(+, view(fs, neighbors.sortperm_j)))
+    fs_accum_bounds_j = fs_accum_pad_j[neighbors.atom_bounds_j]
+    fs_accum_bounds_offset_j = vcat(zf, fs_accum_bounds_j[1:(end - 1)])
+
+    return (fs_accum_bounds_j .- fs_accum_bounds_offset_j) .- (fs_accum_bounds_i .- fs_accum_bounds_offset_i)
 end
 
 """
