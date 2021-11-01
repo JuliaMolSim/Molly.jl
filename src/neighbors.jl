@@ -4,7 +4,7 @@ export
     NoNeighborFinder,
     find_neighbors!,
     DistanceNeighborFinder,
-    DistanceNeighborFinderVec,
+    DistanceVecNeighborFinder,
     TreeNeighborFinder,
     CellListMapNeighborFinder
 
@@ -96,11 +96,11 @@ function find_neighbors!(s::Simulation,
 end
 
 """
-    DistanceNeighborFinderVec(; nb_matrix, matrix_14, n_steps, dist_cutoff)
+    DistanceVecNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff)
 
 Find close atoms by distance.
 """
-struct DistanceNeighborFinderVec{D, B, I} <: NeighborFinder
+struct DistanceVecNeighborFinder{D, B, I} <: NeighborFinder
     nb_matrix::B
     matrix_14::B
     n_steps::Int
@@ -109,7 +109,7 @@ struct DistanceNeighborFinderVec{D, B, I} <: NeighborFinder
     js::I
 end
 
-function DistanceNeighborFinderVec(;
+function DistanceVecNeighborFinder(;
                                 nb_matrix,
                                 matrix_14=falses(size(nb_matrix)),
                                 n_steps=10,
@@ -122,7 +122,7 @@ function DistanceNeighborFinderVec(;
         is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
         js = permutedims(is, (2, 1))
     end
-    return DistanceNeighborFinderVec{typeof(dist_cutoff), typeof(nb_matrix), typeof(is)}(
+    return DistanceVecNeighborFinder{typeof(dist_cutoff), typeof(nb_matrix), typeof(is)}(
             nb_matrix, matrix_14, n_steps, dist_cutoff, is, js)
 end
 
@@ -143,7 +143,7 @@ function findindices(nbs_ord, n_atoms)
 end
 
 function find_neighbors!(s::Simulation,
-                         nf::DistanceNeighborFinderVec,
+                         nf::DistanceVecNeighborFinder,
                          step_n::Integer,
                          current_nbs=nothing;
                          parallel::Bool=true)
