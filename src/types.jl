@@ -195,7 +195,7 @@ default values.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E, NL, NF}
+mutable struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E, NL, NF}
     simulator::Simulator
     atoms::A
     atoms_data::AD

@@ -83,13 +83,12 @@ function simulate!(s::Simulation{true},
             log_property!(logger, s, step_n)
         end
 
-        # In-place updates here required to work with views but are not Zygote-compatible
-        s.coords .+= s.velocities .* s.timestep .+ (removemolar.(accels_t) .* s.timestep ^ 2) ./ 2
-        s.coords .= wrapcoordsvec.(s.coords, (s.box_size,))
+        s.coords += s.velocities .* s.timestep .+ (removemolar.(accels_t) .* s.timestep ^ 2) ./ 2
+        s.coords = wrapcoordsvec.(s.coords, (s.box_size,))
         accels_t_dt = accelerations(s, s.coords, s.atoms, nbsi, nbsj, nb_inds, weights_14)
-        s.velocities .+= removemolar.(accels_t .+ accels_t_dt) .* s.timestep / 2
+        s.velocities += removemolar.(accels_t .+ accels_t_dt) .* s.timestep / 2
 
-        s.velocities .= apply_thermostat!(s.velocities, s, s.thermostat)
+        s.velocities = apply_thermostat!(s.velocities, s, s.thermostat)
 
         nbsi, nbsj, nb_inds, weights_14 = find_neighbors!(s, s.neighbor_finder, step_n, nbsi, nbsj, nb_inds, weights_14)
 
