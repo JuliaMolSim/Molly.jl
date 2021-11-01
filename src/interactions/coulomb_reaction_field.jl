@@ -1,12 +1,11 @@
 """
-    CoulombReactionField(; cutoff_dist, matrix_14, solvent_dielectric, nl_only,
-                            weight_14, coulomb_const, force_unit, energy_unit)
+    CoulombReactionField(; cutoff_dist, solvent_dielectric, nl_only, weight_14,
+                            coulomb_const, force_unit, energy_unit)
 
 The Coulomb electrostatic interaction modified using the reaction field approximation.
 """
 struct CoulombReactionField{D, S, W, T, F, E, D2, K, R} <: GeneralInteraction
     cutoff_dist::D
-    matrix_14::BitArray{2}
     solvent_dielectric::S
     nl_only::Bool
     weight_14::W
@@ -24,7 +23,6 @@ const solventdielectric = 78.3
 
 function CoulombReactionField(;
                     cutoff_dist,
-                    matrix_14,
                     solvent_dielectric=solventdielectric,
                     nl_only=false,
                     weight_14=1.0,
@@ -39,7 +37,7 @@ function CoulombReactionField(;
     return CoulombReactionField{typeof(cutoff_dist), typeof(solvent_dielectric), typeof(weight_14),
                                 typeof(coulomb_const), typeof(force_unit), typeof(energy_unit),
                                 typeof(sqdist_cutoff), typeof(krf), typeof(crf)}(
-        cutoff_dist, matrix_14, solvent_dielectric, nl_only, weight_14, coulomb_const,
+        cutoff_dist, solvent_dielectric, nl_only, weight_14, coulomb_const,
         force_unit, energy_unit, sqdist_cutoff, krf, crf, krf_14, crf_14)
 end
 
@@ -48,7 +46,8 @@ end
                                     coord_j,
                                     atom_i,
                                     atom_j,
-                                    box_size)
+                                    box_size,
+                                    weight_14::Bool=false)
     dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 
@@ -60,7 +59,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     r = √r2
     i, j = atom_i.index, atom_j.index
-    if inter.matrix_14[i, j]
+    if weight_14
         # 1-4 interactions do not use the reaction field approximation
         krf = inter.krf_14
     else
@@ -69,13 +68,18 @@ end
 
     f = (coulomb_const * qi * qj) * (inv(r) - 2 * krf * r2) * inv(r2)
 
-    return f * dr
+    if weight_14
+        return f * dr * inter.weight_14
+    else
+        return f * dr
+    end
 end
 
 @inline @inbounds function potential_energy(inter::CoulombReactionField,
                                     s::Simulation,
                                     i::Integer,
-                                    j::Integer)
+                                    j::Integer,
+                                    weight_14::Bool=false)
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
 
@@ -86,7 +90,7 @@ end
     coulomb_const = inter.coulomb_const
     qi, qj = s.atoms[i].charge, s.atoms[j].charge
     r = √r2
-    if inter.matrix_14[i, j]
+    if weight_14
         # 1-4 interactions do not use the reaction field approximation
         krf = inter.krf_14
         crf = inter.crf_14
@@ -95,5 +99,11 @@ end
         crf = inter.crf
     end
 
-    return (coulomb_const * qi * qj) * (inv(r) + krf * r2 - crf)
+    pe = (coulomb_const * qi * qj) * (inv(r) + krf * r2 - crf)
+
+    if weight_14
+        return pe * inter.weight_14
+    else
+        return pe
+    end
 end

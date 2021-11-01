@@ -39,7 +39,8 @@ end
                                     coord_j,
                                     atom_i,
                                     atom_j,
-                                    box_size) where {S, C}
+                                    box_size,
+                                    weight_14::Bool=false) where {S, C}
     dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 
@@ -72,7 +73,11 @@ end
         end
     end
 
-    return f * dr
+    if weight_14
+        return f * dr * inter.weight_14
+    else
+        return f * dr
+    end
 end
 
 @fastmath function force_divr_nocutoff(::LennardJones, r2, invr2, (σ2, ϵ))
@@ -84,7 +89,8 @@ end
 @inline @inbounds function potential_energy(inter::LennardJones{S, C},
                                             s::Simulation,
                                             i::Integer,
-                                            j::Integer) where {S, C}
+                                            j::Integer,
+                                            weight_14::Bool=false) where {S, C}
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
 
@@ -100,19 +106,25 @@ end
     params = (σ2, ϵ)
 
     if cutoff_points(C) == 0
-        potential(inter, r2, inv(r2), params)
+        pe = potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
         r2 > cutoff.sqdist_cutoff && return ustrip(zero(s.timestep)) * inter.energy_unit
 
-        potential_cutoff(cutoff, r2, inter, params)
+        pe = potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
         r2 > cutoff.sqdist_cutoff && return ustrip(zero(s.timestep)) * inter.energy_unit
 
         if r2 < cutoff.activation_dist
-            potential(inter, r2, inv(r2), params)
+            pe = potential(inter, r2, inv(r2), params)
         else
-            potential_cutoff(cutoff, r2, inter, params)
+            pe = potential_cutoff(cutoff, r2, inter, params)
         end
+    end
+
+    if weight_14
+        return pe * inter.weight_14
+    else
+        return pe
     end
 end
 

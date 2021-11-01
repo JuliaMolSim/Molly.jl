@@ -47,24 +47,24 @@ Custom interaction types should implement this function.
 """
 function force end
 
-@inline @inbounds function force(inter, coord_i, coord_j, atom_i, atom_j, box_size, force_unit, weight_14)
-    fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
-    checkforcetype(fdr, force_unit)
+@inline @inbounds function force(inter, coord_i, coord_j, atom_i, atom_j, box_size, force_unit, weight_14::Bool=false)
     if weight_14
-        return ustrip.(fdr) * inter.weight_14
+        fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size, true)
     else
-        return ustrip.(fdr)
+        fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
     end
+    checkforcetype(fdr, force_unit)
+    return ustrip.(fdr)
 end
 
 @inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer, force_unit, weight_14::Bool=false)
-    fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
-    checkforcetype(fdr, force_unit)
     if weight_14
-        fdr_ustrip = ustrip.(fdr) * inter.weight_14
+        fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size, true)
     else
-        fdr_ustrip = ustrip.(fdr)
+        fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
     end
+    checkforcetype(fdr, force_unit)
+    fdr_ustrip = ustrip.(fdr)
     forces[i] -= fdr_ustrip
     forces[j] += fdr_ustrip
     return nothing

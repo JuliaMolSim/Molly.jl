@@ -108,7 +108,7 @@ function potential_energy(s::Simulation)
             @inbounds for ni in 1:neighbors.n
                 i, j, weight_14 = neighbors.list[ni]
                 if weight_14
-                    potential += potential_energy(inter, s, i, j) * inter.weight_14
+                    potential += potential_energy(inter, s, i, j, true)
                 else
                     potential += potential_energy(inter, s, i, j)
                 end
