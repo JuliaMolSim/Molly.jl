@@ -66,7 +66,7 @@ function simulate!(s::Simulation{false},
         accels_t = accels_t_dt
         s.n_steps_made[1] += 1
     end
-    return s.coords
+    return s
 end
 
 function simulate!(s::Simulation{true},
@@ -89,13 +89,12 @@ function simulate!(s::Simulation{true},
         s.velocities += removemolar.(accels_t .+ accels_t_dt) .* s.timestep / 2
 
         s.velocities = apply_thermostat!(s.velocities, s, s.thermostat)
-
         neighbors = find_neighbors!(s, s.neighbor_finder, step_n, neighbors)
 
         accels_t = accels_t_dt
         s.n_steps_made[1] += 1
     end
-    return s.coords
+    return s
 end
 
 """
@@ -135,7 +134,7 @@ function simulate!(s::Simulation,
 
         s.n_steps_made[1] += 1
     end
-    return s.coords
+    return s
 end
 
 function simulate!(s::Simulation, n_steps::Integer; parallel::Bool=true)
