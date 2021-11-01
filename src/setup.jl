@@ -117,6 +117,7 @@ function readinputs(T::Type,
                     top_file::AbstractString,
                     coord_file::AbstractString;
                     units::Bool=true,
+                    gpu::Bool=false,
                     cutoff_dist=1.0u"nm",
                     nl_dist=1.2u"nm")
     # Read force field and topology file
@@ -355,6 +356,11 @@ function readinputs(T::Type,
                                                 dist_cutoff=units ? T(nl_dist) : T(ustrip(nl_dist)),
                                                 x0=coords, unit_cell=box_size)
 
+    if gpu
+        atoms = cu(atoms)
+        coords = cu(coords)
+    end
+
     return atoms, atoms_data, specific_inter_lists, general_inters,
             neighbor_finder, coords, box_size
 end
@@ -567,6 +573,7 @@ neighbor finder, coordinates and box size.
 """
 function setupsystem(coord_file::AbstractString,
                         force_field;
+                        gpu::Bool=false,
                         cutoff_dist=1.0u"nm",
                         nl_dist=1.2u"nm")
     T = typeof(force_field.weight_14_coulomb)
@@ -871,6 +878,12 @@ function setupsystem(coord_file::AbstractString,
                                                 n_steps=10, dist_cutoff=T(nl_dist),
                                                 x0=coords, unit_cell=box_size)
 
-    return [atoms...], atoms_data, specific_inter_lists, general_inters,
+    atoms = [atoms...]
+    if gpu
+        atoms = cu(atoms)
+        coords = cu(coords)
+    end
+
+    return atoms, atoms_data, specific_inter_lists, general_inters,
             neighbor_finder, coords, box_size
 end
