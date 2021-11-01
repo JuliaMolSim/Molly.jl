@@ -70,17 +70,14 @@ end
     return nothing
 end
 
-@views @inbounds function forcesum(inter, coords, atoms, neighbors, box_size, force_unit)
-    nbsi, nbsj = neighbors.nbsi, neighbors.nbsj
-    fs = force.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi], atoms[nbsj],
-                (box_size,), force_unit, neighbors.weights_14)
-    zf = zero(fs[1:1])
+@views @inbounds function sumforces(nb_forces, neighbors)
+    zf = zero(nb_forces[1:1])
 
-    fs_accum_pad_i = vcat(zf, accumulate(+, fs))
+    fs_accum_pad_i = vcat(zf, accumulate(+, nb_forces))
     fs_accum_bounds_i = fs_accum_pad_i[neighbors.atom_bounds_i]
     fs_accum_bounds_offset_i = vcat(zf, fs_accum_bounds_i[1:(end - 1)])
 
-    fs_accum_pad_j = vcat(zf, accumulate(+, view(fs, neighbors.sortperm_j)))
+    fs_accum_pad_j = vcat(zf, accumulate(+, view(nb_forces, neighbors.sortperm_j)))
     fs_accum_bounds_j = fs_accum_pad_j[neighbors.atom_bounds_j]
     fs_accum_bounds_offset_j = vcat(zf, fs_accum_bounds_j[1:(end - 1)])
 
@@ -152,8 +149,16 @@ function accelerations(s::Simulation, coords, atoms, neighbors)
     n_atoms = length(coords)
     forces = ustripvec.(zero(coords))
 
-    for inter in values(s.general_inters)
-        forces += forcesum(inter, coords, atoms, neighbors, s.box_size, s.force_unit)
+    general_inters = values(s.general_inters)
+    nbsi, nbsj = neighbors.nbsi, neighbors.nbsj
+    @views if length(general_inters) > 0
+        nb_forces = force.((first(general_inters),), coords[nbsi], coords[nbsj], atoms[nbsi],
+                            atoms[nbsj], (s.box_size,), s.force_unit, neighbors.weights_14)
+        for inter in general_inters[2:end]
+            nb_forces += force.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi], atoms[nbsj],
+                                (s.box_size,), s.force_unit, neighbors.weights_14)
+        end
+        forces += sumforces(nb_forces, neighbors)
     end
 
     for inter_list in values(s.specific_inter_lists)
