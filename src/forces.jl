@@ -47,17 +47,6 @@ Custom interaction types should implement this function.
 """
 function force end
 
-@views @inbounds function force(inter, coords, atoms, nbsi, nbsj, nb_inds, box_size, force_unit, weights_14)
-    fs = force.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi], atoms[nbsj],
-                (box_size,), force_unit, weights_14)
-    zf = zero(fs[1:1])
-    afs_ip = accumulate!(+, fs, fs)
-    afs = vcat(zf, afs_ip)
-    afs_inds = afs[nb_inds]
-    afs_inds_i1 = vcat(zf, afs_inds[1:(end - 1)])
-    return afs_inds_i1 .- afs_inds
-end
-
 @inline @inbounds function force(inter, coord_i, coord_j, atom_i, atom_j, box_size, force_unit, weight_14)
     fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
     checkforcetype(fdr, force_unit)
@@ -79,6 +68,18 @@ end
     forces[i] -= fdr_ustrip
     forces[j] += fdr_ustrip
     return nothing
+end
+
+@views @inbounds function forcesum(inter, coords, atoms, neighbors, box_size, force_unit)
+    nbsi, nbsj = neighbors.nbsi, neighbors.nbsj
+    fs = force.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi], atoms[nbsj],
+                (box_size,), force_unit, neighbors.weights_14)
+    zf = zero(fs[1:1])
+    afs_ip = accumulate!(+, fs, fs)
+    afs = vcat(zf, afs_ip)
+    afs_inds = afs[neighbors.atom_bounds_i]
+    afs_inds_i1 = vcat(zf, afs_inds[1:(end - 1)])
+    return afs_inds_i1 .- afs_inds
 end
 
 """
@@ -142,13 +143,12 @@ function accelerations(s::Simulation; parallel::Bool=true)
     return (forces * s.force_unit) ./ mass.(s.atoms)
 end
 
-function accelerations(s::Simulation, coords, atoms, nbsi, nbsj, nb_inds, weights_14)
+function accelerations(s::Simulation, coords, atoms, neighbors)
     n_atoms = length(coords)
     forces = ustripvec.(zero(coords))
 
     for inter in values(s.general_inters)
-        forces += force(inter, coords, atoms, nbsi, nbsj, nb_inds, s.box_size,
-                        s.force_unit, weights_14)
+        forces += forcesum(inter, coords, atoms, neighbors, s.box_size, s.force_unit)
     end
 
     for inter_list in values(s.specific_inter_lists)

@@ -145,12 +145,9 @@ end
 function find_neighbors!(s::Simulation,
                          nf::DistanceNeighborFinderVec,
                          step_n::Integer,
-                         nbsi=nothing,
-                         nbsj=nothing,
-                         nb_inds=nothing,
-                         weights_14=nothing;
+                         current_nbs=nothing;
                          parallel::Bool=true)
-    !iszero(step_n % nf.n_steps) && return nbsi, nbsj, nb_inds, weights_14
+    !iszero(step_n % nf.n_steps) && return current_nbs
 
     n_atoms = length(s.coords)
     sqdist_cutoff = nf.dist_cutoff ^ 2
@@ -163,13 +160,17 @@ function find_neighbors!(s::Simulation,
     fa = Array(findall(!iszero, eligible))
     nbsi = getindex.(fa, 1)
     nbsj = getindex.(fa, 2)
-    weights_14 = nf.matrix_14[fa]
-    order = sortperm(nbsi)
-    nbsi_ord, nbs_j_ord, weights_14_ord = nbsi[order], nbsj[order], weights_14[order]
+    order_i = sortperm(nbsi)
+    order_j = sortperm(nbsj)
+    weights_14 = @view nf.matrix_14[fa]
 
-    nb_inds = findindices(nbsi_ord, n_atoms)
+    nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
+    weights_14_ordi = @view weights_14[order_i]
+    atom_bounds_i = findindices(nbsi_ordi, n_atoms)
+    atom_bounds_j = findindices(view(nbsj, order_j), n_atoms)
 
-    return nbsi_ord, nbs_j_ord, nb_inds, weights_14_ord
+    return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
+                            order_j, weights_14_ordi)
 end
 
 """

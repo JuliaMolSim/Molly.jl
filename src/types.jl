@@ -11,6 +11,8 @@ export
     Logger,
     Atom,
     AtomData,
+    NeighborList,
+    NeighborListVec,
     Simulation
 
 const DefaultFloat = Float64
@@ -122,7 +124,11 @@ function AtomData(;
     return AtomData(atom_type, atom_name, res_number, res_name, element)
 end
 
-# Structure to contain preallocated neighbor lists
+"""
+    NeighborList(n, list)
+
+Structure to contain pre-allocated neighbor lists.
+"""
 mutable struct NeighborList
     n::Int # Number of neighbors in list (n <= length(list))
     list::Vector{Tuple{Int, Int, Bool}}
@@ -152,6 +158,19 @@ end
 
 Base.append!(nl::NeighborList, nl_app::NeighborList) = append!(nl, @view(nl_app.list[1:nl_app.n]))
 
+"""
+    NeighborListVec(n, list)
+
+Structure to contain neighbor lists for broadcasting.
+"""
+struct NeighborListVec{T}
+    nbsi::Vector{Int} # Sorted ascending
+    nbsj::Vector{Int}
+    atom_bounds_i::Vector{Int}
+    atom_bounds_j::Vector{Int}
+    sortperm_j::Vector{Int}
+    weights_14::T
+end
 
 """
     Simulation(; <keyword arguments>)

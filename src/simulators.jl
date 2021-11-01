@@ -74,8 +74,8 @@ function simulate!(s::Simulation{true},
                     n_steps::Integer;
                     parallel::Bool=true)
     n_atoms = length(s.coords)
-    nbsi, nbsj, nb_inds, weights_14 = find_neighbors!(s, s.neighbor_finder, 0)
-    accels_t = accelerations(s, s.coords, s.atoms, nbsi, nbsj, nb_inds, weights_14)
+    neighbors = find_neighbors!(s, s.neighbor_finder, 0)
+    accels_t = accelerations(s, s.coords, s.atoms, neighbors)
     accels_t_dt = zero(accels_t)
 
     for step_n in 1:n_steps
@@ -85,12 +85,12 @@ function simulate!(s::Simulation{true},
 
         s.coords += s.velocities .* s.timestep .+ (removemolar.(accels_t) .* s.timestep ^ 2) ./ 2
         s.coords = wrapcoordsvec.(s.coords, (s.box_size,))
-        accels_t_dt = accelerations(s, s.coords, s.atoms, nbsi, nbsj, nb_inds, weights_14)
+        accels_t_dt = accelerations(s, s.coords, s.atoms, neighbors)
         s.velocities += removemolar.(accels_t .+ accels_t_dt) .* s.timestep / 2
 
         s.velocities = apply_thermostat!(s.velocities, s, s.thermostat)
 
-        nbsi, nbsj, nb_inds, weights_14 = find_neighbors!(s, s.neighbor_finder, step_n, nbsi, nbsj, nb_inds, weights_14)
+        neighbors = find_neighbors!(s, s.neighbor_finder, step_n, neighbors)
 
         accels_t = accels_t_dt
         s.n_steps_made[1] += 1
