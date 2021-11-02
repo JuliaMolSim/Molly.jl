@@ -12,7 +12,7 @@ struct Coulomb{C, W, T, F, E} <: GeneralInteraction
     energy_unit::E
 end
 
-const coulombconst = 138.93545764u"kJ * mol^-1 * nm * q^-2" # 1 / 4πϵ0
+const coulombconst = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
 
 function Coulomb(;
                     cutoff=NoCutoff(),
@@ -78,8 +78,7 @@ end
 
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
-    qi = s.atoms[i].charge
-    qj = s.atoms[j].charge
+    qi, qj = s.atoms[i].charge, s.atoms[j].charge
     params = (coulomb_const, qi, qj)
 
     if cutoff_points(C) == 0

@@ -35,7 +35,7 @@ const SUITE = BenchmarkGroup(
 
 c1 = SVector(1.0, 1.0, 1.0)u"nm"
 c2 = SVector(1.4, 1.0, 1.0)u"nm"
-a1 = Atom(charge=1.0u"q", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
 box_size = SVector(2.0, 2.0, 2.0)u"nm"
 coords = [c1, c2]
 s = Simulation(atoms=[a1, a1], coords=coords, box_size=box_size)
@@ -86,12 +86,12 @@ function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::B
     if gpu
         coords = cu(deepcopy(f32 ? starting_coords_f32 : starting_coords))
         velocities = cu(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-        atoms = cu([Atom(charge=f32 ? 0.0f0u"q" : 0.0u"q", mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+        atoms = cu([Atom(charge=f32 ? 0.0f0 : 0.0, mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                             ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
     else
         coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
         velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
-        atoms = [Atom(charge=f32 ? 0.0f0u"q" : 0.0u"q", mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+        atoms = [Atom(charge=f32 ? 0.0f0 : 0.0, mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                         ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
     end
 

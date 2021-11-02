@@ -191,8 +191,8 @@ function readinputs(T::Type,
             # Take the first version of each atom type only
             if !haskey(atomtypes, atomname)
                 if units
-                    atomtypes[atomname] = Atom(charge=parse(T, c[5]) * T(1u"q"),
-                            mass=parse(T, c[4])u"u", σ=parse(T, c[7])u"nm", ϵ=parse(T, c[8])u"kJ * mol^-1")
+                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4])u"u",
+                            σ=parse(T, c[7])u"nm", ϵ=parse(T, c[8])u"kJ * mol^-1")
                 else
                     atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4]),
                             σ=parse(T, c[7]), ϵ=parse(T, c[8]))
@@ -200,11 +200,10 @@ function readinputs(T::Type,
             end
         elseif current_field == "atoms"
             attype = atomnames[c[2]]
+            charge = parse(T, c[7])
             if units
-                charge = parse(T, c[7]) * T(1u"q")
                 mass = parse(T, c[8])u"u"
             else
-                charge = parse(T, c[7])
                 mass = parse(T, c[8])
             end
             atom_index = length(atoms) + 1
@@ -286,11 +285,7 @@ function readinputs(T::Type,
             attype = replace(atname, r"\d+" => "")
             temp_charge = atomtypes[attype].charge
             if attype == "CL" # Temp hack to fix charges
-                if units
-                    temp_charge = T(-1u"q")
-                else
-                    temp_charge = T(-1.0)
-                end
+                temp_charge = T(-1.0)
             end
             atom_index = length(atoms) + 1
             push!(atoms, Atom(index=atom_index, charge=temp_charge, mass=atomtypes[attype].mass,
@@ -418,9 +413,9 @@ An OpenMM force field.
 Read one or more OpenMM force field XML files by passing them to the
 constructor.
 """
-struct OpenMMForceField{T, M, D, E, C, K}
+struct OpenMMForceField{T, M, D, E, K}
     atom_types::Dict{String, OpenMMAtomType{M, D, E}}
-    residue_types::Dict{String, OpenMMResiduetype{C}}
+    residue_types::Dict{String, OpenMMResiduetype{T}}
     bond_types::Dict{Tuple{String, String}, BondType{D, K}}
     angle_types::Dict{Tuple{String, String, String}, AngleType{T, E}}
     torsion_types::Dict{Tuple{String, String, String, String}, PeriodicTorsionType{T, E}}
@@ -457,7 +452,7 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...)
                 for residue in eachelement(entry)
                     name = residue["name"]
                     types = Dict{String, String}()
-                    charges = Dict{String, typeof(T(1u"q"))}()
+                    charges = Dict{String, T}()
                     indices = Dict{String, Int}()
                     index = 1
                     for atom_or_bond in eachelement(residue)
@@ -465,7 +460,7 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...)
                         if atom_or_bond.name == "Atom"
                             atom_name = atom_or_bond["name"]
                             types[atom_name] = atom_or_bond["type"]
-                            charges[atom_name] = parse(T, atom_or_bond["charge"])u"q"
+                            charges[atom_name] = parse(T, atom_or_bond["charge"])
                             indices[atom_name] = index
                             index += 1
                         end
@@ -541,9 +536,8 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...)
     M = typeof(T(1u"u"))
     D = typeof(T(1u"nm"))
     E = typeof(T(1u"kJ * mol^-1"))
-    C = typeof(T(1u"q"))
     K = typeof(T(1u"kJ * mol^-1 * nm^-2"))
-    return OpenMMForceField{T, M, D, E, C, K}(atom_types, residue_types, bond_types, angle_types,
+    return OpenMMForceField{T, M, D, E, K}(atom_types, residue_types, bond_types, angle_types,
                 torsion_types, torsion_order, weight_14_coulomb, weight_14_lj)
 end
 

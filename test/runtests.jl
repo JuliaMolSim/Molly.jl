@@ -46,7 +46,7 @@ temp_fp_viz = tempname(cleanup=true) * ".mp4"
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
     c3 = SVector(1.4, 1.0, 1.0)u"nm"
-    a1 = Atom(charge=1.0u"q", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
     coords = [c1, c2, c3]
     s = Simulation(atoms=[a1, a1, a1], coords=coords, box_size=box_size)
@@ -177,7 +177,7 @@ end
 
     s = Simulation(
         simulator=VelocityVerlet(),
-        atoms=[Atom(charge=0.0u"q", mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=placeatoms(n_atoms, box_size, 0.3u"nm"; dims=2),
         velocities=[velocity(10.0u"u", temp; dims=2) .* 0.01 for i in 1:n_atoms],
@@ -216,7 +216,7 @@ end
     for parallel in parallel_list
         s = Simulation(
             simulator=VelocityVerlet(),
-            atoms=[Atom(charge=0.0u"q", mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+            atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR") for i in 1:n_atoms],
             general_inters=(LennardJones(nl_only=true),),
             coords=placeatoms(n_atoms, box_size, 0.3u"nm"),
@@ -267,7 +267,7 @@ end
 
     s = Simulation(
         simulator=VelocityFreeVerlet(),
-        atoms=[Atom(charge=0.0u"q", mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=[c .+ 0.01 .* rand(SVector{3})u"nm" for c in coords],
@@ -302,7 +302,7 @@ end
 
     s = Simulation(
         simulator=VelocityVerlet(),
-        atoms=[Atom(charge=0.0u"q", mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         specific_inter_lists=(bonds,),
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
@@ -432,7 +432,7 @@ end
 
         s = Simulation(
             simulator=VelocityVerlet(),
-            atoms=[Atom(charge=i % 2 == 0 ? -1.0u"q" : 1.0u"q", mass=10.0u"u", σ=0.2u"nm",
+            atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"u", σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             general_inters=(gi,),
             coords=placeatoms(n_atoms, box_size, 0.2u"nm"),
@@ -463,7 +463,7 @@ end
 
     s = Simulation(
         simulator=VelocityVerlet(),
-        atoms=[Atom(charge=0.0u"q", mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=velocities,
@@ -549,12 +549,12 @@ end
         if gpu
             coords = cu(deepcopy(f32 ? starting_coords_f32 : starting_coords))
             velocities = cu(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-            atoms = cu([Atom(charge=f32 ? 0.0f0u"q" : 0.0u"q", mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+            atoms = cu([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                                 ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
         else
             coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
             velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
-            atoms = [Atom(charge=f32 ? 0.0f0u"q" : 0.0u"q", mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+            atoms = [Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                             ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
         end
 

@@ -72,7 +72,7 @@ The types used should be bits types if the GPU is going to be used.
 
 # Arguments
 - `index::Int`: the index of the atom in the system.
-- `charge::C=0.0u"q"`: the charge of the atom, used for electrostatic interactions.
+- `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
 - `mass::M=0.0u"u"`: the mass of the atom.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
@@ -88,7 +88,7 @@ end
 
 function Atom(;
                 index=1,
-                charge=0.0u"q",
+                charge=0.0,
                 mass=0.0u"u",
                 σ=0.0u"nm",
                 ϵ=0.0u"kJ * mol^-1")

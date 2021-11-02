@@ -378,6 +378,7 @@ The performance overhead of using units is minimal.
 All your interaction types need to return the same units of force and energy or the simulation will not run.
 By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_unit` and `energy_unit` arguments to [`Simulation`](@ref).
 If you need to strip units for downstream analysis, use the `ustrip` function.
+It should be noted that charges are stored as dimensionless, i.e. 1.0 is an atomic charge of +1.
 
 ## Forces
 
