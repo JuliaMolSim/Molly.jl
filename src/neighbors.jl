@@ -24,8 +24,9 @@ Obtain a list of close atoms in a system.
 Custom neighbor finders should implement this function.
 """
 function find_neighbors!(s::Simulation,
-                         ::NoNeighborFinder,
-                         ::Integer;
+                         nf::NoNeighborFinder,
+                         step_n::Integer,
+                         neighbors=nothing;
                          kwargs...)
     return
 end
@@ -171,6 +172,21 @@ function find_neighbors!(s::Simulation,
 
     return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
                             order_j, weights_14_ordi)
+end
+
+function allneighbors(n_atoms)
+    nbs_all = findall(!iszero, tril(ones(Bool, n_atoms, n_atoms), -1))
+    nbsi, nbsj = getindex.(nbs_all, 1), getindex.(nbs_all, 2)
+    order_i = sortperm(nbsi)
+    order_j = sortperm(nbsj)
+
+    nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
+    atom_bounds_i = findindices(nbsi_ordi, n_atoms)
+    atom_bounds_j = findindices(view(nbsj, order_j), n_atoms)
+    weight_14 = nothing
+
+    return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
+                            order_j, weight_14)
 end
 
 """

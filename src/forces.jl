@@ -47,16 +47,6 @@ Custom interaction types should implement this function.
 """
 function force end
 
-@inline @inbounds function force(inter, coord_i, coord_j, atom_i, atom_j, box_size, force_unit, weight_14::Bool=false)
-    if weight_14
-        fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size, true)
-    else
-        fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
-    end
-    checkforcetype(fdr, force_unit)
-    return ustrip.(fdr)
-end
-
 @inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer, force_unit, weight_14::Bool=false)
     if weight_14
         fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size, true)
@@ -68,6 +58,17 @@ end
     forces[i] -= fdr_ustrip
     forces[j] += fdr_ustrip
     return nothing
+end
+
+@inline @inbounds function force_nounit(inter, coord_i, coord_j, atom_i, atom_j,
+                                        box_size, force_unit, weight_14::Bool=false)
+    if weight_14
+        fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size, true)
+    else
+        fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
+    end
+    checkforcetype(fdr, force_unit)
+    return ustrip.(fdr)
 end
 
 @views @inbounds function sumforces(nb_forces, neighbors)
@@ -145,20 +146,32 @@ function accelerations(s::Simulation; parallel::Bool=true)
     return (forces * s.force_unit) ./ mass.(s.atoms)
 end
 
-function accelerations(s::Simulation, coords, atoms, neighbors)
+function accelerations(s::Simulation, coords, atoms, neighbors, neighbors_all=nothing)
     n_atoms = length(coords)
     forces = ustripvec.(zero(coords))
 
-    general_inters = values(s.general_inters)
-    nbsi, nbsj = neighbors.nbsi, neighbors.nbsj
-    @views if length(general_inters) > 0 && length(nbsi) > 0
-        nb_forces = force.((first(general_inters),), coords[nbsi], coords[nbsj], atoms[nbsi],
-                            atoms[nbsj], (s.box_size,), s.force_unit, neighbors.weights_14)
-        for inter in general_inters[2:end]
-            nb_forces += force.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi], atoms[nbsj],
-                                (s.box_size,), s.force_unit, neighbors.weights_14)
+    general_inters_nonl = [inter for inter in values(s.general_inters) if !inter.nl_only]
+    @views if length(general_inters_nonl) > 0
+        nbsi, nbsj = neighbors_all.nbsi, neighbors_all.nbsj
+        for inter in general_inters_nonl
+            @inbounds nb_forces = force_nounit.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi],
+                                                atoms[nbsj], (s.box_size,), s.force_unit)
+            forces += sumforces(nb_forces, neighbors_all)
         end
-        forces += sumforces(nb_forces, neighbors)
+    end
+
+    general_inters_nl = [inter for inter in values(s.general_inters) if inter.nl_only]
+    @views if length(general_inters_nl) > 0
+        nbsi, nbsj = neighbors.nbsi, neighbors.nbsj
+        if length(nbsi) > 0
+            @inbounds nb_forces = force_nounit.((first(general_inters_nl),), coords[nbsi], coords[nbsj],
+                    atoms[nbsi], atoms[nbsj], (s.box_size,), s.force_unit, neighbors.weights_14)
+            for inter in general_inters_nl[2:end]
+                @inbounds nb_forces += force_nounit.((inter,), coords[nbsi], coords[nbsj],
+                    atoms[nbsi], atoms[nbsj], (s.box_size,), s.force_unit, neighbors.weights_14)
+            end
+            forces += sumforces(nb_forces, neighbors)
+        end
     end
 
     for inter_list in values(s.specific_inter_lists)
