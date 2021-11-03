@@ -31,6 +31,8 @@ function find_neighbors!(s::Simulation,
     return
 end
 
+Base.show(io::IO, neighbor_finder::NoNeighborFinder) = print(io, typeof(neighbor_finder))
+
 """
     DistanceNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff)
 
@@ -119,12 +121,14 @@ function DistanceVecNeighborFinder(;
     if isa(nb_matrix, CuArray)
         is = cu(hcat([collect(1:n_atoms) for i in 1:n_atoms]...))
         js = cu(permutedims(is, (2, 1)))
+        m14 = cu(matrix_14)
     else
         is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
         js = permutedims(is, (2, 1))
+        m14 = matrix_14
     end
     return DistanceVecNeighborFinder{typeof(dist_cutoff), typeof(nb_matrix), typeof(is)}(
-            nb_matrix, matrix_14, n_steps, dist_cutoff, is, js)
+            nb_matrix, m14, n_steps, dist_cutoff, is, js)
 end
 
 function findindices(nbs_ord, n_atoms)
@@ -159,34 +163,33 @@ function find_neighbors!(s::Simulation,
     eligible = tril(close_nb, -1)
 
     fa = Array(findall(!iszero, eligible))
-    nbsi = getindex.(fa, 1)
-    nbsj = getindex.(fa, 2)
+    nbsi, nbsj = getindex.(fa, 1), getindex.(fa, 2)
     order_i = sortperm(nbsi)
-    order_j = sortperm(nbsj)
     weights_14 = @view nf.matrix_14[fa]
 
     nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
+    sortperm_j = sortperm(nbsj_ordi)
     weights_14_ordi = @view weights_14[order_i]
     atom_bounds_i = findindices(nbsi_ordi, n_atoms)
-    atom_bounds_j = findindices(view(nbsj, order_j), n_atoms)
+    atom_bounds_j = findindices(view(nbsj_ordi, sortperm_j), n_atoms)
 
     return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
-                            order_j, weights_14_ordi)
+                            sortperm_j, weights_14_ordi)
 end
 
 function allneighbors(n_atoms)
     nbs_all = findall(!iszero, tril(ones(Bool, n_atoms, n_atoms), -1))
     nbsi, nbsj = getindex.(nbs_all, 1), getindex.(nbs_all, 2)
     order_i = sortperm(nbsi)
-    order_j = sortperm(nbsj)
 
     nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
+    sortperm_j = sortperm(nbsj_ordi)
     atom_bounds_i = findindices(nbsi_ordi, n_atoms)
-    atom_bounds_j = findindices(view(nbsj, order_j), n_atoms)
-    weight_14 = nothing
+    atom_bounds_j = findindices(view(nbsj_ordi, sortperm_j), n_atoms)
+    weights_14 = nothing
 
     return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
-                            order_j, weight_14)
+                            sortperm_j, weights_14)
 end
 
 """
@@ -309,13 +312,6 @@ mutable struct CellListMapNeighborFinder{D, N, T} <: NeighborFinder
     neighbors_threaded::Vector{NeighborList}
 end
 
-function Base.show(io::IO, neighbor_finder::NeighborFinder)
-    println(io, typeof(neighbor_finder))
-    println(io,"  Size of nb_matrix = " , size(neighbor_finder.nb_matrix))
-    println(io,"  n_steps = " , neighbor_finder.n_steps)
-    print(io,"  dist_cutoff = ", neighbor_finder.dist_cutoff)
-end
-
 # This function sets up the box structure for CellListMap. It uses the unit cell
 # if it is given, or guesses a box size from the number of particles, assuming 
 # that the atomic density is similar to that of liquid water at ambient conditions.
@@ -421,4 +417,11 @@ function Molly.find_neighbors!(s::Simulation,
 
     nf.cl = cl
     return neighbors
+end
+
+function Base.show(io::IO, neighbor_finder::NeighborFinder)
+    println(io, typeof(neighbor_finder))
+    println(io,"  Size of nb_matrix = " , size(neighbor_finder.nb_matrix))
+    println(io,"  n_steps = " , neighbor_finder.n_steps)
+    print(io,"  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end

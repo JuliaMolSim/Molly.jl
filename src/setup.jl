@@ -118,6 +118,7 @@ function readinputs(T::Type,
                     coord_file::AbstractString;
                     units::Bool=true,
                     gpu::Bool=false,
+                    gpu_diff_safe::Bool=gpu,
                     cutoff_dist=1.0u"nm",
                     nl_dist=1.2u"nm")
     # Read force field and topology file
@@ -346,15 +347,18 @@ function readinputs(T::Type,
 
     atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
 
-    if gpu
-        atoms = cu(atoms)
-        coords = cu(coords)
-        neighbor_finder = DistanceVecNeighborFinder(nb_matrix=cu(nb_matrix), matrix_14=cu(matrix_14), n_steps=10,
+    if gpu_diff_safe
+        neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(nb_matrix) : nb_matrix,
+                                                    matrix_14=gpu ? cu(matrix_14) : matrix_14, n_steps=10,
                                                     dist_cutoff=units ? T(nl_dist) : T(ustrip(nl_dist)))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
                                                     dist_cutoff=units ? T(nl_dist) : T(ustrip(nl_dist)),
                                                     x0=coords, unit_cell=box_size)
+    end
+    if gpu
+        atoms = cu(atoms)
+        coords = cu(coords)
     end
 
     return atoms, atoms_data, specific_inter_lists, general_inters,
@@ -569,6 +573,7 @@ neighbor finder, coordinates and box size.
 function setupsystem(coord_file::AbstractString,
                         force_field;
                         gpu::Bool=false,
+                        gpu_diff_safe::Bool=gpu,
                         cutoff_dist=1.0u"nm",
                         nl_dist=1.2u"nm")
     T = typeof(force_field.weight_14_coulomb)
@@ -869,15 +874,18 @@ function setupsystem(coord_file::AbstractString,
     coords = wrapcoordsvec.(coords, (box_size,))
 
     atoms = [atoms...]
-    if gpu
-        atoms = cu(atoms)
-        coords = cu(coords)
-        neighbor_finder = DistanceVecNeighborFinder(nb_matrix=cu(nb_matrix), matrix_14=cu(matrix_14),
+    if gpu_diff_safe
+        neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(nb_matrix) : nb_matrix,
+                                                    matrix_14=gpu ? cu(matrix_14) : matrix_14,
                                                     n_steps=10, dist_cutoff=T(nl_dist))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14,
                                                     n_steps=10, dist_cutoff=T(nl_dist),
                                                     x0=coords, unit_cell=box_size)
+    end
+    if gpu
+        atoms = cu(atoms)
+        coords = cu(coords)
     end
 
     return atoms, atoms_data, specific_inter_lists, general_inters,

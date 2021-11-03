@@ -78,7 +78,7 @@ end
     fs_accum_bounds_i = fs_accum_pad_i[neighbors.atom_bounds_i]
     fs_accum_bounds_offset_i = vcat(zf, fs_accum_bounds_i[1:(end - 1)])
 
-    fs_accum_pad_j = vcat(zf, accumulate(+, view(nb_forces, neighbors.sortperm_j)))
+    fs_accum_pad_j = vcat(zf, accumulate(+, nb_forces[neighbors.sortperm_j]))
     fs_accum_bounds_j = fs_accum_pad_j[neighbors.atom_bounds_j]
     fs_accum_bounds_offset_j = vcat(zf, fs_accum_bounds_j[1:(end - 1)])
 

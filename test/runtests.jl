@@ -538,12 +538,17 @@ end
         specific_inter_lists = (bonds,)
 
         neighbor_finder = NoNeighborFinder()
-        cutoff = DistanceCutoff(1.0u"nm")
-        general_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
+        cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
+        general_inters = (LennardJones(nl_only=false, cutoff=cutoff, weight_14=f32 ? 1.0f0 : 1.0),)
         if nl
-            neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,
-                                                        dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm")
-            general_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
+            if gpu_diff_safe
+                neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+                                                            n_steps=10, dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm")
+            else
+                neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,
+                                                            dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm")
+            end
+            general_inters = (LennardJones(nl_only=true, cutoff=cutoff, weight_14=f32 ? 1.0f0 : 1.0),)
         end
 
         if gpu
@@ -574,8 +579,8 @@ end
             gpu_diff_safe=gpu_diff_safe,
         )
 
-        c = simulate!(s; parallel=parallel)
-        return c
+        simulate!(s; parallel=parallel)
+        return s.coords
     end
 
     runs = [
@@ -590,8 +595,10 @@ end
         push!(runs, ("in-place NL parallel", [true , true , false, false, false]))
     end
     if CUDA.functional()
-        push!(runs, ("out-of-place gpu"    , [false, false, true , false, true ]))
-        push!(runs, ("out-of-place gpu f32", [false, false, true , true , true ]))
+        push!(runs, ("out-of-place gpu"       , [false, false, true , false, true ]))
+        push!(runs, ("out-of-place gpu f32"   , [false, false, true , true , true ]))
+        push!(runs, ("out-of-place gpu NL"    , [true , false, true , false, true ]))
+        push!(runs, ("out-of-place gpu f32 NL", [true , false, true , true , true ]))
     end
 
     final_coords_ref = Array(runsim(runs[1][2]...))
