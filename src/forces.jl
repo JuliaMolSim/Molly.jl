@@ -71,6 +71,11 @@ end
     return ustrip.(fdr)
 end
 
+# Sum forces on neighboring atom pairs to get forces on each atom
+# Neighbor forces are accumulated and then atom forces extracted by subtraction
+#   at the atom boundaries
+# The forces are re-arranged for the other atom index and the process is repeated
+# This isn't pretty but it works on the GPU
 @views @inbounds function sumforces(nb_forces, neighbors)
     zf = zero(nb_forces[1:1])
 
@@ -166,6 +171,7 @@ function accelerations(s::Simulation, coords, atoms, neighbors, neighbors_all=no
         if length(nbsi) > 0
             @inbounds nb_forces = force_nounit.((first(general_inters_nl),), coords[nbsi], coords[nbsj],
                     atoms[nbsi], atoms[nbsj], (s.box_size,), s.force_unit, neighbors.weights_14)
+            # Add all atom pair forces before summation
             for inter in general_inters_nl[2:end]
                 @inbounds nb_forces += force_nounit.((inter,), coords[nbsi], coords[nbsj],
                     atoms[nbsi], atoms[nbsj], (s.box_size,), s.force_unit, neighbors.weights_14)

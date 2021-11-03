@@ -125,6 +125,7 @@ runs = [
     ("in-place NL"     , [true , false, false, false, false]),
     ("in-place f32"    , [false, false, false, true , false]),
     ("out-of-place"    , [false, false, true , false, false]),
+    ("out-of-place NL" , [true , false, true , false, false]),
     ("out-of-place f32", [false, false, true , true , false]),
 ]
 if nthreads() > 1

@@ -101,7 +101,7 @@ end
 """
     DistanceVecNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff)
 
-Find close atoms by distance.
+Find close atoms by distance in a GPU and differentiable safe manner.
 """
 struct DistanceVecNeighborFinder{D, B, I} <: NeighborFinder
     nb_matrix::B
@@ -131,7 +131,8 @@ function DistanceVecNeighborFinder(;
             nb_matrix, m14, n_steps, dist_cutoff, is, js)
 end
 
-function findindices(nbs_ord, n_atoms)
+# Find the boundaries of an ordered list of integers
+function findboundaries(nbs_ord, n_atoms)
     inds = zeros(Int, n_atoms)
     atom_i = 1
     for (nb_i, nb_ai) in enumerate(nbs_ord)
@@ -170,8 +171,8 @@ function find_neighbors!(s::Simulation,
     nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
     sortperm_j = sortperm(nbsj_ordi)
     weights_14_ordi = @view weights_14[order_i]
-    atom_bounds_i = findindices(nbsi_ordi, n_atoms)
-    atom_bounds_j = findindices(view(nbsj_ordi, sortperm_j), n_atoms)
+    atom_bounds_i = findboundaries(nbsi_ordi, n_atoms)
+    atom_bounds_j = findboundaries(view(nbsj_ordi, sortperm_j), n_atoms)
 
     return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
                             sortperm_j, weights_14_ordi)
@@ -184,8 +185,8 @@ function allneighbors(n_atoms)
 
     nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
     sortperm_j = sortperm(nbsj_ordi)
-    atom_bounds_i = findindices(nbsi_ordi, n_atoms)
-    atom_bounds_j = findindices(view(nbsj_ordi, sortperm_j), n_atoms)
+    atom_bounds_i = findboundaries(nbsi_ordi, n_atoms)
+    atom_bounds_j = findboundaries(view(nbsj_ordi, sortperm_j), n_atoms)
     weights_14 = nothing
 
     return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,

@@ -588,6 +588,7 @@ end
         ("in-place NL"     , [true , false, false, false, false]),
         ("in-place f32"    , [false, false, false, true , false]),
         ("out-of-place"    , [false, false, true , false, false]),
+        ("out-of-place NL" , [true , false, true , false, false]),
         ("out-of-place f32", [false, false, true , true , false]),
     ]
     if nthreads() > 1
@@ -670,7 +671,7 @@ end
     # Run a short simulation with all interactions
     n_steps = 100
     timestep = 0.0005u"ps"
-    velocities = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
+    velocities_start = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
 
     s = Simulation(
         simulator=VelocityVerlet(),
@@ -678,7 +679,7 @@ end
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
         coords=coords,
-        velocities=velocities,
+        velocities=deepcopy(velocities_start),
         box_size=box_size,
         neighbor_finder=neighbor_finder,
         timestep=timestep,
@@ -695,6 +696,32 @@ end
     # Coordinates and velocities at end must match at some threshold
     @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
     @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
+
+    # Test the same simulation on the GPU
+    if CUDA.functional()
+        atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
+            joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=true)
+        
+        s = Simulation(
+            simulator=VelocityVerlet(),
+            atoms=atoms,
+            specific_inter_lists=specific_inter_lists,
+            general_inters=general_inters,
+            coords=coords,
+            velocities=cu(deepcopy(velocities_start)),
+            box_size=box_size,
+            neighbor_finder=neighbor_finder,
+            timestep=timestep,
+            n_steps=n_steps,
+        )
+    
+        simulate!(s)
+
+        coords_diff = Array(s.coords) .- wrapcoordsvec.(coords_openmm, (s.box_size,))
+        vels_diff = Array(s.velocities) .- vels_openmm
+        @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
+        @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
+    end
 end
 
 @enum Status susceptible infected recovered
