@@ -2,6 +2,7 @@ module Molly
 
 using BioStructures
 using CellListMap
+using ChainRulesCore
 using Chemfiles
 using Colors
 using Combinatorics
@@ -29,6 +30,7 @@ include("setup.jl")
 include("spatial.jl")
 include("forces.jl")
 include("simulators.jl")
+include("chain_rules.jl")
 include("thermostats.jl")
 include("neighbors.jl")
 include("loggers.jl")
