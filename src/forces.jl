@@ -71,6 +71,8 @@ end
     return ustrip.(fdr)
 end
 
+accumulateadd(x) = accumulate(+, x)
+
 # Sum forces on neighboring atom pairs to get forces on each atom
 # Neighbor forces are accumulated and then atom forces extracted by subtraction
 #   at the atom boundaries
@@ -79,11 +81,11 @@ end
 @views @inbounds function sumforces(nb_forces, neighbors)
     zf = zero(nb_forces[1:1])
 
-    fs_accum_pad_i = vcat(zf, accumulate(+, nb_forces))
+    fs_accum_pad_i = vcat(zf, accumulateadd(nb_forces))
     fs_accum_bounds_i = fs_accum_pad_i[neighbors.atom_bounds_i]
     fs_accum_bounds_offset_i = vcat(zf, fs_accum_bounds_i[1:(end - 1)])
 
-    fs_accum_pad_j = vcat(zf, accumulate(+, nb_forces[neighbors.sortperm_j]))
+    fs_accum_pad_j = vcat(zf, accumulateadd(nb_forces[neighbors.sortperm_j]))
     fs_accum_bounds_j = fs_accum_pad_j[neighbors.atom_bounds_j]
     fs_accum_bounds_offset_j = vcat(zf, fs_accum_bounds_j[1:(end - 1)])
 

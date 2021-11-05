@@ -599,7 +599,7 @@ function Molly.simulate!(s::Simulation,
                                         parallel=parallel)
 
         # Increment the step counter like this
-        s.n_steps_made[1] += 1
+        s.n_steps_made += 1
     end
     return s
 end

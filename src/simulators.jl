@@ -64,7 +64,7 @@ function simulate!(s::Simulation{false},
         find_neighbors!(s, s.neighbor_finder, step_n; parallel=parallel)
 
         accels_t = accels_t_dt
-        s.n_steps_made[1] += 1
+        s.n_steps_made += 1
     end
     return s
 end
@@ -97,7 +97,7 @@ function simulate!(s::Simulation{true},
         neighbors = find_neighbors!(s, s.neighbor_finder, step_n, neighbors)
 
         accels_t = accels_t_dt
-        s.n_steps_made[1] += 1
+        s.n_steps_made += 1
     end
     return s
 end
@@ -137,7 +137,7 @@ function simulate!(s::Simulation,
         apply_thermostat!(coords_last, s, s.thermostat)
         find_neighbors!(s, s.neighbor_finder, step_n; parallel=parallel)
 
-        s.n_steps_made[1] += 1
+        s.n_steps_made += 1
     end
     return s
 end
@@ -147,5 +147,5 @@ function simulate!(s::Simulation, n_steps::Integer; parallel::Bool=true)
 end
 
 function simulate!(s::Simulation; parallel::Bool=true)
-    simulate!(s, s.n_steps - first(s.n_steps_made); parallel=parallel)
+    simulate!(s, s.n_steps - s.n_steps_made; parallel=parallel)
 end

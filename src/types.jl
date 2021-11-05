@@ -230,7 +230,7 @@ mutable struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E, NL, NF}
     loggers::Dict{String, <:Logger}
     timestep::S
     n_steps::Int
-    n_steps_made::Vector{Int}
+    n_steps_made::Int
     force_unit::F
     energy_unit::E
 end
@@ -254,7 +254,7 @@ function Simulation(;
                     loggers=Dict{String, Logger}(),
                     timestep=0.0u"ps",
                     n_steps=0,
-                    n_steps_made=[0],
+                    n_steps_made=0,
                     force_unit=u"kJ * mol^-1 * nm^-1",
                     energy_unit=u"kJ * mol^-1",
                     gpu_diff_safe=isa(coords, CuArray))
