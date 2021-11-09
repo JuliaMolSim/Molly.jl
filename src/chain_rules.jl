@@ -1,10 +1,19 @@
 # Chain rules to allow differentiable simulations
 
-function ChainRulesCore.rrule(T::Type{<:SVector}, x::Number...)
+function ChainRulesCore.rrule(T::Type{<:SVector}, vs::Number...)
+    Y = T(vs...)
     function SVector_pullback(Ȳ)
         return NoTangent(), Ȳ...
     end
-    return T(x...), SVector_pullback
+    return Y, SVector_pullback
+end
+
+function ChainRulesCore.rrule(::typeof(sparsevec), is, vs, l)
+    Y = sparsevec(is, vs, l)
+    function sparsevec_pullback(Ȳ)
+        return NoTangent(), collect(1:length(Ȳ)), Ȳ, length(Ȳ)
+    end
+    return Y, sparsevec_pullback
 end
 
 function ChainRulesCore.rrule(::typeof(accumulateadd), x)
