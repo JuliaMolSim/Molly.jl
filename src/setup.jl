@@ -119,8 +119,8 @@ function readinputs(T::Type,
                     units::Bool=true,
                     gpu::Bool=false,
                     gpu_diff_safe::Bool=gpu,
-                    cutoff_dist=1.0u"nm",
-                    nl_dist=1.2u"nm")
+                    cutoff_dist=units ? 1.0u"nm" : 1.0,
+                    nl_dist=units ? 1.2u"nm" : 1.2)
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
     bondtypes = Dict{String, BondType}()
@@ -333,7 +333,8 @@ function readinputs(T::Type,
     lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true, weight_14=T(0.5),
                         force_unit=force_unit, energy_unit=energy_unit)
     coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), solvent_dielectric=T(solventdielectric),
-                                        nl_only=true, weight_14=T(0.5), coulomb_const=T(coulombconst),
+                                        nl_only=true, weight_14=T(0.5),
+                                        coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
                                         force_unit=force_unit, energy_unit=energy_unit)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
@@ -350,11 +351,10 @@ function readinputs(T::Type,
     if gpu_diff_safe
         neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(nb_matrix) : nb_matrix,
                                                     matrix_14=gpu ? cu(matrix_14) : matrix_14, n_steps=10,
-                                                    dist_cutoff=units ? T(nl_dist) : T(ustrip(nl_dist)))
+                                                    dist_cutoff=T(nl_dist))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-                                                    dist_cutoff=units ? T(nl_dist) : T(ustrip(nl_dist)),
-                                                    x0=coords, unit_cell=box_size)
+                                                    dist_cutoff=T(nl_dist), x0=coords, unit_cell=box_size)
     end
     if gpu
         atoms = cu(atoms)
@@ -428,7 +428,7 @@ struct OpenMMForceField{T, M, D, E, K}
     weight_14_lj::T
 end
 
-function OpenMMForceField(T::Type, ff_files::AbstractString...)
+function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true)
     atom_types = Dict{String, OpenMMAtomType}()
     residue_types = Dict{String, OpenMMResiduetype}()
     bond_types = Dict{Tuple{String, String}, BondType}()
@@ -447,9 +447,9 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...)
                 for atom_type in eachelement(entry)
                     class = atom_type["class"]
                     element = atom_type["element"]
-                    mass = parse(T, atom_type["mass"])u"u"
-                    σ = T(-1u"nm") # Updated later
-                    ϵ = T(-1u"kJ * mol^-1") # Updated later
+                    mass = units ? parse(T, atom_type["mass"])u"u" : parse(T, atom_type["mass"])
+                    σ = units ? T(-1u"nm") : T(-1) # Updated later
+                    ϵ = units ? T(-1u"kJ * mol^-1") : T(-1) # Updated later
                     atom_types[class] = OpenMMAtomType(class, element, mass, σ, ϵ)
                 end
             elseif entry_name == "Residues"
@@ -475,8 +475,8 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...)
                 for bond in eachelement(entry)
                     atom_type_1 = bond["type1"]
                     atom_type_2 = bond["type2"]
-                    b0 = parse(T, bond["length"])u"nm"
-                    kb = parse(T, bond["k"])u"kJ * mol^-1 * nm^-2"
+                    b0 = units ? parse(T, bond["length"])u"nm" : parse(T, bond["length"])
+                    kb = units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"])
                     bond_types[(atom_type_1, atom_type_2)] = BondType(b0, kb)
                 end
             elseif entry_name == "HarmonicAngleForce"
@@ -485,7 +485,7 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...)
                     atom_type_2 = angle["type2"]
                     atom_type_3 = angle["type3"]
                     th0 = parse(T, angle["angle"])
-                    k = parse(T, angle["k"])u"kJ * mol^-1"
+                    k = units ? parse(T, angle["k"])u"kJ * mol^-1" : parse(T, angle["k"])
                     angle_types[(atom_type_1, atom_type_2, atom_type_3)] = AngleType(th0, k)
                 end
             elseif entry_name == "PeriodicTorsionForce"
@@ -498,13 +498,13 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...)
                     atom_type_4 = torsion["type4"]
                     periodicities = Int[]
                     phases = T[]
-                    ks = typeof(T(1u"kJ * mol^-1"))[]
+                    ks = units ? typeof(T(1u"kJ * mol^-1"))[] : T[]
                     phase_i = 1
                     phase_present = true
                     while phase_present
                         push!(periodicities, parse(Int, torsion["periodicity$phase_i"]))
                         push!(phases, parse(T, torsion["phase$phase_i"]))
-                        push!(ks, parse(T, torsion["k$phase_i"])u"kJ * mol^-1")
+                        push!(ks, units ? parse(T, torsion["k$phase_i"])u"kJ * mol^-1" : parse(T, torsion["k$phase_i"]))
                         phase_i += 1
                         phase_present = haskey(torsion, "periodicity$phase_i")
                     end
@@ -519,8 +519,8 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...)
                         atom_type = atom_or_attr["type"]
                         # Update previous atom types
                         partial_type = atom_types[atom_type]
-                        σ = parse(T, atom_or_attr["sigma"])u"nm"
-                        ϵ = parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1"
+                        σ = units ? parse(T, atom_or_attr["sigma"])u"nm" : parse(T, atom_or_attr["sigma"])
+                        ϵ = units ? parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_attr["epsilon"])
                         complete_type = OpenMMAtomType(partial_type.class, partial_type.element,
                                                         partial_type.mass, σ, ϵ)
                         atom_types[atom_type] = complete_type
@@ -532,20 +532,24 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...)
 
     # Check all atoms were updated
     for atom_type in values(atom_types)
-        if atom_type.σ < zero(T)u"nm"
+        if (units && atom_type.σ < zero(T)u"nm") || (!units && atom_type.σ < zero(T))
             error("Atom of class ", atom_type.class, " has not had σ or ϵ set")
         end
     end
 
-    M = typeof(T(1u"u"))
-    D = typeof(T(1u"nm"))
-    E = typeof(T(1u"kJ * mol^-1"))
-    K = typeof(T(1u"kJ * mol^-1 * nm^-2"))
+    if units
+        M = typeof(T(1u"u"))
+        D = typeof(T(1u"nm"))
+        E = typeof(T(1u"kJ * mol^-1"))
+        K = typeof(T(1u"kJ * mol^-1 * nm^-2"))
+    else
+        M, D, E, K = T, T, T, T
+    end
     return OpenMMForceField{T, M, D, E, K}(atom_types, residue_types, bond_types, angle_types,
                 torsion_types, torsion_order, weight_14_coulomb, weight_14_lj)
 end
 
-OpenMMForceField(ff_files::AbstractString...) = OpenMMForceField(DefaultFloat, ff_files...)
+OpenMMForceField(ff_files::AbstractString...; kwargs...) = OpenMMForceField(DefaultFloat, ff_files...; kwargs...)
 
 # Return the residue name with N or C added for terminal residues
 # Assumes no missing residue numbers, won't work with multiple chains
@@ -572,10 +576,11 @@ neighbor finder, coordinates and box size.
 """
 function setupsystem(coord_file::AbstractString,
                         force_field;
+                        units::Bool=true,
                         gpu::Bool=false,
                         gpu_diff_safe::Bool=gpu,
-                        cutoff_dist=1.0u"nm",
-                        nl_dist=1.2u"nm")
+                        cutoff_dist=units ? 1.0u"nm" : 1.0,
+                        nl_dist=units ? 1.2u"nm" : 1.2)
     T = typeof(force_field.weight_14_coulomb)
 
     # Chemfiles uses zero-based indexing, be careful
@@ -858,19 +863,36 @@ function setupsystem(coord_file::AbstractString,
 
     specific_inter_lists = ([bonds...], [angles...], [torsions...], [impropers...])
 
-    lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true,
-                        weight_14=force_field.weight_14_lj)
+    if units
+        force_unit = u"kJ * mol^-1 * nm^-1"
+        energy_unit = u"kJ * mol^-1"
+    else
+        force_unit = NoUnits
+        energy_unit = NoUnits
+    end
+
+    lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true, weight_14=force_field.weight_14_lj,
+                        force_unit=force_unit, energy_unit=energy_unit)
     coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), solvent_dielectric=T(solventdielectric),
                                         nl_only=true, weight_14=force_field.weight_14_coulomb,
-                                        coulomb_const=T(coulombconst))
+                                        coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
+                                        force_unit=force_unit, energy_unit=energy_unit)
     general_inters = (lj, coulomb_rf)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     # Convert from Å
-    box_size = SVector{3}(T.(lengths(UnitCell(frame))u"nm" / 10.0))
+    if units
+        box_size = SVector{3}(T.(lengths(UnitCell(frame))u"nm" / 10.0))
+    else
+        box_size = SVector{3}(T.(lengths(UnitCell(frame)) / 10.0))
+    end
 
     # Convert from Å
-    coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(positions(frame))]
+    if units
+        coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(positions(frame))]
+    else
+        coords = [T.(SVector{3}(col) / 10.0) for col in eachcol(positions(frame))]
+    end
     coords = wrapcoordsvec.(coords, (box_size,))
 
     atoms = [atoms...]
