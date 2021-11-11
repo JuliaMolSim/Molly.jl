@@ -19,7 +19,7 @@ end
 function ChainRulesCore.rrule(::typeof(accumulateadd), x)
     Y = accumulateadd(x)
     function accumulateadd_pullback(Ȳ)
-        return NoTangent(), Ȳ .* collect(length(x):-1:1)
+        return NoTangent(), reverse(accumulateadd(reverse(Ȳ)))
     end
     return Y, accumulateadd_pullback
 end
