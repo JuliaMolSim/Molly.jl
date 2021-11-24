@@ -10,12 +10,14 @@ using CUDA
 using Distances
 using Distributions
 using EzXML
+using ForwardDiff
 using KernelDensity
 using NearestNeighbors
 using ProgressMeter
 using Reexport
 using Requires
 using Unitful
+using Zygote
 
 @reexport using StaticArrays
 @reexport using Unitful
@@ -31,6 +33,7 @@ include("spatial.jl")
 include("forces.jl")
 include("simulators.jl")
 include("chain_rules.jl")
+include("zygote.jl")
 include("thermostats.jl")
 include("neighbors.jl")
 include("loggers.jl")
