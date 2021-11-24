@@ -1,7 +1,14 @@
 # Extend Zygote to work with static vectors on the GPU
 # Here be dragons
 
+Zygote.unbroadcast(x::Tuple{Any}, x̄::Nothing) = nothing
+
 Zygote.accum_sum(xs::AbstractVector{<:StaticVector}; dims=:) = Zygote.accum_sum(sum.(xs); dims=:)
+
+Base.:+(x::Real, y::SizedVector) = x .+ y
+Base.:+(x::SizedVector, y::Real) = x .+ y
+
+Base.:+(x::Real, y::Zygote.OneElement) = x .+ y
 
 # See the dualize function in ForwardDiff
 @generated function dualize_add1(::Type{T}, x::StaticArray) where T
