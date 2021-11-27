@@ -130,3 +130,10 @@ function potential_energy(s::Simulation)
 
     return uconvert(s.energy_unit, potential)
 end
+
+function vacf(vl::VelocityLogger)
+	n_atoms = length(first(vl.velocities))
+	
+	return (1/n_atoms)*(dot(first(vl.velocities), last(vl.velocities)))
+
+end
