@@ -5,7 +5,8 @@ export
     displacements,
     distances,
     rdf,
-    energy
+    energy,
+	velocityautocorr
 
 """
     visualize(coord_logger, box_size, out_filepath; <keyword arguments>)
@@ -131,9 +132,19 @@ function potential_energy(s::Simulation)
     return uconvert(s.energy_unit, potential)
 end
 
-function vacf(vl::VelocityLogger)
+"""
+	velocityautocorr(vl, first, last)
+
+Calculates the autocorrelation function of velocity from the velocity logger. 
+This helps characterize the similarity between velocities observed at different
+time instances.
+
+"""
+
+function velocityautocorr(vl::VelocityLogger, first::Int64 = 1, last::Int64 = length(vl.velocities))
+
 	n_atoms = length(first(vl.velocities))
 	
-	return (1/n_atoms)*(dot(first(vl.velocities), last(vl.velocities)))
+	return (1/n_atoms)*(dot(vl[first], dot(vl[last])))
 
 end

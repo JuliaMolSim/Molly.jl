@@ -118,13 +118,13 @@ function VelocityLogger(T, n_steps::Integer, dims::Integer=3)
 end
 
 function VelocityLogger(n_steps::Integer, dims::Integer=3)
-	return VelocityLogger(typeof(one(DefaultFloat)u"nm * s^-1"), n_steps; dims=dims)
+	return VelocityLogger(typeof(one(DefaultFloat)u"nm * ps^-1"), n_steps; dims=dims)
 
 end
 
 function Base.show(io::IO, vl::VelocityLogger)
-	print(io, "VelocityLogger{", eltype(eltype(vl.velocities), "} with n_steps
-	", vl.n_steps, ", ", length(vl.velocities), " frames recorded for",
+	print(io, "VelocityLogger{", eltype(eltype(vl.velocities), "} with n_steps ",
+	vl.n_steps, ", ", length(vl.velocities), " frames recorded for ",
 	length(first(vl.velocities)), " atoms"))
 end
 
