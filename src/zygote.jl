@@ -4,7 +4,10 @@
 using ForwardDiff: Chunk, Dual, partials, value
 
 Zygote.unbroadcast(x::Tuple{Any}, x̄::Nothing) = nothing
-#Zygote.unbroadcast(x::Tuple{<:SVector}, x̄) = (sum(x̄),) # Caused an issue on CPU path but good for box size grad?
+
+function Zygote.accum(x::AbstractArray{<:SizedVector}, ys::CuArray{<:SVector}...)
+    Zygote.accum.(convert(typeof(ys[1]), x), ys...)
+end
 
 function Zygote.accum(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
     Atom{T, T, T, T}(0, x.charge + y.charge, x.mass + y.mass, x.σ + y.σ, x.ϵ + y.ϵ)
@@ -40,9 +43,6 @@ function Zygote.unbroadcast(x::AbstractArray{<:Real}, x̄::AbstractArray{<:Stati
         Zygote._project(x, accum_sum(x̄; dims = dims))
     end
 end
-
-# Was needed before but not anymore and messes with Rg
-#Zygote.accum_sum(xs::AbstractVector{<:StaticVector}; dims=:) = Zygote.accum_sum(sum.(xs); dims=:)
 
 Zygote._zero(xs::AbstractArray{<:StaticVector}, T) = fill!(similar(xs, T), zero(T))
 
@@ -285,7 +285,6 @@ end
         barg1 = broadcast(ȳ, out) do y1, o1
             ps = partials(o1)
             Atom(0, y1 * ps[1], y1 * ps[2], y1 * ps[3], y1 * ps[4])
-            #(index=0, charge=y1 * ps[1], mass=y1 * ps[2], σ=y1 * ps[3], ϵ=y1 * ps[4]) # rm...
         end
         darg1 = Zygote.unbroadcast(arg1, barg1)
         println("mo4backend")
@@ -299,14 +298,9 @@ function combine_dual_GeneralInteraction(y1::SVector{D, T}, o1::SVector{D, Dual{
     LennardJones{false, Nothing, T, typeof(NoUnits), typeof(NoUnits)}(
                     nothing, false, false, y1[1] * ps1[i] + y1[2] * ps2[i] + y1[3] * ps3[i],
                     NoUnits, NoUnits)
-    #nothing
 end
 
 function combine_dual_Atom(y1::SVector{D, T}, o1::SVector{D, Dual{Nothing, T, P}}, i::Integer, j::Integer, k::Integer, l::Integer) where {D, T, P}
-    #psi, psj, psk, pkl = SVector{D, T}(partials.(o1, i)), SVector{D, T}(partials.(o1, j)), SVector{D, T}(partials.(o1, k)), SVector{D, T}(partials.(o1, l))
-    #Atom(0, y1[1] * psi[1] + y1[2] * psi[2] + y1[3] * psi[3], 0.0f0, 0.0f0, 0.0f0)
-    #Atom{T, T, T, T}(0, 0.0f0, 0.0f0, 0.0f0, 0.0f0)
-    #nothing
     ps1, ps2, ps3 = partials(o1[1]), partials(o1[2]), partials(o1[3])
     Atom(
         0,
