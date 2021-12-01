@@ -21,6 +21,16 @@ end
 
 const solventdielectric = 78.3
 
+# Defined as a function since this is reused elsewhere
+function coulombproperties(cutoff_dist, solvent_dielectric)
+    sqdist_cutoff = cutoff_dist ^ 2
+    krf = (1 / (cutoff_dist ^ 3)) * ((solvent_dielectric - 1) / (2 * solvent_dielectric + 1))
+    crf = (1 /  cutoff_dist     ) * ((3 * solvent_dielectric) / (2 * solvent_dielectric + 1))
+    krf_14 = (1 / (cutoff_dist ^ 3)) * 0
+    crf_14 = (1 /  cutoff_dist     ) * 0
+    return 
+end
+
 function CoulombReactionField(;
                     cutoff_dist,
                     solvent_dielectric=solventdielectric,
@@ -29,11 +39,7 @@ function CoulombReactionField(;
                     coulomb_const=coulombconst,
                     force_unit=u"kJ * mol^-1 * nm^-1",
                     energy_unit=u"kJ * mol^-1")
-    sqdist_cutoff = cutoff_dist ^ 2
-    krf = (1 / (cutoff_dist ^ 3)) * ((solvent_dielectric - 1) / (2 * solvent_dielectric + 1))
-    crf = (1 /  cutoff_dist     ) * ((3 * solvent_dielectric) / (2 * solvent_dielectric + 1))
-    krf_14 = (1 / (cutoff_dist ^ 3)) * 0
-    crf_14 = (1 /  cutoff_dist     ) * 0
+    sqdist_cutoff, krf, crf, krf_14, crf_14 = coulombproperties(cutoff_dist, solvent_dielectric)
     return CoulombReactionField{typeof(cutoff_dist), typeof(solvent_dielectric), typeof(weight_14),
                                 typeof(coulomb_const), typeof(force_unit), typeof(energy_unit),
                                 typeof(sqdist_cutoff), typeof(krf), typeof(crf)}(

@@ -8,6 +8,14 @@ function ChainRulesCore.rrule(T::Type{<:SVector}, vs::Number...)
     return Y, SVector_pullback
 end
 
+function ChainRulesCore.rrule(T::Type{<:Atom}, vs...)
+    Y = T(vs...)
+    function Atom_pullback(Ȳ)
+        return NoTangent(), Ȳ.index, Ȳ.charge, Ȳ.mass, Ȳ.σ, Ȳ.ϵ
+    end
+    return Y, Atom_pullback
+end
+
 function ChainRulesCore.rrule(::typeof(sparsevec), is, vs, l)
     Y = sparsevec(is, vs, l)
     function sparsevec_pullback(Ȳ)
