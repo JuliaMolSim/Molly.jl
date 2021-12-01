@@ -4,8 +4,8 @@ export
     TemperatureLogger,
     log_property!,
     CoordinateLogger,
+    VelocityLogger,
     EnergyLogger,
-	VelocityLogger
     StructureWriter
 
 """
@@ -62,13 +62,46 @@ end
 
 function Base.show(io::IO, cl::CoordinateLogger)
     print(io, "CoordinateLogger{", eltype(eltype(cl.coords)), "} with n_steps ",
-                cl.n_steps, ", ", length(cl.coords), " frames recorded for ",
-                length(cl.coords) > 0 ? length(first(cl.coords)) : "?", " atoms")
+            cl.n_steps, ", ", length(cl.coords), " frames recorded for ",
+            length(cl.coords) > 0 ? length(first(cl.coords)) : "?", " atoms")
 end
 
 function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
         push!(logger.coords, deepcopy(s.coords))
+    end
+end
+
+"""
+    VelocityLogger(n_steps; dims=3)
+
+Log the velocities throughout a simulation.
+"""
+struct VelocityLogger{T} <: Logger
+    n_steps::Int
+    velocities::Vector{Vector{T}}
+end
+
+function VelocityLogger(T, n_steps::Integer; dims::Integer=3)
+    return VelocityLogger(n_steps,
+                            Array{SArray{Tuple{dims}, T, 1, dims}, 1}[])
+
+end
+
+function VelocityLogger(n_steps::Integer; dims::Integer=3)
+    return VelocityLogger(typeof(one(DefaultFloat)u"nm * ps^-1"), n_steps; dims=dims)
+
+end
+
+function Base.show(io::IO, vl::VelocityLogger)
+    print(io, "VelocityLogger{", eltype(eltype(vl.velocities)), "} with n_steps ",
+            vl.n_steps, ", ", length(vl.velocities), " frames recorded for ",
+            length(vl.velocities) > 0 ? length(first(vl.velocities)) : "?", " atoms")
+end
+
+function log_property!(logger::VelocityLogger, s::Simulation, step_n::Integer)
+    if step_n % logger.n_steps == 0
+        push!(logger.velocities, deepcopy(s.velocities))
     end
 end
 
@@ -97,41 +130,6 @@ function log_property!(logger::EnergyLogger, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
         push!(logger.energies, energy(s))
     end
-end
-
-"""
-	VelocityLogger(n_steps; dims=3)
-
-Log the velocities of the system throughout a simulation
-
-"""
-
-struct VelocityLogger{T} <: Logger
-	n_steps::Int
-	velocities::Vector{Vector{T}}
-end
-
-function VelocityLogger(T, n_steps::Integer, dims::Integer=3)
-    return VelocityLogger(n_steps,
-							Array{SArray{Tuple{dims}, T, 1, dims}, 1}[])
-
-end
-
-function VelocityLogger(n_steps::Integer, dims::Integer=3)
-	return VelocityLogger(typeof(one(DefaultFloat)u"nm * ps^-1"), n_steps; dims=dims)
-
-end
-
-function Base.show(io::IO, vl::VelocityLogger)
-	print(io, "VelocityLogger{", eltype(eltype(vl.velocities), "} with n_steps ",
-	vl.n_steps, ", ", length(vl.velocities), " frames recorded for ",
-	length(first(vl.velocities)), " atoms"))
-end
-
-function log_property!(logger::VelocityLogger, s::Simulation, step_n::Integer)
-	if step_n % logger.n_steps == 0
-		push!(logger.velocities, deepcopy(s.velocities))
-	end
 end
 
 """
