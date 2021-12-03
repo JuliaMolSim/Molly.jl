@@ -117,18 +117,20 @@ function DistanceVecNeighborFinder(;
                                 matrix_14=falses(size(nb_matrix)),
                                 n_steps=10,
                                 dist_cutoff)
-    n_atoms = size(nb_matrix, 1)
-    if isa(nb_matrix, CuArray)
-        is = cu(hcat([collect(1:n_atoms) for i in 1:n_atoms]...))
-        js = cu(permutedims(is, (2, 1)))
-        m14 = cu(matrix_14)
-    else
-        is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
-        js = permutedims(is, (2, 1))
-        m14 = matrix_14
+    Zygote.ignore() do
+        n_atoms = size(nb_matrix, 1)
+        if isa(nb_matrix, CuArray)
+            is = cu(hcat([collect(1:n_atoms) for i in 1:n_atoms]...))
+            js = cu(permutedims(is, (2, 1)))
+            m14 = cu(matrix_14)
+        else
+            is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
+            js = permutedims(is, (2, 1))
+            m14 = matrix_14
+        end
+        return DistanceVecNeighborFinder{typeof(dist_cutoff), typeof(nb_matrix), typeof(is)}(
+                nb_matrix, m14, n_steps, dist_cutoff, is, js)
     end
-    return DistanceVecNeighborFinder{typeof(dist_cutoff), typeof(nb_matrix), typeof(is)}(
-            nb_matrix, m14, n_steps, dist_cutoff, is, js)
 end
 
 # Find the boundaries of an ordered list of integers
@@ -181,18 +183,20 @@ function find_neighbors!(s::Simulation,
 end
 
 function allneighbors(n_atoms)
-    nbs_all = findall(!iszero, tril(ones(Bool, n_atoms, n_atoms), -1))
-    nbsi, nbsj = getindex.(nbs_all, 1), getindex.(nbs_all, 2)
-    order_i = sortperm(nbsi)
+    Zygote.ignore() do
+        nbs_all = findall(!iszero, tril(ones(Bool, n_atoms, n_atoms), -1))
+        nbsi, nbsj = getindex.(nbs_all, 1), getindex.(nbs_all, 2)
+        order_i = sortperm(nbsi)
 
-    nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
-    sortperm_j = sortperm(nbsj_ordi)
-    atom_bounds_i = findboundaries(nbsi_ordi, n_atoms)
-    atom_bounds_j = findboundaries(view(nbsj_ordi, sortperm_j), n_atoms)
-    weights_14 = nothing
+        nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
+        sortperm_j = sortperm(nbsj_ordi)
+        atom_bounds_i = findboundaries(nbsi_ordi, n_atoms)
+        atom_bounds_j = findboundaries(view(nbsj_ordi, sortperm_j), n_atoms)
+        weights_14 = nothing
 
-    return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
-                            sortperm_j, weights_14)
+        return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
+                                sortperm_j, weights_14)
+    end
 end
 
 """

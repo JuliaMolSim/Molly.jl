@@ -212,11 +212,9 @@ function matm(sv::Dual{Nothing, T}, y1::SVector{3, T}, i::Integer, j::Integer, k
 end
 
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}) where {D, T}
-    println("mo1")
     out = dual_function_svec(f).(arg1)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ)
-        println("mo1backstart")
         barg1 = broadcast(ȳ, out) do y1, o1
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials(o1))
@@ -225,18 +223,15 @@ end
             end
         end
         darg1 = Zygote.unbroadcast(arg1, barg1)
-        println("mo1backend")
         (nothing, nothing, darg1)
     end
     return y, bc_fwd_back
 end
 
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}, arg2) where {D, T}
-    println("mo2")
     out = dual_function_svec_real(f).(arg1, arg2)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ)
-        println("mo2backstart")
         barg1 = broadcast(ȳ, out) do y1, o1
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials.((o1,), (1, 2, 3)))
@@ -246,18 +241,15 @@ end
         end
         darg1 = Zygote.unbroadcast(arg1, barg1)
         darg2 = Zygote.unbroadcast(arg2, broadcast((y1, o1) -> y1 .* partials.(o1, 4), ȳ, out))
-        println("mo2backend")
         (nothing, nothing, darg1, darg2)
     end
     return y, bc_fwd_back
 end
 
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}, arg2::AbstractArray{SVector{D, T}}) where {D, T}
-    println("mo3")
     out = dual_function_svec_svec(f).(arg1, arg2)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ)
-        println("mo3backstart")
         barg1 = broadcast(ȳ, out) do y1, o1
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials.((o1,), (1, 2, 3)))
@@ -274,24 +266,20 @@ end
             end
         end
         darg2 = Zygote.unbroadcast(arg2, barg2)
-        println("mo3backend")
         (nothing, nothing, darg1, darg2)
     end
     return y, bc_fwd_back
 end
 
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{<:Atom})
-    println("mo4")
     out = dual_function_atom(f).(arg1)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ)
-        println("mo4backstart")
         barg1 = broadcast(ȳ, out) do y1, o1
             ps = partials(o1)
             Atom(0, y1 * ps[1], y1 * ps[2], y1 * ps[3], y1 * ps[4])
         end
         darg1 = Zygote.unbroadcast(arg1, barg1)
-        println("mo4backend")
         (nothing, nothing, darg1)
     end
     return y, bc_fwd_back
@@ -324,11 +312,9 @@ end
                                             arg6::Tuple{SVector{D, T}},
                                             arg7::Base.RefValue{<:Unitful.FreeUnits},
                                             arg8) where {D, T}
-    println("mo5")
     out = dual_function_force_broadcast(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ)
-        println("mo5backstart")
         darg1 = Zygote.unbroadcast(arg1, broadcast(combine_dual_GeneralInteraction, ȳ, out, 1))
         darg2 = Zygote.unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(matm.(o1, (y1,), 5, 6, 7 )), ȳ, out))
         darg3 = Zygote.unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(matm.(o1, (y1,), 8, 9, 10)), ȳ, out))
@@ -337,7 +323,6 @@ end
         darg6 = Zygote.unbroadcast(arg6, broadcast((y1, o1) -> SVector{D, T}(matm.(o1, (y1,), 19, 20, 21)), ȳ, out))
         darg7 = nothing
         darg8 = nothing
-        println("mo5backend")
         return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6, darg7, darg8)
     end
     return y, bc_fwd_back

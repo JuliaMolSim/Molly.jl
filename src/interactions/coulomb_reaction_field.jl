@@ -28,7 +28,7 @@ function coulombproperties(cutoff_dist, solvent_dielectric)
     crf = (1 /  cutoff_dist     ) * ((3 * solvent_dielectric) / (2 * solvent_dielectric + 1))
     krf_14 = (1 / (cutoff_dist ^ 3)) * 0
     crf_14 = (1 /  cutoff_dist     ) * 0
-    return 
+    return sqdist_cutoff, krf, crf, krf_14, crf_14
 end
 
 function CoulombReactionField(;
