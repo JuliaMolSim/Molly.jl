@@ -162,7 +162,7 @@ function accelerations(s::Simulation, coords, atoms, neighbors, neighbors_all=no
         nbsi, nbsj = neighbors_all.nbsi, neighbors_all.nbsj
         for inter in general_inters_nonl
             @inbounds nb_forces = force_nounit.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi],
-                                                atoms[nbsj], (s.box_size,), s.force_unit)
+                                                atoms[nbsj], (s.box_size,), s.force_unit, false)
             forces += sumforces(nb_forces, neighbors_all)
         end
     end

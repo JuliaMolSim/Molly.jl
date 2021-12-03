@@ -5,9 +5,8 @@ using ForwardDiff: Chunk, Dual, partials, value
 
 Zygote.unbroadcast(x::Tuple{Any}, x̄::Nothing) = nothing
 
-function Zygote.accum(x::AbstractArray{<:SizedVector}, ys::CuArray{<:SVector}...)
-    Zygote.accum.(convert(typeof(ys[1]), x), ys...)
-end
+Zygote.accum(x::AbstractArray{<:SizedVector}, ys::CuArray{<:SVector}...) = Zygote.accum.(convert(typeof(ys[1]), x), ys...)
+Zygote.accum(x::CuArray{<:SVector}, ys::AbstractArray{<:SizedVector}...) = Zygote.accum.(x, convert.(typeof(x), ys)...)
 
 function Zygote.accum(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
     Atom{T, T, T, T}(0, x.charge + y.charge, x.mass + y.mass, x.σ + y.σ, x.ϵ + y.ϵ)
@@ -45,6 +44,10 @@ function Zygote.unbroadcast(x::AbstractArray{<:Real}, x̄::AbstractArray{<:Stati
 end
 
 Zygote._zero(xs::AbstractArray{<:StaticVector}, T) = fill!(similar(xs, T), zero(T))
+
+function Base.zero(::Type{Union{Nothing, SizedVector{D, T, Vector{T}}}}) where {D, T}
+    zero(SizedVector{D, T, Vector{T}})
+end
 
 Base.:+(x::Real, y::SizedVector) = x .+ y
 Base.:+(x::SizedVector, y::Real) = x .+ y
@@ -191,7 +194,7 @@ function dual_function_atom(f::F) where F
 end
 
 function dual_function_force_broadcast(f::F) where F
-    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7)
+    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
         ds1 = dualize_fb(arg1)
         ds2 = dualize_fb1(Nothing, arg2)
         ds3 = dualize_fb2(Nothing, arg3)
@@ -199,10 +202,11 @@ function dual_function_force_broadcast(f::F) where F
         ds5 = dualize_atom_fb2(arg5)
         ds6 = dualize_fb3(Nothing, arg6)
         ds7 = arg7
-        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7)
+        ds8 = arg8
+        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8)
     end
 end
-  
+
 function matm(sv::Dual{Nothing, T}, y1::SVector{3, T}, i::Integer, j::Integer, k::Integer) where T
     partials(sv, i) * y1[1] + partials(sv, j) * y1[2] + partials(sv, k) * y1[3]
 end
@@ -318,9 +322,10 @@ end
                                             arg4::AbstractArray{<:Atom},
                                             arg5::AbstractArray{<:Atom},
                                             arg6::Tuple{SVector{D, T}},
-                                            arg7::Base.RefValue{<:Unitful.FreeUnits}) where {D, T}
+                                            arg7::Base.RefValue{<:Unitful.FreeUnits},
+                                            arg8) where {D, T}
     println("mo5")
-    out = dual_function_force_broadcast(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7)
+    out = dual_function_force_broadcast(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ)
         println("mo5backstart")
@@ -331,8 +336,9 @@ end
         darg5 = Zygote.unbroadcast(arg5, broadcast(combine_dual_Atom, ȳ, out, 15, 16, 17, 18))
         darg6 = Zygote.unbroadcast(arg6, broadcast((y1, o1) -> SVector{D, T}(matm.(o1, (y1,), 19, 20, 21)), ȳ, out))
         darg7 = nothing
+        darg8 = nothing
         println("mo5backend")
-        return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6, darg7)
+        return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6, darg7, darg8)
     end
     return y, bc_fwd_back
 end

@@ -147,29 +147,31 @@ function find_neighbors!(s::Simulation,
                          step_n::Integer,
                          current_nbs=nothing;
                          parallel::Bool=true)
-    !iszero(step_n % nf.n_steps) && return current_nbs
+    Zygote.ignore() do
+        !iszero(step_n % nf.n_steps) && return current_nbs
 
-    n_atoms = length(s.coords)
-    sqdist_cutoff = nf.dist_cutoff ^ 2
-    sqdists = sqdistance.(nf.is, nf.js, (s.coords,), (s.box_size,))
+        n_atoms = length(s.coords)
+        sqdist_cutoff = nf.dist_cutoff ^ 2
+        sqdists = sqdistance.(nf.is, nf.js, (s.coords,), (s.box_size,))
 
-    close = sqdists .< sqdist_cutoff
-    close_nb = close .* nf.nb_matrix
-    eligible = tril(close_nb, -1)
+        close = sqdists .< sqdist_cutoff
+        close_nb = close .* nf.nb_matrix
+        eligible = tril(close_nb, -1)
 
-    fa = Array(findall(!iszero, eligible))
-    nbsi, nbsj = getindex.(fa, 1), getindex.(fa, 2)
-    order_i = sortperm(nbsi)
-    weights_14 = @view nf.matrix_14[fa]
+        fa = Array(findall(!iszero, eligible))
+        nbsi, nbsj = getindex.(fa, 1), getindex.(fa, 2)
+        order_i = sortperm(nbsi)
+        weights_14 = @view nf.matrix_14[fa]
 
-    nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
-    sortperm_j = sortperm(nbsj_ordi)
-    weights_14_ordi = @view weights_14[order_i]
-    atom_bounds_i = findboundaries(nbsi_ordi, n_atoms)
-    atom_bounds_j = findboundaries(view(nbsj_ordi, sortperm_j), n_atoms)
+        nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
+        sortperm_j = sortperm(nbsj_ordi)
+        weights_14_ordi = @view weights_14[order_i]
+        atom_bounds_i = findboundaries(nbsi_ordi, n_atoms)
+        atom_bounds_j = findboundaries(view(nbsj_ordi, sortperm_j), n_atoms)
 
-    return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
-                            sortperm_j, weights_14_ordi)
+        return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
+                                sortperm_j, weights_14_ordi)
+    end
 end
 
 function allneighbors(n_atoms)
