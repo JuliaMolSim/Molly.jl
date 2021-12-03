@@ -133,13 +133,19 @@ end
 
 # Find the boundaries of an ordered list of integers
 function findboundaries(nbs_ord, n_atoms)
-    nb_i = 1
-    return map(1:n_atoms) do atom_i
-        while nb_i <= length(nbs_ord) && nbs_ord[nb_i] <= atom_i
-            nb_i += 1
+    inds = zeros(Int, n_atoms)
+    atom_i = 1
+    for (nb_i, nb_ai) in enumerate(nbs_ord)
+        while atom_i < nb_ai
+            inds[atom_i] = nb_i
+            atom_i += 1
         end
-        return nb_i
     end
+    while atom_i < (n_atoms + 1)
+        inds[atom_i] = length(nbs_ord) + 1
+        atom_i += 1
+    end
+    return inds
 end
 
 function find_neighbors!(s::Simulation,
