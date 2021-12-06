@@ -2,8 +2,7 @@
 # Here be dragons
 
 using ForwardDiff: Chunk, Dual, partials, value
-
-Zygote.unbroadcast(x::Tuple{Any}, x̄::Nothing) = nothing
+using Zygote: unbroadcast
 
 Zygote.accum(x::AbstractArray{<:SizedVector}, ys::CuArray{<:SVector}...) = Zygote.accum.(convert(typeof(ys[1]), x), ys...)
 Zygote.accum(x::CuArray{<:SVector}, ys::AbstractArray{<:SizedVector}...) = Zygote.accum.(x, convert.(typeof(x), ys)...)
@@ -16,11 +15,6 @@ function Zygote.accum(x::NamedTuple{(:index, :charge, :mass, :σ, :ϵ), Tuple{In
     Atom{T, T, T, T}(0, x.charge + y.charge, x.mass + y.mass, x.σ + y.σ, x.ϵ + y.ϵ)
 end
 
-atomorempty(at::Atom, T) = at
-atomorempty(at::Nothing, T) = Atom(0, zero(T), zero(T), zero(T), zero(T))
-
-Zygote.z2d(dx::AbstractArray{Union{Nothing, Atom{T, T, T, T}}}, primal::AbstractArray{Atom{T, T, T, T}}) where {T} = atomorempty.(dx, T)
-
 function Zygote.accum(x::LennardJones{S, C, W, F, E}, y::LennardJones{S, C, W, F, E}) where {S, C, W, F, E}
     LennardJones{S, C, W, F, E}(x.cutoff, x.nl_only, x.lorentz_mixing, x.weight_14 + y.weight_14, x.force_unit, x.energy_unit)
 end
@@ -32,6 +26,14 @@ end
 function Zygote.accum_sum(xs::AbstractArray{LennardJones{S, C, W, F, E}}; dims=:) where {S, C, W, F, E}
     reduce(Zygote.accum, xs, dims=dims; init=LennardJones{S, C, W, F, E}(nothing, false, false, zero(W), NoUnits, NoUnits))
 end
+
+atomorempty(at::Atom, T) = at
+atomorempty(at::Nothing, T) = Atom(0, zero(T), zero(T), zero(T), zero(T))
+
+Zygote.z2d(dx::AbstractArray{Union{Nothing, Atom{T, T, T, T}}}, primal::AbstractArray{Atom{T, T, T, T}}) where {T} = atomorempty.(dx, T)
+Zygote.z2d(dx::SVector{3, T}, primal::T) where {T} = sum(dx)
+
+Zygote.unbroadcast(x::Tuple{Any}, x̄::Nothing) = nothing
 
 function Zygote.unbroadcast(x::AbstractArray{<:Real}, x̄::AbstractArray{<:StaticVector})
     N = ndims(x̄)
@@ -222,7 +224,7 @@ end
                 SVector{D, T}(sumpartials(o1, y1, 1), sumpartials(o1, y1, 2), sumpartials(o1, y1, 3))
             end
         end
-        darg1 = Zygote.unbroadcast(arg1, barg1)
+        darg1 = unbroadcast(arg1, barg1)
         (nothing, nothing, darg1)
     end
     return y, bc_fwd_back
@@ -239,8 +241,8 @@ end
                 SVector{D, T}(sumpartials(o1, y1, 1), sumpartials(o1, y1, 2), sumpartials(o1, y1, 3))
             end
         end
-        darg1 = Zygote.unbroadcast(arg1, barg1)
-        darg2 = Zygote.unbroadcast(arg2, broadcast((y1, o1) -> y1 .* partials.(o1, 4), ȳ, out))
+        darg1 = unbroadcast(arg1, barg1)
+        darg2 = unbroadcast(arg2, broadcast((y1, o1) -> y1 .* partials.(o1, 4), ȳ, out))
         (nothing, nothing, darg1, darg2)
     end
     return y, bc_fwd_back
@@ -257,7 +259,7 @@ end
                 SVector{D, T}(sumpartials(o1, y1, 1), sumpartials(o1, y1, 2), sumpartials(o1, y1, 3))
             end
         end
-        darg1 = Zygote.unbroadcast(arg1, barg1)
+        darg1 = unbroadcast(arg1, barg1)
         barg2 = broadcast(ȳ, out) do y1, o1
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials.((o1,), (4, 5, 6)))
@@ -265,7 +267,7 @@ end
                 SVector{D, T}(sumpartials(o1, y1, 4), sumpartials(o1, y1, 5), sumpartials(o1, y1, 6))
             end
         end
-        darg2 = Zygote.unbroadcast(arg2, barg2)
+        darg2 = unbroadcast(arg2, barg2)
         (nothing, nothing, darg1, darg2)
     end
     return y, bc_fwd_back
@@ -279,20 +281,19 @@ end
             ps = partials(o1)
             Atom(0, y1 * ps[1], y1 * ps[2], y1 * ps[3], y1 * ps[4])
         end
-        darg1 = Zygote.unbroadcast(arg1, barg1)
+        darg1 = unbroadcast(arg1, barg1)
         (nothing, nothing, darg1)
     end
     return y, bc_fwd_back
 end
 
-function combine_dual_GeneralInteraction(y1::SVector{D, T}, o1::SVector{D, Dual{Nothing, T, P}}, i::Integer) where {D, T, P}
-    ps1, ps2, ps3 = partials(o1[1]), partials(o1[2]), partials(o1[3])
-    LennardJones{false, Nothing, T, typeof(NoUnits), typeof(NoUnits)}(
-                    nothing, false, false, y1[1] * ps1[i] + y1[2] * ps2[i] + y1[3] * ps3[i],
+function combine_dual_GeneralInteraction(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer) where {T, P}
+    LennardJones{false, Nothing, T, typeof(NoUnits), typeof(NoUnits)}(nothing, false, false,
+                    y1[1] * partials(o1[1], i) + y1[2] * partials(o1[2], i) + y1[3] * partials(o1[3], i),
                     NoUnits, NoUnits)
 end
 
-function combine_dual_Atom(y1::SVector{D, T}, o1::SVector{D, Dual{Nothing, T, P}}, i::Integer, j::Integer, k::Integer, l::Integer) where {D, T, P}
+function combine_dual_Atom(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer, j::Integer, k::Integer, l::Integer) where {T, P}
     ps1, ps2, ps3 = partials(o1[1]), partials(o1[2]), partials(o1[3])
     Atom(
         0,
@@ -315,12 +316,15 @@ end
     out = dual_function_force_broadcast(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ)
-        darg1 = Zygote.unbroadcast(arg1, broadcast(combine_dual_GeneralInteraction, ȳ, out, 1))
-        darg2 = Zygote.unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1,  5), sumpartials(o1, y1,  6), sumpartials(o1, y1,  7)), ȳ, out))
-        darg3 = Zygote.unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1,  8), sumpartials(o1, y1,  9), sumpartials(o1, y1, 10)), ȳ, out))
-        darg4 = Zygote.unbroadcast(arg4, broadcast(combine_dual_Atom, ȳ, out, 11, 12, 13, 14))
-        darg5 = Zygote.unbroadcast(arg5, broadcast(combine_dual_Atom, ȳ, out, 15, 16, 17, 18))
-        darg6 = Zygote.unbroadcast(arg6, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1, 19), sumpartials(o1, y1, 20), sumpartials(o1, y1, 21)), ȳ, out))
+        darg1 = unbroadcast(arg1, broadcast(combine_dual_GeneralInteraction, ȳ, out, 1))
+        darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1,  5),
+                                sumpartials(o1, y1,  6), sumpartials(o1, y1,  7)), ȳ, out))
+        darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1,  8),
+                                sumpartials(o1, y1,  9), sumpartials(o1, y1, 10)), ȳ, out))
+        darg4 = unbroadcast(arg4, broadcast(combine_dual_Atom, ȳ, out, 11, 12, 13, 14))
+        darg5 = unbroadcast(arg5, broadcast(combine_dual_Atom, ȳ, out, 15, 16, 17, 18))
+        darg6 = unbroadcast(arg6, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1, 19),
+                                sumpartials(o1, y1, 20), sumpartials(o1, y1, 21)), ȳ, out))
         darg7 = nothing
         darg8 = nothing
         return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6, darg7, darg8)
