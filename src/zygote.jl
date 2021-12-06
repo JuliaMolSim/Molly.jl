@@ -207,8 +207,8 @@ function dual_function_force_broadcast(f::F) where F
     end
 end
 
-function matm(sv::Dual{Nothing, T}, y1::SVector{3, T}, i::Integer, j::Integer, k::Integer) where T
-    partials(sv, i) * y1[1] + partials(sv, j) * y1[2] + partials(sv, k) * y1[3]
+@inline function sumpartials(sv::SVector{3, Dual{Nothing, T, P}}, y1::SVector{3, T}, i::Integer) where {T, P}
+    partials(sv[1], i) * y1[1] + partials(sv[2], i) * y1[2] + partials(sv[3], i) * y1[3]
 end
 
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}) where {D, T}
@@ -219,7 +219,7 @@ end
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials(o1))
             else
-                SVector{D, T}(matm.(o1, (y1,), 1, 2, 3))
+                SVector{D, T}(sumpartials(o1, y1, 1), sumpartials(o1, y1, 2), sumpartials(o1, y1, 3))
             end
         end
         darg1 = Zygote.unbroadcast(arg1, barg1)
@@ -236,7 +236,7 @@ end
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials.((o1,), (1, 2, 3)))
             else
-                SVector{D, T}(matm.(o1, (y1,), 1, 2, 3))
+                SVector{D, T}(sumpartials(o1, y1, 1), sumpartials(o1, y1, 2), sumpartials(o1, y1, 3))
             end
         end
         darg1 = Zygote.unbroadcast(arg1, barg1)
@@ -254,7 +254,7 @@ end
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials.((o1,), (1, 2, 3)))
             else
-                SVector{D, T}(matm.(o1, (y1,), 1, 2, 3))
+                SVector{D, T}(sumpartials(o1, y1, 1), sumpartials(o1, y1, 2), sumpartials(o1, y1, 3))
             end
         end
         darg1 = Zygote.unbroadcast(arg1, barg1)
@@ -262,7 +262,7 @@ end
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials.((o1,), (4, 5, 6)))
             else
-                SVector{D, T}(matm.(o1, (y1,), 4, 5, 6))
+                SVector{D, T}(sumpartials(o1, y1, 4), sumpartials(o1, y1, 5), sumpartials(o1, y1, 6))
             end
         end
         darg2 = Zygote.unbroadcast(arg2, barg2)
@@ -316,11 +316,11 @@ end
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ)
         darg1 = Zygote.unbroadcast(arg1, broadcast(combine_dual_GeneralInteraction, ȳ, out, 1))
-        darg2 = Zygote.unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(matm.(o1, (y1,), 5, 6, 7 )), ȳ, out))
-        darg3 = Zygote.unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(matm.(o1, (y1,), 8, 9, 10)), ȳ, out))
+        darg2 = Zygote.unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1,  5), sumpartials(o1, y1,  6), sumpartials(o1, y1,  7)), ȳ, out))
+        darg3 = Zygote.unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1,  8), sumpartials(o1, y1,  9), sumpartials(o1, y1, 10)), ȳ, out))
         darg4 = Zygote.unbroadcast(arg4, broadcast(combine_dual_Atom, ȳ, out, 11, 12, 13, 14))
         darg5 = Zygote.unbroadcast(arg5, broadcast(combine_dual_Atom, ȳ, out, 15, 16, 17, 18))
-        darg6 = Zygote.unbroadcast(arg6, broadcast((y1, o1) -> SVector{D, T}(matm.(o1, (y1,), 19, 20, 21)), ȳ, out))
+        darg6 = Zygote.unbroadcast(arg6, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1, 19), sumpartials(o1, y1, 20), sumpartials(o1, y1, 21)), ȳ, out))
         darg7 = nothing
         darg8 = nothing
         return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6, darg7, darg8)
