@@ -27,6 +27,20 @@ function Zygote.accum_sum(xs::AbstractArray{LennardJones{S, C, W, F, E}}; dims=:
     reduce(Zygote.accum, xs, dims=dims; init=LennardJones{S, C, W, F, E}(nothing, false, false, zero(W), NoUnits, NoUnits))
 end
 
+function Zygote.accum(x::CoulombReactionField{D, S, W, T, F, E}, y::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
+    CoulombReactionField{D, S, W, T, F, E}(x.cutoff_dist + y.cutoff_dist, x.solvent_dielectric + y.solvent_dielectric, x.nl_only,
+                x.weight_14 + y.weight_14, x.coulomb_const + y.coulomb_const, x.force_unit, x.energy_unit)
+end
+
+function Zygote.accum(x::NamedTuple{(:cutoff_dist, :solvent_dielectric, :nl_only, :weight_14, :coulomb_const, :force_unit, :energy_unit), Tuple{D, S, Bool, W, T, F, E}}, y::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
+    CoulombReactionField{D, S, W, T, F, E}(x.cutoff_dist + y.cutoff_dist, x.solvent_dielectric + y.solvent_dielectric, x.nl_only,
+                x.weight_14 + y.weight_14, x.coulomb_const + y.coulomb_const, x.force_unit, x.energy_unit)
+end
+
+function Zygote.accum_sum(xs::AbstractArray{CoulombReactionField{D, S, W, T, F, E}}; dims=:) where {D, S, W, T, F, E}
+    reduce(Zygote.accum, xs, dims=dims; init=CoulombReactionField{D, S, W, T, F, E}(zero(D), zero(S), false, zero(W), zero(T), NoUnits, NoUnits))
+end
+
 atomorempty(at::Atom, T) = at
 atomorempty(at::Nothing, T) = Atom(0, zero(T), zero(T), zero(T), zero(T))
 
@@ -132,16 +146,14 @@ function dualize_fb(inter::LennardJones{S, C, W, F, E}) where {S, C, W, F, E}
                                                         weight_14, inter.force_unit, inter.energy_unit)
 end
 
-function dualize_fb(inter::CoulombReactionField{D, S, W, T, F, E, D2, K, R}) where {D, S, W, T, F, E, D2, K, R}
+function dualize_fb(inter::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
     cutoff_dist        = Dual(inter.cutoff_dist       , true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
     solvent_dielectric = Dual(inter.solvent_dielectric, false, true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
     weight_14          = Dual(inter.weight_14         , false, false, true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
     coulomb_const      = Dual(inter.coulomb_const     , false, false, false, true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
-    sqdist_cutoff, krf, crf, krf_14, crf_14 = coulombproperties(cutoff_dist, solvent_dielectric)
-    return CoulombReactionField{typeof(cutoff_dist), typeof(solvent_dielectric), typeof(weight_14), typeof(coulomb_const),
-                                F, E, typeof(sqdist_cutoff), typeof(krf), typeof(crf)}(
-                    cutoff_dist, solvent_dielectric, nl_only, weight_14, coulomb_const,
-                    force_unit, energy_unit, sqdist_cutoff, krf, crf, krf_14, crf_14)
+    return CoulombReactionField{typeof(cutoff_dist), typeof(solvent_dielectric), typeof(weight_14), typeof(coulomb_const), F, E}(
+                    cutoff_dist, solvent_dielectric, inter.nl_only, weight_14,
+                    coulomb_const, inter.force_unit, inter.energy_unit)
 end
 
 function dualize_atom_fb1(at::Atom)
@@ -287,9 +299,19 @@ end
     return y, bc_fwd_back
 end
 
-function combine_dual_GeneralInteraction(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer) where {T, P}
+function combine_dual_GeneralInteraction(inter::LennardJones, y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer) where {T, P}
     LennardJones{false, Nothing, T, typeof(NoUnits), typeof(NoUnits)}(nothing, false, false,
                     y1[1] * partials(o1[1], i) + y1[2] * partials(o1[2], i) + y1[3] * partials(o1[3], i),
+                    NoUnits, NoUnits)
+end
+
+function combine_dual_GeneralInteraction(inter::CoulombReactionField, y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer) where {T, P}
+    CoulombReactionField{T, T, T, T, typeof(NoUnits), typeof(NoUnits)}(
+                    y1[1] * partials(o1[1], i    ) + y1[2] * partials(o1[2], i    ) + y1[3] * partials(o1[3], i    ),
+                    y1[1] * partials(o1[1], i + 1) + y1[2] * partials(o1[2], i + 1) + y1[3] * partials(o1[3], i + 1),
+                    false,
+                    y1[1] * partials(o1[1], i + 2) + y1[2] * partials(o1[2], i + 2) + y1[3] * partials(o1[3], i + 2),
+                    y1[1] * partials(o1[1], i + 3) + y1[2] * partials(o1[2], i + 3) + y1[3] * partials(o1[3], i + 3),
                     NoUnits, NoUnits)
 end
 
@@ -316,7 +338,7 @@ end
     out = dual_function_force_broadcast(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ)
-        darg1 = unbroadcast(arg1, broadcast(combine_dual_GeneralInteraction, ȳ, out, 1))
+        darg1 = unbroadcast(arg1, broadcast(combine_dual_GeneralInteraction, arg1, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1,  5),
                                 sumpartials(o1, y1,  6), sumpartials(o1, y1,  7)), ȳ, out))
         darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1,  8),
