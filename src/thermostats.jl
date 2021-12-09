@@ -21,8 +21,8 @@ struct NoThermostat <: Thermostat end
 Apply a thermostat to modify a simulation.
 Custom thermostats should implement this function.
 """
-function apply_thermostat!(velocities, s::Simulation, ::NoThermostat)
-    return velocities
+function apply_thermostat!(s::Simulation, ::NoThermostat)
+    return s
 end
 
 """
@@ -34,15 +34,15 @@ struct AndersenThermostat{T} <: Thermostat
     coupling_const::T
 end
 
-function apply_thermostat!(velocities, s::Simulation, thermostat::AndersenThermostat)
-    dims = length(first(velocities))
-    for i in 1:length(velocities)
+function apply_thermostat!(s::Simulation, thermostat::AndersenThermostat)
+    dims = length(first(s.velocities))
+    for i in 1:length(s.velocities)
         if rand() < s.timestep / thermostat.coupling_const
             mass = s.atoms[i].mass
-            velocities[i] = velocity(mass, s.temperature; dims=dims)
+            s.velocities[i] = velocity(mass, s.temperature; dims=dims)
         end
     end
-    return velocities
+    return s
 end
 
 """

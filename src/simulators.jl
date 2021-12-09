@@ -60,7 +60,7 @@ function simulate!(s::Simulation{false},
             s.velocities[i] += removemolar(accels_t[i] + accels_t_dt[i]) * s.timestep / 2
         end
 
-        apply_thermostat!(s.velocities, s, s.thermostat)
+        apply_thermostat!(s, s.thermostat)
         find_neighbors!(s, s.neighbor_finder, step_n; parallel=parallel)
 
         accels_t = accels_t_dt
@@ -93,7 +93,7 @@ function simulate!(s::Simulation{true},
         accels_t_dt = accelerations(s, s.coords, s.atoms, neighbors, neighbors_all)
         s.velocities += removemolar.(accels_t .+ accels_t_dt) .* s.timestep / 2
 
-        s.velocities = apply_thermostat!(s.velocities, s, s.thermostat)
+        apply_thermostat!(s, s.thermostat)
         neighbors = find_neighbors!(s, s.neighbor_finder, step_n, neighbors)
 
         accels_t = accels_t_dt
@@ -117,7 +117,6 @@ function simulate!(s::Simulation,
                     parallel::Bool=true)
     n_atoms = length(s.coords)
     find_neighbors!(s, s.neighbor_finder, 0; parallel=parallel)
-    coords_last = s.velocities
 
     @showprogress for step_n in 1:n_steps
         for logger in values(s.loggers)
@@ -129,12 +128,12 @@ function simulate!(s::Simulation,
         # Update coordinates
         coords_copy = s.coords
         for i in 1:length(s.coords)
-            s.coords[i] = s.coords[i] + vector(coords_last[i], s.coords[i], s.box_size) + removemolar(accels_t[i]) * s.timestep ^ 2
+            s.coords[i] = s.coords[i] + vector(s.velocities[i], s.coords[i], s.box_size) + removemolar(accels_t[i]) * s.timestep ^ 2
             s.coords[i] = wrapcoords.(s.coords[i], s.box_size)
         end
-        coords_last = coords_copy
+        s.velocities = coords_copy
 
-        apply_thermostat!(coords_last, s, s.thermostat)
+        apply_thermostat!(s, s.thermostat)
         find_neighbors!(s, s.neighbor_finder, step_n; parallel=parallel)
 
         s.n_steps_made += 1
