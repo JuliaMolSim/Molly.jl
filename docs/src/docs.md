@@ -268,7 +268,7 @@ This example shows how atom properties can be mutable, i.e. change during the si
 
 # Custom atom type
 mutable struct Person
-    i::Int64
+    i::Int
     status::Status
     mass::Float64
     σ::Float64

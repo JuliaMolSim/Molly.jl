@@ -18,7 +18,7 @@ using GLMakie
 using LinearAlgebra
 
 struct BondableAtom
-    i::Int64
+    i::Int
     mass::Float64
     σ::Float64
     ϵ::Float64

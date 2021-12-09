@@ -727,7 +727,7 @@ end
 
 # Custom atom type
 mutable struct Person
-    i::Int64
+    i::Int
     status::Status
     mass::Float64
     σ::Float64
