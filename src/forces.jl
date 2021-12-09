@@ -47,7 +47,7 @@ Custom interaction types should implement this function.
 """
 function force end
 
-@inline @inbounds function force!(forces, inter, s::Simulation, i::Integer, j::Integer, force_unit, weight_14::Bool=false)
+@inline @inbounds function force!(fs, inter, s::Simulation, i::Integer, j::Integer, force_unit, weight_14::Bool=false)
     if weight_14
         fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size, true)
     else
@@ -55,8 +55,8 @@ function force end
     end
     checkforcetype(fdr, force_unit)
     fdr_ustrip = ustrip.(fdr)
-    forces[i] -= fdr_ustrip
-    forces[j] += fdr_ustrip
+    fs[i] -= fdr_ustrip
+    fs[j] += fdr_ustrip
     return nothing
 end
 
@@ -102,38 +102,38 @@ function accelerations(s::Simulation, neighbors=nothing; parallel::Bool=true)
     n_atoms = length(s.coords)
 
     if parallel && nthreads() > 1 && n_atoms >= 100
-        forces_threads = [ustripvec.(zero(s.coords)) for i in 1:nthreads()]
+        fs_threads = [ustripvec.(zero(s.coords)) for i in 1:nthreads()]
 
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.general_inters)
             if inter.nl_only
                 @threads for ni in 1:neighbors.n
                     i, j, w = neighbors.list[ni]
-                    force!(forces_threads[threadid()], inter, s, i, j, s.force_unit, w)
+                    force!(fs_threads[threadid()], inter, s, i, j, s.force_unit, w)
                 end
             else
                 @threads for i in 1:n_atoms
                     for j in 1:(i - 1)
-                        force!(forces_threads[threadid()], inter, s, i, j, s.force_unit)
+                        force!(fs_threads[threadid()], inter, s, i, j, s.force_unit)
                     end
                 end
             end
         end
 
-        forces = sum(forces_threads)
+        fs = sum(fs_threads)
     else
-        forces = ustripvec.(zero(s.coords))
+        fs = ustripvec.(zero(s.coords))
 
         for inter in values(s.general_inters)
             if inter.nl_only
                 for ni in 1:neighbors.n
                     i, j, w = neighbors.list[ni]
-                    force!(forces, inter, s, i, j, s.force_unit, w)
+                    force!(fs, inter, s, i, j, s.force_unit, w)
                 end
             else
                 for i in 1:n_atoms
                     for j in 1:(i - 1)
-                        force!(forces, inter, s, i, j, s.force_unit)
+                        force!(fs, inter, s, i, j, s.force_unit)
                     end
                 end
             end
@@ -141,19 +141,19 @@ function accelerations(s::Simulation, neighbors=nothing; parallel::Bool=true)
     end
 
     for inter_list in values(s.specific_inter_lists)
-        sparse_forces = force.(inter_list, (s.coords,), (s,))
-        ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
+        sparse_fs = force.(inter_list, (s.coords,), (s,))
+        ge1, ge2 = getindex.(sparse_fs, 1), getindex.(sparse_fs, 2)
         checkforcetype(first(first(ge2)), s.force_unit)
         sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
-        forces += ustripvec.(Array(sparse_vec))
+        fs += ustripvec.(Array(sparse_vec))
     end
 
-    return (forces * s.force_unit) ./ mass.(s.atoms)
+    return (fs * s.force_unit) ./ mass.(s.atoms)
 end
 
 function accelerations(s::Simulation, coords, atoms, neighbors=nothing, neighbors_all=nothing)
     n_atoms = length(coords)
-    forces = ustripvec.(zero(coords))
+    fs = ustripvec.(zero(coords))
 
     general_inters_nonl = [inter for inter in values(s.general_inters) if !inter.nl_only]
     @views if length(general_inters_nonl) > 0
@@ -161,7 +161,7 @@ function accelerations(s::Simulation, coords, atoms, neighbors=nothing, neighbor
         for inter in general_inters_nonl
             @inbounds nb_forces = force_nounit.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi],
                                                 atoms[nbsj], (s.box_size,), s.force_unit, false)
-            forces += sumforces(nb_forces, neighbors_all)
+            fs += sumforces(nb_forces, neighbors_all)
         end
     end
 
@@ -176,22 +176,22 @@ function accelerations(s::Simulation, coords, atoms, neighbors=nothing, neighbor
                 @inbounds nb_forces += force_nounit.((inter,), coords[nbsi], coords[nbsj],
                     atoms[nbsi], atoms[nbsj], (s.box_size,), s.force_unit, neighbors.weights_14)
             end
-            forces += sumforces(nb_forces, neighbors)
+            fs += sumforces(nb_forces, neighbors)
         end
     end
 
     for inter_list in values(s.specific_inter_lists)
         # Take coords off the GPU if they are on there
         coords_cpu = Array(coords)
-        sparse_forces = force.(inter_list, (coords_cpu,), (s,))
-        ge1, ge2 = getindex.(sparse_forces, 1), getindex.(sparse_forces, 2)
+        sparse_fs = force.(inter_list, (coords_cpu,), (s,))
+        ge1, ge2 = getindex.(sparse_fs, 1), getindex.(sparse_fs, 2)
         checkforcetype(first(first(ge2)), s.force_unit)
         sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
         # Move back to GPU if required
-        forces += convert(typeof(forces), ustripvec.(Array(sparse_vec)))
+        fs += convert(typeof(fs), ustripvec.(Array(sparse_vec)))
     end
 
-    return (forces * s.force_unit) ./ mass.(s.atoms)
+    return (fs * s.force_unit) ./ mass.(s.atoms)
 end
 
 include("interactions/lennard_jones.jl")

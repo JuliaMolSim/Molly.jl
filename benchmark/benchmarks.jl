@@ -107,7 +107,6 @@ function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::B
         general_inters=general_inters,
         coords=coords,
         velocities=velocities,
-        temperature=temp,
         box_size=box_size,
         neighbor_finder=neighbor_finder,
         thermostat=thermostat,
