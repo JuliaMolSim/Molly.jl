@@ -3,10 +3,10 @@
 # See OpenMM documentation and Gromacs manual for other aspects of forces
 
 export
-    mass,
     ustripvec,
     force,
     accelerations,
+    forces,
     LennardJones,
     SoftSphere,
     Mie,
@@ -17,13 +17,6 @@ export
     HarmonicAngle,
     PeriodicTorsion,
     RBTorsion
-
-"""
-    mass(atom)
-
-The mass of an atom.
-"""
-mass(atom::Atom) = atom.mass
 
 """
     ustripvec(x)
@@ -99,6 +92,19 @@ Calculate the accelerations of all atoms using the general and specific
 interactions and Newton's second law.
 """
 function accelerations(s::Simulation, neighbors=nothing; parallel::Bool=true)
+    return forces(s, neighbors; parallel=parallel) ./ mass.(s.atoms)
+end
+
+function accelerations(s::Simulation, coords, atoms, neighbors=nothing, neighbors_all=nothing)
+    return forces(s, coords, atoms, neighbors, neighbors_all) ./ mass.(s.atoms)
+end
+
+"""
+    forces(simulation, neighbors=nothing; parallel=true)
+
+Calculate the forces on all atoms using the general and specific interactions.
+"""
+function forces(s::Simulation, neighbors=nothing; parallel::Bool=true)
     n_atoms = length(s.coords)
 
     if parallel && nthreads() > 1 && n_atoms >= 100
@@ -148,10 +154,10 @@ function accelerations(s::Simulation, neighbors=nothing; parallel::Bool=true)
         fs += ustripvec.(Array(sparse_vec))
     end
 
-    return (fs * s.force_unit) ./ mass.(s.atoms)
+    return fs * s.force_unit
 end
 
-function accelerations(s::Simulation, coords, atoms, neighbors=nothing, neighbors_all=nothing)
+function forces(s::Simulation, coords, atoms, neighbors=nothing, neighbors_all=nothing)
     n_atoms = length(coords)
     fs = ustripvec.(zero(coords))
 
@@ -191,7 +197,7 @@ function accelerations(s::Simulation, coords, atoms, neighbors=nothing, neighbor
         fs += convert(typeof(fs), ustripvec.(Array(sparse_vec)))
     end
 
-    return (fs * s.force_unit) ./ mass.(s.atoms)
+    return fs * s.force_unit
 end
 
 include("interactions/lennard_jones.jl")

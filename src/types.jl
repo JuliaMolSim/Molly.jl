@@ -10,6 +10,7 @@ export
     NeighborFinder,
     Logger,
     Atom,
+    mass,
     AtomData,
     NeighborList,
     NeighborListVec,
@@ -94,6 +95,13 @@ function Atom(;
                 ϵ=0.0u"kJ * mol^-1")
     return Atom(index, charge, mass, σ, ϵ)
 end
+
+"""
+    mass(atom)
+
+The mass of an atom.
+"""
+mass(atom::Atom) = atom.mass
 
 function Base.show(io::IO, a::Atom)
     print(io, "Atom with index ", a.index, ", charge=", a.charge,
