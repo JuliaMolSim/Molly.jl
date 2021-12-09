@@ -1,11 +1,11 @@
 """
-    CoulombReactionField(; cutoff_dist, solvent_dielectric, nl_only, weight_14,
+    CoulombReactionField(; dist_cutoff, solvent_dielectric, nl_only, weight_14,
                             coulomb_const, force_unit, energy_unit)
 
 The Coulomb electrostatic interaction modified using the reaction field approximation.
 """
 struct CoulombReactionField{D, S, W, T, F, E} <: GeneralInteraction
-    cutoff_dist::D
+    dist_cutoff::D
     solvent_dielectric::S
     nl_only::Bool
     weight_14::W
@@ -17,16 +17,16 @@ end
 const solventdielectric = 78.3
 
 function CoulombReactionField(;
-                    cutoff_dist,
+                    dist_cutoff,
                     solvent_dielectric=solventdielectric,
                     nl_only=false,
                     weight_14=1.0,
                     coulomb_const=coulombconst,
                     force_unit=u"kJ * mol^-1 * nm^-1",
                     energy_unit=u"kJ * mol^-1")
-    return CoulombReactionField{typeof(cutoff_dist), typeof(solvent_dielectric), typeof(weight_14),
+    return CoulombReactionField{typeof(dist_cutoff), typeof(solvent_dielectric), typeof(weight_14),
                                 typeof(coulomb_const), typeof(force_unit), typeof(energy_unit)}(
-        cutoff_dist, solvent_dielectric, nl_only, weight_14,
+        dist_cutoff, solvent_dielectric, nl_only, weight_14,
         coulomb_const, force_unit, energy_unit)
 end
 
@@ -40,7 +40,7 @@ end
     dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 
-    if r2 > (inter.cutoff_dist ^ 2)
+    if r2 > (inter.dist_cutoff ^ 2)
         return ustrip.(zero(coord_i)) * inter.force_unit
     end
 
@@ -50,10 +50,10 @@ end
     i, j = atom_i.index, atom_j.index
     if weight_14
         # 1-4 interactions do not use the reaction field approximation
-        krf = (1 / (inter.cutoff_dist ^ 3)) * 0
+        krf = (1 / (inter.dist_cutoff ^ 3)) * 0
     else
         # These values could be pre-computed but this way is easier for AD
-        krf = (1 / (inter.cutoff_dist ^ 3)) * ((inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1))
+        krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1))
     end
 
     f = (coulomb_const * qi * qj) * (inv(r) - 2 * krf * r2) * inv(r2)
@@ -73,7 +73,7 @@ end
     dr = vector(s.coords[i], s.coords[j], s.box_size)
     r2 = sum(abs2, dr)
 
-    if r2 > (inter.cutoff_dist ^ 2)
+    if r2 > (inter.dist_cutoff ^ 2)
         return ustrip(zero(s.timestep)) * inter.energy_unit
     end
 
@@ -82,11 +82,11 @@ end
     r = √r2
     if weight_14
         # 1-4 interactions do not use the reaction field approximation
-        krf = (1 / (inter.cutoff_dist ^ 3)) * 0
-        crf = (1 /  inter.cutoff_dist     ) * 0
+        krf = (1 / (inter.dist_cutoff ^ 3)) * 0
+        crf = (1 /  inter.dist_cutoff     ) * 0
     else
-        krf = (1 / (inter.cutoff_dist ^ 3)) * ((inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1))
-        crf = (1 /  inter.cutoff_dist     ) * ((3 * inter.solvent_dielectric) / (2 * inter.solvent_dielectric + 1))
+        krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1))
+        crf = (1 /  inter.dist_cutoff     ) * ((3 * inter.solvent_dielectric) / (2 * inter.solvent_dielectric + 1))
     end
 
     pe = (coulomb_const * qi * qj) * (inv(r) + krf * r2 - crf)

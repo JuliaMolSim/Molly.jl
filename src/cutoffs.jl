@@ -16,52 +16,52 @@ struct NoCutoff <: AbstractCutoff end
 cutoff_points(::Type{NoCutoff}) = 0
 
 """
-    DistanceCutoff(cutoff_dist)
+    DistanceCutoff(dist_cutoff)
 
 Cutoff that sets the potential and force to be zero past a specified cutoff point.
 """
 struct DistanceCutoff{D, S, I} <: AbstractCutoff
-    cutoff_dist::D
+    dist_cutoff::D
     sqdist_cutoff::S
     inv_sqdist_cutoff::I
 end
 
-function DistanceCutoff(cutoff_dist)
-    return DistanceCutoff(cutoff_dist, cutoff_dist ^ 2, inv(cutoff_dist ^ 2))
+function DistanceCutoff(dist_cutoff)
+    return DistanceCutoff(dist_cutoff, dist_cutoff ^ 2, inv(dist_cutoff ^ 2))
 end
 
 cutoff_points(::Type{DistanceCutoff{D, S, I}}) where {D, S, I} = 1
 
 """
-    ShiftedPotentialCutoff(cutoff_dist)
+    ShiftedPotentialCutoff(dist_cutoff)
 
 Cutoff that shifts the potential to be continuous at a specified cutoff point.
 """
 struct ShiftedPotentialCutoff{D, S, I} <: AbstractCutoff
-    cutoff_dist::D
+    dist_cutoff::D
     sqdist_cutoff::S
     inv_sqdist_cutoff::I
 end
 
-function ShiftedPotentialCutoff(cutoff_dist)
-    return ShiftedPotentialCutoff(cutoff_dist, cutoff_dist ^ 2, inv(cutoff_dist ^ 2))
+function ShiftedPotentialCutoff(dist_cutoff)
+    return ShiftedPotentialCutoff(dist_cutoff, dist_cutoff ^ 2, inv(dist_cutoff ^ 2))
 end
 
 cutoff_points(::Type{ShiftedPotentialCutoff{D, S, I}}) where {D, S, I} = 1
 
 """
-    ShiftedForceCutoff(cutoff_dist)
+    ShiftedForceCutoff(dist_cutoff)
 
 Cutoff that shifts the force to be continuous at a specified cutoff point.
 """
 struct ShiftedForceCutoff{D, S, I} <: AbstractCutoff
-    cutoff_dist::D
+    dist_cutoff::D
     sqdist_cutoff::S
     inv_sqdist_cutoff::I
 end
 
-function ShiftedForceCutoff(cutoff_dist)
-    return ShiftedForceCutoff(cutoff_dist, cutoff_dist ^ 2, inv(cutoff_dist ^ 2))
+function ShiftedForceCutoff(dist_cutoff)
+    return ShiftedForceCutoff(dist_cutoff, dist_cutoff ^ 2, inv(dist_cutoff ^ 2))
 end
 
 cutoff_points(::Type{ShiftedForceCutoff{D, S, I}}) where {D, S, I} = 1
@@ -86,7 +86,7 @@ end
 @fastmath function potential_cutoff(cutoff::ShiftedForceCutoff, r2, inter, params)
     invr2 = inv(r2)
     r = √r2
-    rc = cutoff.cutoff_dist
+    rc = cutoff.dist_cutoff
     fc = force_divr_nocutoff(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params) * r
 
     potential(inter, r2, invr2, params) - (r - rc) * fc -

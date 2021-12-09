@@ -119,7 +119,7 @@ function readinputs(T::Type,
                     units::Bool=true,
                     gpu::Bool=false,
                     gpu_diff_safe::Bool=gpu,
-                    cutoff_dist=units ? 1.0u"nm" : 1.0,
+                    dist_cutoff=units ? 1.0u"nm" : 1.0,
                     nl_dist=units ? 1.2u"nm" : 1.2)
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
@@ -330,9 +330,9 @@ function readinputs(T::Type,
         matrix_14[j, i] = true
     end
 
-    lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true, weight_14=T(0.5),
+    lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true, weight_14=T(0.5),
                         force_unit=force_unit, energy_unit=energy_unit)
-    coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), solvent_dielectric=T(solventdielectric),
+    coulomb_rf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(solventdielectric),
                                         nl_only=true, weight_14=T(0.5),
                                         coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
                                         force_unit=force_unit, energy_unit=energy_unit)
@@ -567,7 +567,7 @@ function residuename(res, res_num_to_standard::Dict, rename_terminal_res::Bool=t
 end
 
 """
-    setupsystem(coord_file, force_field; cutoff_dist=1.0u"nm")
+    setupsystem(coord_file, force_field; dist_cutoff=1.0u"nm")
 
 Read a coordinate file and apply a force field to it.
 Any file format readable by Chemfiles can be given.
@@ -579,7 +579,7 @@ function setupsystem(coord_file::AbstractString,
                         units::Bool=true,
                         gpu::Bool=false,
                         gpu_diff_safe::Bool=gpu,
-                        cutoff_dist=units ? 1.0u"nm" : 1.0,
+                        dist_cutoff=units ? 1.0u"nm" : 1.0,
                         nl_dist=units ? 1.2u"nm" : 1.2,
                         rename_terminal_res::Bool=true)
     T = typeof(force_field.weight_14_coulomb)
@@ -872,9 +872,9 @@ function setupsystem(coord_file::AbstractString,
         energy_unit = NoUnits
     end
 
-    lj = LennardJones(cutoff=DistanceCutoff(T(cutoff_dist)), nl_only=true, weight_14=force_field.weight_14_lj,
+    lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true, weight_14=force_field.weight_14_lj,
                         force_unit=force_unit, energy_unit=energy_unit)
-    coulomb_rf = CoulombReactionField(cutoff_dist=T(cutoff_dist), solvent_dielectric=T(solventdielectric),
+    coulomb_rf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(solventdielectric),
                                         nl_only=true, weight_14=force_field.weight_14_coulomb,
                                         coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
                                         force_unit=force_unit, energy_unit=energy_unit)

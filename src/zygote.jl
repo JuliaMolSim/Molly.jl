@@ -28,12 +28,12 @@ function Zygote.accum_sum(xs::AbstractArray{LennardJones{S, C, W, F, E}}; dims=:
 end
 
 function Zygote.accum(x::CoulombReactionField{D, S, W, T, F, E}, y::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
-    CoulombReactionField{D, S, W, T, F, E}(x.cutoff_dist + y.cutoff_dist, x.solvent_dielectric + y.solvent_dielectric, x.nl_only,
+    CoulombReactionField{D, S, W, T, F, E}(x.dist_cutoff + y.dist_cutoff, x.solvent_dielectric + y.solvent_dielectric, x.nl_only,
                 x.weight_14 + y.weight_14, x.coulomb_const + y.coulomb_const, x.force_unit, x.energy_unit)
 end
 
-function Zygote.accum(x::NamedTuple{(:cutoff_dist, :solvent_dielectric, :nl_only, :weight_14, :coulomb_const, :force_unit, :energy_unit), Tuple{D, S, Bool, W, T, F, E}}, y::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
-    CoulombReactionField{D, S, W, T, F, E}(x.cutoff_dist + y.cutoff_dist, x.solvent_dielectric + y.solvent_dielectric, x.nl_only,
+function Zygote.accum(x::NamedTuple{(:dist_cutoff, :solvent_dielectric, :nl_only, :weight_14, :coulomb_const, :force_unit, :energy_unit), Tuple{D, S, Bool, W, T, F, E}}, y::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
+    CoulombReactionField{D, S, W, T, F, E}(x.dist_cutoff + y.dist_cutoff, x.solvent_dielectric + y.solvent_dielectric, x.nl_only,
                 x.weight_14 + y.weight_14, x.coulomb_const + y.coulomb_const, x.force_unit, x.energy_unit)
 end
 
@@ -147,12 +147,12 @@ function dualize_fb(inter::LennardJones{S, C, W, F, E}) where {S, C, W, F, E}
 end
 
 function dualize_fb(inter::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
-    cutoff_dist        = Dual(inter.cutoff_dist       , true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
+    dist_cutoff        = Dual(inter.dist_cutoff       , true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
     solvent_dielectric = Dual(inter.solvent_dielectric, false, true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
     weight_14          = Dual(inter.weight_14         , false, false, true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
     coulomb_const      = Dual(inter.coulomb_const     , false, false, false, true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
-    return CoulombReactionField{typeof(cutoff_dist), typeof(solvent_dielectric), typeof(weight_14), typeof(coulomb_const), F, E}(
-                    cutoff_dist, solvent_dielectric, inter.nl_only, weight_14,
+    return CoulombReactionField{typeof(dist_cutoff), typeof(solvent_dielectric), typeof(weight_14), typeof(coulomb_const), F, E}(
+                    dist_cutoff, solvent_dielectric, inter.nl_only, weight_14,
                     coulomb_const, inter.force_unit, inter.energy_unit)
 end
 
