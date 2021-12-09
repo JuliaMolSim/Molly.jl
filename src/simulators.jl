@@ -42,9 +42,7 @@ function simulate!(s::Simulation{false},
     accels_t_dt = zero(accels_t)
 
     @showprogress for step_n in 1:n_steps
-        for logger in values(s.loggers)
-            log_property!(logger, s, neighbors, step_n)
-        end
+        run_loggers!(s, neighbors, step_n)
 
         # Update coordinates
         for i in 1:length(s.coords)
@@ -82,9 +80,7 @@ function simulate!(s::Simulation{true},
     accels_t_dt = zero(accels_t)
 
     for step_n in 1:n_steps
-        for logger in values(s.loggers)
-            log_property!(logger, s, neighbors, step_n)
-        end
+        run_loggers!(s, neighbors, step_n)
 
         s.coords += s.velocities .* s.timestep .+ (removemolar.(accels_t) .* s.timestep ^ 2) ./ 2
         s.coords = wrapcoordsvec.(s.coords, (s.box_size,))
@@ -116,9 +112,7 @@ function simulate!(s::Simulation,
     neighbors = find_neighbors(s, s.neighbor_finder; parallel=parallel)
 
     @showprogress for step_n in 1:n_steps
-        for logger in values(s.loggers)
-            log_property!(logger, s, neighbors, step_n)
-        end
+        run_loggers!(s, neighbors, step_n)
 
         accels_t = accelerations(s, neighbors; parallel=parallel)
 

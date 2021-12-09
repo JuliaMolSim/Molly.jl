@@ -578,9 +578,7 @@ function Molly.simulate!(s::Simulation,
     # Show a progress bar like this, if you have imported ProgressMeter
     @showprogress for step_n in 1:n_steps
         # Apply the loggers like this
-        for logger in values(s.loggers)
-            log_property!(logger, s, neighbors, step_n)
-        end
+        run_loggers!(s, neighbors, step_n)
 
         # Calculate accelerations like this
         accels_t = accelerations(s, neighbors; parallel=parallel)
