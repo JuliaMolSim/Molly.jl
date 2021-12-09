@@ -43,7 +43,7 @@ function simulate!(s::Simulation{false},
 
     @showprogress for step_n in 1:n_steps
         for logger in values(s.loggers)
-            log_property!(logger, s, step_n)
+            log_property!(logger, s, neighbors, step_n)
         end
 
         # Update coordinates
@@ -83,7 +83,7 @@ function simulate!(s::Simulation{true},
 
     for step_n in 1:n_steps
         for logger in values(s.loggers)
-            log_property!(logger, s, step_n)
+            log_property!(logger, s, neighbors, step_n)
         end
 
         s.coords += s.velocities .* s.timestep .+ (removemolar.(accels_t) .* s.timestep ^ 2) ./ 2
@@ -117,7 +117,7 @@ function simulate!(s::Simulation,
 
     @showprogress for step_n in 1:n_steps
         for logger in values(s.loggers)
-            log_property!(logger, s, step_n)
+            log_property!(logger, s, neighbors, step_n)
         end
 
         accels_t = accelerations(s, neighbors; parallel=parallel)

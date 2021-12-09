@@ -5,7 +5,9 @@ export
     displacements,
     distances,
     rdf,
-    energy
+    energy,
+    kinetic_energy,
+    potential_energy
 
 """
     visualize(coord_logger, box_size, out_filepath; <keyword arguments>)
@@ -81,12 +83,17 @@ function rdf(coords, box_size; npoints::Integer=200)
 end
 
 """
-    energy(s)
+    energy(s, neighbors=nothing)
 
 Compute the total energy of the system.
 """
 energy(s, neighbors=nothing) = kinetic_energy(s) + potential_energy(s, neighbors)
 
+"""
+    kinetic_energy(s)
+
+Compute the kinetic energy of the system.
+"""
 function kinetic_energy(s::Simulation)
     ke = sum(i -> s.atoms[i].mass * dot(s.velocities[i], s.velocities[i]) / 2, axes(s.atoms, 1))
     # Convert energy to per mol if required
@@ -98,6 +105,11 @@ function kinetic_energy(s::Simulation)
     end
 end
 
+"""
+    potential_energy(s, neighbors=nothing)
+
+Compute the potential energy of the system.
+"""
 function potential_energy(s::Simulation, neighbors=nothing)
     n_atoms = length(s.coords)
     potential = zero(ustrip(s.timestep)) * s.energy_unit

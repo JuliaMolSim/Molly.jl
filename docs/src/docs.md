@@ -319,7 +319,7 @@ struct SIRLogger <: Logger
 end
 
 # Custom logging function
-function Molly.log_property!(logger::SIRLogger, s::Simulation, step_n::Integer)
+function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n)
     if step_n % logger.n_steps == 0
         counts_sir = [
             count(p -> p.status == susceptible, s.atoms),
@@ -579,7 +579,7 @@ function Molly.simulate!(s::Simulation,
     @showprogress for step_n in 1:n_steps
         # Apply the loggers like this
         for logger in values(s.loggers)
-            log_property!(logger, s, step_n)
+            log_property!(logger, s, neighbors, step_n)
         end
 
         # Calculate accelerations like this
@@ -695,7 +695,7 @@ end
 ```
 Then, define the logging function that is called every step by the simulator:
 ```julia
-function Molly.log_property!(logger::MyLogger, s::Simulation, step_n::Integer)
+function Molly.log_property!(logger::MyLogger, s, neighbors, step_n)
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end

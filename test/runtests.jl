@@ -57,10 +57,10 @@ temp_fp_viz = tempname(cleanup=true) * ".mp4"
     @test isapprox(force(LennardJones(), c1, c3, a1, a1, box_size),
                     SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(Molly.potential_energy(LennardJones(), s, 1, 2),
+    @test isapprox(potential_energy(LennardJones(), s, 1, 2),
                     0.0u"kJ * mol^-1",
                     atol=1e-9u"kJ * mol^-1")
-    @test isapprox(Molly.potential_energy(LennardJones(), s, 1, 3),
+    @test isapprox(potential_energy(LennardJones(), s, 1, 3),
                     -0.1170417309u"kJ * mol^-1",
                     atol=1e-9u"kJ * mol^-1")
 
@@ -70,10 +70,10 @@ temp_fp_viz = tempname(cleanup=true) * ".mp4"
     @test isapprox(force(Coulomb(), c1, c3, a1, a1, box_size),
                     SVector(868.3466125, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-5u"kJ * mol^-1 * nm^-1")
-    @test isapprox(Molly.potential_energy(Coulomb(), s, 1, 2),
+    @test isapprox(potential_energy(Coulomb(), s, 1, 2),
                     463.1181933u"kJ * mol^-1",
                     atol=1e-5u"kJ * mol^-1")
-    @test isapprox(Molly.potential_energy(Coulomb(), s, 1, 3),
+    @test isapprox(potential_energy(Coulomb(), s, 1, 3),
                     347.338645u"kJ * mol^-1",
                     atol=1e-5u"kJ * mol^-1")
     
@@ -95,10 +95,10 @@ temp_fp_viz = tempname(cleanup=true) * ".mp4"
     @test isapprox(fs[2],
                     SVector(20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(Molly.potential_energy(b1, s),
+    @test isapprox(potential_energy(b1, s),
                     1500.0u"kJ * mol^-1",
                     atol=1e-9u"kJ * mol^-1")
-    @test isapprox(Molly.potential_energy(b2, s),
+    @test isapprox(potential_energy(b2, s),
                     2000.0u"kJ * mol^-1",
                     atol=1e-9u"kJ * mol^-1")
 end
@@ -661,7 +661,7 @@ end
         # All force terms on all atoms must match at some threshold
         @test !any(d -> any(abs.(d) .> 1e-6), forces_molly .- forces_openmm)
 
-        E_molly = ustrip(Molly.potential_energy(s, neighbors))
+        E_molly = ustrip(potential_energy(s, neighbors))
         E_openmm = readdlm(joinpath(openmm_dir, "energy_$(inter)_only.txt"))[1]
         # Energy must match at some threshold
         @test E_molly - E_openmm < 1e-5
@@ -774,7 +774,7 @@ end
     end
 
     # Custom logging function
-    function Molly.log_property!(logger::SIRLogger, s::Simulation, step_n::Integer)
+    function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n)
         if step_n % logger.n_steps == 0
             counts_sir = [
                 count(p -> p.status == susceptible, s.atoms),

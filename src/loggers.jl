@@ -29,12 +29,12 @@ function Base.show(io::IO, tl::TemperatureLogger)
 end
 
 """
-    log_property!(logger, simulation, step_n)
+    log_property!(logger, simulation, neighbors, step_n)
 
 Log a property thoughout a simulation.
 Custom loggers should implement this function.
 """
-function log_property!(logger::TemperatureLogger, s::Simulation, step_n::Integer)
+function log_property!(logger::TemperatureLogger, neighbors, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
         push!(logger.temperatures, temperature(s))
     end
@@ -65,7 +65,7 @@ function Base.show(io::IO, cl::CoordinateLogger)
                 length(cl.coords) > 0 ? length(first(cl.coords)) : "?", " atoms")
 end
 
-function log_property!(logger::CoordinateLogger, s::Simulation, step_n::Integer)
+function log_property!(logger::CoordinateLogger, neighbors, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
         push!(logger.coords, deepcopy(s.coords))
     end
@@ -92,9 +92,9 @@ function Base.show(io::IO, el::EnergyLogger)
                 el.n_steps, ", ", length(el.energies), " energies recorded")
 end
 
-function log_property!(logger::EnergyLogger, s::Simulation, step_n::Integer)
+function log_property!(logger::EnergyLogger, neighbors, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
-        push!(logger.energies, energy(s))
+        push!(logger.energies, energy(s, neighbors))
     end
 end
 
@@ -119,7 +119,7 @@ function Base.show(io::IO, sw::StructureWriter)
                 sw.filepath, "\", ", sw.structure_n - 1, " frames written")
 end
 
-function log_property!(logger::StructureWriter, s::Simulation, step_n::Integer)
+function log_property!(logger::StructureWriter, neighbors, s::Simulation, step_n::Integer)
     if step_n % logger.n_steps == 0
         if length(s.atoms) != length(s.atoms_data)
             error("Number of atoms is ", length(s.atoms), " but number of atom data entries is ",
