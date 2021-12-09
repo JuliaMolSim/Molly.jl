@@ -20,13 +20,15 @@ else
     @warn "The visualization tests will not be run as run_visualize_tests is set to false"
 end
 
-if nthreads() > 1
+run_parallel_tests = nthreads() > 1
+if run_parallel_tests
     @info "The parallel tests will be run as Julia is running on $(nthreads()) threads"
 else
     @warn "The parallel tests will not be run as Julia is running on 1 thread"
 end
 
-if CUDA.functional()
+run_gpu_tests = CUDA.functional()
+if run_gpu_tests
     @info "The GPU tests will be run as a CUDA-enabled device is available"
 else
     @warn "The GPU tests will not be run as a CUDA-enabled device is not available"
@@ -141,7 +143,7 @@ end
         )
         neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
         @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
-        if nthreads() > 1
+        if run_parallel_tests
             neighbors = find_neighbors(s, s.neighbor_finder; parallel=true)
             @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
         end
@@ -162,7 +164,7 @@ end
     )
     neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
     @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
-    if nthreads() > 1
+    if run_parallel_tests
         neighbors = find_neighbors(s, s.neighbor_finder; parallel=true)
         @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
     end
@@ -211,7 +213,7 @@ end
     temp = 298.0u"K"
     timestep = 0.002u"ps"
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
-    parallel_list = nthreads() > 1 ? (false, true) : (false,)
+    parallel_list = run_parallel_tests ? (false, true) : (false,)
 
     for parallel in parallel_list
         s = Simulation(
@@ -591,11 +593,11 @@ end
         ("out-of-place NL" , [true , false, true , false, false]),
         ("out-of-place f32", [false, false, true , true , false]),
     ]
-    if nthreads() > 1
+    if run_parallel_tests
         push!(runs, ("in-place parallel"   , [false, true , false, false, false]))
         push!(runs, ("in-place NL parallel", [true , true , false, false, false]))
     end
-    if CUDA.functional()
+    if run_gpu_tests
         push!(runs, ("out-of-place gpu"       , [false, false, true , false, true ]))
         push!(runs, ("out-of-place gpu f32"   , [false, false, true , true , true ]))
         push!(runs, ("out-of-place gpu NL"    , [true , false, true , false, true ]))
@@ -698,7 +700,7 @@ end
     @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 
     # Test the same simulation on the GPU
-    if CUDA.functional()
+    if run_gpu_tests
         atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
             joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=true)
         

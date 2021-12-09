@@ -159,7 +159,7 @@ function find_neighbors(s::Simulation,
                         nf::DistanceVecNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        parallel::Bool)
+                        kwargs...)
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
     n_atoms = length(s.coords)
