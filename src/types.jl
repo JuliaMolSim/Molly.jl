@@ -201,7 +201,6 @@ default values.
     which should be the same type as the coordinates. The meaning of the
     velocities depends on the simulator used, e.g. for the `VelocityFreeVerlet`
     simulator they represent the previous step coordinates for the first step.
-- `temperature::T=0.0`: the temperature of the simulation.
 - `box_size::B`: the size of the box in which the simulation takes place.
 - `neighbor_finder::NeighborFinder=NoNeighborFinder()`: the neighbor finder
     used to find close atoms and save on computation.
@@ -217,7 +216,7 @@ default values.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-mutable struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E, NF}
+mutable struct Simulation{D, A, AD, C, V, GI, SI, B, S, F, E, NF}
     simulator::Simulator
     atoms::A
     atoms_data::AD
@@ -225,7 +224,6 @@ mutable struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E, NF}
     general_inters::GI
     coords::C
     velocities::V
-    temperature::T
     box_size::B
     neighbor_finder::NF
     thermostat::Thermostat
@@ -237,8 +235,8 @@ mutable struct Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E, NF}
     energy_unit::E
 end
 
-Simulation{D}(args...) where {D, T, A, AD, C, V, GI, SI, B, S, F, E, NF} = 
-    Simulation{D, T, A, AD, C, V, GI, SI, B, S, F, E, NF}(args...)
+Simulation{D}(args...) where {D, A, AD, C, V, GI, SI, B, S, F, E, NF} = 
+    Simulation{D, A, AD, C, V, GI, SI, B, S, F, E, NF}(args...)
 
 function Simulation(;
                     simulator=VelocityVerlet(),
@@ -248,7 +246,6 @@ function Simulation(;
                     general_inters=(),
                     coords,
                     velocities=zero(coords),
-                    temperature=0.0u"K",
                     box_size,
                     neighbor_finder=NoNeighborFinder(),
                     thermostat=NoThermostat(),
@@ -259,7 +256,6 @@ function Simulation(;
                     force_unit=u"kJ * mol^-1 * nm^-1",
                     energy_unit=u"kJ * mol^-1",
                     gpu_diff_safe=isa(coords, CuArray))
-    T = typeof(temperature)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     C = typeof(coords)
@@ -271,11 +267,10 @@ function Simulation(;
     F = typeof(force_unit)
     E = typeof(energy_unit)
     NF = typeof(neighbor_finder)
-    return Simulation{gpu_diff_safe, T, A, AD, C, V, GI, SI, B, S, F, E, NF}(
+    return Simulation{gpu_diff_safe, A, AD, C, V, GI, SI, B, S, F, E, NF}(
                 simulator, atoms, atoms_data, specific_inter_lists, general_inters,
-                coords, velocities, temperature, box_size, neighbor_finder,
-                thermostat, loggers, timestep, n_steps, n_steps_made, force_unit,
-                energy_unit)
+                coords, velocities, box_size, neighbor_finder, thermostat, loggers,
+                timestep, n_steps, n_steps_made, force_unit, energy_unit)
 end
 
 function Base.show(io::IO, s::Simulation)

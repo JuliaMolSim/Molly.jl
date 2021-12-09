@@ -26,12 +26,13 @@ function apply_thermostat!(s::Simulation, ::NoThermostat)
 end
 
 """
-    AndersenThermostat(coupling_const)
+    AndersenThermostat(temperature, coupling_const)
 
 Rescale random velocities according to the Andersen thermostat.
 """
-struct AndersenThermostat{T} <: Thermostat
-    coupling_const::T
+struct AndersenThermostat{T, C} <: Thermostat
+    temperature::T
+    coupling_const::C
 end
 
 function apply_thermostat!(s::Simulation, thermostat::AndersenThermostat)
@@ -39,7 +40,7 @@ function apply_thermostat!(s::Simulation, thermostat::AndersenThermostat)
     for i in 1:length(s.velocities)
         if rand() < s.timestep / thermostat.coupling_const
             mass = s.atoms[i].mass
-            s.velocities[i] = velocity(mass, s.temperature; dims=dims)
+            s.velocities[i] = velocity(mass, thermostat.temperature; dims=dims)
         end
     end
     return s

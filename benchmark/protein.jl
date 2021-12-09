@@ -23,10 +23,9 @@ s = Simulation(
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
-    temperature=temp,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    thermostat=AndersenThermostat(1.0u"ps"),
+    thermostat=AndersenThermostat(temp, 1.0u"ps"),
     timestep=timestep,
     n_steps=n_steps,
 )

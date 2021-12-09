@@ -183,10 +183,9 @@ end
         general_inters=(LennardJones(nl_only=true),),
         coords=placeatoms(n_atoms, box_size, 0.3u"nm"; dims=2),
         velocities=[velocity(10.0u"u", temp; dims=2) .* 0.01 for i in 1:n_atoms],
-        temperature=temp,
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-        thermostat=AndersenThermostat(10.0u"ps"),
+        thermostat=AndersenThermostat(temp, 10.0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(100),
                      "coords" => CoordinateLogger(100; dims=2)),
         timestep=timestep,
@@ -223,10 +222,9 @@ end
             general_inters=(LennardJones(nl_only=true),),
             coords=placeatoms(n_atoms, box_size, 0.3u"nm"),
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
-            temperature=temp,
             box_size=box_size,
             neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-            thermostat=AndersenThermostat(10.0u"ps"),
+            thermostat=AndersenThermostat(temp, 10.0u"ps"),
             loggers=Dict("temp"   => TemperatureLogger(100),
                          "coords" => CoordinateLogger(100),
                          "vels"   => VelocityLogger(100),
@@ -262,7 +260,6 @@ end
 @testset "Lennard-Jones gas velocity-free" begin
     n_atoms = 100
     n_steps = 20_000
-    temp = 298.0u"K"
     timestep = 0.002u"ps"
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
     coords = placeatoms(n_atoms, box_size, 0.3u"nm")
@@ -273,7 +270,6 @@ end
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=[c .+ 0.01 .* rand(SVector{3})u"nm" for c in coords],
-        temperature=temp,
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
         thermostat=NoThermostat(),
@@ -309,10 +305,9 @@ end
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
-        temperature=temp,
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-        thermostat=AndersenThermostat(10.0u"ps"),
+        thermostat=AndersenThermostat(temp, 10.0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(10),
                         "coords" => CoordinateLogger(10)),
         timestep=timestep,
@@ -354,10 +349,9 @@ end
         general_inters=general_inters,
         coords=coords,
         velocities=[velocity(a.mass, temp) .* 0.01 for a in atoms],
-        temperature=temp,
         box_size=box_size,
         neighbor_finder=neighbor_finder,
-        thermostat=AndersenThermostat(10.0u"ps"),
+        thermostat=AndersenThermostat(temp, 10.0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(10),
                         "coords" => CoordinateLogger(10),
                         "energy" => EnergyLogger(10),
@@ -390,10 +384,9 @@ end
         general_inters=general_inters,
         coords=coords,
         velocities=[velocity(a.mass, Float32(temp)) .* 0.01f0 for a in atoms],
-        temperature=temp,
         box_size=box_size,
         neighbor_finder=neighbor_finder,
-        thermostat=AndersenThermostat(10.0f0u"ps"),
+        thermostat=AndersenThermostat(temp, 10.0f0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(typeof(1.0f0u"K"), 10),
                         "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10),
                         "energy" => EnergyLogger(typeof(1.0f0u"kJ * mol^-1"), 10)),
@@ -439,10 +432,9 @@ end
             general_inters=(gi,),
             coords=placeatoms(n_atoms, box_size, 0.2u"nm"),
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
-            temperature=temp,
             box_size=box_size,
             neighbor_finder=neighbor_finder,
-            thermostat=AndersenThermostat(10.0u"ps"),
+            thermostat=AndersenThermostat(temp, 10.0u"ps"),
             loggers=Dict("temp" => TemperatureLogger(100),
                          "coords" => CoordinateLogger(100),
                          "energy" => EnergyLogger(100)),
@@ -469,7 +461,6 @@ end
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=velocities,
-        temperature=temp,
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
         thermostat=NoThermostat(),
@@ -486,7 +477,6 @@ end
         general_inters=(LennardJones(nl_only=true),),
         coords=ustripvec.(coords),
         velocities=ustripvec.(velocities),
-        temperature=ustrip(temp),
         box_size=ustrip.(box_size),
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0),
         thermostat=NoThermostat(),
@@ -572,7 +562,6 @@ end
             general_inters=general_inters,
             coords=coords,
             velocities=velocities,
-            temperature=temp,
             box_size=box_size,
             neighbor_finder=neighbor_finder,
             thermostat=thermostat,
@@ -700,7 +689,7 @@ end
     @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 
     # Test the same simulation on the GPU
-    if false#run_gpu_tests
+    if run_gpu_tests
         atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
             joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=true)
         
@@ -807,10 +796,9 @@ end
         general_inters=general_inters,
         coords=coords,
         velocities=velocities,
-        temperature=temp,
         box_size=box_size,
         neighbor_finder=neighbor_finder,
-        thermostat=AndersenThermostat(5.0),
+        thermostat=AndersenThermostat(temp, 5.0),
         loggers=Dict("coords" => CoordinateLogger(Float64, 10; dims=2),
                         "SIR" => SIRLogger(10, [])),
         timestep=timestep,

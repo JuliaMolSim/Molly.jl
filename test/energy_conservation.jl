@@ -27,7 +27,6 @@ using Test
                 general_inters=(lj_potential,),
                 coords=placeatoms(n_atoms, box_size, 0.6u"nm"),
                 velocities=[velocity(atom_mass, temp) for i in 1:n_atoms],
-                temperature=temp,
                 box_size=box_size,
                 loggers=Dict("coords" => CoordinateLogger(100),
                                 "energy" => EnergyLogger(100)),
