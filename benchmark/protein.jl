@@ -25,7 +25,7 @@ s = Simulation(
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    thermostat=AndersenThermostat(temp, 1.0u"ps"),
+    coupling=AndersenThermostat(temp, 1.0u"ps"),
     timestep=timestep,
     n_steps=n_steps,
 )

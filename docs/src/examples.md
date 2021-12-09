@@ -101,7 +101,7 @@ s = Simulation(
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    thermostat=AndersenThermostat(temp, 5.0),
+    coupling=AndersenThermostat(temp, 5.0),
     loggers=Dict("coords" => CoordinateLogger(Float64, 20; dims=2),
                     "bonds" => BondLogger(20, [])),
     timestep=timestep,

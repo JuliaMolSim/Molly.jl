@@ -1,27 +1,27 @@
-# Thermostats
+# Temperature and pressure coupling
 
 export
-    NoThermostat,
-    apply_thermostat!,
+    NoCoupling,
+    apply_coupling!,
     AndersenThermostat,
     velocity,
     maxwellboltzmann,
     temperature
 
 """
-    NoThermostat()
+    NoCoupling()
 
-Placeholder thermostat that does nothing.
+Placeholder coupler that does nothing.
 """
-struct NoThermostat <: Thermostat end
+struct NoCoupling <: AbstractCoupler end
 
 """
-    apply_thermostat!(simulation, thermostat)
+    apply_coupling!(simulation, coupling)
 
-Apply a thermostat to modify a simulation.
-Custom thermostats should implement this function.
+Apply a coupler to modify a simulation.
+Custom couplers should implement this function.
 """
-function apply_thermostat!(s::Simulation, ::NoThermostat)
+function apply_coupling!(s::Simulation, ::NoCoupling)
     return s
 end
 
@@ -30,12 +30,12 @@ end
 
 Rescale random velocities according to the Andersen thermostat.
 """
-struct AndersenThermostat{T, C} <: Thermostat
+struct AndersenThermostat{T, C} <: AbstractCoupler
     temperature::T
     coupling_const::C
 end
 
-function apply_thermostat!(s::Simulation, thermostat::AndersenThermostat)
+function apply_coupling!(s::Simulation, thermostat::AndersenThermostat)
     dims = length(first(s.velocities))
     for i in 1:length(s.velocities)
         if rand() < s.timestep / thermostat.coupling_const

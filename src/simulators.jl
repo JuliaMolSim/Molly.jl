@@ -57,7 +57,7 @@ function simulate!(s::Simulation{false},
             s.velocities[i] += removemolar(accels_t[i] + accels_t_dt[i]) * s.timestep / 2
         end
 
-        apply_thermostat!(s, s.thermostat)
+        apply_coupling!(s, s.coupling)
         neighbors = find_neighbors(s, s.neighbor_finder, neighbors, step_n; parallel=parallel)
 
         accels_t = accels_t_dt
@@ -87,7 +87,7 @@ function simulate!(s::Simulation{true},
         accels_t_dt = accelerations(s, s.coords, s.atoms, neighbors, neighbors_all)
         s.velocities += removemolar.(accels_t .+ accels_t_dt) .* s.timestep / 2
 
-        apply_thermostat!(s, s.thermostat)
+        apply_coupling!(s, s.coupling)
         neighbors = find_neighbors(s, s.neighbor_finder, neighbors, step_n)
 
         accels_t = accels_t_dt
@@ -124,7 +124,7 @@ function simulate!(s::Simulation,
         end
         s.velocities = coords_copy
 
-        apply_thermostat!(s, s.thermostat)
+        apply_coupling!(s, s.coupling)
         neighbors = find_neighbors(s, s.neighbor_finder, neighbors, step_n; parallel=parallel)
 
         s.n_steps_made += 1

@@ -49,7 +49,7 @@ s = Simulation(
     coords=coords,
     velocities=velocities,
     box_size=box_size,
-    thermostat=AndersenThermostat(temp, 1.0u"ps"),
+    coupling=AndersenThermostat(temp, 1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "coords" => CoordinateLogger(10)),
     timestep=0.002u"ps",
@@ -91,7 +91,7 @@ s = Simulation(
     coords=coords,
     velocities=velocities,
     box_size=box_size,
-    thermostat=NoThermostat(),
+    coupling=NoCoupling(),
     loggers=Dict("temp" => TemperatureLogger(typeof(1.0f0u"K"), 10),
                     "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10)),
     timestep=0.002f0u"ps",
@@ -144,7 +144,7 @@ s = Simulation(
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    thermostat=AndersenThermostat(temp, 1.0u"ps"),
+    coupling=AndersenThermostat(temp, 1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "coords" => CoordinateLogger(10)),
     timestep=0.002u"ps",
@@ -243,7 +243,7 @@ s = Simulation(
     velocities=[velocity(a.mass, temp) for a in atoms],
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    thermostat=AndersenThermostat(temp, 1.0u"ps"),
+    coupling=AndersenThermostat(temp, 1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),
     timestep=0.0002u"ps",
@@ -346,7 +346,7 @@ s = Simulation(
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    thermostat=AndersenThermostat(temp, 5.0),
+    coupling=AndersenThermostat(temp, 5.0),
     loggers=Dict("coords" => CoordinateLogger(Float64, 10; dims=2),
                     "SIR" => SIRLogger(10, [])),
     timestep=timestep,
@@ -583,8 +583,8 @@ function Molly.simulate!(s::Simulation,
             s.coords[i] = wrapcoords.(s.coords[i], s.box_size)
         end
 
-        # Apply the thermostat like this
-        apply_thermostat!(s, s.thermostat)
+        # Apply coupling like this
+        apply_coupling!(s, s.coupling)
 
         # Find new neighbors like this
         neighbors = find_neighbors(s, s.neighbor_finder, neighbors, step_n;
@@ -606,27 +606,27 @@ The above example is more similar to the in-place version; see the source code f
 
 The implementation to use is guessed when you call [`Simulation`](@ref) based on whether `coords` is a `CuArray`, but can be given explicitly with the `gpu_diff_safe` argument.
 
-## Thermostats
+## Coupling
 
-Thermostats control the temperature over a simulation.
-The available thermostats are:
+Temperature and pressure coupling allows properties to be controlled during a simulation.
+The available couplers are:
 - [`AndersenThermostat`](@ref).
 
-To define your own [`Thermostat`](@ref), first define the `struct`:
+To define your own [`AbstractCoupler`](@ref), first define the `struct`:
 ```julia
-struct MyThermostat <: Thermostat
-    # Any properties, e.g. a coupling constant
+struct MyCoupler <: AbstractCoupler
+    # Any properties, e.g. a target temperature or coupling constant
 end
 ```
-Then, define the function that implements the thermostat every timestep:
+Then, define the function that implements the coupling every timestep:
 ```julia
-function apply_thermostat!(s::Simulation, thermostat::MyThermostat)
+function apply_coupling!(s::Simulation, coupling::MyCoupler)
     # Do something to the simulation, e.g. scale the velocities
     return s
 end
 ```
 The functions [`velocity`](@ref), [`maxwellboltzmann`](@ref) and [`temperature`](@ref) may be useful here.
-To use your custom thermostat, give it as the `thermostat` argument when creating the [`Simulation`](@ref).
+To use your custom coupler, give it as the `coupling` argument when creating the [`Simulation`](@ref).
 
 ## Neighbor finders
 

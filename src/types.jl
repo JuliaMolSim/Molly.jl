@@ -6,7 +6,7 @@ export
     SpecificInteraction,
     AbstractCutoff,
     Simulator,
-    Thermostat,
+    AbstractCoupler,
     NeighborFinder,
     Logger,
     Atom,
@@ -46,10 +46,10 @@ Custom simulators should sub-type this type.
 abstract type Simulator end
 
 """
-A way to keep the temperature of a simulation constant.
-Custom thermostats should sub-type this type.
+A way to keep properties of a simulation constant.
+Custom temperature and pressure couplers should sub-type this type.
 """
-abstract type Thermostat end
+abstract type AbstractCoupler end
 
 """
 A way to find near atoms to save on simulation time.
@@ -212,7 +212,7 @@ default values.
 - `box_size::B`: the size of the box in which the simulation takes place.
 - `neighbor_finder::NeighborFinder=NoNeighborFinder()`: the neighbor finder
     used to find close atoms and save on computation.
-- `thermostat::Thermostat=NoThermostat()`: the thermostat which applies during
+- `coupling::AbstractCoupler=NoCoupling()`: the coupling which applies during
     the simulation.
 - `loggers::Dict{String, <:Logger}=Dict()`: the loggers that record properties
     of interest during the simulation.
@@ -224,7 +224,7 @@ default values.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-mutable struct Simulation{D, A, AD, C, V, GI, SI, B, S, F, E, NF}
+mutable struct Simulation{D, A, AD, C, V, GI, SI, B, S, F, E, NF, CO}
     simulator::Simulator
     atoms::A
     atoms_data::AD
@@ -234,7 +234,7 @@ mutable struct Simulation{D, A, AD, C, V, GI, SI, B, S, F, E, NF}
     velocities::V
     box_size::B
     neighbor_finder::NF
-    thermostat::Thermostat
+    coupling::CO
     loggers::Dict{String, <:Logger}
     timestep::S
     n_steps::Int
@@ -243,8 +243,8 @@ mutable struct Simulation{D, A, AD, C, V, GI, SI, B, S, F, E, NF}
     energy_unit::E
 end
 
-Simulation{D}(args...) where {D, A, AD, C, V, GI, SI, B, S, F, E, NF} = 
-    Simulation{D, A, AD, C, V, GI, SI, B, S, F, E, NF}(args...)
+Simulation{D}(args...) where {D, A, AD, C, V, GI, SI, B, S, F, E, NF, CO} = 
+    Simulation{D, A, AD, C, V, GI, SI, B, S, F, E, NF, CO}(args...)
 
 function Simulation(;
                     simulator=VelocityVerlet(),
@@ -256,7 +256,7 @@ function Simulation(;
                     velocities=zero(coords),
                     box_size,
                     neighbor_finder=NoNeighborFinder(),
-                    thermostat=NoThermostat(),
+                    coupling=NoCoupling(),
                     loggers=Dict{String, Logger}(),
                     timestep=0.0u"ps",
                     n_steps=0,
@@ -275,9 +275,10 @@ function Simulation(;
     F = typeof(force_unit)
     E = typeof(energy_unit)
     NF = typeof(neighbor_finder)
-    return Simulation{gpu_diff_safe, A, AD, C, V, GI, SI, B, S, F, E, NF}(
+    CO = typeof(coupling)
+    return Simulation{gpu_diff_safe, A, AD, C, V, GI, SI, B, S, F, E, NF, CO}(
                 simulator, atoms, atoms_data, specific_inter_lists, general_inters,
-                coords, velocities, box_size, neighbor_finder, thermostat, loggers,
+                coords, velocities, box_size, neighbor_finder, coupling, loggers,
                 timestep, n_steps, n_steps_made, force_unit, energy_unit)
 end
 

@@ -68,7 +68,7 @@ function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::B
     timestep = f32 ? 0.02f0u"ps" : 0.02u"ps"
     temp = f32 ? 1.0f0u"K" : 1.0u"K"
     simulator = VelocityVerlet()
-    thermostat = NoThermostat()
+    coupling = NoCoupling()
     b0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
     kb = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
     bonds = [HarmonicBond(i=((i * 2) - 1), j=(i * 2), b0=b0, kb=kb) for i in 1:(n_atoms ÷ 2)]
@@ -109,7 +109,7 @@ function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::B
         velocities=velocities,
         box_size=box_size,
         neighbor_finder=neighbor_finder,
-        thermostat=thermostat,
+        coupling=coupling,
         timestep=timestep,
         n_steps=n_steps,
         gpu_diff_safe=gpu_diff_safe,
