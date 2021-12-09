@@ -1,6 +1,6 @@
 # Chain rules to allow differentiable simulations
 
-@non_differentiable find_neighbors!(args...)
+@non_differentiable find_neighbors(args...)
 @non_differentiable DistanceVecNeighborFinder(args...)
 @non_differentiable allneighbors(args...)
 

@@ -2,7 +2,7 @@
 
 export
     NoNeighborFinder,
-    find_neighbors!,
+    find_neighbors,
     DistanceNeighborFinder,
     DistanceVecNeighborFinder,
     TreeNeighborFinder,
@@ -18,17 +18,17 @@ set to `false`.
 struct NoNeighborFinder <: NeighborFinder end
 
 """
-    find_neighbors!(simulation, neighbor_finder, step_n; parallel=true)
+    find_neighbors(simulation, neighbor_finder, current_neighbors=nothing, step_n=0; parallel=true)
 
 Obtain a list of close atoms in a system.
 Custom neighbor finders should implement this function.
 """
-function find_neighbors!(s::Simulation,
-                         nf::NoNeighborFinder,
-                         step_n::Integer,
-                         neighbors=nothing;
-                         kwargs...)
-    return
+function find_neighbors(s::Simulation,
+                        nf::NoNeighborFinder,
+                        current_neighbors=nothing,
+                        step_n::Integer=0;
+                        kwargs...)
+    return nothing
 end
 
 Base.show(io::IO, neighbor_finder::NoNeighborFinder) = print(io, typeof(neighbor_finder))
@@ -53,13 +53,18 @@ function DistanceNeighborFinder(;
     return DistanceNeighborFinder{typeof(dist_cutoff)}(nb_matrix, matrix_14, n_steps, dist_cutoff)
 end
 
-function find_neighbors!(s::Simulation,
-                         nf::DistanceNeighborFinder,
-                         step_n::Integer;
-                         parallel::Bool=true)
-    !iszero(step_n % nf.n_steps) && return
+function find_neighbors(s::Simulation,
+                        nf::DistanceNeighborFinder,
+                        current_neighbors=nothing,
+                        step_n::Integer=0;
+                        parallel::Bool=true)
+    !iszero(step_n % nf.n_steps) && return current_neighbors
 
-    neighbors = s.neighbors
+    if isnothing(current_neighbors)
+        neighbors = NeighborList()
+    else
+        neighbors = current_neighbors
+    end
     empty!(neighbors)
 
     sqdist_cutoff = nf.dist_cutoff ^ 2
@@ -96,6 +101,8 @@ function find_neighbors!(s::Simulation,
             end
         end
     end
+
+    return neighbors
 end
 
 """
@@ -148,12 +155,12 @@ function findboundaries(nbs_ord, n_atoms)
     return inds
 end
 
-function find_neighbors!(s::Simulation,
-                         nf::DistanceVecNeighborFinder,
-                         step_n::Integer,
-                         current_nbs=nothing;
-                         parallel::Bool=true)
-    !iszero(step_n % nf.n_steps) && return current_nbs
+function find_neighbors(s::Simulation,
+                        nf::DistanceVecNeighborFinder,
+                        current_neighbors=nothing,
+                        step_n::Integer=0;
+                        parallel::Bool)
+    !iszero(step_n % nf.n_steps) && return current_neighbors
 
     n_atoms = length(s.coords)
     sqdist_cutoff = nf.dist_cutoff ^ 2
@@ -213,13 +220,18 @@ function TreeNeighborFinder(;
     return TreeNeighborFinder{typeof(dist_cutoff)}(nb_matrix, matrix_14, n_steps, dist_cutoff)
 end
 
-function find_neighbors!(s::Simulation,
-                         nf::TreeNeighborFinder,
-                         step_n::Integer;
-                         parallel::Bool=true)
-    !iszero(step_n % nf.n_steps) && return
+function find_neighbors(s::Simulation,
+                        nf::TreeNeighborFinder,
+                        current_neighbors=nothing,
+                        step_n::Integer=0;
+                        parallel::Bool=true)
+    !iszero(step_n % nf.n_steps) && return current_neighbors
 
-    neighbors = s.neighbors
+    if isnothing(current_neighbors)
+        neighbors = NeighborList()
+    else
+        neighbors = current_neighbors
+    end
     empty!(neighbors)
 
     dist_unit = unit(first(first(s.coords)))
@@ -259,6 +271,8 @@ function find_neighbors!(s::Simulation,
             end
         end
     end
+
+    return neighbors
 end
 
 # Find neighbor lists using CellListMap.jl
@@ -373,24 +387,29 @@ end
 CellListMap.strip_value(x::Unitful.Quantity) = Unitful.ustrip(x)
 
 """
-    find_neighbors!(s::Simulation,
+    find_neighbors(s::Simulation,
                     nf::CellListMapNeighborFinder,
-                    step_n::Integer;
+                    current_neighbors=nothing,
+                    step_n::Integer=0;
                     parallel::Bool=true)
 
 Find neighbors using `CellListMap`, without in-place updating. Should be called only
 the first time the cell lists are built. Modifies the mutable `nf` structure.
 """
-function Molly.find_neighbors!(s::Simulation,
-                               nf::CellListMapNeighborFinder,
-                               step_n::Integer;
-                               parallel::Bool=true)
-    !iszero(step_n % nf.n_steps) && return
+function find_neighbors(s::Simulation,
+                        nf::CellListMapNeighborFinder,
+                        current_neighbors=nothing,
+                        step_n::Integer=0;
+                        parallel::Bool=true)
+    !iszero(step_n % nf.n_steps) && return current_neighbors
 
+    if isnothing(current_neighbors)
+        neighbors = NeighborList()
+    else
+        neighbors = current_neighbors
+    end
     aux = nf.aux
     cl = nf.cl
-
-    neighbors = s.neighbors
     neighbors.n = 0
     neighbors_threaded = nf.neighbors_threaded
     if parallel

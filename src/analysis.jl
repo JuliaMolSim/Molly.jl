@@ -85,7 +85,7 @@ end
 
 Compute the total energy of the system.
 """
-energy(s) = kinetic_energy(s) + potential_energy(s)
+energy(s, neighbors=nothing) = kinetic_energy(s) + potential_energy(s, neighbors)
 
 function kinetic_energy(s::Simulation)
     ke = sum(i -> s.atoms[i].mass * dot(s.velocities[i], s.velocities[i]) / 2, axes(s.atoms, 1))
@@ -98,13 +98,12 @@ function kinetic_energy(s::Simulation)
     end
 end
 
-function potential_energy(s::Simulation)
+function potential_energy(s::Simulation, neighbors=nothing)
     n_atoms = length(s.coords)
     potential = zero(ustrip(s.timestep)) * s.energy_unit
 
     for inter in values(s.general_inters)
         if inter.nl_only
-            neighbors = s.neighbors
             @inbounds for ni in 1:neighbors.n
                 i, j, weight_14 = neighbors.list[ni]
                 if weight_14

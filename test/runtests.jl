@@ -139,11 +139,11 @@ end
             box_size=SVector(10.0, 10.0, 10.0)u"nm",
             neighbor_finder=neighbor_finder(nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm"),
         )
-        find_neighbors!(s, s.neighbor_finder, 0; parallel=false)
-        @test s.neighbors.list == [(2, 1, false)] || s.neighbors.list == [(1, 2, false)]
+        neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
+        @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
         if nthreads() > 1
-            find_neighbors!(s, s.neighbor_finder, 0; parallel=true)
-            @test s.neighbors.list == [(2, 1, false)] || s.neighbors.list == [(1, 2, false)]
+            neighbors = find_neighbors(s, s.neighbor_finder; parallel=true)
+            @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
         end
     end
 
@@ -160,11 +160,11 @@ end
         coords=coords, box_size=box_size,
         neighbor_finder=neighbor_finder,
     )
-    find_neighbors!(s, s.neighbor_finder, 0; parallel=false)
-    @test s.neighbors.list == [(2, 1, false)] || s.neighbors.list == [(1, 2, false)]
+    neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
+    @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
     if nthreads() > 1
-        find_neighbors!(s, s.neighbor_finder, 0; parallel=true)
-        @test s.neighbors.list == [(2, 1, false)] || s.neighbors.list == [(1, 2, false)]
+        neighbors = find_neighbors(s, s.neighbor_finder; parallel=true)
+        @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
     end
 end
 
@@ -234,10 +234,9 @@ end
         )
 
         nf_tree = TreeNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
-        find_neighbors!(s, s.neighbor_finder, 0; parallel=parallel)
-        ref = copy(s.neighbors.list)
-        find_neighbors!(s, nf_tree, 0; parallel=parallel)
-        @test s.neighbors.list == ref
+        neighbors = find_neighbors(s, s.neighbor_finder; parallel=parallel)
+        neighbors_tree = find_neighbors(s, nf_tree; parallel=parallel)
+        @test neighbors.list == neighbors_tree.list
 
         @time simulate!(s; parallel=parallel)
 
@@ -497,9 +496,9 @@ end
         energy_unit=NoUnits,
     )
 
-    find_neighbors!(s, s.neighbor_finder, 0; parallel=false)
-    find_neighbors!(s_nounits, s_nounits.neighbor_finder, 0; parallel=false)
-    accel_diff = ustripvec.(accelerations(s)) .- accelerations(s_nounits)
+    neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
+    neighbors_nounits = find_neighbors(s_nounits, s_nounits.neighbor_finder; parallel=false)
+    accel_diff = ustripvec.(accelerations(s, neighbors)) .- accelerations(s_nounits, neighbors_nounits)
     @test iszero(accel_diff)
 
     simulate!(s; parallel=false)
@@ -655,14 +654,14 @@ end
             box_size=box_size,
             neighbor_finder=neighbor_finder,
         )
-        find_neighbors!(s, s.neighbor_finder, 0)
+        neighbors = find_neighbors(s, s.neighbor_finder)
     
-        forces_molly = ustripvec.(accelerations(s; parallel=false) .* mass.(atoms))
+        forces_molly = ustripvec.(accelerations(s, neighbors; parallel=false) .* mass.(atoms))
         forces_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "forces_$(inter)_only.txt"))))
         # All force terms on all atoms must match at some threshold
         @test !any(d -> any(abs.(d) .> 1e-6), forces_molly .- forces_openmm)
 
-        E_molly = ustrip(Molly.potential_energy(s))
+        E_molly = ustrip(Molly.potential_energy(s, neighbors))
         E_openmm = readdlm(joinpath(openmm_dir, "energy_$(inter)_only.txt"))[1]
         # Energy must match at some threshold
         @test E_molly - E_openmm < 1e-5

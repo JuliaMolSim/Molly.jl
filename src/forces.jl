@@ -93,12 +93,12 @@ accumulateadd(x) = accumulate(+, x)
 end
 
 """
-    accelerations(simulation; parallel=true)
+    accelerations(simulation, neighbors=nothing; parallel=true)
 
 Calculate the accelerations of all atoms using the general and specific
 interactions and Newton's second law.
 """
-function accelerations(s::Simulation; parallel::Bool=true)
+function accelerations(s::Simulation, neighbors=nothing; parallel::Bool=true)
     n_atoms = length(s.coords)
 
     if parallel && nthreads() > 1 && n_atoms >= 100
@@ -107,7 +107,6 @@ function accelerations(s::Simulation; parallel::Bool=true)
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.general_inters)
             if inter.nl_only
-                neighbors = s.neighbors
                 @threads for ni in 1:neighbors.n
                     i, j, w = neighbors.list[ni]
                     force!(forces_threads[threadid()], inter, s, i, j, s.force_unit, w)
@@ -127,7 +126,6 @@ function accelerations(s::Simulation; parallel::Bool=true)
 
         for inter in values(s.general_inters)
             if inter.nl_only
-                neighbors = s.neighbors
                 for ni in 1:neighbors.n
                     i, j, w = neighbors.list[ni]
                     force!(forces, inter, s, i, j, s.force_unit, w)
@@ -153,7 +151,7 @@ function accelerations(s::Simulation; parallel::Bool=true)
     return (forces * s.force_unit) ./ mass.(s.atoms)
 end
 
-function accelerations(s::Simulation, coords, atoms, neighbors, neighbors_all=nothing)
+function accelerations(s::Simulation, coords, atoms, neighbors=nothing, neighbors_all=nothing)
     n_atoms = length(coords)
     forces = ustripvec.(zero(coords))
 

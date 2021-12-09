@@ -37,9 +37,8 @@ function simulate!(s::Simulation{false},
                     parallel::Bool=true)
     # See https://www.saylor.org/site/wp-content/uploads/2011/06/MA221-6.1.pdf for
     #   integration algorithm - used shorter second version
-    n_atoms = length(s.coords)
-    find_neighbors!(s, s.neighbor_finder, 0; parallel=parallel)
-    accels_t = accelerations(s; parallel=parallel)
+    neighbors = find_neighbors(s, s.neighbor_finder; parallel=parallel)
+    accels_t = accelerations(s, neighbors; parallel=parallel)
     accels_t_dt = zero(accels_t)
 
     @showprogress for step_n in 1:n_steps
@@ -53,7 +52,7 @@ function simulate!(s::Simulation{false},
             s.coords[i] = wrapcoords.(s.coords[i], s.box_size)
         end
 
-        accels_t_dt = accelerations(s; parallel=parallel)
+        accels_t_dt = accelerations(s, neighbors; parallel=parallel)
 
         # Update velocities
         for i in 1:length(s.velocities)
@@ -61,7 +60,7 @@ function simulate!(s::Simulation{false},
         end
 
         apply_thermostat!(s, s.thermostat)
-        find_neighbors!(s, s.neighbor_finder, step_n; parallel=parallel)
+        neighbors = find_neighbors(s, s.neighbor_finder, neighbors, step_n; parallel=parallel)
 
         accels_t = accels_t_dt
         s.n_steps_made += 1
@@ -73,13 +72,12 @@ function simulate!(s::Simulation{true},
                     ::VelocityVerlet,
                     n_steps::Integer;
                     parallel::Bool=true)
-    n_atoms = length(s.coords)
     if length([inter for inter in values(s.general_inters) if !inter.nl_only]) > 0
-        neighbors_all = allneighbors(n_atoms)
+        neighbors_all = allneighbors(length(s.coords))
     else
         neighbors_all = nothing
     end
-    neighbors = find_neighbors!(s, s.neighbor_finder, 0)
+    neighbors = find_neighbors(s, s.neighbor_finder)
     accels_t = accelerations(s, s.coords, s.atoms, neighbors, neighbors_all)
     accels_t_dt = zero(accels_t)
 
@@ -94,7 +92,7 @@ function simulate!(s::Simulation{true},
         s.velocities += removemolar.(accels_t .+ accels_t_dt) .* s.timestep / 2
 
         apply_thermostat!(s, s.thermostat)
-        neighbors = find_neighbors!(s, s.neighbor_finder, step_n, neighbors)
+        neighbors = find_neighbors(s, s.neighbor_finder, neighbors, step_n)
 
         accels_t = accels_t_dt
         s.n_steps_made += 1
@@ -115,15 +113,14 @@ function simulate!(s::Simulation,
                     ::VelocityFreeVerlet,
                     n_steps::Integer;
                     parallel::Bool=true)
-    n_atoms = length(s.coords)
-    find_neighbors!(s, s.neighbor_finder, 0; parallel=parallel)
+    neighbors = find_neighbors(s, s.neighbor_finder; parallel=parallel)
 
     @showprogress for step_n in 1:n_steps
         for logger in values(s.loggers)
             log_property!(logger, s, step_n)
         end
 
-        accels_t = accelerations(s; parallel=parallel)
+        accels_t = accelerations(s, neighbors; parallel=parallel)
 
         # Update coordinates
         coords_copy = s.coords
@@ -134,7 +131,7 @@ function simulate!(s::Simulation,
         s.velocities = coords_copy
 
         apply_thermostat!(s, s.thermostat)
-        find_neighbors!(s, s.neighbor_finder, step_n; parallel=parallel)
+        neighbors = find_neighbors(s, s.neighbor_finder, neighbors, step_n; parallel=parallel)
 
         s.n_steps_made += 1
     end
