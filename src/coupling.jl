@@ -4,7 +4,6 @@ export
     NoCoupling,
     apply_coupling!,
     AndersenThermostat,
-    velocity,
     maxwellboltzmann,
     temperature
 
@@ -51,7 +50,7 @@ end
 
 Generate a random velocity from the Maxwell-Boltzmann distribution.
 """
-function velocity(mass, temp; dims::Integer=3)
+function AtomsBase.velocity(mass, temp; dims::Integer=3)
     return SVector([maxwellboltzmann(mass, temp) for i in 1:dims]...)
 end
 

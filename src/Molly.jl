@@ -1,6 +1,5 @@
 module Molly
 
-using AtomsBase
 using BioStructures
 using CellListMap
 using ChainRulesCore
@@ -20,6 +19,7 @@ using Requires
 using Unitful
 using Zygote
 
+@reexport using AtomsBase
 @reexport using StaticArrays
 @reexport using Unitful
 

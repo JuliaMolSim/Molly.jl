@@ -103,6 +103,8 @@ The mass of an atom.
 """
 mass(atom::Atom) = atom.mass
 
+AtomsBase.atomic_mass(atom::Atom) = mass(atom)
+
 function Base.show(io::IO, a::Atom)
     print(io, "Atom with index ", a.index, ", charge=", a.charge,
             ", mass=", a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
@@ -218,7 +220,7 @@ interface described there.
     the simulation.
 - `loggers::Dict{String, <:Logger}=Dict()`: the loggers that record properties
     of interest during the simulation.
-- `timestep::S=0.0`: the timestep of the simulation.
+- `timestep::T=0.0`: the timestep of the simulation.
 - `n_steps::Integer=0`: the number of steps in the simulation.
 - `force_unit::F=u"kJ * mol^-1 * nm^-1"`: the unit of force used in the
     simulation.
@@ -226,9 +228,9 @@ interface described there.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-mutable struct Simulation{D, S, G, AD, C, V, GI, SI, B, T, F, E, NF, CO} <: AbstractSystem{D, S}
+mutable struct Simulation{D, S, G, A, AD, C, V, GI, SI, B, T, F, E, NF, CO} <: AbstractSystem{D, S}
     simulator::Simulator
-    atoms::S
+    atoms::A
     atoms_data::AD
     specific_inter_lists::SI
     general_inters::GI
@@ -262,7 +264,8 @@ function Simulation(;
                     energy_unit=u"kJ * mol^-1",
                     gpu_diff_safe=isa(coords, CuArray))
     D = length(box_size)
-    S = typeof(atoms)
+    S = eltype(atoms)
+    A = typeof(atoms)
     AD = typeof(atoms_data)
     C = typeof(coords)
     V = typeof(velocities)
@@ -274,10 +277,35 @@ function Simulation(;
     E = typeof(energy_unit)
     NF = typeof(neighbor_finder)
     CO = typeof(coupling)
-    return Simulation{D, S, gpu_diff_safe, AD, C, V, GI, SI, B, T, F, E, NF, CO}(
+    return Simulation{D, S, gpu_diff_safe, A, AD, C, V, GI, SI, B, T, F, E, NF, CO}(
                 simulator, atoms, atoms_data, specific_inter_lists, general_inters,
                 coords, velocities, box_size, neighbor_finder, coupling, loggers,
                 timestep, n_steps, force_unit, energy_unit)
+end
+
+Base.getindex(s::Simulation, i::Integer) = s.atoms[i]
+Base.length(s::Simulation) = length(s.atoms)
+
+AtomsBase.species(s::Simulation) = s.atoms
+AtomsBase.species(s::Simulation, i::Integer) = s.atoms[i]
+
+AtomsBase.position(s::Simulation) = s.coords
+AtomsBase.position(s::Simulation, i::Integer) = s.coords[i]
+
+AtomsBase.velocity(s::Simulation) = s.velocities
+AtomsBase.velocity(s::Simulation, i::Integer) = s.velocities[i]
+
+AtomsBase.boundary_conditions(::Simulation{3}) = SVector(Periodic(), Periodic(), Periodic())
+AtomsBase.boundary_conditions(::Simulation{2}) = SVector(Periodic(), Periodic())
+
+edges_to_box(bs::SVector{3}, z) = SVector{3}([SVector(bs[1], z, z), SVector(z, bs[2], z), SVector(z, z, bs[3])])
+edges_to_box(bs::SVector{2}, z) = SVector{2}([SVector(bs[1], z), SVector(z, bs[2])])
+
+function AtomsBase.bounding_box(s::Simulation)
+    bs = s.box_size
+    z = zero(bs[1])
+    bb = edges_to_box(bs, z)
+    return unit(z) == NoUnits ? (bb)u"nm" : bb # Assume nm without other information
 end
 
 function Base.show(io::IO, ::MIME"text/plain", s::Simulation)
