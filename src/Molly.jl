@@ -3,7 +3,7 @@ module Molly
 using BioStructures
 using CellListMap
 using ChainRulesCore
-using Chemfiles
+import Chemfiles # Imported to avoid clashing names
 using Colors
 using Combinatorics
 using CUDA
