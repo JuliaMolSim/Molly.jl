@@ -64,53 +64,44 @@ atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_at
 coords = placeatoms(n_atoms, box_size, 0.3u"nm")
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 general_inters = (LennardJones(),)
+simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
 
-s = System(
-    simulator=VelocityVerlet(),
+sys = System(
     atoms=atoms,
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
     box_size=box_size,
-    coupling=AndersenThermostat(temp, 1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(100)),
-    timestep=0.002u"ps",
-    n_steps=10_000,
 )
 
-simulate!(s)
+simulate!(sys, simulator, 10_000)
 ```
 
 Simulation of a protein:
 ```julia
 using Molly
 
-timestep = 0.0002u"ps"
 temp = 298u"K"
-n_steps = 5_000
-
 atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
+simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
 
-s = System(
-    simulator=VelocityVerlet(),
+sys = System(
     atoms=atoms,
     atoms_data=atoms_data,
-    specific_inter_lists=specific_inter_lists,
     general_inters=general_inters,
+    specific_inter_lists=specific_inter_lists,
     coords=coords,
     velocities=[velocity(a.mass, temp) for a in atoms],
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    coupling=AndersenThermostat(temp, 1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),
-    timestep=timestep,
-    n_steps=n_steps,
 )
 
-simulate!(s)
+simulate!(sys, simulator, 5_000)
 ```
 
 The above 1 ps simulation looks something like this when you view it in [VMD](https://www.ks.uiuc.edu/Research/vmd):

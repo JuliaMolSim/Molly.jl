@@ -11,13 +11,15 @@ using CUDA
 using Base.Threads
 using DelimitedFiles
 
-if nthreads() > 1
+run_parallel_tests = nthreads() > 1
+if run_parallel_tests
     @info "The parallel benchmarks will be run as Julia is running on $(nthreads()) threads"
 else
     @warn "The parallel benchmarks will not be run as Julia is running on 1 thread"
 end
 
-if CUDA.functional()
+run_gpu_tests = CUDA.functional()
+if run_gpu_tests
     @info "The GPU benchmarks will be run as a CUDA-enabled device is available"
 else
     @warn "The GPU benchmarks will not be run as a CUDA-enabled device is not available"
@@ -52,23 +54,19 @@ SUITE["spatial"]["vector1D"] = @benchmarkable vector1D($(4.0u"nm"), $(6.0u"nm"),
 SUITE["spatial"]["vector"  ] = @benchmarkable vector($(SVector(4.0, 1.0, 1.0)u"nm"), $(SVector(6.0, 4.0, 3.0)u"nm"), $(SVector(10.0, 5.0, 3.5)u"nm"))
 
 n_atoms = 400
-mass = 10.0u"u"
+atom_mass = 10.0u"u"
 box_size = SVector(6.0, 6.0, 6.0)u"nm"
-temp = 1.0u"K"
 starting_coords = placediatomics(n_atoms ÷ 2, box_size, 0.2u"nm", 0.2u"nm")
-starting_velocities = [velocity(mass, temp) for i in 1:n_atoms]
+starting_velocities = [velocity(atom_mass, 1.0u"K") for i in 1:n_atoms]
 starting_coords_f32 = [Float32.(c) for c in starting_coords]
 starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
 function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::Bool)
     n_atoms = 400
     n_steps = 200
-    mass = f32 ? 10.0f0u"u" : 10.0u"u"
+    atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
     box_size = f32 ? SVector(6.0f0, 6.0f0, 6.0f0)u"nm" : SVector(6.0, 6.0, 6.0)u"nm"
-    timestep = f32 ? 0.02f0u"ps" : 0.02u"ps"
-    temp = f32 ? 1.0f0u"K" : 1.0u"K"
-    simulator = VelocityVerlet()
-    coupling = NoCoupling()
+    simulator = VelocityVerlet(dt=f32 ? 0.02f0u"ps" : 0.02u"ps")
     b0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
     kb = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
     bonds = [HarmonicBond(i=((i * 2) - 1), j=(i * 2), b0=b0, kb=kb) for i in 1:(n_atoms ÷ 2)]
@@ -91,31 +89,27 @@ function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::B
     if gpu
         coords = cu(deepcopy(f32 ? starting_coords_f32 : starting_coords))
         velocities = cu(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-        atoms = cu([Atom(charge=f32 ? 0.0f0 : 0.0, mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+        atoms = cu([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                             ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
     else
         coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
         velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
-        atoms = [Atom(charge=f32 ? 0.0f0 : 0.0, mass=mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+        atoms = [Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                         ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
     end
 
     s = System(
-        simulator=simulator,
         atoms=atoms,
-        specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
+        specific_inter_lists=specific_inter_lists,
         coords=coords,
         velocities=velocities,
         box_size=box_size,
         neighbor_finder=neighbor_finder,
-        coupling=coupling,
-        timestep=timestep,
-        n_steps=n_steps,
         gpu_diff_safe=gpu_diff_safe,
     )
 
-    simulate!(s; parallel=parallel)
+    simulate!(s, simulator, n_steps; parallel=parallel)
     return s.coords
 end
 
@@ -127,11 +121,11 @@ runs = [
     ("out-of-place NL" , [true , false, true , false, false]),
     ("out-of-place f32", [false, false, true , true , false]),
 ]
-if nthreads() > 1
+if run_parallel_tests
     push!(runs, ("in-place parallel"   , [false, true , false, false, false]))
     push!(runs, ("in-place NL parallel", [true , true , false, false, false]))
 end
-if CUDA.functional()
+if run_gpu_tests
     push!(runs, ("out-of-place gpu"       , [false, false, true , false, true ]))
     push!(runs, ("out-of-place gpu f32"   , [false, false, true , true , true ]))
     push!(runs, ("out-of-place gpu NL"    , [true , false, true , false, true ]))
@@ -153,20 +147,18 @@ atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords
     joinpath(data_dir, "6mrr_equil.pdb"), ff)
 
 n_steps = 25
-timestep = 0.0005u"ps"
 velocities = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
+simulator = VelocityVerlet(dt=0.0005u"ps")
 
 s = System(
-    simulator=VelocityVerlet(),
     atoms=atoms,
-    specific_inter_lists=specific_inter_lists,
     general_inters=general_inters,
+    specific_inter_lists=specific_inter_lists,
     coords=coords,
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    timestep=timestep,
 )
 
-simulate!(s, n_steps; parallel=true)
-SUITE["protein"]["in-place NL parallel"] = @benchmarkable simulate!($(s), $(n_steps); parallel=true)
+simulate!(s, simulator, n_steps; parallel=true)
+SUITE["protein"]["in-place NL parallel"] = @benchmarkable simulate!($(s), $(simulator), $(n_steps); parallel=true)

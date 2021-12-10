@@ -84,11 +84,11 @@ end
     if cutoff_points(C) == 0
         pe = potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(s.timestep)) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(s.box_size[1])) * inter.energy_unit
 
         pe = potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(s.timestep)) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(s.box_size[1])) * inter.energy_unit
 
         if r2 < cutoff.activation_dist
             pe = potential(inter, r2, inv(r2), params)

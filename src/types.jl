@@ -288,6 +288,5 @@ function AtomsBase.bounding_box(s::System)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", s::System)
-    print(io, "System with ", length(s), " atoms, ", typeof(s.simulator), " simulator, ",
-            s.timestep, " time step, ", s.n_steps, " steps")
+    print(io, "System with ", length(s), " atoms, box size ", s.box_size)
 end

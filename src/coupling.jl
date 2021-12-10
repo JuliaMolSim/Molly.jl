@@ -15,13 +15,13 @@ Placeholder coupler that does nothing.
 struct NoCoupling <: AbstractCoupler end
 
 """
-    apply_coupling!(system, coupling)
+    apply_coupling!(system, simulator, coupling)
 
 Apply a coupler to modify a simulation.
 Custom couplers should implement this function.
 """
-function apply_coupling!(s::System, ::NoCoupling)
-    return s
+function apply_coupling!(sys::System, simulator, ::NoCoupling)
+    return sys
 end
 
 """
@@ -34,14 +34,14 @@ struct AndersenThermostat{T, C} <: AbstractCoupler
     coupling_const::C
 end
 
-function apply_coupling!(s::System{D}, thermostat::AndersenThermostat) where D
-    for i in 1:length(s)
-        if rand() < s.timestep / thermostat.coupling_const
-            mass = s.atoms[i].mass
-            s.velocities[i] = velocity(mass, thermostat.temperature; dims=D)
+function apply_coupling!(sys::System{D}, sim, thermostat::AndersenThermostat) where D
+    for i in 1:length(sys)
+        if rand() < (sim.dt / thermostat.coupling_const)
+            mass = sys.atoms[i].mass
+            sys.velocities[i] = velocity(mass, thermostat.temperature; dims=D)
         end
     end
-    return s
+    return sys
 end
 
 """

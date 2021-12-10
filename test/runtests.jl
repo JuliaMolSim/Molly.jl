@@ -134,7 +134,6 @@ end
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
         s = System(
-            simulator=VelocityVerlet(),
             atoms=[Atom(), Atom(), Atom()],
             coords=[SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm",
                     SVector(5.0, 5.0, 5.0)u"nm"],
@@ -157,7 +156,6 @@ end
         x0=coords, unit_cell=box_size,
     )
     s = System(
-        simulator=VelocityVerlet(),
         atoms=[Atom(), Atom(), Atom()],
         coords=coords, box_size=box_size,
         neighbor_finder=neighbor_finder,
@@ -174,27 +172,23 @@ end
     n_atoms = 10
     n_steps = 20_000
     temp = 298.0u"K"
-    timestep = 0.002u"ps"
     box_size = SVector(2.0, 2.0)u"nm"
+    simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
     s = System(
-        simulator=VelocityVerlet(),
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=placeatoms(n_atoms, box_size, 0.3u"nm"; dims=2),
         velocities=[velocity(10.0u"u", temp; dims=2) .* 0.01 for i in 1:n_atoms],
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-        coupling=AndersenThermostat(temp, 10.0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(100),
                      "coords" => CoordinateLogger(100; dims=2)),
-        timestep=timestep,
-        n_steps=n_steps,
     )
 
     show(devnull, s)
 
-    @time simulate!(s; parallel=false)
+    @time simulate!(s, simulator, n_steps; parallel=false)
 
     final_coords = last(s.loggers["coords"].coords)
     @test all(all(c .> 0.0u"nm") for c in final_coords)
@@ -210,13 +204,12 @@ end
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
-    timestep = 0.002u"ps"
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
+    simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     parallel_list = run_parallel_tests ? (false, true) : (false,)
 
     for parallel in parallel_list
         s = System(
-            simulator=VelocityVerlet(),
             atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR") for i in 1:n_atoms],
             general_inters=(LennardJones(nl_only=true),),
@@ -224,14 +217,11 @@ end
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             box_size=box_size,
             neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-            coupling=AndersenThermostat(temp, 10.0u"ps"),
             loggers=Dict("temp"   => TemperatureLogger(100),
                          "coords" => CoordinateLogger(100),
                          "vels"   => VelocityLogger(100),
                          "energy" => EnergyLogger(100),
                          "writer" => StructureWriter(100, temp_fp_pdb)),
-            timestep=timestep,
-            n_steps=n_steps,
         )
 
         nf_tree = TreeNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
@@ -239,7 +229,7 @@ end
         neighbors_tree = find_neighbors(s, nf_tree; parallel=parallel)
         @test neighbors.list == neighbors_tree.list
 
-        @time simulate!(s; parallel=parallel)
+        @time simulate!(s, simulator, n_steps; parallel=parallel)
 
         final_coords = last(s.loggers["coords"].coords)
         @test all(all(c .> 0.0u"nm") for c in final_coords)
@@ -260,32 +250,27 @@ end
 @testset "Lennard-Jones gas velocity-free" begin
     n_atoms = 100
     n_steps = 20_000
-    timestep = 0.002u"ps"
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
     coords = placeatoms(n_atoms, box_size, 0.3u"nm")
+    simulator = VelocityFreeVerlet(dt=0.002u"ps")
 
     s = System(
-        simulator=VelocityFreeVerlet(),
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=[c .+ 0.01 .* rand(SVector{3})u"nm" for c in coords],
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-        coupling=NoCoupling(),
         loggers=Dict("coords" => CoordinateLogger(100)),
-        timestep=timestep,
-        n_steps=n_steps,
     )
 
-    @time simulate!(s; parallel=false)
+    @time simulate!(s, simulator, n_steps; parallel=false)
 end
 
 @testset "Diatomic molecules" begin
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
-    timestep = 0.002u"ps"
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
     coords = placeatoms(n_atoms ÷ 2, box_size, 0.3u"nm")
     for i in 1:length(coords)
@@ -297,24 +282,21 @@ end
         nb_matrix[i, i + (n_atoms ÷ 2)] = false
         nb_matrix[i + (n_atoms ÷ 2), i] = false
     end
+    simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
     s = System(
-        simulator=VelocityVerlet(),
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        specific_inter_lists=(bonds,),
         general_inters=(LennardJones(nl_only=true),),
+        specific_inter_lists=(bonds,),
         coords=coords,
         velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-        coupling=AndersenThermostat(temp, 10.0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(10),
                         "coords" => CoordinateLogger(10)),
-        timestep=timestep,
-        n_steps=n_steps,
     )
 
-    @time simulate!(s; parallel=false)
+    @time simulate!(s, simulator, n_steps; parallel=false)
 
     if run_visualize_tests
         visualize(s.loggers["coords"], box_size, temp_fp_viz;
@@ -326,41 +308,37 @@ end
 @testset "Peptide" begin
     n_steps = 100
     temp = 298.0u"K"
-    timestep = 0.0002u"ps"
     atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
                 joinpath(data_dir, "5XER", "gmx_top_ff.top"),
                 joinpath(data_dir, "5XER", "gmx_coords.gro"))
+    simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
     true_n_atoms = 5191
     @test length(atoms) == true_n_atoms
     @test length(coords) == true_n_atoms
     @test size(neighbor_finder.nb_matrix) == (true_n_atoms, true_n_atoms)
     @test size(neighbor_finder.matrix_14) == (true_n_atoms, true_n_atoms)
-    @test length(specific_inter_lists) == 3
     @test length(general_inters) == 2
+    @test length(specific_inter_lists) == 3
     @test box_size == SVector(3.7146, 3.7146, 3.7146)u"nm"
     show(devnull, first(atoms))
 
     s = System(
-        simulator=VelocityVerlet(),
         atoms=atoms,
         atoms_data=atoms_data,
-        specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
+        specific_inter_lists=specific_inter_lists,
         coords=coords,
         velocities=[velocity(a.mass, temp) .* 0.01 for a in atoms],
         box_size=box_size,
         neighbor_finder=neighbor_finder,
-        coupling=AndersenThermostat(temp, 10.0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(10),
                         "coords" => CoordinateLogger(10),
                         "energy" => EnergyLogger(10),
                         "writer" => StructureWriter(10, temp_fp_pdb)),
-        timestep=timestep,
-        n_steps=n_steps,
     )
 
-    @time simulate!(s; parallel=false)
+    @time simulate!(s, simulator, n_steps; parallel=false)
 
     traj = read(temp_fp_pdb, BioStructures.PDB)
     rm(temp_fp_pdb)
@@ -371,39 +349,35 @@ end
 @testset "Float32" begin
     n_steps = 100
     temp = 298.0f0u"K"
-    timestep = 0.0002f0u"ps"
     atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
                 Float32,
                 joinpath(data_dir, "5XER", "gmx_top_ff.top"),
                 joinpath(data_dir, "5XER", "gmx_coords.gro"))
+    simulator = VelocityVerlet(dt=0.0002f0u"ps", coupling=AndersenThermostat(temp, 10.0f0u"ps"))
 
     s = System(
-        simulator=VelocityVerlet(),
         atoms=atoms,
-        specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
+        specific_inter_lists=specific_inter_lists,
         coords=coords,
         velocities=[velocity(a.mass, Float32(temp)) .* 0.01f0 for a in atoms],
         box_size=box_size,
         neighbor_finder=neighbor_finder,
-        coupling=AndersenThermostat(temp, 10.0f0u"ps"),
         loggers=Dict("temp" => TemperatureLogger(typeof(1.0f0u"K"), 10),
                         "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10),
                         "energy" => EnergyLogger(typeof(1.0f0u"kJ * mol^-1"), 10)),
-        timestep=timestep,
-        n_steps=n_steps,
     )
 
-    @time simulate!(s; parallel=false)
+    @time simulate!(s, simulator, n_steps; parallel=false)
 end
 
 @testset "General interactions" begin
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
-    timestep = 0.002u"ps"
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
     G = 10.0u"kJ * nm * u^-2 * mol^-1"
+    simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     general_inter_types = (
         LennardJones(nl_only=true), LennardJones(nl_only=false),
         LennardJones(cutoff=DistanceCutoff(1.0u"nm"), nl_only=true),
@@ -426,7 +400,6 @@ end
         end
 
         s = System(
-            simulator=VelocityVerlet(),
             atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"u", σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             general_inters=(gi,),
@@ -434,15 +407,12 @@ end
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             box_size=box_size,
             neighbor_finder=neighbor_finder,
-            coupling=AndersenThermostat(temp, 10.0u"ps"),
             loggers=Dict("temp" => TemperatureLogger(100),
                          "coords" => CoordinateLogger(100),
                          "energy" => EnergyLogger(100)),
-            timestep=timestep,
-            n_steps=n_steps,
         )
 
-        @time simulate!(s)
+        @time simulate!(s, simulator, n_steps)
     end
 end
 
@@ -450,41 +420,34 @@ end
     n_atoms = 100
     n_steps = 2_000 # Does diverge for longer simulations or higher velocities
     temp = 298.0u"K"
-    timestep = 0.002u"ps"
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
     coords = placeatoms(n_atoms, box_size, 0.3u"nm")
     velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
+    simulator = VelocityVerlet(dt=0.002u"ps")
+    simulator_nounits = VelocityVerlet(dt=0.002)
 
     s = System(
-        simulator=VelocityVerlet(),
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=velocities,
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-        coupling=NoCoupling(),
         loggers=Dict("temp" => TemperatureLogger(100),
                      "coords" => CoordinateLogger(100),
                      "energy" => EnergyLogger(100)),
-        timestep=timestep,
-        n_steps=n_steps,
     )
 
     s_nounits = System(
-        simulator=VelocityVerlet(),
         atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
         coords=ustripvec.(coords),
         velocities=ustripvec.(velocities),
         box_size=ustrip.(box_size),
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0),
-        coupling=NoCoupling(),
         loggers=Dict("temp" => TemperatureLogger(Float64, 100),
                      "coords" => CoordinateLogger(Float64, 100),
                      "energy" => EnergyLogger(Float64, 100)),
-        timestep=ustrip(timestep),
-        n_steps=n_steps,
         force_unit=NoUnits,
         energy_unit=NoUnits,
     )
@@ -494,8 +457,8 @@ end
     accel_diff = ustripvec.(accelerations(s, neighbors)) .- accelerations(s_nounits, neighbors_nounits)
     @test iszero(accel_diff)
 
-    simulate!(s; parallel=false)
-    simulate!(s_nounits; parallel=false)
+    simulate!(s, simulator, n_steps; parallel=false)
+    simulate!(s_nounits, simulator_nounits, n_steps; parallel=false)
 
     coords_diff = ustripvec.(s.loggers["coords"].coords[end]) .- s_nounits.loggers["coords"].coords[end]
     @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8
@@ -520,10 +483,7 @@ end
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
         box_size = f32 ? SVector(6.0f0, 6.0f0, 6.0f0)u"nm" : SVector(6.0, 6.0, 6.0)u"nm"
-        timestep = f32 ? 0.02f0u"ps" : 0.02u"ps"
-        temp = f32 ? 1.0f0u"K" : 1.0u"K"
-        simulator = VelocityVerlet()
-        coupling = NoCoupling()
+        simulator = VelocityVerlet(dt=f32 ? 0.02f0u"ps" : 0.02u"ps")
         b0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
         kb = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
         bonds = [HarmonicBond(i=((i * 2) - 1), j=(i * 2), b0=b0, kb=kb) for i in 1:(n_atoms ÷ 2)]
@@ -556,21 +516,17 @@ end
         end
 
         s = System(
-            simulator=simulator,
             atoms=atoms,
-            specific_inter_lists=specific_inter_lists,
             general_inters=general_inters,
+            specific_inter_lists=specific_inter_lists,
             coords=coords,
             velocities=velocities,
             box_size=box_size,
             neighbor_finder=neighbor_finder,
-            coupling=coupling,
-            timestep=timestep,
-            n_steps=n_steps,
             gpu_diff_safe=gpu_diff_safe,
         )
 
-        simulate!(s; parallel=parallel)
+        simulate!(s, simulator, n_steps; parallel=parallel)
         return s.coords
     end
 
@@ -640,8 +596,8 @@ end
     
         s = System(
             atoms=atoms,
-            specific_inter_lists=sils,
             general_inters=gin,
+            specific_inter_lists=sils,
             coords=coords,
             box_size=box_size,
             neighbor_finder=neighbor_finder,
@@ -661,23 +617,20 @@ end
 
     # Run a short simulation with all interactions
     n_steps = 100
-    timestep = 0.0005u"ps"
+    simulator = VelocityVerlet(dt=0.0005u"ps")
     velocities_start = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
 
     s = System(
-        simulator=VelocityVerlet(),
         atoms=atoms,
-        specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
+        specific_inter_lists=specific_inter_lists,
         coords=coords,
         velocities=deepcopy(velocities_start),
         box_size=box_size,
         neighbor_finder=neighbor_finder,
-        timestep=timestep,
-        n_steps=n_steps,
     )
 
-    simulate!(s; parallel=true)
+    simulate!(s, simulator, n_steps; parallel=true)
 
     coords_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "coordinates_$(n_steps)steps.txt"))))u"nm"
     vels_openmm   = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_$(n_steps)steps.txt" ))))u"nm * ps^-1"
@@ -694,19 +647,16 @@ end
             joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=true)
         
         s = System(
-            simulator=VelocityVerlet(),
             atoms=atoms,
-            specific_inter_lists=specific_inter_lists,
             general_inters=general_inters,
+            specific_inter_lists=specific_inter_lists,
             coords=coords,
             velocities=cu(deepcopy(velocities_start)),
             box_size=box_size,
             neighbor_finder=neighbor_finder,
-            timestep=timestep,
-            n_steps=n_steps,
         )
     
-        simulate!(s)
+        simulate!(s, simulator, n_steps)
 
         coords_diff = Array(s.coords) .- wrapcoordsvec.(coords_openmm, (s.box_size,))
         vels_diff = Array(s.velocities) .- vels_openmm
@@ -777,35 +727,30 @@ end
         end
     end
 
-    temp = 0.01
-    timestep = 0.02
-    box_size = SVector(10.0, 10.0)
-    n_steps = 1_000
     n_people = 500
+    n_steps = 1_000
+    box_size = SVector(10.0, 10.0)
+    temp = 0.01
     n_starting = 2
     atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
     coords = placeatoms(n_people, box_size, 0.1; dims=2)
     velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
-    general_inters = (LennardJones = LennardJones(nl_only=true),
-                        SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
+    general_inters = (LennardJones=LennardJones(nl_only=true), SIR=SIRInteraction(false, 0.5, 0.06, 0.01))
     neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_people, n_people), n_steps=10, dist_cutoff=2.0)
+    simulator = VelocityVerlet(dt=0.02, coupling=AndersenThermostat(temp, 5.0))
 
     s = System(
-        simulator=VelocityVerlet(),
         atoms=atoms,
         general_inters=general_inters,
         coords=coords,
         velocities=velocities,
         box_size=box_size,
         neighbor_finder=neighbor_finder,
-        coupling=AndersenThermostat(temp, 5.0),
         loggers=Dict("coords" => CoordinateLogger(Float64, 10; dims=2),
                         "SIR" => SIRLogger(10, [])),
-        timestep=timestep,
-        n_steps=n_steps,
         force_unit=NoUnits,
         energy_unit=NoUnits,
     )
 
-    @time simulate!(s; parallel=false)
+    @time simulate!(s, simulator, n_steps; parallel=false)
 end

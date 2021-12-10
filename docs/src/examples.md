@@ -11,7 +11,7 @@ Make a PR to add it to this page.
 There is an example of mutable atom properties in the main docs, but what if you want to make and break bonds during the simulation?
 In this case you can use a `GeneralInteraction` to make, break and apply the bonds.
 The partners of the atom can be stored in the atom type.
-We make a `Logger` to record when the bonds are present, allowing us to visualize them with the `connection_frames` keyword argument to `visualize` (this can take a while to plot).
+We make a logger to record when the bonds are present, allowing us to visualize them with the `connection_frames` keyword argument to `visualize` (this can take a while to plot).
 ```julia
 using Molly
 using GLMakie
@@ -81,49 +81,45 @@ function Molly.log_property!(logger::BondLogger, s, neighbors, step_n)
     end
 end
 
-temp = 0.01
-timestep = 0.02
+n_atoms = 200
 box_size = SVector(10.0, 10.0)
 n_steps = 2_000
-n_atoms = 200
+temp = 0.01
 
 atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = placeatoms(n_atoms, box_size, 0.1; dims=2)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 general_inters = (SoftSphere(nl_only=true), BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0))
 neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0)
+simulator = VelocityVerlet(dt=0.02, coupling=AndersenThermostat(temp, 5.0))
 
-s = System(
-    simulator=VelocityVerlet(),
+sys = System(
     atoms=atoms,
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    coupling=AndersenThermostat(temp, 5.0),
     loggers=Dict("coords" => CoordinateLogger(Float64, 20; dims=2),
                     "bonds" => BondLogger(20, [])),
-    timestep=timestep,
-    n_steps=n_steps,
     force_unit=NoUnits,
     energy_unit=NoUnits,
 )
 
-simulate!(s)
+simulate!(sys, simulator, n_steps)
 
 connections = Tuple{Int, Int}[]
-for i in 1:length(s)
+for i in 1:length(sys)
     for j in 1:(i - 1)
         push!(connections, (i, j))
     end
 end
 
-visualize(s.loggers["coords"],
+visualize(sys.loggers["coords"],
             box_size,
             "sim_mutbond.mp4";
             connections=connections,
-            connection_frames=s.loggers["bonds"].bonds,
+            connection_frames=sys.loggers["bonds"].bonds,
             markersize=10.0)
 ```
 ![Mutable bond simulation](images/sim_mutbond.gif)

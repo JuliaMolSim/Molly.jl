@@ -74,7 +74,7 @@ end
     r2 = sum(abs2, dr)
 
     if r2 > (inter.dist_cutoff ^ 2)
-        return ustrip(zero(s.timestep)) * inter.energy_unit
+        return ustrip(zero(s.box_size[1])) * inter.energy_unit
     end
 
     coulomb_const = inter.coulomb_const

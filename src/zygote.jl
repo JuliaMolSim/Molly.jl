@@ -1,4 +1,4 @@
-# Extend Zygote to work with static vectors on the GPU
+# Extend Zygote to work with static vectors and custom types on the GPU
 # Here be dragons
 
 using ForwardDiff: Chunk, Dual, partials, value

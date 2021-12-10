@@ -42,21 +42,18 @@ Finally, we can define the system and run the simulation.
 We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.
 Periodic boundary conditions are used with the box we defined earlier.
 ```julia
-s = System(
-    simulator=VelocityVerlet(), # Use velocity Verlet integration
+sys = System(
     atoms=atoms,
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
     box_size=box_size,
-    coupling=AndersenThermostat(temp, 1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "coords" => CoordinateLogger(10)),
-    timestep=0.002u"ps",
-    n_steps=1_000,
 )
 
-simulate!(s)
+simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
+simulate!(sys, simulator, 1_000)
 ```
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this can be turned off by giving the keyword argument `parallel=false` to [`simulate!`](@ref).
 An animation of the stored coordinates using can be saved using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
@@ -70,7 +67,6 @@ visualize(s.loggers["coords"], box_size, "sim_lj.mp4")
 
 To run simulations on the GPU you will need to have a CUDA-compatible device and to have [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) installed.
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
-Neighbor lists and thermostats are not currently implemented for the GPU.
 This example also shows setting up a simulation to run with `Float32`, which is a good idea for GPUs.
 ```julia
 using Molly
@@ -83,22 +79,19 @@ temp = 100.0f0u"K"
 atoms = cu([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
 coords = cu(placeatoms(n_atoms, box_size, 0.3u"nm"))
 velocities = cu([velocity(atom_mass, temp) for i in 1:n_atoms])
+simulator = VelocityVerlet(dt=0.002f0u"ps", coupling=NoCoupling())
 
-s = System(
-    simulator=VelocityVerlet(),
+sys = System(
     atoms=atoms,
     general_inters=(LennardJones(),),
     coords=coords,
     velocities=velocities,
     box_size=box_size,
-    coupling=NoCoupling(),
     loggers=Dict("temp" => TemperatureLogger(typeof(1.0f0u"K"), 10),
                     "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10)),
-    timestep=0.002f0u"ps",
-    n_steps=1_000,
 )
 
-simulate!(s)
+simulate!(sys, simulator, 1_000)
 ```
 
 ## Simulating diatomic molecules
@@ -135,27 +128,24 @@ neighbor_finder = DistanceNeighborFinder(nb_matrix=nb_matrix, n_steps=10, dist_c
 ```
 Now we can simulate as before.
 ```julia
-s = System(
-    simulator=VelocityVerlet(),
+sys = System(
     atoms=atoms,
-    specific_inter_lists=specific_inter_lists,
     general_inters=(LennardJones(nl_only=true),),
+    specific_inter_lists=specific_inter_lists,
     coords=coords,
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    coupling=AndersenThermostat(temp, 1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "coords" => CoordinateLogger(10)),
-    timestep=0.002u"ps",
-    n_steps=1_000,
 )
 
-simulate!(s)
+simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
+simulate!(sys, simulator, 1_000)
 ```
 This time when we view the trajectory we can add lines to show the bonds.
 ```julia
-visualize(s.loggers["coords"], box_size, "sim_diatomic.mp4";
+visualize(sys.loggers["coords"], box_size, "sim_diatomic.mp4";
             connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)])
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
@@ -170,26 +160,24 @@ atoms = [Atom(mass=1.0f0), Atom(mass=1.0f0)]
 coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
 velocities = [SVector(0.0f0, 1.0f0), SVector(0.0f0, -1.0f0)]
 general_inters = (Gravity(nl_only=false, G=1.5f0),)
+simulator = VelocityVerlet(dt=0.002f0)
 
-s = System(
-    simulator=VelocityVerlet(),
+sys = System(
     atoms=atoms,
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
     box_size=SVector(1.0f0, 1.0f0),
     loggers=Dict("coords" => CoordinateLogger(Float32, 10; dims=2)),
-    timestep=0.002f0,
-    n_steps=2_000,
     force_unit=NoUnits,
     energy_unit=NoUnits,
 )
 
-simulate!(s)
+simulate!(sys, simulator, 2_000)
 ```
 When we view the simulation we can use some extra options:
 ```julia
-visualize(s.loggers["coords"], 1.0f0, "sim_gravity.mp4";
+visualize(sys.loggers["coords"], 1.0f0, "sim_gravity.mp4";
             trails=4, framerate=15, color=[:orange, :lightgreen])
 ```
 ![Gravity simulation](images/sim_gravity.gif)
@@ -205,24 +193,22 @@ ff = OpenMMForceField("ff99SBildn.xml", "tip3p_standard.xml", "his.xml")
 
 atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
     "6mrr_equil.pdb", ff)
+simulator = VelocityVerlet(dt=0.0005u"ps")
 
-s = System(
-    simulator=VelocityVerlet(),
+sys = System(
     atoms=atoms,
     atoms_data=atoms_data,
-    specific_inter_lists=specific_inter_lists,
     general_inters=general_inters,
+    specific_inter_lists=specific_inter_lists,
     coords=coords,
     velocities=[velocity(a.mass, 298u"K") for a in atoms],
     box_size=box_size,
     neighbor_finder=neighbor_finder,
     loggers=Dict("energy" => EnergyLogger(10),
                     "writer" => StructureWriter(10, "traj_5XER_1ps.pdb", ["HOH"])),
-    timestep=0.0005u"ps",
-    n_steps=5_000,
 )
 
-simulate!(s; parallel=true)
+simulate!(sys, simulator, 5_000; parallel=true)
 ```
 
 Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
@@ -230,27 +216,23 @@ Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topolog
 atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
-
 temp = 298u"K"
+simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
 
-s = System(
-    simulator=VelocityVerlet(),
+sys = System(
     atoms=atoms,
     atoms_data=atoms_data,
-    specific_inter_lists=specific_inter_lists,
     general_inters=general_inters,
+    specific_inter_lists=specific_inter_lists,
     coords=coords,
     velocities=[velocity(a.mass, temp) for a in atoms],
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    coupling=AndersenThermostat(temp, 1.0u"ps"),
     loggers=Dict("temp" => TemperatureLogger(10),
                     "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),
-    timestep=0.0002u"ps",
-    n_steps=5_000,
 )
 
-simulate!(s)
+simulate!(sys, simulator, 5_000)
 ```
 
 ## Agent-based modelling
@@ -327,7 +309,6 @@ function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n)
 end
 
 temp = 0.01
-timestep = 0.02
 box_size = SVector(10.0, 10.0)
 n_steps = 1_000
 n_people = 500
@@ -335,29 +316,26 @@ n_starting = 2
 atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
 coords = placeatoms(n_people, box_size, 0.1; dims=2)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
-general_inters = (LennardJones = LennardJones(nl_only=true), SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
+general_inters = (LennardJones=LennardJones(nl_only=true), SIR=SIRInteraction(false, 0.5, 0.06, 0.01))
 neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_people, n_people), n_steps=10, dist_cutoff=2.0)
+simulator = VelocityVerlet(dt=0.02, coupling=AndersenThermostat(temp, 5.0))
 
-s = System(
-    simulator=VelocityVerlet(),
+sys = System(
     atoms=atoms,
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    coupling=AndersenThermostat(temp, 5.0),
     loggers=Dict("coords" => CoordinateLogger(Float64, 10; dims=2),
                     "SIR" => SIRLogger(10, [])),
-    timestep=timestep,
-    n_steps=n_steps,
     force_unit=NoUnits,
     energy_unit=NoUnits,
 )
 
-simulate!(s)
+simulate!(sys, simulator, n_steps)
 
-visualize(s.loggers["coords"], box_size, "sim_agent.mp4"; markersize=10.0)
+visualize(sys.loggers["coords"], box_size, "sim_agent.mp4"; markersize=10.0)
 ```
 ![Agent simulation](images/sim_agent.gif)
 
@@ -441,7 +419,7 @@ general_inters = (MyGeneralInter(true),)
 Then create a [`System`](@ref) and simulate as above.
 Note that you can also use named tuples instead of tuples if you want to access interactions by name:
 ```julia
-general_inters = (MyGeneralInter = MyGeneralInter(true),)
+general_inters = (MyGeneralInter=MyGeneralInter(true),)
 ```
 For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{GeneralInteraction}`.
 
@@ -557,43 +535,43 @@ The available simulators are:
 To define your own simulator, first define a `struct`:
 ```julia
 struct MySimulator
-    # Any properties, e.g. an implicit solvent friction constant
+    # Any properties, e.g. the time step or coupling methods
 end
 ```
 Then, define the function that carries out the simulation.
 This example shows some of the helper functions you can use:
 ```julia
-function Molly.simulate!(s::System,
-                            simulator::MySimulator,
+function Molly.simulate!(sys::System,
+                            sim::MySimulator,
                             n_steps::Integer;
                             parallel::Bool=true)
     # Find neighbors like this
-    neighbors = find_neighbors(s, s.neighbor_finder; parallel=parallel)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
 
     # Show a progress bar like this, if you have imported ProgressMeter
     @showprogress for step_n in 1:n_steps
         # Apply the loggers like this
-        run_loggers!(s, neighbors, step_n)
+        run_loggers!(sys, neighbors, step_n)
 
         # Calculate accelerations like this
-        accels_t = accelerations(s, neighbors; parallel=parallel)
+        accels_t = accelerations(sys, neighbors; parallel=parallel)
 
         # Ensure coordinates stay within the simulation box like this
-        for i in 1:length(s)
-            s.coords[i] = wrapcoords.(s.coords[i], s.box_size)
+        for i in 1:length(sys)
+            sys.coords[i] = wrapcoords.(sys.coords[i], sys.box_size)
         end
 
         # Apply coupling like this
-        apply_coupling!(s, s.coupling)
+        apply_coupling!(sys, sim, sim.coupling)
 
         # Find new neighbors like this
-        neighbors = find_neighbors(s, s.neighbor_finder, neighbors, step_n;
-                                        parallel=parallel)
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                    parallel=parallel)
     end
-    return s
+    return sys
 end
 ```
-To use your custom simulator, give it as the `simulator` argument when calling [`simulate!`](@ref).
+To use your custom simulator, give it as the second argument when calling [`simulate!`](@ref).
 
 Under the hood there are two implementations of common simulators: an in-place version geared towards CPUs, and an out-of-place version geared towards GPUs and differentiable simulation.
 You can define different versions of a simulator for in-place and out-of-place systems by dispatching on `System{D, S, false}` or `System{D, S, true}` respectively.
@@ -615,11 +593,11 @@ struct MyCoupler <: AbstractCoupler
     # Any properties, e.g. a target temperature or coupling constant
 end
 ```
-Then, define the function that implements the coupling every timestep:
+Then, define the function that implements the coupling every time step:
 ```julia
-function apply_coupling!(s::System, coupling::MyCoupler)
+function apply_coupling!(sys::System, sim, coupling::MyCoupler)
     # Do something to the simulation, e.g. scale the velocities
-    return s
+    return sys
 end
 ```
 The functions [`velocity`](@ref), [`maxwellboltzmann`](@ref) and [`temperature`](@ref) may be useful here.

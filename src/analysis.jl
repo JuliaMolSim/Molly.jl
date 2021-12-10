@@ -113,7 +113,7 @@ Compute the potential energy of the system.
 """
 function potential_energy(s::System, neighbors=nothing)
     n_atoms = length(s)
-    potential = zero(ustrip(s.timestep)) * s.energy_unit
+    potential = zero(ustrip(s.box_size[1])) * s.energy_unit
 
     for inter in values(s.general_inters)
         if inter.nl_only
