@@ -8,7 +8,7 @@ export
     energy,
     kinetic_energy,
     potential_energy,
-    velocityautocorr
+    velocity_autocorr
 
 """
     visualize(coord_logger, box_size, out_filepath; <keyword arguments>)
@@ -144,13 +144,13 @@ function potential_energy(s::Simulation, neighbors=nothing)
 end
 
 """
-    velocityautocorr(vl, first_ind, last_ind)
+    velocity_autocorr(vl, first_ind, last_ind)
 
 Calculates the autocorrelation function of velocity from the velocity logger. 
 This helps characterize the similarity between velocities observed at different
 time instances.
 """
-function velocityautocorr(vl::VelocityLogger, first_ind::Integer=1, last_ind::Integer=length(vl.velocities))
+function velocity_autocorr(vl::VelocityLogger, first_ind::Integer=1, last_ind::Integer=length(vl.velocities))
     n_atoms = length(first(vl.velocities))
     return dot(vl.velocities[first_ind], vl.velocities[last_ind]) / n_atoms
 end
