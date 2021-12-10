@@ -309,7 +309,6 @@ function AtomsBase.bounding_box(s::Simulation)
 end
 
 function Base.show(io::IO, ::MIME"text/plain", s::Simulation)
-    print(io, "Simulation with ", length(s.coords), " atoms, ",
-                typeof(s.simulator), " simulator, ", s.timestep, " timestep, ",
-                s.n_steps, " steps")
+    print(io, "Simulation with ", length(s), " atoms, ", typeof(s.simulator), " simulator, ",
+            s.timestep, " time step, ", s.n_steps, " steps")
 end

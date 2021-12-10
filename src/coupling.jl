@@ -34,12 +34,11 @@ struct AndersenThermostat{T, C} <: AbstractCoupler
     coupling_const::C
 end
 
-function apply_coupling!(s::Simulation, thermostat::AndersenThermostat)
-    dims = length(first(s.velocities))
-    for i in 1:length(s.velocities)
+function apply_coupling!(s::Simulation{D}, thermostat::AndersenThermostat) where D
+    for i in 1:length(s)
         if rand() < s.timestep / thermostat.coupling_const
             mass = s.atoms[i].mass
-            s.velocities[i] = velocity(mass, thermostat.temperature; dims=dims)
+            s.velocities[i] = velocity(mass, thermostat.temperature; dims=D)
         end
     end
     return s
@@ -73,7 +72,7 @@ Calculate the temperature of a system from the kinetic energy of the atoms.
 """
 function temperature(s::Simulation{D, S, false}) where {D, S}
     ke = sum([a.mass * dot(s.velocities[i], s.velocities[i]) for (i, a) in enumerate(s.atoms)]) / 2
-    df = 3 * length(s.coords) - 3
+    df = 3 * length(s) - 3
     T = typeof(ustrip(ke))
     k = unit(ke) == NoUnits ? one(T) : uconvert(u"K^-1" * unit(ke), T(Unitful.k))
     return 2 * ke / (df * k)
@@ -81,7 +80,7 @@ end
 
 function temperature(s::Simulation{D, S, true}) where {D, S}
     ke = sum(mass.(s.atoms) .* sum.(abs2, s.velocities)) / 2
-    df = 3 * length(s.coords) - 3
+    df = 3 * length(s) - 3
     T = typeof(ustrip(ke))
     k = unit(ke) == NoUnits ? one(T) : uconvert(u"K^-1" * unit(ke), T(Unitful.k))
     return 2 * ke / (df * k)

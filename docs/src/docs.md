@@ -322,7 +322,7 @@ function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n)
             count(p -> p.status == infected   , s.atoms),
             count(p -> p.status == recovered  , s.atoms)
         ]
-        push!(logger.fracs_sir, counts_sir ./ length(s.atoms))
+        push!(logger.fracs_sir, counts_sir ./ length(s))
     end
 end
 
@@ -579,7 +579,7 @@ function Molly.simulate!(s::Simulation,
         accels_t = accelerations(s, neighbors; parallel=parallel)
 
         # Ensure coordinates stay within the simulation box like this
-        for i in 1:length(s.coords)
+        for i in 1:length(s)
             s.coords[i] = wrapcoords.(s.coords[i], s.box_size)
         end
 

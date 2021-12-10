@@ -45,7 +45,7 @@ function simulate!(s::Simulation{D, S, false},
         run_loggers!(s, neighbors, step_n)
 
         # Update coordinates
-        for i in 1:length(s.coords)
+        for i in 1:length(s)
             s.coords[i] += s.velocities[i] * s.timestep + removemolar(accels_t[i]) * (s.timestep ^ 2) / 2
             s.coords[i] = wrapcoords.(s.coords[i], s.box_size)
         end
@@ -53,7 +53,7 @@ function simulate!(s::Simulation{D, S, false},
         accels_t_dt = accelerations(s, neighbors; parallel=parallel)
 
         # Update velocities
-        for i in 1:length(s.velocities)
+        for i in 1:length(s)
             s.velocities[i] += removemolar(accels_t[i] + accels_t_dt[i]) * s.timestep / 2
         end
 
@@ -70,7 +70,7 @@ function simulate!(s::Simulation{D, S, true},
                     n_steps::Integer;
                     parallel::Bool=true) where {D, S}
     if length([inter for inter in values(s.general_inters) if !inter.nl_only]) > 0
-        neighbors_all = allneighbors(length(s.coords))
+        neighbors_all = allneighbors(length(s))
     else
         neighbors_all = nothing
     end
@@ -116,7 +116,7 @@ function simulate!(s::Simulation,
 
         # Update coordinates
         coords_copy = s.coords
-        for i in 1:length(s.coords)
+        for i in 1:length(s)
             s.coords[i] = s.coords[i] + vector(s.velocities[i], s.coords[i], s.box_size) + removemolar(accels_t[i]) * s.timestep ^ 2
             s.coords[i] = wrapcoords.(s.coords[i], s.box_size)
         end

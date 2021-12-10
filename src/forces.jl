@@ -105,7 +105,7 @@ end
 Calculate the forces on all atoms using the general and specific interactions.
 """
 function forces(s::Simulation, neighbors=nothing; parallel::Bool=true)
-    n_atoms = length(s.coords)
+    n_atoms = length(s)
 
     if parallel && nthreads() > 1 && n_atoms >= 100
         fs_threads = [ustripvec.(zero(s.coords)) for i in 1:nthreads()]
@@ -158,7 +158,7 @@ function forces(s::Simulation, neighbors=nothing; parallel::Bool=true)
 end
 
 function forces(s::Simulation, coords, atoms, neighbors=nothing, neighbors_all=nothing)
-    n_atoms = length(coords)
+    n_atoms = length(s)
     fs = ustripvec.(zero(coords))
 
     general_inters_nonl = [inter for inter in values(s.general_inters) if !inter.nl_only]

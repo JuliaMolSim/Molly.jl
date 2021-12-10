@@ -773,7 +773,7 @@ end
                 count(p -> p.status == infected   , s.atoms),
                 count(p -> p.status == recovered  , s.atoms)
             ]
-            push!(logger.fracs_sir, counts_sir ./ length(s.atoms))
+            push!(logger.fracs_sir, counts_sir ./ length(s))
         end
     end
 

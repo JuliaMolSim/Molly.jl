@@ -50,12 +50,11 @@ Zygote.z2d(dx::SVector{3, T}, primal::T) where {T} = sum(dx)
 Zygote.unbroadcast(x::Tuple{Any}, x̄::Nothing) = nothing
 
 function Zygote.unbroadcast(x::AbstractArray{<:Real}, x̄::AbstractArray{<:StaticVector})
-    N = ndims(x̄)
     if length(x) == length(x̄)
         Zygote._project(x, sum.(x̄))
     else
-        dims = ntuple(d -> size(x, d) == 1 ? d : ndims(x̄)+1, ndims(x̄))
-        Zygote._project(x, accum_sum(x̄; dims = dims))
+        dims = ntuple(d -> size(x, d) == 1 ? d : ndims(x̄) + 1, ndims(x̄))
+        Zygote._project(x, accum_sum(x̄; dims=dims))
     end
 end
 

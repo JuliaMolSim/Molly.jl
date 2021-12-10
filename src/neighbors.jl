@@ -72,7 +72,7 @@ function find_neighbors(s::Simulation,
     if parallel && nthreads() > 1
         nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:nthreads()]
 
-        @threads for i in 1:length(s.coords)
+        @threads for i in 1:length(s)
             nl = nl_threads[threadid()]
             ci = s.coords[i]
             nbi = @view nf.nb_matrix[:, i]
@@ -89,7 +89,7 @@ function find_neighbors(s::Simulation,
             append!(neighbors, nl)
         end
     else
-        for i in 1:length(s.coords)
+        for i in 1:length(s)
             ci = s.coords[i]
             nbi = @view nf.nb_matrix[:, i]
             w14i = @view nf.matrix_14[:, i]
@@ -162,7 +162,7 @@ function find_neighbors(s::Simulation,
                         kwargs...)
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
-    n_atoms = length(s.coords)
+    n_atoms = length(s)
     sqdist_cutoff = nf.dist_cutoff ^ 2
     sqdists = sqdistance.(nf.is, nf.js, (s.coords,), (s.box_size,))
 
@@ -242,7 +242,7 @@ function find_neighbors(s::Simulation,
     if parallel && nthreads() > 1
         nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:nthreads()]
 
-        @threads for i in 1:length(s.coords)
+        @threads for i in 1:length(s)
             nl = nl_threads[threadid()]
             ci = ustrip.(s.coords[i])
             nbi = @view nf.nb_matrix[:, i]
@@ -259,7 +259,7 @@ function find_neighbors(s::Simulation,
             append!(neighbors, nl)
         end
     else
-        for i in 1:length(s.coords)
+        for i in 1:length(s)
             ci = ustrip.(s.coords[i])
             nbi = @view nf.nb_matrix[:, i]
             w14i = @view nf.matrix_14[:, i]

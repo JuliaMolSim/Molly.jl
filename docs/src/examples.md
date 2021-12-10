@@ -72,7 +72,7 @@ end
 function Molly.log_property!(logger::BondLogger, s, neighbors, step_n)
     if step_n % logger.n_steps == 0
         bonds = BitVector()
-        for i in 1:length(s.coords)
+        for i in 1:length(s)
             for j in 1:(i - 1)
                 push!(bonds, j in s.atoms[i].partners)
             end
@@ -113,7 +113,7 @@ s = Simulation(
 simulate!(s)
 
 connections = Tuple{Int, Int}[]
-for i in 1:length(s.coords)
+for i in 1:length(s)
     for j in 1:(i - 1)
         push!(connections, (i, j))
     end
