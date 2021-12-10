@@ -5,7 +5,6 @@ export
     GeneralInteraction,
     SpecificInteraction,
     AbstractCutoff,
-    Simulator,
     AbstractCoupler,
     NeighborFinder,
     Logger,
@@ -38,12 +37,6 @@ A general type of cutoff encoding the approximation used for a potential.
 Interactions can be parameterized by the cutoff behavior.
 """
 abstract type AbstractCutoff end
-
-"""
-A type of simulation to run, e.g. leap-frog integration or energy minimisation.
-Custom simulators should sub-type this type.
-"""
-abstract type Simulator end
 
 """
 A way to keep properties of a simulation constant.
@@ -195,7 +188,7 @@ This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
 interface described there.
 
 # Arguments
-- `simulator::Simulator`: the type of simulation to run.
+- `simulator`: the type of simulation to run.
 - `atoms::A`: the atoms, or atom equivalents, in the simulation. Can be
     of any type.
 - `atoms_data::AD`: data associated with the atoms, allowing the atoms to be
@@ -229,7 +222,7 @@ interface described there.
     `isa(coords, CuArray)`.
 """
 mutable struct Simulation{D, S, G, A, AD, C, V, GI, SI, B, T, F, E, NF, CO} <: AbstractSystem{D, S}
-    simulator::Simulator
+    simulator
     atoms::A
     atoms_data::AD
     specific_inter_lists::SI

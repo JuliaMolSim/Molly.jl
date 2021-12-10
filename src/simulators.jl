@@ -21,7 +21,7 @@ end
 
 The velocity Verlet integrator.
 """
-struct VelocityVerlet <: Simulator end
+struct VelocityVerlet end
 
 """
     simulate!(simulation; parallel=true)
@@ -98,10 +98,10 @@ end
     VelocityFreeVerlet()
 
 The velocity-free Verlet integrator, also known as the Störmer method.
-In this case the `velocities` given to the `Simulator` act as the previous step
+In this case the `velocities` given to the simulator act as the previous step
 coordinates for the first step.
 """
-struct VelocityFreeVerlet <: Simulator end
+struct VelocityFreeVerlet end
 
 function simulate!(s::Simulation,
                     ::VelocityFreeVerlet,

@@ -554,9 +554,9 @@ The available simulators are:
 - [`VelocityVerlet`](@ref).
 - [`VelocityFreeVerlet`](@ref).
 
-To define your own [`Simulator`](@ref), first define the `struct`:
+To define your own simulator, first define a `struct`:
 ```julia
-struct MySimulator <: Simulator
+struct MySimulator
     # Any properties, e.g. an implicit solvent friction constant
 end
 ```
