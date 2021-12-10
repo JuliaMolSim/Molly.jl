@@ -181,14 +181,13 @@ end
 """
     System(; <keyword arguments>)
 
-A physical system that can be simulated.
+A physical system to be simulated.
 Properties unused in the simulation or in analysis can be left with their
 default values.
 This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
 interface described there.
 
 # Arguments
-- `simulator`: the type of simulation to run.
 - `atoms::A`: the atoms, or atom equivalents, in the system. Can be
     of any type.
 - `atoms_data::AD`: data associated with the atoms, allowing the atoms to be
@@ -207,72 +206,59 @@ interface described there.
     velocities depends on the simulator used, e.g. for the `VelocityFreeVerlet`
     simulator they represent the previous step coordinates for the first step.
 - `box_size::B`: the size of the box in which the simulation takes place.
-- `neighbor_finder::NeighborFinder=NoNeighborFinder()`: the neighbor finder
-    used to find close atoms and save on computation.
-- `coupling::AbstractCoupler=NoCoupling()`: the coupling which applies during
-    the simulation.
-- `loggers::Dict{String, <:Logger}=Dict()`: the loggers that record properties
-    of interest during a simulation.
-- `timestep::T=0.0`: the time step of the simulation.
-- `n_steps::Integer=0`: the number of steps in the simulation.
+- `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
+    close atoms and save on computation.
+- `loggers::L=Dict{String, Logger}()`: the loggers that record properties of
+    interest during a simulation.
 - `force_unit::F=u"kJ * mol^-1 * nm^-1"`: the unit of force of the system.
 - `energy_unit::E=u"kJ * mol^-1"`: the unit of energy of the system.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-mutable struct System{D, S, G, A, AD, C, V, GI, SI, B, T, F, E, NF, CO} <: AbstractSystem{D, S}
-    simulator
+mutable struct System{D, S, G, A, AD, GI, SI, C, V, B, NF, L, F, E} <: AbstractSystem{D, S}
     atoms::A
     atoms_data::AD
-    specific_inter_lists::SI
     general_inters::GI
+    specific_inter_lists::SI
     coords::C
     velocities::V
     box_size::B
     neighbor_finder::NF
-    coupling::CO
-    loggers::Dict{String, <:Logger}
-    timestep::T
-    n_steps::Int
+    loggers::L
     force_unit::F
     energy_unit::E
 end
 
 function System(;
-                    simulator=VelocityVerlet(),
-                    atoms,
-                    atoms_data=[],
-                    specific_inter_lists=(),
-                    general_inters=(),
-                    coords,
-                    velocities=zero(coords),
-                    box_size,
-                    neighbor_finder=NoNeighborFinder(),
-                    coupling=NoCoupling(),
-                    loggers=Dict{String, Logger}(),
-                    timestep=0.0u"ps",
-                    n_steps=0,
-                    force_unit=u"kJ * mol^-1 * nm^-1",
-                    energy_unit=u"kJ * mol^-1",
-                    gpu_diff_safe=isa(coords, CuArray))
+                atoms,
+                atoms_data=[],
+                general_inters=(),
+                specific_inter_lists=(),
+                coords,
+                velocities=zero(coords),
+                box_size,
+                neighbor_finder=NoNeighborFinder(),
+                loggers=Dict{String, Logger}(),
+                force_unit=u"kJ * mol^-1 * nm^-1",
+                energy_unit=u"kJ * mol^-1",
+                gpu_diff_safe=isa(coords, CuArray))
     D = length(box_size)
     S = eltype(atoms)
     A = typeof(atoms)
     AD = typeof(atoms_data)
-    C = typeof(coords)
-    V = typeof(velocities)
     GI = typeof(general_inters)
     SI = typeof(specific_inter_lists)
+    C = typeof(coords)
+    V = typeof(velocities)
     B = typeof(box_size)
-    T = typeof(timestep)
+    NF = typeof(neighbor_finder)
+    L = typeof(loggers)
     F = typeof(force_unit)
     E = typeof(energy_unit)
-    NF = typeof(neighbor_finder)
-    CO = typeof(coupling)
-    return System{D, S, gpu_diff_safe, A, AD, C, V, GI, SI, B, T, F, E, NF, CO}(
-                simulator, atoms, atoms_data, specific_inter_lists, general_inters,
-                coords, velocities, box_size, neighbor_finder, coupling, loggers,
-                timestep, n_steps, force_unit, energy_unit)
+    return System{D, S, gpu_diff_safe, A, AD, GI, SI, C, V, B, NF, L, F, E}(
+                    atoms, atoms_data, general_inters, specific_inter_lists,
+                    coords, velocities, box_size, neighbor_finder, loggers,
+                    force_unit, energy_unit)
 end
 
 Base.getindex(s::System, i::Integer) = s.atoms[i]
@@ -290,7 +276,8 @@ AtomsBase.velocity(s::System, i::Integer) = s.velocities[i]
 AtomsBase.boundary_conditions(::System{3}) = SVector(Periodic(), Periodic(), Periodic())
 AtomsBase.boundary_conditions(::System{2}) = SVector(Periodic(), Periodic())
 
-edges_to_box(bs::SVector{3}, z) = SVector{3}([SVector(bs[1], z, z), SVector(z, bs[2], z), SVector(z, z, bs[3])])
+edges_to_box(bs::SVector{3}, z) = SVector{3}([SVector(bs[1], z, z), SVector(z, bs[2], z),
+                                                SVector(z, z, bs[3])])
 edges_to_box(bs::SVector{2}, z) = SVector{2}([SVector(bs[1], z), SVector(z, bs[2])])
 
 function AtomsBase.bounding_box(s::System)
