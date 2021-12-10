@@ -238,7 +238,6 @@ mutable struct Simulation{D, A, AD, C, V, GI, SI, B, S, F, E, NF, CO}
     loggers::Dict{String, <:Logger}
     timestep::S
     n_steps::Int
-    n_steps_made::Int
     force_unit::F
     energy_unit::E
 end
@@ -260,7 +259,6 @@ function Simulation(;
                     loggers=Dict{String, Logger}(),
                     timestep=0.0u"ps",
                     n_steps=0,
-                    n_steps_made=0,
                     force_unit=u"kJ * mol^-1 * nm^-1",
                     energy_unit=u"kJ * mol^-1",
                     gpu_diff_safe=isa(coords, CuArray))
@@ -279,11 +277,11 @@ function Simulation(;
     return Simulation{gpu_diff_safe, A, AD, C, V, GI, SI, B, S, F, E, NF, CO}(
                 simulator, atoms, atoms_data, specific_inter_lists, general_inters,
                 coords, velocities, box_size, neighbor_finder, coupling, loggers,
-                timestep, n_steps, n_steps_made, force_unit, energy_unit)
+                timestep, n_steps, force_unit, energy_unit)
 end
 
 function Base.show(io::IO, s::Simulation)
     print(io, "Simulation with ", length(s.coords), " atoms, ",
                 typeof(s.simulator), " simulator, ", s.timestep, " timestep, ",
-                s.n_steps, " steps, ", first(s.n_steps_made), " steps made")
+                s.n_steps, " steps")
 end

@@ -61,7 +61,6 @@ function simulate!(s::Simulation{false},
         neighbors = find_neighbors(s, s.neighbor_finder, neighbors, step_n; parallel=parallel)
 
         accels_t = accels_t_dt
-        s.n_steps_made += 1
     end
     return s
 end
@@ -91,7 +90,6 @@ function simulate!(s::Simulation{true},
         neighbors = find_neighbors(s, s.neighbor_finder, neighbors, step_n)
 
         accels_t = accels_t_dt
-        s.n_steps_made += 1
     end
     return s
 end
@@ -126,8 +124,6 @@ function simulate!(s::Simulation,
 
         apply_coupling!(s, s.coupling)
         neighbors = find_neighbors(s, s.neighbor_finder, neighbors, step_n; parallel=parallel)
-
-        s.n_steps_made += 1
     end
     return s
 end
@@ -137,5 +133,5 @@ function simulate!(s::Simulation, n_steps::Integer; parallel::Bool=true)
 end
 
 function simulate!(s::Simulation; parallel::Bool=true)
-    simulate!(s, s.n_steps - s.n_steps_made; parallel=parallel)
+    simulate!(s, s.n_steps; parallel=parallel)
 end

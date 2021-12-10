@@ -589,9 +589,6 @@ function Molly.simulate!(s::Simulation,
         # Find new neighbors like this
         neighbors = find_neighbors(s, s.neighbor_finder, neighbors, step_n;
                                         parallel=parallel)
-
-        # Increment the step counter like this
-        s.n_steps_made += 1
     end
     return s
 end
