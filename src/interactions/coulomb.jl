@@ -69,7 +69,7 @@ end
 end
 
 @inline @inbounds function potential_energy(inter::Coulomb{C},
-                                    s::Simulation,
+                                    s::System,
                                     i::Integer,
                                     j::Integer,
                                     weight_14::Bool=false) where C

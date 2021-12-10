@@ -18,12 +18,12 @@ set to `false`.
 struct NoNeighborFinder <: NeighborFinder end
 
 """
-    find_neighbors(simulation, neighbor_finder, current_neighbors=nothing, step_n=0; parallel=true)
+    find_neighbors(system, neighbor_finder, current_neighbors=nothing, step_n=0; parallel=true)
 
 Obtain a list of close atoms in a system.
 Custom neighbor finders should implement this function.
 """
-function find_neighbors(s::Simulation,
+function find_neighbors(s::System,
                         nf::NoNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
@@ -53,7 +53,7 @@ function DistanceNeighborFinder(;
     return DistanceNeighborFinder{typeof(dist_cutoff)}(nb_matrix, matrix_14, n_steps, dist_cutoff)
 end
 
-function find_neighbors(s::Simulation,
+function find_neighbors(s::System,
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
@@ -155,7 +155,7 @@ function findboundaries(nbs_ord, n_atoms)
     return inds
 end
 
-function find_neighbors(s::Simulation,
+function find_neighbors(s::System,
                         nf::DistanceVecNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
@@ -220,7 +220,7 @@ function TreeNeighborFinder(;
     return TreeNeighborFinder{typeof(dist_cutoff)}(nb_matrix, matrix_14, n_steps, dist_cutoff)
 end
 
-function find_neighbors(s::Simulation,
+function find_neighbors(s::System,
                         nf::TreeNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
@@ -387,7 +387,7 @@ end
 CellListMap.strip_value(x::Unitful.Quantity) = Unitful.ustrip(x)
 
 """
-    find_neighbors(s::Simulation,
+    find_neighbors(s::System,
                     nf::CellListMapNeighborFinder,
                     current_neighbors=nothing,
                     step_n::Integer=0;
@@ -396,7 +396,7 @@ CellListMap.strip_value(x::Unitful.Quantity) = Unitful.ustrip(x)
 Find neighbors using `CellListMap`, without in-place updating. Should be called only
 the first time the cell lists are built. Modifies the mutable `nf` structure.
 """
-function find_neighbors(s::Simulation,
+function find_neighbors(s::System,
                         nf::CellListMapNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;

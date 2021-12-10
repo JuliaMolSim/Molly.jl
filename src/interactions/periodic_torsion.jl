@@ -18,7 +18,7 @@ PeriodicTorsion(; i, j, k, l, periodicities, phases, ks) = PeriodicTorsion{eltyp
 
 @inline @inbounds function force(d::PeriodicTorsion,
                                   coords,
-                                  s::Simulation)
+                                  s::System)
     ab = vector(coords[d.i], coords[d.j], s.box_size)
     bc = vector(coords[d.j], coords[d.k], s.box_size)
     cd = vector(coords[d.k], coords[d.l], s.box_size)
@@ -42,7 +42,7 @@ PeriodicTorsion(; i, j, k, l, periodicities, phases, ks) = PeriodicTorsion{eltyp
 end
 
 @inline @inbounds function potential_energy(d::PeriodicTorsion,
-                                            s::Simulation)
+                                            s::System)
     ab = vector(s.coords[d.i], s.coords[d.j], s.box_size)
     bc = vector(s.coords[d.j], s.coords[d.k], s.box_size)
     cd = vector(s.coords[d.k], s.coords[d.l], s.box_size)

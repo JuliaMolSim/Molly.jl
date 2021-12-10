@@ -36,7 +36,7 @@ end
 
 CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
 
-# Some failures due to dependencies but there is an unbound args error for Simulation
+# Some failures due to dependencies but there is an unbound args error
 Aqua.test_all(Molly; ambiguities=(recursive=false), unbound_args=false, undefined_exports=false)
 
 data_dir = normpath(@__DIR__, "..", "data")
@@ -51,7 +51,7 @@ temp_fp_viz = tempname(cleanup=true) * ".mp4"
     a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
     coords = [c1, c2, c3]
-    s = Simulation(atoms=[a1, a1, a1], coords=coords, box_size=box_size)
+    s = System(atoms=[a1, a1, a1], coords=coords, box_size=box_size)
 
     @test isapprox(force(LennardJones(), c1, c2, a1, a1, box_size),
                     SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
@@ -133,7 +133,7 @@ end
     @test_throws ErrorException wrapcoords(-2.0u"nm", 10.0)
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
-        s = Simulation(
+        s = System(
             simulator=VelocityVerlet(),
             atoms=[Atom(), Atom(), Atom()],
             coords=[SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm",
@@ -156,7 +156,7 @@ end
         nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm",
         x0=coords, unit_cell=box_size,
     )
-    s = Simulation(
+    s = System(
         simulator=VelocityVerlet(),
         atoms=[Atom(), Atom(), Atom()],
         coords=coords, box_size=box_size,
@@ -177,7 +177,7 @@ end
     timestep = 0.002u"ps"
     box_size = SVector(2.0, 2.0)u"nm"
 
-    s = Simulation(
+    s = System(
         simulator=VelocityVerlet(),
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
@@ -215,7 +215,7 @@ end
     parallel_list = run_parallel_tests ? (false, true) : (false,)
 
     for parallel in parallel_list
-        s = Simulation(
+        s = System(
             simulator=VelocityVerlet(),
             atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR") for i in 1:n_atoms],
@@ -264,7 +264,7 @@ end
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
     coords = placeatoms(n_atoms, box_size, 0.3u"nm")
 
-    s = Simulation(
+    s = System(
         simulator=VelocityFreeVerlet(),
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
@@ -298,7 +298,7 @@ end
         nb_matrix[i + (n_atoms ÷ 2), i] = false
     end
 
-    s = Simulation(
+    s = System(
         simulator=VelocityVerlet(),
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         specific_inter_lists=(bonds,),
@@ -341,7 +341,7 @@ end
     @test box_size == SVector(3.7146, 3.7146, 3.7146)u"nm"
     show(devnull, first(atoms))
 
-    s = Simulation(
+    s = System(
         simulator=VelocityVerlet(),
         atoms=atoms,
         atoms_data=atoms_data,
@@ -377,7 +377,7 @@ end
                 joinpath(data_dir, "5XER", "gmx_top_ff.top"),
                 joinpath(data_dir, "5XER", "gmx_coords.gro"))
 
-    s = Simulation(
+    s = System(
         simulator=VelocityVerlet(),
         atoms=atoms,
         specific_inter_lists=specific_inter_lists,
@@ -425,7 +425,7 @@ end
             neighbor_finder = NoNeighborFinder()
         end
 
-        s = Simulation(
+        s = System(
             simulator=VelocityVerlet(),
             atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"u", σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
@@ -455,7 +455,7 @@ end
     coords = placeatoms(n_atoms, box_size, 0.3u"nm")
     velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
 
-    s = Simulation(
+    s = System(
         simulator=VelocityVerlet(),
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
@@ -471,7 +471,7 @@ end
         n_steps=n_steps,
     )
 
-    s_nounits = Simulation(
+    s_nounits = System(
         simulator=VelocityVerlet(),
         atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
@@ -555,7 +555,7 @@ end
                             ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
         end
 
-        s = Simulation(
+        s = System(
             simulator=simulator,
             atoms=atoms,
             specific_inter_lists=specific_inter_lists,
@@ -638,7 +638,7 @@ end
             sils = ()
         end
     
-        s = Simulation(
+        s = System(
             atoms=atoms,
             specific_inter_lists=sils,
             general_inters=gin,
@@ -664,7 +664,7 @@ end
     timestep = 0.0005u"ps"
     velocities_start = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
 
-    s = Simulation(
+    s = System(
         simulator=VelocityVerlet(),
         atoms=atoms,
         specific_inter_lists=specific_inter_lists,
@@ -693,7 +693,7 @@ end
         atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
             joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=true)
         
-        s = Simulation(
+        s = System(
             simulator=VelocityVerlet(),
             atoms=atoms,
             specific_inter_lists=specific_inter_lists,
@@ -790,7 +790,7 @@ end
                         SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
     neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_people, n_people), n_steps=10, dist_cutoff=2.0)
 
-    s = Simulation(
+    s = System(
         simulator=VelocityVerlet(),
         atoms=atoms,
         general_inters=general_inters,

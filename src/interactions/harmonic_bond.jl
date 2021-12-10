@@ -14,7 +14,7 @@ HarmonicBond(; i, j, b0, kb) = HarmonicBond{typeof(b0), typeof(kb)}(i, j, b0, kb
 
 @inline @inbounds function force(b::HarmonicBond,
                 coords,
-                s::Simulation)
+                s::System)
     ab = vector(coords[b.i], coords[b.j], s.box_size)
     c = b.kb * (norm(ab) - b.b0)
     f = c * normalize(ab)
@@ -22,7 +22,7 @@ HarmonicBond(; i, j, b0, kb) = HarmonicBond{typeof(b0), typeof(kb)}(i, j, b0, kb
 end
 
 @inline @inbounds function potential_energy(b::HarmonicBond,
-                                            s::Simulation)
+                                            s::System)
     dr = vector(s.coords[b.i], s.coords[b.j], s.box_size)
     r = norm(dr)
     return (b.kb / 2) * (r - b.b0) ^ 2

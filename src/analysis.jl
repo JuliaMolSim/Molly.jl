@@ -95,7 +95,7 @@ energy(s, neighbors=nothing) = kinetic_energy(s) + potential_energy(s, neighbors
 
 Compute the kinetic energy of the system.
 """
-function kinetic_energy(s::Simulation)
+function kinetic_energy(s::System)
     ke = sum(i -> s.atoms[i].mass * dot(s.velocities[i], s.velocities[i]) / 2, axes(s.atoms, 1))
     # Convert energy to per mol if required
     if dimension(s.energy_unit) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
@@ -111,7 +111,7 @@ end
 
 Compute the potential energy of the system.
 """
-function potential_energy(s::Simulation, neighbors=nothing)
+function potential_energy(s::System, neighbors=nothing)
     n_atoms = length(s)
     potential = zero(ustrip(s.timestep)) * s.energy_unit
 

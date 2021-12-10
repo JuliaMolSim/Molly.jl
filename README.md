@@ -65,7 +65,7 @@ coords = placeatoms(n_atoms, box_size, 0.3u"nm")
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 general_inters = (LennardJones(),)
 
-s = Simulation(
+s = System(
     simulator=VelocityVerlet(),
     atoms=atoms,
     general_inters=general_inters,
@@ -93,7 +93,7 @@ atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
             joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
 
-s = Simulation(
+s = System(
     simulator=VelocityVerlet(),
     atoms=atoms,
     atoms_data=atoms_data,

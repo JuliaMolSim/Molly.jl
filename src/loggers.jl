@@ -10,11 +10,11 @@ export
     StructureWriter
 
 """
-    run_loggers!(s, neighbors=nothing, step_n=0)
+    run_loggers!(system, neighbors=nothing, step_n=0)
 
-Run the loggers associated with the simulation.
+Run the loggers associated with the system.
 """
-function run_loggers!(s::Simulation, neighbors=nothing, step_n::Integer=0)
+function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0)
     for logger in values(s.loggers)
         log_property!(logger, s, neighbors, step_n)
     end
@@ -42,12 +42,12 @@ function Base.show(io::IO, tl::TemperatureLogger)
 end
 
 """
-    log_property!(logger, simulation, neighbors=nothing, step_n=0)
+    log_property!(logger, system, neighbors=nothing, step_n=0)
 
-Log a property thoughout a simulation.
+Log a property of the system thoughout a simulation.
 Custom loggers should implement this function.
 """
-function log_property!(logger::TemperatureLogger, s::Simulation, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::TemperatureLogger, s::System, neighbors=nothing, step_n::Integer=0)
     if step_n % logger.n_steps == 0
         push!(logger.temperatures, temperature(s))
     end
@@ -78,7 +78,7 @@ function Base.show(io::IO, cl::CoordinateLogger)
             length(cl.coords) > 0 ? length(first(cl.coords)) : "?", " atoms")
 end
 
-function log_property!(logger::CoordinateLogger, s::Simulation, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::CoordinateLogger, s::System, neighbors=nothing, step_n::Integer=0)
     if step_n % logger.n_steps == 0
         push!(logger.coords, deepcopy(s.coords))
     end
@@ -109,7 +109,7 @@ function Base.show(io::IO, vl::VelocityLogger)
             length(vl.velocities) > 0 ? length(first(vl.velocities)) : "?", " atoms")
 end
 
-function log_property!(logger::VelocityLogger, s::Simulation, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::VelocityLogger, s::System, neighbors=nothing, step_n::Integer=0)
     if step_n % logger.n_steps == 0
         push!(logger.velocities, deepcopy(s.velocities))
     end
@@ -118,7 +118,7 @@ end
 """
     EnergyLogger(n_steps)
 
-Log the energy of the system throughout a simulation.
+Log the total energy of the system throughout a simulation.
 """
 struct EnergyLogger{T} <: Logger
     n_steps::Int
@@ -136,7 +136,7 @@ function Base.show(io::IO, el::EnergyLogger)
                 el.n_steps, ", ", length(el.energies), " energies recorded")
 end
 
-function log_property!(logger::EnergyLogger, s::Simulation, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::EnergyLogger, s::System, neighbors=nothing, step_n::Integer=0)
     if step_n % logger.n_steps == 0
         push!(logger.energies, energy(s, neighbors))
     end
@@ -163,7 +163,7 @@ function Base.show(io::IO, sw::StructureWriter)
                 sw.filepath, "\", ", sw.structure_n - 1, " frames written")
 end
 
-function log_property!(logger::StructureWriter, s::Simulation, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::StructureWriter, s::System, neighbors=nothing, step_n::Integer=0)
     if step_n % logger.n_steps == 0
         if length(s) != length(s.atoms_data)
             error("Number of atoms is ", length(s), " but number of atom data entries is ",
@@ -174,7 +174,7 @@ function log_property!(logger::StructureWriter, s::Simulation, neighbors=nothing
     end
 end
 
-function append_model(logger::StructureWriter, s::Simulation)
+function append_model(logger::StructureWriter, s::System)
     open(logger.filepath, "a") do output
         println(output, "MODEL     ", lpad(logger.structure_n, 4))
         for (i, coord) in enumerate(s.coords)

@@ -21,7 +21,7 @@ using Test
 
     for parallel in parallel_list
         @testset "$lj_potential" for lj_potential in lj_potentials
-            s = Simulation(
+            s = System(
                 simulator=VelocityVerlet(),
                 atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
                 general_inters=(lj_potential,),

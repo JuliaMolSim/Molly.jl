@@ -24,14 +24,14 @@ The velocity Verlet integrator.
 struct VelocityVerlet end
 
 """
-    simulate!(simulation; parallel=true)
-    simulate!(simulation, n_steps; parallel=true)
-    simulate!(simulation, simulator, n_steps; parallel=true)
+    simulate!(system; parallel=true)
+    simulate!(system, n_steps; parallel=true)
+    simulate!(system, simulator, n_steps; parallel=true)
 
-Run a simulation according to the rules of the given simulator.
+Run a simulation on a system according to the rules of the given simulator.
 Custom simulators should implement this function.
 """
-function simulate!(s::Simulation{D, S, false},
+function simulate!(s::System{D, S, false},
                     ::VelocityVerlet,
                     n_steps::Integer;
                     parallel::Bool=true) where {D, S}
@@ -65,7 +65,7 @@ function simulate!(s::Simulation{D, S, false},
     return s
 end
 
-function simulate!(s::Simulation{D, S, true},
+function simulate!(s::System{D, S, true},
                     ::VelocityVerlet,
                     n_steps::Integer;
                     parallel::Bool=true) where {D, S}
@@ -103,7 +103,7 @@ coordinates for the first step.
 """
 struct VelocityFreeVerlet end
 
-function simulate!(s::Simulation,
+function simulate!(s::System,
                     ::VelocityFreeVerlet,
                     n_steps::Integer;
                     parallel::Bool=true)
@@ -128,10 +128,10 @@ function simulate!(s::Simulation,
     return s
 end
 
-function simulate!(s::Simulation, n_steps::Integer; parallel::Bool=true)
+function simulate!(s::System, n_steps::Integer; parallel::Bool=true)
     simulate!(s, s.simulator, n_steps; parallel=parallel)
 end
 
-function simulate!(s::Simulation; parallel::Bool=true)
+function simulate!(s::System; parallel::Bool=true)
     simulate!(s, s.n_steps; parallel=parallel)
 end

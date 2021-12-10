@@ -38,7 +38,7 @@ c2 = SVector(1.4, 1.0, 1.0)u"nm"
 a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
 box_size = SVector(2.0, 2.0, 2.0)u"nm"
 coords = [c1, c2]
-s = Simulation(atoms=[a1, a1], coords=coords, box_size=box_size)
+s = System(atoms=[a1, a1], coords=coords, box_size=box_size)
 b1 = HarmonicBond(i=1, j=2, b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
 
 SUITE["interactions"]["LennardJones force" ] = @benchmarkable force($(LennardJones()), $(c1), $(c2), $(a1), $(a1), $(box_size))
@@ -100,7 +100,7 @@ function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::B
                         ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
     end
 
-    s = Simulation(
+    s = System(
         simulator=simulator,
         atoms=atoms,
         specific_inter_lists=specific_inter_lists,
@@ -156,7 +156,7 @@ n_steps = 25
 timestep = 0.0005u"ps"
 velocities = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
 
-s = Simulation(
+s = System(
     simulator=VelocityVerlet(),
     atoms=atoms,
     specific_inter_lists=specific_inter_lists,

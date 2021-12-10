@@ -15,7 +15,7 @@ timestep = 0.0005u"ps"
 temp = 300.0u"K"
 velocities = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
 
-s = Simulation(
+s = System(
     simulator=VelocityVerlet(),
     atoms=atoms,
     atoms_data=atoms_data,

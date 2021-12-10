@@ -6,8 +6,8 @@ For more information on specific types or functions, see the [Molly API](@ref) s
 The [Differentiable simulation with Molly](@ref) section describes taking gradients through simulations.
 
 Molly takes a modular approach to molecular simulation.
-To run a simulation you create a [`Simulation`](@ref) object and call [`simulate!`](@ref) on it.
-The different components of the simulation can be used as defined by the package, or you can define your own versions.
+To run a simulation you create a [`System`](@ref) object and call [`simulate!`](@ref) on it.
+The different components of the system and simulation can be used as defined by the package, or you can define your own versions.
 An important principle of the package is that your custom components, particularly force functions, should be easy to define and just as performant as the built-in versions.
 
 ## Simulating a gas
@@ -38,11 +38,11 @@ Because we have defined the relevant parameters for the atoms, we can use the bu
 ```julia
 general_inters = (LennardJones(),)
 ```
-Finally, we can define and run the simulation.
+Finally, we can define the system and run the simulation.
 We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.
 Periodic boundary conditions are used with the box we defined earlier.
 ```julia
-s = Simulation(
+s = System(
     simulator=VelocityVerlet(), # Use velocity Verlet integration
     atoms=atoms,
     general_inters=general_inters,
@@ -84,7 +84,7 @@ atoms = cu([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in
 coords = cu(placeatoms(n_atoms, box_size, 0.3u"nm"))
 velocities = cu([velocity(atom_mass, temp) for i in 1:n_atoms])
 
-s = Simulation(
+s = System(
     simulator=VelocityVerlet(),
     atoms=atoms,
     general_inters=(LennardJones(),),
@@ -135,7 +135,7 @@ neighbor_finder = DistanceNeighborFinder(nb_matrix=nb_matrix, n_steps=10, dist_c
 ```
 Now we can simulate as before.
 ```julia
-s = Simulation(
+s = System(
     simulator=VelocityVerlet(),
     atoms=atoms,
     specific_inter_lists=specific_inter_lists,
@@ -171,7 +171,7 @@ coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
 velocities = [SVector(0.0f0, 1.0f0), SVector(0.0f0, -1.0f0)]
 general_inters = (Gravity(nl_only=false, G=1.5f0),)
 
-s = Simulation(
+s = System(
     simulator=VelocityVerlet(),
     atoms=atoms,
     general_inters=general_inters,
@@ -206,7 +206,7 @@ ff = OpenMMForceField("ff99SBildn.xml", "tip3p_standard.xml", "his.xml")
 atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
     "6mrr_equil.pdb", ff)
 
-s = Simulation(
+s = System(
     simulator=VelocityVerlet(),
     atoms=atoms,
     atoms_data=atoms_data,
@@ -233,7 +233,7 @@ atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords
 
 temp = 298u"K"
 
-s = Simulation(
+s = System(
     simulator=VelocityVerlet(),
     atoms=atoms,
     atoms_data=atoms_data,
@@ -338,7 +338,7 @@ velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
 general_inters = (LennardJones = LennardJones(nl_only=true), SIR = SIRInteraction(false, 0.5, 0.06, 0.01))
 neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_people, n_people), n_steps=10, dist_cutoff=2.0)
 
-s = Simulation(
+s = System(
     simulator=VelocityVerlet(),
     atoms=atoms,
     general_inters=general_inters,
@@ -371,7 +371,7 @@ Whilst you occasionally may run into friction with dimension mismatches, using u
 The performance overhead of using units is minimal.
 
 All your interaction types need to return the same units of force and energy or the simulation will not run.
-By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_unit` and `energy_unit` arguments to [`Simulation`](@ref).
+By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_unit` and `energy_unit` arguments to [`System`](@ref).
 If you need to strip units for downstream analysis, use the `ustrip` function.
 It should be noted that charges are stored as dimensionless, i.e. 1.0 is an atomic charge of +1.
 
@@ -438,7 +438,7 @@ To use your custom force, add it to the list of general interactions:
 ```julia
 general_inters = (MyGeneralInter(true),)
 ```
-Then create and run a [`Simulation`](@ref) as above.
+Then create a [`System`](@ref) and simulate as above.
 Note that you can also use named tuples instead of tuples if you want to access interactions by name:
 ```julia
 general_inters = (MyGeneralInter = MyGeneralInter(true),)
@@ -457,7 +457,7 @@ end
 Next, you need to define the [`force`](@ref) function.
 For example:
 ```julia
-function Molly.force(inter::MySpecificInter, coords, s::Simulation)
+function Molly.force(inter::MySpecificInter, coords, s::System)
     dr = vector(coords[inter.i], coords[inter.j], s.box_size)
 
     # Replace this with your force calculation
@@ -563,7 +563,7 @@ end
 Then, define the function that carries out the simulation.
 This example shows some of the helper functions you can use:
 ```julia
-function Molly.simulate!(s::Simulation,
+function Molly.simulate!(s::System,
                             simulator::MySimulator,
                             n_steps::Integer;
                             parallel::Bool=true)
@@ -593,15 +593,15 @@ function Molly.simulate!(s::Simulation,
     return s
 end
 ```
-To use your custom simulator, give it as the `simulator` argument when creating the [`Simulation`](@ref).
+To use your custom simulator, give it as the `simulator` argument when calling [`simulate!`](@ref).
 
 Under the hood there are two implementations of common simulators: an in-place version geared towards CPUs, and an out-of-place version geared towards GPUs and differentiable simulation.
-You can define different versions of a simulator for in-place and out-of-place simulations by dispatching on `Simulation{D, S, false}` or `Simulation{D, S, true}` respectively.
+You can define different versions of a simulator for in-place and out-of-place systems by dispatching on `System{D, S, false}` or `System{D, S, true}` respectively.
 This also applies to thermostats and neighbor lists.
-You do not have to define two versions though: you may only intend to use the simulation one way, or the out-of-place version may be performant in all cases.
+You do not have to define two versions though: you may only intend to use the simulator one way, or the out-of-place version may be performant in all cases.
 The above example is more similar to the in-place version; see the source code for an example of the out-of-place version.
 
-The implementation to use is guessed when you call [`Simulation`](@ref) based on whether `coords` is a `CuArray`, but can be given explicitly with the `gpu_diff_safe` argument.
+The implementation to use is guessed when you call [`System`](@ref) based on whether `coords` is a `CuArray`, but can be given explicitly with the `gpu_diff_safe` argument.
 
 ## Coupling
 
@@ -617,13 +617,13 @@ end
 ```
 Then, define the function that implements the coupling every timestep:
 ```julia
-function apply_coupling!(s::Simulation, coupling::MyCoupler)
+function apply_coupling!(s::System, coupling::MyCoupler)
     # Do something to the simulation, e.g. scale the velocities
     return s
 end
 ```
 The functions [`velocity`](@ref), [`maxwellboltzmann`](@ref) and [`temperature`](@ref) may be useful here.
-To use your custom coupler, give it as the `coupling` argument when creating the [`Simulation`](@ref).
+To use your custom coupler, give it as the `coupling` argument when calling [`simulate!`](@ref).
 
 ## Neighbor finders
 
@@ -645,7 +645,7 @@ end
 Examples of three useful properties are given here: a matrix indicating atom pairs eligible for non-bonded interactions, a matrix indicating atoms in a 1-4 bonding arrangement, and a value determining how many time steps occur between each evaluation of the neighbor finder.
 Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
-function find_neighbors(s::Simulation,
+function find_neighbors(s::System,
                         nf::MyNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
@@ -665,7 +665,7 @@ function find_neighbors(s::Simulation,
     end
 end
 ```
-To use your custom neighbor finder, give it as the `neighbor_finder` argument when creating the [`Simulation`](@ref).
+To use your custom neighbor finder, give it as the `neighbor_finder` argument when creating the [`System`](@ref).
 
 ## Loggers
 
@@ -693,7 +693,7 @@ function Molly.log_property!(logger::MyLogger, s, neighbors, step_n)
 end
 ```
 The use of `n_steps` is optional and is an example of how to record a property every n steps through the simulation.
-To use your custom logger, add it to the dictionary of loggers:
+To use your custom logger, add it to the dictionary of loggers given when creating the [`System`](@ref):
 ```julia
 loggers = Dict("mylogger" => MyLogger(10))
 ```

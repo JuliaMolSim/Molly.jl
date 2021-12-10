@@ -18,7 +18,7 @@ acosbound(x::Real) = acos(clamp(x, -1, 1))
 
 @inline @inbounds function force(a::HarmonicAngle,
                                   coords,
-                                  s::Simulation)
+                                  s::System)
     ba = vector(coords[a.j], coords[a.i], s.box_size)
     bc = vector(coords[a.j], coords[a.k], s.box_size)
     cross_ba_bc = ba × bc
@@ -36,7 +36,7 @@ acosbound(x::Real) = acos(clamp(x, -1, 1))
 end
 
 @inline @inbounds function potential_energy(a::HarmonicAngle,
-                                            s::Simulation)
+                                            s::System)
     ba = vector(s.coords[a.j], s.coords[a.i], s.box_size)
     bc = vector(s.coords[a.j], s.coords[a.k], s.box_size)
     return (a.cth / 2) * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.th0)^2

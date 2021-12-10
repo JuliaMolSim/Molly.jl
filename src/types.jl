@@ -13,7 +13,7 @@ export
     AtomData,
     NeighborList,
     NeighborListVec,
-    Simulation
+    System
 
 const DefaultFloat = Float64
 
@@ -39,7 +39,7 @@ Interactions can be parameterized by the cutoff behavior.
 abstract type AbstractCutoff end
 
 """
-A way to keep properties of a simulation constant.
+A way to keep properties of a system constant.
 Custom temperature and pressure couplers should sub-type this type.
 """
 abstract type AbstractCoupler end
@@ -179,9 +179,9 @@ struct NeighborListVec{T}
 end
 
 """
-    Simulation(; <keyword arguments>)
+    System(; <keyword arguments>)
 
-The data needed to define and run a molecular simulation.
+A physical system that can be simulated.
 Properties unused in the simulation or in analysis can be left with their
 default values.
 This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
@@ -189,20 +189,20 @@ interface described there.
 
 # Arguments
 - `simulator`: the type of simulation to run.
-- `atoms::A`: the atoms, or atom equivalents, in the simulation. Can be
+- `atoms::A`: the atoms, or atom equivalents, in the system. Can be
     of any type.
 - `atoms_data::AD`: data associated with the atoms, allowing the atoms to be
     bits types and hence work on the GPU.
-- `specific_inter_lists::SI=()`: the specific interactions in the simulation,
+- `specific_inter_lists::SI=()`: the specific interactions in the system,
     i.e. interactions between specific atoms such as bonds or angles. Typically
     a `Tuple`.
-- `general_inters::GI=()`: the general interactions in the simulation, i.e.
+- `general_inters::GI=()`: the general interactions in the system, i.e.
     interactions between all or most atoms such as electrostatics. Typically a
     `Tuple`.
-- `coords::C`: the coordinates of the atoms in the simulation. Typically a
+- `coords::C`: the coordinates of the atoms in the system. Typically a
     `Vector` of `SVector`s of any dimension and type `T`, where `T` is an
     `AbstractFloat` type.
-- `velocities::V=zero(coords)`: the velocities of the atoms in the simulation,
+- `velocities::V=zero(coords)`: the velocities of the atoms in the system,
     which should be the same type as the coordinates. The meaning of the
     velocities depends on the simulator used, e.g. for the `VelocityFreeVerlet`
     simulator they represent the previous step coordinates for the first step.
@@ -212,16 +212,15 @@ interface described there.
 - `coupling::AbstractCoupler=NoCoupling()`: the coupling which applies during
     the simulation.
 - `loggers::Dict{String, <:Logger}=Dict()`: the loggers that record properties
-    of interest during the simulation.
-- `timestep::T=0.0`: the timestep of the simulation.
+    of interest during a simulation.
+- `timestep::T=0.0`: the time step of the simulation.
 - `n_steps::Integer=0`: the number of steps in the simulation.
-- `force_unit::F=u"kJ * mol^-1 * nm^-1"`: the unit of force used in the
-    simulation.
-- `energy_unit::E=u"kJ * mol^-1"`: the unit of energy used in the simulation.
+- `force_unit::F=u"kJ * mol^-1 * nm^-1"`: the unit of force of the system.
+- `energy_unit::E=u"kJ * mol^-1"`: the unit of energy of the system.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-mutable struct Simulation{D, S, G, A, AD, C, V, GI, SI, B, T, F, E, NF, CO} <: AbstractSystem{D, S}
+mutable struct System{D, S, G, A, AD, C, V, GI, SI, B, T, F, E, NF, CO} <: AbstractSystem{D, S}
     simulator
     atoms::A
     atoms_data::AD
@@ -239,7 +238,7 @@ mutable struct Simulation{D, S, G, A, AD, C, V, GI, SI, B, T, F, E, NF, CO} <: A
     energy_unit::E
 end
 
-function Simulation(;
+function System(;
                     simulator=VelocityVerlet(),
                     atoms,
                     atoms_data=[],
@@ -270,38 +269,38 @@ function Simulation(;
     E = typeof(energy_unit)
     NF = typeof(neighbor_finder)
     CO = typeof(coupling)
-    return Simulation{D, S, gpu_diff_safe, A, AD, C, V, GI, SI, B, T, F, E, NF, CO}(
+    return System{D, S, gpu_diff_safe, A, AD, C, V, GI, SI, B, T, F, E, NF, CO}(
                 simulator, atoms, atoms_data, specific_inter_lists, general_inters,
                 coords, velocities, box_size, neighbor_finder, coupling, loggers,
                 timestep, n_steps, force_unit, energy_unit)
 end
 
-Base.getindex(s::Simulation, i::Integer) = s.atoms[i]
-Base.length(s::Simulation) = length(s.atoms)
+Base.getindex(s::System, i::Integer) = s.atoms[i]
+Base.length(s::System) = length(s.atoms)
 
-AtomsBase.species(s::Simulation) = s.atoms
-AtomsBase.species(s::Simulation, i::Integer) = s.atoms[i]
+AtomsBase.species(s::System) = s.atoms
+AtomsBase.species(s::System, i::Integer) = s.atoms[i]
 
-AtomsBase.position(s::Simulation) = s.coords
-AtomsBase.position(s::Simulation, i::Integer) = s.coords[i]
+AtomsBase.position(s::System) = s.coords
+AtomsBase.position(s::System, i::Integer) = s.coords[i]
 
-AtomsBase.velocity(s::Simulation) = s.velocities
-AtomsBase.velocity(s::Simulation, i::Integer) = s.velocities[i]
+AtomsBase.velocity(s::System) = s.velocities
+AtomsBase.velocity(s::System, i::Integer) = s.velocities[i]
 
-AtomsBase.boundary_conditions(::Simulation{3}) = SVector(Periodic(), Periodic(), Periodic())
-AtomsBase.boundary_conditions(::Simulation{2}) = SVector(Periodic(), Periodic())
+AtomsBase.boundary_conditions(::System{3}) = SVector(Periodic(), Periodic(), Periodic())
+AtomsBase.boundary_conditions(::System{2}) = SVector(Periodic(), Periodic())
 
 edges_to_box(bs::SVector{3}, z) = SVector{3}([SVector(bs[1], z, z), SVector(z, bs[2], z), SVector(z, z, bs[3])])
 edges_to_box(bs::SVector{2}, z) = SVector{2}([SVector(bs[1], z), SVector(z, bs[2])])
 
-function AtomsBase.bounding_box(s::Simulation)
+function AtomsBase.bounding_box(s::System)
     bs = s.box_size
     z = zero(bs[1])
     bb = edges_to_box(bs, z)
     return unit(z) == NoUnits ? (bb)u"nm" : bb # Assume nm without other information
 end
 
-function Base.show(io::IO, ::MIME"text/plain", s::Simulation)
-    print(io, "Simulation with ", length(s), " atoms, ", typeof(s.simulator), " simulator, ",
+function Base.show(io::IO, ::MIME"text/plain", s::System)
+    print(io, "System with ", length(s), " atoms, ", typeof(s.simulator), " simulator, ",
             s.timestep, " time step, ", s.n_steps, " steps")
 end

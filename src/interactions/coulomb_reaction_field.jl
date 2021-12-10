@@ -66,7 +66,7 @@ end
 end
 
 @inline @inbounds function potential_energy(inter::CoulombReactionField,
-                                    s::Simulation,
+                                    s::System,
                                     i::Integer,
                                     j::Integer,
                                     weight_14::Bool=false)

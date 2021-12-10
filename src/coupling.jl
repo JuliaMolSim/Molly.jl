@@ -15,12 +15,12 @@ Placeholder coupler that does nothing.
 struct NoCoupling <: AbstractCoupler end
 
 """
-    apply_coupling!(simulation, coupling)
+    apply_coupling!(system, coupling)
 
 Apply a coupler to modify a simulation.
 Custom couplers should implement this function.
 """
-function apply_coupling!(s::Simulation, ::NoCoupling)
+function apply_coupling!(s::System, ::NoCoupling)
     return s
 end
 
@@ -34,7 +34,7 @@ struct AndersenThermostat{T, C} <: AbstractCoupler
     coupling_const::C
 end
 
-function apply_coupling!(s::Simulation{D}, thermostat::AndersenThermostat) where D
+function apply_coupling!(s::System{D}, thermostat::AndersenThermostat) where D
     for i in 1:length(s)
         if rand() < s.timestep / thermostat.coupling_const
             mass = s.atoms[i].mass
@@ -66,11 +66,11 @@ function maxwellboltzmann(mass, temp)
 end
 
 """
-    temperature(simulation)
+    temperature(system)
 
 Calculate the temperature of a system from the kinetic energy of the atoms.
 """
-function temperature(s::Simulation{D, S, false}) where {D, S}
+function temperature(s::System{D, S, false}) where {D, S}
     ke = sum([a.mass * dot(s.velocities[i], s.velocities[i]) for (i, a) in enumerate(s.atoms)]) / 2
     df = 3 * length(s) - 3
     T = typeof(ustrip(ke))
@@ -78,7 +78,7 @@ function temperature(s::Simulation{D, S, false}) where {D, S}
     return 2 * ke / (df * k)
 end
 
-function temperature(s::Simulation{D, S, true}) where {D, S}
+function temperature(s::System{D, S, true}) where {D, S}
     ke = sum(mass.(s.atoms) .* sum.(abs2, s.velocities)) / 2
     df = 3 * length(s) - 3
     T = typeof(ustrip(ke))

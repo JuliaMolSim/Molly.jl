@@ -70,7 +70,7 @@ end
 end
 
 @inbounds function potential_energy(inter::SoftSphere{S, C},
-                                    s::Simulation,
+                                    s::System,
                                     i::Integer,
                                     j::Integer) where {S, C}
     dr = vector(s.coords[i], s.coords[j], s.box_size)

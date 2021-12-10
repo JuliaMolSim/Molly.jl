@@ -27,8 +27,7 @@ ustripvec(x) = ustrip.(x)
 
 function checkforcetype(fdr, force_unit)
     if unit(first(fdr)) != force_unit
-        error("Simulation force type is ", force_unit,
-                " but encountered force type ", unit(first(fdr)))
+        error("System force type is ", force_unit, " but encountered force type ", unit(first(fdr)))
     end
 end
 
@@ -40,7 +39,7 @@ Custom interaction types should implement this function.
 """
 function force end
 
-@inline @inbounds function force!(fs, inter, s::Simulation, i::Integer, j::Integer, force_unit, weight_14::Bool=false)
+@inline @inbounds function force!(fs, inter, s::System, i::Integer, j::Integer, force_unit, weight_14::Bool=false)
     if weight_14
         fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size, true)
     else
@@ -86,25 +85,25 @@ accumulateadd(x) = accumulate(+, x)
 end
 
 """
-    accelerations(simulation, neighbors=nothing; parallel=true)
+    accelerations(system, neighbors=nothing; parallel=true)
 
 Calculate the accelerations of all atoms using the general and specific
 interactions and Newton's second law.
 """
-function accelerations(s::Simulation, neighbors=nothing; parallel::Bool=true)
+function accelerations(s::System, neighbors=nothing; parallel::Bool=true)
     return forces(s, neighbors; parallel=parallel) ./ mass.(s.atoms)
 end
 
-function accelerations(s::Simulation, coords, atoms, neighbors=nothing, neighbors_all=nothing)
+function accelerations(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothing)
     return forces(s, coords, atoms, neighbors, neighbors_all) ./ mass.(s.atoms)
 end
 
 """
-    forces(simulation, neighbors=nothing; parallel=true)
+    forces(system, neighbors=nothing; parallel=true)
 
 Calculate the forces on all atoms using the general and specific interactions.
 """
-function forces(s::Simulation, neighbors=nothing; parallel::Bool=true)
+function forces(s::System, neighbors=nothing; parallel::Bool=true)
     n_atoms = length(s)
 
     if parallel && nthreads() > 1 && n_atoms >= 100
@@ -157,7 +156,7 @@ function forces(s::Simulation, neighbors=nothing; parallel::Bool=true)
     return fs * s.force_unit
 end
 
-function forces(s::Simulation, coords, atoms, neighbors=nothing, neighbors_all=nothing)
+function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothing)
     n_atoms = length(s)
     fs = ustripvec.(zero(coords))
 

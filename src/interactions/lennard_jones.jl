@@ -87,7 +87,7 @@ end
 end
 
 @inline @inbounds function potential_energy(inter::LennardJones{S, C},
-                                            s::Simulation,
+                                            s::System,
                                             i::Integer,
                                             j::Integer,
                                             weight_14::Bool=false) where {S, C}
