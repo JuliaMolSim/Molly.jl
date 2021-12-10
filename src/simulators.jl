@@ -31,10 +31,10 @@ struct VelocityVerlet <: Simulator end
 Run a simulation according to the rules of the given simulator.
 Custom simulators should implement this function.
 """
-function simulate!(s::Simulation{false},
+function simulate!(s::Simulation{D, S, false},
                     ::VelocityVerlet,
                     n_steps::Integer;
-                    parallel::Bool=true)
+                    parallel::Bool=true) where {D, S}
     # See https://www.saylor.org/site/wp-content/uploads/2011/06/MA221-6.1.pdf for
     #   integration algorithm - used shorter second version
     neighbors = find_neighbors(s, s.neighbor_finder; parallel=parallel)
@@ -65,10 +65,10 @@ function simulate!(s::Simulation{false},
     return s
 end
 
-function simulate!(s::Simulation{true},
+function simulate!(s::Simulation{D, S, true},
                     ::VelocityVerlet,
                     n_steps::Integer;
-                    parallel::Bool=true)
+                    parallel::Bool=true) where {D, S}
     if length([inter for inter in values(s.general_inters) if !inter.nl_only]) > 0
         neighbors_all = allneighbors(length(s.coords))
     else

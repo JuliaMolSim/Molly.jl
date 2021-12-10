@@ -189,6 +189,8 @@ end
 The data needed to define and run a molecular simulation.
 Properties unused in the simulation or in analysis can be left with their
 default values.
+This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
+interface described there.
 
 # Arguments
 - `simulator::Simulator`: the type of simulation to run.
@@ -224,9 +226,9 @@ default values.
 - `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
     `isa(coords, CuArray)`.
 """
-mutable struct Simulation{D, A, AD, C, V, GI, SI, B, S, F, E, NF, CO}
+mutable struct Simulation{D, S, G, AD, C, V, GI, SI, B, T, F, E, NF, CO} <: AbstractSystem{D, S}
     simulator::Simulator
-    atoms::A
+    atoms::S
     atoms_data::AD
     specific_inter_lists::SI
     general_inters::GI
@@ -236,14 +238,11 @@ mutable struct Simulation{D, A, AD, C, V, GI, SI, B, S, F, E, NF, CO}
     neighbor_finder::NF
     coupling::CO
     loggers::Dict{String, <:Logger}
-    timestep::S
+    timestep::T
     n_steps::Int
     force_unit::F
     energy_unit::E
 end
-
-Simulation{D}(args...) where {D, A, AD, C, V, GI, SI, B, S, F, E, NF, CO} = 
-    Simulation{D, A, AD, C, V, GI, SI, B, S, F, E, NF, CO}(args...)
 
 function Simulation(;
                     simulator=VelocityVerlet(),
@@ -262,25 +261,26 @@ function Simulation(;
                     force_unit=u"kJ * mol^-1 * nm^-1",
                     energy_unit=u"kJ * mol^-1",
                     gpu_diff_safe=isa(coords, CuArray))
-    A = typeof(atoms)
+    D = length(box_size)
+    S = typeof(atoms)
     AD = typeof(atoms_data)
     C = typeof(coords)
     V = typeof(velocities)
     GI = typeof(general_inters)
     SI = typeof(specific_inter_lists)
     B = typeof(box_size)
-    S = typeof(timestep)
+    T = typeof(timestep)
     F = typeof(force_unit)
     E = typeof(energy_unit)
     NF = typeof(neighbor_finder)
     CO = typeof(coupling)
-    return Simulation{gpu_diff_safe, A, AD, C, V, GI, SI, B, S, F, E, NF, CO}(
+    return Simulation{D, S, gpu_diff_safe, AD, C, V, GI, SI, B, T, F, E, NF, CO}(
                 simulator, atoms, atoms_data, specific_inter_lists, general_inters,
                 coords, velocities, box_size, neighbor_finder, coupling, loggers,
                 timestep, n_steps, force_unit, energy_unit)
 end
 
-function Base.show(io::IO, s::Simulation)
+function Base.show(io::IO, ::MIME"text/plain", s::Simulation)
     print(io, "Simulation with ", length(s.coords), " atoms, ",
                 typeof(s.simulator), " simulator, ", s.timestep, " timestep, ",
                 s.n_steps, " steps")

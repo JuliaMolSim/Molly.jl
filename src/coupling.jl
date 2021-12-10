@@ -72,7 +72,7 @@ end
 
 Calculate the temperature of a system from the kinetic energy of the atoms.
 """
-function temperature(s::Simulation{false})
+function temperature(s::Simulation{D, S, false}) where {D, S}
     ke = sum([a.mass * dot(s.velocities[i], s.velocities[i]) for (i, a) in enumerate(s.atoms)]) / 2
     df = 3 * length(s.coords) - 3
     T = typeof(ustrip(ke))
@@ -80,7 +80,7 @@ function temperature(s::Simulation{false})
     return 2 * ke / (df * k)
 end
 
-function temperature(s::Simulation{true})
+function temperature(s::Simulation{D, S, true}) where {D, S}
     ke = sum(mass.(s.atoms) .* sum.(abs2, s.velocities)) / 2
     df = 3 * length(s.coords) - 3
     T = typeof(ustrip(ke))

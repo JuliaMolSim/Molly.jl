@@ -1,5 +1,6 @@
 module Molly
 
+using AtomsBase
 using BioStructures
 using CellListMap
 using ChainRulesCore

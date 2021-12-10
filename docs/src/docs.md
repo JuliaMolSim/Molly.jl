@@ -596,7 +596,7 @@ end
 To use your custom simulator, give it as the `simulator` argument when creating the [`Simulation`](@ref).
 
 Under the hood there are two implementations of common simulators: an in-place version geared towards CPUs, and an out-of-place version geared towards GPUs and differentiable simulation.
-You can define different versions of a simulator for in-place and out-of-place simulations by dispatching on `Simulation{false}` or `Simulation{true}` respectively.
+You can define different versions of a simulator for in-place and out-of-place simulations by dispatching on `Simulation{D, S, false}` or `Simulation{D, S, true}` respectively.
 This also applies to thermostats and neighbor lists.
 You do not have to define two versions though: you may only intend to use the simulation one way, or the out-of-place version may be performant in all cases.
 The above example is more similar to the in-place version; see the source code for an example of the out-of-place version.
