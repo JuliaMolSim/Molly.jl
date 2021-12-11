@@ -61,7 +61,7 @@ temp = 298u"K"
 atom_mass = 10.0u"u"
 
 atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-coords = placeatoms(n_atoms, box_size, 0.3u"nm")
+coords = place_atoms(n_atoms, box_size, 0.3u"nm")
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 general_inters = (LennardJones(),)
 simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))

@@ -5,8 +5,8 @@ export
     BondType,
     AngleType,
     RBTorsionType,
-    placeatoms,
-    placediatomics,
+    place_atoms,
+    place_diatomics,
     readinputs,
     OpenMMAtomType,
     OpenMMResidueType,
@@ -47,12 +47,12 @@ struct RBTorsionType{T}
 end
 
 """
-    placeatoms(n_atoms, box_size, min_dist; dims=3)
+    place_atoms(n_atoms, box_size, min_dist; dims=3)
 
 Obtain `n_atoms` 3D coordinates in a box with sides `box_size` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
 """
-function placeatoms(n_atoms::Integer, box_size, min_dist; dims::Integer=3)
+function place_atoms(n_atoms::Integer, box_size, min_dist; dims::Integer=3)
     min_dist_sq = min_dist ^ 2
     T = typeof(convert(AbstractFloat, ustrip(first(box_size))))
     coords = SArray[]
@@ -73,13 +73,13 @@ function placeatoms(n_atoms::Integer, box_size, min_dist; dims::Integer=3)
 end
 
 """
-    placediatomics(n_molecules, box_size, min_dist, bond_length; dims=3)
+    place_diatomics(n_molecules, box_size, min_dist, bond_length; dims=3)
 
 Obtain 3D coordinates for `n_molecules` diatomics in a box with sides `box_size`
 where no two points are closer than `min_dist` and the bond length is `bond_length`,
 accounting for periodic boundary conditions.
 """
-function placediatomics(n_molecules::Integer, box_size, min_dist, bond_length; dims::Integer=3)
+function place_diatomics(n_molecules::Integer, box_size, min_dist, bond_length; dims::Integer=3)
     min_dist_sq = min_dist ^ 2
     T = typeof(convert(AbstractFloat, ustrip(first(box_size))))
     coords = SArray[]

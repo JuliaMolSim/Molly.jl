@@ -24,7 +24,7 @@ using Test
             s = System(
                 atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
                 general_inters=(lj_potential,),
-                coords=placeatoms(n_atoms, box_size, 0.6u"nm"),
+                coords=place_atoms(n_atoms, box_size, 0.6u"nm"),
                 velocities=[velocity(atom_mass, temp) for i in 1:n_atoms],
                 box_size=box_size,
                 loggers=Dict("coords" => CoordinateLogger(100),

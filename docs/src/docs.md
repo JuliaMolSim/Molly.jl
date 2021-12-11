@@ -26,7 +26,7 @@ Molly re-exports Unitful.jl and [StaticArrays.jl](https://github.com/JuliaArrays
 Next, we'll need some starting coordinates and velocities.
 ```julia
 box_size = SVector(2.0, 2.0, 2.0)u"nm"
-coords = placeatoms(n_atoms, box_size, 0.3u"nm") # Random placement without clashing
+coords = place_atoms(n_atoms, box_size, 0.3u"nm") # Random placement without clashing
 
 temp = 100u"K"
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
@@ -77,7 +77,7 @@ atom_mass = 10.0f0u"u"
 box_size = SVector(2.0f0, 2.0f0, 2.0f0)u"nm"
 temp = 100.0f0u"K"
 atoms = cu([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
-coords = cu(placeatoms(n_atoms, box_size, 0.3u"nm"))
+coords = cu(place_atoms(n_atoms, box_size, 0.3u"nm"))
 velocities = cu([velocity(atom_mass, temp) for i in 1:n_atoms])
 simulator = VelocityVerlet(dt=0.002f0u"ps", coupling=NoCoupling())
 
@@ -99,7 +99,7 @@ simulate!(sys, simulator, 1_000)
 If we want to define specific interactions between atoms, for example bonds, we can do.
 Using the same definitions as the first example, let's set up the coordinates so that paired atoms are 1 Å apart.
 ```julia
-coords = placeatoms(n_atoms ÷ 2, box_size, 0.3u"nm")
+coords = place_atoms(n_atoms ÷ 2, box_size, 0.3u"nm")
 for i in 1:length(coords)
     push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
 end
@@ -314,7 +314,7 @@ n_steps = 1_000
 n_people = 500
 n_starting = 2
 atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
-coords = placeatoms(n_people, box_size, 0.1; dims=2)
+coords = place_atoms(n_people, box_size, 0.1; dims=2)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
 general_inters = (LennardJones=LennardJones(nl_only=true), SIR=SIRInteraction(false, 0.5, 0.06, 0.01))
 neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_people, n_people), n_steps=10, dist_cutoff=2.0)

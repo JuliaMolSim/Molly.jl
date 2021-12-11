@@ -178,7 +178,7 @@ end
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
-        coords=placeatoms(n_atoms, box_size, 0.3u"nm"; dims=2),
+        coords=place_atoms(n_atoms, box_size, 0.3u"nm"; dims=2),
         velocities=[velocity(10.0u"u", temp; dims=2) .* 0.01 for i in 1:n_atoms],
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
@@ -213,7 +213,7 @@ end
             atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR") for i in 1:n_atoms],
             general_inters=(LennardJones(nl_only=true),),
-            coords=placeatoms(n_atoms, box_size, 0.3u"nm"),
+            coords=place_atoms(n_atoms, box_size, 0.3u"nm"),
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             box_size=box_size,
             neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
@@ -251,7 +251,7 @@ end
     n_atoms = 100
     n_steps = 20_000
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
-    coords = placeatoms(n_atoms, box_size, 0.3u"nm")
+    coords = place_atoms(n_atoms, box_size, 0.3u"nm")
     simulator = StormerVerlet(dt=0.002u"ps")
 
     s = System(
@@ -272,7 +272,7 @@ end
     n_steps = 20_000
     temp = 298.0u"K"
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
-    coords = placeatoms(n_atoms ÷ 2, box_size, 0.3u"nm")
+    coords = place_atoms(n_atoms ÷ 2, box_size, 0.3u"nm")
     for i in 1:length(coords)
         push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
     end
@@ -403,7 +403,7 @@ end
             atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"u", σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             general_inters=(gi,),
-            coords=placeatoms(n_atoms, box_size, 0.2u"nm"),
+            coords=place_atoms(n_atoms, box_size, 0.2u"nm"),
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             box_size=box_size,
             neighbor_finder=neighbor_finder,
@@ -421,7 +421,7 @@ end
     n_steps = 2_000 # Does diverge for longer simulations or higher velocities
     temp = 298.0u"K"
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
-    coords = placeatoms(n_atoms, box_size, 0.3u"nm")
+    coords = place_atoms(n_atoms, box_size, 0.3u"nm")
     velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
     simulator = VelocityVerlet(dt=0.002u"ps")
     simulator_nounits = VelocityVerlet(dt=0.002)
@@ -473,7 +473,7 @@ end
     atom_mass = 10.0u"u"
     box_size = SVector(6.0, 6.0, 6.0)u"nm"
     temp = 1.0u"K"
-    starting_coords = placediatomics(n_atoms ÷ 2, box_size, 0.2u"nm", 0.2u"nm")
+    starting_coords = place_diatomics(n_atoms ÷ 2, box_size, 0.2u"nm", 0.2u"nm")
     starting_velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
@@ -733,7 +733,7 @@ end
     temp = 0.01
     n_starting = 2
     atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
-    coords = placeatoms(n_people, box_size, 0.1; dims=2)
+    coords = place_atoms(n_people, box_size, 0.1; dims=2)
     velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
     general_inters = (LennardJones=LennardJones(nl_only=true), SIR=SIRInteraction(false, 0.5, 0.06, 0.01))
     neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_people, n_people), n_steps=10, dist_cutoff=2.0)
