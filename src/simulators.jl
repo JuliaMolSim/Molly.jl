@@ -2,7 +2,7 @@
 
 export
     VelocityVerlet,
-    VelocityFreeVerlet,
+    StormerVerlet,
     simulate!
 
 # Forces are often expressed per mol but this dimension needs removing for use in the integrator
@@ -33,29 +33,29 @@ end
 VelocityVerlet(; dt, coupling=NoCoupling()) = VelocityVerlet(dt, coupling)
 
 """
-    VelocityFreeVerlet(; <keyword arguments>)
+    StormerVerlet(; <keyword arguments>)
 
-The velocity-free Verlet integrator, also known as the Störmer method.
+The Störmer-Verlet integrator.
 In this case the `velocities` given to the simulator act as the previous step
 coordinates for the first step.
-Does not currently work with units.
+Does not currently work with units or thermostats.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
 - `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
 """
-struct VelocityFreeVerlet{T, C}
+struct StormerVerlet{T, C}
     dt::T
     coupling::C
 end
 
-VelocityFreeVerlet(; dt, coupling=NoCoupling()) = VelocityFreeVerlet(dt, coupling)
+StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
 
 """
     simulate!(system, simulator, n_steps; parallel=true)
+    simulate!(system, simulator; parallel=true)
 
-Run a simulation on a system for n_steps according to the rules of the
-given simulator.
+Run a simulation on a system according to the rules of the given simulator.
 Custom simulators should implement this function.
 """
 function simulate!(sys::System{D, S, false},
@@ -122,7 +122,7 @@ function simulate!(sys::System{D, S, true},
 end
 
 function simulate!(sys::System,
-                    sim::VelocityFreeVerlet,
+                    sim::StormerVerlet,
                     n_steps::Integer;
                     parallel::Bool=true)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)

@@ -184,28 +184,26 @@ end
 A physical system to be simulated.
 Properties unused in the simulation or in analysis can be left with their
 default values.
+`atoms`, `atoms_data`, `coords` and `velocities` should have the same length.
 This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
 interface described there.
 
 # Arguments
 - `atoms::A`: the atoms, or atom equivalents, in the system. Can be
-    of any type.
-- `atoms_data::AD`: data associated with the atoms, allowing the atoms to be
-    bits types and hence work on the GPU.
-- `specific_inter_lists::SI=()`: the specific interactions in the system,
-    i.e. interactions between specific atoms such as bonds or angles. Typically
-    a `Tuple`.
+    of any type but should be a bits type if the GPU is used.
+- `atoms_data::AD`: other data associated with the atoms, allowing the atoms to
+    be bits types and hence work on the GPU.
 - `general_inters::GI=()`: the general interactions in the system, i.e.
     interactions between all or most atoms such as electrostatics. Typically a
     `Tuple`.
+- `specific_inter_lists::SI=()`: the specific interactions in the system,
+    i.e. interactions between specific atoms such as bonds or angles. Typically
+    a `Tuple`.
 - `coords::C`: the coordinates of the atoms in the system. Typically a
-    `Vector` of `SVector`s of any dimension and type `T`, where `T` is an
-    `AbstractFloat` type.
-- `velocities::V=zero(coords)`: the velocities of the atoms in the system,
-    which should be the same type as the coordinates. The meaning of the
-    velocities depends on the simulator used, e.g. for the `VelocityFreeVerlet`
-    simulator they represent the previous step coordinates for the first step.
+    vector of `SVector`s of 2 or 3 dimensions.
+- `velocities::V=zero(coords)`: the velocities of the atoms in the system.
 - `box_size::B`: the size of the box in which the simulation takes place.
+    Typically a `SVector` of 2 or 3 dimensions.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `loggers::L=Dict{String, Logger}()`: the loggers that record properties of

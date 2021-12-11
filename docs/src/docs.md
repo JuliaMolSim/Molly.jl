@@ -530,7 +530,7 @@ Simulators define what type of simulation is run.
 This could be anything from a simple energy minimisation to complicated replica exchange MD.
 The available simulators are:
 - [`VelocityVerlet`](@ref).
-- [`VelocityFreeVerlet`](@ref).
+- [`StormerVerlet`](@ref).
 
 To define your own simulator, first define a `struct`:
 ```julia

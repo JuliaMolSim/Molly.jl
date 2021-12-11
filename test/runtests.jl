@@ -252,7 +252,7 @@ end
     n_steps = 20_000
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
     coords = placeatoms(n_atoms, box_size, 0.3u"nm")
-    simulator = VelocityFreeVerlet(dt=0.002u"ps")
+    simulator = StormerVerlet(dt=0.002u"ps")
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
