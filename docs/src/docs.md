@@ -600,7 +600,7 @@ function apply_coupling!(sys::System, sim, coupling::MyCoupler)
     return sys
 end
 ```
-The functions [`velocity`](@ref), [`maxwellboltzmann`](@ref) and [`temperature`](@ref) may be useful here.
+The functions [`velocity`](@ref), [`maxwell_boltzmann`](@ref) and [`temperature`](@ref) may be useful here.
 To use your custom coupler, give it as the `coupling` argument when calling [`simulate!`](@ref).
 
 ## Neighbor finders

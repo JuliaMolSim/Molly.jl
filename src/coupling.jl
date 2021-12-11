@@ -4,7 +4,7 @@ export
     NoCoupling,
     apply_coupling!,
     AndersenThermostat,
-    maxwellboltzmann,
+    maxwell_boltzmann,
     temperature
 
 """
@@ -50,15 +50,15 @@ end
 Generate a random velocity from the Maxwell-Boltzmann distribution.
 """
 function AtomsBase.velocity(mass, temp; dims::Integer=3)
-    return SVector([maxwellboltzmann(mass, temp) for i in 1:dims]...)
+    return SVector([maxwell_boltzmann(mass, temp) for i in 1:dims]...)
 end
 
 """
-    maxwellboltzmann(mass, temperature)
+    maxwell_boltzmann(mass, temperature)
 
-Draw a speed along one dimension in accordance with the Maxwell-Boltzmann distribution.
+Generate a random speed along one dimension from the Maxwell-Boltzmann distribution.
 """
-function maxwellboltzmann(mass, temp)
+function maxwell_boltzmann(mass, temp)
     T = typeof(convert(AbstractFloat, ustrip(temp)))
     k = unit(temp) == NoUnits ? one(T) : uconvert(u"u * nm^2 * ps^-2 * K^-1", T(Unitful.k))
     σ = sqrt(k * temp / mass)
