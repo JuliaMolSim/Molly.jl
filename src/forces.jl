@@ -163,9 +163,11 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
     general_inters_nonl = [inter for inter in values(s.general_inters) if !inter.nl_only]
     @views if length(general_inters_nonl) > 0
         nbsi, nbsj = neighbors_all.nbsi, neighbors_all.nbsj
+        coords_i, coords_j = coords[nbsi], coords[nbsj]
+        atoms_i, atoms_j = atoms[nbsi], atoms[nbsj]
         for inter in general_inters_nonl
-            @inbounds nb_forces = force_nounit.((inter,), coords[nbsi], coords[nbsj], atoms[nbsi],
-                                                atoms[nbsj], (s.box_size,), s.force_unit, false)
+            @inbounds nb_forces = force_nounit.((inter,), coords_i, coords_j, atoms_i, atoms_j,
+                                                (s.box_size,), s.force_unit, false)
             fs += sumforces(nb_forces, neighbors_all)
         end
     end
@@ -173,13 +175,15 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
     general_inters_nl = [inter for inter in values(s.general_inters) if inter.nl_only]
     @views if length(general_inters_nl) > 0
         nbsi, nbsj = neighbors.nbsi, neighbors.nbsj
+        coords_i, coords_j = coords[nbsi], coords[nbsj]
+        atoms_i, atoms_j = atoms[nbsi], atoms[nbsj]
         if length(nbsi) > 0
-            @inbounds nb_forces = force_nounit.((first(general_inters_nl),), coords[nbsi], coords[nbsj],
-                    atoms[nbsi], atoms[nbsj], (s.box_size,), s.force_unit, neighbors.weights_14)
+            @inbounds nb_forces = force_nounit.((first(general_inters_nl),), coords_i, coords_j,
+                    atoms_i, atoms_j, (s.box_size,), s.force_unit, neighbors.weights_14)
             # Add all atom pair forces before summation
             for inter in general_inters_nl[2:end]
-                @inbounds nb_forces += force_nounit.((inter,), coords[nbsi], coords[nbsj],
-                    atoms[nbsi], atoms[nbsj], (s.box_size,), s.force_unit, neighbors.weights_14)
+                @inbounds nb_forces += force_nounit.((inter,), coords_i, coords_j,
+                    atoms_i, atoms_j, (s.box_size,), s.force_unit, neighbors.weights_14)
             end
             fs += sumforces(nb_forces, neighbors)
         end
