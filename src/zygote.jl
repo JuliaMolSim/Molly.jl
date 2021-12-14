@@ -60,15 +60,27 @@ end
 
 Zygote._zero(xs::AbstractArray{<:StaticVector}, T) = fill!(similar(xs, T), zero(T))
 
+function Zygote._zero(xs::AbstractArray{Atom{T, T, T, T}}, ::Type{Atom{T, T, T, T}}) where {T}
+    fill!(similar(xs), Atom{T, T, T, T}(0, zero(T), zero(T), zero(T), zero(T)))
+end
+
 function Base.zero(::Type{Union{Nothing, SizedVector{D, T, Vector{T}}}}) where {D, T}
     zero(SizedVector{D, T, Vector{T}})
 end
+
+Base.:+(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where {T} = Zygote.accum(x, y)
 
 Base.:+(x::Real, y::SizedVector) = x .+ y
 Base.:+(x::SizedVector, y::Real) = x .+ y
 
 Base.:+(x::Real, y::Zygote.OneElement) = x .+ y
 Base.:+(x::Zygote.OneElement, y::Real) = x .+ y
+
+Zygote.∇getindex(x::CuArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> begin
+    dx = Zygote._zero(x, eltype(dy))
+    NNlib.scatter!(+, dx, dy, inds[1])
+    return (Zygote._project(x, dx), map(_ -> nothing, inds)...)
+end
 
 # See the dualize function in ForwardDiff
 @generated function dualize_add1(::Type{T}, x::StaticArray) where T
