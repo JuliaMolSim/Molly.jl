@@ -7,8 +7,18 @@ using Zygote: unbroadcast
 Zygote.accum(x::AbstractArray{<:SizedVector}, ys::CuArray{<:SVector}...) = Zygote.accum.(convert(typeof(ys[1]), x), ys...)
 Zygote.accum(x::CuArray{<:SVector}, ys::AbstractArray{<:SizedVector}...) = Zygote.accum.(x, convert.(typeof(x), ys)...)
 
-function Zygote.accum(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
+Base.:+(x::Real, y::SizedVector) = x .+ y
+Base.:+(x::SizedVector, y::Real) = x .+ y
+
+Base.:+(x::Real, y::Zygote.OneElement) = x .+ y
+Base.:+(x::Zygote.OneElement, y::Real) = x .+ y
+
+function Base.:+(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
     Atom{T, T, T, T}(0, x.charge + y.charge, x.mass + y.mass, x.σ + y.σ, x.ϵ + y.ϵ)
+end
+
+function Base.:-(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
+    Atom{T, T, T, T}(0, x.charge - y.charge, x.mass - y.mass, x.σ - y.σ, x.ϵ - y.ϵ)
 end
 
 function Zygote.accum(x::NamedTuple{(:index, :charge, :mass, :σ, :ϵ), Tuple{Int64, T, T, T, T}}, y::Atom{T, T, T, T}) where T
@@ -41,8 +51,9 @@ function Zygote.accum_sum(xs::AbstractArray{CoulombReactionField{D, S, W, T, F, 
     reduce(Zygote.accum, xs, dims=dims; init=CoulombReactionField{D, S, W, T, F, E}(zero(D), zero(S), false, zero(W), zero(T), NoUnits, NoUnits))
 end
 
+Base.zero(::Type{Atom{T, T, T, T}}) where {T} = Atom(0, zero(T), zero(T), zero(T), zero(T))
 atomorempty(at::Atom, T) = at
-atomorempty(at::Nothing, T) = Atom(0, zero(T), zero(T), zero(T), zero(T))
+atomorempty(at::Nothing, T) = zero(Atom{T, T, T, T})
 
 Zygote.z2d(dx::AbstractArray{Union{Nothing, Atom{T, T, T, T}}}, primal::AbstractArray{Atom{T, T, T, T}}) where {T} = atomorempty.(dx, T)
 Zygote.z2d(dx::SVector{3, T}, primal::T) where {T} = sum(dx)
@@ -68,14 +79,8 @@ function Base.zero(::Type{Union{Nothing, SizedVector{D, T, Vector{T}}}}) where {
     zero(SizedVector{D, T, Vector{T}})
 end
 
-Base.:+(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where {T} = Zygote.accum(x, y)
-
-Base.:+(x::Real, y::SizedVector) = x .+ y
-Base.:+(x::SizedVector, y::Real) = x .+ y
-
-Base.:+(x::Real, y::Zygote.OneElement) = x .+ y
-Base.:+(x::Zygote.OneElement, y::Real) = x .+ y
-
+# Slower version than in Zygote but doesn't give wrong gradients on the GPU for repeated indices
+# See https://github.com/FluxML/Zygote.jl/pull/1131
 Zygote.∇getindex(x::CuArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> begin
     dx = Zygote._zero(x, eltype(dy))
     NNlib.scatter!(+, dx, dy, inds[1])

@@ -65,6 +65,11 @@ end
 
 accumulateadd(x) = accumulate(+, x)
 
+# Uses the Zygote path which gives wrong gradients on the GPU for repeated indices
+# Hence only used when we know the indices don't contain repeats
+# See https://github.com/FluxML/Zygote.jl/pull/1131
+unsafe_getindex(arr, inds) = @view arr[inds]
+
 # Sum forces on neighboring atom pairs to get forces on each atom
 # Neighbor forces are accumulated and then atom forces extracted by subtraction
 #   at the atom boundaries
@@ -77,7 +82,7 @@ accumulateadd(x) = accumulate(+, x)
     fs_accum_bounds_i = fs_accum_pad_i[neighbors.atom_bounds_i]
     fs_accum_bounds_offset_i = vcat(zf, fs_accum_bounds_i[1:(end - 1)])
 
-    fs_accum_pad_j = vcat(zf, accumulateadd(nb_forces[neighbors.sortperm_j]))
+    fs_accum_pad_j = vcat(zf, accumulateadd(unsafe_getindex(nb_forces, neighbors.sortperm_j)))
     fs_accum_bounds_j = fs_accum_pad_j[neighbors.atom_bounds_j]
     fs_accum_bounds_offset_j = vcat(zf, fs_accum_bounds_j[1:(end - 1)])
 
@@ -97,6 +102,10 @@ end
 function accelerations(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothing)
     return forces(s, coords, atoms, neighbors, neighbors_all) ./ mass.(s.atoms)
 end
+
+# Functions defined to allow us to write rrules
+getindices_i(arr, neighbors) = @view arr[neighbors.nbsi]
+getindices_j(arr, neighbors) = @view arr[neighbors.nbsj]
 
 """
     forces(system, neighbors=nothing; parallel=true)
@@ -162,9 +171,8 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
 
     general_inters_nonl = [inter for inter in values(s.general_inters) if !inter.nl_only]
     @views if length(general_inters_nonl) > 0
-        nbsi, nbsj = neighbors_all.nbsi, neighbors_all.nbsj
-        coords_i, coords_j = coords[nbsi], coords[nbsj]
-        atoms_i, atoms_j = atoms[nbsi], atoms[nbsj]
+        coords_i, atoms_i = getindices_i(coords, neighbors_all), getindices_i(atoms, neighbors_all)
+        coords_j, atoms_j = getindices_j(coords, neighbors_all), getindices_j(atoms, neighbors_all)
         for inter in general_inters_nonl
             @inbounds nb_forces = force_nounit.((inter,), coords_i, coords_j, atoms_i, atoms_j,
                                                 (s.box_size,), s.force_unit, false)
@@ -174,10 +182,9 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
 
     general_inters_nl = [inter for inter in values(s.general_inters) if inter.nl_only]
     @views if length(general_inters_nl) > 0
-        nbsi, nbsj = neighbors.nbsi, neighbors.nbsj
-        coords_i, coords_j = coords[nbsi], coords[nbsj]
-        atoms_i, atoms_j = atoms[nbsi], atoms[nbsj]
-        if length(nbsi) > 0
+        coords_i, atoms_i = getindices_i(coords, neighbors), getindices_i(atoms, neighbors)
+        coords_j, atoms_j = getindices_j(coords, neighbors), getindices_j(atoms, neighbors)
+        if length(neighbors.nbsi) > 0
             @inbounds nb_forces = force_nounit.((first(general_inters_nl),), coords_i, coords_j,
                     atoms_i, atoms_j, (s.box_size,), s.force_unit, neighbors.weights_14)
             # Add all atom pair forces before summation

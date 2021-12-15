@@ -43,7 +43,7 @@ Features not yet implemented include:
 
 ## Installation
 
-[Julia](https://julialang.org/downloads) is required, with Julia v1.6 or later required to get the latest version of Molly.
+[Julia](https://julialang.org/downloads) is required, with Julia v1.7 or later required to get the latest version of Molly.
 Install Molly from the Julia REPL.
 Enter the package mode by pressing `]` and run `add Molly`.
 
