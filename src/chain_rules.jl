@@ -22,8 +22,8 @@ end
 
 function ChainRulesCore.rrule(::typeof(sparsevec), is, vs, l)
     Y = sparsevec(is, vs, l)
-    function sparsevec_pullback(Ȳ)
-        return NoTangent(), collect(1:length(Ȳ)), Ȳ, length(Ȳ)
+    @views function sparsevec_pullback(Ȳ)
+        return NoTangent(), nothing, Ȳ[is], nothing
     end
     return Y, sparsevec_pullback
 end
