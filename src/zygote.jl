@@ -84,7 +84,7 @@ end
 Zygote.∇getindex(x::CuArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> begin
     dx = Zygote._zero(x, eltype(dy))
     NNlib.scatter!(+, dx, dy, inds[1])
-    return (Zygote._project(x, dx), map(_ -> nothing, inds)...)
+    return Zygote._project(x, dx), nothing
 end
 
 # See the dualize function in ForwardDiff

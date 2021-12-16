@@ -65,6 +65,16 @@ end
 
 accumulateadd(x) = accumulate(+, x)
 
+# Accumulate values in an array based on the ordered boundaries in bounds
+# Used to speed up views with repeated indices on the GPU when you have the bounds
+@views @inbounds function accumulate_bounds(arr, bounds)
+    zf = zero(arr[1:1])
+    accum_pad = vcat(zf, accumulateadd(arr))
+    accum_bounds = accum_pad[bounds]
+    accum_bounds_offset = vcat(zf, accum_bounds[1:(end - 1)])
+    return accum_bounds .- accum_bounds_offset
+end
+
 # Uses the Zygote path which gives wrong gradients on the GPU for repeated indices
 # Hence only used when we know the indices don't contain repeats
 # See https://github.com/FluxML/Zygote.jl/pull/1131
@@ -76,17 +86,9 @@ unsafe_getindex(arr, inds) = @view arr[inds]
 # The forces are re-arranged for the other atom index and the process is repeated
 # This isn't pretty but it works on the GPU
 @views @inbounds function sumforces(nb_forces, neighbors)
-    zf = zero(nb_forces[1:1])
-
-    fs_accum_pad_i = vcat(zf, accumulateadd(nb_forces))
-    fs_accum_bounds_i = fs_accum_pad_i[neighbors.atom_bounds_i]
-    fs_accum_bounds_offset_i = vcat(zf, fs_accum_bounds_i[1:(end - 1)])
-
-    fs_accum_pad_j = vcat(zf, accumulateadd(unsafe_getindex(nb_forces, neighbors.sortperm_j)))
-    fs_accum_bounds_j = fs_accum_pad_j[neighbors.atom_bounds_j]
-    fs_accum_bounds_offset_j = vcat(zf, fs_accum_bounds_j[1:(end - 1)])
-
-    return (fs_accum_bounds_j .- fs_accum_bounds_offset_j) .- (fs_accum_bounds_i .- fs_accum_bounds_offset_i)
+    fs_accum_i = accumulate_bounds(nb_forces, neighbors.atom_bounds_i)
+    fs_accum_j = accumulate_bounds(unsafe_getindex(nb_forces, neighbors.sortperm_j), neighbors.atom_bounds_j)
+    return fs_accum_j .- fs_accum_i
 end
 
 """

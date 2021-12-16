@@ -50,24 +50,16 @@ end
 # Only when on the GPU
 function ChainRulesCore.rrule(::typeof(getindices_i), arr::CuArray, neighbors)
     Y = getindices_i(arr, neighbors)
-    @views function getindices_i_pullback(Ȳ)
-        zf = zero(Ȳ[1:1])
-        grads_accum_pad = vcat(zf, accumulate(+, Ȳ))
-        grads_accum_bounds = grads_accum_pad[neighbors.atom_bounds_i]
-        grads_accum_bounds_offset = vcat(zf, grads_accum_bounds[1:(end - 1)])
-        return NoTangent(), grads_accum_bounds .- grads_accum_bounds_offset, nothing
+    @views @inbounds function getindices_i_pullback(Ȳ)
+        return NoTangent(), accumulate_bounds(Ȳ, neighbors.atom_bounds_i), nothing
     end
     return Y, getindices_i_pullback
 end
 
 function ChainRulesCore.rrule(::typeof(getindices_j), arr::CuArray, neighbors)
     Y = getindices_j(arr, neighbors)
-    @views function getindices_j_pullback(Ȳ)
-        zf = zero(Ȳ[1:1])
-        grads_accum_pad = vcat(zf, accumulate(+, Ȳ[neighbors.sortperm_j]))
-        grads_accum_bounds = grads_accum_pad[neighbors.atom_bounds_j]
-        grads_accum_bounds_offset = vcat(zf, grads_accum_bounds[1:(end - 1)])
-        return NoTangent(), grads_accum_bounds .- grads_accum_bounds_offset, nothing
+    @views @inbounds function getindices_j_pullback(Ȳ)
+        return NoTangent(), accumulate_bounds(Ȳ[neighbors.sortperm_j], neighbors.atom_bounds_j), nothing
     end
     return Y, getindices_j_pullback
 end
