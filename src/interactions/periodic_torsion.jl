@@ -16,12 +16,10 @@ end
 PeriodicTorsion(; i, j, k, l, periodicities, phases, ks) = PeriodicTorsion{eltype(phases), eltype(ks)}(
     i, j, k, l, periodicities, phases, ks)
 
-@inline @inbounds function force(d::PeriodicTorsion,
-                                  coords,
-                                  s::System)
-    ab = vector(coords[d.i], coords[d.j], s.box_size)
-    bc = vector(coords[d.j], coords[d.k], s.box_size)
-    cd = vector(coords[d.k], coords[d.l], s.box_size)
+@inline @inbounds function force(d::PeriodicTorsion, coords, box_size)
+    ab = vector(coords[d.i], coords[d.j], box_size)
+    bc = vector(coords[d.j], coords[d.k], box_size)
+    cd = vector(coords[d.k], coords[d.l], box_size)
     cross_ab_bc = ab × bc
     cross_bc_cd = bc × cd
     bc_norm = norm(bc)

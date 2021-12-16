@@ -157,7 +157,7 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
     end
 
     for inter_list in values(s.specific_inter_lists)
-        sparse_fs = force.(inter_list, (s.coords,), (s,))
+        sparse_fs = force.(inter_list, (s.coords,), (s.box_size,))
         ge1, ge2 = getindex.(sparse_fs, 1), getindex.(sparse_fs, 2)
         checkforcetype(first(first(ge2)), s.force_unit)
         sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
@@ -201,7 +201,7 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
     for inter_list in values(s.specific_inter_lists)
         # Take coords off the GPU if they are on there
         coords_cpu = Array(coords)
-        sparse_fs = force.(inter_list, (coords_cpu,), (s,))
+        sparse_fs = force.(inter_list, (coords_cpu,), (s.box_size,))
         ge1, ge2 = getindex.(sparse_fs, 1), getindex.(sparse_fs, 2)
         checkforcetype(first(first(ge2)), s.force_unit)
         sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)

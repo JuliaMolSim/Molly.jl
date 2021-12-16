@@ -435,8 +435,8 @@ end
 Next, you need to define the [`force`](@ref) function.
 For example:
 ```julia
-function Molly.force(inter::MySpecificInter, coords, s::System)
-    dr = vector(coords[inter.i], coords[inter.j], s.box_size)
+function Molly.force(inter::MySpecificInter, coords, box_size)
+    dr = vector(coords[inter.i], coords[inter.j], box_size)
 
     # Replace this with your force calculation
     # A positive force causes the atoms to move apart

@@ -81,7 +81,7 @@ temp_fp_viz = tempname(cleanup=true) * ".mp4"
     
     b1 = HarmonicBond(i=1, j=2, b0=0.2u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2")
     b2 = HarmonicBond(i=1, j=3, b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
-    inds, fs = force(b1, coords, s)
+    inds, fs = force(b1, coords, box_size)
     @test inds == [1, 2]
     @test isapprox(fs[1],
                     SVector(30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
@@ -89,7 +89,7 @@ temp_fp_viz = tempname(cleanup=true) * ".mp4"
     @test isapprox(fs[2],
                     SVector(-30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
-    inds, fs = force(b2, coords, s)
+    inds, fs = force(b2, coords, box_size)
     @test inds == [1, 3]
     @test isapprox(fs[1],
                     SVector(-20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",

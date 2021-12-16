@@ -16,12 +16,10 @@ end
 
 RBTorsion(; i, j, k, l, f1, f2, f3, f4) = RBTorsion{typeof(f1)}(i, j, k, l, f1, f2, f3, f4)
 
-@inline @inbounds function force(d::RBTorsion,
-                                  coords,
-                                  s::System)
-    ab = vector(coords[d.i], coords[d.j], s.box_size)
-    bc = vector(coords[d.j], coords[d.k], s.box_size)
-    cd = vector(coords[d.k], coords[d.l], s.box_size)
+@inline @inbounds function force(d::RBTorsion, coords, box_size)
+    ab = vector(coords[d.i], coords[d.j], box_size)
+    bc = vector(coords[d.j], coords[d.k], box_size)
+    cd = vector(coords[d.k], coords[d.l], box_size)
     cross_ab_bc = ab × bc
     cross_bc_cd = bc × cd
     bc_norm = norm(bc)

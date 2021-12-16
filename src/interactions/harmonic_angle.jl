@@ -16,14 +16,12 @@ HarmonicAngle(; i, j, k, th0, cth) = HarmonicAngle{typeof(th0), typeof(cth)}(i, 
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
 acosbound(x::Real) = acos(clamp(x, -1, 1))
 
-@inline @inbounds function force(a::HarmonicAngle,
-                                  coords,
-                                  s::System)
-    ba = vector(coords[a.j], coords[a.i], s.box_size)
-    bc = vector(coords[a.j], coords[a.k], s.box_size)
+@inline @inbounds function force(a::HarmonicAngle, coords, box_size)
+    ba = vector(coords[a.j], coords[a.i], box_size)
+    bc = vector(coords[a.j], coords[a.k], box_size)
     cross_ba_bc = ba × bc
     if iszero(cross_ba_bc)
-        fz = ustrip.(zero(coords[a.i])) * s.force_unit
+        fz = ustrip.(zero(coords[a.i])) * force_unit
         return [a.i, a.j, a.k], [fz, fz, fz]
     end
     pa = normalize(ba × cross_ba_bc)

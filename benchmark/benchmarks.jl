@@ -47,7 +47,7 @@ SUITE["interactions"]["LennardJones force" ] = @benchmarkable force($(LennardJon
 SUITE["interactions"]["LennardJones energy"] = @benchmarkable potential_energy($(LennardJones()), $(s), 1, 2)
 SUITE["interactions"]["Coulomb force"      ] = @benchmarkable force($(Coulomb()), $(c1), $(c2), $(a1), $(a1), $(box_size))
 SUITE["interactions"]["Coulomb energy"     ] = @benchmarkable potential_energy($(Coulomb()), $(s), 1, 2)
-SUITE["interactions"]["HarmonicBond force" ] = @benchmarkable force($(b1), $(coords), $(s))
+SUITE["interactions"]["HarmonicBond force" ] = @benchmarkable force($(b1), $(coords), $(box_size))
 SUITE["interactions"]["HarmonicBond energy"] = @benchmarkable potential_energy($(b1), $(s))
 
 SUITE["spatial"]["vector1D"] = @benchmarkable vector1D($(4.0u"nm"), $(6.0u"nm"), $(10.0u"nm"))
