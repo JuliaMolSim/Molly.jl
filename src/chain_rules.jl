@@ -63,3 +63,27 @@ function ChainRulesCore.rrule(::typeof(getindices_j), arr::CuArray, neighbors)
     end
     return Y, getindices_j_pullback
 end
+
+# This is defined in Zygote but it doesn't work for SVectors
+# Not currently overwriting the Zygote adjoint
+function ChainRulesCore.rrule(::typeof(sum), xs::AbstractArray{<:StaticVector}; dims=:)
+    Y = sum(xs; dims=dims)
+    function sum_pullback(Ȳ)
+        println("hi2")
+        placeholder = similar(xs)
+        return NoTangent(), isa(Ȳ, SVector) ? fill!(placeholder, Ȳ) : placeholder .= Ȳ
+    end
+    return Y, sum_pullback
+end
+
+backlogger(thing, n) = thing
+
+function ChainRulesCore.rrule(::typeof(backlogger), thing, n)
+    Y = backlogger(thing, n)
+    println("Fwd logger ", n)
+    function backlogger_pullback(Ȳ)
+        println("Back logger ", n, " ", typeof(Ȳ))
+        return NoTangent(), Ȳ
+    end
+    return Y, backlogger_pullback
+end

@@ -154,6 +154,39 @@ end
     end
 end
 
+@generated function dualize_sb1(::Type{T}, x::StaticArray) where T
+    N = length(x)
+    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i+2}())) for i in 1:N]...)
+    V = StaticArrays.similar_type(x, Dual{T,eltype(x),N+8})
+    return quote
+        chunk = Chunk{$N+8}()
+        $(Expr(:meta, :inline))
+        return $V($(dx))
+    end
+end
+
+@generated function dualize_sb2(::Type{T}, x::StaticArray) where T
+    N = length(x)
+    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i+5}())) for i in 1:N]...)
+    V = StaticArrays.similar_type(x, Dual{T,eltype(x),N+8})
+    return quote
+        chunk = Chunk{$N+8}()
+        $(Expr(:meta, :inline))
+        return $V($(dx))
+    end
+end
+
+@generated function dualize_sb3(::Type{T}, x::StaticArray) where T
+    N = length(x)
+    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i+8}())) for i in 1:N]...)
+    V = StaticArrays.similar_type(x, Dual{T,eltype(x),N+8})
+    return quote
+        chunk = Chunk{$N+8}()
+        $(Expr(:meta, :inline))
+        return $V($(dx))
+    end
+end
+
 # Space for 4 duals given to interactions though only one used in this case
 # No gradient for cutoff type
 function dualize_fb(inter::LennardJones{S, C, W, F, E}) where {S, C, W, F, E}
@@ -170,6 +203,12 @@ function dualize_fb(inter::CoulombReactionField{D, S, W, T, F, E}) where {D, S, 
     return CoulombReactionField{typeof(dist_cutoff), typeof(solvent_dielectric), typeof(weight_14), typeof(coulomb_const), F, E}(
                     dist_cutoff, solvent_dielectric, inter.nl_only, weight_14,
                     coulomb_const, inter.force_unit, inter.energy_unit)
+end
+
+function dualize_fb(inter::HarmonicBond{D, K}) where {D, K}
+    b0 = Dual(inter.b0, true , false, false, false, false, false, false, false, false, false, false)
+    kb = Dual(inter.kb, false, true , false, false, false, false, false, false, false, false, false)
+    return HarmonicBond{typeof(b0), typeof(kb)}(inter.i, inter.j, b0, kb)
 end
 
 function dualize_atom_fb1(at::Atom)
@@ -234,6 +273,16 @@ function dual_function_force_broadcast(f::F) where F
         ds7 = arg7
         ds8 = arg8
         return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8)
+    end
+end
+
+function dual_function_specific_broadcast(f::F) where F
+    function (arg1, arg2, arg3, arg4)
+        ds1 = dualize_fb(arg1)
+        ds2 = dualize_sb1(Nothing, arg2)
+        ds3 = dualize_sb2(Nothing, arg3)
+        ds4 = dualize_sb3(Nothing, arg4)
+        return f(ds1, ds2, ds3, ds4)
     end
 end
 
@@ -331,6 +380,12 @@ function combine_dual_GeneralInteraction(inter::CoulombReactionField, y1::SVecto
                     NoUnits, NoUnits)
 end
 
+function combine_dual_SpecificInteraction(inter::HarmonicBond, y1, o1, i::Integer)
+    (0, 0,
+        y1[3][1] * partials(o1[3][1], i    ) + y1[3][2] * partials(o1[3][2], i    ) + y1[3][3] * partials(o1[3][3], i    ) + y1[4][1] * partials(o1[4][1], i    ) + y1[4][2] * partials(o1[4][2], i    ) + y1[4][3] * partials(o1[4][3], i    ),
+        y1[3][1] * partials(o1[3][1], i + 1) + y1[3][2] * partials(o1[3][2], i + 1) + y1[3][3] * partials(o1[3][3], i + 1) + y1[4][1] * partials(o1[4][1], i + 1) + y1[4][2] * partials(o1[4][2], i + 1) + y1[4][3] * partials(o1[4][3], i + 1))
+end
+
 function combine_dual_Atom(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer, j::Integer, k::Integer, l::Integer) where {T, P}
     ps1, ps2, ps3 = partials(o1[1]), partials(o1[2]), partials(o1[3])
     Atom(
@@ -369,3 +424,41 @@ end
     end
     return y, bc_fwd_back
 end
+
+@inline function Zygote.broadcast_forward(f,
+                                            arg1::AbstractArray{<:SpecificInteraction},
+                                            arg2::AbstractArray{SVector{D, T}},
+                                            arg3::AbstractArray{SVector{D, T}},
+                                            arg4::Tuple{SVector{D, T}}) where {D, T}
+    out = dual_function_specific_broadcast(f).(arg1, arg2, arg3, arg4)
+    println(out)
+    y = broadcast(t -> (t[1], t[2], value.(t[3]), value.(t[4])), out)
+    function bc_fwd_back(ȳ)
+        cu_ȳ = cu(y)
+        darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, cu_ȳ, out, 1))
+        darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
+                    sumpartials(o1[3], y1[3], 3) + sumpartials(o1[4], y1[4], 3),
+                    sumpartials(o1[3], y1[3], 4) + sumpartials(o1[4], y1[4], 4),
+                    sumpartials(o1[3], y1[3], 5) + sumpartials(o1[4], y1[4], 5)),
+                    cu_ȳ, out))
+        darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(
+                    sumpartials(o1[3], y1[3], 6) + sumpartials(o1[4], y1[4], 6),
+                    sumpartials(o1[3], y1[3], 7) + sumpartials(o1[4], y1[4], 7),
+                    sumpartials(o1[3], y1[3], 8) + sumpartials(o1[4], y1[4], 8)),
+                    cu_ȳ, out))
+        o1, y1 = out[1], cu_ȳ[1]
+        println(sumpartials(o1[3], y1[3], 6), " ", sumpartials(o1[4], y1[4], 6))
+        println(sumpartials(o1[3], y1[3], 7), " ", sumpartials(o1[4], y1[4], 7))
+        println(sumpartials(o1[3], y1[3], 8), " ", sumpartials(o1[4], y1[4], 8))
+        #=darg4 = unbroadcast(arg4, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1, 19),
+                                sumpartials(o1, y1, 20), sumpartials(o1, y1, 21)), ȳ, out))=#
+        return (nothing, nothing, darg1, darg2, darg3, nothing)
+        #return (nothing, nothing, darg1, darg2, darg3, nothing)
+    end
+    return y, bc_fwd_back
+end
+
+#=Base.zero(::Type{Tuple{Int, Int, SVector{D, T}, SVector{D, T}}}) where {D, T} = (0, 0, zero(SVector{D, T}), zero(SVector{D, T}))
+function Base.:+(x::Type{Tuple{Int, Int, SVector{D, T}, SVector{D, T}}}, y::Type{Tuple{Int, Int, SVector{D, T}, SVector{D, T}}}) where {D, T}
+    (x[1] + y[1], x[2] + y[2], x[3] .+ y[3], x[4] .+ y[4])
+end=#

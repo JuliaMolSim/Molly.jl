@@ -92,6 +92,12 @@ function simulate!(sys::System{D, S, false},
     return sys
 end
 
+function getisjs(bonds)
+    Zygote.ignore() do
+        return [b.i for b in bonds], [b.j for b in bonds]
+    end
+end
+
 function simulate!(sys::System{D, S, true},
                     sim::VelocityVerlet,
                     n_steps::Integer;
@@ -102,7 +108,8 @@ function simulate!(sys::System{D, S, true},
         neighbors_all = nothing
     end
     neighbors = find_neighbors(sys, sys.neighbor_finder)
-    accels_t = accelerations(sys, sys.coords, sys.atoms, neighbors, neighbors_all)
+    is, js = getisjs(sys.specific_inter_lists[1])
+    accels_t = accelerations(sys, sys.coords, sys.atoms, is, js, neighbors, neighbors_all)
     accels_t_dt = zero(accels_t)
 
     for step_n in 1:n_steps
@@ -110,7 +117,7 @@ function simulate!(sys::System{D, S, true},
 
         sys.coords += sys.velocities .* sim.dt .+ (removemolar.(accels_t) .* sim.dt ^ 2) ./ 2
         sys.coords = wrapcoordsvec.(sys.coords, (sys.box_size,))
-        accels_t_dt = accelerations(sys, sys.coords, sys.atoms, neighbors, neighbors_all)
+        accels_t_dt = accelerations(sys, sys.coords, sys.atoms, is, js, neighbors, neighbors_all)
         sys.velocities += removemolar.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         apply_coupling!(sys, sim, sim.coupling)

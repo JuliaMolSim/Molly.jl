@@ -101,8 +101,8 @@ function accelerations(s::System, neighbors=nothing; parallel::Bool=true)
     return forces(s, neighbors; parallel=parallel) ./ mass.(s.atoms)
 end
 
-function accelerations(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothing)
-    return forces(s, coords, atoms, neighbors, neighbors_all) ./ mass.(s.atoms)
+function accelerations(s::System, coords, atoms, is, js, neighbors=nothing, neighbors_all=nothing)
+    return forces(s, coords, atoms, is, js, neighbors, neighbors_all) ./ mass.(s.atoms)
 end
 
 # Functions defined to allow us to write rrules
@@ -167,7 +167,7 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
     return fs * s.force_unit
 end
 
-function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothing)
+function forces(s::System, coords, atoms, is, js, neighbors=nothing, neighbors_all=nothing)
     n_atoms = length(s)
     fs = ustripvec.(zero(coords))
 
@@ -198,13 +198,14 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
         end
     end
 
-    for inter_list in values(s.specific_inter_lists)
-        # Take coords off the GPU if they are on there
-        coords_cpu = Array(coords)
-        sparse_fs = force.(inter_list, (coords_cpu,), (s.box_size,))
-        ge1, ge2 = getindex.(sparse_fs, 1), getindex.(sparse_fs, 2)
-        checkforcetype(first(first(ge2)), s.force_unit)
-        sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
+    @views for inter_list in values(s.specific_inter_lists)
+        coords_si = coords[is]
+        coords_sj = coords[js]
+        sparse_fs = Array(force.(cu(inter_list), coords_si, coords_sj, (s.box_size,)))
+        sis, sjs = getindex.(sparse_fs, 1), getindex.(sparse_fs, 2)
+        fis, fjs = getindex.(sparse_fs, 3), getindex.(sparse_fs, 4)
+        checkforcetype(first(first(fis)), s.force_unit)
+        sparse_vec = sparsevec(sis, fis, n_atoms) + sparsevec(sjs, fjs, n_atoms)
         # Move back to GPU if required
         fs += convert(typeof(fs), ustripvec.(Array(sparse_vec)))
     end

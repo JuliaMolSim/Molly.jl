@@ -4,6 +4,8 @@ export
     NoCoupling,
     apply_coupling!,
     AndersenThermostat,
+    RescaleThermostat,
+    FrictionThermostat,
     maxwell_boltzmann,
     temperature
 
@@ -41,6 +43,24 @@ function apply_coupling!(sys::System{D}, sim, thermostat::AndersenThermostat) wh
             sys.velocities[i] = velocity(mass, thermostat.temperature; dims=D)
         end
     end
+    return sys
+end
+
+struct RescaleThermostat{T} <: AbstractCoupler
+    temperature::T
+end
+
+function apply_coupling!(sys::System, sim, thermostat::RescaleThermostat)
+    sys.velocities *= sqrt(thermostat.temperature / temperature(s))
+    return sys
+end
+
+struct FrictionThermostat{T} <: AbstractCoupler
+    friction_const::T
+end
+
+function apply_coupling!(sys::System, sim, thermostat::FrictionThermostat)
+    sys.velocities *= thermostat.friction_const
     return sys
 end
 
