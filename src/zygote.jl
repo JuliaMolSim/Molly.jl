@@ -382,8 +382,8 @@ end
 
 function combine_dual_SpecificInteraction(inter::HarmonicBond, y1, o1, i::Integer)
     (0, 0,
-        y1[3][1] * partials(o1[3][1], i    ) + y1[3][2] * partials(o1[3][2], i    ) + y1[3][3] * partials(o1[3][3], i    ) + y1[4][1] * partials(o1[4][1], i    ) + y1[4][2] * partials(o1[4][2], i    ) + y1[4][3] * partials(o1[4][3], i    ),
-        y1[3][1] * partials(o1[3][1], i + 1) + y1[3][2] * partials(o1[3][2], i + 1) + y1[3][3] * partials(o1[3][3], i + 1) + y1[4][1] * partials(o1[4][1], i + 1) + y1[4][2] * partials(o1[4][2], i + 1) + y1[4][3] * partials(o1[4][3], i + 1))
+        y1.f1[1] * partials(o1.f1[1], i    ) + y1.f1[2] * partials(o1.f1[2], i    ) + y1.f1[3] * partials(o1.f1[3], i    ) + y1.f2[1] * partials(o1.f2[1], i    ) + y1.f2[2] * partials(o1.f2[2], i    ) + y1.f2[3] * partials(o1.f2[3], i    ),
+        y1.f1[1] * partials(o1.f1[1], i + 1) + y1.f1[2] * partials(o1.f1[2], i + 1) + y1.f1[3] * partials(o1.f1[3], i + 1) + y1.f2[1] * partials(o1.f2[1], i + 1) + y1.f2[2] * partials(o1.f2[2], i + 1) + y1.f2[3] * partials(o1.f2[3], i + 1))
 end
 
 function combine_dual_Atom(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer, j::Integer, k::Integer, l::Integer) where {T, P}
@@ -431,34 +431,26 @@ end
                                             arg3::AbstractArray{SVector{D, T}},
                                             arg4::Tuple{SVector{D, T}}) where {D, T}
     out = dual_function_specific_broadcast(f).(arg1, arg2, arg3, arg4)
-    println(out)
-    y = broadcast(t -> (t[1], t[2], value.(t[3]), value.(t[4])), out)
+    y = broadcast(o1 -> SpecificForce2Atom{3, Float64}(value.(o1.f1), value.(o1.f2)), out)
     function bc_fwd_back(ȳ)
-        cu_ȳ = cu(y)
+        cu_ȳ = cu(ȳ)
         darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, cu_ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
-                    sumpartials(o1[3], y1[3], 3) + sumpartials(o1[4], y1[4], 3),
-                    sumpartials(o1[3], y1[3], 4) + sumpartials(o1[4], y1[4], 4),
-                    sumpartials(o1[3], y1[3], 5) + sumpartials(o1[4], y1[4], 5)),
+                    sumpartials(o1.f1, y1.f1, 3) + sumpartials(o1.f2, y1.f2, 3),
+                    sumpartials(o1.f1, y1.f1, 4) + sumpartials(o1.f2, y1.f2, 4),
+                    sumpartials(o1.f1, y1.f1, 5) + sumpartials(o1.f2, y1.f2, 5)),
                     cu_ȳ, out))
         darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(
-                    sumpartials(o1[3], y1[3], 6) + sumpartials(o1[4], y1[4], 6),
-                    sumpartials(o1[3], y1[3], 7) + sumpartials(o1[4], y1[4], 7),
-                    sumpartials(o1[3], y1[3], 8) + sumpartials(o1[4], y1[4], 8)),
+                    sumpartials(o1.f1, y1.f1, 6) + sumpartials(o1.f2, y1.f2, 6),
+                    sumpartials(o1.f1, y1.f1, 7) + sumpartials(o1.f2, y1.f2, 7),
+                    sumpartials(o1.f1, y1.f1, 8) + sumpartials(o1.f2, y1.f2, 8)),
                     cu_ȳ, out))
-        o1, y1 = out[1], cu_ȳ[1]
-        println(sumpartials(o1[3], y1[3], 6), " ", sumpartials(o1[4], y1[4], 6))
-        println(sumpartials(o1[3], y1[3], 7), " ", sumpartials(o1[4], y1[4], 7))
-        println(sumpartials(o1[3], y1[3], 8), " ", sumpartials(o1[4], y1[4], 8))
-        #=darg4 = unbroadcast(arg4, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1, 19),
-                                sumpartials(o1, y1, 20), sumpartials(o1, y1, 21)), ȳ, out))=#
-        return (nothing, nothing, darg1, darg2, darg3, nothing)
-        #return (nothing, nothing, darg1, darg2, darg3, nothing)
+        darg4 = unbroadcast(arg4, broadcast((y1, o1) -> SVector{D, T}(
+                    sumpartials(o1.f1, y1.f1,  9) + sumpartials(o1.f2, y1.f2,  9),
+                    sumpartials(o1.f1, y1.f1, 10) + sumpartials(o1.f2, y1.f2, 10),
+                    sumpartials(o1.f1, y1.f1, 11) + sumpartials(o1.f2, y1.f2, 11)),
+                    cu_ȳ, out))
+        return (nothing, nothing, darg1, darg2, darg3, darg4)
     end
     return y, bc_fwd_back
 end
-
-#=Base.zero(::Type{Tuple{Int, Int, SVector{D, T}, SVector{D, T}}}) where {D, T} = (0, 0, zero(SVector{D, T}), zero(SVector{D, T}))
-function Base.:+(x::Type{Tuple{Int, Int, SVector{D, T}, SVector{D, T}}}, y::Type{Tuple{Int, Int, SVector{D, T}, SVector{D, T}}}) where {D, T}
-    (x[1] + y[1], x[2] + y[2], x[3] .+ y[3], x[4] .+ y[4])
-end=#

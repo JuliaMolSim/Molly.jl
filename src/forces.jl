@@ -109,6 +109,19 @@ end
 getindices_i(arr, neighbors) = @view arr[neighbors.nbsi]
 getindices_j(arr, neighbors) = @view arr[neighbors.nbsj]
 
+# Local structs to help with propagating gradients
+struct SpecificForce2Atom{D, T}
+    f1::SVector{D, T}
+    f2::SVector{D, T}
+end
+
+function SpecificForce2Atom(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T}) where {D, T}
+    return SpecificForce2Atom{D, T}(f1, f2)
+end
+
+getf1(x) = x.f1
+getf2(x) = x.f2
+
 """
     forces(system, neighbors=nothing; parallel=true)
 
@@ -201,11 +214,10 @@ function forces(s::System, coords, atoms, is, js, neighbors=nothing, neighbors_a
     @views for inter_list in values(s.specific_inter_lists)
         coords_si = coords[is]
         coords_sj = coords[js]
-        sparse_fs = Array(force.(cu(inter_list), coords_si, coords_sj, (s.box_size,)))
-        sis, sjs = getindex.(sparse_fs, 1), getindex.(sparse_fs, 2)
-        fis, fjs = getindex.(sparse_fs, 3), getindex.(sparse_fs, 4)
+        sparse_fs = Array(force.(inter_list, coords_si, coords_sj, (s.box_size,)))
+        fis, fjs = getf1.(sparse_fs), getf2.(sparse_fs)
         checkforcetype(first(first(fis)), s.force_unit)
-        sparse_vec = sparsevec(sis, fis, n_atoms) + sparsevec(sjs, fjs, n_atoms)
+        sparse_vec = sparsevec(is, fis, n_atoms) + sparsevec(js, fjs, n_atoms)
         # Move back to GPU if required
         fs += convert(typeof(fs), ustripvec.(Array(sparse_vec)))
     end

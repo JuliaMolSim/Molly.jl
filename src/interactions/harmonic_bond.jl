@@ -16,7 +16,7 @@ HarmonicBond(; i, j, b0, kb) = HarmonicBond{typeof(b0), typeof(kb)}(i, j, b0, kb
     ab = vector(coord_i, coord_j, box_size)
     c = b.kb * (norm(ab) - b.b0)
     f = c * normalize(ab)
-    return b.i, b.j, f, -f
+    return SpecificForce2Atom(f, -f)
 end
 
 @inline @inbounds function potential_energy(b::HarmonicBond,
