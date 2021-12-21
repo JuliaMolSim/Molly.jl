@@ -430,7 +430,7 @@ end
                                             arg3::AbstractArray{SVector{D, T}},
                                             arg4::Tuple{SVector{D, T}}) where {D, T}
     out = dual_function_specific_broadcast(f).(arg1, arg2, arg3, arg4)
-    y = broadcast(o1 -> SpecificForce2Atom{3, Float64}(value.(o1.f1), value.(o1.f2)), out)
+    y = broadcast(o1 -> SpecificForce2Atoms{D, T}(value.(o1.f1), value.(o1.f2)), out)
     function bc_fwd_back(ȳ)
         cu_ȳ = cu(ȳ)
         darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, cu_ȳ, out, 1))

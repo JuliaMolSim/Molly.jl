@@ -79,30 +79,22 @@ temp_fp_viz = tempname(cleanup=true) * ".mp4"
                     347.338645u"kJ * mol^-1",
                     atol=1e-5u"kJ * mol^-1")
     
-    b1 = HarmonicBond(i=1, j=2, b0=0.2u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2")
-    b2 = HarmonicBond(i=1, j=3, b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
-    inds, fs = force(b1, coords, box_size)
-    @test inds == [1, 2]
-    @test isapprox(fs[1],
-                    SVector(30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+    b1 = HarmonicBond(b0=0.2u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2")
+    b2 = HarmonicBond(b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
+    fs = force(b1, coords[1], coords[2], box_size)
+    @test isapprox(fs.f1, SVector(30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(fs[2],
-                    SVector(-30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+    @test isapprox(fs.f2, SVector(-30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
-    inds, fs = force(b2, coords, box_size)
-    @test inds == [1, 3]
-    @test isapprox(fs[1],
-                    SVector(-20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+    fs = force(b2, coords[1], coords[3], box_size)
+    @test isapprox(fs.f1, SVector(-20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(fs[2],
-                    SVector(20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+    @test isapprox(fs.f2, SVector(20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(potential_energy(b1, s),
-                    1500.0u"kJ * mol^-1",
-                    atol=1e-9u"kJ * mol^-1")
-    @test isapprox(potential_energy(b2, s),
-                    2000.0u"kJ * mol^-1",
-                    atol=1e-9u"kJ * mol^-1")
+    @test isapprox(potential_energy(b1, coords[1], coords[2], box_size),
+                    1500.0u"kJ * mol^-1", atol=1e-9u"kJ * mol^-1")
+    @test isapprox(potential_energy(b2, coords[1], coords[3], box_size),
+                    2000.0u"kJ * mol^-1", atol=1e-9u"kJ * mol^-1")
 end
 
 @testset "Spatial" begin
@@ -276,7 +268,8 @@ end
     for i in 1:length(coords)
         push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
     end
-    bonds = [HarmonicBond(i=i, j=(i + (n_atoms ÷ 2)), b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)]
+    bonds = InteractionList2Atoms(collect(1:(n_atoms ÷ 2)), collect((1 + n_atoms ÷ 2):n_atoms),
+                [HarmonicBond(b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)])
     nb_matrix = trues(n_atoms, n_atoms)
     for i in 1:(n_atoms ÷ 2)
         nb_matrix[i, i + (n_atoms ÷ 2)] = false
@@ -486,8 +479,9 @@ end
         simulator = VelocityVerlet(dt=f32 ? 0.02f0u"ps" : 0.02u"ps")
         b0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
         kb = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
-        bonds = [HarmonicBond(i=((i * 2) - 1), j=(i * 2), b0=b0, kb=kb) for i in 1:(n_atoms ÷ 2)]
-        specific_inter_lists = (bonds,)
+        bonds = [HarmonicBond(b0=b0, kb=kb) for i in 1:(n_atoms ÷ 2)]
+        specific_inter_lists = (InteractionList2Atoms(collect(1:2:n_atoms), collect(2:2:n_atoms),
+                                gpu ? cu(bonds) : bonds),)
 
         neighbor_finder = NoNeighborFinder()
         cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
@@ -579,7 +573,7 @@ end
         else
             gin = ()
         end
-    
+
         if inter == "all"
             sils = specific_inter_lists
         elseif inter == "bond"
@@ -593,7 +587,7 @@ end
         else
             sils = ()
         end
-    
+
         s = System(
             atoms=atoms,
             general_inters=gin,
@@ -603,7 +597,7 @@ end
             neighbor_finder=neighbor_finder,
         )
         neighbors = find_neighbors(s, s.neighbor_finder)
-    
+
         forces_molly = ustripvec.(accelerations(s, neighbors; parallel=false) .* mass.(atoms))
         forces_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "forces_$(inter)_only.txt"))))
         # All force terms on all atoms must match at some threshold

@@ -30,7 +30,7 @@ RBTorsion(; f1, f2, f3, f4) = RBTorsion{typeof(f1)}(f1, f2, f3, f4)
     v = (dot(-ab, bc) / bc_norm^2) * fi - (dot(-cd, bc) / bc_norm^2) * fl
     fj =  v - fi
     fk = -v - fl
-    return SpecificForce4Atom(fi, fj, fk, fl)
+    return SpecificForce4Atoms(fi, fj, fk, fl)
 end
 
 @inline @inbounds function potential_energy(d::RBTorsion, coords_i, coords_j, coords_k,

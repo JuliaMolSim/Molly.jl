@@ -17,17 +17,13 @@ acosbound(x::Real) = acos(clamp(x, -1, 1))
     ba = vector(coords_j, coords_i, box_size)
     bc = vector(coords_j, coords_k, box_size)
     cross_ba_bc = ba × bc
-    if iszero(cross_ba_bc)
-        fz = ustrip.(zero(coords_i)) * force_unit
-        return SpecificForce3Atom(fz, fz, fz)
-    end
     pa = normalize(ba × cross_ba_bc)
     pc = normalize(-bc × cross_ba_bc)
     angle_term = -a.cth * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.th0)
     fa = (angle_term / norm(ba)) * pa
     fc = (angle_term / norm(bc)) * pc
     fb = -fa - fc
-    return SpecificForce3Atom(fa, fb, fc)
+    return SpecificForce3Atoms(fa, fb, fc)
 end
 
 @inline @inbounds function potential_energy(a::HarmonicAngle, coords_i, coords_j,

@@ -3,14 +3,25 @@
 
 A periodic torsion angle between four atoms.
 """
-struct PeriodicTorsion{T, E} <: SpecificInteraction
-    periodicities::Vector{Int}
-    phases::Vector{T}
-    ks::Vector{E}
+struct PeriodicTorsion{N, T, E} <: SpecificInteraction
+    periodicities::NTuple{N, Int}
+    phases::NTuple{N, T}
+    ks::NTuple{N, E}
 end
 
-PeriodicTorsion(; periodicities, phases, ks) = PeriodicTorsion{eltype(phases), eltype(ks)}(
-                                                        periodicities, phases, ks)
+function PeriodicTorsion(; periodicities, phases, ks, n_terms=length(periodicities))
+    T, E = eltype(phases), eltype(ks)
+    if n_terms > length(periodicities)
+        n_to_add = n_terms - length(periodicities)
+        periodicities_pad = vcat(collect(periodicities), ones(Int, n_to_add))
+        phases_pad = vcat(collect(phases), zeros(T, n_to_add))
+        ks_pad = vcat(collect(ks), zeros(E, n_to_add))
+    else
+        periodicities_pad, phases_pad, ks_pad = periodicities, phases, ks
+    end
+    PeriodicTorsion{n_terms, T, E}(tuple(periodicities_pad...), tuple(phases_pad...),
+                                    tuple(ks_pad...))
+end
 
 @inline @inbounds function force(d::PeriodicTorsion, coords_i, coords_j, coords_k,
                                     coords_l, box_size)
@@ -31,9 +42,9 @@ PeriodicTorsion(; periodicities, phases, ks) = PeriodicTorsion{eltype(phases), e
         v = (dot(-ab, bc) / bc_norm^2) * fi - (dot(-cd, bc) / bc_norm^2) * fl
         fj =  v - fi
         fk = -v - fl
-        return [fi, fj, fk, fl]
+        return SpecificForce4Atoms(fi, fj, fk, fl)
     end
-    return SpecificForce4Atom(fs...)
+    return fs
 end
 
 @inline @inbounds function potential_energy(d::PeriodicTorsion, coords_i, coords_j, coords_k,
@@ -48,7 +59,7 @@ end
         ustrip(dot(cross_ab_bc, cross_bc_cd)),
     )
     E = sum(zip(d.periodicities, d.phases, d.ks)) do (periodicity, phase, k)
-        k + k * cos((periodicity * θ) - phase)
+        return k + k * cos((periodicity * θ) - phase)
     end
     return E
 end

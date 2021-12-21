@@ -41,14 +41,14 @@ a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
 box_size = SVector(2.0, 2.0, 2.0)u"nm"
 coords = [c1, c2]
 s = System(atoms=[a1, a1], coords=coords, box_size=box_size)
-b1 = HarmonicBond(i=1, j=2, b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
+b1 = HarmonicBond(b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
 
 SUITE["interactions"]["LennardJones force" ] = @benchmarkable force($(LennardJones()), $(c1), $(c2), $(a1), $(a1), $(box_size))
 SUITE["interactions"]["LennardJones energy"] = @benchmarkable potential_energy($(LennardJones()), $(s), 1, 2)
 SUITE["interactions"]["Coulomb force"      ] = @benchmarkable force($(Coulomb()), $(c1), $(c2), $(a1), $(a1), $(box_size))
 SUITE["interactions"]["Coulomb energy"     ] = @benchmarkable potential_energy($(Coulomb()), $(s), 1, 2)
-SUITE["interactions"]["HarmonicBond force" ] = @benchmarkable force($(b1), $(coords), $(box_size))
-SUITE["interactions"]["HarmonicBond energy"] = @benchmarkable potential_energy($(b1), $(s))
+SUITE["interactions"]["HarmonicBond force" ] = @benchmarkable force($(b1), $(c1), $(c2), $(box_size))
+SUITE["interactions"]["HarmonicBond energy"] = @benchmarkable potential_energy($(b1), $(c1), $(c2), $(box_size))
 
 SUITE["spatial"]["vector1D"] = @benchmarkable vector1D($(4.0u"nm"), $(6.0u"nm"), $(10.0u"nm"))
 SUITE["spatial"]["vector"  ] = @benchmarkable vector($(SVector(4.0, 1.0, 1.0)u"nm"), $(SVector(6.0, 4.0, 3.0)u"nm"), $(SVector(10.0, 5.0, 3.5)u"nm"))
@@ -69,8 +69,9 @@ function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::B
     simulator = VelocityVerlet(dt=f32 ? 0.02f0u"ps" : 0.02u"ps")
     b0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
     kb = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
-    bonds = [HarmonicBond(i=((i * 2) - 1), j=(i * 2), b0=b0, kb=kb) for i in 1:(n_atoms ÷ 2)]
-    specific_inter_lists = (bonds,)
+    bonds = [HarmonicBond(b0=b0, kb=kb) for i in 1:(n_atoms ÷ 2)]
+    specific_inter_lists = (InteractionList2Atoms(collect(1:2:n_atoms), collect(2:2:n_atoms),
+                            gpu ? cu(bonds) : bonds),)
 
     neighbor_finder = NoNeighborFinder()
     cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")

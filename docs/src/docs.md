@@ -106,10 +106,13 @@ end
 
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 ```
-Now we can use the built-in bond type to place a harmonic constraint between paired atoms.
-The arguments are the indices of the two atoms in the bond, the equilibrium distance and the force constant.
+Now we can use the built-in interaction list and bond types to place harmonic bonds between paired atoms.
 ```julia
-bonds = [HarmonicBond(i=i, j=(i + n_atoms ÷ 2), b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)]
+bonds = InteractionList2Atoms(
+    collect(1:(n_atoms ÷ 2)),
+    collect((1 + n_atoms ÷ 2):n_atoms),
+    [HarmonicBond(b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)]
+)
 
 specific_inter_lists = (bonds,)
 ```
@@ -426,33 +429,31 @@ For performance reasons it is best to [avoid containers with abstract type param
 To define your own [`SpecificInteraction`](@ref), first define the `struct`:
 ```julia
 struct MySpecificInter <: SpecificInteraction
-    # Any number of atoms involved in the interaction
-    i::Int
-    j::Int
-    # Any other properties, e.g. a bond distance corresponding to the energy minimum
+    # Properties, e.g. a bond distance corresponding to the energy minimum
 end
 ```
 Next, you need to define the [`force`](@ref) function.
-For example:
+The form of this will depend whether the interaction involves 2, 3 or 4 atoms.
+For example in the 2 atom case:
 ```julia
-function Molly.force(inter::MySpecificInter, coords, box_size)
-    dr = vector(coords[inter.i], coords[inter.j], box_size)
+function Molly.force(inter::MySpecificInter, coords_i, coords_j, box_size)
+    dr = vector(coords_i, coords_j, box_size)
 
     # Replace this with your force calculation
     # A positive force causes the atoms to move apart
     f = 0.0
 
     fdr = f * normalize(dr)
-    return [inter.i, inter.j], [-fdr, fdr]
+    return SpecificForce2Atoms(-fdr, fdr)
 end
 ```
-The return values are a list of the atom indices and a list of the vector forces.
-The example here is between two atoms but can be adapted for any number of atoms.
-To use your custom force, add it to the specific interaction lists:
+The 3 atom case would define `Molly.force(inter::MySpecificInter, coords_i, coords_j, coords_k, box_size)` and return `SpecificForce3Atoms(f1, f2, f3)`.
+To use your custom force, add it to the specific interaction lists along with the atom indices:
 ```julia
-specific_inter_lists = ([MySpecificInter(1, 2), MySpecificInter(3, 4)],)
+specific_inter_lists = (InteractionList2Atoms([1, 3], [2, 4], [MySpecificInter(), MySpecificInter()]),)
 ```
-Specific interactions are always run on the CPU (with the results moved to the GPU if required), which is why we can index into `coords` and access `s` without harming performance.
+For 3 atom interactions use `InteractionList3Atoms` and pass 3 sets of indices.
+If using the GPU, the inner list of interactions should be moved to the GPU.
 
 ## Cutoffs
 

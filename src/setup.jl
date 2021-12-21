@@ -2,9 +2,6 @@
 # See http://manual.gromacs.org/documentation/2016/user-guide/file-formats.html
 
 export
-    BondType,
-    AngleType,
-    RBTorsionType,
     place_atoms,
     place_diatomics,
     readinputs,
@@ -13,38 +10,6 @@ export
     PeriodicTorsionType,
     OpenMMForceField,
     setupsystem
-
-"""
-    BondType(b0, kb)
-
-A bond type.
-"""
-struct BondType{D, K}
-    b0::D
-    kb::K
-end
-
-"""
-    AngleType(th0, cth)
-
-An angle type.
-"""
-struct AngleType{D, K}
-    th0::D
-    cth::K
-end
-
-"""
-    RBTorsionType(f1, f2, f3, f4)
-
-A Ryckaert-Bellemans torsion type.
-"""
-struct RBTorsionType{T}
-    f1::T
-    f2::T
-    f3::T
-    f4::T
-end
 
 """
     place_atoms(n_atoms, box_size, min_dist; dims=3)
@@ -109,8 +74,8 @@ end
 
 Read a Gromacs topology flat file, i.e. all includes collapsed into one file,
 and a Gromacs coordinate file.
-Returns the atoms, specific interaction lists, general interaction lists,
-neighbor finder, coordinates and box size.
+Returns the atoms, atoms data, specific interaction lists, general
+interaction lists, neighbor finder, coordinates and box size.
 `units` determines whether the returned values have units.
 """
 function readinputs(T::Type,
@@ -123,19 +88,19 @@ function readinputs(T::Type,
                     nl_dist=units ? 1.2u"nm" : 1.2)
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
-    bondtypes = Dict{String, BondType}()
-    angletypes = Dict{String, AngleType}()
-    torsiontypes = Dict{String, RBTorsionType}()
+    bondtypes = Dict{String, HarmonicBond}()
+    angletypes = Dict{String, HarmonicAngle}()
+    torsiontypes = Dict{String, RBTorsion}()
     atomnames = Dict{String, String}()
 
     name = "?"
     atoms = Atom[]
     atoms_data = AtomData[]
-    bonds = HarmonicBond[]
+    bonds = InteractionList2Atoms(HarmonicBond)
     pairs = Tuple{Int, Int}[]
-    angles = HarmonicAngle[]
+    angles = InteractionList3Atoms(HarmonicAngle)
     possible_torsions = Tuple{Int, Int, Int, Int}[]
-    torsions = RBTorsion[]
+    torsions = InteractionList4Atoms(RBTorsion)
 
     if units
         force_unit = u"kJ * mol^-1 * nm^-1"
@@ -158,18 +123,18 @@ function readinputs(T::Type,
         c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
         if current_field == "bondtypes"
             if units
-                bondtype = BondType(parse(T, c[4])u"nm", parse(T, c[5])u"kJ * mol^-1 * nm^-2")
+                bondtype = HarmonicBond(parse(T, c[4])u"nm", parse(T, c[5])u"kJ * mol^-1 * nm^-2")
             else
-                bondtype = BondType(parse(T, c[4]), parse(T, c[5]))
+                bondtype = HarmonicBond(parse(T, c[4]), parse(T, c[5]))
             end
             bondtypes["$(c[1])/$(c[2])"] = bondtype
             bondtypes["$(c[2])/$(c[1])"] = bondtype
         elseif current_field == "angletypes"
             # Convert th0 to radians
             if units
-                angletype = AngleType(deg2rad(parse(T, c[5])), parse(T, c[6])u"kJ * mol^-1")
+                angletype = HarmonicAngle(deg2rad(parse(T, c[5])), parse(T, c[6])u"kJ * mol^-1")
             else
-                angletype = AngleType(deg2rad(parse(T, c[5])), parse(T, c[6]))
+                angletype = HarmonicAngle(deg2rad(parse(T, c[5])), parse(T, c[6]))
             end
             angletypes["$(c[1])/$(c[2])/$(c[3])"] = angletype
             angletypes["$(c[3])/$(c[2])/$(c[1])"] = angletype
@@ -180,10 +145,10 @@ function readinputs(T::Type,
             f2 = 4 * f4 - parse(T, c[8])
             f1 = 3 * f3 - 2 * parse(T, c[7])
             if units
-                torsiontype = RBTorsionType((f1)u"kJ * mol^-1", (f2)u"kJ * mol^-1",
-                                            (f3)u"kJ * mol^-1", (f4)u"kJ * mol^-1")
+                torsiontype = RBTorsion((f1)u"kJ * mol^-1", (f2)u"kJ * mol^-1",
+                                        (f3)u"kJ * mol^-1", (f4)u"kJ * mol^-1")
             else
-                torsiontype = RBTorsionType(f1, f2, f3, f4)
+                torsiontype = RBTorsion(f1, f2, f3, f4)
             end
             torsiontypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = torsiontype
         elseif current_field == "atomtypes" && length(c) >= 8
@@ -215,13 +180,18 @@ function readinputs(T::Type,
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
             bondtype = bondtypes["$(atoms_data[i].atom_type)/$(atoms_data[j].atom_type)"]
-            push!(bonds, HarmonicBond(i=i, j=j, b0=bondtype.b0, kb=bondtype.kb))
+            push!(bonds.is, i)
+            push!(bonds.js, j)
+            push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
         elseif current_field == "pairs"
             push!(pairs, (parse(Int, c[1]), parse(Int, c[2])))
         elseif current_field == "angles"
             i, j, k = parse.(Int, c[1:3])
             angletype = angletypes["$(atoms_data[i].atom_type)/$(atoms_data[j].atom_type)/$(atoms_data[k].atom_type)"]
-            push!(angles, HarmonicAngle(i=i, j=j, k=k, th0=angletype.th0, cth=angletype.cth))
+            push!(angles.is, i)
+            push!(angles.js, j)
+            push!(angles.ks, k)
+            push!(angles.inters, HarmonicAngle(th0=angletype.th0, cth=angletype.cth))
         elseif current_field == "dihedrals"
             i, j, k, l = parse.(Int, c[1:4])
             push!(possible_torsions, (i, j, k, l))
@@ -236,8 +206,11 @@ function readinputs(T::Type,
         desired_key = join(at_types, "/")
         if haskey(torsiontypes, desired_key)
             d = torsiontypes[desired_key]
-            push!(torsions, RBTorsion(i=inds[1], j=inds[2], k=inds[3], l=inds[4],
-                                        f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
+            push!(torsions.is, inds[1])
+            push!(torsions.js, inds[2])
+            push!(torsions.ks, inds[3])
+            push!(torsions.ls, inds[4])
+            push!(torsions.inters, RBTorsion(f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
         else
             best_score = 0
             best_key = ""
@@ -263,8 +236,11 @@ function readinputs(T::Type,
             # If a wildcard match is found, add a new specific torsion type
             if best_key != ""
                 d = torsiontypes[best_key]
-                push!(torsions, RBTorsion(i=inds[1], j=inds[2], k=inds[3], l=inds[4],
-                                            f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
+                push!(torsions.is, inds[1])
+                push!(torsions.js, inds[2])
+                push!(torsions.ks, inds[3])
+                push!(torsions.ls, inds[4])
+                push!(torsions.inters, RBTorsion(f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
             end
         end
     end
@@ -297,11 +273,17 @@ function readinputs(T::Type,
             # Add O-H bonds and H-O-H angle in water
             if atname == "OW"
                 bondtype = bondtypes["OW/HW"]
-                push!(bonds, HarmonicBond(i=i, j=(i + 1), b0=bondtype.b0, kb=bondtype.kb))
-                push!(bonds, HarmonicBond(i=i, j=(i + 2), b0=bondtype.b0, kb=bondtype.kb))
+                push!(bonds.is, i)
+                push!(bonds.js, i + 1)
+                push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
+                push!(bonds.is, i)
+                push!(bonds.js, i + 2)
+                push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
                 angletype = angletypes["HW/OW/HW"]
-                push!(angles, HarmonicAngle(i=(i + 1), j=i, k=(i + 2), th0=angletype.th0,
-                                            cth=angletype.cth))
+                push!(angles.is, i + 1)
+                push!(angles.js, i)
+                push!(angles.ks, i + 2)
+                push!(angles.inters, HarmonicAngle(th0=angletype.th0, cth=angletype.cth))
             end
         end
     end
@@ -312,14 +294,14 @@ function readinputs(T::Type,
     for i in 1:n_atoms
         nb_matrix[i, i] = false
     end
-    for b in bonds
-        nb_matrix[b.i, b.j] = false
-        nb_matrix[b.j, b.i] = false
+    for (i, j) in zip(bonds.is, bonds.js)
+        nb_matrix[i, j] = false
+        nb_matrix[j, i] = false
     end
-    for a in angles
+    for (i, k) in zip(angles.is, angles.ks)
         # Assume bonding is already specified
-        nb_matrix[a.i, a.k] = false
-        nb_matrix[a.k, a.i] = false
+        nb_matrix[i, k] = false
+        nb_matrix[k, i] = false
     end
 
     # Calculate matrix of pairs eligible for halved non-bonded interactions
@@ -342,9 +324,19 @@ function readinputs(T::Type,
     box_size = units ? (box_size_vals)u"nm" : box_size_vals
     coords = wrapcoordsvec.([coords...], (box_size,))
 
-    # Ensure array types are concrete
-    specific_inter_lists = ([bonds...], [angles...], [torsions...])
     general_inters = (lj, coulomb_rf)
+    # Ensure array types are concrete
+    if gpu
+        specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, cu([bonds.inters...])),
+                                InteractionList3Atoms(angles.is, angles.js, angles.ks, cu([angles.inters...])),
+                                InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
+                                                        cu([torsions.inters...])))
+    else
+        specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, [bonds.inters...]),
+                                InteractionList3Atoms(angles.is, angles.js, angles.ks, [angles.inters...]),
+                                InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
+                                                        [torsions.inters...]))
+    end
 
     atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
 
@@ -420,8 +412,8 @@ constructor.
 struct OpenMMForceField{T, M, D, E, K}
     atom_types::Dict{String, OpenMMAtomType{M, D, E}}
     residue_types::Dict{String, OpenMMResiduetype{T}}
-    bond_types::Dict{Tuple{String, String}, BondType{D, K}}
-    angle_types::Dict{Tuple{String, String, String}, AngleType{T, E}}
+    bond_types::Dict{Tuple{String, String}, HarmonicBond{D, K}}
+    angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{T, E}}
     torsion_types::Dict{Tuple{String, String, String, String}, PeriodicTorsionType{T, E}}
     torsion_order::String
     weight_14_coulomb::T
@@ -431,8 +423,8 @@ end
 function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true)
     atom_types = Dict{String, OpenMMAtomType}()
     residue_types = Dict{String, OpenMMResiduetype}()
-    bond_types = Dict{Tuple{String, String}, BondType}()
-    angle_types = Dict{Tuple{String, String, String}, AngleType}()
+    bond_types = Dict{Tuple{String, String}, HarmonicBond}()
+    angle_types = Dict{Tuple{String, String, String}, HarmonicAngle}()
     torsion_types = Dict{Tuple{String, String, String, String}, PeriodicTorsionType}()
     torsion_order = ""
     weight_14_coulomb = one(T)
@@ -477,7 +469,7 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
                     atom_type_2 = bond["type2"]
                     b0 = units ? parse(T, bond["length"])u"nm" : parse(T, bond["length"])
                     kb = units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"])
-                    bond_types[(atom_type_1, atom_type_2)] = BondType(b0, kb)
+                    bond_types[(atom_type_1, atom_type_2)] = HarmonicBond(b0, kb)
                 end
             elseif entry_name == "HarmonicAngleForce"
                 for angle in eachelement(entry)
@@ -486,7 +478,7 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
                     atom_type_3 = angle["type3"]
                     th0 = parse(T, angle["angle"])
                     k = units ? parse(T, angle["k"])u"kJ * mol^-1" : parse(T, angle["k"])
-                    angle_types[(atom_type_1, atom_type_2, atom_type_3)] = AngleType(th0, k)
+                    angle_types[(atom_type_1, atom_type_2, atom_type_3)] = HarmonicAngle(th0, k)
                 end
             elseif entry_name == "PeriodicTorsionForce"
                 torsion_order = entry["ordering"]
@@ -592,10 +584,10 @@ function setupsystem(coord_file::AbstractString,
 
     atoms = Atom[]
     atoms_data = AtomData[]
-    bonds = HarmonicBond[]
-    angles = HarmonicAngle[]
-    torsions = PeriodicTorsion[]
-    impropers = PeriodicTorsion[]
+    bonds = InteractionList2Atoms(HarmonicBond)
+    angles = InteractionList3Atoms(HarmonicAngle)
+    torsions = InteractionList4Atoms(PeriodicTorsion)
+    impropers = InteractionList4Atoms(PeriodicTorsion)
     nb_matrix = trues(n_atoms, n_atoms)
     matrix_14 = falses(n_atoms, n_atoms)
 
@@ -684,7 +676,9 @@ function setupsystem(coord_file::AbstractString,
         else
             bond_type = force_field.bond_types[(atom_type_2, atom_type_1)]
         end
-        push!(bonds, HarmonicBond(i=(a1z + 1), j=(a2z + 1), b0=bond_type.b0, kb=bond_type.kb))
+        push!(bonds.is, a1z + 1)
+        push!(bonds.js, a2z + 1)
+        push!(bonds.inters, HarmonicBond(b0=bond_type.b0, kb=bond_type.kb))
         nb_matrix[a1z + 1, a2z + 1] = false
         nb_matrix[a2z + 1, a1z + 1] = false
     end
@@ -704,7 +698,10 @@ function setupsystem(coord_file::AbstractString,
         else
             angle_type = force_field.angle_types[(atom_type_3, atom_type_2, atom_type_1)]
         end
-        push!(angles, HarmonicAngle(i=(a1z + 1), j=(a2z + 1), k=(a3z + 1), th0=angle_type.th0, cth=angle_type.cth))
+        push!(angles.is, a1z + 1)
+        push!(angles.js, a2z + 1)
+        push!(angles.ks, a3z + 1)
+        push!(angles.inters, HarmonicAngle(th0=angle_type.th0, cth=angle_type.cth))
         nb_matrix[a1z + 1, a3z + 1] = false
         nb_matrix[a3z + 1, a1z + 1] = false
     end
@@ -753,9 +750,12 @@ function setupsystem(coord_file::AbstractString,
             end
             torsion_type = force_field.torsion_types[best_key]
         end
-        push!(torsions, PeriodicTorsion(i=(a1z + 1), j=(a2z + 1), k=(a3z + 1), l=(a4z + 1),
-                                        periodicities=torsion_type.periodicities,
-                                        phases=torsion_type.phases, ks=torsion_type.ks))
+        push!(torsions.is, a1z + 1)
+        push!(torsions.js, a2z + 1)
+        push!(torsions.ks, a3z + 1)
+        push!(torsions.ls, a4z + 1)
+        push!(torsions.inters, PeriodicTorsion(periodicities=torsion_type.periodicities,
+                                                phases=torsion_type.phases, ks=torsion_type.ks))
         matrix_14[a1z + 1, a4z + 1] = true
         matrix_14[a4z + 1, a1z + 1] = true
     end
@@ -856,13 +856,14 @@ function setupsystem(coord_file::AbstractString,
                     end
                 end
             end
-            push!(impropers, PeriodicTorsion(i=a2, j=a3, k=a1, l=a4,
-                                                periodicities=torsion_type.periodicities,
-                                                phases=torsion_type.phases, ks=torsion_type.ks))
+            push!(impropers.is, a2)
+            push!(impropers.js, a3)
+            push!(impropers.ks, a1)
+            push!(impropers.ls, a4)
+            push!(impropers.inters, PeriodicTorsion(periodicities=torsion_type.periodicities,
+                                                    phases=torsion_type.phases, ks=torsion_type.ks))
         end
     end
-
-    specific_inter_lists = ([bonds...], [angles...], [torsions...], [impropers...])
 
     if units
         force_unit = u"kJ * mol^-1 * nm^-1"
@@ -879,6 +880,31 @@ function setupsystem(coord_file::AbstractString,
                                         coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
                                         force_unit=force_unit, energy_unit=energy_unit)
     general_inters = (lj, coulomb_rf)
+
+    # Ensure array types are concrete
+    if gpu
+        # All torsions must have the same number of terms on the GPU
+        max_n_terms_torsions = maximum(t -> length(t.periodicities), torsions.inters)
+        torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                n_terms=max_n_terms_torsions) for t in torsions.inters]
+        max_n_terms_impropers = maximum(t -> length(t.periodicities), impropers.inters)
+        improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                n_terms=max_n_terms_impropers) for t in impropers.inters]
+
+        specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, cu([bonds.inters...])),
+                                InteractionList3Atoms(angles.is, angles.js, angles.ks, cu([angles.inters...])),
+                                InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
+                                                        cu(torsion_inters_pad)),
+                                InteractionList4Atoms(impropers.is, impropers.js, impropers.ks, impropers.ls,
+                                                        cu(improper_inters_pad)))
+    else
+        specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, [bonds.inters...]),
+                                InteractionList3Atoms(angles.is, angles.js, angles.ks, [angles.inters...]),
+                                InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
+                                                        [torsions.inters...]),
+                                InteractionList4Atoms(impropers.is, impropers.js, impropers.ks, impropers.ls,
+                                                        [impropers.inters...]))
+    end
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     # Convert from Å

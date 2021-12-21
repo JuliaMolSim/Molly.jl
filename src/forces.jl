@@ -6,6 +6,9 @@ export
     ustripvec,
     force,
     accelerations,
+    SpecificForce2Atoms,
+    SpecificForce3Atoms,
+    SpecificForce4Atoms,
     forces,
     LennardJones,
     SoftSphere,
@@ -109,37 +112,56 @@ end
 getindices_i(arr, neighbors) = @view arr[neighbors.nbsi]
 getindices_j(arr, neighbors) = @view arr[neighbors.nbsj]
 
-struct SpecificForce2Atom{D, T}
+"""
+    SpecificForce2Atoms(f1, f2)
+
+Forces on two atoms arising from an interaction.
+"""
+struct SpecificForce2Atoms{D, T}
     f1::SVector{D, T}
     f2::SVector{D, T}
 end
 
-struct SpecificForce3Atom{D, T}
+"""
+    SpecificForce3Atoms(f1, f2, f3)
+
+Forces on three atoms arising from an interaction.
+"""
+struct SpecificForce3Atoms{D, T}
     f1::SVector{D, T}
     f2::SVector{D, T}
     f3::SVector{D, T}
 end
 
-struct SpecificForce4Atom{D, T}
+"""
+    SpecificForce4Atoms(f1, f2, f3, f4)
+
+Forces on four atoms arising from an interaction.
+"""
+struct SpecificForce4Atoms{D, T}
     f1::SVector{D, T}
     f2::SVector{D, T}
     f3::SVector{D, T}
     f4::SVector{D, T}
 end
 
-function SpecificForce2Atom(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T}) where {D, T}
-    return SpecificForce2Atom{D, T}(f1, f2)
+function SpecificForce2Atoms(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T}) where {D, T}
+    return SpecificForce2Atoms{D, T}(f1, f2)
 end
 
-function SpecificForce3Atom(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T},
+function SpecificForce3Atoms(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T},
                             f3::StaticArray{Tuple{D}, T}) where {D, T}
-    return SpecificForce3Atom{D, T}(f1, f2, f3)
+    return SpecificForce3Atoms{D, T}(f1, f2, f3)
 end
 
-function SpecificForce4Atom(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T},
+function SpecificForce4Atoms(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T},
                             f3::StaticArray{Tuple{D}, T}, f4::StaticArray{Tuple{D}, T}) where {D, T}
-    return SpecificForce4Atom{D, T}(f1, f2, f3, f4)
+    return SpecificForce4Atoms{D, T}(f1, f2, f3, f4)
 end
+
+Base.:+(x::SpecificForce2Atoms, y::SpecificForce2Atoms) = SpecificForce2Atoms(x.f1 + y.f1, x.f2 + y.f2)
+Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3)
+Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 
 getf1(x) = x.f1
 getf2(x) = x.f2
