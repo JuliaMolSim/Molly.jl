@@ -20,6 +20,30 @@ function ChainRulesCore.rrule(T::Type{<:Atom}, vs...)
     return Y, Atom_pullback
 end
 
+function ChainRulesCore.rrule(T::Type{<:SpecificForce2Atoms}, vs...)
+    Y = T(vs...)
+    function SpecificForce2Atoms_pullback(Ȳ)
+        return NoTangent(), Ȳ.f1, Ȳ.f2
+    end
+    return Y, SpecificForce2Atoms_pullback
+end
+
+function ChainRulesCore.rrule(T::Type{<:SpecificForce3Atoms}, vs...)
+    Y = T(vs...)
+    function SpecificForce3Atoms_pullback(Ȳ)
+        return NoTangent(), Ȳ.f1, Ȳ.f2, Ȳ.f3
+    end
+    return Y, SpecificForce3Atoms_pullback
+end
+
+function ChainRulesCore.rrule(T::Type{<:SpecificForce4Atoms}, vs...)
+    Y = T(vs...)
+    function SpecificForce4Atoms_pullback(Ȳ)
+        return NoTangent(), Ȳ.f1, Ȳ.f2, Ȳ.f3, Ȳ.f4
+    end
+    return Y, SpecificForce4Atoms_pullback
+end
+
 function ChainRulesCore.rrule(::typeof(sparsevec), is, vs, l)
     Y = sparsevec(is, vs, l)
     @views function sparsevec_pullback(Ȳ)
