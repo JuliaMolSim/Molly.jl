@@ -109,25 +109,64 @@ end
 getindices_i(arr, neighbors) = @view arr[neighbors.nbsi]
 getindices_j(arr, neighbors) = @view arr[neighbors.nbsj]
 
-# Local structs to help with propagating gradients
 struct SpecificForce2Atom{D, T}
     f1::SVector{D, T}
     f2::SVector{D, T}
+end
+
+struct SpecificForce3Atom{D, T}
+    f1::SVector{D, T}
+    f2::SVector{D, T}
+    f3::SVector{D, T}
+end
+
+struct SpecificForce4Atom{D, T}
+    f1::SVector{D, T}
+    f2::SVector{D, T}
+    f3::SVector{D, T}
+    f4::SVector{D, T}
 end
 
 function SpecificForce2Atom(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T}) where {D, T}
     return SpecificForce2Atom{D, T}(f1, f2)
 end
 
+function SpecificForce3Atom(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T},
+                            f3::StaticArray{Tuple{D}, T}) where {D, T}
+    return SpecificForce3Atom{D, T}(f1, f2, f3)
+end
+
+function SpecificForce4Atom(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T},
+                            f3::StaticArray{Tuple{D}, T}, f4::StaticArray{Tuple{D}, T}) where {D, T}
+    return SpecificForce4Atom{D, T}(f1, f2, f3, f4)
+end
+
 getf1(x) = x.f1
 getf2(x) = x.f2
+getf3(x) = x.f3
+getf4(x) = x.f4
 
 @views function specific_force(inter_list::InteractionList2Atoms, coords, box_size, force_unit, n_atoms)
-    coords_si, coords_sj = coords[inter_list.is], coords[inter_list.js]
-    sparse_fs = Array(force.(inter_list.inters, coords_si, coords_sj, (box_size,)))
+    sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js], (box_size,)))
     fis, fjs = getf1.(sparse_fs), getf2.(sparse_fs)
     checkforcetype(first(first(fis)), force_unit)
     return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms)
+end
+
+@views function specific_force(inter_list::InteractionList3Atoms, coords, box_size, force_unit, n_atoms)
+    sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
+                                coords[inter_list.ks], (box_size,)))
+    fis, fjs, fks = getf1.(sparse_fs), getf2.(sparse_fs), getf3.(sparse_fs)
+    checkforcetype(first(first(fis)), force_unit)
+    return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) + sparsevec(inter_list.ks, fks, n_atoms)
+end
+
+@views function specific_force(inter_list::InteractionList4Atoms, coords, box_size, force_unit, n_atoms)
+    sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
+                                coords[inter_list.ks], coords[inter_list.ls], (box_size,)))
+    fis, fjs, fks, fls = getf1.(sparse_fs), getf2.(sparse_fs), getf3.(sparse_fs), getf4.(sparse_fs)
+    checkforcetype(first(first(fis)), force_unit)
+    return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) + sparsevec(inter_list.ks, fks, n_atoms) + sparsevec(inter_list.ls, fls, n_atoms)
 end
 
 """
@@ -178,10 +217,7 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
     end
 
     for inter_list in values(s.specific_inter_lists)
-        sparse_fs = force.(inter_list, (s.coords,), (s.box_size,))
-        ge1, ge2 = getindex.(sparse_fs, 1), getindex.(sparse_fs, 2)
-        checkforcetype(first(first(ge2)), s.force_unit)
-        sparse_vec = sparsevec(reduce(vcat, ge1), reduce(vcat, ge2), n_atoms)
+        sparse_vec = specific_force(inter_list, s.coords, s.box_size, s.force_unit, n_atoms)
         fs += ustripvec.(Array(sparse_vec))
     end
 

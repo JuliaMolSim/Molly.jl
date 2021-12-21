@@ -1,25 +1,22 @@
 """
-    RBTorsion(; i, j, k, l, f1, f2, f3, f4)
+    RBTorsion(; f1, f2, f3, f4)
 
 A Ryckaert-Bellemans torsion angle between four atoms.
 """
 struct RBTorsion{T} <: SpecificInteraction
-    i::Int
-    j::Int
-    k::Int
-    l::Int
     f1::T
     f2::T
     f3::T
     f4::T
 end
 
-RBTorsion(; i, j, k, l, f1, f2, f3, f4) = RBTorsion{typeof(f1)}(i, j, k, l, f1, f2, f3, f4)
+RBTorsion(; f1, f2, f3, f4) = RBTorsion{typeof(f1)}(f1, f2, f3, f4)
 
-@inline @inbounds function force(d::RBTorsion, coords, box_size)
-    ab = vector(coords[d.i], coords[d.j], box_size)
-    bc = vector(coords[d.j], coords[d.k], box_size)
-    cd = vector(coords[d.k], coords[d.l], box_size)
+@inline @inbounds function force(d::RBTorsion, coords_i, coords_j, coords_k,
+                                    coords_l, box_size)
+    ab = vector(coords_i, coords_j, box_size)
+    bc = vector(coords_j, coords_k, box_size)
+    cd = vector(coords_k, coords_l, box_size)
     cross_ab_bc = ab × bc
     cross_bc_cd = bc × cd
     bc_norm = norm(bc)
@@ -33,14 +30,14 @@ RBTorsion(; i, j, k, l, f1, f2, f3, f4) = RBTorsion{typeof(f1)}(i, j, k, l, f1, 
     v = (dot(-ab, bc) / bc_norm^2) * fi - (dot(-cd, bc) / bc_norm^2) * fl
     fj =  v - fi
     fk = -v - fl
-    return [d.i, d.j, d.k, d.l], [fi, fj, fk, fl]
+    return SpecificForce4Atom(fi, fj, fk, fl)
 end
 
-@inline @inbounds function potential_energy(d::RBTorsion,
-                                            s::System)
-    ab = vector(s.coords[d.i], s.coords[d.j], s.box_size)
-    bc = vector(s.coords[d.j], s.coords[d.k], s.box_size)
-    cd = vector(s.coords[d.k], s.coords[d.l], s.box_size)
+@inline @inbounds function potential_energy(d::RBTorsion, coords_i, coords_j, coords_k,
+                                            coords_l, box_size)
+    ab = vector(coords_i, coords_j, box_size)
+    bc = vector(coords_j, coords_k, box_size)
+    cd = vector(coords_k, coords_l, box_size)
     cross_ab_bc = ab × bc
     cross_bc_cd = bc × cd
     θ = atan(

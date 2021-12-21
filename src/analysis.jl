@@ -135,12 +135,25 @@ function potential_energy(s::System, neighbors=nothing)
     end
 
     for inter_list in values(s.specific_inter_lists)
-        for inter in inter_list
-            potential += potential_energy(inter, s)
-        end
+        potential += potential_energy(inter_list, s.coords, s.box_size)
     end
 
     return uconvert(s.energy_unit, potential)
+end
+
+@views function potential_energy(inter_list::InteractionList2Atoms, coords, box_size)
+    return sum(potential_energy.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
+                                    (box_size,)))
+end
+
+@views function potential_energy(inter_list::InteractionList3Atoms, coords, box_size)
+    return sum(potential_energy.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
+                                    coords[inter_list.ks], (box_size,)))
+end
+
+@views function potential_energy(inter_list::InteractionList4Atoms, coords, box_size)
+    return sum(potential_energy.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
+                                    coords[inter_list.ks], coords[inter_list.ls], (box_size,)))
 end
 
 """

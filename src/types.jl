@@ -9,6 +9,8 @@ export
     NeighborFinder,
     Logger,
     InteractionList2Atoms,
+    InteractionList3Atoms,
+    InteractionList4Atoms,
     Atom,
     mass,
     AtomData,
@@ -63,6 +65,27 @@ A list of specific interactions between two atoms.
 struct InteractionList2Atoms{T}
     is::Vector{Int}
     js::Vector{Int}
+    inters::T
+end
+
+"""
+A list of specific interactions between three atoms.
+"""
+struct InteractionList3Atoms{T}
+    is::Vector{Int}
+    js::Vector{Int}
+    ks::Vector{Int}
+    inters::T
+end
+
+"""
+A list of specific interactions between four atoms.
+"""
+struct InteractionList4Atoms{T}
+    is::Vector{Int}
+    js::Vector{Int}
+    ks::Vector{Int}
+    ls::Vector{Int}
     inters::T
 end
 
