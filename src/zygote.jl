@@ -123,6 +123,12 @@ function dualize_fb(inter::HarmonicBond{D, K}) where {D, K}
     return HarmonicBond{typeof(b0), typeof(kb)}(b0, kb)
 end
 
+function dualize_fb(inter::HarmonicAngle{D, K}) where {D, K}
+    th0 = Dual(inter.th0, true , false, false, false, false, false, false, false, false, false, false, false, false, false)
+    cth = Dual(inter.cth, false, true , false, false, false, false, false, false, false, false, false, false, false, false)
+    return HarmonicAngle{typeof(th0), typeof(cth)}(th0, cth)
+end
+
 function dualize_atom_fb1(at::Atom)
     return Atom(at.index,
                 Dual(at.charge, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, false),
@@ -188,13 +194,24 @@ function dual_function_force_broadcast(f::F) where F
     end
 end
 
-function dual_function_specific_broadcast(f::F) where F
+function dual_function_specific_2_atoms(f::F) where F
     function (arg1, arg2, arg3, arg4)
         ds1 = dualize_fb(arg1)
         ds2 = dualize(Nothing, arg2, Val(2), Val(6))
         ds3 = dualize(Nothing, arg3, Val(5), Val(3))
         ds4 = dualize(Nothing, arg4, Val(8), Val(0))
         return f(ds1, ds2, ds3, ds4)
+    end
+end
+
+function dual_function_specific_3_atoms(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5)
+        ds1 = dualize_fb(arg1)
+        ds2 = dualize(Nothing, arg2, Val(2), Val(9))
+        ds3 = dualize(Nothing, arg3, Val(5), Val(6))
+        ds4 = dualize(Nothing, arg4, Val(8), Val(3))
+        ds5 = dualize(Nothing, arg5, Val(11), Val(0))
+        return f(ds1, ds2, ds3, ds4, ds5)
     end
 end
 
@@ -297,6 +314,11 @@ function combine_dual_SpecificInteraction(inter::HarmonicBond, y1, o1, i::Intege
      y1.f1[1] * partials(o1.f1[1], i + 1) + y1.f1[2] * partials(o1.f1[2], i + 1) + y1.f1[3] * partials(o1.f1[3], i + 1) + y1.f2[1] * partials(o1.f2[1], i + 1) + y1.f2[2] * partials(o1.f2[2], i + 1) + y1.f2[3] * partials(o1.f2[3], i + 1))
 end
 
+function combine_dual_SpecificInteraction(inter::HarmonicAngle, y1, o1, i::Integer)
+    (y1.f1[1] * partials(o1.f1[1], i    ) + y1.f1[2] * partials(o1.f1[2], i    ) + y1.f1[3] * partials(o1.f1[3], i    ) + y1.f2[1] * partials(o1.f2[1], i    ) + y1.f2[2] * partials(o1.f2[2], i    ) + y1.f2[3] * partials(o1.f2[3], i    ) + y1.f3[1] * partials(o1.f3[1], i    ) + y1.f3[2] * partials(o1.f3[2], i    ) + y1.f3[3] * partials(o1.f3[3], i    ),
+     y1.f1[1] * partials(o1.f1[1], i + 1) + y1.f1[2] * partials(o1.f1[2], i + 1) + y1.f1[3] * partials(o1.f1[3], i + 1) + y1.f2[1] * partials(o1.f2[1], i + 1) + y1.f2[2] * partials(o1.f2[2], i + 1) + y1.f2[3] * partials(o1.f2[3], i + 1) + y1.f3[1] * partials(o1.f3[1], i + 1) + y1.f3[2] * partials(o1.f3[2], i + 1) + y1.f3[3] * partials(o1.f3[3], i + 1))
+end
+
 function combine_dual_Atom(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer, j::Integer, k::Integer, l::Integer) where {T, P}
     ps1, ps2, ps3 = partials(o1[1]), partials(o1[2]), partials(o1[3])
     Atom(
@@ -341,7 +363,7 @@ end
                                             arg2::AbstractArray{SVector{D, T}},
                                             arg3::AbstractArray{SVector{D, T}},
                                             arg4::Tuple{SVector{D, T}}) where {D, T}
-    out = dual_function_specific_broadcast(f).(arg1, arg2, arg3, arg4)
+    out = dual_function_specific_2_atoms(f).(arg1, arg2, arg3, arg4)
     y = broadcast(o1 -> SpecificForce2Atoms{D, T}(value.(o1.f1), value.(o1.f2)), out)
     function bc_fwd_back(ȳ)
         cu_ȳ = cu(ȳ)
@@ -362,6 +384,42 @@ end
                     sumpartials(o1.f1, y1.f1, 11) + sumpartials(o1.f2, y1.f2, 11)),
                     cu_ȳ, out))
         return (nothing, nothing, darg1, darg2, darg3, darg4)
+    end
+    return y, bc_fwd_back
+end
+
+@inline function Zygote.broadcast_forward(f,
+                                            arg1::AbstractArray{<:SpecificInteraction},
+                                            arg2::AbstractArray{SVector{D, T}},
+                                            arg3::AbstractArray{SVector{D, T}},
+                                            arg4::AbstractArray{SVector{D, T}},
+                                            arg5::Tuple{SVector{D, T}}) where {D, T}
+    out = dual_function_specific_3_atoms(f).(arg1, arg2, arg3, arg4, arg5)
+    y = broadcast(o1 -> SpecificForce3Atoms{D, T}(value.(o1.f1), value.(o1.f2), value.(o1.f3)), out)
+    function bc_fwd_back(ȳ)
+        cu_ȳ = cu(ȳ)
+        darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, cu_ȳ, out, 1))
+        darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
+                    sumpartials(o1.f1, y1.f1, 3) + sumpartials(o1.f2, y1.f2, 3) + sumpartials(o1.f3, y1.f3, 3),
+                    sumpartials(o1.f1, y1.f1, 4) + sumpartials(o1.f2, y1.f2, 4) + sumpartials(o1.f3, y1.f3, 4),
+                    sumpartials(o1.f1, y1.f1, 5) + sumpartials(o1.f2, y1.f2, 5) + sumpartials(o1.f3, y1.f3, 5)),
+                    cu_ȳ, out))
+        darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(
+                    sumpartials(o1.f1, y1.f1, 6) + sumpartials(o1.f2, y1.f2, 6) + sumpartials(o1.f3, y1.f3, 6),
+                    sumpartials(o1.f1, y1.f1, 7) + sumpartials(o1.f2, y1.f2, 7) + sumpartials(o1.f3, y1.f3, 7),
+                    sumpartials(o1.f1, y1.f1, 8) + sumpartials(o1.f2, y1.f2, 8) + sumpartials(o1.f3, y1.f3, 8)),
+                    cu_ȳ, out))
+        darg4 = unbroadcast(arg4, broadcast((y1, o1) -> SVector{D, T}(
+                    sumpartials(o1.f1, y1.f1,  9) + sumpartials(o1.f2, y1.f2,  9) + sumpartials(o1.f3, y1.f3,  9),
+                    sumpartials(o1.f1, y1.f1, 10) + sumpartials(o1.f2, y1.f2, 10) + sumpartials(o1.f3, y1.f3, 10),
+                    sumpartials(o1.f1, y1.f1, 11) + sumpartials(o1.f2, y1.f2, 11) + sumpartials(o1.f3, y1.f3, 11)),
+                    cu_ȳ, out))
+        darg5 = unbroadcast(arg5, broadcast((y1, o1) -> SVector{D, T}(
+                    sumpartials(o1.f1, y1.f1, 12) + sumpartials(o1.f2, y1.f2, 12) + sumpartials(o1.f3, y1.f3, 12),
+                    sumpartials(o1.f1, y1.f1, 13) + sumpartials(o1.f2, y1.f2, 13) + sumpartials(o1.f3, y1.f3, 13),
+                    sumpartials(o1.f1, y1.f1, 14) + sumpartials(o1.f2, y1.f2, 14) + sumpartials(o1.f3, y1.f3, 14)),
+                    cu_ȳ, out))
+        return (nothing, nothing, darg1, darg2, darg3, darg4, darg5)
     end
     return y, bc_fwd_back
 end
