@@ -208,7 +208,7 @@ end
 function dualize_fb(inter::HarmonicBond{D, K}) where {D, K}
     b0 = Dual(inter.b0, true , false, false, false, false, false, false, false, false, false, false)
     kb = Dual(inter.kb, false, true , false, false, false, false, false, false, false, false, false)
-    return HarmonicBond{typeof(b0), typeof(kb)}(inter.i, inter.j, b0, kb)
+    return HarmonicBond{typeof(b0), typeof(kb)}(b0, kb)
 end
 
 function dualize_atom_fb1(at::Atom)
@@ -381,9 +381,8 @@ function combine_dual_GeneralInteraction(inter::CoulombReactionField, y1::SVecto
 end
 
 function combine_dual_SpecificInteraction(inter::HarmonicBond, y1, o1, i::Integer)
-    (0, 0,
-        y1.f1[1] * partials(o1.f1[1], i    ) + y1.f1[2] * partials(o1.f1[2], i    ) + y1.f1[3] * partials(o1.f1[3], i    ) + y1.f2[1] * partials(o1.f2[1], i    ) + y1.f2[2] * partials(o1.f2[2], i    ) + y1.f2[3] * partials(o1.f2[3], i    ),
-        y1.f1[1] * partials(o1.f1[1], i + 1) + y1.f1[2] * partials(o1.f1[2], i + 1) + y1.f1[3] * partials(o1.f1[3], i + 1) + y1.f2[1] * partials(o1.f2[1], i + 1) + y1.f2[2] * partials(o1.f2[2], i + 1) + y1.f2[3] * partials(o1.f2[3], i + 1))
+    (y1.f1[1] * partials(o1.f1[1], i    ) + y1.f1[2] * partials(o1.f1[2], i    ) + y1.f1[3] * partials(o1.f1[3], i    ) + y1.f2[1] * partials(o1.f2[1], i    ) + y1.f2[2] * partials(o1.f2[2], i    ) + y1.f2[3] * partials(o1.f2[3], i    ),
+     y1.f1[1] * partials(o1.f1[1], i + 1) + y1.f1[2] * partials(o1.f1[2], i + 1) + y1.f1[3] * partials(o1.f1[3], i + 1) + y1.f2[1] * partials(o1.f2[1], i + 1) + y1.f2[2] * partials(o1.f2[2], i + 1) + y1.f2[3] * partials(o1.f2[3], i + 1))
 end
 
 function combine_dual_Atom(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer, j::Integer, k::Integer, l::Integer) where {T, P}

@@ -101,8 +101,8 @@ function accelerations(s::System, neighbors=nothing; parallel::Bool=true)
     return forces(s, neighbors; parallel=parallel) ./ mass.(s.atoms)
 end
 
-function accelerations(s::System, coords, atoms, is, js, neighbors=nothing, neighbors_all=nothing)
-    return forces(s, coords, atoms, is, js, neighbors, neighbors_all) ./ mass.(s.atoms)
+function accelerations(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothing)
+    return forces(s, coords, atoms, neighbors, neighbors_all) ./ mass.(s.atoms)
 end
 
 # Functions defined to allow us to write rrules
@@ -121,6 +121,14 @@ end
 
 getf1(x) = x.f1
 getf2(x) = x.f2
+
+@views function specific_force(inter_list::InteractionList2Atoms, coords, box_size, force_unit, n_atoms)
+    coords_si, coords_sj = coords[inter_list.is], coords[inter_list.js]
+    sparse_fs = Array(force.(inter_list.inters, coords_si, coords_sj, (box_size,)))
+    fis, fjs = getf1.(sparse_fs), getf2.(sparse_fs)
+    checkforcetype(first(first(fis)), force_unit)
+    return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms)
+end
 
 """
     forces(system, neighbors=nothing; parallel=true)
@@ -180,7 +188,7 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
     return fs * s.force_unit
 end
 
-function forces(s::System, coords, atoms, is, js, neighbors=nothing, neighbors_all=nothing)
+function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothing)
     n_atoms = length(s)
     fs = ustripvec.(zero(coords))
 
@@ -211,13 +219,8 @@ function forces(s::System, coords, atoms, is, js, neighbors=nothing, neighbors_a
         end
     end
 
-    @views for inter_list in values(s.specific_inter_lists)
-        coords_si = coords[is]
-        coords_sj = coords[js]
-        sparse_fs = Array(force.(inter_list, coords_si, coords_sj, (s.box_size,)))
-        fis, fjs = getf1.(sparse_fs), getf2.(sparse_fs)
-        checkforcetype(first(first(fis)), s.force_unit)
-        sparse_vec = sparsevec(is, fis, n_atoms) + sparsevec(js, fjs, n_atoms)
+    for inter_list in values(s.specific_inter_lists)
+        sparse_vec = specific_force(inter_list, coords, s.box_size, s.force_unit, n_atoms)
         # Move back to GPU if required
         fs += convert(typeof(fs), ustripvec.(Array(sparse_vec)))
     end

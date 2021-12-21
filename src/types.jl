@@ -8,6 +8,7 @@ export
     AbstractCoupler,
     NeighborFinder,
     Logger,
+    InteractionList2Atoms,
     Atom,
     mass,
     AtomData,
@@ -55,6 +56,15 @@ A way to record a property, e.g. the temperature, throughout a simulation.
 Custom loggers should sub-type this type.
 """
 abstract type Logger end
+
+"""
+A list of specific interactions between two atoms.
+"""
+struct InteractionList2Atoms{T}
+    is::Vector{Int}
+    js::Vector{Int}
+    inters::T
+end
 
 """
     Atom(; <keyword arguments>)
