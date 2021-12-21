@@ -1,7 +1,7 @@
 # Extend Zygote to work with static vectors and custom types on the GPU
 # Here be dragons
 
-using ForwardDiff: Chunk, Dual, partials, value
+using ForwardDiff: Chunk, Dual, dualize, partials, value
 using Zygote: unbroadcast
 
 Zygote.accum(x::AbstractArray{<:SizedVector}, ys::CuArray{<:SVector}...) = Zygote.accum.(convert(typeof(ys[1]), x), ys...)
@@ -87,101 +87,13 @@ Zygote.∇getindex(x::CuArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> be
     return Zygote._project(x, dx), nothing
 end
 
-# See the dualize function in ForwardDiff
-@generated function dualize_add1(::Type{T}, x::StaticArray) where T
+# Extend to add extra empty partials before (B) and after (A) the SVector partials
+@generated function ForwardDiff.dualize(::Type{T}, x::StaticArray, ::Val{B}, ::Val{A}) where {T, B, A}
     N = length(x)
-    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i}())) for i in 1:N]...)
-    V = StaticArrays.similar_type(x, Dual{T,eltype(x),N+1})
+    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i + $B}())) for i in 1:N]...)
+    V = StaticArrays.similar_type(x, Dual{T, eltype(x), N + B + A})
     return quote
-        chunk = Chunk{$N+1}()
-        $(Expr(:meta, :inline))
-        return $V($(dx))
-    end
-end
-
-@generated function dualize_add3(::Type{T}, x::StaticArray) where T
-    N = length(x)
-    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i}())) for i in 1:N]...)
-    V = StaticArrays.similar_type(x, Dual{T,eltype(x),N+3})
-    return quote
-        chunk = Chunk{$N+3}()
-        $(Expr(:meta, :inline))
-        return $V($(dx))
-    end
-end
-
-@generated function dualize_add3bef(::Type{T}, x::StaticArray) where T
-    N = length(x)
-    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i+3}())) for i in 1:N]...)
-    V = StaticArrays.similar_type(x, Dual{T,eltype(x),N+3})
-    return quote
-        chunk = Chunk{$N+3}()
-        $(Expr(:meta, :inline))
-        return $V($(dx))
-    end
-end
-
-@generated function dualize_fb1(::Type{T}, x::StaticArray) where T
-    N = length(x)
-    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i+4}())) for i in 1:N]...)
-    V = StaticArrays.similar_type(x, Dual{T,eltype(x),N+18})
-    return quote
-        chunk = Chunk{$N+18}()
-        $(Expr(:meta, :inline))
-        return $V($(dx))
-    end
-end
-
-@generated function dualize_fb2(::Type{T}, x::StaticArray) where T
-    N = length(x)
-    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i+7}())) for i in 1:N]...)
-    V = StaticArrays.similar_type(x, Dual{T,eltype(x),N+18})
-    return quote
-        chunk = Chunk{$N+18}()
-        $(Expr(:meta, :inline))
-        return $V($(dx))
-    end
-end
-
-@generated function dualize_fb3(::Type{T}, x::StaticArray) where T
-    N = length(x)
-    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i+18}())) for i in 1:N]...)
-    V = StaticArrays.similar_type(x, Dual{T,eltype(x),N+18})
-    return quote
-        chunk = Chunk{$N+18}()
-        $(Expr(:meta, :inline))
-        return $V($(dx))
-    end
-end
-
-@generated function dualize_sb1(::Type{T}, x::StaticArray) where T
-    N = length(x)
-    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i+2}())) for i in 1:N]...)
-    V = StaticArrays.similar_type(x, Dual{T,eltype(x),N+8})
-    return quote
-        chunk = Chunk{$N+8}()
-        $(Expr(:meta, :inline))
-        return $V($(dx))
-    end
-end
-
-@generated function dualize_sb2(::Type{T}, x::StaticArray) where T
-    N = length(x)
-    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i+5}())) for i in 1:N]...)
-    V = StaticArrays.similar_type(x, Dual{T,eltype(x),N+8})
-    return quote
-        chunk = Chunk{$N+8}()
-        $(Expr(:meta, :inline))
-        return $V($(dx))
-    end
-end
-
-@generated function dualize_sb3(::Type{T}, x::StaticArray) where T
-    N = length(x)
-    dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i+8}())) for i in 1:N]...)
-    V = StaticArrays.similar_type(x, Dual{T,eltype(x),N+8})
-    return quote
-        chunk = Chunk{$N+8}()
+        chunk = Chunk{$N + $B + $A}()
         $(Expr(:meta, :inline))
         return $V($(dx))
     end
@@ -229,14 +141,14 @@ end
 
 function dual_function_svec(f::F) where F
     function (arg1)
-        ds1 = ForwardDiff.dualize(Nothing, arg1)
+        ds1 = dualize(Nothing, arg1, Val(0), Val(0))
         return f(ds1)
     end
 end
 
 function dual_function_svec_real(f::F) where F
     function (arg1::SVector{D, T}, arg2) where {D, T}
-        ds1 = dualize_add1(Nothing, arg1)
+        ds1 = dualize(Nothing, arg1, Val(0), Val(1))
         # Leaving the integer type in here results in Float32 -> Float64 conversion
         ds2 = Zygote.dual(isa(arg2, Int) ? T(arg2) : arg2, (false, false, false, true))
         return f(ds1, ds2)
@@ -245,8 +157,8 @@ end
 
 function dual_function_svec_svec(f::F) where F
     function (arg1, arg2)
-        ds1 = dualize_add3(Nothing, arg1)
-        ds2 = dualize_add3bef(Nothing, arg2)
+        ds1 = dualize(Nothing, arg1, Val(0), Val(3))
+        ds2 = dualize(Nothing, arg2, Val(3), Val(0))
         return f(ds1, ds2)
     end
 end
@@ -265,11 +177,11 @@ end
 function dual_function_force_broadcast(f::F) where F
     function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
         ds1 = dualize_fb(arg1)
-        ds2 = dualize_fb1(Nothing, arg2)
-        ds3 = dualize_fb2(Nothing, arg3)
+        ds2 = dualize(Nothing, arg2, Val(4), Val(14))
+        ds3 = dualize(Nothing, arg3, Val(7), Val(11))
         ds4 = dualize_atom_fb1(arg4)
         ds5 = dualize_atom_fb2(arg5)
-        ds6 = dualize_fb3(Nothing, arg6)
+        ds6 = dualize(Nothing, arg6, Val(18), Val(0))
         ds7 = arg7
         ds8 = arg8
         return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8)
@@ -279,9 +191,9 @@ end
 function dual_function_specific_broadcast(f::F) where F
     function (arg1, arg2, arg3, arg4)
         ds1 = dualize_fb(arg1)
-        ds2 = dualize_sb1(Nothing, arg2)
-        ds3 = dualize_sb2(Nothing, arg3)
-        ds4 = dualize_sb3(Nothing, arg4)
+        ds2 = dualize(Nothing, arg2, Val(2), Val(6))
+        ds3 = dualize(Nothing, arg3, Val(5), Val(3))
+        ds4 = dualize(Nothing, arg4, Val(8), Val(0))
         return f(ds1, ds2, ds3, ds4)
     end
 end
