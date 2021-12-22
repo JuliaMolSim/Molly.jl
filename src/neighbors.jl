@@ -316,11 +316,11 @@ CellListMapNeighborFinder{Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋,
 ```
 
 """
-mutable struct CellListMapNeighborFinder{D, N, T} <: NeighborFinder
+mutable struct CellListMapNeighborFinder{N, T} <: NeighborFinder
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int
-    dist_cutoff::D
+    dist_cutoff::T
     # auxiliary arrays for multi-threaded in-place updating of the lists
     cl::CellListMap.CellList{N, T}
     aux::CellListMap.AuxThreaded{N, T}
@@ -334,30 +334,29 @@ function CellListMapNeighborFinder(;
                                    nb_matrix,
                                    matrix_14=falses(size(nb_matrix)),
                                    n_steps=10,
-                                   dist_cutoff::D,
                                    x0=nothing,
-                                   unit_cell=nothing) where D
-    cutoff = ustrip(dist_cutoff)
-    T = typeof(cutoff)
+                                   unit_cell=nothing,
+                                   number_of_batches=(0,0), # (0,0): use default heuristic
+                                   dist_cutoff::T) where T
     np = size(nb_matrix, 1)
     if isnothing(unit_cell)
-        side = T(ustrip(uconvert(unit(dist_cutoff ^ 3), np * 0.01u"nm^3"))) ^ (1 / 3)
-        side = max(side, 2 * cutoff)
-        box = CellListMap.Box(side * ones(SVector{3, T}), cutoff; T=T)
+        side = max(2 * dist_cutoff, uconvert(unit(dist_cutoff), (np * 0.01u"nm^3") ^ (1 / 3)))
+        sides = @SVector([side,side,side])
+        box = CellListMap.Box(sides, dist_cutoff)
     else
-        box = CellListMap.Box(unit_cell, cutoff; T=T)
+        box = CellListMap.Box(unit_cell, dist_cutoff)
     end
     if isnothing(x0)
-        x = [box.unit_cell_max .* rand(SVector{3, T}) for _ in 1:np]
+        x = [ustrip.(box.unit_cell_max) .* rand(SVector{3, T}) for _ in 1:np]
     else
         x = x0
     end
     # Construct the cell list for the first time, to allocate 
-    cl = CellList(x, box; parallel=true)
-    return CellListMapNeighborFinder{D, 3, T}(
+    cl = CellList(x, box; parallel=true, nbatches=number_of_batches)
+    return CellListMapNeighborFinder{3, T}(
         nb_matrix, matrix_14, n_steps, dist_cutoff,
         cl, CellListMap.AuxThreaded(cl), 
-        [NeighborList(0, [(0, 0, false)]) for _ in 1:nthreads()])
+        [NeighborList(0, [(0, 0, false)]) for _ in 1:CellListMap.nbatches(cl)])
 end
 
 """
@@ -376,15 +375,11 @@ end
 # This is only called in the parallel case
 function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{NeighborList})
     neighbors.n = 0
-    for i in 1:nthreads()
+    for i in 1:length(neighbors_threaded)
         append!(neighbors, neighbors_threaded[i])
     end
     return neighbors
 end
-
-# Add method to strip_value from cell list map to pass the 
-# coordinates with units without having to reallocate the vector 
-CellListMap.strip_value(x::Unitful.Quantity) = Unitful.ustrip(x)
 
 """
     find_neighbors(s::System,
@@ -413,18 +408,14 @@ function find_neighbors(s::System,
     neighbors.n = 0
     neighbors_threaded = nf.neighbors_threaded
     if parallel
-        for i in 1:nthreads()
+        for i in 1:length(neighbors_threaded)
             neighbors_threaded[i].n = 0
         end
     else
         neighbors_threaded[1].n = 0
     end
 
-    dist_unit = unit(first(first(s.coords)))
-    box_size_conv = ustrip.(dist_unit, s.box_size)
-    dist_cutoff_conv = ustrip(dist_unit, nf.dist_cutoff)
-
-    box = CellListMap.Box(box_size_conv, dist_cutoff_conv; T=typeof(dist_cutoff_conv), lcell=1)
+    box = CellListMap.Box(s.box_size, nf.dist_cutoff; lcell=1)
     cl = UpdateCellList!(s.coords, box, cl, aux; parallel=parallel)
 
     map_pairwise!(
