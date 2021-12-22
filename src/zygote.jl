@@ -99,50 +99,64 @@ end
     end
 end
 
+# Dualize a value with extra partials
+macro dualize(x, n_partials::Integer, active_partial::Integer)
+    ps = [i == active_partial for i in 1:n_partials]
+    return :(ForwardDiff.Dual($(esc(x)), $(ps...)))
+end
+
 # Space for 4 duals given to interactions though only one used in this case
 # No gradient for cutoff type
 function dualize_fb(inter::LennardJones{S, C, W, F, E}) where {S, C, W, F, E}
-    weight_14 = Dual(inter.weight_14, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
-    return LennardJones{S, C, typeof(weight_14), F, E}(inter.cutoff, inter.nl_only, inter.lorentz_mixing,
-                                                        weight_14, inter.force_unit, inter.energy_unit)
+    w14 = inter.weight_14
+    dual_weight_14 = @dualize(w14, 21, 1)
+    return LennardJones{S, C, typeof(dual_weight_14), F, E}(inter.cutoff, inter.nl_only,
+                inter.lorentz_mixing, dual_weight_14, inter.force_unit, inter.energy_unit)
 end
 
 function dualize_fb(inter::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
-    dist_cutoff        = Dual(inter.dist_cutoff       , true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
-    solvent_dielectric = Dual(inter.solvent_dielectric, false, true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
-    weight_14          = Dual(inter.weight_14         , false, false, true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
-    coulomb_const      = Dual(inter.coulomb_const     , false, false, false, true , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
-    return CoulombReactionField{typeof(dist_cutoff), typeof(solvent_dielectric), typeof(weight_14), typeof(coulomb_const), F, E}(
-                    dist_cutoff, solvent_dielectric, inter.nl_only, weight_14,
-                    coulomb_const, inter.force_unit, inter.energy_unit)
+    dc, sd, w14, cc = inter.dist_cutoff, inter.solvent_dielectric, inter.weight_14, inter.coulomb_const
+    dual_dist_cutoff        = @dualize(dc , 21, 1)
+    dual_solvent_dielectric = @dualize(sd , 21, 2)
+    dual_weight_14          = @dualize(w14, 21, 3)
+    dual_coulomb_const      = @dualize(cc , 21, 4)
+    return CoulombReactionField{typeof(dual_dist_cutoff), typeof(dual_solvent_dielectric), typeof(dual_weight_14), typeof(dual_coulomb_const), F, E}(
+                                dual_dist_cutoff, dual_solvent_dielectric, inter.nl_only, dual_weight_14,
+                                dual_coulomb_const, inter.force_unit, inter.energy_unit)
 end
 
 function dualize_fb(inter::HarmonicBond{D, K}) where {D, K}
-    b0 = Dual(inter.b0, true , false, false, false, false, false, false, false, false, false, false)
-    kb = Dual(inter.kb, false, true , false, false, false, false, false, false, false, false, false)
-    return HarmonicBond{typeof(b0), typeof(kb)}(b0, kb)
+    b0, kb = inter.b0, inter.kb
+    dual_b0 = @dualize(b0, 11, 1)
+    dual_kb = @dualize(kb, 11, 2)
+    return HarmonicBond{typeof(dual_b0), typeof(dual_kb)}(dual_b0, dual_kb)
 end
 
 function dualize_fb(inter::HarmonicAngle{D, K}) where {D, K}
-    th0 = Dual(inter.th0, true , false, false, false, false, false, false, false, false, false, false, false, false, false)
-    cth = Dual(inter.cth, false, true , false, false, false, false, false, false, false, false, false, false, false, false)
-    return HarmonicAngle{typeof(th0), typeof(cth)}(th0, cth)
+    th0, cth = inter.th0, inter.cth
+    dual_th0 = @dualize(th0, 14, 1)
+    dual_cth = @dualize(cth, 14, 2)
+    return HarmonicAngle{typeof(dual_th0), typeof(dual_cth)}(dual_th0, dual_cth)
 end
 
 function dualize_atom_fb1(at::Atom)
-    return Atom(at.index,
-                Dual(at.charge, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false, false),
-                Dual(at.mass  , false, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false, false),
-                Dual(at.σ     , false, false, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false, false),
-                Dual(at.ϵ     , false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false, false))
+    charge, mass, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
+    dual_charge = @dualize(charge, 21, 11)
+    dual_mass = @dualize(mass, 21, 12)
+    dual_σ = @dualize(σ, 21, 13)
+    dual_ϵ = @dualize(ϵ, 21, 14)
+    return Atom{typeof(dual_charge), typeof(dual_mass), typeof(dual_σ), typeof(dual_ϵ)}(
+                at.index, dual_charge, dual_mass, dual_σ, dual_ϵ)
 end
 
 function dualize_atom_fb2(at::Atom)
-    return Atom(at.index,
-                Dual(at.charge, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false, false),
-                Dual(at.mass  , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false, false),
-                Dual(at.σ     , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, false, false, false),
-                Dual(at.ϵ     , false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, false, false))
+    charge, mass, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
+    dual_charge = @dualize(charge, 21, 15)
+    dual_mass = @dualize(mass, 21, 16)
+    dual_σ = @dualize(σ, 21, 17)
+    dual_ϵ = @dualize(ϵ, 21, 18)
+    return Atom{typeof(dual_charge), typeof(dual_mass), typeof(dual_σ), typeof(dual_ϵ)}(
+                at.index, dual_charge, dual_mass, dual_σ, dual_ϵ)
 end
 
 function dual_function_svec(f::F) where F
@@ -171,11 +185,9 @@ end
 
 function dual_function_atom(f::F) where F
     function (arg1)
-        ds1 = Atom(arg1.index,
-                    Dual(arg1.charge, true, false, false, false),
-                    Dual(arg1.mass  , false, true, false, false),
-                    Dual(arg1.σ     , false, false, true, false),
-                    Dual(arg1.ϵ     , false, false, false, true))
+        charge, mass, σ, ϵ = arg1.charge, arg1.mass, arg1.σ, arg1.ϵ
+        ds1 = Atom(arg1.index, @dualize(charge, 4, 1), @dualize(mass, 4, 2),
+                    @dualize(σ, 4, 3), @dualize(ϵ, 4, 4))
         return f(ds1)
     end
 end
@@ -207,9 +219,9 @@ end
 function dual_function_specific_3_atoms(f::F) where F
     function (arg1, arg2, arg3, arg4, arg5)
         ds1 = dualize_fb(arg1)
-        ds2 = dualize(Nothing, arg2, Val(2), Val(9))
-        ds3 = dualize(Nothing, arg3, Val(5), Val(6))
-        ds4 = dualize(Nothing, arg4, Val(8), Val(3))
+        ds2 = dualize(Nothing, arg2, Val( 2), Val(9))
+        ds3 = dualize(Nothing, arg3, Val( 5), Val(6))
+        ds4 = dualize(Nothing, arg4, Val( 8), Val(3))
         ds5 = dualize(Nothing, arg5, Val(11), Val(0))
         return f(ds1, ds2, ds3, ds4, ds5)
     end
@@ -366,7 +378,7 @@ end
     out = dual_function_specific_2_atoms(f).(arg1, arg2, arg3, arg4)
     y = broadcast(o1 -> SpecificForce2Atoms{D, T}(value.(o1.f1), value.(o1.f2)), out)
     function bc_fwd_back(ȳ)
-        cu_ȳ = cu(ȳ)
+        cu_ȳ = arg1 isa CuArray ? cu(ȳ) : ȳ
         darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, cu_ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 3) + sumpartials(o1.f2, y1.f2, 3),
@@ -397,7 +409,7 @@ end
     out = dual_function_specific_3_atoms(f).(arg1, arg2, arg3, arg4, arg5)
     y = broadcast(o1 -> SpecificForce3Atoms{D, T}(value.(o1.f1), value.(o1.f2), value.(o1.f3)), out)
     function bc_fwd_back(ȳ)
-        cu_ȳ = cu(ȳ)
+        cu_ȳ = arg1 isa CuArray ? cu(ȳ) : ȳ
         darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, cu_ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 3) + sumpartials(o1.f2, y1.f2, 3) + sumpartials(o1.f3, y1.f3, 3),
