@@ -51,6 +51,11 @@ function Zygote.accum_sum(xs::AbstractArray{CoulombReactionField{D, S, W, T, F, 
     reduce(Zygote.accum, xs, dims=dims; init=CoulombReactionField{D, S, W, T, F, E}(zero(D), zero(S), false, zero(W), zero(T), NoUnits, NoUnits))
 end
 
+function Zygote.accum(x::Tuple{NTuple{6, Int}, NTuple{6, T}, NTuple{6, E}},
+                        y::Tuple{NTuple{6, Int}, NTuple{6, T}, NTuple{6, E}}) where {T, E}
+    (0, 0, 0, 0, 0, 0), x[2] .+ y[2], x[3] .+ y[3]
+end
+
 Base.zero(::Type{Atom{T, T, T, T}}) where {T} = Atom(0, zero(T), zero(T), zero(T), zero(T))
 atomorempty(at::Atom, T) = at
 atomorempty(at::Nothing, T) = zero(Atom{T, T, T, T})
@@ -139,6 +144,21 @@ function dualize_fb(inter::HarmonicAngle{D, K}) where {D, K}
     return HarmonicAngle{typeof(dual_th0), typeof(dual_cth)}(dual_th0, dual_cth)
 end
 
+function dualize_fb(inter::PeriodicTorsion{6, T, E}) where {T, E}
+    p1, p2, p3, p4, p5, p6 = inter.phases
+    k1, k2, k3, k4, k5, k6 = inter.ks
+    dual_phases = (
+        @dualize(p1, 27,  1), @dualize(p2, 27,  2), @dualize(p3, 27,  3),
+        @dualize(p4, 27,  4), @dualize(p5, 27,  5), @dualize(p6, 27,  6),
+    )
+    dual_ks = (
+        @dualize(k1, 27,  7), @dualize(k2, 27,  8), @dualize(k3, 27,  9),
+        @dualize(k4, 27, 10), @dualize(k5, 27, 11), @dualize(k6, 27, 12),
+    )
+    return PeriodicTorsion{6, eltype(dual_phases), eltype(dual_ks)}(inter.periodicities,
+                            dual_phases, dual_ks)
+end
+
 function dualize_atom_fb1(at::Atom)
     charge, mass, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
     dual_charge = @dualize(charge, 21, 11)
@@ -224,6 +244,18 @@ function dual_function_specific_3_atoms(f::F) where F
         ds4 = dualize(Nothing, arg4, Val( 8), Val(3))
         ds5 = dualize(Nothing, arg5, Val(11), Val(0))
         return f(ds1, ds2, ds3, ds4, ds5)
+    end
+end
+
+function dual_function_specific_4_atoms(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5, arg6)
+        ds1 = dualize_fb(arg1)
+        ds2 = dualize(Nothing, arg2, Val(12), Val(12))
+        ds3 = dualize(Nothing, arg3, Val(15), Val( 9))
+        ds4 = dualize(Nothing, arg4, Val(18), Val( 6))
+        ds5 = dualize(Nothing, arg5, Val(21), Val( 3))
+        ds6 = dualize(Nothing, arg6, Val(24), Val( 0))
+        return f(ds1, ds2, ds3, ds4, ds5, ds6)
     end
 end
 
@@ -331,6 +363,28 @@ function combine_dual_SpecificInteraction(inter::HarmonicAngle, y1, o1, i::Integ
      y1.f1[1] * partials(o1.f1[1], i + 1) + y1.f1[2] * partials(o1.f1[2], i + 1) + y1.f1[3] * partials(o1.f1[3], i + 1) + y1.f2[1] * partials(o1.f2[1], i + 1) + y1.f2[2] * partials(o1.f2[2], i + 1) + y1.f2[3] * partials(o1.f2[3], i + 1) + y1.f3[1] * partials(o1.f3[1], i + 1) + y1.f3[2] * partials(o1.f3[2], i + 1) + y1.f3[3] * partials(o1.f3[3], i + 1))
 end
 
+function combine_dual_SpecificInteraction(inter::PeriodicTorsion{6}, y1, o1, i::Integer)
+    (
+        (0, 0, 0, 0, 0, 0),
+        (
+            y1.f1[1] * partials(o1.f1[1], i     ) + y1.f1[2] * partials(o1.f1[2], i     ) + y1.f1[3] * partials(o1.f1[3], i     ) + y1.f2[1] * partials(o1.f2[1], i     ) + y1.f2[2] * partials(o1.f2[2], i     ) + y1.f2[3] * partials(o1.f2[3], i     ) + y1.f3[1] * partials(o1.f3[1], i     ) + y1.f3[2] * partials(o1.f3[2], i     ) + y1.f3[3] * partials(o1.f3[3], i     ) + y1.f4[1] * partials(o1.f4[1], i     ) + y1.f4[2] * partials(o1.f4[2], i     ) + y1.f4[3] * partials(o1.f4[3], i     ),
+            y1.f1[1] * partials(o1.f1[1], i +  1) + y1.f1[2] * partials(o1.f1[2], i +  1) + y1.f1[3] * partials(o1.f1[3], i +  1) + y1.f2[1] * partials(o1.f2[1], i +  1) + y1.f2[2] * partials(o1.f2[2], i +  1) + y1.f2[3] * partials(o1.f2[3], i +  1) + y1.f3[1] * partials(o1.f3[1], i +  1) + y1.f3[2] * partials(o1.f3[2], i +  1) + y1.f3[3] * partials(o1.f3[3], i +  1) + y1.f4[1] * partials(o1.f4[1], i +  1) + y1.f4[2] * partials(o1.f4[2], i +  1) + y1.f4[3] * partials(o1.f4[3], i +  1),
+            y1.f1[1] * partials(o1.f1[1], i +  2) + y1.f1[2] * partials(o1.f1[2], i +  2) + y1.f1[3] * partials(o1.f1[3], i +  2) + y1.f2[1] * partials(o1.f2[1], i +  2) + y1.f2[2] * partials(o1.f2[2], i +  2) + y1.f2[3] * partials(o1.f2[3], i +  2) + y1.f3[1] * partials(o1.f3[1], i +  2) + y1.f3[2] * partials(o1.f3[2], i +  2) + y1.f3[3] * partials(o1.f3[3], i +  2) + y1.f4[1] * partials(o1.f4[1], i +  2) + y1.f4[2] * partials(o1.f4[2], i +  2) + y1.f4[3] * partials(o1.f4[3], i +  2),
+            y1.f1[1] * partials(o1.f1[1], i +  3) + y1.f1[2] * partials(o1.f1[2], i +  3) + y1.f1[3] * partials(o1.f1[3], i +  3) + y1.f2[1] * partials(o1.f2[1], i +  3) + y1.f2[2] * partials(o1.f2[2], i +  3) + y1.f2[3] * partials(o1.f2[3], i +  3) + y1.f3[1] * partials(o1.f3[1], i +  3) + y1.f3[2] * partials(o1.f3[2], i +  3) + y1.f3[3] * partials(o1.f3[3], i +  3) + y1.f4[1] * partials(o1.f4[1], i +  3) + y1.f4[2] * partials(o1.f4[2], i +  3) + y1.f4[3] * partials(o1.f4[3], i +  3),
+            y1.f1[1] * partials(o1.f1[1], i +  4) + y1.f1[2] * partials(o1.f1[2], i +  4) + y1.f1[3] * partials(o1.f1[3], i +  4) + y1.f2[1] * partials(o1.f2[1], i +  4) + y1.f2[2] * partials(o1.f2[2], i +  4) + y1.f2[3] * partials(o1.f2[3], i +  4) + y1.f3[1] * partials(o1.f3[1], i +  4) + y1.f3[2] * partials(o1.f3[2], i +  4) + y1.f3[3] * partials(o1.f3[3], i +  4) + y1.f4[1] * partials(o1.f4[1], i +  4) + y1.f4[2] * partials(o1.f4[2], i +  4) + y1.f4[3] * partials(o1.f4[3], i +  4),
+            y1.f1[1] * partials(o1.f1[1], i +  5) + y1.f1[2] * partials(o1.f1[2], i +  5) + y1.f1[3] * partials(o1.f1[3], i +  5) + y1.f2[1] * partials(o1.f2[1], i +  5) + y1.f2[2] * partials(o1.f2[2], i +  5) + y1.f2[3] * partials(o1.f2[3], i +  5) + y1.f3[1] * partials(o1.f3[1], i +  5) + y1.f3[2] * partials(o1.f3[2], i +  5) + y1.f3[3] * partials(o1.f3[3], i +  5) + y1.f4[1] * partials(o1.f4[1], i +  5) + y1.f4[2] * partials(o1.f4[2], i +  5) + y1.f4[3] * partials(o1.f4[3], i +  5),
+        ),
+        (
+            y1.f1[1] * partials(o1.f1[1], i +  6) + y1.f1[2] * partials(o1.f1[2], i +  6) + y1.f1[3] * partials(o1.f1[3], i +  6) + y1.f2[1] * partials(o1.f2[1], i +  6) + y1.f2[2] * partials(o1.f2[2], i +  6) + y1.f2[3] * partials(o1.f2[3], i +  6) + y1.f3[1] * partials(o1.f3[1], i +  6) + y1.f3[2] * partials(o1.f3[2], i +  6) + y1.f3[3] * partials(o1.f3[3], i +  6) + y1.f4[1] * partials(o1.f4[1], i +  6) + y1.f4[2] * partials(o1.f4[2], i +  6) + y1.f4[3] * partials(o1.f4[3], i +  6),
+            y1.f1[1] * partials(o1.f1[1], i +  7) + y1.f1[2] * partials(o1.f1[2], i +  7) + y1.f1[3] * partials(o1.f1[3], i +  7) + y1.f2[1] * partials(o1.f2[1], i +  7) + y1.f2[2] * partials(o1.f2[2], i +  7) + y1.f2[3] * partials(o1.f2[3], i +  7) + y1.f3[1] * partials(o1.f3[1], i +  7) + y1.f3[2] * partials(o1.f3[2], i +  7) + y1.f3[3] * partials(o1.f3[3], i +  7) + y1.f4[1] * partials(o1.f4[1], i +  7) + y1.f4[2] * partials(o1.f4[2], i +  7) + y1.f4[3] * partials(o1.f4[3], i +  7),
+            y1.f1[1] * partials(o1.f1[1], i +  8) + y1.f1[2] * partials(o1.f1[2], i +  8) + y1.f1[3] * partials(o1.f1[3], i +  8) + y1.f2[1] * partials(o1.f2[1], i +  8) + y1.f2[2] * partials(o1.f2[2], i +  8) + y1.f2[3] * partials(o1.f2[3], i +  8) + y1.f3[1] * partials(o1.f3[1], i +  8) + y1.f3[2] * partials(o1.f3[2], i +  8) + y1.f3[3] * partials(o1.f3[3], i +  8) + y1.f4[1] * partials(o1.f4[1], i +  8) + y1.f4[2] * partials(o1.f4[2], i +  8) + y1.f4[3] * partials(o1.f4[3], i +  8),
+            y1.f1[1] * partials(o1.f1[1], i +  9) + y1.f1[2] * partials(o1.f1[2], i +  9) + y1.f1[3] * partials(o1.f1[3], i +  9) + y1.f2[1] * partials(o1.f2[1], i +  9) + y1.f2[2] * partials(o1.f2[2], i +  9) + y1.f2[3] * partials(o1.f2[3], i +  9) + y1.f3[1] * partials(o1.f3[1], i +  9) + y1.f3[2] * partials(o1.f3[2], i +  9) + y1.f3[3] * partials(o1.f3[3], i +  9) + y1.f4[1] * partials(o1.f4[1], i +  9) + y1.f4[2] * partials(o1.f4[2], i +  9) + y1.f4[3] * partials(o1.f4[3], i +  9),
+            y1.f1[1] * partials(o1.f1[1], i + 10) + y1.f1[2] * partials(o1.f1[2], i + 10) + y1.f1[3] * partials(o1.f1[3], i + 10) + y1.f2[1] * partials(o1.f2[1], i + 10) + y1.f2[2] * partials(o1.f2[2], i + 10) + y1.f2[3] * partials(o1.f2[3], i + 10) + y1.f3[1] * partials(o1.f3[1], i + 10) + y1.f3[2] * partials(o1.f3[2], i + 10) + y1.f3[3] * partials(o1.f3[3], i + 10) + y1.f4[1] * partials(o1.f4[1], i + 10) + y1.f4[2] * partials(o1.f4[2], i + 10) + y1.f4[3] * partials(o1.f4[3], i + 10),
+            y1.f1[1] * partials(o1.f1[1], i + 11) + y1.f1[2] * partials(o1.f1[2], i + 11) + y1.f1[3] * partials(o1.f1[3], i + 11) + y1.f2[1] * partials(o1.f2[1], i + 11) + y1.f2[2] * partials(o1.f2[2], i + 11) + y1.f2[3] * partials(o1.f2[3], i + 11) + y1.f3[1] * partials(o1.f3[1], i + 11) + y1.f3[2] * partials(o1.f3[2], i + 11) + y1.f3[3] * partials(o1.f3[3], i + 11) + y1.f4[1] * partials(o1.f4[1], i + 11) + y1.f4[2] * partials(o1.f4[2], i + 11) + y1.f4[3] * partials(o1.f4[3], i + 11),
+        ),
+    )
+end
+
 function combine_dual_Atom(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer, j::Integer, k::Integer, l::Integer) where {T, P}
     ps1, ps2, ps3 = partials(o1[1]), partials(o1[2]), partials(o1[3])
     Atom(
@@ -432,6 +486,48 @@ end
                     sumpartials(o1.f1, y1.f1, 14) + sumpartials(o1.f2, y1.f2, 14) + sumpartials(o1.f3, y1.f3, 14)),
                     cu_ȳ, out))
         return (nothing, nothing, darg1, darg2, darg3, darg4, darg5)
+    end
+    return y, bc_fwd_back
+end
+
+@inline function Zygote.broadcast_forward(f,
+                                            arg1::AbstractArray{<:SpecificInteraction},
+                                            arg2::AbstractArray{SVector{D, T}},
+                                            arg3::AbstractArray{SVector{D, T}},
+                                            arg4::AbstractArray{SVector{D, T}},
+                                            arg5::AbstractArray{SVector{D, T}},
+                                            arg6::Tuple{SVector{D, T}}) where {D, T}
+    out = dual_function_specific_4_atoms(f).(arg1, arg2, arg3, arg4, arg5, arg6)
+    y = broadcast(o1 -> SpecificForce4Atoms{D, T}(value.(o1.f1), value.(o1.f2), value.(o1.f3), value.(o1.f4)), out)
+    function bc_fwd_back(ȳ)
+        cu_ȳ = arg1 isa CuArray ? cu(ȳ) : ȳ
+        darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, cu_ȳ, out, 1))
+        darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
+                    sumpartials(o1.f1, y1.f1, 13) + sumpartials(o1.f2, y1.f2, 13) + sumpartials(o1.f3, y1.f3, 13) + sumpartials(o1.f4, y1.f4, 13),
+                    sumpartials(o1.f1, y1.f1, 14) + sumpartials(o1.f2, y1.f2, 14) + sumpartials(o1.f3, y1.f3, 14) + sumpartials(o1.f4, y1.f4, 14),
+                    sumpartials(o1.f1, y1.f1, 15) + sumpartials(o1.f2, y1.f2, 15) + sumpartials(o1.f3, y1.f3, 15) + sumpartials(o1.f4, y1.f4, 15)),
+                    cu_ȳ, out))
+        darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(
+                    sumpartials(o1.f1, y1.f1, 16) + sumpartials(o1.f2, y1.f2, 16) + sumpartials(o1.f3, y1.f3, 16) + sumpartials(o1.f4, y1.f4, 16),
+                    sumpartials(o1.f1, y1.f1, 17) + sumpartials(o1.f2, y1.f2, 17) + sumpartials(o1.f3, y1.f3, 17) + sumpartials(o1.f4, y1.f4, 17),
+                    sumpartials(o1.f1, y1.f1, 18) + sumpartials(o1.f2, y1.f2, 18) + sumpartials(o1.f3, y1.f3, 18) + sumpartials(o1.f4, y1.f4, 18)),
+                    cu_ȳ, out))
+        darg4 = unbroadcast(arg4, broadcast((y1, o1) -> SVector{D, T}(
+                    sumpartials(o1.f1, y1.f1, 19) + sumpartials(o1.f2, y1.f2, 19) + sumpartials(o1.f3, y1.f3, 19) + sumpartials(o1.f4, y1.f4, 19),
+                    sumpartials(o1.f1, y1.f1, 20) + sumpartials(o1.f2, y1.f2, 20) + sumpartials(o1.f3, y1.f3, 20) + sumpartials(o1.f4, y1.f4, 20),
+                    sumpartials(o1.f1, y1.f1, 21) + sumpartials(o1.f2, y1.f2, 21) + sumpartials(o1.f3, y1.f3, 21) + sumpartials(o1.f4, y1.f4, 21)),
+                    cu_ȳ, out))
+        darg5 = unbroadcast(arg5, broadcast((y1, o1) -> SVector{D, T}(
+                    sumpartials(o1.f1, y1.f1, 22) + sumpartials(o1.f2, y1.f2, 22) + sumpartials(o1.f3, y1.f3, 22) + sumpartials(o1.f4, y1.f4, 22),
+                    sumpartials(o1.f1, y1.f1, 23) + sumpartials(o1.f2, y1.f2, 23) + sumpartials(o1.f3, y1.f3, 23) + sumpartials(o1.f4, y1.f4, 23),
+                    sumpartials(o1.f1, y1.f1, 24) + sumpartials(o1.f2, y1.f2, 24) + sumpartials(o1.f3, y1.f3, 24) + sumpartials(o1.f4, y1.f4, 24)),
+                    cu_ȳ, out))
+        darg6 = unbroadcast(arg6, broadcast((y1, o1) -> SVector{D, T}(
+                    sumpartials(o1.f1, y1.f1, 25) + sumpartials(o1.f2, y1.f2, 25) + sumpartials(o1.f3, y1.f3, 25) + sumpartials(o1.f4, y1.f4, 25),
+                    sumpartials(o1.f1, y1.f1, 26) + sumpartials(o1.f2, y1.f2, 26) + sumpartials(o1.f3, y1.f3, 26) + sumpartials(o1.f4, y1.f4, 26),
+                    sumpartials(o1.f1, y1.f1, 27) + sumpartials(o1.f2, y1.f2, 27) + sumpartials(o1.f3, y1.f3, 27) + sumpartials(o1.f4, y1.f4, 27)),
+                    cu_ȳ, out))
+        return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6)
     end
     return y, bc_fwd_back
 end
