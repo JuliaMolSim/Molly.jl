@@ -144,8 +144,8 @@ end
     coords = [SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm", SVector(5.0, 5.0, 5.0)u"nm"]
     box_size = SVector(10.0, 10.0, 10.0)u"nm"
     neighbor_finder=CellListMapNeighborFinder(
-        nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm",
-        x0=coords, unit_cell=box_size,
+        nb_matrix=trues(3, 3), n_steps=10, x0=coords,
+        unit_cell=box_size, dist_cutoff=2.0u"nm",
     )
     s = System(
         atoms=[Atom(), Atom(), Atom()],

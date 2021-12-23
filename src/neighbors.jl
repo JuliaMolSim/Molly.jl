@@ -277,7 +277,6 @@ end
 
 # Find neighbor lists using CellListMap.jl
 """
-
     CellListMapNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff, x0, unit_cell)
 
 Find close atoms by distance, and store auxiliary arrays for in-place threading. `x0` and `unit_cell` 
@@ -314,14 +313,13 @@ CellListMapNeighborFinder{Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋,
   dist_cutoff = 1.2 nm
 
 ```
-
 """
 mutable struct CellListMapNeighborFinder{N, T} <: NeighborFinder
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int
     dist_cutoff::T
-    # auxiliary arrays for multi-threaded in-place updating of the lists
+    # Auxiliary arrays for multi-threaded in-place updating of the lists
     cl::CellListMap.CellList{N, T}
     aux::CellListMap.AuxThreaded{N, T}
     neighbors_threaded::Vector{NeighborList}
@@ -336,12 +334,16 @@ function CellListMapNeighborFinder(;
                                    n_steps=10,
                                    x0=nothing,
                                    unit_cell=nothing,
-                                   number_of_batches=(0,0), # (0,0): use default heuristic
+                                   number_of_batches=(0, 0), # (0, 0): use default heuristic
                                    dist_cutoff::T) where T
     np = size(nb_matrix, 1)
     if isnothing(unit_cell)
-        side = max(2 * dist_cutoff, uconvert(unit(dist_cutoff), (np * 0.01u"nm^3") ^ (1 / 3)))
-        sides = @SVector([side,side,side])
+        if unit(dist_cutoff) == NoUnits
+            side = max(2 * dist_cutoff, (np * 0.01) ^ (1 / 3))
+        else
+            side = max(2 * dist_cutoff, uconvert(unit(dist_cutoff), (np * 0.01u"nm^3") ^ (1 / 3)))
+        end
+        sides = SVector(side, side, side)
         box = CellListMap.Box(sides, dist_cutoff)
     else
         box = CellListMap.Box(unit_cell, dist_cutoff)

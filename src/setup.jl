@@ -346,7 +346,7 @@ function readinputs(T::Type,
                                                     dist_cutoff=T(nl_dist))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-                                                    dist_cutoff=T(nl_dist), x0=coords, unit_cell=box_size)
+                                                    x0=coords, unit_cell=box_size, dist_cutoff=T(nl_dist))
     end
     if gpu
         atoms = cu(atoms)
@@ -928,8 +928,8 @@ function setupsystem(coord_file::AbstractString,
                                                     n_steps=10, dist_cutoff=T(nl_dist))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14,
-                                                    n_steps=10, dist_cutoff=T(nl_dist),
-                                                    x0=coords, unit_cell=box_size)
+                                                    n_steps=10, x0=coords, unit_cell=box_size,
+                                                    dist_cutoff=T(nl_dist))
     end
     if gpu
         atoms = cu(atoms)
