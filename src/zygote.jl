@@ -21,7 +21,7 @@ function Base.:-(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
     Atom{T, T, T, T}(0, x.charge - y.charge, x.mass - y.mass, x.σ - y.σ, x.ϵ - y.ϵ)
 end
 
-function Zygote.accum(x::NamedTuple{(:index, :charge, :mass, :σ, :ϵ), Tuple{Int64, T, T, T, T}}, y::Atom{T, T, T, T}) where T
+function Zygote.accum(x::NamedTuple{(:index, :charge, :mass, :σ, :ϵ), Tuple{Int, T, T, T, T}}, y::Atom{T, T, T, T}) where T
     Atom{T, T, T, T}(0, x.charge + y.charge, x.mass + y.mass, x.σ + y.σ, x.ϵ + y.ϵ)
 end
 
@@ -51,9 +51,9 @@ function Zygote.accum_sum(xs::AbstractArray{CoulombReactionField{D, S, W, T, F, 
     reduce(Zygote.accum, xs, dims=dims; init=CoulombReactionField{D, S, W, T, F, E}(zero(D), zero(S), false, zero(W), zero(T), NoUnits, NoUnits))
 end
 
-function Zygote.accum(x::Tuple{NTuple{6, Int}, NTuple{6, T}, NTuple{6, E}},
-                        y::Tuple{NTuple{6, Int}, NTuple{6, T}, NTuple{6, E}}) where {T, E}
-    (0, 0, 0, 0, 0, 0), x[2] .+ y[2], x[3] .+ y[3]
+function Zygote.accum(x::Tuple{NTuple{N, Int}, NTuple{N, T}, NTuple{N, E}},
+                        y::Tuple{NTuple{N, Int}, NTuple{N, T}, NTuple{N, E}}) where {N, T, E}
+    ntuple(n -> 0, N), x[2] .+ y[2], x[3] .+ y[3]
 end
 
 Base.zero(::Type{Atom{T, T, T, T}}) where {T} = Atom(0, zero(T), zero(T), zero(T), zero(T))

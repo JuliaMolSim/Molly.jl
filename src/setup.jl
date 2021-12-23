@@ -881,16 +881,15 @@ function setupsystem(coord_file::AbstractString,
                                         force_unit=force_unit, energy_unit=energy_unit)
     general_inters = (lj, coulomb_rf)
 
+    # All torsions must have the same number of terms on the GPU and for taking gradients
+    # For now always pad to 6 terms
+    torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                            n_terms=6) for t in torsions.inters]
+    improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                            n_terms=6) for t in impropers.inters]
+
     # Ensure array types are concrete
     if gpu
-        # All torsions must have the same number of terms on the GPU
-        max_n_terms_torsions = maximum(t -> length(t.periodicities), torsions.inters)
-        torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                n_terms=max_n_terms_torsions) for t in torsions.inters]
-        max_n_terms_impropers = maximum(t -> length(t.periodicities), impropers.inters)
-        improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                n_terms=max_n_terms_impropers) for t in impropers.inters]
-
         specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, cu([bonds.inters...])),
                                 InteractionList3Atoms(angles.is, angles.js, angles.ks, cu([angles.inters...])),
                                 InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
@@ -901,9 +900,9 @@ function setupsystem(coord_file::AbstractString,
         specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, [bonds.inters...]),
                                 InteractionList3Atoms(angles.is, angles.js, angles.ks, [angles.inters...]),
                                 InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
-                                                        [torsions.inters...]),
+                                                        torsion_inters_pad),
                                 InteractionList4Atoms(impropers.is, impropers.js, impropers.ks, impropers.ls,
-                                                        [impropers.inters...]))
+                                                        improper_inters_pad))
     end
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
