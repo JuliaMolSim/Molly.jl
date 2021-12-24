@@ -164,13 +164,14 @@ coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
 velocities = [SVector(0.0f0, 1.0f0), SVector(0.0f0, -1.0f0)]
 general_inters = (Gravity(nl_only=false, G=1.5f0),)
 simulator = VelocityVerlet(dt=0.002f0)
+box_size = SVector(1.0f0, 1.0f0)
 
 sys = System(
     atoms=atoms,
     general_inters=general_inters,
     coords=coords,
     velocities=velocities,
-    box_size=SVector(1.0f0, 1.0f0),
+    box_size=box_size,
     loggers=Dict("coords" => CoordinateLogger(Float32, 10; dims=2)),
     force_unit=NoUnits,
     energy_unit=NoUnits,
@@ -180,7 +181,7 @@ simulate!(sys, simulator, 2_000)
 ```
 When we view the simulation we can use some extra options:
 ```julia
-visualize(sys.loggers["coords"], 1.0f0, "sim_gravity.mp4";
+visualize(sys.loggers["coords"], box_size, "sim_gravity.mp4";
             trails=4, framerate=15, color=[:orange, :lightgreen])
 ```
 ![Gravity simulation](images/sim_gravity.gif)
