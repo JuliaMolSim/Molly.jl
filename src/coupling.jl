@@ -51,7 +51,7 @@ struct RescaleThermostat{T} <: AbstractCoupler
 end
 
 function apply_coupling!(sys::System, sim, thermostat::RescaleThermostat)
-    sys.velocities *= sqrt(thermostat.temperature / temperature(s))
+    sys.velocities *= sqrt(thermostat.temperature / temperature(sys))
     return sys
 end
 

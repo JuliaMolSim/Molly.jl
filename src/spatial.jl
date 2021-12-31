@@ -25,7 +25,8 @@ end
 """
     vector(c1, c2, box_size)
 
-Displacement between two coordinate values, accounting for the bounding box.
+Displacement between two coordinate values from c1 to c2, accounting for
+the bounding box.
 The minimum image convention is used, so the displacement is to the closest
 version of the coordinates accounting for the periodic boundaries.
 """
@@ -36,6 +37,21 @@ vector(c1, c2, box_size) = vector1D.(c1, c2, box_size)
         Base.Cartesian.@ncall $N SVector{$N} i->vector1D(c1[i], c2[i], box_size[i])
     end
 end
+
+# Pad a vector to 3D to allow operations such as the cross product
+function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, box_size::SVector{2, T}) where T
+    SVector{3, T}(
+        vector1D(c1[1], c2[1], box_size[1]),
+        vector1D(c1[2], c2[2], box_size[2]),
+        zero(T),
+    )
+end
+
+vector_pad3D(c1::SVector{3}, c2::SVector{3}, box_size::SVector{3}) = vector(c1, c2, box_size)
+
+# Trim a vector back to 2D if required
+trim3D(v::SVector{3, T}, box_size::SVector{2}) where T = SVector{2, T}(v[1], v[2])
+trim3D(v::SVector{3}, box_size::SVector{3}) = v
 
 sqdistance(i, j, coords, box_size) = sum(abs2, vector(coords[i], coords[j], box_size))
 
