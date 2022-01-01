@@ -110,6 +110,8 @@ end
     potential_energy(s, neighbors=nothing)
 
 Compute the potential energy of the system.
+If the interactions use neighbor lists, the neighbors should be computed
+first and passed to the function.
 """
 function potential_energy(s::System, neighbors=nothing)
     n_atoms = length(s)
@@ -120,15 +122,18 @@ function potential_energy(s::System, neighbors=nothing)
             @inbounds for ni in 1:neighbors.n
                 i, j, weight_14 = neighbors.list[ni]
                 if weight_14
-                    potential += potential_energy(inter, s, i, j, true)
+                    potential += potential_energy(inter, s.coords[i], s.coords[j], s.atoms[i],
+                                                    s.atoms[j], s.box_size, true)
                 else
-                    potential += potential_energy(inter, s, i, j)
+                    potential += potential_energy(inter, s.coords[i], s.coords[j], s.atoms[i],
+                                                    s.atoms[j], s.box_size)
                 end
             end
         else
             for i in 1:n_atoms
                 for j in (i + 1):n_atoms
-                    potential += potential_energy(inter, s, i, j)
+                    potential += potential_energy(inter, s.coords[i], s.coords[j], s.atoms[i],
+                                                    s.atoms[j], s.box_size)
                 end
             end
         end

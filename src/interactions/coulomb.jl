@@ -69,26 +69,28 @@ end
 end
 
 @inline @inbounds function potential_energy(inter::Coulomb{C},
-                                    s::System,
-                                    i::Integer,
-                                    j::Integer,
-                                    weight_14::Bool=false) where C
-    dr = vector(s.coords[i], s.coords[j], s.box_size)
+                                            coord_i,
+                                            coord_j,
+                                            atom_i,
+                                            atom_j,
+                                            box_size,
+                                            weight_14::Bool=false) where C
+    dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
-    qi, qj = s.atoms[i].charge, s.atoms[j].charge
+    qi, qj = atom_i.charge, atom_j.charge
     params = (coulomb_const, qi, qj)
 
     if cutoff_points(C) == 0
         pe = potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(s.box_size[1])) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_unit
 
         pe = potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(s.box_size[1])) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_unit
 
         if r2 < cutoff.activation_dist
             pe = potential(inter, r2, inv(r2), params)

@@ -50,8 +50,6 @@ temp_fp_viz = tempname(cleanup=true) * ".mp4"
     c3 = SVector(1.4, 1.0, 1.0)u"nm"
     a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
-    coords = [c1, c2, c3]
-    s = System(atoms=[a1, a1, a1], coords=coords, box_size=box_size)
 
     @test isapprox(force(LennardJones(), c1, c2, a1, a1, box_size),
                     SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
@@ -59,10 +57,10 @@ temp_fp_viz = tempname(cleanup=true) * ".mp4"
     @test isapprox(force(LennardJones(), c1, c3, a1, a1, box_size),
                     SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(potential_energy(LennardJones(), s, 1, 2),
+    @test isapprox(potential_energy(LennardJones(), c1, c2, a1, a1, box_size),
                     0.0u"kJ * mol^-1",
                     atol=1e-9u"kJ * mol^-1")
-    @test isapprox(potential_energy(LennardJones(), s, 1, 3),
+    @test isapprox(potential_energy(LennardJones(), c1, c3, a1, a1, box_size),
                     -0.1170417309u"kJ * mol^-1",
                     atol=1e-9u"kJ * mol^-1")
 
@@ -72,28 +70,28 @@ temp_fp_viz = tempname(cleanup=true) * ".mp4"
     @test isapprox(force(Coulomb(), c1, c3, a1, a1, box_size),
                     SVector(868.3466125, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-5u"kJ * mol^-1 * nm^-1")
-    @test isapprox(potential_energy(Coulomb(), s, 1, 2),
+    @test isapprox(potential_energy(Coulomb(), c1, c2, a1, a1, box_size),
                     463.1181933u"kJ * mol^-1",
                     atol=1e-5u"kJ * mol^-1")
-    @test isapprox(potential_energy(Coulomb(), s, 1, 3),
+    @test isapprox(potential_energy(Coulomb(), c1, c3, a1, a1, box_size),
                     347.338645u"kJ * mol^-1",
                     atol=1e-5u"kJ * mol^-1")
     
     b1 = HarmonicBond(b0=0.2u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2")
     b2 = HarmonicBond(b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
-    fs = force(b1, coords[1], coords[2], box_size)
+    fs = force(b1, c1, c2, box_size)
     @test isapprox(fs.f1, SVector(30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
     @test isapprox(fs.f2, SVector(-30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
-    fs = force(b2, coords[1], coords[3], box_size)
+    fs = force(b2, c1, c3, box_size)
     @test isapprox(fs.f1, SVector(-20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
     @test isapprox(fs.f2, SVector(20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(potential_energy(b1, coords[1], coords[2], box_size),
+    @test isapprox(potential_energy(b1, c1, c2, box_size),
                     1500.0u"kJ * mol^-1", atol=1e-9u"kJ * mol^-1")
-    @test isapprox(potential_energy(b2, coords[1], coords[3], box_size),
+    @test isapprox(potential_energy(b2, c1, c3, box_size),
                     2000.0u"kJ * mol^-1", atol=1e-9u"kJ * mol^-1")
 end
 

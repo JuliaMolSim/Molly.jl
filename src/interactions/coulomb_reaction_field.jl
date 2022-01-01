@@ -66,19 +66,21 @@ end
 end
 
 @inline @inbounds function potential_energy(inter::CoulombReactionField,
-                                    s::System,
-                                    i::Integer,
-                                    j::Integer,
-                                    weight_14::Bool=false)
-    dr = vector(s.coords[i], s.coords[j], s.box_size)
+                                            coord_i,
+                                            coord_j,
+                                            atom_i,
+                                            atom_j,
+                                            box_size,
+                                            weight_14::Bool=false)
+    dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 
     if r2 > (inter.dist_cutoff ^ 2)
-        return ustrip(zero(s.box_size[1])) * inter.energy_unit
+        return ustrip(zero(box_size[1])) * inter.energy_unit
     end
 
     coulomb_const = inter.coulomb_const
-    qi, qj = s.atoms[i].charge, s.atoms[j].charge
+    qi, qj = atom_i.charge, atom_j.charge
     r = √r2
     if weight_14
         # 1-4 interactions do not use the reaction field approximation

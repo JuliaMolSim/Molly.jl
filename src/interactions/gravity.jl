@@ -31,13 +31,15 @@ end
 end
 
 @inline @inbounds function potential_energy(inter::Gravity,
-                                    s::System,
-                                    i::Integer,
-                                    j::Integer)
-    dr = vector(s.coords[i], s.coords[j], s.box_size)
+                                            coord_i,
+                                            coord_j,
+                                            atom_i,
+                                            atom_j,
+                                            box_size)
+    dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 
-    mi, mj = s.atoms[i].mass, s.atoms[j].mass
+    mi, mj = atom_i.mass, atom_j.mass
     params = (inter.G, mi, mj)
 
     potential(inter, r2, inv(r2), params)

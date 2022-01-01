@@ -54,7 +54,6 @@ end
     # Derivative obtained via wolfram
     const_mn = inter.mn_fac * ϵ
     σ_r = σ / r
-    σ2 = σ^2
     params = (m, n, σ_r, const_mn)
 
     if cutoff_points(C) == 0
@@ -81,36 +80,37 @@ end
 end
 
 @inline @inbounds function potential_energy(inter::Mie{S, C, T},
-                                            s::System,
-                                            i::Integer,
-                                            j::Integer) where {S, C, T}
-    dr = vector(s.coords[i], s.coords[j], s.box_size)
+                                            coord_i,
+                                            coord_j,
+                                            atom_i,
+                                            atom_j,
+                                            box_size) where {S, C, T}
+    dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
     r = √r2
 
-    if !S && iszero(s.atoms[i].σ) || iszero(s.atoms[j].σ)
-        return ustrip(zero(s.box_size[1])) * inter.energy_unit
+    if !S && iszero(atom_i.σ) || iszero(atom_j.σ)
+        return ustrip(zero(box_size[1])) * inter.energy_unit
     end
 
-    σ = inter.lorentz_mixing ? (s.atoms[i].σ + s.atoms[j].σ) / 2 : sqrt(s.atoms[i].σ * s.atoms[j].σ)
-    ϵ = sqrt(s.atoms[i].ϵ * s.atoms[j].ϵ)
+    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
+    ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
 
     cutoff = inter.cutoff
     m = inter.m
     n = inter.n
     const_mn = inter.mn_fac * ϵ
     σ_r = σ / r
-    σ2 = σ^2
     params = (m, n, σ_r, const_mn)
 
     if cutoff_points(C) == 0
         potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(s.box_size[1])) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_unit
 
         potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(s.box_size[1])) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_unit
 
         if r2 < cutoff.activation_dist
             potential(inter, r2, inv(r2), params)

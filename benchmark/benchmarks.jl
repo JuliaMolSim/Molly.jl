@@ -40,13 +40,12 @@ c2 = SVector(1.4, 1.0, 1.0)u"nm"
 a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
 box_size = SVector(2.0, 2.0, 2.0)u"nm"
 coords = [c1, c2]
-s = System(atoms=[a1, a1], coords=coords, box_size=box_size)
 b1 = HarmonicBond(b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
 
 SUITE["interactions"]["LennardJones force" ] = @benchmarkable force($(LennardJones()), $(c1), $(c2), $(a1), $(a1), $(box_size))
-SUITE["interactions"]["LennardJones energy"] = @benchmarkable potential_energy($(LennardJones()), $(s), 1, 2)
+SUITE["interactions"]["LennardJones energy"] = @benchmarkable potential_energy($(LennardJones()), $(c1), $(c2), $(a1), $(a1), $(box_size))
 SUITE["interactions"]["Coulomb force"      ] = @benchmarkable force($(Coulomb()), $(c1), $(c2), $(a1), $(a1), $(box_size))
-SUITE["interactions"]["Coulomb energy"     ] = @benchmarkable potential_energy($(Coulomb()), $(s), 1, 2)
+SUITE["interactions"]["Coulomb energy"     ] = @benchmarkable potential_energy($(Coulomb()), $(c1), $(c2), $(a1), $(a1), $(box_size))
 SUITE["interactions"]["HarmonicBond force" ] = @benchmarkable force($(b1), $(c1), $(c2), $(box_size))
 SUITE["interactions"]["HarmonicBond energy"] = @benchmarkable potential_energy($(b1), $(c1), $(c2), $(box_size))
 
