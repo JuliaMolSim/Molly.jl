@@ -123,3 +123,46 @@ visualize(sys.loggers["coords"],
             markersize=10.0)
 ```
 ![Mutable bond simulation](images/sim_mutbond.gif)
+
+## Comparing direct forces to AD
+
+The force is the negative derivative of the potential energy with respect to position.
+MD packages including Molly usually implement the force functions directly for performance.
+However it is also possible to compute the forces using AD.
+Here we compare the two approaches for the Lennard-Jones potential and see that they give the same result.
+```julia
+using Molly
+using Zygote
+using GLMakie
+
+inter = LennardJones(force_unit=NoUnits, energy_unit=NoUnits)
+box_size = SVector(5.0, 5.0, 5.0)
+a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
+
+function force_direct(dist)
+    F = force(inter, SVector(1.0, 1.0, 1.0), SVector(dist + 1.0, 1.0, 1.0), a1, a2, box_size)
+    return F[1]
+end
+
+function force_grad(dist)
+    grad = gradient(dist) do dist
+        potential_energy(inter, SVector(1.0, 1.0, 1.0), SVector(dist + 1.0, 1.0, 1.0), a1, a2, box_size)
+    end
+    return -grad[1]
+end
+
+dists = collect(0.2:0.01:1.2)
+forces_direct = force_direct.(dists)
+forces_grad = force_grad.(dists)
+
+f = Figure(resolution=(600, 400))
+ax = Axis(f[1, 1], xlabel="Distance / nm", ylabel="Force / kJ * mol^-1 * nm^-1",
+            title="Comparing gradients from direct calculation and AD")
+scatter!(ax, dists, forces_direct, label="Direct", markersize=8)
+scatter!(ax, dists, forces_grad  , label="AD"    , markersize=8, marker='x')
+xlims!(ax, low=0)
+ylims!(ax, -6.0, 10.0)
+axislegend()
+save("force_comparison.png", f)
+```
+![Force comparison](images/force_comparison.png)
