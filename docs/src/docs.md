@@ -208,7 +208,7 @@ sys = System(
     velocities=[velocity(a.mass, 298u"K") for a in atoms],
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    loggers=Dict("energy" => EnergyLogger(10),
+    loggers=Dict("energy" => TotalEnergyLogger(10),
                     "writer" => StructureWriter(10, "traj_5XER_1ps.pdb", ["HOH"])),
 )
 
@@ -654,7 +654,7 @@ The available loggers are:
 - [`TemperatureLogger`](@ref).
 - [`CoordinateLogger`](@ref).
 - [`VelocityLogger`](@ref).
-- [`EnergyLogger`](@ref).
+- [`TotalEnergyLogger`](@ref).
 - [`StructureWriter`](@ref).
 
 To define your own [`Logger`](@ref), first define the `struct`:

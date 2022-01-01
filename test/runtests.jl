@@ -211,7 +211,7 @@ end
             loggers=Dict("temp"   => TemperatureLogger(100),
                          "coords" => CoordinateLogger(100),
                          "vels"   => VelocityLogger(100),
-                         "energy" => EnergyLogger(100),
+                         "energy" => TotalEnergyLogger(100),
                          "writer" => StructureWriter(100, temp_fp_pdb)),
         )
 
@@ -326,7 +326,7 @@ end
         neighbor_finder=neighbor_finder,
         loggers=Dict("temp" => TemperatureLogger(10),
                         "coords" => CoordinateLogger(10),
-                        "energy" => EnergyLogger(10),
+                        "energy" => TotalEnergyLogger(10),
                         "writer" => StructureWriter(10, temp_fp_pdb)),
     )
 
@@ -357,7 +357,7 @@ end
         neighbor_finder=neighbor_finder,
         loggers=Dict("temp" => TemperatureLogger(typeof(1.0f0u"K"), 10),
                         "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10),
-                        "energy" => EnergyLogger(typeof(1.0f0u"kJ * mol^-1"), 10)),
+                        "energy" => TotalEnergyLogger(typeof(1.0f0u"kJ * mol^-1"), 10)),
     )
 
     @time simulate!(s, simulator, n_steps; parallel=false)
@@ -401,7 +401,7 @@ end
             neighbor_finder=neighbor_finder,
             loggers=Dict("temp" => TemperatureLogger(100),
                          "coords" => CoordinateLogger(100),
-                         "energy" => EnergyLogger(100)),
+                         "energy" => TotalEnergyLogger(100)),
         )
 
         @time simulate!(s, simulator, n_steps)
@@ -427,7 +427,7 @@ end
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
         loggers=Dict("temp" => TemperatureLogger(100),
                      "coords" => CoordinateLogger(100),
-                     "energy" => EnergyLogger(100)),
+                     "energy" => TotalEnergyLogger(100)),
     )
 
     s_nounits = System(
@@ -439,7 +439,7 @@ end
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0),
         loggers=Dict("temp" => TemperatureLogger(Float64, 100),
                      "coords" => CoordinateLogger(Float64, 100),
-                     "energy" => EnergyLogger(Float64, 100)),
+                     "energy" => TotalEnergyLogger(Float64, 100)),
         force_unit=NoUnits,
         energy_unit=NoUnits,
     )

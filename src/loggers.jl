@@ -6,7 +6,7 @@ export
     log_property!,
     CoordinateLogger,
     VelocityLogger,
-    EnergyLogger,
+    TotalEnergyLogger,
     StructureWriter
 
 """
@@ -116,27 +116,27 @@ function log_property!(logger::VelocityLogger, s::System, neighbors=nothing, ste
 end
 
 """
-    EnergyLogger(n_steps)
+    TotalEnergyLogger(n_steps)
 
 Log the total energy of the system throughout a simulation.
 """
-struct EnergyLogger{T} <: Logger
+struct TotalEnergyLogger{T} <: Logger
     n_steps::Int
     energies::Vector{T}
 end
 
-EnergyLogger(T::Type, n_steps::Integer) = EnergyLogger(n_steps, T[])
+TotalEnergyLogger(T::Type, n_steps::Integer) = TotalEnergyLogger(n_steps, T[])
 
-function EnergyLogger(n_steps::Integer)
-    return EnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+function TotalEnergyLogger(n_steps::Integer)
+    return TotalEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
 end
 
-function Base.show(io::IO, el::EnergyLogger)
-    print(io, "EnergyLogger{", eltype(el.energies), "} with n_steps ",
+function Base.show(io::IO, el::TotalEnergyLogger)
+    print(io, "TotalEnergyLogger{", eltype(el.energies), "} with n_steps ",
                 el.n_steps, ", ", length(el.energies), " energies recorded")
 end
 
-function log_property!(logger::EnergyLogger, s::System, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::TotalEnergyLogger, s::System, neighbors=nothing, step_n::Integer=0)
     if step_n % logger.n_steps == 0
         push!(logger.energies, energy(s, neighbors))
     end

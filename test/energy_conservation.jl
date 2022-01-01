@@ -28,7 +28,7 @@ using Test
                 velocities=[velocity(atom_mass, temp) for i in 1:n_atoms],
                 box_size=box_size,
                 loggers=Dict("coords" => CoordinateLogger(100),
-                                "energy" => EnergyLogger(100)),
+                                "energy" => TotalEnergyLogger(100)),
             )
 
             E0 = energy(s)
