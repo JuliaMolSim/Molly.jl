@@ -2,6 +2,7 @@ using Molly
 using Aqua
 import BioStructures # Imported to avoid clashing names
 using CUDA
+using Zygote
 
 using Base.Threads
 using DelimitedFiles
@@ -745,4 +746,27 @@ end
     )
 
     @time simulate!(s, simulator, n_steps; parallel=false)
+end
+
+@testset "Gradients" begin
+    inter = LennardJones(force_unit=NoUnits, energy_unit=NoUnits)
+    box_size = SVector(5.0, 5.0, 5.0)
+    a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
+
+    function force_direct(dist)
+        F = force(inter, SVector(1.0, 1.0, 1.0), SVector(dist + 1.0, 1.0, 1.0), a1, a2, box_size)
+        return F[1]
+    end
+
+    function force_grad(dist)
+        grad = gradient(dist) do dist
+            potential_energy(inter, SVector(1.0, 1.0, 1.0), SVector(dist + 1.0, 1.0, 1.0), a1, a2, box_size)
+        end
+        return -grad[1]
+    end
+
+    dists = collect(0.2:0.01:1.2)
+    forces_direct = force_direct.(dists)
+    forces_grad = force_grad.(dists)
+    @test all(isapprox.(forces_direct, forces_grad))
 end
