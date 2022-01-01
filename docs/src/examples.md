@@ -87,7 +87,7 @@ n_steps = 2_000
 temp = 0.01
 
 atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
-coords = place_atoms(n_atoms, box_size, 0.1; dims=2)
+coords = place_atoms(n_atoms, box_size, 0.1)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 general_inters = (SoftSphere(nl_only=true), BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0))
 neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0)

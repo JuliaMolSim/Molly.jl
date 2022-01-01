@@ -168,7 +168,7 @@ end
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
-        coords=place_atoms(n_atoms, box_size, 0.3u"nm"; dims=2),
+        coords=place_atoms(n_atoms, box_size, 0.3u"nm"),
         velocities=[velocity(10.0u"u", temp; dims=2) .* 0.01 for i in 1:n_atoms],
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
@@ -725,7 +725,7 @@ end
     temp = 0.01
     n_starting = 2
     atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
-    coords = place_atoms(n_people, box_size, 0.1; dims=2)
+    coords = place_atoms(n_people, box_size, 0.1)
     velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
     general_inters = (LennardJones=LennardJones(nl_only=true), SIR=SIRInteraction(false, 0.5, 0.06, 0.01))
     neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_people, n_people), n_steps=10, dist_cutoff=2.0)
