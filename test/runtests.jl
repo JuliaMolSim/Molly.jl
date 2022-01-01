@@ -657,34 +657,34 @@ end
     end
 end
 
-@enum Status susceptible infected recovered
+@testset "Agent-based modelling" begin
+    @enum Status susceptible infected recovered
 
-# Custom atom type
-mutable struct Person
-    i::Int
-    status::Status
-    mass::Float64
-    σ::Float64
-    ϵ::Float64
-end
+    # Custom atom type
+    mutable struct Person
+        i::Int
+        status::Status
+        mass::Float64
+        σ::Float64
+        ϵ::Float64
+    end
 
-Molly.mass(person::Person) = person.mass
+    Molly.mass(person::Person) = person.mass
 
-# Custom GeneralInteraction
-struct SIRInteraction <: GeneralInteraction
-    nl_only::Bool
-    dist_infection::Float64
-    prob_infection::Float64
-    prob_recovery::Float64
-end
+    # Custom GeneralInteraction
+    struct SIRInteraction <: GeneralInteraction
+        nl_only::Bool
+        dist_infection::Float64
+        prob_infection::Float64
+        prob_recovery::Float64
+    end
 
-# Custom Logger
-struct SIRLogger <: Logger
-    n_steps::Int
-    fracs_sir::Vector{Vector{Float64}}
-end
+    # Custom Logger
+    struct SIRLogger <: Logger
+        n_steps::Int
+        fracs_sir::Vector{Vector{Float64}}
+    end
 
-@testset "Agent-based modelling" begin  
     # Custom force function
     function Molly.force(inter::SIRInteraction, coord_i, coord_j, atom_i, atom_j, box_size)
         if (atom_i.status == infected && atom_j.status == susceptible) ||
