@@ -7,6 +7,7 @@ export
     RescaleThermostat,
     FrictionThermostat,
     maxwell_boltzmann,
+    random_velocities!,
     temperature
 
 """
@@ -83,6 +84,17 @@ function maxwell_boltzmann(mass, temp)
     k = unit(temp) == NoUnits ? one(T) : uconvert(u"u * nm^2 * ps^-2 * K^-1", T(Unitful.k))
     σ = sqrt(k * temp / mass)
     return rand(Normal(zero(T), T(ustrip(σ)))) * unit(σ)
+end
+
+"""
+    random_velocities!(sys, temp)
+
+Set the velocities of a `System` to random velocities generated from the
+Maxwell-Boltzmann distribution.
+"""
+function random_velocities!(sys::System, temp)
+    sys.velocities = [velocity(a.mass, temp) for a in sys.atoms]
+    return sys
 end
 
 """
