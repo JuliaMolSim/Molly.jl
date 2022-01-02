@@ -97,7 +97,7 @@ function simulate!(sys::System{D, S, true},
                     n_steps::Integer;
                     parallel::Bool=true) where {D, S}
     if length([inter for inter in values(sys.general_inters) if !inter.nl_only]) > 0
-        neighbors_all = allneighbors(length(sys))
+        neighbors_all = all_neighbors(length(sys))
     else
         neighbors_all = nothing
     end

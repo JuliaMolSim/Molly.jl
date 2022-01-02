@@ -2,7 +2,7 @@
 
 @non_differentiable find_neighbors(args...)
 @non_differentiable DistanceVecNeighborFinder(args...)
-@non_differentiable allneighbors(args...)
+@non_differentiable all_neighbors(args...)
 
 function ChainRulesCore.rrule(T::Type{<:SVector}, vs::Number...)
     Y = T(vs...)

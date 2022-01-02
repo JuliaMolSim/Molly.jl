@@ -139,7 +139,7 @@ function DistanceVecNeighborFinder(;
 end
 
 # Find the boundaries of an ordered list of integers
-function findboundaries(nbs_ord, n_atoms)
+function find_boundaries(nbs_ord, n_atoms)
     inds = zeros(Int, n_atoms)
     atom_i = 1
     for (nb_i, nb_ai) in enumerate(nbs_ord)
@@ -178,22 +178,22 @@ function find_neighbors(s::System,
     nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
     sortperm_j = sortperm(nbsj_ordi)
     weights_14_ordi = @view weights_14[order_i]
-    atom_bounds_i = findboundaries(nbsi_ordi, n_atoms)
-    atom_bounds_j = findboundaries(view(nbsj_ordi, sortperm_j), n_atoms)
+    atom_bounds_i = find_boundaries(nbsi_ordi, n_atoms)
+    atom_bounds_j = find_boundaries(view(nbsj_ordi, sortperm_j), n_atoms)
 
     return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
                             sortperm_j, weights_14_ordi)
 end
 
-function allneighbors(n_atoms)
+function all_neighbors(n_atoms)
     nbs_all = findall(!iszero, tril(ones(Bool, n_atoms, n_atoms), -1))
     nbsi, nbsj = getindex.(nbs_all, 1), getindex.(nbs_all, 2)
     order_i = sortperm(nbsi)
 
     nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
     sortperm_j = sortperm(nbsj_ordi)
-    atom_bounds_i = findboundaries(nbsi_ordi, n_atoms)
-    atom_bounds_j = findboundaries(view(nbsj_ordi, sortperm_j), n_atoms)
+    atom_bounds_i = find_boundaries(nbsi_ordi, n_atoms)
+    atom_bounds_j = find_boundaries(view(nbsj_ordi, sortperm_j), n_atoms)
     weights_14 = nothing
 
     return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
