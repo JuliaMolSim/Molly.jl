@@ -57,10 +57,10 @@ function Zygote.accum(x::Tuple{NTuple{N, Int}, NTuple{N, T}, NTuple{N, E}},
 end
 
 Base.zero(::Type{Atom{T, T, T, T}}) where {T} = Atom(0, zero(T), zero(T), zero(T), zero(T))
-atomorempty(at::Atom, T) = at
-atomorempty(at::Nothing, T) = zero(Atom{T, T, T, T})
+atom_or_empty(at::Atom, T) = at
+atom_or_empty(at::Nothing, T) = zero(Atom{T, T, T, T})
 
-Zygote.z2d(dx::AbstractArray{Union{Nothing, Atom{T, T, T, T}}}, primal::AbstractArray{Atom{T, T, T, T}}) where {T} = atomorempty.(dx, T)
+Zygote.z2d(dx::AbstractArray{Union{Nothing, Atom{T, T, T, T}}}, primal::AbstractArray{Atom{T, T, T, T}}) where {T} = atom_or_empty.(dx, T)
 Zygote.z2d(dx::SVector{3, T}, primal::T) where {T} = sum(dx)
 
 Zygote.unbroadcast(x::Tuple{Any}, x̄::Nothing) = nothing

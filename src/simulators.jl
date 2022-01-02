@@ -6,7 +6,7 @@ export
     simulate!
 
 # Forces are often expressed per mol but this dimension needs removing for use in the integrator
-function removemolar(x)
+function remove_molar(x)
     fx = first(x)
     if dimension(fx) == u"𝐋 * 𝐍^-1 * 𝐓^-2"
         T = typeof(ustrip(fx))
@@ -73,15 +73,15 @@ function simulate!(sys::System{D, S, false},
 
         # Update coordinates
         for i in 1:length(sys)
-            sys.coords[i] += sys.velocities[i] * sim.dt + removemolar(accels_t[i]) * (sim.dt ^ 2) / 2
-            sys.coords[i] = wrapcoords.(sys.coords[i], sys.box_size)
+            sys.coords[i] += sys.velocities[i] * sim.dt + remove_molar(accels_t[i]) * (sim.dt ^ 2) / 2
+            sys.coords[i] = wrap_coords.(sys.coords[i], sys.box_size)
         end
 
         accels_t_dt = accelerations(sys, neighbors; parallel=parallel)
 
         # Update velocities
         for i in 1:length(sys)
-            sys.velocities[i] += removemolar(accels_t[i] + accels_t_dt[i]) * sim.dt / 2
+            sys.velocities[i] += remove_molar(accels_t[i] + accels_t_dt[i]) * sim.dt / 2
         end
 
         apply_coupling!(sys, sim, sim.coupling)
@@ -108,10 +108,10 @@ function simulate!(sys::System{D, S, true},
     for step_n in 1:n_steps
         run_loggers!(sys, neighbors, step_n)
 
-        sys.coords += sys.velocities .* sim.dt .+ (removemolar.(accels_t) .* sim.dt ^ 2) ./ 2
-        sys.coords = wrapcoordsvec.(sys.coords, (sys.box_size,))
+        sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
+        sys.coords = wrap_coords_vec.(sys.coords, (sys.box_size,))
         accels_t_dt = accelerations(sys, sys.coords, sys.atoms, neighbors, neighbors_all)
-        sys.velocities += removemolar.(accels_t .+ accels_t_dt) .* sim.dt / 2
+        sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         apply_coupling!(sys, sim, sim.coupling)
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n)
@@ -135,8 +135,8 @@ function simulate!(sys::System,
         # Update coordinates
         coords_copy = sys.coords
         for i in 1:length(sys)
-            sys.coords[i] = sys.coords[i] + vector(sys.velocities[i], sys.coords[i], sys.box_size) + removemolar(accels_t[i]) * sim.dt ^ 2
-            sys.coords[i] = wrapcoords.(sys.coords[i], sys.box_size)
+            sys.coords[i] = sys.coords[i] + vector(sys.velocities[i], sys.coords[i], sys.box_size) + remove_molar(accels_t[i]) * sim.dt ^ 2
+            sys.coords[i] = wrap_coords.(sys.coords[i], sys.box_size)
         end
         sys.velocities = coords_copy
 

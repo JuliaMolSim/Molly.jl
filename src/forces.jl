@@ -3,7 +3,7 @@
 # See OpenMM documentation and Gromacs manual for other aspects of forces
 
 export
-    ustripvec,
+    ustrip_vec,
     force,
     accelerations,
     SpecificForce2Atoms,
@@ -22,13 +22,13 @@ export
     RBTorsion
 
 """
-    ustripvec(x)
+    ustrip_vec(x)
 
-Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustripvec.(coords)`.
+Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustrip_vec.(coords)`.
 """
-ustripvec(x) = ustrip.(x)
+ustrip_vec(x) = ustrip.(x)
 
-function checkforcetype(fdr, force_unit)
+function check_force_type(fdr, force_unit)
     if unit(first(fdr)) != force_unit
         error("System force type is ", force_unit, " but encountered force type ", unit(first(fdr)))
     end
@@ -48,7 +48,7 @@ function force end
     else
         fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
     end
-    checkforcetype(fdr, force_unit)
+    check_force_type(fdr, force_unit)
     fdr_ustrip = ustrip.(fdr)
     fs[i] -= fdr_ustrip
     fs[j] += fdr_ustrip
@@ -62,7 +62,7 @@ end
     else
         fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
     end
-    checkforcetype(fdr, force_unit)
+    check_force_type(fdr, force_unit)
     return ustrip.(fdr)
 end
 
@@ -171,7 +171,7 @@ getf4(x) = x.f4
 @views function specific_force(inter_list::InteractionList2Atoms, coords, box_size, force_unit, n_atoms)
     sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js], (box_size,)))
     fis, fjs = getf1.(sparse_fs), getf2.(sparse_fs)
-    checkforcetype(first(first(fis)), force_unit)
+    check_force_type(first(first(fis)), force_unit)
     return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms)
 end
 
@@ -179,7 +179,7 @@ end
     sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
                                 coords[inter_list.ks], (box_size,)))
     fis, fjs, fks = getf1.(sparse_fs), getf2.(sparse_fs), getf3.(sparse_fs)
-    checkforcetype(first(first(fis)), force_unit)
+    check_force_type(first(first(fis)), force_unit)
     return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) + sparsevec(inter_list.ks, fks, n_atoms)
 end
 
@@ -187,7 +187,7 @@ end
     sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
                                 coords[inter_list.ks], coords[inter_list.ls], (box_size,)))
     fis, fjs, fks, fls = getf1.(sparse_fs), getf2.(sparse_fs), getf3.(sparse_fs), getf4.(sparse_fs)
-    checkforcetype(first(first(fis)), force_unit)
+    check_force_type(first(first(fis)), force_unit)
     return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) + sparsevec(inter_list.ks, fks, n_atoms) + sparsevec(inter_list.ls, fls, n_atoms)
 end
 
@@ -200,7 +200,7 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
     n_atoms = length(s)
 
     if parallel && nthreads() > 1 && n_atoms >= 100
-        fs_threads = [ustripvec.(zero(s.coords)) for i in 1:nthreads()]
+        fs_threads = [ustrip_vec.(zero(s.coords)) for i in 1:nthreads()]
 
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.general_inters)
@@ -220,7 +220,7 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
 
         fs = sum(fs_threads)
     else
-        fs = ustripvec.(zero(s.coords))
+        fs = ustrip_vec.(zero(s.coords))
 
         for inter in values(s.general_inters)
             if inter.nl_only
@@ -240,7 +240,7 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
 
     for inter_list in values(s.specific_inter_lists)
         sparse_vec = specific_force(inter_list, s.coords, s.box_size, s.force_unit, n_atoms)
-        fs += ustripvec.(Array(sparse_vec))
+        fs += ustrip_vec.(Array(sparse_vec))
     end
 
     return fs * s.force_unit
@@ -248,7 +248,7 @@ end
 
 function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothing)
     n_atoms = length(s)
-    fs = ustripvec.(zero(coords))
+    fs = ustrip_vec.(zero(coords))
 
     general_inters_nonl = [inter for inter in values(s.general_inters) if !inter.nl_only]
     @views if length(general_inters_nonl) > 0
@@ -280,7 +280,7 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
     for inter_list in values(s.specific_inter_lists)
         sparse_vec = specific_force(inter_list, coords, s.box_size, s.force_unit, n_atoms)
         # Move back to GPU if required
-        fs += convert(typeof(fs), ustripvec.(Array(sparse_vec)))
+        fs += convert(typeof(fs), ustrip_vec.(Array(sparse_vec)))
     end
 
     return fs * s.force_unit

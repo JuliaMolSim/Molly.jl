@@ -560,7 +560,7 @@ function Molly.simulate!(sys::System,
 
         # Ensure coordinates stay within the simulation box like this
         for i in 1:length(sys)
-            sys.coords[i] = wrapcoords.(sys.coords[i], sys.box_size)
+            sys.coords[i] = wrap_coords.(sys.coords[i], sys.box_size)
         end
 
         # Apply coupling like this

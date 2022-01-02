@@ -3,8 +3,8 @@
 export
     vector1D,
     vector,
-    wrapcoords,
-    wrapcoordsvec
+    wrap_coords,
+    wrap_coords_vec
 
 """
     vector1D(c1, c2, side_length)
@@ -53,18 +53,18 @@ vector_pad3D(c1::SVector{3}, c2::SVector{3}, box_size::SVector{3}) = vector(c1, 
 trim3D(v::SVector{3, T}, box_size::SVector{2}) where T = SVector{2, T}(v[1], v[2])
 trim3D(v::SVector{3}, box_size::SVector{3}) = v
 
-sqdistance(i, j, coords, box_size) = sum(abs2, vector(coords[i], coords[j], box_size))
+square_distance(i, j, coords, box_size) = sum(abs2, vector(coords[i], coords[j], box_size))
 
 """
-    wrapcoords(c, side_length)
+    wrap_coords(c, side_length)
 
 Ensure a 1D coordinate is within the simulation box and return the coordinate.
 """
-wrapcoords(c, side_length) = c - floor(c / side_length) * side_length
+wrap_coords(c, side_length) = c - floor(c / side_length) * side_length
 
 """
-    wrapcoordsvec(c, box_size)
+    wrap_coords_vec(c, box_size)
 
 Ensure a coordinate is within the simulation box and return the coordinate.
 """
-wrapcoordsvec(v, box_size) = wrapcoords.(v, box_size)
+wrap_coords_vec(v, box_size) = wrap_coords.(v, box_size)

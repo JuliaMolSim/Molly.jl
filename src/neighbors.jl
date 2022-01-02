@@ -164,7 +164,7 @@ function find_neighbors(s::System,
 
     n_atoms = length(s)
     sqdist_cutoff = nf.dist_cutoff ^ 2
-    sqdists = sqdistance.(nf.is, nf.js, (s.coords,), (s.box_size,))
+    sqdists = square_distance.(nf.is, nf.js, (s.coords,), (s.box_size,))
 
     close = sqdists .< sqdist_cutoff
     close_nb = close .* nf.nb_matrix
@@ -236,7 +236,7 @@ function find_neighbors(s::System,
 
     dist_unit = unit(first(first(s.coords)))
     bv = ustrip.(dist_unit, s.box_size)
-    btree = BallTree(ustripvec.(s.coords), PeriodicEuclidean(bv))
+    btree = BallTree(ustrip_vec.(s.coords), PeriodicEuclidean(bv))
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
 
     if parallel && nthreads() > 1

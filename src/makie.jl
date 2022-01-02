@@ -27,7 +27,7 @@ function visualize(coord_logger,
     end
 
     scene = Scene()
-    positions = Node(PointType.(ustripvec.(coords_start)))
+    positions = Node(PointType.(ustrip_vec.(coords_start)))
     scatter!(scene, positions; color=color, markersize=markersize,
                 transparency=transparency, kwargs...)
 
@@ -62,7 +62,7 @@ function visualize(coord_logger,
 
     trail_positions = []
     for trail_i in 1:trails
-        push!(trail_positions, Node(PointType.(ustripvec.(coords_start))))
+        push!(trail_positions, Node(PointType.(ustrip_vec.(coords_start))))
         col = parse.(Colorant, color)
         alpha = 1 - (trail_i / (trails + 1))
         alpha_col = RGBA.(red.(col), green.(col), blue.(col), alpha)
@@ -101,9 +101,9 @@ function visualize(coord_logger,
             end
         end
 
-        positions[] = PointType.(ustripvec.(coords))
+        positions[] = PointType.(ustrip_vec.(coords))
         for (trail_i, trail_position) in enumerate(trail_positions)
-            trail_position[] = PointType.(ustripvec.(coord_logger.coords[max(frame_i - trail_i, 1)]))
+            trail_position[] = PointType.(ustrip_vec.(coord_logger.coords[max(frame_i - trail_i, 1)]))
         end
     end
 end

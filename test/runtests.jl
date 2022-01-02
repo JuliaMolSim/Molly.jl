@@ -115,13 +115,13 @@ end
     @test vector(SVector(4.0, 1.0, 6.0)u"nm", SVector(6.0, 9.0, 4.0)u"nm",
                     SVector(10.0, 10.0, 10.0)u"nm") == SVector(2.0, -2.0, -2.0)u"nm"
 
-    @test wrapcoords(8.0 , 10.0) == 8.0
-    @test wrapcoords(12.0, 10.0) == 2.0
-    @test wrapcoords(-2.0, 10.0) == 8.0
+    @test wrap_coords(8.0 , 10.0) == 8.0
+    @test wrap_coords(12.0, 10.0) == 2.0
+    @test wrap_coords(-2.0, 10.0) == 8.0
 
-    @test wrapcoords(8.0u"nm" , 10.0u"nm") == 8.0u"nm"
-    @test wrapcoords(12.0u"m" , 10.0u"m" ) == 2.0u"m"
-    @test_throws ErrorException wrapcoords(-2.0u"nm", 10.0)
+    @test wrap_coords(8.0u"nm" , 10.0u"nm") == 8.0u"nm"
+    @test wrap_coords(12.0u"m" , 10.0u"m" ) == 2.0u"m"
+    @test_throws ErrorException wrap_coords(-2.0u"nm", 10.0)
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
         s = System(
@@ -433,8 +433,8 @@ end
     s_nounits = System(
         atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
         general_inters=(LennardJones(nl_only=true),),
-        coords=ustripvec.(coords),
-        velocities=ustripvec.(velocities),
+        coords=ustrip_vec.(coords),
+        velocities=ustrip_vec.(velocities),
         box_size=ustrip.(box_size),
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0),
         loggers=Dict("temp" => TemperatureLogger(Float64, 100),
@@ -446,13 +446,13 @@ end
 
     neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
     neighbors_nounits = find_neighbors(s_nounits, s_nounits.neighbor_finder; parallel=false)
-    accel_diff = ustripvec.(accelerations(s, neighbors)) .- accelerations(s_nounits, neighbors_nounits)
+    accel_diff = ustrip_vec.(accelerations(s, neighbors)) .- accelerations(s_nounits, neighbors_nounits)
     @test iszero(accel_diff)
 
     simulate!(s, simulator, n_steps; parallel=false)
     simulate!(s_nounits, simulator_nounits, n_steps; parallel=false)
 
-    coords_diff = ustripvec.(s.loggers["coords"].coords[end]) .- s_nounits.loggers["coords"].coords[end]
+    coords_diff = ustrip_vec.(s.loggers["coords"].coords[end]) .- s_nounits.loggers["coords"].coords[end]
     @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8
 
     final_energy = s.loggers["energy"].energies[end]
@@ -597,7 +597,7 @@ end
         )
         neighbors = find_neighbors(s, s.neighbor_finder)
 
-        forces_molly = ustripvec.(accelerations(s, neighbors; parallel=false) .* mass.(atoms))
+        forces_molly = ustrip_vec.(accelerations(s, neighbors; parallel=false) .* mass.(atoms))
         forces_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "forces_$(inter)_only.txt"))))
         # All force terms on all atoms must match at some threshold
         @test !any(d -> any(abs.(d) .> 1e-6), forces_molly .- forces_openmm)
@@ -628,7 +628,7 @@ end
     coords_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "coordinates_$(n_steps)steps.txt"))))u"nm"
     vels_openmm   = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_$(n_steps)steps.txt" ))))u"nm * ps^-1"
 
-    coords_diff = s.coords .- wrapcoordsvec.(coords_openmm, (s.box_size,))
+    coords_diff = s.coords .- wrap_coords_vec.(coords_openmm, (s.box_size,))
     vels_diff = s.velocities .- vels_openmm
     # Coordinates and velocities at end must match at some threshold
     @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
@@ -651,7 +651,7 @@ end
     
         simulate!(s, simulator, n_steps)
 
-        coords_diff = Array(s.coords) .- wrapcoordsvec.(coords_openmm, (s.box_size,))
+        coords_diff = Array(s.coords) .- wrap_coords_vec.(coords_openmm, (s.box_size,))
         vels_diff = Array(s.velocities) .- vels_openmm
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
         @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
