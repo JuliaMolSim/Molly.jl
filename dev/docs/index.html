@@ -94,41 +94,30 @@ sys = System(
 simulate!(sys, simulator, 2_000)</code></pre><p>When we view the simulation we can use some extra options:</p><pre><code class="language-julia">visualize(sys.loggers[&quot;coords&quot;], box_size, &quot;sim_gravity.mp4&quot;;
             trails=4, framerate=15, color=[:orange, :lightgreen])</code></pre><p><img src="../images/sim_gravity.gif" alt="Gravity simulation"/></p><h2 id="Simulating-a-protein"><a class="docs-heading-anchor" href="#Simulating-a-protein">Simulating a protein</a><a id="Simulating-a-protein-1"></a><a class="docs-heading-anchor-permalink" href="#Simulating-a-protein" title="Permalink"></a></h2><p>The recommended way to simulate a macromolecular simulation is to read in a force field in OpenMM XML format and read in a coordinate file in a format <a href="https://chemfiles.org/chemfiles/latest/formats.html">supported by Chemfiles.jl</a>. This sets up a system in the same data structures as above and is simulated in the same way. Here a <a href="../api/#Molly.StructureWriter"><code>StructureWriter</code></a> is used to write the trajectory as a PDB file.</p><pre><code class="language-julia">ff = OpenMMForceField(&quot;ff99SBildn.xml&quot;, &quot;tip3p_standard.xml&quot;, &quot;his.xml&quot;)
 
-atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
-    &quot;6mrr_equil.pdb&quot;, ff)
+sys = System(
+    &quot;6mrr_equil.pdb&quot;,
+    ff;
+    loggers=Dict(
+        &quot;energy&quot; =&gt; TotalEnergyLogger(10),
+        &quot;writer&quot; =&gt; StructureWriter(10, &quot;traj_5XER_1ps.pdb&quot;, [&quot;HOH&quot;]),
+    ),
+)
+
+random_velocities!(sys, 298.0u&quot;K&quot;)
 simulator = VelocityVerlet(dt=0.0005u&quot;ps&quot;)
 
-sys = System(
-    atoms=atoms,
-    atoms_data=atoms_data,
-    general_inters=general_inters,
-    specific_inter_lists=specific_inter_lists,
-    coords=coords,
-    velocities=[velocity(a.mass, 298u&quot;K&quot;) for a in atoms],
-    box_size=box_size,
-    neighbor_finder=neighbor_finder,
-    loggers=Dict(&quot;energy&quot; =&gt; TotalEnergyLogger(10),
-                    &quot;writer&quot; =&gt; StructureWriter(10, &quot;traj_5XER_1ps.pdb&quot;, [&quot;HOH&quot;])),
+simulate!(sys, simulator, 5_000; parallel=true)</code></pre><p>Molly also has a rudimentary parser of <a href="http://www.gromacs.org">Gromacs</a> topology and coordinate files.</p><pre><code class="language-julia">sys = System(
+    joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_coords.gro&quot;),
+    joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_top_ff.top&quot;);
+    loggers=Dict(
+        &quot;temp&quot;   =&gt; TemperatureLogger(10),
+        &quot;writer&quot; =&gt; StructureWriter(10, &quot;traj_5XER_1ps.pdb&quot;),
+    ),
 )
 
-simulate!(sys, simulator, 5_000; parallel=true)</code></pre><p>Molly also has a rudimentary parser of <a href="http://www.gromacs.org">Gromacs</a> topology and coordinate files.</p><pre><code class="language-julia">atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
-            joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_top_ff.top&quot;),
-            joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_coords.gro&quot;))
-temp = 298u&quot;K&quot;
+temp = 298.0u&quot;K&quot;
+random_velocities!(sys, temp)
 simulator = VelocityVerlet(dt=0.0002u&quot;ps&quot;, coupling=AndersenThermostat(temp, 1.0u&quot;ps&quot;))
-
-sys = System(
-    atoms=atoms,
-    atoms_data=atoms_data,
-    general_inters=general_inters,
-    specific_inter_lists=specific_inter_lists,
-    coords=coords,
-    velocities=[velocity(a.mass, temp) for a in atoms],
-    box_size=box_size,
-    neighbor_finder=neighbor_finder,
-    loggers=Dict(&quot;temp&quot; =&gt; TemperatureLogger(10),
-                    &quot;writer&quot; =&gt; StructureWriter(10, &quot;traj_5XER_1ps.pdb&quot;)),
-)
 
 simulate!(sys, simulator, 5_000)</code></pre><h2 id="Agent-based-modelling"><a class="docs-heading-anchor" href="#Agent-based-modelling">Agent-based modelling</a><a id="Agent-based-modelling-1"></a><a class="docs-heading-anchor-permalink" href="#Agent-based-modelling" title="Permalink"></a></h2><p>Agent-based modelling (ABM) is conceptually similar to molecular dynamics. Julia has <a href="https://juliadynamics.github.io/Agents.jl/stable/">Agents.jl</a> for ABM, but Molly can also be used to simulate arbitrary agent-based systems in continuous space. Here we simulate a toy SIR model for disease spread. This example shows how atom properties can be mutable, i.e. change during the simulation, and includes custom forces and loggers (see below for more).</p><pre><code class="language-julia">@enum Status susceptible infected recovered
 
@@ -292,7 +281,7 @@ end</code></pre><p>Then, define the function that carries out the simulation. Th
 
         # Ensure coordinates stay within the simulation box like this
         for i in 1:length(sys)
-            sys.coords[i] = wrapcoords.(sys.coords[i], sys.box_size)
+            sys.coords[i] = wrap_coords.(sys.coords[i], sys.box_size)
         end
 
         # Apply coupling like this
@@ -338,4 +327,4 @@ end</code></pre><p>Then, define the logging function that is called every step b
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end
-end</code></pre><p>The use of <code>n_steps</code> is optional and is an example of how to record a property every n steps through the simulation. To use your custom logger, add it to the dictionary of loggers given when creating the <a href="../api/#Molly.System"><code>System</code></a>:</p><pre><code class="language-julia">loggers = Dict(&quot;mylogger&quot; =&gt; MyLogger(10))</code></pre><h2 id="Analysis"><a class="docs-heading-anchor" href="#Analysis">Analysis</a><a id="Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Analysis" title="Permalink"></a></h2><p>Molly contains some tools for analysing the results of simulations. The available analysis functions are:</p><ul><li><a href="../api/#Molly.visualize"><code>visualize</code></a>.</li><li><a href="../api/#Molly.rdf-Tuple{Any, Any}"><code>rdf</code></a>.</li><li><a href="../api/#Molly.distances-Tuple{Any, Any}"><code>distances</code></a>.</li><li><a href="../api/#Molly.displacements-Tuple{Any, Any}"><code>displacements</code></a>.</li><li><a href="../api/#Molly.velocity_autocorr"><code>velocity_autocorr</code></a>.</li></ul><p>Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../differentiable/">Differentiable simulation »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Sunday 2 January 2022 01:04">Sunday 2 January 2022</span>. Using Julia version 1.7.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+end</code></pre><p>The use of <code>n_steps</code> is optional and is an example of how to record a property every n steps through the simulation. To use your custom logger, add it to the dictionary of loggers given when creating the <a href="../api/#Molly.System"><code>System</code></a>:</p><pre><code class="language-julia">loggers = Dict(&quot;mylogger&quot; =&gt; MyLogger(10))</code></pre><h2 id="Analysis"><a class="docs-heading-anchor" href="#Analysis">Analysis</a><a id="Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Analysis" title="Permalink"></a></h2><p>Molly contains some tools for analysing the results of simulations. The available analysis functions are:</p><ul><li><a href="../api/#Molly.visualize"><code>visualize</code></a>.</li><li><a href="../api/#Molly.rdf-Tuple{Any, Any}"><code>rdf</code></a>.</li><li><a href="../api/#Molly.distances-Tuple{Any, Any}"><code>distances</code></a>.</li><li><a href="../api/#Molly.displacements-Tuple{Any, Any}"><code>displacements</code></a>.</li><li><a href="../api/#Molly.velocity_autocorr"><code>velocity_autocorr</code></a>.</li></ul><p>Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../differentiable/">Differentiable simulation »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Sunday 2 January 2022 20:33">Sunday 2 January 2022</span>. Using Julia version 1.7.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
