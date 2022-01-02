@@ -285,14 +285,3 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
 
     return fs * s.force_unit
 end
-
-include("interactions/lennard_jones.jl")
-include("interactions/soft_sphere.jl")
-include("interactions/mie.jl")
-include("interactions/coulomb.jl")
-include("interactions/coulomb_reaction_field.jl")
-include("interactions/gravity.jl")
-include("interactions/harmonic_bond.jl")
-include("interactions/harmonic_angle.jl")
-include("interactions/periodic_torsion.jl")
-include("interactions/rb_torsion.jl")
