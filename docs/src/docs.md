@@ -195,46 +195,35 @@ Here a [`StructureWriter`](@ref) is used to write the trajectory as a PDB file.
 ```julia
 ff = OpenMMForceField("ff99SBildn.xml", "tip3p_standard.xml", "his.xml")
 
-atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
-    "6mrr_equil.pdb", ff)
-simulator = VelocityVerlet(dt=0.0005u"ps")
-
 sys = System(
-    atoms=atoms,
-    atoms_data=atoms_data,
-    general_inters=general_inters,
-    specific_inter_lists=specific_inter_lists,
-    coords=coords,
-    velocities=[velocity(a.mass, 298u"K") for a in atoms],
-    box_size=box_size,
-    neighbor_finder=neighbor_finder,
-    loggers=Dict("energy" => TotalEnergyLogger(10),
-                    "writer" => StructureWriter(10, "traj_5XER_1ps.pdb", ["HOH"])),
+    "6mrr_equil.pdb",
+    ff;
+    loggers=Dict(
+        "energy" => TotalEnergyLogger(10),
+        "writer" => StructureWriter(10, "traj_5XER_1ps.pdb", ["HOH"]),
+    ),
 )
+
+random_velocities!(sys, 298.0u"K")
+simulator = VelocityVerlet(dt=0.0005u"ps")
 
 simulate!(sys, simulator, 5_000; parallel=true)
 ```
 
 Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
 ```julia
-atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = readinputs(
-            joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top"),
-            joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"))
-temp = 298u"K"
-simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
-
 sys = System(
-    atoms=atoms,
-    atoms_data=atoms_data,
-    general_inters=general_inters,
-    specific_inter_lists=specific_inter_lists,
-    coords=coords,
-    velocities=[velocity(a.mass, temp) for a in atoms],
-    box_size=box_size,
-    neighbor_finder=neighbor_finder,
-    loggers=Dict("temp" => TemperatureLogger(10),
-                    "writer" => StructureWriter(10, "traj_5XER_1ps.pdb")),
+    joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
+    joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
+    loggers=Dict(
+        "temp"   => TemperatureLogger(10),
+        "writer" => StructureWriter(10, "traj_5XER_1ps.pdb"),
+    ),
 )
+
+temp = 298.0u"K"
+random_velocities!(sys, temp)
+simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
 
 simulate!(sys, simulator, 5_000)
 ```

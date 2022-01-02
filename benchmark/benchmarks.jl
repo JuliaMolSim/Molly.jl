@@ -142,23 +142,10 @@ ff_dir = joinpath(data_dir, "force_fields")
 openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
 ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
-
-atoms, atoms_data, specific_inter_lists, general_inters, neighbor_finder, coords, box_size = setupsystem(
-    joinpath(data_dir, "6mrr_equil.pdb"), ff)
-
-n_steps = 25
 velocities = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
+s = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; velocities=velocities)
 simulator = VelocityVerlet(dt=0.0005u"ps")
-
-s = System(
-    atoms=atoms,
-    general_inters=general_inters,
-    specific_inter_lists=specific_inter_lists,
-    coords=coords,
-    velocities=velocities,
-    box_size=box_size,
-    neighbor_finder=neighbor_finder,
-)
+n_steps = 25
 
 simulate!(s, simulator, n_steps; parallel=true)
 SUITE["protein"]["in-place NL parallel"] = @benchmarkable simulate!($(s), $(simulator), $(n_steps); parallel=true)

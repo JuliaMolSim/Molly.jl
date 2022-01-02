@@ -4,12 +4,10 @@
 export
     place_atoms,
     place_diatomics,
-    readinputs,
     OpenMMAtomType,
     OpenMMResidueType,
     PeriodicTorsionType,
-    OpenMMForceField,
-    setupsystem
+    OpenMMForceField
 
 """
     place_atoms(n_atoms, box_size, min_dist)
@@ -68,299 +66,6 @@ function place_diatomics(n_molecules::Integer, box_size, min_dist, bond_length)
         end
     end
     return [coords...]
-end
-
-"""
-    readinputs(topology_file, coordinate_file; units=true)
-    readinputs(T, topology_file, coordinate_file; units=true)
-
-Read a Gromacs topology flat file, i.e. all includes collapsed into one file,
-and a Gromacs coordinate file.
-Returns the atoms, atoms data, specific interaction lists, general
-interaction lists, neighbor finder, coordinates and box size.
-`units` determines whether the returned values have units.
-"""
-function readinputs(T::Type,
-                    top_file::AbstractString,
-                    coord_file::AbstractString;
-                    units::Bool=true,
-                    gpu::Bool=false,
-                    gpu_diff_safe::Bool=gpu,
-                    dist_cutoff=units ? 1.0u"nm" : 1.0,
-                    nl_dist=units ? 1.2u"nm" : 1.2)
-    # Read force field and topology file
-    atomtypes = Dict{String, Atom}()
-    bondtypes = Dict{String, HarmonicBond}()
-    angletypes = Dict{String, HarmonicAngle}()
-    torsiontypes = Dict{String, RBTorsion}()
-    atomnames = Dict{String, String}()
-
-    name = "?"
-    atoms = Atom[]
-    atoms_data = AtomData[]
-    bonds = InteractionList2Atoms(HarmonicBond)
-    pairs = Tuple{Int, Int}[]
-    angles = InteractionList3Atoms(HarmonicAngle)
-    possible_torsions = Tuple{Int, Int, Int, Int}[]
-    torsions = InteractionList4Atoms(RBTorsion)
-
-    if units
-        force_unit = u"kJ * mol^-1 * nm^-1"
-        energy_unit = u"kJ * mol^-1"
-    else
-        force_unit = NoUnits
-        energy_unit = NoUnits
-    end
-
-    current_field = ""
-    for l in eachline(top_file)
-        sl = strip(l)
-        if length(sl) == 0 || startswith(sl, ';')
-            continue
-        end
-        if startswith(sl, '[') && endswith(sl, ']')
-            current_field = strip(sl[2:end-1])
-            continue
-        end
-        c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
-        if current_field == "bondtypes"
-            if units
-                bondtype = HarmonicBond(parse(T, c[4])u"nm", parse(T, c[5])u"kJ * mol^-1 * nm^-2")
-            else
-                bondtype = HarmonicBond(parse(T, c[4]), parse(T, c[5]))
-            end
-            bondtypes["$(c[1])/$(c[2])"] = bondtype
-            bondtypes["$(c[2])/$(c[1])"] = bondtype
-        elseif current_field == "angletypes"
-            # Convert th0 to radians
-            if units
-                angletype = HarmonicAngle(deg2rad(parse(T, c[5])), parse(T, c[6])u"kJ * mol^-1")
-            else
-                angletype = HarmonicAngle(deg2rad(parse(T, c[5])), parse(T, c[6]))
-            end
-            angletypes["$(c[1])/$(c[2])/$(c[3])"] = angletype
-            angletypes["$(c[3])/$(c[2])/$(c[1])"] = angletype
-        elseif current_field == "dihedraltypes" && c[1] != "#define"
-            # Convert back to OPLS types
-            f4 = parse(T, c[10]) / -4
-            f3 = parse(T, c[9]) / -2
-            f2 = 4 * f4 - parse(T, c[8])
-            f1 = 3 * f3 - 2 * parse(T, c[7])
-            if units
-                torsiontype = RBTorsion((f1)u"kJ * mol^-1", (f2)u"kJ * mol^-1",
-                                        (f3)u"kJ * mol^-1", (f4)u"kJ * mol^-1")
-            else
-                torsiontype = RBTorsion(f1, f2, f3, f4)
-            end
-            torsiontypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = torsiontype
-        elseif current_field == "atomtypes" && length(c) >= 8
-            atomname = uppercase(c[2])
-            atomnames[c[1]] = atomname
-            # Take the first version of each atom type only
-            if !haskey(atomtypes, atomname)
-                if units
-                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4])u"u",
-                            σ=parse(T, c[7])u"nm", ϵ=parse(T, c[8])u"kJ * mol^-1")
-                else
-                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4]),
-                            σ=parse(T, c[7]), ϵ=parse(T, c[8]))
-                end
-            end
-        elseif current_field == "atoms"
-            attype = atomnames[c[2]]
-            charge = parse(T, c[7])
-            if units
-                mass = parse(T, c[8])u"u"
-            else
-                mass = parse(T, c[8])
-            end
-            atom_index = length(atoms) + 1
-            push!(atoms, Atom(index=atom_index, charge=charge, mass=mass,
-                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
-            push!(atoms_data, AtomData(atom_type=attype, atom_name=c[5], res_number=parse(Int, c[3]),
-                                        res_name=c[4]))
-        elseif current_field == "bonds"
-            i, j = parse.(Int, c[1:2])
-            bondtype = bondtypes["$(atoms_data[i].atom_type)/$(atoms_data[j].atom_type)"]
-            push!(bonds.is, i)
-            push!(bonds.js, j)
-            push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
-        elseif current_field == "pairs"
-            push!(pairs, (parse(Int, c[1]), parse(Int, c[2])))
-        elseif current_field == "angles"
-            i, j, k = parse.(Int, c[1:3])
-            angletype = angletypes["$(atoms_data[i].atom_type)/$(atoms_data[j].atom_type)/$(atoms_data[k].atom_type)"]
-            push!(angles.is, i)
-            push!(angles.js, j)
-            push!(angles.ks, k)
-            push!(angles.inters, HarmonicAngle(th0=angletype.th0, cth=angletype.cth))
-        elseif current_field == "dihedrals"
-            i, j, k, l = parse.(Int, c[1:4])
-            push!(possible_torsions, (i, j, k, l))
-        elseif current_field == "system"
-            name = rstrip(first(split(sl, ";", limit=2)))
-        end
-    end
-
-    # Add torsions based on wildcard torsion types
-    for inds in possible_torsions
-        at_types = [atoms_data[x].atom_type for x in inds]
-        desired_key = join(at_types, "/")
-        if haskey(torsiontypes, desired_key)
-            d = torsiontypes[desired_key]
-            push!(torsions.is, inds[1])
-            push!(torsions.js, inds[2])
-            push!(torsions.ks, inds[3])
-            push!(torsions.ls, inds[4])
-            push!(torsions.inters, RBTorsion(f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
-        else
-            best_score = 0
-            best_key = ""
-            for k in keys(torsiontypes)
-                c = split(k, "/")
-                for a in (c, reverse(c))
-                    valid = true
-                    score = 0
-                    for (i, v) in enumerate(a)
-                        if v == at_types[i]
-                            score += 1
-                        elseif v != "X"
-                            valid = false
-                            break
-                        end
-                    end
-                    if valid && (score > best_score)
-                        best_score = score
-                        best_key = k
-                    end
-                end
-            end
-            # If a wildcard match is found, add a new specific torsion type
-            if best_key != ""
-                d = torsiontypes[best_key]
-                push!(torsions.is, inds[1])
-                push!(torsions.js, inds[2])
-                push!(torsions.ks, inds[3])
-                push!(torsions.ls, inds[4])
-                push!(torsions.inters, RBTorsion(f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
-            end
-        end
-    end
-
-    # Read coordinate file and add solvent atoms
-    lines = readlines(coord_file)
-    coords = SArray[]
-    for (i, l) in enumerate(lines[3:end-1])
-        coord = SVector(parse(T, l[21:28]), parse(T, l[29:36]), parse(T, l[37:44]))
-        if units
-            push!(coords, (coord)u"nm")
-        else
-            push!(coords, coord)
-        end
-
-        # Some atoms are not specified explicitly in the topology so are added here
-        if i > length(atoms)
-            atname = strip(l[11:15])
-            attype = replace(atname, r"\d+" => "")
-            temp_charge = atomtypes[attype].charge
-            if attype == "CL" # Temp hack to fix charges
-                temp_charge = T(-1.0)
-            end
-            atom_index = length(atoms) + 1
-            push!(atoms, Atom(index=atom_index, charge=temp_charge, mass=atomtypes[attype].mass,
-                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
-            push!(atoms_data, AtomData(atom_type=attype, atom_name=atname, res_number=parse(Int, l[1:5]),
-                                        res_name=strip(l[6:10])))
-
-            # Add O-H bonds and H-O-H angle in water
-            if atname == "OW"
-                bondtype = bondtypes["OW/HW"]
-                push!(bonds.is, i)
-                push!(bonds.js, i + 1)
-                push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
-                push!(bonds.is, i)
-                push!(bonds.js, i + 2)
-                push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
-                angletype = angletypes["HW/OW/HW"]
-                push!(angles.is, i + 1)
-                push!(angles.js, i)
-                push!(angles.ks, i + 2)
-                push!(angles.inters, HarmonicAngle(th0=angletype.th0, cth=angletype.cth))
-            end
-        end
-    end
-
-    # Calculate matrix of pairs eligible for non-bonded interactions
-    n_atoms = length(coords)
-    nb_matrix = trues(n_atoms, n_atoms)
-    for i in 1:n_atoms
-        nb_matrix[i, i] = false
-    end
-    for (i, j) in zip(bonds.is, bonds.js)
-        nb_matrix[i, j] = false
-        nb_matrix[j, i] = false
-    end
-    for (i, k) in zip(angles.is, angles.ks)
-        # Assume bonding is already specified
-        nb_matrix[i, k] = false
-        nb_matrix[k, i] = false
-    end
-
-    # Calculate matrix of pairs eligible for halved non-bonded interactions
-    # This applies to specified pairs in the topology file, usually 1-4 bonded
-    matrix_14 = falses(n_atoms, n_atoms)
-    for (i, j) in pairs
-        matrix_14[i, j] = true
-        matrix_14[j, i] = true
-    end
-
-    lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true, weight_14=T(0.5),
-                        force_unit=force_unit, energy_unit=energy_unit)
-    coulomb_rf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(solventdielectric),
-                                        nl_only=true, weight_14=T(0.5),
-                                        coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
-                                        force_unit=force_unit, energy_unit=energy_unit)
-
-    # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
-    box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
-    box_size = units ? (box_size_vals)u"nm" : box_size_vals
-    coords = wrap_coords_vec.([coords...], (box_size,))
-
-    general_inters = (lj, coulomb_rf)
-    # Ensure array types are concrete
-    if gpu
-        specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, cu([bonds.inters...])),
-                                InteractionList3Atoms(angles.is, angles.js, angles.ks, cu([angles.inters...])),
-                                InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
-                                                        cu([torsions.inters...])))
-    else
-        specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, [bonds.inters...]),
-                                InteractionList3Atoms(angles.is, angles.js, angles.ks, [angles.inters...]),
-                                InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
-                                                        [torsions.inters...]))
-    end
-
-    atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
-
-    if gpu_diff_safe
-        neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(nb_matrix) : nb_matrix,
-                                                    matrix_14=gpu ? cu(matrix_14) : matrix_14, n_steps=10,
-                                                    dist_cutoff=T(nl_dist))
-    else
-        neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-                                                    x0=coords, unit_cell=box_size, dist_cutoff=T(nl_dist))
-    end
-    if gpu
-        atoms = cu(atoms)
-        coords = cu(coords)
-    end
-
-    return atoms, atoms_data, specific_inter_lists, general_inters,
-            neighbor_finder, coords, box_size
-end
-
-function readinputs(top_file::AbstractString, coord_file::AbstractString; kwargs...)
-    return readinputs(DefaultFloat, top_file, coord_file; kwargs...)
 end
 
 """
@@ -560,22 +265,16 @@ function residue_name(res, res_num_to_standard::Dict, rename_terminal_res::Bool=
     return res_name
 end
 
-"""
-    setupsystem(coord_file, force_field; dist_cutoff=1.0u"nm")
-
-Read a coordinate file and apply a force field to it.
-Any file format readable by Chemfiles can be given.
-Returns the atoms, specific interaction lists, general interaction lists,
-neighbor finder, coordinates and box size.
-"""
-function setupsystem(coord_file::AbstractString,
-                        force_field;
-                        units::Bool=true,
-                        gpu::Bool=false,
-                        gpu_diff_safe::Bool=gpu,
-                        dist_cutoff=units ? 1.0u"nm" : 1.0,
-                        nl_dist=units ? 1.2u"nm" : 1.2,
-                        rename_terminal_res::Bool=true)
+function System(coord_file::AbstractString,
+                force_field::OpenMMForceField;
+                velocities=nothing,
+                loggers=Dict{String, Logger}(),
+                units::Bool=true,
+                gpu::Bool=false,
+                gpu_diff_safe::Bool=gpu,
+                dist_cutoff=units ? 1.0u"nm" : 1.0,
+                nl_dist=units ? 1.2u"nm" : 1.2,
+                rename_terminal_res::Bool=true)
     T = typeof(force_field.weight_14_coulomb)
 
     # Chemfiles uses zero-based indexing, be careful
@@ -943,6 +642,335 @@ function setupsystem(coord_file::AbstractString,
         coords = cu(coords)
     end
 
-    return atoms, atoms_data, specific_inter_lists, general_inters,
-            neighbor_finder, coords, box_size
+    if isnothing(velocities)
+        if units
+            vels = zero(ustrip_vec.(coords))u"nm * ps^-1"
+        else
+            vels = zero(coords)
+        end
+    else
+        vels = velocities
+    end
+
+    return System(
+        atoms=atoms,
+        atoms_data=atoms_data,
+        general_inters=general_inters,
+        specific_inter_lists=specific_inter_lists,
+        coords=coords,
+        velocities=vels,
+        box_size=box_size,
+        neighbor_finder=neighbor_finder,
+        loggers=loggers,
+        force_unit=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
+        energy_unit=units ? u"kJ * mol^-1" : NoUnits,
+        gpu_diff_safe=gpu_diff_safe,
+    )
+end
+
+function System(T::Type,
+                coord_file::AbstractString,
+                top_file::AbstractString;
+                velocities=nothing,
+                loggers=Dict{String, Logger}(),
+                units::Bool=true,
+                gpu::Bool=false,
+                gpu_diff_safe::Bool=gpu,
+                dist_cutoff=units ? 1.0u"nm" : 1.0,
+                nl_dist=units ? 1.2u"nm" : 1.2)
+    # Read force field and topology file
+    atomtypes = Dict{String, Atom}()
+    bondtypes = Dict{String, HarmonicBond}()
+    angletypes = Dict{String, HarmonicAngle}()
+    torsiontypes = Dict{String, RBTorsion}()
+    atomnames = Dict{String, String}()
+
+    name = "?"
+    atoms = Atom[]
+    atoms_data = AtomData[]
+    bonds = InteractionList2Atoms(HarmonicBond)
+    pairs = Tuple{Int, Int}[]
+    angles = InteractionList3Atoms(HarmonicAngle)
+    possible_torsions = Tuple{Int, Int, Int, Int}[]
+    torsions = InteractionList4Atoms(RBTorsion)
+
+    if units
+        force_unit = u"kJ * mol^-1 * nm^-1"
+        energy_unit = u"kJ * mol^-1"
+    else
+        force_unit = NoUnits
+        energy_unit = NoUnits
+    end
+
+    current_field = ""
+    for l in eachline(top_file)
+        sl = strip(l)
+        if length(sl) == 0 || startswith(sl, ';')
+            continue
+        end
+        if startswith(sl, '[') && endswith(sl, ']')
+            current_field = strip(sl[2:end-1])
+            continue
+        end
+        c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
+        if current_field == "bondtypes"
+            if units
+                bondtype = HarmonicBond(parse(T, c[4])u"nm", parse(T, c[5])u"kJ * mol^-1 * nm^-2")
+            else
+                bondtype = HarmonicBond(parse(T, c[4]), parse(T, c[5]))
+            end
+            bondtypes["$(c[1])/$(c[2])"] = bondtype
+            bondtypes["$(c[2])/$(c[1])"] = bondtype
+        elseif current_field == "angletypes"
+            # Convert th0 to radians
+            if units
+                angletype = HarmonicAngle(deg2rad(parse(T, c[5])), parse(T, c[6])u"kJ * mol^-1")
+            else
+                angletype = HarmonicAngle(deg2rad(parse(T, c[5])), parse(T, c[6]))
+            end
+            angletypes["$(c[1])/$(c[2])/$(c[3])"] = angletype
+            angletypes["$(c[3])/$(c[2])/$(c[1])"] = angletype
+        elseif current_field == "dihedraltypes" && c[1] != "#define"
+            # Convert back to OPLS types
+            f4 = parse(T, c[10]) / -4
+            f3 = parse(T, c[9]) / -2
+            f2 = 4 * f4 - parse(T, c[8])
+            f1 = 3 * f3 - 2 * parse(T, c[7])
+            if units
+                torsiontype = RBTorsion((f1)u"kJ * mol^-1", (f2)u"kJ * mol^-1",
+                                        (f3)u"kJ * mol^-1", (f4)u"kJ * mol^-1")
+            else
+                torsiontype = RBTorsion(f1, f2, f3, f4)
+            end
+            torsiontypes["$(c[1])/$(c[2])/$(c[3])/$(c[4])"] = torsiontype
+        elseif current_field == "atomtypes" && length(c) >= 8
+            atomname = uppercase(c[2])
+            atomnames[c[1]] = atomname
+            # Take the first version of each atom type only
+            if !haskey(atomtypes, atomname)
+                if units
+                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4])u"u",
+                            σ=parse(T, c[7])u"nm", ϵ=parse(T, c[8])u"kJ * mol^-1")
+                else
+                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4]),
+                            σ=parse(T, c[7]), ϵ=parse(T, c[8]))
+                end
+            end
+        elseif current_field == "atoms"
+            attype = atomnames[c[2]]
+            charge = parse(T, c[7])
+            if units
+                mass = parse(T, c[8])u"u"
+            else
+                mass = parse(T, c[8])
+            end
+            atom_index = length(atoms) + 1
+            push!(atoms, Atom(index=atom_index, charge=charge, mass=mass,
+                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
+            push!(atoms_data, AtomData(atom_type=attype, atom_name=c[5], res_number=parse(Int, c[3]),
+                                        res_name=c[4]))
+        elseif current_field == "bonds"
+            i, j = parse.(Int, c[1:2])
+            bondtype = bondtypes["$(atoms_data[i].atom_type)/$(atoms_data[j].atom_type)"]
+            push!(bonds.is, i)
+            push!(bonds.js, j)
+            push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
+        elseif current_field == "pairs"
+            push!(pairs, (parse(Int, c[1]), parse(Int, c[2])))
+        elseif current_field == "angles"
+            i, j, k = parse.(Int, c[1:3])
+            angletype = angletypes["$(atoms_data[i].atom_type)/$(atoms_data[j].atom_type)/$(atoms_data[k].atom_type)"]
+            push!(angles.is, i)
+            push!(angles.js, j)
+            push!(angles.ks, k)
+            push!(angles.inters, HarmonicAngle(th0=angletype.th0, cth=angletype.cth))
+        elseif current_field == "dihedrals"
+            i, j, k, l = parse.(Int, c[1:4])
+            push!(possible_torsions, (i, j, k, l))
+        elseif current_field == "system"
+            name = rstrip(first(split(sl, ";", limit=2)))
+        end
+    end
+
+    # Add torsions based on wildcard torsion types
+    for inds in possible_torsions
+        at_types = [atoms_data[x].atom_type for x in inds]
+        desired_key = join(at_types, "/")
+        if haskey(torsiontypes, desired_key)
+            d = torsiontypes[desired_key]
+            push!(torsions.is, inds[1])
+            push!(torsions.js, inds[2])
+            push!(torsions.ks, inds[3])
+            push!(torsions.ls, inds[4])
+            push!(torsions.inters, RBTorsion(f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
+        else
+            best_score = 0
+            best_key = ""
+            for k in keys(torsiontypes)
+                c = split(k, "/")
+                for a in (c, reverse(c))
+                    valid = true
+                    score = 0
+                    for (i, v) in enumerate(a)
+                        if v == at_types[i]
+                            score += 1
+                        elseif v != "X"
+                            valid = false
+                            break
+                        end
+                    end
+                    if valid && (score > best_score)
+                        best_score = score
+                        best_key = k
+                    end
+                end
+            end
+            # If a wildcard match is found, add a new specific torsion type
+            if best_key != ""
+                d = torsiontypes[best_key]
+                push!(torsions.is, inds[1])
+                push!(torsions.js, inds[2])
+                push!(torsions.ks, inds[3])
+                push!(torsions.ls, inds[4])
+                push!(torsions.inters, RBTorsion(f1=d.f1, f2=d.f2, f3=d.f3, f4=d.f4))
+            end
+        end
+    end
+
+    # Read coordinate file and add solvent atoms
+    lines = readlines(coord_file)
+    coords = SArray[]
+    for (i, l) in enumerate(lines[3:end-1])
+        coord = SVector(parse(T, l[21:28]), parse(T, l[29:36]), parse(T, l[37:44]))
+        if units
+            push!(coords, (coord)u"nm")
+        else
+            push!(coords, coord)
+        end
+
+        # Some atoms are not specified explicitly in the topology so are added here
+        if i > length(atoms)
+            atname = strip(l[11:15])
+            attype = replace(atname, r"\d+" => "")
+            temp_charge = atomtypes[attype].charge
+            if attype == "CL" # Temp hack to fix charges
+                temp_charge = T(-1.0)
+            end
+            atom_index = length(atoms) + 1
+            push!(atoms, Atom(index=atom_index, charge=temp_charge, mass=atomtypes[attype].mass,
+                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
+            push!(atoms_data, AtomData(atom_type=attype, atom_name=atname, res_number=parse(Int, l[1:5]),
+                                        res_name=strip(l[6:10])))
+
+            # Add O-H bonds and H-O-H angle in water
+            if atname == "OW"
+                bondtype = bondtypes["OW/HW"]
+                push!(bonds.is, i)
+                push!(bonds.js, i + 1)
+                push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
+                push!(bonds.is, i)
+                push!(bonds.js, i + 2)
+                push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
+                angletype = angletypes["HW/OW/HW"]
+                push!(angles.is, i + 1)
+                push!(angles.js, i)
+                push!(angles.ks, i + 2)
+                push!(angles.inters, HarmonicAngle(th0=angletype.th0, cth=angletype.cth))
+            end
+        end
+    end
+
+    # Calculate matrix of pairs eligible for non-bonded interactions
+    n_atoms = length(coords)
+    nb_matrix = trues(n_atoms, n_atoms)
+    for i in 1:n_atoms
+        nb_matrix[i, i] = false
+    end
+    for (i, j) in zip(bonds.is, bonds.js)
+        nb_matrix[i, j] = false
+        nb_matrix[j, i] = false
+    end
+    for (i, k) in zip(angles.is, angles.ks)
+        # Assume bonding is already specified
+        nb_matrix[i, k] = false
+        nb_matrix[k, i] = false
+    end
+
+    # Calculate matrix of pairs eligible for halved non-bonded interactions
+    # This applies to specified pairs in the topology file, usually 1-4 bonded
+    matrix_14 = falses(n_atoms, n_atoms)
+    for (i, j) in pairs
+        matrix_14[i, j] = true
+        matrix_14[j, i] = true
+    end
+
+    lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true, weight_14=T(0.5),
+                        force_unit=force_unit, energy_unit=energy_unit)
+    coulomb_rf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(solventdielectric),
+                                        nl_only=true, weight_14=T(0.5),
+                                        coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
+                                        force_unit=force_unit, energy_unit=energy_unit)
+
+    # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
+    box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
+    box_size = units ? (box_size_vals)u"nm" : box_size_vals
+    coords = wrap_coords_vec.([coords...], (box_size,))
+
+    general_inters = (lj, coulomb_rf)
+    # Ensure array types are concrete
+    if gpu
+        specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, cu([bonds.inters...])),
+                                InteractionList3Atoms(angles.is, angles.js, angles.ks, cu([angles.inters...])),
+                                InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
+                                                        cu([torsions.inters...])))
+    else
+        specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, [bonds.inters...]),
+                                InteractionList3Atoms(angles.is, angles.js, angles.ks, [angles.inters...]),
+                                InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
+                                                        [torsions.inters...]))
+    end
+
+    atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
+
+    if gpu_diff_safe
+        neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(nb_matrix) : nb_matrix,
+                                                    matrix_14=gpu ? cu(matrix_14) : matrix_14, n_steps=10,
+                                                    dist_cutoff=T(nl_dist))
+    else
+        neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
+                                                    x0=coords, unit_cell=box_size, dist_cutoff=T(nl_dist))
+    end
+    if gpu
+        atoms = cu(atoms)
+        coords = cu(coords)
+    end
+
+    if isnothing(velocities)
+        if units
+            vels = zero(ustrip_vec.(coords))u"nm * ps^-1"
+        else
+            vels = zero(coords)
+        end
+    else
+        vels = velocities
+    end
+
+    return System(
+        atoms=atoms,
+        atoms_data=atoms_data,
+        general_inters=general_inters,
+        specific_inter_lists=specific_inter_lists,
+        coords=coords,
+        velocities=vels,
+        box_size=box_size,
+        neighbor_finder=neighbor_finder,
+        loggers=loggers,
+        force_unit=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
+        energy_unit=units ? u"kJ * mol^-1" : NoUnits,
+        gpu_diff_safe=gpu_diff_safe,
+    )
+end
+
+function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
+    return System(DefaultFloat, coord_file, top_file; kwargs...)
 end
