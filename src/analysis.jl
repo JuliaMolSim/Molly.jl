@@ -5,7 +5,7 @@ export
     displacements,
     distances,
     rdf,
-    energy,
+    total_energy,
     kinetic_energy,
     potential_energy,
     velocity_autocorr
@@ -84,11 +84,11 @@ function rdf(coords, box_size; npoints::Integer=200)
 end
 
 """
-    energy(s, neighbors=nothing)
+    total_energy(s, neighbors=nothing)
 
 Compute the total energy of the system.
 """
-energy(s, neighbors=nothing) = kinetic_energy(s) + potential_energy(s, neighbors)
+total_energy(s, neighbors=nothing) = kinetic_energy(s) + potential_energy(s, neighbors)
 
 """
     kinetic_energy(s)

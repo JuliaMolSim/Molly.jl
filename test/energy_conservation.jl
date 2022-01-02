@@ -31,10 +31,10 @@ using Test
                                 "energy" => TotalEnergyLogger(100)),
             )
 
-            E0 = energy(s)
+            E0 = total_energy(s)
             @time simulate!(s, simulator, n_steps; parallel=parallel)
 
-            ΔE = energy(s) - E0
+            ΔE = total_energy(s) - E0
             @test abs(ΔE) < 2e-2u"kJ * mol^-1"
 
             Es = s.loggers["energy"].energies

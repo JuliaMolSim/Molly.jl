@@ -138,7 +138,7 @@ end
 
 function log_property!(logger::TotalEnergyLogger, s::System, neighbors=nothing, step_n::Integer=0)
     if step_n % logger.n_steps == 0
-        push!(logger.energies, energy(s, neighbors))
+        push!(logger.energies, total_energy(s, neighbors))
     end
 end
 
