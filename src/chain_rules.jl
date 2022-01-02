@@ -1,8 +1,11 @@
 # Chain rules to allow differentiable simulations
 
+@non_differentiable check_force_type(args...)
 @non_differentiable find_neighbors(args...)
 @non_differentiable DistanceVecNeighborFinder(args...)
 @non_differentiable all_neighbors(args...)
+@non_differentiable run_loggers!(args...)
+@non_differentiable visualize(args...)
 
 function ChainRulesCore.rrule(T::Type{<:SVector}, vs::Number...)
     Y = T(vs...)
@@ -86,4 +89,13 @@ function ChainRulesCore.rrule(::typeof(getindices_j), arr::CuArray, neighbors)
         return NoTangent(), accumulate_bounds(Ȳ[neighbors.sortperm_j], neighbors.atom_bounds_j), nothing
     end
     return Y, getindices_j_pullback
+end
+
+# Required for SVector gradients in RescaleThermostat
+function ChainRulesCore.rrule(::typeof(sqrt), x::Real)
+    Y = sqrt(x)
+    function sqrt_pullback(Ȳ)
+        return NoTangent(), sum(Ȳ * inv(2 * Y))
+    end
+    return Y, sqrt_pullback
 end
