@@ -15,7 +15,7 @@ export
 
 Placeholder coupler that does nothing.
 """
-struct NoCoupling <: AbstractCoupler end
+struct NoCoupling end
 
 """
     apply_coupling!(system, simulator, coupling)
@@ -32,7 +32,7 @@ end
 
 Rescale random velocities according to the Andersen thermostat.
 """
-struct AndersenThermostat{T, C} <: AbstractCoupler
+struct AndersenThermostat{T, C}
     temperature::T
     coupling_const::C
 end
@@ -47,7 +47,7 @@ function apply_coupling!(sys::System{D}, sim, thermostat::AndersenThermostat) wh
     return sys
 end
 
-struct RescaleThermostat{T} <: AbstractCoupler
+struct RescaleThermostat{T}
     temperature::T
 end
 
@@ -56,7 +56,7 @@ function apply_coupling!(sys::System, sim, thermostat::RescaleThermostat)
     return sys
 end
 
-struct FrictionThermostat{T} <: AbstractCoupler
+struct FrictionThermostat{T}
     friction_const::T
 end
 

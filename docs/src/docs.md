@@ -578,9 +578,9 @@ Temperature and pressure coupling allows properties to be controlled during a si
 The available couplers are:
 - [`AndersenThermostat`](@ref).
 
-To define your own [`AbstractCoupler`](@ref), first define the `struct`:
+To define your own coupling method, first define the `struct`:
 ```julia
-struct MyCoupler <: AbstractCoupler
+struct MyCoupler
     # Any properties, e.g. a target temperature or coupling constant
 end
 ```

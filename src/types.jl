@@ -4,7 +4,6 @@ export
     Interaction,
     GeneralInteraction,
     SpecificInteraction,
-    AbstractCoupler,
     NeighborFinder,
     InteractionList2Atoms,
     InteractionList3Atoms,
@@ -32,12 +31,6 @@ A specific interaction between sets of specific atoms, e.g. a bond angle.
 Custom specific interactions should sub-type this type.
 """
 abstract type SpecificInteraction <: Interaction end
-
-"""
-A way to keep properties of a system constant.
-Custom temperature and pressure couplers should sub-type this type.
-"""
-abstract type AbstractCoupler end
 
 """
 A way to find near atoms to save on simulation time.
