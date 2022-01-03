@@ -11,7 +11,7 @@ export
 
 Placeholder cutoff that does not alter forces or potentials.
 """
-struct NoCutoff <: AbstractCutoff end
+struct NoCutoff end
 
 cutoff_points(::Type{NoCutoff}) = 0
 
@@ -20,7 +20,7 @@ cutoff_points(::Type{NoCutoff}) = 0
 
 Cutoff that sets the potential and force to be zero past a specified cutoff point.
 """
-struct DistanceCutoff{D, S, I} <: AbstractCutoff
+struct DistanceCutoff{D, S, I}
     dist_cutoff::D
     sqdist_cutoff::S
     inv_sqdist_cutoff::I
@@ -37,7 +37,7 @@ cutoff_points(::Type{DistanceCutoff{D, S, I}}) where {D, S, I} = 1
 
 Cutoff that shifts the potential to be continuous at a specified cutoff point.
 """
-struct ShiftedPotentialCutoff{D, S, I} <: AbstractCutoff
+struct ShiftedPotentialCutoff{D, S, I}
     dist_cutoff::D
     sqdist_cutoff::S
     inv_sqdist_cutoff::I
@@ -54,7 +54,7 @@ cutoff_points(::Type{ShiftedPotentialCutoff{D, S, I}}) where {D, S, I} = 1
 
 Cutoff that shifts the force to be continuous at a specified cutoff point.
 """
-struct ShiftedForceCutoff{D, S, I} <: AbstractCutoff
+struct ShiftedForceCutoff{D, S, I}
     dist_cutoff::D
     sqdist_cutoff::S
     inv_sqdist_cutoff::I

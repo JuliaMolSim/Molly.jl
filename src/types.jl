@@ -4,7 +4,6 @@ export
     Interaction,
     GeneralInteraction,
     SpecificInteraction,
-    AbstractCutoff,
     AbstractCoupler,
     NeighborFinder,
     InteractionList2Atoms,
@@ -33,12 +32,6 @@ A specific interaction between sets of specific atoms, e.g. a bond angle.
 Custom specific interactions should sub-type this type.
 """
 abstract type SpecificInteraction <: Interaction end
-
-"""
-A general type of cutoff encoding the approximation used for a potential.
-Interactions can be parameterized by the cutoff behavior.
-"""
-abstract type AbstractCutoff end
 
 """
 A way to keep properties of a system constant.
