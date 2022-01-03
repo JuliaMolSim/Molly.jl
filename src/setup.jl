@@ -265,6 +265,32 @@ function residue_name(res, res_num_to_standard::Dict, rename_terminal_res::Bool=
     return res_name
 end
 
+"""
+    System(coordinate_file, force_field; <keyword arguments>)
+
+Read a coordinate file in a file format readable by Chemfiles and apply a
+force field to it.
+
+    System(coordinate_file, topology_file; <keyword arguments>)
+    System(T, coordinate_file, topology_file; <keyword arguments>)
+
+Read a Gromacs coordinate file and a Gromacs topology file with all
+includes collapsed into one file.
+
+# Arguments
+- `velocities=nothing`: the velocities of the atoms in the system, set to
+    zero by default.
+- `loggers=Dict()`: the loggers that record properties of interest during a
+    simulation.
+- `units::Bool=true`: whether to use Unitful quantities.
+- `gpu::Bool=false`: whether to move the relevant parts of the system onto
+    the GPU.
+- `gpu_diff_safe::Bool`: whether to use the code path suitable for the
+    GPU and taking gradients, defaults to the value of `gpu`.
+- `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
+- `nl_dist=1.2u"nm"`: cutoff distance for neighbor list, should not be less
+    than `dist_cutoff`.
+"""
 function System(coord_file::AbstractString,
                 force_field::OpenMMForceField;
                 velocities=nothing,

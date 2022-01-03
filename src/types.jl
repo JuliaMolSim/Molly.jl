@@ -252,12 +252,12 @@ interface described there.
     Typically a `SVector` of 2 or 3 dimensions.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
-- `loggers::L=Dict{String, Logger}()`: the loggers that record properties of
-    interest during a simulation.
+- `loggers::L=Dict()`: the loggers that record properties of interest during a
+    simulation.
 - `force_unit::F=u"kJ * mol^-1 * nm^-1"`: the unit of force of the system.
 - `energy_unit::E=u"kJ * mol^-1"`: the unit of energy of the system.
-- `gpu_diff_safe::Bool`: whether to use the GPU implementation. Defaults to
-    `isa(coords, CuArray)`.
+- `gpu_diff_safe::Bool`: whether to use the code path suitable for the
+    GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
 mutable struct System{D, S, G, A, AD, GI, SI, C, V, B, NF, L, F, E} <: AbstractSystem{D, S}
     atoms::A
