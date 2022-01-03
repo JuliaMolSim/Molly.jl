@@ -4,7 +4,9 @@ export
     vector1D,
     vector,
     wrap_coords,
-    wrap_coords_vec
+    wrap_coords_vec,
+    maxwell_boltzmann,
+    random_velocities!
 
 """
     vector1D(c1, c2, side_length)
@@ -38,6 +40,8 @@ vector(c1, c2, box_size) = vector1D.(c1, c2, box_size)
     end
 end
 
+square_distance(i, j, coords, box_size) = sum(abs2, vector(coords[i], coords[j], box_size))
+
 # Pad a vector to 3D to allow operations such as the cross product
 function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, box_size::SVector{2, T}) where T
     SVector{3, T}(
@@ -53,8 +57,6 @@ vector_pad3D(c1::SVector{3}, c2::SVector{3}, box_size::SVector{3}) = vector(c1, 
 trim3D(v::SVector{3, T}, box_size::SVector{2}) where T = SVector{2, T}(v[1], v[2])
 trim3D(v::SVector{3}, box_size::SVector{3}) = v
 
-square_distance(i, j, coords, box_size) = sum(abs2, vector(coords[i], coords[j], box_size))
-
 """
     wrap_coords(c, side_length)
 
@@ -68,3 +70,35 @@ wrap_coords(c, side_length) = c - floor(c / side_length) * side_length
 Ensure a coordinate is within the simulation box and return the coordinate.
 """
 wrap_coords_vec(v, box_size) = wrap_coords.(v, box_size)
+
+"""
+    velocity(mass, temperature; dims=3)
+
+Generate a random velocity from the Maxwell-Boltzmann distribution.
+"""
+function AtomsBase.velocity(mass, temp; dims::Integer=3)
+    return SVector([maxwell_boltzmann(mass, temp) for i in 1:dims]...)
+end
+
+"""
+    maxwell_boltzmann(mass, temperature)
+
+Generate a random speed along one dimension from the Maxwell-Boltzmann distribution.
+"""
+function maxwell_boltzmann(mass, temp)
+    T = typeof(convert(AbstractFloat, ustrip(temp)))
+    k = unit(temp) == NoUnits ? one(T) : uconvert(u"u * nm^2 * ps^-2 * K^-1", T(Unitful.k))
+    σ = sqrt(k * temp / mass)
+    return rand(Normal(zero(T), T(ustrip(σ)))) * unit(σ)
+end
+
+"""
+    random_velocities!(sys, temp)
+
+Set the velocities of a `System` to random velocities generated from the
+Maxwell-Boltzmann distribution.
+"""
+function random_velocities!(sys::System, temp)
+    sys.velocities = [velocity(a.mass, temp) for a in sys.atoms]
+    return sys
+end

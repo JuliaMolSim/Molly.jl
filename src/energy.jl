@@ -2,6 +2,7 @@
 
 export total_energy,
     kinetic_energy,
+    temperature,
     potential_energy
 
 """
@@ -11,13 +12,15 @@ Compute the total energy of the system.
 """
 total_energy(s, neighbors=nothing) = kinetic_energy(s) + potential_energy(s, neighbors)
 
+kinetic_energy_noconvert(s) = sum(mass.(s.atoms) .* sum.(abs2, s.velocities)) / 2
+
 """
     kinetic_energy(s)
 
 Compute the kinetic energy of the system.
 """
 function kinetic_energy(s)
-    ke = sum(i -> s.atoms[i].mass * dot(s.velocities[i], s.velocities[i]) / 2, axes(s.atoms, 1))
+    ke = kinetic_energy_noconvert(s)
     # Convert energy to per mol if required
     if dimension(s.energy_unit) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         T = typeof(ustrip(ke))
@@ -25,6 +28,19 @@ function kinetic_energy(s)
     else
         return uconvert(s.energy_unit, ke)
     end
+end
+
+"""
+    temperature(system)
+
+Calculate the temperature of a system from the kinetic energy of the atoms.
+"""
+function temperature(s)
+    ke = kinetic_energy_noconvert(s)
+    df = 3 * length(s) - 3
+    T = typeof(ustrip(ke))
+    k = unit(ke) == NoUnits ? one(T) : uconvert(u"K^-1" * unit(ke), T(Unitful.k))
+    return 2 * ke / (df * k)
 end
 
 """
