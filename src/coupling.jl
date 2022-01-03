@@ -5,6 +5,7 @@ export
     apply_coupling!,
     AndersenThermostat,
     RescaleThermostat,
+    BerendsenThermostat,
     FrictionThermostat
 
 """
@@ -42,12 +43,35 @@ function apply_coupling!(sys::System{D}, sim, thermostat::AndersenThermostat) wh
     return sys
 end
 
+"""
+    RescaleThermostat(temperature)
+
+The velocity rescaling thermostat.
+This thermostat should not be used in general as it can lead to simulation artifacts.
+"""
 struct RescaleThermostat{T}
     temperature::T
 end
 
 function apply_coupling!(sys::System, sim, thermostat::RescaleThermostat)
     sys.velocities *= sqrt(thermostat.temperature / temperature(sys))
+    return sys
+end
+
+"""
+    BerendsenThermostat(temperature, coupling_const)
+
+The Berendsen thermostat.
+This thermostat should not be used in general as it can lead to simulation artifacts.
+"""
+struct BerendsenThermostat{T, C}
+    temperature::T
+    coupling_const::C
+end
+
+function apply_thermostat!(sys::System, sim, thermostat::BerendsenThermostat)
+    λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temperature(sys)) - 1)
+    sys.velocities *= sqrt(λ2)
     return sys
 end
 
