@@ -294,7 +294,7 @@ includes collapsed into one file.
 function System(coord_file::AbstractString,
                 force_field::OpenMMForceField;
                 velocities=nothing,
-                loggers=Dict{String, Logger}(),
+                loggers=Dict(),
                 units::Bool=true,
                 gpu::Bool=false,
                 gpu_diff_safe::Bool=gpu,
@@ -698,7 +698,7 @@ function System(T::Type,
                 coord_file::AbstractString,
                 top_file::AbstractString;
                 velocities=nothing,
-                loggers=Dict{String, Logger}(),
+                loggers=Dict(),
                 units::Bool=true,
                 gpu::Bool=false,
                 gpu_diff_safe::Bool=gpu,

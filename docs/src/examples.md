@@ -64,7 +64,7 @@ function Molly.force(inter::BondableInteraction,
     end
 end
 
-struct BondLogger <: Logger
+struct BondLogger
     n_steps::Int
     bonds::Vector{BitVector}
 end

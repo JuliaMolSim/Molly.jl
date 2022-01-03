@@ -7,7 +7,6 @@ export
     AbstractCutoff,
     AbstractCoupler,
     NeighborFinder,
-    Logger,
     InteractionList2Atoms,
     InteractionList3Atoms,
     InteractionList4Atoms,
@@ -52,12 +51,6 @@ A way to find near atoms to save on simulation time.
 Custom neighbor finders should sub-type this type.
 """
 abstract type NeighborFinder end
-
-"""
-A way to record a property, e.g. the temperature, throughout a simulation.
-Custom loggers should sub-type this type.
-"""
-abstract type Logger end
 
 """
     InteractionList2Atoms(is, js, inters)
@@ -282,7 +275,7 @@ function System(;
                 velocities=zero(coords),
                 box_size,
                 neighbor_finder=NoNeighborFinder(),
-                loggers=Dict{String, Logger}(),
+                loggers=Dict(),
                 force_unit=u"kJ * mol^-1 * nm^-1",
                 energy_unit=u"kJ * mol^-1",
                 gpu_diff_safe=isa(coords, CuArray))

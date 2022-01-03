@@ -26,7 +26,7 @@ end
 
 Log the temperature throughout a simulation.
 """
-struct TemperatureLogger{T} <: Logger
+struct TemperatureLogger{T}
     n_steps::Int
     temperatures::Vector{T}
 end
@@ -58,7 +58,7 @@ end
 
 Log the coordinates throughout a simulation.
 """
-struct CoordinateLogger{T} <: Logger
+struct CoordinateLogger{T}
     n_steps::Int
     coords::Vector{Vector{T}}
 end
@@ -89,7 +89,7 @@ end
 
 Log the velocities throughout a simulation.
 """
-struct VelocityLogger{T} <: Logger
+struct VelocityLogger{T}
     n_steps::Int
     velocities::Vector{Vector{T}}
 end
@@ -120,7 +120,7 @@ end
 
 Log the total energy of the system throughout a simulation.
 """
-struct TotalEnergyLogger{T} <: Logger
+struct TotalEnergyLogger{T}
     n_steps::Int
     energies::Vector{T}
 end
@@ -147,7 +147,7 @@ end
 
 Write 3D output structures to the PDB file format throughout a simulation.
 """
-mutable struct StructureWriter <: Logger
+mutable struct StructureWriter
     n_steps::Int
     filepath::String
     excluded_res::Set{String}

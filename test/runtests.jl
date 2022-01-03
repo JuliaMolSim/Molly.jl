@@ -645,7 +645,7 @@ end
     end
 
     # Custom Logger
-    struct SIRLogger <: Logger
+    struct SIRLogger
         n_steps::Int
         fracs_sir::Vector{Vector{Float64}}
     end

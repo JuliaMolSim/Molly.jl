@@ -284,7 +284,7 @@ function Molly.force(inter::SIRInteraction,
 end
 
 # Custom Logger
-struct SIRLogger <: Logger
+struct SIRLogger
     n_steps::Int
     fracs_sir::Vector{Vector{Float64}}
 end
@@ -646,9 +646,9 @@ The available loggers are:
 - [`TotalEnergyLogger`](@ref).
 - [`StructureWriter`](@ref).
 
-To define your own [`Logger`](@ref), first define the `struct`:
+To define your own logger, first define the `struct`:
 ```julia
-struct MyLogger <: Logger
+struct MyLogger
     n_steps::Int
     # Any other properties, e.g. an Array to record values during the trajectory
 end
