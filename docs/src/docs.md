@@ -644,6 +644,8 @@ The available loggers are:
 - [`CoordinateLogger`](@ref).
 - [`VelocityLogger`](@ref).
 - [`TotalEnergyLogger`](@ref).
+- [`KineticEnergyLogger`](@ref).
+- [`PotentialEnergyLogger`](@ref).
 - [`StructureWriter`](@ref).
 
 To define your own logger, first define the `struct`:

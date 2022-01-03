@@ -7,6 +7,8 @@ export
     CoordinateLogger,
     VelocityLogger,
     TotalEnergyLogger,
+    KineticEnergyLogger,
+    PotentialEnergyLogger,
     StructureWriter
 
 """
@@ -139,6 +141,60 @@ end
 function log_property!(logger::TotalEnergyLogger, s::System, neighbors=nothing, step_n::Integer=0)
     if step_n % logger.n_steps == 0
         push!(logger.energies, total_energy(s, neighbors))
+    end
+end
+
+"""
+    KineticEnergyLogger(n_steps)
+
+Log the kinetic energy of the system throughout a simulation.
+"""
+struct KineticEnergyLogger{T}
+    n_steps::Int
+    energies::Vector{T}
+end
+
+KineticEnergyLogger(T::Type, n_steps::Integer) = KineticEnergyLogger(n_steps, T[])
+
+function KineticEnergyLogger(n_steps::Integer)
+    return KineticEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+end
+
+function Base.show(io::IO, el::KineticEnergyLogger)
+    print(io, "KineticEnergyLogger{", eltype(el.energies), "} with n_steps ",
+                el.n_steps, ", ", length(el.energies), " energies recorded")
+end
+
+function log_property!(logger::KineticEnergyLogger, s::System, neighbors=nothing, step_n::Integer=0)
+    if step_n % logger.n_steps == 0
+        push!(logger.energies, kinetic_energy(s, neighbors))
+    end
+end
+
+"""
+    PotentialEnergyLogger(n_steps)
+
+Log the potential energy of the system throughout a simulation.
+"""
+struct PotentialEnergyLogger{T}
+    n_steps::Int
+    energies::Vector{T}
+end
+
+PotentialEnergyLogger(T::Type, n_steps::Integer) = PotentialEnergyLogger(n_steps, T[])
+
+function PotentialEnergyLogger(n_steps::Integer)
+    return PotentialEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+end
+
+function Base.show(io::IO, el::PotentialEnergyLogger)
+    print(io, "PotentialEnergyLogger{", eltype(el.energies), "} with n_steps ",
+                el.n_steps, ", ", length(el.energies), " energies recorded")
+end
+
+function log_property!(logger::PotentialEnergyLogger, s::System, neighbors=nothing, step_n::Integer=0)
+    if step_n % logger.n_steps == 0
+        push!(logger.energies, potential_energy(s, neighbors))
     end
 end
 
