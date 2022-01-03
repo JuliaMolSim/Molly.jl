@@ -12,34 +12,32 @@ Molecular dynamics (MD) is a computational technique used to explore these pheno
 Molly.jl is a pure Julia package for MD, and for the simulation of physical systems more broadly.
 
 At the minute the package is a proof of concept for MD in Julia.
-**It is not production ready.**
-It can simulate a system of atoms with arbitrary interactions as defined by the user.
+**It is not production ready**, though it can do some cool things and is under active development.
 Implemented features include:
-- Interface to allow definition of new forces, simulators, thermostats, neighbor finders, loggers etc.
-- Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also some support for Gromacs files.
-- Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential, gravitational potential, soft sphere potential, Mie potential.
+- Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential.
 - Bonded interactions - covalent bonds, bond angles, torsion angles.
-- Andersen thermostat.
-- Velocity Verlet and velocity-free Verlet integration.
-- Explicit solvent.
+- Interface to allow definition of new interactions, simulators, thermostats, neighbor finders, loggers etc.
+- Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also some support for Gromacs files.
+- Andersen, Berendsen and velocity rescaling thermostats.
+- Velocity Verlet and Störmer-Verlet integration.
 - Periodic boundary conditions in a cubic box.
-- Neighbor list to speed up calculation of non-bonded forces.
-- Automatic multithreading.
+- Various neighbor list implementations to speed up calculation of non-bonded forces.
 - [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
+- Automatic multithreading.
 - GPU acceleration on CUDA-enabled devices.
 - Run with Float64 or Float32.
 - Some analysis functions, e.g. RDF.
-- Physical agent-based modelling.
 - Visualise simulations as animations.
-- Differentiable molecular simulation on an experimental branch - see the [relevant docs](https://juliamolsim.github.io/Molly.jl/dev/differentiable).
+- Physical agent-based modelling.
+- Differentiable molecular simulation. This is a unique feature of the package and the focus of its current development.
 
 Features not yet implemented include:
-- Energy minimisation.
+- Simulators such as energy minimisation, Langevin dynamics and REMD.
 - Other temperature or pressure coupling methods.
 - Protein preparation - solvent box, add hydrogens etc.
-- Trajectory/topology file format readers/writers.
 - Quantum mechanical modelling.
 - High test coverage.
+- API stability.
 
 ## Installation
 

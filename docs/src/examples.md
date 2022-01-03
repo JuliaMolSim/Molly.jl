@@ -89,8 +89,15 @@ temp = 0.01
 atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = place_atoms(n_atoms, box_size, 0.1)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
-general_inters = (SoftSphere(nl_only=true), BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0))
-neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0)
+general_inters = (
+    SoftSphere(nl_only=true),
+    BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0),
+)
+neighbor_finder = DistanceNeighborFinder(
+    nb_matrix=trues(n_atoms, n_atoms),
+    n_steps=10,
+    dist_cutoff=2.0,
+)
 simulator = VelocityVerlet(dt=0.02, coupling=AndersenThermostat(temp, 5.0))
 
 sys = System(
@@ -100,8 +107,10 @@ sys = System(
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    loggers=Dict("coords" => CoordinateLogger(Float64, 20; dims=2),
-                    "bonds" => BondLogger(20, [])),
+    loggers=Dict(
+        "coords" => CoordinateLogger(Float64, 20; dims=2),
+        "bonds"  => BondLogger(20, []),
+    ),
     force_unit=NoUnits,
     energy_unit=NoUnits,
 )
@@ -124,10 +133,10 @@ visualize(sys.loggers["coords"],
 ```
 ![Mutable bond simulation](images/sim_mutbond.gif)
 
-## Comparing direct forces to AD
+## Comparing forces to AD
 
 The force is the negative derivative of the potential energy with respect to position.
-MD packages including Molly usually implement the force functions directly for performance.
+MD packages, including Molly, implement the force functions directly for performance.
 However it is also possible to compute the forces using AD.
 Here we compare the two approaches for the Lennard-Jones potential and see that they give the same result.
 ```julia
@@ -140,13 +149,15 @@ box_size = SVector(5.0, 5.0, 5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
 function force_direct(dist)
-    F = force(inter, SVector(1.0, 1.0, 1.0), SVector(dist + 1.0, 1.0, 1.0), a1, a2, box_size)
+    F = force(inter, SVector(1.0, 1.0, 1.0), SVector(dist + 1.0, 1.0, 1.0),
+              a1, a2, box_size)
     return F[1]
 end
 
 function force_grad(dist)
     grad = gradient(dist) do dist
-        potential_energy(inter, SVector(1.0, 1.0, 1.0), SVector(dist + 1.0, 1.0, 1.0), a1, a2, box_size)
+        potential_energy(inter, SVector(1.0, 1.0, 1.0), SVector(dist + 1.0, 1.0, 1.0),
+                         a1, a2, box_size)
     end
     return -grad[1]
 end
@@ -156,8 +167,12 @@ forces_direct = force_direct.(dists)
 forces_grad = force_grad.(dists)
 
 f = Figure(resolution=(600, 400))
-ax = Axis(f[1, 1], xlabel="Distance / nm", ylabel="Force / kJ * mol^-1 * nm^-1",
-            title="Comparing gradients from direct calculation and AD")
+ax = Axis(
+    f[1, 1],
+    xlabel="Distance / nm",
+    ylabel="Force / kJ * mol^-1 * nm^-1",
+    title="Comparing gradients from direct calculation and AD",
+)
 scatter!(ax, dists, forces_direct, label="Direct", markersize=8)
 scatter!(ax, dists, forces_grad  , label="AD"    , markersize=8, marker='x')
 xlims!(ax, low=0)

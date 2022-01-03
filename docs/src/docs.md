@@ -28,13 +28,13 @@ Next, we'll need some starting coordinates and velocities.
 box_size = SVector(2.0, 2.0, 2.0)u"nm"
 coords = place_atoms(n_atoms, box_size, 0.3u"nm") # Random placement without clashing
 
-temp = 100u"K"
+temp = 100.0u"K"
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 ```
 We store the coordinates and velocities as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
-They can be of any number of dimensions and of any number type, e.g. `Float64` or `Float32`.
+They can be of 2 or 3 dimensions and of any number type, e.g. `Float64` or `Float32`.
 Now we can define our general interactions, i.e. those between most or all atoms.
-Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard Jones type.
+Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard-Jones type.
 ```julia
 general_inters = (LennardJones(),)
 ```
@@ -48,8 +48,10 @@ sys = System(
     coords=coords,
     velocities=velocities,
     box_size=box_size,
-    loggers=Dict("temp" => TemperatureLogger(10),
-                    "coords" => CoordinateLogger(10)),
+    loggers=Dict(
+        "temp"   => TemperatureLogger(10),
+        "coords" => CoordinateLogger(10),
+    ),
 )
 
 simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
@@ -59,7 +61,7 @@ By default the simulation is run in parallel on the [number of threads](https://
 An animation of the stored coordinates using can be saved using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
 ```julia
 using GLMakie
-visualize(s.loggers["coords"], box_size, "sim_lj.mp4")
+visualize(sys.loggers["coords"], box_size, "sim_lj.mp4")
 ```
 ![LJ simulation](images/sim_lj.gif)
 
@@ -67,7 +69,7 @@ visualize(s.loggers["coords"], box_size, "sim_lj.mp4")
 
 To run simulations on the GPU you will need to have a CUDA-compatible device and to have [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) installed.
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
-This example also shows setting up a simulation to run with `Float32`, which is a good idea for GPUs.
+This example also shows setting up a simulation to run with `Float32`, which can be a good idea for GPUs.
 ```julia
 using Molly
 using CUDA
@@ -83,12 +85,14 @@ simulator = VelocityVerlet(dt=0.002f0u"ps", coupling=NoCoupling())
 
 sys = System(
     atoms=atoms,
-    general_inters=(LennardJones(),),
+    general_inters=(LennardJones(weight_14=1.0f0),),
     coords=coords,
     velocities=velocities,
     box_size=box_size,
-    loggers=Dict("temp" => TemperatureLogger(typeof(1.0f0u"K"), 10),
-                    "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10)),
+    loggers=Dict(
+        "temp"   => TemperatureLogger(typeof(1.0f0u"K"), 10),
+        "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10),
+    ),
 )
 
 simulate!(sys, simulator, 1_000)
@@ -111,14 +115,14 @@ Now we can use the built-in interaction list and bond types to place harmonic bo
 bonds = InteractionList2Atoms(
     collect(1:(n_atoms ÷ 2)),
     collect((1 + n_atoms ÷ 2):n_atoms),
-    [HarmonicBond(b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)]
+    [HarmonicBond(b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)],
 )
 
 specific_inter_lists = (bonds,)
 ```
 This time, we are also going to use a neighbor list to speed up the Lennard Jones calculation.
 We can use the built-in distance neighbor finder.
-The arguments are a 2D array of interaction weightings, the number of steps between each update and the cutoff to be classed as a neighbor.
+The arguments are a 2D array of eligible interacting pairs, the number of steps between each update and the cutoff to be classed as a neighbor.
 ```julia
 # All pairs apart from bonded pairs are eligible to interact
 nb_matrix = trues(n_atoms, n_atoms)
@@ -127,7 +131,11 @@ for i in 1:(n_atoms ÷ 2)
     nb_matrix[i + (n_atoms ÷ 2), i] = false
 end
 
-neighbor_finder = DistanceNeighborFinder(nb_matrix=nb_matrix, n_steps=10, dist_cutoff=1.5u"nm")
+neighbor_finder = DistanceNeighborFinder(
+    nb_matrix=nb_matrix,
+    n_steps=10,
+    dist_cutoff=1.5u"nm",
+)
 ```
 Now we can simulate as before.
 ```julia
@@ -139,17 +147,26 @@ sys = System(
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    loggers=Dict("temp" => TemperatureLogger(10),
-                    "coords" => CoordinateLogger(10)),
+    loggers=Dict(
+        "temp" => TemperatureLogger(10),
+        "coords" => CoordinateLogger(10),
+    ),
 )
 
-simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
+simulator = VelocityVerlet(
+    dt=0.002u"ps",
+    coupling=AndersenThermostat(temp, 1.0u"ps"),
+)
 simulate!(sys, simulator, 1_000)
 ```
 This time when we view the trajectory we can add lines to show the bonds.
 ```julia
-visualize(sys.loggers["coords"], box_size, "sim_diatomic.mp4";
-            connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)])
+visualize(
+    sys.loggers["coords"],
+    box_size,
+    "sim_diatomic.mp4";
+    connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
+)
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
 
@@ -181,8 +198,14 @@ simulate!(sys, simulator, 2_000)
 ```
 When we view the simulation we can use some extra options:
 ```julia
-visualize(sys.loggers["coords"], box_size, "sim_gravity.mp4";
-            trails=4, framerate=15, color=[:orange, :lightgreen])
+visualize(
+    sys.loggers["coords"],
+    box_size,
+    "sim_gravity.mp4";
+    trails=4,
+    framerate=15,
+    color=[:orange, :lightgreen],
+)
 ```
 ![Gravity simulation](images/sim_gravity.gif)
 
@@ -200,7 +223,7 @@ sys = System(
     ff;
     loggers=Dict(
         "energy" => TotalEnergyLogger(10),
-        "writer" => StructureWriter(10, "traj_5XER_1ps.pdb", ["HOH"]),
+        "writer" => StructureWriter(10, "traj_6mrr_1ps.pdb", ["HOH"]),
     ),
 )
 
@@ -358,18 +381,18 @@ In Molly there are two types of interactions.
 [`SpecificInteraction`](@ref)s are present between specific atoms, and account for example for bonded terms.
 
 The available general interactions are:
-- [`LennardJones`](@ref).
-- [`SoftSphere`](@ref).
-- [`Mie`](@ref).
-- [`Coulomb`](@ref).
-- [`CoulombReactionField`](@ref).
-- [`Gravity`](@ref).
+- [`LennardJones`](@ref)
+- [`SoftSphere`](@ref)
+- [`Mie`](@ref)
+- [`Coulomb`](@ref)
+- [`CoulombReactionField`](@ref)
+- [`Gravity`](@ref)
 
 The available specific interactions are:
-- [`HarmonicBond`](@ref).
-- [`HarmonicAngle`](@ref).
-- [`PeriodicTorsion`](@ref).
-- [`RBTorsion`](@ref).
+- [`HarmonicBond`](@ref)
+- [`HarmonicAngle`](@ref)
+- [`PeriodicTorsion`](@ref)
+- [`RBTorsion`](@ref)
 
 To define your own [`GeneralInteraction`](@ref), first define the `struct`:
 ```julia
@@ -511,17 +534,17 @@ The truncation approximations that we use can significantly alter the qualitativ
 Since the truncation algorithm is independent of the interaction for which is used, each interaction is defined without including cutoffs.
 The corresponding interaction `struct` has a `cutoff` field which is then used via dispatch to apply the chosen cutoff.
 The available cutoffs are:
-- [`DistanceCutoff`](@ref).
-- [`ShiftedPotentialCutoff`](@ref).
-- [`ShiftedForceCutoff`](@ref).
+- [`DistanceCutoff`](@ref)
+- [`ShiftedPotentialCutoff`](@ref)
+- [`ShiftedForceCutoff`](@ref)
 
 ## Simulators
 
 Simulators define what type of simulation is run.
 This could be anything from a simple energy minimisation to complicated replica exchange MD.
 The available simulators are:
-- [`VelocityVerlet`](@ref).
-- [`StormerVerlet`](@ref).
+- [`VelocityVerlet`](@ref)
+- [`StormerVerlet`](@ref)
 
 To define your own simulator, first define a `struct`:
 ```julia
@@ -576,7 +599,9 @@ The implementation to use is guessed when you call [`System`](@ref) based on whe
 
 Temperature and pressure coupling allows properties to be controlled during a simulation.
 The available couplers are:
-- [`AndersenThermostat`](@ref).
+- [`AndersenThermostat`](@ref)
+- [`RescaleThermostat`](@ref)
+- [`BerendsenThermostat`](@ref)
 
 To define your own coupling method, first define the `struct`:
 ```julia
@@ -598,9 +623,9 @@ To use your custom coupler, give it as the `coupling` argument when calling [`si
 
 Neighbor finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
 The available neighbor finders are:
-- [`CellListMapNeighborFinder`](@ref).
-- [`TreeNeighborFinder`](@ref).
-- [`DistanceNeighborFinder`](@ref).
+- [`CellListMapNeighborFinder`](@ref)
+- [`TreeNeighborFinder`](@ref)
+- [`DistanceNeighborFinder`](@ref)
 
 To define your own [`AbstractNeighborFinder`](@ref), first define the `struct`:
 ```julia
@@ -640,13 +665,13 @@ To use your custom neighbor finder, give it as the `neighbor_finder` argument wh
 
 Loggers record properties of the simulation to allow monitoring and analysis.
 The available loggers are:
-- [`TemperatureLogger`](@ref).
-- [`CoordinateLogger`](@ref).
-- [`VelocityLogger`](@ref).
-- [`TotalEnergyLogger`](@ref).
-- [`KineticEnergyLogger`](@ref).
-- [`PotentialEnergyLogger`](@ref).
-- [`StructureWriter`](@ref).
+- [`TemperatureLogger`](@ref)
+- [`CoordinateLogger`](@ref)
+- [`VelocityLogger`](@ref)
+- [`TotalEnergyLogger`](@ref)
+- [`KineticEnergyLogger`](@ref)
+- [`PotentialEnergyLogger`](@ref)
+- [`StructureWriter`](@ref)
 
 To define your own logger, first define the `struct`:
 ```julia
@@ -673,10 +698,10 @@ loggers = Dict("mylogger" => MyLogger(10))
 
 Molly contains some tools for analysing the results of simulations.
 The available analysis functions are:
-- [`visualize`](@ref).
-- [`rdf`](@ref).
-- [`distances`](@ref).
-- [`displacements`](@ref).
-- [`velocity_autocorr`](@ref).
+- [`visualize`](@ref)
+- [`rdf`](@ref)
+- [`distances`](@ref)
+- [`displacements`](@ref)
+- [`velocity_autocorr`](@ref)
 
 Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.
