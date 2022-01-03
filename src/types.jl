@@ -4,7 +4,7 @@ export
     Interaction,
     GeneralInteraction,
     SpecificInteraction,
-    NeighborFinder,
+    AbstractNeighborFinder,
     InteractionList2Atoms,
     InteractionList3Atoms,
     InteractionList4Atoms,
@@ -36,7 +36,7 @@ abstract type SpecificInteraction <: Interaction end
 A way to find near atoms to save on simulation time.
 Custom neighbor finders should sub-type this type.
 """
-abstract type NeighborFinder end
+abstract type AbstractNeighborFinder end
 
 """
     InteractionList2Atoms(is, js, inters)

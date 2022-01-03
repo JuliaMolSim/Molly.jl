@@ -15,7 +15,7 @@ Placeholder neighbor finder that returns no neighbors.
 When using this neighbor finder, ensure that `nl_only` for the interactions is
 set to `false`.
 """
-struct NoNeighborFinder <: NeighborFinder end
+struct NoNeighborFinder <: AbstractNeighborFinder end
 
 """
     find_neighbors(system, neighbor_finder, current_neighbors=nothing, step_n=0; parallel=true)
@@ -38,7 +38,7 @@ Base.show(io::IO, neighbor_finder::NoNeighborFinder) = print(io, typeof(neighbor
 
 Find close atoms by distance.
 """
-struct DistanceNeighborFinder{D} <: NeighborFinder
+struct DistanceNeighborFinder{D} <: AbstractNeighborFinder
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int
@@ -110,7 +110,7 @@ end
 
 Find close atoms by distance in a GPU and differentiable safe manner.
 """
-struct DistanceVecNeighborFinder{D, B, I} <: NeighborFinder
+struct DistanceVecNeighborFinder{D, B, I} <: AbstractNeighborFinder
     nb_matrix::B
     matrix_14::B
     n_steps::Int
@@ -205,7 +205,7 @@ end
 
 Find close atoms by distance using a tree search.
 """
-struct TreeNeighborFinder{D} <: NeighborFinder
+struct TreeNeighborFinder{D} <: AbstractNeighborFinder
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int
@@ -314,7 +314,7 @@ CellListMapNeighborFinder{Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋,
 
 ```
 """
-mutable struct CellListMapNeighborFinder{N, T} <: NeighborFinder
+mutable struct CellListMapNeighborFinder{N, T} <: AbstractNeighborFinder
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int
@@ -432,7 +432,7 @@ function find_neighbors(s::System,
     return neighbors
 end
 
-function Base.show(io::IO, neighbor_finder::NeighborFinder)
+function Base.show(io::IO, neighbor_finder::AbstractNeighborFinder)
     println(io, typeof(neighbor_finder))
     println(io,"  Size of nb_matrix = " , size(neighbor_finder.nb_matrix))
     println(io,"  n_steps = " , neighbor_finder.n_steps)

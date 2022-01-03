@@ -602,9 +602,9 @@ The available neighbor finders are:
 - [`TreeNeighborFinder`](@ref).
 - [`DistanceNeighborFinder`](@ref).
 
-To define your own [`NeighborFinder`](@ref), first define the `struct`:
+To define your own [`AbstractNeighborFinder`](@ref), first define the `struct`:
 ```julia
-struct MyNeighborFinder <: NeighborFinder
+struct MyNeighborFinder <: AbstractNeighborFinder
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int
