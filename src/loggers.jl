@@ -230,13 +230,14 @@ function log_property!(logger::StructureWriter, s::System, neighbors=nothing, st
     end
 end
 
-function append_model(logger::StructureWriter, s::System)
+function append_model(logger::StructureWriter, sys)
     open(logger.filepath, "a") do output
         println(output, "MODEL     ", lpad(logger.structure_n, 4))
-        for (i, coord) in enumerate(s.coords)
-            atom_data = s.atoms_data[i]
+        for (i, coord) in enumerate(Array(sys.coords))
+            atom_data = sys.atoms_data[i]
             if unit(first(coord)) == NoUnits
-                coord_convert = 10 .* coord # If not told, assume coordinates are in nm
+                # If not told, assume coordinates are in nm and convert to Å
+                coord_convert = 10 .* coord
             else
                 coord_convert = ustrip.(u"Å", coord)
             end
