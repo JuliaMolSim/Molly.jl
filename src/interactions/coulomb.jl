@@ -1,3 +1,5 @@
+export Coulomb
+
 """
     Coulomb(; cutoff, nl_only, weight_14, coulomb_const, force_unit, energy_unit)
 

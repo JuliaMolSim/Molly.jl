@@ -1,3 +1,5 @@
+export HarmonicBond
+
 """
     HarmonicBond(; b0, kb)
 

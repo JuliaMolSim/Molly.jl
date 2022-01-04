@@ -1,3 +1,5 @@
+export Mie
+
 """
     Mie(; m, n, cutoff, nl_only, lorentz_mixing, force_unit, energy_unit, skip_shortcut)
 

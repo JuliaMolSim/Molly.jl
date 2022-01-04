@@ -1,3 +1,5 @@
+export Gravity
+
 """
     Gravity(; G, nl_only)
 

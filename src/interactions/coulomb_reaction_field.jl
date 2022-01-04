@@ -1,3 +1,5 @@
+export CoulombReactionField
+
 """
     CoulombReactionField(; dist_cutoff, solvent_dielectric, nl_only, weight_14,
                             coulomb_const, force_unit, energy_unit)

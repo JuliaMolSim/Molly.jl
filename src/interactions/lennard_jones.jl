@@ -1,3 +1,5 @@
+export LennardJones
+
 @doc raw"""
     LennardJones(; cutoff, nl_only, lorentz_mixing, weight_14, force_unit, energy_unit, skip_shortcut)
 

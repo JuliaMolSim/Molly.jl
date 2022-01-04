@@ -1,3 +1,5 @@
+export HarmonicAngle
+
 """
     HarmonicAngle(; th0, cth)
 

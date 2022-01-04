@@ -1,3 +1,5 @@
+export PeriodicTorsion
+
 """
     PeriodicTorsion(; periodicities, phases, ks)
 
