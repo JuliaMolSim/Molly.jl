@@ -363,6 +363,7 @@ We can use the logger to plot the fraction of people susceptible (blue), infecte
 Molly is fairly opinionated about using [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) units as shown above: you don't have to use them, but it is better if you do.
 Whilst you occasionally may run into friction with dimension mismatches, using units has the major advantages of catching whole classes of errors and letting you physically interpret the numbers in your system.
 The performance overhead of using units is minimal.
+Units are not currently compatible with differentiable simulations.
 
 All your interaction types need to return the same units of force and energy or the simulation will not run.
 By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_unit` and `energy_unit` arguments to [`System`](@ref).
@@ -463,10 +464,19 @@ end
 The 3 atom case would define `Molly.force(inter::MySpecificInter, coords_i, coords_j, coords_k, box_size)` and return `SpecificForce3Atoms(f1, f2, f3)`.
 To use your custom force, add it to the specific interaction lists along with the atom indices:
 ```julia
-specific_inter_lists = (InteractionList2Atoms([1, 3], [2, 4], [MySpecificInter(), MySpecificInter()]),)
+specific_inter_lists = (
+    InteractionList2Atoms(
+        [1, 3],
+        [2, 4],
+        [MySpecificInter(), MySpecificInter()],
+    ),
+)
 ```
 For 3 atom interactions use `InteractionList3Atoms` and pass 3 sets of indices.
 If using the GPU, the inner list of interactions should be moved to the GPU.
+
+If you wish to calculate potential energies or log the energy throughout a simulation, define the `potential_energy` function.
+This has the same arguments as `force` and should return a single value corresponding to the potential energy.
 
 ## Cutoffs
 
@@ -534,6 +544,7 @@ The truncation approximations that we use can significantly alter the qualitativ
 Since the truncation algorithm is independent of the interaction for which is used, each interaction is defined without including cutoffs.
 The corresponding interaction `struct` has a `cutoff` field which is then used via dispatch to apply the chosen cutoff.
 The available cutoffs are:
+- [`NoCutoff`](@ref)
 - [`DistanceCutoff`](@ref)
 - [`ShiftedPotentialCutoff`](@ref)
 - [`ShiftedForceCutoff`](@ref)
@@ -580,20 +591,21 @@ function Molly.simulate!(sys::System,
 
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                    parallel=parallel)
+                                   parallel=parallel)
     end
+
     return sys
 end
 ```
 To use your custom simulator, give it as the second argument when calling [`simulate!`](@ref).
 
-Under the hood there are two implementations of common simulators: an in-place version geared towards CPUs, and an out-of-place version geared towards GPUs and differentiable simulation.
+Under the hood there are two implementations for simulators: an in-place version geared towards CPUs and parallelism, and an out-of-place version geared towards GPUs and differentiable simulation.
 You can define different versions of a simulator for in-place and out-of-place systems by dispatching on `System{D, S, false}` or `System{D, S, true}` respectively.
-This also applies to thermostats and neighbor lists.
+This also applies to coupling methods and neighbor lists.
 You do not have to define two versions though: you may only intend to use the simulator one way, or the out-of-place version may be performant in all cases.
 The above example is more similar to the in-place version; see the source code for an example of the out-of-place version.
 
-The implementation to use is guessed when you call [`System`](@ref) based on whether `coords` is a `CuArray`, but can be given explicitly with the `gpu_diff_safe` argument.
+The implementation to use is guessed when you call [`System`](@ref) based on whether `coords` is a `CuArray` but can be given explicitly with the `gpu_diff_safe` argument, for example if you want to run differentiable simulations on the CPU.
 
 ## Coupling
 
@@ -617,15 +629,17 @@ function apply_coupling!(sys::System, sim, coupling::MyCoupler)
 end
 ```
 The functions [`velocity`](@ref), [`maxwell_boltzmann`](@ref) and [`temperature`](@ref) may be useful here.
-To use your custom coupler, give it as the `coupling` argument when calling [`simulate!`](@ref).
+To use your custom coupler, give it as the `coupling` argument to the simulator.
 
 ## Neighbor finders
 
 Neighbor finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
 The available neighbor finders are:
+- [`NoNeighborFinder`](@ref)
 - [`CellListMapNeighborFinder`](@ref)
 - [`TreeNeighborFinder`](@ref)
 - [`DistanceNeighborFinder`](@ref)
+- [`DistanceVecNeighborFinder`](@ref)
 
 To define your own [`AbstractNeighborFinder`](@ref), first define the `struct`:
 ```julia
@@ -659,6 +673,7 @@ function find_neighbors(s::System,
     end
 end
 ```
+A different setup is used for the out-of-place implementation.
 To use your custom neighbor finder, give it as the `neighbor_finder` argument when creating the [`System`](@ref).
 
 ## Loggers
@@ -682,7 +697,7 @@ end
 ```
 Then, define the logging function that is called every step by the simulator:
 ```julia
-function Molly.log_property!(logger::MyLogger, s, neighbors, step_n)
+function Molly.log_property!(logger::MyLogger, sys, neighbors, step_n)
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end
