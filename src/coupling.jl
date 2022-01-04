@@ -5,8 +5,7 @@ export
     apply_coupling!,
     AndersenThermostat,
     RescaleThermostat,
-    BerendsenThermostat,
-    FrictionThermostat
+    BerendsenThermostat
 
 """
     NoCoupling()
@@ -69,17 +68,8 @@ struct BerendsenThermostat{T, C}
     coupling_const::C
 end
 
-function apply_thermostat!(sys::System, sim, thermostat::BerendsenThermostat)
+function apply_coupling!(sys::System, sim, thermostat::BerendsenThermostat)
     λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temperature(sys)) - 1)
     sys.velocities *= sqrt(λ2)
-    return sys
-end
-
-struct FrictionThermostat{T}
-    friction_const::T
-end
-
-function apply_coupling!(sys::System, sim, thermostat::FrictionThermostat)
-    sys.velocities *= thermostat.friction_const
     return sys
 end
