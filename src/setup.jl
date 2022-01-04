@@ -1,4 +1,5 @@
 # Read files to set up a system
+# See OpenMM source code
 # See http://manual.gromacs.org/documentation/2016/user-guide/file-formats.html
 
 export

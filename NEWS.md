@@ -1,5 +1,24 @@
 # Molly.jl release notes
 
+## v0.6.0 - Jan 2022
+
+- Differentiable simulation works with Zygote reverse and forward mode on both CPU and GPU. General and specific interactions are supported along with neighbor lists. It does not currently work with units or generic types.
+- Significant API changes are made including a number of functions renamed, thermostats renamed to couplers and the removal of some types.
+- `Simulation` is renamed to `System` and the time step and coupling are passed to the simulator, which is passed to the `simulate!` function.
+- `System` is a sub-type of `AbstractSystem` from AtomsBase.jl and the relevant interface is implemented, allowing interoperability with the wider ecosystem.
+- Specific interactions are changed to store indices and parameters as part of types such as `InteractionList2Atoms`. Specific interaction force functions now return types such as `SpecificForce4Atoms`. Specific interactions can now run on the GPU.
+- Some abstract types are removed. `NeighborFinder` is renamed to `AbstractNeighborFinder`.
+- The `potential_energy` function arguments match the `force` function arguments.
+- File reader setup functions are called using `System` and return a `System` directly.
+- `find_neighbors!` is renamed to `find_neighbors` and returns the neighbors, which are no longer stored as part of the simulation.
+- `VelocityFreeVerlet` is renamed to `StormerVerlet`.
+- `RescaleThermostat` and `BerendsenThermostat` are added.
+- `random_velocities!` and `velocity_autocorr` are added.
+- `VelocityLogger`, `KineticEnergyLogger` and `PotentialEnergyLogger` are added.
+- `DistanceVecNeighborFinder` is added for use on the GPU.
+- Atomic charges are now dimensionless, i.e 1.0 is an atomic charge of +1.
+- `HarmonicAngle` now works in 2D.
+
 ## v0.5.0 - Oct 2021
 
 - Readers are added for OpenMM XML force field files and coordinate files supported by Chemfiles.jl. Forces, energies and the results of a short simulation exactly match the OpenMM reference implementation for a standard protein in the a99SB-ILDN force field.
