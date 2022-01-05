@@ -609,17 +609,13 @@ function System(coord_file::AbstractString,
                                         force_unit=force_unit, energy_unit=energy_unit)
     general_inters = (lj, coulomb_rf)
 
-    if gpu || gpu_diff_safe
-        # All torsions must have the same number of terms on the GPU and for taking gradients
-        # For now always pad to 6 terms
-        torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                                n_terms=6) for t in torsions.inters]
-        improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                                n_terms=6) for t in impropers.inters]
-    else
-        torsion_inters_pad = [torsions.inters...]
-        improper_inters_pad = [impropers.inters...]
-    end
+    # All torsions should have the same number of terms for speed, GPU compatibility
+    #   and for taking gradients
+    # For now always pad to 6 terms
+    torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                            n_terms=6) for t in torsions.inters]
+    improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                            n_terms=6) for t in impropers.inters]
 
     # Ensure array types are concrete
     if gpu
