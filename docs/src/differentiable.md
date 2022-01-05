@@ -1,7 +1,7 @@
 # Differentiable simulation with Molly
 
 !!! note
-    There are still some rough edges when taking gradients through simulations. Please open an issue if you run into an error and remember to check your gradients against finite differencing.
+    There are still some rough edges when taking gradients through simulations. Please open an issue if you run into an error and remember the golden rule of AD: always check your gradients against finite differencing.
 
 In the last few years, the deep learning revolution has broadened to include the paradigm of [differentiable programming](https://en.wikipedia.org/wiki/Differentiable_programming).
 The concept of using automatic differentiation (AD) to obtain exact gradients through physical simulations has many interesting applications, including parameterising force fields and training neural networks to describe atom potentials.
@@ -11,7 +11,7 @@ However Julia provides a strong suite of AD tools, with [Zygote.jl](https://gith
 With Molly you can use the power of Zygote to obtain gradients through molecular simulations.
 Reverse and forward mode AD can be used on the CPU and the GPU.
 General and specific interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
-Differentiable simulation does not currently work with units, user-defined types and some components of Molly.
+Differentiable simulation does not currently work with units, user-defined types and some components of the package.
 
 ## General interactions
 
@@ -400,6 +400,7 @@ Some of these are currently not possible in Molly as the loggers are ignored for
 
 ## Tips and tricks
 
+- The magnitude of gradients may be less important than the sign. Consider sampling gradients across different sources of stochasticity, such as starting velocities or conformations.
 - Exploding gradients prove a problem when using the velocity Verlet integrator in the NVE ensemble. This is why the velocity rescaling and Berendsen thermostats were used in the above examples. It is likely that the development of suitable simulation strategies and thermostats will be necessary to unlock the potential of differentiable simulation.
 - Do you *really* need a neural network to describe your potential? Think about learning a smaller number of physically-meaningful parameters before you put in a large neural network and expect it to learn. Whilst it is true that neural networks are universal function approximators, it does not follow that you will be able to train one by differentiating through  a long simulation. A 1000-step simulation with a 10-layer network at each step is analogous to training a 10,000 layer network (with shared weights).
 - Forward mode AD holds much promise for differentiable simulation, provided the number of parameters is small, because the memory requirement is constant in the number of simulation steps. However, if the code runs slower than non-differentiable alternatives then the best approach may be to use finite differencing with the simulation as a black box.

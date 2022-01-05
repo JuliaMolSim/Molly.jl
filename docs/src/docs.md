@@ -81,11 +81,11 @@ temp = 100.0f0u"K"
 atoms = cu([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
 coords = cu(place_atoms(n_atoms, box_size, 0.3u"nm"))
 velocities = cu([velocity(atom_mass, temp) for i in 1:n_atoms])
-simulator = VelocityVerlet(dt=0.002f0u"ps", coupling=NoCoupling())
+simulator = VelocityVerlet(dt=0.002f0u"ps")
 
 sys = System(
     atoms=atoms,
-    general_inters=(LennardJones(weight_14=1.0f0),),
+    general_inters=(LennardJones(),),
     coords=coords,
     velocities=velocities,
     box_size=box_size,
@@ -429,7 +429,7 @@ This gets the vector between the closest images of atoms `i` and `j` accounting 
 Atom properties can be accessed, e.g. `atom_i.σ`.
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
 
-To use your custom force, add it to the list of general interactions:
+To use your custom force in a simulation, add it to the list of general interactions:
 ```julia
 general_inters = (MyGeneralInter(true),)
 ```

@@ -28,7 +28,7 @@ function LennardJones(;
                         cutoff=NoCutoff(),
                         nl_only=false,
                         lorentz_mixing=true,
-                        weight_14=1.0,
+                        weight_14=1,
                         force_unit=u"kJ * mol^-1 * nm^-1",
                         energy_unit=u"kJ * mol^-1",
                         skip_shortcut=false)

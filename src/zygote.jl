@@ -259,7 +259,7 @@ function dual_function_specific_4_atoms(f::F) where F
     end
 end
 
-@inline function sumpartials(sv::SVector{3, Dual{Nothing, T, P}}, y1::SVector{3, T}, i::Integer) where {T, P}
+@inline function sumpartials(sv::SVector{3, Dual{Nothing, T, P}}, y1, i::Integer) where {T, P}
     partials(sv[1], i) * y1[1] + partials(sv[2], i) * y1[2] + partials(sv[3], i) * y1[3]
 end
 

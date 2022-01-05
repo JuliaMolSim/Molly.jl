@@ -22,7 +22,7 @@ function CoulombReactionField(;
                     dist_cutoff,
                     solvent_dielectric=solventdielectric,
                     nl_only=false,
-                    weight_14=1.0,
+                    weight_14=1,
                     coulomb_const=coulombconst,
                     force_unit=u"kJ * mol^-1 * nm^-1",
                     energy_unit=u"kJ * mol^-1")

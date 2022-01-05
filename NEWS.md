@@ -2,8 +2,8 @@
 
 ## v0.6.0 - Jan 2022
 
-- Differentiable simulation works with Zygote reverse and forward mode on both CPU and GPU. General and specific interactions are supported along with neighbor lists. It does not currently work with units or generic types.
-- Significant API changes are made including a number of functions renamed, thermostats renamed to couplers and the removal of some types.
+- Differentiable simulation works with Zygote reverse and forward mode AD on both CPU and GPU. General and specific interactions are supported along with neighbor lists. It does not currently work with units, user-defined types and some components of the package.
+- Significant API changes are made including a number of functions being renamed, thermostats being renamed to couplers and the removal of some types.
 - `Simulation` is renamed to `System` and the time step and coupling are passed to the simulator, which is passed to the `simulate!` function.
 - `System` is a sub-type of `AbstractSystem` from AtomsBase.jl and the relevant interface is implemented, allowing interoperability with the wider ecosystem.
 - Specific interactions are changed to store indices and parameters as part of types such as `InteractionList2Atoms`. Specific interaction force functions now return types such as `SpecificForce4Atoms`. Specific interactions can now run on the GPU.
