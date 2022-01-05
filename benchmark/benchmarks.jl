@@ -60,7 +60,7 @@ starting_velocities = [velocity(atom_mass, 1.0u"K") for i in 1:n_atoms]
 starting_coords_f32 = [Float32.(c) for c in starting_coords]
 starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::Bool)
+function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::Bool)
     n_atoms = 400
     n_steps = 200
     atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
@@ -133,8 +133,8 @@ if run_gpu_tests
 end
 
 for (name, args) in runs
-    runsim(args...) # Run once for setup
-    SUITE["simulation"][name] = @benchmarkable runsim($(args[1]), $(args[2]), $(args[3]), $(args[4]), $(args[5]))
+    test_sim(args...) # Run once for setup
+    SUITE["simulation"][name] = @benchmarkable test_sim($(args[1]), $(args[2]), $(args[3]), $(args[4]), $(args[5]))
 end
 
 data_dir = normpath(@__DIR__, "..", "data")

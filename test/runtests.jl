@@ -457,7 +457,7 @@ end
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-    function runsim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::Bool)
+    function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::Bool)
         n_atoms = 400
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
@@ -529,9 +529,9 @@ end
         push!(runs, ("out-of-place gpu f32 NL", [true , false, true , true , true ]))
     end
 
-    final_coords_ref = Array(runsim(runs[1][2]...))
+    final_coords_ref = Array(test_sim(runs[1][2]...))
     for (name, args) in runs
-        final_coords = Array(runsim(args...))
+        final_coords = Array(test_sim(args...))
         final_coords_f64 = [Float64.(c) for c in final_coords]
         diff = sum(sum(map(x -> abs.(x), final_coords_f64 .- final_coords_ref))) / (3 * n_atoms)
         # Check all simulations give the same result to within some error

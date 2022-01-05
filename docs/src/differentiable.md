@@ -22,7 +22,7 @@ First we need a function to obtain the mean distance of each atom to its closest
 ```julia
 using Molly
 
-function meanminseparation(final_coords, box_size)
+function mean_min_separation(final_coords, box_size)
     n_atoms = length(final_coords)
     sum_dists = 0.0
     for i in 1:n_atoms
@@ -84,9 +84,9 @@ function loss(σ)
         gpu_diff_safe=true,
     )
 
-    mms_start = meanminseparation(s.coords, box_size)
+    mms_start = mean_min_separation(s.coords, box_size)
     simulate!(s, simulator, n_steps)
-    mms_end = meanminseparation(s.coords, box_size)
+    mms_end = mean_min_separation(s.coords, box_size)
     loss_val = abs(mms_end - dist_true)
 
     Zygote.ignore() do
