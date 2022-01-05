@@ -23,6 +23,14 @@ function ChainRulesCore.rrule(T::Type{<:Atom}, vs...)
     return Y, Atom_pullback
 end
 
+function ChainRulesCore.rrule(T::Type{<:SpecificInteraction}, vs...)
+    Y = T(vs...)
+    function SpecificInteraction_pullback(Ȳ)
+        return NoTangent(), Ȳ...
+    end
+    return Y, SpecificInteraction_pullback
+end
+
 function ChainRulesCore.rrule(T::Type{<:SpecificForce2Atoms}, vs...)
     Y = T(vs...)
     function SpecificForce2Atoms_pullback(Ȳ)
