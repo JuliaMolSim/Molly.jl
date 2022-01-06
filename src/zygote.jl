@@ -443,7 +443,7 @@ end
     out = dual_function_specific_2_atoms(f).(arg1, arg2, arg3, arg4)
     y = broadcast(o1 -> SpecificForce2Atoms{D, T}(value.(o1.f1), value.(o1.f2)), out)
     function bc_fwd_back(ȳ_in)
-        ȳ = arg2 isa CuArray ? cu(ȳ_in) : ȳ_in
+        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
         darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 3) + sumpartials(o1.f2, y1.f2, 3),
@@ -474,7 +474,7 @@ end
     out = dual_function_specific_3_atoms(f).(arg1, arg2, arg3, arg4, arg5)
     y = broadcast(o1 -> SpecificForce3Atoms{D, T}(value.(o1.f1), value.(o1.f2), value.(o1.f3)), out)
     function bc_fwd_back(ȳ_in)
-        ȳ = arg2 isa CuArray ? cu(ȳ_in) : ȳ_in
+        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
         darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 3) + sumpartials(o1.f2, y1.f2, 3) + sumpartials(o1.f3, y1.f3, 3),
@@ -511,7 +511,7 @@ end
     out = dual_function_specific_4_atoms(f).(arg1, arg2, arg3, arg4, arg5, arg6)
     y = broadcast(o1 -> SpecificForce4Atoms{D, T}(value.(o1.f1), value.(o1.f2), value.(o1.f3), value.(o1.f4)), out)
     function bc_fwd_back(ȳ_in)
-        ȳ = arg2 isa CuArray ? cu(ȳ_in) : ȳ_in
+        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
         darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 13) + sumpartials(o1.f2, y1.f2, 13) + sumpartials(o1.f3, y1.f3, 13) + sumpartials(o1.f4, y1.f4, 13),

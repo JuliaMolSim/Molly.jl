@@ -123,16 +123,16 @@
     end
 
     runs = [
-        ("cpu"           , [false, false, false, true , true ], 0.05, 0.1 ),
-        ("cpu forward"   , [false, true , false, true , true ], 1e-4, 1e-4),
-        ("cpu f32"       , [false, false, true , true , true ], 0.1 , 5.0 ),
-        ("cpu nospecific", [false, false, false, true , false], 0.05, 0.0 ),
-        ("cpu nogeneral" , [false, false, false, false, true ], 0.0 , 0.1 ),
+        ("cpu"           , [false, false, false, true , true ], 0.1 , 0.2 ),
+        ("cpu forward"   , [false, true , false, true , true ], 0.01, 0.01),
+        ("cpu f32"       , [false, false, true , true , true ], 0.2 , 5.0 ),
+        ("cpu nospecific", [false, false, false, true , false], 0.1 , 0.0 ),
+        ("cpu nogeneral" , [false, false, false, false, true ], 0.0 , 0.2 ),
     ]
     if run_gpu_tests
         push!(runs, ("gpu"           , [true , false, false, true , true ], 0.2 , 5.0 ))
-        push!(runs, ("gpu forward"   , [true , true , false, true , true ], 1e-4, 1e-4))
-        push!(runs, ("gpu f32"       , [true , false, true , true , true ], 0.2 , 5.0 ))
+        push!(runs, ("gpu forward"   , [true , true , false, true , true ], 0.01, 0.01))
+        push!(runs, ("gpu f32"       , [true , false, true , true , true ], 0.5 , 10.0))
         push!(runs, ("gpu nospecific", [true , false, false, true , false], 0.2 , 0.0 ))
         push!(runs, ("gpu nogeneral" , [true , false, false, false, true ], 0.0 , 10.0))
     end
