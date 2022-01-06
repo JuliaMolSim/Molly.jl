@@ -4,7 +4,7 @@ using Base.Threads
 using Statistics
 using Test
 
-@testset "Lennard-Jones gas energy conservation" begin
+@testset "Lennard-Jones energy conservation" begin
     temp = 1.0u"K"
     n_steps = 10_000
     box_size = SVector(50.0, 50.0, 50.0)u"nm"

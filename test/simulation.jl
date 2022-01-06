@@ -1,4 +1,4 @@
-@testset "Lennard-Jones gas 2D" begin
+@testset "Lennard-Jones 2D" begin
     n_atoms = 10
     n_steps = 20_000
     temp = 298.0u"K"
@@ -30,7 +30,7 @@
     run_visualize_tests && visualize(s.loggers["coords"], box_size, temp_fp_viz)
 end
 
-@testset "Lennard-Jones gas" begin
+@testset "Lennard-Jones" begin
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
@@ -77,7 +77,7 @@ end
     end
 end
 
-@testset "Lennard-Jones gas Störmer-Verlet" begin
+@testset "Lennard-Jones Störmer-Verlet" begin
     n_atoms = 100
     n_steps = 20_000
     box_size = SVector(2.0, 2.0, 2.0)u"nm"

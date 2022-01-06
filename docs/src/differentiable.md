@@ -15,7 +15,7 @@ Differentiable simulation does not currently work with units, user-defined types
 
 ## General interactions
 
-First, we show how taking gradients through a simulation can be used to optimise an atom property in a [Lennard-Jones](https://en.wikipedia.org/wiki/Lennard-Jones_potential) gas.
+First, we show how taking gradients through a simulation can be used to optimise an atom property in a [Lennard-Jones](https://en.wikipedia.org/wiki/Lennard-Jones_potential) fluid.
 In this type of simulation each atom has a σ value that determines how close it likes to get to other atoms.
 We are going to find the σ value that results in a desired distance of each atom to its closest neighbor.
 First we need a function to obtain the mean distance of each atom to its closest neighbor:

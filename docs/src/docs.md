@@ -10,9 +10,9 @@ To run a simulation you create a [`System`](@ref) object and call [`simulate!`](
 The different components of the system and simulation can be used as defined by the package, or you can define your own versions.
 An important principle of the package is that your custom components, particularly force functions, should be easy to define and just as performant as the built-in versions.
 
-## Simulating a gas
+## Simulation basics
 
-Let's look at the simulation of a gas acting under the [Lennard-Jones](https://en.wikipedia.org/wiki/Lennard-Jones_potential) potential to start with.
+Let's look at the simulation of a fluid acting under the [Lennard-Jones](https://en.wikipedia.org/wiki/Lennard-Jones_potential) potential to start with.
 First, we'll need some atoms with the relevant parameters defined.
 ```julia
 using Molly

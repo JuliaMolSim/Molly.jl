@@ -17,15 +17,17 @@ using Test
 
 # Allow testing of particular components
 const GROUP = get(ENV, "GROUP", "All")
+if GROUP == "Zygote"
+    @warn "Only running Zygote tests as GROUP is set to Zygote"
+end
 
 # GLMakie doesn't work on CI
 run_visualize_tests = !haskey(ENV, "CI")
-
 if run_visualize_tests
     using GLMakie
-    @info "The visualization tests will be run as run_visualize_tests is set to true"
+    @info "The visualization tests will be run as this is not CI"
 else
-    @warn "The visualization tests will not be run as run_visualize_tests is set to false"
+    @warn "The visualization tests will not be run as this is CI"
 end
 
 run_parallel_tests = nthreads() > 1
@@ -49,7 +51,7 @@ data_dir = normpath(@__DIR__, "..", "data")
 temp_fp_pdb = tempname(cleanup=true) * ".pdb"
 temp_fp_viz = tempname(cleanup=true) * ".mp4"
 
-if GROUP == "All" || GROUP == "Basic"
+if GROUP == "All"
     # Some failures due to dependencies but there is an unbound args error
     Aqua.test_all(
         Molly;
@@ -59,9 +61,6 @@ if GROUP == "All" || GROUP == "Basic"
     )
 
     include("basic.jl")
-end
-
-if GROUP == "All"
     include("simulation.jl")
     include("protein.jl")
     include("agent.jl")

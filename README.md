@@ -49,7 +49,7 @@ Enter the package mode by pressing `]` and run `add Molly`.
 
 Some examples are given here, see [the documentation](https://juliamolsim.github.io/Molly.jl/stable/docs) for more on how to use the package.
 
-Simulation of a Lennard-Jones gas:
+Simulation of a Lennard-Jones fluid:
 ```julia
 using Molly
 
