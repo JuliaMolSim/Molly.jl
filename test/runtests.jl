@@ -16,6 +16,11 @@ using Test
         "see the test directory for more"
 
 run_visualize_tests = false # GLMakie doesn't work on CI
+println("ENV is")
+println(ENV)
+
+# Allow testing of particular components
+const GROUP = get(ENV, "GROUP", "All")
 
 if run_visualize_tests
     using GLMakie
