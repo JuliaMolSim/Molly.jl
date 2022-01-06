@@ -272,7 +272,8 @@ end
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}) where {D, T}
     out = dual_function_svec(f).(arg1)
     y = map(x -> value.(x), out)
-    function bc_fwd_back(ȳ)
+    function bc_fwd_back(ȳ_in)
+        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
         barg1 = broadcast(ȳ, out) do y1, o1
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials(o1))
@@ -289,7 +290,8 @@ end
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}, arg2) where {D, T}
     out = dual_function_svec_real(f).(arg1, arg2)
     y = map(x -> value.(x), out)
-    function bc_fwd_back(ȳ)
+    function bc_fwd_back(ȳ_in)
+        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
         barg1 = broadcast(ȳ, out) do y1, o1
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials.((o1,), (1, 2, 3)))
@@ -307,7 +309,8 @@ end
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}, arg2::AbstractArray{SVector{D, T}}) where {D, T}
     out = dual_function_svec_svec(f).(arg1, arg2)
     y = map(x -> value.(x), out)
-    function bc_fwd_back(ȳ)
+    function bc_fwd_back(ȳ_in)
+        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
         barg1 = broadcast(ȳ, out) do y1, o1
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials.((o1,), (1, 2, 3)))
@@ -332,7 +335,8 @@ end
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{<:Atom})
     out = dual_function_atom(f).(arg1)
     y = map(x -> value.(x), out)
-    function bc_fwd_back(ȳ)
+    function bc_fwd_back(ȳ_in)
+        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
         barg1 = broadcast(ȳ, out) do y1, o1
             ps = partials(o1)
             Atom(0, y1 * ps[1], y1 * ps[2], y1 * ps[3], y1 * ps[4])
@@ -413,7 +417,8 @@ end
                                             arg8) where {D, T}
     out = dual_function_force_broadcast(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
     y = map(x -> value.(x), out)
-    function bc_fwd_back(ȳ)
+    function bc_fwd_back(ȳ_in)
+        ȳ = arg2 isa CuArray ? cu(ȳ_in) : ȳ_in
         darg1 = unbroadcast(arg1, broadcast(combine_dual_GeneralInteraction, arg1, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(sumpartials(o1, y1,  5),
                                 sumpartials(o1, y1,  6), sumpartials(o1, y1,  7)), ȳ, out))
@@ -437,24 +442,24 @@ end
                                             arg4::Tuple{SVector{D, T}}) where {D, T}
     out = dual_function_specific_2_atoms(f).(arg1, arg2, arg3, arg4)
     y = broadcast(o1 -> SpecificForce2Atoms{D, T}(value.(o1.f1), value.(o1.f2)), out)
-    function bc_fwd_back(ȳ)
-        cu_ȳ = arg1 isa CuArray ? cu(ȳ) : ȳ
-        darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, cu_ȳ, out, 1))
+    function bc_fwd_back(ȳ_in)
+        ȳ = arg2 isa CuArray ? cu(ȳ_in) : ȳ_in
+        darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 3) + sumpartials(o1.f2, y1.f2, 3),
                     sumpartials(o1.f1, y1.f1, 4) + sumpartials(o1.f2, y1.f2, 4),
                     sumpartials(o1.f1, y1.f1, 5) + sumpartials(o1.f2, y1.f2, 5)),
-                    cu_ȳ, out))
+                    ȳ, out))
         darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 6) + sumpartials(o1.f2, y1.f2, 6),
                     sumpartials(o1.f1, y1.f1, 7) + sumpartials(o1.f2, y1.f2, 7),
                     sumpartials(o1.f1, y1.f1, 8) + sumpartials(o1.f2, y1.f2, 8)),
-                    cu_ȳ, out))
+                    ȳ, out))
         darg4 = unbroadcast(arg4, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1,  9) + sumpartials(o1.f2, y1.f2,  9),
                     sumpartials(o1.f1, y1.f1, 10) + sumpartials(o1.f2, y1.f2, 10),
                     sumpartials(o1.f1, y1.f1, 11) + sumpartials(o1.f2, y1.f2, 11)),
-                    cu_ȳ, out))
+                    ȳ, out))
         return (nothing, nothing, darg1, darg2, darg3, darg4)
     end
     return y, bc_fwd_back
@@ -468,29 +473,29 @@ end
                                             arg5::Tuple{SVector{D, T}}) where {D, T}
     out = dual_function_specific_3_atoms(f).(arg1, arg2, arg3, arg4, arg5)
     y = broadcast(o1 -> SpecificForce3Atoms{D, T}(value.(o1.f1), value.(o1.f2), value.(o1.f3)), out)
-    function bc_fwd_back(ȳ)
-        cu_ȳ = arg1 isa CuArray ? cu(ȳ) : ȳ
-        darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, cu_ȳ, out, 1))
+    function bc_fwd_back(ȳ_in)
+        ȳ = arg2 isa CuArray ? cu(ȳ_in) : ȳ_in
+        darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 3) + sumpartials(o1.f2, y1.f2, 3) + sumpartials(o1.f3, y1.f3, 3),
                     sumpartials(o1.f1, y1.f1, 4) + sumpartials(o1.f2, y1.f2, 4) + sumpartials(o1.f3, y1.f3, 4),
                     sumpartials(o1.f1, y1.f1, 5) + sumpartials(o1.f2, y1.f2, 5) + sumpartials(o1.f3, y1.f3, 5)),
-                    cu_ȳ, out))
+                    ȳ, out))
         darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 6) + sumpartials(o1.f2, y1.f2, 6) + sumpartials(o1.f3, y1.f3, 6),
                     sumpartials(o1.f1, y1.f1, 7) + sumpartials(o1.f2, y1.f2, 7) + sumpartials(o1.f3, y1.f3, 7),
                     sumpartials(o1.f1, y1.f1, 8) + sumpartials(o1.f2, y1.f2, 8) + sumpartials(o1.f3, y1.f3, 8)),
-                    cu_ȳ, out))
+                    ȳ, out))
         darg4 = unbroadcast(arg4, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1,  9) + sumpartials(o1.f2, y1.f2,  9) + sumpartials(o1.f3, y1.f3,  9),
                     sumpartials(o1.f1, y1.f1, 10) + sumpartials(o1.f2, y1.f2, 10) + sumpartials(o1.f3, y1.f3, 10),
                     sumpartials(o1.f1, y1.f1, 11) + sumpartials(o1.f2, y1.f2, 11) + sumpartials(o1.f3, y1.f3, 11)),
-                    cu_ȳ, out))
+                    ȳ, out))
         darg5 = unbroadcast(arg5, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 12) + sumpartials(o1.f2, y1.f2, 12) + sumpartials(o1.f3, y1.f3, 12),
                     sumpartials(o1.f1, y1.f1, 13) + sumpartials(o1.f2, y1.f2, 13) + sumpartials(o1.f3, y1.f3, 13),
                     sumpartials(o1.f1, y1.f1, 14) + sumpartials(o1.f2, y1.f2, 14) + sumpartials(o1.f3, y1.f3, 14)),
-                    cu_ȳ, out))
+                    ȳ, out))
         return (nothing, nothing, darg1, darg2, darg3, darg4, darg5)
     end
     return y, bc_fwd_back
@@ -505,34 +510,34 @@ end
                                             arg6::Tuple{SVector{D, T}}) where {D, T}
     out = dual_function_specific_4_atoms(f).(arg1, arg2, arg3, arg4, arg5, arg6)
     y = broadcast(o1 -> SpecificForce4Atoms{D, T}(value.(o1.f1), value.(o1.f2), value.(o1.f3), value.(o1.f4)), out)
-    function bc_fwd_back(ȳ)
-        cu_ȳ = arg1 isa CuArray ? cu(ȳ) : ȳ
-        darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, cu_ȳ, out, 1))
+    function bc_fwd_back(ȳ_in)
+        ȳ = arg2 isa CuArray ? cu(ȳ_in) : ȳ_in
+        darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 13) + sumpartials(o1.f2, y1.f2, 13) + sumpartials(o1.f3, y1.f3, 13) + sumpartials(o1.f4, y1.f4, 13),
                     sumpartials(o1.f1, y1.f1, 14) + sumpartials(o1.f2, y1.f2, 14) + sumpartials(o1.f3, y1.f3, 14) + sumpartials(o1.f4, y1.f4, 14),
                     sumpartials(o1.f1, y1.f1, 15) + sumpartials(o1.f2, y1.f2, 15) + sumpartials(o1.f3, y1.f3, 15) + sumpartials(o1.f4, y1.f4, 15)),
-                    cu_ȳ, out))
+                    ȳ, out))
         darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 16) + sumpartials(o1.f2, y1.f2, 16) + sumpartials(o1.f3, y1.f3, 16) + sumpartials(o1.f4, y1.f4, 16),
                     sumpartials(o1.f1, y1.f1, 17) + sumpartials(o1.f2, y1.f2, 17) + sumpartials(o1.f3, y1.f3, 17) + sumpartials(o1.f4, y1.f4, 17),
                     sumpartials(o1.f1, y1.f1, 18) + sumpartials(o1.f2, y1.f2, 18) + sumpartials(o1.f3, y1.f3, 18) + sumpartials(o1.f4, y1.f4, 18)),
-                    cu_ȳ, out))
+                    ȳ, out))
         darg4 = unbroadcast(arg4, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 19) + sumpartials(o1.f2, y1.f2, 19) + sumpartials(o1.f3, y1.f3, 19) + sumpartials(o1.f4, y1.f4, 19),
                     sumpartials(o1.f1, y1.f1, 20) + sumpartials(o1.f2, y1.f2, 20) + sumpartials(o1.f3, y1.f3, 20) + sumpartials(o1.f4, y1.f4, 20),
                     sumpartials(o1.f1, y1.f1, 21) + sumpartials(o1.f2, y1.f2, 21) + sumpartials(o1.f3, y1.f3, 21) + sumpartials(o1.f4, y1.f4, 21)),
-                    cu_ȳ, out))
+                    ȳ, out))
         darg5 = unbroadcast(arg5, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 22) + sumpartials(o1.f2, y1.f2, 22) + sumpartials(o1.f3, y1.f3, 22) + sumpartials(o1.f4, y1.f4, 22),
                     sumpartials(o1.f1, y1.f1, 23) + sumpartials(o1.f2, y1.f2, 23) + sumpartials(o1.f3, y1.f3, 23) + sumpartials(o1.f4, y1.f4, 23),
                     sumpartials(o1.f1, y1.f1, 24) + sumpartials(o1.f2, y1.f2, 24) + sumpartials(o1.f3, y1.f3, 24) + sumpartials(o1.f4, y1.f4, 24)),
-                    cu_ȳ, out))
+                    ȳ, out))
         darg6 = unbroadcast(arg6, broadcast((y1, o1) -> SVector{D, T}(
                     sumpartials(o1.f1, y1.f1, 25) + sumpartials(o1.f2, y1.f2, 25) + sumpartials(o1.f3, y1.f3, 25) + sumpartials(o1.f4, y1.f4, 25),
                     sumpartials(o1.f1, y1.f1, 26) + sumpartials(o1.f2, y1.f2, 26) + sumpartials(o1.f3, y1.f3, 26) + sumpartials(o1.f4, y1.f4, 26),
                     sumpartials(o1.f1, y1.f1, 27) + sumpartials(o1.f2, y1.f2, 27) + sumpartials(o1.f3, y1.f3, 27) + sumpartials(o1.f4, y1.f4, 27)),
-                    cu_ȳ, out))
+                    ȳ, out))
         return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6)
     end
     return y, bc_fwd_back
