@@ -15,9 +15,7 @@ using Test
 @warn "This file does not include all the tests for Molly.jl due to CI time limits, " *
         "see the test directory for more"
 
-run_visualize_tests = false # GLMakie doesn't work on CI
-println("ENV is")
-println(ENV)
+run_visualize_tests = !haskey(ENV, "CI") # GLMakie doesn't work on CI
 
 # Allow testing of particular components
 const GROUP = get(ENV, "GROUP", "All")
@@ -721,7 +719,7 @@ end
 end
 
 @testset "Gradients" begin
-    inter = LennardJones(force_unit=NoUnits, energy_unit=NoUnits)
+    inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
     box_size = SVector(5.0, 5.0, 5.0)
     a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
@@ -769,13 +767,14 @@ end
         velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
         coords_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in coords]
         velocities_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in velocities]
+        nb_cutoff = f32 ? 1.2f0 : 1.2
         lj = LennardJones(
-            cutoff=DistanceCutoff(f32 ? 1.2f0 : 1.2),
+            cutoff=DistanceCutoff(nb_cutoff),
             force_units=NoUnits,
             energy_units=NoUnits,
         )
         crf = CoulombReactionField(
-            dist_cutoff=f32 ? 1.2f0 : 1.2,
+            dist_cutoff=nb_cutoff,
             solvent_dielectric=f32 ? Float32(Molly.solventdielectric) : Molly.solventdielectric,
             coulomb_const=f32 ? Float32(ustrip(Molly.coulombconst)) : ustrip(Molly.coulombconst),
             force_units=NoUnits,
@@ -836,8 +835,8 @@ end
             )
 
             simulate!(s, simulator, n_steps)
-            loss_val = mean_min_separation(s.coords, box_size)
-            return loss_val
+
+            return mean_min_separation(s.coords, box_size)
         end
 
         return loss
@@ -855,7 +854,7 @@ end
         push!(runs, ("gpu forward"   , [true , true , false, true , true ], 1e-5, 1e-5))
         push!(runs, ("gpu f32"       , [true , false, true , true , true ], 0.2 , 5.0 ))
         push!(runs, ("gpu nospecific", [true , false, false, true , false], 0.2 , 0.0 ))
-        push!(runs, ("gpu nogeneral" , [true , false, false, false, true ], 0.0 , 5.0 ))
+        push!(runs, ("gpu nogeneral" , [true , false, false, false, true ], 0.0 , 10.0))
     end
 
     for (name, args, tol_σ, tol_kb) in runs
