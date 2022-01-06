@@ -839,11 +839,11 @@ end
     end
 
     runs = [
-        ("cpu"           , [false, false, false, true , true ], 0.05, 0.05),
+        ("cpu"           , [false, false, false, true , true ], 0.05, 0.1 ),
         ("cpu forward"   , [false, true , false, true , true ], 1e-5, 1e-5),
         ("cpu f32"       , [false, false, true , true , true ], 0.1 , 5.0 ),
         ("cpu nospecific", [false, false, false, true , false], 0.05, 0.0 ),
-        ("cpu nogeneral" , [false, false, false, false, true ], 0.0 , 0.05),
+        ("cpu nogeneral" , [false, false, false, false, true ], 0.0 , 0.1 ),
     ]
     if run_gpu_tests
         push!(runs, ("gpu"           , [true , false, false, true , true ], 0.2 , 5.0 ))
@@ -882,7 +882,7 @@ end
                 @test isnothing(gzy) || abs(gzy) < 1e-13
             else
                 frac_diff = abs(gzy - gfd) / abs(gfd)
-                @info "$(rpad(name, 14)) - fractional difference in $prefix gradient $frac_diff"
+                @info "$(rpad(name, 14)) - fractional difference in $(rpad(prefix, 2)) gradient $frac_diff"
                 @test frac_diff < tol
             end
         end
