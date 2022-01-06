@@ -79,8 +79,8 @@ function loss(σ)
         box_size=box_size,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
-        force_unit=NoUnits,
-        energy_unit=NoUnits,
+        force_units=NoUnits,
+        energy_units=NoUnits,
         gpu_diff_safe=true,
     )
 
@@ -196,8 +196,8 @@ function loss(θ)
         velocities=deepcopy(velocities),
         box_size=box_size,
         loggers=loggers,
-        force_unit=NoUnits,
-        energy_unit=NoUnits,
+        force_units=NoUnits,
+        energy_units=NoUnits,
         gpu_diff_safe=true,
     )
 
@@ -319,8 +319,8 @@ function loss()
         velocities=deepcopy(velocities),
         box_size=box_size,
         loggers=loggers,
-        force_unit=NoUnits,
-        energy_unit=NoUnits,
+        force_units=NoUnits,
+        energy_units=NoUnits,
         gpu_diff_safe=true,
     )
 

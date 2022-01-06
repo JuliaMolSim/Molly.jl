@@ -190,8 +190,8 @@ sys = System(
     velocities=velocities,
     box_size=box_size,
     loggers=Dict("coords" => CoordinateLogger(Float32, 10; dims=2)),
-    force_unit=NoUnits,
-    energy_unit=NoUnits,
+    force_units=NoUnits,
+    energy_units=NoUnits,
 )
 
 simulate!(sys, simulator, 2_000)
@@ -345,8 +345,8 @@ sys = System(
     neighbor_finder=neighbor_finder,
     loggers=Dict("coords" => CoordinateLogger(Float64, 10; dims=2),
                     "SIR" => SIRLogger(10, [])),
-    force_unit=NoUnits,
-    energy_unit=NoUnits,
+    force_units=NoUnits,
+    energy_units=NoUnits,
 )
 
 simulate!(sys, simulator, n_steps)
@@ -366,7 +366,7 @@ The performance overhead of using units is minimal.
 Units are not currently compatible with differentiable simulations.
 
 All your interaction types need to return the same units of force and energy or the simulation will not run.
-By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_unit` and `energy_unit` arguments to [`System`](@ref).
+By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_units` and `energy_units` arguments to [`System`](@ref).
 If you need to strip units for downstream analysis, use the `ustrip` function.
 It should be noted that charges are stored as dimensionless, i.e. 1.0 is an atomic charge of +1.
 

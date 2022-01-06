@@ -26,11 +26,11 @@ function Zygote.accum(x::NamedTuple{(:index, :charge, :mass, :σ, :ϵ), Tuple{In
 end
 
 function Zygote.accum(x::LennardJones{S, C, W, F, E}, y::LennardJones{S, C, W, F, E}) where {S, C, W, F, E}
-    LennardJones{S, C, W, F, E}(x.cutoff, x.nl_only, x.lorentz_mixing, x.weight_14 + y.weight_14, x.force_unit, x.energy_unit)
+    LennardJones{S, C, W, F, E}(x.cutoff, x.nl_only, x.lorentz_mixing, x.weight_14 + y.weight_14, x.force_units, x.energy_units)
 end
 
-function Zygote.accum(x::NamedTuple{(:cutoff, :nl_only, :lorentz_mixing, :weight_14, :force_unit, :energy_unit), Tuple{C, Bool, Bool, W, F, E}}, y::LennardJones{S, C, W, F, E}) where {S, C, W, F, E}
-    LennardJones{S, C, W, F, E}(x.cutoff, x.nl_only, x.lorentz_mixing, x.weight_14 + y.weight_14, x.force_unit, x.energy_unit)
+function Zygote.accum(x::NamedTuple{(:cutoff, :nl_only, :lorentz_mixing, :weight_14, :force_units, :energy_units), Tuple{C, Bool, Bool, W, F, E}}, y::LennardJones{S, C, W, F, E}) where {S, C, W, F, E}
+    LennardJones{S, C, W, F, E}(x.cutoff, x.nl_only, x.lorentz_mixing, x.weight_14 + y.weight_14, x.force_units, x.energy_units)
 end
 
 function Zygote.accum_sum(xs::AbstractArray{LennardJones{S, C, W, F, E}}; dims=:) where {S, C, W, F, E}
@@ -39,12 +39,12 @@ end
 
 function Zygote.accum(x::CoulombReactionField{D, S, W, T, F, E}, y::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
     CoulombReactionField{D, S, W, T, F, E}(x.dist_cutoff + y.dist_cutoff, x.solvent_dielectric + y.solvent_dielectric, x.nl_only,
-                x.weight_14 + y.weight_14, x.coulomb_const + y.coulomb_const, x.force_unit, x.energy_unit)
+                x.weight_14 + y.weight_14, x.coulomb_const + y.coulomb_const, x.force_units, x.energy_units)
 end
 
-function Zygote.accum(x::NamedTuple{(:dist_cutoff, :solvent_dielectric, :nl_only, :weight_14, :coulomb_const, :force_unit, :energy_unit), Tuple{D, S, Bool, W, T, F, E}}, y::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
+function Zygote.accum(x::NamedTuple{(:dist_cutoff, :solvent_dielectric, :nl_only, :weight_14, :coulomb_const, :force_units, :energy_units), Tuple{D, S, Bool, W, T, F, E}}, y::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
     CoulombReactionField{D, S, W, T, F, E}(x.dist_cutoff + y.dist_cutoff, x.solvent_dielectric + y.solvent_dielectric, x.nl_only,
-                x.weight_14 + y.weight_14, x.coulomb_const + y.coulomb_const, x.force_unit, x.energy_unit)
+                x.weight_14 + y.weight_14, x.coulomb_const + y.coulomb_const, x.force_units, x.energy_units)
 end
 
 function Zygote.accum_sum(xs::AbstractArray{CoulombReactionField{D, S, W, T, F, E}}; dims=:) where {D, S, W, T, F, E}
@@ -122,7 +122,7 @@ function dualize_fb(inter::LennardJones{S, C, W, F, E}) where {S, C, W, F, E}
     w14 = inter.weight_14
     dual_weight_14 = @dualize(w14, 21, 1)
     return LennardJones{S, C, typeof(dual_weight_14), F, E}(inter.cutoff, inter.nl_only,
-                inter.lorentz_mixing, dual_weight_14, inter.force_unit, inter.energy_unit)
+                inter.lorentz_mixing, dual_weight_14, inter.force_units, inter.energy_units)
 end
 
 function dualize_fb(inter::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
@@ -133,7 +133,7 @@ function dualize_fb(inter::CoulombReactionField{D, S, W, T, F, E}) where {D, S, 
     dual_coulomb_const      = @dualize(cc , 21, 4)
     return CoulombReactionField{typeof(dual_dist_cutoff), typeof(dual_solvent_dielectric), typeof(dual_weight_14), typeof(dual_coulomb_const), F, E}(
                                 dual_dist_cutoff, dual_solvent_dielectric, inter.nl_only, dual_weight_14,
-                                dual_coulomb_const, inter.force_unit, inter.energy_unit)
+                                dual_coulomb_const, inter.force_units, inter.energy_units)
 end
 
 function dualize_fb(inter::HarmonicBond{D, K}) where {D, K}

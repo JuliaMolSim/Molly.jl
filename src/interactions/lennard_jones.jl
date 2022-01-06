@@ -1,7 +1,7 @@
 export LennardJones
 
 @doc raw"""
-    LennardJones(; cutoff, nl_only, lorentz_mixing, weight_14, force_unit, energy_unit, skip_shortcut)
+    LennardJones(; cutoff, nl_only, lorentz_mixing, weight_14, force_units, energy_units, skip_shortcut)
 
 The Lennard-Jones 6-12 interaction. The potential is given by
 ```math
@@ -20,8 +20,8 @@ struct LennardJones{S, C, W, F, E} <: GeneralInteraction
     nl_only::Bool
     lorentz_mixing::Bool
     weight_14::W
-    force_unit::F
-    energy_unit::E
+    force_units::F
+    energy_units::E
 end
 
 function LennardJones(;
@@ -29,11 +29,11 @@ function LennardJones(;
                         nl_only=false,
                         lorentz_mixing=true,
                         weight_14=1,
-                        force_unit=u"kJ * mol^-1 * nm^-1",
-                        energy_unit=u"kJ * mol^-1",
+                        force_units=u"kJ * mol^-1 * nm^-1",
+                        energy_units=u"kJ * mol^-1",
                         skip_shortcut=false)
-    return LennardJones{skip_shortcut, typeof(cutoff), typeof(weight_14), typeof(force_unit), typeof(energy_unit)}(
-        cutoff, nl_only, lorentz_mixing, weight_14, force_unit, energy_unit)
+    return LennardJones{skip_shortcut, typeof(cutoff), typeof(weight_14), typeof(force_units), typeof(energy_units)}(
+        cutoff, nl_only, lorentz_mixing, weight_14, force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::LennardJones{S, C},
@@ -47,7 +47,7 @@ end
     r2 = sum(abs2, dr)
 
     if !S && iszero(atom_i.σ) || iszero(atom_j.σ)
-        return ustrip.(zero(coord_i)) * inter.force_unit
+        return ustrip.(zero(coord_i)) * inter.force_units
     end
 
     # Lorentz-Berthelot mixing rules use the arithmetic average for σ
@@ -62,11 +62,11 @@ end
     if cutoff_points(C) == 0
         f = force_divr_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         f = force_divr_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         if r2 < cutoff.activation_dist
             f = force_divr_nocutoff(inter, r2, inv(r2), params)
@@ -99,7 +99,7 @@ end
     r2 = sum(abs2, dr)
 
     if !S && iszero(atom_i.σ) || iszero(atom_j.σ)
-        return ustrip(zero(box_size[1])) * inter.energy_unit
+        return ustrip(zero(box_size[1])) * inter.energy_units
     end
 
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
@@ -112,11 +112,11 @@ end
     if cutoff_points(C) == 0
         pe = potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_units
 
         pe = potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_units
 
         if r2 < cutoff.activation_dist
             pe = potential(inter, r2, inv(r2), params)

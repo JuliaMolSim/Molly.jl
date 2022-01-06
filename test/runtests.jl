@@ -430,8 +430,8 @@ end
         loggers=Dict("temp" => TemperatureLogger(Float64, 100),
                      "coords" => CoordinateLogger(Float64, 100),
                      "energy" => TotalEnergyLogger(Float64, 100)),
-        force_unit=NoUnits,
-        energy_unit=NoUnits,
+        force_units=NoUnits,
+        energy_units=NoUnits,
     )
 
     neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
@@ -708,8 +708,8 @@ end
         neighbor_finder=neighbor_finder,
         loggers=Dict("coords" => CoordinateLogger(Float64, 10; dims=2),
                         "SIR" => SIRLogger(10, [])),
-        force_unit=NoUnits,
-        energy_unit=NoUnits,
+        force_units=NoUnits,
+        energy_units=NoUnits,
     )
 
     @time simulate!(s, simulator, n_steps; parallel=false)
@@ -766,15 +766,15 @@ end
         velocities_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in velocities]
         lj = LennardJones(
             cutoff=DistanceCutoff(f32 ? 1.2f0 : 1.2),
-            force_unit=NoUnits,
-            energy_unit=NoUnits,
+            force_units=NoUnits,
+            energy_units=NoUnits,
         )
         crf = CoulombReactionField(
             dist_cutoff=f32 ? 1.2f0 : 1.2,
             solvent_dielectric=f32 ? Float32(Molly.solventdielectric) : Molly.solventdielectric,
             coulomb_const=f32 ? Float32(ustrip(Molly.coulombconst)) : ustrip(Molly.coulombconst),
-            force_unit=NoUnits,
-            energy_unit=NoUnits,
+            force_units=NoUnits,
+            energy_units=NoUnits,
         )
         general_inters = gis ? (lj, crf) : ()
         bond_is, bond_js = collect(1:(n_atoms ÷ 2)), collect((1 + n_atoms ÷ 2):n_atoms)
@@ -826,8 +826,8 @@ end
                 box_size=box_size,
                 neighbor_finder=neighbor_finder,
                 gpu_diff_safe=true,
-                force_unit=NoUnits,
-                energy_unit=NoUnits,
+                force_units=NoUnits,
+                energy_units=NoUnits,
             )
 
             simulate!(s, simulator, n_steps)

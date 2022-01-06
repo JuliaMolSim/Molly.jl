@@ -1,7 +1,7 @@
 export SoftSphere
 
 """
-    SoftSphere(; cutoff, nl_only, lorentz_mixing, force_unit, energy_unit, skip_shortcut)
+    SoftSphere(; cutoff, nl_only, lorentz_mixing, force_units, energy_units, skip_shortcut)
 
 The soft-sphere potential.
 """
@@ -9,19 +9,19 @@ struct SoftSphere{S, C, F, E} <: GeneralInteraction
     cutoff::C
     nl_only::Bool
     lorentz_mixing::Bool
-    force_unit::F
-    energy_unit::E
+    force_units::F
+    energy_units::E
 end
 
 function SoftSphere(;
                     cutoff=NoCutoff(),
                     nl_only=false,
                     lorentz_mixing=true,
-                    force_unit=u"kJ * mol^-1 * nm^-1",
-                    energy_unit=u"kJ * mol^-1",
+                    force_units=u"kJ * mol^-1 * nm^-1",
+                    energy_units=u"kJ * mol^-1",
                     skip_shortcut=false)
-    return SoftSphere{skip_shortcut, typeof(cutoff), typeof(force_unit), typeof(energy_unit)}(
-        cutoff, nl_only, lorentz_mixing, force_unit, energy_unit)
+    return SoftSphere{skip_shortcut, typeof(cutoff), typeof(force_units), typeof(energy_units)}(
+        cutoff, nl_only, lorentz_mixing, force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::SoftSphere{S, C},
@@ -34,7 +34,7 @@ end
     r2 = sum(abs2, dr)
 
     if !S && iszero(atom_i.σ) || iszero(atom_j.σ)
-        return ustrip.(zero(coord_i)) * inter.force_unit
+        return ustrip.(zero(coord_i)) * inter.force_units
     end
 
     # Lorentz-Berthelot mixing rules use the arithmetic average for σ
@@ -49,11 +49,11 @@ end
     if cutoff_points(C) == 0
         f = force_divr_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         f = force_divr_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         if r2 < cutoff.activation_dist
             f = force_divr_nocutoff(inter, r2, inv(r2), params)
@@ -81,7 +81,7 @@ end
     r2 = sum(abs2, dr)
 
     if !S && iszero(atom_i.σ) || iszero(atom_j.σ)
-        return ustrip(zero(box_size[1])) * inter.energy_unit
+        return ustrip(zero(box_size[1])) * inter.energy_units
     end
 
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
@@ -94,11 +94,11 @@ end
     if cutoff_points(C) == 0
         potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_units
 
         potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_units
 
         if r2 < cutoff.activation_dist
             potential(inter, r2, inv(r2), params)

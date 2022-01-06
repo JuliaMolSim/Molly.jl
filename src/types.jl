@@ -233,8 +233,8 @@ interface described there.
     close atoms and save on computation.
 - `loggers::L=Dict()`: the loggers that record properties of interest during a
     simulation.
-- `force_unit::F=u"kJ * mol^-1 * nm^-1"`: the unit of force of the system.
-- `energy_unit::E=u"kJ * mol^-1"`: the unit of energy of the system.
+- `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
+- `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
@@ -248,8 +248,8 @@ mutable struct System{D, S, G, A, AD, GI, SI, C, V, B, NF, L, F, E} <: AbstractS
     box_size::B
     neighbor_finder::NF
     loggers::L
-    force_unit::F
-    energy_unit::E
+    force_units::F
+    energy_units::E
 end
 
 function System(;
@@ -262,8 +262,8 @@ function System(;
                 box_size,
                 neighbor_finder=NoNeighborFinder(),
                 loggers=Dict(),
-                force_unit=u"kJ * mol^-1 * nm^-1",
-                energy_unit=u"kJ * mol^-1",
+                force_units=u"kJ * mol^-1 * nm^-1",
+                energy_units=u"kJ * mol^-1",
                 gpu_diff_safe=isa(coords, CuArray))
     D = length(box_size)
     S = eltype(atoms)
@@ -276,12 +276,12 @@ function System(;
     B = typeof(box_size)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
-    F = typeof(force_unit)
-    E = typeof(energy_unit)
+    F = typeof(force_units)
+    E = typeof(energy_units)
     return System{D, S, gpu_diff_safe, A, AD, GI, SI, C, V, B, NF, L, F, E}(
                     atoms, atoms_data, general_inters, specific_inter_lists,
                     coords, velocities, box_size, neighbor_finder, loggers,
-                    force_unit, energy_unit)
+                    force_units, energy_units)
 end
 
 Base.getindex(s::System, i::Integer) = s.atoms[i]

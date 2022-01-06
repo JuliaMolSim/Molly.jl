@@ -18,9 +18,9 @@ Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustrip_vec.(coords)
 """
 ustrip_vec(x) = ustrip.(x)
 
-function check_force_type(fdr, force_unit)
-    if unit(first(fdr)) != force_unit
-        error("System force type is ", force_unit, " but encountered force type ", unit(first(fdr)))
+function check_force_units(fdr, force_units)
+    if unit(first(fdr)) != force_units
+        error("System force units are ", force_units, " but encountered force units ", unit(first(fdr)))
     end
 end
 
@@ -32,13 +32,13 @@ Custom interaction types should implement this function.
 """
 function force end
 
-@inline @inbounds function force!(fs, inter, s::System, i::Integer, j::Integer, force_unit, weight_14::Bool=false)
+@inline @inbounds function force!(fs, inter, s::System, i::Integer, j::Integer, force_units, weight_14::Bool=false)
     if weight_14
         fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size, true)
     else
         fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
     end
-    check_force_type(fdr, force_unit)
+    check_force_units(fdr, force_units)
     fdr_ustrip = ustrip.(fdr)
     fs[i] -= fdr_ustrip
     fs[j] += fdr_ustrip
@@ -46,13 +46,13 @@ function force end
 end
 
 @inline @inbounds function force_nounit(inter, coord_i, coord_j, atom_i, atom_j,
-                                        box_size, force_unit, weight_14::Bool=false)
+                                        box_size, force_units, weight_14::Bool=false)
     if weight_14
         fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size, true)
     else
         fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
     end
-    check_force_type(fdr, force_unit)
+    check_force_units(fdr, force_units)
     return ustrip.(fdr)
 end
 
@@ -78,7 +78,7 @@ unsafe_getindex(arr, inds) = @view arr[inds]
 #   at the atom boundaries
 # The forces are re-arranged for the other atom index and the process is repeated
 # This isn't pretty but it works on the GPU
-@views @inbounds function sumforces(nb_forces, neighbors)
+@views @inbounds function sum_forces(nb_forces, neighbors)
     fs_accum_i = accumulate_bounds(nb_forces, neighbors.atom_bounds_i)
     fs_accum_j = accumulate_bounds(unsafe_getindex(nb_forces, neighbors.sortperm_j), neighbors.atom_bounds_j)
     return fs_accum_j .- fs_accum_i
@@ -158,26 +158,26 @@ getf2(x) = x.f2
 getf3(x) = x.f3
 getf4(x) = x.f4
 
-@views function specific_force(inter_list::InteractionList2Atoms, coords, box_size, force_unit, n_atoms)
+@views function specific_force(inter_list::InteractionList2Atoms, coords, box_size, force_units, n_atoms)
     sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js], (box_size,)))
     fis, fjs = getf1.(sparse_fs), getf2.(sparse_fs)
-    check_force_type(first(first(fis)), force_unit)
+    check_force_units(first(first(fis)), force_units)
     return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms)
 end
 
-@views function specific_force(inter_list::InteractionList3Atoms, coords, box_size, force_unit, n_atoms)
+@views function specific_force(inter_list::InteractionList3Atoms, coords, box_size, force_units, n_atoms)
     sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
                                 coords[inter_list.ks], (box_size,)))
     fis, fjs, fks = getf1.(sparse_fs), getf2.(sparse_fs), getf3.(sparse_fs)
-    check_force_type(first(first(fis)), force_unit)
+    check_force_units(first(first(fis)), force_units)
     return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) + sparsevec(inter_list.ks, fks, n_atoms)
 end
 
-@views function specific_force(inter_list::InteractionList4Atoms, coords, box_size, force_unit, n_atoms)
+@views function specific_force(inter_list::InteractionList4Atoms, coords, box_size, force_units, n_atoms)
     sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
                                 coords[inter_list.ks], coords[inter_list.ls], (box_size,)))
     fis, fjs, fks, fls = getf1.(sparse_fs), getf2.(sparse_fs), getf3.(sparse_fs), getf4.(sparse_fs)
-    check_force_type(first(first(fis)), force_unit)
+    check_force_units(first(first(fis)), force_units)
     return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) + sparsevec(inter_list.ks, fks, n_atoms) + sparsevec(inter_list.ls, fls, n_atoms)
 end
 
@@ -197,12 +197,12 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
             if inter.nl_only
                 @threads for ni in 1:neighbors.n
                     i, j, w = neighbors.list[ni]
-                    force!(fs_threads[threadid()], inter, s, i, j, s.force_unit, w)
+                    force!(fs_threads[threadid()], inter, s, i, j, s.force_units, w)
                 end
             else
                 @threads for i in 1:n_atoms
                     for j in 1:(i - 1)
-                        force!(fs_threads[threadid()], inter, s, i, j, s.force_unit)
+                        force!(fs_threads[threadid()], inter, s, i, j, s.force_units)
                     end
                 end
             end
@@ -216,12 +216,12 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
             if inter.nl_only
                 for ni in 1:neighbors.n
                     i, j, w = neighbors.list[ni]
-                    force!(fs, inter, s, i, j, s.force_unit, w)
+                    force!(fs, inter, s, i, j, s.force_units, w)
                 end
             else
                 for i in 1:n_atoms
                     for j in 1:(i - 1)
-                        force!(fs, inter, s, i, j, s.force_unit)
+                        force!(fs, inter, s, i, j, s.force_units)
                     end
                 end
             end
@@ -229,11 +229,11 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
     end
 
     for inter_list in values(s.specific_inter_lists)
-        sparse_vec = specific_force(inter_list, s.coords, s.box_size, s.force_unit, n_atoms)
+        sparse_vec = specific_force(inter_list, s.coords, s.box_size, s.force_units, n_atoms)
         fs += ustrip_vec.(Array(sparse_vec))
     end
 
-    return fs * s.force_unit
+    return fs * s.force_units
 end
 
 function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothing)
@@ -246,8 +246,8 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
         coords_j, atoms_j = getindices_j(coords, neighbors_all), getindices_j(atoms, neighbors_all)
         for inter in general_inters_nonl
             @inbounds nb_forces = force_nounit.((inter,), coords_i, coords_j, atoms_i, atoms_j,
-                                                (s.box_size,), s.force_unit, false)
-            fs += sumforces(nb_forces, neighbors_all)
+                                                (s.box_size,), s.force_units, false)
+            fs += sum_forces(nb_forces, neighbors_all)
         end
     end
 
@@ -257,21 +257,21 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
         coords_j, atoms_j = getindices_j(coords, neighbors), getindices_j(atoms, neighbors)
         if length(neighbors.nbsi) > 0
             @inbounds nb_forces = force_nounit.((first(general_inters_nl),), coords_i, coords_j,
-                    atoms_i, atoms_j, (s.box_size,), s.force_unit, neighbors.weights_14)
+                    atoms_i, atoms_j, (s.box_size,), s.force_units, neighbors.weights_14)
             # Add all atom pair forces before summation
             for inter in general_inters_nl[2:end]
                 @inbounds nb_forces += force_nounit.((inter,), coords_i, coords_j,
-                    atoms_i, atoms_j, (s.box_size,), s.force_unit, neighbors.weights_14)
+                    atoms_i, atoms_j, (s.box_size,), s.force_units, neighbors.weights_14)
             end
-            fs += sumforces(nb_forces, neighbors)
+            fs += sum_forces(nb_forces, neighbors)
         end
     end
 
     for inter_list in values(s.specific_inter_lists)
-        sparse_vec = specific_force(inter_list, coords, s.box_size, s.force_unit, n_atoms)
+        sparse_vec = specific_force(inter_list, coords, s.box_size, s.force_units, n_atoms)
         # Move back to GPU if required
         fs += convert(typeof(fs), ustrip_vec.(Array(sparse_vec)))
     end
 
-    return fs * s.force_unit
+    return fs * s.force_units
 end

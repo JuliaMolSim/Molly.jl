@@ -22,11 +22,11 @@ Compute the kinetic energy of the system.
 function kinetic_energy(s)
     ke = kinetic_energy_noconvert(s)
     # Convert energy to per mol if required
-    if dimension(s.energy_unit) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+    if dimension(s.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         T = typeof(ustrip(ke))
-        return uconvert(s.energy_unit, ke * T(Unitful.Na))
+        return uconvert(s.energy_units, ke * T(Unitful.Na))
     else
-        return uconvert(s.energy_unit, ke)
+        return uconvert(s.energy_units, ke)
     end
 end
 
@@ -52,7 +52,7 @@ first and passed to the function.
 """
 function potential_energy(s, neighbors=nothing)
     n_atoms = length(s)
-    potential = zero(ustrip(s.box_size[1])) * s.energy_unit
+    potential = zero(ustrip(s.box_size[1])) * s.energy_units
 
     for inter in values(s.general_inters)
         if inter.nl_only
@@ -80,7 +80,7 @@ function potential_energy(s, neighbors=nothing)
         potential += potential_energy(inter_list, s.coords, s.box_size)
     end
 
-    return uconvert(s.energy_unit, potential)
+    return uconvert(s.energy_units, potential)
 end
 
 @views function potential_energy(inter_list::InteractionList2Atoms, coords, box_size)

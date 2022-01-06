@@ -111,8 +111,8 @@ sys = System(
         "coords" => CoordinateLogger(Float64, 20; dims=2),
         "bonds"  => BondLogger(20, []),
     ),
-    force_unit=NoUnits,
-    energy_unit=NoUnits,
+    force_units=NoUnits,
+    energy_units=NoUnits,
 )
 
 simulate!(sys, simulator, n_steps)
@@ -144,7 +144,7 @@ using Molly
 using Zygote
 using GLMakie
 
-inter = LennardJones(force_unit=NoUnits, energy_unit=NoUnits)
+inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
 box_size = SVector(5.0, 5.0, 5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 

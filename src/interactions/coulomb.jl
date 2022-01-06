@@ -1,7 +1,7 @@
 export Coulomb
 
 """
-    Coulomb(; cutoff, nl_only, weight_14, coulomb_const, force_unit, energy_unit)
+    Coulomb(; cutoff, nl_only, weight_14, coulomb_const, force_units, energy_units)
 
 The Coulomb electrostatic interaction.
 """
@@ -10,8 +10,8 @@ struct Coulomb{C, W, T, F, E} <: GeneralInteraction
     nl_only::Bool
     weight_14::W
     coulomb_const::T
-    force_unit::F
-    energy_unit::E
+    force_units::F
+    energy_units::E
 end
 
 const coulombconst = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
@@ -21,10 +21,10 @@ function Coulomb(;
                     nl_only=false,
                     weight_14=1,
                     coulomb_const=coulombconst,
-                    force_unit=u"kJ * mol^-1 * nm^-1",
-                    energy_unit=u"kJ * mol^-1")
-    return Coulomb{typeof(cutoff), typeof(weight_14), typeof(coulomb_const), typeof(force_unit), typeof(energy_unit)}(
-        cutoff, nl_only, weight_14, coulomb_const, force_unit, energy_unit)
+                    force_units=u"kJ * mol^-1 * nm^-1",
+                    energy_units=u"kJ * mol^-1")
+    return Coulomb{typeof(cutoff), typeof(weight_14), typeof(coulomb_const), typeof(force_units), typeof(energy_units)}(
+        cutoff, nl_only, weight_14, coulomb_const, force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::Coulomb{C},
@@ -46,11 +46,11 @@ end
     if cutoff_points(C) == 0
         f = force_divr_nocutoff(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         f = force_divr_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
         if r2 < cutoff.activation_dist
             f = force_divr_nocutoff(inter, r2, inv(r2), params)
@@ -88,11 +88,11 @@ end
     if cutoff_points(C) == 0
         pe = potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_units
 
         pe = potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_unit
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_units
 
         if r2 < cutoff.activation_dist
             pe = potential(inter, r2, inv(r2), params)

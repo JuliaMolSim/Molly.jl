@@ -594,19 +594,19 @@ function System(coord_file::AbstractString,
     end
 
     if units
-        force_unit = u"kJ * mol^-1 * nm^-1"
-        energy_unit = u"kJ * mol^-1"
+        force_units = u"kJ * mol^-1 * nm^-1"
+        energy_units = u"kJ * mol^-1"
     else
-        force_unit = NoUnits
-        energy_unit = NoUnits
+        force_units = NoUnits
+        energy_units = NoUnits
     end
 
     lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true, weight_14=force_field.weight_14_lj,
-                        force_unit=force_unit, energy_unit=energy_unit)
+                        force_units=force_units, energy_units=energy_units)
     coulomb_rf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(solventdielectric),
                                         nl_only=true, weight_14=force_field.weight_14_coulomb,
                                         coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
-                                        force_unit=force_unit, energy_unit=energy_unit)
+                                        force_units=force_units, energy_units=energy_units)
     general_inters = (lj, coulomb_rf)
 
     # All torsions should have the same number of terms for speed, GPU compatibility
@@ -685,8 +685,8 @@ function System(coord_file::AbstractString,
         box_size=box_size,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
-        force_unit=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
-        energy_unit=units ? u"kJ * mol^-1" : NoUnits,
+        force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
+        energy_units=units ? u"kJ * mol^-1" : NoUnits,
         gpu_diff_safe=gpu_diff_safe,
     )
 end
@@ -718,11 +718,11 @@ function System(T::Type,
     torsions = InteractionList4Atoms(RBTorsion)
 
     if units
-        force_unit = u"kJ * mol^-1 * nm^-1"
-        energy_unit = u"kJ * mol^-1"
+        force_units = u"kJ * mol^-1 * nm^-1"
+        energy_units = u"kJ * mol^-1"
     else
-        force_unit = NoUnits
-        energy_unit = NoUnits
+        force_units = NoUnits
+        energy_units = NoUnits
     end
 
     current_field = ""
@@ -928,11 +928,11 @@ function System(T::Type,
     end
 
     lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true, weight_14=T(0.5),
-                        force_unit=force_unit, energy_unit=energy_unit)
+                        force_units=force_units, energy_units=energy_units)
     coulomb_rf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(solventdielectric),
                                         nl_only=true, weight_14=T(0.5),
                                         coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
-                                        force_unit=force_unit, energy_unit=energy_unit)
+                                        force_units=force_units, energy_units=energy_units)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
@@ -988,8 +988,8 @@ function System(T::Type,
         box_size=box_size,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
-        force_unit=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
-        energy_unit=units ? u"kJ * mol^-1" : NoUnits,
+        force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
+        energy_units=units ? u"kJ * mol^-1" : NoUnits,
         gpu_diff_safe=gpu_diff_safe,
     )
 end

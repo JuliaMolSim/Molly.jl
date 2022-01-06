@@ -2,7 +2,7 @@ export CoulombReactionField
 
 """
     CoulombReactionField(; dist_cutoff, solvent_dielectric, nl_only, weight_14,
-                            coulomb_const, force_unit, energy_unit)
+                            coulomb_const, force_units, energy_units)
 
 The Coulomb electrostatic interaction modified using the reaction field approximation.
 """
@@ -12,8 +12,8 @@ struct CoulombReactionField{D, S, W, T, F, E} <: GeneralInteraction
     nl_only::Bool
     weight_14::W
     coulomb_const::T
-    force_unit::F
-    energy_unit::E
+    force_units::F
+    energy_units::E
 end
 
 const solventdielectric = 78.3
@@ -24,12 +24,12 @@ function CoulombReactionField(;
                     nl_only=false,
                     weight_14=1,
                     coulomb_const=coulombconst,
-                    force_unit=u"kJ * mol^-1 * nm^-1",
-                    energy_unit=u"kJ * mol^-1")
+                    force_units=u"kJ * mol^-1 * nm^-1",
+                    energy_units=u"kJ * mol^-1")
     return CoulombReactionField{typeof(dist_cutoff), typeof(solvent_dielectric), typeof(weight_14),
-                                typeof(coulomb_const), typeof(force_unit), typeof(energy_unit)}(
+                                typeof(coulomb_const), typeof(force_units), typeof(energy_units)}(
         dist_cutoff, solvent_dielectric, nl_only, weight_14,
-        coulomb_const, force_unit, energy_unit)
+        coulomb_const, force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::CoulombReactionField,
@@ -43,7 +43,7 @@ end
     r2 = sum(abs2, dr)
 
     if r2 > (inter.dist_cutoff ^ 2)
-        return ustrip.(zero(coord_i)) * inter.force_unit
+        return ustrip.(zero(coord_i)) * inter.force_units
     end
 
     coulomb_const = inter.coulomb_const
@@ -78,7 +78,7 @@ end
     r2 = sum(abs2, dr)
 
     if r2 > (inter.dist_cutoff ^ 2)
-        return ustrip(zero(box_size[1])) * inter.energy_unit
+        return ustrip(zero(box_size[1])) * inter.energy_units
     end
 
     coulomb_const = inter.coulomb_const
