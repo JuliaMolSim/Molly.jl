@@ -4,8 +4,8 @@
 using ForwardDiff: Chunk, Dual, dualize, partials, value
 using Zygote: unbroadcast
 
-Zygote.accum(x::AbstractArray{<:SizedVector}, ys::CuArray{<:SVector}...) = Zygote.accum.(convert(typeof(ys[1]), x), ys...)
-Zygote.accum(x::CuArray{<:SVector}, ys::AbstractArray{<:SizedVector}...) = Zygote.accum.(x, convert.(typeof(x), ys)...)
+Zygote.accum(x::AbstractArray{<:SizedVector}, ys::AbstractArray{<:SVector}...) = Zygote.accum.(convert(typeof(ys[1]), x), ys...)
+Zygote.accum(x::AbstractArray{<:SVector}, ys::AbstractArray{<:SizedVector}...) = Zygote.accum.(x, convert.(typeof(x), ys)...)
 
 Base.:+(x::Real, y::SizedVector) = x .+ y
 Base.:+(x::SizedVector, y::Real) = x .+ y

@@ -20,7 +20,7 @@
     forces_grad = force_grad.(dists)
     @test all(isapprox.(forces_direct, forces_grad))
 
-    sumabs2(x) = sum(abs2, x)
+    abs2_vec(x) = abs2.(x)
 
     # Function is strange in order to work with gradients on the GPU
     function mean_min_separation(coords, box_size)
@@ -28,7 +28,7 @@
         coords_rep = repeat(reshape(coords, n_atoms, 1), 1, n_atoms)
         vec2arg(c1, c2) = vector(c1, c2, box_size)
         diffs = vec2arg.(coords_rep, permutedims(coords_rep, (2, 1)))
-        disps = Array(sumabs2.(diffs))
+        disps = Array(sum.(abs2_vec.(diffs)))
         disps_diag = disps .+ Diagonal(100 * ones(typeof(box_size[1]), n_atoms))
         return mean(sqrt.(minimum(disps_diag; dims=1)))
     end
@@ -40,7 +40,7 @@
         box_size = f32 ? SVector(3.0f0, 3.0f0, 3.0f0) : SVector(3.0, 3.0, 3.0)
         temp = f32 ? 1.0f0 : 1.0
         simulator = VelocityVerlet(
-            dt=f32 ? 0.002f0 : 0.002,
+            dt=f32 ? 0.001f0 : 0.001,
             coupling=RescaleThermostat(temp),
         )
         coords = place_atoms(n_atoms, box_size, f32 ? 0.6f0 : 0.6)

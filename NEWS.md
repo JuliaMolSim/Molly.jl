@@ -18,6 +18,7 @@
 - `DistanceVecNeighborFinder` is added for use on the GPU.
 - Atomic charges are now dimensionless, i.e 1.0 is an atomic charge of +1.
 - `HarmonicAngle` now works in 2D.
+- Support for Julia versions before 1.7 is dropped.
 
 ## v0.5.0 - Oct 2021
 
