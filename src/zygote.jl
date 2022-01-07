@@ -542,3 +542,11 @@ end
     end
     return y, bc_fwd_back
 end
+
+# Use fast broadcast path on CPU
+for op in (:+, :-, :*, :/, :force, :force_nounit, :mass, :remove_molar,
+            :ustrip, :ustrip_vec, :wrap_coords_vec)
+    @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
+    # Avoid ambiguous dispatch
+    @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
+end
