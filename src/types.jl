@@ -13,7 +13,8 @@ export
     AtomData,
     NeighborList,
     NeighborListVec,
-    System
+    System,
+    is_gpu_diff_safe
 
 const DefaultFloat = Float64
 
@@ -238,7 +239,7 @@ interface described there.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
-mutable struct System{D, S, G, A, AD, GI, SI, C, V, B, NF, L, F, E} <: AbstractSystem{D, S}
+mutable struct System{D, G, A, AD, GI, SI, C, V, B, NF, L, F, E} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     general_inters::GI
@@ -266,7 +267,6 @@ function System(;
                 energy_units=u"kJ * mol^-1",
                 gpu_diff_safe=isa(coords, CuArray))
     D = length(box_size)
-    S = eltype(atoms)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     GI = typeof(general_inters)
@@ -278,17 +278,24 @@ function System(;
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
-    return System{D, S, gpu_diff_safe, A, AD, GI, SI, C, V, B, NF, L, F, E}(
+    return System{D, gpu_diff_safe, A, AD, GI, SI, C, V, B, NF, L, F, E}(
                     atoms, atoms_data, general_inters, specific_inter_lists,
                     coords, velocities, box_size, neighbor_finder, loggers,
                     force_units, energy_units)
 end
 
+"""
+    is_gpu_diff_safe(sys)
+
+Whether a `System` uses the code path suitable for the GPU and
+    for taking gradients.
+"""
+is_gpu_diff_safe(::System{D, G}) where {D, G} = G
+
+AtomsBase.species_type(s::System) = eltype(s.atoms)
+
 Base.getindex(s::System, i::Integer) = s.atoms[i]
 Base.length(s::System) = length(s.atoms)
-
-AtomsBase.species(s::System) = s.atoms
-AtomsBase.species(s::System, i::Integer) = s.atoms[i]
 
 AtomsBase.position(s::System) = s.coords
 AtomsBase.position(s::System, i::Integer) = s.coords[i]
@@ -310,6 +317,6 @@ function AtomsBase.bounding_box(s::System)
     return unit(z) == NoUnits ? (bb)u"nm" : bb # Assume nm without other information
 end
 
-function Base.show(io::IO, ::MIME"text/plain", s::System)
+function Base.show(io::IO, s::System)
     print(io, "System with ", length(s), " atoms, box size ", s.box_size)
 end

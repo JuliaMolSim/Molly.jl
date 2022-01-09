@@ -58,7 +58,7 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
 Run a simulation on a system according to the rules of the given simulator.
 Custom simulators should implement this function.
 """
-function simulate!(sys::System{D, S, false},
+function simulate!(sys::System{D, false},
                     sim::VelocityVerlet,
                     n_steps::Integer;
                     parallel::Bool=true) where {D, S}
@@ -95,7 +95,7 @@ function simulate!(sys::System{D, S, false},
     return sys
 end
 
-function simulate!(sys::System{D, S, true},
+function simulate!(sys::System{D, true},
                     sim::VelocityVerlet,
                     n_steps::Integer;
                     parallel::Bool=true) where {D, S}
