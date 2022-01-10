@@ -179,13 +179,13 @@ function loss(θ)
         InteractionList2Atoms(
             [1, 2, 4, 5],
             [2, 3, 5, 6],
-            [HarmonicBond(b0=0.7, kb=100.0) for _ in 1:4],
+            [HarmonicBond(0.7, 100.0) for _ in 1:4],
         ),
         InteractionList3Atoms(
             [1, 4],
             [2, 5],
             [3, 6],
-            [HarmonicAngle(th0=θ, cth=10.0), HarmonicAngle(th0=θ, cth=10.0)],
+            [HarmonicAngle(θ, 10.0), HarmonicAngle(θ, 10.0)],
         ),
     )
 
