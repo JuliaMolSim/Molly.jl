@@ -45,15 +45,17 @@ function force end
     return nothing
 end
 
-@inline @inbounds function force_nounit(inter, coord_i, coord_j, atom_i, atom_j,
+@inline @inbounds function force_nounit(inters, coord_i, coord_j, atom_i, atom_j,
                                         box_size, force_units, weight_14::Bool=false)
-    if weight_14
-        fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size, true)
-    else
-        fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
+    sum(inters) do inter
+        if weight_14
+            fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size, true)
+        else
+            fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
+        end
+        check_force_units(fdr, force_units)
+        return ustrip.(fdr)
     end
-    check_force_units(fdr, force_units)
-    return ustrip.(fdr)
 end
 
 accumulateadd(x) = accumulate(+, x)
@@ -240,31 +242,22 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
     n_atoms = length(s)
     fs = ustrip_vec.(zero(coords))
 
-    general_inters_nonl = [inter for inter in values(s.general_inters) if !inter.nl_only]
+    general_inters_nonl = filter(inter -> !inter.nl_only, values(s.general_inters))
     @views if length(general_inters_nonl) > 0
         coords_i, atoms_i = getindices_i(coords, neighbors_all), getindices_i(atoms, neighbors_all)
         coords_j, atoms_j = getindices_j(coords, neighbors_all), getindices_j(atoms, neighbors_all)
-        for inter in general_inters_nonl
-            @inbounds nb_forces = force_nounit.((inter,), coords_i, coords_j, atoms_i, atoms_j,
-                                                (s.box_size,), s.force_units, false)
-            fs += sum_forces(nb_forces, neighbors_all)
-        end
+        @inbounds nb_forces = force_nounit.((general_inters_nonl,), coords_i, coords_j, atoms_i, atoms_j,
+                                            (s.box_size,), s.force_units, false)
+        fs += sum_forces(nb_forces, neighbors_all)
     end
 
-    general_inters_nl = [inter for inter in values(s.general_inters) if inter.nl_only]
-    @views if length(general_inters_nl) > 0
+    general_inters_nl = filter(inter -> inter.nl_only, values(s.general_inters))
+    @views if length(general_inters_nl) > 0 && length(neighbors.nbsi) > 0
         coords_i, atoms_i = getindices_i(coords, neighbors), getindices_i(atoms, neighbors)
         coords_j, atoms_j = getindices_j(coords, neighbors), getindices_j(atoms, neighbors)
-        if length(neighbors.nbsi) > 0
-            @inbounds nb_forces = force_nounit.((first(general_inters_nl),), coords_i, coords_j,
-                    atoms_i, atoms_j, (s.box_size,), s.force_units, neighbors.weights_14)
-            # Add all atom pair forces before summation
-            for inter in general_inters_nl[2:end]
-                @inbounds nb_forces += force_nounit.((inter,), coords_i, coords_j,
-                    atoms_i, atoms_j, (s.box_size,), s.force_units, neighbors.weights_14)
-            end
-            fs += sum_forces(nb_forces, neighbors)
-        end
+        @inbounds nb_forces = force_nounit.((general_inters_nl,), coords_i, coords_j, atoms_i, atoms_j,
+                                            (s.box_size,), s.force_units, neighbors.weights_14)
+        fs += sum_forces(nb_forces, neighbors)
     end
 
     for inter_list in values(s.specific_inter_lists)
