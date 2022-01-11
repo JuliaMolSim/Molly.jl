@@ -85,6 +85,7 @@ function Base.zero(::Type{Union{Nothing, SizedVector{D, T, Vector{T}}}}) where {
 end
 
 # Slower version than in Zygote but doesn't give wrong gradients on the GPU for repeated indices
+# Here we just move it to the CPU then move it back
 # See https://github.com/FluxML/Zygote.jl/pull/1131
 Zygote.∇getindex(x::CuArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> begin
     inds1_cpu = Array(inds[1])
@@ -539,9 +540,54 @@ end
     return y, bc_fwd_back
 end
 
+@inline function Zygote.broadcast_forward(f::typeof(getf1),
+                                            arg1::AbstractArray{<:SpecificForce2Atoms}) where {D, T}
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=y1, f2=zero(y1)), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(getf1),
+                                            arg1::AbstractArray{<:SpecificForce3Atoms}) where {D, T}
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=y1, f2=zero(y1), f3=zero(y1)), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(getf1),
+                                            arg1::AbstractArray{<:SpecificForce4Atoms}) where {D, T}
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=y1, f2=zero(y1), f3=zero(y1), f4=zero(y1)), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(getf2),
+                                            arg1::AbstractArray{<:SpecificForce2Atoms}) where {D, T}
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=y1), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(getf2),
+                                            arg1::AbstractArray{<:SpecificForce3Atoms}) where {D, T}
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=y1, f3=zero(y1)), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(getf2),
+                                            arg1::AbstractArray{<:SpecificForce4Atoms}) where {D, T}
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=y1, f3=zero(y1), f4=zero(y1)), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(getf3),
+                                            arg1::AbstractArray{<:SpecificForce3Atoms}) where {D, T}
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=zero(y1), f3=y1), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(getf3),
+                                            arg1::AbstractArray{<:SpecificForce4Atoms}) where {D, T}
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=zero(y1), f3=y1, f4=zero(y1)), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(getf4),
+                                            arg1::AbstractArray{<:SpecificForce4Atoms}) where {D, T}
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=zero(y1), f3=zero(y1), f4=y1), ȳ)))
+end
+
 # Use fast broadcast path on CPU
-for op in (:+, :-, :*, :/, :force, :force_nounit, :mass, :remove_molar,
-            :ustrip, :ustrip_vec, :wrap_coords_vec)
+for op in (:+, :-, :*, :/, :force, :force_nounit, :mass, :remove_molar, :ustrip,
+            :ustrip_vec, :wrap_coords_vec, :getf1, :getf2, :getf3, :getf4)
     @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
     # Avoid ambiguous dispatch
     @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
