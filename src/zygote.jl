@@ -87,15 +87,11 @@ end
 # Slower version than in Zygote but doesn't give wrong gradients on the GPU for repeated indices
 # See https://github.com/FluxML/Zygote.jl/pull/1131
 Zygote.∇getindex(x::CuArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> begin
-    dx = Zygote._zero(x, eltype(dy))
     inds1_cpu = Array(inds[1])
-    if allunique(inds1_cpu)
-        dxv = view(dx, inds[1])
-        dxv .= Zygote.accum.(dxv, Zygote._droplike(dy, dxv))
-    else
-        NNlib.scatter!(+, dx, dy, inds1_cpu)
-    end
-    return Zygote._project(x, dx), nothing
+    dx = Zygote._zero(Array(x), eltype(dy))
+    dxv = view(dx, inds1_cpu)
+    dxv .= Zygote.accum.(dxv, Zygote._droplike(Array(dy), dxv))
+    return Zygote._project(x, cu(dx)), nothing
 end
 
 # Extend to add extra empty partials before (B) and after (A) the SVector partials
