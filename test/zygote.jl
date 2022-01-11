@@ -50,12 +50,14 @@
         nb_cutoff = f32 ? 1.2f0 : 1.2
         lj = LennardJones(
             cutoff=DistanceCutoff(nb_cutoff),
+            nl_only=true,
             force_units=NoUnits,
             energy_units=NoUnits,
         )
         crf = CoulombReactionField(
             dist_cutoff=nb_cutoff,
             solvent_dielectric=f32 ? Float32(Molly.solventdielectric) : Molly.solventdielectric,
+            nl_only=true,
             coulomb_const=f32 ? Float32(ustrip(Molly.coulombconst)) : ustrip(Molly.coulombconst),
             force_units=NoUnits,
             energy_units=NoUnits,
