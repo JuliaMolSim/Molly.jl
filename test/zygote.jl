@@ -13,7 +13,10 @@
 
     function force_grad(dist)
         grad = gradient(dist) do dist
-            potential_energy(inter, SVector(1.0, 1.0, 1.0), SVector(dist + 1.0, 1.0, 1.0), a1, a2, box_size)
+            c1 = SVector(1.0, 1.0, 1.0)
+            c2 = SVector(dist + 1.0, 1.0, 1.0)
+            vec = vector(c1, c2, box_size)
+            potential_energy(inter, vec, c1, c2, a1, a2, box_size)
         end
         return -grad[1]
     end

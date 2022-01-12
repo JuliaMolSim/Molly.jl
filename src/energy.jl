@@ -58,18 +58,20 @@ function potential_energy(s, neighbors=nothing)
         if inter.nl_only
             @inbounds for ni in 1:neighbors.n
                 i, j, weight_14 = neighbors.list[ni]
+                dr = vector(s.coords[i], s.coords[j], s.box_size)
                 if weight_14
-                    potential += potential_energy(inter, s.coords[i], s.coords[j], s.atoms[i],
+                    potential += potential_energy(inter, dr, s.coords[i], s.coords[j], s.atoms[i],
                                                     s.atoms[j], s.box_size, true)
                 else
-                    potential += potential_energy(inter, s.coords[i], s.coords[j], s.atoms[i],
+                    potential += potential_energy(inter, dr, s.coords[i], s.coords[j], s.atoms[i],
                                                     s.atoms[j], s.box_size)
                 end
             end
         else
             for i in 1:n_atoms
                 for j in (i + 1):n_atoms
-                    potential += potential_energy(inter, s.coords[i], s.coords[j], s.atoms[i],
+                    dr = vector(s.coords[i], s.coords[j], s.box_size)
+                    potential += potential_energy(inter, dr, s.coords[i], s.coords[j], s.atoms[i],
                                                     s.atoms[j], s.box_size)
                 end
             end

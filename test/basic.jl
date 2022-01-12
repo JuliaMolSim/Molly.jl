@@ -13,10 +13,10 @@
     @test isapprox(force(LennardJones(), dr13, c1, c3, a1, a1, box_size),
                     SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(potential_energy(LennardJones(), c1, c2, a1, a1, box_size),
+    @test isapprox(potential_energy(LennardJones(), dr12, c1, c2, a1, a1, box_size),
                     0.0u"kJ * mol^-1",
                     atol=1e-9u"kJ * mol^-1")
-    @test isapprox(potential_energy(LennardJones(), c1, c3, a1, a1, box_size),
+    @test isapprox(potential_energy(LennardJones(), dr13, c1, c3, a1, a1, box_size),
                     -0.1170417309u"kJ * mol^-1",
                     atol=1e-9u"kJ * mol^-1")
 
@@ -26,10 +26,10 @@
     @test isapprox(force(Coulomb(), dr13, c1, c3, a1, a1, box_size),
                     SVector(868.3466125, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-5u"kJ * mol^-1 * nm^-1")
-    @test isapprox(potential_energy(Coulomb(), c1, c2, a1, a1, box_size),
+    @test isapprox(potential_energy(Coulomb(), dr12, c1, c2, a1, a1, box_size),
                     463.1181933u"kJ * mol^-1",
                     atol=1e-5u"kJ * mol^-1")
-    @test isapprox(potential_energy(Coulomb(), c1, c3, a1, a1, box_size),
+    @test isapprox(potential_energy(Coulomb(), dr13, c1, c3, a1, a1, box_size),
                     347.338645u"kJ * mol^-1",
                     atol=1e-5u"kJ * mol^-1")
 
