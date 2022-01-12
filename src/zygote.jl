@@ -13,8 +13,6 @@ Base.:+(x::SizedVector, y::Real) = x .+ y
 Base.:+(x::Real, y::Zygote.OneElement) = x .+ y
 Base.:+(x::Zygote.OneElement, y::Real) = x .+ y
 
-Base.:+(::Unitful.FreeUnits{(), NoDims, nothing}, ::Unitful.FreeUnits{(), NoDims, nothing}) = NoUnits
-
 function Base.:+(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
     Atom{T, T, T, T}(0, x.charge + y.charge, x.mass + y.mass, x.σ + y.σ, x.ϵ + y.ϵ)
 end
@@ -23,8 +21,20 @@ function Base.:-(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
     Atom{T, T, T, T}(0, x.charge - y.charge, x.mass - y.mass, x.σ - y.σ, x.ϵ - y.ϵ)
 end
 
-function Zygote.accum(x::NamedTuple{(:index, :charge, :mass, :σ, :ϵ), Tuple{Int, T, T, T, T}}, y::Atom{T, T, T, T}) where T
-    Atom{T, T, T, T}(0, x.charge + y.charge, x.mass + y.mass, x.σ + y.σ, x.ϵ + y.ϵ)
+function Zygote.accum(x::LennardJones{S, C, W, F, E}, y::LennardJones{S, C, W, F, E}) where {S, C, W, F, E}
+    LennardJones{S, C, W, F, E}(x.cutoff, x.nl_only, x.lorentz_mixing, x.weight_14 + y.weight_14, x.force_units, x.energy_units)
+end
+
+function Zygote.accum(x::CoulombReactionField{D, S, W, T, F, E}, y::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
+    CoulombReactionField{D, S, W, T, F, E}(x.dist_cutoff + y.dist_cutoff, x.solvent_dielectric + y.solvent_dielectric, x.nl_only,
+                x.weight_14 + y.weight_14, x.coulomb_const + y.coulomb_const, x.force_units, x.energy_units)
+end
+
+function Zygote.accum_sum(xs::AbstractArray{Tuple{LennardJones{S, C, W, F, E}, CoulombReactionField{D, SO, W, T, F, E}}}; dims=:) where {S, C, W, F, E, D, SO, T}
+    reduce(Zygote.accum, xs, dims=dims; init=(
+        LennardJones{S, C, W, F, E}(nothing, false, false, zero(W), NoUnits, NoUnits),
+        CoulombReactionField{D, SO, W, T, F, E}(zero(D), zero(S), false, zero(W), zero(T), NoUnits, NoUnits),
+    ))
 end
 
 function Zygote.accum(x::Tuple{NTuple{N, Int}, NTuple{N, T}, NTuple{N, E}},
@@ -193,7 +203,7 @@ end
 
 function dual_function_force_broadcast(f::F) where F
     function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
-        ds1 = (dualize_fb(arg1[1]), dualize_fb(arg1[2])) # Fix
+        ds1 = (dualize_fb(arg1[1]), dualize_fb(arg1[2])) # Only works for this case
         ds2 = dualize(Nothing, arg2, Val(4), Val(14))
         ds3 = dualize(Nothing, arg3, Val(7), Val(11))
         ds4 = dualize_atom_fb1(arg4)
@@ -322,19 +332,19 @@ end
 
 function combine_dual_GeneralInteraction(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer) where {T, P}
     (
-        (
+        LennardJones{false, Nothing, T, typeof(NoUnits), typeof(NoUnits)}(
             nothing, false, false,
             y1[1] * partials(o1[1], i) + y1[2] * partials(o1[2], i) + y1[3] * partials(o1[3], i),
             NoUnits, NoUnits,
         ),
-        (
+        CoulombReactionField{T, T, T, T, typeof(NoUnits), typeof(NoUnits)}(
             y1[1] * partials(o1[1], i    ) + y1[2] * partials(o1[2], i    ) + y1[3] * partials(o1[3], i    ),
             y1[1] * partials(o1[1], i + 1) + y1[2] * partials(o1[2], i + 1) + y1[3] * partials(o1[3], i + 1),
             false,
             y1[1] * partials(o1[1], i + 2) + y1[2] * partials(o1[2], i + 2) + y1[3] * partials(o1[3], i + 2),
             y1[1] * partials(o1[1], i + 3) + y1[2] * partials(o1[2], i + 3) + y1[3] * partials(o1[3], i + 3),
             NoUnits, NoUnits,
-        )
+        ),
     )
 end
 
@@ -394,7 +404,7 @@ end
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ_in)
         ȳ = arg2 isa CuArray ? cu(ȳ_in) : ȳ_in
-        darg1 = unbroadcast(arg1, Array(broadcast(combine_dual_GeneralInteraction, ȳ, out, 1))) # Slow
+        darg1 = unbroadcast(arg1, broadcast(combine_dual_GeneralInteraction, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1,  5),
                                 sum_partials(o1, y1,  6), sum_partials(o1, y1,  7)), ȳ, out))
         darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1,  8),
