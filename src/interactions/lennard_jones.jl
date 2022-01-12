@@ -37,13 +37,13 @@ function LennardJones(;
 end
 
 @inline @inbounds function force(inter::LennardJones{S, C},
+                                    dr,
                                     coord_i,
                                     coord_j,
                                     atom_i,
                                     atom_j,
                                     box_size,
                                     weight_14::Bool=false) where {S, C}
-    dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 
     if !S && iszero(atom_i.σ) || iszero(atom_j.σ)

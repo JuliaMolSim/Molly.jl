@@ -32,12 +32,12 @@ function Mie(;
 end
 
 @fastmath @inbounds function force(inter::Mie{S, C, T},
+                                    dr,
                                     coord_i,
                                     coord_j,
                                     atom_i,
                                     atom_j,
                                     box_size) where {S, C, T}
-    dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
     r = √r2
 

@@ -33,13 +33,13 @@ function CoulombReactionField(;
 end
 
 @inline @inbounds function force(inter::CoulombReactionField,
+                                    dr,
                                     coord_i,
                                     coord_j,
                                     atom_i,
                                     atom_j,
                                     box_size,
                                     weight_14::Bool=false)
-    dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
 
     if r2 > (inter.dist_cutoff ^ 2)

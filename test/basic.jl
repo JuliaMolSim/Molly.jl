@@ -4,11 +4,13 @@
     c3 = SVector(1.4, 1.0, 1.0)u"nm"
     a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
+    dr12 = vector(c1, c2, box_size)
+    dr13 = vector(c1, c3, box_size)
 
-    @test isapprox(force(LennardJones(), c1, c2, a1, a1, box_size),
+    @test isapprox(force(LennardJones(), dr12, c1, c2, a1, a1, box_size),
                     SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(force(LennardJones(), c1, c3, a1, a1, box_size),
+    @test isapprox(force(LennardJones(), dr13, c1, c3, a1, a1, box_size),
                     SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-9u"kJ * mol^-1 * nm^-1")
     @test isapprox(potential_energy(LennardJones(), c1, c2, a1, a1, box_size),
@@ -18,10 +20,10 @@
                     -0.1170417309u"kJ * mol^-1",
                     atol=1e-9u"kJ * mol^-1")
 
-    @test isapprox(force(Coulomb(), c1, c2, a1, a1, box_size),
+    @test isapprox(force(Coulomb(), dr12, c1, c2, a1, a1, box_size),
                     SVector(1543.727311, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-5u"kJ * mol^-1 * nm^-1")
-    @test isapprox(force(Coulomb(), c1, c3, a1, a1, box_size),
+    @test isapprox(force(Coulomb(), dr13, c1, c3, a1, a1, box_size),
                     SVector(868.3466125, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
                     atol=1e-5u"kJ * mol^-1 * nm^-1")
     @test isapprox(potential_energy(Coulomb(), c1, c2, a1, a1, box_size),

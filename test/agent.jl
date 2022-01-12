@@ -27,11 +27,10 @@
     end
 
     # Custom force function
-    function Molly.force(inter::SIRInteraction, coord_i, coord_j, atom_i, atom_j, box_size)
+    function Molly.force(inter::SIRInteraction, dr, coord_i, coord_j, atom_i, atom_j, box_size)
         if (atom_i.status == infected && atom_j.status == susceptible) ||
                     (atom_i.status == susceptible && atom_j.status == infected)
             # Infect close people randomly
-            dr = vector(coord_i, coord_j, box_size)
             r2 = sum(abs2, dr)
             if r2 < inter.dist_infection ^ 2 && rand() < inter.prob_infection
                 atom_i.status = infected

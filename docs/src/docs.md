@@ -281,6 +281,7 @@ end
 
 # Custom force function
 function Molly.force(inter::SIRInteraction,
+                        vec_ij,
                         coord_i,
                         coord_j,
                         atom_i,
@@ -289,8 +290,7 @@ function Molly.force(inter::SIRInteraction,
     if (atom_i.status == infected && atom_j.status == susceptible) ||
                 (atom_i.status == susceptible && atom_j.status == infected)
         # Infect close people randomly
-        dr = vector(coord_i, coord_j, box_size)
-        r2 = sum(abs2, dr)
+        r2 = sum(abs2, vec_ij)
         if r2 < inter.dist_infection ^ 2 && rand() < inter.prob_infection
             atom_i.status = infected
             atom_j.status = infected
@@ -408,24 +408,22 @@ This has a set series of arguments.
 For example:
 ```julia
 function Molly.force(inter::MyGeneralInter,
+                        vec_ij,
                         coord_i,
                         coord_j,
                         atom_i,
                         atom_j,
                         box_size)
-    dr = vector(coord_i, coord_j, box_size)
-
     # Replace this with your force calculation
     # A positive force causes the atoms to move apart
     f = 0.0
 
     # Obtain a vector for the force
-    fdr = f * normalize(dr)
+    fdr = f * normalize(vec_ij)
     return fdr
 end
 ```
-If you need to obtain the vector from atom `i` to atom `j`, use the [`vector`](@ref) function.
-This gets the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
+`vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
 

@@ -37,6 +37,7 @@ struct BondableInteraction <: GeneralInteraction
 end
 
 function Molly.force(inter::BondableInteraction,
+                        dr,
                         coord_i,
                         coord_j,
                         atom_i,
@@ -48,7 +49,6 @@ function Molly.force(inter::BondableInteraction,
         delete!(atom_j.partners, atom_j.i)
     end
     # Make bonds between close atoms randomly
-    dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
     if r2 < inter.b0 * inter.dist_formation && rand() < inter.prob_formation
         push!(atom_i.partners, atom_j.i)
@@ -149,8 +149,10 @@ box_size = SVector(5.0, 5.0, 5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
 function force_direct(dist)
-    F = force(inter, SVector(1.0, 1.0, 1.0), SVector(dist + 1.0, 1.0, 1.0),
-              a1, a2, box_size)
+    c1 = SVector(1.0, 1.0, 1.0)
+    c2 = SVector(dist + 1.0, 1.0, 1.0)
+    vec = vector(c1, c2, box_size)
+    F = force(inter, vec, c1, c2, a1, a2, box_size)
     return F[1]
 end
 

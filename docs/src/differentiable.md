@@ -289,10 +289,9 @@ ps = params(model)
 
 struct NNBond <: SpecificInteraction end
 
-function Molly.force(b::NNBond, coords_i, coords_j, box_size)
-    ab = vector(coords_i, coords_j, box_size)
-    dist = norm(ab)
-    f = model([dist])[1] * normalize(ab)
+function Molly.force(b::NNBond, vec_ij, coords_i, coords_j, box_size)
+    dist = norm(vec_ij)
+    f = model([dist])[1] * normalize(vec_ij)
     return SpecificForce2Atoms(f, -f)
 end
 

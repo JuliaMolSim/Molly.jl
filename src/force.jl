@@ -25,7 +25,7 @@ function check_force_units(fdr, force_units)
 end
 
 """
-    force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
+    force(inter, vec_ij, coord_i, coord_j, atom_i, atom_j, box_size)
 
 Calculate the force between a pair of atoms due to a given interation type.
 Custom interaction types should implement this function.
@@ -33,10 +33,11 @@ Custom interaction types should implement this function.
 function force end
 
 @inline @inbounds function force!(fs, inter, s::System, i::Integer, j::Integer, force_units, weight_14::Bool=false)
+    dr = vector(s.coords[i], s.coords[j], s.box_size)
     if weight_14
-        fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size, true)
+        fdr = force(inter, dr, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size, true)
     else
-        fdr = force(inter, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
+        fdr = force(inter, dr, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.box_size)
     end
     check_force_units(fdr, force_units)
     fdr_ustrip = ustrip.(fdr)
@@ -47,11 +48,12 @@ end
 
 @inline @inbounds function force_nounit(inters, coord_i, coord_j, atom_i, atom_j,
                                         box_size, force_units, weight_14::Bool=false)
+    dr = vector(coord_i, coord_j, box_size)
     sum(inters) do inter
         if weight_14
-            fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size, true)
+            fdr = force(inter, dr, coord_i, coord_j, atom_i, atom_j, box_size, true)
         else
-            fdr = force(inter, coord_i, coord_j, atom_i, atom_j, box_size)
+            fdr = force(inter, dr, coord_i, coord_j, atom_i, atom_j, box_size)
         end
         check_force_units(fdr, force_units)
         return ustrip.(fdr)
