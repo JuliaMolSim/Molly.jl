@@ -6,7 +6,8 @@ export
     wrap_coords,
     wrap_coords_vec,
     maxwell_boltzmann,
-    random_velocities!
+    random_velocities!,
+    torsion_angle
 
 """
     vector1D(c1, c2, side_length)
@@ -101,4 +102,30 @@ Maxwell-Boltzmann distribution.
 function random_velocities!(sys::System, temp)
     sys.velocities = [velocity(a.mass, temp) for a in sys.atoms]
     return sys
+end
+
+"""
+    torsion_angle(coord_i, coord_j, coord_k, coord_l, box_size)
+    torsion_angle(vec_ab, vec_bc, vec_cd)
+
+Calculate the torsion angle in radians defined by four coordinates or
+three vectors.
+The angle between the planes defined by atoms (i, j, k) and (j, k, l) is
+returned in the range -π to π.
+"""
+function torsion_angle(coords_i, coords_j, coords_k, coords_l, box_size)
+    vec_ab = vector(coords_i, coords_j, box_size)
+    vec_bc = vector(coords_j, coords_k, box_size)
+    vec_cd = vector(coords_k, coords_l, box_size)
+    return torsion_angle(vec_ab, vec_bc, vec_cd)
+end
+
+function torsion_angle(vec_ab, vec_bc, vec_cd)
+    cross_ab_bc = vec_ab × vec_bc
+    cross_bc_cd = vec_bc × vec_cd
+    θ = atan(
+        ustrip(dot(cross_ab_bc × cross_bc_cd, normalize(vec_bc))),
+        ustrip(dot(cross_ab_bc, cross_bc_cd)),
+    )
+    return θ
 end
