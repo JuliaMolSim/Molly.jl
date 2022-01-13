@@ -23,6 +23,7 @@ struct BondableInteraction &lt;: GeneralInteraction
 end
 
 function Molly.force(inter::BondableInteraction,
+                        dr,
                         coord_i,
                         coord_j,
                         atom_i,
@@ -34,7 +35,6 @@ function Molly.force(inter::BondableInteraction,
         delete!(atom_j.partners, atom_j.i)
     end
     # Make bonds between close atoms randomly
-    dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
     if r2 &lt; inter.b0 * inter.dist_formation &amp;&amp; rand() &lt; inter.prob_formation
         push!(atom_i.partners, atom_j.i)
@@ -124,15 +124,19 @@ box_size = SVector(5.0, 5.0, 5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
 function force_direct(dist)
-    F = force(inter, SVector(1.0, 1.0, 1.0), SVector(dist + 1.0, 1.0, 1.0),
-              a1, a2, box_size)
+    c1 = SVector(1.0, 1.0, 1.0)
+    c2 = SVector(dist + 1.0, 1.0, 1.0)
+    vec = vector(c1, c2, box_size)
+    F = force(inter, vec, c1, c2, a1, a2, box_size)
     return F[1]
 end
 
 function force_grad(dist)
     grad = gradient(dist) do dist
-        potential_energy(inter, SVector(1.0, 1.0, 1.0), SVector(dist + 1.0, 1.0, 1.0),
-                         a1, a2, box_size)
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        vec = vector(c1, c2, box_size)
+        potential_energy(inter, vec, c1, c2, a1, a2, box_size)
     end
     return -grad[1]
 end
@@ -153,4 +157,4 @@ scatter!(ax, dists, forces_grad  , label=&quot;AD&quot;    , markersize=8, marke
 xlims!(ax, low=0)
 ylims!(ax, -6.0, 10.0)
 axislegend()
-save(&quot;force_comparison.png&quot;, f)</code></pre><p><img src="../images/force_comparison.png" alt="Force comparison"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Wednesday 12 January 2022 16:03">Wednesday 12 January 2022</span>. Using Julia version 1.7.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+save(&quot;force_comparison.png&quot;, f)</code></pre><p><img src="../images/force_comparison.png" alt="Force comparison"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Thursday 13 January 2022 15:57">Thursday 13 January 2022</span>. Using Julia version 1.7.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
