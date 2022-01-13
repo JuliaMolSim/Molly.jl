@@ -7,6 +7,7 @@ export
     wrap_coords_vec,
     maxwell_boltzmann,
     random_velocities!,
+    bond_angle,
     torsion_angle
 
 """
@@ -102,6 +103,27 @@ Maxwell-Boltzmann distribution.
 function random_velocities!(sys::System, temp)
     sys.velocities = [velocity(a.mass, temp) for a in sys.atoms]
     return sys
+end
+
+# Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
+acosbound(x::Real) = acos(clamp(x, -1, 1))
+
+"""
+    bond_angle(coord_i, coord_j, coord_k, box_size)
+    bond_angle(vec_ba, vec_bc)
+
+Calculate the bond or pseudo-bond angle in radians between three
+coordinates or two vectors.
+The angle between B→A and B→C is returned in the range 0 to π.
+"""
+function bond_angle(coords_i, coords_j, coords_k, box_size)
+    vec_ba = vector(coords_j, coords_i, box_size)
+    vec_bc = vector(coords_j, coords_k, box_size)
+    return bond_angle(vec_ba, vec_bc)
+end
+
+function bond_angle(vec_ba, vec_bc)
+    acosbound(dot(vec_ba, vec_bc) / (norm(vec_ba) * norm(vec_bc)))
 end
 
 """

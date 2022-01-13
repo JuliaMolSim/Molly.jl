@@ -12,9 +12,6 @@ end
 
 HarmonicAngle(; th0, cth) = HarmonicAngle{typeof(th0), typeof(cth)}(th0, cth)
 
-# Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
-acosbound(x::Real) = acos(clamp(x, -1, 1))
-
 @inline @inbounds function force(a::HarmonicAngle, coords_i, coords_j, coords_k, box_size)
     # In 2D we use then eliminate the cross product
     ba = vector_pad3D(coords_j, coords_i, box_size)
@@ -31,7 +28,6 @@ end
 
 @inline @inbounds function potential_energy(a::HarmonicAngle, coords_i, coords_j,
                                             coords_k, box_size)
-    ba = vector(coords_j, coords_i, box_size)
-    bc = vector(coords_j, coords_k, box_size)
-    return (a.cth / 2) * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.th0) ^ 2
+    θ = bond_angle(coords_i, coords_j, coords_k, box_size)
+    return (a.cth / 2) * (θ - a.th0) ^ 2
 end
