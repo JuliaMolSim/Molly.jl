@@ -85,7 +85,10 @@ function simulate!(sys::System{D, S, false},
         end
 
         apply_coupling!(sys, sim, sim.coupling)
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n; parallel=parallel)
+
+        if step_n != n_steps
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n; parallel=parallel)
+        end
 
         accels_t = accels_t_dt
     end
@@ -114,7 +117,10 @@ function simulate!(sys::System{D, S, true},
         sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         apply_coupling!(sys, sim, sim.coupling)
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n)
+
+        if step_n != n_steps
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n)
+        end
 
         accels_t = accels_t_dt
     end
@@ -141,7 +147,10 @@ function simulate!(sys::System,
         sys.velocities = coords_copy
 
         apply_coupling!(sys, sim, sim.coupling)
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n; parallel=parallel)
+
+        if step_n != n_steps
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n; parallel=parallel)
+        end
     end
     return sys
 end
