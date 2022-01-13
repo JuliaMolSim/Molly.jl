@@ -75,7 +75,7 @@ end
 # See https://github.com/FluxML/Zygote.jl/pull/1131
 Zygote.∇getindex(x::CuArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> begin
     inds1_cpu = Array(inds[1])
-    dx = Zygote._zero(Array(x), eltype(dy))
+    dx = zeros(eltype(dy), length(x))
     dxv = view(dx, inds1_cpu)
     dxv .= Zygote.accum.(dxv, Zygote._droplike(Array(dy), dxv))
     return Zygote._project(x, cu(dx)), nothing
