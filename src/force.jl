@@ -93,6 +93,8 @@ end
 
 Calculate the accelerations of all atoms using the general and specific
 interactions and Newton's second law.
+If the interactions use neighbor lists, the neighbors should be computed
+first and passed to the function.
 """
 function accelerations(s::System, neighbors=nothing; parallel::Bool=true)
     return forces(s, neighbors; parallel=parallel) ./ mass.(s.atoms)
@@ -189,6 +191,8 @@ end
     forces(system, neighbors=nothing; parallel=true)
 
 Calculate the forces on all atoms using the general and specific interactions.
+If the interactions use neighbor lists, the neighbors should be computed
+first and passed to the function.
 """
 function forces(s::System, neighbors=nothing; parallel::Bool=true)
     n_atoms = length(s)

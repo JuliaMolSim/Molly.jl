@@ -9,6 +9,8 @@ export total_energy,
     total_energy(s, neighbors=nothing)
 
 Compute the total energy of the system.
+If the interactions use neighbor lists, the neighbors should be computed
+first and passed to the function.
 """
 total_energy(s, neighbors=nothing) = kinetic_energy(s) + potential_energy(s, neighbors)
 
