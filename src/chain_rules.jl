@@ -77,7 +77,7 @@ function ChainRulesCore.rrule(::typeof(unsafe_getindex), arr, inds)
         dx = Zygote._zero(arr, eltype(Ȳ))
         dxv = @view dx[inds]
         dxv .= Zygote.accum.(dxv, Zygote._droplike(Ȳ, dxv))
-        return NoTangent(), Zygote._project(x, dx), nothing
+        return NoTangent(), Zygote._project(arr, dx), nothing
     end
     return Y, unsafe_getindex_pullback
 end
