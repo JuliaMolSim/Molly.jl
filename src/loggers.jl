@@ -242,15 +242,15 @@ function append_model(logger::StructureWriter, sys)
                 coord_convert = ustrip.(u"Å", coord)
             end
             if !(atom_data.res_name in logger.excluded_res)
-                at_rec = atomrecord(atom_data, i, coord_convert)
-                println(output, pdbline(at_rec))
+                at_rec = atom_record(atom_data, i, coord_convert)
+                println(output, BioStructures.pdbline(at_rec))
             end
         end
         println(output, "ENDMDL")
     end
 end
 
-atomrecord(at_data, i, coord) = AtomRecord(
+atom_record(at_data, i, coord) = BioStructures.AtomRecord(
     false, i, at_data.atom_name, ' ', at_data.res_name, "A",
     at_data.res_number, ' ', coord, 1.0, 0.0,
     at_data.element == "?" ? "  " : at_data.element, "  "

@@ -1,9 +1,9 @@
 module Molly
 
-using BioStructures
+import BioStructures # Imported to avoid clashing names
 using CellListMap
 using ChainRulesCore
-import Chemfiles # Imported to avoid clashing names
+import Chemfiles
 using Colors
 using Combinatorics
 using CUDA

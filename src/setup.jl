@@ -329,7 +329,7 @@ function System(coord_file::AbstractString,
         res = Chemfiles.Residue(top, ri - 1)
         res_num = Chemfiles.id(res)
         res_name = Chemfiles.name(res)
-        standard_res = res_name in keys(threeletter_to_aa)
+        standard_res = res_name in keys(BioStructures.threeletter_to_aa)
         res_num_to_standard[res_num] = standard_res
 
         if standard_res && residue_name(res, res_num_to_standard, rename_terminal_res) == "N" * res_name
