@@ -27,7 +27,7 @@ function visualize(coord_logger,
     end
 
     scene = Scene()
-    positions = Node(PointType.(ustrip_vec.(coords_start)))
+    positions = Observable(PointType.(ustrip_vec.(coords_start)))
     scatter!(scene, positions; color=color, markersize=markersize,
                 transparency=transparency, kwargs...)
 
@@ -35,21 +35,21 @@ function visualize(coord_logger,
     for (ci, (i, j)) in enumerate(connections)
         if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < (first(box_size) / 2)
             if dims == 3
-                push!(connection_nodes, Node(PointType.(
+                push!(connection_nodes, Observable(PointType.(
                         ustrip.([coords_start[i][1], coords_start[j][1]]),
                         ustrip.([coords_start[i][2], coords_start[j][2]]),
                         ustrip.([coords_start[i][3], coords_start[j][3]]))))
             elseif dims == 2
-                push!(connection_nodes, Node(PointType.(
+                push!(connection_nodes, Observable(PointType.(
                         ustrip.([coords_start[i][1], coords_start[j][1]]),
                         ustrip.([coords_start[i][2], coords_start[j][2]]))))
             end
         else
             if dims == 3
-                push!(connection_nodes, Node(PointType.([0.0, 0.0], [0.0, 0.0],
+                push!(connection_nodes, Observable(PointType.([0.0, 0.0], [0.0, 0.0],
                                                         [0.0, 0.0])))
             elseif dims == 2
-                push!(connection_nodes, Node(PointType.([0.0, 0.0], [0.0, 0.0])))
+                push!(connection_nodes, Observable(PointType.([0.0, 0.0], [0.0, 0.0])))
             end
         end
     end
@@ -62,7 +62,7 @@ function visualize(coord_logger,
 
     trail_positions = []
     for trail_i in 1:trails
-        push!(trail_positions, Node(PointType.(ustrip_vec.(coords_start))))
+        push!(trail_positions, Observable(PointType.(ustrip_vec.(coords_start))))
         col = parse.(Colorant, color)
         alpha = 1 - (trail_i / (trails + 1))
         alpha_col = RGBA.(red.(col), green.(col), blue.(col), alpha)
