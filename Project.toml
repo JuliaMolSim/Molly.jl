@@ -29,7 +29,7 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
-AtomsBase = "0.1"
+AtomsBase = "0.1, 0.2"
 BioStructures = "1"
 CUDA = "3"
 CellListMap = "0.7"
