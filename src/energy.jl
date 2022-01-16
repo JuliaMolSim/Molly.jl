@@ -51,6 +51,12 @@ end
 Compute the potential energy of the system.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
+
+    potential_energy(inter, vec_ij, coord_i, coord_j, atom_i, atom_j, box_size)
+
+Calculate the potential energy between a pair of atoms due to a given
+interation type.
+Custom interaction types should implement this function.
 """
 function potential_energy(s, neighbors=nothing)
     n_atoms = length(s)
