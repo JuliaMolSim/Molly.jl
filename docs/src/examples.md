@@ -129,7 +129,7 @@ visualize(sys.loggers["coords"],
             "sim_mutbond.mp4";
             connections=connections,
             connection_frames=sys.loggers["bonds"].bonds,
-            markersize=10.0)
+            markersize=0.1)
 ```
 ![Mutable bond simulation](images/sim_mutbond.gif)
 

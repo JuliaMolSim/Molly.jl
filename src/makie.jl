@@ -12,24 +12,28 @@ function visualize(coord_logger,
                     framerate::Integer=30,
                     color=:purple,
                     connection_color=:orange,
-                    markersize=20.0,
+                    markersize=0.05,
                     linewidth=2.0,
                     transparency=true,
                     kwargs...)
     coords_start = first(coord_logger.coords)
     dims = length(first(coords_start))
+    fig = Figure()
+
     if dims == 3
         PointType = Point3f
+        ax = Axis3(fig[1, 1], aspect=:data)
     elseif dims == 2
         PointType = Point2f
+        ax = Axis(fig[1, 1])
+        ax.aspect = DataAspect()
     else
         throw(ArgumentError("Found $dims dimensions but can only visualize 2 or 3 dimensions"))
     end
 
-    scene = Scene()
     positions = Observable(PointType.(ustrip_vec.(coords_start)))
-    scatter!(scene, positions; color=color, markersize=markersize,
-                transparency=transparency, kwargs...)
+    scatter!(ax, positions; color=color, markersize=markersize, transparency=transparency,
+                markerspace=SceneSpace, kwargs...)
 
     connection_nodes = []
     for (ci, (i, j)) in enumerate(connections)
@@ -54,7 +58,7 @@ function visualize(coord_logger,
         end
     end
     for (ci, cn) in enumerate(connection_nodes)
-        lines!(scene, cn,
+        lines!(ax, cn,
                 color=isa(connection_color, Array) ? connection_color[ci] : connection_color,
                 linewidth=isa(linewidth, Array) ? linewidth[ci] : linewidth,
                 transparency=transparency)
@@ -66,17 +70,17 @@ function visualize(coord_logger,
         col = parse.(Colorant, color)
         alpha = 1 - (trail_i / (trails + 1))
         alpha_col = RGBA.(red.(col), green.(col), blue.(col), alpha)
-        scatter!(scene, trail_positions[end]; color=alpha_col,
-                    markersize=markersize, transparency=transparency, kwargs...)
+        scatter!(ax, trail_positions[end]; color=alpha_col,  markersize=markersize,
+                    transparency=transparency, markerspace=SceneSpace, kwargs...)
     end
 
     dist_unit = unit(first(first(coords_start)))
     box_size_conv = ustrip.(dist_unit, box_size)
-    xlims!(scene, 0.0, box_size_conv[1])
-    ylims!(scene, 0.0, box_size_conv[2])
-    dims == 3 && zlims!(scene, 0.0, box_size_conv[3])
+    xlims!(ax, 0.0, box_size_conv[1])
+    ylims!(ax, 0.0, box_size_conv[2])
+    dims == 3 && zlims!(ax, 0.0, box_size_conv[3])
 
-    GLMakie.record(scene, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
+    GLMakie.record(fig, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
         coords = coord_logger.coords[frame_i]
 
         for (ci, (i, j)) in enumerate(connections)

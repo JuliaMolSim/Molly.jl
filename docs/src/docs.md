@@ -351,7 +351,7 @@ sys = System(
 
 simulate!(sys, simulator, n_steps)
 
-visualize(sys.loggers["coords"], box_size, "sim_agent.mp4"; markersize=10.0)
+visualize(sys.loggers["coords"], box_size, "sim_agent.mp4"; markersize=0.1)
 ```
 ![Agent simulation](images/sim_agent.gif)
 
