@@ -33,7 +33,7 @@ end
                                     box_size) where {S, C}
     r2 = sum(abs2, dr)
 
-    if !S && iszero(atom_i.σ) || iszero(atom_j.σ)
+    if !S && (iszero(atom_i.ϵ) || iszero(atom_j.ϵ) || iszero(atom_i.σ) || iszero(atom_j.σ))
         return ustrip.(zero(coord_i)) * inter.force_units
     end
 
@@ -80,7 +80,7 @@ end
                                     box_size) where {S, C}
     r2 = sum(abs2, dr)
 
-    if !S && iszero(atom_i.σ) || iszero(atom_j.σ)
+    if !S && (iszero(atom_i.ϵ) || iszero(atom_j.ϵ) || iszero(atom_i.σ) || iszero(atom_j.σ))
         return ustrip(zero(box_size[1])) * inter.energy_units
     end
 
