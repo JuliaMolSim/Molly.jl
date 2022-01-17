@@ -252,6 +252,20 @@ end
     partials(sv[1], i) * y1[1] + partials(sv[2], i) * y1[2] + partials(sv[3], i) * y1[3]
 end
 
+sized_to_static(v::SizedVector{3, T, Vector{T}}) where {T} = SVector{3, T}(v[1], v[2], v[3])
+sized_to_static(v::SizedVector{2, T, Vector{T}}) where {T} = SVector{2, T}(v[1], v[2])
+
+function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg::CuArray) where {D, T}
+    cu(sized_to_static.(ȳ_in))
+end
+
+function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg) where {D, T}
+    sized_to_static.(ȳ_in)
+end
+
+modify_grad(ȳ_in, arg::CuArray) = cu(ȳ_in)
+modify_grad(ȳ_in, arg) = ȳ_in
+
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}) where {D, T}
     out = dual_function_svec(f).(arg1)
     y = map(x -> value.(x), out)
@@ -269,20 +283,6 @@ end
     end
     return y, bc_fwd_back
 end
-
-sized_to_static(v::SizedVector{3, T, Vector{T}}) where {T} = SVector{3, T}(v[1], v[2], v[3])
-sized_to_static(v::SizedVector{2, T, Vector{T}}) where {T} = SVector{2, T}(v[1], v[2])
-
-function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg::CuArray) where {D, T}
-    cu(sized_to_static.(ȳ_in))
-end
-
-function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg) where {D, T}
-    sized_to_static.(ȳ_in)
-end
-
-modify_grad(ȳ_in, arg::CuArray) = cu(ȳ_in)
-modify_grad(ȳ_in, arg) = ȳ_in
 
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}, arg2) where {D, T}
     out = dual_function_svec_real(f).(arg1, arg2)
