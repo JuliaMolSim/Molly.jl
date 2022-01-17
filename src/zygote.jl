@@ -179,7 +179,7 @@ function dual_function_svec_real(f::F) where F
     function (arg1::SVector{D, T}, arg2) where {D, T}
         ds1 = dualize(Nothing, arg1, Val(0), Val(1))
         # Leaving the integer type in here results in Float32 -> Float64 conversion
-        ds2 = Zygote.dual(isa(arg2, Int) ? T(arg2) : arg2, (false, false, false, true))
+        ds2 = Zygote.dual(arg2 isa Int ? T(arg2) : arg2, (false, false, false, true))
         return f(ds1, ds2)
     end
 end
@@ -256,7 +256,7 @@ end
     out = dual_function_svec(f).(arg1)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ_in)
-        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
+        ȳ = modify_grad(ȳ_in, arg1)
         barg1 = broadcast(ȳ, out) do y1, o1
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials(o1))
@@ -270,11 +270,25 @@ end
     return y, bc_fwd_back
 end
 
+sized_to_static(v::SizedVector{3, T, Vector{T}}) where {T} = SVector{3, T}(v[1], v[2], v[3])
+sized_to_static(v::SizedVector{2, T, Vector{T}}) where {T} = SVector{2, T}(v[1], v[2])
+
+function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg::CuArray) where {D, T}
+    cu(sized_to_static.(ȳ_in))
+end
+
+function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg) where {D, T}
+    sized_to_static.(ȳ_in)
+end
+
+modify_grad(ȳ_in, arg::CuArray) = cu(ȳ_in)
+modify_grad(ȳ_in, arg) = ȳ_in
+
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}, arg2) where {D, T}
     out = dual_function_svec_real(f).(arg1, arg2)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ_in)
-        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
+        ȳ = modify_grad(ȳ_in, arg1)
         barg1 = broadcast(ȳ, out) do y1, o1
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials.((o1,), (1, 2, 3)))
@@ -293,7 +307,7 @@ end
     out = dual_function_svec_svec(f).(arg1, arg2)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ_in)
-        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
+        ȳ = modify_grad(ȳ_in, arg1)
         barg1 = broadcast(ȳ, out) do y1, o1
             if length(y1) == 1
                 y1 .* SVector{D, T}(partials.((o1,), (1, 2, 3)))
@@ -319,7 +333,7 @@ end
     out = dual_function_atom(f).(arg1)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ_in)
-        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
+        ȳ = modify_grad(ȳ_in, arg1)
         barg1 = broadcast(ȳ, out) do y1, o1
             ps = partials(o1)
             Atom(0, y1 * ps[1], y1 * ps[2], y1 * ps[3], y1 * ps[4])
@@ -403,7 +417,7 @@ end
     out = dual_function_force_broadcast(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ_in)
-        ȳ = arg2 isa CuArray ? cu(ȳ_in) : ȳ_in
+        ȳ = modify_grad(ȳ_in, arg2)
         darg1 = unbroadcast(arg1, broadcast(combine_dual_GeneralInteraction, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1,  5),
                                 sum_partials(o1, y1,  6), sum_partials(o1, y1,  7)), ȳ, out))
@@ -428,7 +442,7 @@ end
     out = dual_function_specific_2_atoms(f).(arg1, arg2, arg3, arg4)
     y = broadcast(o1 -> SpecificForce2Atoms{D, T}(value.(o1.f1), value.(o1.f2)), out)
     function bc_fwd_back(ȳ_in)
-        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
+        ȳ = modify_grad(ȳ_in, arg1)
         darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
                     sum_partials(o1.f1, y1.f1, 3) + sum_partials(o1.f2, y1.f2, 3),
@@ -459,7 +473,7 @@ end
     out = dual_function_specific_3_atoms(f).(arg1, arg2, arg3, arg4, arg5)
     y = broadcast(o1 -> SpecificForce3Atoms{D, T}(value.(o1.f1), value.(o1.f2), value.(o1.f3)), out)
     function bc_fwd_back(ȳ_in)
-        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
+        ȳ = modify_grad(ȳ_in, arg1)
         darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
                     sum_partials(o1.f1, y1.f1, 3) + sum_partials(o1.f2, y1.f2, 3) + sum_partials(o1.f3, y1.f3, 3),
@@ -496,7 +510,7 @@ end
     out = dual_function_specific_4_atoms(f).(arg1, arg2, arg3, arg4, arg5, arg6)
     y = broadcast(o1 -> SpecificForce4Atoms{D, T}(value.(o1.f1), value.(o1.f2), value.(o1.f3), value.(o1.f4)), out)
     function bc_fwd_back(ȳ_in)
-        ȳ = arg1 isa CuArray ? cu(ȳ_in) : ȳ_in
+        ȳ = modify_grad(ȳ_in, arg1)
         darg1 = unbroadcast(arg1, broadcast(combine_dual_SpecificInteraction, arg1, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
                     sum_partials(o1.f1, y1.f1, 13) + sum_partials(o1.f2, y1.f2, 13) + sum_partials(o1.f3, y1.f3, 13) + sum_partials(o1.f4, y1.f4, 13),
