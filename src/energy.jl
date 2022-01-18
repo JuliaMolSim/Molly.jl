@@ -24,13 +24,15 @@ Compute the kinetic energy of the system.
 function kinetic_energy(s)
     ke = kinetic_energy_noconvert(s)
     # Convert energy to per mol if required
+    T = typeof(ustrip(ke))
     if dimension(s.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        T = typeof(ustrip(ke))
-        return uconvert(s.energy_units, ke * T(Unitful.Na))
+        return T(uconvert(s.energy_units, ke * Unitful.Na))
     else
-        return uconvert(s.energy_units, ke)
+        return T(uconvert(s.energy_units, ke))
     end
 end
+
+const temp_conversion_factor = ustrip(u"nm^2 * u * K^-1 * ps^-2", Unitful.k)
 
 """
     temperature(system)
@@ -41,7 +43,11 @@ function temperature(s)
     ke = kinetic_energy_noconvert(s)
     df = 3 * length(s) - 3
     T = typeof(ustrip(ke))
-    k = unit(ke) == NoUnits ? one(T) : uconvert(u"K^-1" * unit(ke), T(Unitful.k))
+    if unit(ke) == NoUnits
+        k = T(temp_conversion_factor)
+    else
+        k = T(uconvert(u"K^-1" * unit(ke), Unitful.k))
+    end
     return 2 * ke / (df * k)
 end
 

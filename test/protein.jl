@@ -109,6 +109,9 @@ end
     simulator = VelocityVerlet(dt=0.0005u"ps")
     velocities_start = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
     sys.velocities = deepcopy(velocities_start)
+    @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
+    @test temperature(sys) ≈ 329.3202932884933u"K"
+
     simulate!(sys, simulator, n_steps; parallel=true)
 
     coords_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "coordinates_$(n_steps)steps.txt"))))u"nm"
