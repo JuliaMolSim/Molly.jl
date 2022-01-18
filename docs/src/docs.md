@@ -324,7 +324,7 @@ function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n)
     end
 end
 
-temp = 0.01
+temp = 1.0
 box_size = SVector(10.0, 10.0)
 n_steps = 1_000
 n_people = 500

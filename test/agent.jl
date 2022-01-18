@@ -62,7 +62,7 @@
     n_people = 500
     n_steps = 1_000
     box_size = SVector(10.0, 10.0)
-    temp = 0.01
+    temp = 1.0
     n_starting = 2
     atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
     coords = place_atoms(n_people, box_size, 0.1)

@@ -82,6 +82,8 @@ function AtomsBase.velocity(mass, temp; dims::Integer=3)
     return SVector([maxwell_boltzmann(mass, temp) for i in 1:dims]...)
 end
 
+const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
+
 """
     maxwell_boltzmann(mass, temperature)
 
@@ -89,7 +91,7 @@ Generate a random speed along one dimension from the Maxwell-Boltzmann distribut
 """
 function maxwell_boltzmann(mass, temp)
     T = typeof(convert(AbstractFloat, ustrip(temp)))
-    k = unit(temp) == NoUnits ? one(T) : uconvert(u"u * nm^2 * ps^-2 * K^-1", T(Unitful.k))
+    k = unit(temp) == NoUnits ? T(ustrip(mb_conversion_factor)) : T(mb_conversion_factor)
     σ = sqrt(k * temp / mass)
     return rand(Normal(zero(T), T(ustrip(σ)))) * unit(σ)
 end
@@ -100,8 +102,8 @@ end
 Set the velocities of a `System` to random velocities generated from the
 Maxwell-Boltzmann distribution.
 """
-function random_velocities!(sys::System, temp)
-    sys.velocities = [velocity(a.mass, temp) for a in sys.atoms]
+function random_velocities!(sys::System{D}, temp) where D
+    sys.velocities = [velocity(a.mass, temp; dims=D) for a in sys.atoms]
     return sys
 end
 

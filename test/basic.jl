@@ -112,4 +112,9 @@ end
         neighbors = find_neighbors(s, s.neighbor_finder; parallel=true)
         @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
     end
+
+    vels_units   = [maxwell_boltzmann(12.0u"u", 300.0u"K") for _ in 1:1_000]
+    vels_nounits = [maxwell_boltzmann(12.0    , 300.0    ) for _ in 1:1_000]
+    @test 0.35 < ustrip(std(vels_units))  < 0.55
+    @test 0.35 < std(vels_nounits)        < 0.55
 end

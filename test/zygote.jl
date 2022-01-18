@@ -174,7 +174,7 @@
                 @test isnothing(gzy) || abs(gzy) < 1e-13
             else
                 frac_diff = abs(gzy - gfd) / abs(gfd)
-                @info "$(rpad(name, 14)) - fractional difference in $(rpad(prefix, 2)) gradient $frac_diff"
+                @info "$(rpad(name, 14)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy, fractional difference $frac_diff"
                 @test frac_diff < tol
             end
         end

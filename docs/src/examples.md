@@ -84,7 +84,7 @@ end
 n_atoms = 200
 box_size = SVector(10.0, 10.0)
 n_steps = 2_000
-temp = 0.01
+temp = 1.0
 
 atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = place_atoms(n_atoms, box_size, 0.1)
