@@ -6,6 +6,7 @@ export
     wrap_coords,
     wrap_coords_vec,
     maxwell_boltzmann,
+    random_velocities,
     random_velocities!,
     bond_angle,
     torsion_angle
@@ -97,13 +98,23 @@ function maxwell_boltzmann(mass, temp)
 end
 
 """
+    random_velocities(sys, temp)
+
+Generate random velocities from the Maxwell-Boltzmann distribution
+for a `System`.
+"""
+function random_velocities(sys::System{D}, temp) where D
+    [velocity(a.mass, temp; dims=D) for a in sys.atoms]
+end
+
+"""
     random_velocities!(sys, temp)
 
 Set the velocities of a `System` to random velocities generated from the
 Maxwell-Boltzmann distribution.
 """
-function random_velocities!(sys::System{D}, temp) where D
-    sys.velocities = [velocity(a.mass, temp; dims=D) for a in sys.atoms]
+function random_velocities!(sys::System, temp)
+    sys.velocities = random_velocities(sys, temp)
     return sys
 end
 
