@@ -64,6 +64,9 @@ function potential_energy(s, neighbors=nothing)
 
     for inter in values(s.general_inters)
         if inter.nl_only
+            if isnothing(neighbors)
+                error("An interaction uses the neighbor list but neighbors is nothing")
+            end
             @inbounds for ni in 1:neighbors.n
                 i, j, weight_14 = neighbors.list[ni]
                 dr = vector(s.coords[i], s.coords[j], s.box_size)

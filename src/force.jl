@@ -203,6 +203,9 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.general_inters)
             if inter.nl_only
+                if isnothing(neighbors)
+                    error("An interaction uses the neighbor list but neighbors is nothing")
+                end
                 @threads for ni in 1:neighbors.n
                     i, j, w = neighbors.list[ni]
                     force!(fs_threads[threadid()], inter, s, i, j, s.force_units, w)
@@ -222,6 +225,9 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
 
         for inter in values(s.general_inters)
             if inter.nl_only
+                if isnothing(neighbors)
+                    error("An interaction uses the neighbor list but neighbors is nothing")
+                end
                 for ni in 1:neighbors.n
                     i, j, w = neighbors.list[ni]
                     force!(fs, inter, s, i, j, s.force_units, w)
