@@ -93,15 +93,15 @@ end
             neighbor_finder=sys.neighbor_finder,
         )
 
-        forces_molly = ustrip_vec.(accelerations(sys_part, neighbors; parallel=false) .* mass.(sys_part.atoms))
-        forces_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "forces_$(inter)_only.txt"))))
+        forces_molly = accelerations(sys_part, neighbors; parallel=false) .* mass.(sys_part.atoms)
+        forces_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "forces_$(inter)_only.txt"))))u"kJ * mol^-1 * nm^-1"
         # All force terms on all atoms must match at some threshold
-        @test !any(d -> any(abs.(d) .> 1e-6), forces_molly .- forces_openmm)
+        @test !any(d -> any(abs.(d) .> 1e-6u"kJ * mol^-1 * nm^-1"), forces_molly .- forces_openmm)
 
-        E_molly = ustrip(potential_energy(sys_part, neighbors))
-        E_openmm = readdlm(joinpath(openmm_dir, "energy_$(inter)_only.txt"))[1]
+        E_molly = potential_energy(sys_part, neighbors)
+        E_openmm = readdlm(joinpath(openmm_dir, "energy_$(inter)_only.txt"))[1] * u"kJ * mol^-1"
         # Energy must match at some threshold
-        @test E_molly - E_openmm < 1e-5
+        @test E_molly - E_openmm < 1e-5u"kJ * mol^-1"
     end
 
     # Run a short simulation with all interactions

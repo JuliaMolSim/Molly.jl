@@ -219,18 +219,18 @@ end
 
     neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
     neighbors_nounits = find_neighbors(s_nounits, s_nounits.neighbor_finder; parallel=false)
-    accel_diff = ustrip_vec.(accelerations(s, neighbors)) .- accelerations(s_nounits, neighbors_nounits)
+    accel_diff = accelerations(s, neighbors) .- accelerations(s_nounits, neighbors_nounits)u"kJ * mol^-1 * nm^-1 * u^-1"
     @test iszero(accel_diff)
 
     simulate!(s, simulator, n_steps; parallel=false)
     simulate!(s_nounits, simulator_nounits, n_steps; parallel=false)
 
-    coords_diff = ustrip_vec.(s.loggers["coords"].coords[end]) .- s_nounits.loggers["coords"].coords[end]
-    @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8
+    coords_diff = s.loggers["coords"].coords[end] .- s_nounits.loggers["coords"].coords[end] * u"nm"
+    @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8u"nm"
 
     final_energy = s.loggers["energy"].energies[end]
-    final_energy_nounits = s_nounits.loggers["energy"].energies[end]
-    @test isapprox(ustrip(final_energy), final_energy_nounits, atol=5e-4)
+    final_energy_nounits = s_nounits.loggers["energy"].energies[end] * u"kJ * mol^-1"
+    @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
 end
 
 @testset "Different implementations" begin
