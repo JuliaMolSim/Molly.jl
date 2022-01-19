@@ -21,10 +21,9 @@ kinetic_energy_noconvert(s) = sum(mass.(s.atoms) .* sum.(abs2, s.velocities)) / 
 
 Compute the kinetic energy of the system.
 """
-function kinetic_energy(s)
+function kinetic_energy(s::System{D, G, T}) where {D, G, T}
     ke = kinetic_energy_noconvert(s)
     # Convert energy to per mol if required
-    T = typeof(ustrip(ke))
     if dimension(s.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         return T(uconvert(s.energy_units, ke * Unitful.Na))
     else
@@ -39,10 +38,9 @@ const temp_conversion_factor = ustrip(u"nm^2 * u * K^-1 * ps^-2", Unitful.k)
 
 Calculate the temperature of a system from the kinetic energy of the atoms.
 """
-function temperature(s)
+function temperature(s::System{D, G, T}) where {D, G, T}
     ke = kinetic_energy_noconvert(s)
     df = 3 * length(s) - 3
-    T = typeof(ustrip(ke))
     if unit(ke) == NoUnits
         k = T(temp_conversion_factor)
     else
@@ -64,9 +62,9 @@ Calculate the potential energy between a pair of atoms due to a given
 interation type.
 Custom interaction types should implement this function.
 """
-function potential_energy(s, neighbors=nothing)
+function potential_energy(s::System{D, G, T}, neighbors=nothing) where {D, G, T}
     n_atoms = length(s)
-    potential = zero(ustrip(s.box_size[1])) * s.energy_units
+    potential = zero(T) * s.energy_units
 
     for inter in values(s.general_inters)
         if inter.nl_only

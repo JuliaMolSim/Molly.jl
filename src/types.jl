@@ -14,7 +14,8 @@ export
     NeighborList,
     NeighborListVec,
     System,
-    is_gpu_diff_safe
+    is_gpu_diff_safe,
+    float_type
 
 const DefaultFloat = Float64
 
@@ -239,7 +240,7 @@ interface described there.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
-mutable struct System{D, G, A, AD, GI, SI, C, V, B, NF, L, F, E} <: AbstractSystem{D}
+mutable struct System{D, G, T, A, AD, GI, SI, C, V, B, NF, L, F, E} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     general_inters::GI
@@ -267,6 +268,8 @@ function System(;
                 energy_units=u"kJ * mol^-1",
                 gpu_diff_safe=isa(coords, CuArray))
     D = length(box_size)
+    G = gpu_diff_safe
+    T = typeof(ustrip(first(box_size)))
     A = typeof(atoms)
     AD = typeof(atoms_data)
     GI = typeof(general_inters)
@@ -278,7 +281,7 @@ function System(;
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
-    return System{D, gpu_diff_safe, A, AD, GI, SI, C, V, B, NF, L, F, E}(
+    return System{D, G, T, A, AD, GI, SI, C, V, B, NF, L, F, E}(
                     atoms, atoms_data, general_inters, specific_inter_lists,
                     coords, velocities, box_size, neighbor_finder, loggers,
                     force_units, energy_units)
@@ -291,6 +294,13 @@ Whether a `System` uses the code path suitable for the GPU and
     for taking gradients.
 """
 is_gpu_diff_safe(::System{D, G}) where {D, G} = G
+
+"""
+    float_type(sys)
+
+The float type a `System` uses.
+"""
+float_type(::System{D, G, T}) where {D, G, T} = T
 
 AtomsBase.species_type(s::System) = eltype(s.atoms)
 
@@ -307,7 +317,7 @@ AtomsBase.boundary_conditions(::System{3}) = SVector(Periodic(), Periodic(), Per
 AtomsBase.boundary_conditions(::System{2}) = SVector(Periodic(), Periodic())
 
 edges_to_box(bs::SVector{3}, z) = SVector{3}([SVector(bs[1], z, z), SVector(z, bs[2], z),
-                                                SVector(z, z, bs[3])])
+                                              SVector(z, z, bs[3])])
 edges_to_box(bs::SVector{2}, z) = SVector{2}([SVector(bs[1], z), SVector(z, bs[2])])
 
 function AtomsBase.bounding_box(s::System)
