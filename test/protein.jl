@@ -123,14 +123,54 @@ end
     @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
     @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 
+    # Test with no units
+    ff_nounits = OpenMMForceField(
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...;
+        units=false,
+    )
+    sys_nounits = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff_nounits;
+        velocities=deepcopy(ustrip_vec.(velocities_start)),
+        units=false,
+    )
+    simulator_nounits = VelocityVerlet(dt=0.0005)
+    @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
+    @test temperature(sys_nounits)u"K" ≈ 329.3202932884933u"K"
+
+    simulate!(sys_nounits, simulator_nounits, n_steps; parallel=true)
+
+    coords_diff = sys_nounits.coords * u"nm" .- wrap_coords_vec.(coords_openmm, (sys.box_size,))
+    vels_diff = sys_nounits.velocities * u"nm * ps^-1" .- vels_openmm
+    @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
+    @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
+
     # Test the same simulation on the GPU
     if run_gpu_tests
-        sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=true)
-        sys.velocities = cu(deepcopy(velocities_start))    
+        sys = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            velocities=cu(deepcopy(velocities_start)),
+            gpu=true,
+        )
         simulate!(sys, simulator, n_steps)
 
         coords_diff = Array(sys.coords) .- wrap_coords_vec.(coords_openmm, (sys.box_size,))
         vels_diff = Array(sys.velocities) .- vels_openmm
+        @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
+        @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
+
+        sys_nounits = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff_nounits;
+            velocities=cu(deepcopy(ustrip_vec.(velocities_start))),
+            units=false,
+            gpu=true,
+        )
+        simulate!(sys_nounits, simulator_nounits, n_steps)
+
+        coords_diff = Array(sys_nounits.coords * u"nm") .- wrap_coords_vec.(coords_openmm, (sys.box_size,))
+        vels_diff = Array(sys_nounits.velocities * u"nm * ps^-1") .- vels_openmm
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
         @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
     end
