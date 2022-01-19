@@ -103,17 +103,17 @@ end
 # No gradient for cutoff type
 function dualize_fb(inter::LennardJones{S, C, W, F, E}) where {S, C, W, F, E}
     w14 = inter.weight_14
-    dual_weight_14 = @dualize(w14, 21, 1)
+    dual_weight_14 = @dualize(w14, 22, 1)
     return LennardJones{S, C, typeof(dual_weight_14), F, E}(inter.cutoff, inter.nl_only,
                 inter.lorentz_mixing, dual_weight_14, inter.force_units, inter.energy_units)
 end
 
 function dualize_fb(inter::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
     dc, sd, w14, cc = inter.dist_cutoff, inter.solvent_dielectric, inter.weight_14, inter.coulomb_const
-    dual_dist_cutoff        = @dualize(dc , 21, 1)
-    dual_solvent_dielectric = @dualize(sd , 21, 2)
-    dual_weight_14          = @dualize(w14, 21, 3)
-    dual_coulomb_const      = @dualize(cc , 21, 4)
+    dual_dist_cutoff        = @dualize(dc , 22, 2)
+    dual_solvent_dielectric = @dualize(sd , 22, 3)
+    dual_weight_14          = @dualize(w14, 22, 4)
+    dual_coulomb_const      = @dualize(cc , 22, 5)
     return CoulombReactionField{typeof(dual_dist_cutoff), typeof(dual_solvent_dielectric), typeof(dual_weight_14), typeof(dual_coulomb_const), F, E}(
                                 dual_dist_cutoff, dual_solvent_dielectric, inter.nl_only, dual_weight_14,
                                 dual_coulomb_const, inter.force_units, inter.energy_units)
@@ -150,20 +150,20 @@ end
 
 function dualize_atom_fb1(at::Atom)
     charge, mass, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
-    dual_charge = @dualize(charge, 21, 11)
-    dual_mass = @dualize(mass, 21, 12)
-    dual_σ = @dualize(σ, 21, 13)
-    dual_ϵ = @dualize(ϵ, 21, 14)
+    dual_charge = @dualize(charge, 22, 12)
+    dual_mass = @dualize(mass, 22, 13)
+    dual_σ = @dualize(σ, 22, 14)
+    dual_ϵ = @dualize(ϵ, 22, 15)
     return Atom{typeof(dual_charge), typeof(dual_mass), typeof(dual_σ), typeof(dual_ϵ)}(
                 at.index, dual_charge, dual_mass, dual_σ, dual_ϵ)
 end
 
 function dualize_atom_fb2(at::Atom)
     charge, mass, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
-    dual_charge = @dualize(charge, 21, 15)
-    dual_mass = @dualize(mass, 21, 16)
-    dual_σ = @dualize(σ, 21, 17)
-    dual_ϵ = @dualize(ϵ, 21, 18)
+    dual_charge = @dualize(charge, 22, 16)
+    dual_mass = @dualize(mass, 22, 17)
+    dual_σ = @dualize(σ, 22, 18)
+    dual_ϵ = @dualize(ϵ, 22, 19)
     return Atom{typeof(dual_charge), typeof(dual_mass), typeof(dual_σ), typeof(dual_ϵ)}(
                 at.index, dual_charge, dual_mass, dual_σ, dual_ϵ)
 end
@@ -203,12 +203,12 @@ end
 
 function dual_function_force_broadcast(f::F) where F
     function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
-        ds1 = (dualize_fb(arg1[1]), dualize_fb(arg1[2])) # Only works for this case
-        ds2 = dualize(Nothing, arg2, Val(4), Val(14))
-        ds3 = dualize(Nothing, arg3, Val(7), Val(11))
+        ds1 = map(dualize_fb, arg1)
+        ds2 = dualize(Nothing, arg2, Val(5), Val(14))
+        ds3 = dualize(Nothing, arg3, Val(8), Val(11))
         ds4 = dualize_atom_fb1(arg4)
         ds5 = dualize_atom_fb2(arg5)
-        ds6 = dualize(Nothing, arg6, Val(18), Val(0))
+        ds6 = dualize(Nothing, arg6, Val(19), Val(0))
         ds7 = arg7
         ds8 = arg8
         return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8)
@@ -352,11 +352,11 @@ function combine_dual_GeneralInteraction(y1::SVector{3, T}, o1::SVector{3, Dual{
             NoUnits, NoUnits,
         ),
         CoulombReactionField{T, T, T, T, typeof(NoUnits), typeof(NoUnits)}(
-            y1[1] * partials(o1[1], i    ) + y1[2] * partials(o1[2], i    ) + y1[3] * partials(o1[3], i    ),
             y1[1] * partials(o1[1], i + 1) + y1[2] * partials(o1[2], i + 1) + y1[3] * partials(o1[3], i + 1),
-            false,
             y1[1] * partials(o1[1], i + 2) + y1[2] * partials(o1[2], i + 2) + y1[3] * partials(o1[3], i + 2),
+            false,
             y1[1] * partials(o1[1], i + 3) + y1[2] * partials(o1[2], i + 3) + y1[3] * partials(o1[3], i + 3),
+            y1[1] * partials(o1[1], i + 4) + y1[2] * partials(o1[2], i + 4) + y1[3] * partials(o1[3], i + 4),
             NoUnits, NoUnits,
         ),
     )
@@ -419,14 +419,14 @@ end
     function bc_fwd_back(ȳ_in)
         ȳ = modify_grad(ȳ_in, arg2)
         darg1 = unbroadcast(arg1, broadcast(combine_dual_GeneralInteraction, ȳ, out, 1))
-        darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1,  5),
-                                sum_partials(o1, y1,  6), sum_partials(o1, y1,  7)), ȳ, out))
-        darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1,  8),
-                                sum_partials(o1, y1,  9), sum_partials(o1, y1, 10)), ȳ, out))
-        darg4 = unbroadcast(arg4, broadcast(combine_dual_Atom, ȳ, out, 11, 12, 13, 14))
-        darg5 = unbroadcast(arg5, broadcast(combine_dual_Atom, ȳ, out, 15, 16, 17, 18))
-        darg6 = unbroadcast(arg6, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1, 19),
-                                sum_partials(o1, y1, 20), sum_partials(o1, y1, 21)), ȳ, out))
+        darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1,  6),
+                                sum_partials(o1, y1,  7), sum_partials(o1, y1,  8)), ȳ, out))
+        darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1,  9),
+                                sum_partials(o1, y1, 10), sum_partials(o1, y1, 11)), ȳ, out))
+        darg4 = unbroadcast(arg4, broadcast(combine_dual_Atom, ȳ, out, 12, 13, 14, 15))
+        darg5 = unbroadcast(arg5, broadcast(combine_dual_Atom, ȳ, out, 16, 17, 18, 19))
+        darg6 = unbroadcast(arg6, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1, 20),
+                                sum_partials(o1, y1, 21), sum_partials(o1, y1, 22)), ȳ, out))
         darg7 = nothing
         darg8 = nothing
         return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6, darg7, darg8)
