@@ -71,7 +71,7 @@ function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu:
     kb = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
     bonds = [HarmonicBond(b0=b0, kb=kb) for i in 1:(n_atoms ÷ 2)]
     specific_inter_lists = (InteractionList2Atoms(collect(1:2:n_atoms), collect(2:2:n_atoms),
-                            gpu ? cu(bonds) : bonds),)
+                            repeat([""], length(bonds)), gpu ? cu(bonds) : bonds),)
 
     neighbor_finder = NoNeighborFinder()
     cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")

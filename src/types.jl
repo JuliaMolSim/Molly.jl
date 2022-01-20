@@ -41,7 +41,7 @@ Custom neighbor finders should sub-type this type.
 abstract type AbstractNeighborFinder end
 
 """
-    InteractionList2Atoms(is, js, inters)
+    InteractionList2Atoms(is, js, types, inters)
     InteractionList2Atoms(inter_type)
 
 A list of specific interactions between two atoms.
@@ -49,11 +49,12 @@ A list of specific interactions between two atoms.
 struct InteractionList2Atoms{T}
     is::Vector{Int}
     js::Vector{Int}
+    types::Vector{String}
     inters::T
 end
 
 """
-    InteractionList3Atoms(is, js, ks, inters)
+    InteractionList3Atoms(is, js, ks, types, inters)
     InteractionList3Atoms(inter_type)
 
 A list of specific interactions between three atoms.
@@ -62,11 +63,12 @@ struct InteractionList3Atoms{T}
     is::Vector{Int}
     js::Vector{Int}
     ks::Vector{Int}
+    types::Vector{String}
     inters::T
 end
 
 """
-    InteractionList4Atoms(is, js, ks, ls, inters)
+    InteractionList4Atoms(is, js, ks, ls, types, inters)
     InteractionList4Atoms(inter_type)
 
 A list of specific interactions between four atoms.
@@ -76,12 +78,13 @@ struct InteractionList4Atoms{T}
     js::Vector{Int}
     ks::Vector{Int}
     ls::Vector{Int}
+    types::Vector{String}
     inters::T
 end
 
-InteractionList2Atoms(T) = InteractionList2Atoms{Vector{T}}([], [], T[])
-InteractionList3Atoms(T) = InteractionList3Atoms{Vector{T}}([], [], [], T[])
-InteractionList4Atoms(T) = InteractionList4Atoms{Vector{T}}([], [], [], [], T[])
+InteractionList2Atoms(T) = InteractionList2Atoms{Vector{T}}([], [], [], T[])
+InteractionList3Atoms(T) = InteractionList3Atoms{Vector{T}}([], [], [], [], T[])
+InteractionList4Atoms(T) = InteractionList4Atoms{Vector{T}}([], [], [], [], [], T[])
 
 """
     Atom(; <keyword arguments>)

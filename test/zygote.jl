@@ -76,6 +76,7 @@
             collect(1:15),
             collect(16:30),
             collect(31:45),
+            repeat([""], 15),
             gpu ? cu(angles_inner) : angles_inner,
         )
         torsions_inner = [PeriodicTorsion(
@@ -89,6 +90,7 @@
             collect(11:20),
             collect(21:30),
             collect(31:40),
+            repeat([""], 10),
             gpu ? cu(torsions_inner) : torsions_inner,
         )
         neighbor_finder = DistanceVecNeighborFinder(
@@ -105,7 +107,12 @@
             end
 
             bonds_inner = [HarmonicBond(bond_dists[i], kb) for i in 1:(n_atoms ÷ 2)]
-            bonds = InteractionList2Atoms(bond_is, bond_js, gpu ? cu(bonds_inner) : bonds_inner)
+            bonds = InteractionList2Atoms(
+                bond_is,
+                bond_js,
+                repeat([""], length(bonds_inner)),
+                gpu ? cu(bonds_inner) : bonds_inner,
+            )
             cs = deepcopy(forward ? coords_dual : coords)
             vs = deepcopy(forward ? velocities_dual : velocities)
 

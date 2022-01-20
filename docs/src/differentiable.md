@@ -179,12 +179,14 @@ function loss(θ)
         InteractionList2Atoms(
             [1, 2, 4, 5],
             [2, 3, 5, 6],
+            ["", "", "", ""],
             [HarmonicBond(0.7, 100.0) for _ in 1:4],
         ),
         InteractionList3Atoms(
             [1, 4],
             [2, 5],
             [3, 6],
+            ["", ""],
             [HarmonicAngle(θ, 10.0), HarmonicAngle(θ, 10.0)],
         ),
     )
@@ -308,7 +310,7 @@ function loss()
     atoms = [Atom(0, 0.0f0, mass, 0.0f0, 0.0f0) for i in 1:n_atoms]
     loggers = Dict("coords" => CoordinateLogger(Float32, 10))
     specific_inter_lists = (
-        InteractionList2Atoms([1], [3], [NNBond()]),
+        InteractionList2Atoms([1], [3], [""], [NNBond()]),
     )
 
     s = System(

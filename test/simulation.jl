@@ -106,8 +106,12 @@ end
     for i in 1:length(coords)
         push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
     end
-    bonds = InteractionList2Atoms(collect(1:(n_atoms ÷ 2)), collect((1 + n_atoms ÷ 2):n_atoms),
-                [HarmonicBond(b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)])
+    bonds = InteractionList2Atoms(
+        collect(1:(n_atoms ÷ 2)),
+        collect((1 + n_atoms ÷ 2):n_atoms),
+        repeat([""], n_atoms ÷ 2),
+        [HarmonicBond(b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)],
+    )
     nb_matrix = trues(n_atoms, n_atoms)
     for i in 1:(n_atoms ÷ 2)
         nb_matrix[i, i + (n_atoms ÷ 2)] = false
@@ -253,7 +257,7 @@ end
         kb = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
         bonds = [HarmonicBond(b0=b0, kb=kb) for i in 1:(n_atoms ÷ 2)]
         specific_inter_lists = (InteractionList2Atoms(collect(1:2:n_atoms), collect(2:2:n_atoms),
-                                gpu ? cu(bonds) : bonds),)
+                                repeat([""], length(bonds)), gpu ? cu(bonds) : bonds),)
 
         neighbor_finder = NoNeighborFinder()
         cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
