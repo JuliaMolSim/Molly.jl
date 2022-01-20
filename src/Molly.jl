@@ -50,6 +50,7 @@ include("loggers.jl")
 include("analysis.jl")
 include("chain_rules.jl")
 include("zygote.jl")
+include("gradients.jl")
 include("setup.jl")
 
 function __init__()
