@@ -63,13 +63,14 @@ function inject_interaction_list(inter::InteractionList4Atoms, params_dic, gpu)
                           inter.types, inters_grad)
 end
 
-function inject_interaction(inter::LennardJones{S, C, W, F, E}, params_dic) where {S, C, W, F, E}
+function inject_interaction(inter::LennardJones{S, C, W, WS, F, E}, params_dic) where {S, C, W, WS, F, E}
     key_prefix = "inter_LJ_"
-    LennardJones{S, C, W, F, E}(
+    LennardJones{S, C, W, WS, F, E}(
         inter.cutoff,
         inter.nl_only,
         inter.lorentz_mixing,
         dict_get(params_dic, key_prefix * "weight_14", inter.weight_14),
+        dict_get(params_dic, key_prefix * "weight_solute_solvent", inter.weight_solute_solvent),
         inter.force_units,
         inter.energy_units,
     )

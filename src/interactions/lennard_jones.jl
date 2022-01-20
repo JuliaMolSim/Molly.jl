@@ -1,7 +1,8 @@
 export LennardJones
 
 @doc raw"""
-    LennardJones(; cutoff, nl_only, lorentz_mixing, weight_14, force_units, energy_units, skip_shortcut)
+    LennardJones(; cutoff, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
+                 force_units, energy_units, skip_shortcut)
 
 The Lennard-Jones 6-12 interaction. The potential is given by
 ```math
@@ -15,11 +16,12 @@ and the force on each atom by
 \end{aligned}
 ```
 """
-struct LennardJones{S, C, W, F, E} <: GeneralInteraction
+struct LennardJones{S, C, W, WS, F, E} <: GeneralInteraction
     cutoff::C
     nl_only::Bool
     lorentz_mixing::Bool
     weight_14::W
+    weight_solute_solvent::WS
     force_units::F
     energy_units::E
 end
@@ -29,11 +31,13 @@ function LennardJones(;
                         nl_only=false,
                         lorentz_mixing=true,
                         weight_14=1,
+                        weight_solute_solvent=1,
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
                         skip_shortcut=false)
-    return LennardJones{skip_shortcut, typeof(cutoff), typeof(weight_14), typeof(force_units), typeof(energy_units)}(
-        cutoff, nl_only, lorentz_mixing, weight_14, force_units, energy_units)
+    return LennardJones{skip_shortcut, typeof(cutoff), typeof(weight_14), typeof(weight_solute_solvent),
+                        typeof(force_units), typeof(energy_units)}(
+        cutoff, nl_only, lorentz_mixing, weight_14, weight_solute_solvent, force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::LennardJones{S, C},
