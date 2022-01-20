@@ -384,11 +384,13 @@ function System(coord_file::AbstractString,
     for ai in 1:n_atoms
         atom_name = Chemfiles.name(Chemfiles.Atom(top, ai - 1))
         res = Chemfiles.residue_for_atom(top, ai - 1)
+        res_num = Chemfiles.id(res)
         res_name = residue_name(res, res_num_to_standard, rename_terminal_res)
         type = force_field.residue_types[res_name].types[atom_name]
         charge = force_field.residue_types[res_name].charges[atom_name]
         at = force_field.atom_types[type]
-        push!(atoms, Atom(index=ai, charge=charge, mass=at.mass, σ=at.σ, ϵ=at.ϵ))
+        solute = res_num_to_standard[res_num] || res_name in ("ACE", "NME")
+        push!(atoms, Atom(index=ai, charge=charge, mass=at.mass, σ=at.σ, ϵ=at.ϵ, solute=solute))
         push!(atoms_data, AtomData(atom_type=type, atom_name=atom_name, res_number=Chemfiles.id(res),
                                     res_name=Chemfiles.name(res), element=at.element))
         nb_matrix[ai, ai] = false
@@ -799,9 +801,10 @@ function System(T::Type,
             else
                 mass = parse(T, c[8])
             end
+            solute = c[4] in keys(BioStructures.threeletter_to_aa)
             atom_index = length(atoms) + 1
-            push!(atoms, Atom(index=atom_index, charge=charge, mass=mass,
-                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
+            push!(atoms, Atom(index=atom_index, charge=charge, mass=mass, σ=atomtypes[attype].σ,
+                                ϵ=atomtypes[attype].ϵ, solute=solute))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=c[5], res_number=parse(Int, c[3]),
                                         res_name=c[4]))
         elseif current_field == "bonds"
@@ -899,7 +902,7 @@ function System(T::Type,
             end
             atom_index = length(atoms) + 1
             push!(atoms, Atom(index=atom_index, charge=temp_charge, mass=atomtypes[attype].mass,
-                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
+                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ, solute=false))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=atname, res_number=parse(Int, l[1:5]),
                                         res_name=strip(l[6:10])))
 
@@ -976,7 +979,7 @@ function System(T::Type,
                                                         torsions.types, [torsions.inters...]))
     end
 
-    atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ) for a in atoms]
+    atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ, solute=a.solute) for a in atoms]
 
     if gpu_diff_safe
         neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(nb_matrix) : nb_matrix,

@@ -101,9 +101,9 @@
 
         function loss(σ, kb)
             if f32
-                atoms = [Atom(i, i % 2 == 0 ? -0.02f0 : 0.02f0, atom_mass, σ, 0.2f0) for i in 1:n_atoms]
+                atoms = [Atom(i, i % 2 == 0 ? -0.02f0 : 0.02f0, atom_mass, σ, 0.2f0, false) for i in 1:n_atoms]
             else
-                atoms = [Atom(i, i % 2 == 0 ? -0.02 : 0.02, atom_mass, σ, 0.2) for i in 1:n_atoms]
+                atoms = [Atom(i, i % 2 == 0 ? -0.02 : 0.02, atom_mass, σ, 0.2, false) for i in 1:n_atoms]
             end
 
             bonds_inner = [HarmonicBond(bond_dists[i], kb) for i in 1:(n_atoms ÷ 2)]

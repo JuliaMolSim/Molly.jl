@@ -31,6 +31,7 @@ function inject_atom(at, at_data, params_dic)
         dict_get(params_dic, key_prefix * "mass"  , at.mass  ),
         dict_get(params_dic, key_prefix * "σ"     , at.σ     ),
         dict_get(params_dic, key_prefix * "ϵ"     , at.ϵ     ),
+        at.solute,
     )
 end
 

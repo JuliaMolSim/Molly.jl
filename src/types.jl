@@ -101,6 +101,7 @@ The types used should be bits types if the GPU is going to be used.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
+- `solute::Bool=false`: whether the atom is part of the solute.
 """
 struct Atom{C, M, S, E}
     index::Int
@@ -108,6 +109,7 @@ struct Atom{C, M, S, E}
     mass::M
     σ::S
     ϵ::E
+    solute::Bool
 end
 
 function Atom(;
@@ -115,8 +117,9 @@ function Atom(;
                 charge=0.0,
                 mass=0.0u"u",
                 σ=0.0u"nm",
-                ϵ=0.0u"kJ * mol^-1")
-    return Atom(index, charge, mass, σ, ϵ)
+                ϵ=0.0u"kJ * mol^-1",
+                solute=false)
+    return Atom(index, charge, mass, σ, ϵ, solute)
 end
 
 """

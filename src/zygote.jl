@@ -14,11 +14,11 @@ Base.:+(x::Real, y::Zygote.OneElement) = x .+ y
 Base.:+(x::Zygote.OneElement, y::Real) = x .+ y
 
 function Base.:+(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
-    Atom{T, T, T, T}(0, x.charge + y.charge, x.mass + y.mass, x.σ + y.σ, x.ϵ + y.ϵ)
+    Atom{T, T, T, T}(0, x.charge + y.charge, x.mass + y.mass, x.σ + y.σ, x.ϵ + y.ϵ, false)
 end
 
 function Base.:-(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
-    Atom{T, T, T, T}(0, x.charge - y.charge, x.mass - y.mass, x.σ - y.σ, x.ϵ - y.ϵ)
+    Atom{T, T, T, T}(0, x.charge - y.charge, x.mass - y.mass, x.σ - y.σ, x.ϵ - y.ϵ, false)
 end
 
 function Zygote.accum(x::LennardJones{S, C, W, F, E}, y::LennardJones{S, C, W, F, E}) where {S, C, W, F, E}
@@ -42,7 +42,7 @@ function Zygote.accum(x::Tuple{NTuple{N, Int}, NTuple{N, T}, NTuple{N, E}},
     ntuple(n -> 0, N), x[2] .+ y[2], x[3] .+ y[3]
 end
 
-Base.zero(::Type{Atom{T, T, T, T}}) where {T} = Atom(0, zero(T), zero(T), zero(T), zero(T))
+Base.zero(::Type{Atom{T, T, T, T}}) where {T} = Atom(0, zero(T), zero(T), zero(T), zero(T), false)
 atom_or_empty(at::Atom, T) = at
 atom_or_empty(at::Nothing, T) = zero(Atom{T, T, T, T})
 
@@ -63,7 +63,7 @@ end
 Zygote._zero(xs::AbstractArray{<:StaticVector}, T) = fill!(similar(xs, T), zero(T))
 
 function Zygote._zero(xs::AbstractArray{Atom{T, T, T, T}}, ::Type{Atom{T, T, T, T}}) where {T}
-    fill!(similar(xs), Atom{T, T, T, T}(0, zero(T), zero(T), zero(T), zero(T)))
+    fill!(similar(xs), Atom{T, T, T, T}(0, zero(T), zero(T), zero(T), zero(T), false))
 end
 
 function Base.zero(::Type{Union{Nothing, SizedVector{D, T, Vector{T}}}}) where {D, T}
@@ -155,7 +155,7 @@ function dualize_atom_fb1(at::Atom)
     dual_σ = @dualize(σ, 22, 14)
     dual_ϵ = @dualize(ϵ, 22, 15)
     return Atom{typeof(dual_charge), typeof(dual_mass), typeof(dual_σ), typeof(dual_ϵ)}(
-                at.index, dual_charge, dual_mass, dual_σ, dual_ϵ)
+                at.index, dual_charge, dual_mass, dual_σ, dual_ϵ, at.solute)
 end
 
 function dualize_atom_fb2(at::Atom)
@@ -165,7 +165,7 @@ function dualize_atom_fb2(at::Atom)
     dual_σ = @dualize(σ, 22, 18)
     dual_ϵ = @dualize(ϵ, 22, 19)
     return Atom{typeof(dual_charge), typeof(dual_mass), typeof(dual_σ), typeof(dual_ϵ)}(
-                at.index, dual_charge, dual_mass, dual_σ, dual_ϵ)
+                at.index, dual_charge, dual_mass, dual_σ, dual_ϵ, at.solute)
 end
 
 function dual_function_svec(f::F) where F
@@ -196,7 +196,7 @@ function dual_function_atom(f::F) where F
     function (arg1)
         charge, mass, σ, ϵ = arg1.charge, arg1.mass, arg1.σ, arg1.ϵ
         ds1 = Atom(arg1.index, @dualize(charge, 4, 1), @dualize(mass, 4, 2),
-                    @dualize(σ, 4, 3), @dualize(ϵ, 4, 4))
+                    @dualize(σ, 4, 3), @dualize(ϵ, 4, 4), arg1.solute)
         return f(ds1)
     end
 end
@@ -336,7 +336,7 @@ end
         ȳ = modify_grad(ȳ_in, arg1)
         barg1 = broadcast(ȳ, out) do y1, o1
             ps = partials(o1)
-            Atom(0, y1 * ps[1], y1 * ps[2], y1 * ps[3], y1 * ps[4])
+            Atom(0, y1 * ps[1], y1 * ps[2], y1 * ps[3], y1 * ps[4], false)
         end
         darg1 = unbroadcast(arg1, barg1)
         (nothing, nothing, darg1)
@@ -402,6 +402,7 @@ function combine_dual_Atom(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}
         y1[1] * ps1[j] + y1[2] * ps2[j] + y1[3] * ps3[j],
         y1[1] * ps1[k] + y1[2] * ps2[k] + y1[3] * ps3[k],
         y1[1] * ps1[l] + y1[2] * ps2[l] + y1[3] * ps3[l],
+        false,
     )
 end
 

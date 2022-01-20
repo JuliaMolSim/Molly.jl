@@ -68,7 +68,7 @@ simulator = VelocityVerlet(
 )
 
 function loss(σ)
-    atoms = [Atom(0, 0.0, atom_mass, σ, 0.2) for i in 1:n_atoms]
+    atoms = [Atom(0, 0.0, atom_mass, σ, 0.2, false) for i in 1:n_atoms]
     loggers = Dict("coords" => CoordinateLogger(Float64, 10))
 
     s = System(
@@ -173,7 +173,7 @@ simulator = VelocityVerlet(
 )
 
 function loss(θ)
-    atoms = [Atom(0, 0.0, atom_mass, 0.0, 0.0) for i in 1:n_atoms]
+    atoms = [Atom(0, 0.0, atom_mass, 0.0, 0.0, false) for i in 1:n_atoms]
     loggers = Dict("coords" => CoordinateLogger(Float64, 2))
     specific_inter_lists = (
         InteractionList2Atoms(
@@ -307,7 +307,7 @@ velocities = zero(coords)
 simulator = VelocityVerlet(dt=0.02f0, coupling=BerendsenThermostat(temp, 0.5f0))
 
 function loss()
-    atoms = [Atom(0, 0.0f0, mass, 0.0f0, 0.0f0) for i in 1:n_atoms]
+    atoms = [Atom(0, 0.0f0, mass, 0.0f0, 0.0f0, false) for i in 1:n_atoms]
     loggers = Dict("coords" => CoordinateLogger(Float32, 10))
     specific_inter_lists = (
         InteractionList2Atoms([1], [3], [""], [NNBond()]),

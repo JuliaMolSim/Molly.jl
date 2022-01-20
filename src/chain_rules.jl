@@ -18,7 +18,7 @@ end
 function ChainRulesCore.rrule(T::Type{<:Atom}, vs...)
     Y = T(vs...)
     function Atom_pullback(Ȳ)
-        return NoTangent(), Ȳ.index, Ȳ.charge, Ȳ.mass, Ȳ.σ, Ȳ.ϵ
+        return NoTangent(), Ȳ.index, Ȳ.charge, Ȳ.mass, Ȳ.σ, Ȳ.ϵ, Ȳ.solute
     end
     return Y, Atom_pullback
 end
