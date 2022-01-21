@@ -57,7 +57,11 @@ end
     # Lorentz-Berthelot mixing rules use the arithmetic average for σ
     # Otherwise use the geometric average
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-    ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
+    if (atom_i.solute && !atom_j.solute) || (atom_j.solute && !atom_i.solute)
+        ϵ = inter.weight_solute_solvent * sqrt(atom_i.ϵ * atom_j.ϵ)
+    else
+        ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
+    end
 
     cutoff = inter.cutoff
     σ2 = σ^2
@@ -107,7 +111,11 @@ end
     end
 
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-    ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
+    if (atom_i.solute && !atom_j.solute) || (atom_j.solute && !atom_i.solute)
+        ϵ = inter.weight_solute_solvent * sqrt(atom_i.ϵ * atom_j.ϵ)
+    else
+        ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
+    end
 
     cutoff = inter.cutoff
     σ2 = σ^2
