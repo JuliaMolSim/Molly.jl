@@ -45,9 +45,9 @@ function Zygote.accum_sum(xs::AbstractArray{Tuple{LennardJones{S, C, W, WS, F, E
     ))
 end
 
-function Zygote.accum(x::Tuple{NTuple{N, Int}, NTuple{N, T}, NTuple{N, E}},
-                        y::Tuple{NTuple{N, Int}, NTuple{N, T}, NTuple{N, E}}) where {N, T, E}
-    ntuple(n -> 0, N), x[2] .+ y[2], x[3] .+ y[3]
+function Zygote.accum(x::Tuple{NTuple{N, Int}, NTuple{N, T}, NTuple{N, E}, Bool},
+                        y::Tuple{NTuple{N, Int}, NTuple{N, T}, NTuple{N, E}, Bool}) where {N, T, E}
+    ntuple(n -> 0, N), x[2] .+ y[2], x[3] .+ y[3], false
 end
 
 Base.zero(::Type{Atom{T, T, T, T}}) where {T} = Atom(0, zero(T), zero(T), zero(T), zero(T), false)
