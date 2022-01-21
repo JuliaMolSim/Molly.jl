@@ -88,9 +88,8 @@ function simulate!(sys::System{D, false},
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n; parallel=parallel)
+            accels_t = accels_t_dt
         end
-
-        accels_t = accels_t_dt
     end
     return sys
 end
@@ -99,7 +98,7 @@ function simulate!(sys::System{D, true},
                     sim::VelocityVerlet,
                     n_steps::Integer;
                     parallel::Bool=true) where {D, S}
-    if length([inter for inter in values(sys.general_inters) if !inter.nl_only]) > 0
+    if any(inter -> !inter.nl_only, values(sys.general_inters))
         neighbors_all = all_neighbors(length(sys))
     else
         neighbors_all = nothing
@@ -120,9 +119,8 @@ function simulate!(sys::System{D, true},
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n)
+            accels_t = accels_t_dt
         end
-
-        accels_t = accels_t_dt
     end
     return sys
 end
