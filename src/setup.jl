@@ -268,6 +268,8 @@ end
 
 atom_types_to_string(atom_types...) = join(map(at -> at == "" ? "-" : at, atom_types), "/")
 
+atom_types_to_tuple(atom_types) = tuple(map(at -> at == "-" ? "" : at, split(atom_types, "/"))...)
+
 """
     System(coordinate_file, force_field; <keyword arguments>)
 

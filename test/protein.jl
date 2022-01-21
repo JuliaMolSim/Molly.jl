@@ -145,6 +145,12 @@ end
     @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
     @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 
+    params_dic = extract_parameters(sys_nounits, ff_nounits)
+    @test length(params_dic) == 639
+    atoms_grad, gis_grad, sis_grad = inject_gradients(sys_nounits, params_dic)
+    @test atoms_grad == sys_nounits.atoms
+    @test gis_grad == sys_nounits.general_inters
+
     # Test the same simulation on the GPU
     if run_gpu_tests
         sys = System(
@@ -173,5 +179,11 @@ end
         vels_diff = Array(sys_nounits.velocities * u"nm * ps^-1") .- vels_openmm
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
         @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
+
+        params_dic_gpu = extract_parameters(sys_nounits, ff_nounits)
+        @test params_dic == params_dic_gpu
+        atoms_grad, gis_grad, sis_grad = inject_gradients(sys_nounits, params_dic_gpu)
+        @test atoms_grad == sys_nounits.atoms
+        @test gis_grad == sys_nounits.general_inters
     end
 end
