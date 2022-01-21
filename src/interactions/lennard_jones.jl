@@ -40,6 +40,9 @@ function LennardJones(;
         cutoff, nl_only, lorentz_mixing, weight_14, weight_solute_solvent, force_units, energy_units)
 end
 
+is_solute(at::Atom) = at.solute
+is_solute(at) = false
+
 @inline @inbounds function force(inter::LennardJones{S, C},
                                     dr,
                                     coord_i,
@@ -57,7 +60,7 @@ end
     # Lorentz-Berthelot mixing rules use the arithmetic average for σ
     # Otherwise use the geometric average
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-    if (atom_i.solute && !atom_j.solute) || (atom_j.solute && !atom_i.solute)
+    if (is_solute(atom_i) && !is_solute(atom_j)) || (is_solute(atom_j) && !is_solute(atom_i))
         ϵ = inter.weight_solute_solvent * sqrt(atom_i.ϵ * atom_j.ϵ)
     else
         ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
@@ -111,7 +114,7 @@ end
     end
 
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-    if (atom_i.solute && !atom_j.solute) || (atom_j.solute && !atom_i.solute)
+    if (is_solute(atom_i) && !is_solute(atom_j)) || (is_solute(atom_j) && !is_solute(atom_i))
         ϵ = inter.weight_solute_solvent * sqrt(atom_i.ϵ * atom_j.ϵ)
     else
         ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
