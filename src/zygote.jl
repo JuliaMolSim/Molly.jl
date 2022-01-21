@@ -154,7 +154,7 @@ function dualize_fb(inter::PeriodicTorsion{6, T, E}) where {T, E}
         @dualize(k4, 27, 10), @dualize(k5, 27, 11), @dualize(k6, 27, 12),
     )
     return PeriodicTorsion{6, eltype(dual_phases), eltype(dual_ks)}(inter.periodicities,
-                            dual_phases, dual_ks)
+                            dual_phases, dual_ks, inter.proper)
 end
 
 function dualize_atom_fb1(at::Atom)
@@ -401,6 +401,7 @@ function combine_dual_SpecificInteraction(inter::PeriodicTorsion{6}, y1, o1, i::
             y1.f1[1] * partials(o1.f1[1], i + 10) + y1.f1[2] * partials(o1.f1[2], i + 10) + y1.f1[3] * partials(o1.f1[3], i + 10) + y1.f2[1] * partials(o1.f2[1], i + 10) + y1.f2[2] * partials(o1.f2[2], i + 10) + y1.f2[3] * partials(o1.f2[3], i + 10) + y1.f3[1] * partials(o1.f3[1], i + 10) + y1.f3[2] * partials(o1.f3[2], i + 10) + y1.f3[3] * partials(o1.f3[3], i + 10) + y1.f4[1] * partials(o1.f4[1], i + 10) + y1.f4[2] * partials(o1.f4[2], i + 10) + y1.f4[3] * partials(o1.f4[3], i + 10),
             y1.f1[1] * partials(o1.f1[1], i + 11) + y1.f1[2] * partials(o1.f1[2], i + 11) + y1.f1[3] * partials(o1.f1[3], i + 11) + y1.f2[1] * partials(o1.f2[1], i + 11) + y1.f2[2] * partials(o1.f2[2], i + 11) + y1.f2[3] * partials(o1.f2[3], i + 11) + y1.f3[1] * partials(o1.f3[1], i + 11) + y1.f3[2] * partials(o1.f3[2], i + 11) + y1.f3[3] * partials(o1.f3[3], i + 11) + y1.f4[1] * partials(o1.f4[1], i + 11) + y1.f4[2] * partials(o1.f4[2], i + 11) + y1.f4[3] * partials(o1.f4[3], i + 11),
         ),
+        false,
     )
 end
 

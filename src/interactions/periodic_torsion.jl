@@ -1,7 +1,7 @@
 export PeriodicTorsion
 
 """
-    PeriodicTorsion(; periodicities, phases, ks)
+    PeriodicTorsion(; periodicities, phases, ks, proper)
 
 A periodic torsion angle between four atoms.
 """
@@ -9,9 +9,11 @@ struct PeriodicTorsion{N, T, E} <: SpecificInteraction
     periodicities::NTuple{N, Int}
     phases::NTuple{N, T}
     ks::NTuple{N, E}
+    proper::Bool
 end
 
-function PeriodicTorsion(; periodicities, phases, ks, n_terms=length(periodicities))
+function PeriodicTorsion(; periodicities, phases, ks, proper::Bool=true,
+                            n_terms=length(periodicities))
     T, E = eltype(phases), eltype(ks)
     if n_terms > length(periodicities)
         n_to_add = n_terms - length(periodicities)
@@ -22,7 +24,7 @@ function PeriodicTorsion(; periodicities, phases, ks, n_terms=length(periodiciti
         periodicities_pad, phases_pad, ks_pad = periodicities, phases, ks
     end
     PeriodicTorsion{n_terms, T, E}(tuple(periodicities_pad...), tuple(phases_pad...),
-                                    tuple(ks_pad...))
+                                    tuple(ks_pad...), proper)
 end
 
 @inline @inbounds function force(d::PeriodicTorsion, coords_i, coords_j, coords_k,

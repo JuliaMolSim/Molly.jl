@@ -95,15 +95,15 @@ struct OpenMMResiduetype{C}
 end
 
 """
-    PeriodicTorsionType(proper, periodicities, phases, ks)
+    PeriodicTorsionType(periodicities, phases, ks, proper)
 
 A periodic torsion type.
 """
 struct PeriodicTorsionType{T, E}
-    proper::Bool
     periodicities::Vector{Int}
     phases::Vector{T}
     ks::Vector{E}
+    proper::Bool
 end
 
 """
@@ -208,7 +208,7 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
                         phase_i += 1
                         phase_present = haskey(torsion, "periodicity$phase_i")
                     end
-                    torsion_type = PeriodicTorsionType(proper, periodicities, phases, ks)
+                    torsion_type = PeriodicTorsionType(periodicities, phases, ks, proper)
                     torsion_types[(atom_type_1, atom_type_2, atom_type_3, atom_type_4)] = torsion_type
                 end
             elseif entry_name == "NonbondedForce"
@@ -494,7 +494,7 @@ function System(coord_file::AbstractString,
         push!(torsions.ls, a4z + 1)
         push!(torsions.types, atom_types_to_string(best_key...))
         push!(torsions.inters, PeriodicTorsion(periodicities=torsion_type.periodicities,
-                                                phases=torsion_type.phases, ks=torsion_type.ks))
+                    phases=torsion_type.phases, ks=torsion_type.ks, proper=true))
         matrix_14[a1z + 1, a4z + 1] = true
         matrix_14[a4z + 1, a1z + 1] = true
     end
@@ -601,7 +601,7 @@ function System(coord_file::AbstractString,
             push!(impropers.ls, a4)
             push!(impropers.types, atom_types_to_string(best_key...))
             push!(impropers.inters, PeriodicTorsion(periodicities=torsion_type.periodicities,
-                                                    phases=torsion_type.phases, ks=torsion_type.ks))
+                    phases=torsion_type.phases, ks=torsion_type.ks, proper=false))
         end
     end
 
@@ -625,9 +625,9 @@ function System(coord_file::AbstractString,
     #   and for taking gradients
     # For now always pad to 6 terms
     torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                            n_terms=6) for t in torsions.inters]
+                                            proper=t.proper, n_terms=6) for t in torsions.inters]
     improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                            n_terms=6) for t in impropers.inters]
+                                            proper=t.proper, n_terms=6) for t in impropers.inters]
 
     # Ensure array types are concrete
     if gpu
