@@ -17,8 +17,8 @@ using Test
 
 # Allow testing of particular components
 const GROUP = get(ENV, "GROUP", "All")
-if GROUP == "Zygote"
-    @warn "Only running Zygote tests as GROUP is set to Zygote"
+if GROUP == "Protein" || GROUP == "Zygote"
+    @warn "Only running $GROUP tests as GROUP is set to $GROUP"
 end
 
 # GLMakie doesn't work on CI
@@ -62,8 +62,11 @@ if GROUP == "All"
 
     include("basic.jl")
     include("simulation.jl")
-    include("protein.jl")
     include("agent.jl")
+end
+
+if GROUP == "All" || GROUP == "Protein"
+    include("protein.jl")
 end
 
 if GROUP == "All" || GROUP == "Zygote"
