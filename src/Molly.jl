@@ -13,7 +13,6 @@ using EzXML
 using ForwardDiff
 using KernelDensity
 using NearestNeighbors
-import NNlib
 using ProgressMeter
 using Reexport
 using Requires
