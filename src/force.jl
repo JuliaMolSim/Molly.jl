@@ -108,6 +108,14 @@ end
 getindices_i(arr, neighbors) = @view arr[neighbors.nbsi]
 getindices_j(arr, neighbors) = @view arr[neighbors.nbsj]
 
+@views function forces_inters(inters, coords, atoms, neighbors, box_size, force_units, weights_14)
+    coords_i, atoms_i = getindices_i(coords, neighbors), getindices_i(atoms, neighbors)
+    coords_j, atoms_j = getindices_j(coords, neighbors), getindices_j(atoms, neighbors)
+    @inbounds nb_forces = force_nounit.((inters,), coords_i, coords_j, atoms_i, atoms_j,
+                                        (box_size,), force_units, weights_14)
+    return sum_forces(nb_forces, neighbors)
+end
+
 """
     SpecificForce2Atoms(f1, f2)
 
@@ -256,20 +264,14 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
 
     general_inters_nonl = filter(inter -> !inter.nl_only, values(s.general_inters))
     @views if length(general_inters_nonl) > 0
-        coords_i, atoms_i = getindices_i(coords, neighbors_all), getindices_i(atoms, neighbors_all)
-        coords_j, atoms_j = getindices_j(coords, neighbors_all), getindices_j(atoms, neighbors_all)
-        @inbounds nb_forces = force_nounit.((general_inters_nonl,), coords_i, coords_j, atoms_i, atoms_j,
-                                            (s.box_size,), s.force_units, false)
-        fs += sum_forces(nb_forces, neighbors_all)
+        fs += Zygote.checkpointed(forces_inters, general_inters_nonl, coords, atoms, neighbors_all,
+                                    s.box_size, s.force_units, false)
     end
 
     general_inters_nl = filter(inter -> inter.nl_only, values(s.general_inters))
-    @views if length(general_inters_nl) > 0 && length(neighbors.nbsi) > 0
-        coords_i, atoms_i = getindices_i(coords, neighbors), getindices_i(atoms, neighbors)
-        coords_j, atoms_j = getindices_j(coords, neighbors), getindices_j(atoms, neighbors)
-        @inbounds nb_forces = force_nounit.((general_inters_nl,), coords_i, coords_j, atoms_i, atoms_j,
-                                            (s.box_size,), s.force_units, neighbors.weights_14)
-        fs += sum_forces(nb_forces, neighbors)
+    if length(general_inters_nl) > 0 && length(neighbors.nbsi) > 0
+        fs += Zygote.checkpointed(forces_inters, general_inters_nl, coords, atoms, neighbors,
+                                    s.box_size, s.force_units, neighbors.weights_14)
     end
 
     for inter_list in values(s.specific_inter_lists)
