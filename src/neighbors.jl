@@ -18,11 +18,15 @@ set to `false`.
 struct NoNeighborFinder <: AbstractNeighborFinder end
 
 """
-    find_neighbors(system, neighbor_finder, current_neighbors=nothing, step_n=0; parallel=true)
+    find_neighbors(system, neighbor_finder, current_neighbors=nothing,
+                    step_n=0; parallel=true)
+    find_neighbors(system; parallel=true)
 
 Obtain a list of close atoms in a system.
 Custom neighbor finders should implement this function.
 """
+find_neighbors(s::System; kwargs...) = find_neighbors(s, s.neighbor_finder; kwargs...)
+
 function find_neighbors(s::System,
                         nf::NoNeighborFinder,
                         current_neighbors=nothing,
