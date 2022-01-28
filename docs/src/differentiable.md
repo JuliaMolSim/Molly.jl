@@ -53,13 +53,17 @@ n_atoms = 50
 n_steps = 500
 atom_mass = 10.0
 box_size = SVector(3.0, 3.0, 3.0)
-temp = 0.01
+temp = 1.0
 neighbor_finder = DistanceVecNeighborFinder(
     nb_matrix=trues(n_atoms, n_atoms),
     n_steps=10,
     dist_cutoff=1.5,
 )
-general_inters = (LennardJones(nl_only=true),)
+lj = LennardJones(nl_only=true, force_units=NoUnits, energy_units=NoUnits)
+# Currently this is required too though here it does not affect the simulation
+crf = CoulombReactionField(dist_cutoff=1.5, nl_only=true, coulomb_const=0.0,
+                           force_units=NoUnits, energy_units=NoUnits)
+general_inters = (lj, crf)
 coords = place_atoms(n_atoms, box_size, 0.7)
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 simulator = VelocityVerlet(
@@ -105,7 +109,7 @@ We can use this gradient in a training loop to optimise `σ`, starting from an a
 ```julia
 function train()
     σlearn = 0.60 / scale_σ_to_dist
-    n_epochs = 20
+    n_epochs = 15
 
     for epoch_n in 1:n_epochs
         printfmt("Epoch {:>2}  |  ", epoch_n)
@@ -120,28 +124,23 @@ end
 train()
 ```
 ```
-Epoch  1  |  σ  0.535  |  Mean min sep expected  0.600  |  Mean min sep end  0.589  |  Loss  0.089  |  Grad  0.912
-Epoch  2  |  σ  0.525  |  Mean min sep expected  0.590  |  Mean min sep end  0.579  |  Loss  0.079  |  Grad  0.644
-Epoch  3  |  σ  0.519  |  Mean min sep expected  0.583  |  Mean min sep end  0.571  |  Loss  0.071  |  Grad  1.081
-Epoch  4  |  σ  0.508  |  Mean min sep expected  0.570  |  Mean min sep end  0.560  |  Loss  0.060  |  Grad  1.543
-Epoch  5  |  σ  0.493  |  Mean min sep expected  0.553  |  Mean min sep end  0.546  |  Loss  0.046  |  Grad  0.939
-Epoch  6  |  σ  0.483  |  Mean min sep expected  0.543  |  Mean min sep end  0.533  |  Loss  0.033  |  Grad  1.350
-Epoch  7  |  σ  0.470  |  Mean min sep expected  0.527  |  Mean min sep end  0.519  |  Loss  0.019  |  Grad  0.818
-Epoch  8  |  σ  0.462  |  Mean min sep expected  0.518  |  Mean min sep end  0.510  |  Loss  0.010  |  Grad  1.744
-Epoch  9  |  σ  0.444  |  Mean min sep expected  0.499  |  Mean min sep end  0.492  |  Loss  0.008  |  Grad -0.967
-Epoch 10  |  σ  0.454  |  Mean min sep expected  0.509  |  Mean min sep end  0.502  |  Loss  0.002  |  Grad  0.756
-Epoch 11  |  σ  0.446  |  Mean min sep expected  0.501  |  Mean min sep end  0.494  |  Loss  0.006  |  Grad -1.228
-Epoch 12  |  σ  0.459  |  Mean min sep expected  0.515  |  Mean min sep end  0.506  |  Loss  0.006  |  Grad  1.299
-Epoch 13  |  σ  0.446  |  Mean min sep expected  0.500  |  Mean min sep end  0.493  |  Loss  0.007  |  Grad -0.884
-Epoch 14  |  σ  0.454  |  Mean min sep expected  0.510  |  Mean min sep end  0.502  |  Loss  0.002  |  Grad  1.014
-Epoch 15  |  σ  0.444  |  Mean min sep expected  0.499  |  Mean min sep end  0.492  |  Loss  0.008  |  Grad -1.010
-Epoch 16  |  σ  0.454  |  Mean min sep expected  0.510  |  Mean min sep end  0.502  |  Loss  0.002  |  Grad  0.986
-Epoch 17  |  σ  0.445  |  Mean min sep expected  0.499  |  Mean min sep end  0.492  |  Loss  0.008  |  Grad -1.138
-Epoch 18  |  σ  0.456  |  Mean min sep expected  0.512  |  Mean min sep end  0.504  |  Loss  0.004  |  Grad  0.709
-Epoch 19  |  σ  0.449  |  Mean min sep expected  0.504  |  Mean min sep end  0.496  |  Loss  0.004  |  Grad -0.803
-Epoch 20  |  σ  0.457  |  Mean min sep expected  0.513  |  Mean min sep end  0.505  |  Loss  0.005  |  Grad  0.327
+Epoch  1  |  σ  0.535  |  Mean min sep expected  0.600  |  Mean min sep end  0.587  |  Loss  0.087  |  Grad  0.793
+Epoch  2  |  σ  0.527  |  Mean min sep expected  0.591  |  Mean min sep end  0.581  |  Loss  0.081  |  Grad  1.202
+Epoch  3  |  σ  0.515  |  Mean min sep expected  0.578  |  Mean min sep end  0.568  |  Loss  0.068  |  Grad  1.558
+Epoch  4  |  σ  0.499  |  Mean min sep expected  0.560  |  Mean min sep end  0.551  |  Loss  0.051  |  Grad  0.766
+Epoch  5  |  σ  0.491  |  Mean min sep expected  0.552  |  Mean min sep end  0.543  |  Loss  0.043  |  Grad  1.068
+Epoch  6  |  σ  0.481  |  Mean min sep expected  0.540  |  Mean min sep end  0.531  |  Loss  0.031  |  Grad  0.757
+Epoch  7  |  σ  0.473  |  Mean min sep expected  0.531  |  Mean min sep end  0.526  |  Loss  0.026  |  Grad  0.781
+Epoch  8  |  σ  0.465  |  Mean min sep expected  0.522  |  Mean min sep end  0.518  |  Loss  0.018  |  Grad  1.549
+Epoch  9  |  σ  0.450  |  Mean min sep expected  0.505  |  Mean min sep end  0.504  |  Loss  0.004  |  Grad  0.030
+Epoch 10  |  σ  0.450  |  Mean min sep expected  0.505  |  Mean min sep end  0.504  |  Loss  0.004  |  Grad  0.066
+Epoch 11  |  σ  0.449  |  Mean min sep expected  0.504  |  Mean min sep end  0.503  |  Loss  0.003  |  Grad  0.313
+Epoch 12  |  σ  0.446  |  Mean min sep expected  0.500  |  Mean min sep end  0.501  |  Loss  0.001  |  Grad  0.636
+Epoch 13  |  σ  0.439  |  Mean min sep expected  0.493  |  Mean min sep end  0.497  |  Loss  0.003  |  Grad -0.181
+Epoch 14  |  σ  0.441  |  Mean min sep expected  0.495  |  Mean min sep end  0.498  |  Loss  0.002  |  Grad -0.758
+Epoch 15  |  σ  0.449  |  Mean min sep expected  0.504  |  Mean min sep end  0.503  |  Loss  0.003  |  Grad  0.281
 ```
-The final value we get is 0.457, close to the theoretical value of 0.445 if all atoms have a neighbor at the minimum pairwise energy distance.
+The final value we get is 0.449, close to the theoretical value of 0.445 if all atoms have a neighbor at the minimum pairwise energy distance.
 The RDF looks as follows, with the purple line corresponding to the desired distance to the closest neighbor.
 ![LJ RDF](images/rdf_lj.png)
 
@@ -160,7 +159,7 @@ dist_true = 1.0
 n_steps = 150
 atom_mass = 10.0
 box_size = SVector(3.0, 3.0, 3.0)
-temp = 0.001
+temp = 0.05
 coords = [
     SVector(0.8, 0.75, 1.5), SVector(1.5, 0.70, 1.5), SVector(2.3, 0.75, 1.5),
     SVector(0.8, 2.25, 1.5), SVector(1.5, 2.20, 1.5), SVector(2.3, 2.25, 1.5),
@@ -233,28 +232,28 @@ end
 train()
 ```
 ```
-Epoch  1  |  θ 110.0°  |  Final dist 1.16  |  Loss 0.156  |  Grad  0.390
-Epoch  2  |  θ 107.8°  |  Final dist 1.14  |  Loss 0.140  |  Grad  0.410
-Epoch  3  |  θ 105.4°  |  Final dist 1.12  |  Loss 0.122  |  Grad  0.430
-Epoch  4  |  θ 103.0°  |  Final dist 1.10  |  Loss 0.102  |  Grad  0.460
-Epoch  5  |  θ 100.4°  |  Final dist 1.08  |  Loss 0.080  |  Grad  0.510
-Epoch  6  |  θ  97.4°  |  Final dist 1.05  |  Loss 0.047  |  Grad  0.960
-Epoch  7  |  θ  91.9°  |  Final dist 1.00  |  Loss 0.002  |  Grad -0.490
-Epoch  8  |  θ  94.8°  |  Final dist 1.02  |  Loss 0.023  |  Grad  0.460
-Epoch  9  |  θ  92.1°  |  Final dist 1.00  |  Loss 0.000  |  Grad -0.490
-Epoch 10  |  θ  94.9°  |  Final dist 1.02  |  Loss 0.024  |  Grad  0.460
-Epoch 11  |  θ  92.3°  |  Final dist 1.00  |  Loss 0.001  |  Grad  0.490
-Epoch 12  |  θ  89.5°  |  Final dist 0.98  |  Loss 0.024  |  Grad -0.510
-Epoch 13  |  θ  92.5°  |  Final dist 1.00  |  Loss 0.003  |  Grad  0.490
-Epoch 14  |  θ  89.7°  |  Final dist 0.98  |  Loss 0.023  |  Grad -0.510
-Epoch 15  |  θ  92.6°  |  Final dist 1.00  |  Loss 0.004  |  Grad  0.480
-Epoch 16  |  θ  89.8°  |  Final dist 0.98  |  Loss 0.021  |  Grad -0.510
-Epoch 17  |  θ  92.7°  |  Final dist 1.01  |  Loss 0.005  |  Grad  0.480
-Epoch 18  |  θ  90.0°  |  Final dist 0.98  |  Loss 0.020  |  Grad -0.510
-Epoch 19  |  θ  92.9°  |  Final dist 1.01  |  Loss 0.007  |  Grad  0.480
-Epoch 20  |  θ  90.1°  |  Final dist 0.98  |  Loss 0.018  |  Grad -0.510
+Epoch  1  |  θ 110.0°  |  Final dist 1.16  |  Loss 0.155  |  Grad  0.410
+Epoch  2  |  θ 107.7°  |  Final dist 1.14  |  Loss 0.138  |  Grad  0.430
+Epoch  3  |  θ 105.2°  |  Final dist 1.12  |  Loss 0.119  |  Grad  0.450
+Epoch  4  |  θ 102.6°  |  Final dist 1.10  |  Loss 0.099  |  Grad  0.470
+Epoch  5  |  θ 100.0°  |  Final dist 1.08  |  Loss 0.077  |  Grad  0.490
+Epoch  6  |  θ  97.2°  |  Final dist 1.05  |  Loss 0.049  |  Grad  0.710
+Epoch  7  |  θ  93.1°  |  Final dist 1.01  |  Loss 0.012  |  Grad  0.520
+Epoch  8  |  θ  90.1°  |  Final dist 0.98  |  Loss 0.015  |  Grad -0.540
+Epoch  9  |  θ  93.2°  |  Final dist 1.01  |  Loss 0.013  |  Grad  0.520
+Epoch 10  |  θ  90.2°  |  Final dist 0.99  |  Loss 0.015  |  Grad -0.540
+Epoch 11  |  θ  93.3°  |  Final dist 1.01  |  Loss 0.014  |  Grad  0.520
+Epoch 12  |  θ  90.3°  |  Final dist 0.99  |  Loss 0.014  |  Grad -0.540
+Epoch 13  |  θ  93.4°  |  Final dist 1.01  |  Loss 0.015  |  Grad  0.520
+Epoch 14  |  θ  90.4°  |  Final dist 0.99  |  Loss 0.013  |  Grad -0.540
+Epoch 15  |  θ  93.5°  |  Final dist 1.02  |  Loss 0.016  |  Grad  0.520
+Epoch 16  |  θ  90.5°  |  Final dist 0.99  |  Loss 0.012  |  Grad -0.540
+Epoch 17  |  θ  93.6°  |  Final dist 1.02  |  Loss 0.016  |  Grad  0.520
+Epoch 18  |  θ  90.6°  |  Final dist 0.99  |  Loss 0.011  |  Grad -0.530
+Epoch 19  |  θ  93.7°  |  Final dist 1.02  |  Loss 0.017  |  Grad  0.520
+Epoch 20  |  θ  90.7°  |  Final dist 0.99  |  Loss 0.010  |  Grad -0.530
 ```
-The final value we get is 90.1°, close to the theoretical value of 91.2° which is obtainable from trigonometry.
+The final value we get is 90.7°, close to the theoretical value of 91.2° which is obtainable from trigonometry.
 The final simulation looks like this:
 ![Angle simulation](images/sim_angle.gif)
 In the presence of other forces this value would not be so trivially obtainable.
@@ -291,7 +290,8 @@ ps = params(model)
 
 struct NNBond <: SpecificInteraction end
 
-function Molly.force(b::NNBond, vec_ij, coords_i, coords_j, box_size)
+function Molly.force(b::NNBond, coords_i, coords_j, box_size)
+    vec_ij = vector(coords_i, coords_j, box_size)
     dist = norm(vec_ij)
     f = model([dist])[1] * normalize(vec_ij)
     return SpecificForce2Atoms(f, -f)
@@ -300,7 +300,7 @@ end
 n_steps = 400
 mass = 10.0f0
 box_size = SVector(5.0f0, 5.0f0, 5.0f0)
-temp = 0.001f0
+temp = 0.01f0
 coords = [SVector(2.3f0, 2.07f0, 0.0f0), SVector(2.5f0, 2.93f0, 0.0f0), SVector(2.7f0, 2.07f0, 0.0f0)]
 n_atoms = length(coords)
 velocities = zero(coords)
@@ -356,26 +356,26 @@ end
 train()
 ```
 ```
-Epoch  1  |  Dist end  0.611  |  Loss  0.389
-Epoch  2  |  Dist end  0.842  |  Loss  0.158
-Epoch  3  |  Dist end  0.870  |  Loss  0.130
-Epoch  4  |  Dist end  0.905  |  Loss  0.095
-Epoch  5  |  Dist end  0.946  |  Loss  0.054
-Epoch  6  |  Dist end  0.992  |  Loss  0.008
-Epoch  7  |  Dist end  1.041  |  Loss  0.041
-Epoch  8  |  Dist end  1.066  |  Loss  0.066
-Epoch  9  |  Dist end  1.074  |  Loss  0.074
-Epoch 10  |  Dist end  1.071  |  Loss  0.071
-Epoch 11  |  Dist end  1.060  |  Loss  0.060
-Epoch 12  |  Dist end  1.042  |  Loss  0.042
-Epoch 13  |  Dist end  1.020  |  Loss  0.020
-Epoch 14  |  Dist end  0.994  |  Loss  0.006
-Epoch 15  |  Dist end  0.979  |  Loss  0.021
-Epoch 16  |  Dist end  0.972  |  Loss  0.028
-Epoch 17  |  Dist end  0.971  |  Loss  0.029
-Epoch 18  |  Dist end  0.976  |  Loss  0.024
-Epoch 19  |  Dist end  0.985  |  Loss  0.015
-Epoch 20  |  Dist end  0.999  |  Loss  0.001
+Epoch  1  |  Dist end  0.757  |  Loss  0.243
+Epoch  2  |  Dist end  0.773  |  Loss  0.227
+Epoch  3  |  Dist end  0.794  |  Loss  0.206
+Epoch  4  |  Dist end  0.817  |  Loss  0.183
+Epoch  5  |  Dist end  0.843  |  Loss  0.157
+Epoch  6  |  Dist end  0.870  |  Loss  0.130
+Epoch  7  |  Dist end  0.898  |  Loss  0.102
+Epoch  8  |  Dist end  0.927  |  Loss  0.073
+Epoch  9  |  Dist end  0.957  |  Loss  0.043
+Epoch 10  |  Dist end  0.988  |  Loss  0.012
+Epoch 11  |  Dist end  1.018  |  Loss  0.018
+Epoch 12  |  Dist end  1.038  |  Loss  0.038
+Epoch 13  |  Dist end  1.050  |  Loss  0.050
+Epoch 14  |  Dist end  1.055  |  Loss  0.055
+Epoch 15  |  Dist end  1.054  |  Loss  0.054
+Epoch 16  |  Dist end  1.049  |  Loss  0.049
+Epoch 17  |  Dist end  1.041  |  Loss  0.041
+Epoch 18  |  Dist end  1.030  |  Loss  0.030
+Epoch 19  |  Dist end  1.017  |  Loss  0.017
+Epoch 20  |  Dist end  1.003  |  Loss  0.003
 ```
 After training it looks much better:
 ![Logo after](images/logo_after.gif)
