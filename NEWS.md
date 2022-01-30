@@ -1,5 +1,21 @@
 # Molly.jl release notes
 
+## v0.7.0 - Jan 2022
+
+- The `force` and `potential_energy` functions for general interactions now take the vector between atom i and atom j as an argument in order to save on computation.
+- Differentiable simulations are made faster and more memory-efficient.
+- The AtomsBase.jl interface is updated to v0.2 of AtomsBase.jl.
+- `extract_parameters` and `inject_gradients` are added to assist in taking gradients through simulations.
+- `bond_angle` and `torsion_angle` are added.
+- `random_velocities` is added.
+- A `solute` field is added to `Atom` allowing solute-solvent weighting in interactions. This is added to the `LennardJones` interaction.
+- A `proper` field is added to `PeriodicTorsion`.
+- The float type is added as a type parameter to `System`. `float_type` and `is_gpu_diff_safe` are added to access the type parameters of a `System`.
+- A `types` field is added to types such as `InteractionList2Atoms` to record interaction types.
+- `find_neighbors` can now be given just the system as an argument.
+- Visualisation is updated to use GLMakie.jl v0.5.
+- Bugs in velocity generation and temperature calculation with no units are fixed.
+
 ## v0.6.0 - Jan 2022
 
 - Differentiable simulation works with Zygote reverse and forward mode AD on both CPU and GPU. General and specific interactions are supported along with neighbor lists. It does not currently work with units, user-defined types and some components of the package.
