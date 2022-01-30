@@ -60,7 +60,7 @@ neighbor_finder = DistanceVecNeighborFinder(
     dist_cutoff=1.5,
 )
 lj = LennardJones(nl_only=true, force_units=NoUnits, energy_units=NoUnits)
-# Currently this is required too though here it does not affect the simulation
+# Currently required for speed though here it does not affect the simulation
 crf = CoulombReactionField(dist_cutoff=1.5, nl_only=true, coulomb_const=0.0,
                            force_units=NoUnits, energy_units=NoUnits)
 general_inters = (lj, crf)
@@ -101,11 +101,15 @@ function loss(σ)
     return loss_val
 end
 ```
-Now we can obtain the gradient of `loss` with respect to the atom property `σ`.
+Currently only the combination of `LennardJones` and `CoulombReactionField` works on the GPU or fast on the CPU.
+Other types work but run slower on the CPU.
+This will change in future.
+
+We can obtain the gradient of `loss` with respect to the atom property `σ`.
 ```julia
 grad = gradient(loss, σtrue)[1]
 ```
-We can use this gradient in a training loop to optimise `σ`, starting from an arbitrary value.
+This gradient can be used in a training loop to optimise `σ`, starting from an arbitrary value.
 ```julia
 function train()
     σlearn = 0.60 / scale_σ_to_dist
@@ -143,6 +147,12 @@ Epoch 15  |  σ  0.449  |  Mean min sep expected  0.504  |  Mean min sep end  0.
 The final value we get is 0.449, close to the theoretical value of 0.445 if all atoms have a neighbor at the minimum pairwise energy distance.
 The RDF looks as follows, with the purple line corresponding to the desired distance to the closest neighbor.
 ![LJ RDF](images/rdf_lj.png)
+
+It is common to require a loss function formed from values throughout a simulation.
+In this case it is recommended to split up the simulation into a set of short simulations, each starting from the previous final coordinates and velocities.
+This runs the same simulation but makes the intermediate coordinates and velocities available for use in the loss function.
+It is recommended to have a single value to accumulate values of the loss function.
+For example, the RMSD could be calculated from the coordinates every 100 steps and added to a variable that is then divided by the number of chunks to get a loss value corresponding to the mean RMSD over the simulation.
 
 ## Specific interactions
 
