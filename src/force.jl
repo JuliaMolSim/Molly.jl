@@ -25,10 +25,20 @@ function check_force_units(fdr, force_units)
 end
 
 """
-    force(inter, vec_ij, coord_i, coord_j, atom_i, atom_j, box_size)
+    force(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
+          atom_i, atom_j, box_size)
+    force(inter::SpecificInteraction, coord_i, coord_j,
+          box_size)
+    force(inter::SpecificInteraction, coord_i, coord_j,
+          coord_k, box_size)
+    force(inter::SpecificInteraction, coord_i, coord_j,
+          coord_k, coord_l, box_size)
 
-Calculate the force between a pair of atoms due to a given interation type.
-Custom interaction types should implement this function.
+Calculate the force between atoms due to a given interation type.
+For `PairwiseInteraction`s returns a single force vector and for
+`SpecificInteraction`s returns a type such as `SpecificForce2Atoms`.
+Custom pairwise and specific interaction types should implement
+this function.
 """
 function force end
 
@@ -197,10 +207,19 @@ end
 
 """
     forces(system, neighbors=nothing; parallel=true)
+    forces(system, coords, atoms, neighbors=nothing, neighbors_all=nothing)
 
-Calculate the forces on all atoms using the pairwise and specific interactions.
+Calculate the forces on all atoms in the system.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
+
+    forces(inter, system, neighbors=nothing)
+
+Calculate the forces on all atoms in the system arising from a general
+interaction.
+If the interaction uses neighbor lists, the neighbors should be computed
+first and passed to the function.
+Custom general interaction types should implement this function.
 """
 function forces(s::System, neighbors=nothing; parallel::Bool=true)
     n_atoms = length(s)
@@ -255,6 +274,11 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
         fs += ustrip_vec.(Array(sparse_vec))
     end
 
+    for inter in values(s.general_inters)
+        # Force type not checked
+        fs += ustrip_vec.(forces(inter, s, neighbors))
+    end
+
     return fs * s.force_units
 end
 
@@ -278,6 +302,11 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
         sparse_vec = specific_force(inter_list, coords, s.box_size, s.force_units, n_atoms)
         # Move back to GPU if required
         fs += convert(typeof(fs), ustrip_vec.(Array(sparse_vec)))
+    end
+
+    for inter in values(s.general_inters)
+        # Force type not checked
+        fs += ustrip_vec.(forces(inter, s, neighbors))
     end
 
     return fs * s.force_units

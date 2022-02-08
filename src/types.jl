@@ -236,6 +236,9 @@ interface described there.
 - `specific_inter_lists::SI=()`: the specific interactions in the system,
     i.e. interactions between specific atoms such as bonds or angles. Typically
     a `Tuple`.
+- `general_inters::GI=()`: the general interactions in the system,
+    i.e. interactions involving all atoms such as implicit solvent. Typically
+    a `Tuple`.
 - `coords::C`: the coordinates of the atoms in the system. Typically a
     vector of `SVector`s of 2 or 3 dimensions.
 - `velocities::V=zero(coords)`: the velocities of the atoms in the system.
@@ -250,11 +253,12 @@ interface described there.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
-mutable struct System{D, G, T, A, AD, PI, SI, C, V, B, NF, L, F, E} <: AbstractSystem{D}
+mutable struct System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     pairwise_inters::PI
     specific_inter_lists::SI
+    general_inters::GI
     coords::C
     velocities::V
     box_size::B
@@ -269,6 +273,7 @@ function System(;
                 atoms_data=[],
                 pairwise_inters=(),
                 specific_inter_lists=(),
+                general_inters=(),
                 coords,
                 velocities=zero(coords),
                 box_size,
@@ -284,6 +289,7 @@ function System(;
     AD = typeof(atoms_data)
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
+    GI = typeof(general_inters)
     C = typeof(coords)
     V = typeof(velocities)
     B = typeof(box_size)
@@ -291,10 +297,10 @@ function System(;
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
-    return System{D, G, T, A, AD, PI, SI, C, V, B, NF, L, F, E}(
+    return System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E}(
                     atoms, atoms_data, pairwise_inters, specific_inter_lists,
-                    coords, velocities, box_size, neighbor_finder, loggers,
-                    force_units, energy_units)
+                    general_inters, coords, velocities, box_size, neighbor_finder,
+                    loggers, force_units, energy_units)
 end
 
 """

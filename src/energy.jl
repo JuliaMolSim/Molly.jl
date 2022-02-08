@@ -56,10 +56,17 @@ Compute the potential energy of the system.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 
-    potential_energy(inter, vec_ij, coord_i, coord_j, atom_i, atom_j, box_size)
+    potential_energy(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
+                     atom_i, atom_j, box_size)
+    potential_energy(inter::SpecificInteraction, coords_i, coords_j,
+                     box_size)
+    potential_energy(inter::SpecificInteraction, coords_i, coords_j,
+                     coords_k, box_size)
+    potential_energy(inter::SpecificInteraction, coords_i, coords_j,
+                     coords_k, coords_l, box_size)
+    potential_energy(inter, system, neighbors=nothing)
 
-Calculate the potential energy between a pair of atoms due to a given
-interation type.
+Calculate the potential energy due to a given interation type.
 Custom interaction types should implement this function.
 """
 function potential_energy(s::System{D, G, T}, neighbors=nothing) where {D, G, T}
@@ -95,6 +102,10 @@ function potential_energy(s::System{D, G, T}, neighbors=nothing) where {D, G, T}
 
     for inter_list in values(s.specific_inter_lists)
         potential += potential_energy(inter_list, s.coords, s.box_size)
+    end
+
+    for inter in values(s.general_inters)
+        potential += potential_energy(inter, s, neighbors)
     end
 
     return uconvert(s.energy_units, potential)
