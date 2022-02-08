@@ -5,7 +5,7 @@ export SoftSphere
 
 The soft-sphere potential.
 """
-struct SoftSphere{S, C, F, E} <: GeneralInteraction
+struct SoftSphere{S, C, F, E} <: PairwiseInteraction
     cutoff::C
     nl_only::Bool
     lorentz_mixing::Bool

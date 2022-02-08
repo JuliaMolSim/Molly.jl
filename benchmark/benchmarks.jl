@@ -75,7 +75,7 @@ function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu:
 
     neighbor_finder = NoNeighborFinder()
     cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
-    general_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
+    pairwise_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
     if nl
         if gpu_diff_safe
             neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
@@ -84,7 +84,7 @@ function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu:
             neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm")
         end
-        general_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
+        pairwise_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
     end
 
     if gpu
@@ -101,7 +101,7 @@ function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu:
 
     s = System(
         atoms=atoms,
-        general_inters=general_inters,
+        pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
         coords=coords,
         velocities=velocities,

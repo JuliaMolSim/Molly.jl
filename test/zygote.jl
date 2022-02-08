@@ -39,7 +39,7 @@
         return mean(sqrt.(minimum(disps_diag; dims=1)))
     end
 
-    function test_grad(gpu::Bool, forward::Bool, f32::Bool, gis::Bool, sis::Bool)
+    function test_grad(gpu::Bool, forward::Bool, f32::Bool, pis::Bool, sis::Bool)
         n_atoms = 50
         n_steps = 100
         atom_mass = f32 ? 10.0f0 : 10.0
@@ -68,7 +68,7 @@
             force_units=NoUnits,
             energy_units=NoUnits,
         )
-        general_inters = gis ? (lj, crf) : ()
+        pairwise_inters = pis ? (lj, crf) : ()
         bond_is, bond_js = collect(1:(n_atoms ÷ 2)), collect((1 + n_atoms ÷ 2):n_atoms)
         bond_dists = [norm(vector(Array(coords)[i], Array(coords)[i + n_atoms ÷ 2], box_size)) for i in 1:(n_atoms ÷ 2)]
         angles_inner = [HarmonicAngle(th0=f32 ? 2.0f0 : 2.0, cth=f32 ? 10.0f0 : 10.0) for i in 1:15]
@@ -118,7 +118,7 @@
 
             s = System(
                 atoms=gpu ? cu(atoms) : atoms,
-                general_inters=general_inters,
+                pairwise_inters=pairwise_inters,
                 specific_inter_lists=sis ? (bonds, angles, torsions) : (),
                 coords=gpu ? cu(cs) : cs,
                 velocities=gpu ? cu(vs) : vs,
@@ -142,14 +142,14 @@
         ("cpu forward"   , [false, true , false, true , true ], 0.01, 0.01),
         ("cpu f32"       , [false, false, true , true , true ], 0.2 , 10.0),
         ("cpu nospecific", [false, false, false, true , false], 0.1 , 0.0 ),
-        ("cpu nogeneral" , [false, false, false, false, true ], 0.0 , 0.25),
+        ("cpu nopairwise", [false, false, false, false, true ], 0.0 , 0.25),
     ]
     if run_gpu_tests
         push!(runs, ("gpu"           , [true , false, false, true , true ], 0.25, 20.0))
         push!(runs, ("gpu forward"   , [true , true , false, true , true ], 0.01, 0.01))
         push!(runs, ("gpu f32"       , [true , false, true , true , true ], 0.5 , 50.0))
         push!(runs, ("gpu nospecific", [true , false, false, true , false], 0.25, 0.0 ))
-        push!(runs, ("gpu nogeneral" , [true , false, false, false, true ], 0.0 , 10.0))
+        push!(runs, ("gpu nopairwise", [true , false, false, false, true ], 0.0 , 10.0))
     end
 
     for (name, args, tol_σ, tol_kb) in runs

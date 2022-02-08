@@ -2,7 +2,7 @@
 
 export
     Interaction,
-    GeneralInteraction,
+    PairwiseInteraction,
     SpecificInteraction,
     AbstractNeighborFinder,
     InteractionList2Atoms,
@@ -23,10 +23,10 @@ const DefaultFloat = Float64
 abstract type Interaction end
 
 """
-A general interaction that will apply to all or most atom pairs.
-Custom general interactions should sub-type this type.
+A pairwise interaction that will apply to all or most atom pairs.
+Custom pairwise interactions should sub-type this type.
 """
-abstract type GeneralInteraction <: Interaction end
+abstract type PairwiseInteraction <: Interaction end
 
 """
 A specific interaction between sets of specific atoms, e.g. a bond angle.
@@ -230,9 +230,9 @@ interface described there.
     of any type but should be a bits type if the GPU is used.
 - `atoms_data::AD`: other data associated with the atoms, allowing the atoms to
     be bits types and hence work on the GPU.
-- `general_inters::GI=()`: the general interactions in the system, i.e.
-    interactions between all or most atoms such as electrostatics. Typically a
-    `Tuple`.
+- `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
+    interactions between all or most atom pairs such as electrostatics.
+    Typically a `Tuple`.
 - `specific_inter_lists::SI=()`: the specific interactions in the system,
     i.e. interactions between specific atoms such as bonds or angles. Typically
     a `Tuple`.
@@ -250,10 +250,10 @@ interface described there.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
-mutable struct System{D, G, T, A, AD, GI, SI, C, V, B, NF, L, F, E} <: AbstractSystem{D}
+mutable struct System{D, G, T, A, AD, PI, SI, C, V, B, NF, L, F, E} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
-    general_inters::GI
+    pairwise_inters::PI
     specific_inter_lists::SI
     coords::C
     velocities::V
@@ -267,7 +267,7 @@ end
 function System(;
                 atoms,
                 atoms_data=[],
-                general_inters=(),
+                pairwise_inters=(),
                 specific_inter_lists=(),
                 coords,
                 velocities=zero(coords),
@@ -282,7 +282,7 @@ function System(;
     T = typeof(ustrip(first(box_size)))
     A = typeof(atoms)
     AD = typeof(atoms_data)
-    GI = typeof(general_inters)
+    PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     C = typeof(coords)
     V = typeof(velocities)
@@ -291,8 +291,8 @@ function System(;
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
-    return System{D, G, T, A, AD, GI, SI, C, V, B, NF, L, F, E}(
-                    atoms, atoms_data, general_inters, specific_inter_lists,
+    return System{D, G, T, A, AD, PI, SI, C, V, B, NF, L, F, E}(
+                    atoms, atoms_data, pairwise_inters, specific_inter_lists,
                     coords, velocities, box_size, neighbor_finder, loggers,
                     force_units, energy_units)
 end

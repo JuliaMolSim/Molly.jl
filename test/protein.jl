@@ -18,7 +18,7 @@
     @test length(s.coords) == true_n_atoms
     @test size(s.neighbor_finder.nb_matrix) == (true_n_atoms, true_n_atoms)
     @test size(s.neighbor_finder.matrix_14) == (true_n_atoms, true_n_atoms)
-    @test length(s.general_inters) == 2
+    @test length(s.pairwise_inters) == 2
     @test length(s.specific_inter_lists) == 3
     @test s.box_size == SVector(3.7146, 3.7146, 3.7146)u"nm"
     show(devnull, first(s.atoms))
@@ -61,13 +61,13 @@ end
 
     for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul", "all")
         if inter == "all"
-            gin = sys.general_inters
+            pin = sys.pairwise_inters
         elseif inter == "lj"
-            gin = sys.general_inters[1:1]
+            pin = sys.pairwise_inters[1:1]
         elseif inter == "coul"
-            gin = sys.general_inters[2:2]
+            pin = sys.pairwise_inters[2:2]
         else
-            gin = ()
+            pin = ()
         end
 
         if inter == "all"
@@ -86,7 +86,7 @@ end
 
         sys_part = System(
             atoms=sys.atoms,
-            general_inters=gin,
+            pairwise_inters=pin,
             specific_inter_lists=sils,
             coords=sys.coords,
             box_size=sys.box_size,
@@ -147,9 +147,9 @@ end
 
     params_dic = extract_parameters(sys_nounits, ff_nounits)
     @test length(params_dic) == 639
-    atoms_grad, gis_grad, sis_grad = inject_gradients(sys_nounits, params_dic)
+    atoms_grad, pis_grad, sis_grad = inject_gradients(sys_nounits, params_dic)
     @test atoms_grad == sys_nounits.atoms
-    @test gis_grad == sys_nounits.general_inters
+    @test pis_grad == sys_nounits.pairwise_inters
 
     # Test the same simulation on the GPU
     if run_gpu_tests
@@ -182,8 +182,8 @@ end
 
         params_dic_gpu = extract_parameters(sys_nounits, ff_nounits)
         @test params_dic == params_dic_gpu
-        atoms_grad, gis_grad, sis_grad = inject_gradients(sys_nounits, params_dic_gpu)
+        atoms_grad, pis_grad, sis_grad = inject_gradients(sys_nounits, params_dic_gpu)
         @test atoms_grad == sys_nounits.atoms
-        @test gis_grad == sys_nounits.general_inters
+        @test pis_grad == sys_nounits.pairwise_inters
     end
 end

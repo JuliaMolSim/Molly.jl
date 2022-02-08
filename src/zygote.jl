@@ -356,7 +356,7 @@ end
     return y, bc_fwd_back
 end
 
-function combine_dual_GeneralInteraction(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer) where {T, P}
+function combine_dual_PairwiseInteraction(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer) where {T, P}
     (
         LennardJones{false, Nothing, T, T, typeof(NoUnits), typeof(NoUnits)}(
             nothing, false, false,
@@ -433,7 +433,7 @@ end
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ_in)
         ȳ = modify_grad(ȳ_in, arg2)
-        darg1 = unbroadcast(arg1, broadcast(combine_dual_GeneralInteraction, ȳ, out, 1))
+        darg1 = unbroadcast(arg1, broadcast(combine_dual_PairwiseInteraction, ȳ, out, 1))
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1,  7),
                                 sum_partials(o1, y1,  8), sum_partials(o1, y1,  9)), ȳ, out))
         darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1, 10),

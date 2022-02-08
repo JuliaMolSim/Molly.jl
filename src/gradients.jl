@@ -23,7 +23,7 @@ function extract_parameters(sys::System, ff::OpenMMForceField)
         end
     end
 
-    for inter in values(sys.general_inters)
+    for inter in values(sys.pairwise_inters)
         if inter isa LennardJones
             key_prefix = "inter_LJ_"
             params_dic[key_prefix * "weight_14"] = inter.weight_14
@@ -82,7 +82,7 @@ end
 
 Add parameters from a dictionary to a `System`.
 Allows gradients for individual parameters to be tracked.
-Returns atoms, general interactions and specific interaction lists.
+Returns atoms, pairwise interactions and specific interaction lists.
 """
 function inject_gradients(sys, params_dic, gpu::Bool=isa(sys.coords, CuArray))
     if gpu
@@ -90,9 +90,9 @@ function inject_gradients(sys, params_dic, gpu::Bool=isa(sys.coords, CuArray))
     else
         atoms_grad = inject_atom.(sys.atoms, sys.atoms_data, (params_dic,))
     end
-    gis_grad = inject_interaction.(sys.general_inters, (params_dic,))
+    pis_grad = inject_interaction.(sys.pairwise_inters, (params_dic,))
     sis_grad = inject_interaction_list.(sys.specific_inter_lists, (params_dic,), gpu)
-    return atoms_grad, gis_grad, sis_grad
+    return atoms_grad, pis_grad, sis_grad
 end
 
 # get function errors with AD

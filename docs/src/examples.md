@@ -9,7 +9,7 @@ Make a PR to add it to this page.
 ## Making and breaking bonds
 
 There is an example of mutable atom properties in the main docs, but what if you want to make and break bonds during the simulation?
-In this case you can use a `GeneralInteraction` to make, break and apply the bonds.
+In this case you can use a `PairwiseInteraction` to make, break and apply the bonds.
 The partners of the atom can be stored in the atom type.
 We make a logger to record when the bonds are present, allowing us to visualize them with the `connection_frames` keyword argument to `visualize` (this can take a while to plot).
 ```julia
@@ -27,7 +27,7 @@ end
 
 Molly.mass(ba::BondableAtom) = ba.mass
 
-struct BondableInteraction <: GeneralInteraction
+struct BondableInteraction <: PairwiseInteraction
     nl_only::Bool
     prob_formation::Float64
     prob_break::Float64
@@ -89,7 +89,7 @@ temp = 1.0
 atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = place_atoms(n_atoms, box_size, 0.1)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
-general_inters = (
+pairwise_inters = (
     SoftSphere(nl_only=true),
     BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0),
 )
@@ -102,7 +102,7 @@ simulator = VelocityVerlet(dt=0.02, coupling=AndersenThermostat(temp, 5.0))
 
 sys = System(
     atoms=atoms,
-    general_inters=general_inters,
+    pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
     box_size=box_size,

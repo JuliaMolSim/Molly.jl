@@ -12,8 +12,8 @@
 
     Molly.mass(person::Person) = person.mass
 
-    # Custom GeneralInteraction
-    struct SIRInteraction <: GeneralInteraction
+    # Custom PairwiseInteraction
+    struct SIRInteraction <: PairwiseInteraction
         nl_only::Bool
         dist_infection::Float64
         prob_infection::Float64
@@ -67,13 +67,13 @@
     atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
     coords = place_atoms(n_people, box_size, 0.1)
     velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
-    general_inters = (LennardJones=LennardJones(nl_only=true), SIR=SIRInteraction(false, 0.5, 0.06, 0.01))
+    pairwise_inters = (LennardJones=LennardJones(nl_only=true), SIR=SIRInteraction(false, 0.5, 0.06, 0.01))
     neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_people, n_people), n_steps=10, dist_cutoff=2.0)
     simulator = VelocityVerlet(dt=0.02, coupling=AndersenThermostat(temp, 5.0))
 
     s = System(
         atoms=atoms,
-        general_inters=general_inters,
+        pairwise_inters=pairwise_inters,
         coords=coords,
         velocities=velocities,
         box_size=box_size,

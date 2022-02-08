@@ -10,10 +10,10 @@ There are some projects that explore differentiable molecular simulations such a
 However Julia provides a strong suite of AD tools, with [Zygote.jl](https://github.com/FluxML/Zygote.jl) allowing source-to-source transformations for much of the language.
 With Molly you can use the power of Zygote to obtain gradients through molecular simulations.
 Reverse and forward mode AD can be used on the CPU and the GPU.
-General and specific interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
+Pairwise and specific interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
 Differentiable simulation does not currently work with units, user-defined types and some components of the package.
 
-## General interactions
+## Pairwise interactions
 
 First, we show how taking gradients through a simulation can be used to optimise an atom property in a [Lennard-Jones](https://en.wikipedia.org/wiki/Lennard-Jones_potential) fluid.
 In this type of simulation each atom has a σ value that determines how close it likes to get to other atoms.
@@ -63,7 +63,7 @@ lj = LennardJones(nl_only=true, force_units=NoUnits, energy_units=NoUnits)
 # Currently required for speed though here it does not affect the simulation
 crf = CoulombReactionField(dist_cutoff=1.5, nl_only=true, coulomb_const=0.0,
                            force_units=NoUnits, energy_units=NoUnits)
-general_inters = (lj, crf)
+pairwise_inters = (lj, crf)
 coords = place_atoms(n_atoms, box_size, 0.7)
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 simulator = VelocityVerlet(
@@ -77,7 +77,7 @@ function loss(σ)
 
     s = System(
         atoms=atoms,
-        general_inters=general_inters,
+        pairwise_inters=pairwise_inters,
         coords=coords,
         velocities=velocities,
         box_size=box_size,

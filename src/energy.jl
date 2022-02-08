@@ -66,7 +66,7 @@ function potential_energy(s::System{D, G, T}, neighbors=nothing) where {D, G, T}
     n_atoms = length(s)
     potential = zero(T) * s.energy_units
 
-    for inter in values(s.general_inters)
+    for inter in values(s.pairwise_inters)
         if inter.nl_only
             if isnothing(neighbors)
                 error("An interaction uses the neighbor list but neighbors is nothing")

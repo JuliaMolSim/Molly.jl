@@ -7,7 +7,7 @@
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        general_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(nl_only=true),),
         coords=place_atoms(n_atoms, box_size, 0.3u"nm"),
         velocities=[velocity(10.0u"u", temp; dims=2) .* 0.01 for i in 1:n_atoms],
         box_size=box_size,
@@ -42,7 +42,7 @@ end
         s = System(
             atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR") for i in 1:n_atoms],
-            general_inters=(LennardJones(nl_only=true),),
+            pairwise_inters=(LennardJones(nl_only=true),),
             coords=place_atoms(n_atoms, box_size, 0.3u"nm"),
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             box_size=box_size,
@@ -86,7 +86,7 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        general_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=[c .+ 0.01 .* rand(SVector{3})u"nm" for c in coords],
         box_size=box_size,
@@ -121,7 +121,7 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        general_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(nl_only=true),),
         specific_inter_lists=(bonds,),
         coords=coords,
         velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
@@ -140,14 +140,14 @@ end
     end
 end
 
-@testset "General interactions" begin
+@testset "Pairwise interactions" begin
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
     G = 10.0u"kJ * nm * u^-2 * mol^-1"
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
-    general_inter_types = (
+    pairwise_inter_types = (
         LennardJones(nl_only=true), LennardJones(nl_only=false),
         LennardJones(cutoff=DistanceCutoff(1.0u"nm"), nl_only=true),
         LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), nl_only=true),
@@ -160,8 +160,8 @@ end
         Gravity(G=G, nl_only=true), Gravity(G=G, nl_only=false),
     )
 
-    @testset "$gi" for gi in general_inter_types
-        if gi.nl_only
+    @testset "$inter" for inter in pairwise_inter_types
+        if inter.nl_only
             neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=1.5u"nm")
         else
@@ -171,7 +171,7 @@ end
         s = System(
             atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"u", σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-            general_inters=(gi,),
+            pairwise_inters=(inter,),
             coords=place_atoms(n_atoms, box_size, 0.2u"nm"),
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             box_size=box_size,
@@ -197,7 +197,7 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        general_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=velocities,
         box_size=box_size,
@@ -209,7 +209,7 @@ end
 
     s_nounits = System(
         atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
-        general_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(nl_only=true),),
         coords=ustrip_vec.(coords),
         velocities=ustrip_vec.(velocities),
         box_size=ustrip.(box_size),
@@ -261,7 +261,7 @@ end
 
         neighbor_finder = NoNeighborFinder()
         cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
-        general_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
+        pairwise_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
         if nl
             if gpu_diff_safe
                 neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
@@ -270,7 +270,7 @@ end
                 neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,
                                                             dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm")
             end
-            general_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
+            pairwise_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
         end
 
         if gpu
@@ -287,7 +287,7 @@ end
 
         s = System(
             atoms=atoms,
-            general_inters=general_inters,
+            pairwise_inters=pairwise_inters,
             specific_inter_lists=specific_inter_lists,
             coords=coords,
             velocities=velocities,

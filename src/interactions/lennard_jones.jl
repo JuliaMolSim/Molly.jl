@@ -16,7 +16,7 @@ and the force on each atom by
 \end{aligned}
 ```
 """
-struct LennardJones{S, C, W, WS, F, E} <: GeneralInteraction
+struct LennardJones{S, C, W, WS, F, E} <: PairwiseInteraction
     cutoff::C
     nl_only::Bool
     lorentz_mixing::Bool

@@ -31,12 +31,12 @@ function ChainRulesCore.rrule(T::Type{<:SpecificInteraction}, vs...)
     return Y, SpecificInteraction_pullback
 end
 
-function ChainRulesCore.rrule(T::Type{<:GeneralInteraction}, vs...)
+function ChainRulesCore.rrule(T::Type{<:PairwiseInteraction}, vs...)
     Y = T(vs...)
-    function GeneralInteraction_pullback(Ȳ)
+    function PairwiseInteraction_pullback(Ȳ)
         return NoTangent(), getfield.((Ȳ,), fieldnames(T))...
     end
-    return Y, GeneralInteraction_pullback
+    return Y, PairwiseInteraction_pullback
 end
 
 function ChainRulesCore.rrule(T::Type{<:SpecificForce2Atoms}, vs...)

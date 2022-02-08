@@ -6,7 +6,7 @@ export CoulombReactionField
 
 The Coulomb electrostatic interaction modified using the reaction field approximation.
 """
-struct CoulombReactionField{D, S, W, T, F, E} <: GeneralInteraction
+struct CoulombReactionField{D, S, W, T, F, E} <: PairwiseInteraction
     dist_cutoff::D
     solvent_dielectric::S
     nl_only::Bool

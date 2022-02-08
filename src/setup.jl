@@ -621,7 +621,7 @@ function System(coord_file::AbstractString,
                                         nl_only=true, weight_14=force_field.weight_14_coulomb,
                                         coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
                                         force_units=force_units, energy_units=energy_units)
-    general_inters = (lj, coulomb_rf)
+    pairwise_inters = (lj, coulomb_rf)
 
     # All torsions should have the same number of terms for speed, GPU compatibility
     #   and for taking gradients
@@ -694,7 +694,7 @@ function System(coord_file::AbstractString,
     return System(
         atoms=atoms,
         atoms_data=atoms_data,
-        general_inters=general_inters,
+        pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
         coords=coords,
         velocities=vels,
@@ -965,7 +965,7 @@ function System(T::Type,
     box_size = units ? (box_size_vals)u"nm" : box_size_vals
     coords = wrap_coords_vec.([coords...], (box_size,))
 
-    general_inters = (lj, coulomb_rf)
+    pairwise_inters = (lj, coulomb_rf)
     # Ensure array types are concrete
     if gpu
         specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, bonds.types, cu([bonds.inters...])),
@@ -1009,7 +1009,7 @@ function System(T::Type,
     return System(
         atoms=atoms,
         atoms_data=atoms_data,
-        general_inters=general_inters,
+        pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
         coords=coords,
         velocities=vels,

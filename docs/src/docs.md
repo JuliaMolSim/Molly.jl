@@ -33,10 +33,10 @@ velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 ```
 We store the coordinates and velocities as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
 They can be of 2 or 3 dimensions and of any number type, e.g. `Float64` or `Float32`.
-Now we can define our general interactions, i.e. those between most or all atoms.
+Now we can define our pairwise interactions, i.e. those between most or all atom pairs.
 Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard-Jones type.
 ```julia
-general_inters = (LennardJones(),)
+pairwise_inters = (LennardJones(),)
 ```
 Finally, we can define the system and run the simulation.
 We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.
@@ -44,7 +44,7 @@ Periodic boundary conditions are used with the box we defined earlier.
 ```julia
 sys = System(
     atoms=atoms,
-    general_inters=general_inters,
+    pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
     box_size=box_size,
@@ -85,7 +85,7 @@ simulator = VelocityVerlet(dt=0.002f0u"ps")
 
 sys = System(
     atoms=atoms,
-    general_inters=(LennardJones(),),
+    pairwise_inters=(LennardJones(),),
     coords=coords,
     velocities=velocities,
     box_size=box_size,
@@ -142,7 +142,7 @@ Now we can simulate as before.
 ```julia
 sys = System(
     atoms=atoms,
-    general_inters=(LennardJones(nl_only=true),),
+    pairwise_inters=(LennardJones(nl_only=true),),
     specific_inter_lists=specific_inter_lists,
     coords=coords,
     velocities=velocities,
@@ -180,13 +180,13 @@ This example also shows the use of `Float32`, a 2D simulation and no specified u
 atoms = [Atom(mass=1.0f0), Atom(mass=1.0f0)]
 coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
 velocities = [SVector(0.0f0, 1.0f0), SVector(0.0f0, -1.0f0)]
-general_inters = (Gravity(nl_only=false, G=1.5f0),)
+pairwise_inters = (Gravity(nl_only=false, G=1.5f0),)
 simulator = VelocityVerlet(dt=0.002f0)
 box_size = SVector(1.0f0, 1.0f0)
 
 sys = System(
     atoms=atoms,
-    general_inters=general_inters,
+    pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
     box_size=box_size,
@@ -272,8 +272,8 @@ end
 
 Molly.mass(person::Person) = person.mass
 
-# Custom GeneralInteraction
-struct SIRInteraction <: GeneralInteraction
+# Custom PairwiseInteraction
+struct SIRInteraction <: PairwiseInteraction
     nl_only::Bool
     dist_infection::Float64
     prob_infection::Float64
@@ -333,13 +333,13 @@ n_starting = 2
 atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
 coords = place_atoms(n_people, box_size, 0.1)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
-general_inters = (LennardJones=LennardJones(nl_only=true), SIR=SIRInteraction(false, 0.5, 0.06, 0.01))
+pairwise_inters = (LennardJones=LennardJones(nl_only=true), SIR=SIRInteraction(false, 0.5, 0.06, 0.01))
 neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_people, n_people), n_steps=10, dist_cutoff=2.0)
 simulator = VelocityVerlet(dt=0.02, coupling=AndersenThermostat(temp, 5.0))
 
 sys = System(
     atoms=atoms,
-    general_inters=general_inters,
+    pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
     box_size=box_size,
@@ -379,10 +379,10 @@ Forces define how different parts of the system interact. The force on each part
 ```
 
 In Molly there are two types of interactions.
-[`GeneralInteraction`](@ref)s are present between all or most atoms, and account for example for non-bonded terms.
+[`PairwiseInteraction`](@ref)s are present between all or most atom pairs, and account for example for non-bonded terms.
 [`SpecificInteraction`](@ref)s are present between specific atoms, and account for example for bonded terms.
 
-The available general interactions are:
+The available pairwise interactions are:
 - [`LennardJones`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
@@ -396,9 +396,9 @@ The available specific interactions are:
 - [`PeriodicTorsion`](@ref)
 - [`RBTorsion`](@ref)
 
-To define your own [`GeneralInteraction`](@ref), first define the `struct`:
+To define your own [`PairwiseInteraction`](@ref), first define the `struct`:
 ```julia
-struct MyGeneralInter <: GeneralInteraction
+struct MyPairwiseInter <: PairwiseInteraction
     nl_only::Bool
     # Any other properties, e.g. constants for the interaction or cutoff parameters
 end
@@ -408,7 +408,7 @@ Next, you need to define the [`force`](@ref) function acting between a pair of a
 This has a set series of arguments.
 For example:
 ```julia
-function Molly.force(inter::MyGeneralInter,
+function Molly.force(inter::MyPairwiseInter,
                         vec_ij,
                         coord_i,
                         coord_j,
@@ -428,16 +428,16 @@ end
 Atom properties can be accessed, e.g. `atom_i.σ`.
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
 
-To use your custom force in a simulation, add it to the list of general interactions:
+To use your custom force in a simulation, add it to the list of pairwise interactions:
 ```julia
-general_inters = (MyGeneralInter(true),)
+genera_inters = (MyPairwiseInter(true),)
 ```
 Then create a [`System`](@ref) and simulate as above.
 Note that you can also use named tuples instead of tuples if you want to access interactions by name:
 ```julia
-general_inters = (MyGeneralInter=MyGeneralInter(true),)
+pairwise_inters = (MyPairwiseInter=MyPairwiseInter(true),)
 ```
-For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{GeneralInteraction}`.
+For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{PairwiseInteraction}`.
 
 To define your own [`SpecificInteraction`](@ref), first define the `struct`:
 ```julia

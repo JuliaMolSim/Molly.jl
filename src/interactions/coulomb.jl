@@ -5,7 +5,7 @@ export Coulomb
 
 The Coulomb electrostatic interaction.
 """
-struct Coulomb{C, W, T, F, E} <: GeneralInteraction
+struct Coulomb{C, W, T, F, E} <: PairwiseInteraction
     cutoff::C
     nl_only::Bool
     weight_14::W

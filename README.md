@@ -61,12 +61,12 @@ atom_mass = 10.0u"u"
 atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 coords = place_atoms(n_atoms, box_size, 0.3u"nm")
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
-general_inters = (LennardJones(),)
+pairwise_inters = (LennardJones(),)
 simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
 
 sys = System(
     atoms=atoms,
-    general_inters=general_inters,
+    pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
     box_size=box_size,

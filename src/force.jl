@@ -91,7 +91,7 @@ end
 """
     accelerations(system, neighbors=nothing; parallel=true)
 
-Calculate the accelerations of all atoms using the general and specific
+Calculate the accelerations of all atoms using the pairwise and specific
 interactions and Newton's second law.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
@@ -198,7 +198,7 @@ end
 """
     forces(system, neighbors=nothing; parallel=true)
 
-Calculate the forces on all atoms using the general and specific interactions.
+Calculate the forces on all atoms using the pairwise and specific interactions.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
@@ -209,7 +209,7 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
         fs_threads = [ustrip_vec.(zero(s.coords)) for i in 1:nthreads()]
 
         # Loop over interactions and calculate the acceleration due to each
-        for inter in values(s.general_inters)
+        for inter in values(s.pairwise_inters)
             if inter.nl_only
                 if isnothing(neighbors)
                     error("An interaction uses the neighbor list but neighbors is nothing")
@@ -231,7 +231,7 @@ function forces(s::System, neighbors=nothing; parallel::Bool=true)
     else
         fs = ustrip_vec.(zero(s.coords))
 
-        for inter in values(s.general_inters)
+        for inter in values(s.pairwise_inters)
             if inter.nl_only
                 if isnothing(neighbors)
                     error("An interaction uses the neighbor list but neighbors is nothing")
@@ -262,15 +262,15 @@ function forces(s::System, coords, atoms, neighbors=nothing, neighbors_all=nothi
     n_atoms = length(s)
     fs = ustrip_vec.(zero(coords))
 
-    general_inters_nonl = filter(inter -> !inter.nl_only, values(s.general_inters))
-    @views if length(general_inters_nonl) > 0
-        fs += Zygote.checkpointed(forces_inters, general_inters_nonl, coords, atoms, neighbors_all,
+    pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
+    @views if length(pairwise_inters_nonl) > 0
+        fs += Zygote.checkpointed(forces_inters, pairwise_inters_nonl, coords, atoms, neighbors_all,
                                     s.box_size, s.force_units, false)
     end
 
-    general_inters_nl = filter(inter -> inter.nl_only, values(s.general_inters))
-    if length(general_inters_nl) > 0 && length(neighbors.nbsi) > 0
-        fs += Zygote.checkpointed(forces_inters, general_inters_nl, coords, atoms, neighbors,
+    pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
+    if length(pairwise_inters_nl) > 0 && length(neighbors.nbsi) > 0
+        fs += Zygote.checkpointed(forces_inters, pairwise_inters_nl, coords, atoms, neighbors,
                                     s.box_size, s.force_units, neighbors.weights_14)
     end
 

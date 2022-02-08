@@ -6,7 +6,7 @@ export Mie
 The Mie generalized interaction.
 When `m` equals 6 and `n` equals 12 this is equivalent to the Lennard-Jones interaction.
 """
-struct Mie{S, C, T, F, E} <: GeneralInteraction
+struct Mie{S, C, T, F, E} <: PairwiseInteraction
     m::T
     n::T
     cutoff::C

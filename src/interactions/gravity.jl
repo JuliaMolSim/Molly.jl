@@ -5,7 +5,7 @@ export Gravity
 
 The gravitational interaction.
 """
-struct Gravity{T} <: GeneralInteraction
+struct Gravity{T} <: PairwiseInteraction
     G::T
     nl_only::Bool
 end

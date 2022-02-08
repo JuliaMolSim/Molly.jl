@@ -98,7 +98,7 @@ function simulate!(sys::System{D, true},
                     sim::VelocityVerlet,
                     n_steps::Integer;
                     parallel::Bool=true) where {D, S}
-    if any(inter -> !inter.nl_only, values(sys.general_inters))
+    if any(inter -> !inter.nl_only, values(sys.pairwise_inters))
         neighbors_all = all_neighbors(length(sys))
     else
         neighbors_all = nothing
