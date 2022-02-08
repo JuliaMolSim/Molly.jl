@@ -285,6 +285,8 @@ includes collapsed into one file.
 # Arguments
 - `velocities=nothing`: the velocities of the atoms in the system, set to
     zero by default.
+- `box_size=nothing`: the size of the cubic box used for simulation, read
+    from the file by default.
 - `loggers=Dict()`: the loggers that record properties of interest during a
     simulation.
 - `units::Bool=true`: whether to use Unitful quantities.
@@ -299,6 +301,7 @@ includes collapsed into one file.
 function System(coord_file::AbstractString,
                 force_field::OpenMMForceField;
                 velocities=nothing,
+                box_size=nothing,
                 loggers=Dict(),
                 units::Bool=true,
                 gpu::Bool=false,
@@ -651,11 +654,15 @@ function System(coord_file::AbstractString,
     end
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
-    # Convert from Å
-    if units
-        box_size = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame))u"nm" / 10.0))
+    if isnothing(box_size)
+        # Read from file and convert from Å
+        if units
+            box_size_used = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame))u"nm" / 10.0))
+        else
+            box_size_used = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame)) / 10.0))
+        end
     else
-        box_size = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame)) / 10.0))
+        box_size_used = box_size
     end
 
     # Convert from Å
@@ -664,7 +671,7 @@ function System(coord_file::AbstractString,
     else
         coords = [T.(SVector{3}(col) / 10.0) for col in eachcol(Chemfiles.positions(frame))]
     end
-    coords = wrap_coords_vec.(coords, (box_size,))
+    coords = wrap_coords_vec.(coords, (box_size_used,))
 
     atoms = [atoms...]
     if gpu_diff_safe
@@ -673,7 +680,7 @@ function System(coord_file::AbstractString,
                                                     n_steps=10, dist_cutoff=T(nl_dist))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14,
-                                                    n_steps=10, x0=coords, unit_cell=box_size,
+                                                    n_steps=10, x0=coords, unit_cell=box_size_used,
                                                     dist_cutoff=T(nl_dist))
     end
     if gpu
@@ -698,7 +705,7 @@ function System(coord_file::AbstractString,
         specific_inter_lists=specific_inter_lists,
         coords=coords,
         velocities=vels,
-        box_size=box_size,
+        box_size=box_size_used,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
@@ -711,6 +718,7 @@ function System(T::Type,
                 coord_file::AbstractString,
                 top_file::AbstractString;
                 velocities=nothing,
+                box_size=nothing,
                 loggers=Dict(),
                 units::Bool=true,
                 gpu::Bool=false,
@@ -961,9 +969,13 @@ function System(T::Type,
                                         force_units=force_units, energy_units=energy_units)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
-    box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
-    box_size = units ? (box_size_vals)u"nm" : box_size_vals
-    coords = wrap_coords_vec.([coords...], (box_size,))
+    if isnothing(box_size)
+        box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
+        box_size_used = units ? (box_size_vals)u"nm" : box_size_vals
+    else
+        box_size_used = box_size
+    end
+    coords = wrap_coords_vec.([coords...], (box_size_used,))
 
     pairwise_inters = (lj, coulomb_rf)
     # Ensure array types are concrete
@@ -989,7 +1001,7 @@ function System(T::Type,
                                                     dist_cutoff=T(nl_dist))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-                                                    x0=coords, unit_cell=box_size, dist_cutoff=T(nl_dist))
+                                                    x0=coords, unit_cell=box_size_used, dist_cutoff=T(nl_dist))
     end
     if gpu
         atoms = cu(atoms)
@@ -1013,7 +1025,7 @@ function System(T::Type,
         specific_inter_lists=specific_inter_lists,
         coords=coords,
         velocities=vels,
-        box_size=box_size,
+        box_size=box_size_used,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
