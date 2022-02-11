@@ -16,6 +16,8 @@ struct ImplicitSolventOBC{T, R, I}
     α::T
     β::T
     γ::T
+    probe_radius::T
+    sa_factor::T
     is::I
     js::I
     pre_factor::T
@@ -90,6 +92,8 @@ function ImplicitSolventOBC(atoms,
         α, β, γ = T(0.8), T(0.0), T(2.909125)
     end
 
+    probe_radius, sa_factor = T(0.14), T(28.3919551)
+
     is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
     js = permutedims(is, (2, 1))
 
@@ -101,7 +105,7 @@ function ImplicitSolventOBC(atoms,
 
     return ImplicitSolventOBC{T, T, typeof(is)}(offset_radii, scaled_offset_radii,
                 solvent_dielectric, solute_dielectric, offset, cutoff, use_ACE,
-                α, β, γ, is, js, pre_factor)
+                α, β, γ, probe_radius, sa_factor, is, js, pre_factor)
 end
 
 # Calculate Born radii and gradients with respect to atomic distance
@@ -158,9 +162,15 @@ function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, box_size) whe
     return Bs, B_grads
 end
 
-struct ForceLoopResult{T, V}
+# Store the results of ij broadcast during force calculation
+struct ForceLoopResult1{T, V}
     change_born_force_i::T
     change_born_force_j::T
+    change_fs_i::V
+    change_fs_j::V
+end
+
+struct ForceLoopResult2{V}
     change_fs_i::V
     change_fs_j::V
 end
@@ -172,8 +182,7 @@ function forces(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
 
     if inter.use_ACE
         radii = inter.offset_radii .+ inter.offset
-        probe_radius, sa_factor = T(0.14), T(28.3919551)
-        sa_terms = sa_factor .* (radii .+ probe_radius) .^ 2 .* (radii ./ Bs) .^ 6
+        sa_terms = inter.sa_factor .* (radii .+ inter.probe_radius) .^ 2 .* (radii ./ Bs) .^ 6
         born_forces = (-6 .* sa_terms ./ Bs) .* (Bs .> zero(T))
     else
         born_forces = zeros(T, n_atoms)
@@ -186,16 +195,16 @@ function forces(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
     charges_j = @view charges[inter.js]
     Bsi = @view Bs[inter.is]
     Bsj = @view Bs[inter.js]
-    zero_coord = zero(first(coords))
-    zero_loop_result = ForceLoopResult(zero(T), zero(T), zero_coord, zero_coord)
-    loop_res = broadcast(inter.is, inter.js, coords_i, coords_j, charges_i, charges_j, Bsi, Bsj, (box_size,)) do i, j, coord_i, coord_j, charge_i, charge_j, Bi, Bj, bs
+    zero_force = zero(first(coords))
+    zero_loop_result_1 = ForceLoopResult1(zero(T), zero(T), zero_force, zero_force)
+    loop_res_1 = broadcast(inter.is, inter.js, coords_i, coords_j, charges_i, charges_j, Bsi, Bsj, (box_size,)) do i, j, coord_i, coord_j, charge_i, charge_j, Bi, Bj, bs
         if j < i
-            return zero_loop_result
+            return zero_loop_result_1
         end
         dr = vector(coord_i, coord_j, bs)
         r2 = sum(abs2, dr)
         if !iszero(inter.cutoff) && r2 > inter.cutoff^2
-            return zero_loop_result
+            return zero_loop_result_1
         end
         alpha2_ij = Bi * Bj
         D_ij = r2 / (4 * alpha2_ij)
@@ -211,47 +220,45 @@ function forces(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
             fdr = dr * dGpol_dr
             change_fs_i =  fdr
             change_fs_j = -fdr
-            return ForceLoopResult(change_born_force_i, change_born_force_j,
+            return ForceLoopResult1(change_born_force_i, change_born_force_j,
                                     change_fs_i, change_fs_j)
         else
-            return ForceLoopResult(change_born_force_i, zero(T), zero_coord, zero_coord)
+            return ForceLoopResult1(change_born_force_i, zero(T), zero_force, zero_force)
         end
     end
-    born_forces = born_forces .+ sum(lr -> lr.change_born_force_i, loop_res; dims=2)[:, 1]
-    born_forces = born_forces .+ sum(lr -> lr.change_born_force_j, loop_res; dims=1)[1, :]
-    fs = sum(lr -> lr.change_fs_i, loop_res; dims=2)[:, 1] .+ sum(lr -> lr.change_fs_j, loop_res; dims=1)[1, :]
+    born_forces = born_forces .+ sum(lr -> lr.change_born_force_i, loop_res_1; dims=2)[:, 1]
+    born_forces = born_forces .+ sum(lr -> lr.change_born_force_j, loop_res_1; dims=1)[1, :]
+    fs = sum(lr -> lr.change_fs_i, loop_res_1; dims=2)[:, 1] .+ sum(lr -> lr.change_fs_j, loop_res_1; dims=1)[1, :]
 
-    for i in 1:n_atoms
-        born_forces[i] *= Bs[i]^2 * B_grads[i]
-    end
+    born_forces = born_forces .* (Bs .^ 2) .* B_grads
 
-    for i in 1:n_atoms
-        ori = inter.offset_radii[i]
-        for j in 1:n_atoms
-            i == j && continue
-            dr = vector(coords[i], coords[j], box_size)
-            r = norm(dr)
-            if !iszero(inter.cutoff) && r > inter.cutoff
-                continue
-            end
-            srj = inter.scaled_offset_radii[j]
-            rsrj = r + srj
-            if ori < rsrj
-                D = abs(r - srj)
-                L = inv(max(ori, D))
-                U = inv(rsrj)
-                rinv = inv(r)
-                r2inv = rinv^2
-                t3 = (1 + (srj^2)*r2inv)*(L^2 - U^2)/8 + log(U/L)*r2inv/4
-                de = born_forces[i] * t3 * rinv
-                fdr = dr * de
-                fs[i] -= fdr
-                fs[j] += fdr
-            end
+    bis = @view born_forces[inter.is]
+    oris = @view inter.offset_radii[inter.is]
+    srjs = @view inter.scaled_offset_radii[inter.js]
+    zero_loop_result_2 = ForceLoopResult2(zero_force, zero_force)
+    loop_res_2 = broadcast(coords_i, coords_j, bis, oris, srjs, (box_size,)) do coord_i, coord_j, bi, ori, srj, bs
+        dr = vector(coord_i, coord_j, bs)
+        r = norm(dr)
+        if iszero(r) || (!iszero(inter.cutoff) && r > inter.cutoff)
+            return zero_loop_result_2
+        end
+        rsrj = r + srj
+        if ori < rsrj
+            D = abs(r - srj)
+            L = inv(max(ori, D))
+            U = inv(rsrj)
+            rinv = inv(r)
+            r2inv = rinv^2
+            t3 = (1 + (srj^2)*r2inv)*(L^2 - U^2)/8 + log(U/L)*r2inv/4
+            de = bi * t3 * rinv
+            fdr = dr * de
+            return ForceLoopResult2(-fdr, fdr)
+        else
+            return zero_loop_result_2
         end
     end
 
-    return fs
+    return fs .+ sum(lr -> lr.change_fs_i, loop_res_2; dims=2)[:, 1] .+ sum(lr -> lr.change_fs_j, loop_res_2; dims=1)[1, :]
 end
 
 function potential_energy(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
@@ -267,7 +274,7 @@ function potential_energy(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
         if inter.use_ACE
             if Bi > 0
                 radius_i = inter.offset_radii[i] + inter.offset
-                E += T(28.3919551) * (radius_i + T(0.14))^2 * (radius_i / Bi)^6
+                E += inter.sa_factor * (radius_i + inter.probe_radius)^2 * (radius_i / Bi)^6
             end
         end
         for j in (i + 1):n_atoms
