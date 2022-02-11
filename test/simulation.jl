@@ -51,6 +51,8 @@ end
                          "coords" => CoordinateLogger(100),
                          "vels"   => VelocityLogger(100),
                          "energy" => TotalEnergyLogger(100),
+                         "ke"     => KineticEnergyLogger(100),
+                         "pe"     => PotentialEnergyLogger(100),
                          "writer" => StructureWriter(100, temp_fp_pdb)),
         )
 

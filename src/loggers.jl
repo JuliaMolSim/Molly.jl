@@ -167,7 +167,7 @@ end
 
 function log_property!(logger::KineticEnergyLogger, s::System, neighbors=nothing, step_n::Integer=0)
     if step_n % logger.n_steps == 0
-        push!(logger.energies, kinetic_energy(s, neighbors))
+        push!(logger.energies, kinetic_energy(s))
     end
 end
 
