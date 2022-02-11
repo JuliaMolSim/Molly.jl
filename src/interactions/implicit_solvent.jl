@@ -5,7 +5,7 @@ export ImplicitSolventOBC
 
 Onufriev-Bashford-Case GBSA model.
 """
-struct ImplicitSolventOBC{R, T}
+struct ImplicitSolventOBC{T, R, I}
     offset_radii::Vector{R}
     scaled_offset_radii::Vector{R}
     solvent_dielectric::T
@@ -16,6 +16,8 @@ struct ImplicitSolventOBC{R, T}
     α::T
     β::T
     γ::T
+    is::I
+    js::I
 end
 
 # Default solvent dielectric is 78.5 for consistency with AMBER
@@ -53,7 +55,8 @@ function ImplicitSolventOBC(atoms,
     )
 
     # Find atoms bonded to nitrogen
-    atoms_bonded_to_N = falses(length(atoms))
+    n_atoms = length(atoms)
+    atoms_bonded_to_N = falses(n_atoms)
     for (i, j) in zip(bonds.is, bonds.js)
         if atoms_data[i].element == "N"
             atoms_bonded_to_N[j] = true
@@ -85,37 +88,40 @@ function ImplicitSolventOBC(atoms,
         # GBOBCI parameters
         α, β, γ = T(0.8), T(0.0), T(2.909125)
     end
-    return ImplicitSolventOBC{T, T}(offset_radii, scaled_offset_radii, solvent_dielectric,
-                                    solute_dielectric, offset, cutoff, use_ACE, α, β, γ)
+
+    is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
+    js = permutedims(is, (2, 1))
+    return ImplicitSolventOBC{T, T, typeof(is)}(offset_radii, scaled_offset_radii,
+                solvent_dielectric, solute_dielectric, offset, cutoff, use_ACE,
+                α, β, γ, is, js)
 end
 
 # Calculate Born radii and gradients with respect to atomic distance
-function born_radii_and_grad(inter::ImplicitSolventOBC{R, T}, coords, box_size) where {R, T}
-    n_atoms = length(coords)
-    Is = T[]
-    for i in 1:n_atoms
+function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, box_size) where T
+    coords_i = @view coords[inter.is]
+    coords_j = @view coords[inter.js]
+    oris = @view inter.offset_radii[inter.is]
+    srjs = @view inter.scaled_offset_radii[inter.js]
+    Is_2D = broadcast(coords_i, coords_j, oris, srjs, (box_size,)) do coord_i, coord_j, ori, srj, bs
         I = zero(T)
-        ori = inter.offset_radii[i]
-        for j in 1:n_atoms
-            i == j && continue
-            r = norm(vector(coords[i], coords[j], box_size))
-            if !iszero(inter.cutoff) && r > inter.cutoff
-                continue
-            end
-            srj = inter.scaled_offset_radii[j]
-            U = r + srj
-            if ori < U
-                D = abs(r - srj)
-                L = max(ori, D)
-                I += (1/L - 1/U + (r - (srj^2)/r)*(1/(U^2) - 1/(L^2))/4 + log(L/U)/(2*r)) / 2
-                if ori < (srj - r)
-                    I += 2 * (1/ori - 1/L)
-                end
+        r = norm(vector(coord_i, coord_j, bs))
+        if iszero(r) || (!iszero(inter.cutoff) && r > inter.cutoff)
+            return I
+        end
+        U = r + srj
+        if ori < U
+            D = abs(r - srj)
+            L = max(ori, D)
+            I += (1/L - 1/U + (r - (srj^2)/r)*(1/(U^2) - 1/(L^2))/4 + log(L/U)/(2*r)) / 2
+            if ori < (srj - r)
+                I += 2 * (1/ori - 1/L)
             end
         end
-        push!(Is, I)
+        return I
     end
+    Is = sum(Is_2D; dims=2)
 
+    n_atoms = length(coords)
     Bs, B_grads = T[], T[]
     α, β, γ = inter.α, inter.β, inter.γ
     for i in 1:n_atoms
@@ -131,10 +137,20 @@ function born_radii_and_grad(inter::ImplicitSolventOBC{R, T}, coords, box_size) 
         push!(B_grads, B_grad)
     end
 
+    ori = inter.offset_radii
+    radii = ori .+ inter.offset
+    ψs = Is .* ori
+    ψs2 = ψs .^ 2
+    α, β, γ = inter.α, inter.β, inter.γ
+    tanh_sums = tanh.(α .* ψs .- β .* ψs2 .+ γ .* ψs2 .* ψs)
+    Bs = 1 ./ (1 ./ ori .- tanh_sums ./ radii)
+    grad_terms = ori .* (α .- 2 .* β .* ψs .+ 3 .* γ .* ψs2)
+    B_grads = (1 .- tanh_sums .^ 2) .* grad_terms ./ radii
+
     return Bs, B_grads
 end
 
-function forces(inter::ImplicitSolventOBC{R, T}, sys, neighbors) where {R, T}
+function forces(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
     n_atoms = length(sys)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
     Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
@@ -219,7 +235,7 @@ function forces(inter::ImplicitSolventOBC{R, T}, sys, neighbors) where {R, T}
     return fs
 end
 
-function potential_energy(inter::ImplicitSolventOBC{R, T}, sys, neighbors) where {R, T}
+function potential_energy(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
     n_atoms = length(sys)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
     Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
