@@ -1,11 +1,11 @@
-export ImplicitSolventOBC2
+export ImplicitSolventOBC
 
 """
-    ImplicitSolventOBC2(atoms, atoms_data)
+    ImplicitSolventOBC(atoms, atoms_data, bonds)
 
-Onufriev-Bashford-Case GBSA model using the GBOBCII parameters.
+Onufriev-Bashford-Case GBSA model.
 """
-struct ImplicitSolventOBC2{R, T}
+struct ImplicitSolventOBC{R, T}
     offset_radii::Vector{R}
     scaled_offset_radii::Vector{R}
     solvent_dielectric::T
@@ -13,18 +13,22 @@ struct ImplicitSolventOBC2{R, T}
     offset::R
     cutoff::R
     use_ACE::Bool
+    α::T
+    β::T
+    γ::T
 end
 
 # Default solvent dielectric is 78.5 for consistency with AMBER
 # Elsewhere it is 78.3
-function ImplicitSolventOBC2(atoms,
-                                atoms_data,
-                                bonds;
-                                solvent_dielectric=78.5,
-                                solute_dielectric=1.0,
-                                offset=0.009,
-                                cutoff=0.0,
-                                use_ACE=true)
+function ImplicitSolventOBC(atoms,
+                            atoms_data,
+                            bonds;
+                            solvent_dielectric=78.5,
+                            solute_dielectric=1.0,
+                            offset=0.009,
+                            cutoff=0.0,
+                            use_ACE=true,
+                            use_OBC2=false)
     # See OpenMM source code
     default_radius = 0.15 # in nm
     element_to_radius = Dict(
@@ -73,65 +77,182 @@ function ImplicitSolventOBC2(atoms,
         push!(offset_radii, offset_radius)
         push!(scaled_offset_radii, screen * offset_radius)
     end
-    return ImplicitSolventOBC2{T, T}(offset_radii, scaled_offset_radii, solvent_dielectric,
-                                        solute_dielectric, offset, cutoff, use_ACE)
+
+    if use_OBC2
+        # GBOBCII parameters
+        α, β, γ = T(1.0), T(0.8), T(4.85)
+    else
+        # GBOBCI parameters
+        α, β, γ = T(0.8), T(0.0), T(2.909125)
+    end
+    return ImplicitSolventOBC{T, T}(offset_radii, scaled_offset_radii, solvent_dielectric,
+                                    solute_dielectric, offset, cutoff, use_ACE, α, β, γ)
 end
 
-function forces(inter::ImplicitSolventOBC2, sys, neighbors)
-    return ustrip_vec.(zero(sys.coords))
-end
-
-function potential_energy(inter::ImplicitSolventOBC2{R, T}, sys, neighbors) where {R, T}
-    n_atoms = length(sys)
-    coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
-
+# Calculate Born radii and gradients with respect to atomic distance
+function born_radii_and_grad(inter::ImplicitSolventOBC{R, T}, coords, box_size) where {R, T}
+    n_atoms = length(coords)
     Is = T[]
     for i in 1:n_atoms
         I = zero(T)
+        ori = inter.offset_radii[i]
         for j in 1:n_atoms
             i == j && continue
             r = norm(vector(coords[i], coords[j], box_size))
-            sr2 = inter.scaled_offset_radii[j]
-            D = abs(r - sr2)
-            or1 = inter.offset_radii[i]
-            L = max(or1, D)
-            U = r + sr2
-            if U >= or1
-                I += (1/L - 1/U + (r - (sr2^2)/r)*(1/(U^2) - 1/(L^2))/4 + log(L/U)/(2*r)) / 2
+            if !iszero(inter.cutoff) && r > inter.cutoff
+                continue
+            end
+            srj = inter.scaled_offset_radii[j]
+            U = r + srj
+            if ori < U
+                D = abs(r - srj)
+                L = max(ori, D)
+                I += (1/L - 1/U + (r - (srj^2)/r)*(1/(U^2) - 1/(L^2))/4 + log(L/U)/(2*r)) / 2
+                if ori < (srj - r)
+                    I += 2 * (1/ori - 1/L)
+                end
             end
         end
         push!(Is, I)
     end
 
-    Bs = T[]
+    Bs, B_grads = T[], T[]
+    α, β, γ = inter.α, inter.β, inter.γ
     for i in 1:n_atoms
-        or1 = inter.offset_radii[i]
-        radius = or1 + inter.offset
-        psi = Is[i] * or1
-        B = 1 / (1/or1 - tanh(psi - T(0.8)*(psi^2)+T(4.85)*(psi^3)) / radius)
+        ori = inter.offset_radii[i]
+        radius_i = ori + inter.offset
+        psi = Is[i] * ori
+        psi2 = psi^2
+        tanh_sum = tanh(α*psi - β*psi2 + γ*psi2*psi)
+        B = 1 / (1/ori - tanh_sum/radius_i)
+        grad_term = ori * (α - 2*β*psi + 3*γ*psi2)
+        B_grad = (1 - tanh_sum^2) * grad_term / radius_i
         push!(Bs, B)
+        push!(B_grads, B_grad)
     end
 
+    return Bs, B_grads
+end
+
+function forces(inter::ImplicitSolventOBC{R, T}, sys, neighbors) where {R, T}
+    n_atoms = length(sys)
+    coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
+    Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
+
+    born_forces = zeros(T, n_atoms)
+    if inter.use_ACE
+        for i in 1:n_atoms
+            Bi = Bs[i]
+            if Bi > 0
+                radius_i = inter.offset_radii[i] + inter.offset
+                probe_radius = T(0.14)
+                sa_term = T(28.3919551) * (radius_i + probe_radius)^2 * (radius_i / Bi)^6
+                born_forces[i] -= 6 * sa_term / Bi
+            end
+        end
+    end
+
+    fs = ustrip_vec.(zero(coords))
+    if !iszero(inter.solute_dielectric) && !iszero(inter.solvent_dielectric)
+        pre_factor = T(-138.935485) * (1/inter.solute_dielectric - 1/inter.solvent_dielectric)
+    else
+        pre_factor = zero(T)
+    end
+    for i in 1:n_atoms
+        Bi = Bs[i]
+        charge_i_fac = pre_factor * atoms[i].charge
+        for j in i:n_atoms
+            Bj = Bs[j]
+            dr = vector(coords[i], coords[j], box_size)
+            r2 = sum(abs2, dr)
+            if !iszero(inter.cutoff) && r2 > inter.cutoff^2
+                continue
+            end
+            alpha2_ij = Bi * Bj
+            D_ij = r2 / (4 * alpha2_ij)
+            exp_term = exp(-D_ij)
+            denominator2 = r2 + alpha2_ij * exp_term
+            denominator = sqrt(denominator2)
+            Gpol = (charge_i_fac * atoms[j].charge) / denominator
+            dGpol_dr = -Gpol * (1 - exp_term/4) / denominator2
+            dGpol_dalpha2_ij = -Gpol * exp_term * (1 + D_ij) / (2 * denominator2)
+            if i != j
+                born_forces[j] += dGpol_dalpha2_ij * Bi
+                fdr = dr * dGpol_dr
+                fs[i] += fdr
+                fs[j] -= fdr
+            end
+            born_forces[i] += dGpol_dalpha2_ij * Bj
+        end
+    end
+
+    for i in 1:n_atoms
+        born_forces[i] *= Bs[i]^2 * B_grads[i]
+    end
+
+    for i in 1:n_atoms
+        ori = inter.offset_radii[i]
+        for j in 1:n_atoms
+            i == j && continue
+            dr = vector(coords[i], coords[j], box_size)
+            r = norm(dr)
+            if !iszero(inter.cutoff) && r > inter.cutoff
+                continue
+            end
+            srj = inter.scaled_offset_radii[j]
+            rsrj = r + srj
+            if ori < rsrj
+                D = abs(r - srj)
+                L = inv(max(ori, D))
+                U = inv(rsrj)
+                rinv = inv(r)
+                r2inv = rinv^2
+                t3 = (1 + (srj^2)*r2inv)*(L^2 - U^2)/8 + log(U/L)*r2inv/4
+                de = born_forces[i] * t3 * rinv
+                fdr = dr * de
+                fs[i] -= fdr
+                fs[j] += fdr
+            end
+        end
+    end
+
+    return fs
+end
+
+function potential_energy(inter::ImplicitSolventOBC{R, T}, sys, neighbors) where {R, T}
+    n_atoms = length(sys)
+    coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
+    Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
+
     E = zero(T)
-    factor = -138.935485 * (1/inter.solute_dielectric - 1/inter.solvent_dielectric)
+    if !iszero(inter.solute_dielectric) && !iszero(inter.solvent_dielectric)
+        pre_factor = T(-138.935485) * (1/inter.solute_dielectric - 1/inter.solvent_dielectric)
+    else
+        pre_factor = zero(T)
+    end
     for i in 1:n_atoms
         charge_i = atoms[i].charge
         Bi = Bs[i]
-        E += factor * (charge_i^2) / (2*Bi)
+        E += pre_factor * (charge_i^2) / (2*Bi)
         if inter.use_ACE
-            radius = inter.offset_radii[i] + inter.offset
-            E += T(28.3919551) * (radius + T(0.14))^2 * (radius / Bi)^6
+            if Bi > 0
+                radius_i = inter.offset_radii[i] + inter.offset
+                E += T(28.3919551) * (radius_i + T(0.14))^2 * (radius_i / Bi)^6
+            end
         end
         for j in (i + 1):n_atoms
             Bj = Bs[j]
             r2 = square_distance(i, j, coords, box_size)
+            if !iszero(inter.cutoff) && r2 > inter.cutoff^2
+                continue
+            end
             f = sqrt(r2 + Bi*Bj*exp(-r2/(4*Bi*Bj)))
             if iszero(inter.cutoff)
                 f_cutoff = 1/f
             else
                 f_cutoff = (1/f - 1/inter.cutoff)
             end
-            E += factor * charge_i * atoms[j].charge * f_cutoff
+            E += pre_factor * charge_i * atoms[j].charge * f_cutoff
         end
     end
 

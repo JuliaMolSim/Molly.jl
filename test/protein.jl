@@ -93,7 +93,7 @@ end
             neighbor_finder=sys.neighbor_finder,
         )
 
-        forces_molly = accelerations(sys_part, neighbors; parallel=false) .* mass.(sys_part.atoms)
+        forces_molly = forces(sys_part, neighbors; parallel=false)
         forces_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "forces_$(inter)_only.txt"))))u"kJ * mol^-1 * nm^-1"
         # All force terms on all atoms must match at some threshold
         @test !any(d -> any(abs.(d) .> 1e-6u"kJ * mol^-1 * nm^-1"), forces_molly .- forces_openmm)
