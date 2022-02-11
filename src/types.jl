@@ -9,6 +9,7 @@ export
     InteractionList3Atoms,
     InteractionList4Atoms,
     Atom,
+    charge,
     mass,
     AtomData,
     NeighborList,
@@ -127,6 +128,13 @@ function Atom(;
 end
 
 """
+    charge(atom)
+
+The partial charge of an atom.
+"""
+charge(atom::Atom) = atom.charge
+
+"""
     mass(atom)
 
 The mass of an atom.
@@ -136,8 +144,8 @@ mass(atom::Atom) = atom.mass
 AtomsBase.atomic_mass(atom::Atom) = mass(atom)
 
 function Base.show(io::IO, a::Atom)
-    print(io, "Atom with index ", a.index, ", charge=", a.charge,
-            ", mass=", a.mass, ", σ=", a.σ, ", ϵ=", a.ϵ)
+    print(io, "Atom with index ", a.index, ", charge=", charge(a),
+            ", mass=", mass(a), ", σ=", a.σ, ", ϵ=", a.ϵ)
 end
 
 """

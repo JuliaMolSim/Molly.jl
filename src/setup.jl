@@ -392,10 +392,10 @@ function System(coord_file::AbstractString,
         res_num = Chemfiles.id(res)
         res_name = residue_name(res, res_num_to_standard, rename_terminal_res)
         type = force_field.residue_types[res_name].types[atom_name]
-        charge = force_field.residue_types[res_name].charges[atom_name]
+        ch = force_field.residue_types[res_name].charges[atom_name]
         at = force_field.atom_types[type]
         solute = res_num_to_standard[res_num] || res_name in ("ACE", "NME")
-        push!(atoms, Atom(index=ai, charge=charge, mass=at.mass, σ=at.σ, ϵ=at.ϵ, solute=solute))
+        push!(atoms, Atom(index=ai, charge=ch, mass=at.mass, σ=at.σ, ϵ=at.ϵ, solute=solute))
         push!(atoms_data, AtomData(atom_type=type, atom_name=atom_name, res_number=Chemfiles.id(res),
                                     res_name=Chemfiles.name(res), element=at.element))
         nb_matrix[ai, ai] = false
@@ -805,7 +805,7 @@ function System(T::Type,
             end
         elseif current_field == "atoms"
             attype = atomnames[c[2]]
-            charge = parse(T, c[7])
+            ch = parse(T, c[7])
             if units
                 mass = parse(T, c[8])u"u"
             else
@@ -813,7 +813,7 @@ function System(T::Type,
             end
             solute = c[4] in keys(BioStructures.threeletter_to_aa)
             atom_index = length(atoms) + 1
-            push!(atoms, Atom(index=atom_index, charge=charge, mass=mass, σ=atomtypes[attype].σ,
+            push!(atoms, Atom(index=atom_index, charge=ch, mass=mass, σ=atomtypes[attype].σ,
                                 ϵ=atomtypes[attype].ϵ, solute=solute))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=c[5], res_number=parse(Int, c[3]),
                                         res_name=c[4]))

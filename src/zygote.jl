@@ -161,9 +161,9 @@ function dualize_fb(inter::PeriodicTorsion{6, T, E}) where {T, E}
 end
 
 function dualize_atom_fb1(at::Atom)
-    charge, mass, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
-    dual_charge = @dualize(charge, 23, 13)
-    dual_mass = @dualize(mass, 23, 14)
+    c, m, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
+    dual_charge = @dualize(c, 23, 13)
+    dual_mass = @dualize(m, 23, 14)
     dual_σ = @dualize(σ, 23, 15)
     dual_ϵ = @dualize(ϵ, 23, 16)
     return Atom{typeof(dual_charge), typeof(dual_mass), typeof(dual_σ), typeof(dual_ϵ)}(
@@ -171,9 +171,9 @@ function dualize_atom_fb1(at::Atom)
 end
 
 function dualize_atom_fb2(at::Atom)
-    charge, mass, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
-    dual_charge = @dualize(charge, 23, 17)
-    dual_mass = @dualize(mass, 23, 18)
+    c, m, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
+    dual_charge = @dualize(c, 23, 17)
+    dual_mass = @dualize(m, 23, 18)
     dual_σ = @dualize(σ, 23, 19)
     dual_ϵ = @dualize(ϵ, 23, 20)
     return Atom{typeof(dual_charge), typeof(dual_mass), typeof(dual_σ), typeof(dual_ϵ)}(
@@ -206,9 +206,9 @@ end
 
 function dual_function_atom(f::F) where F
     function (arg1)
-        charge, mass, σ, ϵ = arg1.charge, arg1.mass, arg1.σ, arg1.ϵ
-        ds1 = Atom(arg1.index, @dualize(charge, 4, 1), @dualize(mass, 4, 2),
-                    @dualize(σ, 4, 3), @dualize(ϵ, 4, 4), arg1.solute)
+        c, m, σ, ϵ = arg1.charge, arg1.mass, arg1.σ, arg1.ϵ
+        ds1 = Atom(arg1.index, @dualize(c, 4, 1), @dualize(m, 4, 2), @dualize(σ, 4, 3),
+                    @dualize(ϵ, 4, 4), arg1.solute)
         return f(ds1)
     end
 end
