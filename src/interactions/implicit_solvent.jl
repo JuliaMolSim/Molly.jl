@@ -18,6 +18,7 @@ struct ImplicitSolventOBC{T, R, I}
     γ::T
     is::I
     js::I
+    pre_factor::T
 end
 
 # Default solvent dielectric is 78.5 for consistency with AMBER
@@ -91,9 +92,16 @@ function ImplicitSolventOBC(atoms,
 
     is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
     js = permutedims(is, (2, 1))
+
+    if !iszero(solute_dielectric) && !iszero(solvent_dielectric)
+        pre_factor = T(-138.935485) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
+    else
+        pre_factor = zero(T)
+    end
+
     return ImplicitSolventOBC{T, T, typeof(is)}(offset_radii, scaled_offset_radii,
                 solvent_dielectric, solute_dielectric, offset, cutoff, use_ACE,
-                α, β, γ, is, js)
+                α, β, γ, is, js, pre_factor)
 end
 
 # Calculate Born radii and gradients with respect to atomic distance
@@ -150,57 +158,68 @@ function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, box_size) whe
     return Bs, B_grads
 end
 
+struct ForceLoopResult{T, V}
+    change_born_force_i::T
+    change_born_force_j::T
+    change_fs_i::V
+    change_fs_j::V
+end
+
 function forces(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
     n_atoms = length(sys)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
     Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
 
-    born_forces = zeros(T, n_atoms)
     if inter.use_ACE
-        for i in 1:n_atoms
-            Bi = Bs[i]
-            if Bi > 0
-                radius_i = inter.offset_radii[i] + inter.offset
-                probe_radius = T(0.14)
-                sa_term = T(28.3919551) * (radius_i + probe_radius)^2 * (radius_i / Bi)^6
-                born_forces[i] -= 6 * sa_term / Bi
-            end
-        end
+        radii = inter.offset_radii .+ inter.offset
+        probe_radius, sa_factor = T(0.14), T(28.3919551)
+        sa_terms = sa_factor .* (radii .+ probe_radius) .^ 2 .* (radii ./ Bs) .^ 6
+        born_forces = (-6 .* sa_terms ./ Bs) .* (Bs .> zero(T))
+    else
+        born_forces = zeros(T, n_atoms)
     end
 
-    fs = ustrip_vec.(zero(coords))
-    if !iszero(inter.solute_dielectric) && !iszero(inter.solvent_dielectric)
-        pre_factor = T(-138.935485) * (1/inter.solute_dielectric - 1/inter.solvent_dielectric)
-    else
-        pre_factor = zero(T)
-    end
-    for i in 1:n_atoms
-        Bi = Bs[i]
-        charge_i_fac = pre_factor * atoms[i].charge
-        for j in i:n_atoms
-            Bj = Bs[j]
-            dr = vector(coords[i], coords[j], box_size)
-            r2 = sum(abs2, dr)
-            if !iszero(inter.cutoff) && r2 > inter.cutoff^2
-                continue
-            end
-            alpha2_ij = Bi * Bj
-            D_ij = r2 / (4 * alpha2_ij)
-            exp_term = exp(-D_ij)
-            denominator2 = r2 + alpha2_ij * exp_term
-            denominator = sqrt(denominator2)
-            Gpol = (charge_i_fac * atoms[j].charge) / denominator
-            dGpol_dr = -Gpol * (1 - exp_term/4) / denominator2
-            dGpol_dalpha2_ij = -Gpol * exp_term * (1 + D_ij) / (2 * denominator2)
-            if i != j
-                born_forces[j] += dGpol_dalpha2_ij * Bi
-                fdr = dr * dGpol_dr
-                fs[i] += fdr
-                fs[j] -= fdr
-            end
-            born_forces[i] += dGpol_dalpha2_ij * Bj
+    coords_i = @view coords[inter.is]
+    coords_j = @view coords[inter.js]
+    charges = charge.(atoms)
+    charges_i = @view charges[inter.is]
+    charges_j = @view charges[inter.js]
+    Bsi = @view Bs[inter.is]
+    Bsj = @view Bs[inter.js]
+    zero_coord = zero(first(coords))
+    zero_loop_result = ForceLoopResult(zero(T), zero(T), zero_coord, zero_coord)
+    loop_res = broadcast(inter.is, inter.js, coords_i, coords_j, charges_i, charges_j, Bsi, Bsj, (box_size,)) do i, j, coord_i, coord_j, charge_i, charge_j, Bi, Bj, bs
+        if j < i
+            return zero_loop_result
+        end
+        dr = vector(coord_i, coord_j, bs)
+        r2 = sum(abs2, dr)
+        if !iszero(inter.cutoff) && r2 > inter.cutoff^2
+            return zero_loop_result
+        end
+        alpha2_ij = Bi * Bj
+        D_ij = r2 / (4 * alpha2_ij)
+        exp_term = exp(-D_ij)
+        denominator2 = r2 + alpha2_ij * exp_term
+        denominator = sqrt(denominator2)
+        Gpol = (inter.pre_factor * charge_i * charge_j) / denominator
+        dGpol_dr = -Gpol * (1 - exp_term/4) / denominator2
+        dGpol_dalpha2_ij = -Gpol * exp_term * (1 + D_ij) / (2 * denominator2)
+        change_born_force_i = dGpol_dalpha2_ij * Bj
+        if i != j
+            change_born_force_j = dGpol_dalpha2_ij * Bi
+            fdr = dr * dGpol_dr
+            change_fs_i =  fdr
+            change_fs_j = -fdr
+            return ForceLoopResult(change_born_force_i, change_born_force_j,
+                                    change_fs_i, change_fs_j)
+        else
+            return ForceLoopResult(change_born_force_i, zero(T), zero_coord, zero_coord)
         end
     end
+    born_forces = born_forces .+ sum(lr -> lr.change_born_force_i, loop_res; dims=2)[:, 1]
+    born_forces = born_forces .+ sum(lr -> lr.change_born_force_j, loop_res; dims=1)[1, :]
+    fs = sum(lr -> lr.change_fs_i, loop_res; dims=2)[:, 1] .+ sum(lr -> lr.change_fs_j, loop_res; dims=1)[1, :]
 
     for i in 1:n_atoms
         born_forces[i] *= Bs[i]^2 * B_grads[i]
@@ -241,15 +260,10 @@ function potential_energy(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
     Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
 
     E = zero(T)
-    if !iszero(inter.solute_dielectric) && !iszero(inter.solvent_dielectric)
-        pre_factor = T(-138.935485) * (1/inter.solute_dielectric - 1/inter.solvent_dielectric)
-    else
-        pre_factor = zero(T)
-    end
     for i in 1:n_atoms
         charge_i = atoms[i].charge
         Bi = Bs[i]
-        E += pre_factor * (charge_i^2) / (2*Bi)
+        E += inter.pre_factor * (charge_i^2) / (2*Bi)
         if inter.use_ACE
             if Bi > 0
                 radius_i = inter.offset_radii[i] + inter.offset
@@ -268,7 +282,7 @@ function potential_energy(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
             else
                 f_cutoff = (1/f - 1/inter.cutoff)
             end
-            E += pre_factor * charge_i * atoms[j].charge * f_cutoff
+            E += inter.pre_factor * charge_i * atoms[j].charge * f_cutoff
         end
     end
 
