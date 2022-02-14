@@ -32,6 +32,8 @@ function ImplicitSolventOBC(atoms,
                             solute_dielectric=1.0,
                             offset=0.009,
                             cutoff=0.0,
+                            probe_radius=0.14,
+                            sa_factor=28.3919551,
                             use_ACE=true,
                             use_OBC2=false)
     # See OpenMM source code
@@ -92,8 +94,6 @@ function ImplicitSolventOBC(atoms,
         α, β, γ = T(0.8), T(0.0), T(2.909125)
     end
 
-    probe_radius, sa_factor = T(0.14), T(28.3919551)
-
     is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
     js = permutedims(is, (2, 1))
 
@@ -133,22 +133,6 @@ function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, box_size) whe
     end
     Is = sum(Is_2D; dims=2)
 
-    n_atoms = length(coords)
-    Bs, B_grads = T[], T[]
-    α, β, γ = inter.α, inter.β, inter.γ
-    for i in 1:n_atoms
-        ori = inter.offset_radii[i]
-        radius_i = ori + inter.offset
-        psi = Is[i] * ori
-        psi2 = psi^2
-        tanh_sum = tanh(α*psi - β*psi2 + γ*psi2*psi)
-        B = 1 / (1/ori - tanh_sum/radius_i)
-        grad_term = ori * (α - 2*β*psi + 3*γ*psi2)
-        B_grad = (1 - tanh_sum^2) * grad_term / radius_i
-        push!(Bs, B)
-        push!(B_grads, B_grad)
-    end
-
     ori = inter.offset_radii
     radii = ori .+ inter.offset
     ψs = Is .* ori
@@ -162,7 +146,7 @@ function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, box_size) whe
     return Bs, B_grads
 end
 
-# Store the results of ij broadcast during force calculation
+# Store the results of the ij broadcasts during force calculation
 struct ForceLoopResult1{T, V}
     change_born_force_i::T
     change_born_force_j::T
