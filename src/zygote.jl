@@ -191,7 +191,7 @@ function dual_function_svec_real(f::F) where F
     function (arg1::SVector{D, T}, arg2) where {D, T}
         ds1 = dualize(Nothing, arg1, Val(0), Val(1))
         # Leaving the integer type in here results in Float32 -> Float64 conversion
-        ds2 = Zygote.dual(arg2 isa Int ? T(arg2) : arg2, (false, false, false, true))
+        ds2 = Zygote.dual(arg2 isa Int ? T(arg2) : arg2, ntuple(isequal(4), 4))
         return f(ds1, ds2)
     end
 end
@@ -256,6 +256,18 @@ function dual_function_specific_4_atoms(f::F) where F
         ds4 = dualize(Nothing, arg4, Val(18), Val( 6))
         ds5 = dualize(Nothing, arg5, Val(21), Val( 3))
         ds6 = dualize(Nothing, arg6, Val(24), Val( 0))
+        return f(ds1, ds2, ds3, ds4, ds5, ds6)
+    end
+end
+
+function dual_function_born_radii_loop(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5, arg6)
+        ds1 = dualize(Nothing, arg1, Val(0), Val(8))
+        ds2 = dualize(Nothing, arg2, Val(3), Val(5))
+        ds3 = Zygote.dual(arg3, ntuple(isequal(7), 11))
+        ds4 = Zygote.dual(arg4, ntuple(isequal(8), 11))
+        ds5 = arg5
+        ds6 = dualize(Nothing, arg6, Val(8), Val(0))
         return f(ds1, ds2, ds3, ds4, ds5, ds6)
     end
 end
@@ -557,6 +569,32 @@ end
     return y, bc_fwd_back
 end
 
+# For born_radii_loop
+@inline function Zygote.broadcast_forward(f,
+                                            arg1::AbstractArray{SVector{D, T}},
+                                            arg2::AbstractArray{SVector{D, T}},
+                                            arg3::AbstractArray{T},
+                                            arg4::AbstractArray{T},
+                                            arg5::Tuple{T},
+                                            arg6::Tuple{SVector{D, T}}) where {D, T}
+    out = dual_function_born_radii_loop(f).(arg1, arg2, arg3, arg4, arg5, arg6)
+    y = map(x -> value.(x), out)
+    function bc_fwd_back(ȳ_in)
+        ȳ = modify_grad(ȳ_in, arg1)
+        darg1 = unbroadcast(arg1, broadcast((y1, o1) -> SVector{D, T}(partials(o1, 1) * y1,
+                    partials(o1, 2) * y1, partials(o1, 3) * y1), ȳ, out))
+        darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(partials(o1, 4) * y1,
+                    partials(o1, 5) * y1, partials(o1, 6) * y1), ȳ, out))
+        darg3 = unbroadcast(arg3, broadcast((y1, o1) -> partials(o1, 7) * y1, ȳ, out))
+        darg4 = unbroadcast(arg4, broadcast((y1, o1) -> partials(o1, 8) * y1, ȳ, out))
+        darg5 = nothing
+        darg6 = unbroadcast(arg6, broadcast((y1, o1) -> SVector{D, T}(partials(o1, 9) * y1,
+                    partials(o1, 10) * y1, partials(o1, 11) * y1), ȳ, out))
+        return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6)
+    end
+    return y, bc_fwd_back
+end
+
 @inline function Zygote.broadcast_forward(f::typeof(getf1),
                                             arg1::AbstractArray{<:SpecificForce2Atoms}) where {D, T}
     return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=y1, f2=zero(y1)), ȳ)))
@@ -603,8 +641,8 @@ end
 end
 
 # Use fast broadcast path on CPU
-for op in (:+, :-, :*, :/, :mass, :remove_molar, :ustrip, :ustrip_vec, :wrap_coords_vec,
-            :getf1, :getf2, :getf3, :getf4)
+for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec,
+            :wrap_coords_vec, :getf1, :getf2, :getf3, :getf4, :born_radii_loop)
     @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
     # Avoid ambiguous dispatch
     @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
