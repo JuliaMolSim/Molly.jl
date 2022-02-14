@@ -71,10 +71,10 @@ function ImplicitSolventOBC(atoms,
         end
     end
 
-    T = typeof(first(atoms).charge)
+    T = typeof(charge(first(Array(atoms))))
     offset_radii = T[]
     scaled_offset_radii = T[]
-    for (at, at_data, bonded_to_N) in zip(atoms, atoms_data, atoms_bonded_to_N)
+    for (at_data, bonded_to_N) in zip(atoms_data, atoms_bonded_to_N)
         if at_data.element in ("H", "D")
             radius = bonded_to_N ? 0.13 : 0.12
         else
@@ -94,8 +94,8 @@ function ImplicitSolventOBC(atoms,
         α, β, γ = T(0.8), T(0.0), T(2.909125)
     end
 
-    is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
-    js = permutedims(is, (2, 1))
+    inds_i = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
+    inds_j = permutedims(inds_i, (2, 1))
 
     if !iszero(solute_dielectric) && !iszero(solvent_dielectric)
         pre_factor = T(-138.935485) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
@@ -103,10 +103,19 @@ function ImplicitSolventOBC(atoms,
         pre_factor = zero(T)
     end
 
-    return ImplicitSolventOBC{T, T, typeof(offset_radii), typeof(is)}(
-                offset_radii, scaled_offset_radii,
-                solvent_dielectric, solute_dielectric, offset, cutoff, use_ACE,
-                α, β, γ, probe_radius, sa_factor, is, js, pre_factor)
+    if isa(atoms, CuArray)
+        or = cu(offset_radii)
+        sor = cu(scaled_offset_radii)
+        is, js = cu(inds_i), cu(inds_j)
+    else
+        or = offset_radii
+        sor = scaled_offset_radii
+        is, js = inds_i, inds_j
+    end
+
+    return ImplicitSolventOBC{T, T, typeof(or), typeof(is)}(
+                or, sor, solvent_dielectric, solute_dielectric, offset, cutoff,
+                use_ACE, α, β, γ, probe_radius, sa_factor, is, js, pre_factor)
 end
 
 function born_radii_loop(coord_i::SVector{D, T}, coord_j, ori, srj, cutoff, box_size) where {D, T}
@@ -168,7 +177,7 @@ function gb_force_loop_1(coord_i::SVector{D, T}, coord_j, i, j, charge_i, charge
     end
     dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
-    if !iszero(cutoff) && r2 > inter.cutoff^2
+    if !iszero(cutoff) && r2 > cutoff^2
         return zero_result
     end
     alpha2_ij = Bi * Bj
@@ -234,7 +243,7 @@ function forces(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
     charges_j = @view charges[inter.js]
     Bsi = @view Bs[inter.is]
     Bsj = @view Bs[inter.js]
-    zero_force = zero(first(coords))
+    zero_force = zero(eltype(coords))
     zero_loop_result_1 = ForceLoopResult1(zero(T), zero(T), zero_force, zero_force)
     loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i, charges_j,
                                     Bsi, Bsj, (inter.cutoff,), (inter.pre_factor,),
