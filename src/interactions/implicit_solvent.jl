@@ -1,11 +1,22 @@
-export ImplicitSolventOBC
+export
+    AbstractGBSA,
+    ImplicitSolventOBC,
+    born_radii_and_grad
+
+"""
+Generalized Born (GB) implicit solvent models augmented with the
+hydrophobic solvent accessible surface area (SA) term.
+Custom GBSA methods should sub-type this type.
+"""
+abstract type AbstractGBSA{T} end
 
 """
     ImplicitSolventOBC(atoms, atoms_data, bonds)
 
 Onufriev-Bashford-Case GBSA model.
+Should be used along with a Coulomb or CoulombReactionField interaction.
 """
-struct ImplicitSolventOBC{T, R, V, I}
+struct ImplicitSolventOBC{T, R, V, I} <: AbstractGBSA{T}
     offset_radii::V
     scaled_offset_radii::V
     solvent_dielectric::T
@@ -136,7 +147,12 @@ function born_radii_loop(coord_i::SVector{D, T}, coord_j, ori, srj, cutoff, box_
     return I
 end
 
-# Calculate Born radii and gradients with respect to atomic distance
+"""
+    born_radii_and_grad(inter, coords, box_size)
+
+Calculate Born radii and gradients of Born radii with respect to atomic distance.
+Custom GBSA methods should implement this function.
+"""
 function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, box_size) where T
     coords_i = @view coords[inter.is]
     coords_j = @view coords[inter.js]
@@ -228,7 +244,7 @@ function gb_force_loop_2(coord_i, coord_j, bi, ori, srj, cutoff, box_size)
     end
 end
 
-function forces(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
+function forces(inter::AbstractGBSA{T}, sys, neighbors) where T
     n_atoms = length(sys)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
     Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
@@ -264,7 +280,7 @@ function forces(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
     return fs .+ sum(lr -> lr.fi, loop_res_2; dims=2)[:, 1] .+ sum(lr -> lr.fj, loop_res_2; dims=1)[1, :]
 end
 
-function potential_energy(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
+function potential_energy(inter::AbstractGBSA{T}, sys, neighbors) where T
     n_atoms = length(sys)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
     Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
