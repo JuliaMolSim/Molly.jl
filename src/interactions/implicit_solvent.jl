@@ -1,3 +1,6 @@
+# Implicit solvent models
+# Based on the OpenMM source code
+
 export
     AbstractGBSA,
     ImplicitSolventOBC,
@@ -16,18 +19,18 @@ abstract type AbstractGBSA{T} end
 Onufriev-Bashford-Case GBSA model.
 Should be used along with a Coulomb or CoulombReactionField interaction.
 """
-struct ImplicitSolventOBC{T, R, V, I} <: AbstractGBSA{T}
+struct ImplicitSolventOBC{T, D, V, I} <: AbstractGBSA{T}
     offset_radii::V
     scaled_offset_radii::V
     solvent_dielectric::T
     solute_dielectric::T
-    offset::R
-    cutoff::R
+    offset::D
+    cutoff::D
     use_ACE::Bool
     α::T
     β::T
     γ::T
-    probe_radius::R
+    probe_radius::D
     sa_factor::T
     is::I
     js::I
@@ -36,28 +39,27 @@ end
 
 # Default solvent dielectric is 78.5 for consistency with AMBER
 # Elsewhere it is 78.3
-function ImplicitSolventOBC(atoms,
+function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
                             atoms_data,
                             bonds;
                             solvent_dielectric=78.5,
                             solute_dielectric=1.0,
-                            offset=0.009,
-                            cutoff=0.0,
-                            probe_radius=0.14,
+                            offset=0.009u"nm",
+                            cutoff=0.0u"nm",
+                            probe_radius=0.14u"nm",
                             sa_factor=28.3919551,
                             use_ACE=true,
-                            use_OBC2=false)
-    # See OpenMM source code
-    default_radius = 0.15 # in nm
+                            use_OBC2=false) where {T, M, D, E}
+    default_radius = 0.15u"nm"
     element_to_radius = Dict(
-        "N"  => 0.155,
-        "O"  => 0.15 ,
-        "F"  => 0.15 ,
-        "Si" => 0.21 ,
-        "P"  => 0.185,
-        "S"  => 0.18 ,
-        "Cl" => 0.17 ,
-        "C"  => 0.17 ,
+        "N"  => 0.155u"nm",
+        "O"  => 0.15u"nm" ,
+        "F"  => 0.15u"nm" ,
+        "Si" => 0.21u"nm" ,
+        "P"  => 0.185u"nm",
+        "S"  => 0.18u"nm" ,
+        "Cl" => 0.17u"nm" ,
+        "C"  => 0.17u"nm" ,
     )
     default_screen = 0.8
     element_to_screen = Dict(
@@ -82,19 +84,23 @@ function ImplicitSolventOBC(atoms,
         end
     end
 
-    T = typeof(charge(first(Array(atoms))))
-    offset_radii = T[]
-    scaled_offset_radii = T[]
+    offset_radii = D[]
+    scaled_offset_radii = D[]
     for (at_data, bonded_to_N) in zip(atoms_data, atoms_bonded_to_N)
         if at_data.element in ("H", "D")
-            radius = bonded_to_N ? 0.13 : 0.12
+            radius = bonded_to_N ? 0.13u"nm" : 0.12u"nm"
         else
             radius = get(element_to_radius, at_data.element, default_radius)
         end
         offset_radius = radius - offset
         screen = get(element_to_screen, at_data.element, default_screen)
-        push!(offset_radii, offset_radius)
-        push!(scaled_offset_radii, screen * offset_radius)
+        if dimension(D) == u"𝐋"
+            push!(offset_radii, offset_radius)
+            push!(scaled_offset_radii, screen * offset_radius)
+        else
+            push!(offset_radii, ustrip(offset_radius))
+            push!(scaled_offset_radii, ustrip(screen * offset_radius))
+        end
     end
 
     if use_OBC2
@@ -124,13 +130,19 @@ function ImplicitSolventOBC(atoms,
         is, js = inds_i, inds_j
     end
 
-    return ImplicitSolventOBC{T, T, typeof(or), typeof(is)}(
-                or, sor, solvent_dielectric, solute_dielectric, offset, cutoff,
-                use_ACE, α, β, γ, probe_radius, sa_factor, is, js, pre_factor)
+    if dimension(D) == u"𝐋"
+        return ImplicitSolventOBC{T, D, typeof(or), typeof(is)}(
+                    or, sor, solvent_dielectric, solute_dielectric, offset, cutoff,
+                    use_ACE, α, β, γ, probe_radius, sa_factor, is, js, pre_factor)
+    else
+        return ImplicitSolventOBC{T, D, typeof(or), typeof(is)}(
+                    or, sor, solvent_dielectric, solute_dielectric, ustrip(offset), ustrip(cutoff),
+                    use_ACE, α, β, γ, ustrip(probe_radius), sa_factor, is, js, pre_factor)
+    end
 end
 
 function born_radii_loop(coord_i::SVector{D, T}, coord_j, ori, srj, cutoff, box_size) where {D, T}
-    I = zero(T)
+    I = zero(coord_i[1] / unit(T)^2)
     r = norm(vector(coord_i, coord_j, box_size))
     if iszero(r) || (!iszero(cutoff) && r > cutoff)
         return I
@@ -244,7 +256,7 @@ function gb_force_loop_2(coord_i, coord_j, bi, ori, srj, cutoff, box_size)
     end
 end
 
-function forces(inter::AbstractGBSA{T}, sys, neighbors) where T
+function forces(inter::AbstractGBSA{T}, sys, neighbors=nothing) where T
     n_atoms = length(sys)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
     Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
@@ -280,7 +292,7 @@ function forces(inter::AbstractGBSA{T}, sys, neighbors) where T
     return fs .+ sum(lr -> lr.fi, loop_res_2; dims=2)[:, 1] .+ sum(lr -> lr.fj, loop_res_2; dims=1)[1, :]
 end
 
-function potential_energy(inter::AbstractGBSA{T}, sys, neighbors) where T
+function potential_energy(inter::AbstractGBSA{T}, sys, neighbors=nothing) where T
     n_atoms = length(sys)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
     Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
