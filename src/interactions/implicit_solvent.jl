@@ -159,26 +159,28 @@ end
 
 # Store the results of the ij broadcasts during force calculation
 struct ForceLoopResult1{T, V}
-    change_born_force_i::T
-    change_born_force_j::T
-    change_fs_i::V
-    change_fs_j::V
+    bi::T
+    bj::T
+    fi::V
+    fj::V
 end
 
 struct ForceLoopResult2{V}
-    change_fs_i::V
-    change_fs_j::V
+    fi::V
+    fj::V
 end
 
 function gb_force_loop_1(coord_i::SVector{D, T}, coord_j, i, j, charge_i, charge_j,
-                            Bi, Bj, cutoff, pre_factor, box_size, zero_result, zero_force) where {D, T}
+                            Bi, Bj, cutoff, pre_factor, box_size) where {D, T}
     if j < i
-        return zero_result
+        zero_force = zero(coord_i)
+        return ForceLoopResult1(zero(T), zero(T), zero_force, zero_force)
     end
     dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
     if !iszero(cutoff) && r2 > cutoff^2
-        return zero_result
+        zero_force = zero(coord_i)
+        return ForceLoopResult1(zero(T), zero(T), zero_force, zero_force)
     end
     alpha2_ij = Bi * Bj
     D_ij = r2 / (4 * alpha2_ij)
@@ -197,15 +199,17 @@ function gb_force_loop_1(coord_i::SVector{D, T}, coord_j, i, j, charge_i, charge
         return ForceLoopResult1(change_born_force_i, change_born_force_j,
                                 change_fs_i, change_fs_j)
     else
+        zero_force = zero(coord_i)
         return ForceLoopResult1(change_born_force_i, zero(T), zero_force, zero_force)
     end
 end
 
-function gb_force_loop_2(coord_i, coord_j, bi, ori, srj, cutoff, box_size, zero_result)
+function gb_force_loop_2(coord_i, coord_j, bi, ori, srj, cutoff, box_size)
     dr = vector(coord_i, coord_j, box_size)
     r = norm(dr)
     if iszero(r) || (!iszero(cutoff) && r > cutoff)
-        return zero_result
+        zero_force = zero(coord_i)
+        return ForceLoopResult2(zero_force, zero_force)
     end
     rsrj = r + srj
     if ori < rsrj
@@ -219,7 +223,8 @@ function gb_force_loop_2(coord_i, coord_j, bi, ori, srj, cutoff, box_size, zero_
         fdr = dr * de
         return ForceLoopResult2(-fdr, fdr)
     else
-        return zero_result
+        zero_force = zero(coord_i)
+        return ForceLoopResult2(zero_force, zero_force)
     end
 end
 
@@ -243,25 +248,20 @@ function forces(inter::ImplicitSolventOBC{T}, sys, neighbors) where T
     charges_j = @view charges[inter.js]
     Bsi = @view Bs[inter.is]
     Bsj = @view Bs[inter.js]
-    zero_force = zero(eltype(coords))
-    zero_loop_result_1 = ForceLoopResult1(zero(T), zero(T), zero_force, zero_force)
     loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i, charges_j,
-                                    Bsi, Bsj, (inter.cutoff,), (inter.pre_factor,),
-                                    (box_size,), (zero_loop_result_1,), (zero_force,))
-    born_forces = born_forces .+ sum(lr -> lr.change_born_force_i, loop_res_1; dims=2)[:, 1]
-    born_forces = born_forces .+ sum(lr -> lr.change_born_force_j, loop_res_1; dims=1)[1, :]
-    fs = sum(lr -> lr.change_fs_i, loop_res_1; dims=2)[:, 1] .+ sum(lr -> lr.change_fs_j, loop_res_1; dims=1)[1, :]
+                                    Bsi, Bsj, (inter.cutoff,), (inter.pre_factor,), (box_size,))
+    born_forces = born_forces .+ sum(lr -> lr.bi, loop_res_1; dims=2)[:, 1]
+    born_forces = born_forces .+ sum(lr -> lr.bj, loop_res_1; dims=1)[1, :]
+    fs = sum(lr -> lr.fi, loop_res_1; dims=2)[:, 1] .+ sum(lr -> lr.fj, loop_res_1; dims=1)[1, :]
 
     born_forces = born_forces .* (Bs .^ 2) .* B_grads
 
     bis = @view born_forces[inter.is]
     oris = @view inter.offset_radii[inter.is]
     srjs = @view inter.scaled_offset_radii[inter.js]
-    zero_loop_result_2 = ForceLoopResult2(zero_force, zero_force)
-    loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, oris, srjs, (inter.cutoff,),
-                                    (box_size,), (zero_loop_result_2,))
+    loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, oris, srjs, (inter.cutoff,), (box_size,))
 
-    return fs .+ sum(lr -> lr.change_fs_i, loop_res_2; dims=2)[:, 1] .+ sum(lr -> lr.change_fs_j, loop_res_2; dims=1)[1, :]
+    return fs .+ sum(lr -> lr.fi, loop_res_2; dims=2)[:, 1] .+ sum(lr -> lr.fj, loop_res_2; dims=1)[1, :]
 end
 
 function potential_energy(inter::ImplicitSolventOBC{T}, sys, neighbors) where T

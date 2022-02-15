@@ -272,6 +272,36 @@ function dual_function_born_radii_loop(f::F) where F
     end
 end
 
+function dual_function_gb_force_loop_1(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11)
+        ds1  = dualize(Nothing, arg1, Val(0), Val(11))
+        ds2  = dualize(Nothing, arg2, Val(3), Val( 8))
+        ds3  = arg3
+        ds4  = arg4
+        ds5  = Zygote.dual(arg5 , ntuple(isequal( 7), 14))
+        ds6  = Zygote.dual(arg6 , ntuple(isequal( 8), 14))
+        ds7  = Zygote.dual(arg7 , ntuple(isequal( 9), 14))
+        ds8  = Zygote.dual(arg8 , ntuple(isequal(10), 14))
+        ds9  = arg9
+        ds10 = Zygote.dual(arg10, ntuple(isequal(11), 14))
+        ds11 = dualize(Nothing, arg11, Val(11), Val(0))
+        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10, ds11)
+    end
+end
+
+function dual_function_gb_force_loop_2(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7)
+        ds1 = dualize(Nothing, arg1, Val(0), Val(9))
+        ds2 = dualize(Nothing, arg2, Val(3), Val(6))
+        ds3 = Zygote.dual(arg3, ntuple(isequal(7), 12))
+        ds4 = Zygote.dual(arg4, ntuple(isequal(8), 12))
+        ds5 = Zygote.dual(arg5, ntuple(isequal(9), 12))
+        ds6 = arg6
+        ds7 = dualize(Nothing, arg7, Val(9), Val(0))
+        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7)
+    end
+end
+
 @inline function sum_partials(sv::SVector{3, Dual{Nothing, T, P}}, y1, i::Integer) where {T, P}
     partials(sv[1], i) * y1[1] + partials(sv[2], i) * y1[2] + partials(sv[3], i) * y1[3]
 end
@@ -595,6 +625,91 @@ end
     return y, bc_fwd_back
 end
 
+# For gb_force_loop_1
+@inline function Zygote.broadcast_forward(f,
+                                            arg1::AbstractArray{SVector{D, T}},
+                                            arg2::AbstractArray{SVector{D, T}},
+                                            arg3::AbstractArray{Int},
+                                            arg4::AbstractArray{Int},
+                                            arg5::AbstractArray{T},
+                                            arg6::AbstractArray{T},
+                                            arg7::AbstractArray{T},
+                                            arg8::AbstractArray{T},
+                                            arg9::Tuple{T},
+                                            arg10::Tuple{T},
+                                            arg11::Tuple{SVector{D, T}}) where {D, T}
+    out = dual_function_gb_force_loop_1(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7,
+                                            arg8, arg9, arg10, arg11)
+    y = broadcast(o1 -> ForceLoopResult1{T, SVector{D, T}}(value(o1.bi), value(o1.bj),
+                                            value.(o1.fi), value.(o1.fj)), out)
+    function bc_fwd_back(ȳ_in)
+        ȳ = modify_grad(ȳ_in, arg1)
+        darg1 = unbroadcast(arg1, broadcast((y1, o1) -> SVector{D, T}(
+                    sum_partials(o1.fi, y1.fi, 1) + sum_partials(o1.fj, y1.fj, 1) + partials(o1.bi, 1) * y1.bi + partials(o1.bj, 1) * y1.bj,
+                    sum_partials(o1.fi, y1.fi, 2) + sum_partials(o1.fj, y1.fj, 2) + partials(o1.bi, 2) * y1.bi + partials(o1.bj, 2) * y1.bj,
+                    sum_partials(o1.fi, y1.fi, 3) + sum_partials(o1.fj, y1.fj, 3) + partials(o1.bi, 3) * y1.bi + partials(o1.bj, 3) * y1.bj),
+                    ȳ, out))
+        darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
+                    sum_partials(o1.fi, y1.fi, 4) + sum_partials(o1.fj, y1.fj, 4) + partials(o1.bi, 4) * y1.bi + partials(o1.bj, 4) * y1.bj,
+                    sum_partials(o1.fi, y1.fi, 5) + sum_partials(o1.fj, y1.fj, 5) + partials(o1.bi, 5) * y1.bi + partials(o1.bj, 5) * y1.bj,
+                    sum_partials(o1.fi, y1.fi, 6) + sum_partials(o1.fj, y1.fj, 6) + partials(o1.bi, 6) * y1.bi + partials(o1.bj, 6) * y1.bj),
+                    ȳ, out))
+        darg3 = nothing
+        darg4 = nothing
+        darg5 = unbroadcast(arg5, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi,  7) + sum_partials(o1.fj, y1.fj,  7) + partials(o1.bi,  7) * y1.bi + partials(o1.bj,  7) * y1.bj, ȳ, out))
+        darg6 = unbroadcast(arg6, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi,  8) + sum_partials(o1.fj, y1.fj,  8) + partials(o1.bi,  8) * y1.bi + partials(o1.bj,  8) * y1.bj, ȳ, out))
+        darg7 = unbroadcast(arg7, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi,  9) + sum_partials(o1.fj, y1.fj,  9) + partials(o1.bi,  9) * y1.bi + partials(o1.bj,  9) * y1.bj, ȳ, out))
+        darg8 = unbroadcast(arg8, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi, 10) + sum_partials(o1.fj, y1.fj, 10) + partials(o1.bi, 10) * y1.bi + partials(o1.bj, 10) * y1.bj, ȳ, out))
+        darg9 = nothing
+        darg10 = unbroadcast(arg10, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi, 11) + sum_partials(o1.fj, y1.fj, 11) + partials(o1.bi, 11) * y1.bi + partials(o1.bj, 11) * y1.bj, ȳ, out))
+        darg11 = unbroadcast(arg11, broadcast((y1, o1) -> SVector{D, T}(
+                    sum_partials(o1.fi, y1.fi, 12) + sum_partials(o1.fj, y1.fj, 12) + partials(o1.bi, 12) * y1.bi + partials(o1.bj, 12) * y1.bj,
+                    sum_partials(o1.fi, y1.fi, 13) + sum_partials(o1.fj, y1.fj, 13) + partials(o1.bi, 13) * y1.bi + partials(o1.bj, 13) * y1.bj,
+                    sum_partials(o1.fi, y1.fi, 14) + sum_partials(o1.fj, y1.fj, 14) + partials(o1.bi, 14) * y1.bi + partials(o1.bj, 14) * y1.bj),
+                    ȳ, out))
+        return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6, darg7,
+                darg8, darg9, darg10, darg11)
+    end
+    return y, bc_fwd_back
+end
+
+# For gb_force_loop_2
+@inline function Zygote.broadcast_forward(f,
+                                            arg1::AbstractArray{SVector{D, T}},
+                                            arg2::AbstractArray{SVector{D, T}},
+                                            arg3::AbstractArray{T},
+                                            arg4::AbstractArray{T},
+                                            arg5::AbstractArray{T},
+                                            arg6::Tuple{T},
+                                            arg7::Tuple{SVector{D, T}}) where {D, T}
+    out = dual_function_gb_force_loop_2(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7)
+    y = broadcast(o1 -> ForceLoopResult2{SVector{D, T}}(value.(o1.fi), value.(o1.fj)), out)
+    function bc_fwd_back(ȳ_in)
+        ȳ = modify_grad(ȳ_in, arg1)
+        darg1 = unbroadcast(arg1, broadcast((y1, o1) -> SVector{D, T}(
+                    sum_partials(o1.fi, y1.fi, 1) + sum_partials(o1.fj, y1.fj, 1),
+                    sum_partials(o1.fi, y1.fi, 2) + sum_partials(o1.fj, y1.fj, 2),
+                    sum_partials(o1.fi, y1.fi, 3) + sum_partials(o1.fj, y1.fj, 3)),
+                    ȳ, out))
+        darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
+                    sum_partials(o1.fi, y1.fi, 4) + sum_partials(o1.fj, y1.fj, 4),
+                    sum_partials(o1.fi, y1.fi, 5) + sum_partials(o1.fj, y1.fj, 5),
+                    sum_partials(o1.fi, y1.fi, 6) + sum_partials(o1.fj, y1.fj, 6)),
+                    ȳ, out))
+        darg3 = unbroadcast(arg3, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi, 7) + sum_partials(o1.fj, y1.fj, 7), ȳ, out))
+        darg4 = unbroadcast(arg4, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi, 8) + sum_partials(o1.fj, y1.fj, 8), ȳ, out))
+        darg5 = unbroadcast(arg5, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi, 9) + sum_partials(o1.fj, y1.fj, 9), ȳ, out))
+        darg6 = nothing
+        darg7 = unbroadcast(arg7, broadcast((y1, o1) -> SVector{D, T}(
+                    sum_partials(o1.fi, y1.fi, 10) + sum_partials(o1.fj, y1.fj, 10),
+                    sum_partials(o1.fi, y1.fi, 11) + sum_partials(o1.fj, y1.fj, 11),
+                    sum_partials(o1.fi, y1.fi, 12) + sum_partials(o1.fj, y1.fj, 12)),
+                    ȳ, out))
+        return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6, darg7)
+    end
+    return y, bc_fwd_back
+end
+
 @inline function Zygote.broadcast_forward(f::typeof(getf1),
                                             arg1::AbstractArray{<:SpecificForce2Atoms}) where {D, T}
     return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=y1, f2=zero(y1)), ȳ)))
@@ -641,8 +756,8 @@ end
 end
 
 # Use fast broadcast path on CPU
-for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec,
-            :wrap_coords_vec, :getf1, :getf2, :getf3, :getf4, :born_radii_loop)
+for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec, :wrap_coords_vec,
+            :getf1, :getf2, :getf3, :getf4, :born_radii_loop, :gb_force_loop_1, :gb_force_loop_2)
     @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
     # Avoid ambiguous dispatch
     @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
