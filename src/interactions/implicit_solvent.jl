@@ -104,8 +104,8 @@ function ImplicitSolventOBC(atoms,
     end
 
     if isa(atoms, CuArray)
-        or = cu(offset_radii)
-        sor = cu(scaled_offset_radii)
+        or = CuArray(offset_radii) # cu converts to Float32
+        sor = CuArray(scaled_offset_radii)
         is, js = cu(inds_i), cu(inds_j)
     else
         or = offset_radii

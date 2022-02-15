@@ -191,7 +191,7 @@ function dual_function_svec_real(f::F) where F
     function (arg1::SVector{D, T}, arg2) where {D, T}
         ds1 = dualize(Nothing, arg1, Val(0), Val(1))
         # Leaving the integer type in here results in Float32 -> Float64 conversion
-        ds2 = Zygote.dual(arg2 isa Int ? T(arg2) : arg2, ntuple(isequal(4), 4))
+        ds2 = Zygote.dual(arg2 isa Int ? T(arg2) : arg2, (false, false, false, true))
         return f(ds1, ds2)
     end
 end
@@ -264,8 +264,8 @@ function dual_function_born_radii_loop(f::F) where F
     function (arg1, arg2, arg3, arg4, arg5, arg6)
         ds1 = dualize(Nothing, arg1, Val(0), Val(8))
         ds2 = dualize(Nothing, arg2, Val(3), Val(5))
-        ds3 = Zygote.dual(arg3, ntuple(isequal(7), 11))
-        ds4 = Zygote.dual(arg4, ntuple(isequal(8), 11))
+        ds3 = Zygote.dual(arg3, (false, false, false, false, false, false, true , false, false, false, false))
+        ds4 = Zygote.dual(arg3, (false, false, false, false, false, false, false, true , false, false, false))
         ds5 = arg5
         ds6 = dualize(Nothing, arg6, Val(8), Val(0))
         return f(ds1, ds2, ds3, ds4, ds5, ds6)
@@ -278,12 +278,12 @@ function dual_function_gb_force_loop_1(f::F) where F
         ds2  = dualize(Nothing, arg2, Val(3), Val( 8))
         ds3  = arg3
         ds4  = arg4
-        ds5  = Zygote.dual(arg5 , ntuple(isequal( 7), 14))
-        ds6  = Zygote.dual(arg6 , ntuple(isequal( 8), 14))
-        ds7  = Zygote.dual(arg7 , ntuple(isequal( 9), 14))
-        ds8  = Zygote.dual(arg8 , ntuple(isequal(10), 14))
+        ds5  = Zygote.dual(arg5 , (false, false, false, false, false, false, true , false, false, false, false, false, false, false))
+        ds6  = Zygote.dual(arg6 , (false, false, false, false, false, false, false, true , false, false, false, false, false, false))
+        ds7  = Zygote.dual(arg7 , (false, false, false, false, false, false, false, false, true , false, false, false, false, false))
+        ds8  = Zygote.dual(arg8 , (false, false, false, false, false, false, false, false, false, true , false, false, false, false))
         ds9  = arg9
-        ds10 = Zygote.dual(arg10, ntuple(isequal(11), 14))
+        ds10 = Zygote.dual(arg10, (false, false, false, false, false, false, false, false, false, false, true , false, false, false))
         ds11 = dualize(Nothing, arg11, Val(11), Val(0))
         return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10, ds11)
     end
@@ -293,9 +293,9 @@ function dual_function_gb_force_loop_2(f::F) where F
     function (arg1, arg2, arg3, arg4, arg5, arg6, arg7)
         ds1 = dualize(Nothing, arg1, Val(0), Val(9))
         ds2 = dualize(Nothing, arg2, Val(3), Val(6))
-        ds3 = Zygote.dual(arg3, ntuple(isequal(7), 12))
-        ds4 = Zygote.dual(arg4, ntuple(isequal(8), 12))
-        ds5 = Zygote.dual(arg5, ntuple(isequal(9), 12))
+        ds3 = Zygote.dual(arg3, (false, false, false, false, false, false, true , false, false, false, false, false))
+        ds4 = Zygote.dual(arg4, (false, false, false, false, false, false, false, true , false, false, false, false))
+        ds5 = Zygote.dual(arg5, (false, false, false, false, false, false, false, false, true , false, false, false))
         ds6 = arg6
         ds7 = dualize(Nothing, arg7, Val(9), Val(0))
         return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7)
