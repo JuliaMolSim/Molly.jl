@@ -265,7 +265,7 @@ function dual_function_born_radii_loop(f::F) where F
         ds1 = dualize(Nothing, arg1, Val(0), Val(8))
         ds2 = dualize(Nothing, arg2, Val(3), Val(5))
         ds3 = Zygote.dual(arg3, (false, false, false, false, false, false, true , false, false, false, false))
-        ds4 = Zygote.dual(arg3, (false, false, false, false, false, false, false, true , false, false, false))
+        ds4 = Zygote.dual(arg4, (false, false, false, false, false, false, false, true , false, false, false))
         ds5 = arg5
         ds6 = dualize(Nothing, arg6, Val(8), Val(0))
         return f(ds1, ds2, ds3, ds4, ds5, ds6)
@@ -383,6 +383,7 @@ end
     return y, bc_fwd_back
 end
 
+# For mass, charge etc.
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{<:Atom})
     out = dual_function_atom(f).(arg1)
     y = map(x -> value.(x), out)
@@ -462,6 +463,7 @@ function combine_dual_Atom(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}
     )
 end
 
+# For force_nounit
 @inline function Zygote.broadcast_forward(f,
                                             arg1,
                                             arg2::AbstractArray{SVector{D, T}},
@@ -491,6 +493,7 @@ end
     return y, bc_fwd_back
 end
 
+# For force
 @inline function Zygote.broadcast_forward(f,
                                             arg1::AbstractArray{<:SpecificInteraction},
                                             arg2::AbstractArray{SVector{D, T}},
@@ -521,6 +524,7 @@ end
     return y, bc_fwd_back
 end
 
+# For force
 @inline function Zygote.broadcast_forward(f,
                                             arg1::AbstractArray{<:SpecificInteraction},
                                             arg2::AbstractArray{SVector{D, T}},
@@ -557,6 +561,7 @@ end
     return y, bc_fwd_back
 end
 
+# For force
 @inline function Zygote.broadcast_forward(f,
                                             arg1::AbstractArray{<:SpecificInteraction},
                                             arg2::AbstractArray{SVector{D, T}},
@@ -608,7 +613,7 @@ end
                                             arg5::Tuple{T},
                                             arg6::Tuple{SVector{D, T}}) where {D, T}
     out = dual_function_born_radii_loop(f).(arg1, arg2, arg3, arg4, arg5, arg6)
-    y = map(x -> value.(x), out)
+    y = value.(out)
     function bc_fwd_back(ȳ_in)
         ȳ = modify_grad(ȳ_in, arg1)
         darg1 = unbroadcast(arg1, broadcast((y1, o1) -> SVector{D, T}(partials(o1, 1) * y1,
