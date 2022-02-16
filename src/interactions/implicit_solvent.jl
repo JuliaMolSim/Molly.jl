@@ -170,7 +170,8 @@ function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, box_size) whe
     coords_j = @view coords[inter.js]
     oris = @view inter.offset_radii[inter.is]
     srjs = @view inter.scaled_offset_radii[inter.js]
-    Is = sum(born_radii_loop.(coords_i, coords_j, oris, srjs, (inter.cutoff,), (box_size,)); dims=2)
+    Is = dropdims(sum(born_radii_loop.(coords_i, coords_j, oris, srjs, (inter.cutoff,),
+                                        (box_size,)); dims=2); dims=2)
 
     ori = inter.offset_radii
     radii = ori .+ inter.offset
@@ -278,9 +279,9 @@ function forces(inter::AbstractGBSA{T, D}, sys, neighbors=nothing) where {T, D}
     Bsj = @view Bs[inter.js]
     loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i, charges_j,
                                     Bsi, Bsj, (inter.cutoff,), (inter.pre_factor,), (box_size,))
-    born_forces = born_forces .+ sum(lr -> lr.bi, loop_res_1; dims=2)[:, 1]
-    born_forces = born_forces .+ sum(lr -> lr.bj, loop_res_1; dims=1)[1, :]
-    fs = sum(lr -> lr.fi, loop_res_1; dims=2)[:, 1] .+ sum(lr -> lr.fj, loop_res_1; dims=1)[1, :]
+    born_forces = born_forces .+ dropdims(sum(lr -> lr.bi, loop_res_1; dims=2); dims=2)
+    born_forces = born_forces .+ dropdims(sum(lr -> lr.bj, loop_res_1; dims=1); dims=1)
+    fs = dropdims(sum(lr -> lr.fi, loop_res_1; dims=2); dims=2) .+ dropdims(sum(lr -> lr.fj, loop_res_1; dims=1); dims=1)
 
     born_forces_2 = born_forces .* (Bs .^ 2) .* B_grads
 
@@ -289,7 +290,7 @@ function forces(inter::AbstractGBSA{T, D}, sys, neighbors=nothing) where {T, D}
     srjs = @view inter.scaled_offset_radii[inter.js]
     loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, oris, srjs, (inter.cutoff,), (box_size,))
 
-    return fs .+ sum(lr -> lr.fi, loop_res_2; dims=2)[:, 1] .+ sum(lr -> lr.fj, loop_res_2; dims=1)[1, :]
+    return fs .+ dropdims(sum(lr -> lr.fi, loop_res_2; dims=2); dims=2) .+ dropdims(sum(lr -> lr.fj, loop_res_2; dims=1); dims=1)
 end
 
 function potential_energy(inter::AbstractGBSA{T, D}, sys, neighbors=nothing) where {T, D}
