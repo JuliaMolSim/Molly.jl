@@ -52,9 +52,7 @@ end
 end
 
 @testset "OpenMM protein comparison" begin
-    ff_dir = joinpath(data_dir, "force_fields")
     openmm_dir = joinpath(data_dir, "openmm_6mrr")
-
     ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff)
     neighbors = find_neighbors(sys, sys.neighbor_finder)
@@ -186,4 +184,26 @@ end
         @test atoms_grad == sys_nounits.atoms
         @test pis_grad == sys_nounits.pairwise_inters
     end
+end
+
+@testset "Implicit solvent" begin
+    openmm_dir = joinpath(data_dir, "openmm_6mrr")
+    ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...)
+    sys = System(
+        joinpath(data_dir, "6mrr_nowater.pdb"),
+        ff;
+        box_size=SVector(100.0, 100.0, 100.0)u"nm",
+        implicit_solvent="obc2",
+        dist_cutoff=5.0u"nm",
+        nl_dist=5.0u"nm",
+    )
+    neighbors = find_neighbors(sys)
+
+    forces_molly = forces(sys, neighbors)
+    forces_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "forces_obc2.txt"))))u"kJ * mol^-1 * nm^-1"
+    @test !any(d -> any(abs.(d) .> 1e-3u"kJ * mol^-1 * nm^-1"), forces_molly .- forces_openmm)
+
+    E_molly = potential_energy(sys, neighbors)
+    E_openmm = readdlm(joinpath(openmm_dir, "energy_obc2.txt"))[1] * u"kJ * mol^-1"
+    @test E_molly - E_openmm < 1e-2u"kJ * mol^-1"
 end

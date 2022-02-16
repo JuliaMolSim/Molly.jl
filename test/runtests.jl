@@ -47,6 +47,7 @@ end
 CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
 
 data_dir = normpath(@__DIR__, "..", "data")
+ff_dir = joinpath(data_dir, "force_fields")
 
 temp_fp_pdb = tempname(cleanup=true) * ".pdb"
 temp_fp_viz = tempname(cleanup=true) * ".mp4"
