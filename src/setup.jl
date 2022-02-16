@@ -634,24 +634,33 @@ function System(coord_file::AbstractString,
     improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
                                             proper=t.proper, n_terms=6) for t in impropers.inters]
 
-    # Ensure array types are concrete
-    if gpu
-        specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, bonds.types, cu([bonds.inters...])),
-                                InteractionList3Atoms(angles.is, angles.js, angles.ks, angles.types,
-                                                        cu([angles.inters...])),
-                                InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
-                                                        torsions.types, cu(torsion_inters_pad)),
-                                InteractionList4Atoms(impropers.is, impropers.js, impropers.ks, impropers.ls,
-                                                        impropers.types, cu(improper_inters_pad)))
-    else
-        specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, bonds.types, [bonds.inters...]),
-                                InteractionList3Atoms(angles.is, angles.js, angles.ks, angles.types,
-                                                        [angles.inters...]),
-                                InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
-                                                        torsions.types, torsion_inters_pad),
-                                InteractionList4Atoms(impropers.is, impropers.js, impropers.ks, impropers.ls,
-                                                        impropers.types, improper_inters_pad))
+    # Only add present interactions and ensure that array types are concrete
+    specific_inter_array = []
+    if length(bonds.is) > 0
+        push!(specific_inter_array, InteractionList2Atoms(
+            bonds.is, bonds.js, bonds.types,
+            gpu ? cu([bonds.inters...]) : [bonds.inters...],
+        ))
     end
+    if length(angles.is) > 0
+        push!(specific_inter_array, InteractionList3Atoms(
+            angles.is, angles.js, angles.ks, angles.types,
+            gpu ? cu([angles.inters...]) : [angles.inters...],
+        ))
+    end
+    if length(torsions.is) > 0
+        push!(specific_inter_array, InteractionList4Atoms(
+            torsions.is, torsions.js, torsions.ks, torsions.ls, torsions.types,
+            gpu ? cu(torsion_inters_pad) : torsion_inters_pad,
+        ))
+    end
+    if length(impropers.is) > 0
+        push!(specific_inter_array, InteractionList4Atoms(
+            impropers.is, impropers.js, impropers.ks, impropers.ls, impropers.types,
+            gpu ? cu(improper_inters_pad) : improper_inters_pad,
+        ))
+    end
+    specific_inter_lists = tuple(specific_inter_array...)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     if isnothing(box_size)
@@ -978,20 +987,28 @@ function System(T::Type,
     coords = wrap_coords_vec.([coords...], (box_size_used,))
 
     pairwise_inters = (lj, coulomb_rf)
-    # Ensure array types are concrete
-    if gpu
-        specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, bonds.types, cu([bonds.inters...])),
-                                InteractionList3Atoms(angles.is, angles.js, angles.ks, angles.types,
-                                                        cu([angles.inters...])),
-                                InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
-                                                        torsions.types, cu([torsions.inters...])))
-    else
-        specific_inter_lists = (InteractionList2Atoms(bonds.is, bonds.js, bonds.types, [bonds.inters...]),
-                                InteractionList3Atoms(angles.is, angles.js, angles.ks, angles.types,
-                                                        [angles.inters...]),
-                                InteractionList4Atoms(torsions.is, torsions.js, torsions.ks, torsions.ls,
-                                                        torsions.types, [torsions.inters...]))
+
+    # Only add present interactions and ensure that array types are concrete
+    specific_inter_array = []
+    if length(bonds.is) > 0
+        push!(specific_inter_array, InteractionList2Atoms(
+            bonds.is, bonds.js, bonds.types,
+            gpu ? cu([bonds.inters...]) : [bonds.inters...],
+        ))
     end
+    if length(angles.is) > 0
+        push!(specific_inter_array, InteractionList3Atoms(
+            angles.is, angles.js, angles.ks, angles.types,
+            gpu ? cu([angles.inters...]) : [angles.inters...],
+        ))
+    end
+    if length(torsions.is) > 0
+        push!(specific_inter_array, InteractionList4Atoms(
+            torsions.is, torsions.js, torsions.ks, torsions.ls, torsions.types,
+            gpu ? cu([torsions.inters...]) : [torsions.inters...],
+        ))
+    end
+    specific_inter_lists = tuple(specific_inter_array...)
 
     atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ, solute=a.solute) for a in atoms]
 
