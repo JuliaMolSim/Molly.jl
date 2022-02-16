@@ -297,6 +297,8 @@ includes collapsed into one file.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
 - `nl_dist=1.2u"nm"`: cutoff distance for neighbor list, should not be less
     than `dist_cutoff`.
+- `implicit_solvent=nothing`: specify a string to add an implicit solvent
+    model, options are "obc1" or "obc2".
 """
 function System(coord_file::AbstractString,
                 force_field::OpenMMForceField;
@@ -308,6 +310,7 @@ function System(coord_file::AbstractString,
                 gpu_diff_safe::Bool=gpu,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 nl_dist=units ? 1.2u"nm" : 1.2,
+                implicit_solvent=nothing,
                 rename_terminal_res::Bool=true)
     T = typeof(force_field.weight_14_coulomb)
 
@@ -707,11 +710,24 @@ function System(coord_file::AbstractString,
         vels = velocities
     end
 
+    if !isnothing(implicit_solvent)
+        if implicit_solvent == "obc1"
+            general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds; use_OBC2=false),)
+        elseif implicit_solvent == "obc2"
+            general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds; use_OBC2=true ),)
+        else
+            error("Unknown implicit solvent model: \"$implicit_solvent\"")
+        end
+    else
+        general_inters = ()
+    end
+
     return System(
         atoms=atoms,
         atoms_data=atoms_data,
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
         coords=coords,
         velocities=vels,
         box_size=box_size_used,
