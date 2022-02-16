@@ -11,7 +11,7 @@ Generalized Born (GB) implicit solvent models augmented with the
 hydrophobic solvent accessible surface area (SA) term.
 Custom GBSA methods should sub-type this type.
 """
-abstract type AbstractGBSA{T} end
+abstract type AbstractGBSA{T, D} end
 
 """
     ImplicitSolventOBC(atoms, atoms_data, bonds)
@@ -19,7 +19,7 @@ abstract type AbstractGBSA{T} end
 Onufriev-Bashford-Case GBSA model.
 Should be used along with a Coulomb or CoulombReactionField interaction.
 """
-struct ImplicitSolventOBC{T, D, V, I} <: AbstractGBSA{T}
+struct ImplicitSolventOBC{T, D, V, S, F, I} <: AbstractGBSA{T, D}
     offset_radii::V
     scaled_offset_radii::V
     solvent_dielectric::T
@@ -31,10 +31,10 @@ struct ImplicitSolventOBC{T, D, V, I} <: AbstractGBSA{T}
     β::T
     γ::T
     probe_radius::D
-    sa_factor::T
+    sa_factor::S
+    pre_factor::F
     is::I
     js::I
-    pre_factor::T
 end
 
 # Default solvent dielectric is 78.5 for consistency with AMBER
@@ -47,7 +47,7 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
                             offset=0.009u"nm",
                             cutoff=0.0u"nm",
                             probe_radius=0.14u"nm",
-                            sa_factor=28.3919551,
+                            sa_factor=28.3919551u"kJ * mol^-1 * nm^-2",
                             use_ACE=true,
                             use_OBC2=false) where {T, M, D, E}
     default_radius = 0.15u"nm"
@@ -115,9 +115,9 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     inds_j = permutedims(inds_i, (2, 1))
 
     if !iszero(solute_dielectric) && !iszero(solvent_dielectric)
-        pre_factor = T(-138.935485) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
+        pre_factor = T(-coulombconst) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
     else
-        pre_factor = zero(T)
+        pre_factor = zero(T(coulombconst))
     end
 
     if isa(atoms, CuArray)
@@ -131,13 +131,13 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     end
 
     if dimension(D) == u"𝐋"
-        return ImplicitSolventOBC{T, D, typeof(or), typeof(is)}(
+        return ImplicitSolventOBC{T, D, typeof(or), typeof(T(sa_factor)), typeof(pre_factor), typeof(is)}(
                     or, sor, solvent_dielectric, solute_dielectric, offset, cutoff,
-                    use_ACE, α, β, γ, probe_radius, sa_factor, is, js, pre_factor)
+                    use_ACE, α, β, γ, probe_radius, T(sa_factor), pre_factor, is, js)
     else
-        return ImplicitSolventOBC{T, D, typeof(or), typeof(is)}(
+        return ImplicitSolventOBC{T, T, typeof(or), T, T, typeof(is)}(
                     or, sor, solvent_dielectric, solute_dielectric, ustrip(offset), ustrip(cutoff),
-                    use_ACE, α, β, γ, ustrip(probe_radius), sa_factor, is, js, pre_factor)
+                    use_ACE, α, β, γ, ustrip(probe_radius), ustrip(sa_factor), ustrip(pre_factor), is, js)
     end
 end
 
@@ -198,26 +198,26 @@ struct ForceLoopResult2{V}
     fj::V
 end
 
-function gb_force_loop_1(coord_i::SVector{D, T}, coord_j, i, j, charge_i, charge_j,
-                            Bi, Bj, cutoff, pre_factor, box_size) where {D, T}
+function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j,
+                            Bi, Bj, cutoff, pre_factor, box_size)
     if j < i
-        zero_force = zero(coord_i)
-        return ForceLoopResult1(zero(T), zero(T), zero_force, zero_force)
+        zero_force = zero(pre_factor ./ coord_i .^ 2)
+        return ForceLoopResult1(zero_force[1], zero_force[1], zero_force, zero_force)
     end
     dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
     if !iszero(cutoff) && r2 > cutoff^2
-        zero_force = zero(coord_i)
-        return ForceLoopResult1(zero(T), zero(T), zero_force, zero_force)
+        zero_force = zero(pre_factor ./ coord_i .^ 2)
+        return ForceLoopResult1(zero_force[1], zero_force[1], zero_force, zero_force)
     end
     alpha2_ij = Bi * Bj
-    D_ij = r2 / (4 * alpha2_ij)
-    exp_term = exp(-D_ij)
+    D = r2 / (4 * alpha2_ij)
+    exp_term = exp(-D)
     denominator2 = r2 + alpha2_ij * exp_term
     denominator = sqrt(denominator2)
     Gpol = (pre_factor * charge_i * charge_j) / denominator
     dGpol_dr = -Gpol * (1 - exp_term/4) / denominator2
-    dGpol_dalpha2_ij = -Gpol * exp_term * (1 + D_ij) / (2 * denominator2)
+    dGpol_dalpha2_ij = -Gpol * exp_term * (1 + D) / (2 * denominator2)
     change_born_force_i = dGpol_dalpha2_ij * Bj
     if i != j
         change_born_force_j = dGpol_dalpha2_ij * Bi
@@ -227,8 +227,8 @@ function gb_force_loop_1(coord_i::SVector{D, T}, coord_j, i, j, charge_i, charge
         return ForceLoopResult1(change_born_force_i, change_born_force_j,
                                 change_fs_i, change_fs_j)
     else
-        zero_force = zero(coord_i)
-        return ForceLoopResult1(change_born_force_i, zero(T), zero_force, zero_force)
+        zero_force = zero(pre_factor ./ coord_i .^ 2)
+        return ForceLoopResult1(change_born_force_i, zero_force[1], zero_force, zero_force)
     end
 end
 
@@ -236,7 +236,7 @@ function gb_force_loop_2(coord_i, coord_j, bi, ori, srj, cutoff, box_size)
     dr = vector(coord_i, coord_j, box_size)
     r = norm(dr)
     if iszero(r) || (!iszero(cutoff) && r > cutoff)
-        zero_force = zero(coord_i)
+        zero_force = zero(bi ./ coord_i .^ 2)
         return ForceLoopResult2(zero_force, zero_force)
     end
     rsrj = r + srj
@@ -251,12 +251,12 @@ function gb_force_loop_2(coord_i, coord_j, bi, ori, srj, cutoff, box_size)
         fdr = dr * de
         return ForceLoopResult2(-fdr, fdr)
     else
-        zero_force = zero(coord_i)
+        zero_force = zero(bi ./ coord_i .^ 2)
         return ForceLoopResult2(zero_force, zero_force)
     end
 end
 
-function forces(inter::AbstractGBSA{T}, sys, neighbors=nothing) where T
+function forces(inter::AbstractGBSA{T, D}, sys, neighbors=nothing) where {T, D}
     n_atoms = length(sys)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
     Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
@@ -264,9 +264,9 @@ function forces(inter::AbstractGBSA{T}, sys, neighbors=nothing) where T
     if inter.use_ACE
         radii = inter.offset_radii .+ inter.offset
         sa_terms = inter.sa_factor .* (radii .+ inter.probe_radius) .^ 2 .* (radii ./ Bs) .^ 6
-        born_forces = (-6 .* sa_terms ./ Bs) .* (Bs .> zero(T))
+        born_forces = (-6 .* sa_terms ./ Bs) .* (Bs .> zero(D))
     else
-        born_forces = zeros(T, n_atoms)
+        born_forces = zeros(typeof(inter.sa_factor * inter.cutoff), n_atoms)
     end
 
     coords_i = @view coords[inter.is]
@@ -282,9 +282,9 @@ function forces(inter::AbstractGBSA{T}, sys, neighbors=nothing) where T
     born_forces = born_forces .+ sum(lr -> lr.bj, loop_res_1; dims=1)[1, :]
     fs = sum(lr -> lr.fi, loop_res_1; dims=2)[:, 1] .+ sum(lr -> lr.fj, loop_res_1; dims=1)[1, :]
 
-    born_forces = born_forces .* (Bs .^ 2) .* B_grads
+    born_forces_2 = born_forces .* (Bs .^ 2) .* B_grads
 
-    bis = @view born_forces[inter.is]
+    bis = @view born_forces_2[inter.is]
     oris = @view inter.offset_radii[inter.is]
     srjs = @view inter.scaled_offset_radii[inter.js]
     loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, oris, srjs, (inter.cutoff,), (box_size,))
@@ -292,18 +292,18 @@ function forces(inter::AbstractGBSA{T}, sys, neighbors=nothing) where T
     return fs .+ sum(lr -> lr.fi, loop_res_2; dims=2)[:, 1] .+ sum(lr -> lr.fj, loop_res_2; dims=1)[1, :]
 end
 
-function potential_energy(inter::AbstractGBSA{T}, sys, neighbors=nothing) where T
+function potential_energy(inter::AbstractGBSA{T, D}, sys, neighbors=nothing) where {T, D}
     n_atoms = length(sys)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
     Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
 
-    E = zero(T)
+    E = zero(inter.pre_factor / inter.offset)
     for i in 1:n_atoms
         charge_i = atoms[i].charge
         Bi = Bs[i]
         E += inter.pre_factor * (charge_i^2) / (2*Bi)
         if inter.use_ACE
-            if Bi > 0
+            if Bi > zero(D)
                 radius_i = inter.offset_radii[i] + inter.offset
                 E += inter.sa_factor * (radius_i + inter.probe_radius)^2 * (radius_i / Bi)^6
             end
