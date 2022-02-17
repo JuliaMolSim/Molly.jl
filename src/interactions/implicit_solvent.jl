@@ -11,7 +11,7 @@ Generalized Born (GB) implicit solvent models augmented with the
 hydrophobic solvent accessible surface area (SA) term.
 Custom GBSA methods should sub-type this type.
 """
-abstract type AbstractGBSA{T, D} end
+abstract type AbstractGBSA end
 
 """
     ImplicitSolventOBC(atoms, atoms_data, bonds)
@@ -19,7 +19,7 @@ abstract type AbstractGBSA{T, D} end
 Onufriev-Bashford-Case GBSA model.
 Should be used along with a Coulomb or CoulombReactionField interaction.
 """
-struct ImplicitSolventOBC{T, D, V, S, F, I} <: AbstractGBSA{T, D}
+struct ImplicitSolventOBC{T, D, V, S, F, I} <: AbstractGBSA
     offset_radii::V
     scaled_offset_radii::V
     solvent_dielectric::T
@@ -141,8 +141,8 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     end
 end
 
-function born_radii_loop(coord_i::SVector{D, T}, coord_j, ori, srj, cutoff, box_size) where {D, T}
-    I = zero(coord_i[1] / unit(T)^2)
+function born_radii_loop(coord_i, coord_j, ori, srj, cutoff, box_size)
+    I = zero(coord_i[1] / unit(cutoff)^2)
     r = norm(vector(coord_i, coord_j, box_size))
     if iszero(r) || (!iszero(cutoff) && r > cutoff)
         return I
@@ -165,7 +165,7 @@ end
 Calculate Born radii and gradients of Born radii with respect to atomic distance.
 Custom GBSA methods should implement this function.
 """
-function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, box_size) where T
+function born_radii_and_grad(inter::ImplicitSolventOBC, coords, box_size)
     coords_i = @view coords[inter.is]
     coords_j = @view coords[inter.js]
     oris = @view inter.offset_radii[inter.is]
@@ -257,17 +257,16 @@ function gb_force_loop_2(coord_i, coord_j, bi, ori, srj, cutoff, box_size)
     end
 end
 
-function forces(inter::AbstractGBSA{T, D}, sys, neighbors=nothing) where {T, D}
-    n_atoms = length(sys)
+function forces(inter::AbstractGBSA, sys, neighbors=nothing)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
     Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
 
     if inter.use_ACE
         radii = inter.offset_radii .+ inter.offset
         sa_terms = inter.sa_factor .* (radii .+ inter.probe_radius) .^ 2 .* (radii ./ Bs) .^ 6
-        born_forces = (-6 .* sa_terms ./ Bs) .* (Bs .> zero(D))
+        born_forces = (-6 .* sa_terms ./ Bs) .* (Bs .> zero(inter.offset))
     else
-        born_forces = zeros(typeof(inter.sa_factor * inter.cutoff), n_atoms)
+        born_forces = zeros(typeof(inter.sa_factor * inter.cutoff), length(sys))
     end
 
     coords_i = @view coords[inter.is]
@@ -293,37 +292,46 @@ function forces(inter::AbstractGBSA{T, D}, sys, neighbors=nothing) where {T, D}
     return fs .+ dropdims(sum(lr -> lr.fi, loop_res_2; dims=2); dims=2) .+ dropdims(sum(lr -> lr.fj, loop_res_2; dims=1); dims=1)
 end
 
-function potential_energy(inter::AbstractGBSA{T, D}, sys, neighbors=nothing) where {T, D}
-    n_atoms = length(sys)
+function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori, cutoff,
+                        pre_factor, offset, probe_radius, sa_factor, use_ACE, box_size)
+    if i == j
+        E = pre_factor * (charge_i^2) / (2*Bi)
+        if use_ACE && (Bi > zero(offset))
+            radius_i = ori + offset
+            E += sa_factor * (radius_i + probe_radius)^2 * (radius_i / Bi)^6
+        end
+        return E
+    elseif j > i
+        r2 = sum(abs2, vector(coord_i, coord_j, box_size))
+        if !iszero(cutoff) && r2 > cutoff^2
+            return zero(pre_factor / offset)
+        end
+        f = sqrt(r2 + Bi*Bj*exp(-r2/(4*Bi*Bj)))
+        if iszero(cutoff)
+            f_cutoff = 1/f
+        else
+            f_cutoff = (1/f - 1/cutoff)
+        end
+        return pre_factor * charge_i * charge_j * f_cutoff
+    else
+        return zero(pre_factor / offset)
+    end
+end
+
+function potential_energy(inter::AbstractGBSA, sys, neighbors=nothing)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
     Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
 
-    E = zero(inter.pre_factor / inter.offset)
-    for i in 1:n_atoms
-        charge_i = atoms[i].charge
-        Bi = Bs[i]
-        E += inter.pre_factor * (charge_i^2) / (2*Bi)
-        if inter.use_ACE
-            if Bi > zero(D)
-                radius_i = inter.offset_radii[i] + inter.offset
-                E += inter.sa_factor * (radius_i + inter.probe_radius)^2 * (radius_i / Bi)^6
-            end
-        end
-        for j in (i + 1):n_atoms
-            Bj = Bs[j]
-            r2 = square_distance(i, j, coords, box_size)
-            if !iszero(inter.cutoff) && r2 > inter.cutoff^2
-                continue
-            end
-            f = sqrt(r2 + Bi*Bj*exp(-r2/(4*Bi*Bj)))
-            if iszero(inter.cutoff)
-                f_cutoff = 1/f
-            else
-                f_cutoff = (1/f - 1/inter.cutoff)
-            end
-            E += inter.pre_factor * charge_i * atoms[j].charge * f_cutoff
-        end
-    end
-
-    return E
+    coords_i = @view coords[inter.is]
+    coords_j = @view coords[inter.js]
+    charges = charge.(atoms)
+    charges_i = @view charges[inter.is]
+    charges_j = @view charges[inter.js]
+    Bsi = @view Bs[inter.is]
+    Bsj = @view Bs[inter.js]
+    oris = @view inter.offset_radii[inter.is]
+    return sum(gb_energy_loop.(coords_i, coords_j, inter.is, inter.js, charges_i, charges_j,
+                                Bsi, Bsj, oris, (inter.cutoff,), (inter.pre_factor,),
+                                (inter.offset,), (inter.probe_radius,), (inter.sa_factor,),
+                                (inter.use_ACE,), (box_size,)))
 end
