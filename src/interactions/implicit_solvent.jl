@@ -18,6 +18,8 @@ abstract type AbstractGBSA end
 
 Onufriev-Bashford-Case GBSA model.
 Should be used along with a Coulomb or CoulombReactionField interaction.
+The keyword argument `use_OBC2` determines whether to use parameter set
+I (`false`, the default) or II (`true`).
 """
 struct ImplicitSolventOBC{T, D, V, S, F, I} <: AbstractGBSA
     offset_radii::V

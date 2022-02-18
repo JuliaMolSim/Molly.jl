@@ -624,17 +624,17 @@ function System(coord_file::AbstractString,
     lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true, weight_14=force_field.weight_14_lj,
                         force_units=force_units, energy_units=energy_units)
     if isnothing(implicit_solvent)
-        coulomb_rf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(solventdielectric),
-                                            nl_only=true, weight_14=force_field.weight_14_coulomb,
-                                            coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
-                                            force_units=force_units, energy_units=energy_units)
+        crf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(solventdielectric),
+                                    nl_only=true, weight_14=force_field.weight_14_coulomb,
+                                    coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
+                                    force_units=force_units, energy_units=energy_units)
     else
-        coulomb_rf = Coulomb(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true,
-                                weight_14=force_field.weight_14_coulomb,
-                                coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
-                                force_units=force_units, energy_units=energy_units)
+        crf = Coulomb(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true,
+                        weight_14=force_field.weight_14_coulomb,
+                        coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
+                        force_units=force_units, energy_units=energy_units)
     end
-    pairwise_inters = (lj, coulomb_rf)
+    pairwise_inters = (lj, crf)
 
     # All torsions should have the same number of terms for speed, GPU compatibility
     #   and for taking gradients
@@ -995,10 +995,10 @@ function System(T::Type,
 
     lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true, weight_14=T(0.5),
                         force_units=force_units, energy_units=energy_units)
-    coulomb_rf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(solventdielectric),
-                                        nl_only=true, weight_14=T(0.5),
-                                        coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
-                                        force_units=force_units, energy_units=energy_units)
+    crf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(solventdielectric),
+                                nl_only=true, weight_14=T(0.5),
+                                coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
+                                force_units=force_units, energy_units=energy_units)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     if isnothing(box_size)
@@ -1009,7 +1009,7 @@ function System(T::Type,
     end
     coords = wrap_coords_vec.([coords...], (box_size_used,))
 
-    pairwise_inters = (lj, coulomb_rf)
+    pairwise_inters = (lj, crf)
 
     # Only add present interactions and ensure that array types are concrete
     specific_inter_array = []

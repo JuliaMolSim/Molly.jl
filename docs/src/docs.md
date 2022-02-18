@@ -233,6 +233,9 @@ simulator = VelocityVerlet(dt=0.0005u"ps")
 
 simulate!(sys, simulator, 5_000; parallel=true)
 ```
+You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
+The options are `"obc1"` and `"obc2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II.
+Other options include overriding the box size in the file (`box_size`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `nl_dist`).
 
 Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
 ```julia
@@ -378,9 +381,10 @@ Forces define how different parts of the system interact. The force on each part
 \vec{F}_i = -\sum_j \frac{dV_{ij}(r_{ij})}{dr_{ij}}\frac{\vec{r}_{ij}}{r_{ij}}
 ```
 
-In Molly there are two types of interactions.
-[`PairwiseInteraction`](@ref)s are present between all or most atom pairs, and account for example for non-bonded terms.
-[`SpecificInteraction`](@ref)s are present between specific atoms, and account for example for bonded terms.
+In Molly there are three types of interactions:
+- [`PairwiseInteraction`](@ref)s are present between all or most atom pairs, and account for example for non-bonded terms.
+- [`SpecificInteraction`](@ref)s are present between specific atoms, and account for example for bonded terms.
+- General interactions are a free-form interaction type that can access the whole system and outputs forces for all atom. This is useful for neural network potentials and implicit solvent models.
 
 The available pairwise interactions are:
 - [`LennardJones`](@ref)
@@ -395,6 +399,11 @@ The available specific interactions are:
 - [`HarmonicAngle`](@ref)
 - [`PeriodicTorsion`](@ref)
 - [`RBTorsion`](@ref)
+
+The available general interactions are:
+- [`ImplicitSolventOBC`](@ref)
+
+### Pairwise interactions
 
 To define your own [`PairwiseInteraction`](@ref), first define the `struct`:
 ```julia
@@ -430,7 +439,7 @@ Typically the force function is where most computation time is spent during the 
 
 To use your custom force in a simulation, add it to the list of pairwise interactions:
 ```julia
-genera_inters = (MyPairwiseInter(true),)
+pairwise_inters = (MyPairwiseInter(true),)
 ```
 Then create a [`System`](@ref) and simulate as above.
 Note that you can also use named tuples instead of tuples if you want to access interactions by name:
@@ -438,6 +447,11 @@ Note that you can also use named tuples instead of tuples if you want to access 
 pairwise_inters = (MyPairwiseInter=MyPairwiseInter(true),)
 ```
 For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{PairwiseInteraction}`.
+
+If you wish to calculate potential energies or log the energy throughout a simulation, define the [`potential_energy`](@ref) function.
+This has the same arguments as [`force`](@ref) and should return a single value corresponding to the potential energy.
+
+### Specific interactions
 
 To define your own [`SpecificInteraction`](@ref), first define the `struct`:
 ```julia
@@ -475,8 +489,29 @@ specific_inter_lists = (
 For 3 atom interactions use `InteractionList3Atoms` and pass 3 sets of indices.
 If using the GPU, the inner list of interactions should be moved to the GPU.
 
-If you wish to calculate potential energies or log the energy throughout a simulation, define the `potential_energy` function.
-This has the same arguments as `force` and should return a single value corresponding to the potential energy.
+### General interactions
+
+To define your own general interaction, first define the `struct`:
+```julia
+struct MyGeneralInter
+    # Properties, e.g. a neural network model
+end
+```
+Next, you need to define the [`forces`](@ref) function (note this is different to the [`force`](@ref) function above).
+```julia
+function Molly.forces(inter::MyGeneralInter, sys, neighbors=nothing)
+    # Calculate the forces on all atoms using the interaction and the system
+    # The output should have the same shape as the coordinates
+    # For example, a neural network might do something like the below
+    return inter.model(sys.coords, sys.atoms)
+end
+```
+You can also define a [`potential_energy`](@ref) function that takes the same arguments and returns a single value.
+To use your custom force in a simulation, add it to the list of general interactions:
+```julia
+general_inters = (MyGeneralInter(),)
+```
+`general_inters` can be given as a keyword argument when setting up the [`System`](@ref).
 
 ## Cutoffs
 
