@@ -502,16 +502,18 @@ Next, you need to define the [`forces`](@ref) function (note this is different t
 function Molly.forces(inter::MyGeneralInter, sys, neighbors=nothing)
     # Calculate the forces on all atoms using the interaction and the system
     # The output should have the same shape as the coordinates
-    # For example, a neural network might do something like the below
+    # For example, a neural network might do something like this
     return inter.model(sys.coords, sys.atoms)
 end
 ```
+The neighbors calculated from the neighbor list are available in this function, but may or may not be used depending on context.
+
 You can also define a [`potential_energy`](@ref) function that takes the same arguments and returns a single value.
 To use your custom force in a simulation, add it to the list of general interactions:
 ```julia
 general_inters = (MyGeneralInter(),)
 ```
-`general_inters` can be given as a keyword argument when setting up the [`System`](@ref).
+`general_inters=general_inters` can be given as a keyword argument when setting up the [`System`](@ref).
 
 ## Cutoffs
 
