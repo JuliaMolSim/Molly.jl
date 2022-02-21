@@ -39,7 +39,8 @@
         return mean(sqrt.(minimum(disps_diag; dims=1)))
     end
 
-    function test_grad(gpu::Bool, forward::Bool, f32::Bool, pis::Bool, sis::Bool)
+    function test_grad(gpu::Bool, forward::Bool, f32::Bool, pis::Bool,
+                        sis::Bool, implicit_solvent::Bool)
         n_atoms = 50
         n_steps = 100
         atom_mass = f32 ? 10.0f0 : 10.0
@@ -93,6 +94,14 @@
             repeat([""], 10),
             gpu ? cu(torsions_inner) : torsions_inner,
         )
+        atoms_setup = [Atom(charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.0f0 : 0.0) for i in 1:n_atoms]
+        imp = ImplicitSolventOBC(
+            gpu ? cu(atoms_setup) : atoms_setup,
+            [AtomData(element="O") for i in 1:n_atoms],
+            InteractionList2Atoms(bond_is, bond_js, [""], nothing);
+            use_OBC2=true,
+        )
+        general_inters = implicit_solvent ? (imp,) : ()
         neighbor_finder = DistanceVecNeighborFinder(
             nb_matrix=gpu ? cu(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
             n_steps=10,
@@ -120,6 +129,7 @@
                 atoms=gpu ? cu(atoms) : atoms,
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=sis ? (bonds, angles, torsions) : (),
+                general_inters=general_inters,
                 coords=gpu ? cu(cs) : cs,
                 velocities=gpu ? cu(vs) : vs,
                 box_size=box_size,
@@ -138,18 +148,22 @@
     end
 
     runs = [
-        ("cpu"           , [false, false, false, true , true ], 0.1 , 0.25),
-        ("cpu forward"   , [false, true , false, true , true ], 0.01, 0.01),
-        ("cpu f32"       , [false, false, true , true , true ], 0.2 , 10.0),
-        ("cpu nospecific", [false, false, false, true , false], 0.1 , 0.0 ),
-        ("cpu nopairwise", [false, false, false, false, true ], 0.0 , 0.25),
+        ("cpu"                 , [false, false, false, true , true , false], 0.1 , 0.25),
+        ("cpu forward"         , [false, true , false, true , true , false], 0.01, 0.01),
+        ("cpu f32"             , [false, false, true , true , true , false], 0.2 , 10.0),
+        ("cpu nospecific"      , [false, false, false, true , false, false], 0.1 , 0.0 ),
+        ("cpu nopairwise"      , [false, false, false, false, true , false], 0.0 , 0.25),
+        ("cpu implicit"        , [false, false, false, true , true , true ], 0.1 , 0.25),
+        ("cpu implicit forward", [false, true , false, true , true , true ], 0.01, 0.01),
     ]
     if run_gpu_tests
-        push!(runs, ("gpu"           , [true , false, false, true , true ], 0.25, 20.0))
-        push!(runs, ("gpu forward"   , [true , true , false, true , true ], 0.01, 0.01))
-        push!(runs, ("gpu f32"       , [true , false, true , true , true ], 0.5 , 50.0))
-        push!(runs, ("gpu nospecific", [true , false, false, true , false], 0.25, 0.0 ))
-        push!(runs, ("gpu nopairwise", [true , false, false, false, true ], 0.0 , 10.0))
+        push!(runs, ("gpu"                 , [true , false, false, true , true , false], 0.25, 20.0))
+        push!(runs, ("gpu forward"         , [true , true , false, true , true , false], 0.01, 0.01))
+        push!(runs, ("gpu f32"             , [true , false, true , true , true , false], 0.5 , 50.0))
+        push!(runs, ("gpu nospecific"      , [true , false, false, true , false, false], 0.25, 0.0 ))
+        push!(runs, ("gpu nopairwise"      , [true , false, false, false, true , false], 0.0 , 10.0))
+        push!(runs, ("gpu implicit"        , [true , false, false, true , true , true ], 0.25, 20.0))
+        push!(runs, ("gpu implicit forward", [true , true , false, true , true , true ], 0.01, 0.01))
     end
 
     for (name, args, tol_σ, tol_kb) in runs
@@ -181,7 +195,7 @@
                 @test isnothing(gzy) || abs(gzy) < 1e-12
             else
                 frac_diff = abs(gzy - gfd) / abs(gfd)
-                @info "$(rpad(name, 14)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy, fractional difference $frac_diff"
+                @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy, fractional difference $frac_diff"
                 @test frac_diff < tol
             end
         end

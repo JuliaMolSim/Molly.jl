@@ -507,7 +507,6 @@ function Molly.forces(inter::MyGeneralInter, sys, neighbors=nothing)
 end
 ```
 The neighbors calculated from the neighbor list are available in this function, but may or may not be used depending on context.
-
 You can also define a [`potential_energy`](@ref) function that takes the same arguments and returns a single value.
 To use your custom force in a simulation, add it to the list of general interactions:
 ```julia
