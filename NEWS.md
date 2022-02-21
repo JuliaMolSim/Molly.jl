@@ -1,5 +1,13 @@
 # Molly.jl release notes
 
+## v0.8.0 - Feb 2022
+
+- General interactions are renamed to pairwise interactions throughout to better reflect their nature. The abstract type is now `PairwiseInteraction` and the keyword argument to `System` is now `pairwise_inters`. General interaction now refers to a new type of interaction that takes in the whole system and returns forces for all atoms, allowing interactions such as neural network potentials acting on the whole system. This is available via the keyword argument `general_inters` to `System`.
+- Implicit solvent models are added via the `ImplicitSolventOBC` general interaction type and the `implicit_solvent` keyword argument when setting up a `System` from a file. The Onufriev-Bashford-Case GBSA model with parameter sets I and II is provided.
+- `charge` is added to access the partial charge of an `Atom`.
+- The `box_size` keyword argument may be given when setting up a `System` from a file.
+- A bug in `KineticEnergyLogger` is fixed.
+
 ## v0.7.0 - Jan 2022
 
 - The `force` and `potential_energy` functions for general interactions now take the vector between atom i and atom j as an argument in order to save on computation.
