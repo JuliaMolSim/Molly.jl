@@ -609,8 +609,7 @@ function Molly.simulate!(sys::System,
     # Find neighbors like this
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
 
-    # Show a progress bar like this, if you have imported ProgressMeter
-    @showprogress for step_n in 1:n_steps
+    for step_n in 1:n_steps
         # Apply the loggers like this
         run_loggers!(sys, neighbors, step_n)
 

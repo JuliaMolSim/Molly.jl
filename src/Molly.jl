@@ -13,7 +13,6 @@ using EzXML
 using ForwardDiff
 using KernelDensity
 using NearestNeighbors
-using ProgressMeter
 using Reexport
 using Requires
 using Unitful

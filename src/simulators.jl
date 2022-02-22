@@ -48,7 +48,7 @@ function simulate!(sys::System{D, false},
     accels_t = accelerations(sys, neighbors; parallel=parallel)
     accels_t_dt = zero(accels_t)
 
-    @showprogress for step_n in 1:n_steps
+    for step_n in 1:n_steps
         run_loggers!(sys, neighbors, step_n)
 
         # Update coordinates
@@ -125,7 +125,7 @@ function simulate!(sys::System,
                     parallel::Bool=true)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
 
-    @showprogress for step_n in 1:n_steps
+    for step_n in 1:n_steps
         run_loggers!(sys, neighbors, step_n)
 
         accels_t = accelerations(sys, neighbors; parallel=parallel)
