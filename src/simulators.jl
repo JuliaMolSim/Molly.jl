@@ -104,7 +104,7 @@ function simulate!(sys::System{D, true},
         neighbors_all = nothing
     end
     neighbors = find_neighbors(sys, sys.neighbor_finder)
-    accels_t = accelerations(sys, sys.coords, sys.atoms, neighbors, neighbors_all)
+    accels_t = accelerations(sys, neighbors, neighbors_all)
     accels_t_dt = zero(accels_t)
 
     for step_n in 1:n_steps
@@ -112,7 +112,7 @@ function simulate!(sys::System{D, true},
 
         sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
         sys.coords = wrap_coords_vec.(sys.coords, (sys.box_size,))
-        accels_t_dt = accelerations(sys, sys.coords, sys.atoms, neighbors, neighbors_all)
+        accels_t_dt = accelerations(sys, neighbors, neighbors_all)
         sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         apply_coupling!(sys, sim, sim.coupling)

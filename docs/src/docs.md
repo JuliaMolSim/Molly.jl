@@ -755,5 +755,6 @@ The available analysis functions are:
 - [`distances`](@ref)
 - [`displacements`](@ref)
 - [`velocity_autocorr`](@ref)
+- [`rmsd`](@ref)
 
 Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.
