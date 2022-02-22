@@ -115,3 +115,23 @@ function ChainRulesCore.rrule(::typeof(sqrt), x::Real)
     end
     return Y, sqrt_pullback
 end
+
+function ChainRulesCore.rrule(::typeof(reinterpret),
+                                ::Type{T},
+                                arr::SVector{D, T}) where {D, T}
+    Y = reinterpret(T, arr)
+    function reinterpret_pullback(Ȳ::Vector{T})
+        return NoTangent(), NoTangent(), SVector{D, T}(Ȳ)
+    end
+    return Y, reinterpret_pullback
+end
+
+function ChainRulesCore.rrule(::typeof(reinterpret),
+                                ::Type{T},
+                                arr::AbstractArray{SVector{D, T}}) where {D, T}
+    Y = reinterpret(T, arr)
+    function reinterpret_pullback(Ȳ::Vector{T})
+        return NoTangent(), NoTangent(), SVector{D, T}.(eachcol(reshape(Ȳ, D, length(Ȳ) ÷ D)))
+    end
+    return Y, reinterpret_pullback
+end

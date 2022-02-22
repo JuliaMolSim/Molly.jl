@@ -5,7 +5,8 @@ export
     displacements,
     distances,
     rdf,
-    velocity_autocorr
+    velocity_autocorr,
+    rmsd
 
 """
     visualize(coord_logger, box_size, out_filepath; <keyword arguments>)
@@ -85,11 +86,37 @@ end
 """
     velocity_autocorr(vl, first_ind, last_ind)
 
-Calculates the autocorrelation function of velocity from the velocity logger. 
+Calculate the autocorrelation function of velocity from the velocity logger. 
 This helps characterize the similarity between velocities observed at different
 time instances.
 """
 function velocity_autocorr(vl::VelocityLogger, first_ind::Integer=1, last_ind::Integer=length(vl.velocities))
     n_atoms = length(first(vl.velocities))
     return dot(vl.velocities[first_ind], vl.velocities[last_ind]) / n_atoms
+end
+
+"""
+    rmsd(coords_1, coords_2)
+
+Calculate the root-mean-square deviation (RMSD) from two sets of
+3D coordinates after superimposition by the Kabsch algorithm.
+Assumes the coordinates do not cross the bounding box, i.e. all
+coordinates in each set correspond to the same periodic image.
+"""
+function rmsd(coords_1::AbstractArray{SVector{D, T}},
+                coords_2::AbstractArray{SVector{D, T}}) where {D, T}
+    n_atoms = length(coords_1)
+    trans_1 = mean(coords_1)
+    trans_2 = mean(coords_2)
+    p = Array(reshape(reinterpret(T, coords_1), D, n_atoms)) .- repeat(reinterpret(T, trans_1), 1, n_atoms)
+    q = Array(reshape(reinterpret(T, coords_2), D, n_atoms)) .- repeat(reinterpret(T, trans_2), 1, n_atoms)
+    cov = p * transpose(q)
+    svd_res = svd(ustrip.(cov))
+    Ut = transpose(svd_res.U)
+    d = sign(det(svd_res.V * Ut))
+    dmat = [1 0 0; 0 1 0; 0 0 d]
+    rot = svd_res.V * dmat * Ut
+    diffs = rot * p - q
+    msd = sum(abs2, diffs) / n_atoms
+    return sqrt(msd)
 end

@@ -78,6 +78,13 @@ end
     @test wrap_coords(12.0u"m" , 10.0u"m" ) == 2.0u"m"
     @test_throws ErrorException wrap_coords(-2.0u"nm", 10.0)
 
+    vels_units   = [maxwell_boltzmann(12.0u"u", 300.0u"K") for _ in 1:1_000]
+    vels_nounits = [maxwell_boltzmann(12.0    , 300.0    ) for _ in 1:1_000]
+    @test 0.35u"nm * ps^-1" < std(vels_units) < 0.55u"nm * ps^-1"
+    @test 0.35 < std(vels_nounits) < 0.55
+end
+
+@testset "Neighbor lists" begin
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
         s = System(
             atoms=[Atom(), Atom(), Atom()],
@@ -112,9 +119,17 @@ end
         neighbors = find_neighbors(s, s.neighbor_finder; parallel=true)
         @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
     end
+end
 
-    vels_units   = [maxwell_boltzmann(12.0u"u", 300.0u"K") for _ in 1:1_000]
-    vels_nounits = [maxwell_boltzmann(12.0    , 300.0    ) for _ in 1:1_000]
-    @test 0.35u"nm * ps^-1" < std(vels_units) < 0.55u"nm * ps^-1"
-    @test 0.35 < std(vels_nounits) < 0.55
+@testset "Analysis" begin
+    pdb_path = joinpath(data_dir, "1ssu.pdb")
+    struc = read(pdb_path, BioStructures.PDB)
+    cm_1 = BioStructures.coordarray(struc[1], BioStructures.calphaselector)
+    cm_2 = BioStructures.coordarray(struc[2], BioStructures.calphaselector)
+    coords_1 = SVector{3, Float64}.(eachcol(cm_1))
+    coords_2 = SVector{3, Float64}.(eachcol(cm_2))
+    @test rmsd(coords_1, coords_2) ≈ 2.54859467758795u"Å"
+    if run_gpu_tests
+        @test rmsd(cu(coords_1), cu(coords_2)) ≈ 2.54859467758795u"Å"
+    end
 end

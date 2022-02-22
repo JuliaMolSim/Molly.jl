@@ -81,6 +81,10 @@ function Base.zero(::Type{Union{Nothing, SizedVector{D, T, Vector{T}}}}) where {
     zero(SizedVector{D, T, Vector{T}})
 end
 
+function Zygote._backmean(xs::AbstractArray{SVector{D, T}}, Δ::SVector{D, T}, ::Colon) where {D, T}
+    zero(xs) .+ (Δ ./ length(xs),)
+end
+
 # Slower version than in Zygote but doesn't give wrong gradients on the GPU for repeated indices
 # Here we just move it to the CPU then move it back
 # See https://github.com/FluxML/Zygote.jl/pull/1131
