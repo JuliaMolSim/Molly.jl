@@ -3,7 +3,6 @@
 @non_differentiable check_force_units(args...)
 @non_differentiable find_neighbors(args...)
 @non_differentiable DistanceVecNeighborFinder(args...)
-@non_differentiable all_neighbors(args...)
 @non_differentiable run_loggers!(args...)
 @non_differentiable visualize(args...)
 

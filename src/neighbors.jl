@@ -18,21 +18,31 @@ set to `false`.
 struct NoNeighborFinder <: AbstractNeighborFinder end
 
 """
+    find_neighbors(system; parallel=true)
     find_neighbors(system, neighbor_finder, current_neighbors=nothing,
                     step_n=0; parallel=true)
-    find_neighbors(system; parallel=true)
 
 Obtain a list of close atoms in a system.
 Custom neighbor finders should implement this function.
 """
 find_neighbors(s::System; kwargs...) = find_neighbors(s, s.neighbor_finder; kwargs...)
 
-function find_neighbors(s::System,
+function find_neighbors(s::System{D, false},
                         nf::NoNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        kwargs...)
+                        kwargs...) where D
     return nothing
+end
+
+function find_neighbors(s::System{D, true},
+                        nf::NoNeighborFinder,
+                        current_neighbors=nothing,
+                        step_n::Integer=0;
+                        kwargs...) where D
+    step_n > 0 && return current_neighbors
+    all_pairs = all_neighbors(length(s))
+    return NeighborListVec(NeighborsVec(), all_pairs)
 end
 
 Base.show(io::IO, neighbor_finder::NoNeighborFinder) = print(io, typeof(neighbor_finder))
@@ -167,41 +177,52 @@ function find_neighbors(s::System,
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
     n_atoms = length(s)
-    sqdist_cutoff = nf.dist_cutoff ^ 2
-    sqdists = square_distance.(nf.is, nf.js, (s.coords,), (s.box_size,))
+    if any(inter -> inter.nl_only, values(s.pairwise_inters))
+        sqdist_cutoff = nf.dist_cutoff ^ 2
+        sqdists = square_distance.(nf.is, nf.js, (s.coords,), (s.box_size,))
 
-    close = sqdists .< sqdist_cutoff
-    close_nb = close .* nf.nb_matrix
-    eligible = tril(close_nb, -1)
+        close = sqdists .< sqdist_cutoff
+        close_nb = close .* nf.nb_matrix
+        eligible = tril(close_nb, -1)
 
-    fa = Array(findall(!iszero, eligible))
-    nbsi, nbsj = getindex.(fa, 1), getindex.(fa, 2)
-    order_i = sortperm(nbsi)
-    weights_14 = @view nf.matrix_14[fa]
+        fa = Array(findall(!iszero, eligible))
+        nbsi, nbsj = getindex.(fa, 1), getindex.(fa, 2)
+        order_i = sortperm(nbsi)
+        weights_14 = @view nf.matrix_14[fa]
 
-    nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
-    sortperm_j = sortperm(nbsj_ordi)
-    weights_14_ordi = @view weights_14[order_i]
-    atom_bounds_i = find_boundaries(nbsi_ordi, n_atoms)
-    atom_bounds_j = find_boundaries(view(nbsj_ordi, sortperm_j), n_atoms)
+        nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
+        sortperm_j = sortperm(nbsj_ordi)
+        weights_14_ordi = @view weights_14[order_i]
+        atom_bounds_i = find_boundaries(nbsi_ordi, n_atoms)
+        atom_bounds_j = find_boundaries(view(nbsj_ordi, sortperm_j), n_atoms)
 
-    return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
-                            sortperm_j, weights_14_ordi)
+        close_pairs = NeighborsVec{typeof(weights_14_ordi)}(nbsi_ordi, nbsj_ordi,
+                        atom_bounds_i, atom_bounds_j, sortperm_j, weights_14_ordi)
+    else
+        close_pairs = NeighborsVec()
+    end
+
+    if any(inter -> !inter.nl_only, values(s.pairwise_inters))
+        all_pairs = all_neighbors(n_atoms)
+    else
+        all_pairs = NeighborsVec()
+    end
+
+    return NeighborListVec(close_pairs, all_pairs)
 end
 
 function all_neighbors(n_atoms)
     nbs_all = findall(!iszero, tril(ones(Bool, n_atoms, n_atoms), -1))
-    nbsi, nbsj = getindex.(nbs_all, 1), getindex.(nbs_all, 2)
-    order_i = sortperm(nbsi)
+    nbsi_all, nbsj_all = getindex.(nbs_all, 1), getindex.(nbs_all, 2)
+    order_i_all = sortperm(nbsi_all)
 
-    nbsi_ordi, nbsj_ordi = nbsi[order_i], nbsj[order_i]
-    sortperm_j = sortperm(nbsj_ordi)
-    atom_bounds_i = find_boundaries(nbsi_ordi, n_atoms)
-    atom_bounds_j = find_boundaries(view(nbsj_ordi, sortperm_j), n_atoms)
-    weights_14 = nothing
+    nbsi_ordi_all, nbsj_ordi_all = nbsi_all[order_i_all], nbsj_all[order_i_all]
+    sortperm_j_all = sortperm(nbsj_ordi_all)
+    atom_bounds_i_all = find_boundaries(nbsi_ordi_all, n_atoms)
+    atom_bounds_j_all = find_boundaries(view(nbsj_ordi_all, sortperm_j_all), n_atoms)
 
-    return NeighborListVec(nbsi_ordi, nbsj_ordi, atom_bounds_i, atom_bounds_j,
-                            sortperm_j, weights_14)
+    all_pairs = NeighborsVec{Nothing}(nbsi_ordi_all, nbsj_ordi_all, atom_bounds_i_all,
+                    atom_bounds_j_all, sortperm_j_all, nothing)
 end
 
 """

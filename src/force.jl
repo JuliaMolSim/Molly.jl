@@ -32,12 +32,8 @@ interactions and Newton's second law.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
-function accelerations(s::System{D, false}, neighbors=nothing; parallel::Bool=true) where D
+function accelerations(s, neighbors=nothing; parallel::Bool=true)
     return forces(s, neighbors; parallel=parallel) ./ mass.(s.atoms)
-end
-
-function accelerations(s::System{D, true}, neighbors=nothing, neighbors_all=nothing) where D
-    return forces(s, neighbors, neighbors_all) ./ mass.(s.atoms)
 end
 
 """
@@ -207,7 +203,6 @@ end
 
 """
     forces(system, neighbors=nothing; parallel=true)
-    forces(system, neighbors=nothing, neighbors_all=nothing)
 
 Calculate the forces on all atoms in the system.
 If the interactions use neighbor lists, the neighbors should be computed
@@ -282,19 +277,19 @@ function forces(s::System{D, false}, neighbors=nothing; parallel::Bool=true) whe
     return fs * s.force_units
 end
 
-function forces(s::System{D, true}, neighbors=nothing, neighbors_all=nothing) where D
+function forces(s::System{D, true}, neighbors=nothing; parallel::Bool=true) where D
     fs = ustrip_vec.(zero(s.coords))
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     @views if length(pairwise_inters_nonl) > 0
-        fs += Zygote.checkpointed(forces_inters, pairwise_inters_nonl, s.coords, s.atoms, neighbors_all,
+        fs += Zygote.checkpointed(forces_inters, pairwise_inters_nonl, s.coords, s.atoms, neighbors.all,
                                     s.box_size, s.force_units, false)
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
-    if length(pairwise_inters_nl) > 0 && length(neighbors.nbsi) > 0
-        fs += Zygote.checkpointed(forces_inters, pairwise_inters_nl, s.coords, s.atoms, neighbors,
-                                    s.box_size, s.force_units, neighbors.weights_14)
+    if length(pairwise_inters_nl) > 0 && length(neighbors.close.nbsi) > 0
+        fs += Zygote.checkpointed(forces_inters, pairwise_inters_nl, s.coords, s.atoms, neighbors.close,
+                                    s.box_size, s.force_units, neighbors.close.weights_14)
     end
 
     for inter_list in values(s.specific_inter_lists)

@@ -33,27 +33,7 @@ end
 VelocityVerlet(; dt, coupling=NoCoupling()) = VelocityVerlet(dt, coupling)
 
 """
-    StormerVerlet(; <keyword arguments>)
-
-The Störmer-Verlet integrator.
-In this case the `velocities` given to the simulator act as the previous step
-coordinates for the first step.
-Does not currently work with units or thermostats.
-
-# Arguments
-- `dt::T`: the time step of the simulation.
-- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
-"""
-struct StormerVerlet{T, C}
-    dt::T
-    coupling::C
-end
-
-StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
-
-"""
     simulate!(system, simulator, n_steps; parallel=true)
-    simulate!(system, simulator; parallel=true)
 
 Run a simulation on a system according to the rules of the given simulator.
 Custom simulators should implement this function.
@@ -61,7 +41,7 @@ Custom simulators should implement this function.
 function simulate!(sys::System{D, false},
                     sim::VelocityVerlet,
                     n_steps::Integer;
-                    parallel::Bool=true) where {D, S}
+                    parallel::Bool=true) where D
     # See https://www.saylor.org/site/wp-content/uploads/2011/06/MA221-6.1.pdf for
     #   integration algorithm - used shorter second version
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
@@ -97,14 +77,9 @@ end
 function simulate!(sys::System{D, true},
                     sim::VelocityVerlet,
                     n_steps::Integer;
-                    parallel::Bool=true) where {D, S}
-    if any(inter -> !inter.nl_only, values(sys.pairwise_inters))
-        neighbors_all = all_neighbors(length(sys))
-    else
-        neighbors_all = nothing
-    end
+                    parallel::Bool=true) where D
     neighbors = find_neighbors(sys, sys.neighbor_finder)
-    accels_t = accelerations(sys, neighbors, neighbors_all)
+    accels_t = accelerations(sys, neighbors)
     accels_t_dt = zero(accels_t)
 
     for step_n in 1:n_steps
@@ -112,7 +87,7 @@ function simulate!(sys::System{D, true},
 
         sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
         sys.coords = wrap_coords_vec.(sys.coords, (sys.box_size,))
-        accels_t_dt = accelerations(sys, neighbors, neighbors_all)
+        accels_t_dt = accelerations(sys, neighbors)
         sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         apply_coupling!(sys, sim, sim.coupling)
@@ -124,6 +99,25 @@ function simulate!(sys::System{D, true},
     end
     return sys
 end
+
+"""
+    StormerVerlet(; <keyword arguments>)
+
+The Störmer-Verlet integrator.
+In this case the `velocities` given to the simulator act as the previous step
+coordinates for the first step.
+Does not currently work with units or thermostats.
+
+# Arguments
+- `dt::T`: the time step of the simulation.
+- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
+"""
+struct StormerVerlet{T, C}
+    dt::T
+    coupling::C
+end
+
+StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
 
 function simulate!(sys::System,
                     sim::StormerVerlet,
