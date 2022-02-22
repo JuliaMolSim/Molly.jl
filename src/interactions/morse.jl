@@ -3,7 +3,7 @@ export Morse
 """
     Morse
 
-Morse potential for bond between two atoms
+Morse potential for bonds between two atoms
 
 """
 
