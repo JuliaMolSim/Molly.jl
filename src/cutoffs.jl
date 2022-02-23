@@ -89,6 +89,6 @@ end
     rc = cutoff.dist_cutoff
     fc = force_divr_nocutoff(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params) * r
 
-    potential(inter, r2, invr2, params) - (r - rc) * fc -
+    potential(inter, r2, invr2, params) + (r - rc) * fc -
         potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
 end

@@ -28,4 +28,3 @@ end
     ralp = exp(-b.α*(r - b.r0))
     return b.D * (1 - ralp)^2
 end
-
