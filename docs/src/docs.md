@@ -396,6 +396,7 @@ The available pairwise interactions are:
 
 The available specific interactions are:
 - [`HarmonicBond`](@ref)
+- [`MorseBond`](@ref)
 - [`HarmonicAngle`](@ref)
 - [`PeriodicTorsion`](@ref)
 - [`RBTorsion`](@ref)
