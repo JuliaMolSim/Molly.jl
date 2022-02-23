@@ -9,7 +9,8 @@ export
     random_velocities,
     random_velocities!,
     bond_angle,
-    torsion_angle
+    torsion_angle,
+    remove_CM_motion!
 
 """
     vector1D(c1, c2, side_length)
@@ -163,4 +164,20 @@ function torsion_angle(vec_ab, vec_bc, vec_cd)
         ustrip(dot(cross_ab_bc, cross_bc_cd)),
     )
     return θ
+end
+
+# Used to write an rrule that can override the Zygote sum adjoint
+sum_svec(arr) = sum(arr)
+
+"""
+    remove_CM_motion!(system)
+
+Remove the centre of mass motion from a system.
+"""
+function remove_CM_motion!(sys)
+    masses = mass.(sys.atoms)
+    cm_momentum = sum_svec(sys.velocities .* masses)
+    cm_velocity = cm_momentum / sum(masses)
+    sys.velocities = sys.velocities .- (cm_velocity,)
+    return sys
 end

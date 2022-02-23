@@ -19,7 +19,6 @@ system = force_field.createSystem(
     nonbondedMethod=NoCutoff,
     constraints=None,
     rigidWater=False,
-    removeCMMotion=False,
     switchDistance=None,
     useDispersionCorrection=False,
 )

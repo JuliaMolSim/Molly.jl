@@ -1,5 +1,5 @@
 # Calculate energy and forces with OpenMM for comparison to Molly
-# Used OpenMM v7.6.0, Python v3.9.5
+# Used OpenMM v7.7.0, Python v3.9.10
 
 from openmm.app import *
 from openmm import *
@@ -41,10 +41,15 @@ for inter in ["bond", "angle", "proptor", "improptor", "lj", "coul", "all"]:
             os.path.join(ff_dir, f"tip3p_standard_{inter}_only.xml"),
         )
 
-    system = force_field.createSystem(pdb.topology, nonbondedMethod=CutoffPeriodic,
-                                        nonbondedCutoff=1*nanometer, constraints=None,
-                                        rigidWater=False, removeCMMotion=False,
-                                        switchDistance=None, useDispersionCorrection=False)
+    system = force_field.createSystem(
+        pdb.topology,
+        nonbondedMethod=CutoffPeriodic,
+        nonbondedCutoff=1*nanometer,
+        constraints=None,
+        rigidWater=False,
+        switchDistance=None,
+        useDispersionCorrection=False,
+    )
     integrator = VelocityVerletIntegrator(time_step)
     simulation = Simulation(pdb.topology, system, integrator, platform)
     simulation.context.setPositions(pdb.positions)

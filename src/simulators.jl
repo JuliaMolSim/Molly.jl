@@ -24,13 +24,18 @@ The velocity Verlet integrator.
 # Arguments
 - `dt::T`: the time step of the simulation.
 - `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
+- `remove_CM_motion::Bool=true`: whether to remove the centre of mass motion
+    every time step.
 """
 struct VelocityVerlet{T, C}
     dt::T
     coupling::C
+    remove_CM_motion::Bool
 end
 
-VelocityVerlet(; dt, coupling=NoCoupling()) = VelocityVerlet(dt, coupling)
+function VelocityVerlet(; dt, coupling=NoCoupling(), remove_CM_motion=true)
+    return VelocityVerlet(dt, coupling, remove_CM_motion)
+end
 
 """
     simulate!(system, simulator, n_steps; parallel=true)
@@ -45,6 +50,7 @@ function simulate!(sys,
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
     accels_t = accelerations(sys, neighbors; parallel=parallel)
     accels_t_dt = zero(accels_t)
+    sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
         run_loggers!(sys, neighbors, step_n)
@@ -54,6 +60,7 @@ function simulate!(sys,
         accels_t_dt = accelerations(sys, neighbors; parallel=parallel)
         sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
+        sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim, sim.coupling)
 
         if step_n != n_steps

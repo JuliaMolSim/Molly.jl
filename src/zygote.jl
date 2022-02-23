@@ -385,7 +385,9 @@ end
     return y, bc_fwd_back
 end
 
-@inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}, arg2::AbstractArray{SVector{D, T}}) where {D, T}
+@inline function Zygote.broadcast_forward(f,
+                                            arg1::AbstractArray{SVector{D, T}},
+                                            arg2::Union{AbstractArray{SVector{D, T}}, Tuple{SVector{D, T}}}) where {D, T}
     out = dual_function_svec_svec(f).(arg1, arg2)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ_in)
