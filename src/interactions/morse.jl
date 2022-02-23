@@ -7,8 +7,8 @@ Morse potential for bonds between two atoms
 
 """
 
-struct Morse{D, A, R} <: SpecificInteraction
-    depth::D
+struct Morse{T, A, R} <: SpecificInteraction
+    D::T
     α::A
     r0::R
 end
