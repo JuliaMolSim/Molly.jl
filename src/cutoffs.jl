@@ -92,3 +92,48 @@ end
     potential(inter, r2, invr2, params) + (r - rc) * fc -
         potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
 end
+struct CubicSplineCutoff{D,S,I}
+
+    dist_cutoff::D
+    sqdist_cutoff::S
+    inv_sqdist_cutoff::I
+
+    dist_activation::D
+    sqdist_activation::S
+    inv_sqdist_activation::I
+
+end
+
+function CubicSplineCutoff(dist_activation, dist_cutoff)
+    if dist_cutoff <= dist_activation
+        error("The cutoff radius must be strictly larger than the activation radius.")
+    end
+
+    (D, S, I) = typeof.([dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2)])
+
+    return CubicSplineCutoff{D,S,I}(dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2), dist_activation, dist_activation^2,inv(dist_activation^2))
+end
+
+Molly.cutoff_points(::Type{CubicSplineCutoff{D,S,I}}) where {D,S,I} = 2
+
+
+@fastmath function Molly.force_divr_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
+    r = √r2
+    t = (r - ra) / (cutoff.dist_cutoff-cutoff.dist_activation)
+
+    Va = Molly.potential(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params)
+    dVa = -Molly.force_divr_nocutoff(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params) * cutoff.dist_activation
+    ##cubic spline interpolation derivative
+    return -((6t^2 - 6t) * Va / (cutoff.dist_cutoff-ra) + (3t^2 - 4t + 1) * dVa)/r
+
+end
+
+@fastmath function Molly.potential_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
+    r = √r2
+    t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff-cutoff.dist_activation)
+
+    Va = Molly.potential(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params)
+    dVa = -Molly.force_divr_nocutoff(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params) * cutoff.dist_activation
+    ##cubic spline interpolation
+    return (2t^3 - 3t^2 + 1) * Vs + (t^3 - 2t^2 + t) * (cutoff.dist_cutoff-cutoff.dist_activation) * dVa
+end
