@@ -4,7 +4,8 @@ export
     NoCutoff,
     DistanceCutoff,
     ShiftedPotentialCutoff,
-    ShiftedForceCutoff
+    ShiftedForceCutoff,
+    CubicSplineCutoff
 
 """
     NoCutoff()
@@ -92,6 +93,13 @@ end
     potential(inter, r2, invr2, params) + (r - rc) * fc -
         potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
 end
+            
+            
+"""
+    CubicSplineCutoff(dist_activation,dist_cutoff)
+
+Cutoff that interpolates the true potential and zero between an activation point and a cutoff point, using a cubic Hermite spline.
+"""
 struct CubicSplineCutoff{D,S,I}
 
     dist_cutoff::D
@@ -114,26 +122,26 @@ function CubicSplineCutoff(dist_activation, dist_cutoff)
     return CubicSplineCutoff{D,S,I}(dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2), dist_activation, dist_activation^2,inv(dist_activation^2))
 end
 
-Molly.cutoff_points(::Type{CubicSplineCutoff{D,S,I}}) where {D,S,I} = 2
+cutoff_points(::Type{CubicSplineCutoff{D,S,I}}) where {D,S,I} = 2
 
 
-@fastmath function Molly.force_divr_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
+@fastmath function force_divr_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
     r = √r2
     t = (r - ra) / (cutoff.dist_cutoff-cutoff.dist_activation)
 
-    Va = Molly.potential(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params)
-    dVa = -Molly.force_divr_nocutoff(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params) * cutoff.dist_activation
-    ##cubic spline interpolation derivative
+    Va = potential(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params)
+    dVa = -force_divr_nocutoff(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params) * cutoff.dist_activation
+    
     return -((6t^2 - 6t) * Va / (cutoff.dist_cutoff-ra) + (3t^2 - 4t + 1) * dVa)/r
 
 end
 
-@fastmath function Molly.potential_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
+@fastmath function potential_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
     r = √r2
     t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff-cutoff.dist_activation)
 
-    Va = Molly.potential(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params)
-    dVa = -Molly.force_divr_nocutoff(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params) * cutoff.dist_activation
-    ##cubic spline interpolation
+    Va = potential(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params)
+    dVa = -force_divr_nocutoff(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params) * cutoff.dist_activation
+    
     return (2t^3 - 3t^2 + 1) * Vs + (t^3 - 2t^2 + t) * (cutoff.dist_cutoff-cutoff.dist_activation) * dVa
 end
