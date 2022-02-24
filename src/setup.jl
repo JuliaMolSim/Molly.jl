@@ -107,8 +107,8 @@ struct PeriodicTorsionType{T, E}
 end
 
 """
-    OpenMMForceField(ff_files...)
-    OpenMMForceField(T, ff_files...)
+    OpenMMForceField(ff_files...; units=true)
+    OpenMMForceField(T, ff_files...; units=true)
     OpenMMForceField(atom_types, residue_types, bond_types, angle_types,
                         torsion_types, torsion_order, weight_14_coulomb,
                         weight_14_lj)
@@ -299,6 +299,8 @@ includes collapsed into one file.
     than `dist_cutoff`.
 - `implicit_solvent=nothing`: specify a string to add an implicit solvent
     model, options are "obc1" or "obc2".
+- `centre_coords::Bool=true`: whether to centre the coordinates in the
+    simulation box.
 """
 function System(coord_file::AbstractString,
                 force_field::OpenMMForceField;
@@ -311,6 +313,7 @@ function System(coord_file::AbstractString,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 nl_dist=units ? 1.2u"nm" : 1.2,
                 implicit_solvent=nothing,
+                centre_coords::Bool=true,
                 rename_terminal_res::Bool=true)
     T = typeof(force_field.weight_14_coulomb)
 
@@ -690,6 +693,9 @@ function System(coord_file::AbstractString,
     else
         coords = [T.(SVector{3}(col) / 10.0) for col in eachcol(Chemfiles.positions(frame))]
     end
+    if centre_coords
+        coords = coords .- (mean(coords),) .+ (box_size_used / 2,)
+    end
     coords = wrap_coords_vec.(coords, (box_size_used,))
 
     atoms = [atoms...]
@@ -756,7 +762,8 @@ function System(T::Type,
                 gpu::Bool=false,
                 gpu_diff_safe::Bool=gpu,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
-                nl_dist=units ? 1.2u"nm" : 1.2)
+                nl_dist=units ? 1.2u"nm" : 1.2,
+                centre_coords::Bool=true)
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
     bondtypes = Dict{String, HarmonicBond}()
@@ -1007,7 +1014,11 @@ function System(T::Type,
     else
         box_size_used = box_size
     end
-    coords = wrap_coords_vec.([coords...], (box_size_used,))
+    coords = [coords...]
+    if centre_coords
+        coords = coords .- (mean(coords),) .+ (box_size_used / 2,)
+    end
+    coords = wrap_coords_vec.(coords, (box_size_used,))
 
     pairwise_inters = (lj, crf)
 
