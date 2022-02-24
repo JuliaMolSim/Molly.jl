@@ -143,5 +143,5 @@ end
     Va = potential(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params)
     dVa = -force_divr_nocutoff(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params) * cutoff.dist_activation
     
-    return (2t^3 - 3t^2 + 1) * Vs + (t^3 - 2t^2 + t) * (cutoff.dist_cutoff-cutoff.dist_activation) * dVa
+    return (2t^3 - 3t^2 + 1) * Va + (t^3 - 2t^2 + t) * (cutoff.dist_cutoff-cutoff.dist_activation) * dVa
 end
