@@ -129,8 +129,8 @@ cutoff_points(::Type{CubicSplineCutoff{D,S,I}}) where {D,S,I} = 2
     r = √r2
     t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff-cutoff.dist_activation)
 
-    Va = potential(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params)
-    dVa = -force_divr_nocutoff(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params) * cutoff.dist_activation
+    Va = potential(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params)
+    dVa = -force_divr_nocutoff(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params) * cutoff.dist_activation
     
     return -((6t^2 - 6t) * Va / (cutoff.dist_cutoff-cutoff.dist_activation) + (3t^2 - 4t + 1) * dVa)/r
 
@@ -140,8 +140,8 @@ end
     r = √r2
     t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff-cutoff.dist_activation)
 
-    Va = potential(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params)
-    dVa = -force_divr_nocutoff(inter, cutoff.activation_dist, cutoff.inv_activation_dist, params) * cutoff.dist_activation
+    Va = potential(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params)
+    dVa = -force_divr_nocutoff(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params) * cutoff.dist_activation
     
     return (2t^3 - 3t^2 + 1) * Vs + (t^3 - 2t^2 + t) * (cutoff.dist_cutoff-cutoff.dist_activation) * dVa
 end
