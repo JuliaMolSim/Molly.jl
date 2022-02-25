@@ -606,7 +606,7 @@ end
 Then, define the function that carries out the simulation.
 This example shows some of the helper functions you can use:
 ```julia
-function Molly.simulate!(sys::System,
+function Molly.simulate!(sys,
                             sim::MySimulator,
                             n_steps::Integer;
                             parallel::Bool=true)
@@ -663,7 +663,7 @@ end
 ```
 Then, define the function that implements the coupling every time step:
 ```julia
-function apply_coupling!(sys::System, sim, coupling::MyCoupler)
+function apply_coupling!(sys, sim, coupling::MyCoupler)
     # Do something to the simulation, e.g. scale the velocities
     return sys
 end
@@ -693,7 +693,7 @@ end
 Examples of three useful properties are given here: a matrix indicating atom pairs eligible for non-bonded interactions, a matrix indicating atoms in a 1-4 bonding arrangement, and a value determining how many time steps occur between each evaluation of the neighbor finder.
 Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
-function find_neighbors(s::System,
+function find_neighbors(s,
                         nf::MyNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;

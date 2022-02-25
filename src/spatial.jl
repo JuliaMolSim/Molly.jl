@@ -104,8 +104,8 @@ end
 Generate random velocities from the Maxwell-Boltzmann distribution
 for a `System`.
 """
-function random_velocities(sys::System{D}, temp) where D
-    [velocity(a.mass, temp; dims=D) for a in Array(sys.atoms)]
+function random_velocities(sys, temp)
+    [velocity(a.mass, temp; dims=n_dimensions(sys)) for a in Array(sys.atoms)]
 end
 
 """
@@ -114,7 +114,7 @@ end
 Set the velocities of a `System` to random velocities generated from the
 Maxwell-Boltzmann distribution.
 """
-function random_velocities!(sys::System, temp)
+function random_velocities!(sys, temp)
     sys.velocities = random_velocities(sys, temp)
     return sys
 end

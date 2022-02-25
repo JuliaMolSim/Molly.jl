@@ -20,7 +20,7 @@ struct NoCoupling end
 Apply a coupler to modify a simulation.
 Custom couplers should implement this function.
 """
-apply_coupling!(sys::System, sim, ::NoCoupling) = sys
+apply_coupling!(sys, sim, ::NoCoupling) = sys
 
 """
     AndersenThermostat(temperature, coupling_const)
@@ -32,11 +32,12 @@ struct AndersenThermostat{T, C}
     coupling_const::C
 end
 
-function apply_coupling!(sys::System{D}, sim, thermostat::AndersenThermostat) where D
+function apply_coupling!(sys, sim, thermostat::AndersenThermostat)
     for i in 1:length(sys)
         if rand() < (sim.dt / thermostat.coupling_const)
             mass = sys.atoms[i].mass
-            sys.velocities[i] = velocity(mass, thermostat.temperature; dims=D)
+            sys.velocities[i] = velocity(mass, thermostat.temperature;
+                                            dims=n_dimensions(sys))
         end
     end
     return sys
@@ -52,7 +53,7 @@ struct RescaleThermostat{T}
     temperature::T
 end
 
-function apply_coupling!(sys::System, sim, thermostat::RescaleThermostat)
+function apply_coupling!(sys, sim, thermostat::RescaleThermostat)
     sys.velocities *= sqrt(thermostat.temperature / temperature(sys))
     return sys
 end
@@ -68,7 +69,7 @@ struct BerendsenThermostat{T, C}
     coupling_const::C
 end
 
-function apply_coupling!(sys::System, sim, thermostat::BerendsenThermostat)
+function apply_coupling!(sys, sim, thermostat::BerendsenThermostat)
     λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temperature(sys)) - 1)
     sys.velocities *= sqrt(λ2)
     return sys

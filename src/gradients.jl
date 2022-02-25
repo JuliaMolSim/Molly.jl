@@ -10,7 +10,7 @@ export
 Form a `Dict` of all parameters in a `System`, allowing gradients
 to be tracked.
 """
-function extract_parameters(sys::System, ff::OpenMMForceField)
+function extract_parameters(sys, ff)
     params_dic = Dict()
 
     for at_data in sys.atoms_data
