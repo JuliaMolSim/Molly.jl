@@ -54,7 +54,7 @@ end
 @testset "OpenMM protein comparison" begin
     openmm_dir = joinpath(data_dir, "openmm_6mrr")
     ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
-    sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff)
+    sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; centre_coords=false)
     neighbors = find_neighbors(sys, sys.neighbor_finder)
 
     for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul", "all")
@@ -131,6 +131,7 @@ end
         ff_nounits;
         velocities=deepcopy(ustrip_vec.(velocities_start)),
         units=false,
+        centre_coords=false,
     )
     simulator_nounits = VelocityVerlet(dt=0.0005)
     @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
@@ -156,6 +157,7 @@ end
             ff;
             velocities=cu(deepcopy(velocities_start)),
             gpu=true,
+            centre_coords=false,
         )
         simulate!(sys, simulator, n_steps)
 
@@ -170,6 +172,7 @@ end
             velocities=cu(deepcopy(ustrip_vec.(velocities_start))),
             units=false,
             gpu=true,
+            centre_coords=false,
         )
         simulate!(sys_nounits, simulator_nounits, n_steps)
 
