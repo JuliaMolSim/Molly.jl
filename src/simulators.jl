@@ -2,8 +2,9 @@
 
 export
     VelocityVerlet,
+    simulate!,
     StormerVerlet,
-    simulate!
+    Langevin
 
 # Forces are often expressed per mol but this dimension needs removing for use in the integrator
 function remove_molar(x)
@@ -114,6 +115,68 @@ function simulate!(sys::System,
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n; parallel=parallel)
+        end
+    end
+    return sys
+end
+
+"""
+    Langevin(; <keyword arguments>)
+
+The Langevin integrator, based on the Langevin Middle Integrator in OpenMM.
+This is a leapfrog integrator, so the velocities are offset by half a time step
+behind the positions.
+
+# Arguments
+- `dt::T`: the time step of the simulation.
+- `temperature::K`: the temperature of the simulation.
+- `friction::F`: the friction coefficient of the simulation.
+- `remove_CM_motion::Bool=true`: whether to remove the centre of mass motion
+    every time step.
+"""
+struct Langevin{S, K, F, T}
+    dt::S
+    temperature::K
+    friction::F
+    remove_CM_motion::Bool
+    vel_scale::T
+    noise_scale::T
+end
+
+function Langevin(; dt, temperature, friction, remove_CM_motion=true)
+    vel_scale = exp(-dt * friction)
+    noise_scale = sqrt(1 - vel_scale^2)
+    return Langevin(dt, temperature, friction, remove_CM_motion, vel_scale, noise_scale)
+end
+
+function simulate!(sys::System{D},
+                    sim::Langevin,
+                    n_steps::Integer;
+                    parallel::Bool=true) where D
+    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
+    sim.remove_CM_motion && remove_CM_motion!(sys)
+
+    for step_n in 1:n_steps
+        run_loggers!(sys, neighbors, step_n)
+
+        accels_t = accelerations(sys, neighbors; parallel=parallel)
+        sys.velocities += remove_molar.(accels_t) .* sim.dt
+
+        sys.coords += sys.velocities .* sim.dt / 2
+        if isa(sys.coords, CuArray)
+            noise = cu(velocity.(Array(mass.(sys.atoms)), (sim.temperature,); dims=D))
+        else
+            noise = velocity.(mass.(sys.atoms), (sim.temperature,); dims=D)
+        end
+        sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
+
+        sys.coords += sys.velocities .* sim.dt / 2
+        sys.coords = wrap_coords_vec.(sys.coords, (sys.box_size,))
+
+        sim.remove_CM_motion && remove_CM_motion!(sys)
+        if step_n != n_steps
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                        parallel=parallel)
         end
     end
     return sys
