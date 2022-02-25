@@ -154,7 +154,7 @@ end
         LennardJones(cutoff=DistanceCutoff(1.0u"nm"), nl_only=true),
         LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), nl_only=true),
         LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm"), nl_only=true),
-        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm",1.0u"nm"),nl_only=true),
+        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm"), nl_only=true),
         SoftSphere(nl_only=true), SoftSphere(nl_only=false),
         Mie(m=5, n=10, nl_only=true), Mie(m=5, n=10, nl_only=false),
         Coulomb(nl_only=true), Coulomb(nl_only=false),

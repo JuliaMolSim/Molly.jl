@@ -16,6 +16,9 @@ struct NoCutoff end
 
 cutoff_points(::Type{NoCutoff}) = 0
 
+force_divr_cutoff(::NoCutoff, r2, inter, params) = force_divr_nocutoff(inter, r2, inv(r2), params)
+potential_cutoff(::NoCutoff, r2, inter, params) = potential(inter, r2, inv(r2), params)
+
 """
     DistanceCutoff(dist_cutoff)
 
@@ -32,6 +35,9 @@ function DistanceCutoff(dist_cutoff)
 end
 
 cutoff_points(::Type{DistanceCutoff{D, S, I}}) where {D, S, I} = 1
+
+force_divr_cutoff(::DistanceCutoff, r2, inter, params) = force_divr_nocutoff(inter, r2, inv(r2), params)
+potential_cutoff(::DistanceCutoff, r2, inter, params) = potential(inter, r2, inv(r2), params)
 
 """
     ShiftedPotentialCutoff(dist_cutoff)
@@ -50,6 +56,12 @@ end
 
 cutoff_points(::Type{ShiftedPotentialCutoff{D, S, I}}) where {D, S, I} = 1
 
+force_divr_cutoff(::ShiftedPotentialCutoff, r2, inter, params) = force_divr_nocutoff(inter, r2, inv(r2), params)
+
+function potential_cutoff(cutoff::ShiftedPotentialCutoff, r2, inter, params)
+    potential(inter, r2, inv(r2), params) - potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
+end
+
 """
     ShiftedForceCutoff(dist_cutoff)
 
@@ -67,18 +79,6 @@ end
 
 cutoff_points(::Type{ShiftedForceCutoff{D, S, I}}) where {D, S, I} = 1
 
-force_divr_cutoff(::NoCutoff, r2, inter, params) = force_divr_nocutoff(inter, r2, inv(r2), params)
-potential_cutoff(::NoCutoff, r2, inter, params) = potential(inter, r2, inv(r2), params)
-
-force_divr_cutoff(::DistanceCutoff, r2, inter, params) = force_divr_nocutoff(inter, r2, inv(r2), params)
-potential_cutoff(::DistanceCutoff, r2, inter, params) = potential(inter, r2, inv(r2), params)
-
-force_divr_cutoff(::ShiftedPotentialCutoff, r2, inter, params) = force_divr_nocutoff(inter, r2, inv(r2), params)
-
-function potential_cutoff(cutoff::ShiftedPotentialCutoff, r2, inter, params)
-    potential(inter, r2, inv(r2), params) - potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
-end
-
 function force_divr_cutoff(cutoff::ShiftedForceCutoff, r2, inter, params)
     return force_divr_nocutoff(inter, r2, inv(r2), params) - force_divr_nocutoff(
                                 inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
@@ -93,37 +93,34 @@ end
     potential(inter, r2, invr2, params) + (r - rc) * fc -
         potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
 end
-            
-            
-"""
-    CubicSplineCutoff(dist_activation,dist_cutoff)
 
-Cutoff that interpolates the true potential and zero between an activation point and a cutoff point, using a cubic Hermite spline.
 """
-struct CubicSplineCutoff{D,S,I}
+    CubicSplineCutoff(dist_activation, dist_cutoff)
 
+Cutoff that interpolates the true potential and zero between an activation point
+and a cutoff point, using a cubic Hermite spline.
+"""
+struct CubicSplineCutoff{D, S, I}
     dist_cutoff::D
     sqdist_cutoff::S
     inv_sqdist_cutoff::I
-
     dist_activation::D
     sqdist_activation::S
     inv_sqdist_activation::I
-
 end
 
 function CubicSplineCutoff(dist_activation, dist_cutoff)
     if dist_cutoff <= dist_activation
-        error("The cutoff radius must be strictly larger than the activation radius.")
+        error("The cutoff radius must be strictly larger than the activation radius")
     end
 
-    (D, S, I) = typeof.([dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2)])
+    D, S, I = typeof.([dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2)])
 
-    return CubicSplineCutoff{D,S,I}(dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2), dist_activation, dist_activation^2,inv(dist_activation^2))
+    return CubicSplineCutoff{D,S,I}(dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2), dist_activation,
+                                    dist_activation^2, inv(dist_activation^2))
 end
 
-cutoff_points(::Type{CubicSplineCutoff{D,S,I}}) where {D,S,I} = 2
-
+cutoff_points(::Type{CubicSplineCutoff{D, S, I}}) where {D, S, I} = 2
 
 @fastmath function force_divr_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
     r = √r2
