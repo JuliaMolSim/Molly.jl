@@ -593,6 +593,7 @@ Simulators define what type of simulation is run.
 This could be anything from a simple energy minimisation to complicated replica exchange MD.
 The available simulators are:
 - [`VelocityVerlet`](@ref)
+- [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
 

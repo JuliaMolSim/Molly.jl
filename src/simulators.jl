@@ -3,6 +3,7 @@
 export
     VelocityVerlet,
     simulate!,
+    Verlet,
     StormerVerlet,
     Langevin
 
@@ -68,6 +69,56 @@ function simulate!(sys,
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                         parallel=parallel)
             accels_t = accels_t_dt
+        end
+    end
+    return sys
+end
+
+"""
+    Verlet(; <keyword arguments>)
+
+The leapfrog Verlet integrator.
+This is a leapfrog integrator, so the velocities are offset by half a time step
+behind the positions.
+
+# Arguments
+- `dt::T`: the time step of the simulation.
+- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
+- `remove_CM_motion::Bool=true`: whether to remove the centre of mass motion
+    every time step.
+"""
+struct Verlet{T, C}
+    dt::T
+    coupling::C
+    remove_CM_motion::Bool
+end
+
+function Verlet(; dt, coupling=NoCoupling(), remove_CM_motion=true)
+    return Verlet(dt, coupling, remove_CM_motion)
+end
+
+function simulate!(sys,
+                    sim::Verlet,
+                    n_steps::Integer;
+                    parallel::Bool=true)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
+    sim.remove_CM_motion && remove_CM_motion!(sys)
+
+    for step_n in 1:n_steps
+        run_loggers!(sys, neighbors, step_n)
+
+        accels_t = accelerations(sys, neighbors; parallel=parallel)
+        sys.velocities += remove_molar.(accels_t) .* sim.dt
+
+        sys.coords += sys.velocities .* sim.dt
+        sys.coords = wrap_coords_vec.(sys.coords, (sys.box_size,))
+
+        sim.remove_CM_motion && remove_CM_motion!(sys)
+        apply_coupling!(sys, sim, sim.coupling)
+
+        if step_n != n_steps
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                        parallel=parallel)
         end
     end
     return sys
