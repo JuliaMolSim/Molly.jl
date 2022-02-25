@@ -292,7 +292,7 @@ function System(;
                 specific_inter_lists=(),
                 general_inters=(),
                 coords,
-                velocities=zero(coords),
+                velocities=zero(coords) * u"ps^-1",
                 box_size,
                 neighbor_finder=NoNeighborFinder(),
                 loggers=Dict(),

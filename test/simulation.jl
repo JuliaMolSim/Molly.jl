@@ -99,6 +99,32 @@ end
     @time simulate!(s, simulator, n_steps; parallel=false)
 end
 
+@testset "Lennard-Jones simulators" begin
+    n_atoms = 100
+    n_steps = 20_000
+    temp = 298.0u"K"
+    box_size = SVector(2.0, 2.0, 2.0)u"nm"
+    coords = place_atoms(n_atoms, box_size, 0.3u"nm")
+    simulators = [
+        Verlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps")),
+        Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
+    ]
+
+    s = System(
+        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        pairwise_inters=(LennardJones(nl_only=true),),
+        coords=coords,
+        box_size=box_size,
+        neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
+        loggers=Dict("coords" => CoordinateLogger(100)),
+    )
+    random_velocities!(s, temp)
+
+    for simulator in simulators
+        @time simulate!(s, simulator, n_steps; parallel=false)
+    end
+end
+
 @testset "Diatomic molecules" begin
     n_atoms = 100
     n_steps = 20_000
