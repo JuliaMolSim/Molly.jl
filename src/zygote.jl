@@ -36,9 +36,34 @@ function Zygote.accum(x::LennardJones{S, C, W, WS, F, E}, y::LennardJones{S, C, 
     )
 end
 
+function Zygote.accum(x::Coulomb{C, W, T, F, E}, y::Coulomb{C, W, T, F, E}) where {C, W, T, F, E}
+    Coulomb{C, W, T, F, E}(
+        x.cutoff,
+        x.nl_only,
+        x.weight_14 + y.weight_14,
+        x.coulomb_const + y.coulomb_const,
+        x.force_units,
+        x.energy_units,
+    )
+end
+
 function Zygote.accum(x::CoulombReactionField{D, S, W, T, F, E}, y::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
-    CoulombReactionField{D, S, W, T, F, E}(x.dist_cutoff + y.dist_cutoff, x.solvent_dielectric + y.solvent_dielectric, x.nl_only,
-                x.weight_14 + y.weight_14, x.coulomb_const + y.coulomb_const, x.force_units, x.energy_units)
+    CoulombReactionField{D, S, W, T, F, E}(
+        x.dist_cutoff + y.dist_cutoff,
+        x.solvent_dielectric + y.solvent_dielectric,
+        x.nl_only,
+        x.weight_14 + y.weight_14,
+        x.coulomb_const + y.coulomb_const,
+        x.force_units,
+        x.energy_units,
+    )
+end
+
+function Zygote.accum_sum(xs::AbstractArray{Tuple{LennardJones{S, C, W, WS, F, E}, Coulomb{C, WC, T, F, E}}}; dims=:) where {S, C, W, WS, F, E, WC, T}
+    reduce(Zygote.accum, xs, dims=dims; init=(
+        LennardJones{S, C, W, WS, F, E}(nothing, false, false, zero(W), zero(WS), NoUnits, NoUnits),
+        Coulomb{C, WC, T, F, E}(nothing, false, zero(WC), zero(T), NoUnits, NoUnits),
+    ))
 end
 
 function Zygote.accum_sum(xs::AbstractArray{Tuple{LennardJones{S, C, W, WS, F, E}, CoulombReactionField{D, SO, WC, T, F, E}}}; dims=:) where {S, C, W, WS, F, E, D, SO, WC, T}
@@ -122,6 +147,15 @@ function dualize_fb(inter::LennardJones{S, C, W, WS, F, E}) where {S, C, W, WS, 
     return LennardJones{S, C, typeof(dual_weight_14), typeof(dual_weight_solute_solvent), F, E}(
                 inter.cutoff, inter.nl_only, inter.lorentz_mixing, dual_weight_14,
                 dual_weight_solute_solvent, inter.force_units, inter.energy_units)
+end
+
+function dualize_fb(inter::Coulomb{C, W, T, F, E}) where {C, W, T, F, E}
+    w14, cc = inter.weight_14, inter.coulomb_const
+    dual_weight_14     = @dualize(w14, 23, 3)
+    dual_coulomb_const = @dualize(cc , 23, 4)
+    return Coulomb{C, typeof(dual_weight_14), typeof(dual_coulomb_const), F, E}(
+                inter.cutoff, inter.nl_only, dual_weight_14, dual_coulomb_const,
+                inter.force_units, inter.energy_units)
 end
 
 function dualize_fb(inter::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
@@ -429,7 +463,24 @@ end
     return y, bc_fwd_back
 end
 
-function combine_dual_PairwiseInteraction(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer) where {T, P}
+function combine_dual_PairwiseInteraction_coul(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer) where {T, P}
+    (
+        LennardJones{false, Nothing, T, T, typeof(NoUnits), typeof(NoUnits)}(
+            nothing, false, false,
+            y1[1] * partials(o1[1], i    ) + y1[2] * partials(o1[2], i    ) + y1[3] * partials(o1[3], i    ),
+            y1[1] * partials(o1[1], i + 1) + y1[2] * partials(o1[2], i + 1) + y1[3] * partials(o1[3], i + 1),
+            NoUnits, NoUnits,
+        ),
+        Coulomb{Nothing, T, T, typeof(NoUnits), typeof(NoUnits)}(
+            nothing, false,
+            y1[1] * partials(o1[1], i + 2) + y1[2] * partials(o1[2], i + 2) + y1[3] * partials(o1[3], i + 2),
+            y1[1] * partials(o1[1], i + 3) + y1[2] * partials(o1[2], i + 3) + y1[3] * partials(o1[3], i + 3),
+            NoUnits, NoUnits,
+        ),
+    )
+end
+
+function combine_dual_PairwiseInteraction_crf(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer) where {T, P}
     (
         LennardJones{false, Nothing, T, T, typeof(NoUnits), typeof(NoUnits)}(
             nothing, false, false,
@@ -495,19 +546,23 @@ end
 
 # For force_nounit
 @inline function Zygote.broadcast_forward(f,
-                                            arg1,
+                                            arg1::A,
                                             arg2::AbstractArray{SVector{D, T}},
                                             arg3::AbstractArray{SVector{D, T}},
                                             arg4::AbstractArray{<:Atom},
                                             arg5::AbstractArray{<:Atom},
                                             arg6::Tuple{SVector{D, T}},
                                             arg7::Base.RefValue{<:Unitful.FreeUnits},
-                                            arg8) where {D, T}
+                                            arg8) where {A, D, T}
     out = dual_function_force_broadcast(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
     y = map(x -> value.(x), out)
     function bc_fwd_back(ȳ_in)
         ȳ = modify_grad(ȳ_in, arg2)
-        darg1 = unbroadcast(arg1, broadcast(combine_dual_PairwiseInteraction, ȳ, out, 1))
+        if A <: Tuple{Tuple{X, Y}} where {X <: LennardJones, Y <: Coulomb}
+            darg1 = unbroadcast(arg1, broadcast(combine_dual_PairwiseInteraction_coul, ȳ, out, 1))
+        elseif A <: Tuple{Tuple{X, Y}} where {X <: LennardJones, Y <: CoulombReactionField}
+            darg1 = unbroadcast(arg1, broadcast(combine_dual_PairwiseInteraction_crf , ȳ, out, 1))
+        end
         darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1,  7),
                                 sum_partials(o1, y1,  8), sum_partials(o1, y1,  9)), ȳ, out))
         darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1, 10),
@@ -849,8 +904,10 @@ end
 
 # Interactions not specified here run on the slow path on CPU
 @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force_nounit), inters::Tuple{Tuple{X, Y}}, args...) where {X <: LennardJones, Y <: CoulombReactionField} = Zygote.broadcast_forward(f, inters, args...)
+@eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force_nounit), inters::Tuple{Tuple{X, Y}}, args...) where {X <: LennardJones, Y <: Coulomb             } = Zygote.broadcast_forward(f, inters, args...)
 
 @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force_nounit), inters::Tuple{Tuple{X, Y}}, args...) where {X <: LennardJones, Y <: CoulombReactionField} = Zygote.broadcast_forward(f, inters, args...)
+@eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force_nounit), inters::Tuple{Tuple{X, Y}}, args...) where {X <: LennardJones, Y <: Coulomb             } = Zygote.broadcast_forward(f, inters, args...)
 
 @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{HarmonicBond{D, K}}      , args...) where {D, K}    = Zygote.broadcast_forward(f, inters, args...)
 @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{HarmonicAngle{D, K}}     , args...) where {D, K}    = Zygote.broadcast_forward(f, inters, args...)

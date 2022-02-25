@@ -101,7 +101,7 @@ function loss(σ)
     return loss_val
 end
 ```
-Currently only the combination of `LennardJones` and `CoulombReactionField` works on the GPU or fast on the CPU.
+Currently only the combination of `LennardJones` and `CoulombReactionField` or `Coulomb` works on the GPU or fast on the CPU.
 Other types work but run slower on the CPU.
 This will change in future.
 
