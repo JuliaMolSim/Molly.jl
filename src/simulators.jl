@@ -92,7 +92,7 @@ end
 
 StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
 
-function simulate!(sys::System,
+function simulate!(sys,
                     sim::StormerVerlet,
                     n_steps::Integer;
                     parallel::Bool=true)
@@ -149,10 +149,10 @@ function Langevin(; dt, temperature, friction, remove_CM_motion=true)
     return Langevin(dt, temperature, friction, remove_CM_motion, vel_scale, noise_scale)
 end
 
-function simulate!(sys::System{D},
+function simulate!(sys,
                     sim::Langevin,
                     n_steps::Integer;
-                    parallel::Bool=true) where D
+                    parallel::Bool=true)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
@@ -164,9 +164,10 @@ function simulate!(sys::System{D},
 
         sys.coords += sys.velocities .* sim.dt / 2
         if isa(sys.coords, CuArray)
-            noise = cu(velocity.(Array(mass.(sys.atoms)), (sim.temperature,); dims=D))
+            noise = cu(velocity.(Array(mass.(sys.atoms)), (sim.temperature,);
+                                    dims=n_dimensions(sys)))
         else
-            noise = velocity.(mass.(sys.atoms), (sim.temperature,); dims=D)
+            noise = velocity.(mass.(sys.atoms), (sim.temperature,); dims=n_dimensions(sys))
         end
         sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
 

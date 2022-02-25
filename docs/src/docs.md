@@ -594,6 +594,7 @@ This could be anything from a simple energy minimisation to complicated replica 
 The available simulators are:
 - [`VelocityVerlet`](@ref)
 - [`StormerVerlet`](@ref)
+- [`Langevin`](@ref)
 
 To define your own simulator, first define a `struct`:
 ```julia
