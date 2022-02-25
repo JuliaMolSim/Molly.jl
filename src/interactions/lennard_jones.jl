@@ -79,7 +79,7 @@ is_solute(at) = false
     elseif cutoff_points(C) == 2
         r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
 
-        if r2 < cutoff.activation_dist
+        if r2 < cutoff.sqdist_activation
             f = force_divr_nocutoff(inter, r2, inv(r2), params)
         else
             f = force_divr_cutoff(cutoff, r2, inter, params)
@@ -133,7 +133,7 @@ end
     elseif cutoff_points(C) == 2
         r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_units
 
-        if r2 < cutoff.activation_dist
+        if r2 < cutoff.sqdist_activation
             pe = potential(inter, r2, inv(r2), params)
         else
             pe = potential_cutoff(cutoff, r2, inter, params)

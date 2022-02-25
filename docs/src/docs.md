@@ -585,6 +585,7 @@ The available cutoffs are:
 - [`DistanceCutoff`](@ref)
 - [`ShiftedPotentialCutoff`](@ref)
 - [`ShiftedForceCutoff`](@ref)
+- [`CubicSplineCutoff`](@ref)
 
 ## Simulators
 
