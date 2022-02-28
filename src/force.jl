@@ -282,14 +282,14 @@ function forces(s::System{D, true}, neighbors=nothing; parallel::Bool=true) wher
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     @views if length(pairwise_inters_nonl) > 0
-        fs += Zygote.checkpointed(forces_inters, pairwise_inters_nonl, s.coords, s.atoms, neighbors.all,
-                                    s.box_size, s.force_units, false)
+        fs += forces_inters(pairwise_inters_nonl, s.coords, s.atoms, neighbors.all,
+                            s.box_size, s.force_units, false)
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nl) > 0 && length(neighbors.close.nbsi) > 0
-        fs += Zygote.checkpointed(forces_inters, pairwise_inters_nl, s.coords, s.atoms, neighbors.close,
-                                    s.box_size, s.force_units, neighbors.close.weights_14)
+        fs += forces_inters(pairwise_inters_nl, s.coords, s.atoms, neighbors.close,
+                            s.box_size, s.force_units, neighbors.close.weights_14)
     end
 
     for inter_list in values(s.specific_inter_lists)
