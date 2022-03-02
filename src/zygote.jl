@@ -298,7 +298,7 @@ function dual_function_specific_4_atoms(f::F) where F
     end
 end
 
-function dual_function_born_radii_loop(f::F) where F
+function dual_function_born_radii_loop_OBC(f::F) where F
     function (arg1, arg2, arg3, arg4, arg5, arg6)
         ds1 = dualize(Nothing, arg1, Val(0), Val(8))
         ds2 = dualize(Nothing, arg2, Val(3), Val(5))
@@ -689,7 +689,7 @@ end
     return y, bc_fwd_back
 end
 
-# For born_radii_loop
+# For born_radii_loop_OBC
 @inline function Zygote.broadcast_forward(f,
                                             arg1::AbstractArray{SVector{D, T}},
                                             arg2::AbstractArray{SVector{D, T}},
@@ -697,7 +697,7 @@ end
                                             arg4::AbstractArray{T},
                                             arg5::Tuple{T},
                                             arg6::Tuple{SVector{D, T}}) where {D, T}
-    out = dual_function_born_radii_loop(f).(arg1, arg2, arg3, arg4, arg5, arg6)
+    out = dual_function_born_radii_loop_OBC(f).(arg1, arg2, arg3, arg4, arg5, arg6)
     y = value.(out)
     function bc_fwd_back(ȳ_in)
         ȳ = modify_grad(ȳ_in, arg1)
@@ -895,7 +895,7 @@ end
 
 # Use fast broadcast path on CPU
 for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec, :wrap_coords_vec,
-            :getf1, :getf2, :getf3, :getf4, :born_radii_loop, :gb_force_loop_1, :gb_force_loop_2,
+            :getf1, :getf2, :getf3, :getf4, :born_radii_loop_OBC, :gb_force_loop_1, :gb_force_loop_2,
             :gb_energy_loop)
     @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
     # Avoid ambiguous dispatch

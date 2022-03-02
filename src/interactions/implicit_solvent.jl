@@ -61,7 +61,7 @@ mbondi3_radii(atoms_data, bonds) = mbondi2_radii(atoms_data, bonds; use_mbondi3=
 
 # We use a full atom pairwise table rather than looking up a value with the atom radius
 # This works better with broadcasting
-function lookup_table(T, full_table, radii, offset)
+function lookup_table(full_table::AbstractArray{T}, radii, offset) where T
     n_atoms = length(radii)
     table_positions = [(r + offset - 0.1u"nm") * 200 for r in radii]
     # These zero-based indexes are converted to one-based when looking up the full table
@@ -92,8 +92,6 @@ function lookup_table(T, full_table, radii, offset)
     end
     return table
 end
-
-lookup_table(full_table, radii, offset) = lookup_table(DefaultFloat, full_table, radii, offset)
 
 """
     ImplicitSolventOBC(atoms, atoms_data, bonds)
@@ -206,7 +204,7 @@ end
 GBn2 solvation model.
 Should be used along with a Coulomb or CoulombReactionField interaction.
 """
-struct ImplicitSolventGBN2{T, D, V, S, F, I} <: AbstractGBSA
+struct ImplicitSolventGBN2{T, D, V, S, F, I, TD, TM} <: AbstractGBSA
     offset_radii::V
     scaled_offset_radii::V
     solvent_dielectric::T
@@ -222,8 +220,10 @@ struct ImplicitSolventGBN2{T, D, V, S, F, I} <: AbstractGBSA
     pre_factor::F
     is::I
     js::I
-    d0s::Matrix{T}
-    m0s::Matrix{T}
+    d0s::TD
+    m0s::TM
+    neck_scale::T
+    neck_cut::D
 end
 
 function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
@@ -235,7 +235,9 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
                                 cutoff=0.0u"nm",
                                 probe_radius=0.14u"nm",
                                 sa_factor=28.3919551u"kJ * mol^-1 * nm^-2",
-                                use_ACE=true) where {T, M, D, E}
+                                use_ACE=true,
+                                neck_scale=0.826836,
+                                neck_cut=0.68u"nm") where {T, M, D, E}
     element_to_screen = Dict(
         "H" => 1.425952,
         "C" => 1.058554,
@@ -339,7 +341,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
         3.22855, 3.28307, 3.33751, 3.39188, 3.4462, 3.50046, 3.55466, 3.6088,
         3.6629, 3.71694, 3.77095, 3.82489, 3.8788, 3.93265, 3.98646, 4.04022,
         4.09395, 4.14762, 4.20126, 4.25485, 4.3084,
-    ] ./ 10.0
+    ]u"nm" ./ 10.0
     data_m0 = [
         0.0381511, 0.0338587, 0.0301776, 0.027003, 0.0242506, 0.0218529,
         0.0197547, 0.0179109, 0.0162844, 0.0148442, 0.0135647, 0.0124243,
@@ -425,7 +427,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
         0.0332033, 0.030322, 0.0277596, 0.0254732, 0.0234266, 0.0215892,
         0.0199351, 0.018442, 0.0170909, 0.0158654, 0.0147514, 0.0137365,
         0.0128101, 0.0119627, 0.0111863,
-    ] .* 10.0
+    ]u"nm^-1" .* 10.0
     nucleic_acid_residues = ("A", "C", "G", "U", "DA", "DC", "DG", "DT")
 
     radii = mbondi3_radii(atoms_data, bonds)
@@ -458,8 +460,8 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
     inds_i = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
     inds_j = permutedims(inds_i, (2, 1))
 
-    table_d0 = lookup_table(T, data_d0, radii, offset)
-    table_m0 = lookup_table(T, data_m0, radii, offset)
+    table_d0 = T.(lookup_table(data_d0, radii, offset))
+    table_m0 = T.(lookup_table(data_m0, radii, offset))
 
     if !iszero(solute_dielectric) && !iszero(solvent_dielectric)
         pre_factor = T(-coulombconst) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
@@ -480,18 +482,20 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
     end
 
     if dimension(D) == u"𝐋"
-        return ImplicitSolventGBN2{T, D, typeof(or), typeof(T(sa_factor)), typeof(pre_factor), typeof(is)}(
+        return ImplicitSolventGBN2{T, D, typeof(or), typeof(T(sa_factor)), typeof(pre_factor),
+                        typeof(is), typeof(d0s), typeof(m0s)}(
                     or, sor, solvent_dielectric, solute_dielectric, offset, cutoff,
-                    use_ACE, αs, βs, γs, probe_radius, T(sa_factor), pre_factor, is, js, d0s, m0s)
+                    use_ACE, αs, βs, γs, probe_radius, T(sa_factor), pre_factor, is, js,
+                    d0s, m0s, neck_scale, neck_cut)
     else
-        return ImplicitSolventGBN2{T, T, typeof(or), T, T, typeof(is)}(
+        return ImplicitSolventGBN2{T, T, typeof(or), T, T, typeof(is), typeof(d0s), typeof(m0s)}(
                     or, sor, solvent_dielectric, solute_dielectric, ustrip(offset), ustrip(cutoff),
                     use_ACE, αs, βs, γs, ustrip(probe_radius), ustrip(sa_factor), ustrip(pre_factor),
-                    is, js, d0s, m0s)
+                    is, js, d0s, m0s, neck_scale, ustrip(neck_cut))
     end
 end
 
-function born_radii_loop(coord_i, coord_j, ori, srj, cutoff, box_size)
+function born_radii_loop_OBC(coord_i, coord_j, ori, srj, cutoff, box_size)
     I = zero(coord_i[1] / unit(cutoff)^2)
     r = norm(vector(coord_i, coord_j, box_size))
     if iszero(r) || (!iszero(cutoff) && r > cutoff)
@@ -520,8 +524,8 @@ function born_radii_and_grad(inter::ImplicitSolventOBC, coords, box_size)
     coords_j = @view coords[inter.js]
     oris = @view inter.offset_radii[inter.is]
     srjs = @view inter.scaled_offset_radii[inter.js]
-    Is = dropdims(sum(born_radii_loop.(coords_i, coords_j, oris, srjs, (inter.cutoff,),
-                                        (box_size,)); dims=2); dims=2)
+    Is = dropdims(sum(born_radii_loop_OBC.(coords_i, coords_j, oris, srjs, (inter.cutoff,),
+                                            (box_size,)); dims=2); dims=2)
 
     ori = inter.offset_radii
     radii = ori .+ inter.offset
@@ -531,6 +535,54 @@ function born_radii_and_grad(inter::ImplicitSolventOBC, coords, box_size)
     tanh_sums = tanh.(α .* ψs .- β .* ψs2 .+ γ .* ψs2 .* ψs)
     Bs = 1 ./ (1 ./ ori .- tanh_sums ./ radii)
     grad_terms = ori .* (α .- 2 .* β .* ψs .+ 3 .* γ .* ψs2)
+    B_grads = (1 .- tanh_sums .^ 2) .* grad_terms ./ radii
+
+    return Bs, B_grads
+end
+
+function born_radii_loop_GBN2(coord_i, coord_j, ori, orj, srj, cutoff, offset,
+                                neck_scale, neck_cut, d0, m0, box_size)
+    I = zero(coord_i[1] / unit(cutoff)^2)
+    r = norm(vector(coord_i, coord_j, box_size))
+    if iszero(r) || (!iszero(cutoff) && r > cutoff)
+        return I
+    end
+    U = r + srj
+    if ori < U
+        D_ij = abs(r - srj)
+        L = max(ori, D_ij)
+        I += (1/L - 1/U + (r - (srj^2)/r)*(1/(U^2) - 1/(L^2))/4 + log(L/U)/(2*r)) / 2
+        if ori < (srj - r)
+            I += 2 * (1/ori - 1/L)
+        end
+    end
+    radius_i = ori + offset
+    radius_j = orj + offset
+    if r < (radius_i + radius_j + neck_cut)
+        r_d0_strip = ustrip(u"nm", r - d0)
+        I += neck_scale * m0 / (1 + 100 * r_d0_strip^2 + 300000 * r_d0_strip^6)
+    end
+    return I
+end
+
+function born_radii_and_grad(inter::ImplicitSolventGBN2, coords, box_size)
+    coords_i = @view coords[inter.is]
+    coords_j = @view coords[inter.js]
+    oris = @view inter.offset_radii[inter.is]
+    orjs = @view inter.offset_radii[inter.js]
+    srjs = @view inter.scaled_offset_radii[inter.js]
+    Is = dropdims(sum(born_radii_loop_GBN2.(coords_i, coords_j, oris, orjs, srjs, (inter.cutoff,),
+                    (inter.offset,), (inter.neck_scale,), (inter.neck_cut,), inter.d0s, inter.m0s,
+                    (box_size,)); dims=2); dims=2)
+
+    ori = inter.offset_radii
+    radii = ori .+ inter.offset
+    ψs = Is .* ori
+    ψs2 = ψs .^ 2
+    αs, βs, γs = inter.αs, inter.βs, inter.γs
+    tanh_sums = tanh.(αs .* ψs .- βs .* ψs2 .+ γs .* ψs2 .* ψs)
+    Bs = 1 ./ (1 ./ ori .- tanh_sums ./ radii)
+    grad_terms = ori .* (αs .- 2 .* βs .* ψs .+ 3 .* γs .* ψs2)
     B_grads = (1 .- tanh_sums .^ 2) .* grad_terms ./ radii
 
     return Bs, B_grads
