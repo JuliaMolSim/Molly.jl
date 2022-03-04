@@ -298,7 +298,7 @@ includes collapsed into one file.
 - `nl_dist=1.2u"nm"`: cutoff distance for neighbor list, should not be less
     than `dist_cutoff`.
 - `implicit_solvent=nothing`: specify a string to add an implicit solvent
-    model, options are "obc1" or "obc2".
+    model, options are "obc1", "obc2" or "gbn2".
 - `centre_coords::Bool=true`: whether to centre the coordinates in the
     simulation box.
 """
@@ -727,7 +727,9 @@ function System(coord_file::AbstractString,
         if implicit_solvent == "obc1"
             general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds; use_OBC2=false),)
         elseif implicit_solvent == "obc2"
-            general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds; use_OBC2=true ),)
+            general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds; use_OBC2=true),)
+        elseif implicit_solvent == "gbn2"
+            general_inters = (ImplicitSolventGBN2(atoms, atoms_data, bonds),)
         else
             error("Unknown implicit solvent model: \"$implicit_solvent\"")
         end

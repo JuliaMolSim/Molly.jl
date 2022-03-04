@@ -14,10 +14,11 @@ Custom GBSA methods should sub-type this type.
 """
 abstract type AbstractGBSA end
 
-is_carboxylate_O() = false
+# This is force field dependent
+#is_carboxylate_O(at_data) = at_data.atom_type == "O2" # Waiting on fix in OpenMM
+is_carboxylate_O(at_data) = false
 
 function mbondi2_radii(atoms_data, bonds; use_mbondi3=false)
-    default_radius = 0.15u"nm"
     element_to_radius = Dict(
         "N"  => 0.155u"nm",
         "O"  => 0.15u"nm" ,
@@ -27,6 +28,7 @@ function mbondi2_radii(atoms_data, bonds; use_mbondi3=false)
         "S"  => 0.18u"nm" ,
         "Cl" => 0.17u"nm" ,
         "C"  => 0.17u"nm" ,
+        "-"  => 0.15u"nm" ,
     )
 
     # Find atoms bonded to nitrogen
@@ -40,17 +42,17 @@ function mbondi2_radii(atoms_data, bonds; use_mbondi3=false)
         end
     end
 
-    radii = typeof(default_radius)[]
+    radii = typeof(element_to_radius["-"])[]
     for (at_data, bonded_to_N) in zip(atoms_data, atoms_bonded_to_N)
         if use_mbondi3 && at_data.res_name == "ARG" &&
                 (startswith(at_data.atom_name, "HH") || startswith(at_data.atom_name, "HE"))
             radius = 0.117u"nm"
-        elseif use_mbondi3 && is_carboxylate_O()
+        elseif use_mbondi3 && is_carboxylate_O(at_data)
             radius = 0.14u"nm"
         elseif at_data.element in ("H", "D")
             radius = bonded_to_N ? 0.13u"nm" : 0.12u"nm"
         else
-            radius = get(element_to_radius, at_data.element, default_radius)
+            radius = get(element_to_radius, at_data.element, element_to_radius["-"])
         end
         push!(radii, radius)
     end
@@ -61,9 +63,9 @@ mbondi3_radii(atoms_data, bonds) = mbondi2_radii(atoms_data, bonds; use_mbondi3=
 
 # We use a full atom pairwise table rather than looking up a value with the atom radius
 # This works better with broadcasting
-function lookup_table(full_table::AbstractArray{T}, radii, offset) where T
+function lookup_table(full_table::AbstractArray{T}, radii) where T
     n_atoms = length(radii)
-    table_positions = [(r + offset - 0.1u"nm") * 200 for r in radii]
+    table_positions = [(r - 0.1u"nm") * 200 for r in radii]
     # These zero-based indexes are converted to one-based when looking up the full table
     index_1, index_2 = zeros(Int, n_atoms), zeros(Int, n_atoms)
     weight_1, weight_2 = zeros(n_atoms), zeros(n_atoms)
@@ -84,7 +86,7 @@ function lookup_table(full_table::AbstractArray{T}, radii, offset) where T
     table = zeros(T, n_atoms, n_atoms)
     for i in 1:n_atoms
         for j in 1:n_atoms
-            table[i, j] = weight_1[i] * weight_1[j] * full_table[index_1[i] * 21 + index_1[j] + 1] +
+            table[j, i] = weight_1[i] * weight_1[j] * full_table[index_1[i] * 21 + index_1[j] + 1] +
                           weight_1[i] * weight_2[j] * full_table[index_1[i] * 21 + index_2[j] + 1] +
                           weight_2[i] * weight_1[j] * full_table[index_2[i] * 21 + index_1[j] + 1] +
                           weight_2[i] * weight_2[j] * full_table[index_2[i] * 21 + index_2[j] + 1]
@@ -341,7 +343,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
         3.22855, 3.28307, 3.33751, 3.39188, 3.4462, 3.50046, 3.55466, 3.6088,
         3.6629, 3.71694, 3.77095, 3.82489, 3.8788, 3.93265, 3.98646, 4.04022,
         4.09395, 4.14762, 4.20126, 4.25485, 4.3084,
-    ]u"nm" ./ 10.0
+    ]u"nm" ./ 10
     data_m0 = [
         0.0381511, 0.0338587, 0.0301776, 0.027003, 0.0242506, 0.0218529,
         0.0197547, 0.0179109, 0.0162844, 0.0148442, 0.0135647, 0.0124243,
@@ -427,7 +429,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
         0.0332033, 0.030322, 0.0277596, 0.0254732, 0.0234266, 0.0215892,
         0.0199351, 0.018442, 0.0170909, 0.0158654, 0.0147514, 0.0137365,
         0.0128101, 0.0119627, 0.0111863,
-    ]u"nm^-1" .* 10.0
+    ]u"nm^-1" .* 10
     nucleic_acid_residues = ("A", "C", "G", "U", "DA", "DC", "DG", "DT")
 
     radii = mbondi3_radii(atoms_data, bonds)
@@ -460,8 +462,8 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
     inds_i = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
     inds_j = permutedims(inds_i, (2, 1))
 
-    table_d0 = T.(lookup_table(data_d0, radii, offset))
-    table_m0 = T.(lookup_table(data_m0, radii, offset))
+    table_d0 = T.(lookup_table(data_d0, radii))
+    table_m0 = T.(lookup_table(data_m0, radii))
 
     if !iszero(solute_dielectric) && !iszero(solvent_dielectric)
         pre_factor = T(-coulombconst) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
