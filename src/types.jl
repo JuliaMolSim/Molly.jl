@@ -141,8 +141,6 @@ The mass of an atom.
 """
 mass(atom::Atom) = atom.mass
 
-AtomsBase.atomic_mass(atom::Atom) = mass(atom)
-
 function Base.show(io::IO, a::Atom)
     print(io, "Atom with index ", a.index, ", charge=", charge(a),
             ", mass=", mass(a), ", σ=", a.σ, ", ϵ=", a.ϵ)
@@ -337,7 +335,7 @@ float_type(::System{D, G, T}) where {D, G, T} = T
 
 AtomsBase.species_type(s::System) = eltype(s.atoms)
 
-Base.getindex(s::System, i::Integer) = s.atoms[i]
+Base.getindex(s::System, i::Integer) = AtomView(s, i)
 Base.length(s::System) = length(s.atoms)
 
 AtomsBase.position(s::System) = s.coords
@@ -345,6 +343,10 @@ AtomsBase.position(s::System, i::Integer) = s.coords[i]
 
 AtomsBase.velocity(s::System) = s.velocities
 AtomsBase.velocity(s::System, i::Integer) = s.velocities[i]
+
+AtomsBase.atomic_mass(s::System, i::Integer) = mass(s.atoms[i])
+AtomsBase.atomic_symbol(s::System, i::Integer) = Symbol(s.atoms_data[i].element)
+AtomsBase.atomic_number(s::System, i::Integer) = missing
 
 AtomsBase.boundary_conditions(::System{3}) = SVector(Periodic(), Periodic(), Periodic())
 AtomsBase.boundary_conditions(::System{2}) = SVector(Periodic(), Periodic())
