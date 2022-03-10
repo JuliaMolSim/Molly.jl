@@ -192,21 +192,26 @@ end
 @testset "Implicit solvent" begin
     openmm_dir = joinpath(data_dir, "openmm_6mrr")
     ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...)
-    sys = System(
-        joinpath(data_dir, "6mrr_nowater.pdb"),
-        ff;
-        box_size=SVector(100.0, 100.0, 100.0)u"nm",
-        implicit_solvent="obc2",
-        dist_cutoff=5.0u"nm",
-        nl_dist=5.0u"nm",
-    )
-    neighbors = find_neighbors(sys)
 
-    forces_molly = forces(sys, neighbors)
-    forces_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "forces_obc2.txt"))))u"kJ * mol^-1 * nm^-1"
-    @test !any(d -> any(abs.(d) .> 1e-3u"kJ * mol^-1 * nm^-1"), forces_molly .- forces_openmm)
+    for solvent_model in ("obc2", "gbn2")
+        sys = System(
+            joinpath(data_dir, "6mrr_nowater.pdb"),
+            ff;
+            box_size=SVector(100.0, 100.0, 100.0)u"nm",
+            implicit_solvent=solvent_model,
+            dist_cutoff=5.0u"nm",
+            nl_dist=5.0u"nm",
+        )
+        neighbors = find_neighbors(sys)
 
-    E_molly = potential_energy(sys, neighbors)
-    E_openmm = readdlm(joinpath(openmm_dir, "energy_obc2.txt"))[1] * u"kJ * mol^-1"
-    @test E_molly - E_openmm < 1e-2u"kJ * mol^-1"
+        forces_molly = forces(sys, neighbors)
+        openmm_force_fp = joinpath(openmm_dir, "forces_$solvent_model.txt")
+        forces_openmm = SVector{3}.(eachrow(readdlm(openmm_force_fp)))u"kJ * mol^-1 * nm^-1"
+        @test !any(d -> any(abs.(d) .> 1e-3u"kJ * mol^-1 * nm^-1"), forces_molly .- forces_openmm)
+
+        E_molly = potential_energy(sys, neighbors)
+        openmm_E_fp = joinpath(openmm_dir, "energy_$solvent_model.txt")
+        E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
+        @test E_molly - E_openmm < 1e-2u"kJ * mol^-1"
+    end
 end
