@@ -15,8 +15,7 @@ Custom GBSA methods should sub-type this type.
 abstract type AbstractGBSA end
 
 # This is force field dependent
-#is_carboxylate_O(at_data) = at_data.atom_type == "O2" # Waiting on fix in OpenMM
-is_carboxylate_O(at_data) = false
+is_carboxylate_O(at_data) = at_data.atom_type == "O2"
 
 function mbondi2_radii(atoms_data, bonds; use_mbondi3=false)
     element_to_radius = Dict(
@@ -145,6 +144,7 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
         "-" => 0.80,
     )
 
+    units = dimension(D) == u"𝐋"
     radii = mbondi2_radii(atoms_data, bonds)
     offset_radii = D[]
     scaled_offset_radii = D[]
@@ -152,7 +152,7 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     for (at_data, radius) in zip(atoms_data, radii)
         offset_radius = radius - offset
         screen = get(element_to_screen, at_data.element, element_to_screen["-"])
-        if dimension(D) == u"𝐋"
+        if units
             push!(offset_radii, offset_radius)
             push!(scaled_offset_radii, screen * offset_radius)
         else
@@ -189,7 +189,7 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
         is, js = inds_i, inds_j
     end
 
-    if dimension(D) == u"𝐋"
+    if units
         return ImplicitSolventOBC{T, D, typeof(or), typeof(T(sa_factor)), typeof(pre_factor), typeof(is)}(
                     or, sor, solvent_dielectric, solute_dielectric, offset, cutoff,
                     use_ACE, α, β, γ, probe_radius, T(sa_factor), pre_factor, is, js)
@@ -206,17 +206,17 @@ end
 GBn2 solvation model.
 Should be used along with a Coulomb or CoulombReactionField interaction.
 """
-struct ImplicitSolventGBN2{T, D, V, S, F, I, TD, TM} <: AbstractGBSA
-    offset_radii::V
-    scaled_offset_radii::V
+struct ImplicitSolventGBN2{T, D, VT, VD, S, F, I, TD, TM} <: AbstractGBSA
+    offset_radii::VD
+    scaled_offset_radii::VD
     solvent_dielectric::T
     solute_dielectric::T
     offset::D
     cutoff::D
     use_ACE::Bool
-    αs::Vector{T}
-    βs::Vector{T}
-    γs::Vector{T}
+    αs::VT
+    βs::VT
+    γs::VT
     probe_radius::D
     sa_factor::S
     pre_factor::F
@@ -432,10 +432,11 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
     ]u"nm^-1" .* 10
     nucleic_acid_residues = ("A", "C", "G", "U", "DA", "DC", "DG", "DT")
 
+    units = dimension(D) == u"𝐋"
     radii = mbondi3_radii(atoms_data, bonds)
     offset_radii = D[]
     scaled_offset_radii = D[]
-    αs, βs, γs = T[], T[], T[]
+    αs_cpu, βs_cpu, γs_cpu = T[], T[], T[]
 
     for (at_data, radius) in zip(atoms_data, radii)
         offset_radius = radius - offset
@@ -446,24 +447,31 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
             screen = get(element_to_screen, at_data.element, element_to_screen["-"])
             params = get(atom_params, at_data.element, atom_params["-"])
         end
-        if dimension(D) == u"𝐋"
+        if units
             push!(offset_radii, offset_radius)
             push!(scaled_offset_radii, screen * offset_radius)
         else
             push!(offset_radii, ustrip(offset_radius))
             push!(scaled_offset_radii, ustrip(screen * offset_radius))
         end
-        push!(αs, params[1])
-        push!(βs, params[2])
-        push!(γs, params[3])
+        push!(αs_cpu, params[1])
+        push!(βs_cpu, params[2])
+        push!(γs_cpu, params[3])
     end
 
     n_atoms = length(atoms)
     inds_i = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
     inds_j = permutedims(inds_i, (2, 1))
 
-    table_d0 = T.(lookup_table(data_d0, radii))
-    table_m0 = T.(lookup_table(data_m0, radii))
+    table_d0_units = T.(lookup_table(data_d0, radii))
+    table_m0_units = T.(lookup_table(data_m0, radii))
+    if units
+        table_d0 = table_d0_units
+        table_m0 = table_m0_units
+    else
+        table_d0 = ustrip.(table_d0_units)
+        table_m0 = ustrip.(table_m0_units)
+    end
 
     if !iszero(solute_dielectric) && !iszero(solvent_dielectric)
         pre_factor = T(-coulombconst) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
@@ -476,21 +484,24 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
         sor = CuArray(scaled_offset_radii)
         is, js = cu(inds_i), cu(inds_j)
         d0s, m0s = CuArray(table_d0), CuArray(table_m0)
+        αs, βs, γs = CuArray(αs_cpu), CuArray(βs_cpu), CuArray(γs_cpu)
     else
         or = offset_radii
         sor = scaled_offset_radii
         is, js = inds_i, inds_j
         d0s, m0s = table_d0, table_m0
+        αs, βs, γs = αs_cpu, βs_cpu, γs_cpu
     end
 
-    if dimension(D) == u"𝐋"
-        return ImplicitSolventGBN2{T, D, typeof(or), typeof(T(sa_factor)), typeof(pre_factor),
-                        typeof(is), typeof(d0s), typeof(m0s)}(
+    if units
+        return ImplicitSolventGBN2{T, D, typeof(αs), typeof(or), typeof(T(sa_factor)),
+                        typeof(pre_factor),typeof(is), typeof(d0s), typeof(m0s)}(
                     or, sor, solvent_dielectric, solute_dielectric, offset, cutoff,
                     use_ACE, αs, βs, γs, probe_radius, T(sa_factor), pre_factor, is, js,
                     d0s, m0s, neck_scale, neck_cut)
     else
-        return ImplicitSolventGBN2{T, T, typeof(or), T, T, typeof(is), typeof(d0s), typeof(m0s)}(
+        return ImplicitSolventGBN2{T, T, typeof(αs), typeof(or), T, T, typeof(is),
+                        typeof(d0s), typeof(m0s)}(
                     or, sor, solvent_dielectric, solute_dielectric, ustrip(offset), ustrip(cutoff),
                     use_ACE, αs, βs, γs, ustrip(probe_radius), ustrip(sa_factor), ustrip(pre_factor),
                     is, js, d0s, m0s, neck_scale, ustrip(neck_cut))
@@ -518,7 +529,8 @@ end
 """
     born_radii_and_grad(inter, coords, box_size)
 
-Calculate Born radii and gradients of Born radii with respect to atomic distance.
+Calculate Born radii and gradients of Born radii and surface area overlap
+with respect to atomic distance.
 Custom GBSA methods should implement this function.
 """
 function born_radii_and_grad(inter::ImplicitSolventOBC, coords, box_size)
@@ -526,8 +538,10 @@ function born_radii_and_grad(inter::ImplicitSolventOBC, coords, box_size)
     coords_j = @view coords[inter.js]
     oris = @view inter.offset_radii[inter.is]
     srjs = @view inter.scaled_offset_radii[inter.js]
-    Is = dropdims(sum(born_radii_loop_OBC.(coords_i, coords_j, oris, srjs, (inter.cutoff,),
-                                            (box_size,)); dims=2); dims=2)
+    loop_res = born_radii_loop_OBC.(coords_i, coords_j, oris, srjs, (inter.cutoff,),
+                                    (box_size,))
+    Is = dropdims(sum(loop_res; dims=2); dims=2)
+    I_grads = zero(loop_res) ./ unit(inter.cutoff)
 
     ori = inter.offset_radii
     radii = ori .+ inter.offset
@@ -539,15 +553,21 @@ function born_radii_and_grad(inter::ImplicitSolventOBC, coords, box_size)
     grad_terms = ori .* (α .- 2 .* β .* ψs .+ 3 .* γ .* ψs2)
     B_grads = (1 .- tanh_sums .^ 2) .* grad_terms ./ radii
 
-    return Bs, B_grads
+    return Bs, B_grads, I_grads
 end
 
-function born_radii_loop_GBN2(coord_i, coord_j, ori, orj, srj, cutoff, offset,
-                                neck_scale, neck_cut, d0, m0, box_size)
+struct BornRadiiGBN2LoopResult{I, G}
+    I::I
+    I_grad::G
+end
+
+function born_radii_loop_GBN2(coord_i::SVector{D, T}, coord_j, ori, orj, srj, cutoff, offset,
+                                neck_scale, neck_cut, d0, m0, box_size) where {D, T}
     I = zero(coord_i[1] / unit(cutoff)^2)
+    I_grad = zero(coord_i[1] / unit(cutoff)^3)
     r = norm(vector(coord_i, coord_j, box_size))
     if iszero(r) || (!iszero(cutoff) && r > cutoff)
-        return I
+        return BornRadiiGBN2LoopResult(I, I_grad)
     end
     U = r + srj
     if ori < U
@@ -561,10 +581,17 @@ function born_radii_loop_GBN2(coord_i, coord_j, ori, orj, srj, cutoff, offset,
     radius_i = ori + offset
     radius_j = orj + offset
     if r < (radius_i + radius_j + neck_cut)
-        r_d0_strip = ustrip(u"nm", r - d0)
-        I += neck_scale * m0 / (1 + 100 * r_d0_strip^2 + 300000 * r_d0_strip^6)
+        if dimension(D) == u"𝐋"
+            r_d0_strip = 10 * ustrip(u"nm", r - d0) # The integral uses Å
+        else
+            r_d0_strip = 10 * (r - d0)
+        end
+        denom = 1 + r_d0_strip^2 + 3 * r_d0_strip^6 / 10
+        I += neck_scale * m0 / denom
+        numer = 2 * r_d0_strip + 9 * r_d0_strip^5 / 5
+        I_grad -= 10 * neck_scale * m0 * numer / (denom^2 * unit(cutoff))
     end
-    return I
+    return BornRadiiGBN2LoopResult(I, I_grad)
 end
 
 function born_radii_and_grad(inter::ImplicitSolventGBN2, coords, box_size)
@@ -573,9 +600,11 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2, coords, box_size)
     oris = @view inter.offset_radii[inter.is]
     orjs = @view inter.offset_radii[inter.js]
     srjs = @view inter.scaled_offset_radii[inter.js]
-    Is = dropdims(sum(born_radii_loop_GBN2.(coords_i, coords_j, oris, orjs, srjs, (inter.cutoff,),
-                    (inter.offset,), (inter.neck_scale,), (inter.neck_cut,), inter.d0s, inter.m0s,
-                    (box_size,)); dims=2); dims=2)
+    loop_res = born_radii_loop_GBN2.(coords_i, coords_j, oris, orjs, srjs, (inter.cutoff,),
+                    (inter.offset,), (inter.neck_scale,), (inter.neck_cut,), inter.d0s,
+                    inter.m0s, (box_size,))
+    Is = dropdims(sum(lr -> lr.I, loop_res; dims=2); dims=2)
+    I_grads = map(lr -> lr.I_grad, loop_res)
 
     ori = inter.offset_radii
     radii = ori .+ inter.offset
@@ -587,7 +616,7 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2, coords, box_size)
     grad_terms = ori .* (αs .- 2 .* βs .* ψs .+ 3 .* γs .* ψs2)
     B_grads = (1 .- tanh_sums .^ 2) .* grad_terms ./ radii
 
-    return Bs, B_grads
+    return Bs, B_grads, I_grads
 end
 
 # Store the results of the ij broadcasts during force calculation
@@ -637,7 +666,7 @@ function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j,
     end
 end
 
-function gb_force_loop_2(coord_i, coord_j, bi, ori, srj, cutoff, box_size)
+function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, cutoff, box_size)
     dr = vector(coord_i, coord_j, box_size)
     r = norm(dr)
     if iszero(r) || (!iszero(cutoff) && r > cutoff)
@@ -652,7 +681,7 @@ function gb_force_loop_2(coord_i, coord_j, bi, ori, srj, cutoff, box_size)
         rinv = inv(r)
         r2inv = rinv^2
         t3 = (1 + (srj^2)*r2inv)*(L^2 - U^2)/8 + log(U/L)*r2inv/4
-        de = bi * t3 * rinv
+        de = bi * (t3 - ig) * rinv
         fdr = dr * de
         return ForceLoopResult2(-fdr, fdr)
     else
@@ -663,7 +692,7 @@ end
 
 function forces(inter::AbstractGBSA, sys, neighbors=nothing)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
-    Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
+    Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, box_size)
 
     if inter.use_ACE
         radii = inter.offset_radii .+ inter.offset
@@ -691,7 +720,8 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing)
     bis = @view born_forces_2[inter.is]
     oris = @view inter.offset_radii[inter.is]
     srjs = @view inter.scaled_offset_radii[inter.js]
-    loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, oris, srjs, (inter.cutoff,), (box_size,))
+    loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, I_grads, oris, srjs,
+                                    (inter.cutoff,), (box_size,))
 
     return fs .+ dropdims(sum(lr -> lr.fi, loop_res_2; dims=2); dims=2) .+ dropdims(sum(lr -> lr.fj, loop_res_2; dims=1); dims=1)
 end
@@ -724,7 +754,7 @@ end
 
 function potential_energy(inter::AbstractGBSA, sys, neighbors=nothing)
     coords, atoms, box_size = sys.coords, sys.atoms, sys.box_size
-    Bs, B_grads = born_radii_and_grad(inter, coords, box_size)
+    Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, box_size)
 
     coords_i = @view coords[inter.is]
     coords_j = @view coords[inter.js]

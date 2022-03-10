@@ -328,15 +328,16 @@ function dual_function_gb_force_loop_1(f::F) where F
 end
 
 function dual_function_gb_force_loop_2(f::F) where F
-    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7)
-        ds1 = dualize(Nothing, arg1, Val(0), Val(9))
-        ds2 = dualize(Nothing, arg2, Val(3), Val(6))
-        ds3 = Zygote.dual(arg3, (false, false, false, false, false, false, true , false, false, false, false, false))
-        ds4 = Zygote.dual(arg4, (false, false, false, false, false, false, false, true , false, false, false, false))
-        ds5 = Zygote.dual(arg5, (false, false, false, false, false, false, false, false, true , false, false, false))
-        ds6 = arg6
-        ds7 = dualize(Nothing, arg7, Val(9), Val(0))
-        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7)
+    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
+        ds1 = dualize(Nothing, arg1, Val(0), Val(10))
+        ds2 = dualize(Nothing, arg2, Val(3), Val(7))
+        ds3 = Zygote.dual(arg3, (false, false, false, false, false, false, true , false, false, false, false, false, false))
+        ds4 = Zygote.dual(arg4, (false, false, false, false, false, false, false, true , false, false, false, false, false))
+        ds5 = Zygote.dual(arg5, (false, false, false, false, false, false, false, false, true , false, false, false, false))
+        ds6 = Zygote.dual(arg6, (false, false, false, false, false, false, false, false, false, true , false, false, false))
+        ds7 = arg7
+        ds8 = dualize(Nothing, arg8, Val(10), Val(0))
+        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8)
     end
 end
 
@@ -770,9 +771,10 @@ end
                                             arg3::AbstractArray{T},
                                             arg4::AbstractArray{T},
                                             arg5::AbstractArray{T},
-                                            arg6::Tuple{T},
-                                            arg7::Tuple{SVector{D, T}}) where {D, T}
-    out = dual_function_gb_force_loop_2(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7)
+                                            arg6::AbstractArray{T},
+                                            arg7::Tuple{T},
+                                            arg8::Tuple{SVector{D, T}}) where {D, T}
+    out = dual_function_gb_force_loop_2(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
     y = broadcast(o1 -> ForceLoopResult2{SVector{D, T}}(value.(o1.fi), value.(o1.fj)), out)
     function bc_fwd_back(ȳ_in)
         ȳ = modify_grad(ȳ_in, arg1)
@@ -786,16 +788,17 @@ end
                     sum_partials(o1.fi, y1.fi, 5) + sum_partials(o1.fj, y1.fj, 5),
                     sum_partials(o1.fi, y1.fi, 6) + sum_partials(o1.fj, y1.fj, 6)),
                     ȳ, out))
-        darg3 = unbroadcast(arg3, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi, 7) + sum_partials(o1.fj, y1.fj, 7), ȳ, out))
-        darg4 = unbroadcast(arg4, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi, 8) + sum_partials(o1.fj, y1.fj, 8), ȳ, out))
-        darg5 = unbroadcast(arg5, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi, 9) + sum_partials(o1.fj, y1.fj, 9), ȳ, out))
-        darg6 = nothing
-        darg7 = unbroadcast(arg7, broadcast((y1, o1) -> SVector{D, T}(
-                    sum_partials(o1.fi, y1.fi, 10) + sum_partials(o1.fj, y1.fj, 10),
+        darg3 = unbroadcast(arg3, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi,  7) + sum_partials(o1.fj, y1.fj,  7), ȳ, out))
+        darg4 = unbroadcast(arg4, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi,  8) + sum_partials(o1.fj, y1.fj,  8), ȳ, out))
+        darg5 = unbroadcast(arg5, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi,  9) + sum_partials(o1.fj, y1.fj,  9), ȳ, out))
+        darg6 = unbroadcast(arg6, broadcast((y1, o1) -> sum_partials(o1.fi, y1.fi, 10) + sum_partials(o1.fj, y1.fj, 10), ȳ, out))
+        darg7 = nothing
+        darg8 = unbroadcast(arg8, broadcast((y1, o1) -> SVector{D, T}(
                     sum_partials(o1.fi, y1.fi, 11) + sum_partials(o1.fj, y1.fj, 11),
-                    sum_partials(o1.fi, y1.fi, 12) + sum_partials(o1.fj, y1.fj, 12)),
+                    sum_partials(o1.fi, y1.fi, 12) + sum_partials(o1.fj, y1.fj, 12),
+                    sum_partials(o1.fi, y1.fi, 13) + sum_partials(o1.fj, y1.fj, 13)),
                     ȳ, out))
-        return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6, darg7)
+        return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6, darg7, darg8)
     end
     return y, bc_fwd_back
 end
