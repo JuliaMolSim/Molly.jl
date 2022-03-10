@@ -581,7 +581,7 @@ function born_radii_loop_GBN2(coord_i::SVector{D, T}, coord_j, ori, orj, srj, cu
     radius_i = ori + offset
     radius_j = orj + offset
     if r < (radius_i + radius_j + neck_cut)
-        if dimension(D) == u"𝐋"
+        if dimension(T) == u"𝐋"
             r_d0_strip = 10 * ustrip(u"nm", r - d0) # The integral uses Å
         else
             r_d0_strip = 10 * (r - d0)
