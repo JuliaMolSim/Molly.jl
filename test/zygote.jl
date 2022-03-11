@@ -40,7 +40,7 @@
     end
 
     function test_grad(gpu::Bool, forward::Bool, f32::Bool, pis::Bool,
-                        sis::Bool, implicit_solvent::Bool)
+                        sis::Bool, obc2::Bool, gbn2::Bool)
         n_atoms = 50
         n_steps = 100
         atom_mass = f32 ? 10.0f0 : 10.0
@@ -95,13 +95,24 @@
             gpu ? cu(torsions_inner) : torsions_inner,
         )
         atoms_setup = [Atom(charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.0f0 : 0.0) for i in 1:n_atoms]
-        imp = ImplicitSolventOBC(
-            gpu ? cu(atoms_setup) : atoms_setup,
-            [AtomData(element="O") for i in 1:n_atoms],
-            InteractionList2Atoms(bond_is, bond_js, [""], nothing);
-            use_OBC2=true,
-        )
-        general_inters = implicit_solvent ? (imp,) : ()
+        if obc2
+            imp_obc2 = ImplicitSolventOBC(
+                gpu ? cu(atoms_setup) : atoms_setup,
+                [AtomData(element="O") for i in 1:n_atoms],
+                InteractionList2Atoms(bond_is, bond_js, [""], nothing);
+                use_OBC2=true,
+            )
+            general_inters = (imp_obc2,)
+        elseif gbn2
+            imp_gbn2 = ImplicitSolventGBN2(
+                gpu ? cu(atoms_setup) : atoms_setup,
+                [AtomData(element="O") for i in 1:n_atoms],
+                InteractionList2Atoms(bond_is, bond_js, [""], nothing),
+            )
+            general_inters = (imp_gbn2,)
+        else
+            general_inters = ()
+        end
         neighbor_finder = DistanceVecNeighborFinder(
             nb_matrix=gpu ? cu(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
             n_steps=10,
@@ -147,23 +158,25 @@
         return loss
     end
 
-    runs = [
-        ("cpu"                 , [false, false, false, true , true , false], 0.1 , 0.25),
-        ("cpu forward"         , [false, true , false, true , true , false], 0.01, 0.01),
-        ("cpu f32"             , [false, false, true , true , true , false], 0.2 , 10.0),
-        ("cpu nospecific"      , [false, false, false, true , false, false], 0.1 , 0.0 ),
-        ("cpu nopairwise"      , [false, false, false, false, true , false], 0.0 , 0.25),
-        ("cpu implicit"        , [false, false, false, true , true , true ], 0.1 , 0.25),
-        ("cpu implicit forward", [false, true , false, true , true , true ], 0.01, 0.01),
+    runs = [ #                gpu    fwd    f32    pis    sis    obc2   gbn2
+        ("cpu"             , [false, false, false, true , true , false, false], 0.1 , 0.25),
+        ("cpu forward"     , [false, true , false, true , true , false, false], 0.01, 0.01),
+        ("cpu f32"         , [false, false, true , true , true , false, false], 0.2 , 10.0),
+        ("cpu nospecific"  , [false, false, false, true , false, false, false], 0.1 , 0.0 ),
+        ("cpu nopairwise"  , [false, false, false, false, true , false, false], 0.0 , 0.25),
+        ("cpu obc2"        , [false, false, false, true , true , true , false], 0.1 , 0.25),
+        ("cpu gbn2"        , [false, false, false, true , true , false, true ], 0.1 , 0.25),
+        ("cpu gbn2 forward", [false, true , false, true , true , false, true ], 0.01, 0.01),
     ]
-    if run_gpu_tests
-        push!(runs, ("gpu"                 , [true , false, false, true , true , false], 0.25, 20.0))
-        push!(runs, ("gpu forward"         , [true , true , false, true , true , false], 0.01, 0.01))
-        push!(runs, ("gpu f32"             , [true , false, true , true , true , false], 0.5 , 50.0))
-        push!(runs, ("gpu nospecific"      , [true , false, false, true , false, false], 0.25, 0.0 ))
-        push!(runs, ("gpu nopairwise"      , [true , false, false, false, true , false], 0.0 , 10.0))
-        push!(runs, ("gpu implicit"        , [true , false, false, true , true , true ], 0.25, 20.0))
-        push!(runs, ("gpu implicit forward", [true , true , false, true , true , true ], 0.01, 0.01))
+    if run_gpu_tests #                    gpu    fwd    f32    pis    sis    obc2   gbn2
+        push!(runs, ("gpu"             , [true , false, false, true , true , false, false], 0.25, 20.0))
+        push!(runs, ("gpu forward"     , [true , true , false, true , true , false, false], 0.01, 0.01))
+        push!(runs, ("gpu f32"         , [true , false, true , true , true , false, false], 0.5 , 50.0))
+        push!(runs, ("gpu nospecific"  , [true , false, false, true , false, false, false], 0.25, 0.0 ))
+        push!(runs, ("gpu nopairwise"  , [true , false, false, false, true , false, false], 0.0 , 10.0))
+        push!(runs, ("gpu obc2"        , [true , false, false, true , true , true , false], 0.25, 20.0))
+        push!(runs, ("gpu gbn2"        , [true , false, false, true , true , false, true ], 0.25, 20.0))
+        push!(runs, ("gpu gbn2 forward", [true , true , false, true , true , false, true ], 0.01, 0.01))
     end
 
     for (name, args, tol_σ, tol_kb) in runs

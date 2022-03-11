@@ -561,6 +561,8 @@ struct BornRadiiGBN2LoopResult{I, G}
     I_grad::G
 end
 
+get_I_grad(r::BornRadiiGBN2LoopResult) = r.I_grad
+
 function born_radii_loop_GBN2(coord_i::SVector{D, T}, coord_j, ori, orj, srj, cutoff, offset,
                                 neck_scale, neck_cut, d0, m0, box_size) where {D, T}
     I = zero(coord_i[1] / unit(cutoff)^2)
@@ -604,7 +606,7 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2, coords, box_size)
                     (inter.offset,), (inter.neck_scale,), (inter.neck_cut,), inter.d0s,
                     inter.m0s, (box_size,))
     Is = dropdims(sum(lr -> lr.I, loop_res; dims=2); dims=2)
-    I_grads = map(lr -> lr.I_grad, loop_res)
+    I_grads = get_I_grad.(loop_res)
 
     ori = inter.offset_radii
     radii = ori .+ inter.offset

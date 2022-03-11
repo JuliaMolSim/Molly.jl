@@ -234,7 +234,7 @@ simulator = VelocityVerlet(dt=0.0005u"ps")
 simulate!(sys, simulator, 5_000; parallel=true)
 ```
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
-The options are `"obc1"` and `"obc2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II.
+The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
 Other options include overriding the box size in the file (`box_size`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `nl_dist`).
 
 Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.

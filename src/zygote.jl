@@ -1,4 +1,5 @@
-# Extend Zygote to work with static vectors and custom types on the GPU
+# Extend Zygote to work with static vectors and custom types on the
+#   fast broadcast/GPU path
 # Here be dragons
 
 using ForwardDiff: Chunk, Dual, dualize, partials, value
@@ -307,6 +308,24 @@ function dual_function_born_radii_loop_OBC(f::F) where F
         ds5 = arg5
         ds6 = dualize(Nothing, arg6, Val(8), Val(0))
         return f(ds1, ds2, ds3, ds4, ds5, ds6)
+    end
+end
+
+function dual_function_born_radii_loop_GBN2(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12)
+        ds1  = dualize(Nothing, arg1, Val(0), Val(14))
+        ds2  = dualize(Nothing, arg2, Val(3), Val(11))
+        ds3  = Zygote.dual(arg3,  (false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false))
+        ds4  = Zygote.dual(arg4,  (false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false))
+        ds5  = Zygote.dual(arg5,  (false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false))
+        ds6  = arg6
+        ds7  = Zygote.dual(arg7,  (false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false))
+        ds8  = Zygote.dual(arg8,  (false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false))
+        ds9  = Zygote.dual(arg9,  (false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false))
+        ds10 = Zygote.dual(arg10, (false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false))
+        ds11 = Zygote.dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false))
+        ds12 = dualize(Nothing, arg12, Val(14), Val(0))
+        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10, ds11, ds12)
     end
 end
 
@@ -716,6 +735,55 @@ end
     return y, bc_fwd_back
 end
 
+# For born_radii_loop_GBN2
+@inline function Zygote.broadcast_forward(f,
+                                            arg1::AbstractArray{SVector{D, T}},
+                                            arg2::AbstractArray{SVector{D, T}},
+                                            arg3::AbstractArray{T},
+                                            arg4::AbstractArray{T},
+                                            arg5::AbstractArray{T},
+                                            arg6::Tuple{T},
+                                            arg7::Tuple{T},
+                                            arg8::Tuple{T},
+                                            arg9::Tuple{T},
+                                            arg10::AbstractArray{T},
+                                            arg11::AbstractArray{T},
+                                            arg12::Tuple{SVector{D, T}}) where {D, T}
+    out = dual_function_born_radii_loop_GBN2(f).(arg1, arg2, arg3, arg4, arg5, arg6,
+                                                    arg7, arg8, arg9, arg10, arg11, arg12)
+    y = broadcast(o1 -> BornRadiiGBN2LoopResult{T, T}(value(o1.I), value(o1.I_grad)), out)
+    function bc_fwd_back(ȳ_in)
+        ȳ = modify_grad(ȳ_in, arg1)
+        darg1  = unbroadcast(arg1, broadcast((y1, o1) -> SVector{D, T}(
+                    partials(o1.I, 1) * y1.I + partials(o1.I_grad, 1) * y1.I_grad,
+                    partials(o1.I, 2) * y1.I + partials(o1.I_grad, 2) * y1.I_grad,
+                    partials(o1.I, 3) * y1.I + partials(o1.I_grad, 3) * y1.I_grad),
+                    ȳ, out))
+        darg2  = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(
+                    partials(o1.I, 4) * y1.I + partials(o1.I_grad, 4) * y1.I_grad,
+                    partials(o1.I, 5) * y1.I + partials(o1.I_grad, 5) * y1.I_grad,
+                    partials(o1.I, 6) * y1.I + partials(o1.I_grad, 6) * y1.I_grad),
+                    ȳ, out))
+        darg3  = unbroadcast(arg3,  broadcast((y1, o1) -> partials(o1.I,  7) * y1.I + partials(o1.I_grad,  7) * y1.I_grad, ȳ, out))
+        darg4  = unbroadcast(arg4,  broadcast((y1, o1) -> partials(o1.I,  8) * y1.I + partials(o1.I_grad,  8) * y1.I_grad, ȳ, out))
+        darg5  = unbroadcast(arg5,  broadcast((y1, o1) -> partials(o1.I,  9) * y1.I + partials(o1.I_grad,  9) * y1.I_grad, ȳ, out))
+        darg6  = nothing
+        darg7  = unbroadcast(arg7,  broadcast((y1, o1) -> partials(o1.I, 10) * y1.I + partials(o1.I_grad, 10) * y1.I_grad, ȳ, out))
+        darg8  = unbroadcast(arg8,  broadcast((y1, o1) -> partials(o1.I, 11) * y1.I + partials(o1.I_grad, 11) * y1.I_grad, ȳ, out))
+        darg9  = unbroadcast(arg9,  broadcast((y1, o1) -> partials(o1.I, 12) * y1.I + partials(o1.I_grad, 12) * y1.I_grad, ȳ, out))
+        darg10 = unbroadcast(arg10, broadcast((y1, o1) -> partials(o1.I, 13) * y1.I + partials(o1.I_grad, 13) * y1.I_grad, ȳ, out))
+        darg11 = unbroadcast(arg11, broadcast((y1, o1) -> partials(o1.I, 14) * y1.I + partials(o1.I_grad, 14) * y1.I_grad, ȳ, out))
+        darg12 = unbroadcast(arg12, broadcast((y1, o1) -> SVector{D, T}(
+                    partials(o1.I, 15) * y1.I + partials(o1.I_grad, 15) * y1.I_grad,
+                    partials(o1.I, 16) * y1.I + partials(o1.I_grad, 16) * y1.I_grad,
+                    partials(o1.I, 17) * y1.I + partials(o1.I_grad, 17) * y1.I_grad),
+                    ȳ, out))
+        return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6,
+                darg7, darg8, darg9, darg10, darg11, darg12)
+    end
+    return y, bc_fwd_back
+end
+
 # For gb_force_loop_1
 @inline function Zygote.broadcast_forward(f,
                                             arg1::AbstractArray{SVector{D, T}},
@@ -896,10 +964,15 @@ end
     return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=zero(y1), f3=zero(y1), f4=y1), ȳ)))
 end
 
+@inline function Zygote.broadcast_forward(f::typeof(get_I_grad),
+                                            arg1::AbstractArray{<:BornRadiiGBN2LoopResult})
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (I=zero(y1), I_grad=y1), ȳ)))
+end
+
 # Use fast broadcast path on CPU
 for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec, :wrap_coords_vec,
-            :getf1, :getf2, :getf3, :getf4, :born_radii_loop_OBC, :gb_force_loop_1, :gb_force_loop_2,
-            :gb_energy_loop)
+            :getf1, :getf2, :getf3, :getf4, :get_I_grad, :born_radii_loop_OBC, :born_radii_loop_GBN2,
+            :gb_force_loop_1, :gb_force_loop_2, :gb_energy_loop)
     @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
     # Avoid ambiguous dispatch
     @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
