@@ -626,6 +626,9 @@ function Molly.simulate!(sys,
         # Apply coupling like this
         apply_coupling!(sys, sim, sim.coupling)
 
+        # Remove centre of mass motion like this
+        remove_CM_motion!(sys)
+
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                    parallel=parallel)

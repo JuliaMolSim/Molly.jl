@@ -1,5 +1,19 @@
 # Molly.jl release notes
 
+## v0.9.0 - Mar 2022
+
+- The arguments to `forces` and `accelerations` are made consistent across implementations.
+- Centre of mass motion is removed by default during simulation using `remove_CM_motion!`.
+- Coordinates are centred in the simulation box by default during setup.
+- The `Langevin` integrator and `Verlet` integrator are added.
+- The `MorseBond` potential is added.
+- The GB-Neck2 implicit solvent model is added via `ImplicitSolventGBN2`.
+- The `CubicSplineCutoff` is added.
+- The `rmsd` function is added.
+- The AtomsBase.jl interface is made more complete.
+- The progress bar is removed from simulations.
+- The out-of-place neighbor list type `NeighborListVec` is changed.
+
 ## v0.8.0 - Feb 2022
 
 - General interactions are renamed to pairwise interactions throughout to better reflect their nature. The abstract type is now `PairwiseInteraction` and the keyword argument to `System` is now `pairwise_inters`. General interaction now refers to a new type of interaction that takes in the whole system and returns forces for all atoms, allowing interactions such as neural network potentials acting on the whole system. This is available via the keyword argument `general_inters` to `System`.
