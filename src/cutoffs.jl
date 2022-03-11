@@ -116,8 +116,8 @@ function CubicSplineCutoff(dist_activation, dist_cutoff)
 
     D, S, I = typeof.([dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2)])
 
-    return CubicSplineCutoff{D,S,I}(dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2), dist_activation,
-                                    dist_activation^2, inv(dist_activation^2))
+    return CubicSplineCutoff{D, S, I}(dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2), dist_activation,
+                                        dist_activation^2, inv(dist_activation^2))
 end
 
 cutoff_points(::Type{CubicSplineCutoff{D, S, I}}) where {D, S, I} = 2

@@ -459,7 +459,7 @@ end
 
 function Base.show(io::IO, neighbor_finder::AbstractNeighborFinder)
     println(io, typeof(neighbor_finder))
-    println(io,"  Size of nb_matrix = " , size(neighbor_finder.nb_matrix))
-    println(io,"  n_steps = " , neighbor_finder.n_steps)
-    print(io,"  dist_cutoff = ", neighbor_finder.dist_cutoff)
+    println(io, "  Size of nb_matrix = " , size(neighbor_finder.nb_matrix))
+    println(io, "  n_steps = " , neighbor_finder.n_steps)
+    print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end

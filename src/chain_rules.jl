@@ -1,6 +1,8 @@
 # Chain rules to allow differentiable simulations
 
 @non_differentiable check_force_units(args...)
+@non_differentiable atoms_bonded_to_N(args...)
+@non_differentiable lookup_table(args...)
 @non_differentiable find_neighbors(args...)
 @non_differentiable DistanceVecNeighborFinder(args...)
 @non_differentiable run_loggers!(args...)
