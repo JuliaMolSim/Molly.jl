@@ -173,14 +173,14 @@ Base.:+(x::SpecificForce2Atoms, y::SpecificForce2Atoms) = SpecificForce2Atoms(x.
 Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3)
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 
-getf1(x) = x.f1
-getf2(x) = x.f2
-getf3(x) = x.f3
-getf4(x) = x.f4
+get_f1(x) = x.f1
+get_f2(x) = x.f2
+get_f3(x) = x.f3
+get_f4(x) = x.f4
 
 @views function specific_force(inter_list::InteractionList2Atoms, coords, box_size, force_units, n_atoms)
     sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js], (box_size,)))
-    fis, fjs = getf1.(sparse_fs), getf2.(sparse_fs)
+    fis, fjs = get_f1.(sparse_fs), get_f2.(sparse_fs)
     check_force_units(first(first(fis)), force_units)
     return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms)
 end
@@ -188,7 +188,7 @@ end
 @views function specific_force(inter_list::InteractionList3Atoms, coords, box_size, force_units, n_atoms)
     sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
                                 coords[inter_list.ks], (box_size,)))
-    fis, fjs, fks = getf1.(sparse_fs), getf2.(sparse_fs), getf3.(sparse_fs)
+    fis, fjs, fks = get_f1.(sparse_fs), get_f2.(sparse_fs), get_f3.(sparse_fs)
     check_force_units(first(first(fis)), force_units)
     return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) + sparsevec(inter_list.ks, fks, n_atoms)
 end
@@ -196,7 +196,7 @@ end
 @views function specific_force(inter_list::InteractionList4Atoms, coords, box_size, force_units, n_atoms)
     sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
                                 coords[inter_list.ks], coords[inter_list.ls], (box_size,)))
-    fis, fjs, fks, fls = getf1.(sparse_fs), getf2.(sparse_fs), getf3.(sparse_fs), getf4.(sparse_fs)
+    fis, fjs, fks, fls = get_f1.(sparse_fs), get_f2.(sparse_fs), get_f3.(sparse_fs), get_f4.(sparse_fs)
     check_force_units(first(first(fis)), force_units)
     return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) + sparsevec(inter_list.ks, fks, n_atoms) + sparsevec(inter_list.ls, fls, n_atoms)
 end

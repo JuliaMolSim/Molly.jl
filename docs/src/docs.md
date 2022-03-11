@@ -621,9 +621,7 @@ function Molly.simulate!(sys,
         accels_t = accelerations(sys, neighbors; parallel=parallel)
 
         # Ensure coordinates stay within the simulation box like this
-        for i in 1:length(sys)
-            sys.coords[i] = wrap_coords.(sys.coords[i], sys.box_size)
-        end
+        wrap_coords_vec.(sys.coords, (sys.box_size,))
 
         # Apply coupling like this
         apply_coupling!(sys, sim, sim.coupling)
@@ -638,11 +636,10 @@ end
 ```
 To use your custom simulator, give it as the second argument when calling [`simulate!`](@ref).
 
-Under the hood there are two implementations for simulators: an in-place version geared towards CPUs and parallelism, and an out-of-place version geared towards GPUs and differentiable simulation.
+Under the hood there are two implementations for the [`forces`](@ref) function used by [`accelerations`](@ref): an in-place version geared towards CPUs and parallelism, and an out-of-place version geared towards GPUs and differentiable simulation.
 You can define different versions of a simulator for in-place and out-of-place systems by dispatching on `System{D, false}` or `System{D, true}` respectively.
 This also applies to coupling methods and neighbor lists.
 You do not have to define two versions though: you may only intend to use the simulator one way, or the out-of-place version may be performant in all cases.
-The above example is more similar to the in-place version; see the source code for an example of the out-of-place version.
 
 The implementation to use is guessed when you call [`System`](@ref) based on whether `coords` is a `CuArray` but can be given explicitly with the `gpu_diff_safe` argument, for example if you want to run differentiable simulations on the CPU.
 [`is_gpu_diff_safe`](@ref) will retrieve this property for a [`System`](@ref).
