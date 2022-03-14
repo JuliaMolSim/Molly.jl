@@ -86,7 +86,8 @@ end
 
 Add parameters from a dictionary to a `System`.
 Allows gradients for individual parameters to be tracked.
-Returns atoms, pairwise interactions and specific interaction lists.
+Returns atoms, pairwise interactions, specific interaction lists and general
+interactions.
 """
 function inject_gradients(sys, params_dic, gpu::Bool=isa(sys.coords, CuArray))
     if gpu
@@ -96,7 +97,8 @@ function inject_gradients(sys, params_dic, gpu::Bool=isa(sys.coords, CuArray))
     end
     pis_grad = inject_interaction.(sys.pairwise_inters, (params_dic,))
     sis_grad = inject_interaction_list.(sys.specific_inter_lists, (params_dic,), gpu)
-    return atoms_grad, pis_grad, sis_grad
+    gis_grad = inject_interaction.(sys.general_inters, (params_dic,), (sys,))
+    return atoms_grad, pis_grad, sis_grad, gis_grad
 end
 
 # get function errors with AD
@@ -207,5 +209,40 @@ function inject_interaction(inter::PeriodicTorsion{N, T, E}, inter_type, params_
         ntuple(i -> dict_get(params_dic, key_prefix * "phase_$i", inter.phases[i]), N),
         ntuple(i -> dict_get(params_dic, key_prefix * "k_$i"    , inter.ks[i]    ), N),
         inter.proper,
+    )
+end
+
+function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
+    key_prefix = "inter_GB_"
+    bond_index = findfirst(sil -> eltype(sil.inters) <: HarmonicBond, sys.specific_inter_lists)
+
+    element_to_radius = empty(mbondi2_element_to_radius)
+    for k in keys(mbondi2_element_to_radius)
+        element_to_radius[k] = dict_get(params_dic, key_prefix * "radius_" * k, ustrip(mbondi2_element_to_radius[k]))u"nm"
+    end
+    element_to_screen = empty(gbn2_element_to_screen)
+    for k in keys(gbn2_element_to_screen)
+        element_to_screen[k] = dict_get(params_dic, key_prefix * "screen_" * k, gbn2_element_to_screen[k])
+    end
+    atom_params = empty(gbn2_atom_params)
+    for k in keys(gbn2_atom_params)
+        atom_params[k] = dict_get(params_dic, key_prefix * "params_" * k, gbn2_atom_params[k])
+    end
+
+    ImplicitSolventGBN2(sys.atoms,
+        sys.atoms_data,
+        sys.specific_inter_lists[bond_index];
+        solvent_dielectric=dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
+        solute_dielectric=dict_get(params_dic, key_prefix * "solute_dielectric", inter.solute_dielectric),
+        offset=dict_get(params_dic, key_prefix * "offset", ustrip(inter.offset))u"nm",
+        cutoff=inter.cutoff,
+        probe_radius=dict_get(params_dic, key_prefix * "probe_radius", ustrip(inter.probe_radius))u"nm",
+        sa_factor=dict_get(params_dic, key_prefix * "sa_factor", ustrip(inter.sa_factor))u"kJ * mol^-1 * nm^-2",
+        use_ACE=inter.use_ACE,
+        neck_scale=dict_get(params_dic, key_prefix * "neck_scale", inter.neck_scale),
+        neck_cut=dict_get(params_dic, key_prefix * "neck_cut", ustrip(inter.neck_cut))u"nm",
+        element_to_radius=element_to_radius,
+        element_to_screen=element_to_screen,
+        atom_params=atom_params,
     )
 end

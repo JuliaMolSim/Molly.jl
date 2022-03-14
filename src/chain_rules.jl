@@ -144,3 +144,11 @@ function ChainRulesCore.rrule(::typeof(sum_svec), arr::AbstractArray{SVector{D, 
     end
     return Y, sum_svec_pullback
 end
+
+function ChainRulesCore.rrule(::typeof(ustrip), x::Number)
+    Y = ustrip(x)
+    function ustrip_pullback(Ȳ)
+        return NoTangent(), Ȳ * unit(x)
+    end
+    return Y, ustrip_pullback
+end
