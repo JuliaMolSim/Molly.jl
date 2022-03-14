@@ -387,10 +387,11 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     inds_i = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
     inds_j = permutedims(inds_i, (2, 1))
 
+    coulomb_const = units ? coulombconst : ustrip(coulombconst)
     if !iszero(solute_dielectric) && !iszero(solvent_dielectric)
-        pre_factor = T(-coulombconst) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
+        pre_factor = T(-coulomb_const) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
     else
-        pre_factor = zero(T(coulombconst))
+        pre_factor = zero(T(coulomb_const))
     end
 
     if isa(atoms, CuArray)
@@ -410,7 +411,7 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     else
         return ImplicitSolventOBC{T, T, typeof(or), T, T, typeof(is)}(
                     or, sor, solvent_dielectric, solute_dielectric, ustrip(offset), ustrip(cutoff),
-                    use_ACE, α, β, γ, ustrip(probe_radius), ustrip(sa_factor), ustrip(pre_factor), is, js)
+                    use_ACE, α, β, γ, ustrip(probe_radius), ustrip(sa_factor), pre_factor, is, js)
     end
 end
 
@@ -481,24 +482,27 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
 
     αs_cpu = map(atoms_data) do at_data
         if at_data.res_name in nucleic_acid_residues
-            return dict_get(atom_params_nucleic, at_data.element * "_α", atom_params_nucleic["-_α"])
+            α = dict_get(atom_params_nucleic, at_data.element * "_α", atom_params_nucleic["-_α"])
         else
-            return dict_get(atom_params, at_data.element * "_α", atom_params["-_α"])
+            α = dict_get(atom_params, at_data.element * "_α", atom_params["-_α"])
         end
+        return T(α)
     end
     βs_cpu = map(atoms_data) do at_data
         if at_data.res_name in nucleic_acid_residues
-            return dict_get(atom_params_nucleic, at_data.element * "_β", atom_params_nucleic["-_β"])
+            β = dict_get(atom_params_nucleic, at_data.element * "_β", atom_params_nucleic["-_β"])
         else
-            return dict_get(atom_params, at_data.element * "_β", atom_params["-_β"])
+            β = dict_get(atom_params, at_data.element * "_β", atom_params["-_β"])
         end
+        return T(β)
     end
     γs_cpu = map(atoms_data) do at_data
         if at_data.res_name in nucleic_acid_residues
-            return dict_get(atom_params_nucleic, at_data.element * "_γ", atom_params_nucleic["-_γ"])
+            γ = dict_get(atom_params_nucleic, at_data.element * "_γ", atom_params_nucleic["-_γ"])
         else
-            return dict_get(atom_params, at_data.element * "_γ", atom_params["-_γ"])
+            γ = dict_get(atom_params, at_data.element * "_γ", atom_params["-_γ"])
         end
+        return T(γ)
     end
 
     n_atoms = length(atoms)
@@ -515,10 +519,11 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
         table_m0 = ustrip.(table_m0_units)
     end
 
+    coulomb_const = units ? coulombconst : ustrip(coulombconst)
     if !iszero(solute_dielectric) && !iszero(solvent_dielectric)
-        pre_factor = T(-coulombconst) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
+        pre_factor = T(-coulomb_const) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
     else
-        pre_factor = zero(T(coulombconst))
+        pre_factor = zero(T(coulomb_const))
     end
 
     if isa(atoms, CuArray)
@@ -545,7 +550,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
         return ImplicitSolventGBN2{T, T, typeof(αs), typeof(or), T, T, typeof(is),
                         typeof(d0s), typeof(m0s)}(
                     or, sor, solvent_dielectric, solute_dielectric, ustrip(offset), ustrip(cutoff),
-                    use_ACE, αs, βs, γs, ustrip(probe_radius), ustrip(sa_factor), ustrip(pre_factor),
+                    use_ACE, αs, βs, γs, ustrip(probe_radius), ustrip(sa_factor), pre_factor,
                     is, js, d0s, m0s, neck_scale, ustrip(neck_cut))
     end
 end
