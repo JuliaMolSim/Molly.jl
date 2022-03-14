@@ -14,6 +14,20 @@ Custom GBSA methods should sub-type this type.
 """
 abstract type AbstractGBSA end
 
+# Default solvent dielectric is 78.5 for consistency with AMBER
+# Elsewhere it is 78.3
+const gb_solvent_dielectric = 78.5
+const gb_solute_dielectric = 1.0
+
+const obc_offset = 0.009u"nm"
+const gbn2_offset = 0.0195141u"nm"
+
+const gb_probe_radius = 0.14u"nm"
+const gb_sa_factor = 28.3919551u"kJ * mol^-1 * nm^-2"
+
+const gbn2_neck_scale = 0.826836
+const gbn2_neck_cut = 0.68u"nm"
+
 const mbondi2_element_to_radius = Dict(
     "N"     => 0.155u"nm",
     "O"     => 0.15u"nm" ,
@@ -335,17 +349,15 @@ struct ImplicitSolventOBC{T, D, V, S, F, I} <: AbstractGBSA
     js::I
 end
 
-# Default solvent dielectric is 78.5 for consistency with AMBER
-# Elsewhere it is 78.3
 function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
                             atoms_data,
                             bonds;
-                            solvent_dielectric=78.5,
-                            solute_dielectric=1.0,
-                            offset=0.009u"nm",
+                            solvent_dielectric=gb_solvent_dielectric,
+                            solute_dielectric=gb_solute_dielectric,
+                            offset=obc_offset,
                             cutoff=0.0u"nm",
-                            probe_radius=0.14u"nm",
-                            sa_factor=28.3919551u"kJ * mol^-1 * nm^-2",
+                            probe_radius=gb_probe_radius,
+                            sa_factor=gb_sa_factor,
                             use_ACE=true,
                             use_OBC2=false,
                             element_to_radius=mbondi2_element_to_radius,
@@ -433,15 +445,15 @@ end
 function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
                                 atoms_data,
                                 bonds;
-                                solvent_dielectric=78.5,
-                                solute_dielectric=1.0,
-                                offset=0.0195141u"nm",
+                                solvent_dielectric=gb_solvent_dielectric,
+                                solute_dielectric=gb_solute_dielectric,
+                                offset=gbn2_offset,
                                 cutoff=0.0u"nm",
-                                probe_radius=0.14u"nm",
-                                sa_factor=28.3919551u"kJ * mol^-1 * nm^-2",
+                                probe_radius=gb_probe_radius,
+                                sa_factor=gb_sa_factor,
                                 use_ACE=true,
-                                neck_scale=0.826836,
-                                neck_cut=0.68u"nm",
+                                neck_scale=gbn2_neck_scale,
+                                neck_cut=gbn2_neck_cut,
                                 element_to_radius=mbondi2_element_to_radius,
                                 element_to_screen=gbn2_element_to_screen,
                                 element_to_screen_nucleic=gbn2_element_to_screen_nucleic,
