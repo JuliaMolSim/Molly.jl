@@ -16,11 +16,11 @@ struct CoulombReactionField{D, S, W, T, F, E} <: PairwiseInteraction
     energy_units::E
 end
 
-const solventdielectric = 78.3
+const crf_solvent_dielectric = 78.3
 
 function CoulombReactionField(;
                     dist_cutoff,
-                    solvent_dielectric=solventdielectric,
+                    solvent_dielectric=crf_solvent_dielectric,
                     nl_only=false,
                     weight_14=1,
                     coulomb_const=coulombconst,

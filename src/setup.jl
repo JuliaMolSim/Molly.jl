@@ -627,7 +627,7 @@ function System(coord_file::AbstractString,
     lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true, weight_14=force_field.weight_14_lj,
                         force_units=force_units, energy_units=energy_units)
     if isnothing(implicit_solvent)
-        crf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(solventdielectric),
+        crf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(crf_solvent_dielectric),
                                     nl_only=true, weight_14=force_field.weight_14_coulomb,
                                     coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
                                     force_units=force_units, energy_units=energy_units)
@@ -1004,7 +1004,7 @@ function System(T::Type,
 
     lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true, weight_14=T(0.5),
                         force_units=force_units, energy_units=energy_units)
-    crf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(solventdielectric),
+    crf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(crf_solvent_dielectric),
                                 nl_only=true, weight_14=T(0.5),
                                 coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
                                 force_units=force_units, energy_units=energy_units)

@@ -63,7 +63,7 @@
         )
         crf = CoulombReactionField(
             dist_cutoff=nb_cutoff,
-            solvent_dielectric=f32 ? Float32(Molly.solventdielectric) : Molly.solventdielectric,
+            solvent_dielectric=f32 ? Float32(Molly.crf_solvent_dielectric) : Molly.crf_solvent_dielectric,
             nl_only=true,
             coulomb_const=f32 ? Float32(ustrip(Molly.coulombconst)) : ustrip(Molly.coulombconst),
             force_units=NoUnits,
