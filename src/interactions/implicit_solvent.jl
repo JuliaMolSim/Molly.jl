@@ -78,24 +78,24 @@ const gbn2_element_to_screen_nucleic = Dict(
 )
 
 const gbn2_atom_params = Dict(
-    "H" => [0.788440, 0.798699, 0.437334],
-    "D" => [0.788440, 0.798699, 0.437334],
-    "C" => [0.733756, 0.506378, 0.205844],
-    "N" => [0.503364, 0.316828, 0.192915],
-    "O" => [0.867814, 0.876635, 0.387882],
-    "S" => [0.867814, 0.876635, 0.387882],
-    "-" => [1.0     , 0.8     , 4.851   ],
+    "H_α" => 0.788440, "H_β" => 0.798699, "H_γ" => 0.437334,
+    "D_α" => 0.788440, "D_β" => 0.798699, "D_γ" => 0.437334,
+    "C_α" => 0.733756, "C_β" => 0.506378, "C_γ" => 0.205844,
+    "N_α" => 0.503364, "N_β" => 0.316828, "N_γ" => 0.192915,
+    "O_α" => 0.867814, "O_β" => 0.876635, "O_γ" => 0.387882,
+    "S_α" => 0.867814, "S_β" => 0.876635, "S_γ" => 0.387882,
+    "-_α" => 1.0     , "-_β" => 0.8     , "-_γ" => 4.851   ,
 )
 
 const gbn2_atom_params_nucleic = Dict(
-    "H" => [0.537050, 0.362861, 0.116704 ],
-    "D" => [0.537050, 0.362861, 0.116704 ],
-    "C" => [0.331670, 0.196842, 0.093422 ],
-    "N" => [0.686311, 0.463189, 0.138722 ],
-    "O" => [0.606344, 0.463006, 0.142262 ],
-    "S" => [0.606344, 0.463006, 0.142262 ],
-    "P" => [0.418365, 0.290054, 0.1064245],
-    "-" => [1.0     , 0.8     , 4.851    ],
+    "H_α" => 0.537050, "H_β" => 0.362861, "H_γ" => 0.116704 ,
+    "D_α" => 0.537050, "D_β" => 0.362861, "D_γ" => 0.116704 ,
+    "C_α" => 0.331670, "C_β" => 0.196842, "C_γ" => 0.093422 ,
+    "N_α" => 0.686311, "N_β" => 0.463189, "N_γ" => 0.138722 ,
+    "O_α" => 0.606344, "O_β" => 0.463006, "O_γ" => 0.142262 ,
+    "S_α" => 0.606344, "S_β" => 0.463006, "S_γ" => 0.142262 ,
+    "P_α" => 0.418365, "P_β" => 0.290054, "P_γ" => 0.1064245,
+    "-_α" => 1.0     , "-_β" => 0.8     , "-_γ" => 4.851    ,
 )
 
 const gbn2_data_d0 = [
@@ -279,7 +279,7 @@ function mbondi2_radii(atoms_data, bonds; use_mbondi3=false,
         elseif at_data.element in ("H", "D")
             radius = at_bonded_to_N ? element_to_radius["H_N"] : element_to_radius["H"]
         else
-            radius = get(element_to_radius, at_data.element, element_to_radius["-"])
+            radius = dict_get(element_to_radius, at_data.element, element_to_radius["-"])
         end
         return radius
     end
@@ -371,7 +371,7 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
         offset_radii = ustrip.(T.(radii .- offset))
     end
     scaled_offset_radii = map(atoms_data, offset_radii) do at_data, offset_radius
-        screen = get(element_to_screen, at_data.element, element_to_screen["-"])
+        screen = dict_get(element_to_screen, at_data.element, element_to_screen["-"])
         return T(screen) * offset_radius
     end
 
@@ -472,36 +472,33 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
     end
     scaled_offset_radii = map(atoms_data, offset_radii) do at_data, offset_radius
         if at_data.res_name in nucleic_acid_residues
-            screen = get(element_to_screen_nucleic, at_data.element, element_to_screen_nucleic["-"])
+            screen = dict_get(element_to_screen_nucleic, at_data.element, element_to_screen_nucleic["-"])
         else
-            screen = get(element_to_screen, at_data.element, element_to_screen["-"])
+            screen = dict_get(element_to_screen, at_data.element, element_to_screen["-"])
         end
         return T(screen) * offset_radius
     end
 
     αs_cpu = map(atoms_data) do at_data
         if at_data.res_name in nucleic_acid_residues
-            params = get(atom_params_nucleic, at_data.element, atom_params_nucleic["-"])
+            return dict_get(atom_params_nucleic, at_data.element * "_α", atom_params_nucleic["-_α"])
         else
-            params = get(atom_params, at_data.element, atom_params["-"])
+            return dict_get(atom_params, at_data.element * "_α", atom_params["-_α"])
         end
-        return params[1]
     end
     βs_cpu = map(atoms_data) do at_data
         if at_data.res_name in nucleic_acid_residues
-            params = get(atom_params_nucleic, at_data.element, atom_params_nucleic["-"])
+            return dict_get(atom_params_nucleic, at_data.element * "_β", atom_params_nucleic["-_β"])
         else
-            params = get(atom_params, at_data.element, atom_params["-"])
+            return dict_get(atom_params, at_data.element * "_β", atom_params["-_β"])
         end
-        return params[2]
     end
     γs_cpu = map(atoms_data) do at_data
         if at_data.res_name in nucleic_acid_residues
-            params = get(atom_params_nucleic, at_data.element, atom_params_nucleic["-"])
+            return dict_get(atom_params_nucleic, at_data.element * "_γ", atom_params_nucleic["-_γ"])
         else
-            params = get(atom_params, at_data.element, atom_params["-"])
+            return dict_get(atom_params, at_data.element * "_γ", atom_params["-_γ"])
         end
-        return params[3]
     end
 
     n_atoms = length(atoms)
