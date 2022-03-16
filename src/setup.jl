@@ -70,12 +70,12 @@ function place_diatomics(n_molecules::Integer, box_size, min_dist, bond_length)
 end
 
 """
-    OpenMMAtomType(class, element, mass, σ, ϵ)
+    OpenMMAtomType(type, element, mass, σ, ϵ)
 
 An OpenMM atom type.
 """
 struct OpenMMAtomType{M, S, E}
-    class::String
+    type::String
     element::String
     mass::M
     σ::S
@@ -145,12 +145,12 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
             entry_name = entry.name
             if entry_name == "AtomTypes"
                 for atom_type in eachelement(entry)
-                    class = atom_type["class"]
+                    at_type = atom_type["name"]
                     element = atom_type["element"]
                     mass = units ? parse(T, atom_type["mass"])u"u" : parse(T, atom_type["mass"])
                     σ = units ? T(-1u"nm") : T(-1) # Updated later
                     ϵ = units ? T(-1u"kJ * mol^-1") : T(-1) # Updated later
-                    atom_types[class] = OpenMMAtomType(class, element, mass, σ, ϵ)
+                    atom_types[at_type] = OpenMMAtomType(at_type, element, mass, σ, ϵ)
                 end
             elseif entry_name == "Residues"
                 for residue in eachelement(entry)
@@ -216,24 +216,21 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
                 weight_14_lj = parse(T, entry["lj14scale"])
                 for atom_or_attr in eachelement(entry)
                     if atom_or_attr.name == "Atom"
-                        atom_type = atom_or_attr["type"]
                         # Update previous atom types
+                        atom_type = atom_or_attr["type"]
+                        if !haskey(atom_types, atom_type)
+                            # Skip types not defined above
+                            continue
+                        end
                         partial_type = atom_types[atom_type]
                         σ = units ? parse(T, atom_or_attr["sigma"])u"nm" : parse(T, atom_or_attr["sigma"])
                         ϵ = units ? parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_attr["epsilon"])
-                        complete_type = OpenMMAtomType(partial_type.class, partial_type.element,
+                        complete_type = OpenMMAtomType(partial_type.type, partial_type.element,
                                                         partial_type.mass, σ, ϵ)
                         atom_types[atom_type] = complete_type
                     end
                 end
             end
-        end
-    end
-
-    # Check all atoms were updated
-    for atom_type in values(atom_types)
-        if (units && atom_type.σ < zero(T)u"nm") || (!units && atom_type.σ < zero(T))
-            error("Atom of class ", atom_type.class, " has not had σ or ϵ set")
         end
     end
 
@@ -331,6 +328,7 @@ function System(coord_file::AbstractString,
     impropers = InteractionList4Atoms(PeriodicTorsion)
     nb_matrix = trues(n_atoms, n_atoms)
     matrix_14 = falses(n_atoms, n_atoms)
+    torsion_n_terms = 6
 
     top_bonds     = Vector{Int}[is for is in eachcol(Int.(Chemfiles.bonds(    top)))]
     top_angles    = Vector{Int}[is for is in eachcol(Int.(Chemfiles.angles(   top)))]
@@ -397,12 +395,15 @@ function System(coord_file::AbstractString,
         res = Chemfiles.residue_for_atom(top, ai - 1)
         res_num = Chemfiles.id(res)
         res_name = residue_name(res, res_num_to_standard, rename_terminal_res)
-        type = force_field.residue_types[res_name].types[atom_name]
+        at_type = force_field.residue_types[res_name].types[atom_name]
         ch = force_field.residue_types[res_name].charges[atom_name]
-        at = force_field.atom_types[type]
+        at = force_field.atom_types[at_type]
         solute = res_num_to_standard[res_num] || res_name in ("ACE", "NME")
+        if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
+            error("Atom of type ", at.type, " has not had σ or ϵ set")
+        end
         push!(atoms, Atom(index=ai, charge=ch, mass=at.mass, σ=at.σ, ϵ=at.ϵ, solute=solute))
-        push!(atoms_data, AtomData(atom_type=type, atom_name=atom_name, res_number=Chemfiles.id(res),
+        push!(atoms_data, AtomData(atom_type=at_type, atom_name=atom_name, res_number=Chemfiles.id(res),
                                     res_name=Chemfiles.name(res), element=at.element))
         nb_matrix[ai, ai] = false
     end
@@ -497,15 +498,27 @@ function System(coord_file::AbstractString,
                     end
                 end
             end
-            torsion_type = force_field.torsion_types[best_key]
+            if best_key != ("", "", "", "")
+                torsion_type = force_field.torsion_types[best_key]
+            end
         end
-        push!(torsions.is, a1z + 1)
-        push!(torsions.js, a2z + 1)
-        push!(torsions.ks, a3z + 1)
-        push!(torsions.ls, a4z + 1)
-        push!(torsions.types, atom_types_to_string(best_key...))
-        push!(torsions.inters, PeriodicTorsion(periodicities=torsion_type.periodicities,
-                    phases=torsion_type.phases, ks=torsion_type.ks, proper=true))
+        if best_key != ("", "", "", "")
+            n_terms = length(torsion_type.periodicities)
+            for start_i in 1:torsion_n_terms:n_terms
+                push!(torsions.is, a1z + 1)
+                push!(torsions.js, a2z + 1)
+                push!(torsions.ks, a3z + 1)
+                push!(torsions.ls, a4z + 1)
+                push!(torsions.types, atom_types_to_string(best_key...))
+                end_i = min(start_i + torsion_n_terms - 1, n_terms)
+                push!(torsions.inters, PeriodicTorsion(
+                            periodicities=torsion_type.periodicities[start_i:end_i],
+                            phases=torsion_type.phases[start_i:end_i],
+                            ks=torsion_type.ks[start_i:end_i],
+                            proper=true,
+                ))
+            end
+        end
         matrix_14[a1z + 1, a4z + 1] = true
         matrix_14[a4z + 1, a1z + 1] = true
     end
@@ -643,9 +656,9 @@ function System(coord_file::AbstractString,
     #   and for taking gradients
     # For now always pad to 6 terms
     torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                            proper=t.proper, n_terms=6) for t in torsions.inters]
+                                            proper=t.proper, n_terms=torsion_n_terms) for t in torsions.inters]
     improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                            proper=t.proper, n_terms=6) for t in impropers.inters]
+                                            proper=t.proper, n_terms=torsion_n_terms) for t in impropers.inters]
 
     # Only add present interactions and ensure that array types are concrete
     specific_inter_array = []
