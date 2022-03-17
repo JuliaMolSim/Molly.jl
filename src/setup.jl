@@ -267,6 +267,8 @@ atom_types_to_string(atom_types...) = join(map(at -> at == "" ? "-" : at, atom_t
 
 atom_types_to_tuple(atom_types) = tuple(map(at -> at == "-" ? "" : at, split(atom_types, "/"))...)
 
+const standard_res_names = [keys(BioStructures.threeletter_to_aa)..., "HID", "HIE", "HIP"]
+
 """
     System(coordinate_file, force_field; <keyword arguments>)
 
@@ -340,7 +342,7 @@ function System(coord_file::AbstractString,
         res = Chemfiles.Residue(top, ri - 1)
         res_num = Chemfiles.id(res)
         res_name = Chemfiles.name(res)
-        standard_res = res_name in keys(BioStructures.threeletter_to_aa)
+        standard_res = res_name in standard_res_names
         res_num_to_standard[res_num] = standard_res
 
         if standard_res && residue_name(res, res_num_to_standard, rename_terminal_res) == "N" * res_name
@@ -498,26 +500,22 @@ function System(coord_file::AbstractString,
                     end
                 end
             end
-            if best_key != ("", "", "", "")
-                torsion_type = force_field.torsion_types[best_key]
-            end
+            torsion_type = force_field.torsion_types[best_key]
         end
-        if best_key != ("", "", "", "")
-            n_terms = length(torsion_type.periodicities)
-            for start_i in 1:torsion_n_terms:n_terms
-                push!(torsions.is, a1z + 1)
-                push!(torsions.js, a2z + 1)
-                push!(torsions.ks, a3z + 1)
-                push!(torsions.ls, a4z + 1)
-                push!(torsions.types, atom_types_to_string(best_key...))
-                end_i = min(start_i + torsion_n_terms - 1, n_terms)
-                push!(torsions.inters, PeriodicTorsion(
-                            periodicities=torsion_type.periodicities[start_i:end_i],
-                            phases=torsion_type.phases[start_i:end_i],
-                            ks=torsion_type.ks[start_i:end_i],
-                            proper=true,
-                ))
-            end
+        n_terms = length(torsion_type.periodicities)
+        for start_i in 1:torsion_n_terms:n_terms
+            push!(torsions.is, a1z + 1)
+            push!(torsions.js, a2z + 1)
+            push!(torsions.ks, a3z + 1)
+            push!(torsions.ls, a4z + 1)
+            push!(torsions.types, atom_types_to_string(best_key...))
+            end_i = min(start_i + torsion_n_terms - 1, n_terms)
+            push!(torsions.inters, PeriodicTorsion(
+                        periodicities=torsion_type.periodicities[start_i:end_i],
+                        phases=torsion_type.phases[start_i:end_i],
+                        ks=torsion_type.ks[start_i:end_i],
+                        proper=true,
+            ))
         end
         matrix_14[a1z + 1, a4z + 1] = true
         matrix_14[a4z + 1, a1z + 1] = true
@@ -865,7 +863,7 @@ function System(T::Type,
             else
                 mass = parse(T, c[8])
             end
-            solute = c[4] in keys(BioStructures.threeletter_to_aa)
+            solute = c[4] in standard_res_names
             atom_index = length(atoms) + 1
             push!(atoms, Atom(index=atom_index, charge=ch, mass=mass, σ=atomtypes[attype].σ,
                                 ϵ=atomtypes[attype].ϵ, solute=solute))
