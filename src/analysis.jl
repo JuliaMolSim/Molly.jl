@@ -6,7 +6,8 @@ export
     distances,
     rdf,
     velocity_autocorr,
-    rmsd
+    rmsd,
+    radius_gyration
 
 """
     visualize(coord_logger, box_size, out_filepath; <keyword arguments>)
@@ -98,7 +99,7 @@ end
 """
     rmsd(coords_1, coords_2)
 
-Calculate the root-mean-square deviation (RMSD) from two sets of
+Calculate the root-mean-square deviation (RMSD) of two sets of
 3D coordinates after superimposition by the Kabsch algorithm.
 Assumes the coordinates do not cross the bounding box, i.e. all
 coordinates in each set correspond to the same periodic image.
@@ -119,4 +120,21 @@ function rmsd(coords_1::AbstractArray{SVector{D, T}},
     diffs = rot * p - q
     msd = sum(abs2, diffs) / n_atoms
     return sqrt(msd)
+end
+
+sum_abs2(x) = sum(abs2, x)
+
+"""
+    radius_gyration(coords, atoms)
+
+Calculate the radius of gyration of a set of coordinates.
+Assumes the coordinates do not cross the bounding box, i.e. all
+coordinates correspond to the same periodic image.
+"""
+function radius_gyration(coords, atoms)
+    centre = mean(coords)
+    vecs_to_centre = coords .- (centre,)
+    masses = mass.(atoms)
+    I = sum(sum_abs2.(vecs_to_centre) .* masses)
+    return sqrt(I / sum(masses))
 end
