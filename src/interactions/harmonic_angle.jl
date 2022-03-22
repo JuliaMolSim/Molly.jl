@@ -17,6 +17,10 @@ HarmonicAngle(; th0, cth) = HarmonicAngle{typeof(th0), typeof(cth)}(th0, cth)
     ba = vector_pad3D(coords_j, coords_i, box_size)
     bc = vector_pad3D(coords_j, coords_k, box_size)
     cross_ba_bc = ba × bc
+    if iszero(cross_ba_bc)
+        zf = zero(a.cth ./ ba)
+        return SpecificForce3Atoms(zf, zf, zf)
+    end
     pa = normalize(trim3D( ba × cross_ba_bc, box_size))
     pc = normalize(trim3D(-bc × cross_ba_bc, box_size))
     angle_term = -a.cth * (acosbound(dot(ba, bc) / (norm(ba) * norm(bc))) - a.th0)
