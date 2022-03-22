@@ -24,6 +24,7 @@ using Zygote
 
 using Base.Threads
 using LinearAlgebra
+using Random
 using SparseArrays
 
 include("types.jl")

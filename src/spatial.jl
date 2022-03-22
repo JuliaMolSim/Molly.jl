@@ -80,8 +80,8 @@ wrap_coords_vec(v, box_size) = wrap_coords.(v, box_size)
 
 Generate a random velocity from the Maxwell-Boltzmann distribution.
 """
-function AtomsBase.velocity(mass, temp; dims::Integer=3)
-    return SVector([maxwell_boltzmann(mass, temp) for i in 1:dims]...)
+function AtomsBase.velocity(mass, temp; dims::Integer=3, rng=Random.GLOBAL_RNG)
+    return SVector([maxwell_boltzmann(mass, temp; rng=rng) for i in 1:dims]...)
 end
 
 const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
@@ -91,11 +91,11 @@ const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
 
 Generate a random speed along one dimension from the Maxwell-Boltzmann distribution.
 """
-function maxwell_boltzmann(mass, temp)
+function maxwell_boltzmann(mass, temp; rng=Random.GLOBAL_RNG)
     T = typeof(convert(AbstractFloat, ustrip(temp)))
     k = unit(temp) == NoUnits ? T(ustrip(mb_conversion_factor)) : T(mb_conversion_factor)
     σ = sqrt(k * temp / mass)
-    return rand(Normal(zero(T), T(ustrip(σ)))) * unit(σ)
+    return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
 end
 
 """

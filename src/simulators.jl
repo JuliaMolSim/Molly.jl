@@ -203,7 +203,8 @@ end
 function simulate!(sys,
                     sim::Langevin,
                     n_steps::Integer;
-                    parallel::Bool=true)
+                    parallel::Bool=true,
+                    rng=Random.GLOBAL_RNG)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
@@ -216,9 +217,10 @@ function simulate!(sys,
         sys.coords += sys.velocities .* sim.dt / 2
         if isa(sys.coords, CuArray)
             noise = cu(velocity.(Array(mass.(sys.atoms)), (sim.temperature,);
-                                    dims=n_dimensions(sys)))
+                                    dims=n_dimensions(sys), rng=rng))
         else
-            noise = velocity.(mass.(sys.atoms), (sim.temperature,); dims=n_dimensions(sys))
+            noise = velocity.(mass.(sys.atoms), (sim.temperature,);
+                                dims=n_dimensions(sys), rng=rng)
         end
         sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
 
