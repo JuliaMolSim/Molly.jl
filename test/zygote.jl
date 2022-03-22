@@ -205,7 +205,7 @@
         )
         for (prefix, gzy, gfd, tol) in zip(("σ", "kb"), grad_zygote, grad_fd, (tol_σ, tol_kb))
             if abs(gfd) < 1e-13
-                @test isnothing(gzy) || abs(gzy) < 1e-12
+                @test isnothing(gzy) || abs(gzy) < 1e-11
             else
                 frac_diff = abs(gzy - gfd) / abs(gfd)
                 @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy, fractional difference $frac_diff"
