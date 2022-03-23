@@ -608,6 +608,7 @@ struct BornRadiiGBN2LoopResult{I, G}
     I_grad::G
 end
 
+get_I(r::BornRadiiGBN2LoopResult) = r.I
 get_I_grad(r::BornRadiiGBN2LoopResult) = r.I_grad
 
 function born_radii_loop_GBN2(coord_i::SVector{D, T}, coord_j, ori, orj, srj, cutoff, offset,
@@ -652,7 +653,7 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2, coords, box_size)
     loop_res = born_radii_loop_GBN2.(coords_i, coords_j, oris, orjs, srjs, (inter.cutoff,),
                     (inter.offset,), (inter.neck_scale,), (inter.neck_cut,), inter.d0s,
                     inter.m0s, (box_size,))
-    Is = dropdims(sum(lr -> lr.I, loop_res; dims=2); dims=2)
+    Is = dropdims(sum(get_I.(loop_res); dims=2); dims=2)
     I_grads = get_I_grad.(loop_res)
 
     ori = inter.offset_radii
@@ -676,10 +677,16 @@ struct ForceLoopResult1{T, V}
     fj::V
 end
 
+get_bi(r::ForceLoopResult1) = r.bi
+get_bj(r::ForceLoopResult1) = r.bj
+
 struct ForceLoopResult2{V}
     fi::V
     fj::V
 end
+
+get_fi(r::Union{ForceLoopResult1, ForceLoopResult2}) = r.fi
+get_fj(r::Union{ForceLoopResult1, ForceLoopResult2}) = r.fj
 
 function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j,
                             Bi, Bj, cutoff, pre_factor, box_size)
@@ -760,9 +767,9 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing)
     Bsj = @view Bs[inter.js]
     loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i, charges_j,
                                     Bsi, Bsj, (inter.cutoff,), (inter.pre_factor,), (box_size,))
-    born_forces = born_forces .+ dropdims(sum(lr -> lr.bi, loop_res_1; dims=2); dims=2)
-    born_forces = born_forces .+ dropdims(sum(lr -> lr.bj, loop_res_1; dims=1); dims=1)
-    fs = dropdims(sum(lr -> lr.fi, loop_res_1; dims=2); dims=2) .+ dropdims(sum(lr -> lr.fj, loop_res_1; dims=1); dims=1)
+    born_forces = born_forces .+ dropdims(sum(get_bi.(loop_res_1); dims=2); dims=2)
+    born_forces = born_forces .+ dropdims(sum(get_bj.(loop_res_1); dims=1); dims=1)
+    fs = dropdims(sum(get_fi.(loop_res_1); dims=2); dims=2) .+ dropdims(sum(get_fj.(loop_res_1); dims=1); dims=1)
 
     born_forces_2 = born_forces .* (Bs .^ 2) .* B_grads
 
@@ -772,7 +779,7 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing)
     loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, I_grads, oris, srjs,
                                     (inter.cutoff,), (box_size,))
 
-    return fs .+ dropdims(sum(lr -> lr.fi, loop_res_2; dims=2); dims=2) .+ dropdims(sum(lr -> lr.fj, loop_res_2; dims=1); dims=1)
+    return fs .+ dropdims(sum(get_fi.(loop_res_2); dims=2); dims=2) .+ dropdims(sum(get_fj.(loop_res_2); dims=1); dims=1)
 end
 
 function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori, cutoff,

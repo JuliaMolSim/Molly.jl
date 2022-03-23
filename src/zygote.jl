@@ -11,6 +11,8 @@ Zygote.accum(x::AbstractArray{<:SVector}, ys::AbstractArray{<:SizedVector}...) =
 Zygote.accum(x::Vector{<:SVector} , y::CuArray{<:SVector}) = Zygote.accum(cu(x), y)
 Zygote.accum(x::CuArray{<:SVector}, y::Vector{<:SVector} ) = Zygote.accum(x, cu(y))
 
+Zygote.accum(x::SVector{D, T}, y::T) where {D, T} = x .+ y
+
 Base.:+(x::Real, y::SizedVector) = x .+ y
 Base.:+(x::SizedVector, y::Real) = x .+ y
 
@@ -964,15 +966,55 @@ end
     return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=zero(y1), f3=zero(y1), f4=y1), ȳ)))
 end
 
+@inline function Zygote.broadcast_forward(f::typeof(get_I),
+                                            arg1::AbstractArray{<:BornRadiiGBN2LoopResult})
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (I=y1, I_grad=zero(y1)), ȳ)))
+end
+
 @inline function Zygote.broadcast_forward(f::typeof(get_I_grad),
                                             arg1::AbstractArray{<:BornRadiiGBN2LoopResult})
     return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (I=zero(y1), I_grad=y1), ȳ)))
 end
 
+@inline function Zygote.broadcast_forward(f::typeof(get_bi),
+                                            arg1::AbstractArray{<:ForceLoopResult1})
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1,
+                            broadcast(y1 -> (bi=y1, bj=zero(y1), fi=zero(y1), fj=zero(y1)), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(get_bj),
+                                            arg1::AbstractArray{<:ForceLoopResult1})
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1,
+                            broadcast(y1 -> (bi=zero(y1), bj=y1, fi=zero(y1), fj=zero(y1)), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(get_fi),
+                                            arg1::AbstractArray{<:ForceLoopResult1})
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1,
+                            broadcast(y1 -> (bi=zero(y1), bj=zero(y1), fi=y1, fj=zero(y1)), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(get_fj),
+                                            arg1::AbstractArray{<:ForceLoopResult1})
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1,
+                            broadcast(y1 -> (bi=zero(y1), bj=zero(y1), fi=zero(y1), fj=y1), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(get_fi),
+                                            arg1::AbstractArray{<:ForceLoopResult2})
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (fi=y1, fj=zero(y1)), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(get_fj),
+                                            arg1::AbstractArray{<:ForceLoopResult2})
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (fi=zero(y1), fj=y1), ȳ)))
+end
+
 # Use fast broadcast path on CPU
 for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec, :wrap_coords_vec,
-            :get_f1, :get_f2, :get_f3, :get_f4, :get_I_grad, :born_radii_loop_OBC, :born_radii_loop_GBN2,
-            :gb_force_loop_1, :gb_force_loop_2, :gb_energy_loop)
+            :get_f1, :get_f2, :get_f3, :get_f4, :born_radii_loop_OBC, :get_I, :get_I_grad,
+            :born_radii_loop_GBN2, :get_bi, :get_bj, :get_fi, :get_fj, :gb_force_loop_1,
+            :gb_force_loop_2, :gb_energy_loop)
     @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
     # Avoid ambiguous dispatch
     @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
