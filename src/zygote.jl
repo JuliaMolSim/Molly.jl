@@ -119,7 +119,7 @@ Zygote.∇getindex(x::CuArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> be
     dx = zeros(eltype(dy), length(x))
     dxv = view(dx, inds1_cpu)
     dxv .= Zygote.accum.(dxv, Zygote._droplike(Array(dy), dxv))
-    return Zygote._project(x, cu(dx)), nothing
+    return Zygote._project(x, CuArray(dx)), nothing
 end
 
 # Extend to add extra empty partials before (B) and after (A) the SVector partials
@@ -399,7 +399,7 @@ function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg) wh
     sized_to_static.(ȳ_in)
 end
 
-modify_grad(ȳ_in, arg::CuArray) = cu(ȳ_in)
+modify_grad(ȳ_in, arg::CuArray) = CuArray(ȳ_in)
 modify_grad(ȳ_in, arg) = ȳ_in
 
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}) where {D, T}

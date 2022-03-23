@@ -229,7 +229,8 @@ function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
         atom_params[k] = dict_get(params_dic, key_prefix * "params_" * k, gbn2_atom_params[k])
     end
 
-    ImplicitSolventGBN2(sys.atoms,
+    ImplicitSolventGBN2(
+        sys.atoms,
         sys.atoms_data,
         sys.specific_inter_lists[bond_index];
         solvent_dielectric=dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
