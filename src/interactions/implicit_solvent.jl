@@ -323,6 +323,10 @@ function lookup_table(full_table::AbstractArray{T}, radii) where T
     return table
 end
 
+function lookup_table(full_table::AbstractArray{T}, radii::AbstractArray{<:AbstractFloat}) where T
+    return lookup_table(full_table, radii * u"nm")
+end
+
 """
     ImplicitSolventOBC(atoms, atoms_data, bonds)
 
@@ -469,7 +473,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
     if units
         offset_radii = T.(radii .- offset)
     else
-        offset_radii = ustrip.(T.(radii .- offset))
+        offset_radii = T.(ustrip.(radii) .- ustrip(offset))
     end
     scaled_offset_radii = map(atoms_data, offset_radii) do at_data, offset_radius
         if at_data.res_name in nucleic_acid_residues

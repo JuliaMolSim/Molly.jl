@@ -216,9 +216,10 @@ function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
     key_prefix = "inter_GB_"
     bond_index = findfirst(sil -> eltype(sil.inters) <: HarmonicBond, sys.specific_inter_lists)
 
-    element_to_radius = empty(mbondi2_element_to_radius)
+    element_to_radius = Dict{String, DefaultFloat}() # Units here made the gradients vanish
     for k in keys(mbondi2_element_to_radius)
-        element_to_radius[k] = dict_get(params_dic, key_prefix * "radius_" * k, ustrip(mbondi2_element_to_radius[k]))u"nm"
+        element_to_radius[k] = dict_get(params_dic, key_prefix * "radius_" * k,
+                                        ustrip(mbondi2_element_to_radius[k]))
     end
     element_to_screen = empty(gbn2_element_to_screen)
     for k in keys(gbn2_element_to_screen)
