@@ -1,5 +1,7 @@
 # Chain rules to allow differentiable simulations
 
+@non_differentiable random_velocities(args...)
+@non_differentiable random_velocities!(args...)
 @non_differentiable check_force_units(args...)
 @non_differentiable atoms_bonded_to_N(args...)
 @non_differentiable lookup_table(args...)

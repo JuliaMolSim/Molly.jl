@@ -215,13 +215,7 @@ function simulate!(sys,
         sys.velocities += remove_molar.(accels_t) .* sim.dt
 
         sys.coords += sys.velocities .* sim.dt / 2
-        if isa(sys.coords, CuArray)
-            noise = cu(velocity.(Array(mass.(sys.atoms)), (sim.temperature,);
-                                    dims=n_dimensions(sys), rng=rng))
-        else
-            noise = velocity.(mass.(sys.atoms), (sim.temperature,);
-                                dims=n_dimensions(sys), rng=rng)
-        end
+        noise = random_velocities(sys, sim.temperature; rng=rng)
         sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
 
         sys.coords += sys.velocities .* sim.dt / 2

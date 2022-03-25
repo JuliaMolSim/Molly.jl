@@ -84,6 +84,21 @@ function AtomsBase.velocity(mass, temp; dims::Integer=3, rng=Random.GLOBAL_RNG)
     return SVector([maxwell_boltzmann(mass, temp; rng=rng) for i in 1:dims]...)
 end
 
+function velocity_3D(mass, temp; rng=Random.GLOBAL_RNG)
+    return SVector(
+        maxwell_boltzmann(mass, temp; rng=rng),
+        maxwell_boltzmann(mass, temp; rng=rng),
+        maxwell_boltzmann(mass, temp; rng=rng),
+    )
+end
+
+function velocity_2D(mass, temp; rng=Random.GLOBAL_RNG)
+    return SVector(
+        maxwell_boltzmann(mass, temp; rng=rng),
+        maxwell_boltzmann(mass, temp; rng=rng),
+    )
+end
+
 const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
 
 """
@@ -104,8 +119,20 @@ end
 Generate random velocities from the Maxwell-Boltzmann distribution
 for a `System`.
 """
-function random_velocities(sys, temp)
-    [velocity(a.mass, temp; dims=n_dimensions(sys)) for a in Array(sys.atoms)]
+function random_velocities(sys::AbstractSystem{3}, temp; rng=Random.GLOBAL_RNG)
+    if isa(sys.coords, CuArray)
+        return cu(velocity_3D.(Array(mass.(sys.atoms)), temp; rng=rng))
+    else
+        return velocity_3D.(mass.(sys.atoms), temp; rng=rng)
+    end
+end
+
+function random_velocities(sys::AbstractSystem{2}, temp; rng=Random.GLOBAL_RNG)
+    if isa(sys.coords, CuArray)
+        return cu(velocity_2D.(Array(mass.(sys.atoms)), temp; rng=rng))
+    else
+        return velocity_2D.(mass.(sys.atoms), temp; rng=rng)
+    end
 end
 
 """
@@ -114,8 +141,8 @@ end
 Set the velocities of a `System` to random velocities generated from the
 Maxwell-Boltzmann distribution.
 """
-function random_velocities!(sys, temp)
-    sys.velocities = random_velocities(sys, temp)
+function random_velocities!(sys, temp; rng=Random.GLOBAL_RNG)
+    sys.velocities = random_velocities(sys, temp; rng=rng)
     return sys
 end
 
