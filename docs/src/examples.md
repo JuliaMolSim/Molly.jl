@@ -46,13 +46,13 @@ function Molly.force(inter::BondableInteraction,
     # Break bonds randomly
     if atom_j.i in atom_i.partners && rand() < inter.prob_break
         delete!(atom_i.partners, atom_j.i)
-        delete!(atom_j.partners, atom_j.i)
+        delete!(atom_j.partners, atom_i.i)
     end
     # Make bonds between close atoms randomly
     r2 = sum(abs2, dr)
     if r2 < inter.b0 * inter.dist_formation && rand() < inter.prob_formation
         push!(atom_i.partners, atom_j.i)
-        push!(atom_j.partners, atom_j.i)
+        push!(atom_j.partners, atom_i.i)
     end
     # Apply the force of a harmonic bond
     if atom_j.i in atom_i.partners
