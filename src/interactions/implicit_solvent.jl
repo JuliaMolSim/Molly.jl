@@ -335,11 +335,12 @@ Should be used along with a Coulomb or CoulombReactionField interaction.
 The keyword argument `use_OBC2` determines whether to use parameter set
 I (`false`, the default) or II (`true`).
 """
-struct ImplicitSolventOBC{T, D, V, S, F, I} <: AbstractGBSA
+struct ImplicitSolventOBC{T, D, V, K, S, F, I} <: AbstractGBSA
     offset_radii::V
     scaled_offset_radii::V
     solvent_dielectric::T
     solute_dielectric::T
+    kappa::K
     offset::D
     cutoff::D
     use_ACE::Bool
@@ -348,7 +349,8 @@ struct ImplicitSolventOBC{T, D, V, S, F, I} <: AbstractGBSA
     γ::T
     probe_radius::D
     sa_factor::S
-    pre_factor::F
+    factor_solute::F
+    factor_solvent::F
     is::I
     js::I
 end
@@ -358,6 +360,7 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
                             bonds;
                             solvent_dielectric=gb_solvent_dielectric,
                             solute_dielectric=gb_solute_dielectric,
+                            kappa=0.0u"nm^-1",
                             offset=obc_offset,
                             cutoff=0.0u"nm",
                             probe_radius=gb_probe_radius,
@@ -392,10 +395,15 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     inds_j = permutedims(inds_i, (2, 1))
 
     coulomb_const = units ? coulombconst : ustrip(coulombconst)
-    if !iszero(solute_dielectric) && !iszero(solvent_dielectric)
-        pre_factor = T(-coulomb_const) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
+    if !iszero(solute_dielectric)
+        factor_solute = -T(coulomb_const) / T(solute_dielectric)
     else
-        pre_factor = zero(T(coulomb_const))
+        factor_solute = zero(T(coulomb_const))
+    end
+    if !iszero(solvent_dielectric)
+        factor_solvent = T(coulomb_const) / T(solvent_dielectric)
+    else
+        factor_solvent = zero(T(coulomb_const))
     end
 
     if isa(atoms, CuArray)
@@ -409,13 +417,16 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     end
 
     if units
-        return ImplicitSolventOBC{T, D, typeof(or), typeof(T(sa_factor)), typeof(pre_factor), typeof(is)}(
-                    or, sor, solvent_dielectric, solute_dielectric, offset, cutoff,
-                    use_ACE, α, β, γ, probe_radius, T(sa_factor), pre_factor, is, js)
+        return ImplicitSolventOBC{T, D, typeof(or), typeof(T(kappa)), typeof(T(sa_factor)),
+                        typeof(factor_solute), typeof(is)}(
+                    or, sor, solvent_dielectric, solute_dielectric, T(kappa), offset,
+                    cutoff, use_ACE, α, β, γ, probe_radius, T(sa_factor), factor_solute,
+                    factor_solvent, is, js)
     else
-        return ImplicitSolventOBC{T, T, typeof(or), T, T, typeof(is)}(
-                    or, sor, solvent_dielectric, solute_dielectric, ustrip(offset), ustrip(cutoff),
-                    use_ACE, α, β, γ, ustrip(probe_radius), ustrip(sa_factor), pre_factor, is, js)
+        return ImplicitSolventOBC{T, T, typeof(or), typeof(T(ustrip(kappa))), T, T, typeof(is)}(
+                    or, sor, solvent_dielectric, solute_dielectric, T(ustrip(kappa)),
+                    ustrip(offset), ustrip(cutoff), use_ACE, α, β, γ, ustrip(probe_radius),
+                    ustrip(sa_factor), factor_solute, factor_solvent, is, js)
     end
 end
 
@@ -425,11 +436,12 @@ end
 GBn2 solvation model.
 Should be used along with a Coulomb or CoulombReactionField interaction.
 """
-struct ImplicitSolventGBN2{T, D, VT, VD, S, F, I, TD, TM} <: AbstractGBSA
+struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, TD, TM} <: AbstractGBSA
     offset_radii::VD
     scaled_offset_radii::VD
     solvent_dielectric::T
     solute_dielectric::T
+    kappa::K
     offset::D
     cutoff::D
     use_ACE::Bool
@@ -438,7 +450,8 @@ struct ImplicitSolventGBN2{T, D, VT, VD, S, F, I, TD, TM} <: AbstractGBSA
     γs::VT
     probe_radius::D
     sa_factor::S
-    pre_factor::F
+    factor_solute::F
+    factor_solvent::F
     is::I
     js::I
     d0s::TD
@@ -452,6 +465,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
                                 bonds;
                                 solvent_dielectric=gb_solvent_dielectric,
                                 solute_dielectric=gb_solute_dielectric,
+                                kappa=0.0u"nm^-1",
                                 offset=gbn2_offset,
                                 cutoff=0.0u"nm",
                                 probe_radius=gb_probe_radius,
@@ -524,10 +538,15 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
     end
 
     coulomb_const = units ? coulombconst : ustrip(coulombconst)
-    if !iszero(solute_dielectric) && !iszero(solvent_dielectric)
-        pre_factor = T(-coulomb_const) * (1/T(solute_dielectric) - 1/T(solvent_dielectric))
+    if !iszero(solute_dielectric)
+        factor_solute = -T(coulomb_const) / T(solute_dielectric)
     else
-        pre_factor = zero(T(coulomb_const))
+        factor_solute = zero(T(coulomb_const))
+    end
+    if !iszero(solvent_dielectric)
+        factor_solvent = T(coulomb_const) / T(solvent_dielectric)
+    else
+        factor_solvent = zero(T(coulomb_const))
     end
 
     if isa(atoms, CuArray)
@@ -545,17 +564,17 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
     end
 
     if units
-        return ImplicitSolventGBN2{T, D, typeof(αs), typeof(or), typeof(T(sa_factor)),
-                        typeof(pre_factor), typeof(is), typeof(d0s), typeof(m0s)}(
-                    or, sor, solvent_dielectric, solute_dielectric, offset, cutoff,
-                    use_ACE, αs, βs, γs, probe_radius, T(sa_factor), pre_factor, is, js,
-                    d0s, m0s, neck_scale, neck_cut)
+        return ImplicitSolventGBN2{T, D, typeof(αs), typeof(or), typeof(T(kappa)), typeof(T(sa_factor)),
+                        typeof(factor_solute), typeof(is), typeof(d0s), typeof(m0s)}(
+                    or, sor, solvent_dielectric, solute_dielectric, T(kappa), offset, cutoff,
+                    use_ACE, αs, βs, γs, probe_radius, T(sa_factor), factor_solute,
+                    factor_solvent, is, js, d0s, m0s, neck_scale, neck_cut)
     else
-        return ImplicitSolventGBN2{T, T, typeof(αs), typeof(or), T, T, typeof(is),
-                        typeof(d0s), typeof(m0s)}(
-                    or, sor, solvent_dielectric, solute_dielectric, ustrip(offset), ustrip(cutoff),
-                    use_ACE, αs, βs, γs, ustrip(probe_radius), ustrip(sa_factor), pre_factor,
-                    is, js, d0s, m0s, neck_scale, ustrip(neck_cut))
+        return ImplicitSolventGBN2{T, T, typeof(αs), typeof(or), typeof(T(ustrip(kappa))), T, T,
+                        typeof(is), typeof(d0s), typeof(m0s)}(
+                    or, sor, solvent_dielectric, solute_dielectric, T(ustrip(kappa)), ustrip(offset),
+                    ustrip(cutoff), use_ACE, αs, βs, γs, ustrip(probe_radius), ustrip(sa_factor),
+                    factor_solute, factor_solvent, is, js, d0s, m0s, neck_scale, ustrip(neck_cut))
     end
 end
 
@@ -692,16 +711,16 @@ end
 get_fi(r::Union{ForceLoopResult1, ForceLoopResult2}) = r.fi
 get_fj(r::Union{ForceLoopResult1, ForceLoopResult2}) = r.fj
 
-function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j,
-                            Bi, Bj, cutoff, pre_factor, box_size)
+function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, cutoff,
+                            factor_solute, factor_solvent, kappa, box_size)
     if j < i
-        zero_force = zero(pre_factor ./ coord_i .^ 2)
+        zero_force = zero(factor_solute ./ coord_i .^ 2)
         return ForceLoopResult1(zero_force[1], zero_force[1], zero_force, zero_force)
     end
     dr = vector(coord_i, coord_j, box_size)
     r2 = sum(abs2, dr)
     if !iszero(cutoff) && r2 > cutoff^2
-        zero_force = zero(pre_factor ./ coord_i .^ 2)
+        zero_force = zero(factor_solute ./ coord_i .^ 2)
         return ForceLoopResult1(zero_force[1], zero_force[1], zero_force, zero_force)
     end
     alpha2_ij = Bi * Bj
@@ -709,6 +728,11 @@ function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j,
     exp_term = exp(-D)
     denominator2 = r2 + alpha2_ij * exp_term
     denominator = sqrt(denominator2)
+    if iszero(kappa)
+        pre_factor = factor_solute + factor_solvent
+    else
+        pre_factor = factor_solute + exp(-kappa * denominator) * factor_solvent
+    end
     Gpol = (pre_factor * charge_i * charge_j) / denominator
     dGpol_dr = -Gpol * (1 - exp_term/4) / denominator2
     dGpol_dalpha2_ij = -Gpol * exp_term * (1 + D) / (2 * denominator2)
@@ -721,7 +745,7 @@ function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j,
         return ForceLoopResult1(change_born_force_i, change_born_force_j,
                                 change_fs_i, change_fs_j)
     else
-        zero_force = zero(pre_factor ./ coord_i .^ 2)
+        zero_force = zero(factor_solute ./ coord_i .^ 2)
         return ForceLoopResult1(change_born_force_i, zero_force[1], zero_force, zero_force)
     end
 end
@@ -770,7 +794,8 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing)
     Bsi = @view Bs[inter.is]
     Bsj = @view Bs[inter.js]
     loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i, charges_j,
-                                    Bsi, Bsj, (inter.cutoff,), (inter.pre_factor,), (box_size,))
+                                    Bsi, Bsj, (inter.cutoff,), (inter.factor_solute,),
+                                    (inter.factor_solvent,), (inter.kappa,), (box_size,))
     born_forces = born_forces .+ dropdims(sum(get_bi.(loop_res_1); dims=2); dims=2)
     born_forces = born_forces .+ dropdims(sum(get_bj.(loop_res_1); dims=1); dims=1)
     fs = dropdims(sum(get_fi.(loop_res_1); dims=2); dims=2) .+ dropdims(sum(get_fj.(loop_res_1); dims=1); dims=1)
@@ -787,8 +812,14 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing)
 end
 
 function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori, cutoff,
-                        pre_factor, offset, probe_radius, sa_factor, use_ACE, box_size)
+                        factor_solute, factor_solvent, kappa, offset, probe_radius,
+                        sa_factor, use_ACE, box_size)
     if i == j
+        if iszero(kappa)
+            pre_factor = factor_solute + factor_solvent
+        else
+            pre_factor = factor_solute + exp(-kappa * Bi) * factor_solvent
+        end
         E = pre_factor * (charge_i^2) / (2*Bi)
         if use_ACE && (Bi > zero(offset))
             radius_i = ori + offset
@@ -798,7 +829,7 @@ function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
     elseif j > i
         r2 = sum(abs2, vector(coord_i, coord_j, box_size))
         if !iszero(cutoff) && r2 > cutoff^2
-            return zero(pre_factor / offset)
+            return zero(factor_solute / offset)
         end
         f = sqrt(r2 + Bi*Bj*exp(-r2/(4*Bi*Bj)))
         if iszero(cutoff)
@@ -806,9 +837,14 @@ function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
         else
             f_cutoff = (1/f - 1/cutoff)
         end
+        if iszero(kappa)
+            pre_factor = factor_solute + factor_solvent
+        else
+            pre_factor = factor_solute + exp(-kappa * f) * factor_solvent
+        end
         return pre_factor * charge_i * charge_j * f_cutoff
     else
-        return zero(pre_factor / offset)
+        return zero(factor_solute / offset)
     end
 end
 
@@ -825,7 +861,8 @@ function potential_energy(inter::AbstractGBSA, sys, neighbors=nothing)
     Bsj = @view Bs[inter.js]
     oris = @view inter.offset_radii[inter.is]
     return sum(gb_energy_loop.(coords_i, coords_j, inter.is, inter.js, charges_i, charges_j,
-                                Bsi, Bsj, oris, (inter.cutoff,), (inter.pre_factor,),
-                                (inter.offset,), (inter.probe_radius,), (inter.sa_factor,),
-                                (inter.use_ACE,), (box_size,)))
+                                Bsi, Bsj, oris, (inter.cutoff,), (inter.factor_solute,),
+                                (inter.factor_solvent,), (inter.kappa,), (inter.offset,),
+                                (inter.probe_radius,), (inter.sa_factor,), (inter.use_ACE,),
+                                (box_size,)))
 end

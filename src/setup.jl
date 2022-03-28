@@ -313,7 +313,8 @@ function System(coord_file::AbstractString,
                 nl_dist=units ? 1.2u"nm" : 1.2,
                 implicit_solvent=nothing,
                 centre_coords::Bool=true,
-                rename_terminal_res::Bool=true)
+                rename_terminal_res::Bool=true,
+                kappa=0.0u"nm^-1")
     T = typeof(force_field.weight_14_coulomb)
 
     # Chemfiles uses zero-based indexing, be careful
@@ -736,11 +737,13 @@ function System(coord_file::AbstractString,
 
     if !isnothing(implicit_solvent)
         if implicit_solvent == "obc1"
-            general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds; use_OBC2=false),)
+            general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds;
+                                kappa=kappa, use_OBC2=false),)
         elseif implicit_solvent == "obc2"
-            general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds; use_OBC2=true),)
+            general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds;
+                                kappa=kappa, use_OBC2=true),)
         elseif implicit_solvent == "gbn2"
-            general_inters = (ImplicitSolventGBN2(atoms, atoms_data, bonds),)
+            general_inters = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
         else
             error("Unknown implicit solvent model: \"$implicit_solvent\"")
         end
