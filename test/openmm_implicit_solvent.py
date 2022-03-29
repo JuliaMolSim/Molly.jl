@@ -22,6 +22,7 @@ for solvent_model in ["obc2", "gbn2"]:
     system = force_field.createSystem(
         pdb.topology,
         nonbondedMethod=NoCutoff,
+        implicitSolventKappa=1.0,
     )
     integrator = LangevinMiddleIntegrator(300*kelvin, 91/picosecond, 0.004*picoseconds)
     simulation = Simulation(pdb.topology, system, integrator, platform)

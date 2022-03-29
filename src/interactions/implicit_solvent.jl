@@ -731,7 +731,8 @@ function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, cut
     if iszero(kappa)
         pre_factor = factor_solute + factor_solvent
     else
-        pre_factor = factor_solute + exp(-kappa * denominator) * factor_solvent
+        pre_factor = factor_solute + exp(-kappa * denominator) * factor_solvent +
+                        kappa * denominator * exp(-kappa * denominator) * factor_solvent
     end
     Gpol = (pre_factor * charge_i * charge_j) / denominator
     dGpol_dr = -Gpol * (1 - exp_term/4) / denominator2

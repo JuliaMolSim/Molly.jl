@@ -201,6 +201,7 @@ end
             implicit_solvent=solvent_model,
             dist_cutoff=5.0u"nm",
             nl_dist=5.0u"nm",
+            kappa=1.0u"nm^-1",
         )
         neighbors = find_neighbors(sys)
 

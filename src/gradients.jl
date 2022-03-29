@@ -236,6 +236,7 @@ function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
         sys.specific_inter_lists[bond_index];
         solvent_dielectric=dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
         solute_dielectric=dict_get(params_dic, key_prefix * "solute_dielectric", inter.solute_dielectric),
+        kappa=dict_get(params_dic, key_prefix * "kappa", ustrip(inter.kappa))u"nm^-1",
         offset=dict_get(params_dic, key_prefix * "offset", ustrip(inter.offset))u"nm",
         cutoff=inter.cutoff,
         probe_radius=dict_get(params_dic, key_prefix * "probe_radius", ustrip(inter.probe_radius))u"nm",
