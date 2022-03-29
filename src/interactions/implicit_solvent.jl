@@ -608,7 +608,7 @@ function born_radii_and_grad(inter::ImplicitSolventOBC, coords, box_size)
     coords_j = @view coords[inter.js]
     oris = @view inter.offset_radii[inter.is]
     srjs = @view inter.scaled_offset_radii[inter.js]
-    loop_res = born_radii_loop_OBC.(coords_i, coords_j, oris, srjs, (inter.cutoff,),
+    loop_res = born_radii_loop_OBC.(coords_i, coords_j, oris, srjs, inter.cutoff,
                                     (box_size,))
     Is = dropdims(sum(loop_res; dims=2); dims=2)
     I_grads = zero(loop_res) ./ unit(inter.cutoff)
@@ -673,8 +673,8 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2, coords, box_size)
     oris = @view inter.offset_radii[inter.is]
     orjs = @view inter.offset_radii[inter.js]
     srjs = @view inter.scaled_offset_radii[inter.js]
-    loop_res = born_radii_loop_GBN2.(coords_i, coords_j, oris, orjs, srjs, (inter.cutoff,),
-                    (inter.offset,), (inter.neck_scale,), (inter.neck_cut,), inter.d0s,
+    loop_res = born_radii_loop_GBN2.(coords_i, coords_j, oris, orjs, srjs, inter.cutoff,
+                    inter.offset, inter.neck_scale, inter.neck_cut, inter.d0s,
                     inter.m0s, (box_size,))
     Is = dropdims(sum(get_I.(loop_res); dims=2); dims=2)
     I_grads = get_I_grad.(loop_res)
@@ -795,8 +795,8 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing)
     Bsi = @view Bs[inter.is]
     Bsj = @view Bs[inter.js]
     loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i, charges_j,
-                                    Bsi, Bsj, (inter.cutoff,), (inter.factor_solute,),
-                                    (inter.factor_solvent,), (inter.kappa,), (box_size,))
+                                    Bsi, Bsj, inter.cutoff, inter.factor_solute,
+                                    inter.factor_solvent, inter.kappa, (box_size,))
     born_forces = born_forces .+ dropdims(sum(get_bi.(loop_res_1); dims=2); dims=2)
     born_forces = born_forces .+ dropdims(sum(get_bj.(loop_res_1); dims=1); dims=1)
     fs = dropdims(sum(get_fi.(loop_res_1); dims=2); dims=2) .+ dropdims(sum(get_fj.(loop_res_1); dims=1); dims=1)
@@ -807,7 +807,7 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing)
     oris = @view inter.offset_radii[inter.is]
     srjs = @view inter.scaled_offset_radii[inter.js]
     loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, I_grads, oris, srjs,
-                                    (inter.cutoff,), (box_size,))
+                                    inter.cutoff, (box_size,))
 
     return fs .+ dropdims(sum(get_fi.(loop_res_2); dims=2); dims=2) .+ dropdims(sum(get_fj.(loop_res_2); dims=1); dims=1)
 end
@@ -862,8 +862,8 @@ function potential_energy(inter::AbstractGBSA, sys, neighbors=nothing)
     Bsj = @view Bs[inter.js]
     oris = @view inter.offset_radii[inter.is]
     return sum(gb_energy_loop.(coords_i, coords_j, inter.is, inter.js, charges_i, charges_j,
-                                Bsi, Bsj, oris, (inter.cutoff,), (inter.factor_solute,),
-                                (inter.factor_solvent,), (inter.kappa,), (inter.offset,),
-                                (inter.probe_radius,), (inter.sa_factor,), (inter.use_ACE,),
+                                Bsi, Bsj, oris, inter.cutoff, inter.factor_solute,
+                                inter.factor_solvent, inter.kappa, inter.offset,
+                                inter.probe_radius, inter.sa_factor, inter.use_ACE,
                                 (box_size,)))
 end
