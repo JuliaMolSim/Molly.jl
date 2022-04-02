@@ -50,13 +50,12 @@ function simulate!(sys,
                     n_steps::Integer;
                     parallel::Bool=true)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
+    run_loggers!(sys, neighbors, 0)
     accels_t = accelerations(sys, neighbors; parallel=parallel)
     accels_t_dt = zero(accels_t)
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
-        run_loggers!(sys, neighbors, step_n)
-
         sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
         sys.coords = wrap_coords_vec.(sys.coords, (sys.box_size,))
         accels_t_dt = accelerations(sys, neighbors; parallel=parallel)
@@ -64,6 +63,8 @@ function simulate!(sys,
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim, sim.coupling)
+
+        run_loggers!(sys, neighbors, step_n)
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
@@ -102,11 +103,10 @@ function simulate!(sys,
                     n_steps::Integer;
                     parallel::Bool=true)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
+    run_loggers!(sys, neighbors, 0)
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
-        run_loggers!(sys, neighbors, step_n)
-
         accels_t = accelerations(sys, neighbors; parallel=parallel)
         sys.velocities += remove_molar.(accels_t) .* sim.dt
 
@@ -115,6 +115,8 @@ function simulate!(sys,
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim, sim.coupling)
+
+        run_loggers!(sys, neighbors, step_n)
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
@@ -148,10 +150,9 @@ function simulate!(sys,
                     n_steps::Integer;
                     parallel::Bool=true)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
+    run_loggers!(sys, neighbors, 0)
 
     for step_n in 1:n_steps
-        run_loggers!(sys, neighbors, step_n)
-
         accels_t = accelerations(sys, neighbors; parallel=parallel)
 
         # Update coordinates
@@ -163,6 +164,8 @@ function simulate!(sys,
         sys.velocities = coords_copy
 
         apply_coupling!(sys, sim, sim.coupling)
+
+        run_loggers!(sys, neighbors, step_n)
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n; parallel=parallel)
@@ -206,10 +209,10 @@ function simulate!(sys,
                     parallel::Bool=true,
                     rng=Random.GLOBAL_RNG)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
+    run_loggers!(sys, neighbors, 0)
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
-        run_loggers!(sys, neighbors, step_n)
 
         accels_t = accelerations(sys, neighbors; parallel=parallel)
         sys.velocities += remove_molar.(accels_t) .* sim.dt
@@ -220,8 +223,10 @@ function simulate!(sys,
 
         sys.coords += sys.velocities .* sim.dt / 2
         sys.coords = wrap_coords_vec.(sys.coords, (sys.box_size,))
-
         sim.remove_CM_motion && remove_CM_motion!(sys)
+
+        run_loggers!(sys, neighbors, step_n)
+
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                         parallel=parallel)

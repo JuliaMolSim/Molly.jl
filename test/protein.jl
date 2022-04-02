@@ -28,7 +28,7 @@
 
     traj = read(temp_fp_pdb, BioStructures.PDB)
     rm(temp_fp_pdb)
-    @test BioStructures.countmodels(traj) == 10
+    @test BioStructures.countmodels(traj) == 11
     @test BioStructures.countatoms(first(traj)) == 5191
 end
 

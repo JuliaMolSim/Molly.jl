@@ -20,6 +20,7 @@
 
     @time simulate!(s, simulator, n_steps; parallel=false)
 
+    @test length(s.loggers["coords"].coords) == 201
     final_coords = last(s.loggers["coords"].coords)
     @test all(all(c .> 0.0u"nm") for c in final_coords)
     @test all(all(c .< box_size) for c in final_coords)
@@ -72,7 +73,7 @@ end
 
         traj = read(temp_fp_pdb, BioStructures.PDB)
         rm(temp_fp_pdb)
-        @test BioStructures.countmodels(traj) == 200
+        @test BioStructures.countmodels(traj) == 201
         @test BioStructures.countatoms(first(traj)) == 100
 
         run_visualize_tests && visualize(s.loggers["coords"], box_size, temp_fp_viz)

@@ -612,6 +612,7 @@ function Molly.simulate!(sys,
                             parallel::Bool=true)
     # Find neighbors like this
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
+    run_loggers!(sys, neighbors, 0)
 
     for step_n in 1:n_steps
         # Apply the loggers like this
@@ -748,6 +749,9 @@ To use your custom logger, add it to the dictionary of loggers given when creati
 ```julia
 loggers = Dict("mylogger" => MyLogger(10))
 ```
+In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0.
+This means a logger that records a value every step for a simulation with 100 steps will end up with 101 values.
+Loggers are currently ignored for the purposes of taking gradients.
 
 ## Analysis
 
