@@ -248,6 +248,12 @@ end
 
 OpenMMForceField(ff_files::AbstractString...; kwargs...) = OpenMMForceField(DefaultFloat, ff_files...; kwargs...)
 
+function Base.show(io::IO, ff::OpenMMForceField)
+    print(io, "OpenMMForceField with ", length(ff.atom_types), " atom types, ",
+            length(ff.residue_types), " residue types, ", length(ff.bond_types), " bond types, ",
+            length(ff.angle_types), " angle types and ", length(ff.torsion_types), " torsion types")
+end
+
 get_res_id(res) = (Chemfiles.id(res), Chemfiles.property(res, "chainid"))
 
 # Return the residue name with N or C added for terminal residues
