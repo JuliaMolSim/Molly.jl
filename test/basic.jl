@@ -86,12 +86,13 @@ end
 
 @testset "Neighbor lists" begin
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
+        nf = neighbor_finder(nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
         s = System(
             atoms=[Atom(), Atom(), Atom()],
             coords=[SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm",
                     SVector(5.0, 5.0, 5.0)u"nm"],
             box_size=SVector(10.0, 10.0, 10.0)u"nm",
-            neighbor_finder=neighbor_finder(nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm"),
+            neighbor_finder=nf,
         )
         neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
         @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
@@ -99,6 +100,7 @@ end
             neighbors = find_neighbors(s, s.neighbor_finder; parallel=true)
             @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
         end
+        show(devnull, nf)
     end
 
     # Test passing the box_size and coordinates as keyword arguments to CellListMapNeighborFinder

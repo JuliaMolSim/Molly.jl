@@ -302,6 +302,7 @@ end
             end
             pairwise_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
         end
+        show(devnull, neighbor_finder)
 
         if gpu
             coords = cu(deepcopy(f32 ? starting_coords_f32 : starting_coords))

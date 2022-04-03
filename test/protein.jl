@@ -54,6 +54,7 @@ end
 @testset "OpenMM protein comparison" begin
     openmm_dir = joinpath(data_dir, "openmm_6mrr")
     ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+    show(devnull, ff)
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; centre_coords=false)
     neighbors = find_neighbors(sys, sys.neighbor_finder)
 
