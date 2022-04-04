@@ -80,26 +80,6 @@ end
     end
 end
 
-@testset "Lennard-Jones Störmer-Verlet" begin
-    n_atoms = 100
-    n_steps = 20_000
-    box_size = SVector(2.0, 2.0, 2.0)u"nm"
-    coords = place_atoms(n_atoms, box_size, 0.3u"nm")
-    simulator = StormerVerlet(dt=0.002u"ps")
-
-    s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(nl_only=true),),
-        coords=coords,
-        velocities=[c .+ 0.01 .* rand(SVector{3})u"nm" for c in coords],
-        box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-        loggers=Dict("coords" => CoordinateLogger(100)),
-    )
-
-    @time simulate!(s, simulator, n_steps; parallel=false)
-end
-
 @testset "Lennard-Jones simulators" begin
     n_atoms = 100
     n_steps = 20_000
@@ -108,6 +88,7 @@ end
     coords = place_atoms(n_atoms, box_size, 0.3u"nm")
     simulators = [
         Verlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps")),
+        StormerVerlet(dt=0.002u"ps"),
         Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
     ]
 

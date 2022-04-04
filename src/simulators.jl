@@ -58,7 +58,9 @@ function simulate!(sys,
     for step_n in 1:n_steps
         sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
         sys.coords = wrap_coords_vec.(sys.coords, (sys.box_size,))
+
         accels_t_dt = accelerations(sys, neighbors; parallel=parallel)
+
         sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
@@ -108,6 +110,7 @@ function simulate!(sys,
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; parallel=parallel)
+
         sys.velocities += remove_molar.(accels_t) .* sim.dt
 
         sys.coords += sys.velocities .* sim.dt
@@ -130,9 +133,7 @@ end
     StormerVerlet(; <keyword arguments>)
 
 The Störmer-Verlet integrator.
-In this case the `velocities` given to the simulator act as the previous step
-coordinates for the first step.
-Does not currently work with units or thermostats.
+Does not currently work with coupling methods that alter the velocity.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
@@ -151,24 +152,31 @@ function simulate!(sys,
                     parallel::Bool=true)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
     run_loggers!(sys, neighbors, 0)
+    coords_last = sys.coords
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; parallel=parallel)
 
-        # Update coordinates
         coords_copy = sys.coords
-        for i in 1:length(sys)
-            sys.coords[i] = sys.coords[i] + vector(sys.velocities[i], sys.coords[i], sys.box_size) + remove_molar(accels_t[i]) * sim.dt ^ 2
-            sys.coords[i] = wrap_coords.(sys.coords[i], sys.box_size)
+        if step_n == 1
+            # Use the velocities at the first step since there is only one set of coordinates
+            sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
+        else
+            sys.coords += vector.(coords_last, sys.coords, (sys.box_size,)) .+ remove_molar.(accels_t) .* sim.dt ^ 2
         end
-        sys.velocities = coords_copy
+        sys.coords = wrap_coords_vec.(sys.coords, (sys.box_size,))
+
+        # This is accurate to O(dt)
+        sys.velocities = vector.(coords_copy, sys.coords, (sys.box_size,)) ./ sim.dt
 
         apply_coupling!(sys, sim, sim.coupling)
 
         run_loggers!(sys, neighbors, step_n)
 
         if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n; parallel=parallel)
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                        parallel=parallel)
+            coords_last = coords_copy
         end
     end
     return sys
@@ -213,8 +221,8 @@ function simulate!(sys,
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
-
         accels_t = accelerations(sys, neighbors; parallel=parallel)
+
         sys.velocities += remove_molar.(accels_t) .* sim.dt
 
         sys.coords += sys.velocities .* sim.dt / 2
