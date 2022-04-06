@@ -62,6 +62,7 @@ if GROUP == "All"
     )
 
     include("basic.jl")
+    include("minimization.jl")
     include("simulation.jl")
     include("agent.jl")
 end

@@ -233,5 +233,14 @@ end
         openmm_E_fp = joinpath(openmm_dir, "energy_$solvent_model.txt")
         E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
         @test E_molly - E_openmm < 1e-2u"kJ * mol^-1"
+
+        if solvent_model == "gbn2"
+            sim = SteepestDescentMinimizer(tol=400.0u"kJ * mol^-1 * nm^-1")
+            coords_start = deepcopy(sys.coords)
+            simulate!(sys, sim)
+            neighbors = find_neighbors(sys)
+            @test potential_energy(sys, neighbors) < E_molly
+            @test rmsd(coords_start, sys.coords) < 0.1u"nm"
+        end
     end
 end
