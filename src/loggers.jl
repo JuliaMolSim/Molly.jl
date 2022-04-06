@@ -211,12 +211,12 @@ mutable struct StructureWriter
 end
 
 function StructureWriter(n_steps::Integer, filepath::AbstractString, excluded_res=String[])
-    return StructureWriter(n_steps, filepath, Set(excluded_res), 1)
+    return StructureWriter(n_steps, filepath, Set(excluded_res), 0)
 end
 
 function Base.show(io::IO, sw::StructureWriter)
     print(io, "StructureWriter with n_steps ", sw.n_steps, ", filepath \"",
-                sw.filepath, "\", ", sw.structure_n - 1, " frames written")
+                sw.filepath, "\", ", sw.structure_n, " frames written")
 end
 
 function log_property!(logger::StructureWriter, s::System, neighbors=nothing, step_n::Integer=0)
@@ -225,12 +225,12 @@ function log_property!(logger::StructureWriter, s::System, neighbors=nothing, st
             error("Number of atoms is ", length(s), " but number of atom data entries is ",
                     length(s.atoms_data))
         end
-        append_model(logger, s)
-        logger.structure_n += 1
+        append_model!(logger, s)
     end
 end
 
-function append_model(logger::StructureWriter, sys)
+function append_model!(logger::StructureWriter, sys)
+    logger.structure_n += 1
     open(logger.filepath, "a") do output
         println(output, "MODEL     ", lpad(logger.structure_n, 4))
         for (i, coord) in enumerate(Array(sys.coords))
