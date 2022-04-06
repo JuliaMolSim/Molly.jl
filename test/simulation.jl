@@ -308,8 +308,11 @@ end
             gpu_diff_safe=gpu_diff_safe,
         )
 
+        neighbors = find_neighbors(s; parallel=parallel)
+        E_start = potential_energy(s, neighbors)
+
         simulate!(s, simulator, n_steps; parallel=parallel)
-        return s.coords
+        return s.coords, E_start
     end
 
     runs = [
@@ -331,13 +334,15 @@ end
         push!(runs, ("out-of-place gpu f32 NL", [true , false, true , true , true ]))
     end
 
-    final_coords_ref = Array(test_sim(runs[1][2]...))
+    final_coords_ref, E_start_ref = test_sim(runs[1][2]...)
+    # Check all simulations give the same result to within some error
     for (name, args) in runs
-        final_coords = Array(test_sim(args...))
-        final_coords_f64 = [Float64.(c) for c in final_coords]
-        diff = sum(sum(map(x -> abs.(x), final_coords_f64 .- final_coords_ref))) / (3 * n_atoms)
-        # Check all simulations give the same result to within some error
-        @info "$(rpad(name, 20)) - difference per coordinate $diff"
-        @test diff < 1e-4u"nm"
+        final_coords, E_start = test_sim(args...)
+        final_coords_f64 = [Float64.(c) for c in Array(final_coords)]
+        coord_diff = sum(sum(map(x -> abs.(x), final_coords_f64 .- final_coords_ref))) / (3 * n_atoms)
+        E_diff = abs(Float64(E_start) - E_start_ref)
+        @info "$(rpad(name, 20)) - difference per coordinate $coord_diff - energy difference $E_diff"
+        @test coord_diff < 1e-4u"nm"
+        @test E_diff < 1e-4u"kJ * mol^-1"
     end
 end

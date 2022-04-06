@@ -56,7 +56,7 @@ end
     ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     show(devnull, ff)
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; centre_coords=false)
-    neighbors = find_neighbors(sys, sys.neighbor_finder)
+    neighbors = find_neighbors(sys)
 
     for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul", "all")
         if inter == "all"
@@ -138,6 +138,11 @@ end
     @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
     @test temperature(sys_nounits)u"K" ≈ 329.3202932884933u"K"
 
+    E_openmm = readdlm(joinpath(openmm_dir, "energy_all_only.txt"))[1] * u"kJ * mol^-1"
+    neighbors_nounits = find_neighbors(sys_nounits)
+    @test isapprox(potential_energy(sys_nounits, neighbors_nounits) * u"kJ * mol^-1",
+                    E_openmm; atol=1e-5u"kJ * mol^-1")
+
     simulate!(sys_nounits, simulator_nounits, n_steps; parallel=true)
 
     coords_diff = sys_nounits.coords * u"nm" .- wrap_coords_vec.(coords_openmm, (sys.box_size,))
@@ -160,6 +165,12 @@ end
             gpu=true,
             centre_coords=false,
         )
+        @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
+        @test temperature(sys) ≈ 329.3202932884933u"K"
+
+        neighbors = find_neighbors(sys)
+        @test isapprox(potential_energy(sys, neighbors), E_openmm; atol=1e-5u"kJ * mol^-1")
+
         simulate!(sys, simulator, n_steps)
 
         coords_diff = Array(sys.coords) .- wrap_coords_vec.(coords_openmm, (sys.box_size,))
@@ -175,6 +186,13 @@ end
             gpu=true,
             centre_coords=false,
         )
+        @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
+        @test temperature(sys_nounits)u"K" ≈ 329.3202932884933u"K"
+
+        neighbors_nounits = find_neighbors(sys_nounits)
+        @test isapprox(potential_energy(sys_nounits, neighbors_nounits) * u"kJ * mol^-1",
+                        E_openmm; atol=1e-5u"kJ * mol^-1")
+
         simulate!(sys_nounits, simulator_nounits, n_steps)
 
         coords_diff = Array(sys_nounits.coords * u"nm") .- wrap_coords_vec.(coords_openmm, (sys.box_size,))
