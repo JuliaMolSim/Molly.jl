@@ -20,7 +20,8 @@ ustrip_vec(x) = ustrip.(x)
 
 function check_force_units(fdr, force_units)
     if unit(first(fdr)) != force_units
-        error("System force units are ", force_units, " but encountered force units ", unit(first(fdr)))
+        error("System force units are ", force_units, " but encountered force units ",
+                unit(first(fdr)))
     end
 end
 
@@ -281,7 +282,7 @@ function forces(s::System{D, true}, neighbors=nothing; parallel::Bool=true) wher
     fs = ustrip_vec.(zero(s.coords))
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
-    @views if length(pairwise_inters_nonl) > 0
+    if length(pairwise_inters_nonl) > 0
         fs += forces_inters(pairwise_inters_nonl, s.coords, s.atoms, neighbors.all,
                             s.box_size, s.force_units, false)
     end

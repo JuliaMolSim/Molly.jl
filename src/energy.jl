@@ -1,6 +1,7 @@
 # Energy calculation
 
-export total_energy,
+export
+    total_energy,
     kinetic_energy,
     temperature,
     potential_energy
@@ -49,6 +50,38 @@ function temperature(s::System{D, G, T}) where {D, G, T}
     return 2 * ke / (df * k)
 end
 
+function check_energy_units(E, energy_units)
+    if unit(E) != energy_units
+        error("System energy units are ", energy_units, " but encountered energy units ",
+                unit(E))
+    end
+end
+
+@inline @inbounds function potential_energy_nounit(inters, coord_i, coord_j, atom_i, atom_j,
+                                        box_size, energy_units, weight_14::Bool=false)
+    dr = vector(coord_i, coord_j, box_size)
+    sum(inters) do inter
+        if weight_14
+            E = potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j,
+                                    box_size, true)
+        else
+            E = potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j,
+                                    box_size)
+        end
+        check_energy_units(E, energy_units)
+        return ustrip(E)
+    end
+end
+
+@views function potential_energy_inters(inters, coords, atoms, neighbors, box_size,
+                                        energy_units, weights_14)
+    coords_i, atoms_i = getindices_i(coords, neighbors), getindices_i(atoms, neighbors)
+    coords_j, atoms_j = getindices_j(coords, neighbors), getindices_j(atoms, neighbors)
+    @inbounds energies = potential_energy_nounit.((inters,), coords_i, coords_j,
+                                atoms_i, atoms_j, (box_size,), energy_units, weights_14)
+    return sum(energies) * energy_units
+end
+
 """
     potential_energy(s, neighbors=nothing)
 
@@ -69,7 +102,7 @@ first and passed to the function.
 Calculate the potential energy due to a given interation type.
 Custom interaction types should implement this function.
 """
-function potential_energy(s::System{D, G, T}, neighbors=nothing) where {D, G, T}
+function potential_energy(s::System{D, false, T}, neighbors=nothing) where {D, T}
     n_atoms = length(s)
     potential = zero(T) * s.energy_units
 
@@ -98,6 +131,33 @@ function potential_energy(s::System{D, G, T}, neighbors=nothing) where {D, G, T}
                 end
             end
         end
+    end
+
+    for inter_list in values(s.specific_inter_lists)
+        potential += potential_energy(inter_list, s.coords, s.box_size)
+    end
+
+    for inter in values(s.general_inters)
+        potential += potential_energy(inter, s, neighbors)
+    end
+
+    return uconvert(s.energy_units, potential)
+end
+
+function potential_energy(s::System{D, true, T}, neighbors=nothing) where {D, T}
+    n_atoms = length(s)
+    potential = zero(T) * s.energy_units
+
+    pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
+    if length(pairwise_inters_nonl) > 0
+        potential += potential_energy_inters(pairwise_inters_nonl, s.coords, s.atoms,
+                        neighbors.all, s.box_size, s.energy_units, false)
+    end
+
+    pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
+    if length(pairwise_inters_nl) > 0 && length(neighbors.close.nbsi) > 0
+        potential += potential_energy_inters(pairwise_inters_nl, s.coords, s.atoms,
+                        neighbors.close, s.box_size, s.energy_units, neighbors.close.weights_14)
     end
 
     for inter_list in values(s.specific_inter_lists)
