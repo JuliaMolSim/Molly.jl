@@ -20,6 +20,7 @@ Implemented features include:
 - Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also some support for Gromacs files.
 - Andersen, Berendsen and velocity rescaling thermostats.
 - Verlet, velocity Verlet, Störmer-Verlet and Langevin integrators.
+- Steepest descent energy minimization.
 - Periodic boundary conditions in a cubic box.
 - Various neighbor list implementations to speed up calculation of non-bonded forces.
 - [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
@@ -32,7 +33,7 @@ Implemented features include:
 - Differentiable molecular simulation. This is a unique feature of the package and the focus of its current development.
 
 Features not yet implemented include:
-- Simulators such as energy minimisation and REMD.
+- Simulators such as REMD.
 - Other temperature or pressure coupling methods.
 - Protein preparation - solvent box, add hydrogens etc.
 - Quantum mechanical modelling.

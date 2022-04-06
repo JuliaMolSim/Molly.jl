@@ -1,11 +1,94 @@
 # Different ways to simulate molecules
 
 export
-    VelocityVerlet,
+    SteepestDescentMinimizer,
     simulate!,
+    VelocityVerlet,
     Verlet,
     StormerVerlet,
     Langevin
+
+"""
+    SteepestDescentMinimizer(; <keyword arguments>)
+
+Steepest descent energy minimization.
+
+# Arguments
+- `step_size::D=0.01u"nm"`: the initial maximum displacement.
+- `max_steps::Int=1000`: the maximum number of steps.
+- `tol::F=10.0u"kJ * mol^-1 * nm^-1"`: the maximum force below which to
+    finish minimization.
+- `run_loggers::Bool=false`: whether to run the loggers during minimization.
+- `log_stream::L=devnull`: stream to print minimization progress to.
+"""
+struct SteepestDescentMinimizer{D, F, L}
+    step_size::D
+    max_steps::Int
+    tol::F
+    run_loggers::Bool
+    log_stream::L
+end
+
+function SteepestDescentMinimizer(;
+                                    step_size=0.01u"nm",
+                                    max_steps=1_000,
+                                    tol=10.0u"kJ * mol^-1 * nm^-1",
+                                    run_loggers=false,
+                                    log_stream=devnull)
+    return SteepestDescentMinimizer(step_size, max_steps, tol,
+                                    run_loggers, log_stream)
+end
+
+"""
+    simulate!(system, simulator, n_steps; parallel=true)
+    simulate!(system, simulator; parallel=true)
+
+Run a simulation on a system according to the rules of the given simulator.
+Custom simulators should implement this function.
+"""
+function simulate!(sys,
+                    sim::SteepestDescentMinimizer;
+                    parallel::Bool=true)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
+    sim.run_loggers && run_loggers!(sys, neighbors, 0)
+    E = potential_energy(sys, neighbors)
+    println(sim.log_stream, "Step 0 - potential energy ",
+            E, " - max force N/A - N/A")
+    hn = sim.step_size
+
+    for step_n in 1:sim.max_steps
+        F = forces(sys, neighbors; parallel=parallel)
+        max_force = maximum(norm.(F))
+
+        coords_copy = sys.coords
+        sys.coords += hn * F ./ max_force
+        sys.coords = wrap_coords_vec.(sys.coords, (sys.box_size,))
+
+        neighbors_copy = neighbors
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                    parallel=parallel)
+        E_trial = potential_energy(sys, neighbors)
+        if E_trial < E
+            hn = 6 * hn / 5
+            E = E_trial
+            println(sim.log_stream, "Step ", step_n, " - potential energy ",
+                    E_trial, " - max force ", max_force, " - accepted")
+        else
+            sys.coords = coords_copy
+            neighbors = neighbors_copy
+            hn = hn / 5
+            println(sim.log_stream, "Step ", step_n, " - potential energy ",
+                    E_trial, " - max force ", max_force, " - rejected")
+        end
+
+        sim.run_loggers && run_loggers!(sys, neighbors, step_n)
+
+        if max_force < sim.tol
+            break
+        end
+    end
+    return sys
+end
 
 # Forces are often expressed per mol but this dimension needs removing for use in the integrator
 function remove_molar(x)
@@ -39,12 +122,6 @@ function VelocityVerlet(; dt, coupling=NoCoupling(), remove_CM_motion=true)
     return VelocityVerlet(dt, coupling, remove_CM_motion)
 end
 
-"""
-    simulate!(system, simulator, n_steps; parallel=true)
-
-Run a simulation on a system according to the rules of the given simulator.
-Custom simulators should implement this function.
-"""
 function simulate!(sys,
                     sim::VelocityVerlet,
                     n_steps::Integer;

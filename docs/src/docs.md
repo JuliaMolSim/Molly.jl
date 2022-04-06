@@ -590,8 +590,9 @@ The available cutoffs are:
 ## Simulators
 
 Simulators define what type of simulation is run.
-This could be anything from a simple energy minimisation to complicated replica exchange MD.
+This could be anything from a simple energy minimization to complicated replica exchange MD.
 The available simulators are:
+- [`SteepestDescentMinimizer`](@ref)
 - [`VelocityVerlet`](@ref)
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
