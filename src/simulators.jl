@@ -16,7 +16,7 @@ Steepest descent energy minimization.
 # Arguments
 - `step_size::D=0.01u"nm"`: the initial maximum displacement.
 - `max_steps::Int=1000`: the maximum number of steps.
-- `tol::F=10.0u"kJ * mol^-1 * nm^-1"`: the maximum force below which to
+- `tol::F=1000.0u"kJ * mol^-1 * nm^-1"`: the maximum force below which to
     finish minimization.
 - `run_loggers::Bool=false`: whether to run the loggers during minimization.
 - `log_stream::L=devnull`: stream to print minimization progress to.
@@ -32,7 +32,7 @@ end
 function SteepestDescentMinimizer(;
                                     step_size=0.01u"nm",
                                     max_steps=1_000,
-                                    tol=10.0u"kJ * mol^-1 * nm^-1",
+                                    tol=1000.0u"kJ * mol^-1 * nm^-1",
                                     run_loggers=false,
                                     log_stream=devnull)
     return SteepestDescentMinimizer(step_size, max_steps, tol,

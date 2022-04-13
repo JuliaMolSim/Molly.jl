@@ -145,7 +145,6 @@ function potential_energy(s::System{D, false, T}, neighbors=nothing) where {D, T
 end
 
 function potential_energy(s::System{D, true, T}, neighbors=nothing) where {D, T}
-    n_atoms = length(s)
     potential = zero(T) * s.energy_units
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
