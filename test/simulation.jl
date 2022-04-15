@@ -343,6 +343,6 @@ end
         E_diff = abs(Float64(E_start) - E_start_ref)
         @info "$(rpad(name, 20)) - difference per coordinate $coord_diff - potential energy difference $E_diff"
         @test coord_diff < 1e-4u"nm"
-        @test E_diff < 1e-4u"kJ * mol^-1"
+        @test E_diff < 5e-4u"kJ * mol^-1"
     end
 end

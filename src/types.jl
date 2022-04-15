@@ -265,9 +265,9 @@ interface described there.
 - `loggers::L=Dict()`: the loggers that record properties of interest during a
     simulation.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
-    Set to `NoUnits` if units are not being used.
-- `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Set to
-    `NoUnits` if units are not being used.
+    Should be set to `NoUnits` if units are not being used.
+- `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
+    be set to `NoUnits` if units are not being used.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """

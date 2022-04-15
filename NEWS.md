@@ -1,5 +1,20 @@
 # Molly.jl release notes
 
+## v0.10.0 - Apr 2022
+
+- Loggers now also run before the first simulation step, i.e. at step 0, allowing the starting state to be recorded.
+- `inject_gradients` now returns general interactions in addition to atoms, pairwise interactions and specific interaction lists.
+- Steepest descent energy minimization is added via `SteepestDescentMinimizer`.
+- GPU support is added for `potential_energy`.
+- The `radius_gyration` function is added.
+- A kappa value for ionic screening may be given to `ImplicitSolventOBC` and `ImplicitSolventGBN2`.
+- Improvements are made to simulation setup such as allowing multiple macromolecular chains.
+- A random number generator can now be passed to `Langevin`, allowing reproducible simulations.
+- Gradients through the GB-Neck2 interaction are made to work on the GPU.
+- Bugs in `StormerVerlet` are fixed.
+- The possibility of a NaN value for the `HarmonicAngle` force when the angle is π is fixed.
+- A bug causing `random_velocities` to run slowly is fixed.
+
 ## v0.9.0 - Mar 2022
 
 - The arguments to `forces` and `accelerations` are made consistent across implementations.
