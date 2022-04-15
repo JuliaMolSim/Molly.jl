@@ -28,8 +28,8 @@ end
 """
     accelerations(system, neighbors=nothing; parallel=true)
 
-Calculate the accelerations of all atoms using the pairwise and specific
-interactions and Newton's second law.
+Calculate the accelerations of all atoms using the pairwise, specific and
+general interactions and Newton's second law of motion.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
@@ -205,7 +205,8 @@ end
 """
     forces(system, neighbors=nothing; parallel=true)
 
-Calculate the forces on all atoms in the system.
+Calculate the forces on all atoms in the system using the pairwise, specific and
+general interactions.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 

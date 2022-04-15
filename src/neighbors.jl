@@ -408,16 +408,6 @@ function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{Neighb
     return neighbors
 end
 
-"""
-    find_neighbors(s::System,
-                    nf::CellListMapNeighborFinder,
-                    current_neighbors=nothing,
-                    step_n::Integer=0;
-                    parallel::Bool=true)
-
-Find neighbors using `CellListMap`, without in-place updating. Should be called only
-the first time the cell lists are built. Modifies the mutable `nf` structure.
-"""
 function find_neighbors(s::System,
                         nf::CellListMapNeighborFinder,
                         current_neighbors=nothing,

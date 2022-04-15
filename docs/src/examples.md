@@ -1,14 +1,14 @@
 # Molly examples
 
 The best examples for learning how the package works are in the [Molly documentation](@ref) section.
-Here we give further examples, showing what you can do with the package.
+Here we give further examples showing what you can do with the package.
 Each is a self-contained block of code.
 Made something cool yourself?
 Make a PR to add it to this page.
 
 ## Making and breaking bonds
 
-There is an example of mutable atom properties in the main docs, but what if you want to make and break bonds during the simulation?
+There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation?
 In this case you can use a `PairwiseInteraction` to make, break and apply the bonds.
 The partners of the atom can be stored in the atom type.
 We make a logger to record when the bonds are present, allowing us to visualize them with the `connection_frames` keyword argument to `visualize` (this can take a while to plot).
@@ -98,7 +98,10 @@ neighbor_finder = DistanceNeighborFinder(
     n_steps=10,
     dist_cutoff=2.0,
 )
-simulator = VelocityVerlet(dt=0.02, coupling=AndersenThermostat(temp, 5.0))
+simulator = VelocityVerlet(
+    dt=0.02,
+    coupling=AndersenThermostat(temp, 5.0),
+)
 
 sys = System(
     atoms=atoms,
@@ -124,12 +127,14 @@ for i in 1:length(sys)
     end
 end
 
-visualize(sys.loggers["coords"],
-            box_size,
-            "sim_mutbond.mp4";
-            connections=connections,
-            connection_frames=sys.loggers["bonds"].bonds,
-            markersize=0.1)
+visualize(
+    sys.loggers["coords"],
+    box_size,
+    "sim_mutbond.mp4";
+    connections=connections,
+    connection_frames=sys.loggers["bonds"].bonds,
+    markersize=0.1,
+)
 ```
 ![Mutable bond simulation](images/sim_mutbond.gif)
 

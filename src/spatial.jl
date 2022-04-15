@@ -151,25 +151,25 @@ acosbound(x::Real) = acos(clamp(x, -1, 1))
 
 """
     bond_angle(coord_i, coord_j, coord_k, box_size)
-    bond_angle(vec_ba, vec_bc)
+    bond_angle(vec_ji, vec_jk)
 
 Calculate the bond or pseudo-bond angle in radians between three
 coordinates or two vectors.
-The angle between B→A and B→C is returned in the range 0 to π.
+The angle between j→i and j→k is returned in the range 0 to π.
 """
 function bond_angle(coords_i, coords_j, coords_k, box_size)
-    vec_ba = vector(coords_j, coords_i, box_size)
-    vec_bc = vector(coords_j, coords_k, box_size)
-    return bond_angle(vec_ba, vec_bc)
+    vec_ji = vector(coords_j, coords_i, box_size)
+    vec_jk = vector(coords_j, coords_k, box_size)
+    return bond_angle(vec_ji, vec_jk)
 end
 
-function bond_angle(vec_ba, vec_bc)
-    acosbound(dot(vec_ba, vec_bc) / (norm(vec_ba) * norm(vec_bc)))
+function bond_angle(vec_ji, vec_jk)
+    acosbound(dot(vec_ji, vec_jk) / (norm(vec_ji) * norm(vec_jk)))
 end
 
 """
     torsion_angle(coord_i, coord_j, coord_k, coord_l, box_size)
-    torsion_angle(vec_ab, vec_bc, vec_cd)
+    torsion_angle(vec_ij, vec_jk, vec_kl)
 
 Calculate the torsion angle in radians defined by four coordinates or
 three vectors.
@@ -177,18 +177,18 @@ The angle between the planes defined by atoms (i, j, k) and (j, k, l) is
 returned in the range -π to π.
 """
 function torsion_angle(coords_i, coords_j, coords_k, coords_l, box_size)
-    vec_ab = vector(coords_i, coords_j, box_size)
-    vec_bc = vector(coords_j, coords_k, box_size)
-    vec_cd = vector(coords_k, coords_l, box_size)
-    return torsion_angle(vec_ab, vec_bc, vec_cd)
+    vec_ij = vector(coords_i, coords_j, box_size)
+    vec_jk = vector(coords_j, coords_k, box_size)
+    vec_kl = vector(coords_k, coords_l, box_size)
+    return torsion_angle(vec_ij, vec_jk, vec_kl)
 end
 
-function torsion_angle(vec_ab, vec_bc, vec_cd)
-    cross_ab_bc = vec_ab × vec_bc
-    cross_bc_cd = vec_bc × vec_cd
+function torsion_angle(vec_ij, vec_jk, vec_kl)
+    cross_ij_jk = vec_ij × vec_jk
+    cross_jk_kl = vec_jk × vec_kl
     θ = atan(
-        ustrip(dot(cross_ab_bc × cross_bc_cd, normalize(vec_bc))),
-        ustrip(dot(cross_ab_bc, cross_bc_cd)),
+        ustrip(dot(cross_ij_jk × cross_jk_kl, normalize(vec_jk))),
+        ustrip(dot(cross_ij_jk, cross_jk_kl)),
     )
     return θ
 end

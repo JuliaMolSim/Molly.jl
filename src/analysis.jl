@@ -15,13 +15,14 @@ export
 Visualize a simulation as an animation.
 This function is only available when GLMakie is imported.
 GLMakie v0.5 or later should be used.
-It can take a while to run, depending on the length and size of the simulation.
+It can take a while to run, depending on the length of the simulation and the
+number of atoms.
 
 # Arguments
 - `connections=Tuple{Int, Int}[]`: pairs of atoms indices to link with bonds.
-- `connection_frames`: the frames in which bonds are shown. Is a list of the
-    same length as the number of frames, where each item is a list of `Bool`s of
-    the same length as `connections`. Defaults to always `true`.
+- `connection_frames`: the frames in which bonds are shown. Should be a list of
+    the same length as the number of frames, where each item is a list of
+    `Bool`s of the same length as `connections`. Defaults to always `true`.
 - `trails::Integer=0`: the number of preceding frames to show as transparent
     trails.
 - `framerate::Integer=30`: the frame rate of the animation.
@@ -40,8 +41,8 @@ function visualize end
 """
     displacements(coords, box_size)
 
-Get the pairwise vector displacements of a set of coordinates, accounting for
-the periodic boundary conditions.
+Calculate the pairwise vector displacements of a set of coordinates, accounting
+for the periodic boundary conditions.
 """
 function displacements(coords, box_size)
     n_atoms = length(coords)
@@ -53,15 +54,15 @@ end
 """
     distances(coords, box_size)
 
-Get the pairwise distances of a set of coordinates, accounting for the periodic
-boundary conditions.
+Calculate the pairwise distances of a set of coordinates, accounting for the
+periodic boundary conditions.
 """
 distances(coords, box_size) = norm.(displacements(coords, box_size))
 
 """
     rdf(coords, box_size; npoints=200)
 
-Get the radial distribution function of a set of coordinates.
+Calculate the radial distribution function of a set of coordinates.
 This describes how density varies as a function of distance from each atom.
 Returns a list of distance bin centres and a list of the corresponding
 densities.
@@ -88,7 +89,7 @@ end
     velocity_autocorr(vl, first_ind, last_ind)
 
 Calculate the autocorrelation function of velocity from the velocity logger. 
-This helps characterize the similarity between velocities observed at different
+This characterizes the similarity between velocities observed at different
 time instances.
 """
 function velocity_autocorr(vl::VelocityLogger, first_ind::Integer=1, last_ind::Integer=length(vl.velocities))

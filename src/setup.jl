@@ -303,10 +303,10 @@ includes collapsed into one file.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients, defaults to the value of `gpu`.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
-- `nl_dist=1.2u"nm"`: cutoff distance for neighbor list, should not be less
-    than `dist_cutoff`.
+- `nl_dist=1.2u"nm"`: cutoff distance for the neighbor list, should not be
+    less than `dist_cutoff`.
 - `implicit_solvent=nothing`: specify a string to add an implicit solvent
-    model, options are "obc1", "obc2" or "gbn2".
+    model, options are "obc1", "obc2" and "gbn2".
 - `centre_coords::Bool=true`: whether to centre the coordinates in the
     simulation box.
 """

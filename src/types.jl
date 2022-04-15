@@ -256,7 +256,8 @@ interface described there.
     a `Tuple`.
 - `coords::C`: the coordinates of the atoms in the system. Typically a
     vector of `SVector`s of 2 or 3 dimensions.
-- `velocities::V=zero(coords)`: the velocities of the atoms in the system.
+- `velocities::V=zero(coords) * u"ps^-1"`: the velocities of the atoms in the
+    system.
 - `box_size::B`: the size of the box in which the simulation takes place.
     Typically a `SVector` of 2 or 3 dimensions.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
@@ -264,7 +265,9 @@ interface described there.
 - `loggers::L=Dict()`: the loggers that record properties of interest during a
     simulation.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
-- `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system.
+    Set to `NoUnits` if units are not being used.
+- `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Set to
+    `NoUnits` if units are not being used.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """

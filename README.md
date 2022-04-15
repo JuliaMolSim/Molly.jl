@@ -23,6 +23,7 @@ Implemented features include:
 - Steepest descent energy minimization.
 - Periodic boundary conditions in a cubic box.
 - Various neighbor list implementations to speed up calculation of non-bonded forces.
+- Implicit solvent GBSA methods.
 - [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
 - Automatic multithreading.
 - GPU acceleration on CUDA-enabled devices.
@@ -33,10 +34,13 @@ Implemented features include:
 - Differentiable molecular simulation. This is a unique feature of the package and the focus of its current development.
 
 Features not yet implemented include:
-- Simulators such as REMD.
+- Simulators such as REMD and metadynamics.
 - Other temperature or pressure coupling methods.
 - Protein preparation - solvent box, add hydrogens etc.
 - Quantum mechanical modelling.
+- Constrained bonds and angles.
+- Domain decomposition algorithms.
+- Alchemical free energy calculations.
 - High test coverage.
 - API stability.
 - High GPU performance.
@@ -64,7 +68,10 @@ atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_at
 coords = place_atoms(n_atoms, box_size, 0.3u"nm")
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 pairwise_inters = (LennardJones(),)
-simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
+simulator = VelocityVerlet(
+    dt=0.002u"ps",
+    coupling=AndersenThermostat(temp, 1.0u"ps"),
+)
 
 sys = System(
     atoms=atoms,
@@ -93,7 +100,10 @@ sys = System(
 
 temp = 298.0u"K"
 random_velocities!(sys, temp)
-simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
+simulator = VelocityVerlet(
+    dt=0.0002u"ps",
+    coupling=AndersenThermostat(temp, 1.0u"ps"),
+)
 
 simulate!(sys, simulator, 5_000)
 ```

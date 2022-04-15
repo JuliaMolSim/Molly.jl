@@ -1,17 +1,17 @@
 # Differentiable simulation with Molly
 
 !!! note
-    There are still some rough edges when taking gradients through simulations. Please open an issue if you run into an error and remember the golden rule of AD: always check your gradients against finite differencing.
+    There are still many rough edges when taking gradients through simulations. Please open an issue if you run into an error and remember the golden rule of AD: always check your gradients against finite differencing.
 
 In the last few years, the deep learning revolution has broadened to include the paradigm of [differentiable programming](https://en.wikipedia.org/wiki/Differentiable_programming).
-The concept of using automatic differentiation (AD) to obtain exact gradients through physical simulations has many interesting applications, including parameterising force fields and training neural networks to describe atom potentials.
+The concept of using automatic differentiation (AD) to obtain exact gradients through physical simulations has many interesting applications, including parameterising force fields and training neural networks to describe atomic potentials.
 
 There are some projects that explore differentiable molecular simulations such as [Jax, M.D.](https://github.com/google/jax-md), [TorchMD](https://github.com/torchmd/torchmd) and [mdgrad](https://github.com/torchmd/mdgrad).
 However Julia provides a strong suite of AD tools, with [Zygote.jl](https://github.com/FluxML/Zygote.jl) allowing source-to-source transformations for much of the language.
-With Molly you can use the power of Zygote to obtain gradients through molecular simulations.
+With Molly you can use the power of Zygote to obtain gradients through molecular simulations, even in the presence of complex interactions such as implicit solvation.
 Reverse and forward mode AD can be used on the CPU and the GPU.
-Pairwise and specific interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
-Differentiable simulation does not currently work with units, user-defined types and some components of the package.
+Pairwise, specific and general interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
+Differentiable simulation does not currently work with units and some components of the package.
 
 ## Pairwise interactions
 
@@ -153,6 +153,7 @@ In this case it is recommended to split up the simulation into a set of short si
 This runs the same simulation but makes the intermediate coordinates and velocities available for use in the loss function.
 It is recommended to have a single value to accumulate values of the loss function.
 For example, the RMSD could be calculated from the coordinates every 100 steps and added to a variable that is then divided by the number of chunks to get a loss value corresponding to the mean RMSD over the simulation.
+Loggers are ignored for gradient calculation and should not be used in the loss function.
 
 ## Specific interactions
 
@@ -263,7 +264,7 @@ Epoch 18  |  θ  90.6°  |  Final dist 0.99  |  Loss 0.011  |  Grad -0.530
 Epoch 19  |  θ  93.7°  |  Final dist 1.02  |  Loss 0.017  |  Grad  0.520
 Epoch 20  |  θ  90.7°  |  Final dist 0.99  |  Loss 0.010  |  Grad -0.530
 ```
-The final value we get is 90.7°, close to the theoretical value of 91.2° which is obtainable from trigonometry.
+The final value we get is 90.7°, close to the theoretical value of 91.2° which can be calculated with trigonometry.
 The final simulation looks like this:
 ![Angle simulation](images/sim_angle.gif)
 In the presence of other forces this value would not be so trivially obtainable.
@@ -311,10 +312,17 @@ n_steps = 400
 mass = 10.0f0
 box_size = SVector(5.0f0, 5.0f0, 5.0f0)
 temp = 0.01f0
-coords = [SVector(2.3f0, 2.07f0, 0.0f0), SVector(2.5f0, 2.93f0, 0.0f0), SVector(2.7f0, 2.07f0, 0.0f0)]
+coords = [
+    SVector(2.3f0, 2.07f0, 0.0f0),
+    SVector(2.5f0, 2.93f0, 0.0f0),
+    SVector(2.7f0, 2.07f0, 0.0f0),
+]
 n_atoms = length(coords)
 velocities = zero(coords)
-simulator = VelocityVerlet(dt=0.02f0, coupling=BerendsenThermostat(temp, 0.5f0))
+simulator = VelocityVerlet(
+    dt=0.02f0,
+    coupling=BerendsenThermostat(temp, 0.5f0),
+)
 
 function loss()
     atoms = [Atom(0, 0.0f0, mass, 0.0f0, 0.0f0, false) for i in 1:n_atoms]
@@ -400,6 +408,7 @@ Here are some ideas for loss functions suitable for differentiable molecular sim
 - The radial distribution function of atoms.
 - RMSD between atoms and a reference state - this would be suitable for macromolecules.
 - dRMSD, the distance between a distance map and a reference distance map.
+- The radius of gyration of a molecule.
 - The flexibility of a set of atoms over the simulation.
 - Supramolecular geometry, for example assembly of molecules into straight fibres.
 - The correlation of different velocities over the simulation.
@@ -411,7 +420,7 @@ Some of these are currently not possible in Molly as the loggers are ignored for
 
 ## Tips and tricks
 
-- The magnitude of gradients may be less important than the sign. Consider sampling gradients across different sources of stochasticity, such as starting velocities or conformations.
+- The magnitude of gradients may be less important than the sign. Consider sampling gradients across different sources of stochasticity, such as starting velocities and conformations.
 - Exploding gradients prove a problem when using the velocity Verlet integrator in the NVE ensemble. This is why the velocity rescaling and Berendsen thermostats were used in the above examples. It is likely that the development of suitable simulation strategies and thermostats will be necessary to unlock the potential of differentiable simulation.
-- Do you *really* need a neural network to describe your potential? Think about learning a smaller number of physically-meaningful parameters before you put in a large neural network and expect it to learn. Whilst it is true that neural networks are universal function approximators, it does not follow that you will be able to train one by differentiating through  a long simulation. A 1000-step simulation with a 10-layer network at each step is analogous to training a 10,000 layer network (with shared weights).
-- Forward mode AD holds much promise for differentiable simulation, provided the number of parameters is small, because the memory requirement is constant in the number of simulation steps. However, if the code runs slower than non-differentiable alternatives then the best approach may be to use finite differencing with the simulation as a black box.
+- Do you *really* need a neural network to describe your potential? Think about learning a smaller number of physically-meaningful parameters before you put in a large neural network and expect it to learn. Whilst it is true that neural networks are universal function approximators, it does not follow that you will be able to train one by differentiating through  a long simulation. A 1,000-step simulation with a 10-layer network at each step is analogous to training a 10,000 layer network (with shared weights).
+- Forward mode AD holds much promise for differentiable simulation, provided that the number of parameters is small, because the memory requirement is constant in the number of simulation steps. However, if the code runs slower than non-differentiable alternatives then the best approach is likely to use finite differencing with the simulation as a black box.
