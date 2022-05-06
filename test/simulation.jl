@@ -152,7 +152,7 @@ end
         nb_matrix[i, i + (n_atoms ÷ 2)] = false
         nb_matrix[i + (n_atoms ÷ 2), i] = false
     end
-    simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
+    simulator = VelocityVerlet(dt=0.002u"ps", coupling=BerendsenThermostat(temp, 1.0u"ps"))
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
