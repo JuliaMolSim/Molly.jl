@@ -68,6 +68,14 @@ end
 
         @time simulate!(s, simulator, n_steps; parallel=parallel)
 
+        show(devnull, s.loggers["temp"])
+        show(devnull, s.loggers["coords"])
+        show(devnull, s.loggers["vels"])
+        show(devnull, s.loggers["energy"])
+        show(devnull, s.loggers["ke"])
+        show(devnull, s.loggers["pe"])
+        show(devnull, s.loggers["writer"])
+
         final_coords = last(s.loggers["coords"].coords)
         @test all(all(c .> 0.0u"nm") for c in final_coords)
         @test all(all(c .< box_size) for c in final_coords)
