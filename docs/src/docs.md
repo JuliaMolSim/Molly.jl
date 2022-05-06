@@ -379,7 +379,7 @@ sys = System(
     neighbor_finder=neighbor_finder,
     loggers=Dict(
         "coords" => CoordinateLogger(Float64, 10; dims=2),
-        "SIR" => SIRLogger(10, []),
+        "SIR"    => SIRLogger(10, []),
     ),
     force_units=NoUnits,
     energy_units=NoUnits,

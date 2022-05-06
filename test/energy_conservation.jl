@@ -27,8 +27,10 @@ using Test
                 coords=place_atoms(n_atoms, box_size, 0.6u"nm"),
                 velocities=[velocity(atom_mass, temp) for i in 1:n_atoms],
                 box_size=box_size,
-                loggers=Dict("coords" => CoordinateLogger(100),
-                                "energy" => TotalEnergyLogger(100)),
+                loggers=Dict(
+                    "coords" => CoordinateLogger(100),
+                    "energy" => TotalEnergyLogger(100),
+                ),
             )
 
             E0 = total_energy(s)

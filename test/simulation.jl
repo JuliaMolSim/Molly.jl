@@ -12,8 +12,10 @@
         velocities=[velocity(10.0u"u", temp; dims=2) .* 0.01 for i in 1:n_atoms],
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-        loggers=Dict("temp" => TemperatureLogger(100),
-                     "coords" => CoordinateLogger(100; dims=2)),
+        loggers=Dict(
+            "temp"   => TemperatureLogger(100),
+            "coords" => CoordinateLogger(100; dims=2),
+        ),
     )
 
     show(devnull, s)
@@ -48,13 +50,15 @@ end
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             box_size=box_size,
             neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-            loggers=Dict("temp"   => TemperatureLogger(100),
-                         "coords" => CoordinateLogger(100),
-                         "vels"   => VelocityLogger(100),
-                         "energy" => TotalEnergyLogger(100),
-                         "ke"     => KineticEnergyLogger(100),
-                         "pe"     => PotentialEnergyLogger(100),
-                         "writer" => StructureWriter(100, temp_fp_pdb)),
+            loggers=Dict(
+                "temp"   => TemperatureLogger(100),
+                "coords" => CoordinateLogger(100),
+                "vels"   => VelocityLogger(100),
+                "energy" => TotalEnergyLogger(100),
+                "ke"     => KineticEnergyLogger(100),
+                "pe"     => PotentialEnergyLogger(100),
+                "writer" => StructureWriter(100, temp_fp_pdb),
+            ),
         )
 
         nf_tree = TreeNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
@@ -137,8 +141,10 @@ end
         velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-        loggers=Dict("temp" => TemperatureLogger(10),
-                        "coords" => CoordinateLogger(10)),
+        loggers=Dict(
+            "temp"   => TemperatureLogger(10),
+            "coords" => CoordinateLogger(10),
+        ),
     )
 
     @time simulate!(s, simulator, n_steps; parallel=false)
@@ -187,9 +193,11 @@ end
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             box_size=box_size,
             neighbor_finder=neighbor_finder,
-            loggers=Dict("temp" => TemperatureLogger(100),
-                         "coords" => CoordinateLogger(100),
-                         "energy" => TotalEnergyLogger(100)),
+            loggers=Dict(
+                "temp"   => TemperatureLogger(100),
+                "coords" => CoordinateLogger(100),
+                "energy" => TotalEnergyLogger(100),
+            ),
         )
 
         @time simulate!(s, simulator, n_steps)
@@ -213,9 +221,11 @@ end
         velocities=velocities,
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
-        loggers=Dict("temp" => TemperatureLogger(100),
-                     "coords" => CoordinateLogger(100),
-                     "energy" => TotalEnergyLogger(100)),
+        loggers=Dict(
+            "temp"   => TemperatureLogger(100),
+            "coords" => CoordinateLogger(100),
+            "energy" => TotalEnergyLogger(100),
+        ),
     )
 
     s_nounits = System(
@@ -225,9 +235,11 @@ end
         velocities=ustrip_vec.(velocities),
         box_size=ustrip.(box_size),
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0),
-        loggers=Dict("temp" => TemperatureLogger(Float64, 100),
-                     "coords" => CoordinateLogger(Float64, 100),
-                     "energy" => TotalEnergyLogger(Float64, 100)),
+        loggers=Dict(
+            "temp"   => TemperatureLogger(Float64, 100),
+            "coords" => CoordinateLogger(Float64, 100),
+            "energy" => TotalEnergyLogger(Float64, 100),
+        ),
         force_units=NoUnits,
         energy_units=NoUnits,
     )

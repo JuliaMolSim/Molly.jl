@@ -78,8 +78,10 @@
         velocities=velocities,
         box_size=box_size,
         neighbor_finder=neighbor_finder,
-        loggers=Dict("coords" => CoordinateLogger(Float64, 10; dims=2),
-                        "SIR" => SIRLogger(10, [])),
+        loggers=Dict(
+            "coords" => CoordinateLogger(Float64, 10; dims=2),
+            "SIR"    => SIRLogger(10, []),
+        ),
         force_units=NoUnits,
         energy_units=NoUnits,
     )
