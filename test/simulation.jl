@@ -9,7 +9,6 @@
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         pairwise_inters=(LennardJones(nl_only=true),),
         coords=place_atoms(n_atoms, box_size, 0.3u"nm"),
-        velocities=[velocity(10.0u"u", temp; dims=2) .* 0.01 for i in 1:n_atoms],
         box_size=box_size,
         neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
         loggers=Dict(
@@ -17,6 +16,7 @@
             "coords" => CoordinateLogger(100; dims=2),
         ),
     )
+    random_velocities!(s, temp)
 
     show(devnull, s)
 
@@ -74,6 +74,7 @@ end
         displacements(final_coords, box_size)
         distances(final_coords, box_size)
         rdf(final_coords, box_size)
+        @test unit(velocity_autocorr(s.loggers["vels"])) == u"nm^2 * ps^-2"
 
         traj = read(temp_fp_pdb, BioStructures.PDB)
         rm(temp_fp_pdb)
