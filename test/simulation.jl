@@ -10,7 +10,11 @@
         pairwise_inters=(LennardJones(nl_only=true),),
         coords=place_atoms(n_atoms, box_size, 0.3u"nm"),
         box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
+        neighbor_finder=DistanceNeighborFinder(
+            nb_matrix=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=2.0u"nm",
+        ),
         loggers=Dict(
             "temp"   => TemperatureLogger(100),
             "coords" => CoordinateLogger(100; dims=2),
@@ -49,7 +53,11 @@ end
             coords=place_atoms(n_atoms, box_size, 0.3u"nm"),
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             box_size=box_size,
-            neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
+            neighbor_finder=DistanceNeighborFinder(
+                nb_matrix=trues(n_atoms, n_atoms),
+                n_steps=10,
+                dist_cutoff=2.0u"nm",
+            ),
             loggers=Dict(
                 "temp"   => TemperatureLogger(100),
                 "coords" => CoordinateLogger(100),
@@ -110,7 +118,11 @@ end
         pairwise_inters=(LennardJones(nl_only=true),),
         coords=coords,
         box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
+        neighbor_finder=DistanceNeighborFinder(
+            nb_matrix=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=2.0u"nm",
+        ),
         loggers=Dict("coords" => CoordinateLogger(100)),
     )
     random_velocities!(s, temp)
@@ -149,7 +161,11 @@ end
         coords=coords,
         velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
         box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
+        neighbor_finder=DistanceNeighborFinder(
+            nb_matrix=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=2.0u"nm",
+        ),
         loggers=Dict(
             "temp"   => TemperatureLogger(10),
             "coords" => CoordinateLogger(10),
@@ -229,7 +245,11 @@ end
         coords=coords,
         velocities=velocities,
         box_size=box_size,
-        neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm"),
+        neighbor_finder=DistanceNeighborFinder(
+            nb_matrix=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=2.0u"nm",
+        ),
         loggers=Dict(
             "temp"   => TemperatureLogger(100),
             "coords" => CoordinateLogger(100),
@@ -243,7 +263,11 @@ end
         coords=ustrip_vec.(coords),
         velocities=ustrip_vec.(velocities),
         box_size=ustrip.(box_size),
-        neighbor_finder=DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0),
+        neighbor_finder=DistanceNeighborFinder(
+            nb_matrix=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=2.0,
+        ),
         loggers=Dict(
             "temp"   => TemperatureLogger(Float64, 100),
             "coords" => CoordinateLogger(Float64, 100),
@@ -296,11 +320,17 @@ end
         pairwise_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
         if nl
             if gpu_diff_safe
-                neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
-                                                            n_steps=10, dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm")
+                neighbor_finder = DistanceVecNeighborFinder(
+                    nb_matrix=gpu ? cu(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+                    n_steps=10,
+                    dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+                )
             else
-                neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,
-                                                            dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm")
+                neighbor_finder = DistanceNeighborFinder(
+                    nb_matrix=trues(n_atoms, n_atoms),
+                    n_steps=10,
+                    dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+                )
             end
             pairwise_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
         end
