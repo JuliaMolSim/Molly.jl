@@ -22,6 +22,12 @@
     )
     random_velocities!(s, temp)
 
+    @test typeof(boundary_conditions(s)) <: SVector
+    @test bounding_box(s) == SVector(
+        SVector(2.0, 0.0)u"nm",
+        SVector(0.0, 2.0)u"nm",
+    )
+
     show(devnull, s)
 
     @time simulate!(s, simulator, n_steps; parallel=false)
@@ -39,6 +45,7 @@ end
 
 @testset "Lennard-Jones" begin
     n_atoms = 100
+    atom_mass = 10.0u"u"
     n_steps = 20_000
     temp = 298.0u"K"
     box_size = SVector(2.0, 2.0, 2.0)u"nm"
@@ -47,11 +54,11 @@ end
 
     for parallel in parallel_list
         s = System(
-            atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-            atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR") for i in 1:n_atoms],
+            atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+            atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR", element="Ar") for i in 1:n_atoms],
             pairwise_inters=(LennardJones(nl_only=true),),
             coords=place_atoms(n_atoms, box_size, 0.3u"nm"),
-            velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
+            velocities=[velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
             box_size=box_size,
             neighbor_finder=DistanceNeighborFinder(
                 nb_matrix=trues(n_atoms, n_atoms),
@@ -67,6 +74,24 @@ end
                 "pe"     => PotentialEnergyLogger(100),
                 "writer" => StructureWriter(100, temp_fp_pdb),
             ),
+        )
+
+        # Test AtomsBase.jl interface
+        @test species_type(s) <: Atom
+        @test typeof(s[5]) <: AtomView
+        @test position(s) == s.coords
+        @test position(s, 5) == s.coords[5]
+        @test velocity(s) == s.velocities
+        @test velocity(s, 5) == s.velocities[5]
+        @test atomic_mass(s) == repeat([atom_mass], 100)
+        @test atomic_mass(s, 5) == atom_mass
+        @test atomic_symbol(s) == repeat([:Ar], 100)
+        @test atomic_symbol(s, 5) == :Ar
+        @test typeof(boundary_conditions(s)) <: SVector
+        @test bounding_box(s) == SVector(
+            SVector(2.0, 0.0, 0.0)u"nm",
+            SVector(0.0, 2.0, 0.0)u"nm",
+            SVector(0.0, 0.0, 2.0)u"nm",
         )
 
         nf_tree = TreeNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
@@ -358,6 +383,9 @@ end
             neighbor_finder=neighbor_finder,
             gpu_diff_safe=gpu_diff_safe,
         )
+
+        @test is_gpu_diff_safe(s) == gpu_diff_safe
+        @test float_type(s) == (f32 ? Float32 : Float64)
 
         neighbors = find_neighbors(s; parallel=parallel)
         E_start = potential_energy(s, neighbors)

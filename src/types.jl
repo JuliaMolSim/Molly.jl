@@ -354,9 +354,15 @@ AtomsBase.atomic_number(s::System, i::Integer) = missing
 AtomsBase.boundary_conditions(::System{3}) = SVector(Periodic(), Periodic(), Periodic())
 AtomsBase.boundary_conditions(::System{2}) = SVector(Periodic(), Periodic())
 
-edges_to_box(bs::SVector{3}, z) = SVector{3}([SVector(bs[1], z, z), SVector(z, bs[2], z),
-                                              SVector(z, z, bs[3])])
-edges_to_box(bs::SVector{2}, z) = SVector{2}([SVector(bs[1], z), SVector(z, bs[2])])
+edges_to_box(bs::SVector{3}, z) = SVector{3}([
+    SVector(bs[1], z    , z    ),
+    SVector(z    , bs[2], z    ),
+    SVector(z    , z    , bs[3]),
+])
+edges_to_box(bs::SVector{2}, z) = SVector{2}([
+    SVector(bs[1], z    ),
+    SVector(z    , bs[2]),
+])
 
 function AtomsBase.bounding_box(s::System)
     bs = s.box_size
