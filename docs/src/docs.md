@@ -64,7 +64,7 @@ simulate!(sys, simulator, 1_000)
 ```
 `atoms`, `coords` and `box_size` are the minimum required properties to define a [`System`](@ref).
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this can be turned off by giving the keyword argument `parallel=false` to [`simulate!`](@ref).
-An animation of the stored coordinates using can be saved using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
+An animation of the stored coordinates can be saved by using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
 ```julia
 using GLMakie
 visualize(sys.loggers["coords"], box_size, "sim_lj.mp4")
@@ -108,7 +108,7 @@ simulate!(sys, simulator, 1_000)
 
 ## Simulating diatomic molecules
 
-If we want to define specific interactions between atoms, for example bonds, we can do.
+If we want to define specific interactions between atoms, for example bonds, we can do this as well.
 Using the same definitions as the first example, let's set up the coordinates so that paired atoms are 1 Å apart.
 ```julia
 coords = place_atoms(n_atoms ÷ 2, box_size, 0.3u"nm")
@@ -392,6 +392,18 @@ visualize(sys.loggers["coords"], box_size, "sim_agent.mp4"; markersize=0.1)
 ![Agent simulation](images/sim_agent.gif)
 
 We can use the logger to plot the fraction of people susceptible (blue), infected (orange) and recovered (green) over the course of the simulation:
+
+```
+using Plots
+
+sir_matrix = zeros(length(sys.loggers["SIR"].fracs_sir),3)
+for i = 1:101
+    sir_matrix[i,:] .= sys.loggers["SIR"].fracs_sir[i][:]
+end
+
+plot(sir_matrix)
+```
+
 ![Fraction SIR](images/fraction_sir.png)
 
 ## Units
