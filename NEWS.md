@@ -1,5 +1,9 @@
 # Molly.jl release notes
 
+## v0.10.1 - May 2022
+
+- A bug in the `Gravity` force and potential energy is fixed.
+
 ## v0.10.0 - Apr 2022
 
 - Loggers now also run before the first simulation step, i.e. at step 0, allowing the starting state to be recorded.

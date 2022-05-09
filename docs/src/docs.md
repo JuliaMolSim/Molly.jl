@@ -396,9 +396,9 @@ We can use the logger to plot the fraction of people susceptible (blue), infecte
 ```
 using Plots
 
-sir_matrix = zeros(length(sys.loggers["SIR"].fracs_sir),3)
+sir_matrix = zeros(length(sys.loggers["SIR"].fracs_sir), 3)
 for i = 1:101
-    sir_matrix[i,:] .= sys.loggers["SIR"].fracs_sir[i][:]
+    sir_matrix[i, :] .= sys.loggers["SIR"].fracs_sir[i][:]
 end
 
 plot(sir_matrix)
