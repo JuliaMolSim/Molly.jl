@@ -188,7 +188,7 @@ This example also shows the use of `Float32`, a 2D simulation and no specified u
 atoms = [Atom(mass=1.0f0), Atom(mass=1.0f0)]
 coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
 velocities = [SVector(0.0f0, 1.0f0), SVector(0.0f0, -1.0f0)]
-pairwise_inters = (Gravity(nl_only=false, G=-1.5f0),)
+pairwise_inters = (Gravity(nl_only=false, G=1.5f0),)
 simulator = VelocityVerlet(dt=0.002f0)
 box_size = SVector(1.0f0, 1.0f0)
 
@@ -401,7 +401,7 @@ for i = 1:101
     sir_matrix[i,:] .= sys.loggers["SIR"].fracs_sir[i][:]
 end
 
-Plots.plot(sir_matrix)
+plot(sir_matrix)
 ```
 
 ![Fraction SIR](images/fraction_sir.png)
