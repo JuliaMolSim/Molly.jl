@@ -48,7 +48,7 @@
     end
 
     # Custom logging function
-    function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n)
+    function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n; parallel=true)
         if step_n % logger.n_steps == 0
             counts_sir = [
                 count(p -> p.status == susceptible, s.atoms),

@@ -69,7 +69,7 @@ struct BondLogger
     bonds::Vector{BitVector}
 end
 
-function Molly.log_property!(logger::BondLogger, s, neighbors, step_n)
+function Molly.log_property!(logger::BondLogger, s, neighbors, step_n; parallel=true)
     if step_n % logger.n_steps == 0
         bonds = BitVector()
         for i in 1:length(s)

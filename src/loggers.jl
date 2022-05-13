@@ -12,13 +12,13 @@ export
     StructureWriter
 
 """
-    run_loggers!(system, neighbors=nothing, step_n=0)
+    run_loggers!(system, neighbors=nothing, step_n=0; parallel=true)
 
 Run the loggers associated with the system.
 """
-function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0)
+function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0; parallel::Bool=true)
     for logger in values(s.loggers)
-        log_property!(logger, s, neighbors, step_n)
+        log_property!(logger, s, neighbors, step_n; parallel=parallel)
     end
 end
 
@@ -44,12 +44,13 @@ function Base.show(io::IO, tl::TemperatureLogger)
 end
 
 """
-    log_property!(logger, system, neighbors=nothing, step_n=0)
+    log_property!(logger, system, neighbors=nothing, step_n=0; parallel=true)
 
 Log a property of the system thoughout a simulation.
 Custom loggers should implement this function.
 """
-function log_property!(logger::TemperatureLogger, s::System, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::TemperatureLogger, s::System, neighbors=nothing,
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.temperatures, temperature(s))
     end
@@ -80,7 +81,8 @@ function Base.show(io::IO, cl::CoordinateLogger)
             length(cl.coords) > 0 ? length(first(cl.coords)) : "?", " atoms")
 end
 
-function log_property!(logger::CoordinateLogger, s::System, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::CoordinateLogger, s::System, neighbors=nothing,
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.coords, deepcopy(s.coords))
     end
@@ -111,7 +113,8 @@ function Base.show(io::IO, vl::VelocityLogger)
             length(vl.velocities) > 0 ? length(first(vl.velocities)) : "?", " atoms")
 end
 
-function log_property!(logger::VelocityLogger, s::System, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::VelocityLogger, s::System, neighbors=nothing,
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.velocities, deepcopy(s.velocities))
     end
@@ -138,7 +141,8 @@ function Base.show(io::IO, el::TotalEnergyLogger)
                 el.n_steps, ", ", length(el.energies), " energies recorded")
 end
 
-function log_property!(logger::TotalEnergyLogger, s::System, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::TotalEnergyLogger, s::System, neighbors=nothing,
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.energies, total_energy(s, neighbors))
     end
@@ -165,7 +169,8 @@ function Base.show(io::IO, el::KineticEnergyLogger)
                 el.n_steps, ", ", length(el.energies), " energies recorded")
 end
 
-function log_property!(logger::KineticEnergyLogger, s::System, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::KineticEnergyLogger, s::System, neighbors=nothing,
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.energies, kinetic_energy(s))
     end
@@ -192,7 +197,8 @@ function Base.show(io::IO, el::PotentialEnergyLogger)
                 el.n_steps, ", ", length(el.energies), " energies recorded")
 end
 
-function log_property!(logger::PotentialEnergyLogger, s::System, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::PotentialEnergyLogger, s::System, neighbors=nothing,
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.energies, potential_energy(s, neighbors))
     end
@@ -219,7 +225,8 @@ function Base.show(io::IO, sw::StructureWriter)
                 sw.filepath, "\", ", sw.structure_n, " frames written")
 end
 
-function log_property!(logger::StructureWriter, s::System, neighbors=nothing, step_n::Integer=0)
+function log_property!(logger::StructureWriter, s::System, neighbors=nothing,
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         if length(s) != length(s.atoms_data)
             error("Number of atoms is ", length(s), " but number of atom data entries is ",

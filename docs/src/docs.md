@@ -337,7 +337,7 @@ struct SIRLogger
 end
 
 # Custom logging function
-function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n)
+function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n; parallel=true)
     if step_n % logger.n_steps == 0
         counts_sir = [
             count(p -> p.status == susceptible, s.atoms),
@@ -393,7 +393,7 @@ visualize(sys.loggers["coords"], box_size, "sim_agent.mp4"; markersize=0.1)
 
 We can use the logger to plot the fraction of people susceptible (blue), infected (orange) and recovered (green) over the course of the simulation:
 
-```
+```julia
 using Plots
 
 sir_matrix = zeros(length(sys.loggers["SIR"].fracs_sir), 3)
@@ -659,7 +659,7 @@ function Molly.simulate!(sys,
                             parallel::Bool=true)
     # Find neighbors like this
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    run_loggers!(sys, neighbors, 0)
+    run_loggers!(sys, neighbors, 0; parallel=parallel)
 
     for step_n in 1:n_steps
         # Calculate accelerations like this
@@ -675,7 +675,7 @@ function Molly.simulate!(sys,
         remove_CM_motion!(sys)
 
         # Apply the loggers like this
-        run_loggers!(sys, neighbors, step_n)
+        run_loggers!(sys, neighbors, step_n; parallel=parallel)
 
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
@@ -785,7 +785,7 @@ end
 ```
 Then, define the logging function that is called every step by the simulator:
 ```julia
-function Molly.log_property!(logger::MyLogger, sys, neighbors, step_n)
+function Molly.log_property!(logger::MyLogger, sys, neighbors, step_n; parallel=true)
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end

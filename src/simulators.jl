@@ -50,7 +50,7 @@ function simulate!(sys,
                     sim::SteepestDescentMinimizer;
                     parallel::Bool=true)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    sim.run_loggers && run_loggers!(sys, neighbors, 0)
+    sim.run_loggers && run_loggers!(sys, neighbors, 0; parallel=parallel)
     E = potential_energy(sys, neighbors)
     println(sim.log_stream, "Step 0 - potential energy ",
             E, " - max force N/A - N/A")
@@ -81,7 +81,8 @@ function simulate!(sys,
                     E_trial, " - max force ", max_force, " - rejected")
         end
 
-        sim.run_loggers && run_loggers!(sys, neighbors, step_n)
+        sim.run_loggers && run_loggers!(sys, neighbors, step_n;
+                                        parallel=parallel)
 
         if max_force < sim.tol
             break
@@ -127,7 +128,7 @@ function simulate!(sys,
                     n_steps::Integer;
                     parallel::Bool=true)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    run_loggers!(sys, neighbors, 0)
+    run_loggers!(sys, neighbors, 0; parallel=parallel)
     accels_t = accelerations(sys, neighbors; parallel=parallel)
     accels_t_dt = zero(accels_t)
     sim.remove_CM_motion && remove_CM_motion!(sys)
@@ -143,7 +144,7 @@ function simulate!(sys,
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim, sim.coupling)
 
-        run_loggers!(sys, neighbors, step_n)
+        run_loggers!(sys, neighbors, step_n; parallel=parallel)
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
@@ -182,7 +183,7 @@ function simulate!(sys,
                     n_steps::Integer;
                     parallel::Bool=true)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    run_loggers!(sys, neighbors, 0)
+    run_loggers!(sys, neighbors, 0; parallel=parallel)
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
@@ -196,7 +197,7 @@ function simulate!(sys,
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim, sim.coupling)
 
-        run_loggers!(sys, neighbors, step_n)
+        run_loggers!(sys, neighbors, step_n; parallel=parallel)
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
@@ -228,7 +229,7 @@ function simulate!(sys,
                     n_steps::Integer;
                     parallel::Bool=true)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    run_loggers!(sys, neighbors, 0)
+    run_loggers!(sys, neighbors, 0; parallel=parallel)
     coords_last = sys.coords
 
     for step_n in 1:n_steps
@@ -248,7 +249,7 @@ function simulate!(sys,
 
         apply_coupling!(sys, sim, sim.coupling)
 
-        run_loggers!(sys, neighbors, step_n)
+        run_loggers!(sys, neighbors, step_n; parallel=parallel)
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
@@ -294,7 +295,7 @@ function simulate!(sys,
                     parallel::Bool=true,
                     rng=Random.GLOBAL_RNG)
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    run_loggers!(sys, neighbors, 0)
+    run_loggers!(sys, neighbors, 0; parallel=parallel)
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
@@ -310,7 +311,7 @@ function simulate!(sys,
         sys.coords = wrap_coords_vec.(sys.coords, (sys.box_size,))
         sim.remove_CM_motion && remove_CM_motion!(sys)
 
-        run_loggers!(sys, neighbors, step_n)
+        run_loggers!(sys, neighbors, step_n; parallel=parallel)
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
