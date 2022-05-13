@@ -774,6 +774,7 @@ The available loggers are:
 - [`TotalEnergyLogger`](@ref)
 - [`KineticEnergyLogger`](@ref)
 - [`PotentialEnergyLogger`](@ref)
+- [`ForceLogger`](@ref)
 - [`StructureWriter`](@ref)
 
 To define your own logger, first define the `struct`:

@@ -9,6 +9,7 @@ export
     TotalEnergyLogger,
     KineticEnergyLogger,
     PotentialEnergyLogger,
+    ForceLogger,
     StructureWriter
 
 """
@@ -201,6 +202,38 @@ function log_property!(logger::PotentialEnergyLogger, s::System, neighbors=nothi
                         step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.energies, potential_energy(s, neighbors))
+    end
+end
+
+"""
+    ForceLogger(n_steps; dims=3)
+
+Log the forces throughout a simulation.
+"""
+struct ForceLogger{T}
+    n_steps::Int
+    forces::Vector{Vector{T}}
+end
+
+function ForceLogger(T, n_steps::Integer; dims::Integer=3)
+    return ForceLogger(n_steps,
+                        Array{SArray{Tuple{dims}, T, 1, dims}, 1}[])
+end
+
+function ForceLogger(n_steps::Integer; dims::Integer=3)
+    return ForceLogger(typeof(one(DefaultFloat)u"kJ * mol^-1 * nm^-1"), n_steps; dims=dims)
+end
+
+function Base.show(io::IO, fl::ForceLogger)
+    print(io, "ForceLogger{", eltype(eltype(fl.forces)), "} with n_steps ",
+            fl.n_steps, ", ", length(fl.forces), " frames recorded for ",
+            length(fl.forces) > 0 ? length(first(fl.forces)) : "?", " atoms")
+end
+
+function log_property!(logger::ForceLogger, s::System, neighbors=nothing,
+                        step_n::Integer=0; parallel::Bool=true)
+    if step_n % logger.n_steps == 0
+        push!(logger.forces, forces(s, neighbors; parallel=parallel))
     end
 end
 
