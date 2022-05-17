@@ -6,6 +6,68 @@ Each is a self-contained block of code.
 Made something cool yourself?
 Make a PR to add it to this page.
 
+## Simulated annealing
+
+You can change the thermostat temperature of a simulation by changing the simulator.
+Here we reduce the temperature of a simulation in stages from 300 K to 0 K.
+```julia
+using Molly
+using GLMakie
+
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+ff = OpenMMForceField(
+    joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
+    joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
+    joinpath(data_dir, "force_fields", "his.xml"),
+)
+
+sys = System(
+    joinpath(data_dir, "6mrr_equil.pdb"),
+    ff;
+    loggers=Dict("temp" => TemperatureLogger(100)),
+)
+
+minimizer = SteepestDescentMinimizer()
+simulate!(sys, minimizer)
+
+temps = [300.0, 200.0, 100.0, 0.0]u"K"
+random_velocities!(sys, temps[1])
+
+for temp in temps
+    simulator = Langevin(
+        dt=0.001u"ps",
+        temperature=temp,
+        friction=1.0u"ps^-1",
+    )
+    simulate!(sys, simulator, 5_000)
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel="Step",
+    ylabel="Temperature",
+    title="Temperature change during simulated annealing",
+)
+for (i, temp) in enumerate(temps)
+    lines!(
+        ax,
+        [5100 * i - 5000, 5100 * i],
+        [ustrip(temp), ustrip(temp)],
+        linestyle="--",
+        color=:orange,
+    )
+end
+scatter!(
+    ax,
+    100 .* (1:length(sys.loggers["temp"].temperatures)),
+    ustrip.(sys.loggers["temp"].temperatures),
+    markersize=5,
+)
+save("annealing.png", f)
+```
+![Annealing](images/annealing.png)
+
 ## Making and breaking bonds
 
 There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation?
