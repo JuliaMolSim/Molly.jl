@@ -221,13 +221,19 @@ visualize(
 ## Simulating a protein
 
 The recommended way to run a macromolecular simulation is to read in a force field in [OpenMM XML format](http://docs.openmm.org/latest/userguide/application/05_creating_ffs.html) and read in a coordinate file in a format [supported by Chemfiles.jl](https://chemfiles.org/chemfiles/latest/formats.html).
+Files for common force fields can be found at [OpenMM](https://github.com/openmm/openmm) and [OpenMM force fields](https://github.com/openmm/openmmforcefields).
 This sets up a system in the same data structures as above and that is simulated in the same way.
 Here we carry out an energy minimization, simulate with a Langevin integrator and use a [`StructureWriter`](@ref) to write the trajectory as a PDB file.
 ```julia
-ff = OpenMMForceField("ff99SBildn.xml", "tip3p_standard.xml", "his.xml")
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+ff = OpenMMForceField(
+    joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
+    joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
+    joinpath(data_dir, "force_fields", "his.xml"),
+)
 
 sys = System(
-    "6mrr_equil.pdb",
+    joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
     loggers=Dict(
         "energy" => TotalEnergyLogger(10),
