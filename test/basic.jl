@@ -7,48 +7,82 @@
     dr12 = vector(c1, c2, box_size)
     dr13 = vector(c1, c3, box_size)
 
-    @test isapprox(force(LennardJones(), dr12, c1, c2, a1, a1, box_size),
-                    SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
-                    atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(force(LennardJones(), dr13, c1, c3, a1, a1, box_size),
-                    SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
-                    atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(potential_energy(LennardJones(), dr12, c1, c2, a1, a1, box_size),
-                    0.0u"kJ * mol^-1",
-                    atol=1e-9u"kJ * mol^-1")
-    @test isapprox(potential_energy(LennardJones(), dr13, c1, c3, a1, a1, box_size),
-                    -0.1170417309u"kJ * mol^-1",
-                    atol=1e-9u"kJ * mol^-1")
+    @test isapprox(
+        force(LennardJones(), dr12, c1, c2, a1, a1, box_size),
+        SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        force(LennardJones(), dr13, c1, c3, a1, a1, box_size),
+        SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(LennardJones(), dr12, c1, c2, a1, a1, box_size),
+        0.0u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(LennardJones(), dr13, c1, c3, a1, a1, box_size),
+        -0.1170417309u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
 
-    @test isapprox(force(Coulomb(), dr12, c1, c2, a1, a1, box_size),
-                    SVector(1543.727311, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
-                    atol=1e-5u"kJ * mol^-1 * nm^-1")
-    @test isapprox(force(Coulomb(), dr13, c1, c3, a1, a1, box_size),
-                    SVector(868.3466125, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
-                    atol=1e-5u"kJ * mol^-1 * nm^-1")
-    @test isapprox(potential_energy(Coulomb(), dr12, c1, c2, a1, a1, box_size),
-                    463.1181933u"kJ * mol^-1",
-                    atol=1e-5u"kJ * mol^-1")
-    @test isapprox(potential_energy(Coulomb(), dr13, c1, c3, a1, a1, box_size),
-                    347.338645u"kJ * mol^-1",
-                    atol=1e-5u"kJ * mol^-1")
+    @test isapprox(
+        force(Coulomb(), dr12, c1, c2, a1, a1, box_size),
+        SVector(1543.727311, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-5u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        force(Coulomb(), dr13, c1, c3, a1, a1, box_size),
+        SVector(868.3466125, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-5u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(Coulomb(), dr12, c1, c2, a1, a1, box_size),
+        463.1181933u"kJ * mol^-1",
+        atol=1e-5u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(Coulomb(), dr13, c1, c3, a1, a1, box_size),
+        347.338645u"kJ * mol^-1",
+        atol=1e-5u"kJ * mol^-1",
+    )
 
     b1 = HarmonicBond(b0=0.2u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2")
     b2 = HarmonicBond(b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
     fs = force(b1, c1, c2, box_size)
-    @test isapprox(fs.f1, SVector(30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
-                    atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(fs.f2, SVector(-30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
-                    atol=1e-9u"kJ * mol^-1 * nm^-1")
+    @test isapprox(
+        fs.f1,
+        SVector(30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f2,
+        SVector(-30000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
     fs = force(b2, c1, c3, box_size)
-    @test isapprox(fs.f1, SVector(-20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
-                    atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(fs.f2, SVector(20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
-                    atol=1e-9u"kJ * mol^-1 * nm^-1")
-    @test isapprox(potential_energy(b1, c1, c2, box_size),
-                    1500.0u"kJ * mol^-1", atol=1e-9u"kJ * mol^-1")
-    @test isapprox(potential_energy(b2, c1, c3, box_size),
-                    2000.0u"kJ * mol^-1", atol=1e-9u"kJ * mol^-1")
+    @test isapprox(
+        fs.f1,
+        SVector(-20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f2,
+        SVector(20000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(b1, c1, c2, box_size),
+        1500.0u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(b2, c1, c3, box_size),
+        2000.0u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
 end
 
 @testset "Spatial" begin
