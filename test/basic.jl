@@ -74,6 +74,24 @@
         atol=1e-5u"kJ * mol^-1",
     )
 
+    c1_grav = SVector(1.0, 1.0, 1.0)u"m"
+    c2_grav = SVector(6.0, 1.0, 1.0)u"m"
+    a1_grav, a2_grav = Atom(mass=1e6u"kg"), Atom(mass=1e5u"kg")
+    box_size_grav = SVector(20.0, 20.0, 20.0)u"m"
+    dr12_grav = vector(c1_grav, c2_grav, box_size_grav)
+    inter = Gravity()
+    @test isapprox(
+        force(inter, dr12_grav, c1_grav, c2_grav, a1_grav, a2_grav, box_size_grav),
+        SVector(-0.266972, 0.0, 0.0)u"kg * m * s^-2",
+        atol=1e-9u"kg * m * s^-2",
+    )
+    @test isapprox(
+        potential_energy(inter, dr12_grav, c1_grav, c2_grav,
+                         a1_grav, a2_grav, box_size_grav),
+        -1.33486u"kg * m^2 * s^-2",
+        atol=1e-9u"kg * m^2 * s^-2",
+    )
+
     b1 = HarmonicBond(b0=0.2u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2")
     b2 = HarmonicBond(b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
     fs = force(b1, c1, c2, box_size)
