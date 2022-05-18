@@ -123,5 +123,5 @@ end
 end
 
 @fastmath function potential(::Mie, r2, invr2, (m, n, σ_r, const_mn))
-    return const_mn * (σ_r ^ m - σ_r ^ m)
+    return const_mn * (σ_r ^ n - σ_r ^ m)
 end
