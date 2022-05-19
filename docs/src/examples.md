@@ -252,3 +252,49 @@ axislegend()
 save("force_comparison.png", f)
 ```
 ![Force comparison](images/force_comparison.png)
+
+## Variations of the Mie potential
+
+The Mie potential is parameterised by *m* describing the attraction and *n* describing the repulsion.
+When *m*=6 and *n*=12 this is the Lennard-Jones potential.
+```julia
+using Molly
+using GLMakie
+
+box_size = SVector(5.0, 5.0, 5.0)
+a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
+dists = collect(0.2:0.005:0.8)
+
+function energies(m, n)
+    inter = Mie(m=m, n=n)
+    return map(dists) do dist
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        vec = vector(c1, c2, box_size)
+        potential_energy(inter, vec, c1, c2, a1, a2, box_size)
+    end
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel="Distance / nm",
+    ylabel="Potential energy / kJ * mol^-1",
+    title="Variations of the Mie potential",
+)
+for m in [4, 6]
+    for n in [10, 12]
+        lines!(
+            ax,
+            dists,
+            energies(Float64(m), Float64(n)),
+            label="m=$m, n=$n",
+        )
+    end
+end
+xlims!(ax, low=0.2)
+ylims!(ax, -0.6, 0.3)
+axislegend(position=:rb)
+save("mie.png", f)
+```
+![Mie](images/mie.png)
