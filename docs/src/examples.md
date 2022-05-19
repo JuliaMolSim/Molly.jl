@@ -102,6 +102,7 @@ masses = [
 
 box_size = SVector(1e9, 1e9, 1e9)u"km"
 
+# Convert the gravitational constant to the appropriate units
 inter = Gravity(G=convert(typeof(1.0u"km^3 * kg^-1 * d^-2"), Unitful.G))
 
 sys = System(
@@ -319,10 +320,56 @@ save("force_comparison.png", f)
 ```
 ![Force comparison](images/force_comparison.png)
 
+## Variations of the Morse potential
+
+The Morse potential for bonds has a parameter *α* that determines the width of the potential.
+It can also be compared to the harmonic bond potential.
+```julia
+using Molly
+using GLMakie
+
+box_size = SVector(5.0, 5.0, 5.0)
+dists = collect(0.12:0.005:2.0)
+
+function energies(inter)
+    return map(dists) do dist
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        potential_energy(inter, c1, c2, box_size)
+    end
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel="Distance / nm",
+    ylabel="Potential energy / kJ * mol^-1",
+    title="Variations of the Morse potential",
+)
+lines!(
+    ax,
+    dists,
+    energies(HarmonicBond(b0=0.2, kb=20_000.0)),
+    label="Harmonic",
+)
+for α in [2.5, 5.0, 10.0]
+    lines!(
+        ax,
+        dists,
+        energies(MorseBond(D=100.0, α=α, r0=0.2)),
+        label="Morse α=$α nm^-1",
+    )
+end
+ylims!(ax, 0.0, 120.0)
+axislegend(position=:rb)
+save("morse.png", f)
+```
+![Morse](images/morse.png)
+
 ## Variations of the Mie potential
 
 The Mie potential is parameterised by *m* describing the attraction and *n* describing the repulsion.
-When *m*=6 and *n*=12 this is the Lennard-Jones potential.
+When *m*=6 and *n*=12 this is equivalent to the Lennard-Jones potential.
 ```julia
 using Molly
 using GLMakie
