@@ -68,6 +68,72 @@ save("annealing.png", f)
 ```
 ![Annealing](images/annealing.png)
 
+## Solar system
+
+Orbits of the four closest planets to the sun can be simulated.
+```julia
+using Molly
+using GLMakie
+
+# Using get_body_barycentric_posvel from Astropy
+coords = [
+    SVector(-1336052.8665050615,  294465.0896030796 ,  158690.88781384667)u"km",
+    SVector(-58249418.70233503 , -26940630.286818042, -8491250.752464907 )u"km",
+    SVector( 58624128.321813114, -81162437.2641475  , -40287143.05760552 )u"km",
+    SVector(-99397467.7302648  , -105119583.06486066, -45537506.29775053 )u"km",
+    SVector( 131714235.34070954, -144249196.60814604, -69730238.5084304  )u"km",
+]
+
+velocities = [
+    SVector(-303.86327859262457, -1229.6540090943934, -513.791218405548  )u"km * d^-1",
+    SVector( 1012486.9596885007, -3134222.279236384 , -1779128.5093088674)u"km * d^-1",
+    SVector( 2504563.6403826815,  1567163.5923297722,  546718.234192132  )u"km * d^-1",
+    SVector( 1915792.9709661514, -1542400.0057833872, -668579.962254351  )u"km * d^-1",
+    SVector( 1690083.43357355  ,  1393597.7855017239,  593655.0037930267 )u"km * d^-1",
+]
+
+masses = [
+    1.989e30u"kg",
+    0.330e24u"kg",
+    4.87e24u"kg" ,
+    5.97e24u"kg" ,
+    0.642e24u"kg",
+]
+
+box_size = SVector(1e9, 1e9, 1e9)u"km"
+
+inter = Gravity(G=convert(typeof(1.0u"km^3 * kg^-1 * d^-2"), Unitful.G))
+
+sys = System(
+    atoms=[Atom(mass=m) for m in masses],
+    pairwise_inters=(inter,),
+    coords=coords .+ (SVector(5e8, 5e8, 5e8)u"km",),
+    velocities=velocities,
+    box_size=box_size,
+    loggers=Dict("coords" => CoordinateLogger(typeof(1.0u"km"), 10)),
+    force_units=u"kg * km * d^-2",
+    energy_units=u"kg * km^2 * d^-2",
+)
+
+simulator = Verlet(
+    dt=0.1u"d",
+    remove_CM_motion=false,
+)
+
+simulate!(sys, simulator, 3650) # 1 year
+
+visualize(
+    sys.loggers["coords"],
+    box_size,
+    "sim_planets.mp4";
+    trails=5,
+    color=[:yellow, :grey, :orange, :blue, :red],
+    markersize=[0.25, 0.08, 0.08, 0.08, 0.08],
+    transparency=false,
+)
+```
+![Planet simulation](images/sim_planets.gif)
+
 ## Making and breaking bonds
 
 There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation?
