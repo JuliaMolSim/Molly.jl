@@ -126,6 +126,41 @@
         2000.0u"kJ * mol^-1",
         atol=1e-9u"kJ * mol^-1",
     )
+
+    b1 = MorseBond(D=100.0u"kJ * mol^-1", α=10.0u"nm^-1", r0=0.2u"nm")
+    b2 = MorseBond(D=200.0u"kJ * mol^-1", α=5.0u"nm^-1" , r0=0.6u"nm")
+    fs = force(b1, c1, c2, box_size)
+    @test isapprox(
+        fs.f1,
+        SVector(465.0883158697, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f2,
+        SVector(-465.0883158697, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    fs = force(b2, c1, c3, box_size)
+    @test isapprox(
+        fs.f1,
+        SVector(-9341.5485409432, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f2,
+        SVector(9341.5485409432, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(b1, c1, c2, box_size),
+        39.9576400894u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(b2, c1, c3, box_size),
+        590.4984884025u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
 end
 
 @testset "Spatial" begin
