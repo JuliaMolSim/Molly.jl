@@ -59,6 +59,7 @@ end
 
 """
     CoordinateLogger(n_steps; dims=3)
+    CoordinateLogger(T, n_steps; dims=3)
 
 Log the coordinates throughout a simulation.
 """
@@ -91,6 +92,7 @@ end
 
 """
     VelocityLogger(n_steps; dims=3)
+    VelocityLogger(T, n_steps; dims=3)
 
 Log the velocities throughout a simulation.
 """
@@ -123,6 +125,7 @@ end
 
 """
     TotalEnergyLogger(n_steps)
+    TotalEnergyLogger(T, n_steps)
 
 Log the total energy of the system throughout a simulation.
 """
@@ -151,6 +154,7 @@ end
 
 """
     KineticEnergyLogger(n_steps)
+    KineticEnergyLogger(T, n_steps)
 
 Log the kinetic energy of the system throughout a simulation.
 """
@@ -179,6 +183,7 @@ end
 
 """
     PotentialEnergyLogger(n_steps)
+    PotentialEnergyLogger(T, n_steps)
 
 Log the potential energy of the system throughout a simulation.
 """
@@ -207,6 +212,7 @@ end
 
 """
     ForceLogger(n_steps; dims=3)
+    ForceLogger(T, n_steps; dims=3)
 
 Log the forces throughout a simulation.
 """
