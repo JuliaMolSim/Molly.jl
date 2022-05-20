@@ -1,5 +1,12 @@
 # Molly.jl release notes
 
+## v0.10.2 - May 2022
+
+- `ForceLogger` is added.
+- The `parallel` keyword argument is now available in the `log_property!` function.
+- More examples are added to the documentation.
+- A bug in the `Mie` potential energy is fixed.
+
 ## v0.10.1 - May 2022
 
 - A bug in the `Gravity` force and potential energy is fixed.
