@@ -18,6 +18,11 @@ points are closer than `min_dist`, accounting for periodic boundary conditions.
 """
 function place_atoms(n_atoms::Integer, box_size, min_dist)
     dims = length(box_size)
+    # not floor(x / min_dist) + 1 due to periodic boundary conditions
+    max_atoms = prod(x -> floor(x / min_dist), box_size)
+    if n_atoms > max_atoms
+        error("Box size of $(ustrip.(box_size)) too small for $n_atoms atoms with minimum distance of $min_dist.")
+    end
     min_dist_sq = min_dist ^ 2
     T = typeof(convert(AbstractFloat, ustrip(first(box_size))))
     coords = SArray[]
