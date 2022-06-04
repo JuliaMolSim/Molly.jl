@@ -11,10 +11,10 @@ export
     OpenMMForceField
 
 """
-    place_atoms(n_atoms, box_size, min_dist)
+    place_atoms(n_atoms, box_size, min_dist; max_attempts=100)
 
 Obtain `n_atoms` 3D coordinates in a box with sides `box_size` where no two
-points are closer than `min_dist`, accounting for periodic boundary conditions.
+points are closer than `min_dist`, accounting for periodic boundary conditions. The keyword argument `max_attempts` determines the number of failed tries after which to stop placing atoms.
 """
 function place_atoms(n_atoms::Integer, box_size, min_dist; max_attempts::Integer=100)
     dims = length(box_size)
