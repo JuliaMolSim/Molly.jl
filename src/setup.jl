@@ -11,27 +11,38 @@ export
     OpenMMForceField
 
 """
-    place_atoms(n_atoms, box_size, min_dist)
+    place_atoms(n_atoms, box_size, min_dist; max_attempts=100)
 
 Obtain `n_atoms` 3D coordinates in a box with sides `box_size` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
+The keyword argument `max_attempts` determines the number of failed tries after which to stop placing atoms.
 """
-function place_atoms(n_atoms::Integer, box_size, min_dist)
+function place_atoms(n_atoms::Integer, box_size, min_dist; max_attempts::Integer=100)
     dims = length(box_size)
+    # not floor(x / min_dist) + 1 due to periodic boundary conditions
+    max_atoms = prod(x -> floor(x / min_dist), box_size)
+    if n_atoms > max_atoms
+        error("Box size of $(box_size) too small for $n_atoms atoms with minimum distance of $min_dist.")
+    end
     min_dist_sq = min_dist ^ 2
     T = typeof(convert(AbstractFloat, ustrip(first(box_size))))
     coords = SArray[]
+    failed_attempts = 0
     while length(coords) < n_atoms
         new_coord = SVector{dims}(rand(T, dims)) .* box_size
         okay = true
         for coord in coords
             if sum(abs2, vector(coord, new_coord, box_size)) < min_dist_sq
                 okay = false
+                failed_attempts += 1
                 break
             end
         end
         if okay
             push!(coords, new_coord)
+            failed_attempts = 0
+        elseif failed_attempts > max_attempts
+            error("Failed to place $(length(coords)+1)th atom after $max_attempts (max_attempts) tries.")
         end
     end
     return [coords...]
