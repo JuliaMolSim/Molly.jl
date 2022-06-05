@@ -2,6 +2,7 @@
 # This file is only loaded when GLMakie is imported
 
 using .GLMakie
+using LinearAlgebra
 
 function visualize(coord_logger,
                     box_size,
@@ -33,7 +34,7 @@ function visualize(coord_logger,
 
     positions = Observable(PointType.(ustrip_vec.(coords_start)))
     scatter!(ax, positions; color=color, markersize=markersize, transparency=transparency,
-                markerspace=SceneSpace, kwargs...)
+                markerspace=:data, kwargs...)
 
     connection_nodes = []
     for (ci, (i, j)) in enumerate(connections)
