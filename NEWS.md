@@ -1,5 +1,10 @@
 # Molly.jl release notes
 
+## v0.10.3 - Jun 2022
+
+- `place_atoms` now checks for sensible inputs and terminates after a certain number of failed attempts.
+- A bug in precompilation is fixed.
+
 ## v0.10.2 - May 2022
 
 - `ForceLogger` is added.
