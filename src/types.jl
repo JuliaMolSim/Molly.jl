@@ -321,6 +321,78 @@ function System(;
                     loggers, force_units, energy_units)
 end
 
+# A wrapper for replicas containing related configuration
+mutable struct ReplicaWrapper{C, V, T, L}
+    index::Int64
+    coords::C
+    velocities::V
+    temp::T
+end
+
+# A system to be simulated using replica exchange simulation
+mutable struct ReplicaSystem{D, G, T, A, AD, PI, SI, GI, RL, RT, RI, B, NF, L, F, E} <: AbstractSystem{D}
+    atoms::A
+    atoms_data::AD
+    pairwise_inters::PI
+    specific_inter_lists::SI
+    general_inters::GI
+    replica_list::RL
+    replica_temps::RT
+    replica_indices::RI
+    box_size::B
+    neighbor_finder::NF
+    replica_loggers::L
+    force_units::F
+    energy_units::E
+end
+
+# Constructor for ReplicaSystem
+function ReplicaSystem(;
+        atoms,
+        atoms_data=[],
+        pairwise_inters=(),
+        specific_inter_lists=(),
+        general_inters=(),
+        coords,
+        velocities=zero(coords) * u"ps^-1",
+        replica_temps,
+        box_size,
+        neighbor_finder=NoNeighborFinder(),
+        loggers=Dict(),
+        force_units=u"kJ * mol^-1 * nm^-1",
+        energy_units=u"kJ * mol^-1",
+        gpu_diff_safe=isa(coords, CuArray)
+    )
+
+    D = length(box_size)
+    G = gpu_diff_safe
+    T = typeof(ustrip(first(box_size)))
+    A = typeof(atoms)
+    AD = typeof(atoms_data)
+    PI = typeof(pairwise_inters)
+    SI = typeof(specific_inter_lists)
+    GI = typeof(general_inters)
+    RT = typeof(replica_temps)
+    B = typeof(box_size)
+    NF = typeof(neighbor_finder)
+    F = typeof(force_units)
+    E = typeof(energy_units)
+
+    replica_indices = [i for i=eachindex(replica_temps)]
+    RI = typeof(replica_indices)
+
+    replica_list = [ReplicaWrapper(i, coords, velocities, replica_temps[i]) for i in replica_indices]
+    RL = typeof(replica_list)
+
+    replica_loggers = Dict(["$i", copy(loggers)] for i in replica_indices)
+    L = typeof(replica_loggers)
+
+    return ReplicaSystem{D, G, T, A, AD, PI, SI, GI, RL, RT, RI, B, NF, L, F, E}(
+            atoms, atoms_data, pairwise_inters, specific_inter_lists,
+            general_inters, replica_list, replica_temps, replica_indices, box_size, neighbor_finder,
+            replica_loggers, force_units, energy_units)
+end
+
 """
     is_gpu_diff_safe(sys)
 
