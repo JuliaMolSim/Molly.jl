@@ -88,8 +88,6 @@ atom_or_empty(at::Nothing, T) = zero(Atom{T, T, T, T})
 Zygote.z2d(dx::AbstractArray{Union{Nothing, Atom{T, T, T, T}}}, primal::AbstractArray{Atom{T, T, T, T}}) where {T} = atom_or_empty.(dx, T)
 Zygote.z2d(dx::SVector{3, T}, primal::T) where {T} = sum(dx)
 
-Zygote.unbroadcast(x::Tuple{Any}, x̄::Nothing) = nothing
-
 function Zygote.unbroadcast(x::AbstractArray{<:Real}, x̄::AbstractArray{<:StaticVector})
     if length(x) == length(x̄)
         Zygote._project(x, sum.(x̄))
