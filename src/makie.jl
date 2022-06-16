@@ -2,7 +2,6 @@
 # This file is only loaded when GLMakie is imported
 
 using .GLMakie
-using LinearAlgebra
 
 function visualize(coord_logger,
                     box_size,
@@ -72,7 +71,7 @@ function visualize(coord_logger,
         alpha = 1 - (trail_i / (trails + 1))
         alpha_col = RGBA.(red.(col), green.(col), blue.(col), alpha)
         scatter!(ax, trail_positions[end]; color=alpha_col,  markersize=markersize,
-                    transparency=transparency, markerspace=SceneSpace, kwargs...)
+                    transparency=transparency, markerspace=:data, kwargs...)
     end
 
     dist_unit = unit(first(first(coords_start)))
