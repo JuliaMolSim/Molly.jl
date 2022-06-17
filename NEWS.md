@@ -1,5 +1,9 @@
 # Molly.jl release notes
 
+## v0.10.4 - Jun 2022
+
+- Visualisation is updated to use GLMakie.jl v0.6.
+
 ## v0.10.3 - Jun 2022
 
 - `place_atoms` now checks for sensible inputs and terminates after a certain number of failed attempts.
