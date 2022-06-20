@@ -324,9 +324,8 @@ end
     atom_mass = 10.0u"u"
     box_size = SVector(6.0, 6.0, 6.0)u"nm"
     temp = 1.0u"K"
-    k_conv=uconvert(u"u * nm^2 * ps^-2 * K^-1",Unitful.k)
     starting_coords = place_diatomics(n_atoms ÷ 2, box_size, 0.2u"nm", 0.2u"nm")
-    starting_velocities = [velocity(atom_mass, temp,k_conv) for i in 1:n_atoms]
+    starting_velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
