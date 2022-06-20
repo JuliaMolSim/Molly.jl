@@ -33,7 +33,7 @@ function visualize(coord_logger,
 
     positions = Observable(PointType.(ustrip_vec.(coords_start)))
     scatter!(ax, positions; color=color, markersize=markersize, transparency=transparency,
-                markerspace=SceneSpace, kwargs...)
+                markerspace=:data, kwargs...)
 
     connection_nodes = []
     for (ci, (i, j)) in enumerate(connections)
@@ -71,7 +71,7 @@ function visualize(coord_logger,
         alpha = 1 - (trail_i / (trails + 1))
         alpha_col = RGBA.(red.(col), green.(col), blue.(col), alpha)
         scatter!(ax, trail_positions[end]; color=alpha_col,  markersize=markersize,
-                    transparency=transparency, markerspace=SceneSpace, kwargs...)
+                    transparency=transparency, markerspace=:data, kwargs...)
     end
 
     dist_unit = unit(first(first(coords_start)))
