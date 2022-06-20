@@ -18,6 +18,13 @@ Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustrip_vec.(coords)
 """
 ustrip_vec(x) = ustrip.(x)
 
+
+"""
+    uconvert_vec(unit,x)
+Broadcasted from of `uconvert` from Unitful.jl, allowing e.g. `uconvert_vec.(u"nm",coords)`
+"""
+uconvert_vec(unit,x)=uconvert.(unit,x)
+
 function check_force_units(fdr, force_units)
     if unit(first(fdr)) != force_units
         error("System force units are ", force_units, " but encountered force units ",

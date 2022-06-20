@@ -271,7 +271,7 @@ interface described there.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
-mutable struct System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E} <: AbstractSystem{D}
+mutable struct System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     pairwise_inters::PI
@@ -284,6 +284,7 @@ mutable struct System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E} <: Abstr
     loggers::L
     force_units::F
     energy_units::E
+    k::K
 end
 
 function System(;
@@ -299,6 +300,7 @@ function System(;
                 loggers=Dict(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
+                k=Unitful.k,
                 gpu_diff_safe=isa(coords, CuArray))
     D = length(box_size)
     G = gpu_diff_safe
@@ -315,10 +317,25 @@ function System(;
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
-    return System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E}(
+
+    if energy_units==NoUnits
+        if unit(k)==NoUnits #Use user-supplied unitless Boltzmann constant
+            k_converted=k
+        else
+            k_converted=ustrip(u"u* nm^2 * ps^-2 * K^-1",k) #otherwise assume energy units are (u* nm^2 * ps^-2)
+        end
+    elseif dimension(energy_units)== u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        k_converted=uconvert(energy_units*u"mol * K^-1",k)
+    else
+        k_converted=uconvert(energy_units*u"K^-1",k)
+    end
+    
+    K=typeof(k_converted)
+
+    return System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
                     atoms, atoms_data, pairwise_inters, specific_inter_lists,
                     general_inters, coords, velocities, box_size, neighbor_finder,
-                    loggers, force_units, energy_units)
+                    loggers, force_units, energy_units,k_converted)
 end
 
 """
