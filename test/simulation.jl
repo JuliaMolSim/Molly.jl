@@ -1,4 +1,4 @@
-"""@testset "Lennard-Jones 2D" begin
+@testset "Lennard-Jones 2D" begin
     n_atoms = 10
     n_steps = 20_000
     temp = 298.0u"K"
@@ -228,7 +228,7 @@ end
         Gravity(G=G, nl_only=true), Gravity(G=G, nl_only=false),
     )
 
-    @testset "\$inter" for inter in pairwise_inter_types
+    @testset "$inter" for inter in pairwise_inter_types
         if inter.nl_only
             neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=1.5u"nm")
@@ -317,7 +317,7 @@ end
     final_energy = s.loggers["energy"].energies[end]
     final_energy_nounits = s_nounits.loggers["energy"].energies[end] * u"kJ * mol^-1"
     @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
-end"""
+end
 
 @testset "Langevin Splitting" begin
     n_atoms=400
