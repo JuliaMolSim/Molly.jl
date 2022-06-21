@@ -301,3 +301,90 @@ atom_record(at_data, i, coord) = BioStructures.AtomRecord(
     at_data.res_number, ' ', coord, 1.0, 0.0,
     at_data.element == "?" ? "  " : at_data.element, "  "
 )
+
+"""
+A time correlation logger, which allow to estimate statistical correlations of the form
+\[C(t)=\left(\left\langle A(t)\cdot B(0)\right\rangle -\left\langle A(0)\cdot B(0)\right\rangle\right)\left(\sqrt{\left\langle |A|^2\right\rangle\left\langle |B|^2\right\rangle}\right)^{-1}\]
+or
+\[C(t)=\left(\left\langle A(t)\cdot B(0)\right\rangle -\left\langle A(0)\cdot B(0)\right\rangle\right)\]
+These can be used to estimate statistical error, or to compute transport coefficients from Green-Kubo type formulas.
+A and B are observables, functions of the form f(sys::System,neighbors=nothing) which return types supporting the
+
+the output of A and B can be numeric or vectors (including vectors of SVectors, like the positions or velocities), in which case the products inside the brackets are dot products.
+# Arguments
+- `TA::DataType`: The `DataType` returned by `A`, suppporting `zero(TA)`.
+- `observableA::Function`: The function corresponding to observable A.
+- `observableB::Function`: The function corresponding to observable B.
+- `observable_length::Integer`: The length of the observables if they are vectors, or one if they are scalar-valued.
+- `n_correlation::Integer`: The length of the computed correlation vector.
+
+ `n_correlation` should typically be chosen so that `dt*n_correlation>t_corr`,
+  where `dt` is the simulation timestep and `t_corr` is the decorrelation time for the considered system and observables.
+"""
+mutable struct TimeCorrelationLogger{T_A,T_A2,T_B,T_B2,T_AB,TF_A,TF_B}
+
+    observableA::TF_A
+    observableB::TF_B
+
+    n_correlation::Integer
+
+    history_A::CircularBuffer{T_A}
+    history_B::CircularBuffer{T_B}
+
+    sum_offset_products::Vector{T_AB}
+
+    n_timesteps::Int64
+
+    sum_A::T_A
+    sum_B::T_B
+
+    sum_sq_A::T_A2
+    sum_sq_B::T_B2
+end
+
+function TimeCorrelationLogger(TA::DataType,TB::DataType, observableA::T_FA, observableB::T_FB, observable_length::Integer,n_correlation::Integer) where {T_FA,T_FB}
+    ini_sum_A= (observable_length>1) ? zeros(TA,observable_length) : zero(TA)
+    ini_sum_B= (observable_length>1) ? zeros(TB,observable_length) : zero(TB)
+    
+    ini_sum_sq_A=dot(ini_sum_A,ini_sum_A)
+    ini_sum_sq_B=dot(ini_sum_B,ini_sum_B)
+
+    T_A=typeof(ini_sum_A)
+    T_A2=typeof(ini_sum_sq_A)
+
+    T_B=typeof(ini_sum_B)
+    T_B2=typeof(ini_sum_B)
+
+    T_AB=typeof(zero(TA)*zero(TB))
+    
+    return TimeCorrelationLogger{T_A,T_A2,T_B,T_B2,T_AB,TF_A,TF_B}(observableA, observableB, n_correlation, CircularBuffer{T_A}(n_correlation), CircularBuffer{T_B}(n_correlation), zeros(T_AB, n_correlation), 0, ini_sum_A, ini_sum_B, ini_sum_sq_A, ini_sum_sq_B)
+
+end
+
+function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothing, step_n::Integer=0;parallel::Bool=true)
+
+    #compute observables
+    A = logger.observableA(s, neighbors)
+    B = (logger.observableA!=logger.observableB) ? logger.observableB(s, neighbors) : A
+
+    logger.n_timesteps += 1
+
+    #update history lists -- values of A and B older than n_correlation steps are overwritten (see DataStructures.jl CircularBuffer)
+
+    push!(logger.history_A, A)
+    push!(logger.history_B, B)
+
+    #update running sums (numerically stable method consists of summing and computing averages at output time)
+    logger.sum_A += A
+    logger.sum_B += B
+
+    logger.sum_sq_A += dot(A, A)
+    logger.sum_sq_B += dot(B, B)
+
+    B1 = first(logger.history_B)
+
+    for i = 1:min(logger.n_correlation,logger.n_timesteps)
+        logger.sum_offset_products[i] += dot(logger.history_A[i], B1)
+    end
+
+end
