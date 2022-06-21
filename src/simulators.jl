@@ -329,8 +329,9 @@ A Langevin simulator using a general splitting scheme, consisting of a successio
 - `friction::frictionType`: The friction coefficient. If units are used, it should have a dimensionality of mass per time.
 - `temperature::temperatureType`: The equilibrium temperature.
 - `splitting::splittingType`: The splitting specifier. Should be a string consisting of the characters `A`,`B` and `O`. Strings with no `O`s reduce to deterministic symplectic schemes.
-- `rseed::UInt32`: An optional seed for the random number generator. Defaults to nearest epoch time in seconds.
-- `rng::rngType`: The random generator for the simulation.
+- `remove_CM_motion::Bool=true`: Whether to remove the centre of mass motion at each simulation iteration.
+- `rseed::UInt32=round(UInt32,time())`: An optional seed for the random number generator. Defaults to nearest epoch time in seconds.
+- `rng::rngType=MersenneTwister`: The random generator type for the simulation. The RNG is seeded with rseed.
 """
 struct LangevinSplitting{dtType,frictionType,temperatureType,rngType,splittingType}
     dt::dtType
@@ -338,9 +339,10 @@ struct LangevinSplitting{dtType,frictionType,temperatureType,rngType,splittingTy
     temperature::temperatureType
     rng::rngType
     splitting::splittingType
+    remove_CM_motion::Bool
 end
-function LangevinSplitting(; dt, friction, temperature, splitting,rseed = round(UInt32, time()), rng_type = MersenneTwister)
-    LangevinSplitting{typeof(dt),typeof(friction),typeof(temperature),rng_type,typeof(splitting)}(dt, friction, temperature, rng_type(rseed), splitting)
+function LangevinSplitting(; dt, friction, temperature, splitting,remove_CM_motion=true,rseed = round(UInt32, time()), rng_type = MersenneTwister)
+    LangevinSplitting{typeof(dt),typeof(friction),typeof(temperature),rng_type,typeof(splitting)}(dt, friction, temperature, rng_type(rseed), splitting,remove_CM_motion)
 end
 
 function simulate!(sys,sim::LangevinSplitting,n_steps::Integer;parallel::Bool=true)
@@ -391,13 +393,18 @@ function simulate!(sys,sim::LangevinSplitting,n_steps::Integer;parallel::Bool=tr
 
     step_arg_pairs = zip(steps, arguments)
 
+    run_loggers!(sys, neighbors, 0; parallel=parallel)
+    sim.remove_CM_motion && remove_CM_motion!(sys)
+
     for step_n = 1:n_steps
 
-        run_loggers!(sys, neighbors, step_n)
-
+        
         for (step!, args) = step_arg_pairs
             step!(args...)
         end
+        
+        run_loggers!(sys, neighbors, step_n)
+        sim.remove_CM_motion && remove_CM_motion!(sys)
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n; parallel=parallel)
     end
