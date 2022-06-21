@@ -339,7 +339,7 @@ struct LangevinSplitting{dtType,frictionType,temperatureType,rngType,splittingTy
     rng::rngType
     splitting::splittingType
 end
-function LangevinSplitting(; dt, friction, temperature, splitting,rseed=round(UInt32, time()), rng_type=MersenneTwister)
+function LangevinSplitting(; dt, friction, temperature, splitting,rseed = round(UInt32, time()), rng_type = MersenneTwister)
     LangevinSplitting{typeof(dt),typeof(friction),typeof(temperature),rng_type,typeof(splitting)}(dt, friction, temperature, rng_type(rseed), splitting)
 end
 
@@ -347,7 +347,7 @@ function simulate!(sys,sim::LangevinSplitting,n_steps::Integer;parallel::Bool=tr
     M_inv = inv.(mass.(sys.atoms))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
     σ_eff = sqrt.( (1.0 * unit(eltype(α_eff))) .- (α_eff .^ 2))
-    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel = parallel)
     accels_t = accelerations(sys, neighbors; parallel=parallel)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
@@ -404,7 +404,7 @@ function simulate!(sys,sim::LangevinSplitting,n_steps::Integer;parallel::Bool=tr
 end
 
 function O_step!(s::System, α_eff::V, σ_eff::V, rng::R, temperature::T) where {V,R<:AbstractRNG,T}
-    noise = random_velocities(s,temperature;rng=rng)
+    noise = random_velocities(s, temperature; rng = rng)
     s.velocities = α_eff .* s.velocities + σ_eff .* noise
 end
 
@@ -414,6 +414,6 @@ function A_step!(s::System, dt_eff::T) where {T}
 end
 
 function B_step!(s::System, dt_eff::T, acceleration_vector::A, neighbors, compute_forces::Bool, parallel::Bool) where {T,A}
-    compute_forces && (acceleration_vector .= accelerations(s, neighbors, parallel=parallel))
+    compute_forces && (acceleration_vector .= accelerations(s, neighbors, parallel = parallel))
     s.velocities += dt_eff * remove_molar.(acceleration_vector)
 end
