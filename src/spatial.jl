@@ -91,16 +91,16 @@ end
 function velocity_3D(mass, temp,k=mb_conversion_factor; rng=Random.GLOBAL_RNG)
 
     return SVector(
-        maxwell_boltzmann(mass, temp, mb_conversion_factor; rng=rng),
-        maxwell_boltzmann(mass, temp, mb_conversion_factor; rng=rng),
-        maxwell_boltzmann(mass, temp, mb_conversion_factor; rng=rng),
+        maxwell_boltzmann(mass, temp, k; rng=rng),
+        maxwell_boltzmann(mass, temp, k; rng=rng),
+        maxwell_boltzmann(mass, temp, k; rng=rng),
     )
 end
 
 function velocity_2D(mass, temp,k=mb_conversion_factor; rng=Random.GLOBAL_RNG)
     return SVector(
-        maxwell_boltzmann(mass, temp, mb_conversion_factor; rng=rng),
-        maxwell_boltzmann(mass, temp, mb_conversion_factor; rng=rng),
+        maxwell_boltzmann(mass, temp, k; rng=rng),
+        maxwell_boltzmann(mass, temp, k; rng=rng),
     )
 end
 
