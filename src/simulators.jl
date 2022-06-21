@@ -322,6 +322,16 @@ function simulate!(sys,
     return sys
 end
 
+"""LangevinSplitting(; <keyword arguments>)
+A Langevin simulator using a general splitting scheme, consisting of a succession of **A**, **B** and **O** steps, corresponding respectively to updates in position, velocity for the potential part, and velocity for the thermal fluctuation-dissipation part. The `Langevin` and `VelocityVerlet` simulators without coupling correspond to the **BAOA** and **BAB** schemes respectively.
+# Arguments
+- `dt::dtType`: The timestep for the simulation
+- `friction::frictionType`: The friction coefficient. If units are used, it should have a dimensionality of mass per time.
+- `temperature::temperatureType`: The equilibrium temperature.
+- `splitting::splittingType`: The splitting specifier. Should be a string consisting of the characters `A`,`B` and `O`. Strings with no `O`s reduce to deterministic symplectic schemes.
+- `rseed::UInt32`: An optional seed for the random number generator. Defaults to nearest epoch time in seconds.
+- `rng::rngType`: The random generator for the simulation.
+"""
 struct LangevinSplitting{dtType,frictionType,temperatureType,rngType,splittingType}
     dt::dtType
     friction::frictionType
@@ -329,7 +339,6 @@ struct LangevinSplitting{dtType,frictionType,temperatureType,rngType,splittingTy
     rng::rngType
     splitting::splittingType
 end
-
 function LangevinSplitting(; dt, friction, temperature, splitting,rseed=round(UInt32, time()), rng_type=MersenneTwister)
     LangevinSplitting{typeof(dt),typeof(friction),typeof(temperature),rng_type,typeof(splitting)}(dt, friction, temperature, rng_type(rseed), splitting)
 end
