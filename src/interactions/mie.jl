@@ -92,7 +92,7 @@ end
     r = √r2
 
     if !S && (iszero(atom_i.ϵ) || iszero(atom_j.ϵ) || iszero(atom_i.σ) || iszero(atom_j.σ))
-        return ustrip(zero(box_size[1])) * inter.energy_units
+        return ustrip(zero(coord_i[1])) * inter.energy_units
     end
 
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
@@ -108,11 +108,11 @@ end
     if cutoff_points(C) == 0
         potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_units
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
 
         potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_units
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
 
         if r2 < cutoff.sqdist_activation
             potential(inter, r2, inv(r2), params)
