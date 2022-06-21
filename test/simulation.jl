@@ -344,12 +344,12 @@ end
     s2=deepcopy(s1)
     rseed=2022
     simulator1=Langevin(dt=0.002u"ps",temperature=temp,friction=1.0u"ps^-1")
-    simulator2=LangevinSplitting(dt=0.002u"ps",friction=10.0u"u * ps^-1",temperature=temp,splitting="BAOA",rseed=rseed)
+    simulator2=LangevinSplitting(dt=0.002u"ps",friction=10.0u"u * ps^-1",temperature=temp,splitting="BAOA")
 
     @time simulate!(s1,simulator1,n_steps;rng=MersenneTwister(rseed))
     @test 280.0u"K"<= mean(s1.loggers["temp"].temperatures[end-100:end])<=320.0u"K"
 
-    @time simulate!(s2,simulator2,n_steps)
+    @time simulate!(s2,simulator2,n_steps;rng=MersenneTwister(rseed))
     @test 280.0u"K"<= mean(s2.loggers["temp"].temperatures[end-100:end])<=320.0u"K"
 
     atol=1e-5u"nm"

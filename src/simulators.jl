@@ -330,22 +330,19 @@ A Langevin simulator using a general splitting scheme, consisting of a successio
 - `temperature::temperatureType`: The equilibrium temperature.
 - `splitting::splittingType`: The splitting specifier. Should be a string consisting of the characters `A`,`B` and `O`. Strings with no `O`s reduce to deterministic symplectic schemes.
 - `remove_CM_motion::Bool=true`: Whether to remove the centre of mass motion at each simulation iteration.
-- `rseed::UInt32=round(UInt32,time())`: An optional seed for the random number generator. Defaults to nearest epoch time in seconds.
-- `rng::rngType=MersenneTwister`: The random generator type for the simulation. The RNG is seeded with rseed.
 """
-struct LangevinSplitting{dtType,frictionType,temperatureType,rngType,splittingType}
+struct LangevinSplitting{dtType,frictionType,temperatureType,splittingType}
     dt::dtType
     friction::frictionType
     temperature::temperatureType
-    rng::rngType
     splitting::splittingType
     remove_CM_motion::Bool
 end
-function LangevinSplitting(; dt, friction, temperature, splitting,remove_CM_motion=true,rseed = round(UInt32, time()), rng_type = MersenneTwister)
-    LangevinSplitting{typeof(dt),typeof(friction),typeof(temperature),rng_type,typeof(splitting)}(dt, friction, temperature, rng_type(rseed), splitting,remove_CM_motion)
+function LangevinSplitting(; dt, friction, temperature, splitting,remove_CM_motion=true)
+    LangevinSplitting{typeof(dt),typeof(friction),typeof(temperature),typeof(splitting)}(dt, friction, temperature, splitting,remove_CM_motion)
 end
 
-function simulate!(sys,sim::LangevinSplitting,n_steps::Integer;parallel::Bool=true)
+function simulate!(sys,sim::LangevinSplitting,n_steps::Integer;parallel::Bool=true,rng=Random.GLOBAL_RNG)
     M_inv = inv.(mass.(sys.atoms))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
     σ_eff = sqrt.( (1.0 * unit(eltype(α_eff))) .- (α_eff .^ 2))
@@ -387,7 +384,7 @@ function simulate!(sys,sim::LangevinSplitting,n_steps::Integer;parallel::Bool=tr
             push!(arguments, (sys, effective_dts[j], accels_t, neighbors, force_computation_steps[j], parallel))
         elseif op == 'O'
             push!(steps, O_step!)
-            push!(arguments, (sys, α_eff, σ_eff, sim.rng, sim.temperature))
+            push!(arguments, (sys, α_eff, σ_eff, rng, sim.temperature))
         end
     end
 
