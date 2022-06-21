@@ -75,44 +75,50 @@ Ensure a coordinate is within the simulation box and return the coordinate.
 """
 wrap_coords_vec(v, box_size) = wrap_coords.(v, box_size)
 
-"""
-    velocity(mass, temperature; dims=3)
-
-Generate a random velocity from the Maxwell-Boltzmann distribution.
-"""
-function AtomsBase.velocity(mass, temp; dims::Integer=3, rng=Random.GLOBAL_RNG)
-    return SVector([maxwell_boltzmann(mass, temp; rng=rng) for i in 1:dims]...)
-end
-
-function velocity_3D(mass, temp; rng=Random.GLOBAL_RNG)
-    return SVector(
-        maxwell_boltzmann(mass, temp; rng=rng),
-        maxwell_boltzmann(mass, temp; rng=rng),
-        maxwell_boltzmann(mass, temp; rng=rng),
-    )
-end
-
-function velocity_2D(mass, temp; rng=Random.GLOBAL_RNG)
-    return SVector(
-        maxwell_boltzmann(mass, temp; rng=rng),
-        maxwell_boltzmann(mass, temp; rng=rng),
-    )
-end
 
 const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
 
 """
-    maxwell_boltzmann(mass, temperature)
-
-Generate a random speed along one dimension from the Maxwell-Boltzmann distribution.
+    velocity(mass, temperature,k; dims=3)
+    velocity(mass, temperature; dims=3)
+Generate a random velocity from the Maxwell-Boltzmann distribution, with optional custom Boltzmann constant k.
 """
-function maxwell_boltzmann(mass, temp; rng=Random.GLOBAL_RNG)
+function AtomsBase.velocity(mass, temp,k=mb_conversion_factor; dims::Integer=3, rng=Random.GLOBAL_RNG)
+    k_strip = (unit(mass) == NoUnits) ? ustrip(k) : k
+    return SVector([maxwell_boltzmann(mass, temp, k_strip; rng=rng) for i in 1:dims]...)
+end
+
+function velocity_3D(mass, temp,k=mb_conversion_factor; rng=Random.GLOBAL_RNG)
+
+    return SVector(
+        maxwell_boltzmann(mass, temp, k; rng=rng),
+        maxwell_boltzmann(mass, temp, k; rng=rng),
+        maxwell_boltzmann(mass, temp, k; rng=rng),
+    )
+end
+
+function velocity_2D(mass, temp,k=mb_conversion_factor; rng=Random.GLOBAL_RNG)
+    return SVector(
+        maxwell_boltzmann(mass, temp, k; rng=rng),
+        maxwell_boltzmann(mass, temp, k; rng=rng),
+    )
+end
+
+"""
+    maxwell_boltzmann(mass, temperature,k;rng=Random.GLOBAL_RNG)
+    maxwell_boltzmann(mass,temperature;rng=Random.GLOBAL_RNG)
+Generate a random speed along one dimension from the Maxwell-Boltzmann distribution, with optionally specified Boltzmann's constant.
+"""
+function maxwell_boltzmann(mass, temp, k; rng=Random.GLOBAL_RNG)
     T = typeof(convert(AbstractFloat, ustrip(temp)))
-    k = unit(temp) == NoUnits ? T(ustrip(mb_conversion_factor)) : T(mb_conversion_factor)
     σ = sqrt(k * temp / mass)
     return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
 end
 
+function maxwell_boltzmann(mass,temp;rng=Random.GLOBAL_RNG)
+    k = unit(temp) == NoUnits ? ustrip(mb_conversion_factor) : mb_conversion_factor
+    return maxwell_boltzmann(mass,temp,k;rng=rng)
+end
 """
     random_velocities(sys, temp)
 
@@ -121,17 +127,17 @@ for a `System`.
 """
 function random_velocities(sys::AbstractSystem{3}, temp; rng=Random.GLOBAL_RNG)
     if isa(sys.coords, CuArray)
-        return cu(velocity_3D.(Array(mass.(sys.atoms)), temp; rng=rng))
+        return cu(velocity_3D.(Array(mass.(sys.atoms)), temp,sys.k; rng=rng))
     else
-        return velocity_3D.(mass.(sys.atoms), temp; rng=rng)
+        return velocity_3D.(mass.(sys.atoms), temp,sys.k; rng=rng)
     end
 end
 
 function random_velocities(sys::AbstractSystem{2}, temp; rng=Random.GLOBAL_RNG)
     if isa(sys.coords, CuArray)
-        return cu(velocity_2D.(Array(mass.(sys.atoms)), temp; rng=rng))
+        return cu(velocity_2D.(Array(mass.(sys.atoms)), temp,sys.k; rng=rng))
     else
-        return velocity_2D.(mass.(sys.atoms), temp; rng=rng)
+        return velocity_2D.(mass.(sys.atoms), temp,sys.k; rng=rng)
     end
 end
 

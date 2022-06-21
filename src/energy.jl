@@ -42,12 +42,13 @@ Calculate the temperature of a system from the kinetic energy of the atoms.
 function temperature(s::System{D, G, T}) where {D, G, T}
     ke = kinetic_energy_noconvert(s)
     df = 3 * length(s) - 3
-    if unit(ke) == NoUnits
-        k = T(temp_conversion_factor)
+    temp = 2 * ke / (df * s.k)
+
+    if s.energy_units == NoUnits
+        return temp
     else
-        k = T(uconvert(u"K^-1" * unit(ke), Unitful.k))
+        return uconvert(u"K",temp)
     end
-    return 2 * ke / (df * k)
 end
 
 function check_energy_units(E, energy_units)
