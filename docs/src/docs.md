@@ -649,6 +649,7 @@ The available simulators are:
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
+- [`LangevinSplitting`](@ref)
 
 To define your own simulator, first define a `struct`:
 ```julia
