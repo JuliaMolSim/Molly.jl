@@ -331,11 +331,11 @@ A Langevin simulator using a general splitting scheme, consisting of a successio
 - `splitting::splittingType`: The splitting specifier. Should be a string consisting of the characters `A`,`B` and `O`. Strings with no `O`s reduce to deterministic symplectic schemes.
 - `remove_CM_motion::Bool=true`: Whether to remove the centre of mass motion at each simulation iteration.
 """
-struct LangevinSplitting{dtType,frictionType,temperatureType,splittingType}
-    dt::dtType
-    friction::frictionType
-    temperature::temperatureType
-    splitting::splittingType
+struct LangevinSplitting{S,F,K,W}
+    dt::S
+    friction::F
+    temperature::K
+    splitting::W
     remove_CM_motion::Bool
 end
 function LangevinSplitting(; dt, friction, temperature, splitting,remove_CM_motion=true)
@@ -345,7 +345,7 @@ end
 function simulate!(sys,sim::LangevinSplitting,n_steps::Integer;parallel::Bool=true,rng=Random.GLOBAL_RNG)
     M_inv = inv.(mass.(sys.atoms))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
-    σ_eff = sqrt.( (1.0 * unit(eltype(α_eff))) .- (α_eff .^ 2))
+    σ_eff = sqrt.( (1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel = parallel)
     accels_t = accelerations(sys, neighbors; parallel=parallel)
 
