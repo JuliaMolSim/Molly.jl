@@ -75,41 +75,39 @@ Ensure a coordinate is within the simulation box and return the coordinate.
 """
 wrap_coords_vec(v, box_size) = wrap_coords.(v, box_size)
 
+
+const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
+
 """
     velocity(mass, temperature,k; dims=3)
-
-Generate a random velocity from the Maxwell-Boltzmann distribution, with Boltzmann constant k.
+    velocity(mass, temperature; dims=3)
+Generate a random velocity from the Maxwell-Boltzmann distribution, with optional custom Boltzmann constant k.
 """
-const k_conv=uconvert(u"u * nm^2 * ps^-2 * K^-1",Unitful.k)
-const k_conv_strip=ustrip(k_conv)
-
-function AtomsBase.velocity(mass, temp,k=k_conv; dims::Integer=3, rng=Random.GLOBAL_RNG)
-    k_strip=(unit(mass)==NoUnits) ? ustrip(k) : k
+function AtomsBase.velocity(mass, temp,k=mb_conversion_factor; dims::Integer=3, rng=Random.GLOBAL_RNG)
+    k_strip = (unit(mass) == NoUnits) ? ustrip(k) : k
     return SVector([maxwell_boltzmann(mass, temp, k_strip; rng=rng) for i in 1:dims]...)
 end
 
-function velocity_3D(mass, temp,k=k_conv; rng=Random.GLOBAL_RNG)
+function velocity_3D(mass, temp,k=mb_conversion_factor; rng=Random.GLOBAL_RNG)
 
     return SVector(
-        maxwell_boltzmann(mass, temp, k; rng=rng),
-        maxwell_boltzmann(mass, temp, k; rng=rng),
-        maxwell_boltzmann(mass, temp, k; rng=rng),
+        maxwell_boltzmann(mass, temp, mb_conversion_factor; rng=rng),
+        maxwell_boltzmann(mass, temp, mb_conversion_factor; rng=rng),
+        maxwell_boltzmann(mass, temp, mb_conversion_factor; rng=rng),
     )
 end
 
-function velocity_2D(mass, temp,k=k_conv; rng=Random.GLOBAL_RNG)
+function velocity_2D(mass, temp,k=mb_conversion_factor; rng=Random.GLOBAL_RNG)
     return SVector(
-        maxwell_boltzmann(mass, temp, k; rng=rng),
-        maxwell_boltzmann(mass, temp, k; rng=rng),
+        maxwell_boltzmann(mass, temp, mb_conversion_factor; rng=rng),
+        maxwell_boltzmann(mass, temp, mb_conversion_factor; rng=rng),
     )
 end
-
-#const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
 
 """
-    maxwell_boltzmann(mass, temperature)
-
-Generate a random speed along one dimension from the Maxwell-Boltzmann distribution.
+    maxwell_boltzmann(mass, temperature,k;rng=Random.GLOBAL_RNG)
+    maxwell_boltzmann(mass,temperature;rng=Random.GLOBAL_RNG)
+Generate a random speed along one dimension from the Maxwell-Boltzmann distribution, with optionally specified Boltzmann's constant.
 """
 function maxwell_boltzmann(mass, temp, k; rng=Random.GLOBAL_RNG)
     T = typeof(convert(AbstractFloat, ustrip(temp)))
@@ -117,6 +115,10 @@ function maxwell_boltzmann(mass, temp, k; rng=Random.GLOBAL_RNG)
     return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
 end
 
+function maxwell_boltzmann(mass,temp;rng=Random.GLOBAL_RNG)
+    k = unit(temp) == NoUnits ? ustrip(mb_conversion_factor) : mb_conversion_factor
+    return maxwell_boltzmann(mass,temp,k;rng=rng)
+end
 """
     random_velocities(sys, temp)
 

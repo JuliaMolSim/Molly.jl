@@ -193,8 +193,8 @@ end
     k_conv=uconvert(u"u * nm^2 * ps^-2 * K^-1",Unitful.k)
     k_conv_no_units=ustrip(k_conv)
 
-    vels_units   = [maxwell_boltzmann(12.0u"u", 300.0u"K",k_conv) for _ in 1:1_000]
-    vels_nounits = [maxwell_boltzmann(12.0    , 300.0    ,k_conv_no_units) for _ in 1:1_000]
+    vels_units   = [maxwell_boltzmann(12.0u"u", 300.0u"K") for _ in 1:1_000]
+    vels_nounits = [maxwell_boltzmann(12.0    , 300.0    ) for _ in 1:1_000]
     @test 0.35u"nm * ps^-1" < std(vels_units) < 0.55u"nm * ps^-1"
     @test 0.35 < std(vels_nounits) < 0.55
 end

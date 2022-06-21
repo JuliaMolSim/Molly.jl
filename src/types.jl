@@ -318,19 +318,21 @@ function System(;
     F = typeof(force_units)
     E = typeof(energy_units)
 
-    if energy_units==NoUnits
-        if unit(k)==NoUnits #Use user-supplied unitless Boltzmann constant
-            k_converted=k
-        else
-            k_converted=ustrip(u"u* nm^2 * ps^-2 * K^-1",k) #otherwise assume energy units are (u* nm^2 * ps^-2)
+    if energy_units == NoUnits
+        Zygote.ignore() do
+            if unit(k) == NoUnits #Use user-supplied unitless Boltzmann constant
+                k_converted = k
+            else
+                k_converted = ustrip(u"u* nm^2 * ps^-2 * K^-1",k) #otherwise assume energy units are (u* nm^2 * ps^-2)
+            end
         end
-    elseif dimension(energy_units)== u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        k_converted=uconvert(energy_units*u"mol * K^-1",k)
+    elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        k_converted = uconvert(energy_units*u"mol * K^-1",k)
     else
-        k_converted=uconvert(energy_units*u"K^-1",k)
+        k_converted = uconvert(energy_units*u"K^-1",k)
     end
     
-    K=typeof(k_converted)
+    K = typeof(k_converted)
 
     return System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
                     atoms, atoms_data, pairwise_inters, specific_inter_lists,
