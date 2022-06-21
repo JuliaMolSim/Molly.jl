@@ -43,7 +43,6 @@ function temperature(s::System{D, G, T}) where {D, G, T}
     ke = kinetic_energy_noconvert(s)
     df = 3 * length(s) - 3
     temp = 2 * ke / (df * s.k)
-
     if s.energy_units == NoUnits
         return temp
     else

@@ -268,6 +268,8 @@ interface described there.
     Should be set to `NoUnits` if units are not being used.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
     be set to `NoUnits` if units are not being used.
+- `k::K=Unitful.k`: the Boltzmann constant, which may be modified in some
+    simulations.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
@@ -319,17 +321,20 @@ function System(;
     E = typeof(energy_units)
 
     if energy_units == NoUnits
+        # Remove this ignore block once Unitful gradient support is added
         Zygote.ignore() do
-            if unit(k) == NoUnits #Use user-supplied unitless Boltzmann constant
-                k_converted = k
+            if unit(k) == NoUnits
+                # Use user-supplied unitless Boltzmann constant
+                k_converted = T(k)
             else
-                k_converted = ustrip(u"u* nm^2 * ps^-2 * K^-1",k) #otherwise assume energy units are (u* nm^2 * ps^-2)
+                # Otherwise assume energy units are (u* nm^2 * ps^-2)
+                k_converted = T(ustrip(u"u * nm^2 * ps^-2 * K^-1", k))
             end
         end
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        k_converted = uconvert(energy_units*u"mol * K^-1",k)
+        k_converted = T(uconvert(energy_units * u"mol * K^-1", k))
     else
-        k_converted = uconvert(energy_units*u"K^-1",k)
+        k_converted = T(uconvert(energy_units * u"K^-1", k))
     end
     
     K = typeof(k_converted)
