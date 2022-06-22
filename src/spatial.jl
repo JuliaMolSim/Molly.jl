@@ -1,6 +1,9 @@
 # Spatial calculations
 
 export
+    CubicBoundary,
+    RectangularBoundary,
+    box_volume,
     vector1D,
     vector,
     wrap_coords,
@@ -11,6 +14,60 @@ export
     bond_angle,
     torsion_angle,
     remove_CM_motion!
+
+"""
+    CubicBoundary(x, y, z)
+    CubicBoundary(arr)
+
+Cubic 3D bounding box defined by 3 side lengths.
+"""
+struct CubicBoundary{T}
+    side_lengths::SVector{3, T}
+end
+
+CubicBoundary(x, y, z) = CubicBoundary(SVector{3}(x, y, z))
+CubicBoundary(arr) = CubicBoundary(SVector{3}(arr))
+
+Base.getindex(b::CubicBoundary, i::Integer) = b.side_lengths[i]
+Base.firstindex(b::CubicBoundary) = b.side_lengths[1]
+Base.lastindex(b::CubicBoundary) = b.side_lengths[3]
+
+"""
+    n_dimensions(boundary)
+
+Number of dimensions of a bounding box.
+"""
+AtomsBase.n_dimensions(::CubicBoundary) = 3
+
+"""
+    RectangularBoundary(x, y)
+    RectangularBoundary(arr)
+
+Rectangular 2D bounding box defined by 2 side lengths.
+"""
+struct RectangularBoundary{T}
+    side_lengths::SVector{2, T}
+end
+
+RectangularBoundary(x, y) = RectangularBoundary(SVector{2}(x, y))
+RectangularBoundary(arr) = RectangularBoundary(SVector{2}(arr))
+
+Base.getindex(b::RectangularBoundary, i::Integer) = b.side_lengths[i]
+Base.firstindex(b::RectangularBoundary) = b.side_lengths[1]
+Base.lastindex(b::RectangularBoundary) = b.side_lengths[2]
+
+AtomsBase.n_dimensions(::RectangularBoundary) = 2
+
+Base.broadcastable(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
+
+float_type(b::Union{CubicBoundary, RectangularBoundary}) = typeof(ustrip(b.side_lengths[1]))
+
+"""
+    box_volume(boundary)
+
+Calculate the volume of a bounding box.
+"""
+box_volume(box_size::Union{CubicBoundary, RectangularBoundary}) = prod(box_size.side_lengths)
 
 """
     vector1D(c1, c2, side_length)
@@ -36,9 +93,9 @@ the bounding box.
 The minimum image convention is used, so the displacement is to the closest
 version of the coordinates accounting for the periodic boundaries.
 """
-vector(c1, c2, box_size) = vector1D.(c1, c2, box_size)
+vector(c1, c2, box_size::Union{CubicBoundary, RectangularBoundary}) = vector1D.(c1, c2, box_size)
 
-@generated function vector(c1::SVector{N}, c2::SVector{N}, box_size) where N
+@generated function vector(c1::SVector{N}, c2::SVector{N}, box_size::Union{CubicBoundary, RectangularBoundary}) where N
     quote
         Base.Cartesian.@ncall $N SVector{$N} i->vector1D(c1[i], c2[i], box_size[i])
     end
@@ -47,7 +104,7 @@ end
 square_distance(i, j, coords, box_size) = sum(abs2, vector(coords[i], coords[j], box_size))
 
 # Pad a vector to 3D to allow operations such as the cross product
-function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, box_size::SVector{2, T}) where T
+function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, box_size::RectangularBoundary{T}) where T
     SVector{3, T}(
         vector1D(c1[1], c2[1], box_size[1]),
         vector1D(c1[2], c2[2], box_size[2]),
@@ -55,11 +112,11 @@ function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, box_size::SVector{2,
     )
 end
 
-vector_pad3D(c1::SVector{3}, c2::SVector{3}, box_size::SVector{3}) = vector(c1, c2, box_size)
+vector_pad3D(c1::SVector{3}, c2::SVector{3}, box_size) = vector(c1, c2, box_size)
 
 # Trim a vector back to 2D if required
-trim3D(v::SVector{3, T}, box_size::SVector{2}) where T = SVector{2, T}(v[1], v[2])
-trim3D(v::SVector{3}, box_size::SVector{3}) = v
+trim3D(v::SVector{3, T}, box_size::RectangularBoundary{T}) where T = SVector{2, T}(v[1], v[2])
+trim3D(v::SVector{3}, box_size) = v
 
 """
     wrap_coords(c, side_length)
@@ -73,7 +130,7 @@ wrap_coords(c, side_length) = c - floor(c / side_length) * side_length
 
 Ensure a coordinate is within the simulation box and return the coordinate.
 """
-wrap_coords_vec(v, box_size) = wrap_coords.(v, box_size)
+wrap_coords_vec(v, box_size::Union{CubicBoundary, RectangularBoundary}) = wrap_coords.(v, box_size)
 
 const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
 

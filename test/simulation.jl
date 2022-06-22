@@ -2,7 +2,7 @@
     n_atoms = 10
     n_steps = 20_000
     temp = 298.0u"K"
-    box_size = SVector(2.0, 2.0)u"nm"
+    box_size = RectangularBoundary(2.0u"nm", 2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
     s = System(
@@ -48,7 +48,7 @@ end
     atom_mass = 10.0u"u"
     n_steps = 20_000
     temp = 298.0u"K"
-    box_size = SVector(2.0, 2.0, 2.0)u"nm"
+    box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     parallel_list = run_parallel_tests ? (false, true) : (false,)
 
@@ -131,7 +131,7 @@ end
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
-    box_size = SVector(2.0, 2.0, 2.0)u"nm"
+    box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
     coords = place_atoms(n_atoms, box_size, 0.3u"nm")
     simulators = [
         Verlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps")),
@@ -162,7 +162,7 @@ end
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
-    box_size = SVector(2.0, 2.0, 2.0)u"nm"
+    box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
     coords = place_atoms(n_atoms ÷ 2, box_size, 0.3u"nm")
     for i in 1:length(coords)
         push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
@@ -211,7 +211,7 @@ end
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
-    box_size = SVector(2.0, 2.0, 2.0)u"nm"
+    box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
     G = 10.0u"kJ * nm * u^-2 * mol^-1"
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     pairwise_inter_types = (
@@ -259,7 +259,7 @@ end
     n_atoms = 100
     n_steps = 2_000 # Does diverge for longer simulations or higher velocities
     temp = 298.0u"K"
-    box_size = SVector(2.0, 2.0, 2.0)u"nm"
+    box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
     coords = place_atoms(n_atoms, box_size, 0.3u"nm")
     velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
     simulator = VelocityVerlet(dt=0.002u"ps")
@@ -294,7 +294,7 @@ end
         pairwise_inters=(LennardJones(nl_only=true),),
         coords=ustrip_vec.(coords),
         velocities=ustrip_vec.(velocities),
-        box_size=ustrip.(box_size),
+        box_size=CubicBoundary(ustrip.(box_size)),
         neighbor_finder=DistanceNeighborFinder(
             nb_matrix=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -373,7 +373,7 @@ end
 @testset "Different implementations" begin
     n_atoms = 400
     atom_mass = 10.0u"u"
-    box_size = SVector(6.0, 6.0, 6.0)u"nm"
+    box_size = CubicBoundary(6.0u"nm", 6.0u"nm", 6.0u"nm")
     temp = 1.0u"K"
     starting_coords = place_diatomics(n_atoms ÷ 2, box_size, 0.2u"nm", 0.2u"nm")
     starting_velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
@@ -384,7 +384,7 @@ end
         n_atoms = 400
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
-        box_size = f32 ? SVector(6.0f0, 6.0f0, 6.0f0)u"nm" : SVector(6.0, 6.0, 6.0)u"nm"
+        box_size = f32 ? CubicBoundary(6.0f0u"nm", 6.0f0u"nm", 6.0f0u"nm") : CubicBoundary(6.0u"nm", 6.0u"nm", 6.0u"nm")
         simulator = VelocityVerlet(dt=f32 ? 0.02f0u"ps" : 0.02u"ps")
         b0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
         kb = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"

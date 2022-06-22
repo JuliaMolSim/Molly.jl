@@ -100,7 +100,7 @@ masses = [
     0.642e24u"kg",
 ]
 
-box_size = SVector(1e9, 1e9, 1e9)u"km"
+box_size = CubicBoundary(1e9u"km", 1e9u"km", 1e9u"km")
 
 # Convert the gravitational constant to the appropriate units
 inter = Gravity(G=convert(typeof(1.0u"km^3 * kg^-1 * d^-2"), Unitful.G))
@@ -211,7 +211,7 @@ function Molly.log_property!(logger::BondLogger, s, neighbors, step_n; parallel=
 end
 
 n_atoms = 200
-box_size = SVector(10.0, 10.0)
+box_size = RectangularBoundary(10.0, 10.0)
 n_steps = 2_000
 temp = 1.0
 
@@ -279,7 +279,7 @@ using Zygote
 using GLMakie
 
 inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
-box_size = SVector(5.0, 5.0, 5.0)
+box_size = CubicBoundary(5.0, 5.0, 5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
 function force_direct(dist)
@@ -328,7 +328,7 @@ It can also be compared to the harmonic bond potential.
 using Molly
 using GLMakie
 
-box_size = SVector(5.0, 5.0, 5.0)
+box_size = CubicBoundary(5.0, 5.0, 5.0)
 dists = collect(0.12:0.005:2.0)
 
 function energies(inter)
@@ -374,7 +374,7 @@ When *m*=6 and *n*=12 this is equivalent to the Lennard-Jones potential.
 using Molly
 using GLMakie
 
-box_size = SVector(5.0, 5.0, 5.0)
+box_size = CubicBoundary(5.0, 5.0, 5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 dists = collect(0.2:0.005:0.8)
 

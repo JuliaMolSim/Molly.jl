@@ -371,7 +371,7 @@ function CellListMapNeighborFinder(;
         sides = SVector(side, side, side)
         box = CellListMap.Box(sides, dist_cutoff)
     else
-        box = CellListMap.Box(unit_cell, dist_cutoff)
+        box = CellListMap.Box(unit_cell.side_lengths, dist_cutoff)
     end
     if isnothing(x0)
         x = [ustrip.(box.unit_cell_max) .* rand(SVector{3, T}) for _ in 1:np]
@@ -432,7 +432,7 @@ function find_neighbors(s::System,
         neighbors_threaded[1].n = 0
     end
 
-    box = CellListMap.Box(s.box_size, nf.dist_cutoff; lcell=1)
+    box = CellListMap.Box(s.box_size.side_lengths, nf.dist_cutoff; lcell=1)
     cl = UpdateCellList!(s.coords, box, cl, aux; parallel=parallel)
 
     map_pairwise!(

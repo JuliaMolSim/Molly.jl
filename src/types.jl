@@ -258,8 +258,7 @@ interface described there.
     vector of `SVector`s of 2 or 3 dimensions.
 - `velocities::V=zero(coords) * u"ps^-1"`: the velocities of the atoms in the
     system.
-- `box_size::B`: the size of the box in which the simulation takes place.
-    Typically a `SVector` of 2 or 3 dimensions.
+- `box_size::B`: the boundary box in which the simulation takes place.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `loggers::L=Dict()`: the loggers that record properties of interest during a
@@ -304,9 +303,9 @@ function System(;
                 energy_units=u"kJ * mol^-1",
                 k=Unitful.k,
                 gpu_diff_safe=isa(coords, CuArray))
-    D = length(box_size)
+    D = n_dimensions(box_size)
     G = gpu_diff_safe
-    T = typeof(ustrip(first(box_size)))
+    T = float_type(box_size)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     PI = typeof(pairwise_inters)
@@ -349,14 +348,15 @@ end
     is_gpu_diff_safe(sys)
 
 Whether a `System` uses the code path suitable for the GPU and
-    for taking gradients.
+for taking gradients.
 """
 is_gpu_diff_safe(::System{D, G}) where {D, G} = G
 
 """
     float_type(sys)
+    float_type(boundary)
 
-The float type a `System` uses.
+The float type a `System` or bounding box uses.
 """
 float_type(::System{D, G, T}) where {D, G, T} = T
 
@@ -389,12 +389,12 @@ edges_to_box(bs::SVector{2}, z) = SVector{2}([
 ])
 
 function AtomsBase.bounding_box(s::System)
-    bs = s.box_size
+    bs = s.box_size.side_lengths
     z = zero(bs[1])
     bb = edges_to_box(bs, z)
     return unit(z) == NoUnits ? (bb)u"nm" : bb # Assume nm without other information
 end
 
 function Base.show(io::IO, s::System)
-    print(io, "System with ", length(s), " atoms, box size ", s.box_size)
+    print(io, "System with ", length(s), " atoms, boundary ", s.box_size)
 end

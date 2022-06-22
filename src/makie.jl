@@ -37,7 +37,7 @@ function visualize(coord_logger,
 
     connection_nodes = []
     for (ci, (i, j)) in enumerate(connections)
-        if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < (first(box_size) / 2)
+        if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < (box_size[1] / 2)
             if dims == 3
                 push!(connection_nodes, Observable(PointType.(
                         ustrip.([coords_start[i][1], coords_start[j][1]]),
@@ -84,7 +84,7 @@ function visualize(coord_logger,
         coords = coord_logger.coords[frame_i]
 
         for (ci, (i, j)) in enumerate(connections)
-            if connection_frames[frame_i][ci] && norm(coords[i] - coords[j]) < (first(box_size) / 2)
+            if connection_frames[frame_i][ci] && norm(coords[i] - coords[j]) < (box_size[1] / 2)
                 if dims == 3
                     connection_nodes[ci][] = PointType.(
                                 ustrip.([coords[i][1], coords[j][1]]),

@@ -13,19 +13,20 @@ export
 """
     place_atoms(n_atoms, box_size, min_dist; max_attempts=100)
 
-Obtain `n_atoms` 3D coordinates in a box with sides `box_size` where no two
+Obtain `n_atoms` coordinates in bounding box `box_size` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
-The keyword argument `max_attempts` determines the number of failed tries after which to stop placing atoms.
+The keyword argument `max_attempts` determines the number of failed tries after
+which to stop placing atoms.
 """
 function place_atoms(n_atoms::Integer, box_size, min_dist; max_attempts::Integer=100)
-    dims = length(box_size)
+    dims = n_dimensions(box_size)
     # not floor(x / min_dist) + 1 due to periodic boundary conditions
-    max_atoms = prod(x -> floor(x / min_dist), box_size)
+    max_atoms = prod(x -> floor(x / min_dist), box_size.side_lengths)
     if n_atoms > max_atoms
-        error("Box size of $(box_size) too small for $n_atoms atoms with minimum distance of $min_dist.")
+        error("Box size of $box_size too small for $n_atoms atoms with minimum distance of $min_dist")
     end
     min_dist_sq = min_dist ^ 2
-    T = typeof(convert(AbstractFloat, ustrip(first(box_size))))
+    T = typeof(convert(AbstractFloat, ustrip(box_size[1])))
     coords = SArray[]
     failed_attempts = 0
     while length(coords) < n_atoms
@@ -51,14 +52,14 @@ end
 """
     place_diatomics(n_molecules, box_size, min_dist, bond_length)
 
-Obtain 3D coordinates for `n_molecules` diatomics in a box with sides `box_size`
+Obtain coordinates for `n_molecules` diatomics in bounding box `box_size`
 where no two points are closer than `min_dist` and the bond length is `bond_length`,
 accounting for periodic boundary conditions.
 """
 function place_diatomics(n_molecules::Integer, box_size, min_dist, bond_length)
-    dims = length(box_size)
+    dims = n_dimensions(box_size)
     min_dist_sq = min_dist ^ 2
-    T = typeof(convert(AbstractFloat, ustrip(first(box_size))))
+    T = typeof(convert(AbstractFloat, ustrip(box_size[1])))
     coords = SArray[]
     while length(coords) < (n_molecules * 2)
         new_coord_a = SVector{dims}(rand(T, dims)) .* box_size
@@ -304,8 +305,8 @@ includes collapsed into one file.
 # Arguments
 - `velocities=nothing`: the velocities of the atoms in the system, set to
     zero by default.
-- `box_size=nothing`: the size of the cubic box used for simulation, read
-    from the file by default.
+- `box_size=nothing`: the bounding box used for simulation, read from the
+    file by default.
 - `loggers=Dict()`: the loggers that record properties of interest during a
     simulation.
 - `units::Bool=true`: whether to use Unitful quantities.
@@ -715,8 +716,9 @@ function System(coord_file::AbstractString,
         else
             box_size_used = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame)) / 10.0))
         end
+        boundary = CubicBoundary(box_size_used)
     else
-        box_size_used = box_size
+        boundary = box_size
     end
 
     # Convert from Å
@@ -726,9 +728,9 @@ function System(coord_file::AbstractString,
         coords = [T.(SVector{3}(col) / 10.0) for col in eachcol(Chemfiles.positions(frame))]
     end
     if centre_coords
-        coords = coords .- (mean(coords),) .+ (box_size_used / 2,)
+        coords = coords .- (mean(coords),) .+ (boundary.side_lengths / 2,)
     end
-    coords = wrap_coords_vec.(coords, (box_size_used,))
+    coords = wrap_coords_vec.(coords, (boundary,))
 
     atoms = [atoms...]
     if gpu_diff_safe
@@ -737,7 +739,7 @@ function System(coord_file::AbstractString,
                                                     n_steps=10, dist_cutoff=T(nl_dist))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14,
-                                                    n_steps=10, x0=coords, unit_cell=box_size_used,
+                                                    n_steps=10, x0=coords, unit_cell=boundary,
                                                     dist_cutoff=T(nl_dist))
     end
     if gpu
@@ -779,7 +781,7 @@ function System(coord_file::AbstractString,
         general_inters=general_inters,
         coords=coords,
         velocities=vels,
-        box_size=box_size_used,
+        box_size=boundary,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
@@ -1047,14 +1049,15 @@ function System(T::Type,
     if isnothing(box_size)
         box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
         box_size_used = units ? (box_size_vals)u"nm" : box_size_vals
+        boundary = CubicBoundary(box_size_used)
     else
-        box_size_used = box_size
+        boundary = box_size
     end
     coords = [coords...]
     if centre_coords
-        coords = coords .- (mean(coords),) .+ (box_size_used / 2,)
+        coords = coords .- (mean(coords),) .+ (boundary.side_lengths / 2,)
     end
-    coords = wrap_coords_vec.(coords, (box_size_used,))
+    coords = wrap_coords_vec.(coords, (boundary,))
 
     pairwise_inters = (lj, crf)
 
@@ -1088,7 +1091,7 @@ function System(T::Type,
                                                     dist_cutoff=T(nl_dist))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-                                                    x0=coords, unit_cell=box_size_used, dist_cutoff=T(nl_dist))
+                                                    x0=coords, unit_cell=boundary, dist_cutoff=T(nl_dist))
     end
     if gpu
         atoms = cu(atoms)
@@ -1112,7 +1115,7 @@ function System(T::Type,
         specific_inter_lists=specific_inter_lists,
         coords=coords,
         velocities=vels,
-        box_size=box_size_used,
+        box_size=boundary,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,

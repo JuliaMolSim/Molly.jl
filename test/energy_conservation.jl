@@ -7,7 +7,7 @@ using Test
 @testset "Lennard-Jones energy conservation" begin
     temp = 1.0u"K"
     n_steps = 10_000
-    box_size = SVector(50.0, 50.0, 50.0)u"nm"
+    box_size = CubicBoundary(50.0u"nm", 50.0u"nm", 50.0u"nm")
     n_atoms = 2_000
     atom_mass = 40.0u"u"
     simulator = VelocityVerlet(dt=0.005u"ps")

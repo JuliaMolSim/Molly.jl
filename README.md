@@ -60,7 +60,7 @@ Simulation of a Lennard-Jones fluid:
 using Molly
 
 n_atoms = 100
-box_size = SVector(2.0, 2.0, 2.0)u"nm"
+box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
 temp = 298.0u"K"
 atom_mass = 10.0u"u"
 

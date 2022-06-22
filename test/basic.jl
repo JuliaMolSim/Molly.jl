@@ -3,7 +3,7 @@
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
     c3 = SVector(1.4, 1.0, 1.0)u"nm"
     a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
-    box_size = SVector(2.0, 2.0, 2.0)u"nm"
+    box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
     dr12 = vector(c1, c2, box_size)
     dr13 = vector(c1, c3, box_size)
 
@@ -77,7 +77,7 @@
     c1_grav = SVector(1.0, 1.0, 1.0)u"m"
     c2_grav = SVector(6.0, 1.0, 1.0)u"m"
     a1_grav, a2_grav = Atom(mass=1e6u"kg"), Atom(mass=1e5u"kg")
-    box_size_grav = SVector(20.0, 20.0, 20.0)u"m"
+    box_size_grav = CubicBoundary(20.0u"m", 20.0u"m", 20.0u"m")
     dr12_grav = vector(c1_grav, c2_grav, box_size_grav)
     inter = Gravity()
     @test isapprox(
@@ -173,14 +173,26 @@ end
     @test vector1D(1.0u"m" , 9.0u"m" , 10.0u"m" ) == -2.0u"m"
     @test_throws Unitful.DimensionError vector1D(6.0u"nm", 4.0u"nm", 10.0)
 
-    @test vector(SVector(4.0, 1.0, 6.0), SVector(6.0, 9.0, 4.0),
-                    SVector(10.0, 10.0, 10.0)) == SVector(2.0, -2.0, -2.0)
-    @test vector(SVector(4.0, 1.0, 1.0), SVector(6.0, 4.0, 3.0),
-                    SVector(10.0, 5.0, 3.5)) == SVector(2.0, -2.0, -1.5)
-    @test vector(SVector(4.0, 1.0), SVector(6.0, 9.0),
-                    SVector(10.0, 10.0)) == SVector(2.0, -2.0)
-    @test vector(SVector(4.0, 1.0, 6.0)u"nm", SVector(6.0, 9.0, 4.0)u"nm",
-                    SVector(10.0, 10.0, 10.0)u"nm") == SVector(2.0, -2.0, -2.0)u"nm"
+    @test vector(
+        SVector(4.0, 1.0, 6.0),
+        SVector(6.0, 9.0, 4.0),
+        CubicBoundary(SVector(10.0, 10.0, 10.0)),
+    ) == SVector(2.0, -2.0, -2.0)
+    @test vector(
+        SVector(4.0, 1.0, 1.0),
+        SVector(6.0, 4.0, 3.0),
+        CubicBoundary(SVector(10.0, 5.0, 3.5)),
+    ) == SVector(2.0, -2.0, -1.5)
+    @test vector(
+        SVector(4.0, 1.0),
+        SVector(6.0, 9.0),
+        RectangularBoundary(SVector(10.0, 10.0)),
+    ) == SVector(2.0, -2.0)
+    @test vector(
+        SVector(4.0, 1.0, 6.0)u"nm",
+        SVector(6.0, 9.0, 4.0)u"nm",
+        CubicBoundary(SVector(10.0, 10.0, 10.0)u"nm"),
+    ) == SVector(2.0, -2.0, -2.0)u"nm"
 
     @test wrap_coords(8.0 , 10.0) == 8.0
     @test wrap_coords(12.0, 10.0) == 2.0
@@ -203,7 +215,7 @@ end
             atoms=[Atom(), Atom(), Atom()],
             coords=[SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm",
                     SVector(5.0, 5.0, 5.0)u"nm"],
-            box_size=SVector(10.0, 10.0, 10.0)u"nm",
+            box_size=CubicBoundary(10.0u"nm", 10.0u"nm", 10.0u"nm"),
             neighbor_finder=nf,
         )
         neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
@@ -217,14 +229,15 @@ end
 
     # Test passing the box_size and coordinates as keyword arguments to CellListMapNeighborFinder
     coords = [SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm", SVector(5.0, 5.0, 5.0)u"nm"]
-    box_size = SVector(10.0, 10.0, 10.0)u"nm"
+    box_size = CubicBoundary(10.0u"nm", 10.0u"nm", 10.0u"nm")
     neighbor_finder=CellListMapNeighborFinder(
         nb_matrix=trues(3, 3), n_steps=10, x0=coords,
         unit_cell=box_size, dist_cutoff=2.0u"nm",
     )
     s = System(
         atoms=[Atom(), Atom(), Atom()],
-        coords=coords, box_size=box_size,
+        coords=coords,
+        box_size=box_size,
         neighbor_finder=neighbor_finder,
     )
     neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)

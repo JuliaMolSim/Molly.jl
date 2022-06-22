@@ -20,7 +20,7 @@
     @test size(s.neighbor_finder.matrix_14) == (true_n_atoms, true_n_atoms)
     @test length(s.pairwise_inters) == 2
     @test length(s.specific_inter_lists) == 3
-    @test s.box_size == SVector(3.7146, 3.7146, 3.7146)u"nm"
+    @test s.box_size == CubicBoundary(3.7146u"nm", 3.7146u"nm", 3.7146u"nm")
     show(devnull, first(s.atoms))
 
     s.velocities = [velocity(a.mass, temp) .* 0.01 for a in s.atoms]
@@ -216,7 +216,7 @@ end
         sys = System(
             joinpath(data_dir, "6mrr_nowater.pdb"),
             ff;
-            box_size=SVector(100.0, 100.0, 100.0)u"nm",
+            box_size=CubicBoundary(100.0u"nm", 100.0u"nm", 100.0u"nm"),
             implicit_solvent=solvent_model,
             dist_cutoff=5.0u"nm",
             nl_dist=5.0u"nm",
