@@ -326,11 +326,11 @@ end
     @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
 
     
-    @test unit(first(s.loggers["autocorrelations"].normalized_correlation))==NoUnits
+    @test unit(first(s.loggers["autocorrelations"].normalized_correlations))==NoUnits
     @test unit(first(s.loggers["autocorrelations"].unnormalized_correlations))==u"nm^2 * ps^-2"
     
-    @test isapprox(first(s.loggers["autocorrelations"].normalized_correlation),1.0,atol=1e-2)
-    @test isapprox(first(s_nounits.loggers["autocorrelations"].normalized_correlation),1.0,atol=1e-2)
+    @test isapprox(first(s.loggers["autocorrelations"].normalized_correlations),1.0,atol=1e-2)
+    @test isapprox(first(s_nounits.loggers["autocorrelations"].normalized_correlations),1.0,atol=1e-2)
     
     show(devnull,s_nounits.loggers["autocorrelations"].unnormalized_correlations)
 end
