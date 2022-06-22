@@ -270,7 +270,7 @@ behind the positions.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
-- `temperature::K`: the temperature of the simulation.
+- `temperature::K`: the equilibrium temperature of the simulation.
 - `friction::F`: the friction coefficient of the simulation.
 - `remove_CM_motion::Bool=true`: whether to remove the centre of mass motion
     every time step.
@@ -322,31 +322,49 @@ function simulate!(sys,
     return sys
 end
 
-"""LangevinSplitting(; <keyword arguments>)
-A Langevin simulator using a general splitting scheme, consisting of a succession of **A**, **B** and **O** steps, corresponding respectively to updates in position, velocity for the potential part, and velocity for the thermal fluctuation-dissipation part. The `Langevin` and `VelocityVerlet` simulators without coupling correspond to the **BAOA** and **BAB** schemes respectively.
-# Arguments
-- `dt::dtType`: The timestep for the simulation
-- `friction::frictionType`: The friction coefficient. If units are used, it should have a dimensionality of mass per time.
-- `temperature::temperatureType`: The equilibrium temperature.
-- `splitting::splittingType`: The splitting specifier. Should be a string consisting of the characters `A`,`B` and `O`. Strings with no `O`s reduce to deterministic symplectic schemes.
-- `remove_CM_motion::Bool=true`: Whether to remove the centre of mass motion at each simulation iteration.
 """
-struct LangevinSplitting{S,F,K,W}
+    LangevinSplitting(; <keyword arguments>)
+
+The Langevin simulator using a general splitting scheme, consisting of a
+succession of **A**, **B** and **O** steps, corresponding respectively to
+updates in position, velocity for the potential part, and velocity for the
+thermal fluctuation-dissipation part. The `Langevin` and `VelocityVerlet`
+simulators without coupling correspond to the **BAOA** and **BAB** schemes
+respectively.
+
+# Arguments
+- `dt::S`: the time step of the simulation.
+- `friction::F`: the friction coefficient. If units are used, it should have a
+    dimensionality of mass per time.
+- `temperature::K`: the equilibrium temperature of the simulation.
+- `splitting::W`: the splitting specifier. Should be a string consisting of the
+    characters `A`,`B` and `O`. Strings with no `O`s reduce to deterministic
+    symplectic schemes.
+- `remove_CM_motion::Bool=true`: whether to remove the centre of mass motion
+    every time step.
+"""
+struct LangevinSplitting{S, F, K, W}
     dt::S
     friction::F
     temperature::K
     splitting::W
     remove_CM_motion::Bool
 end
-function LangevinSplitting(; dt, friction, temperature, splitting,remove_CM_motion=true)
-    LangevinSplitting{typeof(dt),typeof(friction),typeof(temperature),typeof(splitting)}(dt, friction, temperature, splitting,remove_CM_motion)
+
+function LangevinSplitting(; dt, friction, temperature, splitting, remove_CM_motion=true)
+    LangevinSplitting{typeof(dt), typeof(friction), typeof(temperature), typeof(splitting)}(
+        dt, friction, temperature, splitting, remove_CM_motion)
 end
 
-function simulate!(sys,sim::LangevinSplitting,n_steps::Integer;parallel::Bool=true,rng=Random.GLOBAL_RNG)
+function simulate!(sys,
+                    sim::LangevinSplitting,
+                    n_steps::Integer;
+                    parallel::Bool=true,
+                    rng=Random.GLOBAL_RNG)
     M_inv = inv.(mass.(sys.atoms))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
     σ_eff = sqrt.( (1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
-    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel = parallel)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
     accels_t = accelerations(sys, neighbors; parallel=parallel)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
@@ -354,7 +372,8 @@ function simulate!(sys,sim::LangevinSplitting,n_steps::Integer;parallel::Bool=tr
     forces_known = true
     force_computation_steps = Bool[]
 
-    occursin(r"^.*B[^B]*A[^B]*$", sim.splitting) && (forces_known = false) #determine the need to recompute accelerations before B steps
+    # Determine the need to recompute accelerations before B steps
+    occursin(r"^.*B[^B]*A[^B]*$", sim.splitting) && (forces_known = false)
 
     for op in sim.splitting
         if op == 'O'
@@ -381,7 +400,8 @@ function simulate!(sys,sim::LangevinSplitting,n_steps::Integer;parallel::Bool=tr
             push!(arguments, (sys, effective_dts[j]))
         elseif op == 'B'
             push!(steps, B_step!)
-            push!(arguments, (sys, effective_dts[j], accels_t, neighbors, force_computation_steps[j], parallel))
+            push!(arguments, (sys, effective_dts[j], accels_t, neighbors,
+                                force_computation_steps[j], parallel))
         elseif op == 'O'
             push!(steps, O_step!)
             push!(arguments, (sys, α_eff, σ_eff, rng, sim.temperature))
@@ -393,31 +413,33 @@ function simulate!(sys,sim::LangevinSplitting,n_steps::Integer;parallel::Bool=tr
     run_loggers!(sys, neighbors, 0; parallel=parallel)
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
-    for step_n = 1:n_steps
-
-        
-        for (step!, args) = step_arg_pairs
+    for step_n in 1:n_steps
+        for (step!, args) in step_arg_pairs
             step!(args...)
         end
         
         run_loggers!(sys, neighbors, step_n)
         sim.remove_CM_motion && remove_CM_motion!(sys)
 
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n; parallel=parallel)
+        if step_n != n_steps
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                        parallel=parallel)
+        end
     end
 end
 
-function O_step!(s::System, α_eff::V, σ_eff::V, rng::R, temperature::T) where {V,R<:AbstractRNG,T}
-    noise = random_velocities(s, temperature; rng = rng)
+function O_step!(s::System, α_eff::V, σ_eff::V, rng::R, temperature::T) where {V, R <: AbstractRNG, T}
+    noise = random_velocities(s, temperature; rng=rng)
     s.velocities = α_eff .* s.velocities + σ_eff .* noise
 end
 
-function A_step!(s::System, dt_eff::T) where {T}
+function A_step!(s::System, dt_eff::T) where T
     s.coords += s.velocities * dt_eff
     s.coords = wrap_coords_vec.(s.coords, (s.box_size,))
 end
 
-function B_step!(s::System, dt_eff::T, acceleration_vector::A, neighbors, compute_forces::Bool, parallel::Bool) where {T,A}
-    compute_forces && (acceleration_vector .= accelerations(s, neighbors, parallel = parallel))
+function B_step!(s::System, dt_eff::T, acceleration_vector::A, neighbors,
+                    compute_forces::Bool, parallel::Bool) where {T, A}
+    compute_forces && (acceleration_vector .= accelerations(s, neighbors, parallel=parallel))
     s.velocities += dt_eff * remove_molar.(acceleration_vector)
 end

@@ -9,8 +9,8 @@ using Zygote
 using Base.Threads
 using DelimitedFiles
 using LinearAlgebra
-using Statistics
 using Random
+using Statistics
 using Test
 
 @warn "This file does not include all the tests for Molly.jl due to CI time limits, " *

@@ -333,11 +333,11 @@ end
     show(devnull,s_nounits.loggers["autocorrelations"].unnormalized_correlations)
 end
 
-@testset "Langevin Splitting" begin
-    n_atoms=400
-    n_steps=2000
-    temp=300.0u"K"
-    box_size = SVector(10.0, 10.0, 10.0)u"nm"
+@testset "Langevin splitting" begin
+    n_atoms = 400
+    n_steps = 2000
+    temp = 300.0u"K"
+    box_size = CubicBoundary(10.0u"nm", 10.0u"nm", 10.0u"nm")
     coords = place_atoms(n_atoms, box_size, 0.3u"nm")
     velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
     s1 = System(
@@ -351,23 +351,21 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=Dict(
-            "temp"   => TemperatureLogger(10),
-        ),
+        loggers=Dict("temp" => TemperatureLogger(10)),
     )
-    s2=deepcopy(s1)
-    rseed=2022
-    simulator1=Langevin(dt=0.002u"ps",temperature=temp,friction=1.0u"ps^-1")
-    simulator2=LangevinSplitting(dt=0.002u"ps",friction=10.0u"u * ps^-1",temperature=temp,splitting="BAOA")
+    s2 = deepcopy(s1)
+    rseed = 2022
+    simulator1 = Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1")
+    simulator2 = LangevinSplitting(dt=0.002u"ps", friction=10.0u"u * ps^-1",
+                                    temperature=temp, splitting="BAOA")
 
-    @time simulate!(s1,simulator1,n_steps;rng=MersenneTwister(rseed))
-    @test 280.0u"K"<= mean(s1.loggers["temp"].temperatures[end-100:end])<=320.0u"K"
+    @time simulate!(s1, simulator1, n_steps; rng=MersenneTwister(rseed))
+    @test 280.0u"K" <= mean(s1.loggers["temp"].temperatures[(end - 100):end]) <= 320.0u"K"
 
-    @time simulate!(s2,simulator2,n_steps;rng=MersenneTwister(rseed))
-    @test 280.0u"K"<= mean(s2.loggers["temp"].temperatures[end-100:end])<=320.0u"K"
+    @time simulate!(s2, simulator2, n_steps; rng=MersenneTwister(rseed))
+    @test 280.0u"K" <= mean(s2.loggers["temp"].temperatures[(end - 100):end]) <= 320.0u"K"
 
-    atol=1e-5u"nm"
-    @test all(all(abs(x1[i]-x2[i])<atol for i=1:3) for (x1,x2)=zip(s1.coords,s2.coords))
+    @test maximum(maximum(abs.(v)) for v in (s1.coords .- s2.coords)) < 1e-5u"nm"
 end
 
 @testset "Different implementations" begin
