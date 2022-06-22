@@ -813,8 +813,10 @@ This means that a logger that records a value every step for a simulation with 1
 Loggers are currently ignored for the purposes of taking gradients, so if you use a logger in the gradient calculation the gradients will appear to be nothing.
 
 The [`TimeCorrelationLogger`](@ref) logger can be used to compute correlation functions of the form
-$$C(t)=\frac{\langle A_t\cdot B_0 \rangle}{\sqrt{\langle|A|^2\rangle\langle |B|^2\rangle }},$$
-where $A$ and $B$ are scalar or vectors observables, and the brackets are ensemble averages.
+```math
+C(t) = \frac{\langle A_t \cdot B_0 \rangle}{\sqrt{\langle |A|^2 \rangle \langle |B|^2 \rangle}}
+```
+where *A* and *B* are scalar or vector observables, and the brackets are ensemble averages.
 This includes the computations of autocorrelation functions, which can be used to gather insight into the dynamical properties of the system, for instance using Green-Kubo formulas, or the statistical properties of a sampling method.
 
 Let's look at a simple example, computing the velocity autocorrelation function for a simple system consisting of diatomic molecules defined by [`HarmonicBond`](@ref) potentials between pairs of atoms, and an additional [`SoftSphere`](@ref) potential between all pairs of atoms. Let's start by defining the system.
