@@ -329,9 +329,7 @@ end
     @test unit(first(s.loggers["autocorrelations"].normalized_correlations))==NoUnits
     @test unit(first(s.loggers["autocorrelations"].unnormalized_correlations))==u"nm^2 * ps^-2"
     
-    @test isapprox(first(s.loggers["autocorrelations"].normalized_correlations),1.0,atol=1e-2)
-    @test isapprox(first(s_nounits.loggers["autocorrelations"].normalized_correlations),1.0,atol=1e-2)
-    
+    show(devnull,s_nounits.loggers["autocorrelations"].normalized_correlations)
     show(devnull,s_nounits.loggers["autocorrelations"].unnormalized_correlations)
 end
 
