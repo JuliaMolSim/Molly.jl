@@ -179,7 +179,7 @@ end
         nb_matrix[i + (n_atoms ÷ 2), i] = false
     end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=BerendsenThermostat(temp, 1.0u"ps"))
-
+    
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         pairwise_inters=(LennardJones(nl_only=true),),
@@ -265,6 +265,9 @@ end
     simulator = VelocityVerlet(dt=0.002u"ps")
     simulator_nounits = VelocityVerlet(dt=0.002)
 
+    vtype=eltype(velocities)
+    V(sys::System,neighbors=nothing)=sys.velocities
+
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         pairwise_inters=(LennardJones(nl_only=true),),
@@ -280,8 +283,11 @@ end
             "temp"   => TemperatureLogger(100),
             "coords" => CoordinateLogger(100),
             "energy" => TotalEnergyLogger(100),
+            "autocorrelations" => TimeCorrelationLogger(vtype,vtype,V,V,n_atoms,100)
         ),
     )
+
+    vtype_nounits=eltype(ustrip_vec.(velocities))
 
     s_nounits = System(
         atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
@@ -298,6 +304,7 @@ end
             "temp"   => TemperatureLogger(Float64, 100),
             "coords" => CoordinateLogger(Float64, 100),
             "energy" => TotalEnergyLogger(Float64, 100),
+            "autocorrelations" => TimeCorrelationLogger(vtype_nounits,vtype_nounits,V,V,n_atoms,100)
         ),
         force_units=NoUnits,
         energy_units=NoUnits,
@@ -317,6 +324,13 @@ end
     final_energy = s.loggers["energy"].energies[end]
     final_energy_nounits = s_nounits.loggers["energy"].energies[end] * u"kJ * mol^-1"
     @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
+
+    
+    @test unit(first(s.loggers["autocorrelations"].normalized_correlations))==NoUnits
+    @test unit(first(s.loggers["autocorrelations"].unnormalized_correlations))==u"nm^2 * ps^-2"
+    
+    show(devnull,s_nounits.loggers["autocorrelations"].normalized_correlations)
+    show(devnull,s_nounits.loggers["autocorrelations"].unnormalized_correlations)
 end
 
 @testset "Langevin Splitting" begin
@@ -463,3 +477,4 @@ end
         @test E_diff < 5e-4u"kJ * mol^-1"
     end
 end
+

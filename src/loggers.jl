@@ -10,7 +10,8 @@ export
     KineticEnergyLogger,
     PotentialEnergyLogger,
     ForceLogger,
-    StructureWriter
+    StructureWriter,
+    TimeCorrelationLogger
 
 """
     run_loggers!(system, neighbors=nothing, step_n=0; parallel=true)
@@ -301,3 +302,112 @@ atom_record(at_data, i, coord) = BioStructures.AtomRecord(
     at_data.res_number, ' ', coord, 1.0, 0.0,
     at_data.element == "?" ? "  " : at_data.element, "  "
 )
+
+"""
+`TimeCorrelationLogger(TA::DataType, TB::DataType, observableA::Function, observableB::Function, observable_length::Integer, n_correlation::Integer)`
+A time correlation logger, which allow to estimate statistical correlations of the form
+\$\$ C(t)=\\left(\\left\\langle A(t)\\cdot B(0)\\right\\rangle -\\left\\langle A\\right\\rangle\\cdot \\left\\langle B\\right\\rangle\\right)\\left(\\sqrt{\\left\\langle |A|^2\\right\\rangle\\left\\langle |B|^2\\right\\rangle}\\right)^{-1}\$\$
+(normalized form), or
+\$\$C(t)=\\left(\\left\\langle A(t)\\cdot B(0)\\right\\rangle -\\left\\langle \\right\\rangle\\cdot \\left\\langle B\\right\\rangle\\right)\$\$
+(unnormalized form). These can be used to estimate statistical error, or to compute transport coefficients from Green-Kubo type formulas.
+A and B are observables, functions of the form f(sys::System,neighbors=nothing).    
+The return values of A and B can be of scalar or vector type (including vectors of `SVector`s, like positions or velocities), and must implement `dot`
+# Arguments
+- `TA::DataType`: The `DataType` returned by `A`, suppporting `zero(TA)`.
+- `observableA::Function`: The function corresponding to observable A.
+- `observableB::Function`: The function corresponding to observable B.
+- `observable_length::Integer`: The length of the observables if they are vectors, or one if they are scalar-valued.
+- `n_correlation::Integer`: The length of the computed correlation vector.
+
+ `n_correlation` should typically be chosen so that `dt*n_correlation>t_corr`,
+  where `dt` is the simulation timestep and `t_corr` is the decorrelation time for the considered system and observables.
+
+  For the purpose of numerical stability, the logger internally records sums instead of running averages. The normalized and unnormalized form of the correlation function can be retrieved 
+ from a`logger::TimeCorrelationLogger` through accessing the `logger.normalized_correlations` and `logger.unnormalized_correlations` properties.
+"""
+mutable struct TimeCorrelationLogger{T_A,T_A2,T_B,T_B2,T_AB,TF_A,TF_B}
+    observableA::TF_A
+    observableB::TF_B
+
+    n_correlation::Integer
+
+    history_A::CircularBuffer{T_A}
+    history_B::CircularBuffer{T_B}
+
+    sum_offset_products::Vector{T_AB} 
+
+    n_timesteps::Int64
+
+    sum_A::T_A
+    sum_B::T_B
+
+    sum_sq_A::T_A2
+    sum_sq_B::T_B2
+end
+
+function TimeCorrelationLogger(TA::DataType, TB::DataType, observableA::TF_A, observableB::TF_B, observable_length::Integer, n_correlation::Integer) where {TF_A,TF_B}
+    ini_sum_A = (observable_length > 1) ? zeros(TA, observable_length) : zero(TA)
+    ini_sum_B = (observable_length > 1) ? zeros(TB, observable_length) : zero(TB)
+
+    ini_sum_sq_A = dot(ini_sum_A, ini_sum_A)
+    ini_sum_sq_B = dot(ini_sum_B, ini_sum_B)
+
+    T_A = typeof(ini_sum_A)
+    T_A2 = typeof(ini_sum_sq_A)
+
+    T_B = typeof(ini_sum_B)
+    T_B2 = typeof(ini_sum_sq_B)
+
+    T_AB = typeof(dot(zero(TA),zero(TB)))
+
+    return TimeCorrelationLogger{T_A,T_A2,T_B,T_B2,T_AB,TF_A,TF_B}(observableA, observableB, n_correlation, CircularBuffer{T_A}(n_correlation), CircularBuffer{T_B}(n_correlation), zeros(T_AB, n_correlation), 0, ini_sum_A, ini_sum_B, ini_sum_sq_A, ini_sum_sq_B)
+
+end
+
+function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothing, step_n::Integer=0; parallel::Bool=true)
+
+    #compute observables
+    A = logger.observableA(s, neighbors)
+    B = (logger.observableA != logger.observableB) ? logger.observableB(s, neighbors) : A
+
+    logger.n_timesteps += 1
+
+    #update history lists -- values of A and B older than n_correlation steps are overwritten (see DataStructures.jl CircularBuffer)
+
+    push!(logger.history_A, A)
+    push!(logger.history_B, B)
+
+    #update running sums (numerically stable method consists of summing and computing averages at output time)
+    logger.sum_A += A
+    logger.sum_B += B
+
+    logger.sum_sq_A += dot(A, A)
+    logger.sum_sq_B += dot(B, B)
+
+    B1 = first(logger.history_B)
+
+    for i = 1:min(logger.n_correlation, logger.n_timesteps)
+        logger.sum_offset_products[i] += dot(logger.history_A[i], B1)
+    end
+
+end
+
+function Base.getproperty(logger::TimeCorrelationLogger,s::Symbol)
+    if (s != :normalized_correlations) && (s != :unnormalized_correlations)
+        return getfield(logger,s)
+    else
+        n_samps = getfield(logger, :n_timesteps)
+        C = zero(getfield(logger, :sum_offset_products))
+        C_bar = dot(getfield(logger, :sum_A) / n_samps, getfield(logger, :sum_B) / n_samps)
+        for i=1:getfield(logger, :n_correlation)
+            C[i]=getfield(logger, :sum_offset_products)[i] / (n_samps - i + 1)
+        end
+        C .-= C_bar
+        if s == :unnormalized_correlations
+            return C
+        else
+            denom = sqrt((getfield(logger, :sum_sq_A) / n_samps) * (getfield(logger, :sum_sq_B) / n_samps))
+            return C / denom
+        end
+    end
+end

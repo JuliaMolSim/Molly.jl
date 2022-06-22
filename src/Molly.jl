@@ -7,6 +7,7 @@ import Chemfiles
 using Colors
 using Combinatorics
 using CUDA
+using DataStructures
 using Distances
 using Distributions
 using EzXML

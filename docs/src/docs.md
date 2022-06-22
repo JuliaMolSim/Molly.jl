@@ -812,6 +812,74 @@ In addition to being run at the end of each step, loggers are run before the fir
 This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values.
 Loggers are currently ignored for the purposes of taking gradients, so if you use a logger in the gradient calculation the gradients will appear to be nothing.
 
+The [`TimeCorrelationLogger`](@ref) logger can be used to compute correlation functions of the form
+$$C(t)=\frac{\langle A_t\cdot B_0 \rangle}{\sqrt{\langle|A|^2\rangle\langle |B|^2\rangle }},$$
+where $A$ and $B$ are scalar or vectors observables, and the brackets are ensemble averages.
+This includes the computations of autocorrelation functions, which can be used to gather insight into the dynamical properties of the system, for instance using Green-Kubo formulas, or the statistical properties of a sampling method.
+
+Let's look at a simple example, computing the velocity autocorrelation function for a simple system consisting of diatomic molecules defined by [`HarmonicBond`](@ref) potentials between pairs of atoms, and an additional [`SoftSphere`](@ref) potential between all pairs of atoms. Let's start by defining the system.
+
+```julia
+n_atoms = 400
+atom_mass = 10.0u"u"
+atoms = [Atom(mass = atom_mass, σ = 0.2u"nm", ϵ = 0.2u"kJ * mol^-1") for i=1:n_atoms]
+
+# Initialization
+box_size = SVector(6.0, 6.0, 6.0)u"nm"
+coords = place_diatomics(n_atoms ÷ 2, box_size, 0.2u"nm", 0.2u"nm")
+
+temp = 50.0u"K"
+velocities = [velocity(atom_mass, temp)*0.01 for i=1:n_atoms]
+
+
+# Interaction potentials
+pairwise_inters = (SoftSphere(nl_only=true, cutoff=DistanceCutoff(0.6u"nm")),)
+
+bonds = [HarmonicBond(b0=0.2u"nm", kb=10000u"kJ * mol^-1 * nm^-2") for i=1:(n_atoms ÷ 2)]
+specific_inter_lists = (InteractionList2Atoms(collect(1:2:n_atoms), collect(2:2:n_atoms), repeat([""], length(bonds)),bonds),)
+
+# Define system
+nf = DistanceNeighborFinder(dist_cutoff=0.6u"nm", nb_matrix=trues(n_atoms, n_atoms))
+
+sys = System(atoms=atoms,
+    coords=coords,
+    velocities=velocities,
+    neighbor_finder=nf,
+    pairwise_inters=pairwise_inters,
+    specific_inter_lists=specific_inter_lists,
+    box_size=box_size,
+    loggers=Dict{Symbol,Any}()
+    )
+```
+
+We leave the loggers empty until we thermalize the system using Langevin dynamics.
+
+```julia
+simulator = LangevinSplitting(dt=0.002u"ps", friction=10.0u"u* ps^-1", temperature=temp, splitting="BAOAB")
+simulate!(sys, simulator, 10000)
+@show temperature(sys)
+```
+```console
+temperature(sys) = 48.76795299825687 K
+```
+Good. Next we define our correlation logger, add it to the system's loggers and run a long simulation
+```julia
+V(s::System, neighbors=nothing) = s.velocities
+V_Type = eltype(sys.velocities)
+sys.loggers = Dict(:velocity_autocorrelation => TimeCorrelationLogger(V_Type, V_Type, V, V, n_atoms, 1000))
+simulate!(sys, simulator, 100000)
+```
+
+Check the output:
+```julia
+using Plots, UnitfulRecipes
+
+t_range=(0:999)*u"ps"
+plot(t_range,sys.loggers[:velocity_autocorrelation].normalized_correlations,xlabel="time",ylabel="correlation",label="C(t)")
+```
+![Velocity Autocorrelations](images/velocity_autocorrelations.png)\
+As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly. The oscillatory behavior is due to the contribution of the harmonic bond interactions.
+
 ## Analysis
 
 Molly contains some tools for analysing the results of simulations.
