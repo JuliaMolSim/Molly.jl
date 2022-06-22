@@ -11,8 +11,7 @@ export
     PotentialEnergyLogger,
     ForceLogger,
     StructureWriter,
-    TimeCorrelationLogger,
-    compute_statistical_correlation
+    TimeCorrelationLogger
 
 """
     run_loggers!(system, neighbors=nothing, step_n=0; parallel=true)
@@ -42,8 +41,8 @@ TemperatureLogger(n_steps::Integer) = TemperatureLogger(typeof(one(DefaultFloat)
 
 function Base.show(io::IO, tl::TemperatureLogger)
     print(io, "TemperatureLogger{", eltype(tl.temperatures), "} with n_steps ",
-        tl.n_steps, ", ", length(tl.temperatures),
-        " temperatures recorded")
+                tl.n_steps, ", ", length(tl.temperatures),
+                " temperatures recorded")
 end
 
 """
@@ -53,7 +52,7 @@ Log a property of the system thoughout a simulation.
 Custom loggers should implement this function.
 """
 function log_property!(logger::TemperatureLogger, s::System, neighbors=nothing,
-    step_n::Integer=0; kwargs...)
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.temperatures, temperature(s))
     end
@@ -72,7 +71,7 @@ end
 
 function CoordinateLogger(T, n_steps::Integer; dims::Integer=3)
     return CoordinateLogger(n_steps,
-        Array{SArray{Tuple{dims},T,1,dims},1}[])
+                            Array{SArray{Tuple{dims}, T, 1, dims}, 1}[])
 end
 
 function CoordinateLogger(n_steps::Integer; dims::Integer=3)
@@ -81,12 +80,12 @@ end
 
 function Base.show(io::IO, cl::CoordinateLogger)
     print(io, "CoordinateLogger{", eltype(eltype(cl.coords)), "} with n_steps ",
-        cl.n_steps, ", ", length(cl.coords), " frames recorded for ",
-        length(cl.coords) > 0 ? length(first(cl.coords)) : "?", " atoms")
+            cl.n_steps, ", ", length(cl.coords), " frames recorded for ",
+            length(cl.coords) > 0 ? length(first(cl.coords)) : "?", " atoms")
 end
 
 function log_property!(logger::CoordinateLogger, s::System, neighbors=nothing,
-    step_n::Integer=0; kwargs...)
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.coords, deepcopy(s.coords))
     end
@@ -105,7 +104,7 @@ end
 
 function VelocityLogger(T, n_steps::Integer; dims::Integer=3)
     return VelocityLogger(n_steps,
-        Array{SArray{Tuple{dims},T,1,dims},1}[])
+                            Array{SArray{Tuple{dims}, T, 1, dims}, 1}[])
 end
 
 function VelocityLogger(n_steps::Integer; dims::Integer=3)
@@ -114,12 +113,12 @@ end
 
 function Base.show(io::IO, vl::VelocityLogger)
     print(io, "VelocityLogger{", eltype(eltype(vl.velocities)), "} with n_steps ",
-        vl.n_steps, ", ", length(vl.velocities), " frames recorded for ",
-        length(vl.velocities) > 0 ? length(first(vl.velocities)) : "?", " atoms")
+            vl.n_steps, ", ", length(vl.velocities), " frames recorded for ",
+            length(vl.velocities) > 0 ? length(first(vl.velocities)) : "?", " atoms")
 end
 
 function log_property!(logger::VelocityLogger, s::System, neighbors=nothing,
-    step_n::Integer=0; kwargs...)
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.velocities, deepcopy(s.velocities))
     end
@@ -144,11 +143,11 @@ end
 
 function Base.show(io::IO, el::TotalEnergyLogger)
     print(io, "TotalEnergyLogger{", eltype(el.energies), "} with n_steps ",
-        el.n_steps, ", ", length(el.energies), " energies recorded")
+                el.n_steps, ", ", length(el.energies), " energies recorded")
 end
 
 function log_property!(logger::TotalEnergyLogger, s::System, neighbors=nothing,
-    step_n::Integer=0; kwargs...)
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.energies, total_energy(s, neighbors))
     end
@@ -173,11 +172,11 @@ end
 
 function Base.show(io::IO, el::KineticEnergyLogger)
     print(io, "KineticEnergyLogger{", eltype(el.energies), "} with n_steps ",
-        el.n_steps, ", ", length(el.energies), " energies recorded")
+                el.n_steps, ", ", length(el.energies), " energies recorded")
 end
 
 function log_property!(logger::KineticEnergyLogger, s::System, neighbors=nothing,
-    step_n::Integer=0; kwargs...)
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.energies, kinetic_energy(s))
     end
@@ -202,11 +201,11 @@ end
 
 function Base.show(io::IO, el::PotentialEnergyLogger)
     print(io, "PotentialEnergyLogger{", eltype(el.energies), "} with n_steps ",
-        el.n_steps, ", ", length(el.energies), " energies recorded")
+                el.n_steps, ", ", length(el.energies), " energies recorded")
 end
 
 function log_property!(logger::PotentialEnergyLogger, s::System, neighbors=nothing,
-    step_n::Integer=0; kwargs...)
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         push!(logger.energies, potential_energy(s, neighbors))
     end
@@ -225,7 +224,7 @@ end
 
 function ForceLogger(T, n_steps::Integer; dims::Integer=3)
     return ForceLogger(n_steps,
-        Array{SArray{Tuple{dims},T,1,dims},1}[])
+                        Array{SArray{Tuple{dims}, T, 1, dims}, 1}[])
 end
 
 function ForceLogger(n_steps::Integer; dims::Integer=3)
@@ -234,12 +233,12 @@ end
 
 function Base.show(io::IO, fl::ForceLogger)
     print(io, "ForceLogger{", eltype(eltype(fl.forces)), "} with n_steps ",
-        fl.n_steps, ", ", length(fl.forces), " frames recorded for ",
-        length(fl.forces) > 0 ? length(first(fl.forces)) : "?", " atoms")
+            fl.n_steps, ", ", length(fl.forces), " frames recorded for ",
+            length(fl.forces) > 0 ? length(first(fl.forces)) : "?", " atoms")
 end
 
 function log_property!(logger::ForceLogger, s::System, neighbors=nothing,
-    step_n::Integer=0; parallel::Bool=true)
+                        step_n::Integer=0; parallel::Bool=true)
     if step_n % logger.n_steps == 0
         push!(logger.forces, forces(s, neighbors; parallel=parallel))
     end
@@ -263,15 +262,15 @@ end
 
 function Base.show(io::IO, sw::StructureWriter)
     print(io, "StructureWriter with n_steps ", sw.n_steps, ", filepath \"",
-        sw.filepath, "\", ", sw.structure_n, " frames written")
+                sw.filepath, "\", ", sw.structure_n, " frames written")
 end
 
 function log_property!(logger::StructureWriter, s::System, neighbors=nothing,
-    step_n::Integer=0; kwargs...)
+                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         if length(s) != length(s.atoms_data)
             error("Number of atoms is ", length(s), " but number of atom data entries is ",
-                length(s.atoms_data))
+                    length(s.atoms_data))
         end
         append_model!(logger, s)
     end
@@ -305,6 +304,7 @@ atom_record(at_data, i, coord) = BioStructures.AtomRecord(
 )
 
 """
+`TimeCorrelationLogger(TA::DataType, TB::DataType, observableA::Function, observableB::Function, observable_length::Integer, n_correlation::Integer)`
 A time correlation logger, which allow to estimate statistical correlations of the form
 \$\$ C(t)=\\left(\\left\\langle A(t)\\cdot B(0)\\right\\rangle -\\left\\langle A\\right\\rangle\\cdot \\left\\langle B\\right\\rangle\\right)\\left(\\sqrt{\\left\\langle |A|^2\\right\\rangle\\left\\langle |B|^2\\right\\rangle}\\right)^{-1}\$\$
 (normalized form), or
