@@ -199,195 +199,6 @@ function dualize_fb(inter::PeriodicTorsion{6, T, E}) where {T, E}
                             dual_phases, dual_ks, inter.proper)
 end
 
-function dualize_atom_fb1(at::Atom)
-    c, m, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
-    dual_charge = @dualize(c, 23, 13)
-    dual_mass = @dualize(m, 23, 14)
-    dual_σ = @dualize(σ, 23, 15)
-    dual_ϵ = @dualize(ϵ, 23, 16)
-    return Atom{typeof(dual_charge), typeof(dual_mass), typeof(dual_σ), typeof(dual_ϵ)}(
-                at.index, dual_charge, dual_mass, dual_σ, dual_ϵ, at.solute)
-end
-
-function dualize_atom_fb2(at::Atom)
-    c, m, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
-    dual_charge = @dualize(c, 23, 17)
-    dual_mass = @dualize(m, 23, 18)
-    dual_σ = @dualize(σ, 23, 19)
-    dual_ϵ = @dualize(ϵ, 23, 20)
-    return Atom{typeof(dual_charge), typeof(dual_mass), typeof(dual_σ), typeof(dual_ϵ)}(
-                at.index, dual_charge, dual_mass, dual_σ, dual_ϵ, at.solute)
-end
-
-function dual_function_svec(f::F) where F
-    function (arg1)
-        ds1 = dualize(Nothing, arg1, Val(0), Val(0))
-        return f(ds1)
-    end
-end
-
-function dual_function_svec_real(f::F) where F
-    function (arg1::SVector{D, T}, arg2) where {D, T}
-        ds1 = dualize(Nothing, arg1, Val(0), Val(1))
-        # Leaving the integer type in here results in Float32 -> Float64 conversion
-        ds2 = Zygote.dual(arg2 isa Int ? T(arg2) : arg2, (false, false, false, true))
-        return f(ds1, ds2)
-    end
-end
-
-function dual_function_svec_svec(f::F) where F
-    function (arg1, arg2)
-        ds1 = dualize(Nothing, arg1, Val(0), Val(3))
-        ds2 = dualize(Nothing, arg2, Val(3), Val(0))
-        return f(ds1, ds2)
-    end
-end
-
-function dual_function_atom(f::F) where F
-    function (arg1)
-        c, m, σ, ϵ = arg1.charge, arg1.mass, arg1.σ, arg1.ϵ
-        ds1 = Atom(arg1.index, @dualize(c, 4, 1), @dualize(m, 4, 2), @dualize(σ, 4, 3),
-                    @dualize(ϵ, 4, 4), arg1.solute)
-        return f(ds1)
-    end
-end
-
-function dual_function_force_broadcast(f::F) where F
-    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
-        ds1 = map(dualize_fb, arg1)
-        ds2 = dualize(Nothing, arg2, Val(6), Val(14))
-        ds3 = dualize(Nothing, arg3, Val(9), Val(11))
-        ds4 = dualize_atom_fb1(arg4)
-        ds5 = dualize_atom_fb2(arg5)
-        ds6 = dualize(Nothing, arg6, Val(20), Val(0))
-        ds7 = arg7
-        ds8 = arg8
-        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8)
-    end
-end
-
-function dual_function_specific_2_atoms(f::F) where F
-    function (arg1, arg2, arg3, arg4)
-        ds1 = dualize_fb(arg1)
-        ds2 = dualize(Nothing, arg2, Val(2), Val(6))
-        ds3 = dualize(Nothing, arg3, Val(5), Val(3))
-        ds4 = dualize(Nothing, arg4, Val(8), Val(0))
-        return f(ds1, ds2, ds3, ds4)
-    end
-end
-
-function dual_function_specific_3_atoms(f::F) where F
-    function (arg1, arg2, arg3, arg4, arg5)
-        ds1 = dualize_fb(arg1)
-        ds2 = dualize(Nothing, arg2, Val( 2), Val(9))
-        ds3 = dualize(Nothing, arg3, Val( 5), Val(6))
-        ds4 = dualize(Nothing, arg4, Val( 8), Val(3))
-        ds5 = dualize(Nothing, arg5, Val(11), Val(0))
-        return f(ds1, ds2, ds3, ds4, ds5)
-    end
-end
-
-function dual_function_specific_4_atoms(f::F) where F
-    function (arg1, arg2, arg3, arg4, arg5, arg6)
-        ds1 = dualize_fb(arg1)
-        ds2 = dualize(Nothing, arg2, Val(12), Val(12))
-        ds3 = dualize(Nothing, arg3, Val(15), Val( 9))
-        ds4 = dualize(Nothing, arg4, Val(18), Val( 6))
-        ds5 = dualize(Nothing, arg5, Val(21), Val( 3))
-        ds6 = dualize(Nothing, arg6, Val(24), Val( 0))
-        return f(ds1, ds2, ds3, ds4, ds5, ds6)
-    end
-end
-
-function dual_function_born_radii_loop_OBC(f::F) where F
-    function (arg1, arg2, arg3, arg4, arg5, arg6)
-        ds1 = dualize(Nothing, arg1, Val(0), Val(8))
-        ds2 = dualize(Nothing, arg2, Val(3), Val(5))
-        ds3 = Zygote.dual(arg3, (false, false, false, false, false, false, true , false, false, false, false))
-        ds4 = Zygote.dual(arg4, (false, false, false, false, false, false, false, true , false, false, false))
-        ds5 = arg5
-        ds6 = dualize(Nothing, arg6, Val(8), Val(0))
-        return f(ds1, ds2, ds3, ds4, ds5, ds6)
-    end
-end
-
-function dual_function_born_radii_loop_GBN2(f::F) where F
-    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12)
-        ds1  = dualize(Nothing, arg1, Val(0), Val(14))
-        ds2  = dualize(Nothing, arg2, Val(3), Val(11))
-        ds3  = Zygote.dual(arg3,  (false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false))
-        ds4  = Zygote.dual(arg4,  (false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false))
-        ds5  = Zygote.dual(arg5,  (false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false))
-        ds6  = arg6
-        ds7  = Zygote.dual(arg7,  (false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false))
-        ds8  = Zygote.dual(arg8,  (false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false))
-        ds9  = Zygote.dual(arg9,  (false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false))
-        ds10 = Zygote.dual(arg10, (false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false))
-        ds11 = Zygote.dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false))
-        ds12 = dualize(Nothing, arg12, Val(14), Val(0))
-        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10, ds11, ds12)
-    end
-end
-
-function dual_function_gb_force_loop_1(f::F) where F
-    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13)
-        ds1  = dualize(Nothing, arg1, Val(0), Val(13))
-        ds2  = dualize(Nothing, arg2, Val(3), Val(10))
-        ds3  = arg3
-        ds4  = arg4
-        ds5  = Zygote.dual(arg5 , (false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false))
-        ds6  = Zygote.dual(arg6 , (false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false))
-        ds7  = Zygote.dual(arg7 , (false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false))
-        ds8  = Zygote.dual(arg8 , (false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false))
-        ds9  = arg9
-        ds10 = Zygote.dual(arg10, (false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false))
-        ds11 = Zygote.dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false))
-        ds12 = Zygote.dual(arg12, (false, false, false, false, false, false, false, false, false, false, true , false, true , false, false, false))
-        ds13 = dualize(Nothing, arg13, Val(13), Val(0))
-        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10, ds11, ds12, ds13)
-    end
-end
-
-function dual_function_gb_force_loop_2(f::F) where F
-    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
-        ds1 = dualize(Nothing, arg1, Val(0), Val(10))
-        ds2 = dualize(Nothing, arg2, Val(3), Val(7))
-        ds3 = Zygote.dual(arg3, (false, false, false, false, false, false, true , false, false, false, false, false, false))
-        ds4 = Zygote.dual(arg4, (false, false, false, false, false, false, false, true , false, false, false, false, false))
-        ds5 = Zygote.dual(arg5, (false, false, false, false, false, false, false, false, true , false, false, false, false))
-        ds6 = Zygote.dual(arg6, (false, false, false, false, false, false, false, false, false, true , false, false, false))
-        ds7 = arg7
-        ds8 = dualize(Nothing, arg8, Val(10), Val(0))
-        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8)
-    end
-end
-
-function dual_function_gb_energy_loop(f::F) where F
-    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10,
-                arg11, arg12, arg13, arg14, arg15, arg16, arg17, arg18)
-        ds1  = dualize(Nothing, arg1, Val(0), Val(17))
-        ds2  = dualize(Nothing, arg2, Val(3), Val(14))
-        ds3  = arg3
-        ds4  = arg4
-        ds5  = Zygote.dual(arg5 , (false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false, false, false, false))
-        ds6  = Zygote.dual(arg6 , (false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false, false, false))
-        ds7  = Zygote.dual(arg7 , (false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false, false))
-        ds8  = Zygote.dual(arg8 , (false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false))
-        ds9  = Zygote.dual(arg9 , (false, false, false, false, false, false, false, false, false, true , true , false, false, false, false, false, false, false, false, false))
-        ds10 = arg10
-        ds11 = Zygote.dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false))
-        ds12 = Zygote.dual(arg12, (false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false))
-        ds13 = Zygote.dual(arg13, (false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false))
-        ds14 = Zygote.dual(arg14, (false, false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false))
-        ds15 = Zygote.dual(arg15, (false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false))
-        ds16 = Zygote.dual(arg16, (false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false))
-        ds17 = arg17
-        ds18 = dualize(Nothing, arg18, Val(17), Val(0))
-        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10,
-                    ds11, ds12, ds13, ds14, ds15, ds16, ds17, ds18)
-    end
-end
-
 @inline function sum_partials(sv::SVector{3, Dual{Nothing, T, P}}, y1, i::Integer) where {T, P}
     partials(sv[1], i) * y1[1] + partials(sv[2], i) * y1[2] + partials(sv[3], i) * y1[3]
 end
@@ -405,6 +216,13 @@ end
 
 modify_grad(ȳ_in, arg::CuArray) = CuArray(ȳ_in)
 modify_grad(ȳ_in, arg) = ȳ_in
+
+function dual_function_svec(f::F) where F
+    function (arg1)
+        ds1 = dualize(Nothing, arg1, Val(0), Val(0))
+        return f(ds1)
+    end
+end
 
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}) where {D, T}
     out = dual_function_svec(f).(arg1)
@@ -424,6 +242,15 @@ modify_grad(ȳ_in, arg) = ȳ_in
     return y, bc_fwd_back
 end
 
+function dual_function_svec_real(f::F) where F
+    function (arg1::SVector{D, T}, arg2) where {D, T}
+        ds1 = dualize(Nothing, arg1, Val(0), Val(1))
+        # Leaving the integer type in here results in Float32 -> Float64 conversion
+        ds2 = Zygote.dual(arg2 isa Int ? T(arg2) : arg2, (false, false, false, true))
+        return f(ds1, ds2)
+    end
+end
+
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{SVector{D, T}}, arg2) where {D, T}
     out = dual_function_svec_real(f).(arg1, arg2)
     y = map(x -> value.(x), out)
@@ -441,6 +268,14 @@ end
         (nothing, nothing, darg1, darg2)
     end
     return y, bc_fwd_back
+end
+
+function dual_function_svec_svec(f::F) where F
+    function (arg1, arg2)
+        ds1 = dualize(Nothing, arg1, Val(0), Val(3))
+        ds2 = dualize(Nothing, arg2, Val(3), Val(0))
+        return f(ds1, ds2)
+    end
 end
 
 @inline function Zygote.broadcast_forward(f,
@@ -471,6 +306,15 @@ end
     return y, bc_fwd_back
 end
 
+function dual_function_atom(f::F) where F
+    function (arg1)
+        c, m, σ, ϵ = arg1.charge, arg1.mass, arg1.σ, arg1.ϵ
+        ds1 = Atom(arg1.index, @dualize(c, 4, 1), @dualize(m, 4, 2), @dualize(σ, 4, 3),
+                    @dualize(ϵ, 4, 4), arg1.solute)
+        return f(ds1)
+    end
+end
+
 # For mass, charge etc.
 @inline function Zygote.broadcast_forward(f, arg1::AbstractArray{<:Atom})
     out = dual_function_atom(f).(arg1)
@@ -485,6 +329,40 @@ end
         (nothing, nothing, darg1)
     end
     return y, bc_fwd_back
+end
+
+function dualize_atom_fb1(at::Atom)
+    c, m, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
+    dual_charge = @dualize(c, 23, 13)
+    dual_mass = @dualize(m, 23, 14)
+    dual_σ = @dualize(σ, 23, 15)
+    dual_ϵ = @dualize(ϵ, 23, 16)
+    return Atom{typeof(dual_charge), typeof(dual_mass), typeof(dual_σ), typeof(dual_ϵ)}(
+                at.index, dual_charge, dual_mass, dual_σ, dual_ϵ, at.solute)
+end
+
+function dualize_atom_fb2(at::Atom)
+    c, m, σ, ϵ = at.charge, at.mass, at.σ, at.ϵ
+    dual_charge = @dualize(c, 23, 17)
+    dual_mass = @dualize(m, 23, 18)
+    dual_σ = @dualize(σ, 23, 19)
+    dual_ϵ = @dualize(ϵ, 23, 20)
+    return Atom{typeof(dual_charge), typeof(dual_mass), typeof(dual_σ), typeof(dual_ϵ)}(
+                at.index, dual_charge, dual_mass, dual_σ, dual_ϵ, at.solute)
+end
+
+function dual_function_force_broadcast(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
+        ds1 = map(dualize_fb, arg1)
+        ds2 = dualize(Nothing, arg2, Val(6), Val(14))
+        ds3 = dualize(Nothing, arg3, Val(9), Val(11))
+        ds4 = dualize_atom_fb1(arg4)
+        ds5 = dualize_atom_fb2(arg5)
+        ds6 = dualize(Nothing, arg6, Val(20), Val(0))
+        ds7 = arg7
+        ds8 = arg8
+        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8)
+    end
 end
 
 function combine_dual_PairwiseInteraction_coul(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}}, i::Integer) where {T, P}
@@ -520,39 +398,6 @@ function combine_dual_PairwiseInteraction_crf(y1::SVector{3, T}, o1::SVector{3, 
             y1[1] * partials(o1[1], i + 5) + y1[2] * partials(o1[2], i + 5) + y1[3] * partials(o1[3], i + 5),
             NoUnits, NoUnits,
         ),
-    )
-end
-
-function combine_dual_SpecificInteraction(inter::HarmonicBond, y1, o1, i::Integer)
-    (y1.f1[1] * partials(o1.f1[1], i    ) + y1.f1[2] * partials(o1.f1[2], i    ) + y1.f1[3] * partials(o1.f1[3], i    ) + y1.f2[1] * partials(o1.f2[1], i    ) + y1.f2[2] * partials(o1.f2[2], i    ) + y1.f2[3] * partials(o1.f2[3], i    ),
-     y1.f1[1] * partials(o1.f1[1], i + 1) + y1.f1[2] * partials(o1.f1[2], i + 1) + y1.f1[3] * partials(o1.f1[3], i + 1) + y1.f2[1] * partials(o1.f2[1], i + 1) + y1.f2[2] * partials(o1.f2[2], i + 1) + y1.f2[3] * partials(o1.f2[3], i + 1))
-end
-
-function combine_dual_SpecificInteraction(inter::HarmonicAngle, y1, o1, i::Integer)
-    (y1.f1[1] * partials(o1.f1[1], i    ) + y1.f1[2] * partials(o1.f1[2], i    ) + y1.f1[3] * partials(o1.f1[3], i    ) + y1.f2[1] * partials(o1.f2[1], i    ) + y1.f2[2] * partials(o1.f2[2], i    ) + y1.f2[3] * partials(o1.f2[3], i    ) + y1.f3[1] * partials(o1.f3[1], i    ) + y1.f3[2] * partials(o1.f3[2], i    ) + y1.f3[3] * partials(o1.f3[3], i    ),
-     y1.f1[1] * partials(o1.f1[1], i + 1) + y1.f1[2] * partials(o1.f1[2], i + 1) + y1.f1[3] * partials(o1.f1[3], i + 1) + y1.f2[1] * partials(o1.f2[1], i + 1) + y1.f2[2] * partials(o1.f2[2], i + 1) + y1.f2[3] * partials(o1.f2[3], i + 1) + y1.f3[1] * partials(o1.f3[1], i + 1) + y1.f3[2] * partials(o1.f3[2], i + 1) + y1.f3[3] * partials(o1.f3[3], i + 1))
-end
-
-function combine_dual_SpecificInteraction(inter::PeriodicTorsion{6}, y1, o1, i::Integer)
-    (
-        (0, 0, 0, 0, 0, 0),
-        (
-            y1.f1[1] * partials(o1.f1[1], i     ) + y1.f1[2] * partials(o1.f1[2], i     ) + y1.f1[3] * partials(o1.f1[3], i     ) + y1.f2[1] * partials(o1.f2[1], i     ) + y1.f2[2] * partials(o1.f2[2], i     ) + y1.f2[3] * partials(o1.f2[3], i     ) + y1.f3[1] * partials(o1.f3[1], i     ) + y1.f3[2] * partials(o1.f3[2], i     ) + y1.f3[3] * partials(o1.f3[3], i     ) + y1.f4[1] * partials(o1.f4[1], i     ) + y1.f4[2] * partials(o1.f4[2], i     ) + y1.f4[3] * partials(o1.f4[3], i     ),
-            y1.f1[1] * partials(o1.f1[1], i +  1) + y1.f1[2] * partials(o1.f1[2], i +  1) + y1.f1[3] * partials(o1.f1[3], i +  1) + y1.f2[1] * partials(o1.f2[1], i +  1) + y1.f2[2] * partials(o1.f2[2], i +  1) + y1.f2[3] * partials(o1.f2[3], i +  1) + y1.f3[1] * partials(o1.f3[1], i +  1) + y1.f3[2] * partials(o1.f3[2], i +  1) + y1.f3[3] * partials(o1.f3[3], i +  1) + y1.f4[1] * partials(o1.f4[1], i +  1) + y1.f4[2] * partials(o1.f4[2], i +  1) + y1.f4[3] * partials(o1.f4[3], i +  1),
-            y1.f1[1] * partials(o1.f1[1], i +  2) + y1.f1[2] * partials(o1.f1[2], i +  2) + y1.f1[3] * partials(o1.f1[3], i +  2) + y1.f2[1] * partials(o1.f2[1], i +  2) + y1.f2[2] * partials(o1.f2[2], i +  2) + y1.f2[3] * partials(o1.f2[3], i +  2) + y1.f3[1] * partials(o1.f3[1], i +  2) + y1.f3[2] * partials(o1.f3[2], i +  2) + y1.f3[3] * partials(o1.f3[3], i +  2) + y1.f4[1] * partials(o1.f4[1], i +  2) + y1.f4[2] * partials(o1.f4[2], i +  2) + y1.f4[3] * partials(o1.f4[3], i +  2),
-            y1.f1[1] * partials(o1.f1[1], i +  3) + y1.f1[2] * partials(o1.f1[2], i +  3) + y1.f1[3] * partials(o1.f1[3], i +  3) + y1.f2[1] * partials(o1.f2[1], i +  3) + y1.f2[2] * partials(o1.f2[2], i +  3) + y1.f2[3] * partials(o1.f2[3], i +  3) + y1.f3[1] * partials(o1.f3[1], i +  3) + y1.f3[2] * partials(o1.f3[2], i +  3) + y1.f3[3] * partials(o1.f3[3], i +  3) + y1.f4[1] * partials(o1.f4[1], i +  3) + y1.f4[2] * partials(o1.f4[2], i +  3) + y1.f4[3] * partials(o1.f4[3], i +  3),
-            y1.f1[1] * partials(o1.f1[1], i +  4) + y1.f1[2] * partials(o1.f1[2], i +  4) + y1.f1[3] * partials(o1.f1[3], i +  4) + y1.f2[1] * partials(o1.f2[1], i +  4) + y1.f2[2] * partials(o1.f2[2], i +  4) + y1.f2[3] * partials(o1.f2[3], i +  4) + y1.f3[1] * partials(o1.f3[1], i +  4) + y1.f3[2] * partials(o1.f3[2], i +  4) + y1.f3[3] * partials(o1.f3[3], i +  4) + y1.f4[1] * partials(o1.f4[1], i +  4) + y1.f4[2] * partials(o1.f4[2], i +  4) + y1.f4[3] * partials(o1.f4[3], i +  4),
-            y1.f1[1] * partials(o1.f1[1], i +  5) + y1.f1[2] * partials(o1.f1[2], i +  5) + y1.f1[3] * partials(o1.f1[3], i +  5) + y1.f2[1] * partials(o1.f2[1], i +  5) + y1.f2[2] * partials(o1.f2[2], i +  5) + y1.f2[3] * partials(o1.f2[3], i +  5) + y1.f3[1] * partials(o1.f3[1], i +  5) + y1.f3[2] * partials(o1.f3[2], i +  5) + y1.f3[3] * partials(o1.f3[3], i +  5) + y1.f4[1] * partials(o1.f4[1], i +  5) + y1.f4[2] * partials(o1.f4[2], i +  5) + y1.f4[3] * partials(o1.f4[3], i +  5),
-        ),
-        (
-            y1.f1[1] * partials(o1.f1[1], i +  6) + y1.f1[2] * partials(o1.f1[2], i +  6) + y1.f1[3] * partials(o1.f1[3], i +  6) + y1.f2[1] * partials(o1.f2[1], i +  6) + y1.f2[2] * partials(o1.f2[2], i +  6) + y1.f2[3] * partials(o1.f2[3], i +  6) + y1.f3[1] * partials(o1.f3[1], i +  6) + y1.f3[2] * partials(o1.f3[2], i +  6) + y1.f3[3] * partials(o1.f3[3], i +  6) + y1.f4[1] * partials(o1.f4[1], i +  6) + y1.f4[2] * partials(o1.f4[2], i +  6) + y1.f4[3] * partials(o1.f4[3], i +  6),
-            y1.f1[1] * partials(o1.f1[1], i +  7) + y1.f1[2] * partials(o1.f1[2], i +  7) + y1.f1[3] * partials(o1.f1[3], i +  7) + y1.f2[1] * partials(o1.f2[1], i +  7) + y1.f2[2] * partials(o1.f2[2], i +  7) + y1.f2[3] * partials(o1.f2[3], i +  7) + y1.f3[1] * partials(o1.f3[1], i +  7) + y1.f3[2] * partials(o1.f3[2], i +  7) + y1.f3[3] * partials(o1.f3[3], i +  7) + y1.f4[1] * partials(o1.f4[1], i +  7) + y1.f4[2] * partials(o1.f4[2], i +  7) + y1.f4[3] * partials(o1.f4[3], i +  7),
-            y1.f1[1] * partials(o1.f1[1], i +  8) + y1.f1[2] * partials(o1.f1[2], i +  8) + y1.f1[3] * partials(o1.f1[3], i +  8) + y1.f2[1] * partials(o1.f2[1], i +  8) + y1.f2[2] * partials(o1.f2[2], i +  8) + y1.f2[3] * partials(o1.f2[3], i +  8) + y1.f3[1] * partials(o1.f3[1], i +  8) + y1.f3[2] * partials(o1.f3[2], i +  8) + y1.f3[3] * partials(o1.f3[3], i +  8) + y1.f4[1] * partials(o1.f4[1], i +  8) + y1.f4[2] * partials(o1.f4[2], i +  8) + y1.f4[3] * partials(o1.f4[3], i +  8),
-            y1.f1[1] * partials(o1.f1[1], i +  9) + y1.f1[2] * partials(o1.f1[2], i +  9) + y1.f1[3] * partials(o1.f1[3], i +  9) + y1.f2[1] * partials(o1.f2[1], i +  9) + y1.f2[2] * partials(o1.f2[2], i +  9) + y1.f2[3] * partials(o1.f2[3], i +  9) + y1.f3[1] * partials(o1.f3[1], i +  9) + y1.f3[2] * partials(o1.f3[2], i +  9) + y1.f3[3] * partials(o1.f3[3], i +  9) + y1.f4[1] * partials(o1.f4[1], i +  9) + y1.f4[2] * partials(o1.f4[2], i +  9) + y1.f4[3] * partials(o1.f4[3], i +  9),
-            y1.f1[1] * partials(o1.f1[1], i + 10) + y1.f1[2] * partials(o1.f1[2], i + 10) + y1.f1[3] * partials(o1.f1[3], i + 10) + y1.f2[1] * partials(o1.f2[1], i + 10) + y1.f2[2] * partials(o1.f2[2], i + 10) + y1.f2[3] * partials(o1.f2[3], i + 10) + y1.f3[1] * partials(o1.f3[1], i + 10) + y1.f3[2] * partials(o1.f3[2], i + 10) + y1.f3[3] * partials(o1.f3[3], i + 10) + y1.f4[1] * partials(o1.f4[1], i + 10) + y1.f4[2] * partials(o1.f4[2], i + 10) + y1.f4[3] * partials(o1.f4[3], i + 10),
-            y1.f1[1] * partials(o1.f1[1], i + 11) + y1.f1[2] * partials(o1.f1[2], i + 11) + y1.f1[3] * partials(o1.f1[3], i + 11) + y1.f2[1] * partials(o1.f2[1], i + 11) + y1.f2[2] * partials(o1.f2[2], i + 11) + y1.f2[3] * partials(o1.f2[3], i + 11) + y1.f3[1] * partials(o1.f3[1], i + 11) + y1.f3[2] * partials(o1.f3[2], i + 11) + y1.f3[3] * partials(o1.f3[3], i + 11) + y1.f4[1] * partials(o1.f4[1], i + 11) + y1.f4[2] * partials(o1.f4[2], i + 11) + y1.f4[3] * partials(o1.f4[3], i + 11),
-        ),
-        false,
     )
 end
 
@@ -602,6 +447,49 @@ end
     return y, bc_fwd_back
 end
 
+function dual_function_specific_2_atoms(f::F) where F
+    function (arg1, arg2, arg3, arg4)
+        ds1 = dualize_fb(arg1)
+        ds2 = dualize(Nothing, arg2, Val(2), Val(6))
+        ds3 = dualize(Nothing, arg3, Val(5), Val(3))
+        ds4 = dualize(Nothing, arg4, Val(8), Val(0))
+        return f(ds1, ds2, ds3, ds4)
+    end
+end
+
+function combine_dual_SpecificInteraction(inter::HarmonicBond, y1, o1, i::Integer)
+    (y1.f1[1] * partials(o1.f1[1], i    ) + y1.f1[2] * partials(o1.f1[2], i    ) + y1.f1[3] * partials(o1.f1[3], i    ) + y1.f2[1] * partials(o1.f2[1], i    ) + y1.f2[2] * partials(o1.f2[2], i    ) + y1.f2[3] * partials(o1.f2[3], i    ),
+     y1.f1[1] * partials(o1.f1[1], i + 1) + y1.f1[2] * partials(o1.f1[2], i + 1) + y1.f1[3] * partials(o1.f1[3], i + 1) + y1.f2[1] * partials(o1.f2[1], i + 1) + y1.f2[2] * partials(o1.f2[2], i + 1) + y1.f2[3] * partials(o1.f2[3], i + 1))
+end
+
+function combine_dual_SpecificInteraction(inter::HarmonicAngle, y1, o1, i::Integer)
+    (y1.f1[1] * partials(o1.f1[1], i    ) + y1.f1[2] * partials(o1.f1[2], i    ) + y1.f1[3] * partials(o1.f1[3], i    ) + y1.f2[1] * partials(o1.f2[1], i    ) + y1.f2[2] * partials(o1.f2[2], i    ) + y1.f2[3] * partials(o1.f2[3], i    ) + y1.f3[1] * partials(o1.f3[1], i    ) + y1.f3[2] * partials(o1.f3[2], i    ) + y1.f3[3] * partials(o1.f3[3], i    ),
+     y1.f1[1] * partials(o1.f1[1], i + 1) + y1.f1[2] * partials(o1.f1[2], i + 1) + y1.f1[3] * partials(o1.f1[3], i + 1) + y1.f2[1] * partials(o1.f2[1], i + 1) + y1.f2[2] * partials(o1.f2[2], i + 1) + y1.f2[3] * partials(o1.f2[3], i + 1) + y1.f3[1] * partials(o1.f3[1], i + 1) + y1.f3[2] * partials(o1.f3[2], i + 1) + y1.f3[3] * partials(o1.f3[3], i + 1))
+end
+
+function combine_dual_SpecificInteraction(inter::PeriodicTorsion{6}, y1, o1, i::Integer)
+    (
+        (0, 0, 0, 0, 0, 0),
+        (
+            y1.f1[1] * partials(o1.f1[1], i     ) + y1.f1[2] * partials(o1.f1[2], i     ) + y1.f1[3] * partials(o1.f1[3], i     ) + y1.f2[1] * partials(o1.f2[1], i     ) + y1.f2[2] * partials(o1.f2[2], i     ) + y1.f2[3] * partials(o1.f2[3], i     ) + y1.f3[1] * partials(o1.f3[1], i     ) + y1.f3[2] * partials(o1.f3[2], i     ) + y1.f3[3] * partials(o1.f3[3], i     ) + y1.f4[1] * partials(o1.f4[1], i     ) + y1.f4[2] * partials(o1.f4[2], i     ) + y1.f4[3] * partials(o1.f4[3], i     ),
+            y1.f1[1] * partials(o1.f1[1], i +  1) + y1.f1[2] * partials(o1.f1[2], i +  1) + y1.f1[3] * partials(o1.f1[3], i +  1) + y1.f2[1] * partials(o1.f2[1], i +  1) + y1.f2[2] * partials(o1.f2[2], i +  1) + y1.f2[3] * partials(o1.f2[3], i +  1) + y1.f3[1] * partials(o1.f3[1], i +  1) + y1.f3[2] * partials(o1.f3[2], i +  1) + y1.f3[3] * partials(o1.f3[3], i +  1) + y1.f4[1] * partials(o1.f4[1], i +  1) + y1.f4[2] * partials(o1.f4[2], i +  1) + y1.f4[3] * partials(o1.f4[3], i +  1),
+            y1.f1[1] * partials(o1.f1[1], i +  2) + y1.f1[2] * partials(o1.f1[2], i +  2) + y1.f1[3] * partials(o1.f1[3], i +  2) + y1.f2[1] * partials(o1.f2[1], i +  2) + y1.f2[2] * partials(o1.f2[2], i +  2) + y1.f2[3] * partials(o1.f2[3], i +  2) + y1.f3[1] * partials(o1.f3[1], i +  2) + y1.f3[2] * partials(o1.f3[2], i +  2) + y1.f3[3] * partials(o1.f3[3], i +  2) + y1.f4[1] * partials(o1.f4[1], i +  2) + y1.f4[2] * partials(o1.f4[2], i +  2) + y1.f4[3] * partials(o1.f4[3], i +  2),
+            y1.f1[1] * partials(o1.f1[1], i +  3) + y1.f1[2] * partials(o1.f1[2], i +  3) + y1.f1[3] * partials(o1.f1[3], i +  3) + y1.f2[1] * partials(o1.f2[1], i +  3) + y1.f2[2] * partials(o1.f2[2], i +  3) + y1.f2[3] * partials(o1.f2[3], i +  3) + y1.f3[1] * partials(o1.f3[1], i +  3) + y1.f3[2] * partials(o1.f3[2], i +  3) + y1.f3[3] * partials(o1.f3[3], i +  3) + y1.f4[1] * partials(o1.f4[1], i +  3) + y1.f4[2] * partials(o1.f4[2], i +  3) + y1.f4[3] * partials(o1.f4[3], i +  3),
+            y1.f1[1] * partials(o1.f1[1], i +  4) + y1.f1[2] * partials(o1.f1[2], i +  4) + y1.f1[3] * partials(o1.f1[3], i +  4) + y1.f2[1] * partials(o1.f2[1], i +  4) + y1.f2[2] * partials(o1.f2[2], i +  4) + y1.f2[3] * partials(o1.f2[3], i +  4) + y1.f3[1] * partials(o1.f3[1], i +  4) + y1.f3[2] * partials(o1.f3[2], i +  4) + y1.f3[3] * partials(o1.f3[3], i +  4) + y1.f4[1] * partials(o1.f4[1], i +  4) + y1.f4[2] * partials(o1.f4[2], i +  4) + y1.f4[3] * partials(o1.f4[3], i +  4),
+            y1.f1[1] * partials(o1.f1[1], i +  5) + y1.f1[2] * partials(o1.f1[2], i +  5) + y1.f1[3] * partials(o1.f1[3], i +  5) + y1.f2[1] * partials(o1.f2[1], i +  5) + y1.f2[2] * partials(o1.f2[2], i +  5) + y1.f2[3] * partials(o1.f2[3], i +  5) + y1.f3[1] * partials(o1.f3[1], i +  5) + y1.f3[2] * partials(o1.f3[2], i +  5) + y1.f3[3] * partials(o1.f3[3], i +  5) + y1.f4[1] * partials(o1.f4[1], i +  5) + y1.f4[2] * partials(o1.f4[2], i +  5) + y1.f4[3] * partials(o1.f4[3], i +  5),
+        ),
+        (
+            y1.f1[1] * partials(o1.f1[1], i +  6) + y1.f1[2] * partials(o1.f1[2], i +  6) + y1.f1[3] * partials(o1.f1[3], i +  6) + y1.f2[1] * partials(o1.f2[1], i +  6) + y1.f2[2] * partials(o1.f2[2], i +  6) + y1.f2[3] * partials(o1.f2[3], i +  6) + y1.f3[1] * partials(o1.f3[1], i +  6) + y1.f3[2] * partials(o1.f3[2], i +  6) + y1.f3[3] * partials(o1.f3[3], i +  6) + y1.f4[1] * partials(o1.f4[1], i +  6) + y1.f4[2] * partials(o1.f4[2], i +  6) + y1.f4[3] * partials(o1.f4[3], i +  6),
+            y1.f1[1] * partials(o1.f1[1], i +  7) + y1.f1[2] * partials(o1.f1[2], i +  7) + y1.f1[3] * partials(o1.f1[3], i +  7) + y1.f2[1] * partials(o1.f2[1], i +  7) + y1.f2[2] * partials(o1.f2[2], i +  7) + y1.f2[3] * partials(o1.f2[3], i +  7) + y1.f3[1] * partials(o1.f3[1], i +  7) + y1.f3[2] * partials(o1.f3[2], i +  7) + y1.f3[3] * partials(o1.f3[3], i +  7) + y1.f4[1] * partials(o1.f4[1], i +  7) + y1.f4[2] * partials(o1.f4[2], i +  7) + y1.f4[3] * partials(o1.f4[3], i +  7),
+            y1.f1[1] * partials(o1.f1[1], i +  8) + y1.f1[2] * partials(o1.f1[2], i +  8) + y1.f1[3] * partials(o1.f1[3], i +  8) + y1.f2[1] * partials(o1.f2[1], i +  8) + y1.f2[2] * partials(o1.f2[2], i +  8) + y1.f2[3] * partials(o1.f2[3], i +  8) + y1.f3[1] * partials(o1.f3[1], i +  8) + y1.f3[2] * partials(o1.f3[2], i +  8) + y1.f3[3] * partials(o1.f3[3], i +  8) + y1.f4[1] * partials(o1.f4[1], i +  8) + y1.f4[2] * partials(o1.f4[2], i +  8) + y1.f4[3] * partials(o1.f4[3], i +  8),
+            y1.f1[1] * partials(o1.f1[1], i +  9) + y1.f1[2] * partials(o1.f1[2], i +  9) + y1.f1[3] * partials(o1.f1[3], i +  9) + y1.f2[1] * partials(o1.f2[1], i +  9) + y1.f2[2] * partials(o1.f2[2], i +  9) + y1.f2[3] * partials(o1.f2[3], i +  9) + y1.f3[1] * partials(o1.f3[1], i +  9) + y1.f3[2] * partials(o1.f3[2], i +  9) + y1.f3[3] * partials(o1.f3[3], i +  9) + y1.f4[1] * partials(o1.f4[1], i +  9) + y1.f4[2] * partials(o1.f4[2], i +  9) + y1.f4[3] * partials(o1.f4[3], i +  9),
+            y1.f1[1] * partials(o1.f1[1], i + 10) + y1.f1[2] * partials(o1.f1[2], i + 10) + y1.f1[3] * partials(o1.f1[3], i + 10) + y1.f2[1] * partials(o1.f2[1], i + 10) + y1.f2[2] * partials(o1.f2[2], i + 10) + y1.f2[3] * partials(o1.f2[3], i + 10) + y1.f3[1] * partials(o1.f3[1], i + 10) + y1.f3[2] * partials(o1.f3[2], i + 10) + y1.f3[3] * partials(o1.f3[3], i + 10) + y1.f4[1] * partials(o1.f4[1], i + 10) + y1.f4[2] * partials(o1.f4[2], i + 10) + y1.f4[3] * partials(o1.f4[3], i + 10),
+            y1.f1[1] * partials(o1.f1[1], i + 11) + y1.f1[2] * partials(o1.f1[2], i + 11) + y1.f1[3] * partials(o1.f1[3], i + 11) + y1.f2[1] * partials(o1.f2[1], i + 11) + y1.f2[2] * partials(o1.f2[2], i + 11) + y1.f2[3] * partials(o1.f2[3], i + 11) + y1.f3[1] * partials(o1.f3[1], i + 11) + y1.f3[2] * partials(o1.f3[2], i + 11) + y1.f3[3] * partials(o1.f3[3], i + 11) + y1.f4[1] * partials(o1.f4[1], i + 11) + y1.f4[2] * partials(o1.f4[2], i + 11) + y1.f4[3] * partials(o1.f4[3], i + 11),
+        ),
+        false,
+    )
+end
+
 # For force
 @inline function Zygote.broadcast_forward(f,
                                             arg1::AbstractArray{<:SpecificInteraction},
@@ -631,6 +519,17 @@ end
         return (nothing, nothing, darg1, darg2, darg3, darg4)
     end
     return y, bc_fwd_back
+end
+
+function dual_function_specific_3_atoms(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5)
+        ds1 = dualize_fb(arg1)
+        ds2 = dualize(Nothing, arg2, Val( 2), Val(9))
+        ds3 = dualize(Nothing, arg3, Val( 5), Val(6))
+        ds4 = dualize(Nothing, arg4, Val( 8), Val(3))
+        ds5 = dualize(Nothing, arg5, Val(11), Val(0))
+        return f(ds1, ds2, ds3, ds4, ds5)
+    end
 end
 
 # For force
@@ -668,6 +567,18 @@ end
         return (nothing, nothing, darg1, darg2, darg3, darg4, darg5)
     end
     return y, bc_fwd_back
+end
+
+function dual_function_specific_4_atoms(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5, arg6)
+        ds1 = dualize_fb(arg1)
+        ds2 = dualize(Nothing, arg2, Val(12), Val(12))
+        ds3 = dualize(Nothing, arg3, Val(15), Val( 9))
+        ds4 = dualize(Nothing, arg4, Val(18), Val( 6))
+        ds5 = dualize(Nothing, arg5, Val(21), Val( 3))
+        ds6 = dualize(Nothing, arg6, Val(24), Val( 0))
+        return f(ds1, ds2, ds3, ds4, ds5, ds6)
+    end
 end
 
 # For force
@@ -713,6 +624,18 @@ end
     return y, bc_fwd_back
 end
 
+function dual_function_born_radii_loop_OBC(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5, arg6)
+        ds1 = dualize(Nothing, arg1, Val(0), Val(8))
+        ds2 = dualize(Nothing, arg2, Val(3), Val(5))
+        ds3 = Zygote.dual(arg3, (false, false, false, false, false, false, true , false, false, false, false))
+        ds4 = Zygote.dual(arg4, (false, false, false, false, false, false, false, true , false, false, false))
+        ds5 = arg5
+        ds6 = dualize(Nothing, arg6, Val(8), Val(0))
+        return f(ds1, ds2, ds3, ds4, ds5, ds6)
+    end
+end
+
 # For born_radii_loop_OBC
 @inline function Zygote.broadcast_forward(f,
                                             arg1::AbstractArray{SVector{D, T}},
@@ -737,6 +660,24 @@ end
         return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6)
     end
     return y, bc_fwd_back
+end
+
+function dual_function_born_radii_loop_GBN2(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12)
+        ds1  = dualize(Nothing, arg1, Val(0), Val(14))
+        ds2  = dualize(Nothing, arg2, Val(3), Val(11))
+        ds3  = Zygote.dual(arg3,  (false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false))
+        ds4  = Zygote.dual(arg4,  (false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false))
+        ds5  = Zygote.dual(arg5,  (false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false))
+        ds6  = arg6
+        ds7  = Zygote.dual(arg7,  (false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false))
+        ds8  = Zygote.dual(arg8,  (false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false))
+        ds9  = Zygote.dual(arg9,  (false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false))
+        ds10 = Zygote.dual(arg10, (false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false))
+        ds11 = Zygote.dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false))
+        ds12 = dualize(Nothing, arg12, Val(14), Val(0))
+        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10, ds11, ds12)
+    end
 end
 
 # For born_radii_loop_GBN2
@@ -786,6 +727,25 @@ end
                 darg7, darg8, darg9, darg10, darg11, darg12)
     end
     return y, bc_fwd_back
+end
+
+function dual_function_gb_force_loop_1(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12, arg13)
+        ds1  = dualize(Nothing, arg1, Val(0), Val(13))
+        ds2  = dualize(Nothing, arg2, Val(3), Val(10))
+        ds3  = arg3
+        ds4  = arg4
+        ds5  = Zygote.dual(arg5 , (false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false))
+        ds6  = Zygote.dual(arg6 , (false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false))
+        ds7  = Zygote.dual(arg7 , (false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false))
+        ds8  = Zygote.dual(arg8 , (false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false))
+        ds9  = arg9
+        ds10 = Zygote.dual(arg10, (false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false))
+        ds11 = Zygote.dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false))
+        ds12 = Zygote.dual(arg12, (false, false, false, false, false, false, false, false, false, false, true , false, true , false, false, false))
+        ds13 = dualize(Nothing, arg13, Val(13), Val(0))
+        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10, ds11, ds12, ds13)
+    end
 end
 
 # For gb_force_loop_1
@@ -840,6 +800,20 @@ end
     return y, bc_fwd_back
 end
 
+function dual_function_gb_force_loop_2(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
+        ds1 = dualize(Nothing, arg1, Val(0), Val(10))
+        ds2 = dualize(Nothing, arg2, Val(3), Val(7))
+        ds3 = Zygote.dual(arg3, (false, false, false, false, false, false, true , false, false, false, false, false, false))
+        ds4 = Zygote.dual(arg4, (false, false, false, false, false, false, false, true , false, false, false, false, false))
+        ds5 = Zygote.dual(arg5, (false, false, false, false, false, false, false, false, true , false, false, false, false))
+        ds6 = Zygote.dual(arg6, (false, false, false, false, false, false, false, false, false, true , false, false, false))
+        ds7 = arg7
+        ds8 = dualize(Nothing, arg8, Val(10), Val(0))
+        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8)
+    end
+end
+
 # For gb_force_loop_2
 @inline function Zygote.broadcast_forward(f,
                                             arg1::AbstractArray{SVector{D, T}},
@@ -877,6 +851,32 @@ end
         return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6, darg7, darg8)
     end
     return y, bc_fwd_back
+end
+
+function dual_function_gb_energy_loop(f::F) where F
+    function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10,
+                arg11, arg12, arg13, arg14, arg15, arg16, arg17, arg18)
+        ds1  = dualize(Nothing, arg1, Val(0), Val(17))
+        ds2  = dualize(Nothing, arg2, Val(3), Val(14))
+        ds3  = arg3
+        ds4  = arg4
+        ds5  = Zygote.dual(arg5 , (false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false, false, false, false))
+        ds6  = Zygote.dual(arg6 , (false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false, false, false))
+        ds7  = Zygote.dual(arg7 , (false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false, false))
+        ds8  = Zygote.dual(arg8 , (false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false))
+        ds9  = Zygote.dual(arg9 , (false, false, false, false, false, false, false, false, false, true , true , false, false, false, false, false, false, false, false, false))
+        ds10 = arg10
+        ds11 = Zygote.dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false))
+        ds12 = Zygote.dual(arg12, (false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false))
+        ds13 = Zygote.dual(arg13, (false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false))
+        ds14 = Zygote.dual(arg14, (false, false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false))
+        ds15 = Zygote.dual(arg15, (false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false))
+        ds16 = Zygote.dual(arg16, (false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false))
+        ds17 = arg17
+        ds18 = dualize(Nothing, arg18, Val(17), Val(0))
+        return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10,
+                    ds11, ds12, ds13, ds14, ds15, ds16, ds17, ds18)
+    end
 end
 
 # For gb_energy_loop
