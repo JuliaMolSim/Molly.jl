@@ -319,6 +319,43 @@ end
     @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
 end
 
+@testset "Langevin Splitting" begin
+    n_atoms=400
+    n_steps=2000
+    temp=300.0u"K"
+    box_size = SVector(10.0, 10.0, 10.0)u"nm"
+    coords = place_atoms(n_atoms, box_size, 0.3u"nm")
+    velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
+    s1 = System(
+        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        pairwise_inters=(LennardJones(nl_only=true),),
+        coords=coords,
+        velocities=velocities,
+        box_size=box_size,
+        neighbor_finder=DistanceNeighborFinder(
+            nb_matrix=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=2.0u"nm",
+        ),
+        loggers=Dict(
+            "temp"   => TemperatureLogger(10),
+        ),
+    )
+    s2=deepcopy(s1)
+    rseed=2022
+    simulator1=Langevin(dt=0.002u"ps",temperature=temp,friction=1.0u"ps^-1")
+    simulator2=LangevinSplitting(dt=0.002u"ps",friction=10.0u"u * ps^-1",temperature=temp,splitting="BAOA")
+
+    @time simulate!(s1,simulator1,n_steps;rng=MersenneTwister(rseed))
+    @test 280.0u"K"<= mean(s1.loggers["temp"].temperatures[end-100:end])<=320.0u"K"
+
+    @time simulate!(s2,simulator2,n_steps;rng=MersenneTwister(rseed))
+    @test 280.0u"K"<= mean(s2.loggers["temp"].temperatures[end-100:end])<=320.0u"K"
+
+    atol=1e-5u"nm"
+    @test all(all(abs(x1[i]-x2[i])<atol for i=1:3) for (x1,x2)=zip(s1.coords,s2.coords))
+end
+
 @testset "Different implementations" begin
     n_atoms = 400
     atom_mass = 10.0u"u"
