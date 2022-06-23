@@ -229,6 +229,7 @@ end
     TreeNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff)
 
 Find close atoms by distance using a tree search.
+Can not be used if one or more dimensions has infinite boundaries.
 """
 struct TreeNeighborFinder{D} <: AbstractNeighborFinder
     nb_matrix::BitArray{2}
@@ -300,7 +301,6 @@ function find_neighbors(s::System,
     return neighbors
 end
 
-# Find neighbor lists using CellListMap.jl
 """
     CellListMapNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff, x0, unit_cell)
 
@@ -309,6 +309,7 @@ are optional initial coordinates and system unit cell that improve the first app
 cell list structure. The unit cell can be provided as a three-component vector of box sides on each
 direction, in which case the unit cell is considered `OrthorhombicCell`, or as a unit cell matrix,
 in which case the cell is considered a general `TriclinicCell` by the cell list algorithm.
+Can not be used if one or more dimensions has infinite boundaries.
 
 ### Example
 

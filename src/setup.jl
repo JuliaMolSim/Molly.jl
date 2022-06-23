@@ -17,6 +17,7 @@ Obtain `n_atoms` coordinates in bounding box `boundary` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
 The keyword argument `max_attempts` determines the number of failed tries after
 which to stop placing atoms.
+Can not be used if one or more dimensions has infinite boundaries.
 """
 function place_atoms(n_atoms::Integer, boundary, min_dist; max_attempts::Integer=100)
     dims = n_dimensions(boundary)
@@ -55,6 +56,7 @@ end
 Obtain coordinates for `n_molecules` diatomics in bounding box `boundary`
 where no two points are closer than `min_dist` and the bond length is `bond_length`,
 accounting for periodic boundary conditions.
+Can not be used if one or more dimensions has infinite boundaries.
 """
 function place_diatomics(n_molecules::Integer, boundary, min_dist, bond_length)
     dims = n_dimensions(boundary)
