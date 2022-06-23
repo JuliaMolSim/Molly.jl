@@ -145,12 +145,15 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
+        loggers=Dict("coords" => CoordinateLogger(100)),
     )
     random_velocities!(s, temp)
 
     @time simulate!(s, simulator, n_steps)
 
     @test maximum(distances(s.coords, boundary)) > 5.0u"nm"
+
+    run_visualize_tests && visualize(s.loggers["coords"], boundary, temp_fp_viz)
 end
 
 @testset "Lennard-Jones simulators" begin
