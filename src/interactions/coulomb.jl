@@ -33,7 +33,7 @@ end
                                     coord_j,
                                     atom_i,
                                     atom_j,
-                                    box_size,
+                                    boundary,
                                     weight_14::Bool=false) where C
     r2 = sum(abs2, dr)
 
@@ -76,7 +76,7 @@ end
                                             coord_j,
                                             atom_i,
                                             atom_j,
-                                            box_size,
+                                            boundary,
                                             weight_14::Bool=false) where C
     r2 = sum(abs2, dr)
 

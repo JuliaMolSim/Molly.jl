@@ -100,7 +100,7 @@ masses = [
     0.642e24u"kg",
 ]
 
-box_size = CubicBoundary(1e9u"km", 1e9u"km", 1e9u"km")
+boundary = CubicBoundary(1e9u"km", 1e9u"km", 1e9u"km")
 
 # Convert the gravitational constant to the appropriate units
 inter = Gravity(G=convert(typeof(1.0u"km^3 * kg^-1 * d^-2"), Unitful.G))
@@ -110,7 +110,7 @@ sys = System(
     pairwise_inters=(inter,),
     coords=coords .+ (SVector(5e8, 5e8, 5e8)u"km",),
     velocities=velocities,
-    box_size=box_size,
+    boundary=boundary,
     loggers=Dict("coords" => CoordinateLogger(typeof(1.0u"km"), 10)),
     force_units=u"kg * km * d^-2",
     energy_units=u"kg * km^2 * d^-2",
@@ -125,7 +125,7 @@ simulate!(sys, simulator, 3650) # 1 year
 
 visualize(
     sys.loggers["coords"],
-    box_size,
+    boundary,
     "sim_planets.mp4";
     trails=5,
     color=[:yellow, :grey, :orange, :blue, :red],
@@ -171,7 +171,7 @@ function Molly.force(inter::BondableInteraction,
                         coord_j,
                         atom_i,
                         atom_j,
-                        box_size)
+                        boundary)
     # Break bonds randomly
     if atom_j.i in atom_i.partners && rand() < inter.prob_break
         delete!(atom_i.partners, atom_j.i)
@@ -211,12 +211,12 @@ function Molly.log_property!(logger::BondLogger, s, neighbors, step_n; parallel=
 end
 
 n_atoms = 200
-box_size = RectangularBoundary(10.0, 10.0)
+boundary = RectangularBoundary(10.0, 10.0)
 n_steps = 2_000
 temp = 1.0
 
 atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
-coords = place_atoms(n_atoms, box_size, 0.1)
+coords = place_atoms(n_atoms, boundary, 0.1)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
     SoftSphere(nl_only=true),
@@ -237,7 +237,7 @@ sys = System(
     pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
-    box_size=box_size,
+    boundary=boundary,
     neighbor_finder=neighbor_finder,
     loggers=Dict(
         "coords" => CoordinateLogger(Float64, 20; dims=2),
@@ -258,7 +258,7 @@ end
 
 visualize(
     sys.loggers["coords"],
-    box_size,
+    boundary,
     "sim_mutbond.mp4";
     connections=connections,
     connection_frames=sys.loggers["bonds"].bonds,
@@ -279,14 +279,14 @@ using Zygote
 using GLMakie
 
 inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
-box_size = CubicBoundary(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0, 5.0, 5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
 function force_direct(dist)
     c1 = SVector(1.0, 1.0, 1.0)
     c2 = SVector(dist + 1.0, 1.0, 1.0)
-    vec = vector(c1, c2, box_size)
-    F = force(inter, vec, c1, c2, a1, a2, box_size)
+    vec = vector(c1, c2, boundary)
+    F = force(inter, vec, c1, c2, a1, a2, boundary)
     return F[1]
 end
 
@@ -294,8 +294,8 @@ function force_grad(dist)
     grad = gradient(dist) do dist
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
-        vec = vector(c1, c2, box_size)
-        potential_energy(inter, vec, c1, c2, a1, a2, box_size)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
     end
     return -grad[1]
 end
@@ -328,14 +328,14 @@ It can also be compared to the harmonic bond potential.
 using Molly
 using GLMakie
 
-box_size = CubicBoundary(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0, 5.0, 5.0)
 dists = collect(0.12:0.005:2.0)
 
 function energies(inter)
     return map(dists) do dist
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
-        potential_energy(inter, c1, c2, box_size)
+        potential_energy(inter, c1, c2, boundary)
     end
 end
 
@@ -374,7 +374,7 @@ When *m*=6 and *n*=12 this is equivalent to the Lennard-Jones potential.
 using Molly
 using GLMakie
 
-box_size = CubicBoundary(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0, 5.0, 5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 dists = collect(0.2:0.005:0.8)
 
@@ -383,8 +383,8 @@ function energies(m, n)
     return map(dists) do dist
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
-        vec = vector(c1, c2, box_size)
-        potential_energy(inter, vec, c1, c2, a1, a2, box_size)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
     end
 end
 

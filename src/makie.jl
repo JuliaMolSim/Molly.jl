@@ -4,7 +4,7 @@
 using .GLMakie
 
 function visualize(coord_logger,
-                    box_size,
+                    boundary,
                     out_filepath::AbstractString;
                     connections=Tuple{Int, Int}[],
                     connection_frames=[trues(length(connections)) for i in coord_logger.coords],
@@ -37,7 +37,7 @@ function visualize(coord_logger,
 
     connection_nodes = []
     for (ci, (i, j)) in enumerate(connections)
-        if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < (box_size[1] / 2)
+        if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < (boundary[1] / 2)
             if dims == 3
                 push!(connection_nodes, Observable(PointType.(
                         ustrip.([coords_start[i][1], coords_start[j][1]]),
@@ -75,16 +75,16 @@ function visualize(coord_logger,
     end
 
     dist_unit = unit(first(first(coords_start)))
-    box_size_conv = ustrip.(dist_unit, box_size)
-    xlims!(ax, 0.0, box_size_conv[1])
-    ylims!(ax, 0.0, box_size_conv[2])
-    dims == 3 && zlims!(ax, 0.0, box_size_conv[3])
+    boundary_conv = ustrip.(dist_unit, boundary)
+    xlims!(ax, 0.0, boundary_conv[1])
+    ylims!(ax, 0.0, boundary_conv[2])
+    dims == 3 && zlims!(ax, 0.0, boundary_conv[3])
 
     GLMakie.record(fig, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
         coords = coord_logger.coords[frame_i]
 
         for (ci, (i, j)) in enumerate(connections)
-            if connection_frames[frame_i][ci] && norm(coords[i] - coords[j]) < (box_size[1] / 2)
+            if connection_frames[frame_i][ci] && norm(coords[i] - coords[j]) < (boundary[1] / 2)
                 if dims == 3
                     connection_nodes[ci][] = PointType.(
                                 ustrip.([coords[i][1], coords[j][1]]),

@@ -2,14 +2,14 @@
     n_atoms = 10
     n_steps = 20_000
     temp = 298.0u"K"
-    box_size = RectangularBoundary(2.0u"nm", 2.0u"nm")
+    boundary = RectangularBoundary(2.0u"nm", 2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         pairwise_inters=(LennardJones(nl_only=true),),
-        coords=place_atoms(n_atoms, box_size, 0.3u"nm"),
-        box_size=box_size,
+        coords=place_atoms(n_atoms, boundary, 0.3u"nm"),
+        boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
             nb_matrix=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -35,12 +35,12 @@
     @test length(s.loggers["coords"].coords) == 201
     final_coords = last(s.loggers["coords"].coords)
     @test all(all(c .> 0.0u"nm") for c in final_coords)
-    @test all(all(c .< box_size) for c in final_coords)
-    displacements(final_coords, box_size)
-    distances(final_coords, box_size)
-    rdf(final_coords, box_size)
+    @test all(all(c .< boundary) for c in final_coords)
+    displacements(final_coords, boundary)
+    distances(final_coords, boundary)
+    rdf(final_coords, boundary)
 
-    run_visualize_tests && visualize(s.loggers["coords"], box_size, temp_fp_viz)
+    run_visualize_tests && visualize(s.loggers["coords"], boundary, temp_fp_viz)
 end
 
 @testset "Lennard-Jones" begin
@@ -48,7 +48,7 @@ end
     atom_mass = 10.0u"u"
     n_steps = 20_000
     temp = 298.0u"K"
-    box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     parallel_list = run_parallel_tests ? (false, true) : (false,)
 
@@ -57,9 +57,9 @@ end
             atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR", element="Ar") for i in 1:n_atoms],
             pairwise_inters=(LennardJones(nl_only=true),),
-            coords=place_atoms(n_atoms, box_size, 0.3u"nm"),
+            coords=place_atoms(n_atoms, boundary, 0.3u"nm"),
             velocities=[velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
-            box_size=box_size,
+            boundary=boundary,
             neighbor_finder=DistanceNeighborFinder(
                 nb_matrix=trues(n_atoms, n_atoms),
                 n_steps=10,
@@ -112,10 +112,10 @@ end
 
         final_coords = last(s.loggers["coords"].coords)
         @test all(all(c .> 0.0u"nm") for c in final_coords)
-        @test all(all(c .< box_size) for c in final_coords)
-        displacements(final_coords, box_size)
-        distances(final_coords, box_size)
-        rdf(final_coords, box_size)
+        @test all(all(c .< boundary) for c in final_coords)
+        displacements(final_coords, boundary)
+        distances(final_coords, boundary)
+        rdf(final_coords, boundary)
         @test unit(velocity_autocorr(s.loggers["vels"])) == u"nm^2 * ps^-2"
 
         traj = read(temp_fp_pdb, BioStructures.PDB)
@@ -123,7 +123,7 @@ end
         @test BioStructures.countmodels(traj) == 201
         @test BioStructures.countatoms(first(traj)) == 100
 
-        run_visualize_tests && visualize(s.loggers["coords"], box_size, temp_fp_viz)
+        run_visualize_tests && visualize(s.loggers["coords"], boundary, temp_fp_viz)
     end
 end
 
@@ -131,8 +131,8 @@ end
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
-    box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
-    coords = place_atoms(n_atoms, box_size, 0.3u"nm")
+    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    coords = place_atoms(n_atoms, boundary, 0.3u"nm")
     simulators = [
         Verlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps")),
         StormerVerlet(dt=0.002u"ps"),
@@ -143,7 +143,7 @@ end
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         pairwise_inters=(LennardJones(nl_only=true),),
         coords=coords,
-        box_size=box_size,
+        boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
             nb_matrix=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -162,8 +162,8 @@ end
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
-    box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
-    coords = place_atoms(n_atoms ÷ 2, box_size, 0.3u"nm")
+    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    coords = place_atoms(n_atoms ÷ 2, boundary, 0.3u"nm")
     for i in 1:length(coords)
         push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
     end
@@ -186,7 +186,7 @@ end
         specific_inter_lists=(bonds,),
         coords=coords,
         velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
-        box_size=box_size,
+        boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
             nb_matrix=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -201,7 +201,7 @@ end
     @time simulate!(s, simulator, n_steps; parallel=false)
 
     if run_visualize_tests
-        visualize(s.loggers["coords"], box_size, temp_fp_viz;
+        visualize(s.loggers["coords"], boundary, temp_fp_viz;
                     connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
                     trails=2)
     end
@@ -211,7 +211,7 @@ end
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
-    box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
     G = 10.0u"kJ * nm * u^-2 * mol^-1"
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     pairwise_inter_types = (
@@ -240,9 +240,9 @@ end
             atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"u", σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             pairwise_inters=(inter,),
-            coords=place_atoms(n_atoms, box_size, 0.2u"nm"),
+            coords=place_atoms(n_atoms, boundary, 0.2u"nm"),
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
-            box_size=box_size,
+            boundary=boundary,
             neighbor_finder=neighbor_finder,
             loggers=Dict(
                 "temp"   => TemperatureLogger(100),
@@ -259,8 +259,8 @@ end
     n_atoms = 100
     n_steps = 2_000 # Does diverge for longer simulations or higher velocities
     temp = 298.0u"K"
-    box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
-    coords = place_atoms(n_atoms, box_size, 0.3u"nm")
+    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    coords = place_atoms(n_atoms, boundary, 0.3u"nm")
     velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
     simulator = VelocityVerlet(dt=0.002u"ps")
     simulator_nounits = VelocityVerlet(dt=0.002)
@@ -273,7 +273,7 @@ end
         pairwise_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=velocities,
-        box_size=box_size,
+        boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
             nb_matrix=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -294,7 +294,7 @@ end
         pairwise_inters=(LennardJones(nl_only=true),),
         coords=ustrip_vec.(coords),
         velocities=ustrip_vec.(velocities),
-        box_size=CubicBoundary(ustrip.(box_size)),
+        boundary=CubicBoundary(ustrip.(boundary)),
         neighbor_finder=DistanceNeighborFinder(
             nb_matrix=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -337,15 +337,15 @@ end
     n_atoms = 400
     n_steps = 2000
     temp = 300.0u"K"
-    box_size = CubicBoundary(10.0u"nm", 10.0u"nm", 10.0u"nm")
-    coords = place_atoms(n_atoms, box_size, 0.3u"nm")
+    boundary = CubicBoundary(10.0u"nm", 10.0u"nm", 10.0u"nm")
+    coords = place_atoms(n_atoms, boundary, 0.3u"nm")
     velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
     s1 = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         pairwise_inters=(LennardJones(nl_only=true),),
         coords=coords,
         velocities=velocities,
-        box_size=box_size,
+        boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
             nb_matrix=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -371,9 +371,9 @@ end
 @testset "Different implementations" begin
     n_atoms = 400
     atom_mass = 10.0u"u"
-    box_size = CubicBoundary(6.0u"nm", 6.0u"nm", 6.0u"nm")
+    boundary = CubicBoundary(6.0u"nm", 6.0u"nm", 6.0u"nm")
     temp = 1.0u"K"
-    starting_coords = place_diatomics(n_atoms ÷ 2, box_size, 0.2u"nm", 0.2u"nm")
+    starting_coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm", 0.2u"nm")
     starting_velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
@@ -382,7 +382,7 @@ end
         n_atoms = 400
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
-        box_size = f32 ? CubicBoundary(6.0f0u"nm", 6.0f0u"nm", 6.0f0u"nm") : CubicBoundary(6.0u"nm", 6.0u"nm", 6.0u"nm")
+        boundary = f32 ? CubicBoundary(6.0f0u"nm", 6.0f0u"nm", 6.0f0u"nm") : CubicBoundary(6.0u"nm", 6.0u"nm", 6.0u"nm")
         simulator = VelocityVerlet(dt=f32 ? 0.02f0u"ps" : 0.02u"ps")
         b0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
         kb = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
@@ -429,7 +429,7 @@ end
             specific_inter_lists=specific_inter_lists,
             coords=coords,
             velocities=velocities,
-            box_size=box_size,
+            boundary=boundary,
             neighbor_finder=neighbor_finder,
             gpu_diff_safe=gpu_diff_safe,
         )

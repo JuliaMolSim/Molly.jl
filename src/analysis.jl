@@ -10,7 +10,7 @@ export
     radius_gyration
 
 """
-    visualize(coord_logger, box_size, out_filepath; <keyword arguments>)
+    visualize(coord_logger, boundary, out_filepath; <keyword arguments>)
 
 Visualize a simulation as an animation.
 This function is only available when GLMakie is imported.
@@ -39,42 +39,42 @@ number of atoms.
 function visualize end
 
 """
-    displacements(coords, box_size)
+    displacements(coords, boundary)
 
 Calculate the pairwise vector displacements of a set of coordinates, accounting
 for the periodic boundary conditions.
 """
-function displacements(coords, box_size)
+function displacements(coords, boundary)
     n_atoms = length(coords)
     coords_rep = repeat(reshape(coords, n_atoms, 1), 1, n_atoms)
-    diffs = vector.(coords_rep, permutedims(coords_rep, (2, 1)), (box_size,))
+    diffs = vector.(coords_rep, permutedims(coords_rep, (2, 1)), (boundary,))
     return diffs
 end
 
 """
-    distances(coords, box_size)
+    distances(coords, boundary)
 
 Calculate the pairwise distances of a set of coordinates, accounting for the
 periodic boundary conditions.
 """
-distances(coords, box_size) = norm.(displacements(coords, box_size))
+distances(coords, boundary) = norm.(displacements(coords, boundary))
 
 """
-    rdf(coords, box_size; npoints=200)
+    rdf(coords, boundary; npoints=200)
 
 Calculate the radial distribution function of a set of coordinates.
 This describes how density varies as a function of distance from each atom.
 Returns a list of distance bin centres and a list of the corresponding
 densities.
 """
-function rdf(coords, box_size; npoints::Integer=200)
+function rdf(coords, boundary; npoints::Integer=200)
     n_atoms = length(coords)
     dims = length(first(coords))
-    dists = distances(coords, box_size)
+    dists = distances(coords, boundary)
     dists_vec = [dists[i, j] for i in 1:n_atoms, j in 1:n_atoms if j > i]
     dist_unit = unit(first(dists_vec))
     kd = kde(ustrip.(dists_vec), npoints=npoints)
-    ρ = n_atoms / box_volume(box_size)
+    ρ = n_atoms / box_volume(boundary)
     if dims == 3
         normalizing_factor = 4π .* ρ .* step(kd.x) .* kd.x .^ 2 .* dist_unit .^ 3
     elseif dims == 2

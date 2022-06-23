@@ -49,7 +49,7 @@ is_solute(at) = false
                                     coord_j,
                                     atom_i,
                                     atom_j,
-                                    box_size,
+                                    boundary,
                                     weight_14::Bool=false) where {S, C}
     r2 = sum(abs2, dr)
 
@@ -105,7 +105,7 @@ end
                                             coord_j,
                                             atom_i,
                                             atom_j,
-                                            box_size,
+                                            boundary,
                                             weight_14::Bool=false) where {S, C}
     r2 = sum(abs2, dr)
 

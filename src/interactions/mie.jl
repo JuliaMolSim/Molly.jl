@@ -37,7 +37,7 @@ end
                                     coord_j,
                                     atom_i,
                                     atom_j,
-                                    box_size) where {S, C, T}
+                                    boundary) where {S, C, T}
     r2 = sum(abs2, dr)
     r = √r2
 
@@ -87,7 +87,7 @@ end
                                             coord_j,
                                             atom_i,
                                             atom_j,
-                                            box_size) where {S, C, T}
+                                            boundary) where {S, C, T}
     r2 = sum(abs2, dr)
     r = √r2
 

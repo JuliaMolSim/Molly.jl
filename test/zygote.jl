@@ -1,13 +1,13 @@
 @testset "Gradients" begin
     inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
-    box_size = CubicBoundary(5.0, 5.0, 5.0)
+    boundary = CubicBoundary(5.0, 5.0, 5.0)
     a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
     function force_direct(dist)
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
-        vec = vector(c1, c2, box_size)
-        F = force(inter, vec, c1, c2, a1, a2, box_size)
+        vec = vector(c1, c2, boundary)
+        F = force(inter, vec, c1, c2, a1, a2, boundary)
         return F[1]
     end
 
@@ -15,8 +15,8 @@
         grad = gradient(dist) do dist
             c1 = SVector(1.0, 1.0, 1.0)
             c2 = SVector(dist + 1.0, 1.0, 1.0)
-            vec = vector(c1, c2, box_size)
-            potential_energy(inter, vec, c1, c2, a1, a2, box_size)
+            vec = vector(c1, c2, boundary)
+            potential_energy(inter, vec, c1, c2, a1, a2, boundary)
         end
         return -grad[1]
     end
@@ -29,13 +29,13 @@
     abs2_vec(x) = abs2.(x)
 
     # Function is strange in order to work with gradients on the GPU
-    function mean_min_separation(coords, box_size)
+    function mean_min_separation(coords, boundary)
         n_atoms = length(coords)
         coords_rep = repeat(reshape(coords, n_atoms, 1), 1, n_atoms)
-        vec2arg(c1, c2) = vector(c1, c2, box_size)
+        vec2arg(c1, c2) = vector(c1, c2, boundary)
         diffs = vec2arg.(coords_rep, permutedims(coords_rep, (2, 1)))
         disps = Array(sum.(abs2_vec.(diffs)))
-        disps_diag = disps .+ Diagonal(100 * ones(typeof(box_size[1]), n_atoms))
+        disps_diag = disps .+ Diagonal(100 * ones(typeof(boundary[1]), n_atoms))
         return mean(sqrt.(minimum(disps_diag; dims=1)))
     end
 
@@ -44,13 +44,13 @@
         n_atoms = 50
         n_steps = 100
         atom_mass = f32 ? 10.0f0 : 10.0
-        box_size = f32 ? CubicBoundary(3.0f0, 3.0f0, 3.0f0) : CubicBoundary(3.0, 3.0, 3.0)
+        boundary = f32 ? CubicBoundary(3.0f0, 3.0f0, 3.0f0) : CubicBoundary(3.0, 3.0, 3.0)
         temp = f32 ? 1.0f0 : 1.0
         simulator = VelocityVerlet(
             dt=f32 ? 0.001f0 : 0.001,
             coupling=RescaleThermostat(temp),
         )
-        coords = place_atoms(n_atoms, box_size, f32 ? 0.6f0 : 0.6; max_attempts=500)
+        coords = place_atoms(n_atoms, boundary, f32 ? 0.6f0 : 0.6; max_attempts=500)
         velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
         coords_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in coords]
         velocities_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in velocities]
@@ -71,7 +71,7 @@
         )
         pairwise_inters = pis ? (lj, crf) : ()
         bond_is, bond_js = collect(1:(n_atoms ÷ 2)), collect((1 + n_atoms ÷ 2):n_atoms)
-        bond_dists = [norm(vector(Array(coords)[i], Array(coords)[i + n_atoms ÷ 2], box_size)) for i in 1:(n_atoms ÷ 2)]
+        bond_dists = [norm(vector(Array(coords)[i], Array(coords)[i + n_atoms ÷ 2], boundary)) for i in 1:(n_atoms ÷ 2)]
         angles_inner = [HarmonicAngle(th0=f32 ? 2.0f0 : 2.0, cth=f32 ? 10.0f0 : 10.0) for i in 1:15]
         angles = InteractionList3Atoms(
             collect(1:15),
@@ -143,7 +143,7 @@
                 general_inters=general_inters,
                 coords=gpu ? cu(cs) : cs,
                 velocities=gpu ? cu(vs) : vs,
-                box_size=box_size,
+                boundary=boundary,
                 neighbor_finder=neighbor_finder,
                 gpu_diff_safe=true,
                 force_units=NoUnits,
@@ -152,7 +152,7 @@
 
             simulate!(s, simulator, n_steps)
 
-            return mean_min_separation(s.coords, box_size)
+            return mean_min_separation(s.coords, boundary)
         end
 
         return loss

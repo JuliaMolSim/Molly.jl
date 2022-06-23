@@ -28,10 +28,10 @@ function PeriodicTorsion(; periodicities, phases, ks, proper::Bool=true,
 end
 
 @inline @inbounds function force(d::PeriodicTorsion, coords_i, coords_j, coords_k,
-                                    coords_l, box_size)
-    ab = vector(coords_i, coords_j, box_size)
-    bc = vector(coords_j, coords_k, box_size)
-    cd = vector(coords_k, coords_l, box_size)
+                                    coords_l, boundary)
+    ab = vector(coords_i, coords_j, boundary)
+    bc = vector(coords_j, coords_k, boundary)
+    cd = vector(coords_k, coords_l, boundary)
     cross_ab_bc = ab × bc
     cross_bc_cd = bc × cd
     bc_norm = norm(bc)
@@ -52,8 +52,8 @@ end
 end
 
 @inline @inbounds function potential_energy(d::PeriodicTorsion, coords_i, coords_j, coords_k,
-                                            coords_l, box_size)
-    θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, box_size)
+                                            coords_l, boundary)
+    θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, boundary)
     E = sum(zip(d.periodicities, d.phases, d.ks)) do (periodicity, phase, k)
         return k + k * cos((periodicity * θ) - phase)
     end

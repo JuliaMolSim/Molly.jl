@@ -58,27 +58,27 @@ function check_energy_units(E, energy_units)
 end
 
 @inline @inbounds function potential_energy_nounit(inters, coord_i, coord_j, atom_i, atom_j,
-                                        box_size, energy_units, weight_14::Bool=false)
-    dr = vector(coord_i, coord_j, box_size)
+                                        boundary, energy_units, weight_14::Bool=false)
+    dr = vector(coord_i, coord_j, boundary)
     sum(inters) do inter
         if weight_14
             E = potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j,
-                                    box_size, true)
+                                    boundary, true)
         else
             E = potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j,
-                                    box_size)
+                                    boundary)
         end
         check_energy_units(E, energy_units)
         return ustrip(E)
     end
 end
 
-@views function potential_energy_inters(inters, coords, atoms, neighbors, box_size,
+@views function potential_energy_inters(inters, coords, atoms, neighbors, boundary,
                                         energy_units, weights_14)
     coords_i, atoms_i = getindices_i(coords, neighbors), getindices_i(atoms, neighbors)
     coords_j, atoms_j = getindices_j(coords, neighbors), getindices_j(atoms, neighbors)
     @inbounds energies = potential_energy_nounit.((inters,), coords_i, coords_j,
-                                atoms_i, atoms_j, (box_size,), energy_units, weights_14)
+                                atoms_i, atoms_j, (boundary,), energy_units, weights_14)
     return sum(energies) * energy_units
 end
 
@@ -91,13 +91,13 @@ If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 
     potential_energy(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
-                     atom_i, atom_j, box_size)
+                     atom_i, atom_j, boundary)
     potential_energy(inter::SpecificInteraction, coords_i, coords_j,
-                     box_size)
+                     boundary)
     potential_energy(inter::SpecificInteraction, coords_i, coords_j,
-                     coords_k, box_size)
+                     coords_k, boundary)
     potential_energy(inter::SpecificInteraction, coords_i, coords_j,
-                     coords_k, coords_l, box_size)
+                     coords_k, coords_l, boundary)
     potential_energy(inter, system, neighbors=nothing)
 
 Calculate the potential energy due to a given interation type.
@@ -114,28 +114,28 @@ function potential_energy(s::System{D, false, T}, neighbors=nothing) where {D, T
             end
             @inbounds for ni in 1:neighbors.n
                 i, j, weight_14 = neighbors.list[ni]
-                dr = vector(s.coords[i], s.coords[j], s.box_size)
+                dr = vector(s.coords[i], s.coords[j], s.boundary)
                 if weight_14
                     potential += potential_energy(inter, dr, s.coords[i], s.coords[j], s.atoms[i],
-                                                    s.atoms[j], s.box_size, true)
+                                                    s.atoms[j], s.boundary, true)
                 else
                     potential += potential_energy(inter, dr, s.coords[i], s.coords[j], s.atoms[i],
-                                                    s.atoms[j], s.box_size)
+                                                    s.atoms[j], s.boundary)
                 end
             end
         else
             for i in 1:n_atoms
                 for j in (i + 1):n_atoms
-                    dr = vector(s.coords[i], s.coords[j], s.box_size)
+                    dr = vector(s.coords[i], s.coords[j], s.boundary)
                     potential += potential_energy(inter, dr, s.coords[i], s.coords[j], s.atoms[i],
-                                                    s.atoms[j], s.box_size)
+                                                    s.atoms[j], s.boundary)
                 end
             end
         end
     end
 
     for inter_list in values(s.specific_inter_lists)
-        potential += potential_energy(inter_list, s.coords, s.box_size)
+        potential += potential_energy(inter_list, s.coords, s.boundary)
     end
 
     for inter in values(s.general_inters)
@@ -151,17 +151,17 @@ function potential_energy(s::System{D, true, T}, neighbors=nothing) where {D, T}
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         potential += potential_energy_inters(pairwise_inters_nonl, s.coords, s.atoms,
-                        neighbors.all, s.box_size, s.energy_units, false)
+                        neighbors.all, s.boundary, s.energy_units, false)
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nl) > 0 && length(neighbors.close.nbsi) > 0
         potential += potential_energy_inters(pairwise_inters_nl, s.coords, s.atoms,
-                        neighbors.close, s.box_size, s.energy_units, neighbors.close.weights_14)
+                        neighbors.close, s.boundary, s.energy_units, neighbors.close.weights_14)
     end
 
     for inter_list in values(s.specific_inter_lists)
-        potential += potential_energy(inter_list, s.coords, s.box_size)
+        potential += potential_energy(inter_list, s.coords, s.boundary)
     end
 
     for inter in values(s.general_inters)
@@ -171,17 +171,17 @@ function potential_energy(s::System{D, true, T}, neighbors=nothing) where {D, T}
     return uconvert(s.energy_units, potential)
 end
 
-@views function potential_energy(inter_list::InteractionList2Atoms, coords, box_size)
+@views function potential_energy(inter_list::InteractionList2Atoms, coords, boundary)
     return sum(potential_energy.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
-                                    (box_size,)))
+                                    (boundary,)))
 end
 
-@views function potential_energy(inter_list::InteractionList3Atoms, coords, box_size)
+@views function potential_energy(inter_list::InteractionList3Atoms, coords, boundary)
     return sum(potential_energy.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
-                                    coords[inter_list.ks], (box_size,)))
+                                    coords[inter_list.ks], (boundary,)))
 end
 
-@views function potential_energy(inter_list::InteractionList4Atoms, coords, box_size)
+@views function potential_energy(inter_list::InteractionList4Atoms, coords, boundary)
     return sum(potential_energy.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
-                                    coords[inter_list.ks], coords[inter_list.ls], (box_size,)))
+                                    coords[inter_list.ks], coords[inter_list.ls], (boundary,)))
 end

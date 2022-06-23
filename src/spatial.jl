@@ -67,7 +67,7 @@ float_type(b::Union{CubicBoundary, RectangularBoundary}) = typeof(ustrip(b.side_
 
 Calculate the volume of a bounding box.
 """
-box_volume(box_size::Union{CubicBoundary, RectangularBoundary}) = prod(box_size.side_lengths)
+box_volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
 
 """
     vector1D(c1, c2, side_length)
@@ -86,51 +86,51 @@ function vector1D(c1, c2, side_length)
 end
 
 """
-    vector(c1, c2, box_size)
+    vector(c1, c2, boundary)
 
 Displacement between two coordinate values from c1 to c2, accounting for
 the bounding box.
 The minimum image convention is used, so the displacement is to the closest
 version of the coordinates accounting for the periodic boundaries.
 """
-vector(c1, c2, box_size::Union{CubicBoundary, RectangularBoundary}) = vector1D.(c1, c2, box_size)
+vector(c1, c2, boundary::Union{CubicBoundary, RectangularBoundary}) = vector1D.(c1, c2, boundary)
 
-@generated function vector(c1::SVector{N}, c2::SVector{N}, box_size::Union{CubicBoundary, RectangularBoundary}) where N
+@generated function vector(c1::SVector{N}, c2::SVector{N}, boundary::Union{CubicBoundary, RectangularBoundary}) where N
     quote
-        Base.Cartesian.@ncall $N SVector{$N} i->vector1D(c1[i], c2[i], box_size[i])
+        Base.Cartesian.@ncall $N SVector{$N} i->vector1D(c1[i], c2[i], boundary[i])
     end
 end
 
-square_distance(i, j, coords, box_size) = sum(abs2, vector(coords[i], coords[j], box_size))
+square_distance(i, j, coords, boundary) = sum(abs2, vector(coords[i], coords[j], boundary))
 
 # Pad a vector to 3D to allow operations such as the cross product
-function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, box_size::RectangularBoundary{T}) where T
+function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, boundary::RectangularBoundary{T}) where T
     SVector{3, T}(
-        vector1D(c1[1], c2[1], box_size[1]),
-        vector1D(c1[2], c2[2], box_size[2]),
+        vector1D(c1[1], c2[1], boundary[1]),
+        vector1D(c1[2], c2[2], boundary[2]),
         zero(T),
     )
 end
 
-vector_pad3D(c1::SVector{3}, c2::SVector{3}, box_size) = vector(c1, c2, box_size)
+vector_pad3D(c1::SVector{3}, c2::SVector{3}, boundary) = vector(c1, c2, boundary)
 
 # Trim a vector back to 2D if required
-trim3D(v::SVector{3, T}, box_size::RectangularBoundary{T}) where T = SVector{2, T}(v[1], v[2])
-trim3D(v::SVector{3}, box_size) = v
+trim3D(v::SVector{3, T}, boundary::RectangularBoundary{T}) where T = SVector{2, T}(v[1], v[2])
+trim3D(v::SVector{3}, boundary) = v
 
 """
     wrap_coords(c, side_length)
 
-Ensure a 1D coordinate is within the simulation box and return the coordinate.
+Ensure a 1D coordinate is within the bounding box and return the coordinate.
 """
 wrap_coords(c, side_length) = c - floor(c / side_length) * side_length
 
 """
-    wrap_coords_vec(c, box_size)
+    wrap_coords_vec(c, boundary)
 
-Ensure a coordinate is within the simulation box and return the coordinate.
+Ensure a coordinate is within the bounding box and return the coordinate.
 """
-wrap_coords_vec(v, box_size::Union{CubicBoundary, RectangularBoundary}) = wrap_coords.(v, box_size)
+wrap_coords_vec(v, boundary::Union{CubicBoundary, RectangularBoundary}) = wrap_coords.(v, boundary)
 
 const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
 
@@ -215,16 +215,16 @@ end
 acosbound(x::Real) = acos(clamp(x, -1, 1))
 
 """
-    bond_angle(coord_i, coord_j, coord_k, box_size)
+    bond_angle(coord_i, coord_j, coord_k, boundary)
     bond_angle(vec_ji, vec_jk)
 
 Calculate the bond or pseudo-bond angle in radians between three
 coordinates or two vectors.
 The angle between j→i and j→k is returned in the range 0 to π.
 """
-function bond_angle(coords_i, coords_j, coords_k, box_size)
-    vec_ji = vector(coords_j, coords_i, box_size)
-    vec_jk = vector(coords_j, coords_k, box_size)
+function bond_angle(coords_i, coords_j, coords_k, boundary)
+    vec_ji = vector(coords_j, coords_i, boundary)
+    vec_jk = vector(coords_j, coords_k, boundary)
     return bond_angle(vec_ji, vec_jk)
 end
 
@@ -233,7 +233,7 @@ function bond_angle(vec_ji, vec_jk)
 end
 
 """
-    torsion_angle(coord_i, coord_j, coord_k, coord_l, box_size)
+    torsion_angle(coord_i, coord_j, coord_k, coord_l, boundary)
     torsion_angle(vec_ij, vec_jk, vec_kl)
 
 Calculate the torsion angle in radians defined by four coordinates or
@@ -241,10 +241,10 @@ three vectors.
 The angle between the planes defined by atoms (i, j, k) and (j, k, l) is
 returned in the range -π to π.
 """
-function torsion_angle(coords_i, coords_j, coords_k, coords_l, box_size)
-    vec_ij = vector(coords_i, coords_j, box_size)
-    vec_jk = vector(coords_j, coords_k, box_size)
-    vec_kl = vector(coords_k, coords_l, box_size)
+function torsion_angle(coords_i, coords_j, coords_k, coords_l, boundary)
+    vec_ij = vector(coords_i, coords_j, boundary)
+    vec_jk = vector(coords_j, coords_k, boundary)
+    vec_kl = vector(coords_k, coords_l, boundary)
     return torsion_angle(vec_ij, vec_jk, vec_kl)
 end
 

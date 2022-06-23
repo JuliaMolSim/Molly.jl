@@ -92,7 +92,7 @@ function find_neighbors(s::System,
             nbi = @view nf.nb_matrix[:, i]
             w14i = @view nf.matrix_14[:, i]
             for j in 1:(i - 1)
-                r2 = sum(abs2, vector(ci, s.coords[j], s.box_size))
+                r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
                 if r2 <= sqdist_cutoff && nbi[j]
                     push!(nl, (i, j, w14i[j]))
                 end
@@ -108,7 +108,7 @@ function find_neighbors(s::System,
             nbi = @view nf.nb_matrix[:, i]
             w14i = @view nf.matrix_14[:, i]
             for j in 1:(i - 1)
-                r2 = sum(abs2, vector(ci, s.coords[j], s.box_size))
+                r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
                 if r2 <= sqdist_cutoff && nbi[j]
                     push!(neighbors, (i, j, w14i[j]))
                 end
@@ -179,7 +179,7 @@ function find_neighbors(s::System,
     n_atoms = length(s)
     if any(inter -> inter.nl_only, values(s.pairwise_inters))
         sqdist_cutoff = nf.dist_cutoff ^ 2
-        sqdists = square_distance.(nf.is, nf.js, (s.coords,), (s.box_size,))
+        sqdists = square_distance.(nf.is, nf.js, (s.coords,), (s.boundary,))
 
         close = sqdists .< sqdist_cutoff
         close_nb = close .* nf.nb_matrix
@@ -260,7 +260,7 @@ function find_neighbors(s::System,
     empty!(neighbors)
 
     dist_unit = unit(first(first(s.coords)))
-    bv = ustrip.(dist_unit, s.box_size)
+    bv = ustrip.(dist_unit, s.boundary)
     btree = BallTree(ustrip_vec.(s.coords), PeriodicEuclidean(bv))
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
 
@@ -321,7 +321,7 @@ julia> coords
  [1.818842280373283 nm, 5.592152965227421 nm, 4.992100424805031 nm]
  [1.7261366568663976 nm, 5.610326185704369 nm, 5.084523386833478 nm]
 
-julia> box_size
+julia> boundary
 3-element SVector{3, Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}} with indices SOneTo(3):
               5.676 nm
              5.6627 nm
@@ -330,7 +330,7 @@ julia> box_size
 julia> neighbor_finder = CellListMapNeighborFinder(
            nb_matrix=s.neighbor_finder.nb_matrix, matrix_14=s.neighbor_finder.matrix_14, 
            n_steps=10, dist_cutoff=1.2u"nm",
-           x0 = coords, unit_cell = box_size
+           x0=coords, unit_cell=boundary
        )
 CellListMapNeighborFinder{Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}, 3, Float64}
   Size of nb_matrix = (15954, 15954)
@@ -432,7 +432,7 @@ function find_neighbors(s::System,
         neighbors_threaded[1].n = 0
     end
 
-    box = CellListMap.Box(s.box_size.side_lengths, nf.dist_cutoff; lcell=1)
+    box = CellListMap.Box(s.boundary.side_lengths, nf.dist_cutoff; lcell=1)
     cl = UpdateCellList!(s.coords, box, cl, aux; parallel=parallel)
 
     map_pairwise!(

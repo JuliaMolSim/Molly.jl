@@ -60,12 +60,12 @@ Simulation of a Lennard-Jones fluid:
 using Molly
 
 n_atoms = 100
-box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
 temp = 298.0u"K"
 atom_mass = 10.0u"u"
 
 atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-coords = place_atoms(n_atoms, box_size, 0.3u"nm")
+coords = place_atoms(n_atoms, boundary, 0.3u"nm")
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 pairwise_inters = (LennardJones(),)
 simulator = VelocityVerlet(
@@ -78,7 +78,7 @@ sys = System(
     pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
-    box_size=box_size,
+    boundary=boundary,
     loggers=Dict("temp" => TemperatureLogger(100)),
 )
 

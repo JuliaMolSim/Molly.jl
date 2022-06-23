@@ -11,29 +11,29 @@ export
     OpenMMForceField
 
 """
-    place_atoms(n_atoms, box_size, min_dist; max_attempts=100)
+    place_atoms(n_atoms, boundary, min_dist; max_attempts=100)
 
-Obtain `n_atoms` coordinates in bounding box `box_size` where no two
+Obtain `n_atoms` coordinates in bounding box `boundary` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
 The keyword argument `max_attempts` determines the number of failed tries after
 which to stop placing atoms.
 """
-function place_atoms(n_atoms::Integer, box_size, min_dist; max_attempts::Integer=100)
-    dims = n_dimensions(box_size)
+function place_atoms(n_atoms::Integer, boundary, min_dist; max_attempts::Integer=100)
+    dims = n_dimensions(boundary)
     # not floor(x / min_dist) + 1 due to periodic boundary conditions
-    max_atoms = prod(x -> floor(x / min_dist), box_size.side_lengths)
+    max_atoms = prod(x -> floor(x / min_dist), boundary.side_lengths)
     if n_atoms > max_atoms
-        error("Box size of $box_size too small for $n_atoms atoms with minimum distance of $min_dist")
+        error("Box size of $boundary too small for $n_atoms atoms with minimum distance of $min_dist")
     end
     min_dist_sq = min_dist ^ 2
-    T = typeof(convert(AbstractFloat, ustrip(box_size[1])))
+    T = typeof(convert(AbstractFloat, ustrip(boundary[1])))
     coords = SArray[]
     failed_attempts = 0
     while length(coords) < n_atoms
-        new_coord = SVector{dims}(rand(T, dims)) .* box_size
+        new_coord = SVector{dims}(rand(T, dims)) .* boundary
         okay = true
         for coord in coords
-            if sum(abs2, vector(coord, new_coord, box_size)) < min_dist_sq
+            if sum(abs2, vector(coord, new_coord, boundary)) < min_dist_sq
                 okay = false
                 failed_attempts += 1
                 break
@@ -50,25 +50,25 @@ function place_atoms(n_atoms::Integer, box_size, min_dist; max_attempts::Integer
 end
 
 """
-    place_diatomics(n_molecules, box_size, min_dist, bond_length)
+    place_diatomics(n_molecules, boundary, min_dist, bond_length)
 
-Obtain coordinates for `n_molecules` diatomics in bounding box `box_size`
+Obtain coordinates for `n_molecules` diatomics in bounding box `boundary`
 where no two points are closer than `min_dist` and the bond length is `bond_length`,
 accounting for periodic boundary conditions.
 """
-function place_diatomics(n_molecules::Integer, box_size, min_dist, bond_length)
-    dims = n_dimensions(box_size)
+function place_diatomics(n_molecules::Integer, boundary, min_dist, bond_length)
+    dims = n_dimensions(boundary)
     min_dist_sq = min_dist ^ 2
-    T = typeof(convert(AbstractFloat, ustrip(box_size[1])))
+    T = typeof(convert(AbstractFloat, ustrip(boundary[1])))
     coords = SArray[]
     while length(coords) < (n_molecules * 2)
-        new_coord_a = SVector{dims}(rand(T, dims)) .* box_size
+        new_coord_a = SVector{dims}(rand(T, dims)) .* boundary
         shift = SVector{dims}([bond_length, [zero(bond_length) for d in 1:(dims - 1)]...])
         new_coord_b = copy(new_coord_a) + shift
-        okay = new_coord_b[1] <= box_size[1]
+        okay = new_coord_b[1] <= boundary[1]
         for coord in coords
-            if sum(abs2, vector(coord, new_coord_a, box_size)) < min_dist_sq ||
-                    sum(abs2, vector(coord, new_coord_b, box_size)) < min_dist_sq
+            if sum(abs2, vector(coord, new_coord_a, boundary)) < min_dist_sq ||
+                    sum(abs2, vector(coord, new_coord_b, boundary)) < min_dist_sq
                 okay = false
                 break
             end
@@ -305,7 +305,7 @@ includes collapsed into one file.
 # Arguments
 - `velocities=nothing`: the velocities of the atoms in the system, set to
     zero by default.
-- `box_size=nothing`: the bounding box used for simulation, read from the
+- `boundary=nothing`: the bounding box used for simulation, read from the
     file by default.
 - `loggers=Dict()`: the loggers that record properties of interest during a
     simulation.
@@ -325,7 +325,7 @@ includes collapsed into one file.
 function System(coord_file::AbstractString,
                 force_field::OpenMMForceField;
                 velocities=nothing,
-                box_size=nothing,
+                boundary=nothing,
                 loggers=Dict(),
                 units::Bool=true,
                 gpu::Bool=false,
@@ -709,16 +709,16 @@ function System(coord_file::AbstractString,
     specific_inter_lists = tuple(specific_inter_array...)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
-    if isnothing(box_size)
+    if isnothing(boundary)
         # Read from file and convert from Å
         if units
-            box_size_used = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame))u"nm" / 10.0))
+            box_size = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame))u"nm" / 10.0))
         else
-            box_size_used = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame)) / 10.0))
+            box_size = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame)) / 10.0))
         end
-        boundary = CubicBoundary(box_size_used)
+        boundary_used = CubicBoundary(box_size)
     else
-        boundary = box_size
+        boundary_used = boundary
     end
 
     # Convert from Å
@@ -728,9 +728,9 @@ function System(coord_file::AbstractString,
         coords = [T.(SVector{3}(col) / 10.0) for col in eachcol(Chemfiles.positions(frame))]
     end
     if centre_coords
-        coords = coords .- (mean(coords),) .+ (boundary.side_lengths / 2,)
+        coords = coords .- (mean(coords),) .+ (boundary_used.side_lengths / 2,)
     end
-    coords = wrap_coords_vec.(coords, (boundary,))
+    coords = wrap_coords_vec.(coords, (boundary_used,))
 
     atoms = [atoms...]
     if gpu_diff_safe
@@ -739,7 +739,7 @@ function System(coord_file::AbstractString,
                                                     n_steps=10, dist_cutoff=T(nl_dist))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14,
-                                                    n_steps=10, x0=coords, unit_cell=boundary,
+                                                    n_steps=10, x0=coords, unit_cell=boundary_used,
                                                     dist_cutoff=T(nl_dist))
     end
     if gpu
@@ -781,7 +781,7 @@ function System(coord_file::AbstractString,
         general_inters=general_inters,
         coords=coords,
         velocities=vels,
-        box_size=boundary,
+        boundary=boundary_used,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
@@ -794,7 +794,7 @@ function System(T::Type,
                 coord_file::AbstractString,
                 top_file::AbstractString;
                 velocities=nothing,
-                box_size=nothing,
+                boundary=nothing,
                 loggers=Dict(),
                 units::Bool=true,
                 gpu::Bool=false,
@@ -1046,18 +1046,18 @@ function System(T::Type,
                                 force_units=force_units, energy_units=energy_units)
 
     # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
-    if isnothing(box_size)
+    if isnothing(boundary)
         box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
-        box_size_used = units ? (box_size_vals)u"nm" : box_size_vals
-        boundary = CubicBoundary(box_size_used)
+        box_size = units ? (box_size_vals)u"nm" : box_size_vals
+        boundary_used = CubicBoundary(box_size)
     else
-        boundary = box_size
+        boundary_used = boundary
     end
     coords = [coords...]
     if centre_coords
-        coords = coords .- (mean(coords),) .+ (boundary.side_lengths / 2,)
+        coords = coords .- (mean(coords),) .+ (boundary_used.side_lengths / 2,)
     end
-    coords = wrap_coords_vec.(coords, (boundary,))
+    coords = wrap_coords_vec.(coords, (boundary_used,))
 
     pairwise_inters = (lj, crf)
 
@@ -1091,7 +1091,7 @@ function System(T::Type,
                                                     dist_cutoff=T(nl_dist))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-                                                    x0=coords, unit_cell=boundary, dist_cutoff=T(nl_dist))
+                                                    x0=coords, unit_cell=boundary_used, dist_cutoff=T(nl_dist))
     end
     if gpu
         atoms = cu(atoms)
@@ -1115,7 +1115,7 @@ function System(T::Type,
         specific_inter_lists=specific_inter_lists,
         coords=coords,
         velocities=vels,
-        box_size=boundary,
+        boundary=boundary_used,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,

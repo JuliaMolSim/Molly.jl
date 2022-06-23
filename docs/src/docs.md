@@ -26,8 +26,8 @@ Molly re-exports Unitful.jl, [StaticArrays.jl](https://github.com/JuliaArrays/St
 You can use your own atom types in Molly, provided that the `mass` function is defined and any fields required by the interactions are present.
 Next, we'll need some starting coordinates and velocities.
 ```julia
-box_size = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
-coords = place_atoms(n_atoms, box_size, 0.3u"nm") # Random placement without clashing
+boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+coords = place_atoms(n_atoms, boundary, 0.3u"nm") # Random placement without clashing
 
 temp = 100.0u"K"
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
@@ -41,14 +41,14 @@ pairwise_inters = (LennardJones(),)
 ```
 Finally, we can define the system and run the simulation.
 We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.
-Periodic boundary conditions are automatically used with the box we defined earlier.
+Periodic boundary conditions are automatically used with the cubic box we defined earlier.
 ```julia
 sys = System(
     atoms=atoms,
     pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
-    box_size=box_size,
+    boundary=boundary,
     loggers=Dict(
         "temp"   => TemperatureLogger(10),
         "coords" => CoordinateLogger(10),
@@ -62,12 +62,12 @@ simulator = VelocityVerlet(
 
 simulate!(sys, simulator, 1_000)
 ```
-`atoms`, `coords` and `box_size` are the minimum required properties to define a [`System`](@ref).
+`atoms`, `coords` and `boundary` are the minimum required properties to define a [`System`](@ref).
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this can be turned off by giving the keyword argument `parallel=false` to [`simulate!`](@ref).
 An animation of the stored coordinates can be saved by using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
 ```julia
 using GLMakie
-visualize(sys.loggers["coords"], box_size, "sim_lj.mp4")
+visualize(sys.loggers["coords"], boundary, "sim_lj.mp4")
 ```
 ![LJ simulation](images/sim_lj.gif)
 
@@ -84,10 +84,10 @@ using CUDA
 
 n_atoms = 100
 atom_mass = 10.0f0u"u"
-box_size = CubicBoundary(2.0f0u"nm", 2.0f0u"nm", 2.0f0u"nm")
+boundary = CubicBoundary(2.0f0u"nm", 2.0f0u"nm", 2.0f0u"nm")
 temp = 100.0f0u"K"
 atoms = cu([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
-coords = cu(place_atoms(n_atoms, box_size, 0.3u"nm"))
+coords = cu(place_atoms(n_atoms, boundary, 0.3u"nm"))
 velocities = cu([velocity(atom_mass, temp) for i in 1:n_atoms])
 simulator = VelocityVerlet(dt=0.002f0u"ps")
 
@@ -96,7 +96,7 @@ sys = System(
     pairwise_inters=(LennardJones(),),
     coords=coords,
     velocities=velocities,
-    box_size=box_size,
+    boundary=boundary,
     loggers=Dict(
         "temp"   => TemperatureLogger(typeof(1.0f0u"K"), 10),
         "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10),
@@ -111,7 +111,7 @@ simulate!(sys, simulator, 1_000)
 If we want to define specific interactions between atoms, for example bonds, we can do this as well.
 Using the same definitions as the first example, let's set up the coordinates so that paired atoms are 1 Å apart.
 ```julia
-coords = place_atoms(n_atoms ÷ 2, box_size, 0.3u"nm")
+coords = place_atoms(n_atoms ÷ 2, boundary, 0.3u"nm")
 for i in 1:length(coords)
     push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
 end
@@ -154,7 +154,7 @@ sys = System(
     specific_inter_lists=specific_inter_lists,
     coords=coords,
     velocities=velocities,
-    box_size=box_size,
+    boundary=boundary,
     neighbor_finder=neighbor_finder,
     loggers=Dict(
         "temp" => TemperatureLogger(10),
@@ -172,7 +172,7 @@ This time when we view the trajectory we can add lines to show the bonds.
 ```julia
 visualize(
     sys.loggers["coords"],
-    box_size,
+    boundary,
     "sim_diatomic.mp4";
     connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
 )
@@ -190,14 +190,14 @@ coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
 velocities = [SVector(0.0f0, 1.0f0), SVector(0.0f0, -1.0f0)]
 pairwise_inters = (Gravity(nl_only=false, G=1.5f0),)
 simulator = VelocityVerlet(dt=0.002f0)
-box_size = RectangularBoundary(1.0f0, 1.0f0)
+boundary = RectangularBoundary(1.0f0, 1.0f0)
 
 sys = System(
     atoms=atoms,
     pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
-    box_size=box_size,
+    boundary=boundary,
     loggers=Dict("coords" => CoordinateLogger(Float32, 10; dims=2)),
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -209,7 +209,7 @@ When we view the simulation we can use some extra options:
 ```julia
 visualize(
     sys.loggers["coords"],
-    box_size,
+    boundary,
     "sim_gravity.mp4";
     trails=4,
     framerate=15,
@@ -255,7 +255,7 @@ simulate!(sys, simulator, 5_000; parallel=true)
 ```
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
 The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
-Other options include overriding the box size in the file (`box_size`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `nl_dist`).
+Other options include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `nl_dist`).
 
 Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
 ```julia
@@ -316,7 +316,7 @@ function Molly.force(inter::SIRInteraction,
                         coord_j,
                         atom_i,
                         atom_j,
-                        box_size)
+                        boundary)
     if (atom_i.status == infected && atom_j.status == susceptible) ||
                 (atom_i.status == susceptible && atom_j.status == infected)
         # Infect close people randomly
@@ -355,12 +355,12 @@ function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n; parallel=t
 end
 
 temp = 1.0
-box_size = RectangularBoundary(10.0, 10.0)
+boundary = RectangularBoundary(10.0, 10.0)
 n_steps = 1_000
 n_people = 500
 n_starting = 2
 atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
-coords = place_atoms(n_people, box_size, 0.1)
+coords = place_atoms(n_people, boundary, 0.1)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
 pairwise_inters = (
     LennardJones=LennardJones(nl_only=true),
@@ -381,7 +381,7 @@ sys = System(
     pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
-    box_size=box_size,
+    boundary=boundary,
     neighbor_finder=neighbor_finder,
     loggers=Dict(
         "coords" => CoordinateLogger(Float64, 10; dims=2),
@@ -393,7 +393,7 @@ sys = System(
 
 simulate!(sys, simulator, n_steps)
 
-visualize(sys.loggers["coords"], box_size, "sim_agent.mp4"; markersize=0.1)
+visualize(sys.loggers["coords"], boundary, "sim_agent.mp4"; markersize=0.1)
 ```
 ![Agent simulation](images/sim_agent.gif)
 
@@ -475,7 +475,7 @@ function Molly.force(inter::MyPairwiseInter,
                         coord_j,
                         atom_i,
                         atom_j,
-                        box_size)
+                        boundary)
     # Replace this with your force calculation
     # A positive force causes the atoms to move apart
     f = 0.0
@@ -515,8 +515,8 @@ Next, you need to define the [`force`](@ref) function.
 The form of this will depend whether the interaction involves 2, 3 or 4 atoms.
 For example in the 2 atom case:
 ```julia
-function Molly.force(inter::MySpecificInter, coords_i, coords_j, box_size)
-    dr = vector(coords_i, coords_j, box_size)
+function Molly.force(inter::MySpecificInter, coords_i, coords_j, boundary)
+    dr = vector(coords_i, coords_j, boundary)
 
     # Replace this with your force calculation
     # A positive force causes the atoms to move apart
@@ -526,7 +526,7 @@ function Molly.force(inter::MySpecificInter, coords_i, coords_j, box_size)
     return SpecificForce2Atoms(-fdr, fdr)
 end
 ```
-The 3 atom case would define `Molly.force(inter::MySpecificInter, coords_i, coords_j, coords_k, box_size)` and return `SpecificForce3Atoms(f1, f2, f3)`.
+The 3 atom case would define `Molly.force(inter::MySpecificInter, coords_i, coords_j, coords_k, boundary)` and return `SpecificForce3Atoms(f1, f2, f3)`.
 To use your custom force, add it to the specific interaction lists along with the atom indices:
 ```julia
 specific_inter_lists = (
@@ -673,7 +673,7 @@ function Molly.simulate!(sys,
         accels_t = accelerations(sys, neighbors; parallel=parallel)
 
         # Ensure coordinates stay within the simulation box like this
-        sys.coords = wrap_coords_vec.(sys.coords, (sys.box_size,))
+        sys.coords = wrap_coords_vec.(sys.coords, (sys.boundary,))
 
         # Apply coupling like this
         apply_coupling!(sys, sim, sim.coupling)
@@ -827,8 +827,8 @@ atom_mass = 10.0u"u"
 atoms = [Atom(mass = atom_mass, σ = 0.2u"nm", ϵ = 0.2u"kJ * mol^-1") for i=1:n_atoms]
 
 # Initialization
-box_size = SVector(6.0, 6.0, 6.0)u"nm"
-coords = place_diatomics(n_atoms ÷ 2, box_size, 0.2u"nm", 0.2u"nm")
+boundary = SVector(6.0, 6.0, 6.0)u"nm"
+coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm", 0.2u"nm")
 
 temp = 50.0u"K"
 velocities = [velocity(atom_mass, temp)*0.01 for i=1:n_atoms]
@@ -849,7 +849,7 @@ sys = System(atoms=atoms,
     neighbor_finder=nf,
     pairwise_inters=pairwise_inters,
     specific_inter_lists=specific_inter_lists,
-    box_size=box_size,
+    boundary=boundary,
     loggers=Dict{Symbol,Any}()
     )
 ```

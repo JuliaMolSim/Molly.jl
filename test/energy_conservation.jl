@@ -7,7 +7,7 @@ using Test
 @testset "Lennard-Jones energy conservation" begin
     temp = 1.0u"K"
     n_steps = 10_000
-    box_size = CubicBoundary(50.0u"nm", 50.0u"nm", 50.0u"nm")
+    boundary = CubicBoundary(50.0u"nm", 50.0u"nm", 50.0u"nm")
     n_atoms = 2_000
     atom_mass = 40.0u"u"
     simulator = VelocityVerlet(dt=0.005u"ps")
@@ -24,9 +24,9 @@ using Test
             s = System(
                 atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
                 pairwise_inters=(lj_potential,),
-                coords=place_atoms(n_atoms, box_size, 0.6u"nm"),
+                coords=place_atoms(n_atoms, boundary, 0.6u"nm"),
                 velocities=[velocity(atom_mass, temp) for i in 1:n_atoms],
-                box_size=box_size,
+                boundary=boundary,
                 loggers=Dict(
                     "coords" => CoordinateLogger(100),
                     "energy" => TotalEnergyLogger(100),
@@ -47,7 +47,7 @@ using Test
 
             final_coords = last(s.loggers["coords"].coords)
             @test all(all(c .> 0.0u"nm") for c in final_coords)
-            @test all(all(c .< box_size) for c in final_coords)
+            @test all(all(c .< boundary) for c in final_coords)
         end
     end
 end
