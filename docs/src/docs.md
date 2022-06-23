@@ -347,7 +347,7 @@ function fracs_SIR(s::System,neighbors=nothing;parallel::Bool=true)
     return counts_sir ./ length(s)
 end
 
-SIRLogger(n_steps)=GeneralObservableLogger(n_steps,Vector{Float64},fracs_SIR)
+SIRLogger(n_steps)=GeneralObservableLogger(fracs_SIR,Vector{Float64},n_steps)
 
 
 temp = 1.0
@@ -398,9 +398,9 @@ We can use the logger to plot the fraction of people susceptible (blue), infecte
 ```julia
 using Plots
 
-sir_matrix = zeros(length(sys.loggers.SIR.history), 3)
+sir_matrix = zeros(length(values(sys.loggers.SIR)), 3)
 for i = 1:101
-    sir_matrix[i, :] .= sys.loggers.SIR.history[i][:]
+    sir_matrix[i, :] .= values(sys.loggers.SIR)[i][:]
 end
 
 plot(sir_matrix)
@@ -820,11 +820,11 @@ end
 A logger which records this property every `n_steps` can be constructed through 
 
 ```julia
-my_logger = GeneralObservableLogger(n_steps, T, my_observable)
+my_logger = GeneralObservableLogger(my_observable, T, n_steps)
 ```
 where `T = typeof(observation)` is the type of the return value for `my_observable`. The logger's history can be accessed through
 ```julia
-my_logger.history
+values(my_logger)
 ```
 
 The [`TimeCorrelationLogger`](@ref) logger can be used to compute correlation functions of the form

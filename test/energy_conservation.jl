@@ -39,13 +39,13 @@ using Test
             ΔE = total_energy(s) - E0
             @test abs(ΔE) < 2e-2u"kJ * mol^-1"
 
-            Es = s.loggers.energy.energies
+            Es = values(s.loggers.energy)
             maxΔE = maximum(abs.(Es .- E0))
             @test maxΔE < 2e-2u"kJ * mol^-1"
 
             @test abs(Es[end] - Es[1]) < 2e-2u"kJ * mol^-1"
 
-            final_coords = last(s.loggers.coords.coords)
+            final_coords = last(values(s.loggers.coords))
             @test all(all(c .> 0.0u"nm") for c in final_coords)
             @test all(all(c .< box_size) for c in final_coords)
         end

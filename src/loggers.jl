@@ -26,7 +26,7 @@ function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0; parallel:
 end
 
 """
-GeneralObservableLogger(n_steps::Int,T::DataType,observable::Function)
+GeneralObservableLogger(observable::Function,T::DataType,n_steps::Int)
 
 Returns a logger which hold a record of regularly sampled observation on the system. 
 The observable should return an object of type T and support the following method.
@@ -38,8 +38,8 @@ struct GeneralObservableLogger{T,F}
     history::Vector{T}
 end
 
-GeneralObservableLogger(n_steps::Int,T::DataType,observable::Function) = GeneralObservableLogger{T,typeof(observable)}(n_steps,observable,T[])
-
+GeneralObservableLogger(observable::Function,T::DataType,n_steps::Int) = GeneralObservableLogger{T,typeof(observable)}(n_steps,observable,T[])
+Base.values(logger::GeneralObservableLogger)=logger.history
 """
     log_property!(logger, system, neighbors=nothing, step_n=0; parallel=true)
 
@@ -54,6 +54,7 @@ function log_property!(logger::GeneralObservableLogger,s::System,neighbors=nothi
 end
 
 
+
 temperature_wrapper(s,neighbors=nothing;parallel::Bool=true)=temperature(s)
 """
     TemperatureLogger(n_steps)
@@ -61,12 +62,12 @@ temperature_wrapper(s,neighbors=nothing;parallel::Bool=true)=temperature(s)
 
 Log the temperature throughout a simulation.
 """
-TemperatureLogger(T::DataType,n_steps::Integer)=GeneralObservableLogger(n_steps,T,temperature_wrapper)
+TemperatureLogger(T::DataType,n_steps::Integer)=GeneralObservableLogger(temperature_wrapper,T,n_steps)
 TemperatureLogger(n_steps::Integer) = TemperatureLogger(typeof(one(DefaultFloat)u"K"), n_steps)
 
 function Base.show(io::IO, tl::GeneralObservableLogger{T,typeof(temperature_wrapper)}) where {T}
-    print(io, "TemperatureLogger{", eltype(tl.history), "} with n_steps ",
-                tl.n_steps, ", ", length(tl.history),
+    print(io, "TemperatureLogger{", eltype(values(tl)), "} with n_steps ",
+                tl.n_steps, ", ", length(values(tl)),
                 " temperatures recorded")
 end
 
@@ -77,7 +78,7 @@ coordinates_wrapper(s,neighbors=nothing;parallel::Bool=true)=s.coords
 
 Log the coordinates throughout a simulation.
 """
-CoordinateLogger(T, n_steps::Integer; dims::Integer=3)=GeneralObservableLogger(n_steps,Array{SArray{Tuple{dims}, T, 1, dims}, 1},coordinates_wrapper)
+CoordinateLogger(T, n_steps::Integer; dims::Integer=3)=GeneralObservableLogger(coordinates_wrapper,Array{SArray{Tuple{dims}, T, 1, dims}, 1},n_steps)
 CoordinateLogger(n_steps::Integer; dims::Integer=3)=CoordinateLogger(typeof(one(DefaultFloat)u"nm"), n_steps; dims=dims)
 
 function Base.show(io::IO, cl::GeneralObservableLogger{T,typeof(coordinates_wrapper)}) where {T}
@@ -93,7 +94,7 @@ velocities_wrapper(s::System,neighbors=nothing;parallel::Bool=true)=s.velocities
 
 Log the velocities throughout a simulation.
 """
-VelocityLogger(T, n_steps::Integer; dims::Integer=3)=GeneralObservableLogger(n_steps,Array{SArray{Tuple{dims}, T, 1, dims}, 1},velocities_wrapper)
+VelocityLogger(T, n_steps::Integer; dims::Integer=3)=GeneralObservableLogger(velocities_wrapper,Array{SArray{Tuple{dims}, T, 1, dims}, 1},n_steps)
 VelocityLogger(n_steps::Integer; dims::Integer=3)=VelocityLogger(typeof(one(DefaultFloat)u"nm * ps^-1"), n_steps; dims=dims)
 
 function Base.show(io::IO, vl::GeneralObservableLogger{T,typeof(velocities_wrapper)}) where {T}
@@ -109,7 +110,7 @@ total_energy_wrapper(s::System,neighbors=nothing;parallel::Bool=true)=total_ener
 
 Log the total energy of the system throughout a simulation.
 """
-TotalEnergyLogger(T::DataType,n_steps)=GeneralObservableLogger(n_steps,T,total_energy_wrapper)
+TotalEnergyLogger(T::DataType,n_steps)=GeneralObservableLogger(total_energy_wrapper,T,n_steps)
 TotalEnergyLogger(n_steps)=TotalEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
 
 function Base.show(io::IO, el::GeneralObservableLogger{T,typeof(total_energy_wrapper)}) where {T}
@@ -125,7 +126,7 @@ kinetic_energy_wrapper(s::System,neighbors=nothing;parallel::Bool=true)=kinetic_
 
 Log the kinetic energy of the system throughout a simulation.
 """
-KineticEnergyLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(n_steps, T,kinetic_energy_wrapper)
+KineticEnergyLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(kinetic_energy_wrapper,T,n_steps)
 KineticEnergyLogger(n_steps::Integer)=KineticEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
 
 function Base.show(io::IO, el::GeneralObservableLogger{T,typeof(kinetic_energy_wrapper)}) where {T}
@@ -140,7 +141,7 @@ potential_energy_wrapper(s::System,neighbors=nothing;parallel::Bool=true)=potent
 
 Log the potential energy of the system throughout a simulation.
 """
-PotentialEnergyLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(n_steps, T,potential_energy_wrapper)
+PotentialEnergyLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(potential_energy_wrapper,T,n_steps)
 PotentialEnergyLogger(n_steps::Integer) = PotentialEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
 
 function Base.show(io::IO, el::GeneralObservableLogger{T,typeof(potential_energy_wrapper)}) where {T}
@@ -155,7 +156,7 @@ end
 
 Log the forces throughout a simulation.
 """
-ForceLogger(T, n_steps::Integer; dims::Integer=3)=GeneralObservableLogger(n_steps,Array{SArray{Tuple{dims}, T, 1, dims}, 1},forces)
+ForceLogger(T, n_steps::Integer; dims::Integer=3)=GeneralObservableLogger(forces,Array{SArray{Tuple{dims}, T, 1, dims}, 1},n_steps)
 ForceLogger(n_steps::Integer; dims::Integer=3)=ForceLogger(typeof(one(DefaultFloat)u"kJ * mol^-1 * nm^-1"), n_steps; dims=dims)
 function Base.show(io::IO, fl::GeneralObservableLogger{T,typeof(forces)}) where {T}
     print(io, "ForceLogger{", eltype(eltype(fl.history)), "} with n_steps ",

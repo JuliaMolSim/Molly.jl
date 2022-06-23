@@ -60,8 +60,8 @@ for (i, temp) in enumerate(temps)
 end
 scatter!(
     ax,
-    100 .* (1:length(sys.loggers.temp.history)),
-    ustrip.(sys.loggers.temp.history),
+    100 .* (1:length(values(sys.loggers.temp))),
+    ustrip.(values(sys.loggers.temp)),
     markersize=5,
 )
 save("annealing.png", f)
@@ -203,7 +203,7 @@ function bonds(sys::System,neighbors=nothing,parallel::Bool=true)
         return bonds
 end
 
-BondLogger(n_steps)=GeneralObservableLogger(n_steps,BitVector,bonds)
+BondLogger(n_steps)=GeneralObservableLogger(bonds,BitVector,n_steps)
 
 n_atoms = 200
 box_size = SVector(10.0, 10.0)
@@ -256,7 +256,7 @@ visualize(
     box_size,
     "sim_mutbond.mp4";
     connections=connections,
-    connection_frames=sys.loggers.bonds.history,
+    connection_frames=values(sys.loggers.bonds),
     markersize=0.1,
 )
 ```

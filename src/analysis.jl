@@ -92,9 +92,9 @@ Calculate the autocorrelation function of velocity from the velocity logger.
 This characterizes the similarity between velocities observed at different
 time instances.
 """
-function velocity_autocorr(vl::GeneralObservableLogger{T,typeof(velocities_wrapper)}, first_ind::Integer=1, last_ind::Integer=length(vl.history)) where {T}
-    n_atoms = length(first(vl.history))
-    return dot(vl.history[first_ind], vl.history[last_ind]) / n_atoms
+function velocity_autocorr(vl::GeneralObservableLogger{T,typeof(velocities_wrapper)}, first_ind::Integer=1, last_ind::Integer=length(values(vl))) where {T}
+    n_atoms = length(first(values(vl)))
+    return dot(values(vl)[first_ind], values(vl)[last_ind]) / n_atoms
 end
 
 """

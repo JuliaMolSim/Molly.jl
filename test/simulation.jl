@@ -32,8 +32,8 @@
 
     @time simulate!(s, simulator, n_steps; parallel=false)
 
-    @test length(s.loggers.coords.history) == 201
-    final_coords = last(s.loggers.coords.history)
+    @test length(values(s.loggers.coords)) == 201
+    final_coords = last(values(s.loggers.coords))
     @test all(all(c .> 0.0u"nm") for c in final_coords)
     @test all(all(c .< box_size) for c in final_coords)
     displacements(final_coords, box_size)
@@ -110,7 +110,7 @@ end
         show(devnull, s.loggers.pe)
         show(devnull, s.loggers.writer)
 
-        final_coords = last(s.loggers.coords.history)
+        final_coords = last(values(s.loggers.coords))
         @test all(all(c .> 0.0u"nm") for c in final_coords)
         @test all(all(c .< box_size) for c in final_coords)
         displacements(final_coords, box_size)
@@ -318,11 +318,11 @@ end
     simulate!(s, simulator, n_steps; parallel=false)
     simulate!(s_nounits, simulator_nounits, n_steps; parallel=false)
 
-    coords_diff = s.loggers.coords.history[end] .- s_nounits.loggers.coords.history[end] * u"nm"
+    coords_diff = last(values(s.loggers.coords)) .- last(values(s_nounits.loggers)) * u"nm"
     @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8u"nm"
 
-    final_energy = s.loggers.energy.history[end]
-    final_energy_nounits = s_nounits.loggers.energy.history[end] * u"kJ * mol^-1"
+    final_energy = last(values(s.loggers.energy))
+    final_energy_nounits = last(values(s_nounits.loggers.energy)) * u"kJ * mol^-1"
     @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
 
     
