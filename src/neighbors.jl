@@ -322,10 +322,7 @@ julia> coords
  [1.7261366568663976 nm, 5.610326185704369 nm, 5.084523386833478 nm]
 
 julia> boundary
-3-element SVector{3, Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}} with indices SOneTo(3):
-              5.676 nm
-             5.6627 nm
-             6.2963 nm
+CubicBoundary{Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}}(Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}[5.676 nm, 5.6627 nm, 6.2963 nm])
 
 julia> neighbor_finder = CellListMapNeighborFinder(
            nb_matrix=s.neighbor_finder.nb_matrix, matrix_14=s.neighbor_finder.matrix_14, 
@@ -383,7 +380,8 @@ function CellListMapNeighborFinder(;
     return CellListMapNeighborFinder{3, T}(
         nb_matrix, matrix_14, n_steps, dist_cutoff,
         cl, CellListMap.AuxThreaded(cl), 
-        [NeighborList(0, [(0, 0, false)]) for _ in 1:CellListMap.nbatches(cl)])
+        [NeighborList(0, [(0, 0, false)]) for _ in 1:CellListMap.nbatches(cl)],
+    )
 end
 
 """

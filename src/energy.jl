@@ -39,7 +39,7 @@ const temp_conversion_factor = ustrip(u"nm^2 * u * K^-1 * ps^-2", Unitful.k)
 
 Calculate the temperature of a system from the kinetic energy of the atoms.
 """
-function temperature(s::System{D, G, T}) where {D, G, T}
+function temperature(s)
     ke = kinetic_energy_noconvert(s)
     df = 3 * length(s) - 3
     temp = 2 * ke / (df * s.k)
