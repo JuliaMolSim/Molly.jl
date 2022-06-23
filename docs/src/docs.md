@@ -337,22 +337,18 @@ function Molly.force(inter::SIRInteraction,
 end
 
 # Custom Logger
-struct SIRLogger
-    n_steps::Int
-    fracs_sir::Vector{Vector{Float64}}
+
+function fracs_SIR(s::System,neighbors=nothing;parallel::Bool=true)
+    counts_sir = [
+        count(p -> p.status == susceptible, s.atoms),
+        count(p -> p.status == infected   , s.atoms),
+        count(p -> p.status == recovered  , s.atoms)
+    ]
+    return counts_sir ./ length(s)
 end
 
-# Custom logging function
-function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n; parallel=true)
-    if step_n % logger.n_steps == 0
-        counts_sir = [
-            count(p -> p.status == susceptible, s.atoms),
-            count(p -> p.status == infected   , s.atoms),
-            count(p -> p.status == recovered  , s.atoms)
-        ]
-        push!(logger.fracs_sir, counts_sir ./ length(s))
-    end
-end
+SIRLogger(n_steps)=GeneralObservableLogger(fracs_SIR,Vector{Float64},n_steps)
+
 
 temp = 1.0
 box_size = SVector(10.0, 10.0)
@@ -385,7 +381,7 @@ sys = System(
     neighbor_finder=neighbor_finder,
     loggers=(
         coords = CoordinateLogger(Float64, 10; dims=2),
-        SIR = SIRLogger(10, []),
+        SIR = SIRLogger(10),
     ),
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -402,9 +398,9 @@ We can use the logger to plot the fraction of people susceptible (blue), infecte
 ```julia
 using Plots
 
-sir_matrix = zeros(length(sys.loggers.SIR.fracs_sir), 3)
+sir_matrix = zeros(length(values(sys.loggers.SIR)), 3)
 for i = 1:101
-    sir_matrix[i, :] .= sys.loggers.SIR.fracs_sir[i][:]
+    sir_matrix[i, :] .= values(sys.loggers.SIR)[i][:]
 end
 
 plot(sir_matrix)
@@ -775,6 +771,7 @@ To use your custom neighbor finder, give it as the `neighbor_finder` argument wh
 
 Loggers record properties of the simulation to allow monitoring and analysis.
 The available loggers are:
+- [`GeneralObservableLogger`](@ref)
 - [`TemperatureLogger`](@ref)
 - [`CoordinateLogger`](@ref)
 - [`VelocityLogger`](@ref)
@@ -811,6 +808,24 @@ loggers = (mylogger = MyLogger(10),)
 In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0.
 This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values.
 Loggers are currently ignored for the purposes of taking gradients, so if you use a logger in the gradient calculation the gradients will appear to be nothing.
+
+Many times, a logger will just record an observation to an `Array` containing a record of past observations.
+For this purpose, you can use the `GeneralObservableLogger` construct without defining a custom logging function. Simply define your observation function as
+```julia
+function my_observable(sys::System,neighbors;parallel::Bool)
+    # Probe the system for some desired property
+    return observation
+end
+```
+A logger which records this property every `n_steps` can be constructed through 
+
+```julia
+my_logger = GeneralObservableLogger(my_observable, T, n_steps)
+```
+where `T = typeof(observation)` is the type of the return value for `my_observable`. The logger's history can be accessed through
+```julia
+values(my_logger)
+```
 
 The [`TimeCorrelationLogger`](@ref) logger can be used to compute correlation functions of the form
 $$C(t)=\frac{\langle A_t\cdot B_0 \rangle}{\sqrt{\langle|A|^2\rangle\langle |B|^2\rangle }},$$
@@ -883,7 +898,7 @@ Check the output:
 using Plots, UnitfulRecipes
 
 t_range=(0:999)*u"ps"
-plot(t_range,sys.loggers.velocity_autocorrelation.normalized_correlations,xlabel="time",ylabel="correlation",label="C(t)")
+plot(t_range,values(sys.loggers.velocity_autocorrelation),xlabel="time",ylabel="correlation",label="C(t)")
 ```
 ![Velocity Autocorrelations](images/velocity_autocorrelations.png)\
 As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly. The oscillatory behavior is due to the contribution of the harmonic bond interactions.

@@ -32,8 +32,8 @@
 
     @time simulate!(s, simulator, n_steps; parallel=false)
 
-    @test length(s.loggers.coords.coords) == 201
-    final_coords = last(s.loggers.coords.coords)
+    @test length(values(s.loggers.coords)) == 201
+    final_coords = last(values(s.loggers.coords))
     @test all(all(c .> 0.0u"nm") for c in final_coords)
     @test all(all(c .< box_size) for c in final_coords)
     displacements(final_coords, box_size)
@@ -110,7 +110,7 @@ end
         show(devnull, s.loggers.pe)
         show(devnull, s.loggers.writer)
 
-        final_coords = last(s.loggers.coords.coords)
+        final_coords = last(values(s.loggers.coords))
         @test all(all(c .> 0.0u"nm") for c in final_coords)
         @test all(all(c .< box_size) for c in final_coords)
         displacements(final_coords, box_size)
@@ -318,19 +318,24 @@ end
     simulate!(s, simulator, n_steps; parallel=false)
     simulate!(s_nounits, simulator_nounits, n_steps; parallel=false)
 
-    coords_diff = s.loggers.coords.coords[end] .- s_nounits.loggers.coords.coords[end] * u"nm"
+    coords_diff = last(values(s.loggers.coords)) .- last(values(s_nounits.loggers.coords)) * u"nm"
     @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8u"nm"
 
-    final_energy = s.loggers.energy.energies[end]
-    final_energy_nounits = s_nounits.loggers.energy.energies[end] * u"kJ * mol^-1"
+    final_energy = last(values(s.loggers.energy))
+    final_energy_nounits = last(values(s_nounits.loggers.energy)) * u"kJ * mol^-1"
     @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
 
     
-    @test unit(first(s.loggers.autocorrelations.normalized_correlations))==NoUnits
-    @test unit(first(s.loggers.autocorrelations.unnormalized_correlations))==u"nm^2 * ps^-2"
+    @test unit(first(values(s.loggers.autocorrelations)))==NoUnits
+    @test unit(first(values(s.loggers.autocorrelations; normalize= false)))==u"nm^2 * ps^-2"
     
+<<<<<<< HEAD
     show(devnull,s_nounits.loggers.autocorrelations.normalized_correlations)
     show(devnull,s_nounits.loggers.autocorrelations.unnormalized_correlations)
+=======
+    show(devnull,values(s_nounits.loggers.autocorrelations))
+    show(devnull,values(s_nounits.loggers.autocorrelations; normalize=false))
+>>>>>>> 99e5ab15777b7d780dc7d40d7715e241bec3e7ce
 
     simulate!(s,simulator, 100)
 end
@@ -363,10 +368,10 @@ end
     simulator2=LangevinSplitting(dt=0.002u"ps",friction=10.0u"u * ps^-1",temperature=temp,splitting="BAOA")
 
     @time simulate!(s1,simulator1,n_steps;rng=MersenneTwister(rseed))
-    @test 280.0u"K"<= mean(s1.loggers.temp.temperatures[end-100:end])<=320.0u"K"
+    @test 280.0u"K"<= mean(s1.loggers.temp.history[end-100:end])<=320.0u"K"
 
     @time simulate!(s2,simulator2,n_steps;rng=MersenneTwister(rseed))
-    @test 280.0u"K"<= mean(s2.loggers.temp.temperatures[end-100:end])<=320.0u"K"
+    @test 280.0u"K"<= mean(s2.loggers.temp.history[end-100:end])<=320.0u"K"
 
     atol=1e-5u"nm"
     @test all(all(abs(x1[i]-x2[i])<atol for i=1:3) for (x1,x2)=zip(s1.coords,s2.coords))
