@@ -123,7 +123,13 @@ trim3D(v::SVector{3}, boundary) = v
 
 Ensure a 1D coordinate is within the bounding box and return the coordinate.
 """
-wrap_coords(c, side_length) = c - floor(c / side_length) * side_length
+function wrap_coords(c, side_length)
+    if isinf(side_length)
+        return c
+    else
+        return c - floor(c / side_length) * side_length
+    end
+end
 
 """
     wrap_coords_vec(c, boundary)

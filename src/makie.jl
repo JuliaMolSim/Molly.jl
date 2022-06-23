@@ -3,6 +3,18 @@
 
 using .GLMakie
 
+function axis_limits(boundary_conv, coord_logger, dim)
+    lim = boundary_conv[dim]
+    if isinf(lim)
+        # Find coordinate limits in given dimension
+        low  = ustrip(minimum(cs -> minimum(c -> c[dim], cs), coord_logger.coords))
+        high = ustrip(maximum(cs -> maximum(c -> c[dim], cs), coord_logger.coords))
+        return low, high
+    else
+        return 0.0, lim
+    end
+end
+
 function visualize(coord_logger,
                     boundary,
                     out_filepath::AbstractString;
@@ -76,9 +88,9 @@ function visualize(coord_logger,
 
     dist_unit = unit(first(first(coords_start)))
     boundary_conv = ustrip.(dist_unit, boundary)
-    xlims!(ax, 0.0, boundary_conv[1])
-    ylims!(ax, 0.0, boundary_conv[2])
-    dims == 3 && zlims!(ax, 0.0, boundary_conv[3])
+    xlims!(ax, axis_limits(boundary_conv, coord_logger, 1))
+    ylims!(ax, axis_limits(boundary_conv, coord_logger, 2))
+    dims == 3 && zlims!(ax, axis_limits(boundary_conv, coord_logger, 3))
 
     GLMakie.record(fig, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
         coords = coord_logger.coords[frame_i]

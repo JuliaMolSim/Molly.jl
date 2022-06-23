@@ -288,6 +288,8 @@ atom_types_to_string(atom_types...) = join(map(at -> at == "" ? "-" : at, atom_t
 
 atom_types_to_tuple(atom_types) = tuple(map(at -> at == "-" ? "" : at, split(atom_types, "/"))...)
 
+box_centre(boundary) = map(x -> isinf(x) ? zero(x) : x / 2, boundary.side_lengths)
+
 const standard_res_names = [keys(BioStructures.threeletter_to_aa)..., "HID", "HIE", "HIP"]
 
 """
@@ -728,7 +730,7 @@ function System(coord_file::AbstractString,
         coords = [T.(SVector{3}(col) / 10.0) for col in eachcol(Chemfiles.positions(frame))]
     end
     if centre_coords
-        coords = coords .- (mean(coords),) .+ (boundary_used.side_lengths / 2,)
+        coords = coords .- (mean(coords),) .+ (box_centre(boundary_used),)
     end
     coords = wrap_coords_vec.(coords, (boundary_used,))
 
@@ -1055,7 +1057,7 @@ function System(T::Type,
     end
     coords = [coords...]
     if centre_coords
-        coords = coords .- (mean(coords),) .+ (boundary_used.side_lengths / 2,)
+        coords = coords .- (mean(coords),) .+ (box_centre(boundary_used),)
     end
     coords = wrap_coords_vec.(coords, (boundary_used,))
 
