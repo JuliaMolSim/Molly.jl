@@ -420,50 +420,36 @@ end
 Whether a `System` uses the code path suitable for the GPU and
     for taking gradients.
 """
-is_gpu_diff_safe(::System{D, G}) where {D, G} = G
-is_gpu_diff_safe(::ReplicaSystem{D, G}) where {D, G} = G
+is_gpu_diff_safe(::Union{System{D, G}, ReplicaSystem{D, G}}) where {D, G} = G
 
 """
     float_type(sys)
 
 The float type a `System` uses.
 """
-float_type(::System{D, G, T}) where {D, G, T} = T
-float_type(::ReplicaSystem{D, G, T}) where {D, G, T} = T
+float_type(::Union{System{D, G, T}, ReplicaSystem{D, G, T}}) where {D, G, T} = T
 
-AtomsBase.species_type(s::System) = eltype(s.atoms)
-AtomsBase.species_type(s::ReplicaSystem) = eltype(s.atoms)
+AtomsBase.species_type(s::Union{System, ReplicaSystem}) = eltype(s.atoms)
 
-Base.getindex(s::System, i::Integer) = AtomView(s, i)
-Base.length(s::System) = length(s.atoms)
-Base.getindex(s::ReplicaSystem, i::Integer) = AtomView(s, i)
-Base.length(s::ReplicaSystem) = length(s.atoms)
+Base.getindex(s::Union{System, ReplicaSystem}, i::Integer) = AtomView(s, i)
+Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)
 
 AtomsBase.position(s::System) = s.coords
 AtomsBase.position(s::System, i::Integer) = s.coords[i]
-AtomsBase.position(s::ReplicaSystem, ri::Integer) = s.replicas[ri].coords
-AtomsBase.position(s::ReplicaSystem, ri::Integer, i::Integer) = s.replicas[ri].coords[i]
-AtomsBase.position(s::ReplicaSystem) = error("Replica index required.")
+AtomsBase.position(s::ReplicaSystem) = s.replicas[1].coords
+AtomsBase.position(s::ReplicaSystem, i::Integer) = s.replicas[1].coords[i]
 
 AtomsBase.velocity(s::System) = s.velocities
 AtomsBase.velocity(s::System, i::Integer) = s.velocities[i]
-AtomsBase.velocity(s::ReplicaSystem, ri::Integer) = s.replicas[ri].velocities
-AtomsBase.velocity(s::ReplicaSystem, ri::Integer, i::Integer) = s.replicas[ri].velocities[i]
-AtomsBase.velocity(s::ReplicaSystem) = error("Replica index required.")
+AtomsBase.velocity(s::ReplicaSystem) = s.replicas[1].velocities
+AtomsBase.velocity(s::ReplicaSystem, i::Integer) = s.replicas[1].velocities[i]
 
+AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}, i::Integer) = mass(s.atoms[i])
+AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem}, i::Integer) = Symbol(s.atoms_data[i].element)
+AtomsBase.atomic_number(s::Union{System, ReplicaSystem}, i::Integer) = missing
 
-AtomsBase.atomic_mass(s::System, i::Integer) = mass(s.atoms[i])
-AtomsBase.atomic_symbol(s::System, i::Integer) = Symbol(s.atoms_data[i].element)
-AtomsBase.atomic_number(s::System, i::Integer) = missing
-AtomsBase.atomic_mass(s::ReplicaSystem, i::Integer) = mass(s.atoms[i])
-AtomsBase.atomic_symbol(s::ReplicaSystem, i::Integer) = Symbol(s.atoms_data[i].element)
-AtomsBase.atomic_number(s::ReplicaSystem, i::Integer) = missing
-
-AtomsBase.boundary_conditions(::System{3}) = SVector(Periodic(), Periodic(), Periodic())
-AtomsBase.boundary_conditions(::System{2}) = SVector(Periodic(), Periodic())
-AtomsBase.boundary_conditions(::ReplicaSystem{3}) = SVector(Periodic(), Periodic(), Periodic())
-AtomsBase.boundary_conditions(::ReplicaSystem{2}) = SVector(Periodic(), Periodic())
-
+AtomsBase.boundary_conditions(::Union{System{3}, ReplicaSystem{3}}) = SVector(Periodic(), Periodic(), Periodic())
+AtomsBase.boundary_conditions(::Union{System{2}, ReplicaSystem{2}}) = SVector(Periodic(), Periodic())
 
 edges_to_box(bs::SVector{3}, z) = SVector{3}([
     SVector(bs[1], z    , z    ),
@@ -475,14 +461,7 @@ edges_to_box(bs::SVector{2}, z) = SVector{2}([
     SVector(z    , bs[2]),
 ])
 
-function AtomsBase.bounding_box(s::System)
-    bs = s.box_size
-    z = zero(bs[1])
-    bb = edges_to_box(bs, z)
-    return unit(z) == NoUnits ? (bb)u"nm" : bb # Assume nm without other information
-end
-
-function AtomsBase.bounding_box(s::ReplicaSystem)
+function AtomsBase.bounding_box(s::Union{System, ReplicaSystem})
     bs = s.box_size
     z = zero(bs[1])
     bb = edges_to_box(bs, z)
