@@ -329,13 +329,8 @@ end
     @test unit(first(values(s.loggers.autocorrelations)))==NoUnits
     @test unit(first(values(s.loggers.autocorrelations; normalize= false)))==u"nm^2 * ps^-2"
     
-<<<<<<< HEAD
-    show(devnull,s_nounits.loggers.autocorrelations.normalized_correlations)
-    show(devnull,s_nounits.loggers.autocorrelations.unnormalized_correlations)
-=======
     show(devnull,values(s_nounits.loggers.autocorrelations))
     show(devnull,values(s_nounits.loggers.autocorrelations; normalize=false))
->>>>>>> 99e5ab15777b7d780dc7d40d7715e241bec3e7ce
 
     simulate!(s,simulator, 100)
 end
