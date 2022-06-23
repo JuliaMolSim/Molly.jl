@@ -32,8 +32,8 @@
 
     @time simulate!(s, simulator, n_steps; parallel=false)
 
-    @test length(s.loggers.coords.coords) == 201
-    final_coords = last(s.loggers.coords.coords)
+    @test length(s.loggers.coords.history) == 201
+    final_coords = last(s.loggers.coords.history)
     @test all(all(c .> 0.0u"nm") for c in final_coords)
     @test all(all(c .< box_size) for c in final_coords)
     displacements(final_coords, box_size)
@@ -110,7 +110,7 @@ end
         show(devnull, s.loggers.pe)
         show(devnull, s.loggers.writer)
 
-        final_coords = last(s.loggers.coords.coords)
+        final_coords = last(s.loggers.coords.history)
         @test all(all(c .> 0.0u"nm") for c in final_coords)
         @test all(all(c .< box_size) for c in final_coords)
         displacements(final_coords, box_size)
@@ -318,11 +318,11 @@ end
     simulate!(s, simulator, n_steps; parallel=false)
     simulate!(s_nounits, simulator_nounits, n_steps; parallel=false)
 
-    coords_diff = s.loggers.coords.coords[end] .- s_nounits.loggers.coords.coords[end] * u"nm"
+    coords_diff = s.loggers.coords.history[end] .- s_nounits.loggers.coords.history[end] * u"nm"
     @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8u"nm"
 
-    final_energy = s.loggers.energy.energies[end]
-    final_energy_nounits = s_nounits.loggers.energy.energies[end] * u"kJ * mol^-1"
+    final_energy = s.loggers.energy.history[end]
+    final_energy_nounits = s_nounits.loggers.energy.history[end] * u"kJ * mol^-1"
     @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
 
     
@@ -361,10 +361,10 @@ end
     simulator2=LangevinSplitting(dt=0.002u"ps",friction=10.0u"u * ps^-1",temperature=temp,splitting="BAOA")
 
     @time simulate!(s1,simulator1,n_steps;rng=MersenneTwister(rseed))
-    @test 280.0u"K"<= mean(s1.loggers.temp.temperatures[end-100:end])<=320.0u"K"
+    @test 280.0u"K"<= mean(s1.loggers.temp.history[end-100:end])<=320.0u"K"
 
     @time simulate!(s2,simulator2,n_steps;rng=MersenneTwister(rseed))
-    @test 280.0u"K"<= mean(s2.loggers.temp.temperatures[end-100:end])<=320.0u"K"
+    @test 280.0u"K"<= mean(s2.loggers.temp.history[end-100:end])<=320.0u"K"
 
     atol=1e-5u"nm"
     @test all(all(abs(x1[i]-x2[i])<atol for i=1:3) for (x1,x2)=zip(s1.coords,s2.coords))
