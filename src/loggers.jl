@@ -243,7 +243,7 @@ The return values of A and B can be of scalar or vector type (including vectors 
   where `dt` is the simulation timestep and `t_corr` is the decorrelation time for the considered system and observables.
 
   For the purpose of numerical stability, the logger internally records sums instead of running averages. The normalized and unnormalized form of the correlation function can be retrieved 
- from a`logger::TimeCorrelationLogger` through accessing the `logger.normalized_correlations` and `logger.unnormalized_correlations` properties.
+  through values(logger::TimeCorrelationLogger; normalize::Bool)
 """
 mutable struct TimeCorrelationLogger{T_A,T_A2,T_B,T_B2,T_AB,TF_A,TF_B}
     observableA::TF_A
@@ -312,22 +312,18 @@ function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothi
 
 end
 
-function Base.getproperty(logger::TimeCorrelationLogger,s::Symbol)
-    if (s != :normalized_correlations) && (s != :unnormalized_correlations)
-        return getfield(logger,s)
-    else
-        n_samps = getfield(logger, :n_timesteps)
-        C = zero(getfield(logger, :sum_offset_products))
-        C_bar = dot(getfield(logger, :sum_A) / n_samps, getfield(logger, :sum_B) / n_samps)
-        for i=1:getfield(logger, :n_correlation)
-            C[i]=getfield(logger, :sum_offset_products)[i] / (n_samps - i + 1)
+function Base.values(logger::TimeCorrelationLogger; normalize::Bool=true)
+    n_samps = logger.n_timesteps
+        C = zero(logger.sum_offset_products)
+        C_bar = dot(logger.sum_A / n_samps, logger.sum_B / n_samps)
+        for i=1:logger.n_correlation
+            C[i]=logger.sum_offset_products[i] / (n_samps - i + 1)
         end
         C .-= C_bar
-        if s == :unnormalized_correlations
-            return C
-        else
+        if normalize
             denom = sqrt((getfield(logger, :sum_sq_A) / n_samps) * (getfield(logger, :sum_sq_B) / n_samps))
             return C / denom
+        else
+            return C
         end
-    end
 end

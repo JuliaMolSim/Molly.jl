@@ -326,11 +326,13 @@ end
     @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
 
     
-    @test unit(first(s.loggers.autocorrelations.normalized_correlations))==NoUnits
-    @test unit(first(s.loggers.autocorrelations.unnormalized_correlations))==u"nm^2 * ps^-2"
+    @test unit(first(values(s.loggers.autocorrelations)))==NoUnits
+    @test unit(first(values(s.loggers.autocorrelations; normalize= False)))==u"nm^2 * ps^-2"
     
-    show(devnull,s_nounits.loggers.autocorrelations.normalized_correlations)
-    show(devnull,s_nounits.loggers.autocorrelations.unnormalized_correlations)
+    show(devnull,values(s_nounits.loggers.autocorrelations))
+    show(devnull,values(s_nounits.loggers.autocorrelations; normalize=false))
+
+    simulate!(s,simulator, 100)
 end
 
 @testset "Langevin Splitting" begin

@@ -898,7 +898,7 @@ Check the output:
 using Plots, UnitfulRecipes
 
 t_range=(0:999)*u"ps"
-plot(t_range,sys.loggers.velocity_autocorrelation.normalized_correlations,xlabel="time",ylabel="correlation",label="C(t)")
+plot(t_range,values(sys.loggers.velocity_autocorrelation),xlabel="time",ylabel="correlation",label="C(t)")
 ```
 ![Velocity Autocorrelations](images/velocity_autocorrelations.png)\
 As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly. The oscillatory behavior is due to the contribution of the harmonic bond interactions.
