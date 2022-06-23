@@ -12,7 +12,7 @@ ff = OpenMMForceField(
 sys = System(
     joinpath(data_dir, &quot;6mrr_equil.pdb&quot;),
     ff;
-    loggers=Dict(&quot;temp&quot; =&gt; TemperatureLogger(100)),
+    loggers=(temp = TemperatureLogger(100),),
 )
 
 minimizer = SteepestDescentMinimizer()
@@ -48,8 +48,8 @@ for (i, temp) in enumerate(temps)
 end
 scatter!(
     ax,
-    100 .* (1:length(sys.loggers[&quot;temp&quot;].temperatures)),
-    ustrip.(sys.loggers[&quot;temp&quot;].temperatures),
+    100 .* (1:length(values(sys.loggers.temp))),
+    ustrip.(values(sys.loggers.temp)),
     markersize=5,
 )
 save(&quot;annealing.png&quot;, f)</code></pre><p><img src="../images/annealing.png" alt="Annealing"/></p><h2 id="Solar-system"><a class="docs-heading-anchor" href="#Solar-system">Solar system</a><a id="Solar-system-1"></a><a class="docs-heading-anchor-permalink" href="#Solar-system" title="Permalink"></a></h2><p>Orbits of the four closest planets to the sun can be simulated.</p><pre><code class="language-julia">using Molly
@@ -91,7 +91,7 @@ sys = System(
     coords=coords .+ (SVector(5e8, 5e8, 5e8)u&quot;km&quot;,),
     velocities=velocities,
     box_size=box_size,
-    loggers=Dict(&quot;coords&quot; =&gt; CoordinateLogger(typeof(1.0u&quot;km&quot;), 10)),
+    loggers=(coords = CoordinateLogger(typeof(1.0u&quot;km&quot;), 10)),
     force_units=u&quot;kg * km * d^-2&quot;,
     energy_units=u&quot;kg * km^2 * d^-2&quot;,
 )
@@ -104,7 +104,7 @@ simulator = Verlet(
 simulate!(sys, simulator, 3650) # 1 year
 
 visualize(
-    sys.loggers[&quot;coords&quot;],
+    sys.loggers.coords,
     box_size,
     &quot;sim_planets.mp4&quot;;
     trails=5,
@@ -162,22 +162,17 @@ function Molly.force(inter::BondableInteraction,
     end
 end
 
-struct BondLogger
-    n_steps::Int
-    bonds::Vector{BitVector}
-end
-
-function Molly.log_property!(logger::BondLogger, s, neighbors, step_n; parallel=true)
-    if step_n % logger.n_steps == 0
+function bonds(sys::System,neighbors=nothing,parallel::Bool=true)
         bonds = BitVector()
-        for i in 1:length(s)
+        for i in 1:length(sys)
             for j in 1:(i - 1)
-                push!(bonds, j in s.atoms[i].partners)
+                push!(bonds, j in sys.atoms[i].partners)
             end
         end
-        push!(logger.bonds, bonds)
-    end
+        return bonds
 end
+
+BondLogger(n_steps)=GeneralObservableLogger(bonds,BitVector,n_steps)
 
 n_atoms = 200
 box_size = SVector(10.0, 10.0)
@@ -208,9 +203,9 @@ sys = System(
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    loggers=Dict(
-        &quot;coords&quot; =&gt; CoordinateLogger(Float64, 20; dims=2),
-        &quot;bonds&quot;  =&gt; BondLogger(20, []),
+    loggers=(
+        coords = CoordinateLogger(Float64, 20; dims=2),
+        bonds = BondLogger(20),
     ),
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -226,11 +221,11 @@ for i in 1:length(sys)
 end
 
 visualize(
-    sys.loggers[&quot;coords&quot;],
+    sys.loggers.coords,
     box_size,
     &quot;sim_mutbond.mp4&quot;;
     connections=connections,
-    connection_frames=sys.loggers[&quot;bonds&quot;].bonds,
+    connection_frames=values(sys.loggers.bonds),
     markersize=0.1,
 )</code></pre><p><img src="../images/sim_mutbond.gif" alt="Mutable bond simulation"/></p><h2 id="Comparing-forces-to-AD"><a class="docs-heading-anchor" href="#Comparing-forces-to-AD">Comparing forces to AD</a><a id="Comparing-forces-to-AD-1"></a><a class="docs-heading-anchor-permalink" href="#Comparing-forces-to-AD" title="Permalink"></a></h2><p>The force is the negative derivative of the potential energy with respect to position. MD packages, including Molly, implement the force functions directly for performance. However it is also possible to compute the forces using AD. Here we compare the two approaches for the Lennard-Jones potential and see that they give the same result.</p><pre><code class="language-julia">using Molly
 using Zygote
@@ -348,4 +343,4 @@ end
 xlims!(ax, low=0.2)
 ylims!(ax, -0.6, 0.3)
 axislegend(position=:rb)
-save(&quot;mie.png&quot;, f)</code></pre><p><img src="../images/mie.png" alt="Mie"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Wednesday 22 June 2022 16:00">Wednesday 22 June 2022</span>. Using Julia version 1.7.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+save(&quot;mie.png&quot;, f)</code></pre><p><img src="../images/mie.png" alt="Mie"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Thursday 23 June 2022 17:17">Thursday 23 June 2022</span>. Using Julia version 1.7.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>

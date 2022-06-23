@@ -13,9 +13,9 @@ velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]</code></pre><p>We st
     coords=coords,
     velocities=velocities,
     box_size=box_size,
-    loggers=Dict(
-        &quot;temp&quot;   =&gt; TemperatureLogger(10),
-        &quot;coords&quot; =&gt; CoordinateLogger(10),
+    loggers=(
+        temp = TemperatureLogger(10),
+        coords = CoordinateLogger(10),
     ),
 )
 
@@ -25,7 +25,7 @@ simulator = VelocityVerlet(
 )
 
 simulate!(sys, simulator, 1_000)</code></pre><p><code>atoms</code>, <code>coords</code> and <code>box_size</code> are the minimum required properties to define a <a href="../api/#Molly.System"><code>System</code></a>. By default the simulation is run in parallel on the <a href="https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1">number of threads</a> available to Julia, but this can be turned off by giving the keyword argument <code>parallel=false</code> to <a href="../api/#Molly.simulate!-Tuple{Any, SteepestDescentMinimizer}"><code>simulate!</code></a>. An animation of the stored coordinates can be saved by using <a href="../api/#Molly.visualize"><code>visualize</code></a>, which is available when <a href="https://github.com/JuliaPlots/Makie.jl">GLMakie.jl</a> is imported.</p><pre><code class="language-julia">using GLMakie
-visualize(sys.loggers[&quot;coords&quot;], box_size, &quot;sim_lj.mp4&quot;)</code></pre><p><img src="../images/sim_lj.gif" alt="LJ simulation"/></p><h2 id="GPU-acceleration"><a class="docs-heading-anchor" href="#GPU-acceleration">GPU acceleration</a><a id="GPU-acceleration-1"></a><a class="docs-heading-anchor-permalink" href="#GPU-acceleration" title="Permalink"></a></h2><p>To run simulations on the GPU you will need to have a CUDA-compatible device and to have <a href="https://github.com/JuliaGPU/CUDA.jl">CUDA.jl</a> installed. Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU. This example also shows setting up a simulation to run with <code>Float32</code>, which gives better performance on GPUs. Of course, you will need to determine whether this level of numerical accuracy is appropriate in your case. The GPU code path is currently designed to work with differentiable simulation and runs slower than related software, but this is an active area of development.</p><pre><code class="language-julia">using Molly
+visualize(sys.loggers.coords, box_size, &quot;sim_lj.mp4&quot;)</code></pre><p><img src="../images/sim_lj.gif" alt="LJ simulation"/></p><h2 id="GPU-acceleration"><a class="docs-heading-anchor" href="#GPU-acceleration">GPU acceleration</a><a id="GPU-acceleration-1"></a><a class="docs-heading-anchor-permalink" href="#GPU-acceleration" title="Permalink"></a></h2><p>To run simulations on the GPU you will need to have a CUDA-compatible device and to have <a href="https://github.com/JuliaGPU/CUDA.jl">CUDA.jl</a> installed. Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU. This example also shows setting up a simulation to run with <code>Float32</code>, which gives better performance on GPUs. Of course, you will need to determine whether this level of numerical accuracy is appropriate in your case. The GPU code path is currently designed to work with differentiable simulation and runs slower than related software, but this is an active area of development.</p><pre><code class="language-julia">using Molly
 using CUDA
 
 n_atoms = 100
@@ -43,9 +43,9 @@ sys = System(
     coords=coords,
     velocities=velocities,
     box_size=box_size,
-    loggers=Dict(
-        &quot;temp&quot;   =&gt; TemperatureLogger(typeof(1.0f0u&quot;K&quot;), 10),
-        &quot;coords&quot; =&gt; CoordinateLogger(typeof(1.0f0u&quot;nm&quot;), 10),
+    loggers=(
+        temp = TemperatureLogger(typeof(1.0f0u&quot;K&quot;), 10),
+        coords = CoordinateLogger(typeof(1.0f0u&quot;nm&quot;), 10),
     ),
 )
 
@@ -80,9 +80,9 @@ neighbor_finder = DistanceNeighborFinder(
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    loggers=Dict(
-        &quot;temp&quot; =&gt; TemperatureLogger(10),
-        &quot;coords&quot; =&gt; CoordinateLogger(10),
+    loggers=(
+        temp = TemperatureLogger(10),
+        coords = CoordinateLogger(10),
     ),
 )
 
@@ -91,7 +91,7 @@ simulator = VelocityVerlet(
     coupling=AndersenThermostat(temp, 1.0u&quot;ps&quot;),
 )
 simulate!(sys, simulator, 1_000)</code></pre><p>This time when we view the trajectory we can add lines to show the bonds.</p><pre><code class="language-julia">visualize(
-    sys.loggers[&quot;coords&quot;],
+    sys.loggers.coords,
     box_size,
     &quot;sim_diatomic.mp4&quot;;
     connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
@@ -108,13 +108,13 @@ sys = System(
     coords=coords,
     velocities=velocities,
     box_size=box_size,
-    loggers=Dict(&quot;coords&quot; =&gt; CoordinateLogger(Float32, 10; dims=2)),
+    loggers=(coords = CoordinateLogger(Float32, 10; dims=2),),
     force_units=NoUnits,
     energy_units=NoUnits,
 )
 
 simulate!(sys, simulator, 2_000)</code></pre><p>When we view the simulation we can use some extra options:</p><pre><code class="language-julia">visualize(
-    sys.loggers[&quot;coords&quot;],
+    sys.loggers.coords,
     box_size,
     &quot;sim_gravity.mp4&quot;;
     trails=4,
@@ -130,9 +130,9 @@ ff = OpenMMForceField(
 sys = System(
     joinpath(data_dir, &quot;6mrr_equil.pdb&quot;),
     ff;
-    loggers=Dict(
-        &quot;energy&quot; =&gt; TotalEnergyLogger(10),
-        &quot;writer&quot; =&gt; StructureWriter(10, &quot;traj_6mrr_1ps.pdb&quot;, [&quot;HOH&quot;]),
+    loggers=(
+        energy = TotalEnergyLogger(10),
+        writer = StructureWriter(10, &quot;traj_6mrr_1ps.pdb&quot;, [&quot;HOH&quot;]),
     ),
 )
 
@@ -149,9 +149,9 @@ simulator = Langevin(
 simulate!(sys, simulator, 5_000; parallel=true)</code></pre><p>You can use an implicit solvent method by giving the <code>implicit_solvent</code> keyword argument to <a href="../api/#Molly.System"><code>System</code></a>. The options are <code>&quot;obc1&quot;</code>, <code>&quot;obc2&quot;</code> and <code>&quot;gbn2&quot;</code>, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model. Other options include overriding the box size in the file (<code>box_size</code>) and modifying the non-bonded interaction and neighbor list cutoff distances (<code>dist_cutoff</code> and <code>nl_dist</code>).</p><p>Molly also has a rudimentary parser of <a href="http://www.gromacs.org">Gromacs</a> topology and coordinate files.</p><pre><code class="language-julia">sys = System(
     joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_coords.gro&quot;),
     joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_top_ff.top&quot;);
-    loggers=Dict(
-        &quot;temp&quot;   =&gt; TemperatureLogger(10),
-        &quot;writer&quot; =&gt; StructureWriter(10, &quot;traj_5XER_1ps.pdb&quot;),
+    loggers=(
+        temp = TemperatureLogger(10),
+        writer = StructureWriter(10, &quot;traj_5XER_1ps.pdb&quot;),
     ),
 )
 
@@ -211,22 +211,18 @@ function Molly.force(inter::SIRInteraction,
 end
 
 # Custom Logger
-struct SIRLogger
-    n_steps::Int
-    fracs_sir::Vector{Vector{Float64}}
+
+function fracs_SIR(s::System,neighbors=nothing;parallel::Bool=true)
+    counts_sir = [
+        count(p -&gt; p.status == susceptible, s.atoms),
+        count(p -&gt; p.status == infected   , s.atoms),
+        count(p -&gt; p.status == recovered  , s.atoms)
+    ]
+    return counts_sir ./ length(s)
 end
 
-# Custom logging function
-function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n; parallel=true)
-    if step_n % logger.n_steps == 0
-        counts_sir = [
-            count(p -&gt; p.status == susceptible, s.atoms),
-            count(p -&gt; p.status == infected   , s.atoms),
-            count(p -&gt; p.status == recovered  , s.atoms)
-        ]
-        push!(logger.fracs_sir, counts_sir ./ length(s))
-    end
-end
+SIRLogger(n_steps)=GeneralObservableLogger(fracs_SIR,Vector{Float64},n_steps)
+
 
 temp = 1.0
 box_size = SVector(10.0, 10.0)
@@ -257,9 +253,9 @@ sys = System(
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    loggers=Dict(
-        &quot;coords&quot; =&gt; CoordinateLogger(Float64, 10; dims=2),
-        &quot;SIR&quot;    =&gt; SIRLogger(10, []),
+    loggers=(
+        coords = CoordinateLogger(Float64, 10; dims=2),
+        SIR = SIRLogger(10),
     ),
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -267,11 +263,11 @@ sys = System(
 
 simulate!(sys, simulator, n_steps)
 
-visualize(sys.loggers[&quot;coords&quot;], box_size, &quot;sim_agent.mp4&quot;; markersize=0.1)</code></pre><p><img src="../images/sim_agent.gif" alt="Agent simulation"/></p><p>We can use the logger to plot the fraction of people susceptible (blue), infected (orange) and recovered (green) over the course of the simulation:</p><pre><code class="language-julia">using Plots
+visualize(sys.loggers.coords, box_size, &quot;sim_agent.mp4&quot;; markersize=0.1)</code></pre><p><img src="../images/sim_agent.gif" alt="Agent simulation"/></p><p>We can use the logger to plot the fraction of people susceptible (blue), infected (orange) and recovered (green) over the course of the simulation:</p><pre><code class="language-julia">using Plots
 
-sir_matrix = zeros(length(sys.loggers[&quot;SIR&quot;].fracs_sir), 3)
+sir_matrix = zeros(length(values(sys.loggers.SIR)), 3)
 for i = 1:101
-    sir_matrix[i, :] .= sys.loggers[&quot;SIR&quot;].fracs_sir[i][:]
+    sir_matrix[i, :] .= values(sys.loggers.SIR)[i][:]
 end
 
 plot(sir_matrix)</code></pre><p><img src="../images/fraction_sir.png" alt="Fraction SIR"/></p><h2 id="Units"><a class="docs-heading-anchor" href="#Units">Units</a><a id="Units-1"></a><a class="docs-heading-anchor-permalink" href="#Units" title="Permalink"></a></h2><p>Molly is fairly opinionated about using <a href="https://github.com/PainterQubits/Unitful.jl">Unitful.jl</a> units as shown above: you don&#39;t have to use them, but it is better if you do. Whilst you occasionally may run into friction with dimension mismatches, using units has the major advantages of catching whole classes of errors and letting you physically interpret the numbers in your system. The performance overhead of using units is minimal. Units are not currently compatible with differentiable simulations.</p><p>All your interaction types need to return the same units of force and energy or the simulation will not run. By default these are <code>kJ * mol^-1 * nm^-1</code> for force and <code>kJ * mol^-1</code> for energy, but this can be changed using the <code>force_units</code> and <code>energy_units</code> arguments to <a href="../api/#Molly.System"><code>System</code></a>. If you need to strip units for downstream analysis, use the <code>ustrip</code> function. It should be noted that charges are stored as dimensionless, i.e. 1.0 is an atomic charge of +1.</p><h2 id="Forces"><a class="docs-heading-anchor" href="#Forces">Forces</a><a id="Forces-1"></a><a class="docs-heading-anchor-permalink" href="#Forces" title="Permalink"></a></h2><p>Forces define how different parts of the system interact. The force on each particle in the system is derived from the potential corresponding to the interaction.</p><p class="math-container">\[\vec{F}_i = -\sum_j \frac{dV_{ij}(r_{ij})}{dr_{ij}}\frac{\vec{r}_{ij}}{r_{ij}}\]</p><p>In Molly there are three types of interactions:</p><ul><li><a href="../api/#Molly.PairwiseInteraction"><code>PairwiseInteraction</code></a>s are present between all or most atom pairs, and account for example for non-bonded terms in molecular mechanics force fields.</li><li><a href="../api/#Molly.SpecificInteraction"><code>SpecificInteraction</code></a>s are present between specific atoms, and account for example for bonded terms in molecular mechanics force fields.</li><li>General interactions are a free-form interaction type that can access the whole system and outputs forces for all atoms. This is useful for neural network potentials, implicit solvent models and other cases that require maximum flexibility.</li></ul><p>The available pairwise interactions are:</p><ul><li><a href="../api/#Molly.LennardJones"><code>LennardJones</code></a></li><li><a href="../api/#Molly.SoftSphere"><code>SoftSphere</code></a></li><li><a href="../api/#Molly.Mie"><code>Mie</code></a></li><li><a href="../api/#Molly.Coulomb"><code>Coulomb</code></a></li><li><a href="../api/#Molly.CoulombReactionField"><code>CoulombReactionField</code></a></li><li><a href="../api/#Molly.Gravity"><code>Gravity</code></a></li></ul><p>The available specific interactions are:</p><ul><li><a href="../api/#Molly.HarmonicBond"><code>HarmonicBond</code></a></li><li><a href="../api/#Molly.MorseBond"><code>MorseBond</code></a></li><li><a href="../api/#Molly.HarmonicAngle"><code>HarmonicAngle</code></a></li><li><a href="../api/#Molly.PeriodicTorsion"><code>PeriodicTorsion</code></a></li><li><a href="../api/#Molly.RBTorsion"><code>RBTorsion</code></a></li></ul><p>The available general interactions are:</p><ul><li><a href="../api/#Molly.ImplicitSolventOBC"><code>ImplicitSolventOBC</code></a></li><li><a href="../api/#Molly.ImplicitSolventGBN2"><code>ImplicitSolventGBN2</code></a></li></ul><h3 id="Pairwise-interactions"><a class="docs-heading-anchor" href="#Pairwise-interactions">Pairwise interactions</a><a id="Pairwise-interactions-1"></a><a class="docs-heading-anchor-permalink" href="#Pairwise-interactions" title="Permalink"></a></h3><p>To define your own <a href="../api/#Molly.PairwiseInteraction"><code>PairwiseInteraction</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyPairwiseInter &lt;: PairwiseInteraction
@@ -397,14 +393,17 @@ end</code></pre><p>Examples of three useful properties are given here: a matrix 
     else
         return current_neighbors
     end
-end</code></pre><p>A different setup is used for the out-of-place implementation. To use your custom neighbor finder, give it as the <code>neighbor_finder</code> argument when creating the <a href="../api/#Molly.System"><code>System</code></a>.</p><h2 id="Loggers"><a class="docs-heading-anchor" href="#Loggers">Loggers</a><a id="Loggers-1"></a><a class="docs-heading-anchor-permalink" href="#Loggers" title="Permalink"></a></h2><p>Loggers record properties of the simulation to allow monitoring and analysis. The available loggers are:</p><ul><li><a href="../api/#Molly.TemperatureLogger"><code>TemperatureLogger</code></a></li><li><a href="../api/#Molly.CoordinateLogger"><code>CoordinateLogger</code></a></li><li><a href="../api/#Molly.VelocityLogger"><code>VelocityLogger</code></a></li><li><a href="../api/#Molly.TotalEnergyLogger"><code>TotalEnergyLogger</code></a></li><li><a href="../api/#Molly.KineticEnergyLogger"><code>KineticEnergyLogger</code></a></li><li><a href="../api/#Molly.PotentialEnergyLogger"><code>PotentialEnergyLogger</code></a></li><li><a href="../api/#Molly.ForceLogger"><code>ForceLogger</code></a></li><li><a href="../api/#Molly.StructureWriter"><code>StructureWriter</code></a></li></ul><p>Many of the loggers can be initialised with just the number of steps between recorded values, e.g. <code>CoordinateLogger(10)</code>. An optional first argument is the type of the recorded value; the above is equivalent to <code>CoordinateLogger(typeof(1.0u&quot;nm&quot;), 10)</code> but if the simulation did not use units then <code>CoordinateLogger(Float64, 10)</code> would be required. If the simulation is in 2D, giving <code>dims=2</code> as a keyword argument is required for some loggers.</p><p>To define your own logger, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyLogger
+end</code></pre><p>A different setup is used for the out-of-place implementation. To use your custom neighbor finder, give it as the <code>neighbor_finder</code> argument when creating the <a href="../api/#Molly.System"><code>System</code></a>.</p><h2 id="Loggers"><a class="docs-heading-anchor" href="#Loggers">Loggers</a><a id="Loggers-1"></a><a class="docs-heading-anchor-permalink" href="#Loggers" title="Permalink"></a></h2><p>Loggers record properties of the simulation to allow monitoring and analysis. The available loggers are:</p><ul><li><a href="../api/#Molly.GeneralObservableLogger"><code>GeneralObservableLogger</code></a></li><li><a href="../api/#Molly.TemperatureLogger-Tuple{DataType, Integer}"><code>TemperatureLogger</code></a></li><li><a href="../api/#Molly.CoordinateLogger-Tuple{Any, Integer}"><code>CoordinateLogger</code></a></li><li><a href="../api/#Molly.VelocityLogger-Tuple{Any, Integer}"><code>VelocityLogger</code></a></li><li><a href="../api/#Molly.TotalEnergyLogger-Tuple{DataType, Any}"><code>TotalEnergyLogger</code></a></li><li><a href="../api/#Molly.KineticEnergyLogger-Tuple{Type, Integer}"><code>KineticEnergyLogger</code></a></li><li><a href="../api/#Molly.PotentialEnergyLogger-Tuple{Type, Integer}"><code>PotentialEnergyLogger</code></a></li><li><a href="../api/#Molly.ForceLogger-Tuple{Any, Integer}"><code>ForceLogger</code></a></li><li><a href="../api/#Molly.StructureWriter"><code>StructureWriter</code></a></li></ul><p>Many of the loggers can be initialised with just the number of steps between recorded values, e.g. <code>CoordinateLogger(10)</code>. An optional first argument is the type of the recorded value; the above is equivalent to <code>CoordinateLogger(typeof(1.0u&quot;nm&quot;), 10)</code> but if the simulation did not use units then <code>CoordinateLogger(Float64, 10)</code> would be required. If the simulation is in 2D, giving <code>dims=2</code> as a keyword argument is required for some loggers.</p><p>To define your own logger, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyLogger
     n_steps::Int
     # Any other properties, e.g. an Array to record values during the trajectory
 end</code></pre><p>Then, define the logging function that is called every step by the simulator:</p><pre><code class="language-julia">function Molly.log_property!(logger::MyLogger, sys, neighbors, step_n; parallel=true)
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end
-end</code></pre><p>The use of <code>n_steps</code> is optional and is an example of how to record a property every n steps through the simulation. To use your custom logger, add it to the dictionary of loggers given when creating the <a href="../api/#Molly.System"><code>System</code></a>:</p><pre><code class="language-julia">loggers = Dict(&quot;mylogger&quot; =&gt; MyLogger(10))</code></pre><p>In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0. This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values. Loggers are currently ignored for the purposes of taking gradients, so if you use a logger in the gradient calculation the gradients will appear to be nothing.</p><p>The <a href="../api/#Molly.TimeCorrelationLogger"><code>TimeCorrelationLogger</code></a> logger can be used to compute correlation functions of the form <span>$C(t)=\frac{\langle A_t\cdot B_0 \rangle}{\sqrt{\langle|A|^2\rangle\langle |B|^2\rangle }},$</span> where <span>$A$</span> and <span>$B$</span> are scalar or vectors observables, and the brackets are ensemble averages. This includes the computations of autocorrelation functions, which can be used to gather insight into the dynamical properties of the system, for instance using Green-Kubo formulas, or the statistical properties of a sampling method.</p><p>Let&#39;s look at a simple example, computing the velocity autocorrelation function for a simple system consisting of diatomic molecules defined by <a href="../api/#Molly.HarmonicBond"><code>HarmonicBond</code></a> potentials between pairs of atoms, and an additional <a href="../api/#Molly.SoftSphere"><code>SoftSphere</code></a> potential between all pairs of atoms. Let&#39;s start by defining the system.</p><pre><code class="language-julia">n_atoms = 400
+end</code></pre><p>The use of <code>n_steps</code> is optional and is an example of how to record a property every n steps through the simulation. To use your custom logger, add it to the named tuple of loggers given when creating the <a href="../api/#Molly.System"><code>System</code></a>:</p><pre><code class="language-julia">loggers = (mylogger = MyLogger(10),)</code></pre><p>In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0. This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values. Loggers are currently ignored for the purposes of taking gradients, so if you use a logger in the gradient calculation the gradients will appear to be nothing.</p><p>Many times, a logger will just record an observation to an <code>Array</code> containing a record of past observations. For this purpose, you can use the <code>GeneralObservableLogger</code> construct without defining a custom logging function. Simply define your observation function as</p><pre><code class="language-julia">function my_observable(sys::System,neighbors;parallel::Bool)
+    # Probe the system for some desired property
+    return observation
+end</code></pre><p>A logger which records this property every <code>n_steps</code> can be constructed through </p><pre><code class="language-julia">my_logger = GeneralObservableLogger(my_observable, T, n_steps)</code></pre><p>where <code>T = typeof(observation)</code> is the type of the return value for <code>my_observable</code>. The logger&#39;s history can be accessed through</p><pre><code class="language-julia">values(my_logger)</code></pre><p>The <a href="../api/#Molly.TimeCorrelationLogger"><code>TimeCorrelationLogger</code></a> logger can be used to compute correlation functions of the form <span>$C(t)=\frac{\langle A_t\cdot B_0 \rangle}{\sqrt{\langle|A|^2\rangle\langle |B|^2\rangle }},$</span> where <span>$A$</span> and <span>$B$</span> are scalar or vectors observables, and the brackets are ensemble averages. This includes the computations of autocorrelation functions, which can be used to gather insight into the dynamical properties of the system, for instance using Green-Kubo formulas, or the statistical properties of a sampling method.</p><p>Let&#39;s look at a simple example, computing the velocity autocorrelation function for a simple system consisting of diatomic molecules defined by <a href="../api/#Molly.HarmonicBond"><code>HarmonicBond</code></a> potentials between pairs of atoms, and an additional <a href="../api/#Molly.SoftSphere"><code>SoftSphere</code></a> potential between all pairs of atoms. Let&#39;s start by defining the system.</p><pre><code class="language-julia">n_atoms = 400
 atom_mass = 10.0u&quot;u&quot;
 atoms = [Atom(mass = atom_mass, σ = 0.2u&quot;nm&quot;, ϵ = 0.2u&quot;kJ * mol^-1&quot;) for i=1:n_atoms]
 
@@ -432,13 +431,21 @@ sys = System(atoms=atoms,
     pairwise_inters=pairwise_inters,
     specific_inter_lists=specific_inter_lists,
     box_size=box_size,
-    loggers=Dict{Symbol,Any}()
     )</code></pre><p>We leave the loggers empty until we thermalize the system using Langevin dynamics.</p><pre><code class="language-julia">simulator = LangevinSplitting(dt=0.002u&quot;ps&quot;, friction=10.0u&quot;u* ps^-1&quot;, temperature=temp, splitting=&quot;BAOAB&quot;)
 simulate!(sys, simulator, 10000)
-@show temperature(sys)</code></pre><pre><code class="language-console">temperature(sys) = 48.76795299825687 K</code></pre><p>Good. Next we define our correlation logger, add it to the system&#39;s loggers and run a long simulation</p><pre><code class="language-julia">V(s::System, neighbors=nothing) = s.velocities
+@show temperature(sys)</code></pre><pre><code class="language-console">temperature(sys) = 48.76795299825687 K</code></pre><p>Good. Next we define our correlation logger, add it to the system&#39;s loggers and run a long simulation. Note we need to redeclare the system when adding a logger.</p><pre><code class="language-julia">V(s::System, neighbors=nothing) = s.velocities
 V_Type = eltype(sys.velocities)
-sys.loggers = Dict(:velocity_autocorrelation =&gt; TimeCorrelationLogger(V_Type, V_Type, V, V, n_atoms, 1000))
+
+sys = System(atoms=atoms,
+    coords=sys.coords,
+    velocities=sys.velocities,
+    neighbor_finder=nf,
+    pairwise_inters=pairwise_inters,
+    specific_inter_lists=specific_inter_lists,
+    box_size= box_size,
+    loggers=(velocity_autocorrelation= TimeCorrelationLogger(V_Type, V_Type, V, V, n_atoms, 1000),)
+    )
 simulate!(sys, simulator, 100000)</code></pre><p>Check the output:</p><pre><code class="language-julia">using Plots, UnitfulRecipes
 
 t_range=(0:999)*u&quot;ps&quot;
-plot(t_range,sys.loggers[:velocity_autocorrelation].normalized_correlations,xlabel=&quot;time&quot;,ylabel=&quot;correlation&quot;,label=&quot;C(t)&quot;)</code></pre><p><img src="../images/velocity_autocorrelations.png" alt="Velocity Autocorrelations"/><br/>As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly. The oscillatory behavior is due to the contribution of the harmonic bond interactions.</p><h2 id="Analysis"><a class="docs-heading-anchor" href="#Analysis">Analysis</a><a id="Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Analysis" title="Permalink"></a></h2><p>Molly contains some tools for analysing the results of simulations. The available analysis functions are:</p><ul><li><a href="../api/#Molly.visualize"><code>visualize</code></a></li><li><a href="../api/#Molly.rdf-Tuple{Any, Any}"><code>rdf</code></a></li><li><a href="../api/#Molly.distances-Tuple{Any, Any}"><code>distances</code></a></li><li><a href="../api/#Molly.displacements-Tuple{Any, Any}"><code>displacements</code></a></li><li><a href="../api/#Molly.velocity_autocorr"><code>velocity_autocorr</code></a></li><li><a href="../api/#Molly.rmsd-Union{Tuple{T}, Tuple{D}, Tuple{AbstractArray{SVector{D, T}}, AbstractArray{SVector{D, T}}}} where {D, T}"><code>rmsd</code></a></li><li><a href="../api/#Molly.radius_gyration-Tuple{Any, Any}"><code>radius_gyration</code></a></li></ul><p>Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../differentiable/">Differentiable simulation »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Wednesday 22 June 2022 16:00">Wednesday 22 June 2022</span>. Using Julia version 1.7.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+plot(t_range,values(sys.loggers.velocity_autocorrelation),xlabel=&quot;time&quot;,ylabel=&quot;correlation&quot;,label=&quot;C(t)&quot;)</code></pre><p><img src="../images/velocity_autocorrelations.png" alt="Velocity Autocorrelations"/><br/>As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly. The oscillatory behavior is due to the contribution of the harmonic bond interactions.</p><h2 id="Analysis"><a class="docs-heading-anchor" href="#Analysis">Analysis</a><a id="Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Analysis" title="Permalink"></a></h2><p>Molly contains some tools for analysing the results of simulations. The available analysis functions are:</p><ul><li><a href="../api/#Molly.visualize"><code>visualize</code></a></li><li><a href="../api/#Molly.rdf-Tuple{Any, Any}"><code>rdf</code></a></li><li><a href="../api/#Molly.distances-Tuple{Any, Any}"><code>distances</code></a></li><li><a href="../api/#Molly.displacements-Tuple{Any, Any}"><code>displacements</code></a></li><li><a href="../api/#Molly.velocity_autocorr-Union{Tuple{GeneralObservableLogger{T, typeof(Molly.velocities_wrapper)}}, Tuple{T}, Tuple{GeneralObservableLogger{T, typeof(Molly.velocities_wrapper)}, Integer}, Tuple{GeneralObservableLogger{T, typeof(Molly.velocities_wrapper)}, Integer, Integer}} where T"><code>velocity_autocorr</code></a></li><li><a href="../api/#Molly.rmsd-Union{Tuple{T}, Tuple{D}, Tuple{AbstractArray{SVector{D, T}}, AbstractArray{SVector{D, T}}}} where {D, T}"><code>rmsd</code></a></li><li><a href="../api/#Molly.radius_gyration-Tuple{Any, Any}"><code>radius_gyration</code></a></li></ul><p>Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../differentiable/">Differentiable simulation »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Thursday 23 June 2022 17:17">Thursday 23 June 2022</span>. Using Julia version 1.7.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
