@@ -288,7 +288,7 @@ function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothi
 
     #compute observables
     A = logger.observableA(s, neighbors)
-    B = logger.observableB(s, neighbors)
+    B = (logger.observableA != logger.observableB) ? logger.observableB(s, neighbors) : A
 
     logger.n_timesteps += 1
 
