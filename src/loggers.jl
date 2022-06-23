@@ -223,27 +223,32 @@ atom_record(at_data, i, coord) = BioStructures.AtomRecord(
     at_data.element == "?" ? "  " : at_data.element, "  "
 )
 
-"""
+raw"""
 `TimeCorrelationLogger(TA::DataType, TB::DataType, observableA::Function, observableB::Function, observable_length::Integer, n_correlation::Integer)`
-A time correlation logger, which allow to estimate statistical correlations of the form
-\$\$ C(t)=\\left(\\left\\langle A(t)\\cdot B(0)\\right\\rangle -\\left\\langle A\\right\\rangle\\cdot \\left\\langle B\\right\\rangle\\right)\\left(\\sqrt{\\left\\langle |A|^2\\right\\rangle\\left\\langle |B|^2\\right\\rangle}\\right)^{-1}\$\$
-(normalized form), or
-\$\$C(t)=\\left(\\left\\langle A(t)\\cdot B(0)\\right\\rangle -\\left\\langle \\right\\rangle\\cdot \\left\\langle B\\right\\rangle\\right)\$\$
-(unnormalized form). These can be used to estimate statistical error, or to compute transport coefficients from Green-Kubo type formulas.
-A and B are observables, functions of the form f(sys::System,neighbors=nothing).    
-The return values of A and B can be of scalar or vector type (including vectors of `SVector`s, like positions or velocities), and must implement `dot`
+A time correlation logger, which allow to estimate statistical correlations of normalized form
+```math
+C(t)=\frac{\langle A_t\cdot B_0\rangle -\langle A\rangle\cdot \langle B\rangle}{\sqrt{\langle |A|^2\rangle\langle |B|^2\rangle}}
+```
+or unnormalized form
+```math
+C(t)=\langle A_t\cdot B_0\rangle -\langle A \rangle\cdot \langle B\rangle
+```
+These can be used to estimate statistical error, or to compute transport coefficients from Green-Kubo type formulas.
+A and B are observables, functions of the form `observable(sys::System,neighbors=nothing)`.    
+The return values of A and B can be of scalar or vector type (including `Vector{SVector{...}}`s, like positions or velocities), and must implement `dot`
 # Arguments
-- `TA::DataType`: The `DataType` returned by `A`, suppporting `zero(TA)`.
+- `TA::DataType`: The type returned by `observableA`, suppporting `zero(TA)`.
+- `TB::DataType`: The type returned by `observableB`, supporting `zero(TB)`.
 - `observableA::Function`: The function corresponding to observable A.
 - `observableB::Function`: The function corresponding to observable B.
-- `observable_length::Integer`: The length of the observables if they are vectors, or one if they are scalar-valued.
+- `observable_length::Integer`: The length of the observables if they are vectors, or `1` if they are scalar-valued.
 - `n_correlation::Integer`: The length of the computed correlation vector.
 
  `n_correlation` should typically be chosen so that `dt*n_correlation>t_corr`,
   where `dt` is the simulation timestep and `t_corr` is the decorrelation time for the considered system and observables.
 
   For the purpose of numerical stability, the logger internally records sums instead of running averages. The normalized and unnormalized form of the correlation function can be retrieved 
-  through values(logger::TimeCorrelationLogger; normalize::Bool)
+  through `values(logger::TimeCorrelationLogger; normalize::Bool)``
 """
 mutable struct TimeCorrelationLogger{T_A,T_A2,T_B,T_B2,T_AB,TF_A,TF_B}
     observableA::TF_A
@@ -326,7 +331,7 @@ function Base.values(logger::TimeCorrelationLogger; normalize::Bool=true)
         end
         C .-= C_bar
         if normalize
-            denom = sqrt((getfield(logger, :sum_sq_A) / n_samps) * (getfield(logger, :sum_sq_B) / n_samps))
+            denom = sqrt(logger.sum_sq_A * logger.sum_sq_B) / n_samps
             return C / denom
         else
             return C
