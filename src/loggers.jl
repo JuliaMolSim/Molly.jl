@@ -2,8 +2,9 @@
 
 export
     run_loggers!,
-    TemperatureLogger,
+    GeneralObservableLogger,
     log_property!,
+    TemperatureLogger,
     CoordinateLogger,
     VelocityLogger,
     TotalEnergyLogger,
@@ -25,191 +26,129 @@ function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0; parallel:
 end
 
 """
-    TemperatureLogger(n_steps)
-    TemperatureLogger(T, n_steps)
+GeneralObservableLogger(observable::Function,T::DataType,n_steps::Int)
 
-Log the temperature throughout a simulation.
+Returns a logger which hold a record of regularly sampled observation on the system. 
+The observable should return an object of type T and support the following method.
+    observable(s::System,neighbors;parallel::Bool)::T
 """
-struct TemperatureLogger{T}
-    n_steps::Int
-    temperatures::Vector{T}
+struct GeneralObservableLogger{T,F}
+    n_steps::Int64
+    observable::F
+    history::Vector{T}
 end
 
-TemperatureLogger(T::Type, n_steps::Integer) = TemperatureLogger(n_steps, T[])
-
-TemperatureLogger(n_steps::Integer) = TemperatureLogger(typeof(one(DefaultFloat)u"K"), n_steps)
-
-function Base.show(io::IO, tl::TemperatureLogger)
-    print(io, "TemperatureLogger{", eltype(tl.temperatures), "} with n_steps ",
-                tl.n_steps, ", ", length(tl.temperatures),
-                " temperatures recorded")
-end
-
+GeneralObservableLogger(observable::Function,T::DataType,n_steps::Int) = GeneralObservableLogger{T,typeof(observable)}(n_steps,observable,T[])
+Base.values(logger::GeneralObservableLogger)=logger.history
 """
     log_property!(logger, system, neighbors=nothing, step_n=0; parallel=true)
 
 Log a property of the system thoughout a simulation.
 Custom loggers should implement this function.
 """
-function log_property!(logger::TemperatureLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; kwargs...)
-    if step_n % logger.n_steps == 0
-        push!(logger.temperatures, temperature(s))
+function log_property!(logger::GeneralObservableLogger,s::System,neighbors=nothing,step_n::Integer=0;parallel::Bool=true)
+    if (step_n % logger.n_steps) == 0
+        obs=logger.observable(s,neighbors;parallel=parallel)
+        push!(logger.history,obs)
     end
 end
 
+
+
+temperature_wrapper(s,neighbors=nothing;parallel::Bool=true)=temperature(s)
+"""
+    TemperatureLogger(n_steps)
+    TemperatureLogger(T, n_steps)
+
+Log the temperature throughout a simulation.
+"""
+TemperatureLogger(T::DataType,n_steps::Integer)=GeneralObservableLogger(temperature_wrapper,T,n_steps)
+TemperatureLogger(n_steps::Integer) = TemperatureLogger(typeof(one(DefaultFloat)u"K"), n_steps)
+
+function Base.show(io::IO, tl::GeneralObservableLogger{T,typeof(temperature_wrapper)}) where {T}
+    print(io, "TemperatureLogger{", eltype(values(tl)), "} with n_steps ",
+                tl.n_steps, ", ", length(values(tl)),
+                " temperatures recorded")
+end
+
+coordinates_wrapper(s,neighbors=nothing;parallel::Bool=true)=s.coords
 """
     CoordinateLogger(n_steps; dims=3)
     CoordinateLogger(T, n_steps; dims=3)
 
 Log the coordinates throughout a simulation.
 """
-struct CoordinateLogger{T}
-    n_steps::Int
-    coords::Vector{Vector{T}}
+CoordinateLogger(T, n_steps::Integer; dims::Integer=3)=GeneralObservableLogger(coordinates_wrapper,Array{SArray{Tuple{dims}, T, 1, dims}, 1},n_steps)
+CoordinateLogger(n_steps::Integer; dims::Integer=3)=CoordinateLogger(typeof(one(DefaultFloat)u"nm"), n_steps; dims=dims)
+
+function Base.show(io::IO, cl::GeneralObservableLogger{T,typeof(coordinates_wrapper)}) where {T}
+    print(io, "CoordinateLogger{", eltype(eltype(cl.history)), "} with n_steps ",
+            cl.n_steps, ", ", length(cl.history), " frames recorded for ",
+            length(cl.history) > 0 ? length(first(cl.history)) : "?", " atoms")
 end
 
-function CoordinateLogger(T, n_steps::Integer; dims::Integer=3)
-    return CoordinateLogger(n_steps,
-                            Array{SArray{Tuple{dims}, T, 1, dims}, 1}[])
-end
-
-function CoordinateLogger(n_steps::Integer; dims::Integer=3)
-    return CoordinateLogger(typeof(one(DefaultFloat)u"nm"), n_steps; dims=dims)
-end
-
-function Base.show(io::IO, cl::CoordinateLogger)
-    print(io, "CoordinateLogger{", eltype(eltype(cl.coords)), "} with n_steps ",
-            cl.n_steps, ", ", length(cl.coords), " frames recorded for ",
-            length(cl.coords) > 0 ? length(first(cl.coords)) : "?", " atoms")
-end
-
-function log_property!(logger::CoordinateLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; kwargs...)
-    if step_n % logger.n_steps == 0
-        push!(logger.coords, deepcopy(s.coords))
-    end
-end
-
+velocities_wrapper(s::System,neighbors=nothing;parallel::Bool=true)=s.velocities
 """
     VelocityLogger(n_steps; dims=3)
     VelocityLogger(T, n_steps; dims=3)
 
 Log the velocities throughout a simulation.
 """
-struct VelocityLogger{T}
-    n_steps::Int
-    velocities::Vector{Vector{T}}
+VelocityLogger(T, n_steps::Integer; dims::Integer=3)=GeneralObservableLogger(velocities_wrapper,Array{SArray{Tuple{dims}, T, 1, dims}, 1},n_steps)
+VelocityLogger(n_steps::Integer; dims::Integer=3)=VelocityLogger(typeof(one(DefaultFloat)u"nm * ps^-1"), n_steps; dims=dims)
+
+function Base.show(io::IO, vl::GeneralObservableLogger{T,typeof(velocities_wrapper)}) where {T}
+    print(io, "VelocityLogger{", eltype(eltype(vl.history)), "} with n_steps ",
+            vl.n_steps, ", ", length(vl.history), " frames recorded for ",
+            length(vl.history) > 0 ? length(first(vl.history)) : "?", " atoms")
 end
 
-function VelocityLogger(T, n_steps::Integer; dims::Integer=3)
-    return VelocityLogger(n_steps,
-                            Array{SArray{Tuple{dims}, T, 1, dims}, 1}[])
-end
-
-function VelocityLogger(n_steps::Integer; dims::Integer=3)
-    return VelocityLogger(typeof(one(DefaultFloat)u"nm * ps^-1"), n_steps; dims=dims)
-end
-
-function Base.show(io::IO, vl::VelocityLogger)
-    print(io, "VelocityLogger{", eltype(eltype(vl.velocities)), "} with n_steps ",
-            vl.n_steps, ", ", length(vl.velocities), " frames recorded for ",
-            length(vl.velocities) > 0 ? length(first(vl.velocities)) : "?", " atoms")
-end
-
-function log_property!(logger::VelocityLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; kwargs...)
-    if step_n % logger.n_steps == 0
-        push!(logger.velocities, deepcopy(s.velocities))
-    end
-end
-
+total_energy_wrapper(s::System,neighbors=nothing;parallel::Bool=true)=total_energy(s,neighbors)
 """
     TotalEnergyLogger(n_steps)
     TotalEnergyLogger(T, n_steps)
 
 Log the total energy of the system throughout a simulation.
 """
-struct TotalEnergyLogger{T}
-    n_steps::Int
-    energies::Vector{T}
+TotalEnergyLogger(T::DataType,n_steps)=GeneralObservableLogger(total_energy_wrapper,T,n_steps)
+TotalEnergyLogger(n_steps)=TotalEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+
+function Base.show(io::IO, el::GeneralObservableLogger{T,typeof(total_energy_wrapper)}) where {T}
+    print(io, "TotalEnergyLogger{", eltype(el.history), "} with n_steps ",
+                el.n_steps, ", ", length(el.history), " energies recorded")
 end
 
-TotalEnergyLogger(T::Type, n_steps::Integer) = TotalEnergyLogger(n_steps, T[])
 
-function TotalEnergyLogger(n_steps::Integer)
-    return TotalEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
-end
-
-function Base.show(io::IO, el::TotalEnergyLogger)
-    print(io, "TotalEnergyLogger{", eltype(el.energies), "} with n_steps ",
-                el.n_steps, ", ", length(el.energies), " energies recorded")
-end
-
-function log_property!(logger::TotalEnergyLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; kwargs...)
-    if step_n % logger.n_steps == 0
-        push!(logger.energies, total_energy(s, neighbors))
-    end
-end
-
+kinetic_energy_wrapper(s::System,neighbors=nothing;parallel::Bool=true)=kinetic_energy(s)
 """
     KineticEnergyLogger(n_steps)
     KineticEnergyLogger(T, n_steps)
 
 Log the kinetic energy of the system throughout a simulation.
 """
-struct KineticEnergyLogger{T}
-    n_steps::Int
-    energies::Vector{T}
+KineticEnergyLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(kinetic_energy_wrapper,T,n_steps)
+KineticEnergyLogger(n_steps::Integer)=KineticEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+
+function Base.show(io::IO, el::GeneralObservableLogger{T,typeof(kinetic_energy_wrapper)}) where {T}
+    print(io, "KineticEnergyLogger{", eltype(el.history), "} with n_steps ",
+                el.n_steps, ", ", length(el.history), " energies recorded")
 end
 
-KineticEnergyLogger(T::Type, n_steps::Integer) = KineticEnergyLogger(n_steps, T[])
-
-function KineticEnergyLogger(n_steps::Integer)
-    return KineticEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
-end
-
-function Base.show(io::IO, el::KineticEnergyLogger)
-    print(io, "KineticEnergyLogger{", eltype(el.energies), "} with n_steps ",
-                el.n_steps, ", ", length(el.energies), " energies recorded")
-end
-
-function log_property!(logger::KineticEnergyLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; kwargs...)
-    if step_n % logger.n_steps == 0
-        push!(logger.energies, kinetic_energy(s))
-    end
-end
-
+potential_energy_wrapper(s::System,neighbors=nothing;parallel::Bool=true)=potential_energy(s,neighbors)
 """
     PotentialEnergyLogger(n_steps)
     PotentialEnergyLogger(T, n_steps)
 
 Log the potential energy of the system throughout a simulation.
 """
-struct PotentialEnergyLogger{T}
-    n_steps::Int
-    energies::Vector{T}
+PotentialEnergyLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(potential_energy_wrapper,T,n_steps)
+PotentialEnergyLogger(n_steps::Integer) = PotentialEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+
+function Base.show(io::IO, el::GeneralObservableLogger{T,typeof(potential_energy_wrapper)}) where {T}
+    print(io, "PotentialEnergyLogger{", eltype(el.history), "} with n_steps ",
+                el.n_steps, ", ", length(el.history), " energies recorded")
 end
 
-PotentialEnergyLogger(T::Type, n_steps::Integer) = PotentialEnergyLogger(n_steps, T[])
-
-function PotentialEnergyLogger(n_steps::Integer)
-    return PotentialEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
-end
-
-function Base.show(io::IO, el::PotentialEnergyLogger)
-    print(io, "PotentialEnergyLogger{", eltype(el.energies), "} with n_steps ",
-                el.n_steps, ", ", length(el.energies), " energies recorded")
-end
-
-function log_property!(logger::PotentialEnergyLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; kwargs...)
-    if step_n % logger.n_steps == 0
-        push!(logger.energies, potential_energy(s, neighbors))
-    end
-end
 
 """
     ForceLogger(n_steps; dims=3)
@@ -217,31 +156,12 @@ end
 
 Log the forces throughout a simulation.
 """
-struct ForceLogger{T}
-    n_steps::Int
-    forces::Vector{Vector{T}}
-end
-
-function ForceLogger(T, n_steps::Integer; dims::Integer=3)
-    return ForceLogger(n_steps,
-                        Array{SArray{Tuple{dims}, T, 1, dims}, 1}[])
-end
-
-function ForceLogger(n_steps::Integer; dims::Integer=3)
-    return ForceLogger(typeof(one(DefaultFloat)u"kJ * mol^-1 * nm^-1"), n_steps; dims=dims)
-end
-
-function Base.show(io::IO, fl::ForceLogger)
-    print(io, "ForceLogger{", eltype(eltype(fl.forces)), "} with n_steps ",
-            fl.n_steps, ", ", length(fl.forces), " frames recorded for ",
-            length(fl.forces) > 0 ? length(first(fl.forces)) : "?", " atoms")
-end
-
-function log_property!(logger::ForceLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; parallel::Bool=true)
-    if step_n % logger.n_steps == 0
-        push!(logger.forces, forces(s, neighbors; parallel=parallel))
-    end
+ForceLogger(T, n_steps::Integer; dims::Integer=3)=GeneralObservableLogger(forces,Array{SArray{Tuple{dims}, T, 1, dims}, 1},n_steps)
+ForceLogger(n_steps::Integer; dims::Integer=3)=ForceLogger(typeof(one(DefaultFloat)u"kJ * mol^-1 * nm^-1"), n_steps; dims=dims)
+function Base.show(io::IO, fl::GeneralObservableLogger{T,typeof(forces)}) where {T}
+    print(io, "ForceLogger{", eltype(eltype(fl.history)), "} with n_steps ",
+            fl.n_steps, ", ", length(fl.history), " frames recorded for ",
+            length(fl.history) > 0 ? length(first(fl.history)) : "?", " atoms")
 end
 
 """
@@ -323,7 +243,7 @@ The return values of A and B can be of scalar or vector type (including vectors 
   where `dt` is the simulation timestep and `t_corr` is the decorrelation time for the considered system and observables.
 
   For the purpose of numerical stability, the logger internally records sums instead of running averages. The normalized and unnormalized form of the correlation function can be retrieved 
- from a`logger::TimeCorrelationLogger` through accessing the `logger.normalized_correlations` and `logger.unnormalized_correlations` properties.
+  through values(logger::TimeCorrelationLogger; normalize::Bool)
 """
 mutable struct TimeCorrelationLogger{T_A,T_A2,T_B,T_B2,T_AB,TF_A,TF_B}
     observableA::TF_A
@@ -392,22 +312,18 @@ function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothi
 
 end
 
-function Base.getproperty(logger::TimeCorrelationLogger,s::Symbol)
-    if (s != :normalized_correlations) && (s != :unnormalized_correlations)
-        return getfield(logger,s)
-    else
-        n_samps = getfield(logger, :n_timesteps)
-        C = zero(getfield(logger, :sum_offset_products))
-        C_bar = dot(getfield(logger, :sum_A) / n_samps, getfield(logger, :sum_B) / n_samps)
-        for i=1:getfield(logger, :n_correlation)
-            C[i]=getfield(logger, :sum_offset_products)[i] / (n_samps - i + 1)
+function Base.values(logger::TimeCorrelationLogger; normalize::Bool=true)
+    n_samps = logger.n_timesteps
+        C = zero(logger.sum_offset_products)
+        C_bar = dot(logger.sum_A / n_samps, logger.sum_B / n_samps)
+        for i=1:logger.n_correlation
+            C[i]=logger.sum_offset_products[i] / (n_samps - i + 1)
         end
         C .-= C_bar
-        if s == :unnormalized_correlations
-            return C
-        else
+        if normalize
             denom = sqrt((getfield(logger, :sum_sq_A) / n_samps) * (getfield(logger, :sum_sq_B) / n_samps))
             return C / denom
+        else
+            return C
         end
-    end
 end
