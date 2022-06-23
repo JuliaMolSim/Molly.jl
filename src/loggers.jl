@@ -368,7 +368,7 @@ function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothi
 
     #compute observables
     A = logger.observableA(s, neighbors)
-    B = (logger.observableA != logger.observableB) ? logger.observableB(s, neighbors) : A
+    B = logger.observableB(s, neighbors)
 
     logger.n_timesteps += 1
 
@@ -383,13 +383,8 @@ function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothi
 
     logger.sum_sq_A += dot(A, A)
     logger.sum_sq_B += dot(B, B)
-
-    B1 = first(logger.history_B)
-
-    for i = 1:min(logger.n_correlation, logger.n_timesteps)
-        logger.sum_offset_products[i] += dot(logger.history_A[i], B1)
-    end
-
+    
+    logger.sum_offset_products .+= dot.(logger.history_A,(first(logger.history_B),))
 end
 
 function Base.getproperty(logger::TimeCorrelationLogger,s::Symbol)
