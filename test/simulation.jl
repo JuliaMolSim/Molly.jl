@@ -127,6 +127,32 @@ end
     end
 end
 
+@testset "Lennard-Jones infinite boundaries" begin
+    n_atoms = 100
+    n_steps = 2_000
+    temp = 298.0u"K"
+    boundary = CubicBoundary(Inf * u"nm", Inf * u"nm", 2.0u"nm")
+    coords = place_atoms(n_atoms, CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm"), 0.3u"nm")
+    simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
+
+    s = System(
+        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        pairwise_inters=(LennardJones(nl_only=true),),
+        coords=coords,
+        boundary=boundary,
+        neighbor_finder=DistanceNeighborFinder(
+            nb_matrix=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=2.0u"nm",
+        ),
+    )
+    random_velocities!(s, temp)
+
+    @time simulate!(s, simulator, n_steps)
+
+    @test maximum(distances(s.coords, boundary)) > 5.0u"nm"
+end
+
 @testset "Lennard-Jones simulators" begin
     n_atoms = 100
     n_steps = 20_000
