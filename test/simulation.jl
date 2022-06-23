@@ -318,7 +318,7 @@ end
     simulate!(s, simulator, n_steps; parallel=false)
     simulate!(s_nounits, simulator_nounits, n_steps; parallel=false)
 
-    coords_diff = last(values(s.loggers.coords)) .- last(values(s_nounits.loggers)) * u"nm"
+    coords_diff = last(values(s.loggers.coords)) .- last(values(s_nounits.loggers.coords)) * u"nm"
     @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8u"nm"
 
     final_energy = last(values(s.loggers.energy))
