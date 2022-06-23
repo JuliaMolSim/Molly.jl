@@ -331,6 +331,8 @@ end
     
     show(devnull,s_nounits.loggers.autocorrelations.normalized_correlations)
     show(devnull,s_nounits.loggers.autocorrelations.unnormalized_correlations)
+
+    simulate!(s,simulator, 100)
 end
 
 @testset "Langevin Splitting" begin

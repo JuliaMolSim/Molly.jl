@@ -384,7 +384,17 @@ function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothi
     logger.sum_sq_A += dot(A, A)
     logger.sum_sq_B += dot(B, B)
     
-    logger.sum_offset_products .+= dot.(logger.history_A,(first(logger.history_B),))
+    buff_length=length(logger.history_A)
+    
+    if parallel
+        chunk_size = Int64(ceil(buff_length / nthreads()))
+        ix_ranges=[i:min(i + chunk_size - 1, buff_length) for i in 1:chunk_size:buff_length]
+        @threads for ixs in ix_ranges
+            logger.sum_offset_products[ixs] .+= dot.(logger.history_A[ixs],(first(logger.history_B),))
+        end
+    else
+        logger.sum_offset_products[1:buff_length] .+= dot.(logger.history_A,(first(logger.history_B),))
+    end
 end
 
 function Base.getproperty(logger::TimeCorrelationLogger,s::Symbol)
