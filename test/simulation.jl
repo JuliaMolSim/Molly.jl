@@ -327,7 +327,7 @@ end
 
     
     @test unit(first(values(s.loggers.autocorrelations)))==NoUnits
-    @test unit(first(values(s.loggers.autocorrelations; normalize= False)))==u"nm^2 * ps^-2"
+    @test unit(first(values(s.loggers.autocorrelations; normalize= false)))==u"nm^2 * ps^-2"
     
     show(devnull,values(s_nounits.loggers.autocorrelations))
     show(devnull,values(s_nounits.loggers.autocorrelations; normalize=false))
