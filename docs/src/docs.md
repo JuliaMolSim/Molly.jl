@@ -648,6 +648,8 @@ The available simulators are:
 - [`Langevin`](@ref)
 - [`LangevinSplitting`](@ref)
 
+The [`LangevinSplitting`](@ref) simulator can be used to define a variety of integrators such as velocity Verlet (splitting `"BAB"`), the Langevin implementation in [`Langevin`](@ref) (`"BAOA"`), and symplectic Euler integrators (`"AB"` and `"BA"`).
+
 To define your own simulator, first define a `struct`:
 ```julia
 struct MySimulator

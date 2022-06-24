@@ -333,6 +333,7 @@ The `Langevin` and `VelocityVerlet` simulators without coupling correspond to
 the **BAOA** and **BAB** schemes respectively.
 For more information on the sampling properties of splitting schemes, see
 [Fass et al. 2018](https://doi.org/10.3390/e20050318).
+Not currently compatible with automatic differentiation.
 
 # Arguments
 - `dt::S`: the time step of the simulation.
@@ -371,46 +372,35 @@ function simulate!(sys,
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
 
-    forces_known = true
-    force_computation_steps = Bool[]
-
     # Determine the need to recompute accelerations before B steps
-    occursin(r"^.*B[^B]*A[^B]*$", sim.splitting) && (forces_known = false)
+    forces_known = !occursin(r"^.*B[^B]*A[^B]*$", sim.splitting)
 
-    for op in sim.splitting
+    force_computation_steps = map(collect(sim.splitting)) do op
         if op == 'O'
-            push!(force_computation_steps, false)
+            return false
         elseif op == 'A'
-            push!(force_computation_steps, false)
             forces_known = false
+            return false
         elseif op == 'B'
             if forces_known
-                push!(force_computation_steps, false)
+                return false
             else
-                push!(force_computation_steps, true)
                 forces_known = true
+                return true
             end
         end
     end
 
-    steps = []
-    arguments = []
-
-    for (j, op) in enumerate(sim.splitting)
+    step_arg_pairs = map(enumerate(sim.splitting)) do (j, op)
         if op == 'A'
-            push!(steps, A_step!)
-            push!(arguments, (sys, effective_dts[j]))
+            return (A_step!, (sys, effective_dts[j]))
         elseif op == 'B'
-            push!(steps, B_step!)
-            push!(arguments, (sys, effective_dts[j], accels_t, neighbors,
+            return (B_step!, (sys, effective_dts[j], accels_t, neighbors,
                                 force_computation_steps[j], parallel))
         elseif op == 'O'
-            push!(steps, O_step!)
-            push!(arguments, (sys, α_eff, σ_eff, rng, sim.temperature))
+            return (O_step!, (sys, α_eff, σ_eff, rng, sim.temperature))
         end
     end
-
-    step_arg_pairs = zip(steps, arguments)
 
     run_loggers!(sys, neighbors, 0; parallel=parallel)
     sim.remove_CM_motion && remove_CM_motion!(sys)
@@ -442,6 +432,8 @@ end
 
 function B_step!(s::System, dt_eff::T, acceleration_vector::A, neighbors,
                     compute_forces::Bool, parallel::Bool) where {T, A}
-    compute_forces && (acceleration_vector .= accelerations(s, neighbors, parallel=parallel))
+    if compute_forces
+        acceleration_vector .= accelerations(s, neighbors, parallel=parallel)
+    end
     s.velocities += dt_eff * remove_molar.(acceleration_vector)
 end

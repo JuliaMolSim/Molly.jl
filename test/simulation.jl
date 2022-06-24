@@ -385,7 +385,7 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=(temp=TemperatureLogger(10)),
+        loggers=(temp=TemperatureLogger(10),),
     )
     s2 = deepcopy(s1)
     rseed = 2022
