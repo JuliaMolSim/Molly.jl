@@ -80,7 +80,7 @@ masses = [
     0.642e24u&quot;kg&quot;,
 ]
 
-box_size = SVector(1e9, 1e9, 1e9)u&quot;km&quot;
+boundary = CubicBoundary(1e9u&quot;km&quot;, 1e9u&quot;km&quot;, 1e9u&quot;km&quot;)
 
 # Convert the gravitational constant to the appropriate units
 inter = Gravity(G=convert(typeof(1.0u&quot;km^3 * kg^-1 * d^-2&quot;), Unitful.G))
@@ -90,8 +90,8 @@ sys = System(
     pairwise_inters=(inter,),
     coords=coords .+ (SVector(5e8, 5e8, 5e8)u&quot;km&quot;,),
     velocities=velocities,
-    box_size=box_size,
-    loggers=(coords = CoordinateLogger(typeof(1.0u&quot;km&quot;), 10)),
+    boundary=boundary,
+    loggers=(coords=CoordinateLogger(typeof(1.0u&quot;km&quot;), 10),),
     force_units=u&quot;kg * km * d^-2&quot;,
     energy_units=u&quot;kg * km^2 * d^-2&quot;,
 )
@@ -105,7 +105,7 @@ simulate!(sys, simulator, 3650) # 1 year
 
 visualize(
     sys.loggers.coords,
-    box_size,
+    boundary,
     &quot;sim_planets.mp4&quot;;
     trails=5,
     color=[:yellow, :grey, :orange, :blue, :red],
@@ -140,7 +140,7 @@ function Molly.force(inter::BondableInteraction,
                         coord_j,
                         atom_i,
                         atom_j,
-                        box_size)
+                        boundary)
     # Break bonds randomly
     if atom_j.i in atom_i.partners &amp;&amp; rand() &lt; inter.prob_break
         delete!(atom_i.partners, atom_j.i)
@@ -175,12 +175,12 @@ end
 BondLogger(n_steps)=GeneralObservableLogger(bonds,BitVector,n_steps)
 
 n_atoms = 200
-box_size = SVector(10.0, 10.0)
+boundary = RectangularBoundary(10.0, 10.0)
 n_steps = 2_000
 temp = 1.0
 
 atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
-coords = place_atoms(n_atoms, box_size, 0.1)
+coords = place_atoms(n_atoms, boundary, 0.1)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
     SoftSphere(nl_only=true),
@@ -201,7 +201,7 @@ sys = System(
     pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
-    box_size=box_size,
+    boundary=boundary,
     neighbor_finder=neighbor_finder,
     loggers=(
         coords = CoordinateLogger(Float64, 20; dims=2),
@@ -222,7 +222,7 @@ end
 
 visualize(
     sys.loggers.coords,
-    box_size,
+    boundary,
     &quot;sim_mutbond.mp4&quot;;
     connections=connections,
     connection_frames=values(sys.loggers.bonds),
@@ -232,14 +232,14 @@ using Zygote
 using GLMakie
 
 inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
-box_size = SVector(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0, 5.0, 5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
 function force_direct(dist)
     c1 = SVector(1.0, 1.0, 1.0)
     c2 = SVector(dist + 1.0, 1.0, 1.0)
-    vec = vector(c1, c2, box_size)
-    F = force(inter, vec, c1, c2, a1, a2, box_size)
+    vec = vector(c1, c2, boundary)
+    F = force(inter, vec, c1, c2, a1, a2, boundary)
     return F[1]
 end
 
@@ -247,8 +247,8 @@ function force_grad(dist)
     grad = gradient(dist) do dist
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
-        vec = vector(c1, c2, box_size)
-        potential_energy(inter, vec, c1, c2, a1, a2, box_size)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
     end
     return -grad[1]
 end
@@ -272,14 +272,14 @@ axislegend()
 save(&quot;force_comparison.png&quot;, f)</code></pre><p><img src="../images/force_comparison.png" alt="Force comparison"/></p><h2 id="Variations-of-the-Morse-potential"><a class="docs-heading-anchor" href="#Variations-of-the-Morse-potential">Variations of the Morse potential</a><a id="Variations-of-the-Morse-potential-1"></a><a class="docs-heading-anchor-permalink" href="#Variations-of-the-Morse-potential" title="Permalink"></a></h2><p>The Morse potential for bonds has a parameter <em>α</em> that determines the width of the potential. It can also be compared to the harmonic bond potential.</p><pre><code class="language-julia">using Molly
 using GLMakie
 
-box_size = SVector(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0, 5.0, 5.0)
 dists = collect(0.12:0.005:2.0)
 
 function energies(inter)
     return map(dists) do dist
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
-        potential_energy(inter, c1, c2, box_size)
+        potential_energy(inter, c1, c2, boundary)
     end
 end
 
@@ -309,7 +309,7 @@ axislegend(position=:rb)
 save(&quot;morse.png&quot;, f)</code></pre><p><img src="../images/morse.png" alt="Morse"/></p><h2 id="Variations-of-the-Mie-potential"><a class="docs-heading-anchor" href="#Variations-of-the-Mie-potential">Variations of the Mie potential</a><a id="Variations-of-the-Mie-potential-1"></a><a class="docs-heading-anchor-permalink" href="#Variations-of-the-Mie-potential" title="Permalink"></a></h2><p>The Mie potential is parameterised by <em>m</em> describing the attraction and <em>n</em> describing the repulsion. When <em>m</em>=6 and <em>n</em>=12 this is equivalent to the Lennard-Jones potential.</p><pre><code class="language-julia">using Molly
 using GLMakie
 
-box_size = SVector(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0, 5.0, 5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 dists = collect(0.2:0.005:0.8)
 
@@ -318,8 +318,8 @@ function energies(m, n)
     return map(dists) do dist
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
-        vec = vector(c1, c2, box_size)
-        potential_energy(inter, vec, c1, c2, a1, a2, box_size)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
     end
 end
 
@@ -343,4 +343,4 @@ end
 xlims!(ax, low=0.2)
 ylims!(ax, -0.6, 0.3)
 axislegend(position=:rb)
-save(&quot;mie.png&quot;, f)</code></pre><p><img src="../images/mie.png" alt="Mie"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Friday 24 June 2022 13:48">Friday 24 June 2022</span>. Using Julia version 1.7.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+save(&quot;mie.png&quot;, f)</code></pre><p><img src="../images/mie.png" alt="Mie"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Friday 24 June 2022 16:00">Friday 24 June 2022</span>. Using Julia version 1.7.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
