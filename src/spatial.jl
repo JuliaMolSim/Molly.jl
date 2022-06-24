@@ -4,7 +4,7 @@ export
     CubicBoundary,
     RectangularBoundary,
     box_volume,
-    vector1D,
+    vector_1D,
     vector,
     wrap_coord_1D,
     wrap_coords,
@@ -70,14 +70,14 @@ Calculate the volume of a bounding box.
 box_volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
 
 """
-    vector1D(c1, c2, side_length)
+    vector_1D(c1, c2, side_length)
 
 Displacement between two 1D coordinate values from c1 to c2, accounting for
 the bounding box.
 The minimum image convention is used, so the displacement is to the closest
 version of the coordinate accounting for the periodic boundaries.
 """
-function vector1D(c1, c2, side_length)
+function vector_1D(c1, c2, side_length)
     if c1 < c2
         return (c2 - c1) < (c1 - c2 + side_length) ? (c2 - c1) : (c2 - c1 - side_length)
     else
@@ -93,11 +93,11 @@ the bounding box.
 The minimum image convention is used, so the displacement is to the closest
 version of the coordinates accounting for the periodic boundaries.
 """
-vector(c1, c2, boundary::Union{CubicBoundary, RectangularBoundary}) = vector1D.(c1, c2, boundary)
+vector(c1, c2, boundary::Union{CubicBoundary, RectangularBoundary}) = vector_1D.(c1, c2, boundary)
 
 @generated function vector(c1::SVector{N}, c2::SVector{N}, boundary::Union{CubicBoundary, RectangularBoundary}) where N
     quote
-        Base.Cartesian.@ncall $N SVector{$N} i->vector1D(c1[i], c2[i], boundary[i])
+        Base.Cartesian.@ncall $N SVector{$N} i -> vector_1D(c1[i], c2[i], boundary[i])
     end
 end
 
@@ -106,8 +106,8 @@ square_distance(i, j, coords, boundary) = sum(abs2, vector(coords[i], coords[j],
 # Pad a vector to 3D to allow operations such as the cross product
 function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, boundary::RectangularBoundary{T}) where T
     SVector{3, T}(
-        vector1D(c1[1], c2[1], boundary[1]),
-        vector1D(c1[2], c2[2], boundary[2]),
+        vector_1D(c1[1], c2[1], boundary[1]),
+        vector_1D(c1[2], c2[2], boundary[2]),
         zero(T),
     )
 end

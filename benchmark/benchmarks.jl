@@ -50,8 +50,8 @@ SUITE["interactions"]["Coulomb energy"     ] = @benchmarkable potential_energy($
 SUITE["interactions"]["HarmonicBond force" ] = @benchmarkable force($(b1), $(c1), $(c2), $(boundary))
 SUITE["interactions"]["HarmonicBond energy"] = @benchmarkable potential_energy($(b1), $(c1), $(c2), $(boundary))
 
-SUITE["spatial"]["vector1D"] = @benchmarkable vector1D($(4.0u"nm"), $(6.0u"nm"), $(10.0u"nm"))
-SUITE["spatial"]["vector"  ] = @benchmarkable vector($(SVector(4.0, 1.0, 1.0)u"nm"), $(SVector(6.0, 4.0, 3.0)u"nm"), $(CubicBoundary(SVector(10.0, 5.0, 3.5)u"nm")))
+SUITE["spatial"]["vector_1D"] = @benchmarkable vector_1D($(4.0u"nm"), $(6.0u"nm"), $(10.0u"nm"))
+SUITE["spatial"]["vector"   ] = @benchmarkable vector($(SVector(4.0, 1.0, 1.0)u"nm"), $(SVector(6.0, 4.0, 3.0)u"nm"), $(CubicBoundary(SVector(10.0, 5.0, 3.5)u"nm")))
 
 n_atoms = 400
 atom_mass = 10.0u"u"

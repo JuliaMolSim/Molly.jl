@@ -164,14 +164,14 @@
 end
 
 @testset "Spatial" begin
-    @test vector1D(4.0, 6.0, 10.0) ==  2.0
-    @test vector1D(1.0, 9.0, 10.0) == -2.0
-    @test vector1D(6.0, 4.0, 10.0) == -2.0
-    @test vector1D(9.0, 1.0, 10.0) ==  2.0
+    @test vector_1D(4.0, 6.0, 10.0) ==  2.0
+    @test vector_1D(1.0, 9.0, 10.0) == -2.0
+    @test vector_1D(6.0, 4.0, 10.0) == -2.0
+    @test vector_1D(9.0, 1.0, 10.0) ==  2.0
 
-    @test vector1D(4.0u"nm", 6.0u"nm", 10.0u"nm") ==  2.0u"nm"
-    @test vector1D(1.0u"m" , 9.0u"m" , 10.0u"m" ) == -2.0u"m"
-    @test_throws Unitful.DimensionError vector1D(6.0u"nm", 4.0u"nm", 10.0)
+    @test vector_1D(4.0u"nm", 6.0u"nm", 10.0u"nm") ==  2.0u"nm"
+    @test vector_1D(1.0u"m" , 9.0u"m" , 10.0u"m" ) == -2.0u"m"
+    @test_throws Unitful.DimensionError vector_1D(6.0u"nm", 4.0u"nm", 10.0)
 
     @test vector(
         SVector(4.0, 1.0, 6.0),
