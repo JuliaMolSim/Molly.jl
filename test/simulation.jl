@@ -56,6 +56,13 @@ end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     parallel_list = run_parallel_tests ? (false, true) : (false,)
 
+    TV=typeof(velocity(10.0u"u", temp))
+    TP=typeof(0.2u"kJ * mol^-1")
+
+    V(sys,neighbors=nothing)=sys.velocities
+    pot_obs(sys,neighbors=nothing)=potential_energy(sys,neighbors)
+    kin_obs(sys,neighbors=nothing)=kinetic_energy(sys)
+
     for parallel in parallel_list
         s = System(
             atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
@@ -78,6 +85,8 @@ end
                 pe = PotentialEnergyLogger(100),
                 force = ForceLogger(100),
                 writer = StructureWriter(100, temp_fp_pdb),
+                velocity_autocorrelation = AutoCorrelationLogger(TV,V,n_atoms,100),
+                potkin_correlation = TimeCorrelationLogger(TP,TP,pot_obs,kin_obs,1,100)
             ),
         )
 
@@ -113,6 +122,8 @@ end
         show(devnull, s.loggers.ke)
         show(devnull, s.loggers.pe)
         show(devnull, s.loggers.writer)
+        show(devnull, s.loggers.potkin_correlation)
+        show(devnull, s.loggers.velocity_autocorrelation)
 
         final_coords = last(values(s.loggers.coords))
         @test all(all(c .> 0.0u"nm") for c in final_coords)
@@ -121,6 +132,8 @@ end
         distances(final_coords, box_size)
         rdf(final_coords, box_size)
         @test unit(velocity_autocorr(s.loggers.vels)) == u"nm^2 * ps^-2"
+        @test unit(first(values(s.loggers.potkin_correlation))) == NoUnits
+        @test unit(first(values(s.loggers.velocity_autocorrelation;normalize=false))) == u"nm^2 * ps^-2"
 
         traj = read(temp_fp_pdb, BioStructures.PDB)
         rm(temp_fp_pdb)
@@ -239,7 +252,7 @@ end
         else
             neighbor_finder = NoNeighborFinder()
         end
-
+        
         s = System(
             atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"u", σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
@@ -251,11 +264,12 @@ end
             loggers=(
                 temp = TemperatureLogger(100),
                 coords = CoordinateLogger(100),
-                energy = TotalEnergyLogger(100),
+                energy = TotalEnergyLogger(100)
             ),
         )
 
         @time simulate!(s, simulator, n_steps)
+
     end
 end
 
@@ -286,8 +300,7 @@ end
         loggers=(
             temp = TemperatureLogger(100),
             coords = CoordinateLogger(100),
-            energy = TotalEnergyLogger(100),
-            autocorrelations = TimeCorrelationLogger(vtype,vtype,V,V,n_atoms,100)
+            energy = TotalEnergyLogger(100)
         ),
     )
 
@@ -307,8 +320,7 @@ end
         loggers=(
             temp = TemperatureLogger(Float64, 100),
             coords = CoordinateLogger(Float64, 100),
-            energy = TotalEnergyLogger(Float64, 100),
-            autocorrelations = AutoCorrelationLogger(vtype_nounits,V,n_atoms,100)
+            energy = TotalEnergyLogger(Float64, 100)
         ),
         force_units=NoUnits,
         energy_units=NoUnits,
@@ -328,16 +340,6 @@ end
     final_energy = last(values(s.loggers.energy))
     final_energy_nounits = last(values(s_nounits.loggers.energy)) * u"kJ * mol^-1"
     @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
-
-    
-    @test unit(first(values(s.loggers.autocorrelations)))==NoUnits
-    @test unit(first(values(s.loggers.autocorrelations; normalize= false)))==u"nm^2 * ps^-2"
-    
-    show(devnull,values(s_nounits.loggers.autocorrelations))
-    show(devnull,values(s_nounits.loggers.autocorrelations; normalize=false))
-
-    show(devnull, s.loggers.autocorrelations)
-    simulate!(s,simulator, 100)
 end
 
 @testset "Langevin Splitting" begin
