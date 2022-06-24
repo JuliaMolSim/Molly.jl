@@ -12,7 +12,8 @@ export
     PotentialEnergyLogger,
     ForceLogger,
     StructureWriter,
-    TimeCorrelationLogger
+    TimeCorrelationLogger,
+    AutoCorrelationLogger
 
 """
     run_loggers!(system, neighbors=nothing, step_n=0; parallel=true)
@@ -294,6 +295,16 @@ end
 An autocorrelation logger, equivalent to a `TimeCorrelationLogger` in the case `observableA == observableB`.
 """
 AutoCorrelationLogger(TA::DataType, observable::TF_A, observable_length::Integer, n_correlation::Integer) where {TF_A} = TimeCorrelationLogger(TA, TA, observable, observable, observable_length, n_correlation)
+
+function Base.show(io::IO, tcl::TimeCorrelationLogger)
+    print(io, "TimeCorrelationLogger with n_correlation ", tcl.n_correlation, ", and ", tcl.n_timesteps, " samples collected for observables ",
+                tcl.observableA, " and ",tcl.observableB)
+end
+
+function Base.show(io::IO, tcl::TimeCorrelationLogger{TA,TA2,TA,TA2,TAB,TFA,TFA}) where {TA,TA2,TAB,TFA}
+    print(io, "AutoCorrelationLogger with n_correlation ", tcl.n_correlation, ", and ", tcl.n_timesteps, " samples collected for observable ",
+                tcl.observableA)
+end
 
 function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothing, step_n::Integer=0; parallel::Bool=true)
 
