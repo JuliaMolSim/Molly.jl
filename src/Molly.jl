@@ -28,6 +28,7 @@ using Base.Threads
 using LinearAlgebra
 using Random
 using SparseArrays
+using Statistics
 
 include("types.jl")
 include("cutoffs.jl")
