@@ -194,13 +194,13 @@ end
         CubicBoundary(SVector(10.0, 10.0, 10.0)u"nm"),
     ) == SVector(2.0, -2.0, -2.0)u"nm"
 
-    @test wrap_coords(8.0 , 10.0) == 8.0
-    @test wrap_coords(12.0, 10.0) == 2.0
-    @test wrap_coords(-2.0, 10.0) == 8.0
+    @test wrap_coord_1D(8.0 , 10.0) == 8.0
+    @test wrap_coord_1D(12.0, 10.0) == 2.0
+    @test wrap_coord_1D(-2.0, 10.0) == 8.0
 
-    @test wrap_coords(8.0u"nm" , 10.0u"nm") == 8.0u"nm"
-    @test wrap_coords(12.0u"m" , 10.0u"m" ) == 2.0u"m"
-    @test_throws ErrorException wrap_coords(-2.0u"nm", 10.0)
+    @test wrap_coord_1D(8.0u"nm" , 10.0u"nm") == 8.0u"nm"
+    @test wrap_coord_1D(12.0u"m" , 10.0u"m" ) == 2.0u"m"
+    @test_throws ErrorException wrap_coord_1D(-2.0u"nm", 10.0)
 
     vels_units   = [maxwell_boltzmann(12.0u"u", 300.0u"K") for _ in 1:1_000]
     vels_nounits = [maxwell_boltzmann(12.0    , 300.0    ) for _ in 1:1_000]

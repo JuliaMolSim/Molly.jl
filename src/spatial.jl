@@ -6,7 +6,7 @@ export
     box_volume,
     vector1D,
     vector,
-    wrap_coords,
+    wrap_coord_1D,
     wrap_coords_vec,
     maxwell_boltzmann,
     random_velocities,
@@ -119,11 +119,11 @@ trim3D(v::SVector{3, T}, boundary::RectangularBoundary{T}) where T = SVector{2, 
 trim3D(v::SVector{3}, boundary) = v
 
 """
-    wrap_coords(c, side_length)
+    wrap_coord_1D(c, side_length)
 
 Ensure a 1D coordinate is within the bounding box and return the coordinate.
 """
-function wrap_coords(c, side_length)
+function wrap_coord_1D(c, side_length)
     if isinf(side_length)
         return c
     else
@@ -136,7 +136,7 @@ end
 
 Ensure a coordinate is within the bounding box and return the coordinate.
 """
-wrap_coords_vec(v, boundary::Union{CubicBoundary, RectangularBoundary}) = wrap_coords.(v, boundary)
+wrap_coords_vec(v, boundary::Union{CubicBoundary, RectangularBoundary}) = wrap_coord_1D.(v, boundary)
 
 const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
 
