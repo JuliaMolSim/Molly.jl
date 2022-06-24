@@ -153,7 +153,7 @@ end
 
     @test maximum(distances(s.coords, boundary)) > 5.0u"nm"
 
-    run_visualize_tests && visualize(s.loggers["coords"], boundary, temp_fp_viz)
+    run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_viz)
 end
 
 @testset "Lennard-Jones simulators" begin

@@ -7,8 +7,8 @@ function axis_limits(boundary_conv, coord_logger, dim)
     lim = boundary_conv[dim]
     if isinf(lim)
         # Find coordinate limits in given dimension
-        low  = ustrip(minimum(cs -> minimum(c -> c[dim], cs), coord_logger.coords))
-        high = ustrip(maximum(cs -> maximum(c -> c[dim], cs), coord_logger.coords))
+        low  = ustrip(minimum(cs -> minimum(c -> c[dim], cs), values(coord_logger))
+        high = ustrip(maximum(cs -> maximum(c -> c[dim], cs), values(coord_logger))
         return low, high
     else
         return 0.0, lim
