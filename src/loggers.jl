@@ -289,6 +289,12 @@ function TimeCorrelationLogger(TA::DataType, TB::DataType, observableA::TF_A, ob
 
 end
 
+"""
+`function AutoCorrelationLogger(TA::DataType, observable::Function, observable_length::Integer, n_correlation::Integer)`
+An autocorrelation logger, equivalent to a `TimeCorrelationLogger` in the case `observableA == observableB`.
+"""
+AutoCorrelationLogger(TA::DataType, observable::TF_A, observable_length::Integer, n_correlation::Integer) where {TF_A} = TimeCorrelationLogger(TA, TA, observable, observable, observable_length, n_correlation)
+
 function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothing, step_n::Integer=0; parallel::Bool=true)
 
     #compute observables
