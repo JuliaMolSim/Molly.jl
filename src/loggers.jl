@@ -13,7 +13,8 @@ export
     ForceLogger,
     StructureWriter,
     TimeCorrelationLogger,
-    AutoCorrelationLogger
+    AutoCorrelationLogger,
+    AverageObservableLogger
 
 """
     run_loggers!(system, neighbors=nothing, step_n=0; parallel=true)
@@ -235,7 +236,7 @@ or unnormalized form
 C(t)=\langle A_t\cdot B_0\rangle -\langle A \rangle\cdot \langle B\rangle
 ```
 These can be used to estimate statistical error, or to compute transport coefficients from Green-Kubo type formulas.
-A and B are observables, functions of the form `observable(sys::System,neighbors=nothing)`.    
+A and B are observables, functions of the form `observable(sys::System,neighbors; parallel::Bool)`.    
 The return values of A and B can be of scalar or vector type (including `Vector{SVector{...}}`s, like positions or velocities), and must implement `dot`
 # Arguments
 - `TA::DataType`: The type returned by `observableA`, suppporting `zero(TA)`.
@@ -309,8 +310,8 @@ end
 function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothing, step_n::Integer=0; parallel::Bool=true)
 
     #compute observables
-    A = logger.observableA(s, neighbors)
-    B = (logger.observableA != logger.observableB) ? logger.observableB(s, neighbors) : A
+    A = logger.observableA(s, neighbors; parallel=parallel)
+    B = (logger.observableA != logger.observableB) ? logger.observableB(s, neighbors; parallel=parallel) : A
 
     logger.n_timesteps += 1
 
@@ -353,4 +354,59 @@ function Base.values(logger::TimeCorrelationLogger; normalize::Bool=true)
         else
             return C
         end
+end
+
+"""
+`AverageObservableLogger(observable::Function,T::DataType,n_steps::Integer;n_blocks::Integer=1024)`
+A logger that periodically records observations of a system, and keeps a running empirical average.
+While `GeneralObservableLogger` holds a full record of observations, `AverageObservableLogger` does not.
+In addition, calling `values(logger::AverageObservableLogger; std::Bool=true)` returns two values: the current running average,
+ and an estimate of the standard deviation for this average, based on the [block averaging method](https://aip.scitation.org/doi/10.1063/1.457480).
+
+# Arguments
+- `observable::Function`: The observable whose mean is recorded. Must support the method `observable(s::System, neighbors; parallel::Bool)`.
+- `T::DataType`: The type returned by `observable`.
+- `n_blocks::Integer`(optional): The number of blocks used in the block averaging method. It should be an even number.
+"""
+mutable struct AverageObservableLogger{T,F}
+    observable::F
+    n_steps::Int64
+    n_blocks::Int64
+    current_block_size::Int64
+    block_averages::Vector{T}
+    current_block::Vector{T}
+end
+
+function AverageObservableLogger(observable::Function, T::DataType, n_steps::Integer; n_blocks::Integer=1024)
+    return AverageObservableLogger{T,typeof(observable)}(observable, n_steps, n_blocks, 1, T[],T[])
+end
+
+function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=nothing, step_n::Integer=0; parallel::Bool=true) where {T}
+    if (step_n % aol.n_steps) == 0
+        obs=aol.observable(s,neighbors;parallel=parallel)
+        push!(aol.current_block,obs)
+
+        if length(aol.current_block)==aol.current_block_size #current block is full
+            push!(aol.block_averages,mean(aol.current_block))
+            aol.current_block=T[]
+        end
+
+        if length(aol.block_averages)==aol.n_blocks #block averages buffer is full
+            aol.block_averages = T[(avg1 + avg2) / 2 for (avg1,avg2)=zip(aol.block_averages[1:2:end],aol.block_averages[2:2:end])]
+            aol.current_block_size = aol.current_block_size * 2
+        end
+        
+    end
+end
+
+function Base.values(aol::AverageObservableLogger) #TODO add some logic to use the samples in the hanging block
+    avg = mean(aol.block_averages)
+    variance = var(aol.block_averages) / length(aol.block_averages)
+
+    return [avg, sqrt(variance)]
+end
+
+function Base.show(io::IO, aol::AverageObservableLogger)
+    print(io, "AverageObservableLogger with n_steps ", aol.n_steps, ", and ", (aol.current_block_size * length(aol.block_averages)) , " samples collected for observable ",
+                aol.observable)
 end

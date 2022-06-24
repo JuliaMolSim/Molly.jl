@@ -16,6 +16,7 @@ using KernelDensity
 using NearestNeighbors
 using Reexport
 using Requires
+using Statistics
 using Unitful
 using Zygote
 
