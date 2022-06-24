@@ -11,6 +11,9 @@ using CUDA
 using Base.Threads
 using DelimitedFiles
 
+# Allow CUDA device to be specified
+const DEVICE = get(ENV, "DEVICE", "0")
+
 run_parallel_tests = nthreads() > 1
 if run_parallel_tests
     @info "The parallel benchmarks will be run as Julia is running on $(nthreads()) threads"
@@ -20,7 +23,8 @@ end
 
 run_gpu_tests = CUDA.functional()
 if run_gpu_tests
-    @info "The GPU benchmarks will be run as a CUDA-enabled device is available"
+    device!(parse(Int, DEVICE))
+    @info "The GPU tests will be run on device $DEVICE"
 else
     @warn "The GPU benchmarks will not be run as a CUDA-enabled device is not available"
 end
