@@ -18,6 +18,7 @@
         loggers=(
             temp = TemperatureLogger(100),
             coords = CoordinateLogger(100; dims=2),
+            avg_temp = AverageObservableLogger(Molly.temperature_wrapper, typeof(temp), 1; n_blocks = 200)
         ),
     )
     random_velocities!(s, temp)
@@ -40,6 +41,9 @@
     distances(final_coords, box_size)
     rdf(final_coords, box_size)
 
+    show(devnull, s.loggers.avg_temp)
+    (t, σ) = values(s.loggers.avg_temp)
+    @test isapprox(t, mean(values(s.loggers.temp)); atol = 3σ)
     run_visualize_tests && visualize(s.loggers.coords, box_size, temp_fp_viz)
 end
 
