@@ -213,6 +213,7 @@ end
 
 The Störmer-Verlet integrator.
 Does not currently work with coupling methods that alter the velocity.
+Does not currently remove the centre of mass motion every time step.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
@@ -333,7 +334,7 @@ The `Langevin` and `VelocityVerlet` simulators without coupling correspond to
 the **BAOA** and **BAB** schemes respectively.
 For more information on the sampling properties of splitting schemes, see
 [Fass et al. 2018](https://doi.org/10.3390/e20050318).
-Not currently compatible with automatic differentiation.
+Not currently compatible with automatic differentiation using Zygote.
 
 # Arguments
 - `dt::S`: the time step of the simulation.
@@ -366,7 +367,7 @@ function simulate!(sys,
                     rng=Random.GLOBAL_RNG)
     M_inv = inv.(mass.(sys.atoms))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
-    σ_eff = sqrt.( (1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
+    σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
     accels_t = accelerations(sys, neighbors; parallel=parallel)
 
@@ -410,14 +411,15 @@ function simulate!(sys,
             step!(args...)
         end
         
-        run_loggers!(sys, neighbors, step_n)
         sim.remove_CM_motion && remove_CM_motion!(sys)
+        run_loggers!(sys, neighbors, step_n)
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                         parallel=parallel)
         end
     end
+    return sys
 end
 
 function O_step!(s::System, α_eff::V, σ_eff::V, rng::R, temperature::T) where {V, R <: AbstractRNG, T}
