@@ -304,7 +304,7 @@ end
             temp = TemperatureLogger(Float64, 100),
             coords = CoordinateLogger(Float64, 100),
             energy = TotalEnergyLogger(Float64, 100),
-            autocorrelations = TimeCorrelationLogger(vtype_nounits,vtype_nounits,V,V,n_atoms,100)
+            autocorrelations = AutoCorrelationLogger(vtype_nounits,V,n_atoms,100)
         ),
         force_units=NoUnits,
         energy_units=NoUnits,
@@ -332,6 +332,7 @@ end
     show(devnull,values(s_nounits.loggers.autocorrelations))
     show(devnull,values(s_nounits.loggers.autocorrelations; normalize=false))
 
+    show(devnull, s.loggers.autocorrelations)
     simulate!(s,simulator, 100)
 end
 
