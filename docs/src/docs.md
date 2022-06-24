@@ -35,6 +35,8 @@ velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 We store the coordinates and velocities as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
 They can be of 2 or 3 dimensions and of any number type, e.g. `Float64` or `Float32`.
 Setting individual dimensions in [`CubicBoundary`](@ref) to `Inf * u"nm"` makes the simulation have no boundary in that dimension.
+Simulations in 2 dimensions should use [`RectangularBoundary`](@ref).
+
 Now we can define our pairwise interactions, i.e. those between most or all atom pairs.
 Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard-Jones type.
 ```julia

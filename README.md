@@ -19,9 +19,9 @@ Implemented features include:
 - Interface to allow definition of new interactions, simulators, thermostats, neighbor finders, loggers etc.
 - Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also some support for Gromacs files.
 - Andersen, Berendsen and velocity rescaling thermostats.
-- Verlet, velocity Verlet, Störmer-Verlet and Langevin integrators.
+- Verlet, velocity Verlet, Störmer-Verlet and flexible Langevin integrators.
 - Steepest descent energy minimization.
-- Periodic boundary conditions in a cubic box.
+- Periodic and infinite boundary conditions in a cubic box.
 - Various neighbor list implementations to speed up calculation of non-bonded forces.
 - Implicit solvent GBSA methods.
 - [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.

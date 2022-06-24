@@ -20,6 +20,7 @@ export
     CubicBoundary(arr)
 
 Cubic 3D bounding box defined by 3 side lengths.
+Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct CubicBoundary{T}
     side_lengths::SVector{3, T}
@@ -44,6 +45,7 @@ AtomsBase.n_dimensions(::CubicBoundary) = 3
     RectangularBoundary(arr)
 
 Rectangular 2D bounding box defined by 2 side lengths.
+Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct RectangularBoundary{T}
     side_lengths::SVector{2, T}
@@ -147,7 +149,8 @@ const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
 Generate a random velocity from the Maxwell-Boltzmann distribution, with
 optional custom Boltzmann constant.
 """
-function AtomsBase.velocity(mass, temp, k=mb_conversion_factor; dims::Integer=3, rng=Random.GLOBAL_RNG)
+function AtomsBase.velocity(mass, temp, k=mb_conversion_factor;
+                            dims::Integer=3, rng=Random.GLOBAL_RNG)
     k_strip = (unit(mass) == NoUnits) ? ustrip(k) : k
     return SVector([maxwell_boltzmann(mass, temp, k_strip; rng=rng) for i in 1:dims]...)
 end
@@ -184,6 +187,7 @@ function maxwell_boltzmann(mass, temp; rng=Random.GLOBAL_RNG)
     k = unit(temp) == NoUnits ? ustrip(mb_conversion_factor) : mb_conversion_factor
     return maxwell_boltzmann(mass, temp, k; rng=rng)
 end
+
 """
     random_velocities(sys, temp)
 

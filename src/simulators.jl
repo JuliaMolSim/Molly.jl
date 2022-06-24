@@ -422,18 +422,18 @@ function simulate!(sys,
     return sys
 end
 
-function O_step!(s::System, α_eff::V, σ_eff::V, rng::R, temperature::T) where {V, R <: AbstractRNG, T}
+function O_step!(s, α_eff, σ_eff, rng, temperature)
     noise = random_velocities(s, temperature; rng=rng)
     s.velocities = α_eff .* s.velocities + σ_eff .* noise
 end
 
-function A_step!(s::System, dt_eff::T) where T
+function A_step!(s, dt_eff)
     s.coords += s.velocities * dt_eff
     s.coords = wrap_coords.(s.coords, (s.boundary,))
 end
 
-function B_step!(s::System, dt_eff::T, acceleration_vector::A, neighbors,
-                    compute_forces::Bool, parallel::Bool) where {T, A}
+function B_step!(s, dt_eff, acceleration_vector, neighbors,
+                    compute_forces::Bool, parallel::Bool)
     if compute_forces
         acceleration_vector .= accelerations(s, neighbors, parallel=parallel)
     end
