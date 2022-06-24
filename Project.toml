@@ -26,6 +26,7 @@ Requires = "ae029012-a4dd-5104-9daa-d747884805df"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+UnitfulChainRules = "f31437dd-25a7-4345-875f-756556e6935d"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
@@ -48,6 +49,7 @@ Reexport = "1"
 Requires = "1"
 StaticArrays = "1"
 Unitful = "1"
+UnitfulChainRules = "0.1"
 Zygote = "0.6.37"
 julia = "1.7"
 

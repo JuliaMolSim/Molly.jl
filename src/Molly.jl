@@ -17,6 +17,7 @@ using NearestNeighbors
 using Reexport
 using Requires
 using Unitful
+using UnitfulChainRules
 using Zygote
 
 @reexport using AtomsBase
