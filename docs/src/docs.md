@@ -782,6 +782,7 @@ The available loggers are:
 - [`StructureWriter`](@ref)
 - [`TimeCorrelationLogger`](@ref)
 - [`AutoCorrelationLogger`](@ref)
+- [`AverageObservableLogger`](@ref)
 
 Many of the loggers can be initialised with just the number of steps between recorded values, e.g. `CoordinateLogger(10)`.
 An optional first argument is the type of the recorded value; the above is equivalent to `CoordinateLogger(typeof(1.0u"nm"), 10)` but if the simulation did not use units then `CoordinateLogger(Float64, 10)` would be required.
