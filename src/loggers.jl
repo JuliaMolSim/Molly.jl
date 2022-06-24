@@ -225,7 +225,7 @@ atom_record(at_data, i, coord) = BioStructures.AtomRecord(
     at_data.element == "?" ? "  " : at_data.element, "  "
 )
 
-@doc md"""
+@doc raw"""
 `TimeCorrelationLogger(TA::DataType, TB::DataType, observableA::Function, observableB::Function, observable_length::Integer, n_correlation::Integer)`
 A time correlation logger, which allow to estimate statistical correlations of normalized form
 ```math
