@@ -145,7 +145,7 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=Dict("coords" => CoordinateLogger(100)),
+        loggers=(coords=CoordinateLogger(100),),
     )
     random_velocities!(s, temp)
 

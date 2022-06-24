@@ -311,7 +311,7 @@ includes collapsed into one file.
     zero by default.
 - `boundary=nothing`: the bounding box used for simulation, read from the
     file by default.
-- `loggers=Dict()`: the loggers that record properties of interest during a
+- `loggers=()`: the loggers that record properties of interest during a
     simulation.
 - `units::Bool=true`: whether to use Unitful quantities.
 - `gpu::Bool=false`: whether to move the relevant parts of the system onto
@@ -330,7 +330,7 @@ function System(coord_file::AbstractString,
                 force_field::OpenMMForceField;
                 velocities=nothing,
                 boundary=nothing,
-                loggers=Dict(),
+                loggers=(),
                 units::Bool=true,
                 gpu::Bool=false,
                 gpu_diff_safe::Bool=gpu,
@@ -799,7 +799,7 @@ function System(T::Type,
                 top_file::AbstractString;
                 velocities=nothing,
                 boundary=nothing,
-                loggers=Dict(),
+                loggers=(),
                 units::Bool=true,
                 gpu::Bool=false,
                 gpu_diff_safe::Bool=gpu,

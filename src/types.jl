@@ -261,7 +261,7 @@ interface described there.
 - `boundary::B`: the bounding box in which the simulation takes place.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
-- `loggers::L=Dict()`: the loggers that record properties of interest during a
+- `loggers::L=()`: the loggers that record properties of interest during a
     simulation.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
@@ -298,7 +298,7 @@ function System(;
                 velocities=zero(coords) * u"ps^-1",
                 boundary,
                 neighbor_finder=NoNeighborFinder(),
-                loggers=Dict(),
+                loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=Unitful.k,
