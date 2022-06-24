@@ -4,11 +4,11 @@
     s = System(
         joinpath(data_dir, "5XER", "gmx_coords.gro"),
         joinpath(data_dir, "5XER", "gmx_top_ff.top");
-        loggers=Dict(
-            "temp"   => TemperatureLogger(10),
-            "coords" => CoordinateLogger(10),
-            "energy" => TotalEnergyLogger(10),
-            "writer" => StructureWriter(10, temp_fp_pdb),
+        loggers=(
+            temp = TemperatureLogger(10),
+            coords = CoordinateLogger(10),
+            energy = TotalEnergyLogger(10),
+            writer = StructureWriter(10, temp_fp_pdb),
         ),
     )
     simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
@@ -39,10 +39,10 @@ end
         Float32,
         joinpath(data_dir, "5XER", "gmx_coords.gro"),
         joinpath(data_dir, "5XER", "gmx_top_ff.top");
-        loggers=Dict(
-            "temp"   => TemperatureLogger(typeof(1.0f0u"K"), 10),
-            "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10),
-            "energy" => TotalEnergyLogger(typeof(1.0f0u"kJ * mol^-1"), 10),
+        loggers=(
+            temp = TemperatureLogger(typeof(1.0f0u"K"), 10),
+            coords = CoordinateLogger(typeof(1.0f0u"nm"), 10),
+            energy = TotalEnergyLogger(typeof(1.0f0u"kJ * mol^-1"), 10),
         ),
     )
     simulator = VelocityVerlet(dt=0.0002f0u"ps", coupling=AndersenThermostat(temp, 10.0f0u"ps"))

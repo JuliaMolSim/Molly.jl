@@ -24,7 +24,7 @@ ff = OpenMMForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
-    loggers=Dict("temp" => TemperatureLogger(100)),
+    loggers=(temp = TemperatureLogger(100),),
 )
 
 minimizer = SteepestDescentMinimizer()
@@ -60,8 +60,8 @@ for (i, temp) in enumerate(temps)
 end
 scatter!(
     ax,
-    100 .* (1:length(sys.loggers["temp"].temperatures)),
-    ustrip.(sys.loggers["temp"].temperatures),
+    100 .* (1:length(values(sys.loggers.temp))),
+    ustrip.(values(sys.loggers.temp)),
     markersize=5,
 )
 save("annealing.png", f)
@@ -111,7 +111,7 @@ sys = System(
     coords=coords .+ (SVector(5e8, 5e8, 5e8)u"km",),
     velocities=velocities,
     box_size=box_size,
-    loggers=Dict("coords" => CoordinateLogger(typeof(1.0u"km"), 10)),
+    loggers=(coords = CoordinateLogger(typeof(1.0u"km"), 10)),
     force_units=u"kg * km * d^-2",
     energy_units=u"kg * km^2 * d^-2",
 )
@@ -124,7 +124,7 @@ simulator = Verlet(
 simulate!(sys, simulator, 3650) # 1 year
 
 visualize(
-    sys.loggers["coords"],
+    sys.loggers.coords,
     box_size,
     "sim_planets.mp4";
     trails=5,
@@ -193,22 +193,17 @@ function Molly.force(inter::BondableInteraction,
     end
 end
 
-struct BondLogger
-    n_steps::Int
-    bonds::Vector{BitVector}
-end
-
-function Molly.log_property!(logger::BondLogger, s, neighbors, step_n; parallel=true)
-    if step_n % logger.n_steps == 0
+function bonds(sys::System,neighbors=nothing,parallel::Bool=true)
         bonds = BitVector()
-        for i in 1:length(s)
+        for i in 1:length(sys)
             for j in 1:(i - 1)
-                push!(bonds, j in s.atoms[i].partners)
+                push!(bonds, j in sys.atoms[i].partners)
             end
         end
-        push!(logger.bonds, bonds)
-    end
+        return bonds
 end
+
+BondLogger(n_steps)=GeneralObservableLogger(bonds,BitVector,n_steps)
 
 n_atoms = 200
 box_size = SVector(10.0, 10.0)
@@ -239,9 +234,9 @@ sys = System(
     velocities=velocities,
     box_size=box_size,
     neighbor_finder=neighbor_finder,
-    loggers=Dict(
-        "coords" => CoordinateLogger(Float64, 20; dims=2),
-        "bonds"  => BondLogger(20, []),
+    loggers=(
+        coords = CoordinateLogger(Float64, 20; dims=2),
+        bonds = BondLogger(20),
     ),
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -257,11 +252,11 @@ for i in 1:length(sys)
 end
 
 visualize(
-    sys.loggers["coords"],
+    sys.loggers.coords,
     box_size,
     "sim_mutbond.mp4";
     connections=connections,
-    connection_frames=sys.loggers["bonds"].bonds,
+    connection_frames=values(sys.loggers.bonds),
     markersize=0.1,
 )
 ```

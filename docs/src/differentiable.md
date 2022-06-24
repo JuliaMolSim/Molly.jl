@@ -73,7 +73,7 @@ simulator = VelocityVerlet(
 
 function loss(σ)
     atoms = [Atom(0, 0.0, atom_mass, σ, 0.2, false) for i in 1:n_atoms]
-    loggers = Dict("coords" => CoordinateLogger(Float64, 10))
+    loggers = (coords = CoordinateLogger(Float64, 10),)
 
     s = System(
         atoms=atoms,
@@ -184,7 +184,7 @@ simulator = VelocityVerlet(
 
 function loss(θ)
     atoms = [Atom(0, 0.0, atom_mass, 0.0, 0.0, false) for i in 1:n_atoms]
-    loggers = Dict("coords" => CoordinateLogger(Float64, 2))
+    loggers = (coords = CoordinateLogger(Float64, 2),)
     specific_inter_lists = (
         InteractionList2Atoms(
             [1, 2, 4, 5],
@@ -326,7 +326,7 @@ simulator = VelocityVerlet(
 
 function loss()
     atoms = [Atom(0, 0.0f0, mass, 0.0f0, 0.0f0, false) for i in 1:n_atoms]
-    loggers = Dict("coords" => CoordinateLogger(Float32, 10))
+    loggers = (coords = CoordinateLogger(Float32, 10),)
     specific_inter_lists = (
         InteractionList2Atoms([1], [3], [""], [NNBond()]),
     )
@@ -352,7 +352,7 @@ function loss()
 
     Zygote.ignore() do
         printfmt("Dist end {:6.3f}  |  Loss {:6.3f}\n", dist_end, loss_val)
-        visualize(s.loggers["coords"], box_size, "sim.mp4")
+        visualize(s.loggers.coords, box_size, "sim.mp4")
     end
 
     return loss_val
