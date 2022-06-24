@@ -18,6 +18,7 @@
         loggers=(
             temp = TemperatureLogger(100),
             coords = CoordinateLogger(100; dims=2),
+            avg_temp = AverageObservableLogger(Molly.temperature_wrapper, typeof(temp), 1; n_blocks = 200)
         ),
     )
     random_velocities!(s, temp)
@@ -40,6 +41,9 @@
     distances(final_coords, box_size)
     rdf(final_coords, box_size)
 
+    show(devnull, s.loggers.avg_temp)
+    (t, σ) = values(s.loggers.avg_temp)
+    @test isapprox(t, mean(values(s.loggers.temp)); atol = 3σ)
     run_visualize_tests && visualize(s.loggers.coords, box_size, temp_fp_viz)
 end
 
@@ -55,9 +59,9 @@ end
     TV=typeof(velocity(10.0u"u", temp))
     TP=typeof(0.2u"kJ * mol^-1")
 
-    V(sys,neighbors=nothing)=sys.velocities
-    pot_obs(sys,neighbors=nothing)=potential_energy(sys,neighbors)
-    kin_obs(sys,neighbors=nothing)=kinetic_energy(sys)
+    V(sys,args...;kwargs...)=sys.velocities
+    pot_obs(sys,neighbors;kwargs...)=potential_energy(sys,neighbors)
+    kin_obs(sys,args...;kwargs...)=kinetic_energy(sys)
 
     for parallel in parallel_list
         s = System(
