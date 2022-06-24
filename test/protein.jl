@@ -116,7 +116,7 @@ end
     coords_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "coordinates_$(n_steps)steps.txt"))))u"nm"
     vels_openmm   = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_$(n_steps)steps.txt" ))))u"nm * ps^-1"
 
-    coords_diff = sys.coords .- wrap_coords_vec.(coords_openmm, (sys.boundary,))
+    coords_diff = sys.coords .- wrap_coords.(coords_openmm, (sys.boundary,))
     vels_diff = sys.velocities .- vels_openmm
     # Coordinates and velocities at end must match at some threshold
     @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
@@ -145,7 +145,7 @@ end
 
     simulate!(sys_nounits, simulator_nounits, n_steps; parallel=true)
 
-    coords_diff = sys_nounits.coords * u"nm" .- wrap_coords_vec.(coords_openmm, (sys.boundary,))
+    coords_diff = sys_nounits.coords * u"nm" .- wrap_coords.(coords_openmm, (sys.boundary,))
     vels_diff = sys_nounits.velocities * u"nm * ps^-1" .- vels_openmm
     @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
     @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
@@ -173,7 +173,7 @@ end
 
         simulate!(sys, simulator, n_steps)
 
-        coords_diff = Array(sys.coords) .- wrap_coords_vec.(coords_openmm, (sys.boundary,))
+        coords_diff = Array(sys.coords) .- wrap_coords.(coords_openmm, (sys.boundary,))
         vels_diff = Array(sys.velocities) .- vels_openmm
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
         @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
@@ -195,7 +195,7 @@ end
 
         simulate!(sys_nounits, simulator_nounits, n_steps)
 
-        coords_diff = Array(sys_nounits.coords * u"nm") .- wrap_coords_vec.(coords_openmm, (sys.boundary,))
+        coords_diff = Array(sys_nounits.coords * u"nm") .- wrap_coords.(coords_openmm, (sys.boundary,))
         vels_diff = Array(sys_nounits.velocities * u"nm * ps^-1") .- vels_openmm
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
         @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"

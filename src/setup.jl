@@ -734,7 +734,7 @@ function System(coord_file::AbstractString,
     if centre_coords
         coords = coords .- (mean(coords),) .+ (box_centre(boundary_used),)
     end
-    coords = wrap_coords_vec.(coords, (boundary_used,))
+    coords = wrap_coords.(coords, (boundary_used,))
 
     atoms = [atoms...]
     if gpu_diff_safe
@@ -1061,7 +1061,7 @@ function System(T::Type,
     if centre_coords
         coords = coords .- (mean(coords),) .+ (box_centre(boundary_used),)
     end
-    coords = wrap_coords_vec.(coords, (boundary_used,))
+    coords = wrap_coords.(coords, (boundary_used,))
 
     pairwise_inters = (lj, crf)
 

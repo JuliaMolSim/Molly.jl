@@ -7,7 +7,7 @@ export
     vector1D,
     vector,
     wrap_coord_1D,
-    wrap_coords_vec,
+    wrap_coords,
     maxwell_boltzmann,
     random_velocities,
     random_velocities!,
@@ -132,11 +132,11 @@ function wrap_coord_1D(c, side_length)
 end
 
 """
-    wrap_coords_vec(c, boundary)
+    wrap_coords(c, boundary)
 
 Ensure a coordinate is within the bounding box and return the coordinate.
 """
-wrap_coords_vec(v, boundary::Union{CubicBoundary, RectangularBoundary}) = wrap_coord_1D.(v, boundary)
+wrap_coords(v, boundary::Union{CubicBoundary, RectangularBoundary}) = wrap_coord_1D.(v, boundary)
 
 const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
 

@@ -672,7 +672,7 @@ function Molly.simulate!(sys,
         accels_t = accelerations(sys, neighbors; parallel=parallel)
 
         # Ensure coordinates stay within the simulation box like this
-        sys.coords = wrap_coords_vec.(sys.coords, (sys.boundary,))
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         # Apply coupling like this
         apply_coupling!(sys, sim, sim.coupling)

@@ -63,7 +63,7 @@ function simulate!(sys,
 
         coords_copy = sys.coords
         sys.coords += hn * F ./ max_force
-        sys.coords = wrap_coords_vec.(sys.coords, (sys.boundary,))
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
@@ -136,7 +136,7 @@ function simulate!(sys,
 
     for step_n in 1:n_steps
         sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
-        sys.coords = wrap_coords_vec.(sys.coords, (sys.boundary,))
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         accels_t_dt = accelerations(sys, neighbors; parallel=parallel)
 
@@ -193,7 +193,7 @@ function simulate!(sys,
         sys.velocities += remove_molar.(accels_t) .* sim.dt
 
         sys.coords += sys.velocities .* sim.dt
-        sys.coords = wrap_coords_vec.(sys.coords, (sys.boundary,))
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim, sim.coupling)
@@ -244,7 +244,7 @@ function simulate!(sys,
         else
             sys.coords += vector.(coords_last, sys.coords, (sys.boundary,)) .+ remove_molar.(accels_t) .* sim.dt ^ 2
         end
-        sys.coords = wrap_coords_vec.(sys.coords, (sys.boundary,))
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         # This is accurate to O(dt)
         sys.velocities = vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt
@@ -310,7 +310,7 @@ function simulate!(sys,
         sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
 
         sys.coords += sys.velocities .* sim.dt / 2
-        sys.coords = wrap_coords_vec.(sys.coords, (sys.boundary,))
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         sim.remove_CM_motion && remove_CM_motion!(sys)
 
         run_loggers!(sys, neighbors, step_n; parallel=parallel)
@@ -429,7 +429,7 @@ end
 
 function A_step!(s::System, dt_eff::T) where T
     s.coords += s.velocities * dt_eff
-    s.coords = wrap_coords_vec.(s.coords, (s.boundary,))
+    s.coords = wrap_coords.(s.coords, (s.boundary,))
 end
 
 function B_step!(s::System, dt_eff::T, acceleration_vector::A, neighbors,

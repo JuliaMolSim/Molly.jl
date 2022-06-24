@@ -998,7 +998,7 @@ end
 end
 
 # Use fast broadcast path on CPU
-for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec, :wrap_coords_vec,
+for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec, :wrap_coords,
             :get_f1, :get_f2, :get_f3, :get_f4, :born_radii_loop_OBC, :get_I, :get_I_grad,
             :born_radii_loop_GBN2, :get_bi, :get_bj, :get_fi, :get_fj, :gb_force_loop_1,
             :gb_force_loop_2, :gb_energy_loop)
