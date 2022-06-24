@@ -881,7 +881,7 @@ temperature(sys) = 48.76795299825687 K
 ```
 Good. Next we define our correlation logger, add it to the system's loggers and run a long simulation. Note we need to redeclare the system when adding a logger.
 ```julia
-V(s::System, neighbors=nothing) = s.velocities
+V(s::System, args...; kwargs...) = s.velocities # velocity observable (args and kwargs because more complex observables may require neighbors and parallelism)
 V_Type = eltype(sys.velocities)
 
 sys = System(atoms=atoms,

@@ -59,9 +59,9 @@ end
     TV=typeof(velocity(10.0u"u", temp))
     TP=typeof(0.2u"kJ * mol^-1")
 
-    V(sys,neighbors=nothing)=sys.velocities
-    pot_obs(sys,neighbors=nothing)=potential_energy(sys,neighbors)
-    kin_obs(sys,neighbors=nothing)=kinetic_energy(sys)
+    V(sys,args...;kwargs...)=sys.velocities
+    pot_obs(sys,neighbors;kwargs...)=potential_energy(sys,neighbors)
+    kin_obs(sys,args...;kwargs...)=kinetic_energy(sys)
 
     for parallel in parallel_list
         s = System(
