@@ -780,6 +780,8 @@ The available loggers are:
 - [`PotentialEnergyLogger`](@ref)
 - [`ForceLogger`](@ref)
 - [`StructureWriter`](@ref)
+- [`TimeCorrelationLogger`](@ref)
+- [`AutoCorrelationLogger`](@ref)
 
 Many of the loggers can be initialised with just the number of steps between recorded values, e.g. `CoordinateLogger(10)`.
 An optional first argument is the type of the recorded value; the above is equivalent to `CoordinateLogger(typeof(1.0u"nm"), 10)` but if the simulation did not use units then `CoordinateLogger(Float64, 10)` would be required.
@@ -829,7 +831,7 @@ values(my_logger)
 
 The [`TimeCorrelationLogger`](@ref) logger can be used to compute correlation functions of the form
 $$C(t)=\frac{\langle A_t\cdot B_0 \rangle}{\sqrt{\langle|A|^2\rangle\langle |B|^2\rangle }},$$
-where $A$ and $B$ are scalar or vectors observables, and the brackets are ensemble averages.
+where $A$ and $B$ are scalar or vectors centered observables, and the brackets are ensemble averages.
 This includes the computations of autocorrelation functions, which can be used to gather insight into the dynamical properties of the system, for instance using Green-Kubo formulas, or the statistical properties of a sampling method.
 
 Let's look at a simple example, computing the velocity autocorrelation function for a simple system consisting of diatomic molecules defined by [`HarmonicBond`](@ref) potentials between pairs of atoms, and an additional [`SoftSphere`](@ref) potential between all pairs of atoms. Let's start by defining the system.
@@ -894,6 +896,13 @@ simulate!(sys, simulator, 100000)
 ```
 
 Check the output:
+```julia
+show(sys.loggers)
+```
+```console
+(velocity_autocorrelation = AutoCorrelationLogger with n_correlation 1000, and 100001 samples collected for observable V,)
+```
+Note we also could have used the convenience function `AutoCorrelationLogger` to define our logger.
 ```julia
 using Plots, UnitfulRecipes
 

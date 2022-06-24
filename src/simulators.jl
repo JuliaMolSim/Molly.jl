@@ -322,8 +322,13 @@ function simulate!(sys,
     return sys
 end
 
-"""LangevinSplitting(; <keyword arguments>)
-A Langevin simulator using a general splitting scheme, consisting of a succession of **A**, **B** and **O** steps, corresponding respectively to updates in position, velocity for the potential part, and velocity for the thermal fluctuation-dissipation part. The `Langevin` and `VelocityVerlet` simulators without coupling correspond to the **BAOA** and **BAB** schemes respectively.
+""" `LangevinSplitting(; <keyword arguments>)`
+A Langevin simulator using a general splitting scheme, consisting of a succession of
+**A**, **B** and **O** steps, corresponding respectively to updates in position, velocity for the potential part,
+ and velocity for the thermal fluctuation-dissipation part.
+The `Langevin` and `VelocityVerlet` simulators without coupling correspond to the **BAOA** and **BAB** schemes respectively.
+For more information on the sampling properties of splitting schemes, see this [paper](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6208357/pdf/entropy-20-00318.pdf) for a general introduction.
+
 # Arguments
 - `dt::dtType`: The timestep for the simulation
 - `friction::frictionType`: The friction coefficient. If units are used, it should have a dimensionality of mass per time.
