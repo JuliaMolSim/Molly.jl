@@ -336,26 +336,26 @@ For more information on the sampling properties of splitting schemes, see
 
 # Arguments
 - `dt::S`: the time step of the simulation.
+- `temperature::K`: the equilibrium temperature of the simulation.
 - `friction::F`: the friction coefficient. If units are used, it should have a
     dimensionality of mass per time.
-- `temperature::K`: the equilibrium temperature of the simulation.
 - `splitting::W`: the splitting specifier. Should be a string consisting of the
     characters `A`,`B` and `O`. Strings with no `O`s reduce to deterministic
     symplectic schemes.
 - `remove_CM_motion::Bool=true`: whether to remove the centre of mass motion
     every time step.
 """
-struct LangevinSplitting{S, F, K, W}
+struct LangevinSplitting{S, K, F, W}
     dt::S
-    friction::F
     temperature::K
+    friction::F
     splitting::W
     remove_CM_motion::Bool
 end
 
-function LangevinSplitting(; dt, friction, temperature, splitting, remove_CM_motion=true)
-    LangevinSplitting{typeof(dt), typeof(friction), typeof(temperature), typeof(splitting)}(
-        dt, friction, temperature, splitting, remove_CM_motion)
+function LangevinSplitting(; dt, temperature, friction, splitting, remove_CM_motion=true)
+    LangevinSplitting{typeof(dt), typeof(temperature), typeof(friction), typeof(splitting)}(
+        dt, temperature, friction, splitting, remove_CM_motion)
 end
 
 function simulate!(sys,

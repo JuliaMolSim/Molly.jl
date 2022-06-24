@@ -390,8 +390,8 @@ end
     s2 = deepcopy(s1)
     rseed = 2022
     simulator1 = Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1")
-    simulator2 = LangevinSplitting(dt=0.002u"ps", friction=10.0u"u * ps^-1",
-                                    temperature=temp, splitting="BAOA")
+    simulator2 = LangevinSplitting(dt=0.002u"ps", temperature=temp,
+                                    friction=10.0u"u * ps^-1", splitting="BAOA")
 
     @time simulate!(s1, simulator1, n_steps; rng=MersenneTwister(rseed))
     @test 280.0u"K" <= mean(s1.loggers.temp.history[(end - 100):end]) <= 320.0u"K"

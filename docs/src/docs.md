@@ -874,7 +874,12 @@ sys = System(atoms=atoms,
 We leave the loggers empty until we thermalize the system using Langevin dynamics.
 
 ```julia
-simulator = LangevinSplitting(dt=0.002u"ps", friction=10.0u"u* ps^-1", temperature=temp, splitting="BAOAB")
+simulator = LangevinSplitting(
+    dt=0.002u"ps",
+    temperature=temp,
+    friction=10.0u"u* ps^-1",
+    splitting="BAOAB",
+)
 simulate!(sys, simulator, 10000)
 @show temperature(sys)
 ```
