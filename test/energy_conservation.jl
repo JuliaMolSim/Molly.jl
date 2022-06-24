@@ -27,9 +27,9 @@ using Test
                 coords=place_atoms(n_atoms, boundary, 0.6u"nm"),
                 velocities=[velocity(atom_mass, temp) for i in 1:n_atoms],
                 boundary=boundary,
-                loggers=Dict(
-                    "coords" => CoordinateLogger(100),
-                    "energy" => TotalEnergyLogger(100),
+                loggers=(
+                    coords=CoordinateLogger(100),
+                    energy=TotalEnergyLogger(100),
                 ),
             )
 
@@ -39,13 +39,13 @@ using Test
             ΔE = total_energy(s) - E0
             @test abs(ΔE) < 2e-2u"kJ * mol^-1"
 
-            Es = s.loggers["energy"].energies
+            Es = values(s.loggers.energy)
             maxΔE = maximum(abs.(Es .- E0))
             @test maxΔE < 2e-2u"kJ * mol^-1"
 
             @test abs(Es[end] - Es[1]) < 2e-2u"kJ * mol^-1"
 
-            final_coords = last(s.loggers["coords"].coords)
+            final_coords = last(values(s.loggers.coords))
             @test all(all(c .> 0.0u"nm") for c in final_coords)
             @test all(all(c .< boundary) for c in final_coords)
         end

@@ -79,7 +79,7 @@ sys = System(
     coords=coords,
     velocities=velocities,
     boundary=boundary,
-    loggers=Dict("temp" => TemperatureLogger(100)),
+    loggers=(temp=TemperatureLogger(100)),
 )
 
 simulate!(sys, simulator, 10_000)
@@ -92,9 +92,9 @@ using Molly
 sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
-    loggers=Dict(
-        "temp"   => TemperatureLogger(10),
-        "writer" => StructureWriter(10, "traj_5XER_1ps.pdb"),
+    loggers=(
+        temp = TemperatureLogger(10),
+        writer = StructureWriter(10, "traj_5XER_1ps.pdb"),
     ),
 )
 

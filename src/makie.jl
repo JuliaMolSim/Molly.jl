@@ -19,7 +19,7 @@ function visualize(coord_logger,
                     boundary,
                     out_filepath::AbstractString;
                     connections=Tuple{Int, Int}[],
-                    connection_frames=[trues(length(connections)) for i in coord_logger.coords],
+                    connection_frames=[trues(length(connections)) for i in coord_logger.history],
                     trails::Integer=0,
                     framerate::Integer=30,
                     color=:purple,
@@ -28,7 +28,7 @@ function visualize(coord_logger,
                     linewidth=2.0,
                     transparency=true,
                     kwargs...)
-    coords_start = first(coord_logger.coords)
+    coords_start = first(coord_logger.history)
     dims = length(first(coords_start))
     fig = Figure()
 
@@ -92,8 +92,8 @@ function visualize(coord_logger,
     ylims!(ax, axis_limits(boundary_conv, coord_logger, 2))
     dims == 3 && zlims!(ax, axis_limits(boundary_conv, coord_logger, 3))
 
-    GLMakie.record(fig, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
-        coords = coord_logger.coords[frame_i]
+    GLMakie.record(fig, out_filepath, eachindex(coord_logger.history); framerate=framerate) do frame_i
+        coords = coord_logger.history[frame_i]
 
         for (ci, (i, j)) in enumerate(connections)
             if connection_frames[frame_i][ci] && norm(coords[i] - coords[j]) < (boundary[1] / 2)
@@ -119,7 +119,7 @@ function visualize(coord_logger,
 
         positions[] = PointType.(ustrip_vec.(coords))
         for (trail_i, trail_position) in enumerate(trail_positions)
-            trail_position[] = PointType.(ustrip_vec.(coord_logger.coords[max(frame_i - trail_i, 1)]))
+            trail_position[] = PointType.(ustrip_vec.(coord_logger.history[max(frame_i - trail_i, 1)]))
         end
     end
 end

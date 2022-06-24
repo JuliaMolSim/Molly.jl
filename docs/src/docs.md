@@ -50,9 +50,9 @@ sys = System(
     coords=coords,
     velocities=velocities,
     boundary=boundary,
-    loggers=Dict(
-        "temp"   => TemperatureLogger(10),
-        "coords" => CoordinateLogger(10),
+    loggers=(
+        temp=TemperatureLogger(10),
+        coords=CoordinateLogger(10),
     ),
 )
 
@@ -68,7 +68,7 @@ By default the simulation is run in parallel on the [number of threads](https://
 An animation of the stored coordinates can be saved by using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
 ```julia
 using GLMakie
-visualize(sys.loggers["coords"], boundary, "sim_lj.mp4")
+visualize(sys.loggers.coords, boundary, "sim_lj.mp4")
 ```
 ![LJ simulation](images/sim_lj.gif)
 
@@ -98,9 +98,9 @@ sys = System(
     coords=coords,
     velocities=velocities,
     boundary=boundary,
-    loggers=Dict(
-        "temp"   => TemperatureLogger(typeof(1.0f0u"K"), 10),
-        "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10),
+    loggers=(
+        temp=TemperatureLogger(typeof(1.0f0u"K"), 10),
+        coords=CoordinateLogger(typeof(1.0f0u"nm"), 10),
     ),
 )
 
@@ -157,9 +157,9 @@ sys = System(
     velocities=velocities,
     boundary=boundary,
     neighbor_finder=neighbor_finder,
-    loggers=Dict(
-        "temp" => TemperatureLogger(10),
-        "coords" => CoordinateLogger(10),
+    loggers=(
+        temp = TemperatureLogger(10),
+        coords = CoordinateLogger(10),
     ),
 )
 
@@ -172,7 +172,7 @@ simulate!(sys, simulator, 1_000)
 This time when we view the trajectory we can add lines to show the bonds.
 ```julia
 visualize(
-    sys.loggers["coords"],
+    sys.loggers.coords,
     boundary,
     "sim_diatomic.mp4";
     connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
@@ -199,7 +199,7 @@ sys = System(
     coords=coords,
     velocities=velocities,
     boundary=boundary,
-    loggers=Dict("coords" => CoordinateLogger(Float32, 10; dims=2)),
+    loggers=(coords=CoordinateLogger(Float32, 10; dims=2),),
     force_units=NoUnits,
     energy_units=NoUnits,
 )
@@ -209,7 +209,7 @@ simulate!(sys, simulator, 2_000)
 When we view the simulation we can use some extra options:
 ```julia
 visualize(
-    sys.loggers["coords"],
+    sys.loggers.coords,
     boundary,
     "sim_gravity.mp4";
     trails=4,
@@ -236,9 +236,9 @@ ff = OpenMMForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
-    loggers=Dict(
-        "energy" => TotalEnergyLogger(10),
-        "writer" => StructureWriter(10, "traj_6mrr_1ps.pdb", ["HOH"]),
+    loggers=(
+        energy = TotalEnergyLogger(10),
+        writer = StructureWriter(10, "traj_6mrr_1ps.pdb", ["HOH"]),
     ),
 )
 
@@ -263,9 +263,9 @@ Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topolog
 sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
-    loggers=Dict(
-        "temp"   => TemperatureLogger(10),
-        "writer" => StructureWriter(10, "traj_5XER_1ps.pdb"),
+    loggers=(
+        temp = TemperatureLogger(10),
+        writer = StructureWriter(10, "traj_5XER_1ps.pdb"),
     ),
 )
 
@@ -338,22 +338,18 @@ function Molly.force(inter::SIRInteraction,
 end
 
 # Custom Logger
-struct SIRLogger
-    n_steps::Int
-    fracs_sir::Vector{Vector{Float64}}
+
+function fracs_SIR(s::System,neighbors=nothing;parallel::Bool=true)
+    counts_sir = [
+        count(p -> p.status == susceptible, s.atoms),
+        count(p -> p.status == infected   , s.atoms),
+        count(p -> p.status == recovered  , s.atoms)
+    ]
+    return counts_sir ./ length(s)
 end
 
-# Custom logging function
-function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n; parallel=true)
-    if step_n % logger.n_steps == 0
-        counts_sir = [
-            count(p -> p.status == susceptible, s.atoms),
-            count(p -> p.status == infected   , s.atoms),
-            count(p -> p.status == recovered  , s.atoms)
-        ]
-        push!(logger.fracs_sir, counts_sir ./ length(s))
-    end
-end
+SIRLogger(n_steps)=GeneralObservableLogger(fracs_SIR,Vector{Float64},n_steps)
+
 
 temp = 1.0
 boundary = RectangularBoundary(10.0, 10.0)
@@ -384,9 +380,9 @@ sys = System(
     velocities=velocities,
     boundary=boundary,
     neighbor_finder=neighbor_finder,
-    loggers=Dict(
-        "coords" => CoordinateLogger(Float64, 10; dims=2),
-        "SIR"    => SIRLogger(10, []),
+    loggers=(
+        coords = CoordinateLogger(Float64, 10; dims=2),
+        SIR = SIRLogger(10),
     ),
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -394,7 +390,7 @@ sys = System(
 
 simulate!(sys, simulator, n_steps)
 
-visualize(sys.loggers["coords"], boundary, "sim_agent.mp4"; markersize=0.1)
+visualize(sys.loggers.coords, boundary, "sim_agent.mp4"; markersize=0.1)
 ```
 ![Agent simulation](images/sim_agent.gif)
 
@@ -403,9 +399,9 @@ We can use the logger to plot the fraction of people susceptible (blue), infecte
 ```julia
 using Plots
 
-sir_matrix = zeros(length(sys.loggers["SIR"].fracs_sir), 3)
+sir_matrix = zeros(length(values(sys.loggers.SIR)), 3)
 for i = 1:101
-    sir_matrix[i, :] .= sys.loggers["SIR"].fracs_sir[i][:]
+    sir_matrix[i, :] .= values(sys.loggers.SIR)[i][:]
 end
 
 plot(sir_matrix)
@@ -776,6 +772,7 @@ To use your custom neighbor finder, give it as the `neighbor_finder` argument wh
 
 Loggers record properties of the simulation to allow monitoring and analysis.
 The available loggers are:
+- [`GeneralObservableLogger`](@ref)
 - [`TemperatureLogger`](@ref)
 - [`CoordinateLogger`](@ref)
 - [`VelocityLogger`](@ref)
@@ -805,13 +802,31 @@ function Molly.log_property!(logger::MyLogger, sys, neighbors, step_n; parallel=
 end
 ```
 The use of `n_steps` is optional and is an example of how to record a property every n steps through the simulation.
-To use your custom logger, add it to the dictionary of loggers given when creating the [`System`](@ref):
+To use your custom logger, add it to the named tuple of loggers given when creating the [`System`](@ref):
 ```julia
-loggers = Dict("mylogger" => MyLogger(10))
+loggers = (mylogger = MyLogger(10),)
 ```
 In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0.
 This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values.
 Loggers are currently ignored for the purposes of taking gradients, so if you use a logger in the gradient calculation the gradients will appear to be nothing.
+
+Many times, a logger will just record an observation to an `Array` containing a record of past observations.
+For this purpose, you can use the `GeneralObservableLogger` construct without defining a custom logging function. Simply define your observation function as
+```julia
+function my_observable(sys::System,neighbors;parallel::Bool)
+    # Probe the system for some desired property
+    return observation
+end
+```
+A logger which records this property every `n_steps` can be constructed through 
+
+```julia
+my_logger = GeneralObservableLogger(my_observable, T, n_steps)
+```
+where `T = typeof(observation)` is the type of the return value for `my_observable`. The logger's history can be accessed through
+```julia
+values(my_logger)
+```
 
 The [`TimeCorrelationLogger`](@ref) logger can be used to compute correlation functions of the form
 ```math
@@ -851,7 +866,6 @@ sys = System(atoms=atoms,
     pairwise_inters=pairwise_inters,
     specific_inter_lists=specific_inter_lists,
     boundary=boundary,
-    loggers=Dict{Symbol,Any}()
     )
 ```
 
@@ -865,11 +879,21 @@ simulate!(sys, simulator, 10000)
 ```console
 temperature(sys) = 48.76795299825687 K
 ```
-Good. Next we define our correlation logger, add it to the system's loggers and run a long simulation
+Good. Next we define our correlation logger, add it to the system's loggers and run a long simulation. Note we need to redeclare the system when adding a logger.
 ```julia
 V(s::System, neighbors=nothing) = s.velocities
 V_Type = eltype(sys.velocities)
-sys.loggers = Dict(:velocity_autocorrelation => TimeCorrelationLogger(V_Type, V_Type, V, V, n_atoms, 1000))
+
+sys = System(
+    atoms=atoms,
+    coords=sys.coords,
+    velocities=sys.velocities,
+    neighbor_finder=nf,
+    pairwise_inters=pairwise_inters,
+    specific_inter_lists=specific_inter_lists,
+    boundary=boundary,
+    loggers=(velocity_autocorrelation=TimeCorrelationLogger(V_Type, V_Type, V, V, n_atoms, 1000),)
+)
 simulate!(sys, simulator, 100000)
 ```
 
@@ -878,7 +902,7 @@ Check the output:
 using Plots, UnitfulRecipes
 
 t_range=(0:999)*u"ps"
-plot(t_range,sys.loggers[:velocity_autocorrelation].normalized_correlations,xlabel="time",ylabel="correlation",label="C(t)")
+plot(t_range,values(sys.loggers.velocity_autocorrelation),xlabel="time",ylabel="correlation",label="C(t)")
 ```
 ![Velocity Autocorrelations](images/velocity_autocorrelations.png)\
 As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly. The oscillatory behavior is due to the contribution of the harmonic bond interactions.

@@ -15,9 +15,9 @@
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=Dict(
-            "temp"   => TemperatureLogger(100),
-            "coords" => CoordinateLogger(100; dims=2),
+        loggers=(
+            temp = TemperatureLogger(100),
+            coords = CoordinateLogger(100; dims=2),
         ),
     )
     random_velocities!(s, temp)
@@ -32,15 +32,15 @@
 
     @time simulate!(s, simulator, n_steps; parallel=false)
 
-    @test length(s.loggers["coords"].coords) == 201
-    final_coords = last(s.loggers["coords"].coords)
+    @test length(values(s.loggers.coords)) == 201
+    final_coords = last(values(s.loggers.coords))
     @test all(all(c .> 0.0u"nm") for c in final_coords)
     @test all(all(c .< boundary) for c in final_coords)
     displacements(final_coords, boundary)
     distances(final_coords, boundary)
     rdf(final_coords, boundary)
 
-    run_visualize_tests && visualize(s.loggers["coords"], boundary, temp_fp_viz)
+    run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_viz)
 end
 
 @testset "Lennard-Jones" begin
@@ -65,15 +65,15 @@ end
                 n_steps=10,
                 dist_cutoff=2.0u"nm",
             ),
-            loggers=Dict(
-                "temp"   => TemperatureLogger(100),
-                "coords" => CoordinateLogger(100),
-                "vels"   => VelocityLogger(100),
-                "energy" => TotalEnergyLogger(100),
-                "ke"     => KineticEnergyLogger(100),
-                "pe"     => PotentialEnergyLogger(100),
-                "force"  => ForceLogger(100),
-                "writer" => StructureWriter(100, temp_fp_pdb),
+            loggers=(
+                temp = TemperatureLogger(100),
+                coords = CoordinateLogger(100),
+                vels = VelocityLogger(100),
+                energy = TotalEnergyLogger(100),
+                ke = KineticEnergyLogger(100),
+                pe = PotentialEnergyLogger(100),
+                force = ForceLogger(100),
+                writer = StructureWriter(100, temp_fp_pdb),
             ),
         )
 
@@ -102,28 +102,28 @@ end
 
         @time simulate!(s, simulator, n_steps; parallel=parallel)
 
-        show(devnull, s.loggers["temp"])
-        show(devnull, s.loggers["coords"])
-        show(devnull, s.loggers["vels"])
-        show(devnull, s.loggers["energy"])
-        show(devnull, s.loggers["ke"])
-        show(devnull, s.loggers["pe"])
-        show(devnull, s.loggers["writer"])
+        show(devnull, s.loggers.temp)
+        show(devnull, s.loggers.coords)
+        show(devnull, s.loggers.vels)
+        show(devnull, s.loggers.energy)
+        show(devnull, s.loggers.ke)
+        show(devnull, s.loggers.pe)
+        show(devnull, s.loggers.writer)
 
-        final_coords = last(s.loggers["coords"].coords)
+        final_coords = last(values(s.loggers.coords))
         @test all(all(c .> 0.0u"nm") for c in final_coords)
         @test all(all(c .< boundary) for c in final_coords)
         displacements(final_coords, boundary)
         distances(final_coords, boundary)
         rdf(final_coords, boundary)
-        @test unit(velocity_autocorr(s.loggers["vels"])) == u"nm^2 * ps^-2"
+        @test unit(velocity_autocorr(s.loggers.vels)) == u"nm^2 * ps^-2"
 
         traj = read(temp_fp_pdb, BioStructures.PDB)
         rm(temp_fp_pdb)
         @test BioStructures.countmodels(traj) == 201
         @test BioStructures.countatoms(first(traj)) == 100
 
-        run_visualize_tests && visualize(s.loggers["coords"], boundary, temp_fp_viz)
+        run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_viz)
     end
 end
 
@@ -178,7 +178,7 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=Dict("coords" => CoordinateLogger(100)),
+        loggers=(coords = CoordinateLogger(100),),
     )
     random_velocities!(s, temp)
 
@@ -221,16 +221,16 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=Dict(
-            "temp"   => TemperatureLogger(10),
-            "coords" => CoordinateLogger(10),
+        loggers=(
+            temp = TemperatureLogger(10),
+            coords = CoordinateLogger(10),
         ),
     )
 
     @time simulate!(s, simulator, n_steps; parallel=false)
 
     if run_visualize_tests
-        visualize(s.loggers["coords"], boundary, temp_fp_viz;
+        visualize(s.loggers.coords, boundary, temp_fp_viz;
                     connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
                     trails=2)
     end
@@ -273,10 +273,10 @@ end
             velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             boundary=boundary,
             neighbor_finder=neighbor_finder,
-            loggers=Dict(
-                "temp"   => TemperatureLogger(100),
-                "coords" => CoordinateLogger(100),
-                "energy" => TotalEnergyLogger(100),
+            loggers=(
+                temp = TemperatureLogger(100),
+                coords = CoordinateLogger(100),
+                energy = TotalEnergyLogger(100),
             ),
         )
 
@@ -308,11 +308,11 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=Dict(
-            "temp"   => TemperatureLogger(100),
-            "coords" => CoordinateLogger(100),
-            "energy" => TotalEnergyLogger(100),
-            "autocorrelations" => TimeCorrelationLogger(vtype,vtype,V,V,n_atoms,100)
+        loggers=(
+            temp = TemperatureLogger(100),
+            coords = CoordinateLogger(100),
+            energy = TotalEnergyLogger(100),
+            autocorrelations = TimeCorrelationLogger(vtype,vtype,V,V,n_atoms,100)
         ),
     )
 
@@ -329,11 +329,11 @@ end
             n_steps=10,
             dist_cutoff=2.0,
         ),
-        loggers=Dict(
-            "temp"   => TemperatureLogger(Float64, 100),
-            "coords" => CoordinateLogger(Float64, 100),
-            "energy" => TotalEnergyLogger(Float64, 100),
-            "autocorrelations" => TimeCorrelationLogger(vtype_nounits,vtype_nounits,V,V,n_atoms,100)
+        loggers=(
+            temp = TemperatureLogger(Float64, 100),
+            coords = CoordinateLogger(Float64, 100),
+            energy = TotalEnergyLogger(Float64, 100),
+            autocorrelations = TimeCorrelationLogger(vtype_nounits,vtype_nounits,V,V,n_atoms,100)
         ),
         force_units=NoUnits,
         energy_units=NoUnits,
@@ -347,19 +347,21 @@ end
     simulate!(s, simulator, n_steps; parallel=false)
     simulate!(s_nounits, simulator_nounits, n_steps; parallel=false)
 
-    coords_diff = s.loggers["coords"].coords[end] .- s_nounits.loggers["coords"].coords[end] * u"nm"
+    coords_diff = last(values(s.loggers.coords)) .- last(values(s_nounits.loggers.coords)) * u"nm"
     @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8u"nm"
 
-    final_energy = s.loggers["energy"].energies[end]
-    final_energy_nounits = s_nounits.loggers["energy"].energies[end] * u"kJ * mol^-1"
+    final_energy = last(values(s.loggers.energy))
+    final_energy_nounits = last(values(s_nounits.loggers.energy)) * u"kJ * mol^-1"
     @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
 
     
-    @test unit(first(s.loggers["autocorrelations"].normalized_correlations))==NoUnits
-    @test unit(first(s.loggers["autocorrelations"].unnormalized_correlations))==u"nm^2 * ps^-2"
+    @test unit(first(values(s.loggers.autocorrelations)))==NoUnits
+    @test unit(first(values(s.loggers.autocorrelations; normalize= false)))==u"nm^2 * ps^-2"
     
-    show(devnull,s_nounits.loggers["autocorrelations"].normalized_correlations)
-    show(devnull,s_nounits.loggers["autocorrelations"].unnormalized_correlations)
+    show(devnull,values(s_nounits.loggers.autocorrelations))
+    show(devnull,values(s_nounits.loggers.autocorrelations; normalize=false))
+
+    simulate!(s,simulator, 100)
 end
 
 @testset "Langevin splitting" begin
@@ -380,7 +382,7 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=Dict("temp" => TemperatureLogger(10)),
+        loggers=(temp=TemperatureLogger(10)),
     )
     s2 = deepcopy(s1)
     rseed = 2022
@@ -389,10 +391,10 @@ end
                                     temperature=temp, splitting="BAOA")
 
     @time simulate!(s1, simulator1, n_steps; rng=MersenneTwister(rseed))
-    @test 280.0u"K" <= mean(s1.loggers["temp"].temperatures[(end - 100):end]) <= 320.0u"K"
+    @test 280.0u"K" <= mean(s1.loggers.temp.history[(end - 100):end]) <= 320.0u"K"
 
     @time simulate!(s2, simulator2, n_steps; rng=MersenneTwister(rseed))
-    @test 280.0u"K" <= mean(s2.loggers["temp"].temperatures[(end - 100):end]) <= 320.0u"K"
+    @test 280.0u"K" <= mean(s2.loggers.temp.history[(end - 100):end]) <= 320.0u"K"
 
     @test maximum(maximum(abs.(v)) for v in (s1.coords .- s2.coords)) < 1e-5u"nm"
 end
