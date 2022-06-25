@@ -342,7 +342,7 @@ Not currently compatible with automatic differentiation using Zygote.
 - `friction::F`: the friction coefficient. If units are used, it should have a
     dimensionality of mass per time.
 - `splitting::W`: the splitting specifier. Should be a string consisting of the
-    characters `A`,`B` and `O`. Strings with no `O`s reduce to deterministic
+    characters `A`, `B` and `O`. Strings with no `O`s reduce to deterministic
     symplectic schemes.
 - `remove_CM_motion::Bool=true`: whether to remove the centre of mass motion
     every time step.

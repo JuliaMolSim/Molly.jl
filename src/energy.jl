@@ -46,7 +46,7 @@ function temperature(s)
     if s.energy_units == NoUnits
         return temp
     else
-        return uconvert(u"K",temp)
+        return uconvert(u"K", temp)
     end
 end
 

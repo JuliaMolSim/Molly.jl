@@ -204,9 +204,9 @@ end
 
 function random_velocities(sys::AbstractSystem{2}, temp; rng=Random.GLOBAL_RNG)
     if isa(sys.coords, CuArray)
-        return cu(velocity_2D.(Array(mass.(sys.atoms)), temp,sys.k; rng=rng))
+        return cu(velocity_2D.(Array(mass.(sys.atoms)), temp, sys.k; rng=rng))
     else
-        return velocity_2D.(mass.(sys.atoms), temp,sys.k; rng=rng)
+        return velocity_2D.(mass.(sys.atoms), temp, sys.k; rng=rng)
     end
 end
 

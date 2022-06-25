@@ -16,9 +16,9 @@
             dist_cutoff=2.0u"nm",
         ),
         loggers=(
-            temp = TemperatureLogger(100),
-            coords = CoordinateLogger(100; dims=2),
-            avg_temp = AverageObservableLogger(Molly.temperature_wrapper, typeof(temp), 1; n_blocks = 200)
+            temp=TemperatureLogger(100),
+            coords=CoordinateLogger(100; dims=2),
+            avg_temp=AverageObservableLogger(Molly.temperature_wrapper, typeof(temp), 1; n_blocks=200)
         ),
     )
     random_velocities!(s, temp)
@@ -43,7 +43,7 @@
 
     show(devnull, s.loggers.avg_temp)
     (t, σ) = values(s.loggers.avg_temp)
-    @test isapprox(t, mean(values(s.loggers.temp)); atol = 3σ)
+    @test isapprox(t, mean(values(s.loggers.temp)); atol=3σ)
     run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_viz)
 end
 
@@ -59,9 +59,9 @@ end
     TV=typeof(velocity(10.0u"u", temp))
     TP=typeof(0.2u"kJ * mol^-1")
 
-    V(sys,args...;kwargs...)=sys.velocities
-    pot_obs(sys,neighbors;kwargs...)=potential_energy(sys,neighbors)
-    kin_obs(sys,args...;kwargs...)=kinetic_energy(sys)
+    V(sys, args...; kwargs...) = sys.velocities
+    pot_obs(sys, neighbors; kwargs...) = potential_energy(sys, neighbors)
+    kin_obs(sys, args...; kwargs...) = kinetic_energy(sys)
 
     for parallel in parallel_list
         s = System(
@@ -77,16 +77,16 @@ end
                 dist_cutoff=2.0u"nm",
             ),
             loggers=(
-                temp = TemperatureLogger(100),
-                coords = CoordinateLogger(100),
-                vels = VelocityLogger(100),
-                energy = TotalEnergyLogger(100),
-                ke = KineticEnergyLogger(100),
-                pe = PotentialEnergyLogger(100),
-                force = ForceLogger(100),
-                writer = StructureWriter(100, temp_fp_pdb),
-                velocity_autocorrelation = AutoCorrelationLogger(TV,V,n_atoms,100),
-                potkin_correlation = TimeCorrelationLogger(TP,TP,pot_obs,kin_obs,1,100)
+                temp=TemperatureLogger(100),
+                coords=CoordinateLogger(100),
+                vels=VelocityLogger(100),
+                energy=TotalEnergyLogger(100),
+                ke=KineticEnergyLogger(100),
+                pe=PotentialEnergyLogger(100),
+                force=ForceLogger(100),
+                writer=StructureWriter(100, temp_fp_pdb),
+                velocity_autocorrelation=AutoCorrelationLogger(TV, V, n_atoms, 100),
+                potkin_correlation=TimeCorrelationLogger(TP, TP, pot_obs, kin_obs, 1, 100),
             ),
         )
 
@@ -133,7 +133,7 @@ end
         rdf(final_coords, boundary)
         @test unit(velocity_autocorr(s.loggers.vels)) == u"nm^2 * ps^-2"
         @test unit(first(values(s.loggers.potkin_correlation))) == NoUnits
-        @test unit(first(values(s.loggers.velocity_autocorrelation;normalize=false))) == u"nm^2 * ps^-2"
+        @test unit(first(values(s.loggers.velocity_autocorrelation; normalize=false))) == u"nm^2 * ps^-2"
 
         traj = read(temp_fp_pdb, BioStructures.PDB)
         rm(temp_fp_pdb)
@@ -195,7 +195,7 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=(coords = CoordinateLogger(100),),
+        loggers=(coords=CoordinateLogger(100),),
     )
     random_velocities!(s, temp)
 
@@ -239,8 +239,8 @@ end
             dist_cutoff=2.0u"nm",
         ),
         loggers=(
-            temp = TemperatureLogger(10),
-            coords = CoordinateLogger(10),
+            temp=TemperatureLogger(10),
+            coords=CoordinateLogger(10),
         ),
     )
 
@@ -291,9 +291,9 @@ end
             boundary=boundary,
             neighbor_finder=neighbor_finder,
             loggers=(
-                temp = TemperatureLogger(100),
-                coords = CoordinateLogger(100),
-                energy = TotalEnergyLogger(100)
+                temp=TemperatureLogger(100),
+                coords=CoordinateLogger(100),
+                energy=TotalEnergyLogger(100),
             ),
         )
 
@@ -313,7 +313,7 @@ end
     simulator_nounits = VelocityVerlet(dt=0.002)
 
     vtype=eltype(velocities)
-    V(sys::System,neighbors=nothing)=sys.velocities
+    V(sys::System, neighbors=nothing) = sys.velocities
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
@@ -327,13 +327,13 @@ end
             dist_cutoff=2.0u"nm",
         ),
         loggers=(
-            temp = TemperatureLogger(100),
-            coords = CoordinateLogger(100),
-            energy = TotalEnergyLogger(100)
+            temp=TemperatureLogger(100),
+            coords=CoordinateLogger(100),
+            energy=TotalEnergyLogger(100),
         ),
     )
 
-    vtype_nounits=eltype(ustrip_vec.(velocities))
+    vtype_nounits = eltype(ustrip_vec.(velocities))
 
     s_nounits = System(
         atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
@@ -347,9 +347,9 @@ end
             dist_cutoff=2.0,
         ),
         loggers=(
-            temp = TemperatureLogger(Float64, 100),
-            coords = CoordinateLogger(Float64, 100),
-            energy = TotalEnergyLogger(Float64, 100)
+            temp=TemperatureLogger(Float64, 100),
+            coords=CoordinateLogger(Float64, 100),
+            energy=TotalEnergyLogger(Float64, 100),
         ),
         force_units=NoUnits,
         energy_units=NoUnits,
@@ -513,4 +513,3 @@ end
         @test E_diff < 5e-4u"kJ * mol^-1"
     end
 end
-

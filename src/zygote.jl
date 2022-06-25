@@ -103,7 +103,7 @@ end
 
 Zygote._zero(xs::AbstractArray{<:StaticVector}, T) = fill!(similar(xs, T), zero(T))
 
-function Zygote._zero(xs::AbstractArray{Atom{T, T, T, T}}, ::Type{Atom{T, T, T, T}}) where {T}
+function Zygote._zero(xs::AbstractArray{Atom{T, T, T, T}}, ::Type{Atom{T, T, T, T}}) where T
     fill!(similar(xs), Atom{T, T, T, T}(0, zero(T), zero(T), zero(T), zero(T), false))
 end
 

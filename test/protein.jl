@@ -5,10 +5,10 @@
         joinpath(data_dir, "5XER", "gmx_coords.gro"),
         joinpath(data_dir, "5XER", "gmx_top_ff.top");
         loggers=(
-            temp = TemperatureLogger(10),
-            coords = CoordinateLogger(10),
-            energy = TotalEnergyLogger(10),
-            writer = StructureWriter(10, temp_fp_pdb),
+            temp=TemperatureLogger(10),
+            coords=CoordinateLogger(10),
+            energy=TotalEnergyLogger(10),
+            writer=StructureWriter(10, temp_fp_pdb),
         ),
     )
     simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
@@ -40,12 +40,15 @@ end
         joinpath(data_dir, "5XER", "gmx_coords.gro"),
         joinpath(data_dir, "5XER", "gmx_top_ff.top");
         loggers=(
-            temp = TemperatureLogger(typeof(1.0f0u"K"), 10),
-            coords = CoordinateLogger(typeof(1.0f0u"nm"), 10),
-            energy = TotalEnergyLogger(typeof(1.0f0u"kJ * mol^-1"), 10),
+            temp=TemperatureLogger(typeof(1.0f0u"K"), 10),
+            coords=CoordinateLogger(typeof(1.0f0u"nm"), 10),
+            energy=TotalEnergyLogger(typeof(1.0f0u"kJ * mol^-1"), 10),
         ),
     )
-    simulator = VelocityVerlet(dt=0.0002f0u"ps", coupling=AndersenThermostat(temp, 10.0f0u"ps"))
+    simulator = VelocityVerlet(
+        dt=0.0002f0u"ps",
+        coupling=AndersenThermostat(temp, 10.0f0u"ps"),
+    )
 
     s.velocities = [velocity(a.mass, Float32(temp)) .* 0.01f0 for a in s.atoms]
     @time simulate!(s, simulator, n_steps; parallel=false)
