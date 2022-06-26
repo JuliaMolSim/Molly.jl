@@ -33,8 +33,6 @@ function kinetic_energy(s::System{D, G, T}) where {D, G, T}
     end
 end
 
-const temp_conversion_factor = ustrip(u"nm^2 * u * K^-1 * ps^-2", Unitful.k)
-
 """
     temperature(system)
 

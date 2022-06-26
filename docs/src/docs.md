@@ -836,6 +836,7 @@ my_logger = GeneralObservableLogger(my_observable, T, n_steps)
 ```
 where `T = typeof(observation)` is the type of the return value for `my_observable`.
 The logger's history can be accessed with `values(my_logger)`.
+[`AverageObservableLogger`](@ref) is similar but records a running average rather than storing observations.
 
 The [`TimeCorrelationLogger`](@ref) logger can be used to compute correlation functions of the form
 ```math

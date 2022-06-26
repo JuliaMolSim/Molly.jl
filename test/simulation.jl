@@ -42,7 +42,7 @@
     rdf(final_coords, boundary)
 
     show(devnull, s.loggers.avg_temp)
-    (t, σ) = values(s.loggers.avg_temp)
+    t, σ = values(s.loggers.avg_temp)
     @test isapprox(t, mean(values(s.loggers.temp)); atol=3σ)
     run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_viz)
 end
@@ -225,7 +225,7 @@ end
         nb_matrix[i + (n_atoms ÷ 2), i] = false
     end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=BerendsenThermostat(temp, 1.0u"ps"))
-    
+
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         pairwise_inters=(LennardJones(nl_only=true),),
@@ -281,7 +281,7 @@ end
         else
             neighbor_finder = NoNeighborFinder()
         end
-        
+
         s = System(
             atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"u", σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
@@ -298,7 +298,6 @@ end
         )
 
         @time simulate!(s, simulator, n_steps)
-
     end
 end
 
@@ -312,7 +311,7 @@ end
     simulator = VelocityVerlet(dt=0.002u"ps")
     simulator_nounits = VelocityVerlet(dt=0.002)
 
-    vtype=eltype(velocities)
+    vtype = eltype(velocities)
     V(sys::System, neighbors=nothing) = sys.velocities
 
     s = System(
