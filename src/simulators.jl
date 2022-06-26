@@ -13,6 +13,7 @@ export
     SteepestDescentMinimizer(; <keyword arguments>)
 
 Steepest descent energy minimization.
+Not currently compatible with automatic differentiation using Zygote.
 
 # Arguments
 - `step_size::D=0.01u"nm"`: the initial maximum displacement.

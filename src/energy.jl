@@ -12,6 +12,7 @@ export
 Calculate the total energy of the system.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
+Not currently compatible with automatic differentiation using Zygote.
 """
 total_energy(s, neighbors=nothing) = kinetic_energy(s) + potential_energy(s, neighbors)
 
@@ -89,6 +90,7 @@ Calculate the potential energy of the system using the pairwise, specific and
 general interactions.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
+Not currently compatible with automatic differentiation using Zygote.
 
     potential_energy(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
                      atom_i, atom_j, boundary)

@@ -20,6 +20,7 @@ export
     run_loggers!(system, neighbors=nothing, step_n=0; parallel=true)
 
 Run the loggers associated with the system.
+Ignored for gradient calculation during automatic differentiation.
 """
 function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0; parallel::Bool=true)
     for logger in values(s.loggers)
