@@ -24,7 +24,7 @@ ff = OpenMMForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
-    loggers=(temp = TemperatureLogger(100),),
+    loggers=(temp=TemperatureLogger(100),),
 )
 
 minimizer = SteepestDescentMinimizer()
@@ -138,9 +138,9 @@ visualize(
 ## Making and breaking bonds
 
 There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation?
-In this case you can use a `PairwiseInteraction` to make, break and apply the bonds.
+In this case you can use a [`PairwiseInteraction`](@ref) to make, break and apply the bonds.
 The partners of the atom can be stored in the atom type.
-We make a logger to record when the bonds are present, allowing us to visualize them with the `connection_frames` keyword argument to `visualize` (this can take a while to plot).
+We make a logger to record when the bonds are present, allowing us to visualize them with the `connection_frames` keyword argument to [`visualize`](@ref) (this can take a while to plot).
 ```julia
 using Molly
 using GLMakie
@@ -193,17 +193,17 @@ function Molly.force(inter::BondableInteraction,
     end
 end
 
-function bonds(sys::System,neighbors=nothing,parallel::Bool=true)
-        bonds = BitVector()
-        for i in 1:length(sys)
-            for j in 1:(i - 1)
-                push!(bonds, j in sys.atoms[i].partners)
-            end
+function bonds(sys::System, neighbors=nothing, parallel::Bool=true)
+    bonds = BitVector()
+    for i in 1:length(sys)
+        for j in 1:(i - 1)
+            push!(bonds, j in sys.atoms[i].partners)
         end
-        return bonds
+    end
+    return bonds
 end
 
-BondLogger(n_steps)=GeneralObservableLogger(bonds,BitVector,n_steps)
+BondLogger(n_steps) = GeneralObservableLogger(bonds, BitVector, n_steps)
 
 n_atoms = 200
 boundary = RectangularBoundary(10.0, 10.0)
@@ -235,8 +235,8 @@ sys = System(
     boundary=boundary,
     neighbor_finder=neighbor_finder,
     loggers=(
-        coords = CoordinateLogger(Float64, 20; dims=2),
-        bonds = BondLogger(20),
+        coords=CoordinateLogger(Float64, 20; dims=2),
+        bonds=BondLogger(20),
     ),
     force_units=NoUnits,
     energy_units=NoUnits,

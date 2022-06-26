@@ -11,7 +11,10 @@ However Julia provides a strong suite of AD tools, with [Zygote.jl](https://gith
 With Molly you can use the power of Zygote to obtain gradients through molecular simulations, even in the presence of complex interactions such as implicit solvation.
 Reverse and forward mode AD can be used on the CPU and the GPU.
 Pairwise, specific and general interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
+
 Differentiable simulation does not currently work with units and some components of the package.
+This is mentioned in the relevant docstrings.
+It is memory intensive on the GPU so using gradient checkpointing will likely be required for larger simulations.
 
 ## Pairwise interactions
 
@@ -73,7 +76,7 @@ simulator = VelocityVerlet(
 
 function loss(σ)
     atoms = [Atom(0, 0.0, atom_mass, σ, 0.2, false) for i in 1:n_atoms]
-    loggers = (coords = CoordinateLogger(Float64, 10),)
+    loggers = (coords=CoordinateLogger(Float64, 10),)
 
     s = System(
         atoms=atoms,
@@ -184,7 +187,7 @@ simulator = VelocityVerlet(
 
 function loss(θ)
     atoms = [Atom(0, 0.0, atom_mass, 0.0, 0.0, false) for i in 1:n_atoms]
-    loggers = (coords = CoordinateLogger(Float64, 2),)
+    loggers = (coords=CoordinateLogger(Float64, 2),)
     specific_inter_lists = (
         InteractionList2Atoms(
             [1, 2, 4, 5],
@@ -326,7 +329,7 @@ simulator = VelocityVerlet(
 
 function loss()
     atoms = [Atom(0, 0.0f0, mass, 0.0f0, 0.0f0, false) for i in 1:n_atoms]
-    loggers = (coords = CoordinateLogger(Float32, 10),)
+    loggers = (coords=CoordinateLogger(Float32, 10),)
     specific_inter_lists = (
         InteractionList2Atoms([1], [3], [""], [NNBond()]),
     )

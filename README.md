@@ -15,7 +15,7 @@ At the minute the package is a proof of concept for MD in Julia.
 **It is not production ready**, though it can do some cool things and is under active development.
 Implemented features include:
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential.
-- Bonded interactions - covalent bonds, bond angles, torsion angles.
+- Bonded interactions - harmonic and Morse bonds, bond angles, torsion angles.
 - Interface to allow definition of new interactions, simulators, thermostats, neighbor finders, loggers etc.
 - Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also some support for Gromacs files.
 - Andersen, Berendsen and velocity rescaling thermostats.
@@ -79,7 +79,7 @@ sys = System(
     coords=coords,
     velocities=velocities,
     boundary=boundary,
-    loggers=(temp=TemperatureLogger(100)),
+    loggers=(temp=TemperatureLogger(100),),
 )
 
 simulate!(sys, simulator, 10_000)
@@ -93,8 +93,8 @@ sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
     loggers=(
-        temp = TemperatureLogger(10),
-        writer = StructureWriter(10, "traj_5XER_1ps.pdb"),
+        temp=TemperatureLogger(10),
+        writer=StructureWriter(10, "traj_5XER_1ps.pdb"),
     ),
 )
 

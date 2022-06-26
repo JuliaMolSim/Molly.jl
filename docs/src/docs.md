@@ -34,13 +34,13 @@ velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 ```
 We store the coordinates and velocities as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
 They can be of 2 or 3 dimensions and of any number type, e.g. `Float64` or `Float32`.
-Setting individual dimensions in [`CubicBoundary`](@ref) to `Inf * u"nm"` makes the simulation have no boundary in that dimension.
-Simulations in 2 dimensions should use [`RectangularBoundary`](@ref).
+Setting individual dimensions in a [`CubicBoundary`](@ref) to `Inf * u"nm"` makes the simulation have no boundary in that dimension.
+Simulations in 2 dimensions should use a [`RectangularBoundary`](@ref).
 
 Now we can define our pairwise interactions, i.e. those between most or all atom pairs.
 Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard-Jones type.
 ```julia
-pairwise_inters = (LennardJones(),)
+pairwise_inters = (LennardJones(),) # Don't forget the trailing comma!
 ```
 Finally, we can define the system and run the simulation.
 We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.
@@ -67,6 +67,7 @@ simulate!(sys, simulator, 1_000)
 ```
 `atoms`, `coords` and `boundary` are the minimum required properties to define a [`System`](@ref).
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this can be turned off by giving the keyword argument `parallel=false` to [`simulate!`](@ref).
+The values stored by the loggers can be accessed using `values`, e.g. `values(sys.loggers.coords)`.
 An animation of the stored coordinates can be saved by using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
 ```julia
 using GLMakie
@@ -160,8 +161,8 @@ sys = System(
     boundary=boundary,
     neighbor_finder=neighbor_finder,
     loggers=(
-        temp = TemperatureLogger(10),
-        coords = CoordinateLogger(10),
+        temp=TemperatureLogger(10),
+        coords=CoordinateLogger(10),
     ),
 )
 
@@ -239,8 +240,8 @@ sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
     loggers=(
-        energy = TotalEnergyLogger(10),
-        writer = StructureWriter(10, "traj_6mrr_1ps.pdb", ["HOH"]),
+        energy=TotalEnergyLogger(10),
+        writer=StructureWriter(10, "traj_6mrr_1ps.pdb", ["HOH"]),
     ),
 )
 
@@ -283,13 +284,14 @@ simulate!(sys, simulator, 5_000)
 The OpenMM setup procedure is tested against OpenMM in terms of matching forces and energies.
 However it is not thoroughly tested with respect to ligands or special residues and requires that atom names exactly match residue templates.
 The Gromacs setup procedure should be considered experimental.
+Currently Ewald summation methods, constraint algorithms, pressure coupling and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
 
 ## Agent-based modelling
 
 Agent-based modelling (ABM) is conceptually similar to molecular dynamics.
 Julia has [Agents.jl](https://juliadynamics.github.io/Agents.jl/stable/) for ABM, but Molly can also be used to simulate arbitrary agent-based systems in continuous space.
-Here we simulate a toy SIR model for disease spread.
-This example shows how atom properties can be mutable, i.e. change during the simulation, and includes custom forces and loggers (see below for more).
+Here we simulate a toy [SIR model](https://en.wikipedia.org/wiki/Compartmental_models_in_epidemiology#The_SIR_model) for disease spread.
+This example shows how atom properties can be mutable, i.e. change during the simulation, and includes custom forces and loggers (see below for more info).
 ```julia
 @enum Status susceptible infected recovered
 
@@ -340,8 +342,7 @@ function Molly.force(inter::SIRInteraction,
 end
 
 # Custom Logger
-
-function fracs_SIR(s::System,neighbors=nothing;parallel::Bool=true)
+function fracs_SIR(s::System, neighbors=nothing; parallel::Bool=true)
     counts_sir = [
         count(p -> p.status == susceptible, s.atoms),
         count(p -> p.status == infected   , s.atoms),
@@ -350,8 +351,7 @@ function fracs_SIR(s::System,neighbors=nothing;parallel::Bool=true)
     return counts_sir ./ length(s)
 end
 
-SIRLogger(n_steps)=GeneralObservableLogger(fracs_SIR,Vector{Float64},n_steps)
-
+SIRLogger(n_steps) = GeneralObservableLogger(fracs_SIR, Vector{Float64}, n_steps)
 
 temp = 1.0
 boundary = RectangularBoundary(10.0, 10.0)
@@ -383,8 +383,8 @@ sys = System(
     boundary=boundary,
     neighbor_finder=neighbor_finder,
     loggers=(
-        coords = CoordinateLogger(Float64, 10; dims=2),
-        SIR = SIRLogger(10),
+        coords=CoordinateLogger(Float64, 10; dims=2),
+        SIR=SIRLogger(10),
     ),
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -421,7 +421,7 @@ Units are not currently compatible with differentiable simulations.
 All your interaction types need to return the same units of force and energy or the simulation will not run.
 By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_units` and `energy_units` arguments to [`System`](@ref).
 If you need to strip units for downstream analysis, use the `ustrip` function.
-It should be noted that charges are stored as dimensionless, i.e. 1.0 is an atomic charge of +1.
+It should be noted that charges are stored as dimensionless, i.e. 1.0 represents an atomic charge of +1.
 
 ## Forces
 
@@ -627,8 +627,6 @@ There are also more complicated truncation methods that interpolate between the 
 
 The truncation approximations that we use can significantly alter the qualitative features of the simulation as shown in many articles in the molecular dynamics literature ([Fitzner 2017](https://aip.scitation.org/doi/full/10.1063/1.4997698), [van der Spoel 2006](https://pubs.acs.org/doi/10.1021/ct0502256) and others).
 
-### Implementation
-
 Since the truncation algorithm is independent of the interaction for which is used, each compatible interaction is defined without including cutoffs.
 The corresponding interaction `struct` has a `cutoff` field which is then used via dispatch to apply the chosen cutoff.
 The available cutoffs are:
@@ -637,6 +635,13 @@ The available cutoffs are:
 - [`ShiftedPotentialCutoff`](@ref)
 - [`ShiftedForceCutoff`](@ref)
 - [`CubicSplineCutoff`](@ref)
+
+The following interactions can use a cutoff by passing the cutoff to the `cutoff` constructor keyword argument:
+- [`LennardJones`](@ref)
+- [`SoftSphere`](@ref)
+- [`Mie`](@ref)
+- [`Coulomb`](@ref)
+[`CoulombReactionField`](@ref) and the implicit solvent models have arguments for a cutoff distance.
 
 ## Simulators
 
@@ -700,7 +705,7 @@ You can define different versions of a simulator for in-place and out-of-place s
 This also applies to coupling methods and neighbor lists.
 You do not have to define two versions though: you may only intend to use the simulator one way, or the out-of-place version may be performant in all cases.
 
-The implementation to use is guessed when you call [`System`](@ref) based on whether `coords` is a `CuArray` but can be given explicitly with the `gpu_diff_safe` argument, for example if you want to run differentiable simulations on the CPU.
+The implementation to use is guessed when you call [`System`](@ref) based on whether `coords` is a `CuArray` but can be given explicitly with the `gpu_diff_safe` keyword argument, for example if you want to run differentiable simulations on the CPU.
 [`is_gpu_diff_safe`](@ref) will retrieve this property for a [`System`](@ref).
 
 ## Coupling
@@ -811,73 +816,74 @@ end
 The use of `n_steps` is optional and is an example of how to record a property every n steps through the simulation.
 To use your custom logger, add it to the named tuple of loggers given when creating the [`System`](@ref):
 ```julia
-loggers = (mylogger = MyLogger(10),)
+loggers = (mylogger=MyLogger(10),) # Don't forget the trailing comma!
 ```
 In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0.
 This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values.
-Loggers are currently ignored for the purposes of taking gradients, so if you use a logger in the gradient calculation the gradients will appear to be nothing.
+Loggers are currently ignored for the purposes of taking gradients, so if a logger is used in the gradient calculation the gradients will appear to be nothing.
 
 Many times, a logger will just record an observation to an `Array` containing a record of past observations.
-For this purpose, you can use the `GeneralObservableLogger` construct without defining a custom logging function. Simply define your observation function as
+For this purpose, you can use the [`GeneralObservableLogger`](@ref) construct without defining a custom logging function. Simply define your observation function as
 ```julia
-function my_observable(sys::System,neighbors;parallel::Bool)
+function my_observable(sys::System, neighbors; parallel::Bool)
     # Probe the system for some desired property
     return observation
 end
 ```
 A logger which records this property every `n_steps` can be constructed through 
-
 ```julia
 my_logger = GeneralObservableLogger(my_observable, T, n_steps)
 ```
-where `T = typeof(observation)` is the type of the return value for `my_observable`. The logger's history can be accessed through
-```julia
-values(my_logger)
-```
+where `T = typeof(observation)` is the type of the return value for `my_observable`.
+The logger's history can be accessed with `values(my_logger)`.
 
 The [`TimeCorrelationLogger`](@ref) logger can be used to compute correlation functions of the form
 ```math
 C(t) = \frac{\langle A_t \cdot B_0 \rangle}{\sqrt{\langle |A|^2 \rangle \langle |B|^2 \rangle}}
 ```
-where *A* and *B* are scalar or vector centered observables, and the brackets are ensemble averages.
+where *A* and *B* are scalar or vector centered observables and the brackets are ensemble averages.
 This includes the computations of autocorrelation functions, which can be used to gather insight into the dynamical properties of the system, for instance using Green-Kubo formulas, or the statistical properties of a sampling method.
 
-Let's look at a simple example, computing the velocity autocorrelation function for a simple system consisting of diatomic molecules defined by [`HarmonicBond`](@ref) potentials between pairs of atoms, and an additional [`SoftSphere`](@ref) potential between all pairs of atoms. Let's start by defining the system.
-
+Let's look at a simple example, computing the velocity autocorrelation function for a simple system consisting of diatomic molecules defined by [`HarmonicBond`](@ref) potentials between pairs of atoms, and an additional [`SoftSphere`](@ref) potential between all pairs of atoms.
+Let's start by defining the system.
 ```julia
 n_atoms = 400
 atom_mass = 10.0u"u"
-atoms = [Atom(mass = atom_mass, σ = 0.2u"nm", ϵ = 0.2u"kJ * mol^-1") for i=1:n_atoms]
+atoms = [Atom(mass=atom_mass, σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 
 # Initialization
 boundary = SVector(6.0, 6.0, 6.0)u"nm"
 coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm", 0.2u"nm")
 
 temp = 50.0u"K"
-velocities = [velocity(atom_mass, temp)*0.01 for i=1:n_atoms]
-
+velocities = [velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms]
 
 # Interaction potentials
 pairwise_inters = (SoftSphere(nl_only=true, cutoff=DistanceCutoff(0.6u"nm")),)
 
-bonds = [HarmonicBond(b0=0.2u"nm", kb=10000u"kJ * mol^-1 * nm^-2") for i=1:(n_atoms ÷ 2)]
-specific_inter_lists = (InteractionList2Atoms(collect(1:2:n_atoms), collect(2:2:n_atoms), repeat([""], length(bonds)),bonds),)
+bonds = [HarmonicBond(b0=0.2u"nm", kb=10000u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)]
+specific_inter_lists = (InteractionList2Atoms(
+    collect(1:2:n_atoms),
+    collect(2:2:n_atoms),
+    repeat([""], length(bonds)),
+    bonds,
+),)
 
 # Define system
 nf = DistanceNeighborFinder(dist_cutoff=0.6u"nm", nb_matrix=trues(n_atoms, n_atoms))
 
-sys = System(atoms=atoms,
+sys = System(
+    atoms=atoms,
     coords=coords,
     velocities=velocities,
+    boundary=boundary,
     neighbor_finder=nf,
     pairwise_inters=pairwise_inters,
     specific_inter_lists=specific_inter_lists,
-    boundary=boundary,
-    )
+)
 ```
 
 We leave the loggers empty until we thermalize the system using Langevin dynamics.
-
 ```julia
 simulator = LangevinSplitting(
     dt=0.002u"ps",
@@ -885,28 +891,33 @@ simulator = LangevinSplitting(
     friction=10.0u"u* ps^-1",
     splitting="BAOAB",
 )
-simulate!(sys, simulator, 10000)
+simulate!(sys, simulator, 10_000)
 @show temperature(sys)
 ```
 ```console
 temperature(sys) = 48.76795299825687 K
 ```
-Good. Next we define our correlation logger, add it to the system's loggers and run a long simulation. Note we need to redeclare the system when adding a logger.
+Good.
+Next we define our correlation logger, add it to the system's loggers and run a long simulation.
+Note that we need to redeclare the system when adding a logger.
 ```julia
-V(s::System, args...; kwargs...) = s.velocities # velocity observable (args and kwargs because more complex observables may require neighbors and parallelism)
+# Velocity observable
+# args and kwargs because more complex observables may require neighbors and parallelism
+V(s::System, args...; kwargs...) = s.velocities
 V_Type = eltype(sys.velocities)
+logger = TimeCorrelationLogger(V_Type, V_Type, V, V, n_atoms, 1_000)
 
 sys = System(
     atoms=atoms,
     coords=sys.coords,
     velocities=sys.velocities,
+    boundary=boundary,
     neighbor_finder=nf,
     pairwise_inters=pairwise_inters,
     specific_inter_lists=specific_inter_lists,
-    boundary=boundary,
-    loggers=(velocity_autocorrelation=TimeCorrelationLogger(V_Type, V_Type, V, V, n_atoms, 1000),)
+    loggers=(velocity_autocorrelation=logger,)
 )
-simulate!(sys, simulator, 100000)
+simulate!(sys, simulator, 100_000)
 ```
 
 Check the output:
@@ -916,15 +927,22 @@ show(sys.loggers)
 ```console
 (velocity_autocorrelation = AutoCorrelationLogger with n_correlation 1000, and 100001 samples collected for observable V,)
 ```
-Note we also could have used the convenience function `AutoCorrelationLogger` to define our logger.
+Note we also could have used the convenience function [`AutoCorrelationLogger`](@ref) to define our logger since the two observables we are correlating are the same.
 ```julia
 using Plots, UnitfulRecipes
 
-t_range=(0:999)*u"ps"
-plot(t_range,values(sys.loggers.velocity_autocorrelation),xlabel="time",ylabel="correlation",label="C(t)")
+t_range = (0:999) * u"ps"
+plot(
+    t_range,
+    values(sys.loggers.velocity_autocorrelation),
+    xlabel="time",
+    ylabel="correlation",
+    label="C(t)",
+)
 ```
 ![Velocity Autocorrelations](images/velocity_autocorrelations.png)\
-As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly. The oscillatory behavior is due to the contribution of the harmonic bond interactions.
+As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly.
+The oscillatory behavior is due to the contribution of the harmonic bond interactions.
 
 ## Analysis
 
