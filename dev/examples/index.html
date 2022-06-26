@@ -12,7 +12,7 @@ ff = OpenMMForceField(
 sys = System(
     joinpath(data_dir, &quot;6mrr_equil.pdb&quot;),
     ff;
-    loggers=(temp = TemperatureLogger(100),),
+    loggers=(temp=TemperatureLogger(100),),
 )
 
 minimizer = SteepestDescentMinimizer()
@@ -111,7 +111,7 @@ visualize(
     color=[:yellow, :grey, :orange, :blue, :red],
     markersize=[0.25, 0.08, 0.08, 0.08, 0.08],
     transparency=false,
-)</code></pre><p><img src="../images/sim_planets.gif" alt="Planet simulation"/></p><h2 id="Making-and-breaking-bonds"><a class="docs-heading-anchor" href="#Making-and-breaking-bonds">Making and breaking bonds</a><a id="Making-and-breaking-bonds-1"></a><a class="docs-heading-anchor-permalink" href="#Making-and-breaking-bonds" title="Permalink"></a></h2><p>There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation? In this case you can use a <code>PairwiseInteraction</code> to make, break and apply the bonds. The partners of the atom can be stored in the atom type. We make a logger to record when the bonds are present, allowing us to visualize them with the <code>connection_frames</code> keyword argument to <code>visualize</code> (this can take a while to plot).</p><pre><code class="language-julia">using Molly
+)</code></pre><p><img src="../images/sim_planets.gif" alt="Planet simulation"/></p><h2 id="Making-and-breaking-bonds"><a class="docs-heading-anchor" href="#Making-and-breaking-bonds">Making and breaking bonds</a><a id="Making-and-breaking-bonds-1"></a><a class="docs-heading-anchor-permalink" href="#Making-and-breaking-bonds" title="Permalink"></a></h2><p>There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation? In this case you can use a <a href="../api/#Molly.PairwiseInteraction"><code>PairwiseInteraction</code></a> to make, break and apply the bonds. The partners of the atom can be stored in the atom type. We make a logger to record when the bonds are present, allowing us to visualize them with the <code>connection_frames</code> keyword argument to <a href="../api/#Molly.visualize"><code>visualize</code></a> (this can take a while to plot).</p><pre><code class="language-julia">using Molly
 using GLMakie
 using LinearAlgebra
 
@@ -162,17 +162,17 @@ function Molly.force(inter::BondableInteraction,
     end
 end
 
-function bonds(sys::System,neighbors=nothing,parallel::Bool=true)
-        bonds = BitVector()
-        for i in 1:length(sys)
-            for j in 1:(i - 1)
-                push!(bonds, j in sys.atoms[i].partners)
-            end
+function bonds(sys::System, neighbors=nothing, parallel::Bool=true)
+    bonds = BitVector()
+    for i in 1:length(sys)
+        for j in 1:(i - 1)
+            push!(bonds, j in sys.atoms[i].partners)
         end
-        return bonds
+    end
+    return bonds
 end
 
-BondLogger(n_steps)=GeneralObservableLogger(bonds,BitVector,n_steps)
+BondLogger(n_steps) = GeneralObservableLogger(bonds, BitVector, n_steps)
 
 n_atoms = 200
 boundary = RectangularBoundary(10.0, 10.0)
@@ -204,8 +204,8 @@ sys = System(
     boundary=boundary,
     neighbor_finder=neighbor_finder,
     loggers=(
-        coords = CoordinateLogger(Float64, 20; dims=2),
-        bonds = BondLogger(20),
+        coords=CoordinateLogger(Float64, 20; dims=2),
+        bonds=BondLogger(20),
     ),
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -343,4 +343,4 @@ end
 xlims!(ax, low=0.2)
 ylims!(ax, -0.6, 0.3)
 axislegend(position=:rb)
-save(&quot;mie.png&quot;, f)</code></pre><p><img src="../images/mie.png" alt="Mie"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Friday 24 June 2022 18:15">Friday 24 June 2022</span>. Using Julia version 1.7.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+save(&quot;mie.png&quot;, f)</code></pre><p><img src="../images/mie.png" alt="Mie"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Sunday 26 June 2022 15:09">Sunday 26 June 2022</span>. Using Julia version 1.7.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
