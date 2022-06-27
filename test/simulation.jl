@@ -85,8 +85,8 @@ end
                 pe=PotentialEnergyLogger(100),
                 force=ForceLogger(100),
                 writer=StructureWriter(100, temp_fp_pdb),
-                velocity_autocorrelation=AutoCorrelationLogger(TV, V, n_atoms, 100),
-                potkin_correlation=TimeCorrelationLogger(TP, TP, pot_obs, kin_obs, 1, 100),
+                velocity_autocorrelation=AutoCorrelationLogger(V, TV, n_atoms, 100),
+                potkin_correlation=TimeCorrelationLogger(pot_obs, kin_obs, TP, TP, 1, 100),
             ),
         )
 

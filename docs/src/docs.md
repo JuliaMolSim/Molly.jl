@@ -636,12 +636,12 @@ The available cutoffs are:
 - [`ShiftedForceCutoff`](@ref)
 - [`CubicSplineCutoff`](@ref)
 
-The following interactions can use a cutoff by passing the cutoff to the `cutoff` constructor keyword argument:
+The following interactions can use a cutoff:
 - [`LennardJones`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
 - [`Coulomb`](@ref)
-[`CoulombReactionField`](@ref) and the implicit solvent models have arguments for a cutoff distance.
+In addition, [`CoulombReactionField`](@ref) and the implicit solvent models have a `dist_cutoff` argument for a cutoff distance.
 
 ## Simulators
 
@@ -906,7 +906,7 @@ Note that we need to redeclare the system when adding a logger.
 # args and kwargs because more complex observables may require neighbors and parallelism
 V(s::System, args...; kwargs...) = s.velocities
 V_Type = eltype(sys.velocities)
-logger = TimeCorrelationLogger(V_Type, V_Type, V, V, n_atoms, 1_000)
+logger = TimeCorrelationLogger(V, V, V_Type, V_Type, n_atoms, 1_000)
 
 sys = System(
     atoms=atoms,
@@ -926,7 +926,7 @@ Check the output:
 show(sys.loggers)
 ```
 ```console
-(velocity_autocorrelation = AutoCorrelationLogger with n_correlation 1000, and 100001 samples collected for observable V,)
+(velocity_autocorrelation = AutoCorrelationLogger with n_correlation 1000 and 100001 samples collected for observable V,)
 ```
 Note we also could have used the convenience function [`AutoCorrelationLogger`](@ref) to define our logger since the two observables we are correlating are the same.
 ```julia
