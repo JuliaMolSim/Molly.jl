@@ -342,15 +342,8 @@ function System(;
                     loggers, force_units, energy_units, k_converted)
 end
 
-# type for wrapping individual replica
-mutable struct IndividualReplica{C, V}
-    index::Int
-    coords::C
-    velocities::V
-end
-
 # A system to be simulated using replica exchage
-mutable struct ReplicaSystem{D, G, T, A, AD, PI, SI, GI, RS, B, NF, L, F, E} <: AbstractSystem{D}
+mutable struct ReplicaSystem{D, G, T, A, AD, PI, SI, GI, RS, B, NF, F, E} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     pairwise_inters::PI
@@ -360,12 +353,10 @@ mutable struct ReplicaSystem{D, G, T, A, AD, PI, SI, GI, RS, B, NF, L, F, E} <: 
     replicas::RS
     boundary::B
     neighbor_finder::NF
-    replica_loggers::L
     force_units::F
     energy_units::E
 end
 
-# constructor for replica system
 function ReplicaSystem(;
     atoms,
     atoms_data=[],
@@ -395,19 +386,31 @@ function ReplicaSystem(;
     NF = typeof(neighbor_finder)
     F = typeof(force_units)
     E = typeof(energy_units)
-    C = typeof(coords)
-    V = typeof(velocities)
 
-    replicas = Dict([i, IndividualReplica{C, V}(i, coords, velocities)] for i=1:n_replicas)
+    replicas = Dict(
+        [i, System(
+            atoms=atoms,
+            atoms_data=atoms_data,
+            pairwise_inters=pairwise_inters,
+            specific_inter_lists=specific_inter_lists,
+            general_inters=general_inters,
+            coords=coords,
+            velocities=velocities,
+            boundary=boundary,
+            neighbor_finder=[copy(neighbor_finder) for i in 1:n_replicas],
+            loggers=loggers,
+            force_units=force_units,
+            energy_units=energy_units,
+            gpu_diff_safe=gpu_diff_safe  
+        )] for i=1:n_replicas
+    )
     RS = typeof(replicas)
 
-    replica_loggers = Dict([i, copy(loggers)] for i=1:n_replicas)
-    L = typeof(replica_loggers)
-
-    return ReplicaSystem{D, G, T, A, AD, PI, SI, GI, RS, B, NF, L, F, E}(
+    return ReplicaSystem{D, G, T, A, AD, PI, SI, GI, RS, B, NF, F, E}(
             atoms, atoms_data, pairwise_inters, specific_inter_lists,
             general_inters, n_replicas, replicas, boundary, neighbor_finder,
-            replica_loggers, force_units, energy_units)
+            force_units, energy_units
+        )
 end
 
 """
