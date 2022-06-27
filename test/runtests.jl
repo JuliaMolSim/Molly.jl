@@ -9,8 +9,8 @@ using Zygote
 using Base.Threads
 using DelimitedFiles
 using LinearAlgebra
-using Statistics
 using Random
+using Statistics
 using Test
 
 @warn "This file does not include all the tests for Molly.jl due to CI time limits, " *
@@ -21,6 +21,9 @@ const GROUP = get(ENV, "GROUP", "All")
 if GROUP == "Protein" || GROUP == "Zygote"
     @warn "Only running $GROUP tests as GROUP is set to $GROUP"
 end
+
+# Allow CUDA device to be specified
+const DEVICE = get(ENV, "DEVICE", "0")
 
 # GLMakie doesn't work on CI
 run_visualize_tests = !haskey(ENV, "CI")
@@ -40,7 +43,8 @@ end
 
 run_gpu_tests = CUDA.functional()
 if run_gpu_tests
-    @info "The GPU tests will be run as a CUDA-enabled device is available"
+    device!(parse(Int, DEVICE))
+    @info "The GPU tests will be run on device $DEVICE"
 else
     @warn "The GPU tests will not be run as a CUDA-enabled device is not available"
 end

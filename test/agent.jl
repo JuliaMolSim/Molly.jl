@@ -27,7 +27,7 @@
     end
 
     # Custom force function
-    function Molly.force(inter::SIRInteraction, dr, coord_i, coord_j, atom_i, atom_j, box_size)
+    function Molly.force(inter::SIRInteraction, dr, coord_i, coord_j, atom_i, atom_j, boundary)
         if (atom_i.status == infected && atom_j.status == susceptible) ||
                     (atom_i.status == susceptible && atom_j.status == infected)
             # Infect close people randomly
@@ -61,11 +61,11 @@
 
     n_people = 500
     n_steps = 1_000
-    box_size = SVector(10.0, 10.0)
+    boundary = RectangularBoundary(10.0, 10.0)
     temp = 1.0
     n_starting = 2
     atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
-    coords = place_atoms(n_people, box_size, 0.1)
+    coords = place_atoms(n_people, boundary, 0.1)
     velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
     pairwise_inters = (
         LennardJones=LennardJones(nl_only=true),
@@ -83,11 +83,11 @@
         pairwise_inters=pairwise_inters,
         coords=coords,
         velocities=velocities,
-        box_size=box_size,
+        boundary=boundary,
         neighbor_finder=neighbor_finder,
-        loggers=Dict(
-            "coords" => CoordinateLogger(Float64, 10; dims=2),
-            "SIR"    => SIRLogger(10, []),
+        loggers=(
+            coords=CoordinateLogger(Float64, 10; dims=2),
+            SIR=SIRLogger(10, []),
         ),
         force_units=NoUnits,
         energy_units=NoUnits,

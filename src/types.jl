@@ -259,11 +259,10 @@ interface described there.
     vector of `SVector`s of 2 or 3 dimensions.
 - `velocities::V=zero(coords) * u"ps^-1"`: the velocities of the atoms in the
     system.
-- `box_size::B`: the size of the box in which the simulation takes place.
-    Typically a `SVector` of 2 or 3 dimensions.
+- `boundary::B`: the bounding box in which the simulation takes place.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
-- `loggers::L=Dict()`: the loggers that record properties of interest during a
+- `loggers::L=()`: the loggers that record properties of interest during a
     simulation.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
@@ -282,7 +281,7 @@ mutable struct System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K} <: Ab
     general_inters::GI
     coords::C
     velocities::V
-    box_size::B
+    boundary::B
     neighbor_finder::NF
     loggers::L
     force_units::F
@@ -298,16 +297,16 @@ function System(;
                 general_inters=(),
                 coords,
                 velocities=zero(coords) * u"ps^-1",
-                box_size,
+                boundary,
                 neighbor_finder=NoNeighborFinder(),
-                loggers=Dict(),
+                loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=Unitful.k,
                 gpu_diff_safe=isa(coords, CuArray))
-    D = length(box_size)
+    D = n_dimensions(boundary)
     G = gpu_diff_safe
-    T = typeof(ustrip(first(box_size)))
+    T = float_type(boundary)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     PI = typeof(pairwise_inters)
@@ -315,22 +314,19 @@ function System(;
     GI = typeof(general_inters)
     C = typeof(coords)
     V = typeof(velocities)
-    B = typeof(box_size)
+    B = typeof(boundary)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
 
     if energy_units == NoUnits
-        # Remove this ignore block once Unitful gradient support is added
-        Zygote.ignore() do
-            if unit(k) == NoUnits
-                # Use user-supplied unitless Boltzmann constant
-                k_converted = T(k)
-            else
-                # Otherwise assume energy units are (u* nm^2 * ps^-2)
-                k_converted = T(ustrip(u"u * nm^2 * ps^-2 * K^-1", k))
-            end
+        if unit(k) == NoUnits
+            # Use user-supplied unitless Boltzmann constant
+            k_converted = T(k)
+        else
+            # Otherwise assume energy units are (u* nm^2 * ps^-2)
+            k_converted = T(ustrip(u"u * nm^2 * ps^-2 * K^-1", k))
         end
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         k_converted = T(uconvert(energy_units * u"mol * K^-1", k))
@@ -342,8 +338,8 @@ function System(;
 
     return System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
                     atoms, atoms_data, pairwise_inters, specific_inter_lists,
-                    general_inters, coords, velocities, box_size, neighbor_finder,
-                    loggers, force_units, energy_units,k_converted)
+                    general_inters, coords, velocities, boundary, neighbor_finder,
+                    loggers, force_units, energy_units, k_converted)
 end
 
 # type for wrapping individual replica
@@ -362,7 +358,7 @@ mutable struct ReplicaSystem{D, G, T, A, AD, PI, SI, GI, RS, B, NF, L, F, E} <: 
     general_inters::GI
     n_replicas::Integer
     replicas::RS
-    box_size::B
+    boundary::B
     neighbor_finder::NF
     replica_loggers::L
     force_units::F
@@ -379,7 +375,7 @@ function ReplicaSystem(;
     coords,
     velocities=zero(coords) * u"ps^-1",
     n_replicas,
-    box_size,
+    boundary,
     neighbor_finder=NoNeighborFinder(),
     loggers=Dict(),
     force_units=u"kJ * mol^-1 * nm^-1",
@@ -395,7 +391,7 @@ function ReplicaSystem(;
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
-    B = typeof(box_size)
+    B = typeof(boundary)
     NF = typeof(neighbor_finder)
     F = typeof(force_units)
     E = typeof(energy_units)
@@ -410,7 +406,7 @@ function ReplicaSystem(;
 
     return ReplicaSystem{D, G, T, A, AD, PI, SI, GI, RS, B, NF, L, F, E}(
             atoms, atoms_data, pairwise_inters, specific_inter_lists,
-            general_inters, n_replicas, replicas, box_size, neighbor_finder,
+            general_inters, n_replicas, replicas, boundary, neighbor_finder,
             replica_loggers, force_units, energy_units)
 end
 
@@ -418,14 +414,15 @@ end
     is_gpu_diff_safe(sys)
 
 Whether a `System` uses the code path suitable for the GPU and
-    for taking gradients.
+for taking gradients.
 """
 is_gpu_diff_safe(::Union{System{D, G}, ReplicaSystem{D, G}}) where {D, G} = G
 
 """
     float_type(sys)
+    float_type(boundary)
 
-The float type a `System` uses.
+The float type a `System` or bounding box uses.
 """
 float_type(::Union{System{D, G, T}, ReplicaSystem{D, G, T}}) where {D, G, T} = T
 
@@ -461,15 +458,15 @@ edges_to_box(bs::SVector{2}, z) = SVector{2}([
     SVector(z    , bs[2]),
 ])
 
-function AtomsBase.bounding_box(s::Union{System, ReplicaSystem})
-    bs = s.box_size
+function AtomsBase.bounding_box(s::System)
+    bs = s.boundary.side_lengths
     z = zero(bs[1])
     bb = edges_to_box(bs, z)
     return unit(z) == NoUnits ? (bb)u"nm" : bb # Assume nm without other information
 end
 
 function Base.show(io::IO, s::System)
-    print(io, "System with ", length(s), " atoms, box size ", s.box_size)
+    print(io, "System with ", length(s), " atoms, boundary ", s.boundary)
 end
 
 function Base.show(io::IO, s::ReplicaSystem)

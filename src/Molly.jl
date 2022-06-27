@@ -17,6 +17,7 @@ using NearestNeighbors
 using Reexport
 using Requires
 using Unitful
+using UnitfulChainRules
 using Zygote
 
 @reexport using AtomsBase
@@ -27,6 +28,7 @@ using Base.Threads
 using LinearAlgebra
 using Random
 using SparseArrays
+using Statistics
 
 include("types.jl")
 include("cutoffs.jl")

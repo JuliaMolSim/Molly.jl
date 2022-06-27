@@ -33,7 +33,7 @@ end
                                     coord_j,
                                     atom_i,
                                     atom_j,
-                                    box_size,
+                                    boundary,
                                     weight_14::Bool=false) where C
     r2 = sum(abs2, dr)
 
@@ -76,7 +76,7 @@ end
                                             coord_j,
                                             atom_i,
                                             atom_j,
-                                            box_size,
+                                            boundary,
                                             weight_14::Bool=false) where C
     r2 = sum(abs2, dr)
 
@@ -88,11 +88,11 @@ end
     if cutoff_points(C) == 0
         pe = potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_units
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
 
         pe = potential_cutoff(cutoff, r2, inter, params)
     elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(box_size[1])) * inter.energy_units
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
 
         if r2 < cutoff.sqdist_activation
             pe = potential(inter, r2, inv(r2), params)

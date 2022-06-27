@@ -3,11 +3,23 @@
 
 using .GLMakie
 
+function axis_limits(boundary_conv, coord_logger, dim)
+    lim = boundary_conv[dim]
+    if isinf(lim)
+        # Find coordinate limits in given dimension
+        low  = ustrip(minimum(cs -> minimum(c -> c[dim], cs), values(coord_logger)))
+        high = ustrip(maximum(cs -> maximum(c -> c[dim], cs), values(coord_logger)))
+        return low, high
+    else
+        return 0.0, lim
+    end
+end
+
 function visualize(coord_logger,
-                    box_size,
+                    boundary,
                     out_filepath::AbstractString;
                     connections=Tuple{Int, Int}[],
-                    connection_frames=[trues(length(connections)) for i in coord_logger.coords],
+                    connection_frames=[trues(length(connections)) for i in values(coord_logger)],
                     trails::Integer=0,
                     framerate::Integer=30,
                     color=:purple,
@@ -16,7 +28,7 @@ function visualize(coord_logger,
                     linewidth=2.0,
                     transparency=true,
                     kwargs...)
-    coords_start = first(coord_logger.coords)
+    coords_start = first(values(coord_logger))
     dims = length(first(coords_start))
     fig = Figure()
 
@@ -37,7 +49,7 @@ function visualize(coord_logger,
 
     connection_nodes = []
     for (ci, (i, j)) in enumerate(connections)
-        if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < (first(box_size) / 2)
+        if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < (boundary[1] / 2)
             if dims == 3
                 push!(connection_nodes, Observable(PointType.(
                         ustrip.([coords_start[i][1], coords_start[j][1]]),
@@ -75,16 +87,16 @@ function visualize(coord_logger,
     end
 
     dist_unit = unit(first(first(coords_start)))
-    box_size_conv = ustrip.(dist_unit, box_size)
-    xlims!(ax, 0.0, box_size_conv[1])
-    ylims!(ax, 0.0, box_size_conv[2])
-    dims == 3 && zlims!(ax, 0.0, box_size_conv[3])
+    boundary_conv = ustrip.(dist_unit, boundary)
+    xlims!(ax, axis_limits(boundary_conv, coord_logger, 1))
+    ylims!(ax, axis_limits(boundary_conv, coord_logger, 2))
+    dims == 3 && zlims!(ax, axis_limits(boundary_conv, coord_logger, 3))
 
-    GLMakie.record(fig, out_filepath, eachindex(coord_logger.coords); framerate=framerate) do frame_i
-        coords = coord_logger.coords[frame_i]
+    GLMakie.record(fig, out_filepath, eachindex(values(coord_logger)); framerate=framerate) do frame_i
+        coords = values(coord_logger)[frame_i]
 
         for (ci, (i, j)) in enumerate(connections)
-            if connection_frames[frame_i][ci] && norm(coords[i] - coords[j]) < (first(box_size) / 2)
+            if connection_frames[frame_i][ci] && norm(coords[i] - coords[j]) < (boundary[1] / 2)
                 if dims == 3
                     connection_nodes[ci][] = PointType.(
                                 ustrip.([coords[i][1], coords[j][1]]),
@@ -107,7 +119,7 @@ function visualize(coord_logger,
 
         positions[] = PointType.(ustrip_vec.(coords))
         for (trail_i, trail_position) in enumerate(trail_positions)
-            trail_position[] = PointType.(ustrip_vec.(coord_logger.coords[max(frame_i - trail_i, 1)]))
+            trail_position[] = PointType.(ustrip_vec.(values(coord_logger)[max(frame_i - trail_i, 1)]))
         end
     end
 end
