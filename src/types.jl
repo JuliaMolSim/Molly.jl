@@ -374,9 +374,9 @@ function ReplicaSystem(;
     gpu_diff_safe=isa(coords, CuArray)
     )
 
-    D = length(box_size)
+    D = n_dimensions(boundary)
     G = gpu_diff_safe
-    T = typeof(ustrip(first(box_size)))
+    T = float_type(boundary)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     PI = typeof(pairwise_inters)
@@ -397,7 +397,7 @@ function ReplicaSystem(;
             coords=coords,
             velocities=velocities,
             boundary=boundary,
-            neighbor_finder=[copy(neighbor_finder) for i in 1:n_replicas],
+            neighbor_finder=neighbor_finder,
             loggers=loggers,
             force_units=force_units,
             energy_units=energy_units,
@@ -461,7 +461,7 @@ edges_to_box(bs::SVector{2}, z) = SVector{2}([
     SVector(z    , bs[2]),
 ])
 
-function AtomsBase.bounding_box(s::System)
+function AtomsBase.bounding_box(s::Union{System, ReplicaSystem})
     bs = s.boundary.side_lengths
     z = zero(bs[1])
     bb = edges_to_box(bs, z)
@@ -473,5 +473,5 @@ function Base.show(io::IO, s::System)
 end
 
 function Base.show(io::IO, s::ReplicaSystem)
-    print(io, "ReplicaSystem containing ",  s.n_replicas, " replicas with ", length(s), " atoms, box size ", s.box_size)
+    print(io, "ReplicaSystem containing ",  s.n_replicas, " replicas with ", length(s), " atoms, boundary ", s.boundary)
 end
