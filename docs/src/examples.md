@@ -24,7 +24,7 @@ ff = OpenMMForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
-    loggers=Dict("temp" => TemperatureLogger(100)),
+    loggers=(temp=TemperatureLogger(100),),
 )
 
 minimizer = SteepestDescentMinimizer()
@@ -60,8 +60,8 @@ for (i, temp) in enumerate(temps)
 end
 scatter!(
     ax,
-    100 .* (1:length(sys.loggers["temp"].temperatures)),
-    ustrip.(sys.loggers["temp"].temperatures),
+    100 .* (1:length(values(sys.loggers.temp))),
+    ustrip.(values(sys.loggers.temp)),
     markersize=5,
 )
 save("annealing.png", f)
@@ -100,7 +100,7 @@ masses = [
     0.642e24u"kg",
 ]
 
-box_size = SVector(1e9, 1e9, 1e9)u"km"
+boundary = CubicBoundary(1e9u"km", 1e9u"km", 1e9u"km")
 
 # Convert the gravitational constant to the appropriate units
 inter = Gravity(G=convert(typeof(1.0u"km^3 * kg^-1 * d^-2"), Unitful.G))
@@ -110,8 +110,8 @@ sys = System(
     pairwise_inters=(inter,),
     coords=coords .+ (SVector(5e8, 5e8, 5e8)u"km",),
     velocities=velocities,
-    box_size=box_size,
-    loggers=Dict("coords" => CoordinateLogger(typeof(1.0u"km"), 10)),
+    boundary=boundary,
+    loggers=(coords=CoordinateLogger(typeof(1.0u"km"), 10),),
     force_units=u"kg * km * d^-2",
     energy_units=u"kg * km^2 * d^-2",
 )
@@ -124,8 +124,8 @@ simulator = Verlet(
 simulate!(sys, simulator, 3650) # 1 year
 
 visualize(
-    sys.loggers["coords"],
-    box_size,
+    sys.loggers.coords,
+    boundary,
     "sim_planets.mp4";
     trails=5,
     color=[:yellow, :grey, :orange, :blue, :red],
@@ -138,9 +138,9 @@ visualize(
 ## Making and breaking bonds
 
 There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation?
-In this case you can use a `PairwiseInteraction` to make, break and apply the bonds.
+In this case you can use a [`PairwiseInteraction`](@ref) to make, break and apply the bonds.
 The partners of the atom can be stored in the atom type.
-We make a logger to record when the bonds are present, allowing us to visualize them with the `connection_frames` keyword argument to `visualize` (this can take a while to plot).
+We make a logger to record when the bonds are present, allowing us to visualize them with the `connection_frames` keyword argument to [`visualize`](@ref) (this can take a while to plot).
 ```julia
 using Molly
 using GLMakie
@@ -171,7 +171,7 @@ function Molly.force(inter::BondableInteraction,
                         coord_j,
                         atom_i,
                         atom_j,
-                        box_size)
+                        boundary)
     # Break bonds randomly
     if atom_j.i in atom_i.partners && rand() < inter.prob_break
         delete!(atom_i.partners, atom_j.i)
@@ -193,30 +193,25 @@ function Molly.force(inter::BondableInteraction,
     end
 end
 
-struct BondLogger
-    n_steps::Int
-    bonds::Vector{BitVector}
+function bonds(sys::System, neighbors=nothing, parallel::Bool=true)
+    bonds = BitVector()
+    for i in 1:length(sys)
+        for j in 1:(i - 1)
+            push!(bonds, j in sys.atoms[i].partners)
+        end
+    end
+    return bonds
 end
 
-function Molly.log_property!(logger::BondLogger, s, neighbors, step_n; parallel=true)
-    if step_n % logger.n_steps == 0
-        bonds = BitVector()
-        for i in 1:length(s)
-            for j in 1:(i - 1)
-                push!(bonds, j in s.atoms[i].partners)
-            end
-        end
-        push!(logger.bonds, bonds)
-    end
-end
+BondLogger(n_steps) = GeneralObservableLogger(bonds, BitVector, n_steps)
 
 n_atoms = 200
-box_size = SVector(10.0, 10.0)
+boundary = RectangularBoundary(10.0, 10.0)
 n_steps = 2_000
 temp = 1.0
 
 atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
-coords = place_atoms(n_atoms, box_size, 0.1)
+coords = place_atoms(n_atoms, boundary, 0.1)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
     SoftSphere(nl_only=true),
@@ -237,11 +232,11 @@ sys = System(
     pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
-    box_size=box_size,
+    boundary=boundary,
     neighbor_finder=neighbor_finder,
-    loggers=Dict(
-        "coords" => CoordinateLogger(Float64, 20; dims=2),
-        "bonds"  => BondLogger(20, []),
+    loggers=(
+        coords=CoordinateLogger(Float64, 20; dims=2),
+        bonds=BondLogger(20),
     ),
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -257,11 +252,11 @@ for i in 1:length(sys)
 end
 
 visualize(
-    sys.loggers["coords"],
-    box_size,
+    sys.loggers.coords,
+    boundary,
     "sim_mutbond.mp4";
     connections=connections,
-    connection_frames=sys.loggers["bonds"].bonds,
+    connection_frames=values(sys.loggers.bonds),
     markersize=0.1,
 )
 ```
@@ -279,14 +274,14 @@ using Zygote
 using GLMakie
 
 inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
-box_size = SVector(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0, 5.0, 5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
 function force_direct(dist)
     c1 = SVector(1.0, 1.0, 1.0)
     c2 = SVector(dist + 1.0, 1.0, 1.0)
-    vec = vector(c1, c2, box_size)
-    F = force(inter, vec, c1, c2, a1, a2, box_size)
+    vec = vector(c1, c2, boundary)
+    F = force(inter, vec, c1, c2, a1, a2, boundary)
     return F[1]
 end
 
@@ -294,8 +289,8 @@ function force_grad(dist)
     grad = gradient(dist) do dist
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
-        vec = vector(c1, c2, box_size)
-        potential_energy(inter, vec, c1, c2, a1, a2, box_size)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
     end
     return -grad[1]
 end
@@ -328,14 +323,14 @@ It can also be compared to the harmonic bond potential.
 using Molly
 using GLMakie
 
-box_size = SVector(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0, 5.0, 5.0)
 dists = collect(0.12:0.005:2.0)
 
 function energies(inter)
     return map(dists) do dist
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
-        potential_energy(inter, c1, c2, box_size)
+        potential_energy(inter, c1, c2, boundary)
     end
 end
 
@@ -374,7 +369,7 @@ When *m*=6 and *n*=12 this is equivalent to the Lennard-Jones potential.
 using Molly
 using GLMakie
 
-box_size = SVector(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0, 5.0, 5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 dists = collect(0.2:0.005:0.8)
 
@@ -383,8 +378,8 @@ function energies(m, n)
     return map(dists) do dist
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
-        vec = vector(c1, c2, box_size)
-        potential_energy(inter, vec, c1, c2, a1, a2, box_size)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
     end
 end
 

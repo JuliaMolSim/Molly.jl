@@ -38,7 +38,7 @@ end
                                     coord_j,
                                     atom_i,
                                     atom_j,
-                                    box_size,
+                                    boundary,
                                     weight_14::Bool=false)
     r2 = sum(abs2, dr)
 
@@ -73,12 +73,12 @@ end
                                             coord_j,
                                             atom_i,
                                             atom_j,
-                                            box_size,
+                                            boundary,
                                             weight_14::Bool=false)
     r2 = sum(abs2, dr)
 
     if r2 > (inter.dist_cutoff ^ 2)
-        return ustrip(zero(box_size[1])) * inter.energy_units
+        return ustrip(zero(coord_i[1])) * inter.energy_units
     end
 
     coulomb_const = inter.coulomb_const

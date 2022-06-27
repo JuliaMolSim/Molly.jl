@@ -15,10 +15,10 @@ end
 RBTorsion(; f1, f2, f3, f4) = RBTorsion{typeof(f1)}(f1, f2, f3, f4)
 
 @inline @inbounds function force(d::RBTorsion, coords_i, coords_j, coords_k,
-                                    coords_l, box_size)
-    ab = vector(coords_i, coords_j, box_size)
-    bc = vector(coords_j, coords_k, box_size)
-    cd = vector(coords_k, coords_l, box_size)
+                                    coords_l, boundary)
+    ab = vector(coords_i, coords_j, boundary)
+    bc = vector(coords_j, coords_k, boundary)
+    cd = vector(coords_k, coords_l, boundary)
     cross_ab_bc = ab × bc
     cross_bc_cd = bc × cd
     bc_norm = norm(bc)
@@ -36,7 +36,7 @@ RBTorsion(; f1, f2, f3, f4) = RBTorsion{typeof(f1)}(f1, f2, f3, f4)
 end
 
 @inline @inbounds function potential_energy(d::RBTorsion, coords_i, coords_j, coords_k,
-                                            coords_l, box_size)
-    θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, box_size)
+                                            coords_l, boundary)
+    θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, boundary)
     return (d.f1 * (1 + cos(θ)) + d.f2 * (1 - cos(2θ)) + d.f3 * (1 + cos(3θ)) + d.f4) / 2
 end

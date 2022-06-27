@@ -1,4 +1,4 @@
-# Temperature and pressure coupling
+# Temperature and pressure coupling methods
 
 export
     NoCoupling,
@@ -26,6 +26,7 @@ apply_coupling!(sys, sim, ::NoCoupling) = sys
     AndersenThermostat(temperature, coupling_const)
 
 Rescale random velocities according to the Andersen thermostat.
+Not currently compatible with automatic differentiation using Zygote.
 """
 struct AndersenThermostat{T, C}
     temperature::T

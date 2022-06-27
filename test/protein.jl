@@ -4,11 +4,11 @@
     s = System(
         joinpath(data_dir, "5XER", "gmx_coords.gro"),
         joinpath(data_dir, "5XER", "gmx_top_ff.top");
-        loggers=Dict(
-            "temp"   => TemperatureLogger(10),
-            "coords" => CoordinateLogger(10),
-            "energy" => TotalEnergyLogger(10),
-            "writer" => StructureWriter(10, temp_fp_pdb),
+        loggers=(
+            temp=TemperatureLogger(10),
+            coords=CoordinateLogger(10),
+            energy=TotalEnergyLogger(10),
+            writer=StructureWriter(10, temp_fp_pdb),
         ),
     )
     simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
@@ -20,7 +20,7 @@
     @test size(s.neighbor_finder.matrix_14) == (true_n_atoms, true_n_atoms)
     @test length(s.pairwise_inters) == 2
     @test length(s.specific_inter_lists) == 3
-    @test s.box_size == SVector(3.7146, 3.7146, 3.7146)u"nm"
+    @test s.boundary == CubicBoundary(3.7146u"nm", 3.7146u"nm", 3.7146u"nm")
     show(devnull, first(s.atoms))
 
     s.velocities = [velocity(a.mass, temp) .* 0.01 for a in s.atoms]
@@ -39,13 +39,16 @@ end
         Float32,
         joinpath(data_dir, "5XER", "gmx_coords.gro"),
         joinpath(data_dir, "5XER", "gmx_top_ff.top");
-        loggers=Dict(
-            "temp"   => TemperatureLogger(typeof(1.0f0u"K"), 10),
-            "coords" => CoordinateLogger(typeof(1.0f0u"nm"), 10),
-            "energy" => TotalEnergyLogger(typeof(1.0f0u"kJ * mol^-1"), 10),
+        loggers=(
+            temp=TemperatureLogger(typeof(1.0f0u"K"), 10),
+            coords=CoordinateLogger(typeof(1.0f0u"nm"), 10),
+            energy=TotalEnergyLogger(typeof(1.0f0u"kJ * mol^-1"), 10),
         ),
     )
-    simulator = VelocityVerlet(dt=0.0002f0u"ps", coupling=AndersenThermostat(temp, 10.0f0u"ps"))
+    simulator = VelocityVerlet(
+        dt=0.0002f0u"ps",
+        coupling=AndersenThermostat(temp, 10.0f0u"ps"),
+    )
 
     s.velocities = [velocity(a.mass, Float32(temp)) .* 0.01f0 for a in s.atoms]
     @time simulate!(s, simulator, n_steps; parallel=false)
@@ -88,7 +91,7 @@ end
             pairwise_inters=pin,
             specific_inter_lists=sils,
             coords=sys.coords,
-            box_size=sys.box_size,
+            boundary=sys.boundary,
             neighbor_finder=sys.neighbor_finder,
         )
 
@@ -116,7 +119,7 @@ end
     coords_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "coordinates_$(n_steps)steps.txt"))))u"nm"
     vels_openmm   = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_$(n_steps)steps.txt" ))))u"nm * ps^-1"
 
-    coords_diff = sys.coords .- wrap_coords_vec.(coords_openmm, (sys.box_size,))
+    coords_diff = sys.coords .- wrap_coords.(coords_openmm, (sys.boundary,))
     vels_diff = sys.velocities .- vels_openmm
     # Coordinates and velocities at end must match at some threshold
     @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
@@ -145,7 +148,7 @@ end
 
     simulate!(sys_nounits, simulator_nounits, n_steps; parallel=true)
 
-    coords_diff = sys_nounits.coords * u"nm" .- wrap_coords_vec.(coords_openmm, (sys.box_size,))
+    coords_diff = sys_nounits.coords * u"nm" .- wrap_coords.(coords_openmm, (sys.boundary,))
     vels_diff = sys_nounits.velocities * u"nm * ps^-1" .- vels_openmm
     @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
     @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
@@ -173,7 +176,7 @@ end
 
         simulate!(sys, simulator, n_steps)
 
-        coords_diff = Array(sys.coords) .- wrap_coords_vec.(coords_openmm, (sys.box_size,))
+        coords_diff = Array(sys.coords) .- wrap_coords.(coords_openmm, (sys.boundary,))
         vels_diff = Array(sys.velocities) .- vels_openmm
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
         @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
@@ -195,7 +198,7 @@ end
 
         simulate!(sys_nounits, simulator_nounits, n_steps)
 
-        coords_diff = Array(sys_nounits.coords * u"nm") .- wrap_coords_vec.(coords_openmm, (sys.box_size,))
+        coords_diff = Array(sys_nounits.coords * u"nm") .- wrap_coords.(coords_openmm, (sys.boundary,))
         vels_diff = Array(sys_nounits.velocities * u"nm * ps^-1") .- vels_openmm
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
         @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
@@ -216,7 +219,7 @@ end
         sys = System(
             joinpath(data_dir, "6mrr_nowater.pdb"),
             ff;
-            box_size=SVector(100.0, 100.0, 100.0)u"nm",
+            boundary=CubicBoundary(100.0u"nm", 100.0u"nm", 100.0u"nm"),
             implicit_solvent=solvent_model,
             dist_cutoff=5.0u"nm",
             nl_dist=5.0u"nm",

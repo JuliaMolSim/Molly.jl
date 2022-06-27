@@ -11,7 +11,10 @@ However Julia provides a strong suite of AD tools, with [Zygote.jl](https://gith
 With Molly you can use the power of Zygote to obtain gradients through molecular simulations, even in the presence of complex interactions such as implicit solvation.
 Reverse and forward mode AD can be used on the CPU and the GPU.
 Pairwise, specific and general interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
+
 Differentiable simulation does not currently work with units and some components of the package.
+This is mentioned in the relevant docstrings.
+It is memory intensive on the GPU so using gradient checkpointing will likely be required for larger simulations.
 
 ## Pairwise interactions
 
@@ -22,14 +25,14 @@ First we need a function to obtain the mean distance of each atom to its closest
 ```julia
 using Molly
 
-function mean_min_separation(final_coords, box_size)
+function mean_min_separation(final_coords, boundary)
     n_atoms = length(final_coords)
     sum_dists = 0.0
     for i in 1:n_atoms
         min_dist = 100.0
         for j in 1:n_atoms
             i == j && continue
-            dist = sqrt(sum(abs2, vector(final_coords[i], final_coords[j], box_size)))
+            dist = sqrt(sum(abs2, vector(final_coords[i], final_coords[j], boundary)))
             min_dist = min(dist, min_dist)
         end
         sum_dists += min_dist
@@ -52,7 +55,7 @@ scale_σ_to_dist = 2 ^ (1 / 6)
 n_atoms = 50
 n_steps = 500
 atom_mass = 10.0
-box_size = SVector(3.0, 3.0, 3.0)
+boundary = CubicBoundary(3.0, 3.0, 3.0)
 temp = 1.0
 neighbor_finder = DistanceVecNeighborFinder(
     nb_matrix=trues(n_atoms, n_atoms),
@@ -64,7 +67,7 @@ lj = LennardJones(nl_only=true, force_units=NoUnits, energy_units=NoUnits)
 crf = CoulombReactionField(dist_cutoff=1.5, nl_only=true, coulomb_const=0.0,
                            force_units=NoUnits, energy_units=NoUnits)
 pairwise_inters = (lj, crf)
-coords = place_atoms(n_atoms, box_size, 0.7)
+coords = place_atoms(n_atoms, boundary, 0.7)
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 simulator = VelocityVerlet(
     dt=0.02,
@@ -73,14 +76,14 @@ simulator = VelocityVerlet(
 
 function loss(σ)
     atoms = [Atom(0, 0.0, atom_mass, σ, 0.2, false) for i in 1:n_atoms]
-    loggers = Dict("coords" => CoordinateLogger(Float64, 10))
+    loggers = (coords=CoordinateLogger(Float64, 10),)
 
     s = System(
         atoms=atoms,
         pairwise_inters=pairwise_inters,
         coords=coords,
         velocities=velocities,
-        box_size=box_size,
+        boundary=boundary,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=NoUnits,
@@ -88,9 +91,9 @@ function loss(σ)
         gpu_diff_safe=true,
     )
 
-    mms_start = mean_min_separation(s.coords, box_size)
+    mms_start = mean_min_separation(s.coords, boundary)
     simulate!(s, simulator, n_steps)
-    mms_end = mean_min_separation(s.coords, box_size)
+    mms_end = mean_min_separation(s.coords, boundary)
     loss_val = abs(mms_end - dist_true)
 
     Zygote.ignore() do
@@ -117,7 +120,7 @@ function train()
 
     for epoch_n in 1:n_epochs
         printfmt("Epoch {:>2}  |  ", epoch_n)
-        coords = place_atoms(n_atoms, box_size, 0.7)
+        coords = place_atoms(n_atoms, boundary, 0.7)
         velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
         grad = gradient(loss, σlearn)[1]
         printfmt("Grad {:6.3f}\n", grad)
@@ -169,7 +172,7 @@ dist_true = 1.0
 
 n_steps = 150
 atom_mass = 10.0
-box_size = SVector(3.0, 3.0, 3.0)
+boundary = CubicBoundary(3.0, 3.0, 3.0)
 temp = 0.05
 coords = [
     SVector(0.8, 0.75, 1.5), SVector(1.5, 0.70, 1.5), SVector(2.3, 0.75, 1.5),
@@ -184,7 +187,7 @@ simulator = VelocityVerlet(
 
 function loss(θ)
     atoms = [Atom(0, 0.0, atom_mass, 0.0, 0.0, false) for i in 1:n_atoms]
-    loggers = Dict("coords" => CoordinateLogger(Float64, 2))
+    loggers = (coords=CoordinateLogger(Float64, 2),)
     specific_inter_lists = (
         InteractionList2Atoms(
             [1, 2, 4, 5],
@@ -206,7 +209,7 @@ function loss(θ)
         specific_inter_lists=specific_inter_lists,
         coords=deepcopy(coords),
         velocities=deepcopy(velocities),
-        box_size=box_size,
+        boundary=boundary,
         loggers=loggers,
         force_units=NoUnits,
         energy_units=NoUnits,
@@ -215,8 +218,8 @@ function loss(θ)
 
     simulate!(s, simulator, n_steps)
 
-    d1 = norm(vector(s.coords[1], s.coords[3], box_size))
-    d2 = norm(vector(s.coords[4], s.coords[6], box_size))
+    d1 = norm(vector(s.coords[1], s.coords[3], boundary))
+    d2 = norm(vector(s.coords[4], s.coords[6], boundary))
     dist_end = 0.5 * (d1 + d2)
     loss_val = abs(dist_end - dist_true)
 
@@ -301,8 +304,8 @@ ps = params(model)
 
 struct NNBond <: SpecificInteraction end
 
-function Molly.force(b::NNBond, coords_i, coords_j, box_size)
-    vec_ij = vector(coords_i, coords_j, box_size)
+function Molly.force(b::NNBond, coords_i, coords_j, boundary)
+    vec_ij = vector(coords_i, coords_j, boundary)
     dist = norm(vec_ij)
     f = model([dist])[1] * normalize(vec_ij)
     return SpecificForce2Atoms(f, -f)
@@ -310,7 +313,7 @@ end
 
 n_steps = 400
 mass = 10.0f0
-box_size = SVector(5.0f0, 5.0f0, 5.0f0)
+boundary = CubicBoundary(5.0f0, 5.0f0, 5.0f0)
 temp = 0.01f0
 coords = [
     SVector(2.3f0, 2.07f0, 0.0f0),
@@ -326,7 +329,7 @@ simulator = VelocityVerlet(
 
 function loss()
     atoms = [Atom(0, 0.0f0, mass, 0.0f0, 0.0f0, false) for i in 1:n_atoms]
-    loggers = Dict("coords" => CoordinateLogger(Float32, 10))
+    loggers = (coords=CoordinateLogger(Float32, 10),)
     specific_inter_lists = (
         InteractionList2Atoms([1], [3], [""], [NNBond()]),
     )
@@ -336,7 +339,7 @@ function loss()
         specific_inter_lists=specific_inter_lists,
         coords=deepcopy(coords),
         velocities=deepcopy(velocities),
-        box_size=box_size,
+        boundary=boundary,
         loggers=loggers,
         force_units=NoUnits,
         energy_units=NoUnits,
@@ -345,14 +348,14 @@ function loss()
 
     simulate!(s, simulator, n_steps)
 
-    dist_end = (norm(vector(s.coords[1], s.coords[2], box_size)) +
-                norm(vector(s.coords[2], s.coords[3], box_size)) +
-                norm(vector(s.coords[3], s.coords[1], box_size))) / 3
+    dist_end = (norm(vector(s.coords[1], s.coords[2], boundary)) +
+                norm(vector(s.coords[2], s.coords[3], boundary)) +
+                norm(vector(s.coords[3], s.coords[1], boundary))) / 3
     loss_val = abs(dist_end - dist_true)
 
     Zygote.ignore() do
         printfmt("Dist end {:6.3f}  |  Loss {:6.3f}\n", dist_end, loss_val)
-        visualize(s.loggers["coords"], box_size, "sim.mp4")
+        visualize(s.loggers.coords, boundary, "sim.mp4")
     end
 
     return loss_val

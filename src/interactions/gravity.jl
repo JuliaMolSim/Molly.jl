@@ -18,7 +18,7 @@ Gravity(; G=Unitful.G, nl_only=false) = Gravity{typeof(G)}(G, nl_only)
                                     coord_j,
                                     atom_i,
                                     atom_j,
-                                    box_size)
+                                    boundary)
     r2 = sum(abs2, dr)
 
     mi, mj = atom_i.mass, atom_j.mass
@@ -38,7 +38,7 @@ end
                                             coord_j,
                                             atom_i,
                                             atom_j,
-                                            box_size)
+                                            boundary)
     r2 = sum(abs2, dr)
 
     mi, mj = atom_i.mass, atom_j.mass

@@ -15,13 +15,13 @@ At the minute the package is a proof of concept for MD in Julia.
 **It is not production ready**, though it can do some cool things and is under active development.
 Implemented features include:
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential.
-- Bonded interactions - covalent bonds, bond angles, torsion angles.
+- Bonded interactions - harmonic and Morse bonds, bond angles, torsion angles.
 - Interface to allow definition of new interactions, simulators, thermostats, neighbor finders, loggers etc.
 - Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also some support for Gromacs files.
 - Andersen, Berendsen and velocity rescaling thermostats.
-- Verlet, velocity Verlet, Störmer-Verlet and Langevin integrators.
+- Verlet, velocity Verlet, Störmer-Verlet and flexible Langevin integrators.
 - Steepest descent energy minimization.
-- Periodic boundary conditions in a cubic box.
+- Periodic and infinite boundary conditions in a cubic box.
 - Various neighbor list implementations to speed up calculation of non-bonded forces.
 - Implicit solvent GBSA methods.
 - [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
@@ -60,12 +60,12 @@ Simulation of a Lennard-Jones fluid:
 using Molly
 
 n_atoms = 100
-box_size = SVector(2.0, 2.0, 2.0)u"nm"
+boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
 temp = 298.0u"K"
 atom_mass = 10.0u"u"
 
 atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-coords = place_atoms(n_atoms, box_size, 0.3u"nm")
+coords = place_atoms(n_atoms, boundary, 0.3u"nm")
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 pairwise_inters = (LennardJones(),)
 simulator = VelocityVerlet(
@@ -78,8 +78,8 @@ sys = System(
     pairwise_inters=pairwise_inters,
     coords=coords,
     velocities=velocities,
-    box_size=box_size,
-    loggers=Dict("temp" => TemperatureLogger(100)),
+    boundary=boundary,
+    loggers=(temp=TemperatureLogger(100),),
 )
 
 simulate!(sys, simulator, 10_000)
@@ -92,9 +92,9 @@ using Molly
 sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
-    loggers=Dict(
-        "temp"   => TemperatureLogger(10),
-        "writer" => StructureWriter(10, "traj_5XER_1ps.pdb"),
+    loggers=(
+        temp=TemperatureLogger(10),
+        writer=StructureWriter(10, "traj_5XER_1ps.pdb"),
     ),
 )
 
