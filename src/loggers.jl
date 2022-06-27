@@ -68,6 +68,12 @@ function log_property!(logger::GeneralObservableLogger, s::System, neighbors=not
     end
 end
 
+function Base.show(io::IO, gol::GeneralObservableLogger)
+    print(io, "GeneralObservableLogger with n_steps ", gol.n_steps, ", ",
+            length(gol.history), " values recorded for observable ",
+            gol.observable)
+end
+
 temperature_wrapper(s, neighbors=nothing; parallel::Bool=true) = temperature(s)
 
 """
@@ -258,7 +264,7 @@ coefficients from Green-Kubo type formulas.
 *A* and *B* are observables, functions of the form
 `observable(sys::System, neighbors; parallel::Bool)`.    
 The return values of *A* and *B* can be of scalar or vector type (including
-`Vector{SVector{...}}`, like positions or velocities), and must implement `dot`.
+`Vector{SVector{...}}`, like positions or velocities) and must implement `dot`.
 
 `n_correlation` should typically be chosen so that
 `dt * n_correlation > t_corr`, where `dt` is the simulation timestep and
@@ -431,6 +437,17 @@ function AverageObservableLogger(observable::Function, T::DataType, n_steps::Int
     return AverageObservableLogger{T, typeof(observable)}(observable, n_steps, n_blocks, 1, T[], T[])
 end
 
+function Base.values(aol::AverageObservableLogger; std::Bool=true)
+    # Could add some logic to use the samples in the hanging block
+    avg = mean(aol.block_averages)
+    variance = var(aol.block_averages) / length(aol.block_averages)
+    if std
+        return (avg, sqrt(variance))
+    else
+        return avg
+    end
+end
+
 function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=nothing,
                         step_n::Integer=0; parallel::Bool=true) where T
     if (step_n % aol.n_steps) == 0
@@ -451,19 +468,8 @@ function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=not
     end
 end
 
-function Base.values(aol::AverageObservableLogger; std::Bool=true)
-    # Could add some logic to use the samples in the hanging block
-    avg = mean(aol.block_averages)
-    variance = var(aol.block_averages) / length(aol.block_averages)
-    if std
-        return (avg, sqrt(variance))
-    else
-        return avg
-    end
-end
-
 function Base.show(io::IO, aol::AverageObservableLogger)
-    print(io, "AverageObservableLogger with n_steps ", aol.n_steps, ", and ",
-            (aol.current_block_size * length(aol.block_averages)) ,
+    print(io, "AverageObservableLogger with n_steps ", aol.n_steps, ", ",
+            aol.current_block_size * length(aol.block_averages),
             " samples collected for observable ", aol.observable)
 end

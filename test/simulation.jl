@@ -4,6 +4,7 @@
     temp = 298.0u"K"
     boundary = RectangularBoundary(2.0u"nm", 2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
+    gen_temp_wrapper(s, neighbors=nothing; parallel::Bool=true) = temperature(s)
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
@@ -18,7 +19,9 @@
         loggers=(
             temp=TemperatureLogger(100),
             coords=CoordinateLogger(100; dims=2),
-            avg_temp=AverageObservableLogger(Molly.temperature_wrapper, typeof(temp), 1; n_blocks=200)
+            gen_temp=GeneralObservableLogger(gen_temp_wrapper, typeof(temp), 10),
+            avg_temp=AverageObservableLogger(Molly.temperature_wrapper,
+                                                typeof(temp), 1; n_blocks=200),
         ),
     )
     random_velocities!(s, temp)
@@ -41,6 +44,7 @@
     distances(final_coords, boundary)
     rdf(final_coords, boundary)
 
+    show(devnull, s.loggers.gen_temp)
     show(devnull, s.loggers.avg_temp)
     t, σ = values(s.loggers.avg_temp)
     @test isapprox(t, mean(values(s.loggers.temp)); atol=3σ)
@@ -85,8 +89,8 @@ end
                 pe=PotentialEnergyLogger(100),
                 force=ForceLogger(100),
                 writer=StructureWriter(100, temp_fp_pdb),
-                velocity_autocorrelation=AutoCorrelationLogger(V, TV, n_atoms, 100),
                 potkin_correlation=TimeCorrelationLogger(pot_obs, kin_obs, TP, TP, 1, 100),
+                velocity_autocorrelation=AutoCorrelationLogger(V, TV, n_atoms, 100),
             ),
         )
 
@@ -121,6 +125,7 @@ end
         show(devnull, s.loggers.energy)
         show(devnull, s.loggers.ke)
         show(devnull, s.loggers.pe)
+        show(devnull, s.loggers.force)
         show(devnull, s.loggers.writer)
         show(devnull, s.loggers.potkin_correlation)
         show(devnull, s.loggers.velocity_autocorrelation)

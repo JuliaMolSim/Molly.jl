@@ -304,7 +304,7 @@ end
 """
     CellListMapNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff, x0, unit_cell)
 
-Find close atoms by distance, and store auxiliary arrays for in-place threading. `x0` and `unit_cell` 
+Find close atoms by distance and store auxiliary arrays for in-place threading. `x0` and `unit_cell` 
 are optional initial coordinates and system unit cell that improve the first approximation of the
 cell list structure. The unit cell can be provided as a three-component vector of box sides on each
 direction, in which case the unit cell is considered `OrthorhombicCell`, or as a unit cell matrix,
