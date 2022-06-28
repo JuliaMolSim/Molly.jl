@@ -484,9 +484,9 @@ function simulate!(sys::ReplicaSystem,
     for cycle=1:n_cycles
         @sync for idx in eachindex(sim.simulators)
             if parallel
-                Threads.@spawn Molly.simulate!(sys.replicas[idx], sim.simulators[idx], cycle_length; parallel=parallel)
+                Threads.@spawn simulate!(sys.replicas[idx], sim.simulators[idx], cycle_length; parallel=parallel)
             else
-                Molly.simulate!(sys.replicas[idx], sim.simulators[idx], cycle_length; parallel=parallel)
+                simulate!(sys.replicas[idx], sim.simulators[idx], cycle_length; parallel=parallel)
             end
         end
 
@@ -509,9 +509,9 @@ function simulate!(sys::ReplicaSystem,
     if remaining_steps > 0
         @sync for idx in eachindex(sim.simulators)
             if parallel
-                Threads.@spawn Molly.simulate!(sys.replicas[idx], sim.simulators[idx], remaining_steps; parallel=parallel)
+                Threads.@spawn simulate!(sys.replicas[idx], sim.simulators[idx], remaining_steps; parallel=parallel)
             else
-                Molly.simulate!(sys.replicas[idx], sim.simulators[idx], remaining_steps; parallel=parallel)
+                simulate!(sys.replicas[idx], sim.simulators[idx], remaining_steps; parallel=parallel)
             end
         end
     end

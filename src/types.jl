@@ -377,7 +377,7 @@ function ReplicaSystem(;
                 gpu_diff_safe=isa(coords, CuArray))
     D = n_dimensions(boundary)
     G = gpu_diff_safe
-    T = Molly.float_type(boundary)
+    T = float_type(boundary)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     PI = typeof(pairwise_inters)
