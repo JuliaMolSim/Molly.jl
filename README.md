@@ -29,7 +29,7 @@ Implemented features include:
 - GPU acceleration on CUDA-enabled devices.
 - Run with Float64 or Float32.
 - Some analysis functions, e.g. RDF.
-- Visualise simulations as animations.
+- Visualise simulations as animations with [Makie.jl](https://makie.juliaplots.org/stable).
 - Physical agent-based modelling.
 - Differentiable molecular simulation. This is a unique feature of the package and the focus of its current development.
 

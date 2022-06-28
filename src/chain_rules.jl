@@ -9,6 +9,13 @@
 @non_differentiable DistanceVecNeighborFinder(args...)
 @non_differentiable run_loggers!(args...)
 @non_differentiable visualize(args...)
+@non_differentiable place_atoms(args...)
+@non_differentiable place_diatomics(args...)
+@non_differentiable OpenMMForceField(T::Type, ff_files::AbstractString...)
+@non_differentiable OpenMMForceField(ff_files::AbstractString...)
+@non_differentiable System(coord_file::AbstractString, force_field::OpenMMForceField)
+@non_differentiable System(T::Type, coord_file::AbstractString, top_file::AbstractString)
+@non_differentiable System(coord_file::AbstractString, top_file::AbstractString)
 
 function ChainRulesCore.rrule(T::Type{<:SVector}, vs::Number...)
     Y = T(vs...)
