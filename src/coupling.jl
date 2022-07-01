@@ -47,8 +47,10 @@ end
 """
     RescaleThermostat(temperature)
 
-The velocity rescaling thermostat.
-This thermostat should not be used in general as it can lead to simulation artifacts.
+The velocity rescaling thermostat that immediately rescales the velocities to
+match a target temperature.
+This thermostat should not be used in general as it can lead to simulation
+artifacts.
 """
 struct RescaleThermostat{T}
     temperature::T
@@ -63,7 +65,8 @@ end
     BerendsenThermostat(temperature, coupling_const)
 
 The Berendsen thermostat.
-This thermostat should not be used in general as it can lead to simulation artifacts.
+This thermostat should not be used in general as it can lead to simulation
+artifacts.
 """
 struct BerendsenThermostat{T, C}
     temperature::T

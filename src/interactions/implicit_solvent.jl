@@ -342,7 +342,7 @@ struct ImplicitSolventOBC{T, D, V, K, S, F, I} <: AbstractGBSA
     solute_dielectric::T
     kappa::K
     offset::D
-    cutoff::D
+    dist_cutoff::D
     use_ACE::Bool
     α::T
     β::T
@@ -362,7 +362,7 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
                             solute_dielectric=gb_solute_dielectric,
                             kappa=0.0u"nm^-1",
                             offset=obc_offset,
-                            cutoff=0.0u"nm",
+                            dist_cutoff=0.0u"nm",
                             probe_radius=gb_probe_radius,
                             sa_factor=gb_sa_factor,
                             use_ACE=true,
@@ -420,12 +420,12 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
         return ImplicitSolventOBC{T, D, typeof(or), typeof(T(kappa)), typeof(T(sa_factor)),
                         typeof(factor_solute), typeof(is)}(
                     or, sor, solvent_dielectric, solute_dielectric, T(kappa), offset,
-                    cutoff, use_ACE, α, β, γ, probe_radius, T(sa_factor), factor_solute,
-                    factor_solvent, is, js)
+                    dist_cutoff, use_ACE, α, β, γ, probe_radius, T(sa_factor),
+                    factor_solute, factor_solvent, is, js)
     else
         return ImplicitSolventOBC{T, T, typeof(or), typeof(T(ustrip(kappa))), T, T, typeof(is)}(
                     or, sor, solvent_dielectric, solute_dielectric, T(ustrip(kappa)),
-                    ustrip(offset), ustrip(cutoff), use_ACE, α, β, γ, ustrip(probe_radius),
+                    ustrip(offset), ustrip(dist_cutoff), use_ACE, α, β, γ, ustrip(probe_radius),
                     ustrip(sa_factor), factor_solute, factor_solvent, is, js)
     end
 end
@@ -443,7 +443,7 @@ struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, TD, TM} <: AbstractGBSA
     solute_dielectric::T
     kappa::K
     offset::D
-    cutoff::D
+    dist_cutoff::D
     use_ACE::Bool
     αs::VT
     βs::VT
@@ -467,7 +467,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
                                 solute_dielectric=gb_solute_dielectric,
                                 kappa=0.0u"nm^-1",
                                 offset=gbn2_offset,
-                                cutoff=0.0u"nm",
+                                dist_cutoff=0.0u"nm",
                                 probe_radius=gb_probe_radius,
                                 sa_factor=gb_sa_factor,
                                 use_ACE=true,
@@ -566,22 +566,22 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
     if units
         return ImplicitSolventGBN2{T, D, typeof(αs), typeof(or), typeof(T(kappa)), typeof(T(sa_factor)),
                         typeof(factor_solute), typeof(is), typeof(d0s), typeof(m0s)}(
-                    or, sor, solvent_dielectric, solute_dielectric, T(kappa), offset, cutoff,
+                    or, sor, solvent_dielectric, solute_dielectric, T(kappa), offset, dist_cutoff,
                     use_ACE, αs, βs, γs, probe_radius, T(sa_factor), factor_solute,
                     factor_solvent, is, js, d0s, m0s, neck_scale, neck_cut)
     else
         return ImplicitSolventGBN2{T, T, typeof(αs), typeof(or), typeof(T(ustrip(kappa))), T, T,
                         typeof(is), typeof(d0s), typeof(m0s)}(
                     or, sor, solvent_dielectric, solute_dielectric, T(ustrip(kappa)), ustrip(offset),
-                    ustrip(cutoff), use_ACE, αs, βs, γs, ustrip(probe_radius), ustrip(sa_factor),
+                    ustrip(dist_cutoff), use_ACE, αs, βs, γs, ustrip(probe_radius), ustrip(sa_factor),
                     factor_solute, factor_solvent, is, js, d0s, m0s, neck_scale, ustrip(neck_cut))
     end
 end
 
-function born_radii_loop_OBC(coord_i, coord_j, ori, srj, cutoff, boundary)
-    I = zero(coord_i[1] / unit(cutoff)^2)
+function born_radii_loop_OBC(coord_i, coord_j, ori, srj, dist_cutoff, boundary)
+    I = zero(coord_i[1] / unit(dist_cutoff)^2)
     r = norm(vector(coord_i, coord_j, boundary))
-    if iszero(r) || (!iszero(cutoff) && r > cutoff)
+    if iszero(r) || (!iszero(dist_cutoff) && r > dist_cutoff)
         return I
     end
     U = r + srj
@@ -608,10 +608,10 @@ function born_radii_and_grad(inter::ImplicitSolventOBC, coords, boundary)
     coords_j = @view coords[inter.js]
     oris = @view inter.offset_radii[inter.is]
     srjs = @view inter.scaled_offset_radii[inter.js]
-    loop_res = born_radii_loop_OBC.(coords_i, coords_j, oris, srjs, inter.cutoff,
-                                    (boundary,))
+    loop_res = born_radii_loop_OBC.(coords_i, coords_j, oris, srjs,
+                                    inter.dist_cutoff, (boundary,))
     Is = dropdims(sum(loop_res; dims=2); dims=2)
-    I_grads = zero(loop_res) ./ unit(inter.cutoff)
+    I_grads = zero(loop_res) ./ unit(inter.dist_cutoff)
 
     ori = inter.offset_radii
     radii = ori .+ inter.offset
@@ -634,12 +634,12 @@ end
 get_I(r::BornRadiiGBN2LoopResult) = r.I
 get_I_grad(r::BornRadiiGBN2LoopResult) = r.I_grad
 
-function born_radii_loop_GBN2(coord_i::SVector{D, T}, coord_j, ori, orj, srj, cutoff, offset,
-                                neck_scale, neck_cut, d0, m0, boundary) where {D, T}
-    I = zero(coord_i[1] / unit(cutoff)^2)
-    I_grad = zero(coord_i[1] / unit(cutoff)^3)
+function born_radii_loop_GBN2(coord_i::SVector{D, T}, coord_j, ori, orj, srj, dist_cutoff,
+                                offset, neck_scale, neck_cut, d0, m0, boundary) where {D, T}
+    I = zero(coord_i[1] / unit(dist_cutoff)^2)
+    I_grad = zero(coord_i[1] / unit(dist_cutoff)^3)
     r = norm(vector(coord_i, coord_j, boundary))
-    if iszero(r) || (!iszero(cutoff) && r > cutoff)
+    if iszero(r) || (!iszero(dist_cutoff) && r > dist_cutoff)
         return BornRadiiGBN2LoopResult(I, I_grad)
     end
     U = r + srj
@@ -662,7 +662,7 @@ function born_radii_loop_GBN2(coord_i::SVector{D, T}, coord_j, ori, orj, srj, cu
         denom = 1 + r_d0_strip^2 + 3 * r_d0_strip^6 / 10
         I += neck_scale * m0 / denom
         numer = 2 * r_d0_strip + 9 * r_d0_strip^5 / 5
-        I_grad -= 10 * neck_scale * m0 * numer / (denom^2 * unit(cutoff))
+        I_grad -= 10 * neck_scale * m0 * numer / (denom^2 * unit(dist_cutoff))
     end
     return BornRadiiGBN2LoopResult(I, I_grad)
 end
@@ -673,9 +673,9 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2, coords, boundary)
     oris = @view inter.offset_radii[inter.is]
     orjs = @view inter.offset_radii[inter.js]
     srjs = @view inter.scaled_offset_radii[inter.js]
-    loop_res = born_radii_loop_GBN2.(coords_i, coords_j, oris, orjs, srjs, inter.cutoff,
-                    inter.offset, inter.neck_scale, inter.neck_cut, inter.d0s,
-                    inter.m0s, (boundary,))
+    loop_res = born_radii_loop_GBN2.(coords_i, coords_j, oris, orjs, srjs,
+                    inter.dist_cutoff, inter.offset, inter.neck_scale,
+                    inter.neck_cut, inter.d0s, inter.m0s, (boundary,))
     Is = dropdims(sum(get_I.(loop_res); dims=2); dims=2)
     I_grads = get_I_grad.(loop_res)
 
@@ -711,7 +711,7 @@ end
 get_fi(r::Union{ForceLoopResult1, ForceLoopResult2}) = r.fi
 get_fj(r::Union{ForceLoopResult1, ForceLoopResult2}) = r.fj
 
-function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, cutoff,
+function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, dist_cutoff,
                             factor_solute, factor_solvent, kappa, boundary)
     if j < i
         zero_force = zero(factor_solute ./ coord_i .^ 2)
@@ -719,7 +719,7 @@ function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, cut
     end
     dr = vector(coord_i, coord_j, boundary)
     r2 = sum(abs2, dr)
-    if !iszero(cutoff) && r2 > cutoff^2
+    if !iszero(dist_cutoff) && r2 > dist_cutoff^2
         zero_force = zero(factor_solute ./ coord_i .^ 2)
         return ForceLoopResult1(zero_force[1], zero_force[1], zero_force, zero_force)
     end
@@ -751,10 +751,10 @@ function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, cut
     end
 end
 
-function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, cutoff, boundary)
+function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, boundary)
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)
-    if iszero(r) || (!iszero(cutoff) && r > cutoff)
+    if iszero(r) || (!iszero(dist_cutoff) && r > dist_cutoff)
         zero_force = zero(bi ./ coord_i .^ 2)
         return ForceLoopResult2(zero_force, zero_force)
     end
@@ -784,7 +784,7 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing)
         sa_terms = inter.sa_factor .* (radii .+ inter.probe_radius) .^ 2 .* (radii ./ Bs) .^ 6
         born_forces = (-6 .* sa_terms ./ Bs) .* (Bs .> zero(inter.offset))
     else
-        born_forces = zeros(typeof(inter.sa_factor * inter.cutoff), length(sys))
+        born_forces = zeros(typeof(inter.sa_factor * inter.dist_cutoff), length(sys))
     end
 
     coords_i = @view coords[inter.is]
@@ -795,7 +795,7 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing)
     Bsi = @view Bs[inter.is]
     Bsj = @view Bs[inter.js]
     loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i, charges_j,
-                                    Bsi, Bsj, inter.cutoff, inter.factor_solute,
+                                    Bsi, Bsj, inter.dist_cutoff, inter.factor_solute,
                                     inter.factor_solvent, inter.kappa, (boundary,))
     born_forces = born_forces .+ dropdims(sum(get_bi.(loop_res_1); dims=2); dims=2)
     born_forces = born_forces .+ dropdims(sum(get_bj.(loop_res_1); dims=1); dims=1)
@@ -807,14 +807,14 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing)
     oris = @view inter.offset_radii[inter.is]
     srjs = @view inter.scaled_offset_radii[inter.js]
     loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, I_grads, oris, srjs,
-                                    inter.cutoff, (boundary,))
+                                    inter.dist_cutoff, (boundary,))
 
     return fs .+ dropdims(sum(get_fi.(loop_res_2); dims=2); dims=2) .+ dropdims(sum(get_fj.(loop_res_2); dims=1); dims=1)
 end
 
-function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori, cutoff,
-                        factor_solute, factor_solvent, kappa, offset, probe_radius,
-                        sa_factor, use_ACE, boundary)
+function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
+                        dist_cutoff, factor_solute, factor_solvent, kappa, offset,
+                        probe_radius, sa_factor, use_ACE, boundary)
     if i == j
         if iszero(kappa)
             pre_factor = factor_solute + factor_solvent
@@ -829,14 +829,14 @@ function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
         return E
     elseif j > i
         r2 = sum(abs2, vector(coord_i, coord_j, boundary))
-        if !iszero(cutoff) && r2 > cutoff^2
+        if !iszero(dist_cutoff) && r2 > dist_cutoff^2
             return zero(factor_solute / offset)
         end
         f = sqrt(r2 + Bi*Bj*exp(-r2/(4*Bi*Bj)))
-        if iszero(cutoff)
+        if iszero(dist_cutoff)
             f_cutoff = 1/f
         else
-            f_cutoff = (1/f - 1/cutoff)
+            f_cutoff = (1/f - 1/dist_cutoff)
         end
         if iszero(kappa)
             pre_factor = factor_solute + factor_solvent
@@ -862,7 +862,7 @@ function potential_energy(inter::AbstractGBSA, sys, neighbors=nothing)
     Bsj = @view Bs[inter.js]
     oris = @view inter.offset_radii[inter.is]
     return sum(gb_energy_loop.(coords_i, coords_j, inter.is, inter.js, charges_i, charges_j,
-                                Bsi, Bsj, oris, inter.cutoff, inter.factor_solute,
+                                Bsi, Bsj, oris, inter.dist_cutoff, inter.factor_solute,
                                 inter.factor_solvent, inter.kappa, inter.offset,
                                 inter.probe_radius, inter.sa_factor, inter.use_ACE,
                                 (boundary,)))

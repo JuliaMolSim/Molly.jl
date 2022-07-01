@@ -68,6 +68,12 @@ function log_property!(logger::GeneralObservableLogger, s::System, neighbors=not
     end
 end
 
+function Base.show(io::IO, gol::GeneralObservableLogger)
+    print(io, "GeneralObservableLogger with n_steps ", gol.n_steps, ", ",
+            length(gol.history), " values recorded for observable ",
+            gol.observable)
+end
+
 temperature_wrapper(s, neighbors=nothing; parallel::Bool=true) = temperature(s)
 
 """
@@ -76,7 +82,7 @@ temperature_wrapper(s, neighbors=nothing; parallel::Bool=true) = temperature(s)
 
 Log the temperature throughout a simulation.
 """
-TemperatureLogger(T::DataType, n_steps::Integer)=GeneralObservableLogger(temperature_wrapper, T, n_steps)
+TemperatureLogger(T::DataType, n_steps::Integer) = GeneralObservableLogger(temperature_wrapper, T, n_steps)
 TemperatureLogger(n_steps::Integer) = TemperatureLogger(typeof(one(DefaultFloat)u"K"), n_steps)
 
 function Base.show(io::IO, tl::GeneralObservableLogger{T, typeof(temperature_wrapper)}) where T
@@ -241,9 +247,9 @@ atom_record(at_data, i, coord) = BioStructures.AtomRecord(
 )
 
 @doc raw"""
-    TimeCorrelationLogger(TA::DataType, TB::DataType, observableA::Function,
-                            observableB::Function, observable_length::Integer,
-                            n_correlation::Integer)
+    TimeCorrelationLogger(observableA::Function, observableB::Function,
+                            TA::DataType, TB::DataType,
+                            observable_length::Integer, n_correlation::Integer)
 
 A time correlation logger, which estimates statistical correlations of normalized form
 ```math
@@ -258,7 +264,7 @@ coefficients from Green-Kubo type formulas.
 *A* and *B* are observables, functions of the form
 `observable(sys::System, neighbors; parallel::Bool)`.    
 The return values of *A* and *B* can be of scalar or vector type (including
-`Vector{SVector{...}}`, like positions or velocities), and must implement `dot`.
+`Vector{SVector{...}}`, like positions or velocities) and must implement `dot`.
 
 `n_correlation` should typically be chosen so that
 `dt * n_correlation > t_corr`, where `dt` is the simulation timestep and
@@ -269,10 +275,10 @@ The normalized and unnormalized form of the correlation function can be
 retrieved through `values(logger::TimeCorrelationLogger; normalize::Bool)`.
 
 # Arguments
-- `TA::DataType`: the type returned by `observableA`, supporting `zero(TA)`.
-- `TB::DataType`: the type returned by `observableB`, supporting `zero(TB)`.
 - `observableA::Function`: the function corresponding to observable A.
 - `observableB::Function`: the function corresponding to observable B.
+- `TA::DataType`: the type returned by `observableA`, supporting `zero(TA)`.
+- `TB::DataType`: the type returned by `observableB`, supporting `zero(TB)`.
 - `observable_length::Integer`: the length of the observables if they are
     vectors, or `1` if they are scalar-valued.
 - `n_correlation::Integer`: the length of the computed correlation vector.
@@ -291,8 +297,9 @@ mutable struct TimeCorrelationLogger{T_A, T_A2, T_B, T_B2, T_AB, TF_A, TF_B}
     sum_sq_B::T_B2
 end
 
-function TimeCorrelationLogger(TA::DataType, TB::DataType, observableA::TF_A,
-                                observableB::TF_B, observable_length::Integer,
+function TimeCorrelationLogger(observableA::TF_A, observableB::TF_B,
+                                TA::DataType, TB::DataType, 
+                                observable_length::Integer,
                                 n_correlation::Integer) where {TF_A, TF_B}
     ini_sum_A = (observable_length > 1) ? zeros(TA, observable_length) : zero(TA)
     ini_sum_B = (observable_length > 1) ? zeros(TB, observable_length) : zero(TB)
@@ -318,26 +325,26 @@ end
 
 function Base.show(io::IO, tcl::TimeCorrelationLogger)
     print(io, "TimeCorrelationLogger with n_correlation ", tcl.n_correlation,
-            ", and ", tcl.n_timesteps, " samples collected for observables ",
+            " and ", tcl.n_timesteps, " samples collected for observables ",
             tcl.observableA, " and ", tcl.observableB)
 end
 
 """
-    AutoCorrelationLogger(TA::DataType, observable::Function,
+    AutoCorrelationLogger(observable::Function, TA::DataType,
                             observable_length::Integer, n_correlation::Integer)
 
 An autocorrelation logger, equivalent to a `TimeCorrelationLogger` in the case
 `observableA == observableB`.
 """
-function AutoCorrelationLogger(TA::DataType, observable::TF_A, observable_length::Integer,
-                                n_correlation::Integer) where TF_A
-    return TimeCorrelationLogger(TA, TA, observable, observable,
+function AutoCorrelationLogger(observable, TA, observable_length::Integer,
+                                n_correlation::Integer)
+    return TimeCorrelationLogger(observable, observable, TA, TA,
                                     observable_length, n_correlation)
 end
 
 function Base.show(io::IO, tcl::TimeCorrelationLogger{TA, TA2, TA, TA2, TAB, TFA, TFA}) where {TA, TA2, TAB, TFA}
     print(io, "AutoCorrelationLogger with n_correlation ", tcl.n_correlation,
-            ", and ", tcl.n_timesteps, " samples collected for observable ",
+            " and ", tcl.n_timesteps, " samples collected for observable ",
             tcl.observableA)
 end
 
@@ -430,6 +437,17 @@ function AverageObservableLogger(observable::Function, T::DataType, n_steps::Int
     return AverageObservableLogger{T, typeof(observable)}(observable, n_steps, n_blocks, 1, T[], T[])
 end
 
+function Base.values(aol::AverageObservableLogger; std::Bool=true)
+    # Could add some logic to use the samples in the hanging block
+    avg = mean(aol.block_averages)
+    variance = var(aol.block_averages) / length(aol.block_averages)
+    if std
+        return (avg, sqrt(variance))
+    else
+        return avg
+    end
+end
+
 function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=nothing,
                         step_n::Integer=0; parallel::Bool=true) where T
     if (step_n % aol.n_steps) == 0
@@ -450,19 +468,8 @@ function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=not
     end
 end
 
-function Base.values(aol::AverageObservableLogger; std::Bool=true)
-    # Could add some logic to use the samples in the hanging block
-    avg = mean(aol.block_averages)
-    variance = var(aol.block_averages) / length(aol.block_averages)
-    if std
-        return (avg, sqrt(variance))
-    else
-        return avg
-    end
-end
-
 function Base.show(io::IO, aol::AverageObservableLogger)
-    print(io, "AverageObservableLogger with n_steps ", aol.n_steps, ", and ",
-            (aol.current_block_size * length(aol.block_averages)) ,
+    print(io, "AverageObservableLogger with n_steps ", aol.n_steps, ", ",
+            aol.current_block_size * length(aol.block_averages),
             " samples collected for observable ", aol.observable)
 end

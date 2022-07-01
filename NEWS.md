@@ -1,5 +1,16 @@
 # Molly.jl release notes
 
+## v0.11.0 - Jun 2022
+
+- `box_size` is renamed to `boundary` throughout. Boundaries of the form `SVector(1.0, 2.0, 3.0)` should be replaced by `CubicBoundary(1.0, 2.0, 3.0)`, allowing non-cubic boundaries to be added in future. Setting one or more values to `Inf` gives no boundary in that dimension. `RectangularBoundary` should be used for 2D simulations. `float_type`, `box_volume` and `AtomsBase.n_dimensions` are defined for boundaries.
+- The recorded values in loggers are now accessed with `Base.values`. Loggers are now given to the `System` as a named tuple rather than as a `Dict` for performance reasons.
+- `wrap_coords_vec` is renamed to `wrap_coords`, `wrap_coords` is renamed to `wrap_coord_1D`, `vector1D` is renamed to `vector_1D`, the `cutoff` argument to the implicit solvent models is renamed to `dist_cutoff`, and the `nl_dist` argument to `System` is renamed to `dist_neighbors`.
+- The general `LangevinSplitting` simulator is added to allow a variety of integrators to be defined such as velocity Verlet (splitting `"BAB"`), the Langevin implementation in `Langevin` (`"BAOA"`), and symplectic Euler integrators (`"AB"` and `"BA"`).
+- `GeneralObservableLogger` is added to periodically record a given observable throughout the simulation. Most existing loggers are changed to be cases of `GeneralObservableLogger`. `AverageObservableLogger` is also added and records a running average rather than storing observations.
+- `TimeCorrelationLogger` is added to calculate correlations between observables. `AutoCorrelationLogger` corresponds to the case when the two observables are the same.
+- The keyword argument `k` to `System`, `velocity` and `maxwell_boltzmann` allows a custom Boltzmann constant to be used.
+- More of the package is made differentiable due to the use of UnitfulChainRules.jl.
+
 ## v0.10.4 - Jun 2022
 
 - Visualisation is updated to use GLMakie.jl v0.6.

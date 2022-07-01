@@ -65,7 +65,7 @@ simulator = VelocityVerlet(
 
 simulate!(sys, simulator, 1_000)
 ```
-`atoms`, `coords` and `boundary` are the minimum required properties to define a [`System`](@ref).
+`atoms`, `coords` and `boundary` are the minimum required properties to define a [`System`](@ref), though you would generally want to add interactions to a [`System`](@ref) to do something useful with it.
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this can be turned off by giving the keyword argument `parallel=false` to [`simulate!`](@ref).
 The values stored by the loggers can be accessed using `values`, e.g. `values(sys.loggers.coords)`.
 An animation of the stored coordinates can be saved by using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
@@ -259,7 +259,7 @@ simulate!(sys, simulator, 5_000; parallel=true)
 ```
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
 The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
-Other options include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `nl_dist`).
+Other options include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_neighbors`).
 
 Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
 ```julia
@@ -628,7 +628,7 @@ There are also more complicated truncation methods that interpolate between the 
 The truncation approximations that we use can significantly alter the qualitative features of the simulation as shown in many articles in the molecular dynamics literature ([Fitzner 2017](https://aip.scitation.org/doi/full/10.1063/1.4997698), [van der Spoel 2006](https://pubs.acs.org/doi/10.1021/ct0502256) and others).
 
 Since the truncation algorithm is independent of the interaction for which is used, each compatible interaction is defined without including cutoffs.
-The corresponding interaction `struct` has a `cutoff` field which is then used via dispatch to apply the chosen cutoff.
+The corresponding interaction constructor has a `cutoff` field (default [`NoCutoff`](@ref)) which is then used via dispatch to apply the chosen cutoff, e.g. `SoftSphere(cutoff=ShiftedPotentialCutoff(1.2u"nm"))`.
 The available cutoffs are:
 - [`NoCutoff`](@ref)
 - [`DistanceCutoff`](@ref)
@@ -636,12 +636,12 @@ The available cutoffs are:
 - [`ShiftedForceCutoff`](@ref)
 - [`CubicSplineCutoff`](@ref)
 
-The following interactions can use a cutoff by passing the cutoff to the `cutoff` constructor keyword argument:
+The following interactions can use a cutoff:
 - [`LennardJones`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
 - [`Coulomb`](@ref)
-[`CoulombReactionField`](@ref) and the implicit solvent models have arguments for a cutoff distance.
+In addition, [`CoulombReactionField`](@ref) and the implicit solvent models have a `dist_cutoff` argument for a cutoff distance.
 
 ## Simulators
 
@@ -906,7 +906,7 @@ Note that we need to redeclare the system when adding a logger.
 # args and kwargs because more complex observables may require neighbors and parallelism
 V(s::System, args...; kwargs...) = s.velocities
 V_Type = eltype(sys.velocities)
-logger = TimeCorrelationLogger(V_Type, V_Type, V, V, n_atoms, 1_000)
+logger = TimeCorrelationLogger(V, V, V_Type, V_Type, n_atoms, 1_000)
 
 sys = System(
     atoms=atoms,
@@ -926,7 +926,7 @@ Check the output:
 show(sys.loggers)
 ```
 ```console
-(velocity_autocorrelation = AutoCorrelationLogger with n_correlation 1000, and 100001 samples collected for observable V,)
+(velocity_autocorrelation = AutoCorrelationLogger with n_correlation 1000 and 100001 samples collected for observable V,)
 ```
 Note we also could have used the convenience function [`AutoCorrelationLogger`](@ref) to define our logger since the two observables we are correlating are the same.
 ```julia

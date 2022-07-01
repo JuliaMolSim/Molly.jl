@@ -319,8 +319,8 @@ includes collapsed into one file.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients, defaults to the value of `gpu`.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
-- `nl_dist=1.2u"nm"`: cutoff distance for the neighbor list, should not be
-    less than `dist_cutoff`.
+- `dist_neighbors=1.2u"nm"`: cutoff distance for the neighbor list, should be
+    greater than `dist_cutoff`.
 - `implicit_solvent=nothing`: specify a string to add an implicit solvent
     model, options are "obc1", "obc2" and "gbn2".
 - `centre_coords::Bool=true`: whether to centre the coordinates in the
@@ -335,7 +335,7 @@ function System(coord_file::AbstractString,
                 gpu::Bool=false,
                 gpu_diff_safe::Bool=gpu,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
-                nl_dist=units ? 1.2u"nm" : 1.2,
+                dist_neighbors=units ? 1.2u"nm" : 1.2,
                 implicit_solvent=nothing,
                 centre_coords::Bool=true,
                 rename_terminal_res::Bool=true,
@@ -740,11 +740,11 @@ function System(coord_file::AbstractString,
     if gpu_diff_safe
         neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(nb_matrix) : nb_matrix,
                                                     matrix_14=gpu ? cu(matrix_14) : matrix_14,
-                                                    n_steps=10, dist_cutoff=T(nl_dist))
+                                                    n_steps=10, dist_cutoff=T(dist_neighbors))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14,
                                                     n_steps=10, x0=coords, unit_cell=boundary_used,
-                                                    dist_cutoff=T(nl_dist))
+                                                    dist_cutoff=T(dist_neighbors))
     end
     if gpu
         atoms = cu(atoms)
@@ -804,7 +804,7 @@ function System(T::Type,
                 gpu::Bool=false,
                 gpu_diff_safe::Bool=gpu,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
-                nl_dist=units ? 1.2u"nm" : 1.2,
+                dist_neighbors=units ? 1.2u"nm" : 1.2,
                 centre_coords::Bool=true)
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
@@ -1092,10 +1092,11 @@ function System(T::Type,
     if gpu_diff_safe
         neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(nb_matrix) : nb_matrix,
                                                     matrix_14=gpu ? cu(matrix_14) : matrix_14, n_steps=10,
-                                                    dist_cutoff=T(nl_dist))
+                                                    dist_cutoff=T(dist_neighbors))
     else
         neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-                                                    x0=coords, unit_cell=boundary_used, dist_cutoff=T(nl_dist))
+                                                    x0=coords, unit_cell=boundary_used,
+                                                    dist_cutoff=T(dist_neighbors))
     end
     if gpu
         atoms = cu(atoms)
