@@ -17,31 +17,31 @@ U_{\text{WCA}}(r) =
     \end{cases}       
 ```
 """
-struct FENEBond{D, K} <: SpecificInteraction
+struct FENEBond{D, K, E} <: SpecificInteraction
     k::K
     r0::D
-    ϵ::K
+    ϵ::E
     σ::D
 end
 
-FENEBond(; k=1, r0=1.5, ϵ=1.0, σ=1.0) = FENEBond{typeof(r0), typeof(k)}(k, r0, ϵ, σ)
+FENEBond(; k, r0, ϵ, σ) = FENEBond{typeof(r0), typeof(k), typeof(ϵ)}(k, r0, ϵ, σ)
 
 @inline @inbounds function force(b::FENEBond, coord_i, coord_j, boundary)
     ab = vector(coord_i, coord_j, boundary)
     r = norm(ab)
     r2 = r^2
-    r2inv = 1.0 / r2
+    r2inv = r2^-1#1 / r2
     r6inv = r2inv^3
     σ6 = b.σ^6
-    fwca = 0.0
-    fmag = 0.0
+    fwca_divr = zero(b.k)
+    fmag_divr = zero(fwca_divr)
 
     if r < (b.σ * 2^(1/6))
-        fwca = 24 * b.ϵ * r2inv * ( 2 * (σ6 * r6inv)^2 - σ6 * r6inv)
+        fwca_divr = 24 * b.ϵ * r2inv * ( 2 * (σ6 * r6inv)^2 - σ6 * r6inv)
     end
-    fmag = fwca - b.k * r / (1 - r2 / b.r0^2)
+    fmag_divr = fwca_divr - b.k / (1 - r2 / b.r0^2)
     
-    f = fmag * normalize(ab)
+    f = fmag_divr * ab
     return SpecificForce2Atoms(-f, +f)
 end
 
@@ -53,7 +53,7 @@ end
     r02 = b.r0^2
     
 
-    uwca = 0.0
+    uwca = zero(b.ϵ)#0.0
     if r < b.σ * 2^(1/6)
         uwca = 4 * b.ϵ * ((σ6 * r6inv)^2 - σ6*r6inv) + b.ϵ
     end
