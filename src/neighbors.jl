@@ -101,7 +101,9 @@ function find_neighbors(s::System,
         end
 
         for nl in nl_threads
-            append!(neighbors, nl)
+            if !isempty(nl)
+                append!(neighbors, nl)
+            end
         end
     else
         for i in 1:length(s)
@@ -283,7 +285,9 @@ function find_neighbors(s::System,
         end
 
         for nl in nl_threads
-            append!(neighbors, nl)
+            if !isempty(nl)
+                append!(neighbors, nl)
+            end
         end
     else
         for i in 1:length(s)

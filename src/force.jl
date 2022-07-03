@@ -221,8 +221,7 @@ Custom general interaction types should implement this function.
 function forces(s::System{D, false}, neighbors=nothing; n_threads::Integer=nthreads()) where D
     n_atoms = length(s)
 
-    # TODO: This can be simplified using @reduce
-    if n_threads > 1 && n_atoms >= 100
+    if nthreads() > 1 && n_atoms >= 100
         fs_threads = [ustrip_vec.(zero(s.coords)) for i in 1:nthreads()]
 
         # Loop over interactions and calculate the acceleration due to each
@@ -231,12 +230,12 @@ function forces(s::System{D, false}, neighbors=nothing; n_threads::Integer=nthre
                 if isnothing(neighbors)
                     error("An interaction uses the neighbor list but neighbors is nothing")
                 end
-                @floop ThreadedEx(basesize = neighbors.n ÷ n_threads) for ni in 1:neighbors.n
+                @threads for ni in 1:neighbors.n
                     i, j, w = neighbors.list[ni]
                     force!(fs_threads[threadid()], inter, s, i, j, s.force_units, w)
                 end
             else
-                @floop ThreadedEx(basesize = n_atoms ÷ n_threads) for i in 1:n_atoms
+                @threads for i in 1:n_atoms
                     for j in 1:(i - 1)
                         force!(fs_threads[threadid()], inter, s, i, j, s.force_units)
                     end

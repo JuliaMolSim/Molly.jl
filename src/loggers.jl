@@ -22,7 +22,7 @@ export
 Run the loggers associated with the system.
 Ignored for gradient calculation during automatic differentiation.
 """
-function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0; n_threads::Integer=default_n_threads)
+function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0; n_threads::Integer=nthreads())
     for logger in values(s.loggers)
         log_property!(logger, s, neighbors, step_n; n_threads=n_threads)
     end
@@ -61,7 +61,7 @@ Log a property of the system thoughout a simulation.
 Custom loggers should implement this function.
 """
 function log_property!(logger::GeneralObservableLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; n_threads::Integer=default_n_threads)
+                        step_n::Integer=0; n_threads::Integer=nthreads())
     if (step_n % logger.n_steps) == 0
         obs = logger.observable(s, neighbors; n_threads=n_threads)
         push!(logger.history, obs)
@@ -74,7 +74,7 @@ function Base.show(io::IO, gol::GeneralObservableLogger)
             gol.observable)
 end
 
-temperature_wrapper(s, neighbors=nothing; n_threads::Integer=default_n_threads) = temperature(s)
+temperature_wrapper(s, neighbors=nothing; n_threads::Integer=nthreads()) = temperature(s)
 
 """
     TemperatureLogger(n_steps)
@@ -90,7 +90,7 @@ function Base.show(io::IO, tl::GeneralObservableLogger{T, typeof(temperature_wra
             tl.n_steps, ", ", length(values(tl)), " temperatures recorded")
 end
 
-coordinates_wrapper(s, neighbors=nothing; n_threads::Integer=default_n_threads) = s.coords
+coordinates_wrapper(s, neighbors=nothing; n_threads::Integer=nthreads()) = s.coords
 
 """
     CoordinateLogger(n_steps; dims=3)
@@ -107,7 +107,7 @@ function Base.show(io::IO, cl::GeneralObservableLogger{T, typeof(coordinates_wra
             length(values(cl)) > 0 ? length(first(values(cl))) : "?", " atoms")
 end
 
-velocities_wrapper(s::System, neighbors=nothing; n_threads::Integer=default_n_threads) = s.velocities
+velocities_wrapper(s::System, neighbors=nothing; n_threads::Integer=nthreads()) = s.velocities
 
 """
     VelocityLogger(n_steps; dims=3)
@@ -124,7 +124,7 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(velocities_wrap
             length(values(vl)) > 0 ? length(first(values(vl))) : "?", " atoms")
 end
 
-total_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=default_n_threads) = total_energy(s, neighbors)
+total_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=nthreads()) = total_energy(s, neighbors)
 
 """
     TotalEnergyLogger(n_steps)
@@ -140,7 +140,7 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(total_energy_wr
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-kinetic_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=default_n_threads) = kinetic_energy(s)
+kinetic_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=nthreads()) = kinetic_energy(s)
 
 """
     KineticEnergyLogger(n_steps)

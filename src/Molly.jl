@@ -31,8 +31,6 @@ using Random
 using SparseArrays
 using Statistics
 
-const nthreads() = Threads.nthreads()
-
 include("types.jl")
 include("cutoffs.jl")
 include("spatial.jl")
