@@ -26,15 +26,15 @@ function check_force_units(fdr, force_units)
 end
 
 """
-    accelerations(system, neighbors=nothing; parallel=true)
+    accelerations(system, neighbors=nothing; n_threads=Threads.nthreads())
 
 Calculate the accelerations of all atoms using the pairwise, specific and
 general interactions and Newton's second law of motion.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
-function accelerations(s, neighbors=nothing; parallel::Bool=true)
-    return forces(s, neighbors; parallel=parallel) ./ mass.(s.atoms)
+function accelerations(s, neighbors=nothing; n_threads::Int=default_n_threads)
+    return forces(s, neighbors; n_threads=n_threads) ./ mass.(s.atoms)
 end
 
 """
@@ -203,7 +203,7 @@ end
 end
 
 """
-    forces(system, neighbors=nothing; parallel=true)
+    forces(system, neighbors=nothing; n_threads=Threads.nthreads())
 
 Calculate the forces on all atoms in the system using the pairwise, specific and
 general interactions.
@@ -218,11 +218,12 @@ If the interaction uses neighbor lists, the neighbors should be computed
 first and passed to the function.
 Custom general interaction types should implement this function.
 """
-function forces(s::System{D, false}, neighbors=nothing; parallel::Bool=true) where D
+function forces(s::System{D, false}, neighbors=nothing; n_threads::Int=default_n_threads) where D
     n_atoms = length(s)
 
-    if parallel && nthreads() > 1 && n_atoms >= 100
-        fs_threads = [ustrip_vec.(zero(s.coords)) for i in 1:nthreads()]
+    # TODO: This can be simplified using @reduce
+    if n_threads > 1 && n_atoms >= 100
+        fs_threads = [ustrip_vec.(zero(s.coords)) for i in 1:default_n_threads]
 
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.pairwise_inters)
@@ -230,12 +231,12 @@ function forces(s::System{D, false}, neighbors=nothing; parallel::Bool=true) whe
                 if isnothing(neighbors)
                     error("An interaction uses the neighbor list but neighbors is nothing")
                 end
-                @threads for ni in 1:neighbors.n
+                @floop ThreadedEx(basesize = neighbors.n ÷ n_threads) for ni in 1:neighbors.n
                     i, j, w = neighbors.list[ni]
                     force!(fs_threads[threadid()], inter, s, i, j, s.force_units, w)
                 end
             else
-                @threads for i in 1:n_atoms
+                @floop ThreadedEx(basesize = n_atoms ÷ n_threads) for i in 1:n_atoms
                     for j in 1:(i - 1)
                         force!(fs_threads[threadid()], inter, s, i, j, s.force_units)
                     end
@@ -279,7 +280,7 @@ function forces(s::System{D, false}, neighbors=nothing; parallel::Bool=true) whe
     return fs * s.force_units
 end
 
-function forces(s::System{D, true}, neighbors=nothing; parallel::Bool=true) where D
+function forces(s::System{D, true}, neighbors=nothing; n_threads::Int=default_n_threads) where D
     fs = ustrip_vec.(zero(s.coords))
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))

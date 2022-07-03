@@ -19,6 +19,7 @@ using Requires
 using Unitful
 using UnitfulChainRules
 using Zygote
+using FLoops
 
 @reexport using AtomsBase
 @reexport using StaticArrays
@@ -29,6 +30,8 @@ using LinearAlgebra
 using Random
 using SparseArrays
 using Statistics
+
+const default_n_threads = Threads.nthreads()
 
 include("types.jl")
 include("cutoffs.jl")

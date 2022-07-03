@@ -42,24 +42,24 @@ function SteepestDescentMinimizer(;
 end
 
 """
-    simulate!(system, simulator, n_steps; parallel=true)
-    simulate!(system, simulator; parallel=true)
+    simulate!(system, simulator, n_steps; n_threads=Threads.nthreads())
+    simulate!(system, simulator; n_threads=Threads.nthreads())
 
 Run a simulation on a system according to the rules of the given simulator.
 Custom simulators should implement this function.
 """
 function simulate!(sys,
                     sim::SteepestDescentMinimizer;
-                    parallel::Bool=true)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    sim.run_loggers && run_loggers!(sys, neighbors, 0; parallel=parallel)
+                    n_threads::Int=default_n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    sim.run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     E = potential_energy(sys, neighbors)
     println(sim.log_stream, "Step 0 - potential energy ",
             E, " - max force N/A - N/A")
     hn = sim.step_size
 
     for step_n in 1:sim.max_steps
-        F = forces(sys, neighbors; parallel=parallel)
+        F = forces(sys, neighbors; n_threads=n_threads)
         max_force = maximum(norm.(F))
 
         coords_copy = sys.coords
@@ -68,7 +68,7 @@ function simulate!(sys,
 
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                    parallel=parallel)
+                                    n_threads=n_threads)
         E_trial = potential_energy(sys, neighbors)
         if E_trial < E
             hn = 6 * hn / 5
@@ -84,7 +84,7 @@ function simulate!(sys,
         end
 
         sim.run_loggers && run_loggers!(sys, neighbors, step_n;
-                                        parallel=parallel)
+                                        n_threads=n_threads)
 
         if max_force < sim.tol
             break
@@ -128,10 +128,10 @@ end
 function simulate!(sys,
                     sim::VelocityVerlet,
                     n_steps::Integer;
-                    parallel::Bool=true)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    run_loggers!(sys, neighbors, 0; parallel=parallel)
-    accels_t = accelerations(sys, neighbors; parallel=parallel)
+                    n_threads::Int=default_n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+    accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
@@ -139,18 +139,18 @@ function simulate!(sys,
         sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
-        accels_t_dt = accelerations(sys, neighbors; parallel=parallel)
+        accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
         sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim, sim.coupling)
 
-        run_loggers!(sys, neighbors, step_n; parallel=parallel)
+        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        parallel=parallel)
+                                        n_threads=n_threads)
             accels_t = accels_t_dt
         end
     end
@@ -183,13 +183,13 @@ end
 function simulate!(sys,
                     sim::Verlet,
                     n_steps::Integer;
-                    parallel::Bool=true)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    run_loggers!(sys, neighbors, 0; parallel=parallel)
+                    n_threads::Int=default_n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
-        accels_t = accelerations(sys, neighbors; parallel=parallel)
+        accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
         sys.velocities += remove_molar.(accels_t) .* sim.dt
 
@@ -199,11 +199,11 @@ function simulate!(sys,
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim, sim.coupling)
 
-        run_loggers!(sys, neighbors, step_n; parallel=parallel)
+        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        parallel=parallel)
+                                        n_threads=n_threads)
         end
     end
     return sys
@@ -230,13 +230,13 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
 function simulate!(sys,
                     sim::StormerVerlet,
                     n_steps::Integer;
-                    parallel::Bool=true)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    run_loggers!(sys, neighbors, 0; parallel=parallel)
+                    n_threads::Int=default_n_threads)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     coords_last = sys.coords
 
     for step_n in 1:n_steps
-        accels_t = accelerations(sys, neighbors; parallel=parallel)
+        accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
         coords_copy = sys.coords
         if step_n == 1
@@ -252,11 +252,11 @@ function simulate!(sys,
 
         apply_coupling!(sys, sim, sim.coupling)
 
-        run_loggers!(sys, neighbors, step_n; parallel=parallel)
+        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        parallel=parallel)
+                                        n_threads=n_threads)
             coords_last = coords_copy
         end
     end
@@ -295,14 +295,14 @@ end
 function simulate!(sys,
                     sim::Langevin,
                     n_steps::Integer;
-                    parallel::Bool=true,
+                    n_threads::Int=default_n_threads,
                     rng=Random.GLOBAL_RNG)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    run_loggers!(sys, neighbors, 0; parallel=parallel)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
-        accels_t = accelerations(sys, neighbors; parallel=parallel)
+        accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
         sys.velocities += remove_molar.(accels_t) .* sim.dt
 
@@ -314,11 +314,11 @@ function simulate!(sys,
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         sim.remove_CM_motion && remove_CM_motion!(sys)
 
-        run_loggers!(sys, neighbors, step_n; parallel=parallel)
+        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        parallel=parallel)
+                                        n_threads=n_threads)
         end
     end
     return sys
@@ -364,13 +364,13 @@ end
 function simulate!(sys,
                     sim::LangevinSplitting,
                     n_steps::Integer;
-                    parallel::Bool=true,
+                    n_threads::Int=default_n_threads,
                     rng=Random.GLOBAL_RNG)
     M_inv = inv.(mass.(sys.atoms))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
     σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
-    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    accels_t = accelerations(sys, neighbors; parallel=parallel)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
 
@@ -398,13 +398,13 @@ function simulate!(sys,
             return (A_step!, (sys, effective_dts[j]))
         elseif op == 'B'
             return (B_step!, (sys, effective_dts[j], accels_t, neighbors,
-                                force_computation_steps[j], parallel))
+                                force_computation_steps[j], n_threads))
         elseif op == 'O'
             return (O_step!, (sys, α_eff, σ_eff, rng, sim.temperature))
         end
     end
 
-    run_loggers!(sys, neighbors, 0; parallel=parallel)
+    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
@@ -417,7 +417,7 @@ function simulate!(sys,
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        parallel=parallel)
+                                        n_threads=n_threads)
         end
     end
     return sys
@@ -434,9 +434,9 @@ function A_step!(s, dt_eff)
 end
 
 function B_step!(s, dt_eff, acceleration_vector, neighbors,
-                    compute_forces::Bool, parallel::Bool)
+                    compute_forces::Bool, n_threads::Int)
     if compute_forces
-        acceleration_vector .= accelerations(s, neighbors, parallel=parallel)
+        acceleration_vector .= accelerations(s, neighbors, n_threads=n_threads)
     end
     s.velocities += dt_eff * remove_molar.(acceleration_vector)
 end
