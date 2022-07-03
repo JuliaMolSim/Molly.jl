@@ -16,10 +16,10 @@ simulator = VelocityVerlet(
 )
 n_steps = 500
 
-parallel = false
-simulate!(s, simulator, 5; parallel=parallel)
-@time simulate!(s, simulator, n_steps; parallel=parallel)
+n_threads = 1
+simulate!(s, simulator, 5; n_threads=n_threads)
+@time simulate!(s, simulator, n_steps; n_threads=n_threads)
 
-parallel = true
-simulate!(s, simulator, 5; parallel=parallel)
-@time simulate!(s, simulator, n_steps; parallel=parallel)
+n_threads = nthreads()
+simulate!(s, simulator, 5; n_threads=n_threads)
+@time simulate!(s, simulator, n_steps; n_threads=n_threads)
