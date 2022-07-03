@@ -31,7 +31,7 @@ using Random
 using SparseArrays
 using Statistics
 
-const default_n_threads = Threads.nthreads()
+const nthreads() = Threads.nthreads()
 
 include("types.jl")
 include("cutoffs.jl")

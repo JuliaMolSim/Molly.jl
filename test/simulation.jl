@@ -4,7 +4,7 @@
     temp = 298.0u"K"
     boundary = RectangularBoundary(2.0u"nm", 2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
-    gen_temp_wrapper(s, neighbors=nothing; n_threads::Int=nthreads()) = temperature(s)
+    gen_temp_wrapper(s, neighbors=nothing; n_threads::Integer=nthreads()) = temperature(s)
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],

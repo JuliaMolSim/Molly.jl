@@ -50,7 +50,7 @@ Custom simulators should implement this function.
 """
 function simulate!(sys,
                     sim::SteepestDescentMinimizer;
-                    n_threads::Int=default_n_threads)
+                    n_threads::Integer=nthreads())
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     sim.run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     E = potential_energy(sys, neighbors)
@@ -128,7 +128,7 @@ end
 function simulate!(sys,
                     sim::VelocityVerlet,
                     n_steps::Integer;
-                    n_threads::Int=default_n_threads)
+                    n_threads::Integer=nthreads())
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
@@ -183,7 +183,7 @@ end
 function simulate!(sys,
                     sim::Verlet,
                     n_steps::Integer;
-                    n_threads::Int=default_n_threads)
+                    n_threads::Integer=nthreads())
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     sim.remove_CM_motion && remove_CM_motion!(sys)
@@ -230,7 +230,7 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
 function simulate!(sys,
                     sim::StormerVerlet,
                     n_steps::Integer;
-                    n_threads::Int=default_n_threads)
+                    n_threads::Integer=nthreads())
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     coords_last = sys.coords
@@ -295,7 +295,7 @@ end
 function simulate!(sys,
                     sim::Langevin,
                     n_steps::Integer;
-                    n_threads::Int=default_n_threads,
+                    n_threads::Integer=nthreads(),
                     rng=Random.GLOBAL_RNG)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
@@ -364,7 +364,7 @@ end
 function simulate!(sys,
                     sim::LangevinSplitting,
                     n_steps::Integer;
-                    n_threads::Int=default_n_threads,
+                    n_threads::Integer=nthreads(),
                     rng=Random.GLOBAL_RNG)
     M_inv = inv.(mass.(sys.atoms))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
@@ -434,7 +434,7 @@ function A_step!(s, dt_eff)
 end
 
 function B_step!(s, dt_eff, acceleration_vector, neighbors,
-                    compute_forces::Bool, n_threads::Int)
+                    compute_forces::Bool, n_threads::Integer)
     if compute_forces
         acceleration_vector .= accelerations(s, neighbors, n_threads=n_threads)
     end

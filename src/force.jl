@@ -33,7 +33,7 @@ general interactions and Newton's second law of motion.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
-function accelerations(s, neighbors=nothing; n_threads::Int=default_n_threads)
+function accelerations(s, neighbors=nothing; n_threads::Integer=nthreads())
     return forces(s, neighbors; n_threads=n_threads) ./ mass.(s.atoms)
 end
 
@@ -218,12 +218,12 @@ If the interaction uses neighbor lists, the neighbors should be computed
 first and passed to the function.
 Custom general interaction types should implement this function.
 """
-function forces(s::System{D, false}, neighbors=nothing; n_threads::Int=default_n_threads) where D
+function forces(s::System{D, false}, neighbors=nothing; n_threads::Integer=nthreads()) where D
     n_atoms = length(s)
 
     # TODO: This can be simplified using @reduce
     if n_threads > 1 && n_atoms >= 100
-        fs_threads = [ustrip_vec.(zero(s.coords)) for i in 1:default_n_threads]
+        fs_threads = [ustrip_vec.(zero(s.coords)) for i in 1:nthreads()]
 
         # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.pairwise_inters)
@@ -280,7 +280,7 @@ function forces(s::System{D, false}, neighbors=nothing; n_threads::Int=default_n
     return fs * s.force_units
 end
 
-function forces(s::System{D, true}, neighbors=nothing; n_threads::Int=default_n_threads) where D
+function forces(s::System{D, true}, neighbors=nothing; n_threads::Integer=nthreads()) where D
     fs = ustrip_vec.(zero(s.coords))
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))

@@ -72,7 +72,7 @@ function find_neighbors(s::System,
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        n_threads::Int=default_n_threads)
+                        n_threads::Integer=nthreads())
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
     if isnothing(current_neighbors)
@@ -85,7 +85,7 @@ function find_neighbors(s::System,
     sqdist_cutoff = nf.dist_cutoff ^ 2
 
     if n_threads > 1
-        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:default_n_threads]
+        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:nthreads()]
 
         @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in 1:length(s)
             nl = nl_threads[threadid()]
@@ -251,7 +251,7 @@ function find_neighbors(s::System,
                         nf::TreeNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        n_threads::Int=default_n_threads)
+                        n_threads::Integer=nthreads())
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
     if isnothing(current_neighbors)
@@ -267,7 +267,7 @@ function find_neighbors(s::System,
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
 
     if n_threads > 1
-        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:default_n_threads]
+        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:nthreads()]
 
         @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in 1:length(s)
             nl = nl_threads[threadid()]
@@ -378,7 +378,7 @@ function CellListMapNeighborFinder(;
         x = x0
     end
     # Construct the cell list for the first time, to allocate 
-    cl = CellList(x, box; n_threads=default_n_threads, nbatches=number_of_batches)
+    cl = CellList(x, box; parallel=true, nbatches=number_of_batches)
     return CellListMapNeighborFinder{3, T}(
         nb_matrix, matrix_14, n_steps, dist_cutoff,
         cl, CellListMap.AuxThreaded(cl), 
@@ -412,7 +412,7 @@ function find_neighbors(s::System,
                         nf::CellListMapNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        n_threads=default_n_threads)
+                        n_threads=nthreads())
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
     if isnothing(current_neighbors)
