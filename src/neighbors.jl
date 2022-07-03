@@ -72,7 +72,7 @@ function find_neighbors(s::System,
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        n_threads::Integer=nthreads())
+                        n_threads::Int=Threads.nthreads())
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
     if isnothing(current_neighbors)
@@ -85,7 +85,7 @@ function find_neighbors(s::System,
     sqdist_cutoff = nf.dist_cutoff ^ 2
 
     if n_threads > 1
-        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:nthreads()]
+        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:Threads.nthreads()]
 
         @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in 1:length(s)
             nl = nl_threads[threadid()]
@@ -253,7 +253,7 @@ function find_neighbors(s::System,
                         nf::TreeNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        n_threads::Integer=nthreads())
+                        n_threads::Integer=Threads.nthreads())
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
     if isnothing(current_neighbors)
@@ -269,7 +269,7 @@ function find_neighbors(s::System,
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
 
     if n_threads > 1
-        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:nthreads()]
+        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:Threads.nthreads()]
 
         @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in 1:length(s)
             nl = nl_threads[threadid()]
@@ -416,7 +416,7 @@ function find_neighbors(s::System,
                         nf::CellListMapNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        n_threads=nthreads())
+                        n_threads=Threads.nthreads())
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
     if isnothing(current_neighbors)

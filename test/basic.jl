@@ -221,7 +221,7 @@ end
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
         @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
         if run_parallel_tests
-            neighbors = find_neighbors(s, s.neighbor_finder; n_threads=nthreads())
+            neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
             @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
         end
         show(devnull, nf)
@@ -243,7 +243,7 @@ end
     neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
     @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
     if run_parallel_tests
-        neighbors = find_neighbors(s, s.neighbor_finder; n_threads=nthreads())
+        neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
         @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
     end
 end

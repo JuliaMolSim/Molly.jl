@@ -114,7 +114,7 @@ end
     @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
     @test temperature(sys) ≈ 329.3202932884933u"K"
 
-    simulate!(sys, simulator, n_steps; n_threads=nthreads())
+    simulate!(sys, simulator, n_steps; n_threads=Threads.nthreads())
 
     coords_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "coordinates_$(n_steps)steps.txt"))))u"nm"
     vels_openmm   = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_$(n_steps)steps.txt" ))))u"nm * ps^-1"
@@ -146,7 +146,7 @@ end
     @test isapprox(potential_energy(sys_nounits, neighbors_nounits) * u"kJ * mol^-1",
                     E_openmm; atol=1e-5u"kJ * mol^-1")
 
-    simulate!(sys_nounits, simulator_nounits, n_steps; n_threads=nthreads())
+    simulate!(sys_nounits, simulator_nounits, n_steps; n_threads=Threads.nthreads())
 
     coords_diff = sys_nounits.coords * u"nm" .- wrap_coords.(coords_openmm, (sys.boundary,))
     vels_diff = sys_nounits.velocities * u"nm * ps^-1" .- vels_openmm

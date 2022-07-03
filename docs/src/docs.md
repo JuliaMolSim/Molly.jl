@@ -255,7 +255,7 @@ simulator = Langevin(
     friction=1.0u"ps^-1",
 )
 
-simulate!(sys, simulator, 5_000; n_threads=nthreads())
+simulate!(sys, simulator, 5_000; n_threads=Threads.nthreads())
 ```
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
 The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
@@ -342,7 +342,7 @@ function Molly.force(inter::SIRInteraction,
 end
 
 # Custom Logger
-function fracs_SIR(s::System, neighbors=nothing; n_threads::Integer=nthreads())
+function fracs_SIR(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     counts_sir = [
         count(p -> p.status == susceptible, s.atoms),
         count(p -> p.status == infected   , s.atoms),
@@ -669,7 +669,7 @@ This example shows some of the helper functions you can use:
 function Molly.simulate!(sys,
                             sim::MySimulator,
                             n_steps::Integer;
-                            n_threads::Integer=nthreads())
+                            n_threads::Integer=Threads.nthreads())
     # Find neighbors like this
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
@@ -758,7 +758,7 @@ function find_neighbors(s,
                         nf::MyNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        n_threads::Integer=nthreads())
+                        n_threads::Integer=Threads.nthreads())
     if step_n % nf.n_steps == 0
         if isnothing(current_neighbors)
             neighbors = NeighborList()
@@ -807,7 +807,7 @@ end
 ```
 Then, define the logging function that is called every step by the simulator:
 ```julia
-function Molly.log_property!(logger::MyLogger, sys, neighbors, step_n; n_threads=nthreads())
+function Molly.log_property!(logger::MyLogger, sys, neighbors, step_n; n_threads=Threads.nthreads())
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end

@@ -20,6 +20,6 @@ n_threads = 1
 simulate!(s, simulator, 5; n_threads=n_threads)
 @time simulate!(s, simulator, n_steps; n_threads=n_threads)
 
-n_threads = nthreads()
+n_threads = Threads.nthreads()
 simulate!(s, simulator, 5; n_threads=n_threads)
 @time simulate!(s, simulator, n_steps; n_threads=n_threads)

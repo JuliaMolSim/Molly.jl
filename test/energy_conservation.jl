@@ -12,7 +12,7 @@ using Test
     atom_mass = 40.0u"u"
     simulator = VelocityVerlet(dt=0.005u"ps")
 
-    n_threads_list = nthreads() > 1 ? (1, nthreads()) : (1,)
+    n_threads_list = Threads.nthreads() > 1 ? (1, Threads.nthreads()) : (1,)
     lj_potentials = (
         LennardJones(cutoff=DistanceCutoff(        3.0u"nm"), nl_only=false),
         LennardJones(cutoff=ShiftedPotentialCutoff(3.0u"nm"), nl_only=false),

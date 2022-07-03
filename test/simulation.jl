@@ -4,7 +4,7 @@
     temp = 298.0u"K"
     boundary = RectangularBoundary(2.0u"nm", 2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
-    gen_temp_wrapper(s, neighbors=nothing; n_threads::Integer=nthreads()) = temperature(s)
+    gen_temp_wrapper(s, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = temperature(s)
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
@@ -58,7 +58,7 @@ end
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
-    n_threads_list = run_parallel_tests ? (1, nthreads()) : (1,)
+    n_threads_list = run_parallel_tests ? (1, Threads.nthreads()) : (1,)
 
     TV=typeof(velocity(10.0u"u", temp))
     TP=typeof(0.2u"kJ * mol^-1")
@@ -467,7 +467,7 @@ end
                             ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
         end
 
-        n_threads = parallel ? nthreads() : 1
+        n_threads = parallel ? Threads.nthreads() : 1
         s = System(
             atoms=atoms,
             pairwise_inters=pairwise_inters,

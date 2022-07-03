@@ -22,7 +22,7 @@ export
 Run the loggers associated with the system.
 Ignored for gradient calculation during automatic differentiation.
 """
-function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0; n_threads::Integer=nthreads())
+function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     for logger in values(s.loggers)
         log_property!(logger, s, neighbors, step_n; n_threads=n_threads)
     end
@@ -61,7 +61,7 @@ Log a property of the system thoughout a simulation.
 Custom loggers should implement this function.
 """
 function log_property!(logger::GeneralObservableLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; n_threads::Integer=nthreads())
+                        step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     if (step_n % logger.n_steps) == 0
         obs = logger.observable(s, neighbors; n_threads=n_threads)
         push!(logger.history, obs)
@@ -74,7 +74,7 @@ function Base.show(io::IO, gol::GeneralObservableLogger)
             gol.observable)
 end
 
-temperature_wrapper(s, neighbors=nothing; n_threads::Integer=nthreads()) = temperature(s)
+temperature_wrapper(s, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = temperature(s)
 
 """
     TemperatureLogger(n_steps)
@@ -90,7 +90,7 @@ function Base.show(io::IO, tl::GeneralObservableLogger{T, typeof(temperature_wra
             tl.n_steps, ", ", length(values(tl)), " temperatures recorded")
 end
 
-coordinates_wrapper(s, neighbors=nothing; n_threads::Integer=nthreads()) = s.coords
+coordinates_wrapper(s, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = s.coords
 
 """
     CoordinateLogger(n_steps; dims=3)
@@ -107,7 +107,7 @@ function Base.show(io::IO, cl::GeneralObservableLogger{T, typeof(coordinates_wra
             length(values(cl)) > 0 ? length(first(values(cl))) : "?", " atoms")
 end
 
-velocities_wrapper(s::System, neighbors=nothing; n_threads::Integer=nthreads()) = s.velocities
+velocities_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = s.velocities
 
 """
     VelocityLogger(n_steps; dims=3)
@@ -124,7 +124,7 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(velocities_wrap
             length(values(vl)) > 0 ? length(first(values(vl))) : "?", " atoms")
 end
 
-total_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=nthreads()) = total_energy(s, neighbors)
+total_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = total_energy(s, neighbors)
 
 """
     TotalEnergyLogger(n_steps)
@@ -140,7 +140,7 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(total_energy_wr
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-kinetic_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=nthreads()) = kinetic_energy(s)
+kinetic_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = kinetic_energy(s)
 
 """
     KineticEnergyLogger(n_steps)
@@ -156,7 +156,7 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(kinetic_energy_
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-potential_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=nthreads()) = potential_energy(s, neighbors)
+potential_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = potential_energy(s, neighbors)
 
 """
     PotentialEnergyLogger(n_steps)
@@ -349,7 +349,7 @@ function Base.show(io::IO, tcl::TimeCorrelationLogger{TA, TA2, TA, TA2, TAB, TFA
 end
 
 function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; n_threads::Integer=nthreads())
+                        step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     A = logger.observableA(s, neighbors; n_threads=n_threads)
     if logger.observableA != logger.observableB
         B = logger.observableB(s, neighbors; n_threads=n_threads)
@@ -449,7 +449,7 @@ function Base.values(aol::AverageObservableLogger; std::Bool=true)
 end
 
 function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=nothing,
-                        step_n::Integer=0; n_threads::Integer=nthreads()) where T
+                        step_n::Integer=0; n_threads::Integer=Threads.nthreads()) where T
     if (step_n % aol.n_steps) == 0
         obs = aol.observable(s, neighbors; n_threads=n_threads)
         push!(aol.current_block, obs)
