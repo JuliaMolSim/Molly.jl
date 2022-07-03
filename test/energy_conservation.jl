@@ -12,14 +12,14 @@ using Test
     atom_mass = 40.0u"u"
     simulator = VelocityVerlet(dt=0.005u"ps")
 
-    parallel_list = nthreads() > 1 ? (false, true) : (false,)
+    n_threads_list = nthreads() > 1 ? (1, nthreads()) : (1,)
     lj_potentials = (
         LennardJones(cutoff=DistanceCutoff(        3.0u"nm"), nl_only=false),
         LennardJones(cutoff=ShiftedPotentialCutoff(3.0u"nm"), nl_only=false),
         LennardJones(cutoff=ShiftedForceCutoff(    3.0u"nm"), nl_only=false),
     )
 
-    for parallel in parallel_list
+    for n_threads in n_threads_list
         @testset "$lj_potential" for lj_potential in lj_potentials
             s = System(
                 atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
@@ -34,7 +34,7 @@ using Test
             )
 
             E0 = total_energy(s)
-            @time simulate!(s, simulator, n_steps; parallel=parallel)
+            @time simulate!(s, simulator, n_steps; n_threads=n_threads)
 
             ΔE = total_energy(s) - E0
             @test abs(ΔE) < 2e-2u"kJ * mol^-1"

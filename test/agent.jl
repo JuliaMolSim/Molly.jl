@@ -48,7 +48,7 @@
     end
 
     # Custom logging function
-    function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n; parallel=true)
+    function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n; n_threads=nthreads())
         if step_n % logger.n_steps == 0
             counts_sir = [
                 count(p -> p.status == susceptible, s.atoms),
@@ -93,5 +93,5 @@
         energy_units=NoUnits,
     )
 
-    @time simulate!(s, simulator, n_steps; parallel=false)
+    @time simulate!(s, simulator, n_steps; n_threads=1)
 end
