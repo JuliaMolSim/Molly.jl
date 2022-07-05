@@ -30,7 +30,7 @@ FENEBond(; k, r0, ϵ, σ) = FENEBond{typeof(r0), typeof(k), typeof(ϵ)}(k, r0, �
     ab = vector(coord_i, coord_j, boundary)
     r = norm(ab)
     r2 = r^2
-    r2inv = r2^-1#1 / r2
+    r2inv = r2^-1
     r6inv = r2inv^3
     σ6 = b.σ^6
     fwca_divr = zero(b.k)
@@ -49,13 +49,12 @@ end
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)
     r2 = r^2
+    r2inv = r2^-1
     r6inv = r2inv^3
     r02 = b.r0^2
-    
-
-    uwca = zero(b.ϵ)#0.0
+    uwca = zero(b.ϵ)
     if r < b.σ * 2^(1/6)
         uwca = 4 * b.ϵ * ((σ6 * r6inv)^2 - σ6*r6inv) + b.ϵ
     end
-    return (b.k / 2) * r02 * log(1 - r2 / r02) + uwca
+    return -(b.k / 2) * r02 * log(1 - r2 / r02) + uwca
 end

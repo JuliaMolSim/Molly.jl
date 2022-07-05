@@ -25,7 +25,7 @@ CosineAngle(; k, θ0) = CosineAngle{typeof(k), typeof{θ0}}(k, θ0)
     bc = vector_pad3D(coords_j, coords_k, boundary)
     cross_ba_bc = ba × bc
     if iszero(cross_ba_bc)
-        zf = zero(a.cth ./ ba)
+        zf = zero(a.k ./ ba)
         return SpecificForce3Atoms(zf, zf, zf)
     end
     pa = normalize(trim3D( ba × cross_ba_bc, boundary))

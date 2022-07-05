@@ -161,6 +161,100 @@
         590.4984884025u"kJ * mol^-1",
         atol=1e-9u"kJ * mol^-1",
     )
+
+    boundary_fene = CubicBoundary(20.0u"nm", 20.0u"nm", 20.0u"nm")
+    c1_fene = SVector(2.3, 0.0, 0.0)u"nm"
+    c2_fene = SVector(1.0, 0.0, 0.0)u"nm"
+    kbT = 2.479u"kJ * mol^-1"
+    b1 = FENEBond(k=10kbT/1u"nm^2", r0=1.6u"nm", ϵ=kbT, σ=1u"nm")
+    b2 = FENEBond(k=0kbT/1u"nm^2", r0=1.6u"nm", ϵ=kbT, σ=1u"nm")
+    fs = force(b1, c1_fene, c2_fene, boundary_fene)
+    @test isapprox(
+        fs.f1,
+        SVector(-94.8288735632, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f2,
+        SVector(94.8288735632, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(b1, c1_fene, c2_fene, boundary_fene),
+        34.2465108316u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
+    fs = force(b2, c1_fene, c2_fene, boundary_fene)
+    @test isapprox(
+        fs.f1,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f2,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(b2, c1_fene, c2_fene, boundary_fene),
+        0.0u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    boundary_cosine = CubicBoundary(10.0u"nm", 10.0u"nm", 10.0u"nm")
+    c1_cosine = SVector(1.0, 0.0, 0.0)u"nm"
+    c2_cosine = SVector(2.0, 0.0, 0.0)u"nm"
+    c3_cosine = SVector(3.0, 0.0, 0.0)u"nm"
+    c4_cosine = SVector(2.0, 1.0, 0.0)u"nm"
+    a1 = CosineAngle(10kbT, 0)
+    a2 = CosineAngle(10kbT, π/2)
+    fs = force(a1, c1_cosine, c2_cosine, c3_cosine, boundary_cosine)
+    @test isapprox(
+        fs.f1,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f2,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f3,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    fs = force(a2, c1_cosine, c2_cosine, c4_cosine, boundary_cosine)
+    @test isapprox(
+        fs.f1,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f2,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f3,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(a1, c1_cosine, c2_cosine, c3_cosine, boundary_cosine),
+        0.0u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(a2, c1_cosine, c2_cosine, c3_cosine, boundary_cosine),
+        24.79u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(a2, c1_cosine, c2_cosine, c4_cosine, boundary_cosine),
+        49.58u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
 end
 
 @testset "Spatial" begin
