@@ -198,7 +198,7 @@ function Base.push!(nl::NeighborList, element::Tuple{Int, Int, Bool})
     return nl
 end
 
-function Base.append!(nl::NeighborList, list::AbstractVector{Tuple{Int, Int, Bool}})
+function Base.append!(nl::NeighborList, list::Base.AbstractVecOrTuple{Tuple{Int, Int, Bool}})
     for element in list
         push!(nl, element)
     end

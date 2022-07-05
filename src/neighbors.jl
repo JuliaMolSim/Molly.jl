@@ -72,54 +72,25 @@ function find_neighbors(s::System,
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        n_threads::Int=Threads.nthreads())
+                        n_threads::Integer=Threads.nthreads())
     !iszero(step_n % nf.n_steps) && return current_neighbors
-
-    if isnothing(current_neighbors)
-        neighbors = NeighborList()
-    else
-        neighbors = current_neighbors
-    end
-    empty!(neighbors)
 
     sqdist_cutoff = nf.dist_cutoff ^ 2
 
-    if n_threads > 1
-        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:Threads.nthreads()]
-
-        @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in 1:length(s)
-            nl = nl_threads[threadid()]
-            ci = s.coords[i]
-            nbi = @view nf.nb_matrix[:, i]
-            w14i = @view nf.matrix_14[:, i]
-            for j in 1:(i - 1)
-                r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
-                if r2 <= sqdist_cutoff && nbi[j]
-                    push!(nl, (i, j, w14i[j]))
-                end
-            end
-        end
-
-        for nl in nl_threads
-            if !isempty(nl)
-                append!(neighbors, nl)
-            end
-        end
-    else
-        for i in 1:length(s)
-            ci = s.coords[i]
-            nbi = @view nf.nb_matrix[:, i]
-            w14i = @view nf.matrix_14[:, i]
-            for j in 1:(i - 1)
-                r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
-                if r2 <= sqdist_cutoff && nbi[j]
-                    push!(neighbors, (i, j, w14i[j]))
-                end
+    @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in 1:length(s)
+        ci = s.coords[i]
+        nbi = @view nf.nb_matrix[:, i]
+        w14i = @view nf.matrix_14[:, i]
+        for j in 1:(i - 1)
+            r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
+            if r2 <= sqdist_cutoff && nbi[j]
+                nn = (i, j, w14i[j])
+                @reduce(neighbors_list = append!(Tuple{Int, Int, Bool}[], (nn,)))
             end
         end
     end
 
-    return neighbors
+    return NeighborList(length(neighbors_list), neighbors_list)
 end
 
 """
@@ -256,54 +227,25 @@ function find_neighbors(s::System,
                         n_threads::Integer=Threads.nthreads())
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
-    if isnothing(current_neighbors)
-        neighbors = NeighborList()
-    else
-        neighbors = current_neighbors
-    end
-    empty!(neighbors)
-
     dist_unit = unit(first(first(s.coords)))
     bv = ustrip.(dist_unit, s.boundary)
     btree = BallTree(ustrip_vec.(s.coords), PeriodicEuclidean(bv))
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
 
-    if n_threads > 1
-        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:Threads.nthreads()]
-
-        @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in 1:length(s)
-            nl = nl_threads[threadid()]
-            ci = ustrip.(s.coords[i])
-            nbi = @view nf.nb_matrix[:, i]
-            w14i = @view nf.matrix_14[:, i]
-            idxs = inrange(btree, ci, dist_cutoff, true)
-            for j in idxs
-                if nbi[j] && i > j
-                    push!(nl, (i, j, w14i[j]))
-                end
-            end
-        end
-
-        for nl in nl_threads
-            if !isempty(nl)
-                append!(neighbors, nl)
-            end
-        end
-    else
-        for i in 1:length(s)
-            ci = ustrip.(s.coords[i])
-            nbi = @view nf.nb_matrix[:, i]
-            w14i = @view nf.matrix_14[:, i]
-            idxs = inrange(btree, ci, dist_cutoff, true)
-            for j in idxs
-                if nbi[j] && i > j
-                    push!(neighbors, (i, j, w14i[j]))
-                end
+    @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in 1:length(s)
+        ci = ustrip.(s.coords[i])
+        nbi = @view nf.nb_matrix[:, i]
+        w14i = @view nf.matrix_14[:, i]
+        idxs = inrange(btree, ci, dist_cutoff, true)
+        for j in idxs
+            if nbi[j] && i > j
+                nn = (i, j, w14i[j])
+                @reduce(neighbors_list = append!(Tuple{Int, Int, Bool}[], (nn,)))
             end
         end
     end
 
-    return neighbors
+    return NeighborList(length(neighbors_list), neighbors_list)
 end
 
 """
