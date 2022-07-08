@@ -221,59 +221,54 @@ Custom general interaction types should implement this function.
 function forces(s::System{D, false}, neighbors=nothing; n_threads::Integer=Threads.nthreads()) where D
     n_atoms = length(s)
 
-    if Threads.nthreads() > 1 && n_atoms >= 100
-        fs_threads = [ustrip_vec.(zero(s.coords)) for i in 1:Threads.nthreads()]
+    # allocate only `missing` for unused threads instead of a large array
+    T = typeof(ustrip_vec.(s.coords))
+    fs_threads = Union{Missing, T}[missing for i in 1:Threads.nthreads()]
+    thread_used = falses(Threads.nthreads())
 
-        # Loop over interactions and calculate the acceleration due to each
-        for inter in values(s.pairwise_inters)
-            if inter.nl_only
-                if isnothing(neighbors)
-                    error("An interaction uses the neighbor list but neighbors is nothing")
+    for inter in values(s.pairwise_inters)
+        if inter.nl_only
+            if isnothing(neighbors)
+                error("An interaction uses the neighbor list but neighbors is nothing")
+            end
+            @floop ThreadedEx(basesize = neighbors.n ÷ n_threads) for ni in 1:neighbors.n
+                FLoops.@init id = Threads.threadid()
+                if !thread_used[id]
+                    fs_threads[id] = ustrip_vec.(zero(s.coords))
+                    thread_used[id] = true
                 end
-                @threads for ni in 1:neighbors.n
-                    i, j, w = neighbors.list[ni]
-                    force!(fs_threads[threadid()], inter, s, i, j, s.force_units, w)
+                i, j, w = neighbors.list[ni]
+                Molly.force!(fs_threads[id], inter, s, i, j, s.force_units, w)
+            end
+        else
+            @floop ThreadedEx(basesize = n_atoms ÷ n_threads) for i in 1:n_atoms
+                FLoops.@init id = Threads.threadid()
+                if !thread_used[id]
+                    fs_threads[id] = ustrip_vec.(zero(s.coords))
+                    thread_used[id] = true
                 end
-            else
-                @threads for i in 1:n_atoms
-                    for j in 1:(i - 1)
-                        force!(fs_threads[threadid()], inter, s, i, j, s.force_units)
-                    end
+                for j in 1:(i - 1)
+                    Molly.force!(fs_threads[id], inter, s, i, j, s.force_units)
                 end
             end
         end
+    end
 
-        fs = sum(fs_threads)
-    else
-        fs = ustrip_vec.(zero(s.coords))
-
-        for inter in values(s.pairwise_inters)
-            if inter.nl_only
-                if isnothing(neighbors)
-                    error("An interaction uses the neighbor list but neighbors is nothing")
-                end
-                for ni in 1:neighbors.n
-                    i, j, w = neighbors.list[ni]
-                    force!(fs, inter, s, i, j, s.force_units, w)
-                end
-            else
-                for i in 1:n_atoms
-                    for j in 1:(i - 1)
-                        force!(fs, inter, s, i, j, s.force_units)
-                    end
-                end
-            end
+    fs = ustrip_vec.(zero(s.coords))
+    for id in 1:Threads.nthreads()
+        if thread_used[id]
+            fs .+= fs_threads[id]
         end
     end
 
     for inter_list in values(s.specific_inter_lists)
         sparse_vec = specific_force(inter_list, s.coords, s.boundary, s.force_units, n_atoms)
-        fs += ustrip_vec.(Array(sparse_vec))
+        fs .+= ustrip_vec.(Array(sparse_vec))
     end
 
     for inter in values(s.general_inters)
         # Force type not checked
-        fs += ustrip_vec.(forces(inter, s, neighbors))
+        fs .+= ustrip_vec.(forces(inter, s, neighbors))
     end
 
     return fs * s.force_units
