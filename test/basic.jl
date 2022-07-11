@@ -166,8 +166,8 @@
     c1_fene = SVector(2.3, 0.0, 0.0)u"nm"
     c2_fene = SVector(1.0, 0.0, 0.0)u"nm"
     kbT = 2.479u"kJ * mol^-1"
-    b1 = FENEBond(k=10kbT/1u"nm^2", r0=1.6u"nm", ϵ=kbT, σ=1u"nm")
-    b2 = FENEBond(k=0kbT/1u"nm^2", r0=1.6u"nm", ϵ=kbT, σ=1u"nm")
+    b1 = FENEBond(k=10.0u"nm^-2" * kbT, r0=1.6u"nm", ϵ=kbT, σ=1.0u"nm")
+    b2 = FENEBond(k=0.0u"nm^-2"  * kbT, r0=1.6u"nm", ϵ=kbT, σ=1.0u"nm")
     fs = force(b1, c1_fene, c2_fene, boundary_fene)
     @test isapprox(
         fs.f1,
@@ -206,8 +206,8 @@
     c2_cosine = SVector(2.0, 0.0, 0.0)u"nm"
     c3_cosine = SVector(3.0, 0.0, 0.0)u"nm"
     c4_cosine = SVector(2.0, 1.0, 0.0)u"nm"
-    a1 = CosineAngle(10kbT, 0)
-    a2 = CosineAngle(10kbT, π/2)
+    a1 = CosineAngle(10.0 * kbT, 0.0)
+    a2 = CosineAngle(10.0 * kbT, π/2)
     fs = force(a1, c1_cosine, c2_cosine, c3_cosine, boundary_cosine)
     @test isapprox(
         fs.f1,
