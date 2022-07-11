@@ -299,12 +299,15 @@ const standard_res_names = [keys(BioStructures.threeletter_to_aa)..., "HID", "HI
 
 Read a coordinate file in a file format readable by Chemfiles and apply a
 force field to it.
+Atom names should exactly match residue templates - no searching of residue
+templates is carried out.
 
     System(coordinate_file, topology_file; <keyword arguments>)
     System(T, coordinate_file, topology_file; <keyword arguments>)
 
 Read a Gromacs coordinate file and a Gromacs topology file with all
 includes collapsed into one file.
+Gromacs file reading should be considered experimental.
 
 # Arguments
 - `velocities=nothing`: the velocities of the atoms in the system, set to
