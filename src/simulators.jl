@@ -366,7 +366,7 @@ function simulate!(sys,
                     n_steps::Integer;
                     parallel::Bool=true,
                     rng=Random.GLOBAL_RNG)
-    M_inv = inv.(mass.(sys.atoms))
+    M_inv = inv.(masses(sys))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
     σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
     neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)

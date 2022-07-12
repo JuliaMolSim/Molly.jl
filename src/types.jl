@@ -16,7 +16,8 @@ export
     NeighborListVec,
     System,
     is_gpu_diff_safe,
-    float_type
+    float_type,
+    masses
 
 const DefaultFloat = Float64
 
@@ -344,7 +345,7 @@ end
 """
     is_gpu_diff_safe(sys)
 
-Whether a `System` uses the code path suitable for the GPU and
+Whether a [`System`](@ref) uses the code path suitable for the GPU and
 for taking gradients.
 """
 is_gpu_diff_safe(::System{D, G}) where {D, G} = G
@@ -353,9 +354,16 @@ is_gpu_diff_safe(::System{D, G}) where {D, G} = G
     float_type(sys)
     float_type(boundary)
 
-The float type a `System` or bounding box uses.
+The float type a [`System`](@ref) or bounding box uses.
 """
 float_type(::System{D, G, T}) where {D, G, T} = T
+
+"""
+    masses(sys)
+
+The masses of the atoms in a [`System`](@ref).
+"""
+masses(s::System) = mass.(s.atoms)
 
 AtomsBase.species_type(s::System) = eltype(s.atoms)
 

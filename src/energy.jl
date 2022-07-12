@@ -16,7 +16,7 @@ Not currently compatible with automatic differentiation using Zygote.
 """
 total_energy(s, neighbors=nothing) = kinetic_energy(s) + potential_energy(s, neighbors)
 
-kinetic_energy_noconvert(s) = sum(mass.(s.atoms) .* sum.(abs2, s.velocities)) / 2
+kinetic_energy_noconvert(s) = sum(masses(s) .* sum.(abs2, s.velocities)) / 2
 
 """
     kinetic_energy(s)

@@ -136,7 +136,7 @@ coordinates correspond to the same periodic image.
 function radius_gyration(coords, atoms)
     centre = mean(coords)
     vecs_to_centre = coords .- (centre,)
-    masses = mass.(atoms)
-    I = sum(sum_abs2.(vecs_to_centre) .* masses)
-    return sqrt(I / sum(masses))
+    atom_masses = mass.(atoms)
+    I = sum(sum_abs2.(vecs_to_centre) .* atom_masses)
+    return sqrt(I / sum(atom_masses))
 end

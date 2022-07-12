@@ -34,7 +34,7 @@ If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
 function accelerations(s, neighbors=nothing; parallel::Bool=true)
-    return forces(s, neighbors; parallel=parallel) ./ mass.(s.atoms)
+    return forces(s, neighbors; parallel=parallel) ./ masses(s)
 end
 
 """

@@ -196,17 +196,17 @@ for a `System`.
 """
 function random_velocities(sys::AbstractSystem{3}, temp; rng=Random.GLOBAL_RNG)
     if isa(sys.coords, CuArray)
-        return cu(velocity_3D.(Array(mass.(sys.atoms)), temp, sys.k; rng=rng))
+        return cu(velocity_3D.(Array(masses(sys)), temp, sys.k; rng=rng))
     else
-        return velocity_3D.(mass.(sys.atoms), temp, sys.k; rng=rng)
+        return velocity_3D.(masses(sys), temp, sys.k; rng=rng)
     end
 end
 
 function random_velocities(sys::AbstractSystem{2}, temp; rng=Random.GLOBAL_RNG)
     if isa(sys.coords, CuArray)
-        return cu(velocity_2D.(Array(mass.(sys.atoms)), temp, sys.k; rng=rng))
+        return cu(velocity_2D.(Array(masses(sys)), temp, sys.k; rng=rng))
     else
-        return velocity_2D.(mass.(sys.atoms), temp, sys.k; rng=rng)
+        return velocity_2D.(masses(sys), temp, sys.k; rng=rng)
     end
 end
 
@@ -277,9 +277,9 @@ sum_svec(arr) = sum(arr)
 Remove the centre of mass motion from a system.
 """
 function remove_CM_motion!(sys)
-    masses = mass.(sys.atoms)
-    cm_momentum = sum_svec(sys.velocities .* masses)
-    cm_velocity = cm_momentum / sum(masses)
+    atom_masses = masses(sys)
+    cm_momentum = sum_svec(sys.velocities .* atom_masses)
+    cm_velocity = cm_momentum / sum(atom_masses)
     sys.velocities = sys.velocities .- (cm_velocity,)
     return sys
 end
