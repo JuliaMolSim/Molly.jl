@@ -40,6 +40,8 @@ end
 """
     force(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
           atom_i, atom_j, boundary)
+    force(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
+          atom_i, atom_j, boundary, weight_14)
     force(inter::SpecificInteraction, coord_i, coord_j,
           boundary)
     force(inter::SpecificInteraction, coord_i, coord_j,
