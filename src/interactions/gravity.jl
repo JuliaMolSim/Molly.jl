@@ -13,12 +13,12 @@ end
 Gravity(; G=Unitful.G, nl_only=false) = Gravity{typeof(G)}(G, nl_only)
 
 @inline @inbounds function force(inter::Gravity,
-                                    dr,
-                                    coord_i,
-                                    coord_j,
-                                    atom_i,
-                                    atom_j,
-                                    boundary)
+                                 dr,
+                                 coord_i,
+                                 coord_j,
+                                 atom_i,
+                                 atom_j,
+                                 boundary)
     r2 = sum(abs2, dr)
 
     mi, mj = atom_i.mass, atom_j.mass

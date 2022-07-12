@@ -307,3 +307,6 @@ function forces(s::System{D, true}, neighbors=nothing; parallel::Bool=true) wher
 
     return fs * s.force_units
 end
+
+force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14) =
+    force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)
