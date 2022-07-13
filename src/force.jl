@@ -55,15 +55,14 @@ For `PairwiseInteraction`s returns a single force vector and for
 Custom pairwise and specific interaction types should implement
 this function.
 """
-function force end
+function force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14)
+    # Fallback for interactions where the 1-4 weighting is not relevant
+    return force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)
+end
 
 @inline @inbounds function force!(fs, inter, s::System, i::Integer, j::Integer, force_units, weight_14::Bool=false)
     dr = vector(s.coords[i], s.coords[j], s.boundary)
-    if weight_14
-        fdr = force(inter, dr, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.boundary, true)
-    else
-        fdr = force(inter, dr, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.boundary)
-    end
+    fdr = force(inter, dr, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.boundary, weight_14)
     check_force_units(fdr, force_units)
     fdr_ustrip = ustrip.(fdr)
     fs[i] -= fdr_ustrip
@@ -75,11 +74,7 @@ end
                                         boundary, force_units, weight_14::Bool=false)
     dr = vector(coord_i, coord_j, boundary)
     sum(inters) do inter
-        if weight_14
-            fdr = force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, true)
-        else
-            fdr = force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)
-        end
+        fdr = force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14)
         check_force_units(fdr, force_units)
         return ustrip.(fdr)
     end
@@ -309,6 +304,3 @@ function forces(s::System{D, true}, neighbors=nothing; parallel::Bool=true) wher
 
     return fs * s.force_units
 end
-
-force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14) =
-    force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)

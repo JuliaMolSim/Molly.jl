@@ -60,13 +60,7 @@ end
                                         boundary, energy_units, weight_14::Bool=false)
     dr = vector(coord_i, coord_j, boundary)
     sum(inters) do inter
-        if weight_14
-            E = potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j,
-                                    boundary, true)
-        else
-            E = potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j,
-                                    boundary)
-        end
+        E = potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14)
         check_energy_units(E, energy_units)
         return ustrip(E)
     end
@@ -115,13 +109,8 @@ function potential_energy(s::System{D, false, T}, neighbors=nothing) where {D, T
             @inbounds for ni in 1:neighbors.n
                 i, j, weight_14 = neighbors.list[ni]
                 dr = vector(s.coords[i], s.coords[j], s.boundary)
-                if weight_14
-                    potential += potential_energy(inter, dr, s.coords[i], s.coords[j], s.atoms[i],
-                                                    s.atoms[j], s.boundary, true)
-                else
-                    potential += potential_energy(inter, dr, s.coords[i], s.coords[j], s.atoms[i],
-                                                    s.atoms[j], s.boundary)
-                end
+                potential += potential_energy(inter, dr, s.coords[i], s.coords[j], s.atoms[i],
+                                                s.atoms[j], s.boundary, weight_14)
             end
         else
             for i in 1:n_atoms
@@ -184,4 +173,9 @@ end
 @views function potential_energy(inter_list::InteractionList4Atoms, coords, boundary)
     return sum(potential_energy.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
                                     coords[inter_list.ks], coords[inter_list.ls], (boundary,)))
+end
+
+function potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14)
+    # Fallback for interactions where the 1-4 weighting is not relevant
+    return potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)
 end
