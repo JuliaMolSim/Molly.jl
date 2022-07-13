@@ -25,11 +25,13 @@ end
 # Allow CUDA device to be specified
 const DEVICE = get(ENV, "DEVICE", "0")
 
-# GLMakie doesn't work on CI
-run_visualize_tests = !haskey(ENV, "CI")
+# GLMakie doesn't work on CI or when running tests remotely
+run_visualize_tests = !haskey(ENV, "CI") && get(ENV, "VISTESTS", "1") != "0"
 if run_visualize_tests
     using GLMakie
     @info "The visualization tests will be run as this is not CI"
+elseif get(ENV, "VISTESTS", "1") == "0"
+    @warn "The visualization tests will not be run as VISTESTS is set to 0"
 else
     @warn "The visualization tests will not be run as this is CI"
 end
