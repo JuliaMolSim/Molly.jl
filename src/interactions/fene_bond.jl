@@ -1,19 +1,19 @@
 export FENEBond
 
 @doc raw"""
-    FENEBond(; k, r0, ϵ, σ)
+    FENEBond(; k, r0, σ, ϵ)
 
-A finitely extensible non-linear elastic (FENE) bond between two atoms
+A finitely extensible non-linear elastic (FENE) bond between two atoms, see
 [Kremer and Grest 1990](https://doi.org/10.1063/1.458541).
 The potential energy is given by
 ```math
-U(r) = -\frac{1}{2} k r^2_0 \ln (1 - (\frac{r}{r_0})^2) + U_{\text{WCA}}(r)
+U(r) = -\frac{1}{2} k r^2_0 \ln \left( 1 - \left( \frac{r}{r_0} \right) ^2 \right) + U_{\text{WCA}}(r)
 ```
 where the WCA contribution is given by
 ```math
 U_{\text{WCA}}(r) =
     \begin{cases}
-      4\epsilon \big[ (\frac{\sigma}{r})^{12} - (\frac{\sigma}{r})^6 \big] + \epsilon & r < 2^{1/6}\sigma\\
+      4\epsilon \left[ \left( \frac{\sigma}{r} \right) ^{12} - \left( \frac{\sigma}{r} \right) ^6 \right] + \epsilon & r < 2^{1/6}\sigma\\
       0 & r \geq 2^{1/6}\sigma\\
     \end{cases}       
 ```
@@ -21,11 +21,11 @@ U_{\text{WCA}}(r) =
 struct FENEBond{D, K, E} <: SpecificInteraction
     k::K
     r0::D
-    ϵ::E
     σ::D
+    ϵ::E
 end
 
-FENEBond(; k, r0, ϵ, σ) = FENEBond{typeof(r0), typeof(k), typeof(ϵ)}(k, r0, ϵ, σ)
+FENEBond(; k, r0, σ, ϵ) = FENEBond{typeof(r0), typeof(k), typeof(ϵ)}(k, r0, σ, ϵ)
 
 @inline @inbounds function force(b::FENEBond, coord_i, coord_j, boundary)
     ab = vector(coord_i, coord_j, boundary)
