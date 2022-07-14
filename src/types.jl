@@ -296,7 +296,7 @@ function System(;
                 specific_inter_lists=(),
                 general_inters=(),
                 coords,
-                velocities=zero(coords) * u"ps^-1",
+                velocities=nothing,
                 boundary,
                 neighbor_finder=NoNeighborFinder(),
                 loggers=(),
@@ -313,12 +313,22 @@ function System(;
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
     C = typeof(coords)
-    V = typeof(velocities)
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
+
+    if isnothing(velocities)
+        if force_units == NoUnits
+            vels = zero(coords)
+        else
+            vels = zero(coords) * u"ps^-1"
+        end
+    else
+        vels = velocities
+    end
+    V = typeof(vels)
 
     if energy_units == NoUnits
         if unit(k) == NoUnits
@@ -333,12 +343,11 @@ function System(;
     else
         k_converted = T(uconvert(energy_units * u"K^-1", k))
     end
-    
     K = typeof(k_converted)
 
     return System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
                     atoms, atoms_data, pairwise_inters, specific_inter_lists,
-                    general_inters, coords, velocities, boundary, neighbor_finder,
+                    general_inters, coords, vels, boundary, neighbor_finder,
                     loggers, force_units, energy_units, k_converted)
 end
 
