@@ -116,7 +116,6 @@ end
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=n_threads)
         neighbors_tree = find_neighbors(s, nf_tree; n_threads=n_threads)
 
-        # @test neighbors.list == neighbors_tree.list
         @test all(in(nn, neighbors_tree.list) for nn in neighbors.list)
 
         @time simulate!(s, simulator, n_steps; n_threads=n_threads)
@@ -363,8 +362,9 @@ end
 
     neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
     neighbors_nounits = find_neighbors(s_nounits, s_nounits.neighbor_finder; n_threads=1)
-    accel_diff = accelerations(s, neighbors) .- accelerations(s_nounits, neighbors_nounits)u"kJ * mol^-1 * nm^-1 * u^-1"
-    @test iszero(accel_diff)
+    a1 = accelerations(s, neighbors)
+    a2 = accelerations(s_nounits, neighbors_nounits)u"kJ * mol^-1 * nm^-1 * u^-1"
+    @test all(all(a1[i] .≈ a2[i]) for i in eachindex(a1)) == true
 
     simulate!(s, simulator, n_steps; n_threads=1)
     simulate!(s_nounits, simulator_nounits, n_steps; n_threads=1)

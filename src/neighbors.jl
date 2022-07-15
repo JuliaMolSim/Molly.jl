@@ -1,6 +1,4 @@
 # Neighbor finders
-# TODO: `find_neighbors!` can be simplified using @reduce in the @floop
-
 export
     NoNeighborFinder,
     find_neighbors,

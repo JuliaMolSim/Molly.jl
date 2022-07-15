@@ -375,10 +375,10 @@ function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothi
     
     buff_length = length(logger.history_A)
     
-    if n_threads > 1  # TODO: This can be simplified using FLoops
+    if n_threads > 1
         chunk_size = Int(ceil(buff_length / n_threads))
         ix_ranges = [i:min(i + chunk_size - 1, buff_length) for i in 1:chunk_size:buff_length]
-        @floop ThreadedEx(basesize = length(ix_ranges) ÷ n_threads) for ixs in ix_ranges
+        Threads.@threads for ixs in ix_ranges
             logger.sum_offset_products[ixs] .+= dot.(logger.history_A[ixs], (first(logger.history_B),))
         end
     else
