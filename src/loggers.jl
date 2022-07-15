@@ -413,7 +413,7 @@ While `GeneralObservableLogger` holds a full record of observations,
 In addition, calling `values(logger::AverageObservableLogger; std::Bool=true)`
 returns two values: the current running average, and an estimate of the standard
 deviation for this average based on the block averaging method described in
-[Flyvbjerg 1989](https://doi.org/10.1063/1.457480).
+[Flyvbjerg and Petersen 1989](https://doi.org/10.1063/1.457480).
 
 # Arguments
 - `observable::Function`: the observable whose mean is recorded, must support

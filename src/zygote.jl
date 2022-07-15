@@ -215,6 +215,35 @@ end
     return y, bc_fwd_back
 end
 
+function dual_function_real_svec(f::F) where F
+    function (arg1, arg2::SVector{D, T}) where {D, T}
+        ds1 = Zygote.dual(arg1 isa Int ? T(arg1) : arg1, (true, false, false, false))
+        ds2 = dualize(Nothing, arg2, Val(1), Val(0))
+        return f(ds1, ds2)
+    end
+end
+
+@inline function Zygote.broadcast_forward(f,
+                                            arg1::Union{AbstractArray{R}, Tuple{R}, R},
+                                            arg2::AbstractArray{SVector{D, T}}) where {D, T, R <: Real}
+    out = dual_function_real_svec(f).(arg1, arg2)
+    y = map(x -> value.(x), out)
+    function bc_fwd_back(ȳ_in)
+        ȳ = modify_grad(ȳ_in, arg2)
+        darg1 = unbroadcast(arg1, broadcast((y1, o1) -> y1 .* partials.(o1, 1), ȳ, out))
+        barg2 = broadcast(ȳ, out) do y1, o1
+            if length(y1) == 1
+                y1 .* SVector{D, T}(partials.((o1,), (2, 3, 4)))
+            else
+                SVector{D, T}(sum_partials(o1, y1, 2), sum_partials(o1, y1, 3), sum_partials(o1, y1, 4))
+            end
+        end
+        darg2 = unbroadcast(arg2, barg2)
+        (nothing, nothing, darg1, darg2)
+    end
+    return y, bc_fwd_back
+end
+
 function dual_function_svec_svec(f::F) where F
     function (arg1, arg2)
         ds1 = dualize(Nothing, arg1, Val(0), Val(3))

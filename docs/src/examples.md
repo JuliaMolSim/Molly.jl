@@ -92,7 +92,7 @@ velocities = [
     SVector( 1690083.43357355  ,  1393597.7855017239,  593655.0037930267 )u"km * d^-1",
 ]
 
-masses = [
+body_masses = [
     1.989e30u"kg",
     0.330e24u"kg",
     4.87e24u"kg" ,
@@ -106,7 +106,7 @@ boundary = CubicBoundary(1e9u"km", 1e9u"km", 1e9u"km")
 inter = Gravity(G=convert(typeof(1.0u"km^3 * kg^-1 * d^-2"), Unitful.G))
 
 sys = System(
-    atoms=[Atom(mass=m) for m in masses],
+    atoms=[Atom(mass=m) for m in body_masses],
     pairwise_inters=(inter,),
     coords=coords .+ (SVector(5e8, 5e8, 5e8)u"km",),
     velocities=velocities,

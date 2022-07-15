@@ -8,7 +8,7 @@ The concept of using automatic differentiation (AD) to obtain exact gradients th
 
 There are some projects that explore differentiable molecular simulations such as [Jax, M.D.](https://github.com/google/jax-md), [TorchMD](https://github.com/torchmd/torchmd) and [mdgrad](https://github.com/torchmd/mdgrad).
 However Julia provides a strong suite of AD tools, with [Zygote.jl](https://github.com/FluxML/Zygote.jl) allowing source-to-source transformations for much of the language.
-With Molly you can use the power of Zygote to obtain gradients through molecular simulations, even in the presence of complex interactions such as implicit solvation.
+With Molly you can use the power of Zygote to obtain gradients through molecular simulations, even in the presence of complex interactions such as implicit solvation and stochasticity such as Langevin dynamics or the Andersen thermostat.
 Reverse and forward mode AD can be used on the CPU and the GPU.
 Pairwise, specific and general interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
 

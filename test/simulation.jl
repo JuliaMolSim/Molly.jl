@@ -26,6 +26,7 @@
     )
     random_velocities!(s, temp)
 
+    @test masses(s) == repeat([10.0u"u"], n_atoms)
     @test typeof(boundary_conditions(s)) <: SVector
     @test bounding_box(s) == SVector(
         SVector(2.0, 0.0)u"nm",
