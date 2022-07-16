@@ -17,7 +17,8 @@ export
     System,
     ReplicaSystem,
     is_gpu_diff_safe,
-    float_type
+    float_type,
+    masses
 
 const DefaultFloat = Float64
 
@@ -296,7 +297,7 @@ function System(;
                 specific_inter_lists=(),
                 general_inters=(),
                 coords,
-                velocities=zero(coords) * u"ps^-1",
+                velocities=nothing,
                 boundary,
                 neighbor_finder=NoNeighborFinder(),
                 loggers=(),
@@ -313,12 +314,22 @@ function System(;
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
     C = typeof(coords)
-    V = typeof(velocities)
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
+
+    if isnothing(velocities)
+        if force_units == NoUnits
+            vels = zero(coords)
+        else
+            vels = zero(coords) * u"ps^-1"
+        end
+    else
+        vels = velocities
+    end
+    V = typeof(vels)
 
     if energy_units == NoUnits
         if unit(k) == NoUnits
@@ -333,12 +344,11 @@ function System(;
     else
         k_converted = T(uconvert(energy_units * u"K^-1", k))
     end
-    
     K = typeof(k_converted)
 
     return System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
                     atoms, atoms_data, pairwise_inters, specific_inter_lists,
-                    general_inters, coords, velocities, boundary, neighbor_finder,
+                    general_inters, coords, vels, boundary, neighbor_finder,
                     loggers, force_units, energy_units, k_converted)
 end
 
@@ -425,7 +435,7 @@ end
 """
     is_gpu_diff_safe(sys)
 
-Whether a `System` uses the code path suitable for the GPU and
+Whether a [`System`](@ref) uses the code path suitable for the GPU and
 for taking gradients.
 """
 is_gpu_diff_safe(::Union{System{D, G}, ReplicaSystem{D, G}}) where {D, G} = G
@@ -434,9 +444,16 @@ is_gpu_diff_safe(::Union{System{D, G}, ReplicaSystem{D, G}}) where {D, G} = G
     float_type(sys)
     float_type(boundary)
 
-The float type a `System` or bounding box uses.
+The float type a [`System`](@ref) or bounding box uses.
 """
 float_type(::Union{System{D, G, T}, ReplicaSystem{D, G, T}}) where {D, G, T} = T
+
+"""
+    masses(sys)
+
+The masses of the atoms in a [`System`](@ref).
+"""
+masses(s::System) = mass.(s.atoms)
 
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = eltype(s.atoms)
 

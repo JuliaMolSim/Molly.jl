@@ -66,6 +66,9 @@ simulator = VelocityVerlet(
 simulate!(sys, simulator, 1_000)
 ```
 `atoms`, `coords` and `boundary` are the minimum required properties to define a [`System`](@ref), though you would generally want to add interactions to a [`System`](@ref) to do something useful with it.
+[`System`](@ref) implements the `AbstractSystem` [interface from AtomsBase.jl](https://juliamolsim.github.io/AtomsBase.jl/stable).
+The functions [`masses`](@ref), [`is_gpu_diff_safe`](@ref) and [`float_type`](@ref) can be used on a [`System`](@ref).
+
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this can be turned off by giving the keyword argument `parallel=false` to [`simulate!`](@ref).
 The values stored by the loggers can be accessed using `values`, e.g. `values(sys.loggers.coords)`.
 An animation of the stored coordinates can be saved by using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
@@ -446,7 +449,9 @@ The available pairwise interactions are:
 The available specific interactions are:
 - [`HarmonicBond`](@ref)
 - [`MorseBond`](@ref)
+- [`FENEBond`](@ref)
 - [`HarmonicAngle`](@ref)
+- [`CosineAngle`](@ref)
 - [`PeriodicTorsion`](@ref)
 - [`RBTorsion`](@ref)
 
@@ -464,6 +469,8 @@ struct MyPairwiseInter <: PairwiseInteraction
 end
 ```
 The `nl_only` property is required and determines whether the neighbor list is used to omit distant atoms (`true`) or whether all atom pairs are always considered (`false`).
+To work on the GPU the `struct` should be a bits type, i.e. `isbitstype(MyPairwiseInter)` should be `true`.
+
 Next, you need to define the [`force`](@ref) function acting between a pair of atoms.
 This has a set series of arguments.
 For example:
@@ -487,6 +494,9 @@ end
 `vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
+An optional final argument `weight_14` is a `Bool` determining whether the atom pair is in a 1-4 bonding arrangement (i-x-x-j).
+When simulating molecules, non-bonded interactions for these pairs are often weighted by a factor such as 0.5.
+For interactions where this is relevant, `weight_14` can be used to apply this weighting in the interaction.
 
 To use your custom force in a simulation, add it to the list of pairwise interactions:
 ```julia

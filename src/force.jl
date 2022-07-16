@@ -34,12 +34,14 @@ If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
 function accelerations(s, neighbors=nothing; parallel::Bool=true)
-    return forces(s, neighbors; parallel=parallel) ./ mass.(s.atoms)
+    return forces(s, neighbors; parallel=parallel) ./ masses(s)
 end
 
 """
     force(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
           atom_i, atom_j, boundary)
+    force(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
+          atom_i, atom_j, boundary, weight_14)
     force(inter::SpecificInteraction, coord_i, coord_j,
           boundary)
     force(inter::SpecificInteraction, coord_i, coord_j,
@@ -53,15 +55,14 @@ For `PairwiseInteraction`s returns a single force vector and for
 Custom pairwise and specific interaction types should implement
 this function.
 """
-function force end
+function force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14)
+    # Fallback for interactions where the 1-4 weighting is not relevant
+    return force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)
+end
 
 @inline @inbounds function force!(fs, inter, s::System, i::Integer, j::Integer, force_units, weight_14::Bool=false)
     dr = vector(s.coords[i], s.coords[j], s.boundary)
-    if weight_14
-        fdr = force(inter, dr, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.boundary, true)
-    else
-        fdr = force(inter, dr, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.boundary)
-    end
+    fdr = force(inter, dr, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.boundary, weight_14)
     check_force_units(fdr, force_units)
     fdr_ustrip = ustrip.(fdr)
     fs[i] -= fdr_ustrip
@@ -73,11 +74,7 @@ end
                                         boundary, force_units, weight_14::Bool=false)
     dr = vector(coord_i, coord_j, boundary)
     sum(inters) do inter
-        if weight_14
-            fdr = force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, true)
-        else
-            fdr = force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)
-        end
+        fdr = force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14)
         check_force_units(fdr, force_units)
         return ustrip.(fdr)
     end
