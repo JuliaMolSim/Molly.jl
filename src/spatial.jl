@@ -3,6 +3,7 @@
 export
     CubicBoundary,
     RectangularBoundary,
+    TriclinicBoundary,
     box_volume,
     vector_1D,
     vector,
@@ -62,7 +63,38 @@ AtomsBase.n_dimensions(::RectangularBoundary) = 2
 
 Base.broadcastable(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 
-float_type(b::Union{CubicBoundary, RectangularBoundary}) = typeof(ustrip(b.side_lengths[1]))
+"""
+    TriclinicBoundary(v1, v2, v3)
+
+Triclinic 3D bounding box defined by 3 basis vectors.
+An approximation is used to find the closest periodic image when using the
+minimum image convention.
+"""
+struct TriclinicBoundary{T}
+    basis_vectors::SVector{3, T}
+    reciprocal_size::T
+end
+
+function TriclinicBoundary(basis_vectors::SVector{3})
+    reciprocal_size = SVector{3}(
+        inv(basis_vectors[1][1]),
+        inv(basis_vectors[2][2]),
+        inv(basis_vectors[3][3]),
+    )
+    return TriclinicBoundary(basis_vectors, reciprocal_size)
+end
+
+TriclinicBoundary(v1, v2, v3) = TriclinicBoundary(SVector{3}(v1, v2, v3))
+TriclinicBoundary(arr) = TriclinicBoundary(SVector{3}(arr))
+
+Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
+Base.firstindex(b::TriclinicBoundary) = b.basis_vectors[1]
+Base.lastindex(b::TriclinicBoundary) = b.basis_vectors[3]
+
+AtomsBase.n_dimensions(::TriclinicBoundary) = 3
+
+float_type(b::Union{CubicBoundary, RectangularBoundary}) = typeof(ustrip(b[1]))
+float_type(b::TriclinicBoundary) = typeof(ustrip(b[1][1]))
 
 """
     box_volume(boundary)
@@ -70,6 +102,7 @@ float_type(b::Union{CubicBoundary, RectangularBoundary}) = typeof(ustrip(b.side_
 Calculate the volume of a bounding box.
 """
 box_volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
+box_volume(b::TriclinicBoundary) = abs(dot(cross(b[1], b[2]), b[3]))
 
 """
     vector_1D(c1, c2, side_length)
@@ -94,6 +127,8 @@ Displacement between two coordinate values from c1 to c2, accounting for
 the bounding box.
 The minimum image convention is used, so the displacement is to the closest
 version of the coordinates accounting for the periodic boundaries.
+For the [`TriclinicBoundary`](@ref) an approximation is used to find the closest
+version.
 """
 vector(c1, c2, boundary::Union{CubicBoundary, RectangularBoundary}) = vector_1D.(c1, c2, boundary)
 
@@ -101,6 +136,15 @@ vector(c1, c2, boundary::Union{CubicBoundary, RectangularBoundary}) = vector_1D.
     quote
         Base.Cartesian.@ncall $N SVector{$N} i -> vector_1D(c1[i], c2[i], boundary[i])
     end
+end
+
+function vector(c1, c2, boundary::TriclinicBoundary)
+    T = float_type(boundary)
+    dr = c2 - c1
+    scale = floor.(dr .* boundary.reciprocal_size .+ T(0.5))
+    return SVector{3}(
+        
+    )
 end
 
 square_distance(i, j, coords, boundary) = sum(abs2, vector(coords[i], coords[j], boundary))
