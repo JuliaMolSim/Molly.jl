@@ -219,38 +219,32 @@ Custom general interaction types should implement this function.
 function forces(s::System{D, false}, neighbors=nothing; n_threads::Integer=Threads.nthreads()) where D
     n_atoms = length(s)
 
-    if n_threads > 1
-        fs_chunks = [ustrip_vec.(zero(s.coords)) for i=1:n_threads]
+    if n_threads > 1 && n_atoms >= 100
+        fs_threads = [ustrip_vec.(zero(s.coords)) for i in 1:Threads.nthreads()]
+
+        # Loop over interactions and calculate the acceleration due to each
         for inter in values(s.pairwise_inters)
             if inter.nl_only
                 if isnothing(neighbors)
                     error("An interaction uses the neighbor list but neighbors is nothing")
                 end
-                basesize = max(1, Int(ceil(neighbors.n / n_threads)))
-                chunks = [i:min(i + basesize - 1, neighbors.n) for i in 1:basesize:neighbors.n]
-                # @threads need collect to be used
-                Threads.@threads for (id, rng) in collect(enumerate(chunks))
-                    for ni in rng
-                        i, j, w = neighbors.list[ni]
-                        Molly.force!(fs_chunks[id], inter, s, i, j, s.force_units, w)
-                    end
+                Threads.@threads for ni in 1:neighbors.n
+                    i, j, w = neighbors.list[ni]
+                    force!(fs_threads[Threads.threadid()], inter, s, i, j, s.force_units, w)
                 end
             else
-                basesize = max(1, Int(ceil(n_atoms / n_threads)))
-                chunks = [i:min(i + basesize - 1, n_atoms) for i in 1:basesize:n_atoms]
-                Threads.@threads for (id, rng) in collect(enumerate(chunks))
-                    for i in rng
-                        for j in 1:(i - 1)
-                            Molly.force!(fs_chunks[id], inter, s, i, j, s.force_units)
-                        end
+                Threads.@threads for i in 1:n_atoms
+                    for j in 1:(i - 1)
+                        force!(fs_threads[Threads.threadid()], inter, s, i, j, s.force_units)
                     end
                 end
             end
         end
-    
-        fs = sum(fs_chunks)
+
+        fs = sum(fs_threads)
     else
         fs = ustrip_vec.(zero(s.coords))
+
         for inter in values(s.pairwise_inters)
             if inter.nl_only
                 if isnothing(neighbors)
@@ -258,12 +252,12 @@ function forces(s::System{D, false}, neighbors=nothing; n_threads::Integer=Threa
                 end
                 for ni in 1:neighbors.n
                     i, j, w = neighbors.list[ni]
-                    Molly.force!(fs, inter, s, i, j, s.force_units, w)
+                    force!(fs, inter, s, i, j, s.force_units, w)
                 end
             else
                 for i in 1:n_atoms
                     for j in 1:(i - 1)
-                        Molly.force!(fs, inter, s, i, j, s.force_units)
+                        force!(fs, inter, s, i, j, s.force_units)
                     end
                 end
             end
