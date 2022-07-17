@@ -397,7 +397,7 @@ function simulate!(sys,
         if op == 'A'
             return (A_step!, (sys, effective_dts[j]))
         elseif op == 'B'
-            return (B_step!, (sys, effective_dts[j], accels_t, force_computation_steps[j], parallel))
+            return (B_step!, (sys, effective_dts[j], accels_t, force_computation_steps[j], n_threads))
         elseif op == 'O'
             return (O_step!, (sys, α_eff, σ_eff, rng, sim.temperature))
         end
@@ -432,7 +432,7 @@ function A_step!(s, dt_eff, neighbors)
     s.coords = wrap_coords.(s.coords, (s.boundary,))
 end
 
-function B_step!(s, dt_eff, acceleration_vector, compute_forces::Bool, parallel::Bool, neighbors)
+function B_step!(s, dt_eff, acceleration_vector, compute_forces::Bool, n_threads::Int, neighbors)
     if compute_forces
         acceleration_vector .= accelerations(s, neighbors, n_threads=n_threads)
     end
