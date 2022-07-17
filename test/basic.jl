@@ -92,6 +92,30 @@
         atol=1e-9u"kg * m^2 * s^-2",
     )
 
+    pr = HarmonicPositionRestraint(x0=c1, kb=300_000.0u"kJ * mol^-1 * nm^-2")
+    fs = force(pr, c2, boundary)
+    @test isapprox(
+        fs.f1,
+        SVector(-90000.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    fs = force(pr, c1, boundary)
+    @test isapprox(
+        fs.f1,
+        SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(pr, c2, boundary),
+        13500.0u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(pr, c1, boundary),
+        0.0u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
+
     b1 = HarmonicBond(k=300_000.0u"kJ * mol^-1 * nm^-2", r0=0.2u"nm")
     b2 = HarmonicBond(k=100_000.0u"kJ * mol^-1 * nm^-2", r0=0.6u"nm")
     fs = force(b1, c1, c2, boundary)
