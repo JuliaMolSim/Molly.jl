@@ -450,6 +450,7 @@ The available pairwise interactions are:
 - [`Gravity`](@ref)
 
 The available specific interactions are:
+- [`HarmonicPositionRestraint`](@ref) - 1 atom
 - [`HarmonicBond`](@ref) - 2 atoms
 - [`MorseBond`](@ref) - 2 atoms
 - [`FENEBond`](@ref) - 2 atoms
