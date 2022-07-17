@@ -15,6 +15,10 @@ HarmonicPositionRestraint(; x0, kb) = HarmonicPositionRestraint{typeof(x0), type
 @inline @inbounds function force(pr::HarmonicPositionRestraint, coord_i, boundary)
     ab = vector(coord_i, pr.x0, boundary)
     c = pr.kb * norm(ab)
+    if iszero(c)
+        f = c * ustrip.(ab)
+        return SpecificForce1Atoms(f)
+    end
     f = c * normalize(ab)
     return SpecificForce1Atoms(f)
 end
