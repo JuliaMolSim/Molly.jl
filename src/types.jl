@@ -5,6 +5,7 @@ export
     PairwiseInteraction,
     SpecificInteraction,
     AbstractNeighborFinder,
+    InteractionList1Atoms,
     InteractionList2Atoms,
     InteractionList3Atoms,
     InteractionList4Atoms,
@@ -43,10 +44,22 @@ Custom neighbor finders should sub-type this type.
 abstract type AbstractNeighborFinder end
 
 """
+    InteractionList1Atoms(is, types, inters)
+    InteractionList1Atoms(inter_type)
+
+A list of specific interactions that give a force on one atom such as position restraints.
+"""
+struct InteractionList1Atoms{T}
+    is::Vector{Int}
+    types::Vector{String}
+    inters::T
+end
+
+"""
     InteractionList2Atoms(is, js, types, inters)
     InteractionList2Atoms(inter_type)
 
-A list of specific interactions between two atoms.
+A list of specific interactions that give forces on two atoms such as bond potentials.
 """
 struct InteractionList2Atoms{T}
     is::Vector{Int}
@@ -59,7 +72,7 @@ end
     InteractionList3Atoms(is, js, ks, types, inters)
     InteractionList3Atoms(inter_type)
 
-A list of specific interactions between three atoms.
+A list of specific interactions that give forces on three atoms such as bond angle potentials.
 """
 struct InteractionList3Atoms{T}
     is::Vector{Int}
@@ -73,7 +86,7 @@ end
     InteractionList4Atoms(is, js, ks, ls, types, inters)
     InteractionList4Atoms(inter_type)
 
-A list of specific interactions between four atoms.
+A list of specific interactions that give forces on four atoms such as torsion potentials.
 """
 struct InteractionList4Atoms{T}
     is::Vector{Int}
@@ -84,10 +97,12 @@ struct InteractionList4Atoms{T}
     inters::T
 end
 
+InteractionList1Atoms(T) = InteractionList1Atoms{Vector{T}}([], [], T[])
 InteractionList2Atoms(T) = InteractionList2Atoms{Vector{T}}([], [], [], T[])
 InteractionList3Atoms(T) = InteractionList3Atoms{Vector{T}}([], [], [], [], T[])
 InteractionList4Atoms(T) = InteractionList4Atoms{Vector{T}}([], [], [], [], [], T[])
 
+interaction_type(::InteractionList1Atoms{T}) where {T} = eltype(T)
 interaction_type(::InteractionList2Atoms{T}) where {T} = eltype(T)
 interaction_type(::InteractionList3Atoms{T}) where {T} = eltype(T)
 interaction_type(::InteractionList4Atoms{T}) where {T} = eltype(T)

@@ -49,6 +49,14 @@ function ChainRulesCore.rrule(T::Type{<:PairwiseInteraction}, vs...)
     return Y, PairwiseInteraction_pullback
 end
 
+function ChainRulesCore.rrule(T::Type{<:SpecificForce1Atoms}, vs...)
+    Y = T(vs...)
+    function SpecificForce1Atoms_pullback(Ȳ)
+        return NoTangent(), Ȳ.f1
+    end
+    return Y, SpecificForce1Atoms_pullback
+end
+
 function ChainRulesCore.rrule(T::Type{<:SpecificForce2Atoms}, vs...)
     Y = T(vs...)
     function SpecificForce2Atoms_pullback(Ȳ)

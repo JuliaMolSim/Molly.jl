@@ -450,13 +450,13 @@ The available pairwise interactions are:
 - [`Gravity`](@ref)
 
 The available specific interactions are:
-- [`HarmonicBond`](@ref)
-- [`MorseBond`](@ref)
-- [`FENEBond`](@ref)
-- [`HarmonicAngle`](@ref)
-- [`CosineAngle`](@ref)
-- [`PeriodicTorsion`](@ref)
-- [`RBTorsion`](@ref)
+- [`HarmonicBond`](@ref) - 2 atoms
+- [`MorseBond`](@ref) - 2 atoms
+- [`FENEBond`](@ref) - 2 atoms
+- [`HarmonicAngle`](@ref) - 3 atoms
+- [`CosineAngle`](@ref) - 3 atoms
+- [`PeriodicTorsion`](@ref) - 4 atoms
+- [`RBTorsion`](@ref) - 4 atoms
 
 The available general interactions are:
 - [`ImplicitSolventOBC`](@ref)

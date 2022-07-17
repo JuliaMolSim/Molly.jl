@@ -161,6 +161,10 @@ function potential_energy(s::System{D, true, T}, neighbors=nothing) where {D, T}
     return uconvert(s.energy_units, potential)
 end
 
+@views function potential_energy(inter_list::InteractionList1Atoms, coords, boundary)
+    return sum(potential_energy.(inter_list.inters, coords[inter_list.is], (boundary,)))
+end
+
 @views function potential_energy(inter_list::InteractionList2Atoms, coords, boundary)
     return sum(potential_energy.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
                                     (boundary,)))

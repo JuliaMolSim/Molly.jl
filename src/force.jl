@@ -6,6 +6,7 @@ export
     ustrip_vec,
     accelerations,
     force,
+    SpecificForce1Atoms,
     SpecificForce2Atoms,
     SpecificForce3Atoms,
     SpecificForce4Atoms,
@@ -121,9 +122,18 @@ getindices_j(arr, neighbors) = @view arr[neighbors.nbsj]
 end
 
 """
+    SpecificForce1Atoms(f1)
+
+Force on one atom arising from an interaction such as a position restraint.
+"""
+struct SpecificForce1Atoms{D, T}
+    f1::SVector{D, T}
+end
+
+"""
     SpecificForce2Atoms(f1, f2)
 
-Forces on two atoms arising from an interaction.
+Forces on two atoms arising from an interaction such as a bond potential.
 """
 struct SpecificForce2Atoms{D, T}
     f1::SVector{D, T}
@@ -133,7 +143,7 @@ end
 """
     SpecificForce3Atoms(f1, f2, f3)
 
-Forces on three atoms arising from an interaction.
+Forces on three atoms arising from an interaction such as a bond angle potential.
 """
 struct SpecificForce3Atoms{D, T}
     f1::SVector{D, T}
@@ -144,13 +154,17 @@ end
 """
     SpecificForce4Atoms(f1, f2, f3, f4)
 
-Forces on four atoms arising from an interaction.
+Forces on four atoms arising from an interaction such as a torsion potential.
 """
 struct SpecificForce4Atoms{D, T}
     f1::SVector{D, T}
     f2::SVector{D, T}
     f3::SVector{D, T}
     f4::SVector{D, T}
+end
+
+function SpecificForce1Atoms(f1::StaticArray{Tuple{D}, T}) where {D, T}
+    return SpecificForce1Atoms{D, T}(f1)
 end
 
 function SpecificForce2Atoms(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T}) where {D, T}
@@ -167,6 +181,7 @@ function SpecificForce4Atoms(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple
     return SpecificForce4Atoms{D, T}(f1, f2, f3, f4)
 end
 
+Base.:+(x::SpecificForce1Atoms, y::SpecificForce1Atoms) = SpecificForce1Atoms(x.f1 + y.f1)
 Base.:+(x::SpecificForce2Atoms, y::SpecificForce2Atoms) = SpecificForce2Atoms(x.f1 + y.f1, x.f2 + y.f2)
 Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3)
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
@@ -175,6 +190,13 @@ get_f1(x) = x.f1
 get_f2(x) = x.f2
 get_f3(x) = x.f3
 get_f4(x) = x.f4
+
+@views function specific_force(inter_list::InteractionList1Atoms, coords, boundary, force_units, n_atoms)
+    sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], (boundary,)))
+    fis = get_f1.(sparse_fs)
+    check_force_units(first(first(fis)), force_units)
+    return sparsevec(inter_list.is, fis, n_atoms)
+end
 
 @views function specific_force(inter_list::InteractionList2Atoms, coords, boundary, force_units, n_atoms)
     sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js], (boundary,)))
@@ -188,7 +210,8 @@ end
                                 coords[inter_list.ks], (boundary,)))
     fis, fjs, fks = get_f1.(sparse_fs), get_f2.(sparse_fs), get_f3.(sparse_fs)
     check_force_units(first(first(fis)), force_units)
-    return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) + sparsevec(inter_list.ks, fks, n_atoms)
+    return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) +
+           sparsevec(inter_list.ks, fks, n_atoms)
 end
 
 @views function specific_force(inter_list::InteractionList4Atoms, coords, boundary, force_units, n_atoms)
@@ -196,7 +219,8 @@ end
                                 coords[inter_list.ks], coords[inter_list.ls], (boundary,)))
     fis, fjs, fks, fls = get_f1.(sparse_fs), get_f2.(sparse_fs), get_f3.(sparse_fs), get_f4.(sparse_fs)
     check_force_units(first(first(fis)), force_units)
-    return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) + sparsevec(inter_list.ks, fks, n_atoms) + sparsevec(inter_list.ls, fls, n_atoms)
+    return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) +
+           sparsevec(inter_list.ks, fks, n_atoms) + sparsevec(inter_list.ls, fls, n_atoms)
 end
 
 """

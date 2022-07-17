@@ -116,6 +116,15 @@ function inject_atom(at, at_data, params_dic)
     )
 end
 
+function inject_interaction_list(inter::InteractionList1Atoms, params_dic, gpu)
+    if gpu
+        inters_grad = cu(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+    else
+        inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
+    end
+    InteractionList1Atoms(inter.is, inter.types, inters_grad)
+end
+
 function inject_interaction_list(inter::InteractionList2Atoms, params_dic, gpu)
     if gpu
         inters_grad = cu(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
