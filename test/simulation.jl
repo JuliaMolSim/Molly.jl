@@ -432,8 +432,12 @@ end
         k = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
         r0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
         bonds = [HarmonicBond(k=k, r0=r0) for i in 1:(n_atoms ÷ 2)]
-        specific_inter_lists = (InteractionList2Atoms(collect(1:2:n_atoms), collect(2:2:n_atoms),
-                                repeat([""], length(bonds)), gpu ? cu(bonds) : bonds),)
+        specific_inter_lists = (
+            InteractionList2Atoms(collect(1:2:n_atoms),
+            collect(2:2:n_atoms),
+            repeat([""], length(bonds)),
+            gpu ? cu(bonds) : bonds,
+        ),)
 
         neighbor_finder = NoNeighborFinder()
         cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")

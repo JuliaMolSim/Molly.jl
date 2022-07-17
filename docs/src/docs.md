@@ -525,7 +525,7 @@ struct MySpecificInter <: SpecificInteraction
 end
 ```
 Next, you need to define the [`force`](@ref) function.
-The form of this will depend whether the interaction involves 2, 3 or 4 atoms.
+The form of this will depend whether the interaction applies forces to 1, 2, 3 or 4 atoms.
 For example in the 2 atom case:
 ```julia
 function Molly.force(inter::MySpecificInter, coords_i, coords_j, boundary)

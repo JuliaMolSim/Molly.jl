@@ -8,7 +8,10 @@ export
     OpenMMAtomType,
     OpenMMResidueType,
     PeriodicTorsionType,
-    OpenMMForceField
+    OpenMMForceField,
+    is_any_atom,
+    is_heavy_atom,
+    add_position_restraints
 
 """
     place_atoms(n_atoms, boundary, min_dist; max_attempts=100)
@@ -1134,4 +1137,73 @@ end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
     return System(DefaultFloat, coord_file, top_file; kwargs...)
+end
+
+"""
+    is_any_atom(at, at_data)
+
+Placeholder function that returns `true`, used to select any atom.
+"""
+is_any_atom(at, at_data) = true
+
+"""
+    is_heavy_atom(at, at_data)
+
+Determines whether an [`Atom`](@ref) is a heavy atom, i.e. any element other than hydrogen.
+"""
+function is_heavy_atom(at, at_data)
+    if at_data.element in ("?", "")
+        return mass(at) > one(mass(at))
+    else
+        return !(at_data.element in ("H", "D"))
+    end
+end
+
+"""
+    add_position_restraints(sys, kb, atom_selector=is_any_atom, restrain_coords=sys.coords)
+
+Add [`HarmonicPositionRestraint`](@ref)s to a [`System`](@ref) to restrain the atoms and return
+a new [`System`](@ref).
+The force constant `kb` can be a single value or an array of equal length to the number of atoms
+in the system.
+The `atom_selector` function takes in each atom and atom data and determines whether to restrain
+that atom.
+"""
+function add_position_restraints(sys,
+                                 kb,
+                                 atom_selector::Function=is_any_atom,
+                                 restrain_coords=sys.coords)
+    kb_array = isa(kb, AbstractArray) ? kb : repeat([kb], length(sys))
+    if length(kb_array) != length(sys)
+        throw(ArgumentError("The system has $(length(sys)) atoms but there are $(length(kb_array)) kb values"))
+    end
+    is = Int[]
+    types = String[]
+    inters = HarmonicPositionRestraint[]
+    for (i, (at, at_data, x0, kb_res)) in enumerate(zip(Array(sys.atoms), sys.atoms_data,
+                                                        Array(restrain_coords), kb_array))
+        if atom_selector(at, at_data)
+            push!(is, i)
+            push!(types, "")
+            push!(inters, HarmonicPositionRestraint(x0, kb_res))
+        end
+    end
+    restraints = InteractionList1Atoms(is, types, inters)
+    sis = (sys.specific_inter_lists..., restraints)
+    return System(
+        atoms=sys.atoms,
+        atoms_data=sys.atoms_data,
+        pairwise_inters=sys.pairwise_inters,
+        specific_inter_lists=sis,
+        general_inters=sys.general_inters,
+        coords=sys.coords,
+        velocities=sys.velocities,
+        boundary=sys.boundary,
+        neighbor_finder=sys.neighbor_finder,
+        loggers=sys.loggers,
+        force_units=sys.force_units,
+        energy_units=sys.energy_units,
+        k=sys.k,
+        gpu_diff_safe=is_gpu_diff_safe(sys),
+    )
 end
