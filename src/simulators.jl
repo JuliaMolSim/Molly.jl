@@ -397,8 +397,7 @@ function simulate!(sys,
         if op == 'A'
             return (A_step!, (sys, effective_dts[j]))
         elseif op == 'B'
-            return (B_step!, (sys, effective_dts[j], accels_t, neighbors,
-                                force_computation_steps[j], n_threads))
+            return (B_step!, (sys, effective_dts[j], accels_t, force_computation_steps[j], parallel))
         elseif op == 'O'
             return (O_step!, (sys, α_eff, σ_eff, rng, sim.temperature))
         end
@@ -409,7 +408,7 @@ function simulate!(sys,
 
     for step_n in 1:n_steps
         for (step!, args) in step_arg_pairs
-            step!(args...)
+            step!(args..., neighbors)
         end
         
         sim.remove_CM_motion && remove_CM_motion!(sys)
@@ -423,18 +422,17 @@ function simulate!(sys,
     return sys
 end
 
-function O_step!(s, α_eff, σ_eff, rng, temperature)
+function O_step!(s, α_eff, σ_eff, rng, temperature, neighbors)
     noise = random_velocities(s, temperature; rng=rng)
     s.velocities = α_eff .* s.velocities + σ_eff .* noise
 end
 
-function A_step!(s, dt_eff)
+function A_step!(s, dt_eff, neighbors)
     s.coords += s.velocities * dt_eff
     s.coords = wrap_coords.(s.coords, (s.boundary,))
 end
 
-function B_step!(s, dt_eff, acceleration_vector, neighbors,
-                    compute_forces::Bool, n_threads::Integer)
+function B_step!(s, dt_eff, acceleration_vector, compute_forces::Bool, parallel::Bool, neighbors)
     if compute_forces
         acceleration_vector .= accelerations(s, neighbors, n_threads=n_threads)
     end
