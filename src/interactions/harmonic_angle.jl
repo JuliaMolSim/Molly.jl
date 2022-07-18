@@ -18,7 +18,7 @@ HarmonicAngle(; th0, cth) = HarmonicAngle{typeof(th0), typeof(cth)}(th0, cth)
     bc = vector_pad3D(coords_j, coords_k, boundary)
     cross_ba_bc = ba × bc
     if iszero(cross_ba_bc)
-        zf = zero(a.cth ./ trim3D(ba))
+        zf = zero(a.cth ./ trim3D(ba, boundary))
         return SpecificForce3Atoms(zf, zf, zf)
     end
     pa = normalize(trim3D( ba × cross_ba_bc, boundary))
