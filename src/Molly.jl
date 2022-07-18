@@ -25,7 +25,6 @@ using FLoops
 @reexport using StaticArrays
 @reexport using Unitful
 
-using Base.Threads
 using LinearAlgebra
 using Random
 using SparseArrays

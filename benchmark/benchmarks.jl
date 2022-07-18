@@ -8,7 +8,6 @@ using Molly
 using BenchmarkTools
 using CUDA
 
-using Base.Threads
 using DelimitedFiles
 
 # Allow CUDA device to be specified
