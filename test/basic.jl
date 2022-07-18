@@ -312,10 +312,10 @@ end
             boundary=CubicBoundary(10.0u"nm", 10.0u"nm", 10.0u"nm"),
             neighbor_finder=nf,
         )
-        neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
+        neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
         @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
         if run_parallel_tests
-            neighbors = find_neighbors(s, s.neighbor_finder; parallel=true)
+            neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
             @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
         end
         show(devnull, nf)
@@ -334,10 +334,10 @@ end
         boundary=boundary,
         neighbor_finder=neighbor_finder,
     )
-    neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
+    neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
     @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
     if run_parallel_tests
-        neighbors = find_neighbors(s, s.neighbor_finder; parallel=true)
+        neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
         @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
     end
 end

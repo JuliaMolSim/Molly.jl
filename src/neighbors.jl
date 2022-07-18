@@ -1,5 +1,4 @@
 # Neighbor finders
-
 export
     NoNeighborFinder,
     find_neighbors,
@@ -18,9 +17,9 @@ set to `false`.
 struct NoNeighborFinder <: AbstractNeighborFinder end
 
 """
-    find_neighbors(system; parallel=true)
+    find_neighbors(system; n_threads = Threads.nthreads())
     find_neighbors(system, neighbor_finder, current_neighbors=nothing,
-                    step_n=0; parallel=true)
+                    step_n=0; n_threads = Threads.nthreads())
 
 Obtain a list of close atoms in a system.
 Custom neighbor finders should implement this function.
@@ -71,52 +70,25 @@ function find_neighbors(s::System,
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        parallel::Bool=true)
+                        n_threads::Integer=Threads.nthreads())
     !iszero(step_n % nf.n_steps) && return current_neighbors
-
-    if isnothing(current_neighbors)
-        neighbors = NeighborList()
-    else
-        neighbors = current_neighbors
-    end
-    empty!(neighbors)
 
     sqdist_cutoff = nf.dist_cutoff ^ 2
 
-    if parallel && nthreads() > 1
-        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:nthreads()]
-
-        @threads for i in 1:length(s)
-            nl = nl_threads[threadid()]
-            ci = s.coords[i]
-            nbi = @view nf.nb_matrix[:, i]
-            w14i = @view nf.matrix_14[:, i]
-            for j in 1:(i - 1)
-                r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
-                if r2 <= sqdist_cutoff && nbi[j]
-                    push!(nl, (i, j, w14i[j]))
-                end
-            end
-        end
-
-        for nl in nl_threads
-            append!(neighbors, nl)
-        end
-    else
-        for i in 1:length(s)
-            ci = s.coords[i]
-            nbi = @view nf.nb_matrix[:, i]
-            w14i = @view nf.matrix_14[:, i]
-            for j in 1:(i - 1)
-                r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
-                if r2 <= sqdist_cutoff && nbi[j]
-                    push!(neighbors, (i, j, w14i[j]))
-                end
+    @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in 1:length(s)
+        ci = s.coords[i]
+        nbi = @view nf.nb_matrix[:, i]
+        w14i = @view nf.matrix_14[:, i]
+        for j in 1:(i - 1)
+            r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
+            if r2 <= sqdist_cutoff && nbi[j]
+                nn = (i, j, w14i[j])
+                @reduce(neighbors_list = append!(Tuple{Int, Int, Bool}[], (nn,)))
             end
         end
     end
 
-    return neighbors
+    return NeighborList(length(neighbors_list), neighbors_list)
 end
 
 """
@@ -250,55 +222,28 @@ function find_neighbors(s::System,
                         nf::TreeNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        parallel::Bool=true)
+                        n_threads::Integer=Threads.nthreads())
     !iszero(step_n % nf.n_steps) && return current_neighbors
-
-    if isnothing(current_neighbors)
-        neighbors = NeighborList()
-    else
-        neighbors = current_neighbors
-    end
-    empty!(neighbors)
 
     dist_unit = unit(first(first(s.coords)))
     bv = ustrip.(dist_unit, s.boundary)
     btree = BallTree(ustrip_vec.(s.coords), PeriodicEuclidean(bv))
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
 
-    if parallel && nthreads() > 1
-        nl_threads = [Tuple{Int, Int, Bool}[] for i in 1:nthreads()]
-
-        @threads for i in 1:length(s)
-            nl = nl_threads[threadid()]
-            ci = ustrip.(s.coords[i])
-            nbi = @view nf.nb_matrix[:, i]
-            w14i = @view nf.matrix_14[:, i]
-            idxs = inrange(btree, ci, dist_cutoff, true)
-            for j in idxs
-                if nbi[j] && i > j
-                    push!(nl, (i, j, w14i[j]))
-                end
-            end
-        end
-
-        for nl in nl_threads
-            append!(neighbors, nl)
-        end
-    else
-        for i in 1:length(s)
-            ci = ustrip.(s.coords[i])
-            nbi = @view nf.nb_matrix[:, i]
-            w14i = @view nf.matrix_14[:, i]
-            idxs = inrange(btree, ci, dist_cutoff, true)
-            for j in idxs
-                if nbi[j] && i > j
-                    push!(neighbors, (i, j, w14i[j]))
-                end
+    @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in 1:length(s)
+        ci = ustrip.(s.coords[i])
+        nbi = @view nf.nb_matrix[:, i]
+        w14i = @view nf.matrix_14[:, i]
+        idxs = inrange(btree, ci, dist_cutoff, true)
+        for j in idxs
+            if nbi[j] && i > j
+                nn = (i, j, w14i[j])
+                @reduce(neighbors_list = append!(Tuple{Int, Int, Bool}[], (nn,)))
             end
         end
     end
 
-    return neighbors
+    return NeighborList(length(neighbors_list), neighbors_list)
 end
 
 """
@@ -411,7 +356,7 @@ function find_neighbors(s::System,
                         nf::CellListMapNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        parallel::Bool=true)
+                        n_threads=Threads.nthreads())
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
     if isnothing(current_neighbors)
@@ -423,7 +368,7 @@ function find_neighbors(s::System,
     cl = nf.cl
     neighbors.n = 0
     neighbors_threaded = nf.neighbors_threaded
-    if parallel
+    if n_threads > 1
         for i in 1:length(neighbors_threaded)
             neighbors_threaded[i].n = 0
         end
@@ -432,6 +377,7 @@ function find_neighbors(s::System,
     end
 
     box = CellListMap.Box(s.boundary.side_lengths, nf.dist_cutoff; lcell=1)
+    parallel = (n_threads > 1)
     cl = UpdateCellList!(s.coords, box, cl, aux; parallel=parallel)
 
     map_pairwise!(

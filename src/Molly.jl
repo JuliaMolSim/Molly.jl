@@ -19,12 +19,12 @@ using Requires
 using Unitful
 using UnitfulChainRules
 using Zygote
+using FLoops
 
 @reexport using AtomsBase
 @reexport using StaticArrays
 @reexport using Unitful
 
-using Base.Threads
 using LinearAlgebra
 using Random
 using SparseArrays

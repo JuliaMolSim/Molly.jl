@@ -4,7 +4,7 @@
     temp = 298.0u"K"
     boundary = RectangularBoundary(2.0u"nm", 2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
-    gen_temp_wrapper(s, neighbors=nothing; parallel::Bool=true) = temperature(s)
+    gen_temp_wrapper(s, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = temperature(s)
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
@@ -35,7 +35,7 @@
 
     show(devnull, s)
 
-    @time simulate!(s, simulator, n_steps; parallel=false)
+    @time simulate!(s, simulator, n_steps; n_threads=1)
 
     @test length(values(s.loggers.coords)) == 201
     final_coords = last(values(s.loggers.coords))
@@ -59,7 +59,7 @@ end
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
-    parallel_list = run_parallel_tests ? (false, true) : (false,)
+    n_threads_list = run_parallel_tests ? (1, Threads.nthreads()) : (1,)
 
     TV=typeof(velocity(10.0u"u", temp))
     TP=typeof(0.2u"kJ * mol^-1")
@@ -68,7 +68,7 @@ end
     pot_obs(sys, neighbors; kwargs...) = potential_energy(sys, neighbors)
     kin_obs(sys, args...; kwargs...) = kinetic_energy(sys)
 
-    for parallel in parallel_list
+    for n_threads in n_threads_list
         s = System(
             atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR", element="Ar") for i in 1:n_atoms],
@@ -114,11 +114,12 @@ end
         )
 
         nf_tree = TreeNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
-        neighbors = find_neighbors(s, s.neighbor_finder; parallel=parallel)
-        neighbors_tree = find_neighbors(s, nf_tree; parallel=parallel)
-        @test neighbors.list == neighbors_tree.list
+        neighbors = find_neighbors(s, s.neighbor_finder; n_threads=n_threads)
+        neighbors_tree = find_neighbors(s, nf_tree; n_threads=n_threads)
 
-        @time simulate!(s, simulator, n_steps; parallel=parallel)
+        @test all(in(nn, neighbors_tree.list) for nn in neighbors.list)
+
+        @time simulate!(s, simulator, n_steps; n_threads=n_threads)
 
         show(devnull, s.loggers.temp)
         show(devnull, s.loggers.coords)
@@ -206,7 +207,7 @@ end
     random_velocities!(s, temp)
 
     for simulator in simulators
-        @time simulate!(s, simulator, n_steps; parallel=false)
+        @time simulate!(s, simulator, n_steps; n_threads=1)
     end
 end
 
@@ -250,7 +251,7 @@ end
         ),
     )
 
-    @time simulate!(s, simulator, n_steps; parallel=false)
+    @time simulate!(s, simulator, n_steps; n_threads=1)
 
     if run_visualize_tests
         visualize(s.loggers.coords, boundary, temp_fp_viz;
@@ -360,13 +361,14 @@ end
         energy_units=NoUnits,
     )
 
-    neighbors = find_neighbors(s, s.neighbor_finder; parallel=false)
-    neighbors_nounits = find_neighbors(s_nounits, s_nounits.neighbor_finder; parallel=false)
-    accel_diff = accelerations(s, neighbors) .- accelerations(s_nounits, neighbors_nounits)u"kJ * mol^-1 * nm^-1 * u^-1"
-    @test iszero(accel_diff)
+    neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
+    neighbors_nounits = find_neighbors(s_nounits, s_nounits.neighbor_finder; n_threads=1)
+    a1 = accelerations(s, neighbors)
+    a2 = accelerations(s_nounits, neighbors_nounits)u"kJ * mol^-1 * nm^-1 * u^-1"
+    @test all(all(a1[i] .≈ a2[i]) for i in eachindex(a1)) == true
 
-    simulate!(s, simulator, n_steps; parallel=false)
-    simulate!(s_nounits, simulator_nounits, n_steps; parallel=false)
+    simulate!(s, simulator, n_steps; n_threads=1)
+    simulate!(s_nounits, simulator_nounits, n_steps; n_threads=1)
 
     coords_diff = last(values(s.loggers.coords)) .- last(values(s_nounits.loggers.coords)) * u"nm"
     @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8u"nm"
@@ -466,6 +468,7 @@ end
                             ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
         end
 
+        n_threads = parallel ? Threads.nthreads() : 1
         s = System(
             atoms=atoms,
             pairwise_inters=pairwise_inters,
@@ -480,10 +483,10 @@ end
         @test is_gpu_diff_safe(s) == gpu_diff_safe
         @test float_type(s) == (f32 ? Float32 : Float64)
 
-        neighbors = find_neighbors(s; parallel=parallel)
+        neighbors = find_neighbors(s; n_threads=n_threads)
         E_start = potential_energy(s, neighbors)
 
-        simulate!(s, simulator, n_steps; parallel=parallel)
+        simulate!(s, simulator, n_steps; n_threads=n_threads)
         return s.coords, E_start
     end
 
