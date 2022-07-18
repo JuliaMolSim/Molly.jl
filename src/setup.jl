@@ -1153,7 +1153,7 @@ Determines whether an [`Atom`](@ref) is a heavy atom, i.e. any element other tha
 """
 function is_heavy_atom(at, at_data)
     if at_data.element in ("?", "")
-        return mass(at) > one(mass(at))
+        return mass(at) > oneunit(mass(at))
     else
         return !(at_data.element in ("H", "D"))
     end
