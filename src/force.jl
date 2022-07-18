@@ -33,7 +33,6 @@ general interactions and Newton's second law of motion.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
-
 function accelerations(s, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     return forces(s, neighbors; n_threads=n_threads) ./ masses(s)
 end
@@ -216,11 +215,12 @@ If the interaction uses neighbor lists, the neighbors should be computed
 first and passed to the function.
 Custom general interaction types should implement this function.
 """
-function forces(s::System{D, false}, neighbors=nothing; n_threads::Integer=Threads.nthreads()) where D
+function forces(s::System{D, false}, neighbors=nothing;
+                n_threads::Integer=Threads.nthreads()) where D
     n_atoms = length(s)
 
     if n_threads > 1
-        fs_chunks = [ustrip_vec.(zero(s.coords)) for i=1:n_threads]
+        fs_chunks = [ustrip_vec.(zero(s.coords)) for i in 1:n_threads]
         for inter in values(s.pairwise_inters)
             if inter.nl_only
                 if isnothing(neighbors)
@@ -228,7 +228,6 @@ function forces(s::System{D, false}, neighbors=nothing; n_threads::Integer=Threa
                 end
                 basesize = max(1, Int(ceil(neighbors.n / n_threads)))
                 chunks = [i:min(i + basesize - 1, neighbors.n) for i in 1:basesize:neighbors.n]
-                # Threads.@threads need collect to be used
                 Threads.@threads for (id, rng) in collect(enumerate(chunks))
                     for ni in rng
                         i, j, w = neighbors.list[ni]
@@ -247,7 +246,6 @@ function forces(s::System{D, false}, neighbors=nothing; n_threads::Integer=Threa
                 end
             end
         end
-    
         fs = sum(fs_chunks)
     else
         fs = ustrip_vec.(zero(s.coords))

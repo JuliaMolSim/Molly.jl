@@ -6,7 +6,6 @@ using FiniteDifferences
 using ForwardDiff
 using Zygote
 
-using Base.Threads
 using DelimitedFiles
 using LinearAlgebra
 using Random

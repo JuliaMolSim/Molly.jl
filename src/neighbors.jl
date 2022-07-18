@@ -1,4 +1,5 @@
 # Neighbor finders
+
 export
     NoNeighborFinder,
     find_neighbors,
@@ -377,7 +378,7 @@ function find_neighbors(s::System,
     end
 
     box = CellListMap.Box(s.boundary.side_lengths, nf.dist_cutoff; lcell=1)
-    parallel = (n_threads > 1)
+    parallel = n_threads > 1
     cl = UpdateCellList!(s.coords, box, cl, aux; parallel=parallel)
 
     map_pairwise!(

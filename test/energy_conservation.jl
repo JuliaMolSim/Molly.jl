@@ -1,6 +1,5 @@
 using Molly
 
-using Base.Threads
 using Statistics
 using Test
 

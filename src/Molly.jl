@@ -11,6 +11,7 @@ using DataStructures
 using Distances
 using Distributions
 using EzXML
+using FLoops
 using ForwardDiff
 using KernelDensity
 using NearestNeighbors
@@ -19,7 +20,6 @@ using Requires
 using Unitful
 using UnitfulChainRules
 using Zygote
-using FLoops
 
 @reexport using AtomsBase
 @reexport using StaticArrays

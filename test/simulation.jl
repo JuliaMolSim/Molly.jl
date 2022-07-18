@@ -116,8 +116,8 @@ end
         nf_tree = TreeNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=n_threads)
         neighbors_tree = find_neighbors(s, nf_tree; n_threads=n_threads)
-
-        @test all(in(nn, neighbors_tree.list) for nn in neighbors.list)
+        @test length(neighbors.list) == length(neighbors_tree.list) &&
+                all(nn in neighbors_tree.list for nn in neighbors.list)
 
         @time simulate!(s, simulator, n_steps; n_threads=n_threads)
 
@@ -365,7 +365,7 @@ end
     neighbors_nounits = find_neighbors(s_nounits, s_nounits.neighbor_finder; n_threads=1)
     a1 = accelerations(s, neighbors)
     a2 = accelerations(s_nounits, neighbors_nounits)u"kJ * mol^-1 * nm^-1 * u^-1"
-    @test all(all(a1[i] .≈ a2[i]) for i in eachindex(a1)) == true
+    @test all(all(a1[i] .≈ a2[i]) for i in eachindex(a1))
 
     simulate!(s, simulator, n_steps; n_threads=1)
     simulate!(s_nounits, simulator_nounits, n_steps; n_threads=1)
@@ -468,7 +468,6 @@ end
                             ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
         end
 
-        n_threads = parallel ? Threads.nthreads() : 1
         s = System(
             atoms=atoms,
             pairwise_inters=pairwise_inters,
@@ -483,6 +482,7 @@ end
         @test is_gpu_diff_safe(s) == gpu_diff_safe
         @test float_type(s) == (f32 ? Float32 : Float64)
 
+        n_threads = parallel ? Threads.nthreads() : 1
         neighbors = find_neighbors(s; n_threads=n_threads)
         E_start = potential_energy(s, neighbors)
 

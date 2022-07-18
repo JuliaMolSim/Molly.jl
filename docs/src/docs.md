@@ -70,7 +70,8 @@ simulate!(sys, simulator, 1_000)
 [`System`](@ref) implements the `AbstractSystem` [interface from AtomsBase.jl](https://juliamolsim.github.io/AtomsBase.jl/stable).
 The functions [`masses`](@ref), [`is_gpu_diff_safe`](@ref) and [`float_type`](@ref) can be used on a [`System`](@ref).
 
-By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this behavior can be changed by giving the keyword argument `n_threads` to [`simulate!`](@ref). For example, `n_threads=1` uses no parallelization.
+By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this behaviour can be changed by giving the keyword argument `n_threads` to [`simulate!`](@ref).
+For example, `n_threads=1` uses no parallelization.
 
 The values stored by the loggers can be accessed using `values`, e.g. `values(sys.loggers.coords)`.
 An animation of the stored coordinates can be saved by using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.

@@ -102,7 +102,6 @@ function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu:
                         ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
     end
 
-    n_threads = parallel ? Threads.nthreads() : 1
 
     s = System(
         atoms=atoms,
@@ -115,6 +114,7 @@ function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu:
         gpu_diff_safe=gpu_diff_safe,
     )
 
+    n_threads = parallel ? Threads.nthreads() : 1
     simulate!(s, simulator, n_steps; n_threads=n_threads)
     return s.coords
 end
