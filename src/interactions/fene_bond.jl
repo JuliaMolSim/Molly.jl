@@ -18,14 +18,14 @@ V_{\text{WCA}}(r) =
     \end{cases}       
 ```
 """
-struct FENEBond{D, K, E} <: SpecificInteraction
+struct FENEBond{K, D, E} <: SpecificInteraction
     k::K
     r0::D
     σ::D
     ϵ::E
 end
 
-FENEBond(; k, r0, σ, ϵ) = FENEBond{typeof(r0), typeof(k), typeof(ϵ)}(k, r0, σ, ϵ)
+FENEBond(; k, r0, σ, ϵ) = FENEBond{typeof(k), typeof(r0), typeof(ϵ)}(k, r0, σ, ϵ)
 
 @inline @inbounds function force(b::FENEBond, coord_i, coord_j, boundary)
     ab = vector(coord_i, coord_j, boundary)
