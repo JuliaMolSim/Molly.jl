@@ -10,7 +10,7 @@ The potential energy is defined as
 V(r_{ij}) = C \varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^n - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^m\right]
 ```
 where
-```
+```math
 C = \frac{n}{n - m} \left( \frac{n}{m} \right) ^\frac{m}{n - m}
 ```
 """

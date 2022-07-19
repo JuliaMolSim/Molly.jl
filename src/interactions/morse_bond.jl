@@ -6,7 +6,7 @@ export MorseBond
 A Morse potential bond between two atoms.
 The potential energy is defined as
 ```math
-V(r) = D(1 - e^{-a(r - r_0)}))^2
+V(r) = D(1 - e^{-a(r - r_0)})^2
 ```
 """
 struct MorseBond{T, A, R} <: SpecificInteraction
