@@ -130,8 +130,8 @@ struct BondableInteraction &lt;: PairwiseInteraction
     prob_formation::Float64
     prob_break::Float64
     dist_formation::Float64
-    b0::Float64
-    kb::Float64
+    k::Float64
+    r0::Float64
 end
 
 function Molly.force(inter::BondableInteraction,
@@ -148,13 +148,13 @@ function Molly.force(inter::BondableInteraction,
     end
     # Make bonds between close atoms randomly
     r2 = sum(abs2, dr)
-    if r2 &lt; inter.b0 * inter.dist_formation &amp;&amp; rand() &lt; inter.prob_formation
+    if r2 &lt; inter.r0 * inter.dist_formation &amp;&amp; rand() &lt; inter.prob_formation
         push!(atom_i.partners, atom_j.i)
         push!(atom_j.partners, atom_i.i)
     end
     # Apply the force of a harmonic bond
     if atom_j.i in atom_i.partners
-        c = inter.kb * (norm(dr) - inter.b0)
+        c = inter.k * (norm(dr) - inter.r0)
         fdr = -c * normalize(dr)
         return fdr
     else
@@ -184,7 +184,7 @@ coords = place_atoms(n_atoms, boundary, 0.1)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
     SoftSphere(nl_only=true),
-    BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0),
+    BondableInteraction(true, 0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(
     nb_matrix=trues(n_atoms, n_atoms),
@@ -269,7 +269,7 @@ scatter!(ax, dists, forces_grad  , label=&quot;AD&quot;    , markersize=8, marke
 xlims!(ax, low=0)
 ylims!(ax, -6.0, 10.0)
 axislegend()
-save(&quot;force_comparison.png&quot;, f)</code></pre><p><img src="../images/force_comparison.png" alt="Force comparison"/></p><h2 id="Variations-of-the-Morse-potential"><a class="docs-heading-anchor" href="#Variations-of-the-Morse-potential">Variations of the Morse potential</a><a id="Variations-of-the-Morse-potential-1"></a><a class="docs-heading-anchor-permalink" href="#Variations-of-the-Morse-potential" title="Permalink"></a></h2><p>The Morse potential for bonds has a parameter <em>α</em> that determines the width of the potential. It can also be compared to the harmonic bond potential.</p><pre><code class="language-julia">using Molly
+save(&quot;force_comparison.png&quot;, f)</code></pre><p><img src="../images/force_comparison.png" alt="Force comparison"/></p><h2 id="Variations-of-the-Morse-potential"><a class="docs-heading-anchor" href="#Variations-of-the-Morse-potential">Variations of the Morse potential</a><a id="Variations-of-the-Morse-potential-1"></a><a class="docs-heading-anchor-permalink" href="#Variations-of-the-Morse-potential" title="Permalink"></a></h2><p>The Morse potential for bonds has a parameter <em>a</em> that determines the width of the potential. It can also be compared to the harmonic bond potential.</p><pre><code class="language-julia">using Molly
 using GLMakie
 
 boundary = CubicBoundary(5.0, 5.0, 5.0)
@@ -293,15 +293,15 @@ ax = Axis(
 lines!(
     ax,
     dists,
-    energies(HarmonicBond(b0=0.2, kb=20_000.0)),
+    energies(HarmonicBond(k=20_000.0, r0=0.2)),
     label=&quot;Harmonic&quot;,
 )
-for α in [2.5, 5.0, 10.0]
+for a in [2.5, 5.0, 10.0]
     lines!(
         ax,
         dists,
-        energies(MorseBond(D=100.0, α=α, r0=0.2)),
-        label=&quot;Morse α=$α nm^-1&quot;,
+        energies(MorseBond(D=100.0, a=a, r0=0.2)),
+        label=&quot;Morse a=$a nm^-1&quot;,
     )
 end
 ylims!(ax, 0.0, 120.0)
@@ -343,4 +343,4 @@ end
 xlims!(ax, low=0.2)
 ylims!(ax, -0.6, 0.3)
 axislegend(position=:rb)
-save(&quot;mie.png&quot;, f)</code></pre><p><img src="../images/mie.png" alt="Mie"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Monday 18 July 2022 15:19">Monday 18 July 2022</span>. Using Julia version 1.7.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+save(&quot;mie.png&quot;, f)</code></pre><p><img src="../images/mie.png" alt="Mie"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../api/">API »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Tuesday 19 July 2022 17:00">Tuesday 19 July 2022</span>. Using Julia version 1.7.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
