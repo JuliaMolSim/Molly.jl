@@ -499,11 +499,11 @@ end
     return y, bc_fwd_back
 end
 
-function dualize_fb(inter::HarmonicAngle{D, K}) where {D, K}
-    th0, cth = inter.th0, inter.cth
-    dual_th0 = @dualize(th0, 11, 1)
-    dual_cth = @dualize(cth, 11, 2)
-    return HarmonicAngle{typeof(dual_th0), typeof(dual_cth)}(dual_th0, dual_cth)
+function dualize_fb(inter::HarmonicAngle{K, D}) where {K, D}
+    k, θ0 = inter.k, inter.θ0
+    dual_k  = @dualize(k , 11, 1)
+    dual_θ0 = @dualize(θ0, 11, 2)
+    return HarmonicAngle{typeof(dual_k), typeof(dual_θ0)}(dual_k, dual_θ0)
 end
 
 function dual_function_specific_3_atoms(f::F) where F
@@ -1044,9 +1044,9 @@ end
 @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force_nounit), inters::Tuple{Tuple{X, Y}}, args...) where {X <: LennardJones, Y <: Coulomb             } = Zygote.broadcast_forward(f, inters, args...)
 
 @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{HarmonicBond{D, K}}      , args...) where {D, K}    = Zygote.broadcast_forward(f, inters, args...)
-@eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{HarmonicAngle{D, K}}     , args...) where {D, K}    = Zygote.broadcast_forward(f, inters, args...)
+@eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{HarmonicAngle{K, D}}     , args...) where {K, D}    = Zygote.broadcast_forward(f, inters, args...)
 @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{PeriodicTorsion{N, T, E}}, args...) where {N, T, E} = Zygote.broadcast_forward(f, inters, args...)
 
 @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force), inters::Vector{HarmonicBond{D, K}}      , args...) where {D, K}    = Zygote.broadcast_forward(f, inters, args...)
-@eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force), inters::Vector{HarmonicAngle{D, K}}     , args...) where {D, K}    = Zygote.broadcast_forward(f, inters, args...)
+@eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force), inters::Vector{HarmonicAngle{K, D}}     , args...) where {K, D}    = Zygote.broadcast_forward(f, inters, args...)
 @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force), inters::Vector{PeriodicTorsion{N, T, E}}, args...) where {N, T, E} = Zygote.broadcast_forward(f, inters, args...)

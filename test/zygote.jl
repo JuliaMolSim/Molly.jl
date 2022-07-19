@@ -72,7 +72,7 @@
         pairwise_inters = pis ? (lj, crf) : ()
         bond_is, bond_js = collect(1:(n_atoms ÷ 2)), collect((1 + n_atoms ÷ 2):n_atoms)
         bond_dists = [norm(vector(Array(coords)[i], Array(coords)[i + n_atoms ÷ 2], boundary)) for i in 1:(n_atoms ÷ 2)]
-        angles_inner = [HarmonicAngle(th0=f32 ? 2.0f0 : 2.0, cth=f32 ? 10.0f0 : 10.0) for i in 1:15]
+        angles_inner = [HarmonicAngle(k=f32 ? 10.0f0 : 10.0, θ0=f32 ? 2.0f0 : 2.0) for i in 1:15]
         angles = InteractionList3Atoms(
             collect(1:15),
             collect(16:30),

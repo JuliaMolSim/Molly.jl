@@ -200,7 +200,7 @@ function loss(θ)
             [2, 5],
             [3, 6],
             ["", ""],
-            [HarmonicAngle(θ, 10.0), HarmonicAngle(θ, 10.0)],
+            [HarmonicAngle(10.0, θ), HarmonicAngle(10.0, θ)],
         ),
     )
 

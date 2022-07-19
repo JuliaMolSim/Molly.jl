@@ -135,7 +135,7 @@ struct OpenMMForceField{T, M, D, E, K}
     atom_types::Dict{String, OpenMMAtomType{M, D, E}}
     residue_types::Dict{String, OpenMMResiduetype{T}}
     bond_types::Dict{Tuple{String, String}, HarmonicBond{D, K}}
-    angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{T, E}}
+    angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{E, T}}
     torsion_types::Dict{Tuple{String, String, String, String}, PeriodicTorsionType{T, E}}
     torsion_order::String
     weight_14_coulomb::T
@@ -198,9 +198,9 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
                     atom_type_1 = angle["type1"]
                     atom_type_2 = angle["type2"]
                     atom_type_3 = angle["type3"]
-                    th0 = parse(T, angle["angle"])
                     k = units ? parse(T, angle["k"])u"kJ * mol^-1" : parse(T, angle["k"])
-                    angle_types[(atom_type_1, atom_type_2, atom_type_3)] = HarmonicAngle(th0, k)
+                    θ0 = parse(T, angle["angle"])
+                    angle_types[(atom_type_1, atom_type_2, atom_type_3)] = HarmonicAngle(k, θ0)
                 end
             elseif entry_name == "PeriodicTorsionForce"
                 torsion_order = entry["ordering"]
@@ -480,7 +480,7 @@ function System(coord_file::AbstractString,
             angle_type = force_field.angle_types[(atom_type_3, atom_type_2, atom_type_1)]
             push!(angles.types, atom_types_to_string(atom_type_3, atom_type_2, atom_type_1))
         end
-        push!(angles.inters, HarmonicAngle(th0=angle_type.th0, cth=angle_type.cth))
+        push!(angles.inters, HarmonicAngle(k=angle_type.k, θ0=angle_type.θ0))
         nb_matrix[a1z + 1, a3z + 1] = false
         nb_matrix[a3z + 1, a1z + 1] = false
     end
@@ -853,11 +853,11 @@ function System(T::Type,
             bondtypes["$(c[1])/$(c[2])"] = bondtype
             bondtypes["$(c[2])/$(c[1])"] = bondtype
         elseif current_field == "angletypes"
-            # Convert th0 to radians
+            # Convert θ0 to radians
             if units
-                angletype = HarmonicAngle(deg2rad(parse(T, c[5])), parse(T, c[6])u"kJ * mol^-1")
+                angletype = HarmonicAngle(parse(T, c[6])u"kJ * mol^-1", deg2rad(parse(T, c[5])))
             else
-                angletype = HarmonicAngle(deg2rad(parse(T, c[5])), parse(T, c[6]))
+                angletype = HarmonicAngle(parse(T, c[6]), deg2rad(parse(T, c[5])))
             end
             angletypes["$(c[1])/$(c[2])/$(c[3])"] = angletype
             angletypes["$(c[3])/$(c[2])/$(c[1])"] = angletype
@@ -919,7 +919,7 @@ function System(T::Type,
             push!(angles.js, j)
             push!(angles.ks, k)
             push!(angles.types, an)
-            push!(angles.inters, HarmonicAngle(th0=angletype.th0, cth=angletype.cth))
+            push!(angles.inters, HarmonicAngle(k=angletype.k, θ0=angletype.θ0))
         elseif current_field == "dihedrals"
             i, j, k, l = parse.(Int, c[1:4])
             push!(possible_torsions, (i, j, k, l))
@@ -1016,7 +1016,7 @@ function System(T::Type,
                 push!(angles.js, i)
                 push!(angles.ks, i + 2)
                 push!(angles.types, "HW/OW/HW")
-                push!(angles.inters, HarmonicAngle(th0=angletype.th0, cth=angletype.cth))
+                push!(angles.inters, HarmonicAngle(k=angletype.k, θ0=angletype.θ0))
             end
         end
     end

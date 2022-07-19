@@ -6,7 +6,7 @@ export PeriodicTorsion
 A periodic torsion angle between four atoms.
 The potential energy is defined as
 ```math
-V(\phi) = \sum_{n=0}^N k_n (1 + \cos(n \phi - \phi_{s,n}))
+V(\phi) = \sum_{n=1}^N k_n (1 + \cos(n \phi - \phi_{s,n}))
 ```
 """
 struct PeriodicTorsion{N, T, E} <: SpecificInteraction

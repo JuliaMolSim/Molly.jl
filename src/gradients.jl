@@ -54,10 +54,10 @@ function extract_parameters(sys, ff)
         elseif Molly.interaction_type(inter) <: HarmonicAngle
             for angle_type in inter.types
                 key_prefix = "inter_HA_$(angle_type)_"
-                if !haskey(params_dic, key_prefix * "th0")
+                if !haskey(params_dic, key_prefix * "k")
                     angle = ff.angle_types[atom_types_to_tuple(angle_type)]
-                    params_dic[key_prefix * "th0"] = angle.th0
-                    params_dic[key_prefix * "cth"] = angle.cth
+                    params_dic[key_prefix * "k" ] = angle.k
+                    params_dic[key_prefix * "θ0"] = angle.θ0
                 end
             end
         elseif Molly.interaction_type(inter) <: PeriodicTorsion
@@ -193,8 +193,8 @@ end
 function inject_interaction(inter::HarmonicAngle, inter_type, params_dic)
     key_prefix = "inter_HA_$(inter_type)_"
     HarmonicAngle(
-        dict_get(params_dic, key_prefix * "th0", inter.th0),
-        dict_get(params_dic, key_prefix * "cth", inter.cth),
+        dict_get(params_dic, key_prefix * "k" , inter.k ),
+        dict_get(params_dic, key_prefix * "θ0", inter.θ0),
     )
 end
 
