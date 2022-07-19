@@ -331,7 +331,7 @@ end
     ImplicitSolventOBC(atoms, atoms_data, bonds)
 
 Onufriev-Bashford-Case GBSA model.
-Should be used along with a Coulomb or CoulombReactionField interaction.
+Should be used along with a [`Coulomb`](@ref) or [`CoulombReactionField`](@ref) interaction.
 The keyword argument `use_OBC2` determines whether to use parameter set
 I (`false`, the default) or II (`true`).
 """
@@ -434,7 +434,7 @@ end
     ImplicitSolventGBN2(atoms, atoms_data, bonds)
 
 GBn2 solvation model.
-Should be used along with a Coulomb or CoulombReactionField interaction.
+Should be used along with a [`Coulomb`](@ref) or [`CoulombReactionField`](@ref) interaction.
 """
 struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, TD, TM} <: AbstractGBSA
     offset_radii::VD

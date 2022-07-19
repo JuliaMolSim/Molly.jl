@@ -4,9 +4,10 @@ export LennardJones
     LennardJones(; cutoff, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
                  force_units, energy_units, skip_shortcut)
 
-The Lennard-Jones 6-12 interaction. The potential is given by
+The Lennard-Jones 6-12 interaction between two atoms.
+The potential energy is defined as
 ```math
-V_{ij}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]
+V(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]
 ```
 and the force on each atom by
 ```math

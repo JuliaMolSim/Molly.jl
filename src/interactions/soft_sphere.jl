@@ -1,9 +1,13 @@
 export SoftSphere
 
-"""
+@doc raw"""
     SoftSphere(; cutoff, nl_only, lorentz_mixing, force_units, energy_units, skip_shortcut)
 
 The soft-sphere potential.
+The potential energy is defined as
+```math
+V(r_{ij}) = 4\varepsilon_{ij} \left(\frac{\sigma_{ij}}{r_{ij}}\right)^12
+```
 """
 struct SoftSphere{S, C, F, E} <: PairwiseInteraction
     cutoff::C

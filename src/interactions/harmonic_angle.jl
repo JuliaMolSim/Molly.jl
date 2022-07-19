@@ -1,9 +1,13 @@
 export HarmonicAngle
 
-"""
+@doc raw"""
     HarmonicAngle(; th0, cth)
 
 A harmonic bond angle between three atoms.
+The potential energy is defined as
+```math
+V(\theta) = \frac{1}{2} k (\theta - \theta_0)^2
+```
 """
 struct HarmonicAngle{D, K} <: SpecificInteraction
     th0::D

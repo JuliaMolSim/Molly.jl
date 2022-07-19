@@ -4,7 +4,8 @@ export CoulombReactionField
     CoulombReactionField(; dist_cutoff, solvent_dielectric, nl_only, weight_14,
                             coulomb_const, force_units, energy_units)
 
-The Coulomb electrostatic interaction modified using the reaction field approximation.
+The Coulomb electrostatic interaction modified using the reaction field approximation
+between two atoms.
 """
 struct CoulombReactionField{D, S, W, T, F, E} <: PairwiseInteraction
     dist_cutoff::D

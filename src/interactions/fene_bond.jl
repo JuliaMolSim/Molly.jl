@@ -5,15 +5,15 @@ export FENEBond
 
 A finitely extensible non-linear elastic (FENE) bond between two atoms, see
 [Kremer and Grest 1990](https://doi.org/10.1063/1.458541).
-The potential energy is given by
+The potential energy is defined as
 ```math
-U(r) = -\frac{1}{2} k r^2_0 \ln \left( 1 - \left( \frac{r}{r_0} \right) ^2 \right) + U_{\text{WCA}}(r)
+V(r) = -\frac{1}{2} k r^2_0 \ln \left( 1 - \left( \frac{r}{r_0} \right) ^2 \right) + V_{\text{WCA}}(r)
 ```
 where the WCA contribution is given by
 ```math
-U_{\text{WCA}}(r) =
+V_{\text{WCA}}(r) =
     \begin{cases}
-      4\epsilon \left[ \left( \frac{\sigma}{r} \right) ^{12} - \left( \frac{\sigma}{r} \right) ^6 \right] + \epsilon & r < 2^{1/6}\sigma\\
+      4\varepsilon \left[ \left( \frac{\sigma}{r} \right) ^{12} - \left( \frac{\sigma}{r} \right) ^6 \right] + \varepsilon & r < 2^{1/6}\sigma\\
       0 & r \geq 2^{1/6}\sigma\\
     \end{cases}       
 ```
@@ -55,7 +55,7 @@ end
     r02 = b.r0^2
     uwca = zero(b.ϵ)
     if r < (b.σ * 2 ^ (1 / 6))
-        uwca = 4 * b.ϵ * ((σ6 * r6inv) ^ 2 - σ6*r6inv) + b.ϵ
+        uwca = 4 * b.ϵ * ((σ6 * r6inv) ^ 2 - σ6 * r6inv) + b.ϵ
     end
     return -(b.k / 2) * r02 * log(1 - r2 / r02) + uwca
 end

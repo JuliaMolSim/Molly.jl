@@ -1,9 +1,13 @@
 export HarmonicBond
 
-"""
+@doc raw"""
     HarmonicBond(; b0, kb)
 
 A harmonic bond between two atoms.
+The potential energy is defined as
+```math
+V(r) = \frac{1}{2}k(r - r_0)^2
+```
 """
 struct HarmonicBond{D, K} <: SpecificInteraction
     b0::D
