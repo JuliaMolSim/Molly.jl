@@ -66,10 +66,13 @@ simulator = VelocityVerlet(
 simulate!(sys, simulator, 1_000)
 ```
 `atoms`, `coords` and `boundary` are the minimum required properties to define a [`System`](@ref), though you would generally want to add interactions to a [`System`](@ref) to do something useful with it.
+
 [`System`](@ref) implements the `AbstractSystem` [interface from AtomsBase.jl](https://juliamolsim.github.io/AtomsBase.jl/stable).
 The functions [`masses`](@ref), [`is_gpu_diff_safe`](@ref) and [`float_type`](@ref) can be used on a [`System`](@ref).
 
-By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this can be turned off by giving the keyword argument `parallel=false` to [`simulate!`](@ref).
+By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this behaviour can be changed by giving the keyword argument `n_threads` to [`simulate!`](@ref).
+For example, `n_threads=1` uses no parallelization.
+
 The values stored by the loggers can be accessed using `values`, e.g. `values(sys.loggers.coords)`.
 An animation of the stored coordinates can be saved by using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
 ```julia
@@ -258,7 +261,7 @@ simulator = Langevin(
     friction=1.0u"ps^-1",
 )
 
-simulate!(sys, simulator, 5_000; parallel=true)
+simulate!(sys, simulator, 5_000; n_threads=Threads.nthreads())
 ```
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
 The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
@@ -345,7 +348,7 @@ function Molly.force(inter::SIRInteraction,
 end
 
 # Custom Logger
-function fracs_SIR(s::System, neighbors=nothing; parallel::Bool=true)
+function fracs_SIR(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     counts_sir = [
         count(p -> p.status == susceptible, s.atoms),
         count(p -> p.status == infected   , s.atoms),
@@ -679,14 +682,14 @@ This example shows some of the helper functions you can use:
 function Molly.simulate!(sys,
                             sim::MySimulator,
                             n_steps::Integer;
-                            parallel::Bool=true)
+                            n_threads::Integer=Threads.nthreads())
     # Find neighbors like this
-    neighbors = find_neighbors(sys, sys.neighbor_finder; parallel=parallel)
-    run_loggers!(sys, neighbors, 0; parallel=parallel)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
 
     for step_n in 1:n_steps
         # Calculate accelerations like this
-        accels_t = accelerations(sys, neighbors; parallel=parallel)
+        accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
         # Ensure coordinates stay within the simulation box like this
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
@@ -698,11 +701,11 @@ function Molly.simulate!(sys,
         remove_CM_motion!(sys)
 
         # Apply the loggers like this
-        run_loggers!(sys, neighbors, step_n; parallel=parallel)
+        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                   parallel=parallel)
+                                   n_threads=n_threads)
     end
 
     return sys
@@ -768,7 +771,7 @@ function find_neighbors(s,
                         nf::MyNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        parallel::Bool=true)
+                        n_threads::Integer=Threads.nthreads())
     if step_n % nf.n_steps == 0
         if isnothing(current_neighbors)
             neighbors = NeighborList()
@@ -817,7 +820,7 @@ end
 ```
 Then, define the logging function that is called every step by the simulator:
 ```julia
-function Molly.log_property!(logger::MyLogger, sys, neighbors, step_n; parallel=true)
+function Molly.log_property!(logger::MyLogger, sys, neighbors, step_n; n_threads=Threads.nthreads())
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end
@@ -835,7 +838,7 @@ Loggers are currently ignored for the purposes of taking gradients, so if a logg
 Many times, a logger will just record an observation to an `Array` containing a record of past observations.
 For this purpose, you can use the [`GeneralObservableLogger`](@ref) construct without defining a custom logging function. Simply define your observation function as
 ```julia
-function my_observable(sys::System, neighbors; parallel::Bool)
+function my_observable(sys::System, neighbors; n_threads::Integer)
     # Probe the system for some desired property
     return observation
 end

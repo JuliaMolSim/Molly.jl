@@ -17,14 +17,14 @@ export
     AverageObservableLogger
 
 """
-    run_loggers!(system, neighbors=nothing, step_n=0; parallel=true)
+    run_loggers!(system, neighbors=nothing, step_n=0; n_threads=Threads.nthreads())
 
 Run the loggers associated with the system.
 Ignored for gradient calculation during automatic differentiation.
 """
-function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0; parallel::Bool=true)
+function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     for logger in values(s.loggers)
-        log_property!(logger, s, neighbors, step_n; parallel=parallel)
+        log_property!(logger, s, neighbors, step_n; n_threads=n_threads)
     end
 end
 
@@ -33,7 +33,7 @@ end
 
 A logger which holds a record of regularly sampled observations of the system. 
 `observable` should return an object of type `T` and support the method
-`observable(s::System, neighbors; parallel::Bool)::T`.
+`observable(s::System, neighbors; n_threads::Integer)::T`.
 """
 struct GeneralObservableLogger{T, F}
     n_steps::Int
@@ -55,15 +55,15 @@ Return the stored observations in a logger.
 Base.values(logger::GeneralObservableLogger) = logger.history
 
 """
-    log_property!(logger, system, neighbors=nothing, step_n=0; parallel=true)
+    log_property!(logger, system, neighbors=nothing, step_n=0; n_threads=Threads.nthreads())
 
 Log a property of the system thoughout a simulation.
 Custom loggers should implement this function.
 """
 function log_property!(logger::GeneralObservableLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; parallel::Bool=true)
+                        step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     if (step_n % logger.n_steps) == 0
-        obs = logger.observable(s, neighbors; parallel=parallel)
+        obs = logger.observable(s, neighbors; n_threads=n_threads)
         push!(logger.history, obs)
     end
 end
@@ -74,7 +74,7 @@ function Base.show(io::IO, gol::GeneralObservableLogger)
             gol.observable)
 end
 
-temperature_wrapper(s, neighbors=nothing; parallel::Bool=true) = temperature(s)
+temperature_wrapper(s, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = temperature(s)
 
 """
     TemperatureLogger(n_steps)
@@ -90,7 +90,7 @@ function Base.show(io::IO, tl::GeneralObservableLogger{T, typeof(temperature_wra
             tl.n_steps, ", ", length(values(tl)), " temperatures recorded")
 end
 
-coordinates_wrapper(s, neighbors=nothing; parallel::Bool=true) = s.coords
+coordinates_wrapper(s, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = s.coords
 
 """
     CoordinateLogger(n_steps; dims=3)
@@ -107,7 +107,7 @@ function Base.show(io::IO, cl::GeneralObservableLogger{T, typeof(coordinates_wra
             length(values(cl)) > 0 ? length(first(values(cl))) : "?", " atoms")
 end
 
-velocities_wrapper(s::System, neighbors=nothing; parallel::Bool=true) = s.velocities
+velocities_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = s.velocities
 
 """
     VelocityLogger(n_steps; dims=3)
@@ -124,7 +124,7 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(velocities_wrap
             length(values(vl)) > 0 ? length(first(values(vl))) : "?", " atoms")
 end
 
-total_energy_wrapper(s::System, neighbors=nothing; parallel::Bool=true) = total_energy(s, neighbors)
+total_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = total_energy(s, neighbors)
 
 """
     TotalEnergyLogger(n_steps)
@@ -140,7 +140,7 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(total_energy_wr
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-kinetic_energy_wrapper(s::System, neighbors=nothing; parallel::Bool=true) = kinetic_energy(s)
+kinetic_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = kinetic_energy(s)
 
 """
     KineticEnergyLogger(n_steps)
@@ -156,7 +156,7 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(kinetic_energy_
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-potential_energy_wrapper(s::System, neighbors=nothing; parallel::Bool=true) = potential_energy(s, neighbors)
+potential_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = potential_energy(s, neighbors)
 
 """
     PotentialEnergyLogger(n_steps)
@@ -262,7 +262,7 @@ C(t)=\langle A_t\cdot B_0\rangle -\langle A \rangle\cdot \langle B\rangle
 These can be used to estimate statistical error, or to compute transport
 coefficients from Green-Kubo type formulas.
 *A* and *B* are observables, functions of the form
-`observable(sys::System, neighbors; parallel::Bool)`.    
+`observable(sys::System, neighbors; n_threads::Integer)`.    
 The return values of *A* and *B* can be of scalar or vector type (including
 `Vector{SVector{...}}`, like positions or velocities) and must implement `dot`.
 
@@ -349,10 +349,10 @@ function Base.show(io::IO, tcl::TimeCorrelationLogger{TA, TA2, TA, TA2, TAB, TFA
 end
 
 function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; parallel::Bool=true)
-    A = logger.observableA(s, neighbors; parallel=parallel)
+                        step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+    A = logger.observableA(s, neighbors; n_threads=n_threads)
     if logger.observableA != logger.observableB
-        B = logger.observableB(s, neighbors; parallel=parallel)
+        B = logger.observableB(s, neighbors; n_threads=n_threads)
     else
         B = A
     end
@@ -375,10 +375,10 @@ function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothi
     
     buff_length = length(logger.history_A)
     
-    if parallel
-        chunk_size = Int(ceil(buff_length / nthreads()))
+    if n_threads > 1
+        chunk_size = Int(ceil(buff_length / n_threads))
         ix_ranges = [i:min(i + chunk_size - 1, buff_length) for i in 1:chunk_size:buff_length]
-        @threads for ixs in ix_ranges
+        Threads.@threads for ixs in ix_ranges
             logger.sum_offset_products[ixs] .+= dot.(logger.history_A[ixs], (first(logger.history_B),))
         end
     else
@@ -417,7 +417,7 @@ deviation for this average based on the block averaging method described in
 
 # Arguments
 - `observable::Function`: the observable whose mean is recorded, must support
-    the method `observable(s::System, neighbors; parallel::Bool)`.
+    the method `observable(s::System, neighbors; n_threads::Integer)`.
 - `T::DataType`: the type returned by `observable`.
 - `n_steps::Integer`: number of simulation steps between observations.
 - `n_blocks::Integer=1024`: the number of blocks used in the block averaging
@@ -449,9 +449,9 @@ function Base.values(aol::AverageObservableLogger; std::Bool=true)
 end
 
 function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=nothing,
-                        step_n::Integer=0; parallel::Bool=true) where T
+                        step_n::Integer=0; n_threads::Integer=Threads.nthreads()) where T
     if (step_n % aol.n_steps) == 0
-        obs = aol.observable(s, neighbors; parallel=parallel)
+        obs = aol.observable(s, neighbors; n_threads=n_threads)
         push!(aol.current_block, obs)
 
         if length(aol.current_block) == aol.current_block_size

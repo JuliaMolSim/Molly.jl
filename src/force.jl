@@ -26,15 +26,15 @@ function check_force_units(fdr, force_units)
 end
 
 """
-    accelerations(system, neighbors=nothing; parallel=true)
+    accelerations(system, neighbors=nothing; n_threads=Threads.nthreads())
 
 Calculate the accelerations of all atoms using the pairwise, specific and
 general interactions and Newton's second law of motion.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
-function accelerations(s, neighbors=nothing; parallel::Bool=true)
-    return forces(s, neighbors; parallel=parallel) ./ masses(s)
+function accelerations(s, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+    return forces(s, neighbors; n_threads=n_threads) ./ masses(s)
 end
 
 """
@@ -200,7 +200,7 @@ end
 end
 
 """
-    forces(system, neighbors=nothing; parallel=true)
+    forces(system, neighbors=nothing; n_threads=Threads.nthreads())
 
 Calculate the forces on all atoms in the system using the pairwise, specific and
 general interactions.
@@ -215,35 +215,40 @@ If the interaction uses neighbor lists, the neighbors should be computed
 first and passed to the function.
 Custom general interaction types should implement this function.
 """
-function forces(s::System{D, false}, neighbors=nothing; parallel::Bool=true) where D
+function forces(s::System{D, false}, neighbors=nothing;
+                n_threads::Integer=Threads.nthreads()) where D
     n_atoms = length(s)
 
-    if parallel && nthreads() > 1 && n_atoms >= 100
-        fs_threads = [ustrip_vec.(zero(s.coords)) for i in 1:nthreads()]
-
-        # Loop over interactions and calculate the acceleration due to each
+    if n_threads > 1
+        fs_chunks = [ustrip_vec.(zero(s.coords)) for i in 1:n_threads]
         for inter in values(s.pairwise_inters)
             if inter.nl_only
                 if isnothing(neighbors)
                     error("An interaction uses the neighbor list but neighbors is nothing")
                 end
-                @threads for ni in 1:neighbors.n
-                    i, j, w = neighbors.list[ni]
-                    force!(fs_threads[threadid()], inter, s, i, j, s.force_units, w)
+                basesize = max(1, Int(ceil(neighbors.n / n_threads)))
+                chunks = [i:min(i + basesize - 1, neighbors.n) for i in 1:basesize:neighbors.n]
+                Threads.@threads for (id, rng) in collect(enumerate(chunks))
+                    for ni in rng
+                        i, j, w = neighbors.list[ni]
+                        force!(fs_chunks[id], inter, s, i, j, s.force_units, w)
+                    end
                 end
             else
-                @threads for i in 1:n_atoms
-                    for j in 1:(i - 1)
-                        force!(fs_threads[threadid()], inter, s, i, j, s.force_units)
+                basesize = max(1, Int(ceil(n_atoms / n_threads)))
+                chunks = [i:min(i + basesize - 1, n_atoms) for i in 1:basesize:n_atoms]
+                Threads.@threads for (id, rng) in collect(enumerate(chunks))
+                    for i in rng
+                        for j in 1:(i - 1)
+                            force!(fs_chunks[id], inter, s, i, j, s.force_units)
+                        end
                     end
                 end
             end
         end
-
-        fs = sum(fs_threads)
+        fs = sum(fs_chunks)
     else
         fs = ustrip_vec.(zero(s.coords))
-
         for inter in values(s.pairwise_inters)
             if inter.nl_only
                 if isnothing(neighbors)
@@ -276,7 +281,7 @@ function forces(s::System{D, false}, neighbors=nothing; parallel::Bool=true) whe
     return fs * s.force_units
 end
 
-function forces(s::System{D, true}, neighbors=nothing; parallel::Bool=true) where D
+function forces(s::System{D, true}, neighbors=nothing; n_threads::Integer=Threads.nthreads()) where D
     fs = ustrip_vec.(zero(s.coords))
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))

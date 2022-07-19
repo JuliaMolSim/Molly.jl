@@ -6,7 +6,6 @@ using FiniteDifferences
 using ForwardDiff
 using Zygote
 
-using Base.Threads
 using DelimitedFiles
 using LinearAlgebra
 using Random
@@ -36,9 +35,9 @@ else
     @warn "The visualization tests will not be run as this is CI"
 end
 
-run_parallel_tests = nthreads() > 1
+run_parallel_tests = Threads.nthreads() > 1
 if run_parallel_tests
-    @info "The parallel tests will be run as Julia is running on $(nthreads()) threads"
+    @info "The parallel tests will be run as Julia is running on $(Threads.nthreads()) threads"
 else
     @warn "The parallel tests will not be run as Julia is running on 1 thread"
 end

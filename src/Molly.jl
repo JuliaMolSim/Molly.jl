@@ -11,6 +11,7 @@ using DataStructures
 using Distances
 using Distributions
 using EzXML
+using FLoops
 using ForwardDiff
 using KernelDensity
 using NearestNeighbors
@@ -24,7 +25,6 @@ using Zygote
 @reexport using StaticArrays
 @reexport using Unitful
 
-using Base.Threads
 using LinearAlgebra
 using Random
 using SparseArrays

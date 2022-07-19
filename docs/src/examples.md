@@ -193,7 +193,7 @@ function Molly.force(inter::BondableInteraction,
     end
 end
 
-function bonds(sys::System, neighbors=nothing, parallel::Bool=true)
+function bonds(sys::System, neighbors=nothing, n_threads::Integer=Threads.nthreads())
     bonds = BitVector()
     for i in 1:length(sys)
         for j in 1:(i - 1)

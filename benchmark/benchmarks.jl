@@ -8,15 +8,14 @@ using Molly
 using BenchmarkTools
 using CUDA
 
-using Base.Threads
 using DelimitedFiles
 
 # Allow CUDA device to be specified
 const DEVICE = get(ENV, "DEVICE", "0")
 
-run_parallel_tests = nthreads() > 1
+run_parallel_tests = Threads.nthreads() > 1
 if run_parallel_tests
-    @info "The parallel benchmarks will be run as Julia is running on $(nthreads()) threads"
+    @info "The parallel benchmarks will be run as Julia is running on $(Threads.nthreads()) threads"
 else
     @warn "The parallel benchmarks will not be run as Julia is running on 1 thread"
 end
@@ -103,6 +102,7 @@ function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu:
                         ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
     end
 
+
     s = System(
         atoms=atoms,
         pairwise_inters=pairwise_inters,
@@ -114,7 +114,8 @@ function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu:
         gpu_diff_safe=gpu_diff_safe,
     )
 
-    simulate!(s, simulator, n_steps; parallel=parallel)
+    n_threads = parallel ? Threads.nthreads() : 1
+    simulate!(s, simulator, n_steps; n_threads=n_threads)
     return s.coords
 end
 
@@ -152,5 +153,5 @@ s = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; velocities=velocities)
 simulator = VelocityVerlet(dt=0.0005u"ps")
 n_steps = 25
 
-simulate!(s, simulator, n_steps; parallel=true)
-SUITE["protein"]["in-place NL parallel"] = @benchmarkable simulate!($(s), $(simulator), $(n_steps); parallel=true)
+simulate!(s, simulator, n_steps; n_threads=Threads.nthreads())
+SUITE["protein"]["in-place NL parallel"] = @benchmarkable simulate!($(s), $(simulator), $(n_steps); n_threads=Threads.nthreads())
