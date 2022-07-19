@@ -55,13 +55,17 @@ function apply_coupling!(sys::System{D, true, T}, sim, thermostat::AndersenTherm
     return sys
 end
 
-"""
+@doc raw"""
     RescaleThermostat(temperature)
 
 The velocity rescaling thermostat that immediately rescales the velocities to
 match a target temperature.
-This thermostat should not be used in general as it can lead to simulation
+This thermostat should be used with caution as it can lead to simulation
 artifacts.
+The scaling factor for the velocities each step is
+```math
+\lambda = \sqrt{\frac{T_0}{T}}
+```
 """
 struct RescaleThermostat{T}
     temperature::T
@@ -72,12 +76,16 @@ function apply_coupling!(sys, sim, thermostat::RescaleThermostat)
     return sys
 end
 
-"""
+@doc raw"""
     BerendsenThermostat(temperature, coupling_const)
 
 The Berendsen thermostat.
-This thermostat should not be used in general as it can lead to simulation
+This thermostat should be used with caution as it can lead to simulation
 artifacts.
+The scaling factor for the velocities each step is
+```math
+\lambda^2 = 1 + \frac{\delta t}{\tau} \left( \frac{T_0}{T} - 1 \right)
+```
 """
 struct BerendsenThermostat{T, C}
     temperature::T
