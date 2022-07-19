@@ -127,8 +127,8 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
-    b1 = MorseBond(D=100.0u"kJ * mol^-1", α=10.0u"nm^-1", r0=0.2u"nm")
-    b2 = MorseBond(D=200.0u"kJ * mol^-1", α=5.0u"nm^-1" , r0=0.6u"nm")
+    b1 = MorseBond(D=100.0u"kJ * mol^-1", a=10.0u"nm^-1", r0=0.2u"nm")
+    b2 = MorseBond(D=200.0u"kJ * mol^-1", a=5.0u"nm^-1" , r0=0.6u"nm")
     fs = force(b1, c1, c2, boundary)
     @test isapprox(
         fs.f1,

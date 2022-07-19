@@ -317,7 +317,7 @@ save("force_comparison.png", f)
 
 ## Variations of the Morse potential
 
-The Morse potential for bonds has a parameter *α* that determines the width of the potential.
+The Morse potential for bonds has a parameter *a* that determines the width of the potential.
 It can also be compared to the harmonic bond potential.
 ```julia
 using Molly
@@ -347,12 +347,12 @@ lines!(
     energies(HarmonicBond(b0=0.2, kb=20_000.0)),
     label="Harmonic",
 )
-for α in [2.5, 5.0, 10.0]
+for a in [2.5, 5.0, 10.0]
     lines!(
         ax,
         dists,
-        energies(MorseBond(D=100.0, α=α, r0=0.2)),
-        label="Morse α=$α nm^-1",
+        energies(MorseBond(D=100.0, a=a, r0=0.2)),
+        label="Morse a=$a nm^-1",
     )
 end
 ylims!(ax, 0.0, 120.0)
