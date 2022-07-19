@@ -134,7 +134,7 @@ bonds = InteractionList2Atoms(
     collect(1:(n_atoms ÷ 2)),           # First atom indices
     collect((1 + n_atoms ÷ 2):n_atoms), # Second atom indices
     repeat([""], n_atoms ÷ 2),          # Bond types
-    [HarmonicBond(b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)],
+    [HarmonicBond(k=300_000.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm") for i in 1:(n_atoms ÷ 2)],
 )
 
 specific_inter_lists = (bonds,)
@@ -875,7 +875,7 @@ velocities = [velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms]
 # Interaction potentials
 pairwise_inters = (SoftSphere(nl_only=true, cutoff=DistanceCutoff(0.6u"nm")),)
 
-bonds = [HarmonicBond(b0=0.2u"nm", kb=10000u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)]
+bonds = [HarmonicBond(k=10000u"kJ * mol^-1 * nm^-2", r0=0.2u"nm") for i in 1:(n_atoms ÷ 2)]
 specific_inter_lists = (InteractionList2Atoms(
     collect(1:2:n_atoms),
     collect(2:2:n_atoms),

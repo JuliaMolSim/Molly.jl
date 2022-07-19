@@ -134,7 +134,7 @@ constructor.
 struct OpenMMForceField{T, M, D, E, K}
     atom_types::Dict{String, OpenMMAtomType{M, D, E}}
     residue_types::Dict{String, OpenMMResiduetype{T}}
-    bond_types::Dict{Tuple{String, String}, HarmonicBond{D, K}}
+    bond_types::Dict{Tuple{String, String}, HarmonicBond{K, D}}
     angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{E, T}}
     torsion_types::Dict{Tuple{String, String, String, String}, PeriodicTorsionType{T, E}}
     torsion_order::String
@@ -189,9 +189,9 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
                 for bond in eachelement(entry)
                     atom_type_1 = bond["type1"]
                     atom_type_2 = bond["type2"]
-                    b0 = units ? parse(T, bond["length"])u"nm" : parse(T, bond["length"])
-                    kb = units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"])
-                    bond_types[(atom_type_1, atom_type_2)] = HarmonicBond(b0, kb)
+                    k = units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"])
+                    r0 = units ? parse(T, bond["length"])u"nm" : parse(T, bond["length"])
+                    bond_types[(atom_type_1, atom_type_2)] = HarmonicBond(k, r0)
                 end
             elseif entry_name == "HarmonicAngleForce"
                 for angle in eachelement(entry)
@@ -455,7 +455,7 @@ function System(coord_file::AbstractString,
             bond_type = force_field.bond_types[(atom_type_2, atom_type_1)]
             push!(bonds.types, atom_types_to_string(atom_type_2, atom_type_1))
         end
-        push!(bonds.inters, HarmonicBond(b0=bond_type.b0, kb=bond_type.kb))
+        push!(bonds.inters, HarmonicBond(k=bond_type.k, r0=bond_type.r0))
         nb_matrix[a1z + 1, a2z + 1] = false
         nb_matrix[a2z + 1, a1z + 1] = false
     end
@@ -846,9 +846,9 @@ function System(T::Type,
         c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
         if current_field == "bondtypes"
             if units
-                bondtype = HarmonicBond(parse(T, c[4])u"nm", parse(T, c[5])u"kJ * mol^-1 * nm^-2")
+                bondtype = HarmonicBond(parse(T, c[5])u"kJ * mol^-1 * nm^-2", parse(T, c[4])u"nm")
             else
-                bondtype = HarmonicBond(parse(T, c[4]), parse(T, c[5]))
+                bondtype = HarmonicBond(parse(T, c[5]), parse(T, c[4]))
             end
             bondtypes["$(c[1])/$(c[2])"] = bondtype
             bondtypes["$(c[2])/$(c[1])"] = bondtype
@@ -908,7 +908,7 @@ function System(T::Type,
             push!(bonds.is, i)
             push!(bonds.js, j)
             push!(bonds.types, bn)
-            push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
+            push!(bonds.inters, HarmonicBond(k=bondtype.k, r0=bondtype.r0))
         elseif current_field == "pairs"
             push!(pairs, (parse(Int, c[1]), parse(Int, c[2])))
         elseif current_field == "angles"
@@ -1006,11 +1006,11 @@ function System(T::Type,
                 push!(bonds.is, i)
                 push!(bonds.js, i + 1)
                 push!(bonds.types, "OW/HW")
-                push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
+                push!(bonds.inters, HarmonicBond(k=bondtype.k, r0=bondtype.r0))
                 push!(bonds.is, i)
                 push!(bonds.js, i + 2)
                 push!(bonds.types, "OW/HW")
-                push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
+                push!(bonds.inters, HarmonicBond(k=bondtype.k, r0=bondtype.r0))
                 angletype = angletypes["HW/OW/HW"]
                 push!(angles.is, i + 1)
                 push!(angles.js, i)

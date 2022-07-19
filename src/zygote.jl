@@ -450,11 +450,11 @@ end
     return y, bc_fwd_back
 end
 
-function dualize_fb(inter::HarmonicBond{D, K}) where {D, K}
-    b0, kb = inter.b0, inter.kb
-    dual_b0 = @dualize(b0, 8, 1)
-    dual_kb = @dualize(kb, 8, 2)
-    return HarmonicBond{typeof(dual_b0), typeof(dual_kb)}(dual_b0, dual_kb)
+function dualize_fb(inter::HarmonicBond{K, D}) where {K, D}
+    k, r0 = inter.k, inter.r0
+    dual_k  = @dualize(k , 8, 1)
+    dual_r0 = @dualize(r0, 8, 2)
+    return HarmonicBond{typeof(dual_k), typeof(dual_r0)}(dual_k, dual_r0)
 end
 
 function dual_function_specific_2_atoms(f::F) where F
@@ -1043,10 +1043,10 @@ end
 @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force_nounit), inters::Tuple{Tuple{X, Y}}, args...) where {X <: LennardJones, Y <: CoulombReactionField} = Zygote.broadcast_forward(f, inters, args...)
 @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force_nounit), inters::Tuple{Tuple{X, Y}}, args...) where {X <: LennardJones, Y <: Coulomb             } = Zygote.broadcast_forward(f, inters, args...)
 
-@eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{HarmonicBond{D, K}}      , args...) where {D, K}    = Zygote.broadcast_forward(f, inters, args...)
+@eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{HarmonicBond{K, D}}      , args...) where {K, D}    = Zygote.broadcast_forward(f, inters, args...)
 @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{HarmonicAngle{K, D}}     , args...) where {K, D}    = Zygote.broadcast_forward(f, inters, args...)
 @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{PeriodicTorsion{N, T, E}}, args...) where {N, T, E} = Zygote.broadcast_forward(f, inters, args...)
 
-@eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force), inters::Vector{HarmonicBond{D, K}}      , args...) where {D, K}    = Zygote.broadcast_forward(f, inters, args...)
+@eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force), inters::Vector{HarmonicBond{K, D}}      , args...) where {K, D}    = Zygote.broadcast_forward(f, inters, args...)
 @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force), inters::Vector{HarmonicAngle{K, D}}     , args...) where {K, D}    = Zygote.broadcast_forward(f, inters, args...)
 @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force), inters::Vector{PeriodicTorsion{N, T, E}}, args...) where {N, T, E} = Zygote.broadcast_forward(f, inters, args...)

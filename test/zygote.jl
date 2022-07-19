@@ -119,14 +119,14 @@
             dist_cutoff=f32 ? 1.5f0 : 1.5,
         )
 
-        function loss(σ, kb)
+        function loss(σ, k)
             if f32
                 atoms = [Atom(i, i % 2 == 0 ? -0.02f0 : 0.02f0, atom_mass, σ, 0.2f0, false) for i in 1:n_atoms]
             else
                 atoms = [Atom(i, i % 2 == 0 ? -0.02 : 0.02, atom_mass, σ, 0.2, false) for i in 1:n_atoms]
             end
 
-            bonds_inner = [HarmonicBond(bond_dists[i], kb) for i in 1:(n_atoms ÷ 2)]
+            bonds_inner = [HarmonicBond(k, bond_dists[i]) for i in 1:(n_atoms ÷ 2)]
             bonds = InteractionList2Atoms(
                 bond_is,
                 bond_js,
@@ -179,31 +179,31 @@
         push!(runs, ("gpu gbn2 forward", [true , true , false, true , true , false, true ], 0.01, 0.01))
     end
 
-    for (name, args, tol_σ, tol_kb) in runs
+    for (name, args, tol_σ, tol_k) in runs
         forward, f32 = args[2], args[3]
         σ = f32 ? 0.4f0 : 0.4
-        kb = f32 ? 100.0f0 : 100.0
+        k = f32 ? 100.0f0 : 100.0
         f = test_grad(args...)
         if forward
             # Run once to setup
             grad_zygote = (
-                gradient((σ, kb) -> Zygote.forwarddiff(σ  -> f(σ, kb), σ ), σ, kb)[1],
-                gradient((σ, kb) -> Zygote.forwarddiff(kb -> f(σ, kb), kb), σ, kb)[2],
+                gradient((σ, k) -> Zygote.forwarddiff(σ -> f(σ, k), σ), σ, k)[1],
+                gradient((σ, k) -> Zygote.forwarddiff(k -> f(σ, k), k), σ, k)[2],
             )
             grad_zygote = (
-                gradient((σ, kb) -> Zygote.forwarddiff(σ  -> f(σ, kb), σ ), σ, kb)[1],
-                gradient((σ, kb) -> Zygote.forwarddiff(kb -> f(σ, kb), kb), σ, kb)[2],
+                gradient((σ, k) -> Zygote.forwarddiff(σ -> f(σ, k), σ), σ, k)[1],
+                gradient((σ, k) -> Zygote.forwarddiff(k -> f(σ, k), k), σ, k)[2],
             )
         else
             # Run once to setup
-            grad_zygote = gradient(f, σ, kb)
-            grad_zygote = gradient(f, σ, kb)
+            grad_zygote = gradient(f, σ, k)
+            grad_zygote = gradient(f, σ, k)
         end
         grad_fd = (
-            central_fdm(6, 1)(σ  -> ForwardDiff.value(f(σ, kb)), σ ),
-            central_fdm(6, 1)(kb -> ForwardDiff.value(f(σ, kb)), kb),
+            central_fdm(6, 1)(σ -> ForwardDiff.value(f(σ, k)), σ),
+            central_fdm(6, 1)(k -> ForwardDiff.value(f(σ, k)), k),
         )
-        for (prefix, gzy, gfd, tol) in zip(("σ", "kb"), grad_zygote, grad_fd, (tol_σ, tol_kb))
+        for (prefix, gzy, gfd, tol) in zip(("σ", "k"), grad_zygote, grad_fd, (tol_σ, tol_k))
             if abs(gfd) < 1e-13
                 @test isnothing(gzy) || abs(gzy) < 1e-11
             else

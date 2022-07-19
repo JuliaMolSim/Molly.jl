@@ -193,7 +193,7 @@ function loss(θ)
             [1, 2, 4, 5],
             [2, 3, 5, 6],
             ["", "", "", ""],
-            [HarmonicBond(0.7, 100.0) for _ in 1:4],
+            [HarmonicBond(100.0, 0.7) for _ in 1:4],
         ),
         InteractionList3Atoms(
             [1, 4],

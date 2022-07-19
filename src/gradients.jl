@@ -45,10 +45,10 @@ function extract_parameters(sys, ff)
         if Molly.interaction_type(inter) <: HarmonicBond
             for bond_type in inter.types
                 key_prefix = "inter_HB_$(bond_type)_"
-                if !haskey(params_dic, key_prefix * "b0")
+                if !haskey(params_dic, key_prefix * "k")
                     bond = ff.bond_types[atom_types_to_tuple(bond_type)]
-                    params_dic[key_prefix * "b0"] = bond.b0
-                    params_dic[key_prefix * "kb"] = bond.kb
+                    params_dic[key_prefix * "k" ] = bond.k
+                    params_dic[key_prefix * "r0"] = bond.r0
                 end
             end
         elseif Molly.interaction_type(inter) <: HarmonicAngle
@@ -185,8 +185,8 @@ end
 function inject_interaction(inter::HarmonicBond, inter_type, params_dic)
     key_prefix = "inter_HB_$(inter_type)_"
     HarmonicBond(
-        dict_get(params_dic, key_prefix * "b0", inter.b0),
-        dict_get(params_dic, key_prefix * "kb", inter.kb),
+        dict_get(params_dic, key_prefix * "k" , inter.k ),
+        dict_get(params_dic, key_prefix * "r0", inter.r0),
     )
 end
 
