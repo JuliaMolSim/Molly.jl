@@ -1160,32 +1160,32 @@ function is_heavy_atom(at, at_data)
 end
 
 """
-    add_position_restraints(sys, kb, atom_selector=is_any_atom, restrain_coords=sys.coords)
+    add_position_restraints(sys, k, atom_selector=is_any_atom, restrain_coords=sys.coords)
 
 Add [`HarmonicPositionRestraint`](@ref)s to a [`System`](@ref) to restrain the atoms and return
 a new [`System`](@ref).
-The force constant `kb` can be a single value or an array of equal length to the number of atoms
+The force constant `k` can be a single value or an array of equal length to the number of atoms
 in the system.
 The `atom_selector` function takes in each atom and atom data and determines whether to restrain
 that atom.
 """
 function add_position_restraints(sys,
-                                 kb,
+                                 k,
                                  atom_selector::Function=is_any_atom,
                                  restrain_coords=sys.coords)
-    kb_array = isa(kb, AbstractArray) ? kb : repeat([kb], length(sys))
-    if length(kb_array) != length(sys)
-        throw(ArgumentError("The system has $(length(sys)) atoms but there are $(length(kb_array)) kb values"))
+    k_array = isa(k, AbstractArray) ? k : repeat([k], length(sys))
+    if length(k_array) != length(sys)
+        throw(ArgumentError("The system has $(length(sys)) atoms but there are $(length(k_array)) k values"))
     end
     is = Int[]
     types = String[]
     inters = HarmonicPositionRestraint[]
-    for (i, (at, at_data, x0, kb_res)) in enumerate(zip(Array(sys.atoms), sys.atoms_data,
-                                                        Array(restrain_coords), kb_array))
+    for (i, (at, at_data, x0, k_res)) in enumerate(zip(Array(sys.atoms), sys.atoms_data,
+                                                   Array(restrain_coords), k_array))
         if atom_selector(at, at_data)
             push!(is, i)
             push!(types, "")
-            push!(inters, HarmonicPositionRestraint(x0, kb_res))
+            push!(inters, HarmonicPositionRestraint(x0, k_res))
         end
     end
     restraints = InteractionList1Atoms(is, types, inters)
