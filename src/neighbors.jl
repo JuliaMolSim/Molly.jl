@@ -113,9 +113,9 @@ function DistanceVecNeighborFinder(;
                                 dist_cutoff)
     n_atoms = size(nb_matrix, 1)
     if isa(nb_matrix, CuArray)
-        is = cu(hcat([collect(1:n_atoms) for i in 1:n_atoms]...))
-        js = cu(permutedims(is, (2, 1)))
-        m14 = cu(matrix_14)
+        is = CuArray(hcat([collect(1:n_atoms) for i in 1:n_atoms]...))
+        js = CuArray(permutedims(is, (2, 1)))
+        m14 = CuArray(matrix_14)
     else
         is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
         js = permutedims(is, (2, 1))

@@ -78,7 +78,7 @@
             collect(16:30),
             collect(31:45),
             repeat([""], 15),
-            gpu ? cu(angles_inner) : angles_inner,
+            gpu ? CuArray(angles_inner) : angles_inner,
         )
         torsions_inner = [PeriodicTorsion(
                 periodicities=[1, 2, 3],
@@ -92,12 +92,12 @@
             collect(21:30),
             collect(31:40),
             repeat([""], 10),
-            gpu ? cu(torsions_inner) : torsions_inner,
+            gpu ? CuArray(torsions_inner) : torsions_inner,
         )
         atoms_setup = [Atom(charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.0f0 : 0.0) for i in 1:n_atoms]
         if obc2
             imp_obc2 = ImplicitSolventOBC(
-                gpu ? cu(atoms_setup) : atoms_setup,
+                gpu ? CuArray(atoms_setup) : atoms_setup,
                 [AtomData(element="O") for i in 1:n_atoms],
                 InteractionList2Atoms(bond_is, bond_js, [""], nothing);
                 use_OBC2=true,
@@ -105,7 +105,7 @@
             general_inters = (imp_obc2,)
         elseif gbn2
             imp_gbn2 = ImplicitSolventGBN2(
-                gpu ? cu(atoms_setup) : atoms_setup,
+                gpu ? CuArray(atoms_setup) : atoms_setup,
                 [AtomData(element="O") for i in 1:n_atoms],
                 InteractionList2Atoms(bond_is, bond_js, [""], nothing),
             )
@@ -114,7 +114,7 @@
             general_inters = ()
         end
         neighbor_finder = DistanceVecNeighborFinder(
-            nb_matrix=gpu ? cu(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+            nb_matrix=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
             n_steps=10,
             dist_cutoff=f32 ? 1.5f0 : 1.5,
         )
@@ -131,18 +131,18 @@
                 bond_is,
                 bond_js,
                 repeat([""], length(bonds_inner)),
-                gpu ? cu(bonds_inner) : bonds_inner,
+                gpu ? CuArray(bonds_inner) : bonds_inner,
             )
             cs = deepcopy(forward ? coords_dual : coords)
             vs = deepcopy(forward ? velocities_dual : velocities)
 
             s = System(
-                atoms=gpu ? cu(atoms) : atoms,
+                atoms=gpu ? CuArray(atoms) : atoms,
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=sis ? (bonds, angles, torsions) : (),
                 general_inters=general_inters,
-                coords=gpu ? cu(cs) : cs,
-                velocities=gpu ? cu(vs) : vs,
+                coords=gpu ? CuArray(cs) : cs,
+                velocities=gpu ? CuArray(vs) : vs,
                 boundary=boundary,
                 neighbor_finder=neighbor_finder,
                 gpu_diff_safe=true,

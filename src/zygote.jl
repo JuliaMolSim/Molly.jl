@@ -8,8 +8,8 @@ using Zygote: unbroadcast
 Zygote.accum(x::AbstractArray{<:SizedVector}, ys::AbstractArray{<:SVector}...) = Zygote.accum.(convert(typeof(ys[1]), x), ys...)
 Zygote.accum(x::AbstractArray{<:SVector}, ys::AbstractArray{<:SizedVector}...) = Zygote.accum.(x, convert.(typeof(x), ys)...)
 
-Zygote.accum(x::Vector{<:SVector} , y::CuArray{<:SVector}) = Zygote.accum(cu(x), y)
-Zygote.accum(x::CuArray{<:SVector}, y::Vector{<:SVector} ) = Zygote.accum(x, cu(y))
+Zygote.accum(x::Vector{<:SVector} , y::CuArray{<:SVector}) = Zygote.accum(CuArray(x), y)
+Zygote.accum(x::CuArray{<:SVector}, y::Vector{<:SVector} ) = Zygote.accum(x, CuArray(y))
 
 Zygote.accum(x::SVector{D, T}, y::T) where {D, T} = x .+ y
 
@@ -146,7 +146,7 @@ sized_to_static(v::SizedVector{3, T, Vector{T}}) where {T} = SVector{3, T}(v[1],
 sized_to_static(v::SizedVector{2, T, Vector{T}}) where {T} = SVector{2, T}(v[1], v[2])
 
 function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg::CuArray) where {D, T}
-    cu(sized_to_static.(ȳ_in))
+    CuArray(sized_to_static.(ȳ_in))
 end
 
 function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg) where {D, T}

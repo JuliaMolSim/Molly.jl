@@ -77,7 +77,7 @@ function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu:
         InteractionList2Atoms(collect(1:2:n_atoms),
         collect(2:2:n_atoms),
         repeat([""], length(bonds)),
-        gpu ? cu(bonds) : bonds,
+        gpu ? CuArray(bonds) : bonds,
     ),)
 
     neighbor_finder = NoNeighborFinder()
@@ -86,7 +86,7 @@ function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu:
     if nl
         if gpu_diff_safe
             neighbor_finder = DistanceVecNeighborFinder(
-                nb_matrix=gpu ? cu(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+                nb_matrix=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
                 n_steps=10,
                 dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
             )
@@ -101,10 +101,10 @@ function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu:
     end
 
     if gpu
-        coords = cu(deepcopy(f32 ? starting_coords_f32 : starting_coords))
-        velocities = cu(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-        atoms = cu([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                         ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
+        coords = CuArray(deepcopy(f32 ? starting_coords_f32 : starting_coords))
+        velocities = CuArray(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
+        atoms = CuArray([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+                              ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
     else
         coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
         velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)

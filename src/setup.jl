@@ -694,25 +694,25 @@ function System(coord_file::AbstractString,
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
             bonds.is, bonds.js, bonds.types,
-            gpu ? cu([bonds.inters...]) : [bonds.inters...],
+            gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
         ))
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
             angles.is, angles.js, angles.ks, angles.types,
-            gpu ? cu([angles.inters...]) : [angles.inters...],
+            gpu ? CuArray([angles.inters...]) : [angles.inters...],
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
             torsions.is, torsions.js, torsions.ks, torsions.ls, torsions.types,
-            gpu ? cu(torsion_inters_pad) : torsion_inters_pad,
+            gpu ? CuArray(torsion_inters_pad) : torsion_inters_pad,
         ))
     end
     if length(impropers.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
             impropers.is, impropers.js, impropers.ks, impropers.ls, impropers.types,
-            gpu ? cu(improper_inters_pad) : improper_inters_pad,
+            gpu ? CuArray(improper_inters_pad) : improper_inters_pad,
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
@@ -743,17 +743,25 @@ function System(coord_file::AbstractString,
 
     atoms = [atoms...]
     if gpu_diff_safe
-        neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(nb_matrix) : nb_matrix,
-                                                    matrix_14=gpu ? cu(matrix_14) : matrix_14,
-                                                    n_steps=10, dist_cutoff=T(dist_neighbors))
+        neighbor_finder = DistanceVecNeighborFinder(
+            nb_matrix=gpu ? CuArray(nb_matrix) : nb_matrix,
+            matrix_14=gpu ? CuArray(matrix_14) : matrix_14,
+            n_steps=10,
+            dist_cutoff=T(dist_neighbors),
+        )
     else
-        neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14,
-                                                    n_steps=10, x0=coords, unit_cell=boundary_used,
-                                                    dist_cutoff=T(dist_neighbors))
+        neighbor_finder = CellListMapNeighborFinder(
+            nb_matrix=nb_matrix,
+            matrix_14=matrix_14,
+            n_steps=10,
+            x0=coords,
+            unit_cell=boundary_used,
+            dist_cutoff=T(dist_neighbors),
+        )
     end
     if gpu
-        atoms = cu(atoms)
-        coords = cu(coords)
+        atoms = CuArray(atoms)
+        coords = CuArray(coords)
     end
 
     if isnothing(velocities)
@@ -1075,19 +1083,19 @@ function System(T::Type,
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
             bonds.is, bonds.js, bonds.types,
-            gpu ? cu([bonds.inters...]) : [bonds.inters...],
+            gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
         ))
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
             angles.is, angles.js, angles.ks, angles.types,
-            gpu ? cu([angles.inters...]) : [angles.inters...],
+            gpu ? CuArray([angles.inters...]) : [angles.inters...],
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
             torsions.is, torsions.js, torsions.ks, torsions.ls, torsions.types,
-            gpu ? cu([torsions.inters...]) : [torsions.inters...],
+            gpu ? CuArray([torsions.inters...]) : [torsions.inters...],
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
@@ -1095,17 +1103,25 @@ function System(T::Type,
     atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ, solute=a.solute) for a in atoms]
 
     if gpu_diff_safe
-        neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(nb_matrix) : nb_matrix,
-                                                    matrix_14=gpu ? cu(matrix_14) : matrix_14, n_steps=10,
-                                                    dist_cutoff=T(dist_neighbors))
+        neighbor_finder = DistanceVecNeighborFinder(
+            nb_matrix=gpu ? CuArray(nb_matrix) : nb_matrix,
+            matrix_14=gpu ? CuArray(matrix_14) : matrix_14,
+            n_steps=10,
+            dist_cutoff=T(dist_neighbors),
+        )
     else
-        neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-                                                    x0=coords, unit_cell=boundary_used,
-                                                    dist_cutoff=T(dist_neighbors))
+        neighbor_finder = CellListMapNeighborFinder(
+            nb_matrix=nb_matrix,
+            matrix_14=matrix_14,
+            n_steps=10,
+            x0=coords,
+            unit_cell=boundary_used,
+            dist_cutoff=T(dist_neighbors),
+        )
     end
     if gpu
-        atoms = cu(atoms)
-        coords = cu(coords)
+        atoms = CuArray(atoms)
+        coords = CuArray(coords)
     end
 
     if isnothing(velocities)

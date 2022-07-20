@@ -96,9 +96,9 @@ n_atoms = 100
 atom_mass = 10.0f0u"u"
 boundary = CubicBoundary(2.0f0u"nm", 2.0f0u"nm", 2.0f0u"nm")
 temp = 100.0f0u"K"
-atoms = cu([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
-coords = cu(place_atoms(n_atoms, boundary, 0.3u"nm"))
-velocities = cu([velocity(atom_mass, temp) for i in 1:n_atoms])
+atoms = CuArray([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
+coords = CuArray(place_atoms(n_atoms, boundary, 0.3u"nm"))
+velocities = CuArray([velocity(atom_mass, temp) for i in 1:n_atoms])
 simulator = VelocityVerlet(dt=0.002f0u"ps")
 
 sys = System(
