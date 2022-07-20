@@ -394,6 +394,10 @@ The masses of the atoms in a [`System`](@ref).
 """
 masses(s::System) = mass.(s.atoms)
 
+# Move an array to the GPU depending on whether the system is on the GPU
+move_array(arr, ::System{D, G, T, false}) where {D, G, T} = arr
+move_array(arr, ::System{D, G, T, true }) where {D, G, T} = CuArray(arr)
+
 AtomsBase.species_type(s::System) = eltype(s.atoms)
 
 Base.getindex(s::System, i::Integer) = AtomView(s, i)

@@ -1189,11 +1189,7 @@ function add_position_restraints(sys,
             push!(inters, HarmonicPositionRestraint(k_res, x0))
         end
     end
-    restraints = InteractionList1Atoms(
-        is,
-        types,
-        isa(sys.coords, CuArray) ? cu([inters...]) : [inters...],
-    )
+    restraints = InteractionList1Atoms(is, types, move_array([inters...], sys))
     sis = (sys.specific_inter_lists..., restraints)
     return System(
         atoms=deepcopy(sys.atoms),

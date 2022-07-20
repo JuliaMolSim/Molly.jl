@@ -46,12 +46,10 @@ end
 function apply_coupling!(sys::System{D, true, T}, sim, thermostat::AndersenThermostat) where {D, T}
     atoms_to_bump = T.(rand(length(sys)) .< (sim.dt / thermostat.coupling_const))
     atoms_to_leave = one(T) .- atoms_to_bump
+    atoms_to_bump_dev = move_array(atoms_to_bump, sys)
+    atoms_to_leave_dev = move_array(atoms_to_leave, sys)
     vs = random_velocities(sys, thermostat.temperature)
-    if isa(sys.coords, CuArray)
-        sys.velocities = sys.velocities .* CuArray(atoms_to_leave) .+ vs .* CuArray(atoms_to_bump)
-    else
-        sys.velocities = sys.velocities .* atoms_to_leave .+ vs .* atoms_to_bump
-    end
+    sys.velocities = sys.velocities .* atoms_to_leave_dev .+ vs .* atoms_to_bump_dev
     return sys
 end
 

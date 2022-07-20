@@ -195,19 +195,13 @@ Generate random velocities from the Maxwell-Boltzmann distribution
 for a [`System`](@ref).
 """
 function random_velocities(sys::AbstractSystem{3}, temp; rng=Random.GLOBAL_RNG)
-    if isa(sys.coords, CuArray)
-        return cu(velocity_3D.(Array(masses(sys)), temp, sys.k; rng=rng))
-    else
-        return velocity_3D.(masses(sys), temp, sys.k; rng=rng)
-    end
+    vels = velocity_3D.(Array(masses(sys)), temp, sys.k; rng=rng)
+    return move_array(vels, sys)
 end
 
 function random_velocities(sys::AbstractSystem{2}, temp; rng=Random.GLOBAL_RNG)
-    if isa(sys.coords, CuArray)
-        return cu(velocity_2D.(Array(masses(sys)), temp, sys.k; rng=rng))
-    else
-        return velocity_2D.(masses(sys), temp, sys.k; rng=rng)
-    end
+    vels = velocity_2D.(Array(masses(sys)), temp, sys.k; rng=rng)
+    return move_array(vels, sys)
 end
 
 """
