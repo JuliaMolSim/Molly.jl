@@ -1,7 +1,6 @@
 # Types
 
 export
-    Interaction,
     PairwiseInteraction,
     SpecificInteraction,
     AbstractNeighborFinder,
@@ -22,20 +21,17 @@ export
 
 const DefaultFloat = Float64
 
-"An interaction between atoms that contributes to forces on the atoms."
-abstract type Interaction end
-
 """
 A pairwise interaction that will apply to all or most atom pairs.
 Custom pairwise interactions should sub-type this type.
 """
-abstract type PairwiseInteraction <: Interaction end
+abstract type PairwiseInteraction end
 
 """
 A specific interaction between sets of specific atoms, e.g. a bond angle.
 Custom specific interactions should sub-type this type.
 """
-abstract type SpecificInteraction <: Interaction end
+abstract type SpecificInteraction end
 
 """
 A way to find near atoms to save on simulation time.
