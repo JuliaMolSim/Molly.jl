@@ -17,6 +17,7 @@ export
     System,
     is_gpu_diff_safe,
     float_type,
+    is_on_gpu,
     masses
 
 const DefaultFloat = Float64
@@ -284,7 +285,7 @@ interface described there.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
-mutable struct System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
+mutable struct System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     pairwise_inters::PI
@@ -318,6 +319,7 @@ function System(;
     D = n_dimensions(boundary)
     G = gpu_diff_safe
     T = float_type(boundary)
+    CU = isa(coords, CuArray)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     PI = typeof(pairwise_inters)
@@ -356,7 +358,7 @@ function System(;
     end
     K = typeof(k_converted)
 
-    return System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
+    return System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
                     atoms, atoms_data, pairwise_inters, specific_inter_lists,
                     general_inters, coords, vels, boundary, neighbor_finder,
                     loggers, force_units, energy_units, k_converted)
@@ -377,6 +379,13 @@ is_gpu_diff_safe(::System{D, G}) where {D, G} = G
 The float type a [`System`](@ref) or bounding box uses.
 """
 float_type(::System{D, G, T}) where {D, G, T} = T
+
+"""
+    is_on_gpu(sys)
+
+Whether a [`System`](@ref) is on the GPU.
+"""
+is_on_gpu(::System{D, G, T, CU}) where {D, G, T, CU} = CU
 
 """
     masses(sys)
