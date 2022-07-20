@@ -51,10 +51,9 @@ end
           coord_k, coord_l, boundary)
 
 Calculate the force between atoms due to a given interation type.
-For `PairwiseInteraction`s returns a single force vector and for
-`SpecificInteraction`s returns a type such as `SpecificForce2Atoms`.
-Custom pairwise and specific interaction types should implement
-this function.
+For [`PairwiseInteraction`](@ref)s returns a single force vector and for
+[`SpecificInteraction`](@ref)s returns a type such as [`SpecificForce2Atoms`](@ref).
+Custom pairwise and specific interaction types should implement this function.
 """
 function force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14)
     # Fallback for interactions where the 1-4 weighting is not relevant

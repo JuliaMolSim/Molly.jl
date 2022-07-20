@@ -192,7 +192,7 @@ end
     random_velocities(sys, temp)
 
 Generate random velocities from the Maxwell-Boltzmann distribution
-for a `System`.
+for a [`System`](@ref).
 """
 function random_velocities(sys::AbstractSystem{3}, temp; rng=Random.GLOBAL_RNG)
     if isa(sys.coords, CuArray)
@@ -213,7 +213,7 @@ end
 """
     random_velocities!(sys, temp)
 
-Set the velocities of a `System` to random velocities generated from the
+Set the velocities of a [`System`](@ref) to random velocities generated from the
 Maxwell-Boltzmann distribution.
 """
 function random_velocities!(sys, temp; rng=Random.GLOBAL_RNG)
@@ -274,7 +274,7 @@ sum_svec(arr) = sum(arr)
 """
     remove_CM_motion!(system)
 
-Remove the centre of mass motion from a system.
+Remove the centre of mass motion from a [`System`](@ref).
 """
 function remove_CM_motion!(sys)
     atom_masses = masses(sys)

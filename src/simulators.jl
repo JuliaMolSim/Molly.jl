@@ -331,8 +331,8 @@ The Langevin simulator using a general splitting scheme, consisting of a
 succession of **A**, **B** and **O** steps, corresponding respectively to
 updates in position, velocity for the potential part, and velocity for the
 thermal fluctuation-dissipation part.
-The `Langevin` and `VelocityVerlet` simulators without coupling correspond to
-the **BAOA** and **BAB** schemes respectively.
+The [`Langevin`](@ref) and [`VelocityVerlet`](@ref) simulators without coupling
+correspond to the **BAOA** and **BAB** schemes respectively.
 For more information on the sampling properties of splitting schemes, see
 [Fass et al. 2018](https://doi.org/10.3390/e20050318).
 Not currently compatible with automatic differentiation using Zygote.

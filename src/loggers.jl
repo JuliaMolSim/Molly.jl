@@ -80,7 +80,7 @@ temperature_wrapper(s, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     TemperatureLogger(n_steps)
     TemperatureLogger(T, n_steps)
 
-Log the temperature throughout a simulation.
+Log the [`temperature`](@ref) throughout a simulation.
 """
 TemperatureLogger(T::DataType, n_steps::Integer) = GeneralObservableLogger(temperature_wrapper, T, n_steps)
 TemperatureLogger(n_steps::Integer) = TemperatureLogger(typeof(one(DefaultFloat)u"K"), n_steps)
@@ -130,7 +130,7 @@ total_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.nt
     TotalEnergyLogger(n_steps)
     TotalEnergyLogger(T, n_steps)
 
-Log the total energy of the system throughout a simulation.
+Log the [`total_energy`](@ref) of the system throughout a simulation.
 """
 TotalEnergyLogger(T::DataType, n_steps) = GeneralObservableLogger(total_energy_wrapper, T, n_steps)
 TotalEnergyLogger(n_steps) = TotalEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
@@ -146,7 +146,7 @@ kinetic_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.
     KineticEnergyLogger(n_steps)
     KineticEnergyLogger(T, n_steps)
 
-Log the kinetic energy of the system throughout a simulation.
+Log the [`kinetic_energy`](@ref) of the system throughout a simulation.
 """
 KineticEnergyLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(kinetic_energy_wrapper, T, n_steps)
 KineticEnergyLogger(n_steps::Integer) = KineticEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
@@ -162,7 +162,7 @@ potential_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=Thread
     PotentialEnergyLogger(n_steps)
     PotentialEnergyLogger(T, n_steps)
 
-Log the potential energy of the system throughout a simulation.
+Log the [`potential_energy`](@ref) of the system throughout a simulation.
 """
 PotentialEnergyLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(potential_energy_wrapper, T, n_steps)
 PotentialEnergyLogger(n_steps::Integer) = PotentialEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
@@ -176,7 +176,7 @@ end
     ForceLogger(n_steps; dims=3)
     ForceLogger(T, n_steps; dims=3)
 
-Log the forces throughout a simulation.
+Log the [`forces`](@ref) throughout a simulation.
 """
 ForceLogger(T, n_steps::Integer; dims::Integer=3) = GeneralObservableLogger(forces, Array{SArray{Tuple{dims}, T, 1, dims}, 1}, n_steps)
 ForceLogger(n_steps::Integer; dims::Integer=3) = ForceLogger(typeof(one(DefaultFloat)u"kJ * mol^-1 * nm^-1"), n_steps; dims=dims)
@@ -333,7 +333,7 @@ end
     AutoCorrelationLogger(observable::Function, TA::DataType,
                             observable_length::Integer, n_correlation::Integer)
 
-An autocorrelation logger, equivalent to a `TimeCorrelationLogger` in the case
+An autocorrelation logger, equivalent to a [`TimeCorrelationLogger`](@ref) in the case
 `observableA == observableB`.
 """
 function AutoCorrelationLogger(observable, TA, observable_length::Integer,
@@ -408,8 +408,8 @@ end
 
 A logger that periodically records observations of a system and keeps a running
 empirical average.
-While `GeneralObservableLogger` holds a full record of observations,
-`AverageObservableLogger` does not.
+While [`GeneralObservableLogger`](@ref) holds a full record of observations,
+[`AverageObservableLogger`](@ref) does not.
 In addition, calling `values(logger::AverageObservableLogger; std::Bool=true)`
 returns two values: the current running average, and an estimate of the standard
 deviation for this average based on the block averaging method described in

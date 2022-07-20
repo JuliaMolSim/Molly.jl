@@ -9,8 +9,8 @@ export
 """
     total_energy(s, neighbors=nothing)
 
-Calculate the total energy of the system as the sum of the kinetic energy
-and the potential energy.
+Calculate the total energy of the system as the sum of the [`kinetic_energy`](@ref)
+and the [`potential_energy`](@ref).
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 Not currently compatible with automatic differentiation using Zygote.

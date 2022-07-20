@@ -146,14 +146,14 @@ end
 """
     charge(atom)
 
-The partial charge of an atom.
+The partial charge of an [`Atom`](@ref).
 """
 charge(atom::Atom) = atom.charge
 
 """
     mass(atom)
 
-The mass of an atom.
+The mass of an [`Atom`](@ref).
 """
 mass(atom::Atom) = atom.mass
 
@@ -166,7 +166,7 @@ end
     AtomData(atom_type, atom_name, res_number, res_name)
 
 Data associated with an atom.
-Storing this separately allows the atom types to be bits types and hence
+Storing this separately allows the [`Atom`](@ref) types to be bits types and hence
 work on the GPU.
 """
 struct AtomData

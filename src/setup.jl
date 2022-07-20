@@ -131,8 +131,7 @@ end
                         weight_14_lj)
 
 An OpenMM force field.
-Read one or more OpenMM force field XML files by passing them to the
-constructor.
+Read one or more OpenMM force field XML files by passing them to the constructor.
 """
 struct OpenMMForceField{T, M, D, E, K}
     atom_types::Dict{String, OpenMMAtomType{M, D, E}}
@@ -1142,7 +1141,7 @@ end
 """
     is_any_atom(at, at_data)
 
-Placeholder function that returns `true`, used to select any atom.
+Placeholder function that returns `true`, used to select any [`Atom`](@ref).
 """
 is_any_atom(at, at_data) = true
 

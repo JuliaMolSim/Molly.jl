@@ -7,8 +7,7 @@ export
 """
     extract_parameters(system, force_field)
 
-Form a `Dict` of all parameters in a `System`, allowing gradients
-to be tracked.
+Form a `Dict` of all parameters in a [`System`](@ref), allowing gradients to be tracked.
 """
 function extract_parameters(sys, ff)
     params_dic = Dict()
@@ -84,7 +83,7 @@ end
 """
     inject_gradients(sys, params_dic)
 
-Add parameters from a dictionary to a `System`.
+Add parameters from a dictionary to a [`System`](@ref).
 Allows gradients for individual parameters to be tracked.
 Returns atoms, pairwise interactions, specific interaction lists and general
 interactions.
