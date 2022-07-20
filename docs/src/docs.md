@@ -273,8 +273,8 @@ sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
     loggers=(
-        temp = TemperatureLogger(10),
-        writer = StructureWriter(10, "traj_5XER_1ps.pdb"),
+        temp=TemperatureLogger(10),
+        writer=StructureWriter(10, "traj_5XER_1ps.pdb"),
     ),
 )
 
@@ -287,6 +287,15 @@ simulator = Verlet(
 
 simulate!(sys, simulator, 5_000)
 ```
+Harmonic position restraints can be added to a [`System`](@ref) for equilibration using [`add_position_restraints`](@ref):
+```julia
+sys_res = add_position_restraints(
+    sys,
+    100_000.0u"kJ * mol^-1 * nm^-2";
+    atom_selector=is_heavy_atom,
+)
+```
+
 The OpenMM setup procedure is tested against OpenMM in terms of matching forces and energies.
 However it is not thoroughly tested with respect to ligands or special residues and requires that atom names exactly match residue templates.
 The Gromacs setup procedure should be considered experimental.

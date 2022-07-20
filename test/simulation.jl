@@ -382,6 +382,40 @@ end
     @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
 end
 
+@testset "Position restraints" begin
+    gpu_list = run_gpu_tests ? (false, true) : (false,)
+    for gpu in gpu_list
+        n_atoms = 10
+        n_atoms_res = n_atoms ÷ 2
+        n_steps = 2_000
+        boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+        starting_coords = place_atoms(n_atoms, boundary, 0.3u"nm")
+        atoms = [Atom(charge=0.0, mass=10.0u"u", σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+        atoms_data = [AtomData(atom_type=(i <= n_atoms_res ? "A1" : "A2")) for i in 1:n_atoms]
+        sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+
+        sys = System(
+            atoms=gpu ? cu(atoms) : atoms,
+            atoms_data=atoms_data,
+            pairwise_inters=(LennardJones(),),
+            coords=gpu ? cu(deepcopy(starting_coords)) : deepcopy(starting_coords),
+            boundary=boundary,
+            loggers=(coords=CoordinateLogger(100),),
+        )
+
+        atom_selector(at, at_data) = at_data.atom_type == "A1"
+
+        sys_res = add_position_restraints(sys, 100_000.0u"kJ * mol^-1 * nm^-2";
+                                          atom_selector=atom_selector)
+
+        @time simulate!(sys_res, sim, n_steps)
+
+        dists = norm.(vector.(starting_coords, Array(sys_res.coords), (boundary,)))
+        @test maximum(dists[1:n_atoms_res]) < 0.1u"nm"
+        @test median(dists[(n_atoms_res + 1):end]) > 0.2u"nm"
+    end
+end
+
 @testset "Langevin splitting" begin
     n_atoms = 400
     n_steps = 2000
