@@ -1152,8 +1152,8 @@ is_any_atom(at, at_data) = true
 Determines whether an [`Atom`](@ref) is a heavy atom, i.e. any element other than hydrogen.
 """
 function is_heavy_atom(at, at_data)
-    if at_data.element in ("?", "")
-        return mass(at) > oneunit(mass(at))
+    if isnothing(at_data) || at_data.element in ("?", "")
+        return mass(at) > 1.01u"u"
     else
         return !(at_data.element in ("H", "D"))
     end
