@@ -1160,7 +1160,7 @@ function is_heavy_atom(at, at_data)
 end
 
 """
-    add_position_restraints(sys, k, atom_selector=is_any_atom, restrain_coords=sys.coords)
+    add_position_restraints(sys, k; atom_selector=is_any_atom, restrain_coords=sys.coords)
 
 Return a copy of a [`System`](@ref) with [`HarmonicPositionRestraint`](@ref)s added to restrain the
 atoms.
@@ -1171,7 +1171,7 @@ that atom.
 For example, [`is_heavy_atom`](@ref) means non-hydrogen atoms are restrained.
 """
 function add_position_restraints(sys,
-                                 k,
+                                 k;
                                  atom_selector::Function=is_any_atom,
                                  restrain_coords=sys.coords)
     k_array = isa(k, AbstractArray) ? k : repeat([k], length(sys))
@@ -1181,27 +1181,32 @@ function add_position_restraints(sys,
     is = Int[]
     types = String[]
     inters = HarmonicPositionRestraint[]
-    for (i, (at, at_data, k_res, x0)) in enumerate(zip(Array(sys.atoms), sys.atoms_data,
-                                                       k_array, Array(restrain_coords)))
+    atoms_data = length(sys.atoms_data) > 0 ? sys.atoms_data : repeat([nothing], length(sys))
+    for (i, (at, at_data, k_res, x0)) in enumerate(zip(Array(sys.atoms), atoms_data, k_array,
+                                                       Array(restrain_coords)))
         if atom_selector(at, at_data)
             push!(is, i)
             push!(types, "")
             push!(inters, HarmonicPositionRestraint(k_res, x0))
         end
     end
-    restraints = InteractionList1Atoms(is, types, [inters...])
+    restraints = InteractionList1Atoms(
+        is,
+        types,
+        isa(sys.coords, CuArray) ? cu([inters...]) : [inters...],
+    )
     sis = (sys.specific_inter_lists..., restraints)
     return System(
-        atoms=sys.atoms,
-        atoms_data=sys.atoms_data,
-        pairwise_inters=sys.pairwise_inters,
+        atoms=deepcopy(sys.atoms),
+        atoms_data=deepcopy(sys.atoms_data),
+        pairwise_inters=deepcopy(sys.pairwise_inters),
         specific_inter_lists=sis,
-        general_inters=sys.general_inters,
-        coords=sys.coords,
-        velocities=sys.velocities,
-        boundary=sys.boundary,
-        neighbor_finder=sys.neighbor_finder,
-        loggers=sys.loggers,
+        general_inters=deepcopy(sys.general_inters),
+        coords=deepcopy(sys.coords),
+        velocities=deepcopy(sys.velocities),
+        boundary=deepcopy(sys.boundary),
+        neighbor_finder=deepcopy(sys.neighbor_finder),
+        loggers=deepcopy(sys.loggers),
         force_units=sys.force_units,
         energy_units=sys.energy_units,
         k=sys.k,
