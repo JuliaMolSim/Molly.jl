@@ -343,6 +343,29 @@ function System(;
     end
     V = typeof(vels)
 
+    if length(atoms) != length(coords)
+        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(coords)) coordinates"))
+    end
+    if length(atoms) != length(vels)
+        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(vels)) velocities"))
+    end
+    if length(atoms_data) > 0 && length(atoms) != length(atoms_data)
+        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
+    end
+
+    if isa(atoms, CuArray) && !isa(coords, CuArray)
+        throw(ArgumentError("The atoms are on the GPU but the coordinates are not"))
+    end
+    if isa(coords, CuArray) && !isa(atoms, CuArray)
+        throw(ArgumentError("The coordinates are on the GPU but the atoms are not"))
+    end
+    if isa(atoms, CuArray) && !isa(vels, CuArray)
+        throw(ArgumentError("The atoms are on the GPU but the velocities are not"))
+    end
+    if isa(vels, CuArray) && !isa(atoms, CuArray)
+        throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
+    end
+
     if energy_units == NoUnits
         if unit(k) == NoUnits
             # Use user-supplied unitless Boltzmann constant
