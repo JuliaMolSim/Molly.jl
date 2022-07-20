@@ -92,7 +92,7 @@
         atol=1e-9u"kg * m^2 * s^-2",
     )
 
-    pr = HarmonicPositionRestraint(x0=c1, kb=300_000.0u"kJ * mol^-1 * nm^-2")
+    pr = HarmonicPositionRestraint(k=300_000.0u"kJ * mol^-1 * nm^-2", x0=c1)
     fs = force(pr, c2, boundary)
     @test isapprox(
         fs.f1,

@@ -1162,12 +1162,13 @@ end
 """
     add_position_restraints(sys, k, atom_selector=is_any_atom, restrain_coords=sys.coords)
 
-Add [`HarmonicPositionRestraint`](@ref)s to a [`System`](@ref) to restrain the atoms and return
-a new [`System`](@ref).
+Return a copy of a [`System`](@ref) with [`HarmonicPositionRestraint`](@ref)s added to restrain the
+atoms.
 The force constant `k` can be a single value or an array of equal length to the number of atoms
 in the system.
 The `atom_selector` function takes in each atom and atom data and determines whether to restrain
 that atom.
+For example, [`is_heavy_atom`](@ref) means non-hydrogen atoms are restrained.
 """
 function add_position_restraints(sys,
                                  k,
@@ -1180,15 +1181,15 @@ function add_position_restraints(sys,
     is = Int[]
     types = String[]
     inters = HarmonicPositionRestraint[]
-    for (i, (at, at_data, x0, k_res)) in enumerate(zip(Array(sys.atoms), sys.atoms_data,
-                                                   Array(restrain_coords), k_array))
+    for (i, (at, at_data, k_res, x0)) in enumerate(zip(Array(sys.atoms), sys.atoms_data,
+                                                       k_array, Array(restrain_coords)))
         if atom_selector(at, at_data)
             push!(is, i)
             push!(types, "")
-            push!(inters, HarmonicPositionRestraint(x0, k_res))
+            push!(inters, HarmonicPositionRestraint(k_res, x0))
         end
     end
-    restraints = InteractionList1Atoms(is, types, inters)
+    restraints = InteractionList1Atoms(is, types, [inters...])
     sis = (sys.specific_inter_lists..., restraints)
     return System(
         atoms=sys.atoms,

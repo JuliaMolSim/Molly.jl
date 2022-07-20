@@ -1,20 +1,24 @@
 export HarmonicPositionRestraint
 
-"""
-    HarmonicPositionRestraint(; x0, kb)
+@doc raw"""
+    HarmonicPositionRestraint(; k, x0)
 
 A harmonic position restraint on an atom to coordinate `x0`.
+The potential energy is defined as
+```math
+V(\boldsymbol{x}) = \frac{1}{2} k |\boldsymbol{x} - \boldsymbol{x}_0|^2
+```
 """
-struct HarmonicPositionRestraint{C, K} <: SpecificInteraction
+struct HarmonicPositionRestraint{K, C} <: SpecificInteraction
+    k::K
     x0::C
-    kb::K
 end
 
-HarmonicPositionRestraint(; x0, kb) = HarmonicPositionRestraint{typeof(x0), typeof(kb)}(x0, kb)
+HarmonicPositionRestraint(; k, x0) = HarmonicPositionRestraint{typeof(k), typeof(x0)}(k, x0)
 
 @inline @inbounds function force(pr::HarmonicPositionRestraint, coord_i, boundary)
     ab = vector(coord_i, pr.x0, boundary)
-    c = pr.kb * norm(ab)
+    c = pr.k * norm(ab)
     if iszero(c)
         f = c * ustrip.(ab)
         return SpecificForce1Atoms(f)
@@ -25,6 +29,5 @@ end
 
 @inline @inbounds function potential_energy(pr::HarmonicPositionRestraint, coord_i, boundary)
     dr = vector(coord_i, pr.x0, boundary)
-    r = norm(dr)
-    return (pr.kb / 2) * r ^ 2
+    return (pr.k / 2) * dot(dr, dr)
 end
