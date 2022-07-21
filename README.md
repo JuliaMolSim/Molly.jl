@@ -22,7 +22,9 @@ Implemented features include:
 - Verlet, velocity Verlet, Störmer-Verlet and flexible Langevin integrators.
 - Steepest descent energy minimization.
 - Periodic and infinite boundary conditions in a cubic box.
-- Various neighbor list implementations to speed up calculation of non-bonded forces.
+- Flexible loggers to track arbitrary properties throughout simulations.
+- Cutoff algorithms for non-bonded interactions.
+- Various neighbor list implementations to speed up the calculation of non-bonded forces, including use of [CellListMap.jl](https://github.com/m3g/CellListMap.jl).
 - Implicit solvent GBSA methods.
 - [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
 - Automatic multithreading.
