@@ -5,6 +5,7 @@ export
     RectangularBoundary,
     TriclinicBoundary,
     box_volume,
+    rand_coord,
     vector_1D,
     vector,
     wrap_coord_1D,
@@ -104,6 +105,14 @@ Calculate the volume of a bounding box.
 """
 box_volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
 box_volume(b::TriclinicBoundary) = abs(dot(cross(b[1], b[2]), b[3]))
+
+"""
+    rand_coord(boundary)
+
+Generate a random coordinate uniformly distributed within a bounding box.
+"""
+rand_coord(boundary::CubicBoundary      ) = SVector{3}(rand(float_type(boundary), 3)) .* boundary
+rand_coord(boundary::RectangularBoundary) = SVector{2}(rand(float_type(boundary), 2)) .* boundary
 
 """
     vector_1D(c1, c2, side_length)

@@ -30,11 +30,10 @@ function place_atoms(n_atoms::Integer, boundary, min_dist; max_attempts::Integer
         error("Box size of $boundary too small for $n_atoms atoms with minimum distance of $min_dist")
     end
     min_dist_sq = min_dist ^ 2
-    T = typeof(convert(AbstractFloat, ustrip(boundary[1])))
     coords = SArray[]
     failed_attempts = 0
     while length(coords) < n_atoms
-        new_coord = SVector{dims}(rand(T, dims)) .* boundary
+        new_coord = rand_coord(boundary)
         okay = true
         for coord in coords
             if sum(abs2, vector(coord, new_coord, boundary)) < min_dist_sq
@@ -47,7 +46,7 @@ function place_atoms(n_atoms::Integer, boundary, min_dist; max_attempts::Integer
             push!(coords, new_coord)
             failed_attempts = 0
         elseif failed_attempts > max_attempts
-            error("Failed to place $(length(coords)+1)th atom after $max_attempts (max_attempts) tries.")
+            error("Failed to place $(length(coords) + 1)th atom after $max_attempts (max_attempts) tries.")
         end
     end
     return [coords...]
@@ -64,10 +63,9 @@ Can not be used if one or more dimensions has infinite boundaries.
 function place_diatomics(n_molecules::Integer, boundary, min_dist, bond_length)
     dims = n_dimensions(boundary)
     min_dist_sq = min_dist ^ 2
-    T = typeof(convert(AbstractFloat, ustrip(boundary[1])))
     coords = SArray[]
     while length(coords) < (n_molecules * 2)
-        new_coord_a = SVector{dims}(rand(T, dims)) .* boundary
+        new_coord_a = rand_coord(boundary)
         shift = SVector{dims}([bond_length, [zero(bond_length) for d in 1:(dims - 1)]...])
         new_coord_b = copy(new_coord_a) + shift
         okay = new_coord_b[1] <= boundary[1]
