@@ -70,18 +70,19 @@ Triclinic 3D bounding box defined by 3 basis vectors.
 An approximation is used to find the closest periodic image when using the
 minimum image convention.
 """
-struct TriclinicBoundary{T}
-    basis_vectors::SVector{3, T}
-    reciprocal_size::T
+struct TriclinicBoundary{T, V}
+    basis_vectors::SVector{3, V}
+    reciprocal_size::V
 end
 
 function TriclinicBoundary(basis_vectors::SVector{3})
+    T = typeof(ustrip(basis_vectors[1][1]))
     reciprocal_size = SVector{3}(
         inv(basis_vectors[1][1]),
         inv(basis_vectors[2][2]),
         inv(basis_vectors[3][3]),
     )
-    return TriclinicBoundary(basis_vectors, reciprocal_size)
+    return TriclinicBoundary{T, typeof(reciprocal_size)}(basis_vectors, reciprocal_size)
 end
 
 TriclinicBoundary(v1, v2, v3) = TriclinicBoundary(SVector{3}(v1, v2, v3))
@@ -94,7 +95,7 @@ Base.lastindex(b::TriclinicBoundary) = b.basis_vectors[3]
 AtomsBase.n_dimensions(::TriclinicBoundary) = 3
 
 float_type(b::Union{CubicBoundary, RectangularBoundary}) = typeof(ustrip(b[1]))
-float_type(b::TriclinicBoundary) = typeof(ustrip(b[1][1]))
+float_type(b::TriclinicBoundary{T}) where {T} = T
 
 """
     box_volume(boundary)
@@ -138,13 +139,12 @@ vector(c1, c2, boundary::Union{CubicBoundary, RectangularBoundary}) = vector_1D.
     end
 end
 
-function vector(c1, c2, boundary::TriclinicBoundary)
-    T = float_type(boundary)
+function vector(c1, c2, boundary::TriclinicBoundary{T}) where T
     dr = c2 - c1
-    scale = floor.(dr .* boundary.reciprocal_size .+ T(0.5))
-    return SVector{3}(
-        
-    )
+    dx = boundary.basis_vectors[1] * floor(dr[1] * boundary.reciprocal_size[1] + T(0.5))
+    dy = boundary.basis_vectors[2] * floor(dr[2] * boundary.reciprocal_size[2] + T(0.5))
+    dz = boundary.basis_vectors[3] * floor(dr[3] * boundary.reciprocal_size[3] + T(0.5))
+    return dr - dx - dy - dz
 end
 
 square_distance(i, j, coords, boundary) = sum(abs2, vector(coords[i], coords[j], boundary))
@@ -183,6 +183,13 @@ end
 Ensure a coordinate is within the bounding box and return the coordinate.
 """
 wrap_coords(v, boundary::Union{CubicBoundary, RectangularBoundary}) = wrap_coord_1D.(v, boundary)
+
+function wrap_coords(v, boundary::TriclinicBoundary)
+    dx = boundary.basis_vectors[1] * floor(v[1] * boundary.reciprocal_size[1])
+    dy = boundary.basis_vectors[2] * floor(v[2] * boundary.reciprocal_size[2])
+    dz = boundary.basis_vectors[3] * floor(v[3] * boundary.reciprocal_size[3])
+    return v - dx - dy - dx
+end
 
 const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
 

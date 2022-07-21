@@ -38,6 +38,7 @@ Implemented features include:
 Features not yet implemented include:
 - Simulators such as REMD and metadynamics.
 - Other temperature or pressure coupling methods.
+- Particle mesh Ewald summation.
 - Protein preparation - solvent box, add hydrogens etc.
 - Quantum mechanical modelling.
 - Constrained bonds and angles.
