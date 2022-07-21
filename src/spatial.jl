@@ -111,8 +111,22 @@ box_volume(b::TriclinicBoundary) = abs(dot(cross(b[1], b[2]), b[3]))
 
 Generate a random coordinate uniformly distributed within a bounding box.
 """
-rand_coord(boundary::CubicBoundary      ) = SVector{3}(rand(float_type(boundary), 3)) .* boundary
-rand_coord(boundary::RectangularBoundary) = SVector{2}(rand(float_type(boundary), 2)) .* boundary
+rand_coord(boundary::CubicBoundary      ) = rand(SVector{3, float_type(boundary)}) .* boundary
+rand_coord(boundary::RectangularBoundary) = rand(SVector{2, float_type(boundary)}) .* boundary
+
+function rand_coord(boundary::TriclinicBoundary{T}) where T
+    in_bounds = false
+    while !in_bounds
+        trial_coord = rand(SVector{3, T}) .* boundary.cubic_bounds
+        dx = floor(trial_coord[1] * boundary.reciprocal_size[1])
+        dy = floor(trial_coord[2] * boundary.reciprocal_size[2])
+        dz = floor(trial_coord[3] * boundary.reciprocal_size[3])
+        if iszero(dx) && iszero(dy) && iszero(dz)
+            in_bounds = true
+        end
+    end
+    return trial_coord
+end
 
 """
     vector_1D(c1, c2, side_length)
