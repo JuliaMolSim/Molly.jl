@@ -71,19 +71,32 @@ Triclinic 3D bounding box defined by 3 basis vectors.
 An approximation is used to find the closest periodic image when using the
 minimum image convention.
 """
-struct TriclinicBoundary{T, V}
-    basis_vectors::SVector{3, V}
-    reciprocal_size::V
+struct TriclinicBoundary{T, D, I}
+    basis_vectors::SVector{3, SVector{3, D}}
+    reciprocal_size::SVector{3, I}
+    angles::SVector{3, T}
+    cubic_bounds::SVector{3, D}
 end
 
 function TriclinicBoundary(basis_vectors::SVector{3})
-    T = typeof(ustrip(basis_vectors[1][1]))
     reciprocal_size = SVector{3}(
         inv(basis_vectors[1][1]),
         inv(basis_vectors[2][2]),
         inv(basis_vectors[3][3]),
     )
-    return TriclinicBoundary{T, typeof(reciprocal_size)}(basis_vectors, reciprocal_size)
+    angles = SVector{3}(
+        bond_angle(basis_vectors[1], basis_vectors[2]), # xy angle
+        bond_angle(basis_vectors[1], basis_vectors[3]), # xz angle
+        bond_angle(basis_vectors[2], basis_vectors[3]), # yz angle
+    )
+    dx, dy, dz = norm.(basis_vectors)
+    cubic_bounds = SVector{3}(
+        dx + dy * cos(angles[1]) + dz * cos(angles[2]),
+        dy * sin(angles[1]) + dz * sin(angles[3]),
+        dz * sin(angles[2]),
+    )
+    return TriclinicBoundary{eltype(angles), eltype(cubic_bounds), eltype(reciprocal_size)}(
+                                basis_vectors, reciprocal_size, angles, cubic_bounds)
 end
 
 TriclinicBoundary(v1, v2, v3) = TriclinicBoundary(SVector{3}(v1, v2, v3))
