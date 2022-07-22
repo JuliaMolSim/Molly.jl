@@ -7,8 +7,7 @@ export
 """
     extract_parameters(system, force_field)
 
-Form a `Dict` of all parameters in a `System`, allowing gradients
-to be tracked.
+Form a `Dict` of all parameters in a [`System`](@ref), allowing gradients to be tracked.
 """
 function extract_parameters(sys, ff)
     params_dic = Dict()
@@ -45,19 +44,19 @@ function extract_parameters(sys, ff)
         if Molly.interaction_type(inter) <: HarmonicBond
             for bond_type in inter.types
                 key_prefix = "inter_HB_$(bond_type)_"
-                if !haskey(params_dic, key_prefix * "b0")
+                if !haskey(params_dic, key_prefix * "k")
                     bond = ff.bond_types[atom_types_to_tuple(bond_type)]
-                    params_dic[key_prefix * "b0"] = bond.b0
-                    params_dic[key_prefix * "kb"] = bond.kb
+                    params_dic[key_prefix * "k" ] = bond.k
+                    params_dic[key_prefix * "r0"] = bond.r0
                 end
             end
         elseif Molly.interaction_type(inter) <: HarmonicAngle
             for angle_type in inter.types
                 key_prefix = "inter_HA_$(angle_type)_"
-                if !haskey(params_dic, key_prefix * "th0")
+                if !haskey(params_dic, key_prefix * "k")
                     angle = ff.angle_types[atom_types_to_tuple(angle_type)]
-                    params_dic[key_prefix * "th0"] = angle.th0
-                    params_dic[key_prefix * "cth"] = angle.cth
+                    params_dic[key_prefix * "k" ] = angle.k
+                    params_dic[key_prefix * "θ0"] = angle.θ0
                 end
             end
         elseif Molly.interaction_type(inter) <: PeriodicTorsion
@@ -84,14 +83,14 @@ end
 """
     inject_gradients(sys, params_dic)
 
-Add parameters from a dictionary to a `System`.
+Add parameters from a dictionary to a [`System`](@ref).
 Allows gradients for individual parameters to be tracked.
 Returns atoms, pairwise interactions, specific interaction lists and general
 interactions.
 """
 function inject_gradients(sys, params_dic, gpu::Bool=isa(sys.coords, CuArray))
     if gpu
-        atoms_grad = cu(inject_atom.(Array(sys.atoms), sys.atoms_data, (params_dic,)))
+        atoms_grad = CuArray(inject_atom.(Array(sys.atoms), sys.atoms_data, (params_dic,)))
     else
         atoms_grad = inject_atom.(sys.atoms, sys.atoms_data, (params_dic,))
     end
@@ -116,9 +115,18 @@ function inject_atom(at, at_data, params_dic)
     )
 end
 
+function inject_interaction_list(inter::InteractionList1Atoms, params_dic, gpu)
+    if gpu
+        inters_grad = CuArray(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+    else
+        inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
+    end
+    InteractionList1Atoms(inter.is, inter.types, inters_grad)
+end
+
 function inject_interaction_list(inter::InteractionList2Atoms, params_dic, gpu)
     if gpu
-        inters_grad = cu(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+        inters_grad = CuArray(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
     else
         inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
     end
@@ -127,7 +135,7 @@ end
 
 function inject_interaction_list(inter::InteractionList3Atoms, params_dic, gpu)
     if gpu
-        inters_grad = cu(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+        inters_grad = CuArray(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
     else
         inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
     end
@@ -136,7 +144,7 @@ end
 
 function inject_interaction_list(inter::InteractionList4Atoms, params_dic, gpu)
     if gpu
-        inters_grad = cu(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+        inters_grad = CuArray(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
     else
         inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
     end
@@ -185,16 +193,16 @@ end
 function inject_interaction(inter::HarmonicBond, inter_type, params_dic)
     key_prefix = "inter_HB_$(inter_type)_"
     HarmonicBond(
-        dict_get(params_dic, key_prefix * "b0", inter.b0),
-        dict_get(params_dic, key_prefix * "kb", inter.kb),
+        dict_get(params_dic, key_prefix * "k" , inter.k ),
+        dict_get(params_dic, key_prefix * "r0", inter.r0),
     )
 end
 
 function inject_interaction(inter::HarmonicAngle, inter_type, params_dic)
     key_prefix = "inter_HA_$(inter_type)_"
     HarmonicAngle(
-        dict_get(params_dic, key_prefix * "th0", inter.th0),
-        dict_get(params_dic, key_prefix * "cth", inter.cth),
+        dict_get(params_dic, key_prefix * "k" , inter.k ),
+        dict_get(params_dic, key_prefix * "θ0", inter.θ0),
     )
 end
 

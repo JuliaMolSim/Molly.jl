@@ -8,7 +8,10 @@ export
     OpenMMAtomType,
     OpenMMResidueType,
     PeriodicTorsionType,
-    OpenMMForceField
+    OpenMMForceField,
+    is_any_atom,
+    is_heavy_atom,
+    add_position_restraints
 
 """
     place_atoms(n_atoms, boundary, min_dist; max_attempts=100)
@@ -128,14 +131,13 @@ end
                         weight_14_lj)
 
 An OpenMM force field.
-Read one or more OpenMM force field XML files by passing them to the
-constructor.
+Read one or more OpenMM force field XML files by passing them to the constructor.
 """
 struct OpenMMForceField{T, M, D, E, K}
     atom_types::Dict{String, OpenMMAtomType{M, D, E}}
     residue_types::Dict{String, OpenMMResiduetype{T}}
-    bond_types::Dict{Tuple{String, String}, HarmonicBond{D, K}}
-    angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{T, E}}
+    bond_types::Dict{Tuple{String, String}, HarmonicBond{K, D}}
+    angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{E, T}}
     torsion_types::Dict{Tuple{String, String, String, String}, PeriodicTorsionType{T, E}}
     torsion_order::String
     weight_14_coulomb::T
@@ -189,18 +191,18 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
                 for bond in eachelement(entry)
                     atom_type_1 = bond["type1"]
                     atom_type_2 = bond["type2"]
-                    b0 = units ? parse(T, bond["length"])u"nm" : parse(T, bond["length"])
-                    kb = units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"])
-                    bond_types[(atom_type_1, atom_type_2)] = HarmonicBond(b0, kb)
+                    k = units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"])
+                    r0 = units ? parse(T, bond["length"])u"nm" : parse(T, bond["length"])
+                    bond_types[(atom_type_1, atom_type_2)] = HarmonicBond(k, r0)
                 end
             elseif entry_name == "HarmonicAngleForce"
                 for angle in eachelement(entry)
                     atom_type_1 = angle["type1"]
                     atom_type_2 = angle["type2"]
                     atom_type_3 = angle["type3"]
-                    th0 = parse(T, angle["angle"])
                     k = units ? parse(T, angle["k"])u"kJ * mol^-1" : parse(T, angle["k"])
-                    angle_types[(atom_type_1, atom_type_2, atom_type_3)] = HarmonicAngle(th0, k)
+                    θ0 = parse(T, angle["angle"])
+                    angle_types[(atom_type_1, atom_type_2, atom_type_3)] = HarmonicAngle(k, θ0)
                 end
             elseif entry_name == "PeriodicTorsionForce"
                 torsion_order = entry["ordering"]
@@ -455,7 +457,7 @@ function System(coord_file::AbstractString,
             bond_type = force_field.bond_types[(atom_type_2, atom_type_1)]
             push!(bonds.types, atom_types_to_string(atom_type_2, atom_type_1))
         end
-        push!(bonds.inters, HarmonicBond(b0=bond_type.b0, kb=bond_type.kb))
+        push!(bonds.inters, HarmonicBond(k=bond_type.k, r0=bond_type.r0))
         nb_matrix[a1z + 1, a2z + 1] = false
         nb_matrix[a2z + 1, a1z + 1] = false
     end
@@ -480,7 +482,7 @@ function System(coord_file::AbstractString,
             angle_type = force_field.angle_types[(atom_type_3, atom_type_2, atom_type_1)]
             push!(angles.types, atom_types_to_string(atom_type_3, atom_type_2, atom_type_1))
         end
-        push!(angles.inters, HarmonicAngle(th0=angle_type.th0, cth=angle_type.cth))
+        push!(angles.inters, HarmonicAngle(k=angle_type.k, θ0=angle_type.θ0))
         nb_matrix[a1z + 1, a3z + 1] = false
         nb_matrix[a3z + 1, a1z + 1] = false
     end
@@ -692,25 +694,25 @@ function System(coord_file::AbstractString,
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
             bonds.is, bonds.js, bonds.types,
-            gpu ? cu([bonds.inters...]) : [bonds.inters...],
+            gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
         ))
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
             angles.is, angles.js, angles.ks, angles.types,
-            gpu ? cu([angles.inters...]) : [angles.inters...],
+            gpu ? CuArray([angles.inters...]) : [angles.inters...],
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
             torsions.is, torsions.js, torsions.ks, torsions.ls, torsions.types,
-            gpu ? cu(torsion_inters_pad) : torsion_inters_pad,
+            gpu ? CuArray(torsion_inters_pad) : torsion_inters_pad,
         ))
     end
     if length(impropers.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
             impropers.is, impropers.js, impropers.ks, impropers.ls, impropers.types,
-            gpu ? cu(improper_inters_pad) : improper_inters_pad,
+            gpu ? CuArray(improper_inters_pad) : improper_inters_pad,
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
@@ -741,17 +743,25 @@ function System(coord_file::AbstractString,
 
     atoms = [atoms...]
     if gpu_diff_safe
-        neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(nb_matrix) : nb_matrix,
-                                                    matrix_14=gpu ? cu(matrix_14) : matrix_14,
-                                                    n_steps=10, dist_cutoff=T(dist_neighbors))
+        neighbor_finder = DistanceVecNeighborFinder(
+            nb_matrix=gpu ? CuArray(nb_matrix) : nb_matrix,
+            matrix_14=gpu ? CuArray(matrix_14) : matrix_14,
+            n_steps=10,
+            dist_cutoff=T(dist_neighbors),
+        )
     else
-        neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14,
-                                                    n_steps=10, x0=coords, unit_cell=boundary_used,
-                                                    dist_cutoff=T(dist_neighbors))
+        neighbor_finder = CellListMapNeighborFinder(
+            nb_matrix=nb_matrix,
+            matrix_14=matrix_14,
+            n_steps=10,
+            x0=coords,
+            unit_cell=boundary_used,
+            dist_cutoff=T(dist_neighbors),
+        )
     end
     if gpu
-        atoms = cu(atoms)
-        coords = cu(coords)
+        atoms = CuArray(atoms)
+        coords = CuArray(coords)
     end
 
     if isnothing(velocities)
@@ -846,18 +856,18 @@ function System(T::Type,
         c = split(rstrip(first(split(sl, ";", limit=2))), r"\s+")
         if current_field == "bondtypes"
             if units
-                bondtype = HarmonicBond(parse(T, c[4])u"nm", parse(T, c[5])u"kJ * mol^-1 * nm^-2")
+                bondtype = HarmonicBond(parse(T, c[5])u"kJ * mol^-1 * nm^-2", parse(T, c[4])u"nm")
             else
-                bondtype = HarmonicBond(parse(T, c[4]), parse(T, c[5]))
+                bondtype = HarmonicBond(parse(T, c[5]), parse(T, c[4]))
             end
             bondtypes["$(c[1])/$(c[2])"] = bondtype
             bondtypes["$(c[2])/$(c[1])"] = bondtype
         elseif current_field == "angletypes"
-            # Convert th0 to radians
+            # Convert θ0 to radians
             if units
-                angletype = HarmonicAngle(deg2rad(parse(T, c[5])), parse(T, c[6])u"kJ * mol^-1")
+                angletype = HarmonicAngle(parse(T, c[6])u"kJ * mol^-1", deg2rad(parse(T, c[5])))
             else
-                angletype = HarmonicAngle(deg2rad(parse(T, c[5])), parse(T, c[6]))
+                angletype = HarmonicAngle(parse(T, c[6]), deg2rad(parse(T, c[5])))
             end
             angletypes["$(c[1])/$(c[2])/$(c[3])"] = angletype
             angletypes["$(c[3])/$(c[2])/$(c[1])"] = angletype
@@ -908,7 +918,7 @@ function System(T::Type,
             push!(bonds.is, i)
             push!(bonds.js, j)
             push!(bonds.types, bn)
-            push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
+            push!(bonds.inters, HarmonicBond(k=bondtype.k, r0=bondtype.r0))
         elseif current_field == "pairs"
             push!(pairs, (parse(Int, c[1]), parse(Int, c[2])))
         elseif current_field == "angles"
@@ -919,7 +929,7 @@ function System(T::Type,
             push!(angles.js, j)
             push!(angles.ks, k)
             push!(angles.types, an)
-            push!(angles.inters, HarmonicAngle(th0=angletype.th0, cth=angletype.cth))
+            push!(angles.inters, HarmonicAngle(k=angletype.k, θ0=angletype.θ0))
         elseif current_field == "dihedrals"
             i, j, k, l = parse.(Int, c[1:4])
             push!(possible_torsions, (i, j, k, l))
@@ -1006,17 +1016,17 @@ function System(T::Type,
                 push!(bonds.is, i)
                 push!(bonds.js, i + 1)
                 push!(bonds.types, "OW/HW")
-                push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
+                push!(bonds.inters, HarmonicBond(k=bondtype.k, r0=bondtype.r0))
                 push!(bonds.is, i)
                 push!(bonds.js, i + 2)
                 push!(bonds.types, "OW/HW")
-                push!(bonds.inters, HarmonicBond(b0=bondtype.b0, kb=bondtype.kb))
+                push!(bonds.inters, HarmonicBond(k=bondtype.k, r0=bondtype.r0))
                 angletype = angletypes["HW/OW/HW"]
                 push!(angles.is, i + 1)
                 push!(angles.js, i)
                 push!(angles.ks, i + 2)
                 push!(angles.types, "HW/OW/HW")
-                push!(angles.inters, HarmonicAngle(th0=angletype.th0, cth=angletype.cth))
+                push!(angles.inters, HarmonicAngle(k=angletype.k, θ0=angletype.θ0))
             end
         end
     end
@@ -1073,19 +1083,19 @@ function System(T::Type,
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
             bonds.is, bonds.js, bonds.types,
-            gpu ? cu([bonds.inters...]) : [bonds.inters...],
+            gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
         ))
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
             angles.is, angles.js, angles.ks, angles.types,
-            gpu ? cu([angles.inters...]) : [angles.inters...],
+            gpu ? CuArray([angles.inters...]) : [angles.inters...],
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
             torsions.is, torsions.js, torsions.ks, torsions.ls, torsions.types,
-            gpu ? cu([torsions.inters...]) : [torsions.inters...],
+            gpu ? CuArray([torsions.inters...]) : [torsions.inters...],
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
@@ -1093,17 +1103,25 @@ function System(T::Type,
     atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ, solute=a.solute) for a in atoms]
 
     if gpu_diff_safe
-        neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(nb_matrix) : nb_matrix,
-                                                    matrix_14=gpu ? cu(matrix_14) : matrix_14, n_steps=10,
-                                                    dist_cutoff=T(dist_neighbors))
+        neighbor_finder = DistanceVecNeighborFinder(
+            nb_matrix=gpu ? CuArray(nb_matrix) : nb_matrix,
+            matrix_14=gpu ? CuArray(matrix_14) : matrix_14,
+            n_steps=10,
+            dist_cutoff=T(dist_neighbors),
+        )
     else
-        neighbor_finder = CellListMapNeighborFinder(nb_matrix=nb_matrix, matrix_14=matrix_14, n_steps=10,
-                                                    x0=coords, unit_cell=boundary_used,
-                                                    dist_cutoff=T(dist_neighbors))
+        neighbor_finder = CellListMapNeighborFinder(
+            nb_matrix=nb_matrix,
+            matrix_14=matrix_14,
+            n_steps=10,
+            x0=coords,
+            unit_cell=boundary_used,
+            dist_cutoff=T(dist_neighbors),
+        )
     end
     if gpu
-        atoms = cu(atoms)
-        coords = cu(coords)
+        atoms = CuArray(atoms)
+        coords = CuArray(coords)
     end
 
     if isnothing(velocities)
@@ -1134,4 +1152,75 @@ end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
     return System(DefaultFloat, coord_file, top_file; kwargs...)
+end
+
+"""
+    is_any_atom(at, at_data)
+
+Placeholder function that returns `true`, used to select any [`Atom`](@ref).
+"""
+is_any_atom(at, at_data) = true
+
+"""
+    is_heavy_atom(at, at_data)
+
+Determines whether an [`Atom`](@ref) is a heavy atom, i.e. any element other than hydrogen.
+"""
+function is_heavy_atom(at, at_data)
+    if isnothing(at_data) || at_data.element in ("?", "")
+        return mass(at) > 1.01u"u"
+    else
+        return !(at_data.element in ("H", "D"))
+    end
+end
+
+"""
+    add_position_restraints(sys, k; atom_selector=is_any_atom, restrain_coords=sys.coords)
+
+Return a copy of a [`System`](@ref) with [`HarmonicPositionRestraint`](@ref)s added to restrain the
+atoms.
+The force constant `k` can be a single value or an array of equal length to the number of atoms
+in the system.
+The `atom_selector` function takes in each atom and atom data and determines whether to restrain
+that atom.
+For example, [`is_heavy_atom`](@ref) means non-hydrogen atoms are restrained.
+"""
+function add_position_restraints(sys,
+                                 k;
+                                 atom_selector::Function=is_any_atom,
+                                 restrain_coords=sys.coords)
+    k_array = isa(k, AbstractArray) ? k : repeat([k], length(sys))
+    if length(k_array) != length(sys)
+        throw(ArgumentError("The system has $(length(sys)) atoms but there are $(length(k_array)) k values"))
+    end
+    is = Int[]
+    types = String[]
+    inters = HarmonicPositionRestraint[]
+    atoms_data = length(sys.atoms_data) > 0 ? sys.atoms_data : repeat([nothing], length(sys))
+    for (i, (at, at_data, k_res, x0)) in enumerate(zip(Array(sys.atoms), atoms_data, k_array,
+                                                       Array(restrain_coords)))
+        if atom_selector(at, at_data)
+            push!(is, i)
+            push!(types, "")
+            push!(inters, HarmonicPositionRestraint(k_res, x0))
+        end
+    end
+    restraints = InteractionList1Atoms(is, types, move_array([inters...], sys))
+    sis = (sys.specific_inter_lists..., restraints)
+    return System(
+        atoms=deepcopy(sys.atoms),
+        atoms_data=deepcopy(sys.atoms_data),
+        pairwise_inters=deepcopy(sys.pairwise_inters),
+        specific_inter_lists=sis,
+        general_inters=deepcopy(sys.general_inters),
+        coords=deepcopy(sys.coords),
+        velocities=deepcopy(sys.velocities),
+        boundary=deepcopy(sys.boundary),
+        neighbor_finder=deepcopy(sys.neighbor_finder),
+        loggers=deepcopy(sys.loggers),
+        force_units=sys.force_units,
+        energy_units=sys.energy_units,
+        k=sys.k,
+        gpu_diff_safe=is_gpu_diff_safe(sys),
+    )
 end

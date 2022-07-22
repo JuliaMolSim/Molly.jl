@@ -4,10 +4,9 @@ export CosineAngle
     CosineAngle(; k, θ0)
 
 A cosine bond angle between three atoms.
-
-The potential is defined as
+The potential energy is defined as
 ```math
-U(\theta) = k(1 + \cos(\theta - \theta_0))
+V(\theta) = k(1 + \cos(\theta - \theta_0))
 ```
 """
 struct CosineAngle{K, D} <: SpecificInteraction

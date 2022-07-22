@@ -43,13 +43,13 @@
                     atol=1e-4u"kJ * mol^-1")
 
     if run_gpu_tests
-        coords = cu([
+        coords = CuArray([
             SVector(1.0, 1.0, 1.0)u"nm",
             SVector(1.6, 1.0, 1.0)u"nm",
             SVector(1.4, 1.6, 1.0)u"nm",
         ])
         sys = System(
-            atoms=cu([Atom(σ=(0.4 / (2 ^ (1 / 6)))u"nm", ϵ=1.0u"kJ * mol^-1") for i in 1:3]),
+            atoms=CuArray([Atom(σ=(0.4 / (2 ^ (1 / 6)))u"nm", ϵ=1.0u"kJ * mol^-1") for i in 1:3]),
             pairwise_inters=(LennardJones(),),
             coords=coords,
             boundary=CubicBoundary(5.0u"nm", 5.0u"nm", 5.0u"nm"),

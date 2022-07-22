@@ -44,7 +44,7 @@ a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
 boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
 coords = [c1, c2]
 dr = vector(c1, c2, boundary)
-b1 = HarmonicBond(b0=0.6u"nm", kb=100_000.0u"kJ * mol^-1 * nm^-2")
+b1 = HarmonicBond(k=100_000.0u"kJ * mol^-1 * nm^-2", r0=0.6u"nm")
 
 SUITE["interactions"]["LennardJones force" ] = @benchmarkable force($(LennardJones()), $(dr), $(c1), $(c2), $(a1), $(a1), $(boundary))
 SUITE["interactions"]["LennardJones energy"] = @benchmarkable potential_energy($(LennardJones()), $(dr), $(c1), $(c2), $(a1), $(a1), $(boundary))
@@ -70,36 +70,46 @@ function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu:
     atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
     boundary = f32 ? CubicBoundary(6.0f0u"nm", 6.0f0u"nm", 6.0f0u"nm") : CubicBoundary(6.0u"nm", 6.0u"nm", 6.0u"nm")
     simulator = VelocityVerlet(dt=f32 ? 0.02f0u"ps" : 0.02u"ps")
-    b0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
-    kb = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
-    bonds = [HarmonicBond(b0=b0, kb=kb) for i in 1:(n_atoms ÷ 2)]
-    specific_inter_lists = (InteractionList2Atoms(collect(1:2:n_atoms), collect(2:2:n_atoms),
-                            repeat([""], length(bonds)), gpu ? cu(bonds) : bonds),)
+    k = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
+    r0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
+    bonds = [HarmonicBond(k=k, r0=r0) for i in 1:(n_atoms ÷ 2)]
+    specific_inter_lists = (
+        InteractionList2Atoms(collect(1:2:n_atoms),
+        collect(2:2:n_atoms),
+        repeat([""], length(bonds)),
+        gpu ? CuArray(bonds) : bonds,
+    ),)
 
     neighbor_finder = NoNeighborFinder()
     cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
     pairwise_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
     if nl
         if gpu_diff_safe
-            neighbor_finder = DistanceVecNeighborFinder(nb_matrix=gpu ? cu(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
-                                                        n_steps=10, dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm")
+            neighbor_finder = DistanceVecNeighborFinder(
+                nb_matrix=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+                n_steps=10,
+                dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+            )
         else
-            neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,
-                                                        dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm")
+            neighbor_finder = DistanceNeighborFinder(
+                nb_matrix=trues(n_atoms, n_atoms),
+                n_steps=10,
+                dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+            )
         end
         pairwise_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
     end
 
     if gpu
-        coords = cu(deepcopy(f32 ? starting_coords_f32 : starting_coords))
-        velocities = cu(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-        atoms = cu([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                            ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
+        coords = CuArray(deepcopy(f32 ? starting_coords_f32 : starting_coords))
+        velocities = CuArray(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
+        atoms = CuArray([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+                              ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
     else
         coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
         velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
         atoms = [Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                        ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
+                      ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
     end
 
 

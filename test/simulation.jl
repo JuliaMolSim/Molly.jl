@@ -224,7 +224,7 @@ end
         collect(1:(n_atoms ÷ 2)),
         collect((1 + n_atoms ÷ 2):n_atoms),
         repeat([""], n_atoms ÷ 2),
-        [HarmonicBond(b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)],
+        [HarmonicBond(k=300_000.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm") for i in 1:(n_atoms ÷ 2)],
     )
     nb_matrix = trues(n_atoms, n_atoms)
     for i in 1:(n_atoms ÷ 2)
@@ -254,9 +254,13 @@ end
     @time simulate!(s, simulator, n_steps; n_threads=1)
 
     if run_visualize_tests
-        visualize(s.loggers.coords, boundary, temp_fp_viz;
-                    connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
-                    trails=2)
+        visualize(
+            s.loggers.coords,
+            boundary,
+            temp_fp_viz;
+            connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
+            trails=2,
+        )
     end
 end
 
@@ -378,6 +382,40 @@ end
     @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
 end
 
+@testset "Position restraints" begin
+    gpu_list = run_gpu_tests ? (false, true) : (false,)
+    for gpu in gpu_list
+        n_atoms = 10
+        n_atoms_res = n_atoms ÷ 2
+        n_steps = 2_000
+        boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+        starting_coords = place_atoms(n_atoms, boundary, 0.3u"nm")
+        atoms = [Atom(charge=0.0, mass=10.0u"u", σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+        atoms_data = [AtomData(atom_type=(i <= n_atoms_res ? "A1" : "A2")) for i in 1:n_atoms]
+        sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+
+        sys = System(
+            atoms=gpu ? CuArray(atoms) : atoms,
+            atoms_data=atoms_data,
+            pairwise_inters=(LennardJones(),),
+            coords=gpu ? CuArray(deepcopy(starting_coords)) : deepcopy(starting_coords),
+            boundary=boundary,
+            loggers=(coords=CoordinateLogger(100),),
+        )
+
+        atom_selector(at, at_data) = at_data.atom_type == "A1"
+
+        sys_res = add_position_restraints(sys, 100_000.0u"kJ * mol^-1 * nm^-2";
+                                          atom_selector=atom_selector)
+
+        @time simulate!(sys_res, sim, n_steps)
+
+        dists = norm.(vector.(starting_coords, Array(sys_res.coords), (boundary,)))
+        @test maximum(dists[1:n_atoms_res]) < 0.1u"nm"
+        @test median(dists[(n_atoms_res + 1):end]) > 0.2u"nm"
+    end
+end
+
 @testset "Langevin splitting" begin
     n_atoms = 400
     n_steps = 2000
@@ -402,7 +440,7 @@ end
     rseed = 2022
     simulator1 = Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1")
     simulator2 = LangevinSplitting(dt=0.002u"ps", temperature=temp,
-                                    friction=10.0u"u * ps^-1", splitting="BAOA")
+                                   friction=10.0u"u * ps^-1", splitting="BAOA")
 
     @time simulate!(s1, simulator1, n_steps; rng=MersenneTwister(rseed))
     @test 280.0u"K" <= mean(s1.loggers.temp.history[(end - 100):end]) <= 320.0u"K"
@@ -429,11 +467,15 @@ end
         atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
         boundary = f32 ? CubicBoundary(6.0f0u"nm", 6.0f0u"nm", 6.0f0u"nm") : CubicBoundary(6.0u"nm", 6.0u"nm", 6.0u"nm")
         simulator = VelocityVerlet(dt=f32 ? 0.02f0u"ps" : 0.02u"ps")
-        b0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
-        kb = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
-        bonds = [HarmonicBond(b0=b0, kb=kb) for i in 1:(n_atoms ÷ 2)]
-        specific_inter_lists = (InteractionList2Atoms(collect(1:2:n_atoms), collect(2:2:n_atoms),
-                                repeat([""], length(bonds)), gpu ? cu(bonds) : bonds),)
+        k = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
+        r0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
+        bonds = [HarmonicBond(k=k, r0=r0) for i in 1:(n_atoms ÷ 2)]
+        specific_inter_lists = (
+            InteractionList2Atoms(collect(1:2:n_atoms),
+            collect(2:2:n_atoms),
+            repeat([""], length(bonds)),
+            gpu ? CuArray(bonds) : bonds,
+        ),)
 
         neighbor_finder = NoNeighborFinder()
         cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
@@ -441,7 +483,7 @@ end
         if nl
             if gpu_diff_safe
                 neighbor_finder = DistanceVecNeighborFinder(
-                    nb_matrix=gpu ? cu(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+                    nb_matrix=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
                     n_steps=10,
                     dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
                 )
@@ -457,10 +499,10 @@ end
         show(devnull, neighbor_finder)
 
         if gpu
-            coords = cu(deepcopy(f32 ? starting_coords_f32 : starting_coords))
-            velocities = cu(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-            atoms = cu([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                                ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
+            coords = CuArray(deepcopy(f32 ? starting_coords_f32 : starting_coords))
+            velocities = CuArray(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
+            atoms = CuArray([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+                                  ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
         else
             coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
             velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
