@@ -68,7 +68,7 @@ simulate!(sys, simulator, 1_000)
 `atoms`, `coords` and `boundary` are the minimum required properties to define a [`System`](@ref), though you would generally want to add interactions to a [`System`](@ref) to do something useful with it.
 
 [`System`](@ref) implements the `AbstractSystem` [interface from AtomsBase.jl](https://juliamolsim.github.io/AtomsBase.jl/stable).
-The functions [`masses`](@ref), [`is_gpu_diff_safe`](@ref) and [`float_type`](@ref) can be used on a [`System`](@ref).
+The functions [`masses`](@ref), [`is_gpu_diff_safe`](@ref), [`is_on_gpu`](@ref) and [`float_type`](@ref) can be used on a [`System`](@ref).
 
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this behaviour can be changed by giving the keyword argument `n_threads` to [`simulate!`](@ref).
 For example, `n_threads=1` uses no parallelization.
@@ -96,9 +96,9 @@ n_atoms = 100
 atom_mass = 10.0f0u"u"
 boundary = CubicBoundary(2.0f0u"nm", 2.0f0u"nm", 2.0f0u"nm")
 temp = 100.0f0u"K"
-atoms = cu([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
-coords = cu(place_atoms(n_atoms, boundary, 0.3u"nm"))
-velocities = cu([velocity(atom_mass, temp) for i in 1:n_atoms])
+atoms = CuArray([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
+coords = CuArray(place_atoms(n_atoms, boundary, 0.3u"nm"))
+velocities = CuArray([velocity(atom_mass, temp) for i in 1:n_atoms])
 simulator = VelocityVerlet(dt=0.002f0u"ps")
 
 sys = System(
@@ -134,7 +134,7 @@ bonds = InteractionList2Atoms(
     collect(1:(n_atoms ÷ 2)),           # First atom indices
     collect((1 + n_atoms ÷ 2):n_atoms), # Second atom indices
     repeat([""], n_atoms ÷ 2),          # Bond types
-    [HarmonicBond(b0=0.1u"nm", kb=300_000.0u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)],
+    [HarmonicBond(k=300_000.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm") for i in 1:(n_atoms ÷ 2)],
 )
 
 specific_inter_lists = (bonds,)
@@ -273,8 +273,8 @@ sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
     loggers=(
-        temp = TemperatureLogger(10),
-        writer = StructureWriter(10, "traj_5XER_1ps.pdb"),
+        temp=TemperatureLogger(10),
+        writer=StructureWriter(10, "traj_5XER_1ps.pdb"),
     ),
 )
 
@@ -287,6 +287,15 @@ simulator = Verlet(
 
 simulate!(sys, simulator, 5_000)
 ```
+Harmonic position restraints can be added to a [`System`](@ref) for equilibration using [`add_position_restraints`](@ref):
+```julia
+sys_res = add_position_restraints(
+    sys,
+    100_000.0u"kJ * mol^-1 * nm^-2";
+    atom_selector=is_heavy_atom,
+)
+```
+
 The OpenMM setup procedure is tested against OpenMM in terms of matching forces and energies.
 However it is not thoroughly tested with respect to ligands or special residues and requires that atom names exactly match residue templates.
 The Gromacs setup procedure should be considered experimental.
@@ -450,13 +459,14 @@ The available pairwise interactions are:
 - [`Gravity`](@ref)
 
 The available specific interactions are:
-- [`HarmonicBond`](@ref)
-- [`MorseBond`](@ref)
-- [`FENEBond`](@ref)
-- [`HarmonicAngle`](@ref)
-- [`CosineAngle`](@ref)
-- [`PeriodicTorsion`](@ref)
-- [`RBTorsion`](@ref)
+- [`HarmonicPositionRestraint`](@ref) - 1 atom
+- [`HarmonicBond`](@ref) - 2 atoms
+- [`MorseBond`](@ref) - 2 atoms
+- [`FENEBond`](@ref) - 2 atoms
+- [`HarmonicAngle`](@ref) - 3 atoms
+- [`CosineAngle`](@ref) - 3 atoms
+- [`PeriodicTorsion`](@ref) - 4 atoms
+- [`RBTorsion`](@ref) - 4 atoms
 
 The available general interactions are:
 - [`ImplicitSolventOBC`](@ref)
@@ -524,7 +534,7 @@ struct MySpecificInter <: SpecificInteraction
 end
 ```
 Next, you need to define the [`force`](@ref) function.
-The form of this will depend whether the interaction involves 2, 3 or 4 atoms.
+The form of this will depend whether the interaction applies forces to 1, 2, 3 or 4 atoms.
 For example in the 2 atom case:
 ```julia
 function Molly.force(inter::MySpecificInter, coords_i, coords_j, boundary)
@@ -875,7 +885,7 @@ velocities = [velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms]
 # Interaction potentials
 pairwise_inters = (SoftSphere(nl_only=true, cutoff=DistanceCutoff(0.6u"nm")),)
 
-bonds = [HarmonicBond(b0=0.2u"nm", kb=10000u"kJ * mol^-1 * nm^-2") for i in 1:(n_atoms ÷ 2)]
+bonds = [HarmonicBond(k=10000u"kJ * mol^-1 * nm^-2", r0=0.2u"nm") for i in 1:(n_atoms ÷ 2)]
 specific_inter_lists = (InteractionList2Atoms(
     collect(1:2:n_atoms),
     collect(2:2:n_atoms),

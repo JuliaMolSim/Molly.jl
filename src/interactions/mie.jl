@@ -1,10 +1,18 @@
 export Mie
 
-"""
+@doc raw"""
     Mie(; m, n, cutoff, nl_only, lorentz_mixing, force_units, energy_units, skip_shortcut)
 
-The Mie generalized interaction.
+The Mie generalized interaction between two atoms.
 When `m` equals 6 and `n` equals 12 this is equivalent to the Lennard-Jones interaction.
+The potential energy is defined as
+```math
+V(r_{ij}) = C \varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^n - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^m\right]
+```
+where
+```math
+C = \frac{n}{n - m} \left( \frac{n}{m} \right) ^\frac{m}{n - m}
+```
 """
 struct Mie{S, C, T, F, E} <: PairwiseInteraction
     m::T
@@ -53,7 +61,6 @@ end
     cutoff = inter.cutoff
     m = inter.m
     n = inter.n
-    # Derivative obtained via wolfram
     const_mn = inter.mn_fac * ϵ
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)

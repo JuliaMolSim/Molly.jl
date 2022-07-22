@@ -22,7 +22,7 @@ struct NoNeighborFinder <: AbstractNeighborFinder end
     find_neighbors(system, neighbor_finder, current_neighbors=nothing,
                     step_n=0; n_threads = Threads.nthreads())
 
-Obtain a list of close atoms in a system.
+Obtain a list of close atoms in a [`System`](@ref).
 Custom neighbor finders should implement this function.
 """
 find_neighbors(s::System; kwargs...) = find_neighbors(s, s.neighbor_finder; kwargs...)
@@ -95,7 +95,7 @@ end
 """
     DistanceVecNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff)
 
-Find close atoms by distance in a GPU and differentiable safe manner.
+Find close atoms by distance in a GPU and Zygote compatible manner.
 """
 struct DistanceVecNeighborFinder{D, B, I} <: AbstractNeighborFinder
     nb_matrix::B
@@ -113,9 +113,9 @@ function DistanceVecNeighborFinder(;
                                 dist_cutoff)
     n_atoms = size(nb_matrix, 1)
     if isa(nb_matrix, CuArray)
-        is = cu(hcat([collect(1:n_atoms) for i in 1:n_atoms]...))
-        js = cu(permutedims(is, (2, 1)))
-        m14 = cu(matrix_14)
+        is = CuArray(hcat([collect(1:n_atoms) for i in 1:n_atoms]...))
+        js = CuArray(permutedims(is, (2, 1)))
+        m14 = CuArray(matrix_14)
     else
         is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
         js = permutedims(is, (2, 1))

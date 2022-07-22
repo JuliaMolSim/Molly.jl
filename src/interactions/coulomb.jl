@@ -1,9 +1,13 @@
 export Coulomb
 
-"""
+@doc raw"""
     Coulomb(; cutoff, nl_only, weight_14, coulomb_const, force_units, energy_units)
 
-The Coulomb electrostatic interaction.
+The Coulomb electrostatic interaction between two atoms.
+The potential energy is defined as
+```math
+V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}}
+```
 """
 struct Coulomb{C, W, T, F, E} <: PairwiseInteraction
     cutoff::C

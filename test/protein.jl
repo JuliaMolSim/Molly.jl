@@ -164,7 +164,7 @@ end
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
-            velocities=cu(deepcopy(velocities_start)),
+            velocities=CuArray(deepcopy(velocities_start)),
             gpu=true,
             centre_coords=false,
         )
@@ -184,7 +184,7 @@ end
         sys_nounits = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff_nounits;
-            velocities=cu(deepcopy(ustrip_vec.(velocities_start))),
+            velocities=CuArray(deepcopy(ustrip_vec.(velocities_start))),
             units=false,
             gpu=true,
             centre_coords=false,

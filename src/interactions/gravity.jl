@@ -1,9 +1,13 @@
 export Gravity
 
-"""
+@doc raw"""
     Gravity(; G, nl_only)
 
-The gravitational interaction.
+The gravitational interaction between two atoms.
+The potential energy is defined as
+```math
+V(r_{ij}) = -\frac{G m_i m_j}{r_{ij}}
+```
 """
 struct Gravity{T} <: PairwiseInteraction
     G::T

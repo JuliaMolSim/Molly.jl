@@ -71,8 +71,8 @@ function visualize(coord_logger,
     end
     for (ci, cn) in enumerate(connection_nodes)
         lines!(ax, cn,
-                color=isa(connection_color, Array) ? connection_color[ci] : connection_color,
-                linewidth=isa(linewidth, Array) ? linewidth[ci] : linewidth,
+                color=isa(connection_color, AbstractArray) ? connection_color[ci] : connection_color,
+                linewidth=isa(linewidth, AbstractArray) ? linewidth[ci] : linewidth,
                 transparency=transparency)
     end
 

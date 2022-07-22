@@ -1,10 +1,10 @@
 # Types
 
 export
-    Interaction,
     PairwiseInteraction,
     SpecificInteraction,
     AbstractNeighborFinder,
+    InteractionList1Atoms,
     InteractionList2Atoms,
     InteractionList3Atoms,
     InteractionList4Atoms,
@@ -18,24 +18,22 @@ export
     ReplicaSystem,
     is_gpu_diff_safe,
     float_type,
+    is_on_gpu,
     masses
 
 const DefaultFloat = Float64
-
-"An interaction between atoms that contributes to forces on the atoms."
-abstract type Interaction end
 
 """
 A pairwise interaction that will apply to all or most atom pairs.
 Custom pairwise interactions should sub-type this type.
 """
-abstract type PairwiseInteraction <: Interaction end
+abstract type PairwiseInteraction end
 
 """
 A specific interaction between sets of specific atoms, e.g. a bond angle.
 Custom specific interactions should sub-type this type.
 """
-abstract type SpecificInteraction <: Interaction end
+abstract type SpecificInteraction end
 
 """
 A way to find near atoms to save on simulation time.
@@ -44,10 +42,22 @@ Custom neighbor finders should sub-type this type.
 abstract type AbstractNeighborFinder end
 
 """
+    InteractionList1Atoms(is, types, inters)
+    InteractionList1Atoms(inter_type)
+
+A list of specific interactions that give a force on one atom such as position restraints.
+"""
+struct InteractionList1Atoms{T}
+    is::Vector{Int}
+    types::Vector{String}
+    inters::T
+end
+
+"""
     InteractionList2Atoms(is, js, types, inters)
     InteractionList2Atoms(inter_type)
 
-A list of specific interactions between two atoms.
+A list of specific interactions that give forces on two atoms such as bond potentials.
 """
 struct InteractionList2Atoms{T}
     is::Vector{Int}
@@ -60,7 +70,7 @@ end
     InteractionList3Atoms(is, js, ks, types, inters)
     InteractionList3Atoms(inter_type)
 
-A list of specific interactions between three atoms.
+A list of specific interactions that give forces on three atoms such as bond angle potentials.
 """
 struct InteractionList3Atoms{T}
     is::Vector{Int}
@@ -74,7 +84,7 @@ end
     InteractionList4Atoms(is, js, ks, ls, types, inters)
     InteractionList4Atoms(inter_type)
 
-A list of specific interactions between four atoms.
+A list of specific interactions that give forces on four atoms such as torsion potentials.
 """
 struct InteractionList4Atoms{T}
     is::Vector{Int}
@@ -85,10 +95,12 @@ struct InteractionList4Atoms{T}
     inters::T
 end
 
+InteractionList1Atoms(T) = InteractionList1Atoms{Vector{T}}([], [], T[])
 InteractionList2Atoms(T) = InteractionList2Atoms{Vector{T}}([], [], [], T[])
 InteractionList3Atoms(T) = InteractionList3Atoms{Vector{T}}([], [], [], [], T[])
 InteractionList4Atoms(T) = InteractionList4Atoms{Vector{T}}([], [], [], [], [], T[])
 
+interaction_type(::InteractionList1Atoms{T}) where {T} = eltype(T)
 interaction_type(::InteractionList2Atoms{T}) where {T} = eltype(T)
 interaction_type(::InteractionList3Atoms{T}) where {T} = eltype(T)
 interaction_type(::InteractionList4Atoms{T}) where {T} = eltype(T)
@@ -132,14 +144,14 @@ end
 """
     charge(atom)
 
-The partial charge of an atom.
+The partial charge of an [`Atom`](@ref).
 """
 charge(atom::Atom) = atom.charge
 
 """
     mass(atom)
 
-The mass of an atom.
+The mass of an [`Atom`](@ref).
 """
 mass(atom::Atom) = atom.mass
 
@@ -152,7 +164,7 @@ end
     AtomData(atom_type, atom_name, res_number, res_name)
 
 Data associated with an atom.
-Storing this separately allows the atom types to be bits types and hence
+Storing this separately allows the [`Atom`](@ref) types to be bits types and hence
 work on the GPU.
 """
 struct AtomData
@@ -274,7 +286,7 @@ interface described there.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
-mutable struct System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
+mutable struct System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     pairwise_inters::PI
@@ -308,6 +320,7 @@ function System(;
     D = n_dimensions(boundary)
     G = gpu_diff_safe
     T = float_type(boundary)
+    CU = isa(coords, CuArray)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     PI = typeof(pairwise_inters)
@@ -331,6 +344,29 @@ function System(;
     end
     V = typeof(vels)
 
+    if length(atoms) != length(coords)
+        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(coords)) coordinates"))
+    end
+    if length(atoms) != length(vels)
+        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(vels)) velocities"))
+    end
+    if length(atoms_data) > 0 && length(atoms) != length(atoms_data)
+        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
+    end
+
+    if isa(atoms, CuArray) && !isa(coords, CuArray)
+        throw(ArgumentError("The atoms are on the GPU but the coordinates are not"))
+    end
+    if isa(coords, CuArray) && !isa(atoms, CuArray)
+        throw(ArgumentError("The coordinates are on the GPU but the atoms are not"))
+    end
+    if isa(atoms, CuArray) && !isa(vels, CuArray)
+        throw(ArgumentError("The atoms are on the GPU but the velocities are not"))
+    end
+    if isa(vels, CuArray) && !isa(atoms, CuArray)
+        throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
+    end
+
     if energy_units == NoUnits
         if unit(k) == NoUnits
             # Use user-supplied unitless Boltzmann constant
@@ -346,7 +382,7 @@ function System(;
     end
     K = typeof(k_converted)
 
-    return System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
+    return System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
                     atoms, atoms_data, pairwise_inters, specific_inter_lists,
                     general_inters, coords, vels, boundary, neighbor_finder,
                     loggers, force_units, energy_units, k_converted)
@@ -449,11 +485,22 @@ The float type a [`System`](@ref) or bounding box uses.
 float_type(::Union{System{D, G, T}, ReplicaSystem{D, G, T}}) where {D, G, T} = T
 
 """
+    is_on_gpu(sys)
+
+Whether a [`System`](@ref) is on the GPU.
+"""
+is_on_gpu(::System{D, G, T, CU}) where {D, G, T, CU} = CU
+
+"""
     masses(sys)
 
 The masses of the atoms in a [`System`](@ref).
 """
 masses(s::System) = mass.(s.atoms)
+
+# Move an array to the GPU depending on whether the system is on the GPU
+move_array(arr, ::System{D, G, T, false}) where {D, G, T} = arr
+move_array(arr, ::System{D, G, T, true }) where {D, G, T} = CuArray(arr)
 
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = eltype(s.atoms)
 

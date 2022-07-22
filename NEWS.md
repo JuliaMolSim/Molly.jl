@@ -1,5 +1,20 @@
 # Molly.jl release notes
 
+## v0.12.0 - Jul 2022
+
+- The `parallel` keyword argument is renamed to `n_threads` throughout, allowing an exact number of threads to be specified with the default remaining `Threads.nthreads()`.
+- Arguments for bonded interactions are made more consistent: `HarmonicBond` has `kb` renamed to `k` and `b0` to `r0`, `HarmonicAngle` has `cth` renamed to `k` and `th0` to `θ0`, and `MorseBond` has `α` renamed to `a`.
+- An additional type parameter is added to `System` that records whether it is on the GPU. The `is_on_gpu` function is added to access this property.
+- The `Interaction` abstract type is removed.
+- The `HarmonicPositionRestraint` interaction for restraining atomic positions, commonly used during equilibration of biomolecular systems, is added. `InteractionList1Atoms` and `SpecificForce1Atoms` are added to allow the definition of interactions that apply a force to one atom. The `add_position_restraints` function is added to apply position restraints to a `System`, along with the atom selector functions `is_any_atom` and `is_heavy_atom`.
+- The `CosineAngle` interaction for the cosine bond angle between three atoms is added.
+- The `FENEBond` interaction for the finitely extensible non-linear elastic (FENE) bond between two atoms is added.
+- The `masses` function to access the mass of each atom in a `System` is added.
+- `AndersenThermostat` is made differentiable.
+- `DistanceNeighborFinder` and `TreeNeighborFinder` now use FLoops.jl and show improved performance on multiple threads.
+- Inconsistent `System` setup now throws an error.
+- Equations are added to some docstrings.
+
 ## v0.11.0 - Jun 2022
 
 - `box_size` is renamed to `boundary` throughout. Boundaries of the form `SVector(1.0, 2.0, 3.0)` should be replaced by `CubicBoundary(1.0, 2.0, 3.0)`, allowing non-cubic boundaries to be added in future. Setting one or more values to `Inf` gives no boundary in that dimension. `RectangularBoundary` should be used for 2D simulations. `float_type`, `box_volume` and `AtomsBase.n_dimensions` are defined for boundaries.

@@ -9,7 +9,8 @@ export
 """
     total_energy(s, neighbors=nothing)
 
-Calculate the total energy of the system.
+Calculate the total energy of the system as the sum of the [`kinetic_energy`](@ref)
+and the [`potential_energy`](@ref).
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 Not currently compatible with automatic differentiation using Zygote.
@@ -158,6 +159,10 @@ function potential_energy(s::System{D, true, T}, neighbors=nothing) where {D, T}
     end
 
     return uconvert(s.energy_units, potential)
+end
+
+@views function potential_energy(inter_list::InteractionList1Atoms, coords, boundary)
+    return sum(potential_energy.(inter_list.inters, coords[inter_list.is], (boundary,)))
 end
 
 @views function potential_energy(inter_list::InteractionList2Atoms, coords, boundary)

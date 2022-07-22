@@ -161,8 +161,8 @@ struct BondableInteraction <: PairwiseInteraction
     prob_formation::Float64
     prob_break::Float64
     dist_formation::Float64
-    b0::Float64
-    kb::Float64
+    k::Float64
+    r0::Float64
 end
 
 function Molly.force(inter::BondableInteraction,
@@ -179,13 +179,13 @@ function Molly.force(inter::BondableInteraction,
     end
     # Make bonds between close atoms randomly
     r2 = sum(abs2, dr)
-    if r2 < inter.b0 * inter.dist_formation && rand() < inter.prob_formation
+    if r2 < inter.r0 * inter.dist_formation && rand() < inter.prob_formation
         push!(atom_i.partners, atom_j.i)
         push!(atom_j.partners, atom_i.i)
     end
     # Apply the force of a harmonic bond
     if atom_j.i in atom_i.partners
-        c = inter.kb * (norm(dr) - inter.b0)
+        c = inter.k * (norm(dr) - inter.r0)
         fdr = -c * normalize(dr)
         return fdr
     else
@@ -215,7 +215,7 @@ coords = place_atoms(n_atoms, boundary, 0.1)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
     SoftSphere(nl_only=true),
-    BondableInteraction(true, 0.1, 0.1, 1.1, 0.1, 2.0),
+    BondableInteraction(true, 0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(
     nb_matrix=trues(n_atoms, n_atoms),
@@ -317,7 +317,7 @@ save("force_comparison.png", f)
 
 ## Variations of the Morse potential
 
-The Morse potential for bonds has a parameter *α* that determines the width of the potential.
+The Morse potential for bonds has a parameter *a* that determines the width of the potential.
 It can also be compared to the harmonic bond potential.
 ```julia
 using Molly
@@ -344,15 +344,15 @@ ax = Axis(
 lines!(
     ax,
     dists,
-    energies(HarmonicBond(b0=0.2, kb=20_000.0)),
+    energies(HarmonicBond(k=20_000.0, r0=0.2)),
     label="Harmonic",
 )
-for α in [2.5, 5.0, 10.0]
+for a in [2.5, 5.0, 10.0]
     lines!(
         ax,
         dists,
-        energies(MorseBond(D=100.0, α=α, r0=0.2)),
-        label="Morse α=$α nm^-1",
+        energies(MorseBond(D=100.0, a=a, r0=0.2)),
+        label="Morse a=$a nm^-1",
     )
 end
 ylims!(ax, 0.0, 120.0)
