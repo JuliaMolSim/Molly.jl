@@ -388,8 +388,49 @@ function System(;
                     loggers, force_units, energy_units, k_converted)
 end
 
-# A system to be simulated using replica exchage
-mutable struct ReplicaSystem{D, G, T, A, AD, PI, SI, GI, RS, B, NF, RL, F, E, K} <: AbstractSystem{D}
+"""
+    ReplicaSystem(; <keyword arguments>)
+
+A wrapper for replicas in a replica exchange simulation. Each individual replica 
+is a [`System`](@ref). Properties unused in the simulation or in analysis can be 
+left with their default values.
+`atoms`, `atoms_data`, `coords` and `velocities` should have the same length. 
+Number of loggers in `replica_loggers` should be equal to `n_replicas`.
+
+# Arguments
+- `atoms::A`: the atoms, or atom equivalents, in the system. Can be
+    of any type but should be a bits type if the GPU is used.
+- `atoms_data::AD`: other data associated with the atoms, allowing the atoms to
+    be bits types and hence work on the GPU.
+- `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
+    interactions between all or most atom pairs such as electrostatics.
+    Typically a `Tuple`.
+- `specific_inter_lists::SI=()`: the specific interactions in the system,
+    i.e. interactions between specific atoms such as bonds or angles. Typically
+    a `Tuple`.
+- `general_inters::GI=()`: the general interactions in the system,
+    i.e. interactions involving all atoms such as implicit solvent. Typically
+    a `Tuple`.
+- `n_replicas::Int`: the number of replicas of the system.
+- `coords::C`: the coordinates of the atoms in the system. Typically a
+    vector of `SVector`s of 2 or 3 dimensions.
+- `velocities::V=zero(coords) * u"ps^-1"`: the velocities of the atoms in the
+    system.
+- `boundary::B`: the bounding box in which the simulation takes place.
+- `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
+    close atoms and save on computation.
+- `replica_loggers::RL=Tuple(() for i=1:n_replicas)`: the loggers for each replica 
+    that record properties of interest during a simulation.
+- `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
+    Should be set to `NoUnits` if units are not being used.
+- `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
+    be set to `NoUnits` if units are not being used.
+- `k::K=Unitful.k`: the Boltzmann constant, which may be modified in some
+    simulations.
+- `gpu_diff_safe::Bool`: whether to use the code path suitable for the
+    GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
+"""
+mutable struct ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, NF, RL, F, E, K} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     pairwise_inters::PI
@@ -399,7 +440,7 @@ mutable struct ReplicaSystem{D, G, T, A, AD, PI, SI, GI, RS, B, NF, RL, F, E, K}
     replicas::RS
     boundary::B
     neighbor_finder::NF
-    loggers::RL
+    replica_loggers::RL
     force_units::F
     energy_units::E
     k::K
@@ -412,31 +453,68 @@ function ReplicaSystem(;
                 specific_inter_lists=(),
                 general_inters=(),
                 coords,
-                velocities=zero(coords) * u"ps^-1",
+                velocities=nothing,
                 n_replicas,
                 boundary,
                 neighbor_finder=NoNeighborFinder(),
-                loggers=Tuple(() for i=1:n_replicas),
+                replica_loggers=Tuple(() for i=1:n_replicas),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=Unitful.k,
                 gpu_diff_safe=isa(coords, CuArray))
     D = n_dimensions(boundary)
     G = gpu_diff_safe
-    T = float_type(boundary)
+    T = Molly.float_type(boundary)
+    CU = isa(coords, CuArray)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
     C = typeof(coords)
-    V = typeof(velocities)
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
-    L = eltype(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
-    RL = typeof(loggers)
+    RL = typeof(replica_loggers)
+
+    if isnothing(velocities)
+        if force_units == NoUnits
+            vels = zero(coords)
+        else
+            vels = zero(coords) * u"ps^-1"
+        end
+    else
+        vels = velocities
+    end
+    V = typeof(vels)
+
+    if length(atoms) != length(coords)
+        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(coords)) coordinates"))
+    end
+    if length(atoms) != length(vels)
+        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(vels)) velocities"))
+    end
+    if length(atoms_data) > 0 && length(atoms) != length(atoms_data)
+        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
+    end
+
+    if isa(atoms, CuArray) && !isa(coords, CuArray)
+        throw(ArgumentError("The atoms are on the GPU but the coordinates are not"))
+    end
+    if isa(coords, CuArray) && !isa(atoms, CuArray)
+        throw(ArgumentError("The coordinates are on the GPU but the atoms are not"))
+    end
+    if isa(atoms, CuArray) && !isa(vels, CuArray)
+        throw(ArgumentError("The atoms are on the GPU but the velocities are not"))
+    end
+    if isa(vels, CuArray) && !isa(atoms, CuArray)
+        throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
+    end
+
+    if length(replica_loggers) != n_replicas
+        throw(ArgumentError("There are $(length(replica_loggers)) loggers but $(n_replicas) replicas"))
+    end
 
     if energy_units == NoUnits
         if unit(k) == NoUnits
@@ -454,17 +532,16 @@ function ReplicaSystem(;
     
     K = typeof(k_converted)
 
-    # TODO:  CellListNeighborFinder is mutable so can't be passed to all replicas.
-    replicas = Tuple(System{D, G, T, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
+    replicas = Tuple(System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, typeof(replica_loggers[i]), F, E, K}(
             atoms, atoms_data, pairwise_inters, specific_inter_lists,
-            general_inters, copy(coords), copy(velocities), boundary, neighbor_finder,
-            loggers[i], force_units, energy_units, k_converted) for i=1:n_replicas)
+            general_inters, copy(coords), copy(velocities), boundary, deepcopy(neighbor_finder),
+            replica_loggers[i], force_units, energy_units, k_converted) for i=1:n_replicas)
     RS = typeof(replicas)
 
-    return ReplicaSystem{D, G, T, A, AD, PI, SI, GI, RS, B, NF, RL, F, E, K}(
+    return ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, NF, RL, F, E, K}(
             atoms, atoms_data, pairwise_inters, specific_inter_lists,
-            general_inters, n_replicas, replicas, boundary, neighbor_finder,
-            loggers, force_units, energy_units, k_converted)
+            general_inters, n_replicas, replicas, boundary, neighbor_finder, 
+            replica_loggers, force_units, energy_units, k_converted)
 end
 
 
