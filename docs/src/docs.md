@@ -582,6 +582,7 @@ end
 ```
 The neighbors calculated from the neighbor list are available in this function, but may or may not be used depending on context.
 You could carry out your own neighbor finding in this function if required.
+Note that this function calculates forces not accelerations; if you have a neural network that calculates accelerations you should multiply these by `masses(sys)` to get the forces according to F=ma.
 A [`potential_energy`](@ref) function that takes the same arguments and returns a single value can also be defined.
 To use your custom force in a simulation, add it to the list of general interactions:
 ```julia

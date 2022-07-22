@@ -70,6 +70,7 @@ Base.broadcastable(b::Union{CubicBoundary, RectangularBoundary}) = b.side_length
 Triclinic 3D bounding box defined by 3 basis vectors.
 An approximation is used to find the closest periodic image when using the
 minimum image convention.
+Not currently compatible with infinite boundaries.
 """
 struct TriclinicBoundary{T, D, I}
     basis_vectors::SVector{3, SVector{3, D}}

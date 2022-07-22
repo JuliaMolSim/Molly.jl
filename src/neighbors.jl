@@ -386,7 +386,7 @@ function find_neighbors(s::System,
         neighbors, box, cl;
         reduce=reduce_pairs,
         output_threaded=neighbors_threaded,
-        parallel=parallel
+        parallel=parallel,
     )
 
     nf.cl = cl

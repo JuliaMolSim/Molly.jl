@@ -15,7 +15,7 @@ At the minute the package is a proof of concept for MD in Julia.
 **It is not production ready**, though it can do some cool things and is under active development.
 Implemented features include:
 - Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential.
-- Bonded interactions - harmonic and Morse bonds, bond angles, torsion angles.
+- Bonded interactions - harmonic and Morse bonds, bond angles, torsion angles, harmonic position restraints.
 - Interface to allow definition of new interactions, simulators, thermostats, neighbor finders, loggers etc.
 - Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also some support for Gromacs files.
 - Andersen, Berendsen and velocity rescaling thermostats.
