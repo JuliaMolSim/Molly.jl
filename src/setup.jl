@@ -23,11 +23,9 @@ which to stop placing atoms.
 Can not be used if one or more dimensions has infinite boundaries.
 """
 function place_atoms(n_atoms::Integer, boundary, min_dist; max_attempts::Integer=100)
-    dims = n_dimensions(boundary)
-    # not floor(x / min_dist) + 1 due to periodic boundary conditions
     max_atoms = prod(x -> floor(x / min_dist), boundary.side_lengths)
     if n_atoms > max_atoms
-        error("Box size of $boundary too small for $n_atoms atoms with minimum distance of $min_dist")
+        throw(ArgumentError("Boundary $boundary too small for $n_atoms atoms with minimum distance $min_dist"))
     end
     min_dist_sq = min_dist ^ 2
     coords = SArray[]
@@ -46,42 +44,61 @@ function place_atoms(n_atoms::Integer, boundary, min_dist; max_attempts::Integer
             push!(coords, new_coord)
             failed_attempts = 0
         elseif failed_attempts > max_attempts
-            error("Failed to place $(length(coords) + 1)th atom after $max_attempts (max_attempts) tries.")
+            error("Failed to place atom $(length(coords) + 1) after $max_attempts (max_attempts) tries")
         end
     end
     return [coords...]
 end
 
 """
-    place_diatomics(n_molecules, boundary, min_dist, bond_length)
+    place_diatomics(n_molecules, boundary, min_dist, bond_length; max_attempts=100, aligned=false)
 
 Obtain coordinates for `n_molecules` diatomics in bounding box `boundary`
 where no two points are closer than `min_dist` and the bond length is `bond_length`,
 accounting for periodic boundary conditions.
+The keyword argument `max_attempts` determines the number of failed tries after
+which to stop placing atoms.
+The keyword argument `aligned` determines whether the bonds all point the same direction
+(`true`) or random directions (`false`).
 Can not be used if one or more dimensions has infinite boundaries.
 """
-function place_diatomics(n_molecules::Integer, boundary, min_dist, bond_length)
+function place_diatomics(n_molecules::Integer, boundary, min_dist, bond_length;
+                         max_attempts::Integer=100, aligned::Bool=false)
+    max_atoms = prod(x -> floor(x / (min_dist + bond_length)), boundary.side_lengths)
+    if n_atoms > max_atoms
+        throw(ArgumentError("Boundary $boundary too small for $n_atoms atoms with minimum distance $min_dist"))
+    end
     dims = n_dimensions(boundary)
     min_dist_sq = min_dist ^ 2
     coords = SArray[]
+    failed_attempts = 0
     while length(coords) < (n_molecules * 2)
         new_coord_a = rand_coord(boundary)
-        shift = SVector{dims}([bond_length, [zero(bond_length) for d in 1:(dims - 1)]...])
+        if aligned
+            shift = SVector{dims}([bond_length, [zero(bond_length) for d in 1:(dims - 1)]...])
+        else
+            shift = bond_length * normalize(randn(SVector{dims, typeof(ustrip(bond_length))}))
+        end
         new_coord_b = copy(new_coord_a) + shift
-        okay = new_coord_b[1] <= boundary[1]
+        okay = true
         for coord in coords
             if sum(abs2, vector(coord, new_coord_a, boundary)) < min_dist_sq ||
                     sum(abs2, vector(coord, new_coord_b, boundary)) < min_dist_sq
                 okay = false
+                failed_attempts += 1
                 break
             end
         end
         if okay
             push!(coords, new_coord_a)
             push!(coords, new_coord_b)
+            failed_attempts = 0
+        elseif failed_attempts > max_attempts
+            error("Failed to place atom $(length(coords) + 1) after $max_attempts (max_attempts) tries")
         end
     end
-    return [coords...]
+    # Second atom in each molecule may be outside boundary
+    return wrap_coords.([coords...], (boundary,))
 end
 
 """
