@@ -90,7 +90,7 @@ function visualize(coord_logger,
     end
 
     dist_unit = unit(first(first(coords_start)))
-    boundary_conv = ustrip.(dist_unit, boundary)
+    boundary_conv = ustrip.(dist_unit, cubic_bounding_box(boundary))
     xlims!(ax, axis_limits(boundary_conv, coord_logger, 1))
     ylims!(ax, axis_limits(boundary_conv, coord_logger, 2))
     dims == 3 && zlims!(ax, axis_limits(boundary_conv, coord_logger, 3))
