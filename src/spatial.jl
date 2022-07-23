@@ -54,21 +54,24 @@ Base.firstindex(b::RectangularBoundary) = b.side_lengths[1]
 Base.lastindex(b::RectangularBoundary) = b.side_lengths[2]
 
 """
-    TriclinicBoundary(v1, v2, v3)
+    TriclinicBoundary(v1, v2, v3; approx_images=true)
+    TriclinicBoundary(arr; approx_images=true)
 
 Triclinic 3D bounding box defined by 3 basis vectors.
 An approximation is used to find the closest periodic image when using the
 minimum image convention.
+Setting the keyword argument `approx_images` to `false` means the exact closest
+image is found, which is slower.
 Not currently compatible with infinite boundaries.
 """
-struct TriclinicBoundary{T, D, I}
+struct TriclinicBoundary{T, A, D, I}
     basis_vectors::SVector{3, SVector{3, D}}
     reciprocal_size::SVector{3, I}
     angles::SVector{3, T}
     cubic_bounds::SVector{3, D}
 end
 
-function TriclinicBoundary(basis_vectors::SVector{3})
+function TriclinicBoundary(basis_vectors::SVector{3}; approx_images::Bool=true)
     reciprocal_size = SVector{3}(
         inv(basis_vectors[1][1]),
         inv(basis_vectors[2][2]),
@@ -85,12 +88,12 @@ function TriclinicBoundary(basis_vectors::SVector{3})
         dy * sin(angles[1]) + dz * sin(angles[3]),
         dz * sin(angles[2]),
     )
-    return TriclinicBoundary{eltype(angles), eltype(cubic_bounds), eltype(reciprocal_size)}(
+    return TriclinicBoundary{eltype(angles), A, eltype(cubic_bounds), eltype(reciprocal_size)}(
                                 basis_vectors, reciprocal_size, angles, cubic_bounds)
 end
 
-TriclinicBoundary(v1, v2, v3) = TriclinicBoundary(SVector{3}(v1, v2, v3))
-TriclinicBoundary(arr) = TriclinicBoundary(SVector{3}(arr))
+TriclinicBoundary(v1, v2, v3; kwargs...) = TriclinicBoundary(SVector{3}(v1, v2, v3); kwargs...)
+TriclinicBoundary(arr; kwargs...) = TriclinicBoundary(SVector{3}(arr); kwargs...)
 
 Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
 Base.firstindex(b::TriclinicBoundary) = b.basis_vectors[1]
@@ -201,12 +204,31 @@ vector(c1, c2, boundary::Union{CubicBoundary, RectangularBoundary}) = vector_1D.
     end
 end
 
-function vector(c1, c2, boundary::TriclinicBoundary{T}) where T
+function vector(c1, c2, boundary::TriclinicBoundary{T, true}) where T
     dr = c2 - c1
     dx = boundary.basis_vectors[1] * floor(dr[1] * boundary.reciprocal_size[1] + T(0.5))
     dy = boundary.basis_vectors[2] * floor(dr[2] * boundary.reciprocal_size[2] + T(0.5))
     dz = boundary.basis_vectors[3] * floor(dr[3] * boundary.reciprocal_size[3] + T(0.5))
     return dr - dx - dy - dz
+end
+
+function vector(c1, c2, boundary::TriclinicBoundary{T, false}) where T
+    offsets = (-1, 0, 1)
+    min_sqdist = typemax(c1[1])
+    min_dr = zero(c1)
+    for ox in offsets, oy in offsets, oz in offsets
+        if iszero(ox) && iszero(oy) && iszero(oz)
+            continue
+        end
+        c2_offset = c2 + ox * b[1] + oy * b[2] + oz * b[3]
+        dr = c2_offset - c1
+        sqdist = dot(dr, dr)
+        if sqdist < min_sqdist
+            min_dr = dr
+            min_sqdist = sqdist
+        end
+    end
+    return min_dr
 end
 
 square_distance(i, j, coords, boundary) = sum(abs2, vector(coords[i], coords[j], boundary))
