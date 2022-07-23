@@ -36,13 +36,6 @@ Base.firstindex(b::CubicBoundary) = b.side_lengths[1]
 Base.lastindex(b::CubicBoundary) = b.side_lengths[3]
 
 """
-    n_dimensions(boundary)
-
-Number of dimensions of a bounding box.
-"""
-AtomsBase.n_dimensions(::CubicBoundary) = 3
-
-"""
     RectangularBoundary(x, y)
     RectangularBoundary(arr)
 
@@ -59,10 +52,6 @@ RectangularBoundary(arr) = RectangularBoundary(SVector{2}(arr))
 Base.getindex(b::RectangularBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::RectangularBoundary) = b.side_lengths[1]
 Base.lastindex(b::RectangularBoundary) = b.side_lengths[2]
-
-AtomsBase.n_dimensions(::RectangularBoundary) = 2
-
-Base.broadcastable(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 
 """
     TriclinicBoundary(v1, v2, v3)
@@ -107,10 +96,42 @@ Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
 Base.firstindex(b::TriclinicBoundary) = b.basis_vectors[1]
 Base.lastindex(b::TriclinicBoundary) = b.basis_vectors[3]
 
+"""
+    n_dimensions(boundary)
+
+Number of dimensions of a bounding box.
+"""
+AtomsBase.n_dimensions(::CubicBoundary) = 3
+AtomsBase.n_dimensions(::RectangularBoundary) = 2
 AtomsBase.n_dimensions(::TriclinicBoundary) = 3
+
+Base.broadcastable(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 
 float_type(b::Union{CubicBoundary, RectangularBoundary}) = typeof(ustrip(b[1]))
 float_type(b::TriclinicBoundary{T}) where {T} = T
+
+function AtomsBase.bounding_box(b::CubicBoundary)
+    z = zero(b[1])
+    bb = SVector{3}([
+        SVector(b[1], z   , z   ),
+        SVector(z   , b[2], z   ),
+        SVector(z   , z   , b[3]),
+    ])
+    return unit(z) == NoUnits ? (bb)u"nm" : bb # Assume nm without other information
+end
+
+function AtomsBase.bounding_box(b::RectangularBoundary)
+    z = zero(b[1])
+    bb = SVector{2}([
+        SVector(b[1], z   ),
+        SVector(z   , b[2]),
+    ])
+    return unit(z) == NoUnits ? (bb)u"nm" : bb
+end
+
+function AtomsBase.bounding_box(b::TriclinicBoundary)
+    return unit(b[1][1]) == NoUnits ? (b.basis_vectors)u"nm" : b.basis_vectors
+end
 
 """
     box_volume(boundary)

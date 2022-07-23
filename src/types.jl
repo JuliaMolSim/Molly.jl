@@ -439,22 +439,7 @@ AtomsBase.atomic_number(s::System, i::Integer) = missing
 AtomsBase.boundary_conditions(::System{3}) = SVector(Periodic(), Periodic(), Periodic())
 AtomsBase.boundary_conditions(::System{2}) = SVector(Periodic(), Periodic())
 
-edges_to_box(bs::SVector{3}, z) = SVector{3}([
-    SVector(bs[1], z    , z    ),
-    SVector(z    , bs[2], z    ),
-    SVector(z    , z    , bs[3]),
-])
-edges_to_box(bs::SVector{2}, z) = SVector{2}([
-    SVector(bs[1], z    ),
-    SVector(z    , bs[2]),
-])
-
-function AtomsBase.bounding_box(s::System)
-    bs = s.boundary.side_lengths
-    z = zero(bs[1])
-    bb = edges_to_box(bs, z)
-    return unit(z) == NoUnits ? (bb)u"nm" : bb # Assume nm without other information
-end
+AtomsBase.bounding_box(s::System) = bounding_box(s.boundary)
 
 function Base.show(io::IO, s::System)
     print(io, "System with ", length(s), " atoms, boundary ", s.boundary)
