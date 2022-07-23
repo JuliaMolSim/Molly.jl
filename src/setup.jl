@@ -1187,14 +1187,14 @@ function add_position_restraints(sys,
                                  k;
                                  atom_selector::Function=is_any_atom,
                                  restrain_coords=sys.coords)
-    k_array = isa(k, AbstractArray) ? k : repeat([k], length(sys))
+    k_array = isa(k, AbstractArray) ? k : fill(k, length(sys))
     if length(k_array) != length(sys)
         throw(ArgumentError("The system has $(length(sys)) atoms but there are $(length(k_array)) k values"))
     end
     is = Int[]
     types = String[]
     inters = HarmonicPositionRestraint[]
-    atoms_data = length(sys.atoms_data) > 0 ? sys.atoms_data : repeat([nothing], length(sys))
+    atoms_data = length(sys.atoms_data) > 0 ? sys.atoms_data : fill(nothing, length(sys))
     for (i, (at, at_data, k_res, x0)) in enumerate(zip(Array(sys.atoms), atoms_data, k_array,
                                                        Array(restrain_coords)))
         if atom_selector(at, at_data)

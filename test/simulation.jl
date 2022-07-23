@@ -26,7 +26,7 @@
     )
     random_velocities!(s, temp)
 
-    @test masses(s) == repeat([10.0u"u"], n_atoms)
+    @test masses(s) == fill(10.0u"u", n_atoms)
     @test typeof(boundary_conditions(s)) <: SVector
     @test bounding_box(s) == SVector(
         SVector(2.0, 0.0)u"nm",
@@ -102,9 +102,9 @@ end
         @test position(s, 5) == s.coords[5]
         @test velocity(s) == s.velocities
         @test velocity(s, 5) == s.velocities[5]
-        @test atomic_mass(s) == repeat([atom_mass], 100)
+        @test atomic_mass(s) == fill(atom_mass, 100)
         @test atomic_mass(s, 5) == atom_mass
-        @test atomic_symbol(s) == repeat([:Ar], 100)
+        @test atomic_symbol(s) == fill(:Ar, 100)
         @test atomic_symbol(s, 5) == :Ar
         @test typeof(boundary_conditions(s)) <: SVector
         @test bounding_box(s) == SVector(
@@ -223,7 +223,7 @@ end
     bonds = InteractionList2Atoms(
         collect(1:(n_atoms ÷ 2)),
         collect((1 + n_atoms ÷ 2):n_atoms),
-        repeat([""], n_atoms ÷ 2),
+        fill("", n_atoms ÷ 2),
         [HarmonicBond(k=300_000.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm") for i in 1:(n_atoms ÷ 2)],
     )
     nb_matrix = trues(n_atoms, n_atoms)
@@ -473,7 +473,7 @@ end
         specific_inter_lists = (
             InteractionList2Atoms(collect(1:2:n_atoms),
             collect(2:2:n_atoms),
-            repeat([""], length(bonds)),
+            fill("", length(bonds)),
             gpu ? CuArray(bonds) : bonds,
         ),)
 

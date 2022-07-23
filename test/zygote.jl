@@ -77,7 +77,7 @@
             collect(1:15),
             collect(16:30),
             collect(31:45),
-            repeat([""], 15),
+            fill("", 15),
             gpu ? CuArray(angles_inner) : angles_inner,
         )
         torsions_inner = [PeriodicTorsion(
@@ -91,7 +91,7 @@
             collect(11:20),
             collect(21:30),
             collect(31:40),
-            repeat([""], 10),
+            fill("", 10),
             gpu ? CuArray(torsions_inner) : torsions_inner,
         )
         atoms_setup = [Atom(charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.0f0 : 0.0) for i in 1:n_atoms]
@@ -130,7 +130,7 @@
             bonds = InteractionList2Atoms(
                 bond_is,
                 bond_js,
-                repeat([""], length(bonds_inner)),
+                fill("", length(bonds_inner)),
                 gpu ? CuArray(bonds_inner) : bonds_inner,
             )
             cs = deepcopy(forward ? coords_dual : coords)
