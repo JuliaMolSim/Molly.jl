@@ -29,7 +29,7 @@ function visualize(coord_logger,
                     transparency=true,
                     kwargs...)
     coords_start = first(values(coord_logger))
-    dims = length(first(coords_start))
+    dims = n_dimensions(boundary)
     fig = Figure()
 
     if dims == 3
@@ -47,9 +47,12 @@ function visualize(coord_logger,
     scatter!(ax, positions; color=color, markersize=markersize, transparency=transparency,
                 markerspace=:data, kwargs...)
 
+    # Don't display connected atoms that are likely connected over the box edge
+    max_connection_dist = cbrt(box_volume(boundary)) / 2
+
     connection_nodes = []
     for (ci, (i, j)) in enumerate(connections)
-        if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < (boundary[1] / 2)
+        if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < max_connection_dist
             if dims == 3
                 push!(connection_nodes, Observable(PointType.(
                         ustrip.([coords_start[i][1], coords_start[j][1]]),
@@ -96,7 +99,7 @@ function visualize(coord_logger,
         coords = values(coord_logger)[frame_i]
 
         for (ci, (i, j)) in enumerate(connections)
-            if connection_frames[frame_i][ci] && norm(coords[i] - coords[j]) < (boundary[1] / 2)
+            if connection_frames[frame_i][ci] && norm(coords[i] - coords[j]) < max_connection_dist
                 if dims == 3
                     connection_nodes[ci][] = PointType.(
                                 ustrip.([coords[i][1], coords[j][1]]),

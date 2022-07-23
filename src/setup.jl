@@ -64,9 +64,9 @@ Can not be used if one or more dimensions has infinite boundaries.
 """
 function place_diatomics(n_molecules::Integer, boundary, min_dist, bond_length;
                          max_attempts::Integer=100, aligned::Bool=false)
-    max_atoms = prod(x -> floor(x / (min_dist + bond_length)), boundary.side_lengths)
-    if n_atoms > max_atoms
-        throw(ArgumentError("Boundary $boundary too small for $n_atoms atoms with minimum distance $min_dist"))
+    max_molecules = prod(x -> floor(x / (min_dist + bond_length)), boundary.side_lengths)
+    if n_molecules > max_molecules
+        throw(ArgumentError("Boundary $boundary too small for $n_molecules diatomics with minimum distance $min_dist"))
     end
     dims = n_dimensions(boundary)
     min_dist_sq = min_dist ^ 2
