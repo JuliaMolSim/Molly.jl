@@ -522,11 +522,12 @@ function simulate!(sys::ReplicaSystem,
             Δ = ustrip((β_m - β_n)*(V_n - V_m))
             if Δ <= 0 || rand() < exp(-Δ)
                 sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
-                # scale velocities
-                sys.replicas[n].velocities .*= sqrt(β_n/β_m)
-                sys.replicas[m].velocities .*= sqrt(β_m/β_n)
+                # scale and exchange velocities
+                vel_n = sys.replicas[n].velocities
+                vel_m = sys.replicas[m].velocities
+                sys.replicas[n].velocities, sys.replicas[m].velocities = sqrt(β_m/β_n)*vel_m, sqrt(β_n/β_m)*vel_n
                 if !isnothing(sys.exchange_logger)
-                    log_property!(sys.exchange_logger, sys, nothing, cycle*cycle_length; indices=(n, m), delta=Δ, n_threads=n_threads)
+                    Molly.log_property!(sys.exchange_logger, sys, nothing, cycle*cycle_length; indices=(n, m), delta=Δ, n_threads=n_threads)
                 end
             end
         end
