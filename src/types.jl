@@ -394,8 +394,8 @@ end
 A wrapper for replicas in a replica exchange simulation. Each individual replica 
 is a [`System`](@ref). Properties unused in the simulation or in analysis can be 
 left with their default values.
-`atoms`, `atoms_data`, `coords` and `velocities` should have the same length. 
-Number of loggers in `replica_loggers` should be equal to `n_replicas`.
+`atoms`, `atoms_data`, `coords` and the elements in `replica_velocities` should have the same length. 
+Number of loggers in `replica_loggers` should be equal to `n_replicas`. Number of elements in `replica_velocities` should be equal to `n_replicas`.
 
 # Arguments
 - `atoms::A`: the atoms, or atom equivalents, in the system. Can be
@@ -414,12 +414,14 @@ Number of loggers in `replica_loggers` should be equal to `n_replicas`.
 - `n_replicas::Int`: the number of replicas of the system.
 - `coords::C`: the coordinates of the atoms in the system. Typically a
     vector of `SVector`s of 2 or 3 dimensions.
-- `velocities::V=zero(coords) * u"ps^-1"`: the velocities of the atoms in the
+- `replica_velocities::V=[zero(coords) * u"ps^-1" for _ in 1:n_replicas]`: the velocities of the atoms in the
     system.
 - `boundary::B`: the bounding box in which the simulation takes place.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
-- `replica_loggers::RL=Tuple(() for i=1:n_replicas)`: the loggers for each replica 
+- `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: the logger used to record
+    the exchange of replicas.
+- `replica_loggers::RL=Tuple(() for _ in 1:n_replicas)`: the loggers for each replica 
     that record properties of interest during a simulation.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
@@ -430,7 +432,7 @@ Number of loggers in `replica_loggers` should be equal to `n_replicas`.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
-mutable struct ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, NF, RL, F, E, K} <: AbstractSystem{D}
+mutable struct ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, NF, EL, F, E, K} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     pairwise_inters::PI
@@ -440,7 +442,7 @@ mutable struct ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, NF, RL, F, E
     replicas::RS
     boundary::B
     neighbor_finder::NF
-    replica_loggers::RL
+    exchange_logger::EL
     force_units::F
     energy_units::E
     k::K
@@ -453,11 +455,12 @@ function ReplicaSystem(;
                 specific_inter_lists=(),
                 general_inters=(),
                 coords,
-                velocities=nothing,
+                replica_velocities=nothing,
                 n_replicas,
                 boundary,
                 neighbor_finder=NoNeighborFinder(),
-                replica_loggers=Tuple(() for i=1:n_replicas),
+                exchange_logger=ReplicaExchangeLogger(n_replicas),
+                replica_loggers=Tuple(() for _ in 1:n_replicas),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=Unitful.k,
@@ -474,26 +477,31 @@ function ReplicaSystem(;
     C = typeof(coords)
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
+    EL = typeof(exchange_logger)
     F = typeof(force_units)
     E = typeof(energy_units)
-    RL = typeof(replica_loggers)
+    
 
-    if isnothing(velocities)
+    if isnothing(replica_velocities)
         if force_units == NoUnits
-            vels = zero(coords)
+            replica_velocities = [zero(coords) for _ in 1:n_replicas]
         else
-            vels = zero(coords) * u"ps^-1"
+            replica_velocities = [zero(coords) * u"ps^-1" for _ in 1:n_replicas]
         end
-    else
-        vels = velocities
     end
-    V = typeof(vels)
+    V = typeof(replica_velocities[1])
+    if !all(y -> typeof(y) == V, replica_velocities)
+        throw(ArgumentError("The velocities for all the replicas are not of the same type."))
+    end
 
+    if !all(y -> y==replica_velocities[1], replica_velocities)
+        throw(ArgumentError("Some replicas have different number of velocities."))
+    end
     if length(atoms) != length(coords)
         throw(ArgumentError("There are $(length(atoms)) atoms but $(length(coords)) coordinates"))
     end
-    if length(atoms) != length(vels)
-        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(vels)) velocities"))
+    if length(atoms) != length(replica_velocities[1])
+        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(replica_velocities[1])) velocities"))
     end
     if length(atoms_data) > 0 && length(atoms) != length(atoms_data)
         throw(ArgumentError("There are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
@@ -505,10 +513,15 @@ function ReplicaSystem(;
     if isa(coords, CuArray) && !isa(atoms, CuArray)
         throw(ArgumentError("The coordinates are on the GPU but the atoms are not"))
     end
-    if isa(atoms, CuArray) && !isa(vels, CuArray)
+
+    n_cuarray = sum(y -> isa(y, CuArray), replica_velocities)
+    if !(n_cuarray == n_replicas || n_cuarray == 0)
+        throw(ArgumentError("The velocities for $(n_cuarray) out of $(n_replicas) replicas are on GPU."))
+    end
+    if isa(atoms, CuArray) && n_cuarray != n_replicas
         throw(ArgumentError("The atoms are on the GPU but the velocities are not"))
     end
-    if isa(vels, CuArray) && !isa(atoms, CuArray)
+    if n_cuarray == n_replicas && !isa(atoms, CuArray)
         throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
     end
 
@@ -534,14 +547,14 @@ function ReplicaSystem(;
 
     replicas = Tuple(System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, typeof(replica_loggers[i]), F, E, K}(
             atoms, atoms_data, pairwise_inters, specific_inter_lists,
-            general_inters, copy(coords), copy(velocities), boundary, deepcopy(neighbor_finder),
+            general_inters, copy(coords), replica_velocities[i], boundary, deepcopy(neighbor_finder),
             replica_loggers[i], force_units, energy_units, k_converted) for i=1:n_replicas)
     RS = typeof(replicas)
 
-    return ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, NF, RL, F, E, K}(
+    return ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, NF, EL, F, E, K}(
             atoms, atoms_data, pairwise_inters, specific_inter_lists,
             general_inters, n_replicas, replicas, boundary, neighbor_finder, 
-            replica_loggers, force_units, energy_units, k_converted)
+            exchange_logger, force_units, energy_units, k_converted)
 end
 
 

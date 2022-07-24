@@ -479,15 +479,16 @@ function TemperatureREMD(;
     simulators = Tuple(simulators[i] for i in 1:N)
     ST = typeof(simulators)
     
-    return TemperatureREMD{N, T, S, DT, TP, ST, ET}(temperatures, simulators, exchange_time, dt)
+    return TemperatureREMD{N, T, S, DT, TP, ST, ET}(dt, temperatures, simulators, exchange_time)
 end
 
 function simulate!(sys::ReplicaSystem,
                     sim::TemperatureREMD,
                     n_steps::Int;
+                    assign_velocities::Bool=false,
                     n_threads::Int=Threads.nthreads())
     if sys.n_replicas != length(sim.simulators)
-        error("Number of replicas in ReplicaSystem and simulators in TemperatureREMD must match.")
+        throw(ArgumentError("Number of replicas in ReplicaSystem and simulators in TemperatureREMD do not match."))
     end
 
     if n_threads > sys.n_replicas
@@ -501,9 +502,10 @@ function simulate!(sys::ReplicaSystem,
     cycle_length = n_steps ÷ n_cycles
     remaining_steps = n_steps % n_cycles
 
-    # scale to correct temperatures
-    for i in eachindex(sys.replicas)
-        sys.replicas[i].velocities .*= sqrt(sim.temperatures[i] / temperature(sys.replicas[i]))
+    if assign_velocities
+        for i in eachindex(sys.replicas)
+            random_velocities!(sys.replicas[i], sim.temperatures[i])
+        end
     end
 
     for cycle=1:n_cycles
@@ -523,8 +525,14 @@ function simulate!(sys::ReplicaSystem,
                 # scale velocities
                 sys.replicas[n].velocities .*= sqrt(β_n/β_m)
                 sys.replicas[m].velocities .*= sqrt(β_m/β_n)
+                if !isnothing(sys.exchange_logger)
+                    log_property!(sys.exchange_logger, sys, nothing, cycle*cycle_length; indices=(n, m), delta=Δ, n_threads=n_threads)
+                end
             end
         end
+    end
+    if !isnothing(sys.exchange_logger)
+        finish_logs!(sys.exchange_logger)
     end
 
     # run for remaining_steps (if >0) for all replicas
