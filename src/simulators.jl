@@ -527,7 +527,7 @@ function simulate!(sys::ReplicaSystem,
                 vel_m = sys.replicas[m].velocities
                 sys.replicas[n].velocities, sys.replicas[m].velocities = sqrt(β_m/β_n)*vel_m, sqrt(β_n/β_m)*vel_n
                 if !isnothing(sys.exchange_logger)
-                    Molly.log_property!(sys.exchange_logger, sys, nothing, cycle*cycle_length; indices=(n, m), delta=Δ, n_threads=n_threads)
+                    log_property!(sys.exchange_logger, sys, nothing, cycle*cycle_length; indices=(n, m), delta=Δ, n_threads=n_threads)
                 end
             end
         end
