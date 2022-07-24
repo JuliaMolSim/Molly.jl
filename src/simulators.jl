@@ -486,6 +486,7 @@ function simulate!(sys::ReplicaSystem,
                     sim::TemperatureREMD,
                     n_steps::Int;
                     assign_velocities::Bool=false,
+                    rng=Random.GLOBAL_RNG,
                     n_threads::Int=Threads.nthreads())
     if sys.n_replicas != length(sim.simulators)
         throw(ArgumentError("Number of replicas in ReplicaSystem and simulators in TemperatureREMD do not match."))
@@ -517,15 +518,16 @@ function simulate!(sys::ReplicaSystem,
             n = rand(1:sys.n_replicas)
             m = mod(n, sys.n_replicas) + 1
             k_b = sys.k
-            β_n, β_m = 1/(k_b*sim.temperatures[n]), 1/(k_b*sim.temperatures[m])
+            T_n, T_m = sim.temperatures[n], sim.temperatures[m]
+            β_n, β_m = 1/(k_b*T_n), 1/(k_b*T_m)
             V_n, V_m = potential_energy(sys.replicas[n]), potential_energy(sys.replicas[m])
             Δ = ustrip((β_m - β_n)*(V_n - V_m))
-            if Δ <= 0 || rand() < exp(-Δ)
+            if Δ <= 0 || rand(rng) < exp(-Δ)
                 sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
                 # scale and exchange velocities
                 vel_n = sys.replicas[n].velocities
                 vel_m = sys.replicas[m].velocities
-                sys.replicas[n].velocities, sys.replicas[m].velocities = sqrt(β_m/β_n)*vel_m, sqrt(β_n/β_m)*vel_n
+                sys.replicas[n].velocities, sys.replicas[m].velocities = sqrt(T_n/T_m)*vel_m, sqrt(T_m/T_n)*vel_n
                 if !isnothing(sys.exchange_logger)
                     log_property!(sys.exchange_logger, sys, nothing, cycle*cycle_length; indices=(n, m), delta=Δ, n_threads=n_threads)
                 end
