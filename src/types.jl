@@ -44,7 +44,7 @@ abstract type AbstractNeighborFinder end
     InteractionList1Atoms(is, types, inters)
     InteractionList1Atoms(inter_type)
 
-A list of specific interactions that give a force on one atom such as position restraints.
+A list of specific interactions that involve one atom such as position restraints.
 """
 struct InteractionList1Atoms{T}
     is::Vector{Int}
@@ -56,7 +56,7 @@ end
     InteractionList2Atoms(is, js, types, inters)
     InteractionList2Atoms(inter_type)
 
-A list of specific interactions that give forces on two atoms such as bond potentials.
+A list of specific interactions that involve two atoms such as bond potentials.
 """
 struct InteractionList2Atoms{T}
     is::Vector{Int}
@@ -69,7 +69,7 @@ end
     InteractionList3Atoms(is, js, ks, types, inters)
     InteractionList3Atoms(inter_type)
 
-A list of specific interactions that give forces on three atoms such as bond angle potentials.
+A list of specific interactions that involve three atoms such as bond angle potentials.
 """
 struct InteractionList3Atoms{T}
     is::Vector{Int}
@@ -83,7 +83,7 @@ end
     InteractionList4Atoms(is, js, ks, ls, types, inters)
     InteractionList4Atoms(inter_type)
 
-A list of specific interactions that give forces on four atoms such as torsion potentials.
+A list of specific interactions that involve four atoms such as torsion potentials.
 """
 struct InteractionList4Atoms{T}
     is::Vector{Int}

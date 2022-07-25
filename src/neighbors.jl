@@ -274,7 +274,7 @@ CubicBoundary{Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}}(
 julia> neighbor_finder = CellListMapNeighborFinder(
            nb_matrix=s.neighbor_finder.nb_matrix, matrix_14=s.neighbor_finder.matrix_14, 
            n_steps=10, dist_cutoff=1.2u"nm",
-           x0=coords, unit_cell=boundary
+           x0=coords, unit_cell=boundary,
        )
 CellListMapNeighborFinder{Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}, 3, Float64}
   Size of nb_matrix = (15954, 15954)

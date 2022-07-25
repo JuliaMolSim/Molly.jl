@@ -3,6 +3,5 @@
 *.jl.mem
 docs/build
 /Manifest.toml
-nbs/*
 benchmark/tune.json
 benchmark/results

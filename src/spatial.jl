@@ -85,10 +85,10 @@ function TriclinicBoundary(basis_vectors::SVector{3}; approx_images::Bool=true)
     dx, dy, dz = norm.(basis_vectors)
     cubic_bounds = SVector{3}(
         dx + dy * cos(angles[1]) + dz * cos(angles[2]),
-        dy * sin(angles[1]) + dz * sin(angles[3]),
+        dy * sin(angles[1]) + dz * cos(angles[3]),
         dz * sin(angles[2]),
     )
-    return TriclinicBoundary{eltype(angles), A, eltype(cubic_bounds), eltype(reciprocal_size)}(
+    return TriclinicBoundary{eltype(angles), approx_images, eltype(cubic_bounds), eltype(reciprocal_size)}(
                                 basis_vectors, reciprocal_size, angles, cubic_bounds)
 end
 
@@ -158,13 +158,15 @@ rand_coord(boundary::RectangularBoundary) = rand(SVector{2, float_type(boundary)
 
 function rand_coord(boundary::TriclinicBoundary{T}) where T
     in_bounds = false
+    trial_coord = rand(SVector{3, T}) .* boundary.cubic_bounds
     while !in_bounds
-        trial_coord = rand(SVector{3, T}) .* boundary.cubic_bounds
         dx = floor(trial_coord[1] * boundary.reciprocal_size[1])
         dy = floor(trial_coord[2] * boundary.reciprocal_size[2])
         dz = floor(trial_coord[3] * boundary.reciprocal_size[3])
         if iszero(dx) && iszero(dy) && iszero(dz)
             in_bounds = true
+        else
+            trial_coord = rand(SVector{3, T}) .* boundary.cubic_bounds
         end
     end
     return trial_coord
