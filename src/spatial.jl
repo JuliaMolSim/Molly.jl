@@ -174,7 +174,7 @@ end
     vector_1D(c1, c2, side_length)
 
 Displacement between two 1D coordinate values from c1 to c2, accounting for
-the bounding box.
+periodic boundary conditions in a [`CubicBoundary`](@ref) or [`RectangularBoundary`](@ref).
 The minimum image convention is used, so the displacement is to the closest
 version of the coordinate accounting for the periodic boundaries.
 """
@@ -190,11 +190,11 @@ end
     vector(c1, c2, boundary)
 
 Displacement between two coordinate values from c1 to c2, accounting for
-the bounding box.
+periodic boundary conditions.
 The minimum image convention is used, so the displacement is to the closest
 version of the coordinates accounting for the periodic boundaries.
 For the [`TriclinicBoundary`](@ref) an approximation is used to find the closest
-version.
+version by default.
 """
 vector(c1, c2, boundary::Union{CubicBoundary, RectangularBoundary}) = vector_1D.(c1, c2, boundary)
 
