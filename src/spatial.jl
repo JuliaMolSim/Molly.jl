@@ -160,10 +160,8 @@ function rand_coord(boundary::TriclinicBoundary{T}) where T
     in_bounds = false
     trial_coord = rand(SVector{3, T}) .* boundary.cubic_bounds
     while !in_bounds
-        dx = floor(trial_coord[1] * boundary.reciprocal_size[1])
-        dy = floor(trial_coord[2] * boundary.reciprocal_size[2])
-        dz = floor(trial_coord[3] * boundary.reciprocal_size[3])
-        if iszero(dx) && iszero(dy) && iszero(dz)
+        wrap_coord = wrap_coords(trial_coord, boundary)
+        if wrap_coord == trial_coord
             in_bounds = true
         else
             trial_coord = rand(SVector{3, T}) .* boundary.cubic_bounds
@@ -208,21 +206,22 @@ end
 
 function vector(c1, c2, boundary::TriclinicBoundary{T, true}) where T
     dr = c2 - c1
-    dx = boundary.basis_vectors[1] * floor(dr[1] * boundary.reciprocal_size[1] + T(0.5))
-    dy = boundary.basis_vectors[2] * floor(dr[2] * boundary.reciprocal_size[2] + T(0.5))
-    dz = boundary.basis_vectors[3] * floor(dr[3] * boundary.reciprocal_size[3] + T(0.5))
-    return dr - dx - dy - dz
+    dr -= boundary.basis_vectors[3] * floor(dr[3] * boundary.reciprocal_size[3] + T(0.5))
+    dr -= boundary.basis_vectors[2] * floor(dr[2] * boundary.reciprocal_size[2] + T(0.5))
+    dr -= boundary.basis_vectors[1] * floor(dr[1] * boundary.reciprocal_size[1] + T(0.5))
+    return dr
 end
 
 function vector(c1, c2, boundary::TriclinicBoundary{T, false}) where T
+    bv = boundary.basis_vectors
     offsets = (-1, 0, 1)
-    min_sqdist = typemax(c1[1])
+    min_sqdist = typemax(c1[1] ^ 2)
     min_dr = zero(c1)
     for ox in offsets, oy in offsets, oz in offsets
         if iszero(ox) && iszero(oy) && iszero(oz)
             continue
         end
-        c2_offset = c2 + ox * b[1] + oy * b[2] + oz * b[3]
+        c2_offset = c2 + ox * bv[1] + oy * bv[2] + oz * bv[3]
         dr = c2_offset - c1
         sqdist = dot(dr, dr)
         if sqdist < min_sqdist
@@ -271,10 +270,12 @@ Ensure a coordinate is within the bounding box and return the coordinate.
 wrap_coords(v, boundary::Union{CubicBoundary, RectangularBoundary}) = wrap_coord_1D.(v, boundary)
 
 function wrap_coords(v, boundary::TriclinicBoundary)
-    dx = boundary.basis_vectors[1] * floor(v[1] * boundary.reciprocal_size[1])
-    dy = boundary.basis_vectors[2] * floor(v[2] * boundary.reciprocal_size[2])
-    dz = boundary.basis_vectors[3] * floor(v[3] * boundary.reciprocal_size[3])
-    return v - dx - dy - dx
+    bv, rs, as = boundary.basis_vectors, boundary.reciprocal_size, boundary.angles
+    v_wrap = v
+    v_wrap -= bv[3] * floor(v_wrap[3] * rs[3])
+    v_wrap -= bv[2] * floor((v_wrap[2] - v_wrap[3] / tan(as[3])) * rs[2])
+    v_wrap -= bv[1] * floor((v_wrap[1] - v_wrap[2] / tan(as[1]) - v_wrap[3] / tan(as[2])) * rs[1])
+    return v_wrap
 end
 
 const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
