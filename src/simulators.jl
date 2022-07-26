@@ -482,12 +482,12 @@ function TemperatureREMD(;
     return TemperatureREMD{N, T, S, DT, TP, ST, ET}(dt, temperatures, simulators, exchange_time)
 end
 
-function simulate!(sys::ReplicaSystem,
+function simulate!(sys::ReplicaSystem{D, G, T},
                     sim::TemperatureREMD,
                     n_steps::Int;
                     assign_velocities::Bool=false,
                     rng=Random.GLOBAL_RNG,
-                    n_threads::Int=Threads.nthreads())
+                    n_threads::Int=Threads.nthreads()) where {D, G, T}
     if sys.n_replicas != length(sim.simulators)
         throw(ArgumentError("Number of replicas in ReplicaSystem and simulators in TemperatureREMD do not match."))
     end
@@ -518,11 +518,15 @@ function simulate!(sys::ReplicaSystem,
             cycle_parity = cycle % 2
             for n in 1+cycle_parity:2:sys.n_replicas-1
                 m = n + 1
-                k_b = sys.k
+                if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+                    k_b = sys.k * T(Unitful.Na)
+                else
+                    k_b = sys.k
+                end
                 T_n, T_m = sim.temperatures[n], sim.temperatures[m]
                 β_n, β_m = 1/(k_b*T_n), 1/(k_b*T_m)
                 V_n, V_m = potential_energy(sys.replicas[n]), potential_energy(sys.replicas[m])
-                Δ = ustrip((β_m - β_n)*(V_n - V_m))
+                Δ = (β_m - β_n)*(V_n - V_m)
                 if Δ <= 0 || rand(rng) < exp(-Δ)
                     # exchange coordinates and velocities
                     sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
