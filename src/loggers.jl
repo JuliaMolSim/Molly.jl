@@ -500,8 +500,6 @@ function log_property!(
     rexl.n_exchanges += 1
 end
 
-function finish_logs!(rexl::ReplicaExchangeLogger)
-    if !isempty(rexl.indices)
-        rexl.end_step = last(rexl.steps)
-    end
+function finish_logs!(rexl::ReplicaExchangeLogger, n_steps)
+    rexl.end_step += n_steps
 end

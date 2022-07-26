@@ -367,19 +367,7 @@ function System(;
         throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
     end
 
-    if energy_units == NoUnits
-        if unit(k) == NoUnits
-            # Use user-supplied unitless Boltzmann constant
-            k_converted = T(k)
-        else
-            # Otherwise assume energy units are (u* nm^2 * ps^-2)
-            k_converted = T(ustrip(u"u * nm^2 * ps^-2 * K^-1", k))
-        end
-    elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        k_converted = T(uconvert(energy_units * u"mol * K^-1", k))
-    else
-        k_converted = T(uconvert(energy_units * u"K^-1", k))
-    end
+    k_converted = convert_k_units(k, energy_units, T)
     K = typeof(k_converted)
 
     return System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
@@ -432,7 +420,7 @@ Number of loggers in `replica_loggers` should be equal to `n_replicas`. Number o
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
-mutable struct ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, NF, EL, F, E, K} <: AbstractSystem{D}
+mutable struct ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, EL, F, E, K} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     pairwise_inters::PI
@@ -441,7 +429,6 @@ mutable struct ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, NF, EL, F, E
     n_replicas::Integer
     replicas::RS
     boundary::B
-    neighbor_finder::NF
     exchange_logger::EL
     force_units::F
     energy_units::E
@@ -467,7 +454,7 @@ function ReplicaSystem(;
                 gpu_diff_safe=isa(coords, CuArray))
     D = n_dimensions(boundary)
     G = gpu_diff_safe
-    T = Molly.float_type(boundary)
+    T = float_type(boundary)
     CU = isa(coords, CuArray)
     A = typeof(atoms)
     AD = typeof(atoms_data)
@@ -493,8 +480,11 @@ function ReplicaSystem(;
     if !all(y -> typeof(y) == V, replica_velocities)
         throw(ArgumentError("The velocities for all the replicas are not of the same type."))
     end
+    if length(replica_velocities) != n_replicas
+        throw(ArgumentError("There are $(length(replica_velocities)) velocities for replicas but $(n_replicas) replicas."))
+    end
 
-    if !all(y -> y==replica_velocities[1], replica_velocities)
+    if !all(y -> length(y)==length(replica_velocities[1]), replica_velocities)
         throw(ArgumentError("Some replicas have different number of velocities."))
     end
     if length(atoms) != length(coords)
@@ -529,6 +519,25 @@ function ReplicaSystem(;
         throw(ArgumentError("There are $(length(replica_loggers)) loggers but $(n_replicas) replicas"))
     end
 
+    k_converted = convert_k_units(k, energy_units, T)
+    K = typeof(k_converted)
+
+    replicas = Tuple(System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, typeof(replica_loggers[i]), F, E, K}(
+            atoms, atoms_data, pairwise_inters, specific_inter_lists,
+            general_inters, copy(coords), replica_velocities[i], boundary, deepcopy(neighbor_finder),
+            replica_loggers[i], force_units, energy_units, k_converted) for i=1:n_replicas)
+    RS = typeof(replicas)
+
+    return ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, EL, F, E, K}(
+            atoms, atoms_data, pairwise_inters, specific_inter_lists,
+            general_inters, n_replicas, replicas, boundary, 
+            exchange_logger, force_units, energy_units, k_converted)
+end
+
+"""
+Convert the value k to suitable units and float type.
+"""
+function convert_k_units(k, energy_units, T::Type)
     if energy_units == NoUnits
         if unit(k) == NoUnits
             # Use user-supplied unitless Boltzmann constant
@@ -542,21 +551,8 @@ function ReplicaSystem(;
     else
         k_converted = T(uconvert(energy_units * u"K^-1", k))
     end
-    
-    K = typeof(k_converted)
-
-    replicas = Tuple(System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, typeof(replica_loggers[i]), F, E, K}(
-            atoms, atoms_data, pairwise_inters, specific_inter_lists,
-            general_inters, copy(coords), replica_velocities[i], boundary, deepcopy(neighbor_finder),
-            replica_loggers[i], force_units, energy_units, k_converted) for i=1:n_replicas)
-    RS = typeof(replicas)
-
-    return ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, NF, EL, F, E, K}(
-            atoms, atoms_data, pairwise_inters, specific_inter_lists,
-            general_inters, n_replicas, replicas, boundary, neighbor_finder, 
-            exchange_logger, force_units, energy_units, k_converted)
+    return k_converted
 end
-
 
 """
     is_gpu_diff_safe(sys)
