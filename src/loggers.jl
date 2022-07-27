@@ -477,6 +477,7 @@ end
 
 mutable struct ReplicaExchangeLogger
     n_replicas::Int
+    n_attempts::Int
     n_exchanges::Int
     indices::Vector{Tuple{Int,Int}}
     steps::Vector{Int}
@@ -484,7 +485,7 @@ mutable struct ReplicaExchangeLogger
     end_step::Int
 end
 
-ReplicaExchangeLogger(n_replicas::Int) = ReplicaExchangeLogger(n_replicas, 0, Tuple{Int, Int}[], Int[], Float64[], 0)
+ReplicaExchangeLogger(n_replicas::Int) = ReplicaExchangeLogger(n_replicas, 0, 0, Tuple{Int, Int}[], Int[], Float64[], 0)
 
 function log_property!(
                     rexl::ReplicaExchangeLogger,
@@ -500,6 +501,7 @@ function log_property!(
     rexl.n_exchanges += 1
 end
 
-function finish_logs!(rexl::ReplicaExchangeLogger, n_steps)
+function finish_logs!(rexl::ReplicaExchangeLogger; n_steps::Int=0, n_attempts::Int=0)
     rexl.end_step += n_steps
+    rexl.n_attempts += n_attempts
 end
