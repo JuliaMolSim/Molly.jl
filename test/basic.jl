@@ -384,3 +384,83 @@ end
     atoms = [Atom(mass=bb_to_mass[BioStructures.element(bb_atoms[i])]) for i in 1:length(bb_atoms)]
     @test isapprox(radius_gyration(coords, atoms), 11.51225678195222u"Å", atol=1e-6u"nm")
 end
+
+@testset "Replica System" begin
+    n_atoms = 100
+    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm") 
+    temp = 298.0u"K"
+    atom_mass = 10.0u"u"
+    
+    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+    coords = place_atoms(n_atoms, boundary, 0.3u"nm")
+    replica_velocities = nothing
+    pairwise_inters = (LennardJones(),)
+    n_replicas = 4
+
+    nb_matrix = trues(n_atoms, n_atoms)
+    for i in 1:(n_atoms ÷ 2)
+        nb_matrix[i, i + (n_atoms ÷ 2)] = false
+        nb_matrix[i + (n_atoms ÷ 2), i] = false
+    end
+    
+    neighbor_finder = DistanceNeighborFinder(
+        nb_matrix=nb_matrix,
+        n_steps=10,
+        dist_cutoff=1.5u"nm",
+    )
+
+    repsys = ReplicaSystem(;
+        n_replicas=n_replicas,
+        atoms=atoms,
+        coords=coords,
+        replica_velocities=replica_velocities,
+        pairwise_inters=pairwise_inters,
+        boundary=boundary,
+    )
+
+    sys = System(;
+        atoms=atoms,
+        coords=coords,
+        velocities=nothing,
+        pairwise_inters=pairwise_inters,
+        boundary=boundary,
+    )
+
+    for i in 1:n_replicas
+        @test all(
+            [getfield(repsys.replicas[i], f) for f in fieldnames(System)] .== [getfield(sys, f) for f in fieldnames(System)]
+        )
+    end
+
+    repsys2 = ReplicaSystem(;
+        n_replicas=n_replicas,
+        atoms=atoms,
+        coords=coords,
+        replica_velocities=replica_velocities,
+        pairwise_inters=pairwise_inters,
+        boundary=boundary,
+        replica_loggers=Tuple((temp=TemperatureLogger(10), coords=CoordinateLogger(10)) for i in 1:n_replicas),
+        neighbor_finder=neighbor_finder,
+    )
+
+    sys2 = System(;
+        atoms=atoms,
+        coords=coords,
+        velocities=nothing,
+        pairwise_inters=pairwise_inters,
+        boundary=boundary,
+        loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
+        neighbor_finder=neighbor_finder,
+    )
+
+    for i in 1:n_replicas
+        l1 = repsys2.replicas[i].loggers
+        l2 = sys2.loggers
+        @test typeof(l1) == typeof(l2)
+        @test propertynames(l1) == propertynames(l2)
+
+        nf1 = [getproperty(repsys2.replicas[i].neighbor_finder, p) for p in propertynames(repsys2.replicas[i].neighbor_finder)]
+        nf2 = [getproperty(sys2.neighbor_finder, p) for p in propertynames(sys2.neighbor_finder)]
+        @test all(nf1 .== nf2)
+    end
+end

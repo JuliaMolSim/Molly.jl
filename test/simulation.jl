@@ -451,6 +451,62 @@ end
     @test maximum(maximum(abs.(v)) for v in (s1.coords .- s2.coords)) < 1e-5u"nm"
 end
 
+@testset "Temperature Replica Exchange" begin
+    n_atoms = 100
+    atom_mass = 10.0u"u"
+    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    coords = place_atoms(n_atoms, boundary, 0.3u"nm")
+
+    pairwise_inters = (LennardJones(),)
+
+    nb_matrix = trues(n_atoms, n_atoms)
+    for i in 1:(n_atoms ÷ 2)
+        nb_matrix[i, i + (n_atoms ÷ 2)] = false
+        nb_matrix[i + (n_atoms ÷ 2), i] = false
+    end
+    
+    neighbor_finder = DistanceNeighborFinder(
+        nb_matrix=nb_matrix,
+        n_steps=10,
+        dist_cutoff=1.5u"nm",
+    )
+
+    n_replicas = 4
+
+    repsys = ReplicaSystem(
+        atoms=atoms,
+        coords=coords,
+        replica_velocities=nothing,
+        n_replicas=n_replicas,
+        boundary=boundary,
+        pairwise_inters=pairwise_inters,
+        replica_loggers=Tuple((temp=TemperatureLogger(10), coords=CoordinateLogger(10)) for i in 1:n_replicas),
+        neighbor_finder=neighbor_finder,
+    )
+
+    temp_vals = [120.0u"K", 180.0u"K", 240.0u"K", 300.0u"K"]
+    simulator = TemperatureREMD(
+        dt=0.005u"ps",
+        temperatures=temp_vals,
+        simulators=[
+            Langevin(
+                dt=0.005u"ps",
+                temperature=temp,
+                friction=0.1u"ps^-1",
+            )
+            for temp in temp_vals],
+        exchange_time=2.5u"ps",
+    )
+
+    rng = MersenneTwister()
+    @time simulate!(repsys, simulator, 10_000; assign_velocities=true, rng=rng);
+    @time simulate!(repsys, simulator, 10_000; assign_velocities=false, rng=rng);
+
+    efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
+    @test efficiency > 0.4
+end
+
 @testset "Different implementations" begin
     n_atoms = 400
     atom_mass = 10.0u"u"
