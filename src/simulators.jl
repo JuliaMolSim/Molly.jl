@@ -7,7 +7,8 @@ export
     Verlet,
     StormerVerlet,
     Langevin,
-    LangevinSplitting
+    LangevinSplitting,
+    TemperatureREMD
 
 """
     SteepestDescentMinimizer(; <keyword arguments>)
