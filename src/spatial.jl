@@ -68,7 +68,6 @@ struct TriclinicBoundary{T, A, D, I}
     basis_vectors::SVector{3, SVector{3, D}}
     reciprocal_size::SVector{3, I}
     angles::SVector{3, T}
-    cubic_bounds::SVector{3, D}
 end
 
 function TriclinicBoundary(basis_vectors::SVector{3}; approx_images::Bool=true)
@@ -82,14 +81,9 @@ function TriclinicBoundary(basis_vectors::SVector{3}; approx_images::Bool=true)
         bond_angle(basis_vectors[1], basis_vectors[3]), # xz angle
         bond_angle(basis_vectors[2], basis_vectors[3]), # yz angle
     )
-    dx, dy, dz = norm.(basis_vectors)
-    cubic_bounds = SVector{3}(
-        dx + dy * cos(angles[1]) + dz * cos(angles[2]),
-        dy * sin(angles[1]) + dz * cos(angles[3]),
-        dz * sin(angles[2]),
-    )
-    return TriclinicBoundary{eltype(angles), approx_images, eltype(cubic_bounds), eltype(reciprocal_size)}(
-                                basis_vectors, reciprocal_size, angles, cubic_bounds)
+    return TriclinicBoundary{eltype(angles), approx_images, eltype(eltype(basis_vectors)),
+                             eltype(reciprocal_size)}(
+                                basis_vectors, reciprocal_size, angles)
 end
 
 TriclinicBoundary(v1, v2, v3; kwargs...) = TriclinicBoundary(SVector{3}(v1, v2, v3); kwargs...)
@@ -146,7 +140,7 @@ box_volume(b::TriclinicBoundary) = abs(dot(cross(b[1], b[2]), b[3]))
 
 # The minimum cubic box surrounding the bounding box, used for visualization
 cubic_bounding_box(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
-cubic_bounding_box(b::TriclinicBoundary) = b.cubic_bounds
+cubic_bounding_box(b::TriclinicBoundary) = sum(b.basis_vectors)
 
 # Coordinates for visualizing bounding box
 function bounding_box_lines(boundary::CubicBoundary, dist_unit)
@@ -290,7 +284,7 @@ function wrap_coords(v, boundary::TriclinicBoundary)
     bv, rs, as = boundary.basis_vectors, boundary.reciprocal_size, boundary.angles
     v_wrap = v
     v_wrap -= bv[3] * floor(v_wrap[3] * rs[3])
-    v_wrap -= bv[2] * floor((v_wrap[2] - v_wrap[3] / tan(as[3])) * rs[2])
+    v_wrap -= bv[2] * floor((v_wrap[2] - sin(as[1]) * v_wrap[3] / tan(as[3])) * rs[2])
     v_wrap -= bv[1] * floor((v_wrap[1] - v_wrap[2] / tan(as[1]) - v_wrap[3] / tan(as[2])) * rs[1])
     return v_wrap
 end
