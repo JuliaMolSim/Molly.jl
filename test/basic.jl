@@ -394,7 +394,7 @@ end
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary, 0.3u"nm")
     replica_velocities = nothing
-    pairwise_inters = (LennardJones(),)
+    pairwise_inters = (LennardJones(nl_only=true),)
     n_replicas = 4
 
     nb_matrix = trues(n_atoms, n_atoms)

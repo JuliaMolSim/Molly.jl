@@ -458,7 +458,7 @@ end
     boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
     coords = place_atoms(n_atoms, boundary, 0.3u"nm")
 
-    pairwise_inters = (LennardJones(),)
+    pairwise_inters = (LennardJones(nl_only=true),)
 
     nb_matrix = trues(n_atoms, n_atoms)
     for i in 1:(n_atoms ÷ 2)
@@ -505,6 +505,7 @@ end
 
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
     @test efficiency > 0.4
+    # TODO: Add some reliable tests here
 end
 
 @testset "Different implementations" begin

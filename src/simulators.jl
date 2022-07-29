@@ -527,7 +527,9 @@ function simulate!(sys::ReplicaSystem{D, G, T},
             end
             T_n, T_m = sim.temperatures[n], sim.temperatures[m]
             β_n, β_m = 1/(k_b*T_n), 1/(k_b*T_m)
-            V_n, V_m = potential_energy(sys.replicas[n]), potential_energy(sys.replicas[m])
+            neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder; n_threads=n_threads)
+            neighbors_m = find_neighbors(sys.replicas[m], sys.replicas[m].neighbor_finder; n_threads=n_threads)
+            V_n, V_m = potential_energy(sys.replicas[n], neighbors_n), potential_energy(sys.replicas[m], neighbors_m)
             Δ = (β_m - β_n)*(V_n - V_m)
             if Δ <= 0 || rand(rng) < exp(-Δ)
                 # exchange coordinates and velocities
