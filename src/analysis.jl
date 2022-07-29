@@ -33,6 +33,9 @@ number of atoms.
 - `markersize=0.05`: the size of the atom markers, in the units of the data.
 - `linewidth=2.0`: the width of the bond lines.
 - `transparency=true`: whether transparency is active on the plot.
+- `show_boundary::Bool=true`: whether to show the bounding box as lines.
+- `boundary_linewidth=2.0`: the width of the boundary lines.
+- `boundary_color=:black`: the color of the boundary lines.
 - `kwargs...`: other keyword arguments are passed to the point plotting
     function.
 """

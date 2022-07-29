@@ -148,6 +148,36 @@ box_volume(b::TriclinicBoundary) = abs(dot(cross(b[1], b[2]), b[3]))
 cubic_bounding_box(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 cubic_bounding_box(b::TriclinicBoundary) = b.cubic_bounds
 
+# Coordinates for visualizing bounding box
+function bounding_box_lines(boundary::CubicBoundary, dist_unit)
+    sl = ustrip.(dist_unit, boundary.side_lengths)
+    xs = [0.0, 0.0, 0.0, 0.0, 0.0, sl[1], sl[1], 0.0, 0.0, sl[1], sl[1], 0.0, sl[1], sl[1], sl[1], sl[1]]
+    ys = [0.0, 0.0, sl[2], sl[2], 0.0, 0.0, sl[2], sl[2], sl[2], sl[2], 0.0, 0.0, 0.0, 0.0, sl[2], sl[2]]
+    zs = [0.0, sl[3], sl[3], 0.0, 0.0, 0.0, 0.0, 0.0, sl[3], sl[3], sl[3], sl[3], sl[3], 0.0, 0.0, sl[3]]
+    return xs, ys, zs
+end
+
+function bounding_box_lines(boundary::RectangularBoundary, dist_unit)
+    sl = ustrip.(dist_unit, boundary.side_lengths)
+    xs = [0.0, 0.0, sl[1], sl[1], 0.0]
+    ys = [0.0, sl[2], sl[2], 0.0, 0.0]
+    return xs, ys
+end
+
+function bounding_box_lines(boundary::TriclinicBoundary, dist_unit)
+    bv = ustrip_vec.(dist_unit, boundary.basis_vectors)
+    p1 = zero(bv[1])
+    p2 = bv[1]
+    p3 = bv[2]
+    p4 = bv[3]
+    p5 = bv[1] + bv[2]
+    p6 = bv[1] + bv[3]
+    p7 = bv[2] + bv[3]
+    p8 = bv[1] + bv[2] + bv[3]
+    seq = [p1, p4, p7, p3, p1, p2, p5, p3, p7, p8, p6, p4, p6, p2, p5, p8]
+    return getindex.(seq, 1), getindex.(seq, 2), getindex.(seq, 3)
+end
+
 """
     rand_coord(boundary)
 

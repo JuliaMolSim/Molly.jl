@@ -15,8 +15,12 @@ function visualize(coord_logger,
                     markersize=0.05,
                     linewidth=2.0,
                     transparency=true,
+                    show_boundary::Bool=true,
+                    boundary_linewidth=2.0,
+                    boundary_color=:black,
                     kwargs...)
     coords_start = first(values(coord_logger))
+    dist_unit = unit(first(first(coords_start)))
     dims = n_dimensions(boundary)
     fig = Figure()
 
@@ -34,6 +38,15 @@ function visualize(coord_logger,
     positions = Observable(PointType.(ustrip_vec.(coords_start)))
     scatter!(ax, positions; color=color, markersize=markersize, transparency=transparency,
                 markerspace=:data, kwargs...)
+
+    if show_boundary
+        lines!(
+            ax,
+            bounding_box_lines(boundary, dist_unit)...;
+            color=boundary_color,
+            linewidth=boundary_linewidth,
+        )
+    end
 
     # Don't display connected atoms that are likely connected over the box edge
     max_connection_dist = cbrt(box_volume(boundary)) / 2
@@ -61,7 +74,7 @@ function visualize(coord_logger,
         end
     end
     for (ci, cn) in enumerate(connection_nodes)
-        lines!(ax, cn,
+        lines!(ax, cn;
                 color=isa(connection_color, AbstractArray) ? connection_color[ci] : connection_color,
                 linewidth=isa(linewidth, AbstractArray) ? linewidth[ci] : linewidth,
                 transparency=transparency)
@@ -77,7 +90,6 @@ function visualize(coord_logger,
                     transparency=transparency, markerspace=:data, kwargs...)
     end
 
-    dist_unit = unit(first(first(coords_start)))
     boundary_conv = ustrip.(dist_unit, cubic_bounding_box(boundary))
     xlims!(ax, axis_limits(boundary_conv, coord_logger, 1))
     ylims!(ax, axis_limits(boundary_conv, coord_logger, 2))

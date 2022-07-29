@@ -17,7 +17,7 @@ export
 
 Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustrip_vec.(coords)`.
 """
-ustrip_vec(x) = ustrip.(x)
+ustrip_vec(x...) = ustrip.(x...)
 
 function check_force_units(fdr, force_units)
     if unit(first(fdr)) != force_units
