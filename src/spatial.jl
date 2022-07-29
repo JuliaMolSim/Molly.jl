@@ -157,17 +157,7 @@ rand_coord(boundary::CubicBoundary      ) = rand(SVector{3, float_type(boundary)
 rand_coord(boundary::RectangularBoundary) = rand(SVector{2, float_type(boundary)}) .* boundary
 
 function rand_coord(boundary::TriclinicBoundary{T}) where T
-    in_bounds = false
-    trial_coord = rand(SVector{3, T}) .* boundary.cubic_bounds
-    while !in_bounds
-        wrap_coord = wrap_coords(trial_coord, boundary)
-        if wrap_coord == trial_coord
-            in_bounds = true
-        else
-            trial_coord = rand(SVector{3, T}) .* boundary.cubic_bounds
-        end
-    end
-    return trial_coord
+    return sum(rand(SVector{3, T}) .* boundary.basis_vectors)
 end
 
 """
@@ -218,9 +208,6 @@ function vector(c1, c2, boundary::TriclinicBoundary{T, false}) where T
     min_sqdist = typemax(c1[1] ^ 2)
     min_dr = zero(c1)
     for ox in offsets, oy in offsets, oz in offsets
-        if iszero(ox) && iszero(oy) && iszero(oz)
-            continue
-        end
         c2_offset = c2 + ox * bv[1] + oy * bv[2] + oz * bv[3]
         dr = c2_offset - c1
         sqdist = dot(dr, dr)
