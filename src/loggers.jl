@@ -475,17 +475,17 @@ function Base.show(io::IO, aol::AverageObservableLogger)
             " samples collected for observable ", aol.observable)
 end
 
-mutable struct ReplicaExchangeLogger
+mutable struct ReplicaExchangeLogger{T}
     n_replicas::Int
     n_attempts::Int
     n_exchanges::Int
     indices::Vector{Tuple{Int,Int}}
     steps::Vector{Int}
-    delta::Vector{Float64}
+    delta::Vector{T}
     end_step::Int
 end
 
-ReplicaExchangeLogger(n_replicas::Int) = ReplicaExchangeLogger(n_replicas, 0, 0, Tuple{Int, Int}[], Int[], Float64[], 0)
+ReplicaExchangeLogger{T}(n_replicas::Int) where T = ReplicaExchangeLogger{T}(n_replicas, 0, 0, Tuple{Int, Int}[], Int[], T[], 0)
 
 function log_property!(
                     rexl::ReplicaExchangeLogger,

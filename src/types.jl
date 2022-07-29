@@ -446,7 +446,7 @@ function ReplicaSystem(;
                 n_replicas,
                 boundary,
                 neighbor_finder=NoNeighborFinder(),
-                exchange_logger=ReplicaExchangeLogger(n_replicas),
+                exchange_logger=nothing,
                 replica_loggers=Tuple(() for _ in 1:n_replicas),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
@@ -464,7 +464,6 @@ function ReplicaSystem(;
     C = typeof(coords)
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
-    EL = typeof(exchange_logger)
     F = typeof(force_units)
     E = typeof(energy_units)
     
@@ -477,6 +476,12 @@ function ReplicaSystem(;
         end
     end
     V = typeof(replica_velocities[1])
+
+    if isnothing(exchange_logger)
+        exchange_logger = ReplicaExchangeLogger{T}(n_replicas)
+    end
+    EL = typeof(exchange_logger)
+    
     if !all(y -> typeof(y) == V, replica_velocities)
         throw(ArgumentError("The velocities for all the replicas are not of the same type."))
     end
