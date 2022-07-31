@@ -67,23 +67,31 @@ Not currently compatible with infinite boundaries.
 struct TriclinicBoundary{T, A, D, I}
     basis_vectors::SVector{3, SVector{3, D}}
     reciprocal_size::SVector{3, I}
-    angles::SVector{3, T}
+    tan_bprojyz_cprojyz::T
+    tan_c_cprojxy::T
+    cos_a_cprojxy::T
+    sin_a_cprojxy::T
+    tan_a_b::T
 end
 
-function TriclinicBoundary(basis_vectors::SVector{3}; approx_images::Bool=true)
+function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
     reciprocal_size = SVector{3}(
-        inv(basis_vectors[1][1]),
-        inv(basis_vectors[2][2]),
-        inv(basis_vectors[3][3]),
+        inv(bv[1][1]),
+        inv(bv[2][2]),
+        inv(bv[3][3]),
     )
-    angles = SVector{3}(
-        bond_angle(basis_vectors[1], basis_vectors[2]), # xy angle
-        bond_angle(basis_vectors[1], basis_vectors[3]), # xz angle
-        bond_angle(basis_vectors[2], basis_vectors[3]), # yz angle
-    )
-    return TriclinicBoundary{eltype(angles), approx_images, eltype(eltype(basis_vectors)),
-                             eltype(reciprocal_size)}(
-                                basis_vectors, reciprocal_size, angles)
+    # Precompute angles to speed up coordinate wrapping
+    tan_bprojyz_cprojyz = tan(bond_angle(
+        SVector(zero(bv[2][1]), bv[2][2], bv[2][3]),
+        SVector(zero(bv[3][1]), bv[3][2], bv[3][3]),
+    ))
+    tan_c_cprojxy = tan(bond_angle(SVector(bv[3][1], bv[3][2], zero(bv[3][3])), bv[3]))
+    a_cprojxy = bond_angle(bv[1], SVector(bv[3][1], bv[3][2], zero(bv[3][3])))
+    tan_a_b = tan(bond_angle(bv[1], bv[2]))
+    return TriclinicBoundary{typeof(tan_bprojyz_cprojyz), approx_images, eltype(eltype(bv)),
+                            eltype(reciprocal_size)}(
+                                bv, reciprocal_size, tan_bprojyz_cprojyz, tan_c_cprojxy,
+                                cos(a_cprojxy), sin(a_cprojxy), tan_a_b)
 end
 
 TriclinicBoundary(v1, v2, v3; kwargs...) = TriclinicBoundary(SVector{3}(v1, v2, v3); kwargs...)
@@ -281,11 +289,17 @@ Ensure a coordinate is within the bounding box and return the coordinate.
 wrap_coords(v, boundary::Union{CubicBoundary, RectangularBoundary}) = wrap_coord_1D.(v, boundary)
 
 function wrap_coords(v, boundary::TriclinicBoundary)
-    bv, rs, as = boundary.basis_vectors, boundary.reciprocal_size, boundary.angles
+    bv, rs = boundary.basis_vectors, boundary.reciprocal_size
     v_wrap = v
+    # Bound in z-axis
     v_wrap -= bv[3] * floor(v_wrap[3] * rs[3])
-    v_wrap -= bv[2] * floor((v_wrap[2] - sin(as[1]) * v_wrap[3] / tan(as[3])) * rs[2])
-    v_wrap -= bv[1] * floor((v_wrap[1] - v_wrap[2] / tan(as[1]) - v_wrap[3] / tan(as[2])) * rs[1])
+    # Bound in y-axis
+    v_wrap -= bv[2] * floor((v_wrap[2] - v_wrap[3] / boundary.tan_bprojyz_cprojyz) * rs[2])
+    dz_projxy = v_wrap[3] / boundary.tan_c_cprojxy
+    dx = dz_projxy * boundary.cos_a_cprojxy
+    dy = dz_projxy * boundary.sin_a_cprojxy
+    # Bound in x-axis
+    v_wrap -= bv[1] * floor((v_wrap[1] - dx - (v_wrap[2] - dy) / boundary.tan_a_b) * rs[1])
     return v_wrap
 end
 
