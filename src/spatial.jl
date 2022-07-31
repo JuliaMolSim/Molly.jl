@@ -153,10 +153,17 @@ cubic_bounding_box(b::TriclinicBoundary) = sum(b.basis_vectors)
 # Coordinates for visualizing bounding box
 function bounding_box_lines(boundary::CubicBoundary, dist_unit)
     sl = ustrip.(dist_unit, boundary.side_lengths)
-    xs = [0.0, 0.0, 0.0, 0.0, 0.0, sl[1], sl[1], 0.0, 0.0, sl[1], sl[1], 0.0, sl[1], sl[1], sl[1], sl[1]]
-    ys = [0.0, 0.0, sl[2], sl[2], 0.0, 0.0, sl[2], sl[2], sl[2], sl[2], 0.0, 0.0, 0.0, 0.0, sl[2], sl[2]]
-    zs = [0.0, sl[3], sl[3], 0.0, 0.0, 0.0, 0.0, 0.0, sl[3], sl[3], sl[3], sl[3], sl[3], 0.0, 0.0, sl[3]]
-    return xs, ys, zs
+    z = zero(sl[1])
+    p1 = SVector(z    , z    , z    )
+    p2 = SVector(sl[1], z    , z    )
+    p3 = SVector(z    , sl[2], z    )
+    p4 = SVector(z    , z    , sl[3])
+    p5 = SVector(sl[1], sl[2], z    )
+    p6 = SVector(sl[1], z    , sl[3])
+    p7 = SVector(z    , sl[2], sl[3])
+    p8 = SVector(sl[1], sl[2], sl[3])
+    seq = [p1, p4, p7, p3, p1, p2, p5, p3, p7, p8, p6, p4, p6, p2, p5, p8]
+    return getindex.(seq, 1), getindex.(seq, 2), getindex.(seq, 3)
 end
 
 function bounding_box_lines(boundary::RectangularBoundary, dist_unit)
