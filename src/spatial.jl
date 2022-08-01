@@ -55,11 +55,18 @@ Base.lastindex(b::RectangularBoundary) = b.side_lengths[2]
 
 """
     TriclinicBoundary(v1, v2, v3; approx_images=true)
+    TriclinicBoundary(SVector(l1, l2, l3), SVector(α, β, γ); approx_images=true)
     TriclinicBoundary(arr; approx_images=true)
 
-Triclinic 3D bounding box defined by 3 basis vectors.
+Triclinic 3D bounding box defined by 3 `SVector{3}` basis vectors or basis vector
+lengths and angles α/β/γ.
+The first basis vector must point along the x-axis and the second must lie in the
+xy plane.
+
 An approximation is used to find the closest periodic image when using the
 minimum image convention.
+The approximation is correct for distances shorter than half the shortest box
+height/width.
 Setting the keyword argument `approx_images` to `false` means the exact closest
 image is found, which is slower.
 Not currently compatible with infinite boundaries.
@@ -82,12 +89,12 @@ function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
                             "and have a positive x component " * 
                             "when constructing a TriclinicBoundary, got $(bv[1])"))
     end
-    if !ispositive((bv[2][2]) || !iszero(bv[2][3])
+    if !ispositive(bv[2][2]) || !iszero(bv[2][3])
         throw(ArgumentError("Second basis vector must be in the xy plane (no z component) " *
                             "and have a positive y component " *
                             "when constructing a TriclinicBoundary, got $(bv[2])"))
     end
-    if !ispositive((bv[3][3])
+    if !ispositive(bv[3][3])
         throw(ArgumentError("Third basis vector must have a positive z component " *
                             "when constructing a TriclinicBoundary, got $(bv[3])"))
     end
@@ -104,6 +111,27 @@ function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
                             eltype(reciprocal_size)}(
                                 bv, reciprocal_size, tan_bprojyz_cprojyz, tan_c_cprojxy,
                                 cos(a_cprojxy), sin(a_cprojxy), tan_a_b)
+end
+
+function TriclinicBoundary(bv_lengths::SVector{3}, angles::SVector{3}; kwargs...)
+    if any(!ispositive, bv_lengths)
+        throw(ArgumentError("Basis vector lengths must be positive " *
+                            "when constructing a TriclinicBoundary, got $bv_lengths"))
+    end
+    if !all(a -> 0 < a < π, angles)
+        throw(ArgumentError("Basis vector angles must be 0 to π radians " *
+                            "when constructing a TriclinicBoundary, got $angles"))
+    end
+    α, β, γ = angles
+    cos_α, cos_β, cos_γ, sin_γ = cos(α), cos(β), cos(γ), sin(γ)
+    z = zero(bv_lengths[1])
+    v1 = SVector(bv_lengths[1], z, z)
+    v2 = SVector(bv_lengths[2] * cos_γ, bv_lengths[2] * sin_γ, z)
+    v3x = bv_lengths[3] * cos_β
+    v3y = bv_lengths[3] * (cos_α - cos_β * cos_γ) / sin_γ
+    v3z = sqrt(bv_lengths[3] ^ 2 - v3x ^ 2 - v3y ^ 2)
+    v3 = SVector(v3x, v3y, v3z)
+    return TriclinicBoundary(SVector{3}(v1, v2, v3); kwargs...)
 end
 
 TriclinicBoundary(v1, v2, v3; kwargs...) = TriclinicBoundary(SVector{3}(v1, v2, v3); kwargs...)
