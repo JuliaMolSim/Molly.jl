@@ -1,5 +1,10 @@
 # Molly.jl release notes
 
+## v0.12.1 - Aug 2022
+
+- Updates are made to support the latest Zygote.jl and UnitfulChainRules.jl versions.
+- A bug in implicit solvent gradient setup is fixed.
+
 ## v0.12.0 - Jul 2022
 
 - The `parallel` keyword argument is renamed to `n_threads` throughout, allowing an exact number of threads to be specified with the default remaining `Threads.nthreads()`.
