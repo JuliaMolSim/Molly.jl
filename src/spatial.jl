@@ -144,7 +144,7 @@ end
 Calculate the volume of a bounding box.
 """
 box_volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
-box_volume(b::TriclinicBoundary) = abs(dot(cross(b[1], b[2]), b[3]))
+box_volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
 
 # The minimum cubic box surrounding the bounding box, used for visualization
 cubic_bounding_box(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
