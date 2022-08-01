@@ -74,17 +74,21 @@ struct TriclinicBoundary{T, A, D, I}
     tan_a_b::T
 end
 
+ispositive(x) = x > zero(x)
+
 function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
-    if iszero(bv[1][1]) || !iszero(bv[1][2]) || !iszero(bv[1][3])
+    if !ispositive(bv[1][1]) || !iszero(bv[1][2]) || !iszero(bv[1][3])
         throw(ArgumentError("First basis vector must be along the x-axis (no y or z component) " *
+                            "and have a positive x component " * 
                             "when constructing a TriclinicBoundary, got $(bv[1])"))
     end
-    if iszero(bv[2][2]) || !iszero(bv[2][3])
-        throw(ArgumentError("Second basis vector must be in the xy plane (no z component) and have a y component " *
+    if !ispositive((bv[2][2]) || !iszero(bv[2][3])
+        throw(ArgumentError("Second basis vector must be in the xy plane (no z component) " *
+                            "and have a positive y component " *
                             "when constructing a TriclinicBoundary, got $(bv[2])"))
     end
-    if iszero(bv[3][3])
-        throw(ArgumentError("Third basis vector must have a z component " *
+    if !ispositive((bv[3][3])
+        throw(ArgumentError("Third basis vector must have a positive z component " *
                             "when constructing a TriclinicBoundary, got $(bv[3])"))
     end
     reciprocal_size = SVector{3}(inv(bv[1][1]), inv(bv[2][2]), inv(bv[3][3]))
