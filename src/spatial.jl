@@ -75,11 +75,19 @@ struct TriclinicBoundary{T, A, D, I}
 end
 
 function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
-    reciprocal_size = SVector{3}(
-        inv(bv[1][1]),
-        inv(bv[2][2]),
-        inv(bv[3][3]),
-    )
+    if iszero(bv[1][1]) || !iszero(bv[1][2]) || !iszero(bv[1][3])
+        throw(ArgumentError("First basis vector must be along the x-axis (no y or z component) " *
+                            "when constructing a TriclinicBoundary, got $(bv[1])"))
+    end
+    if iszero(bv[2][2]) || !iszero(bv[2][3])
+        throw(ArgumentError("Second basis vector must be in the xy plane (no z component) and have a y component " *
+                            "when constructing a TriclinicBoundary, got $(bv[2])"))
+    end
+    if iszero(bv[3][3])
+        throw(ArgumentError("Third basis vector must have a z component " *
+                            "when constructing a TriclinicBoundary, got $(bv[3])"))
+    end
+    reciprocal_size = SVector{3}(inv(bv[1][1]), inv(bv[2][2]), inv(bv[3][3]))
     # Precompute angles to speed up coordinate wrapping
     tan_bprojyz_cprojyz = tan(bond_angle(
         SVector(zero(bv[2][1]), bv[2][2], bv[2][3]),
