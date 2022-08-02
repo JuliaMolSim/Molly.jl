@@ -59,7 +59,7 @@ Base.lastindex(b::RectangularBoundary) = b.side_lengths[2]
     TriclinicBoundary(arr; approx_images=true)
 
 Triclinic 3D bounding box defined by 3 `SVector{3}` basis vectors or basis vector
-lengths and angles α/β/γ.
+lengths and angles α/β/γ in radians.
 The first basis vector must point along the x-axis and the second must lie in the
 xy plane.
 
@@ -74,6 +74,9 @@ Not currently compatible with infinite boundaries.
 struct TriclinicBoundary{T, A, D, I}
     basis_vectors::SVector{3, SVector{3, D}}
     reciprocal_size::SVector{3, I}
+    α::T
+    β::T
+    γ::T
     tan_bprojyz_cprojyz::T
     tan_c_cprojxy::T
     cos_a_cprojxy::T
@@ -99,6 +102,9 @@ function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
                             "when constructing a TriclinicBoundary, got $(bv[3])"))
     end
     reciprocal_size = SVector{3}(inv(bv[1][1]), inv(bv[2][2]), inv(bv[3][3]))
+    α = bond_angle(bv[2], bv[3])
+    β = bond_angle(bv[1], bv[3])
+    γ = bond_angle(bv[1], bv[2])
     # Precompute angles to speed up coordinate wrapping
     tan_bprojyz_cprojyz = tan(bond_angle(
         SVector(zero(bv[2][1]), bv[2][2], bv[2][3]),
@@ -107,9 +113,8 @@ function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
     tan_c_cprojxy = tan(bond_angle(SVector(bv[3][1], bv[3][2], zero(bv[3][3])), bv[3]))
     a_cprojxy = bond_angle(bv[1], SVector(bv[3][1], bv[3][2], zero(bv[3][3])))
     tan_a_b = tan(bond_angle(bv[1], bv[2]))
-    return TriclinicBoundary{typeof(tan_bprojyz_cprojyz), approx_images, eltype(eltype(bv)),
-                            eltype(reciprocal_size)}(
-                                bv, reciprocal_size, tan_bprojyz_cprojyz, tan_c_cprojxy,
+    return TriclinicBoundary{typeof(α), approx_images, eltype(eltype(bv)), eltype(reciprocal_size)}(
+                                bv, reciprocal_size, α, β, γ, tan_bprojyz_cprojyz, tan_c_cprojxy,
                                 cos(a_cprojxy), sin(a_cprojxy), tan_a_b)
 end
 
