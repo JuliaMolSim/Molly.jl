@@ -41,6 +41,11 @@
     vels_nounits = [maxwell_boltzmann(12.0    , 300.0    ) for _ in 1:1_000]
     @test 0.35u"nm * ps^-1" < std(vels_units) < 0.55u"nm * ps^-1"
     @test 0.35 < std(vels_nounits) < 0.55
+
+    b = TriclinicBoundary(SVector(2.2, 2.0, 1.8)u"nm", deg2rad.(SVector(50.0, 40.0, 60.0)))
+    @test isapprox(b.basis_vectors[1], SVector(2.2      , 0.0      , 0.0      )u"nm", atol=1e-6u"nm")
+    @test isapprox(b.basis_vectors[2], SVector(1.0      , 1.7320508, 0.0      )u"nm", atol=1e-6u"nm")
+    @test isapprox(b.basis_vectors[3], SVector(1.37888  , 0.5399122, 1.0233204)u"nm", atol=1e-6u"nm")
 end
 
 @testset "Neighbor lists" begin
