@@ -53,7 +53,7 @@ Requires = "1"
 StaticArrays = "1"
 Unitful = "1"
 UnitfulChainRules = "= 0.1.1"
-Zygote = "= 0.6.42"
+Zygote = "0.6.42 - 0.6.43"
 julia = "1.7"
 
 [extras]
