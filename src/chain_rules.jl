@@ -161,3 +161,11 @@ function ChainRulesCore.rrule(::typeof(sum_svec), arr::AbstractArray{SVector{D, 
     end
     return Y, sum_svec_pullback
 end
+
+function ChainRulesCore.rrule(::typeof(mean), arr::AbstractArray{SVector{D, T}}) where {D, T}
+    Y = mean(arr)
+    function mean_pullback(Ȳ::SVector{D, T})
+        return NoTangent(), zero(arr) .+ (Ȳ ./ length(arr),)
+    end
+    return Y, mean_pullback
+end
