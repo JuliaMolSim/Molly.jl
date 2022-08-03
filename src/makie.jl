@@ -27,10 +27,12 @@ function visualize(coord_logger,
     if dims == 3
         PointType = Point3f
         ax = Axis3(fig[1, 1], aspect=:data)
+        max_connection_dist = cbrt(box_volume(boundary)) / 2
     elseif dims == 2
         PointType = Point2f
         ax = Axis(fig[1, 1])
         ax.aspect = DataAspect()
+        max_connection_dist = sqrt(box_volume(boundary)) / 2
     else
         throw(ArgumentError("Found $dims dimensions but can only visualize 2 or 3 dimensions"))
     end
@@ -48,11 +50,9 @@ function visualize(coord_logger,
         )
     end
 
-    # Don't display connected atoms that are likely connected over the box edge
-    max_connection_dist = cbrt(box_volume(boundary)) / 2
-
     connection_nodes = []
     for (ci, (i, j)) in enumerate(connections)
+        # Don't display connected atoms that are likely connected over the box edge
         if first(connection_frames)[ci] && norm(coords_start[i] - coords_start[j]) < max_connection_dist
             if dims == 3
                 push!(connection_nodes, Observable(PointType.(

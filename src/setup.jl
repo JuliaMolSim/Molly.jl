@@ -23,7 +23,8 @@ which to stop placing atoms.
 Can not be used if one or more dimensions has infinite boundaries.
 """
 function place_atoms(n_atoms::Integer, boundary, min_dist; max_attempts::Integer=100)
-    max_atoms = box_volume(boundary) / (min_dist ^ 3)
+    dims = n_dimensions(boundary)
+    max_atoms = box_volume(boundary) / (min_dist ^ dims)
     if n_atoms > max_atoms
         throw(ArgumentError("Boundary $boundary too small for $n_atoms atoms with minimum distance $min_dist"))
     end
@@ -64,11 +65,11 @@ Can not be used if one or more dimensions has infinite boundaries.
 """
 function place_diatomics(n_molecules::Integer, boundary, min_dist, bond_length;
                          max_attempts::Integer=100, aligned::Bool=false)
-    max_molecules = box_volume(boundary) / ((min_dist + bond_length) ^ 3)
+    dims = n_dimensions(boundary)
+    max_molecules = box_volume(boundary) / ((min_dist + bond_length) ^ dims)
     if n_molecules > max_molecules
         throw(ArgumentError("Boundary $boundary too small for $n_molecules diatomics with minimum distance $min_dist"))
     end
-    dims = n_dimensions(boundary)
     min_dist_sq = min_dist ^ 2
     coords = SArray[]
     failed_attempts = 0

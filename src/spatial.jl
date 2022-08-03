@@ -186,7 +186,7 @@ end
 """
     box_volume(boundary)
 
-Calculate the volume of a bounding box.
+Calculate the volume of a 3D bounding box or the area of a 2D bounding box.
 """
 box_volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
 box_volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
