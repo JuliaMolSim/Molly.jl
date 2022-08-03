@@ -77,6 +77,32 @@
             return true
         end
     end
+
+    atoms = fill(Atom(mass=1.0u"u"), n_atoms)
+    loggers = (coords=CoordinateLogger(10),)
+    temp = 100.0u"K"
+    dt = 0.002u"ps"
+    sim = VelocityVerlet(dt=dt, remove_CM_motion=false)
+    sys = System(atoms=atoms, coords=coords, boundary=b, loggers=loggers)
+    random_velocities!(sys, temp)
+    starting_velocities = copy(sys.velocities)
+    simulate!(sys, sim, 1_000)
+    @test all(isapprox.(sys.velocities, starting_velocities))
+    @test wrap_coords.(sys.coords, (b,)) == sys.coords
+
+    # Test that displacements match those expected from the starting velocity,
+    #   i.e. that coordinate wrapping hasn't caused any atoms to jump
+    logged_coords = values(sys.loggers.coords)
+    max_disps = map(1:n_atoms) do ci
+        return maximum(1:(length(logged_coords) - 1)) do fi
+            return norm(vector(logged_coords[fi][ci], logged_coords[fi + 1][ci], b_exact))
+        end
+    end
+    @test isapprox(
+        maximum(max_disps),
+        norm(sys.velocities[argmax(max_disps)]) * sys.loggers.coords.n_steps * dt,
+        atol=1e-9u"nm",
+    )
 end
 
 @testset "Neighbor lists" begin
