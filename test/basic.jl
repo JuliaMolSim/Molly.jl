@@ -46,6 +46,37 @@
     @test isapprox(b.basis_vectors[1], SVector(2.2      , 0.0      , 0.0      )u"nm", atol=1e-6u"nm")
     @test isapprox(b.basis_vectors[2], SVector(1.0      , 1.7320508, 0.0      )u"nm", atol=1e-6u"nm")
     @test isapprox(b.basis_vectors[3], SVector(1.37888  , 0.5399122, 1.0233204)u"nm", atol=1e-6u"nm")
+
+    @test isapprox(box_volume(b), 3.89937463181886u"nm^3")
+
+    @test_throws ArgumentError TriclinicBoundary(
+        SVector(2.0, 1.0, 0.0)u"nm",
+        SVector(1.0, 2.0, 0.0)u"nm",
+        SVector(1.0, 1.0, 2.0)u"nm",
+    )
+    @test_throws ArgumentError TriclinicBoundary(
+        SVector(2.2, 2.0, 1.8)u"nm",
+        deg2rad.(SVector(190.0, 40.0, 60.0)),
+    )
+
+    n_atoms = 1_000
+    coords = place_atoms(n_atoms, b, 0.01u"nm")
+    @test wrap_coords.(coords, (b,)) == coords
+
+    # Test approximation for minimum image is correct up to half the minimum height/width
+    b_exact = TriclinicBoundary(b.basis_vectors; approx_images=false)
+    correct_limit = min(b.basis_vectors[1][1], b.basis_vectors[2][2], b.basis_vectors[3][3]) / 2
+    @test all(1:(n_atoms - 1)) do i
+        c1 = coords[i]
+        c2 = coords[i + 1]
+        dr_exact = vector(c1, c2, b_exact)
+        if norm(dr_exact) <= correct_limit
+            dr_approx = vector(c1, c2, b)
+            return isapprox(dr_exact, dr_approx)
+        else
+            return true
+        end
+    end
 end
 
 @testset "Neighbor lists" begin
