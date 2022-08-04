@@ -308,8 +308,6 @@ atom_types_to_string(atom_types...) = join(map(at -> at == "" ? "-" : at, atom_t
 
 atom_types_to_tuple(atom_types) = tuple(map(at -> at == "-" ? "" : at, split(atom_types, "/"))...)
 
-box_centre(boundary) = map(x -> isinf(x) ? zero(x) : x / 2, boundary.side_lengths)
-
 const standard_res_names = [keys(BioStructures.threeletter_to_aa)..., "HID", "HIE", "HIP"]
 
 """
@@ -733,7 +731,6 @@ function System(coord_file::AbstractString,
     end
     specific_inter_lists = tuple(specific_inter_array...)
 
-    # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     if isnothing(boundary)
         # Read from file and convert from Å
         if units
@@ -1078,7 +1075,6 @@ function System(T::Type,
                                 coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
                                 force_units=force_units, energy_units=energy_units)
 
-    # Bounding box for PBCs - box goes 0 to a value in each of 3 dimensions
     if isnothing(boundary)
         box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
         box_size = units ? (box_size_vals)u"nm" : box_size_vals
