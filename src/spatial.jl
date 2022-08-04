@@ -70,6 +70,7 @@ height/width.
 Setting the keyword argument `approx_images` to `false` means the exact closest
 image is found, which is slower.
 Not currently compatible with infinite boundaries.
+Not currently compatible with automatic differentiation using Zygote.
 """
 struct TriclinicBoundary{T, A, D, I}
     basis_vectors::SVector{3, SVector{3, D}}

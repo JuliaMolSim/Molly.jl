@@ -42,6 +42,9 @@
     @test 0.35u"nm * ps^-1" < std(vels_units) < 0.55u"nm * ps^-1"
     @test 0.35 < std(vels_nounits) < 0.55
 
+    @test box_volume(CubicBoundary(4.0u"nm", 5.0u"nm", 6.0u"nm")) == 120.0u"nm^3"
+    @test box_volume(RectangularBoundary(4.0u"m", 5.0u"m")) == 20.0u"m^2"
+
     b = TriclinicBoundary(SVector(2.2, 2.0, 1.8)u"nm", deg2rad.(SVector(50.0, 40.0, 60.0)))
     @test isapprox(b.basis_vectors[1], SVector(2.2      , 0.0      , 0.0      )u"nm", atol=1e-6u"nm")
     @test isapprox(b.basis_vectors[2], SVector(1.0      , 1.7320508, 0.0      )u"nm", atol=1e-6u"nm")

@@ -203,6 +203,7 @@ end
 
 Find close atoms by distance using a tree search.
 Can not be used if one or more dimensions has infinite boundaries.
+Can not be used with [`TriclinicBoundary`](@ref).
 """
 struct TreeNeighborFinder{D} <: AbstractNeighborFinder
     nb_matrix::BitArray{2}
@@ -250,11 +251,9 @@ end
 """
     CellListMapNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff, x0, unit_cell)
 
-Find close atoms by distance and store auxiliary arrays for in-place threading. `x0` and `unit_cell` 
-are optional initial coordinates and system unit cell that improve the first approximation of the
-cell list structure. The unit cell can be provided as a three-component vector of box sides on each
-direction, in which case the unit cell is considered `OrthorhombicCell`, or as a unit cell matrix,
-in which case the cell is considered a general `TriclinicCell` by the cell list algorithm.
+Find close atoms by distance and store auxiliary arrays for in-place threading.
+`x0` and `unit_cell` are optional initial coordinates and system unit cell that improve the
+first approximation of the cell list structure.
 Can not be used if one or more dimensions has infinite boundaries.
 
 ### Example
@@ -294,6 +293,9 @@ mutable struct CellListMapNeighborFinder{N, T} <: AbstractNeighborFinder
     neighbors_threaded::Vector{NeighborList}
 end
 
+clm_box_arg(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
+clm_box_arg(b::TriclinicBoundary) = hcat(b.basis_vectors...)
+
 # This function sets up the box structure for CellListMap. It uses the unit cell
 # if it is given, or guesses a box size from the number of particles, assuming 
 # that the atomic density is similar to that of liquid water at ambient conditions.
@@ -315,7 +317,7 @@ function CellListMapNeighborFinder(;
         sides = SVector(side, side, side)
         box = CellListMap.Box(sides, dist_cutoff)
     else
-        box = CellListMap.Box(unit_cell.side_lengths, dist_cutoff)
+        box = CellListMap.Box(clm_box_arg(unit_cell), dist_cutoff)
     end
     if isnothing(x0)
         x = [ustrip.(box.unit_cell_max) .* rand(SVector{3, T}) for _ in 1:np]
@@ -377,7 +379,7 @@ function find_neighbors(s::System,
         neighbors_threaded[1].n = 0
     end
 
-    box = CellListMap.Box(s.boundary.side_lengths, nf.dist_cutoff; lcell=1)
+    box = CellListMap.Box(clm_box_arg(s.boundary), nf.dist_cutoff; lcell=1)
     parallel = n_threads > 1
     cl = UpdateCellList!(s.coords, box, cl, aux; parallel=parallel)
 
