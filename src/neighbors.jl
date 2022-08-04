@@ -154,7 +154,7 @@ function find_neighbors(s::System,
         sqdist_cutoff = nf.dist_cutoff ^ 2
         sqdists = square_distance.(nf.is, nf.js, (s.coords,), (s.boundary,))
 
-        close = sqdists .< sqdist_cutoff
+        close = sqdists .<= sqdist_cutoff
         close_nb = close .* nf.nb_matrix
         eligible = tril(close_nb, -1)
 
