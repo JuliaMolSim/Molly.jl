@@ -475,6 +475,13 @@ function Base.show(io::IO, aol::AverageObservableLogger)
             " samples collected for observable ", aol.observable)
 end
 
+"""
+    ReplicaExchangeLogger(n_steps::Int, T::DataType=DefaultFloat)
+
+A logger that records exchanges in a replica exchange simulation. The logged quantities include: number of exchange attempts (`n_attempts`),
+number of successful exchanges (`n_exchanges`), exchanged replica indices (`indices`), exchange steps (`steps`) and
+the value of Δ i.e. the argument of metropolis rate for the exchanges (`delta`).
+"""
 mutable struct ReplicaExchangeLogger{T}
     n_replicas::Int
     n_attempts::Int
@@ -485,7 +492,7 @@ mutable struct ReplicaExchangeLogger{T}
     end_step::Int
 end
 
-ReplicaExchangeLogger{T}(n_replicas::Int) where T = ReplicaExchangeLogger{T}(n_replicas, 0, 0, Tuple{Int, Int}[], Int[], T[], 0)
+ReplicaExchangeLogger(n_replicas::Int, T::DataType=DefaultFloat) = ReplicaExchangeLogger{T}(n_replicas, 0, 0, Tuple{Int, Int}[], Int[], T[], 0)
 
 function log_property!(
                     rexl::ReplicaExchangeLogger,
@@ -493,7 +500,7 @@ function log_property!(
                     neighbors=nothing,
                     step_n::Int=0;
                     indices::Tuple{Int,Int},
-                    delta::Float64,
+                    delta::Real,
                     n_threads=Threads.nthreads())
     push!(rexl.indices, indices)
     push!(rexl.steps, step_n+rexl.end_step)

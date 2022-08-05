@@ -500,7 +500,7 @@ function simulate!(sys::ReplicaSystem{D, G, T},
     end
 
     # calculate n_cycles and n_steps_per_cycle from dt and exchange_time
-    n_cycles = convert(Int64, (n_steps * sim.dt) ÷ sim.exchange_time)
+    n_cycles = convert(Int, (n_steps * sim.dt) ÷ sim.exchange_time)
     cycle_length = (n_cycles > 0) ? n_steps ÷ n_cycles : 0
     remaining_steps = (n_cycles > 0) ? n_steps % n_cycles : n_steps
     n_attempts = 0

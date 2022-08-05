@@ -499,9 +499,8 @@ end
         exchange_time=2.5u"ps",
     )
 
-    rng = MersenneTwister()
-    @time simulate!(repsys, simulator, 10_000; assign_velocities=true, rng=rng);
-    @time simulate!(repsys, simulator, 10_000; assign_velocities=false, rng=rng);
+    @time simulate!(repsys, simulator, 10_000; assign_velocities=true);
+    @time simulate!(repsys, simulator, 10_000; assign_velocities=false);
 
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
     @test efficiency > 0.35  # This is a fairly arbitrary threshold, but it's a good tests for very bad cases
