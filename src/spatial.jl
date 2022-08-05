@@ -5,6 +5,7 @@ export
     RectangularBoundary,
     TriclinicBoundary,
     box_volume,
+    box_centre,
     rand_coord,
     vector_1D,
     vector,
@@ -192,6 +193,12 @@ Calculate the volume of a 3D bounding box or the area of a 2D bounding box.
 box_volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
 box_volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
 
+"""
+    box_centre(boundary)
+
+Calculate the centre of a bounding box.
+Dimensions with infinite length return zero.
+"""
 function box_centre(b::Union{CubicBoundary, RectangularBoundary})
     return map(x -> isinf(x) ? zero(x) : x / 2, b.side_lengths)
 end
