@@ -670,6 +670,54 @@ The following interactions can use a cutoff:
 - [`Coulomb`](@ref)
 In addition, [`CoulombReactionField`](@ref) and the implicit solvent models have a `dist_cutoff` argument for a cutoff distance.
 
+## Boundaries
+
+Molly allows the use of various periodic and infinite boundary conditions.
+The available 3D boundaries are:
+- [`CubicBoundary`](@ref)
+- [`TriclinicBoundary`](@ref)
+
+The available 2D boundaries are:
+- [`RectangularBoundary`](@ref)
+
+Some examples of using boundaries:
+```julia
+CubicBoundary(2.0u"nm"   , 2.0u"nm"   , 2.0u"nm"   ) # Periodic cube with 2 nm sides
+CubicBoundary(4.0u"nm"   , 5.0u"nm"   , 6.0u"nm"   ) # Periodic cuboid
+CubicBoundary(2.0u"nm"   , 2.0u"nm"   , Inf * u"nm") # Infinite boundary in z direction
+CubicBoundary(Inf * u"nm", Inf * u"nm", Inf * u"nm") # Infinite boundary, no periodicity
+
+RectangularBoundary(4.0u"nm", 5.0u"nm"   ) # Rectangle
+RectangularBoundary(2.0u"nm", Inf * u"nm") # Infinite boundary in y direction
+
+# Periodic triclinic from basis vectors
+TriclinicBoundary(SVector(
+    SVector(2.2      , 0.0      , 0.0      )u"nm",
+    SVector(1.0      , 1.7320508, 0.0      )u"nm",
+    SVector(1.37888  , 0.5399122, 1.0233204)u"nm",
+))
+
+# Periodic triclinic from basis vector lengths and angles α/β/γ
+b = TriclinicBoundary(
+    SVector(2.2, 2.0, 1.8)u"nm",
+    deg2rad.(SVector(50.0, 40.0, 60.0)),
+)
+
+# Volume of bounding box
+box_volume(b) # 3.8993746318188633 nm^3
+
+# Random coordinate uniformly distributed within boundary
+rand_coord(b) # SVector(2.651062310435411, 2.1702306804433973, 0.9518105403051831)u"nm"
+
+# Wrap coordinate back into the boundary if it is outside
+wrap_coords(SVector(1.0, 1.0, 1.0)u"nm", b) # SVector(3.2, 1.0, 1.0)u"nm"
+```
+
+The [`box_centre`](@ref), [`n_dimensions`](@ref), [`float_type`](@ref), [`place_atoms`](@ref) and [`place_diatomics`](@ref) functions are also available for boundaries.
+
+The appropriate boundary to use will depend on your simulation.
+Having different lengths in each dimension would usually only make sense in a situation where forces or restraints depended on the dimension, for example.
+
 ## Simulators
 
 Simulators define what type of simulation is run.
