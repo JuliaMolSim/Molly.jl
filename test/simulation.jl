@@ -451,8 +451,9 @@ end
     @test maximum(maximum(abs.(v)) for v in (s1.coords .- s2.coords)) < 1e-5u"nm"
 end
 
-@testset "Temperature Replica Exchange" begin
+@testset "Temperature REMD" begin
     n_atoms = 100
+    n_steps = 10_000
     atom_mass = 10.0u"u"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
@@ -473,6 +474,7 @@ end
     )
 
     n_replicas = 4
+    replica_loggers = Tuple((temp=TemperatureLogger(10), coords=CoordinateLogger(10)) for i in 1:n_replicas)
 
     repsys = ReplicaSystem(
         atoms=atoms,
@@ -481,7 +483,7 @@ end
         n_replicas=n_replicas,
         boundary=boundary,
         pairwise_inters=pairwise_inters,
-        replica_loggers=Tuple((temp=TemperatureLogger(10), coords=CoordinateLogger(10)) for i in 1:n_replicas),
+        replica_loggers=replica_loggers,
         neighbor_finder=neighbor_finder,
     )
 
@@ -499,14 +501,15 @@ end
         exchange_time=2.5u"ps",
     )
 
-    @time simulate!(repsys, simulator, 10_000; assign_velocities=true);
-    @time simulate!(repsys, simulator, 10_000; assign_velocities=false);
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=true )
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=false)
 
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
-    @test efficiency > 0.35  # This is a fairly arbitrary threshold, but it's a good tests for very bad cases
+    @test efficiency > 0.35 # This is a fairly arbitrary threshold, but it's a good tests for very bad cases
 
     for id in eachindex(repsys.replicas)
-        @test 0.95temp_vals[id] < mean(values(repsys.replicas[id].loggers.temp)) < 1.05temp_vals[id]
+        mean_temp = mean(values(repsys.replicas[id].loggers.temp))
+        @test (0.9 * temp_vals[id]) < mean_temp < (1.1 * temp_vals[id])
     end
 end
 
