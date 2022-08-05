@@ -22,6 +22,7 @@ Implemented features include:
 - Andersen, Berendsen and velocity rescaling thermostats.
 - Verlet, velocity Verlet, Störmer-Verlet and flexible Langevin integrators.
 - Steepest descent energy minimization.
+- Replica exchange molecular dynamics.
 - Periodic, triclinic and infinite boundary conditions in a cubic box.
 - Flexible loggers to track arbitrary properties throughout simulations.
 - Cutoff algorithms for non-bonded interactions.
@@ -37,7 +38,7 @@ Implemented features include:
 - Differentiable molecular simulation. This is a unique feature of the package and the focus of its current development.
 
 Features not yet implemented include:
-- Simulators such as REMD and metadynamics.
+- Simulators such as metadynamics.
 - Other temperature or pressure coupling methods.
 - Particle mesh Ewald summation.
 - Protein preparation - solvent box, add hydrogens etc.
