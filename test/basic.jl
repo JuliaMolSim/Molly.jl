@@ -152,6 +152,33 @@ end
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
         @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
     end
+
+    # Test CellListMapNeighborFinder with TriclinicBoundary
+    boundary = TriclinicBoundary(
+        SVector(2.0, 0.0, 0.0)u"nm",
+        SVector(0.7, 1.8, 0.0)u"nm",
+        SVector(0.5, 0.3, 1.6)u"nm",
+    )
+    n_atoms = 1_000
+    coords = place_atoms(n_atoms, boundary, 0.01u"nm")
+    atoms = fill(Atom(), n_atoms)
+    dist_cutoff = 0.6u"nm"
+    nf = CellListMapNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), dist_cutoff=dist_cutoff)
+    sys = System(atoms=atoms, coords=coords, boundary=boundary, neighbor_finder=nf)
+    neighbors = find_neighbors(sys)
+    neighbors_sorted = map(
+        x -> (x[1], x[2]),
+        sort(neighbors.list, lt=(x, y) -> x[1] < y[1] || (x[1] == y[1] && x[2] < y[2])),
+    )
+    neighbors_dist = Tuple{Int, Int}[]
+    for i in 1:n_atoms
+        for j in (i + 1):n_atoms
+            if norm(vector(coords[i], coords[j], boundary)) <= dist_cutoff
+                push!(neighbors_dist, (i, j))
+            end
+        end
+    end
+    @test neighbors_dist == neighbors_sorted
 end
 
 @testset "Analysis" begin

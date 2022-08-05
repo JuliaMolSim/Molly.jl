@@ -709,7 +709,7 @@ box_volume(b) # 3.8993746318188633 nm^3
 # Random coordinate uniformly distributed within boundary
 rand_coord(b) # SVector(2.651062310435411, 2.1702306804433973, 0.9518105403051831)u"nm"
 
-# Wrap coordinate back into the boundary if it is outside
+# Wrap a coordinate back into the boundary if it is outside
 wrap_coords(SVector(1.0, 1.0, 1.0)u"nm", b) # SVector(3.2, 1.0, 1.0)u"nm"
 ```
 
