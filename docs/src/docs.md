@@ -677,6 +677,7 @@ The available simulators are:
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
 - [`LangevinSplitting`](@ref)
+- [`TemperatureREMD`](@ref)
 
 The [`LangevinSplitting`](@ref) simulator can be used to define a variety of integrators such as velocity Verlet (splitting `"BAB"`), the Langevin implementation in [`Langevin`](@ref) (`"BAOA"`), and symplectic Euler integrators (`"AB"` and `"BA"`).
 
@@ -816,6 +817,7 @@ The available loggers are:
 - [`TimeCorrelationLogger`](@ref)
 - [`AutoCorrelationLogger`](@ref)
 - [`AverageObservableLogger`](@ref)
+- [`ReplicaExchangeLogger`](@ref)
 
 Many of the loggers can be initialised with just the number of steps between recorded values, e.g. `CoordinateLogger(10)`.
 An optional first argument is the type of the recorded value; the above is equivalent to `CoordinateLogger(typeof(1.0u"nm"), 10)` but if the simulation did not use units then `CoordinateLogger(Float64, 10)` would be required.
