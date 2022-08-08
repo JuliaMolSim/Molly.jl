@@ -120,4 +120,4 @@ The above 1 ps simulation looks something like this when you view it in [VMD](ht
 
 Contributions are very welcome - see the [roadmap issue](https://github.com/JuliaMolSim/Molly.jl/issues/2) for more.
 
-Join the #molly channel on the [JuliaMolSim Slack](https://join.slack.com/t/juliamolsim/shared_invite/zt-19xb8u1u8-~Nua4TH~kj29NXO7mSTQHg) to discuss the usage and development of Molly.jl.
+Join the #molly channel on the [JuliaMolSim Zulip](https://juliamolsim.zulipchat.com/join/j5sqhiajbma5hw55hy6wtzv7) to discuss the usage and development of Molly.jl.

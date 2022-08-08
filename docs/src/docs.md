@@ -716,7 +716,7 @@ wrap_coords(SVector(1.0, 1.0, 1.0)u"nm", b) # SVector(3.2, 1.0, 1.0)u"nm"
 The [`box_centre`](@ref), [`n_dimensions`](@ref), [`float_type`](@ref), [`place_atoms`](@ref) and [`place_diatomics`](@ref) functions are also available for boundaries.
 
 The appropriate boundary to use will depend on your simulation.
-Having different lengths in each dimension would usually only make sense in a situation where forces or restraints depended on the dimension, for example.
+For example, having different lengths in each dimension would usually only make sense in a situation where forces or restraints depended on the dimension.
 
 ## Simulators
 

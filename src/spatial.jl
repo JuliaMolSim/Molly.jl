@@ -151,7 +151,7 @@ Base.lastindex(b::TriclinicBoundary) = b.basis_vectors[3]
 """
     n_dimensions(boundary)
 
-Number of dimensions of a bounding box.
+Number of dimensions of a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box.
 """
 AtomsBase.n_dimensions(::CubicBoundary) = 3
 AtomsBase.n_dimensions(::RectangularBoundary) = 2
