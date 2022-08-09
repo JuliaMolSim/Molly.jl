@@ -342,7 +342,7 @@ Gromacs file reading should be considered experimental.
     greater than `dist_cutoff`.
 - `implicit_solvent=nothing`: specify a string to add an implicit solvent
     model, options are "obc1", "obc2" and "gbn2".
-- `centre_coords::Bool=true`: whether to centre the coordinates in the
+- `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
 """
 function System(coord_file::AbstractString,
@@ -356,7 +356,7 @@ function System(coord_file::AbstractString,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 implicit_solvent=nothing,
-                centre_coords::Bool=true,
+                center_coords::Bool=true,
                 rename_terminal_res::Bool=true,
                 kappa=0.0u"nm^-1")
     T = typeof(force_field.weight_14_coulomb)
@@ -749,8 +749,8 @@ function System(coord_file::AbstractString,
     else
         coords = [T.(SVector{3}(col) / 10.0) for col in eachcol(Chemfiles.positions(frame))]
     end
-    if centre_coords
-        coords = coords .- (mean(coords),) .+ (box_centre(boundary_used),)
+    if center_coords
+        coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
@@ -831,7 +831,7 @@ function System(T::Type,
                 gpu_diff_safe::Bool=gpu,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
-                centre_coords::Bool=true)
+                center_coords::Bool=true)
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
     bondtypes = Dict{String, HarmonicBond}()
@@ -1083,8 +1083,8 @@ function System(T::Type,
         boundary_used = boundary
     end
     coords = [coords...]
-    if centre_coords
-        coords = coords .- (mean(coords),) .+ (box_centre(boundary_used),)
+    if center_coords
+        coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
     end
     coords = wrap_coords.(coords, (boundary_used,))
 

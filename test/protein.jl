@@ -58,7 +58,7 @@ end
     openmm_dir = joinpath(data_dir, "openmm_6mrr")
     ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     show(devnull, ff)
-    sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; centre_coords=false)
+    sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; center_coords=false)
     neighbors = find_neighbors(sys)
 
     for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul", "all")
@@ -135,7 +135,7 @@ end
         ff_nounits;
         velocities=deepcopy(ustrip_vec.(velocities_start)),
         units=false,
-        centre_coords=false,
+        center_coords=false,
     )
     simulator_nounits = VelocityVerlet(dt=0.0005)
     @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
@@ -166,7 +166,7 @@ end
             ff;
             velocities=CuArray(deepcopy(velocities_start)),
             gpu=true,
-            centre_coords=false,
+            center_coords=false,
         )
         @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
         @test temperature(sys) ≈ 329.3202932884933u"K"
@@ -187,7 +187,7 @@ end
             velocities=CuArray(deepcopy(ustrip_vec.(velocities_start))),
             units=false,
             gpu=true,
-            centre_coords=false,
+            center_coords=false,
         )
         @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
         @test temperature(sys_nounits)u"K" ≈ 329.3202932884933u"K"

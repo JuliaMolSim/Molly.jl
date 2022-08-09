@@ -5,7 +5,7 @@ export
     RectangularBoundary,
     TriclinicBoundary,
     box_volume,
-    box_centre,
+    box_center,
     rand_coord,
     vector_1D,
     vector,
@@ -194,16 +194,16 @@ box_volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
 box_volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
 
 """
-    box_centre(boundary)
+    box_center(boundary)
 
-Calculate the centre of a bounding box.
+Calculate the center of a bounding box.
 Dimensions with infinite length return zero.
 """
-function box_centre(b::Union{CubicBoundary, RectangularBoundary})
+function box_center(b::Union{CubicBoundary, RectangularBoundary})
     return map(x -> isinf(x) ? zero(x) : x / 2, b.side_lengths)
 end
 
-box_centre(b::TriclinicBoundary) = sum(b.basis_vectors) / 2
+box_center(b::TriclinicBoundary) = sum(b.basis_vectors) / 2
 
 # The minimum cubic box surrounding the bounding box, used for visualization
 cubic_bounding_box(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
@@ -497,7 +497,7 @@ sum_svec(arr) = sum(arr)
 """
     remove_CM_motion!(system)
 
-Remove the centre of mass motion from a [`System`](@ref).
+Remove the center of mass motion from a [`System`](@ref).
 """
 function remove_CM_motion!(sys)
     atom_masses = masses(sys)

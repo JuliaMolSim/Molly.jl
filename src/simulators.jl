@@ -113,7 +113,7 @@ The velocity Verlet integrator.
 # Arguments
 - `dt::T`: the time step of the simulation.
 - `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
-- `remove_CM_motion::Bool=true`: whether to remove the centre of mass motion
+- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
     every time step.
 """
 struct VelocityVerlet{T, C}
@@ -168,7 +168,7 @@ behind the positions.
 # Arguments
 - `dt::T`: the time step of the simulation.
 - `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
-- `remove_CM_motion::Bool=true`: whether to remove the centre of mass motion
+- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
     every time step.
 """
 struct Verlet{T, C}
@@ -215,7 +215,7 @@ end
 
 The Störmer-Verlet integrator.
 Does not currently work with coupling methods that alter the velocity.
-Does not currently remove the centre of mass motion every time step.
+Does not currently remove the center of mass motion every time step.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
@@ -275,7 +275,7 @@ behind the positions.
 - `dt::T`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
 - `friction::F`: the friction coefficient of the simulation.
-- `remove_CM_motion::Bool=true`: whether to remove the centre of mass motion
+- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
     every time step.
 """
 struct Langevin{S, K, F, T}
@@ -346,7 +346,7 @@ Not currently compatible with automatic differentiation using Zygote.
 - `splitting::W`: the splitting specifier. Should be a string consisting of the
     characters `A`, `B` and `O`. Strings with no `O`s reduce to deterministic
     symplectic schemes.
-- `remove_CM_motion::Bool=true`: whether to remove the centre of mass motion
+- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
     every time step.
 """
 struct LangevinSplitting{S, K, F, W}

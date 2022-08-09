@@ -79,7 +79,7 @@ distances(coords, boundary) = norm.(displacements(coords, boundary))
 
 Calculate the radial distribution function of a set of coordinates.
 This describes how density varies as a function of distance from each atom.
-Returns a list of distance bin centres and a list of the corresponding
+Returns a list of distance bin centers and a list of the corresponding
 densities.
 """
 function rdf(coords, boundary; npoints::Integer=200)
@@ -95,9 +95,9 @@ function rdf(coords, boundary; npoints::Integer=200)
     elseif dims == 2
         normalizing_factor = 2π .* ρ .* step(kd.x) .* kd.x .* dist_unit .^ 2
     end
-    bin_centres = collect(kd.x) .* dist_unit
+    bin_centers = collect(kd.x) .* dist_unit
     density_weighted = kd.density ./ normalizing_factor
-    return bin_centres, density_weighted
+    return bin_centers, density_weighted
 end
 
 """
@@ -149,9 +149,9 @@ Assumes the coordinates do not cross the bounding box, i.e. all
 coordinates correspond to the same periodic image.
 """
 function radius_gyration(coords, atoms)
-    centre = mean(coords)
-    vecs_to_centre = coords .- (centre,)
+    center = mean(coords)
+    vecs_to_center = coords .- (center,)
     atom_masses = mass.(atoms)
-    I = sum(sum_abs2.(vecs_to_centre) .* atom_masses)
+    I = sum(sum_abs2.(vecs_to_center) .* atom_masses)
     return sqrt(I / sum(atom_masses))
 end
