@@ -185,6 +185,9 @@ function AtomsBase.bounding_box(b::TriclinicBoundary)
     return unit(b[1][1]) == NoUnits ? (b.basis_vectors)u"nm" : b.basis_vectors
 end
 
+has_infinite_boundary(b::Union{CubicBoundary, RectangularBoundary}) = any(isinf, b.side_lengths)
+has_infinite_boundary(b::TriclinicBoundary) = false
+
 """
     box_volume(boundary)
 

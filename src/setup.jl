@@ -23,6 +23,9 @@ which to stop placing atoms.
 Can not be used if one or more dimensions has infinite boundaries.
 """
 function place_atoms(n_atoms::Integer, boundary, min_dist; max_attempts::Integer=100)
+    if has_infinite_boundary(boundary)
+        throw(ArgumentError("One or more dimensions has infinite boundaries: $boundary"))
+    end
     dims = n_dimensions(boundary)
     max_atoms = box_volume(boundary) / (min_dist ^ dims)
     if n_atoms > max_atoms
@@ -65,6 +68,9 @@ Can not be used if one or more dimensions has infinite boundaries.
 """
 function place_diatomics(n_molecules::Integer, boundary, min_dist, bond_length;
                          max_attempts::Integer=100, aligned::Bool=false)
+    if has_infinite_boundary(boundary)
+        throw(ArgumentError("One or more dimensions has infinite boundaries: $boundary"))
+    end
     dims = n_dimensions(boundary)
     max_molecules = box_volume(boundary) / ((min_dist + bond_length) ^ dims)
     if n_molecules > max_molecules
