@@ -52,6 +52,7 @@ Custom simulators should implement this function.
 function simulate!(sys,
                     sim::SteepestDescentMinimizer;
                     n_threads::Integer=Threads.nthreads())
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     sim.run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     E = potential_energy(sys, neighbors)
@@ -130,6 +131,7 @@ function simulate!(sys,
                     sim::VelocityVerlet,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads())
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
@@ -185,6 +187,7 @@ function simulate!(sys,
                     sim::Verlet,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads())
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     sim.remove_CM_motion && remove_CM_motion!(sys)
@@ -232,6 +235,7 @@ function simulate!(sys,
                     sim::StormerVerlet,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads())
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     coords_last = sys.coords
@@ -298,6 +302,7 @@ function simulate!(sys,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads(),
                     rng=Random.GLOBAL_RNG)
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     sim.remove_CM_motion && remove_CM_motion!(sys)
@@ -370,6 +375,7 @@ function simulate!(sys,
     M_inv = inv.(masses(sys))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
     σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
