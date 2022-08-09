@@ -26,7 +26,7 @@ Molly re-exports Unitful.jl, [StaticArrays.jl](https://github.com/JuliaArrays/St
 You can use your own atom types in Molly, provided that the `mass` function is defined and any fields required by the interactions are present.
 Next, we'll need some starting coordinates and velocities.
 ```julia
-boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm") # Periodic boundary conditions
 coords = place_atoms(n_atoms, boundary, 0.3u"nm") # Random placement without clashing
 
 temp = 100.0u"K"
@@ -129,6 +129,7 @@ end
 
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 ```
+We could have used [`place_diatomics`](@ref) instead here.
 Now we can use the built-in interaction list and bond types to place harmonic bonds between paired atoms.
 ```julia
 bonds = InteractionList2Atoms(
@@ -141,8 +142,9 @@ bonds = InteractionList2Atoms(
 specific_inter_lists = (bonds,)
 ```
 This time, we are also going to use a neighbor list to speed up the Lennard Jones calculation.
-We can use the built-in distance neighbor finder.
+We can use the built-in [`DistanceNeighborFinder`](@ref).
 The arguments are a 2D array of eligible interacting pairs, the number of steps between each update and the distance cutoff to be classed as a neighbor.
+Since the neighbor finder is run every 10 steps we should also use a cutoff for the interaction with a cutoff distance less than the neighbor list distance.
 ```julia
 # All pairs apart from bonded pairs are eligible for non-bonded interactions
 nb_matrix = trues(n_atoms, n_atoms)
@@ -156,12 +158,14 @@ neighbor_finder = DistanceNeighborFinder(
     n_steps=10,
     dist_cutoff=1.5u"nm",
 )
+
+pairwise_inters = (LennardJones(nl_only=true, cutoff=DistanceCutoff(1.2u"nm")),)
 ```
 Now we can simulate as before.
 ```julia
 sys = System(
     atoms=atoms,
-    pairwise_inters=(LennardJones(nl_only=true),),
+    pairwise_inters=pairwise_inters,
     specific_inter_lists=specific_inter_lists,
     coords=coords,
     velocities=velocities,
