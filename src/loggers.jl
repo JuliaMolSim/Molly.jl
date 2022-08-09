@@ -484,7 +484,7 @@ A logger that records exchanges in a replica exchange simulation.
 The logged quantities include the number of exchange attempts (`n_attempts`),
 number of successful exchanges (`n_exchanges`), exchanged replica indices (`indices`),
 exchange steps (`steps`) and the value of Δ i.e. the argument of metropolis rate for
-the exchanges (`delta`).
+the exchanges (`deltas`).
 """
 mutable struct ReplicaExchangeLogger{T}
     n_replicas::Int
@@ -492,7 +492,7 @@ mutable struct ReplicaExchangeLogger{T}
     n_exchanges::Int
     indices::Vector{Tuple{Int, Int}}
     steps::Vector{Int}
-    delta::Vector{T}
+    deltas::Vector{T}
     end_step::Int
 end
 
@@ -511,7 +511,7 @@ function log_property!(rexl::ReplicaExchangeLogger,
                        n_threads::Integer=Threads.nthreads())
     push!(rexl.indices, indices)
     push!(rexl.steps, step_n + rexl.end_step)
-    push!(rexl.delta, delta)
+    push!(rexl.deltas, delta)
     rexl.n_exchanges += 1
 end
 
