@@ -166,7 +166,7 @@
         ("cpu nopairwise"  , [false, false, false, false, true , false, false], 0.0 , 0.25),
         ("cpu obc2"        , [false, false, false, true , true , true , false], 0.1 , 0.25),
         ("cpu gbn2"        , [false, false, false, true , true , false, true ], 0.1 , 0.25),
-        ("cpu gbn2 forward", [false, true , false, true , true , false, true ], 0.01, 0.01),
+        ("cpu gbn2 forward", [false, true , false, true , true , false, true ], 0.02, 0.02),
     ]
     if run_gpu_tests #                    gpu    fwd    f32    pis    sis    obc2   gbn2
         push!(runs, ("gpu"             , [true , false, false, true , true , false, false], 0.25, 20.0))
@@ -176,7 +176,7 @@
         push!(runs, ("gpu nopairwise"  , [true , false, false, false, true , false, false], 0.0 , 10.0))
         push!(runs, ("gpu obc2"        , [true , false, false, true , true , true , false], 0.25, 20.0))
         push!(runs, ("gpu gbn2"        , [true , false, false, true , true , false, true ], 0.25, 20.0))
-        push!(runs, ("gpu gbn2 forward", [true , true , false, true , true , false, true ], 0.01, 0.01))
+        push!(runs, ("gpu gbn2 forward", [true , true , false, true , true , false, true ], 0.02, 0.02))
     end
 
     for (name, args, tol_σ, tol_k) in runs
