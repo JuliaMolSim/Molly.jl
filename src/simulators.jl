@@ -147,7 +147,7 @@ function simulate!(sys,
         sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
-        apply_coupling!(sys, sim, sim.coupling)
+        apply_coupling!(sys, sim.coupling, sim)
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
@@ -201,7 +201,7 @@ function simulate!(sys,
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
-        apply_coupling!(sys, sim, sim.coupling)
+        apply_coupling!(sys, sim.coupling, sim)
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
@@ -255,7 +255,7 @@ function simulate!(sys,
         # This is accurate to O(dt)
         sys.velocities = vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt
 
-        apply_coupling!(sys, sim, sim.coupling)
+        apply_coupling!(sys, sim.coupling, sim)
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 

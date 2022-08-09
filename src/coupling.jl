@@ -15,12 +15,12 @@ Placeholder coupler that does nothing.
 struct NoCoupling end
 
 """
-    apply_coupling!(system, simulator, coupling)
+    apply_coupling!(system, coupling, simulator)
 
 Apply a coupler to modify a simulation.
 Custom couplers should implement this function.
 """
-apply_coupling!(sys, sim, ::NoCoupling) = sys
+apply_coupling!(sys, ::NoCoupling, sim) = sys
 
 """
     AndersenThermostat(temperature, coupling_const)
@@ -32,7 +32,7 @@ struct AndersenThermostat{T, C}
     coupling_const::C
 end
 
-function apply_coupling!(sys::System{D, false}, sim, thermostat::AndersenThermostat) where D
+function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, sim) where D
     for i in 1:length(sys)
         if rand() < (sim.dt / thermostat.coupling_const)
             mass = sys.atoms[i].mass
@@ -43,7 +43,7 @@ function apply_coupling!(sys::System{D, false}, sim, thermostat::AndersenThermos
     return sys
 end
 
-function apply_coupling!(sys::System{D, true, T}, sim, thermostat::AndersenThermostat) where {D, T}
+function apply_coupling!(sys::System{D, true, T}, thermostat::AndersenThermostat, sim) where {D, T}
     atoms_to_bump = T.(rand(length(sys)) .< (sim.dt / thermostat.coupling_const))
     atoms_to_leave = one(T) .- atoms_to_bump
     atoms_to_bump_dev = move_array(atoms_to_bump, sys)
@@ -69,7 +69,7 @@ struct RescaleThermostat{T}
     temperature::T
 end
 
-function apply_coupling!(sys, sim, thermostat::RescaleThermostat)
+function apply_coupling!(sys, thermostat::RescaleThermostat, sim)
     sys.velocities *= sqrt(thermostat.temperature / temperature(sys))
     return sys
 end
@@ -90,7 +90,7 @@ struct BerendsenThermostat{T, C}
     coupling_const::C
 end
 
-function apply_coupling!(sys, sim, thermostat::BerendsenThermostat)
+function apply_coupling!(sys, thermostat::BerendsenThermostat, sim)
     λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temperature(sys)) - 1)
     sys.velocities *= sqrt(λ2)
     return sys

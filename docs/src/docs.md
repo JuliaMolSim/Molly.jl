@@ -762,7 +762,7 @@ function Molly.simulate!(sys,
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         # Apply coupling like this
-        apply_coupling!(sys, sim, sim.coupling)
+        apply_coupling!(sys, sim.coupling, sim)
 
         # Remove center of mass motion like this
         remove_CM_motion!(sys)
@@ -804,7 +804,7 @@ end
 ```
 Then, define the function that implements the coupling every time step:
 ```julia
-function apply_coupling!(sys, sim, coupling::MyCoupler)
+function apply_coupling!(sys, coupling::MyCoupler, sim)
     # Do something to the simulation, e.g. scale the velocities
     return sys
 end
