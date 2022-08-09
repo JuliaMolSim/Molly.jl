@@ -132,11 +132,11 @@ function simulate!(sys,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads())
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+    sim.remove_CM_motion && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
-    sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
         sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
@@ -188,9 +188,9 @@ function simulate!(sys,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads())
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+    sim.remove_CM_motion && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
-    sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
@@ -303,9 +303,9 @@ function simulate!(sys,
                     n_threads::Integer=Threads.nthreads(),
                     rng=Random.GLOBAL_RNG)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+    sim.remove_CM_motion && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
-    sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
@@ -375,8 +375,11 @@ function simulate!(sys,
     M_inv = inv.(masses(sys))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
     σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
+
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+    sim.remove_CM_motion && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
@@ -409,9 +412,6 @@ function simulate!(sys,
             return (O_step!, (sys, α_eff, σ_eff, rng, sim.temperature))
         end
     end
-
-    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
-    sim.remove_CM_motion && remove_CM_motion!(sys)
 
     for step_n in 1:n_steps
         for (step!, args) in step_arg_pairs
