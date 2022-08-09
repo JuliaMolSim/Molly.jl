@@ -50,7 +50,7 @@
             dt=f32 ? 0.001f0 : 0.001,
             coupling=RescaleThermostat(temp),
         )
-        coords = place_atoms(n_atoms, boundary, f32 ? 0.6f0 : 0.6; max_attempts=500)
+        coords = place_atoms(n_atoms, boundary; min_dist=f32 ? 0.6f0 : 0.6, max_attempts=500)
         velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
         coords_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in coords]
         velocities_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in velocities]

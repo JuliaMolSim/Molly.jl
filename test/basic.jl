@@ -69,7 +69,7 @@
     )
 
     n_atoms = 1_000
-    coords = place_atoms(n_atoms, b, 0.01u"nm")
+    coords = place_atoms(n_atoms, b; min_dist=0.01u"nm")
     @test wrap_coords.(coords, (b,)) == coords
 
     # Test approximation for minimum image is correct up to half the minimum height/width
@@ -160,7 +160,7 @@ end
         SVector(0.5, 0.3, 1.6)u"nm",
     )
     n_atoms = 1_000
-    coords = place_atoms(n_atoms, boundary, 0.01u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.01u"nm")
     atoms = fill(Atom(), n_atoms)
     dist_cutoff = 0.6u"nm"
     nf = CellListMapNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), dist_cutoff=dist_cutoff)
@@ -207,7 +207,7 @@ end
     atom_mass = 10.0u"u"
     
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    coords = place_atoms(n_atoms, boundary, 0.3u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     replica_velocities = nothing
     pairwise_inters = (LennardJones(nl_only=true),)
     n_replicas = 4

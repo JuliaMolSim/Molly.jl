@@ -67,7 +67,7 @@ lj = LennardJones(nl_only=true, force_units=NoUnits, energy_units=NoUnits)
 crf = CoulombReactionField(dist_cutoff=1.5, nl_only=true, coulomb_const=0.0,
                            force_units=NoUnits, energy_units=NoUnits)
 pairwise_inters = (lj, crf)
-coords = place_atoms(n_atoms, boundary, 0.7)
+coords = place_atoms(n_atoms, boundary; min_dist=0.7)
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 simulator = VelocityVerlet(
     dt=0.02,
@@ -120,7 +120,7 @@ function train()
 
     for epoch_n in 1:n_epochs
         printfmt("Epoch {:>2}  |  ", epoch_n)
-        coords = place_atoms(n_atoms, boundary, 0.7)
+        coords = place_atoms(n_atoms, boundary; min_dist=0.7)
         velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
         grad = gradient(loss, σlearn)[1]
         printfmt("Grad {:6.3f}\n", grad)

@@ -162,6 +162,9 @@ Base.broadcastable(b::Union{CubicBoundary, RectangularBoundary}) = b.side_length
 float_type(b::Union{CubicBoundary, RectangularBoundary}) = typeof(ustrip(b[1]))
 float_type(b::TriclinicBoundary{T}) where {T} = T
 
+length_type(b::Union{CubicBoundary{T}, RectangularBoundary{T}}) where {T} = T
+length_type(b::TriclinicBoundary{T, A, D}) where {T, A, D} = D
+
 function AtomsBase.bounding_box(b::CubicBoundary)
     z = zero(b[1])
     bb = SVector{3}([

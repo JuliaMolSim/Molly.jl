@@ -23,7 +23,7 @@ using Test
             s = System(
                 atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
                 pairwise_inters=(lj_potential,),
-                coords=place_atoms(n_atoms, boundary, 0.6u"nm"),
+                coords=place_atoms(n_atoms, boundary; min_dist=0.6u"nm"),
                 velocities=[velocity(atom_mass, temp) for i in 1:n_atoms],
                 boundary=boundary,
                 loggers=(

@@ -14,7 +14,7 @@ export
     add_position_restraints
 
 """
-    place_atoms(n_atoms, boundary, min_dist; max_attempts=100)
+    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100)
 
 Obtain `n_atoms` coordinates in bounding box `boundary` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
@@ -22,9 +22,12 @@ The keyword argument `max_attempts` determines the number of failed tries after
 which to stop placing atoms.
 Can not be used if one or more dimensions has infinite boundaries.
 """
-function place_atoms(n_atoms::Integer, boundary, min_dist; max_attempts::Integer=100)
+function place_atoms(n_atoms::Integer,
+                     boundary;
+                     min_dist=zero(length_type(boundary)),
+                     max_attempts::Integer=100)
     if has_infinite_boundary(boundary)
-        throw(ArgumentError("One or more dimensions has infinite boundaries: $boundary"))
+        throw(ArgumentError("One or more dimension has infinite boundaries, boundary is $boundary"))
     end
     dims = n_dimensions(boundary)
     max_atoms = box_volume(boundary) / (min_dist ^ dims)
@@ -55,7 +58,8 @@ function place_atoms(n_atoms::Integer, boundary, min_dist; max_attempts::Integer
 end
 
 """
-    place_diatomics(n_molecules, boundary, min_dist, bond_length; max_attempts=100, aligned=false)
+    place_diatomics(n_molecules, boundary, bond_length; min_dist=nothing,
+                    max_attempts=100, aligned=false)
 
 Obtain coordinates for `n_molecules` diatomics in bounding box `boundary`
 where no two points are closer than `min_dist` and the bond length is `bond_length`,
@@ -66,10 +70,14 @@ The keyword argument `aligned` determines whether the bonds all point the same d
 (`true`) or random directions (`false`).
 Can not be used if one or more dimensions has infinite boundaries.
 """
-function place_diatomics(n_molecules::Integer, boundary, min_dist, bond_length;
-                         max_attempts::Integer=100, aligned::Bool=false)
+function place_diatomics(n_molecules::Integer,
+                         boundary,
+                         bond_length;
+                         min_dist=zero(length_type(boundary)),
+                         max_attempts::Integer=100,
+                         aligned::Bool=false)
     if has_infinite_boundary(boundary)
-        throw(ArgumentError("One or more dimensions has infinite boundaries: $boundary"))
+        throw(ArgumentError("One or more dimension has infinite boundaries, boundary is $boundary"))
     end
     dims = n_dimensions(boundary)
     max_molecules = box_volume(boundary) / ((min_dist + bond_length) ^ dims)

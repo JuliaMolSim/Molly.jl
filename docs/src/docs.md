@@ -27,7 +27,7 @@ You can use your own atom types in Molly, provided that the `mass` function is d
 Next, we'll need some starting coordinates and velocities.
 ```julia
 boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm") # Periodic boundary conditions
-coords = place_atoms(n_atoms, boundary, 0.3u"nm") # Random placement without clashing
+coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm") # Random placement without clashing
 
 temp = 100.0u"K"
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
@@ -98,7 +98,7 @@ atom_mass = 10.0f0u"u"
 boundary = CubicBoundary(2.0f0u"nm", 2.0f0u"nm", 2.0f0u"nm")
 temp = 100.0f0u"K"
 atoms = CuArray([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
-coords = CuArray(place_atoms(n_atoms, boundary, 0.3u"nm"))
+coords = CuArray(place_atoms(n_atoms, boundary; min_dist=0.3u"nm"))
 velocities = CuArray([velocity(atom_mass, temp) for i in 1:n_atoms])
 simulator = VelocityVerlet(dt=0.002f0u"ps")
 
@@ -122,7 +122,7 @@ simulate!(sys, simulator, 1_000)
 If we want to define specific interactions between atoms, for example bonds, we can do this as well.
 Using the same definitions as the first example, let's set up the coordinates so that paired atoms are 1 Å apart.
 ```julia
-coords = place_atoms(n_atoms ÷ 2, boundary, 0.3u"nm")
+coords = place_atoms(n_atoms ÷ 2, boundary; min_dist=0.3u"nm")
 for i in 1:length(coords)
     push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
 end
@@ -379,7 +379,7 @@ n_steps = 1_000
 n_people = 500
 n_starting = 2
 atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
-coords = place_atoms(n_people, boundary, 0.1)
+coords = place_atoms(n_people, boundary; min_dist=0.1)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
 pairwise_inters = (
     LennardJones=LennardJones(nl_only=true),
@@ -935,7 +935,7 @@ atoms = [Atom(mass=atom_mass, σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_at
 
 # Initialization
 boundary = SVector(6.0, 6.0, 6.0)u"nm"
-coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm", 0.2u"nm")
+coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm"; min_dist=0.2u"nm")
 
 temp = 50.0u"K"
 velocities = [velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms]

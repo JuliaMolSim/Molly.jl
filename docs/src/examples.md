@@ -211,7 +211,7 @@ n_steps = 2_000
 temp = 1.0
 
 atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
-coords = place_atoms(n_atoms, boundary, 0.1)
+coords = place_atoms(n_atoms, boundary; min_dist=0.1)
 velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
     SoftSphere(nl_only=true),

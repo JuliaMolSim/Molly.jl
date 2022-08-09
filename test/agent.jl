@@ -65,7 +65,7 @@
     temp = 1.0
     n_starting = 2
     atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
-    coords = place_atoms(n_people, boundary, 0.1)
+    coords = place_atoms(n_people, boundary; min_dist=0.1)
     velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
     pairwise_inters = (
         LennardJones=LennardJones(nl_only=true),
