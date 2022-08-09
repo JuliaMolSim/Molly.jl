@@ -424,7 +424,7 @@ interface described there.
     close atoms and save on computation.
 - `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: the logger used to record
     the exchange of replicas.
-- `replica_loggers::RL=Tuple(() for _ in 1:n_replicas)`: the loggers for each replica 
+- `replica_loggers::RL=[() for _ in 1:n_replicas]`: the loggers for each replica 
     that record properties of interest during a simulation.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
@@ -462,7 +462,7 @@ function ReplicaSystem(;
                         boundary,
                         neighbor_finder=NoNeighborFinder(),
                         exchange_logger=nothing,
-                        replica_loggers=Tuple(() for _ in 1:n_replicas),
+                        replica_loggers=[() for _ in 1:n_replicas],
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
                         k=Unitful.k,

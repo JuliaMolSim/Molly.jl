@@ -23,7 +23,8 @@ export
 Run the loggers associated with the system.
 Ignored for gradient calculation during automatic differentiation.
 """
-function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0;
+                      n_threads::Integer=Threads.nthreads())
     for logger in values(s.loggers)
         log_property!(logger, s, neighbors, step_n; n_threads=n_threads)
     end

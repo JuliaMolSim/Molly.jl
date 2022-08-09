@@ -254,7 +254,7 @@ end
         replica_velocities=replica_velocities,
         pairwise_inters=pairwise_inters,
         boundary=boundary,
-        replica_loggers=Tuple((temp=TemperatureLogger(10), coords=CoordinateLogger(10)) for i in 1:n_replicas),
+        replica_loggers=[(temp=TemperatureLogger(10), coords=CoordinateLogger(10)) for i in 1:n_replicas],
         neighbor_finder=neighbor_finder,
     )
 
