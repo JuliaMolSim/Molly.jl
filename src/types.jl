@@ -3,7 +3,6 @@
 export
     PairwiseInteraction,
     SpecificInteraction,
-    AbstractNeighborFinder,
     InteractionList1Atoms,
     InteractionList2Atoms,
     InteractionList3Atoms,
@@ -34,12 +33,6 @@ A specific interaction between sets of specific atoms, e.g. a bond angle.
 Custom specific interactions should sub-type this type.
 """
 abstract type SpecificInteraction end
-
-"""
-A way to find near atoms to save on simulation time.
-Custom neighbor finders should sub-type this type.
-"""
-abstract type AbstractNeighborFinder end
 
 """
     InteractionList1Atoms(is, types, inters)

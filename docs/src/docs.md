@@ -822,9 +822,9 @@ The available neighbor finders are:
 - [`DistanceNeighborFinder`](@ref)
 - [`DistanceVecNeighborFinder`](@ref)
 
-To define your own [`AbstractNeighborFinder`](@ref), first define the `struct`:
+To define your own neighbor finder, first define the `struct`:
 ```julia
-struct MyNeighborFinder <: AbstractNeighborFinder
+struct MyNeighborFinder
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int

@@ -15,7 +15,7 @@ Placeholder neighbor finder that returns no neighbors.
 When using this neighbor finder, ensure that `nl_only` for the interactions is
 set to `false`.
 """
-struct NoNeighborFinder <: AbstractNeighborFinder end
+struct NoNeighborFinder end
 
 """
     find_neighbors(system; n_threads = Threads.nthreads())
@@ -45,14 +45,12 @@ function find_neighbors(s::System{D, true},
     return NeighborListVec(NeighborsVec(), all_pairs)
 end
 
-Base.show(io::IO, neighbor_finder::NoNeighborFinder) = print(io, typeof(neighbor_finder))
-
 """
     DistanceNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff)
 
 Find close atoms by distance.
 """
-struct DistanceNeighborFinder{D} <: AbstractNeighborFinder
+struct DistanceNeighborFinder{D}
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int
@@ -97,7 +95,7 @@ end
 
 Find close atoms by distance in a GPU and Zygote compatible manner.
 """
-struct DistanceVecNeighborFinder{D, B, I} <: AbstractNeighborFinder
+struct DistanceVecNeighborFinder{D, B, I}
     nb_matrix::B
     matrix_14::B
     n_steps::Int
@@ -205,7 +203,7 @@ Find close atoms by distance using a tree search.
 Can not be used if one or more dimensions has infinite boundaries.
 Can not be used with [`TriclinicBoundary`](@ref).
 """
-struct TreeNeighborFinder{D} <: AbstractNeighborFinder
+struct TreeNeighborFinder{D}
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int
@@ -282,7 +280,7 @@ CellListMapNeighborFinder{Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋,
 
 ```
 """
-mutable struct CellListMapNeighborFinder{N, T} <: AbstractNeighborFinder
+mutable struct CellListMapNeighborFinder{N, T}
     nb_matrix::BitArray{2}
     matrix_14::BitArray{2}
     n_steps::Int
@@ -395,7 +393,8 @@ function find_neighbors(s::System,
     return neighbors
 end
 
-function Base.show(io::IO, neighbor_finder::AbstractNeighborFinder)
+function Base.show(io::IO, neighbor_finder::Union{DistanceNeighborFinder, DistanceVecNeighborFinder,
+                                                  TreeNeighborFinder, CellListMapNeighborFinder})
     println(io, typeof(neighbor_finder))
     println(io, "  Size of nb_matrix = " , size(neighbor_finder.nb_matrix))
     println(io, "  n_steps = " , neighbor_finder.n_steps)
