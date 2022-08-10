@@ -4,23 +4,33 @@ export
     apply_constraint!
 
 
-function run_constraints!(sys, new_coords, dt)
-    if length(sys.constraints) == 0
-        sys.coords = new_coords
-    end
+"""
+    run_constraints!(system, old_coords, dt)
 
-    for cons in sys.constraints
-        apply_constraint!(sys, new_coords, dt, cons)
+Applies all the bond and angle constraints associated with the system.
+"""
+
+function run_constraints!(sys, old_values, dt)
+    for constraint in sys.constraints
+        apply_constraint!(sys, old_values, dt, constraint)
     end
 end
 
+"""
+    SHAKE(d, bond_list)
 
-
+Constrains a set of bonds to a particular distance d.
+"""
 struct SHAKE{D, B}
     d::D
     bond_list::B
 end
 
+"""
+    apply_constraint!(sys, old_values, dt, constraint)
+
+Updates the system coordinates and/or velocities based on the constraint.
+"""
 function apply_constraint!(sys, old_coords, dt, constraint::SHAKE)
 
     for r in 1:length(constraint.bond_list.is)
@@ -29,7 +39,7 @@ function apply_constraint!(sys, old_coords, dt, constraint::SHAKE)
         i1 = constraint.bond_list.js[r]
 
         # Distance vector between the atoms before unconstraied update
-        r01 = vector(old_coords[i1], old_coords[i0], sys.boundary)
+        r01 = vector(old_values[i1], old_values[i0], sys.boundary)
 
         # Distance vector after unconstrained update
         s01 = vector(sys.coords[i1], sys.coords[i0], sys.boundary)

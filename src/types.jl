@@ -279,6 +279,8 @@ interface described there.
 - `general_inters::GI=()`: the general interactions in the system,
     i.e. interactions involving all atoms such as implicit solvent. Typically
     a `Tuple`.
+- `constraints::CN=()`: the constraints for bonds and angles in the system. Typically
+    a `Tuple`.
 - `coords::C`: the coordinates of the atoms in the system. Typically a
     vector of `SVector`s of 2 or 3 dimensions.
 - `velocities::V=zero(coords) * u"ps^-1"`: the velocities of the atoms in the
