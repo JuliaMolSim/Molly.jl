@@ -299,12 +299,13 @@ interface described there.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
-mutable struct System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
+mutable struct System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     pairwise_inters::PI
     specific_inter_lists::SI
     general_inters::GI
+    constraints::CN
     coords::C
     velocities::V
     boundary::B
@@ -385,7 +386,7 @@ function System(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    return System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
+    return System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, K}(
                     atoms, atoms_data, pairwise_inters, specific_inter_lists,
                     general_inters, constraints, coords, vels, boundary, neighbor_finder,
                     loggers, force_units, energy_units, k_converted)
@@ -545,10 +546,12 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF,
+    constraints = ()
+    CN = typeof(constraints)
+    replicas = Tuple(System{D, G, T, CU, A, AD, PI, SI, GI,CN, C, V, B, NF,
                             typeof(replica_loggers[i]), F, E, K}(
             atoms, atoms_data, pairwise_inters, specific_inter_lists,
-            general_inters, copy(coords), replica_velocities[i], boundary, deepcopy(neighbor_finder),
+            general_inters, constraints, copy(coords), replica_velocities[i], boundary, deepcopy(neighbor_finder),
             replica_loggers[i], force_units, energy_units, k_converted) for i in 1:n_replicas)
     RS = typeof(replicas)
 
