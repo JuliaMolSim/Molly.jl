@@ -319,6 +319,7 @@ function System(;
                 pairwise_inters=(),
                 specific_inter_lists=(),
                 general_inters=(),
+                constraints=(),
                 coords,
                 velocities=nothing,
                 boundary,
@@ -337,6 +338,7 @@ function System(;
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
+    CN = typeof(constraints)
     C = typeof(coords)
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
@@ -383,7 +385,7 @@ function System(;
 
     return System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
                     atoms, atoms_data, pairwise_inters, specific_inter_lists,
-                    general_inters, coords, vels, boundary, neighbor_finder,
+                    general_inters, constraints, coords, vels, boundary, neighbor_finder,
                     loggers, force_units, energy_units, k_converted)
 end
 
