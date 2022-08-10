@@ -227,7 +227,7 @@ end
     repsys = ReplicaSystem(;
         n_replicas=n_replicas,
         atoms=atoms,
-        coords=coords,
+        replica_coords=[copy(coords) for _ in 1:n_replicas],
         replica_velocities=replica_velocities,
         pairwise_inters=pairwise_inters,
         boundary=boundary,
@@ -250,7 +250,7 @@ end
     repsys2 = ReplicaSystem(;
         n_replicas=n_replicas,
         atoms=atoms,
-        coords=coords,
+        replica_coords=[copy(coords) for _ in 1:n_replicas],
         replica_velocities=replica_velocities,
         pairwise_inters=pairwise_inters,
         boundary=boundary,

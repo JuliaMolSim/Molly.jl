@@ -61,8 +61,8 @@ end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     n_threads_list = run_parallel_tests ? (1, Threads.nthreads()) : (1,)
 
-    TV=typeof(velocity(10.0u"u", temp))
-    TP=typeof(0.2u"kJ * mol^-1")
+    TV = typeof(velocity(10.0u"u", temp))
+    TP = typeof(0.2u"kJ * mol^-1")
 
     V(sys, args...; kwargs...) = sys.velocities
     pot_obs(sys, neighbors; kwargs...) = potential_energy(sys, neighbors)
@@ -478,7 +478,7 @@ end
 
     repsys = ReplicaSystem(
         atoms=atoms,
-        coords=coords,
+        replica_coords=[copy(coords) for _ in 1:n_replicas],
         replica_velocities=nothing,
         n_replicas=n_replicas,
         boundary=boundary,

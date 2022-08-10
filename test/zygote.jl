@@ -205,6 +205,7 @@
         )
         for (prefix, gzy, gfd, tol) in zip(("σ", "k"), grad_zygote, grad_fd, (tol_σ, tol_k))
             if abs(gfd) < 1e-13
+                @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy"
                 @test isnothing(gzy) || abs(gzy) < 1e-10
             else
                 frac_diff = abs(gzy - gfd) / abs(gfd)
