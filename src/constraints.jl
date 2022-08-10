@@ -39,7 +39,7 @@ function apply_constraint!(sys, old_coords, dt, constraint::SHAKE)
         i1 = constraint.bond_list.js[r]
 
         # Distance vector between the atoms before unconstraied update
-        r01 = vector(old_values[i1], old_values[i0], sys.boundary)
+        r01 = vector(old_coords[i1], old_coords[i0], sys.boundary)
 
         # Distance vector after unconstrained update
         s01 = vector(sys.coords[i1], sys.coords[i0], sys.boundary)

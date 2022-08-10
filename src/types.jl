@@ -548,7 +548,7 @@ function ReplicaSystem(;
 
     constraints = ()
     CN = typeof(constraints)
-    replicas = Tuple(System{D, G, T, CU, A, AD, PI, SI, GI,CN, C, V, B, NF,
+    replicas = Tuple(System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF,
                             typeof(replica_loggers[i]), F, E, K}(
             atoms, atoms_data, pairwise_inters, specific_inter_lists,
             general_inters, constraints, copy(coords), replica_velocities[i], boundary, deepcopy(neighbor_finder),
