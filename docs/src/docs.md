@@ -306,6 +306,67 @@ However it is not thoroughly tested with respect to ligands or special residues 
 The Gromacs setup procedure should be considered experimental.
 Currently Ewald summation methods, constraint algorithms, pressure coupling and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
 
+## Enhanced sampling
+
+Molly has the [`ReplicaSystem`](@ref) struct and simulators such as [`TemperatureREMD`](@ref) to carry out replica exchange molecular dynamics (REMD).
+On CPU these are run in parallel by dividing up the number of available threads.
+For example to run temperature REMD on a protein with 4 replicas and attempt exchanges every 1.0 ps:
+```julia
+using Statistics
+
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+ff = OpenMMForceField(
+    joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
+    joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
+    joinpath(data_dir, "force_fields", "his.xml"),
+)
+
+sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff)
+
+minimizer = SteepestDescentMinimizer()
+simulate!(sys, minimizer)
+
+n_replicas = 4
+
+rep_sys = ReplicaSystem(
+    atoms=sys.atoms,
+    atoms_data=sys.atoms_data,
+    pairwise_inters=sys.pairwise_inters,
+    specific_inter_lists=sys.specific_inter_lists,
+    general_inters=sys.general_inters,
+    n_replicas=n_replicas,
+    replica_coords=[copy(sys.coords) for _ in 1:n_replicas],
+    boundary=sys.boundary,
+    neighbor_finder=sys.neighbor_finder,
+    replica_loggers=[(temp=TemperatureLogger(10),) for _ in 1:n_replicas],
+)
+
+temps = [240.0u"K", 280.0u"K", 320.0u"K", 360.0u"K"]
+dt = 0.0005u"ps"
+simulators = [Langevin(dt=dt, temperature=temp, friction=1.0u"ps^-1") for temp in temps]
+
+sim = TemperatureREMD(
+    dt=dt,
+    temperatures=temps,
+    simulators=simulators,
+    exchange_time=1.0u"ps",
+)
+
+simulate!(rep_sys, sim, 40_000; assign_velocities=true)
+
+println(rep_sys.exchange_logger.n_attempts)
+# 30
+
+for i in 1:n_replicas
+    final_temps = values(rep_sys.replicas[i].loggers.temp)[(end - 10):end]
+    println(mean(final_temps))
+end
+# 240.1691457033836 K
+# 281.3783250460198 K
+# 320.44985840482974 K
+# 357.710520769689 K
+```
+
 ## Agent-based modelling
 
 Agent-based modelling (ABM) is conceptually similar to molecular dynamics.
