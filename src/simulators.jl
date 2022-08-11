@@ -141,13 +141,13 @@ function simulate!(sys,
     for step_n in 1:n_steps
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
+        
+        run_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
         sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
-        
-        run_constraints!(sys, old_coords, sim.dt)
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim.coupling, sim)
@@ -202,9 +202,8 @@ function simulate!(sys,
         
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt
-        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-        
         run_constraints!(sys, old_coords, sim.dt)
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim.coupling, sim)
@@ -256,12 +255,12 @@ function simulate!(sys,
         else
             sys.coords += vector.(coords_last, sys.coords, (sys.boundary,)) .+ remove_molar.(accels_t) .* sim.dt ^ 2
         end
-        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+        
+        run_constraints!(sys, coords_copy, sim.dt)
 
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         # This is accurate to O(dt)
         sys.velocities = vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt
-
-        run_constraints!(sys, coords_copy, sim.dt)
 
         apply_coupling!(sys, sim.coupling, sim)
 
@@ -326,9 +325,9 @@ function simulate!(sys,
         sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
 
         sys.coords += sys.velocities .* sim.dt / 2
-        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+        
         run_constraints!(sys, old_coords, sim.dt)
-
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         sim.remove_CM_motion && remove_CM_motion!(sys)
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
@@ -431,9 +430,10 @@ function simulate!(sys,
         end
         
         run_constraints!(sys, old_coords, sim.dt)
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         sim.remove_CM_motion && remove_CM_motion!(sys)
         run_loggers!(sys, neighbors, step_n)
-
+        
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                         n_threads=n_threads)
