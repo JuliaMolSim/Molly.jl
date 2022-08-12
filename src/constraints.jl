@@ -48,7 +48,7 @@ function apply_constraint!(sys, old_coords, dt, constraint::SHAKE)
         m1 = masses(sys)[i1]
         a = (1/m0 + 1/m1)^2 * norm(r01)^2
         b = 2.0 * (1/m0 + 1/m1) * dot(r01, s01)
-        c = norm(s01)^2 - constr.d^2
+        c = norm(s01)^2 - constraint.d^2
         D = (b^2 - 4*a*c)
         
 
