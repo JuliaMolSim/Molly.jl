@@ -502,6 +502,17 @@ By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energ
 If you need to strip units for downstream analysis, use the `ustrip` function.
 It should be noted that charges are stored as dimensionless, i.e. 1.0 represents an atomic charge of +1.
 
+## Atom types
+
+Molly has a built-in [`Atom`](@ref) type with a few properties commonly used in molecular simulation defined.
+Custom atom types can be used just as well provided that either the [`mass`](@ref) function is defined on the type or the type has a `mass` field (the fallback for the [`mass`](@ref) function).
+The type should also have all fields required by the interactions.
+The list of atoms passed to the [`System`](@ref) constructor should be concretely typed.
+
+Custom atom types should generally be bits types, i.e. `isbitstype(MyAtom)` should be `true`, to work on the GPU.
+Additional non-bits type data for the atoms that is not directly used when calculating the interactions can be passed to the [`System`](@ref) constructor with the `atoms_data` keyword argument.
+For example the built-in [`AtomData`](@ref) type contains fields that are useful when writing trajectories such as the atom name.
+
 ## Forces
 
 Forces define how different parts of the system interact. The force on each particle in the system is derived from the potential corresponding to the interaction.
