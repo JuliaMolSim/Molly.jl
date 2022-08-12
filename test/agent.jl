@@ -10,8 +10,6 @@
         ϵ::Float64
     end
 
-    Molly.mass(person::Person) = person.mass
-
     # Custom PairwiseInteraction
     struct SIRInteraction <: PairwiseInteraction
         nl_only::Bool

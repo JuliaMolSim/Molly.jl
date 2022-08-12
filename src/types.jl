@@ -139,14 +139,16 @@ end
 
 The partial charge of an [`Atom`](@ref).
 """
-charge(atom::Atom) = atom.charge
+charge(atom) = atom.charge
 
 """
     mass(atom)
 
 The mass of an [`Atom`](@ref).
+Custom atom types should implement this function unless they have a `mass` field
+defined, which the function accesses by default.
 """
-mass(atom::Atom) = atom.mass
+mass(atom) = atom.mass
 
 function Base.show(io::IO, a::Atom)
     print(io, "Atom with index ", a.index, ", charge=", charge(a),

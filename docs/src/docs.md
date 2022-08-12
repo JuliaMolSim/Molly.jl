@@ -23,7 +23,7 @@ atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_at
 ```
 See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) docs for more information on the unit annotations.
 Molly re-exports Unitful.jl, [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) and [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) since they are often required to run simulations.
-You can use your own atom types in Molly, provided that the `mass` function is defined and any fields required by the interactions are present.
+You can use your own atom types in Molly, provided that the [`mass`](@ref) function is defined and any fields required by the interactions are present.
 Next, we'll need some starting coordinates and velocities.
 ```julia
 boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm") # Periodic boundary conditions
@@ -384,8 +384,6 @@ mutable struct Person
     σ::Float64
     ϵ::Float64
 end
-
-Molly.mass(person::Person) = person.mass
 
 # Custom PairwiseInteraction
 struct SIRInteraction <: PairwiseInteraction
