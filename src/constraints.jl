@@ -1,7 +1,6 @@
 export
-    run_constraints!,
-    SHAKE,
-    apply_constraint!
+    apply_constraints!,
+    SHAKE
 
 
 """
@@ -12,7 +11,7 @@ Applies all the bond and angle constraints associated with the system.
 
 function apply_constraints!(sys, old_values, dt)
     for constraint in sys.constraints
-        apply_constraint!(sys, constraint, old_values, dt)
+        apply_constraints!(sys, constraint, old_values, dt)
     end
 end
 
@@ -32,7 +31,7 @@ end
 
 Updates the system coordinates and/or velocities based on the constraint.
 """
-function apply_constraint!(sys, constraint::SHAKE, old_coords, dt)
+function apply_constraints!(sys, constraint::SHAKE, old_coords, dt)
 
     for r in 1:length(constraint.is)
         # Atoms that are part of the bond
