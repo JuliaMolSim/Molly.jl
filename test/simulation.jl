@@ -425,7 +425,7 @@ end
     coords = place_atoms(n_atoms ÷ 2, boundary, min_dist=0.3u"nm")
 
     for i in 1:length(coords)
-        push!(coords, coords[i].+ [0.1, 0.0, 0.0]u"nm")
+        push!(coords, coords[i].+ [0.15, 0.0, 0.0]u"nm")
     end
 
     temp = 100.0u"K"
@@ -459,7 +459,24 @@ end
                               "coords" => CoordinateLogger(10),
                              )
                 )
+
+       
+    for i in 1:length(sys.coords)
+        sys.coords[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"        
+    end
+
+    old_coords = sys.coords
+    apply_constraint!(sys, sh, old_coords, 0.002u"ps")
     
+    lengths = []
+    
+    for r in 1:length(sh.is)
+        push!(lengths, norm(vector(sys.coords[sh.is[r]], sys.coords[sh.js[r]], sys.boundary)))
+    end
+    
+    @test maximum(abs.(lengths.-0.1u"nm")) < 1e-10u"nm"
+
+
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"),)
 
     @time simulate!(sys, simulator, 1_000)
