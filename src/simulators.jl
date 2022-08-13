@@ -142,7 +142,7 @@ function simulate!(sys,
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
         
-        run_constraints!(sys, old_coords, sim.dt)
+        apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
@@ -202,7 +202,7 @@ function simulate!(sys,
         
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt
-        run_constraints!(sys, old_coords, sim.dt)
+        apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
@@ -256,7 +256,7 @@ function simulate!(sys,
             sys.coords += vector.(coords_last, sys.coords, (sys.boundary,)) .+ remove_molar.(accels_t) .* sim.dt ^ 2
         end
         
-        run_constraints!(sys, coords_copy, sim.dt)
+        apply_constraints!(sys, coords_copy, sim.dt)
 
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         # This is accurate to O(dt)
@@ -326,7 +326,7 @@ function simulate!(sys,
 
         sys.coords += sys.velocities .* sim.dt / 2
         
-        run_constraints!(sys, old_coords, sim.dt)
+        apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         sim.remove_CM_motion && remove_CM_motion!(sys)
 
@@ -429,7 +429,7 @@ function simulate!(sys,
             step!(args..., neighbors)
         end
         
-        run_constraints!(sys, old_coords, sim.dt)
+        apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         sim.remove_CM_motion && remove_CM_motion!(sys)
         run_loggers!(sys, neighbors, step_n)

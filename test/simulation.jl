@@ -431,15 +431,6 @@ end
     temp = 100.0u"K"
 
     velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
-    
-    bonds = InteractionList2Atoms(
-        collect(1:(n_atoms÷2)),
-        collect((1+n_atoms÷2):n_atoms),
-        repeat([""], n_atoms÷2),
-        [],
-       )
-    
-    specific_inter_lists = (bonds,)
 
     nb_matrix = trues(n_atoms, n_atoms)
 
@@ -449,8 +440,10 @@ end
     end
 
     neighbor_finder = DistanceNeighborFinder(nb_matrix=nb_matrix, n_steps=10, dist_cutoff=1.5u"nm")
+    
+    bond_lengths = [0.1u"nm" for i in 1:(n_atoms÷2)]
 
-    sh = SHAKE(0.1u"nm", bonds)
+    sh = SHAKE(bond_lengths, collect(1:(n_atoms÷2)), collect((1+n_atoms÷2):n_atoms))
     
     constraint_list = (sh,)
 
@@ -471,13 +464,13 @@ end
 
     @time simulate!(sys, simulator, 1_000)
     
-    bond_lengths = []
+    lengths = []
     
-    for r in 1:length(bonds.is)
-        push!(bond_lengths, norm(vector(sys.coords[bonds.is[r]], sys.coords[bonds.js[r]], sys.boundary)))
+    for r in 1:length(sh.is)
+        push!(lengths, norm(vector(sys.coords[sh.is[r]], sys.coords[sh.js[r]], sys.boundary)))
     end
 
-     @test maximum(abs.(bond_lengths.-0.1u"nm")) < 1e-10u"nm"
+     @test maximum(abs.(lengths.-0.1u"nm")) < 1e-10u"nm"
 
 end
 
