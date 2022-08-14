@@ -276,7 +276,7 @@ This is a leapfrog integrator, so the velocities are offset by half a time step
 behind the positions.
 
 # Arguments
-- `dt::T`: the time step of the simulation.
+- `dt::S`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
 - `friction::F`: the friction coefficient of the simulation.
 - `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
@@ -449,7 +449,7 @@ end
 """
     TemperatureREMD(; <keyword arguments>)
 
-A simulator for a parallel temperature replica exchange (TREX) simulation on a
+A simulator for a parallel temperature replica exchange MD (T-REMD) simulation on a
 [`ReplicaSystem`](@ref).
 See [Sugita and Okamoto 1999](https://doi.org/10.1016/S0009-2614(99)01123-9).
 The corresponding [`ReplicaSystem`](@ref) should have the same number of replicas as
@@ -552,6 +552,88 @@ function tremd_exchange!(sys::ReplicaSystem{D,G,T},
     return Δ, should_exchange
 end
 
+"""
+    HamiltonianREMD(; <keyword arguments>)
+
+A simulator for a parallel Hamiltonian replica exchange MD (H-REMD) simulation on a
+[`ReplicaSystem`](@ref). The corresponding replicas are expected to have the different Hamiltonians (due to different interactions or force fields).
+Not currently compatible with automatic differentiation using Zygote.
+
+# Arguments
+- `dt::DT`: the time step of the simulation.
+- `temperature::T`: the temperatures of the simulation.
+- `simulator::S`: the base simulator for each replica.
+- `exchange_time::ET`: the time interval between replica exchange attempts.
+"""
+struct HamiltonianREMD{DT, T, S, ET}
+    dt::DT
+    temperature::T
+    simulator::S
+    exchange_time::ET
+end
+
+function HamiltonianREMD(;
+                         dt,
+                         temperature,
+                         simulator,
+                         exchange_time)
+
+    if exchange_time <= dt
+        throw(ArgumentError("Exchange time ($exchange_time) must be greater than the time step ($dt)"))
+    end
+    
+    return HamiltonianREMD(dt, temperature, simulator, exchange_time)
+end
+
+function simulate!(sys::ReplicaSystem{D, G, T},
+                    sim::HamiltonianREMD,
+                    n_steps::Integer;
+                    rng=Random.GLOBAL_RNG,
+                    n_threads::Integer=Threads.nthreads()) where {D, G, T}
+    simulate_remd!(sys, sim, n_steps, hremd_exchange!; rng=rng, n_threads=n_threads)
+end
+
+function hremd_exchange!(sys::ReplicaSystem{D,G,T},
+                        sim::HamiltonianREMD,
+                        n::Integer,
+                        m::Integer;
+                        n_threads::Int=Threads.nthreads(),
+                        rng=Random.GLOBAL_RNG) where {D,G,T}
+    if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        k_b = sys.k * T(Unitful.Na)
+    else
+        k_b = sys.k
+    end
+
+    T_n, T_m = temperature(sys.replicas[n]), temperature(sys.replicas[m])
+    β_n, β_m = inv(k_b * T_n), inv(k_b * T_m)
+    neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
+                                    n_threads=n_threads)
+    neighbors_m = find_neighbors(sys.replicas[m], sys.replicas[m].neighbor_finder;
+                                    n_threads=n_threads)
+    V_n_i = potential_energy(sys.replicas[n], neighbors_n)
+    V_m_i = potential_energy(sys.replicas[m], neighbors_m)
+
+    sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
+    V_n_f = potential_energy(sys.replicas[n], neighbors_m) # use already calculated neighbors
+    V_m_f = potential_energy(sys.replicas[m], neighbors_n)
+
+    Δ = (β_m - β_n) * ((V_n_f - V_n_i) + (V_m_f - V_m_i))
+    should_exchange = Δ <= 0 || rand(rng) < exp(-Δ)
+
+    if should_exchange
+        # exchange velocities
+        sys.replicas[n].velocities, sys.replicas[m].velocities = sys.replicas[m].velocities, sys.replicas[n].velocities
+        # scale velocities
+        sys.replicas[n].velocities .*= sqrt(T_n / T_m)
+        sys.replicas[m].velocities .*= sqrt(T_m / T_n)
+    else # revert coordinate exchange
+        sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
+    end
+
+    return Δ, should_exchange
+end
+
 function simulate_remd!(sys::ReplicaSystem{D,G,T},
                         remd_sim,
                         n_steps::Int,
@@ -579,7 +661,7 @@ function simulate_remd!(sys::ReplicaSystem{D,G,T},
         @sync for idx in eachindex(remd_sim.simulators)
             Threads.@spawn simulate!(sys.replicas[idx], remd_sim.simulators[idx], remaining_steps;
                                      n_threads=thread_div[idx])
-                end
+        end
 
         # Alternate checking even pairs 2-3/4-5/6-7/... and odd pairs 1-2/3-4/5-6/...
         cycle_parity = cycle % 2
