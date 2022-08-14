@@ -588,7 +588,7 @@ function ReplicaSystem(;
 
     replicas = Tuple(System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, typeof(replica_loggers[i]), F, E, K}(
             atoms, atoms_data, replica_pairwise_inters[i], replica_specific_inter_lists[i],
-            replica_general_inters[i], copy(coords), replica_velocities[i], boundary, deepcopy(neighbor_finder),
+            replica_general_inters[i], replica_coords[i], replica_velocities[i], boundary, deepcopy(neighbor_finder),
             replica_loggers[i], force_units, energy_units, k_converted) for i in 1:n_replicas)
     RS = typeof(replicas)
 
