@@ -23,7 +23,7 @@ atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_at
 ```
 See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) docs for more information on the unit annotations.
 Molly re-exports Unitful.jl, [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) and [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) since they are often required to run simulations.
-You can use your own atom types in Molly, provided that the `mass` function is defined and any fields required by the interactions are present.
+You can use your own atom types in Molly, provided that the [`mass`](@ref) function is defined and any fields required by the interactions are present.
 Next, we'll need some starting coordinates and velocities.
 ```julia
 boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm") # Periodic boundary conditions
@@ -385,8 +385,6 @@ mutable struct Person
     ϵ::Float64
 end
 
-Molly.mass(person::Person) = person.mass
-
 # Custom PairwiseInteraction
 struct SIRInteraction <: PairwiseInteraction
     nl_only::Bool
@@ -503,6 +501,17 @@ All your interaction types need to return the same units of force and energy or 
 By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_units` and `energy_units` arguments to [`System`](@ref).
 If you need to strip units for downstream analysis, use the `ustrip` function.
 It should be noted that charges are stored as dimensionless, i.e. 1.0 represents an atomic charge of +1.
+
+## Atom types
+
+Molly has a built-in [`Atom`](@ref) type with a few properties commonly used in molecular simulation defined.
+Custom atom types can be used just as well provided that either the [`mass`](@ref) function is defined on the type or the type has a `mass` field (the fallback for the [`mass`](@ref) function).
+The type should also have all fields required by the interactions.
+The list of atoms passed to the [`System`](@ref) constructor should be concretely typed.
+
+Custom atom types should generally be bits types, i.e. `isbitstype(MyAtom)` should be `true`, to work on the GPU.
+Additional non-bits type data for the atoms that is not directly used when calculating the interactions can be passed to the [`System`](@ref) constructor with the `atoms_data` keyword argument.
+For example the built-in [`AtomData`](@ref) type contains fields that are useful when writing trajectories such as the atom name.
 
 ## Forces
 

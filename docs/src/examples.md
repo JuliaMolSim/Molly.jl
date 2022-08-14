@@ -154,8 +154,6 @@ struct BondableAtom
     partners::Set{Int}
 end
 
-Molly.mass(ba::BondableAtom) = ba.mass
-
 struct BondableInteraction <: PairwiseInteraction
     nl_only::Bool
     prob_formation::Float64

@@ -14,7 +14,7 @@
 - `visualize` shows the boundary as lines by default and has the `show_boundary`, `boundary_linewidth` and `boundary_color` keyword arguments added.
 
 ### New features
-- Temperature replica exchange MD (REMD) can now be run in parallel on CPU. The `ReplicaSystem` struct is added to act as a container for multiple `System`s. The `TemperatureREMD` simulator and `ReplicaExchangeLogger` are added to set up and run replica exchange simulations.
+- Temperature replica exchange MD (REMD) can now be run in parallel. The `ReplicaSystem` struct is added to act as a container for multiple `System`s. The `TemperatureREMD` simulator and `ReplicaExchangeLogger` are added to set up and run replica exchange simulations.
 - `TriclinicBoundary` is added and can be used to simulate periodic boundary conditions in a triclinic box. A `TriclinicBoundary` can be constructed from either 3 basis vectors or 3 basis vector lengths and angles α/β/γ. The `box_center` function is added.
 
 ### Bug fixes

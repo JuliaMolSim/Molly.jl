@@ -505,7 +505,7 @@ end
     @time simulate!(repsys, simulator, n_steps; assign_velocities=false)
 
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
-    @test efficiency > 0.3 # This is a fairly arbitrary threshold, but it's a good tests for very bad cases
+    @test efficiency > 0.2 # This is a fairly arbitrary threshold, but it's a good tests for very bad cases
 
     for id in eachindex(repsys.replicas)
         mean_temp = mean(values(repsys.replicas[id].loggers.temp))
