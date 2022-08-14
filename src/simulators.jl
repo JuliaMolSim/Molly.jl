@@ -647,14 +647,14 @@ function simulate_remd!(sys::ReplicaSystem{D,G,T},
 
     if n_threads > sys.n_replicas
         thread_div = equal_parts(n_threads, sys.n_replicas)
-    else # pass 1 thread per replica
+    else # Use 1 thread per replica
         thread_div = equal_parts(sys.n_replicas, sys.n_replicas)
     end
 
     # calculate n_cycles and n_steps_per_cycle from dt and exchange_time
     n_cycles = convert(Int, (n_steps * remd_sim.dt) ÷ remd_sim.exchange_time)
-    cycle_length = (n_cycles > 0) ? n_steps ÷ n_cycles : 0
-    remaining_steps = (n_cycles > 0) ? n_steps % n_cycles : n_steps
+    cycle_length = n_cycles > 0 ? n_steps ÷ n_cycles : 0
+    remaining_steps = n_cycles > 0 ? n_steps % n_cycles : n_steps
     n_attempts = 0
 
     for cycle = 1:n_cycles
