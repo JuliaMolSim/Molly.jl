@@ -230,8 +230,8 @@
     c2_cosine = SVector(2.0, 0.0, 0.0)u"nm"
     c3_cosine = SVector(3.0, 0.0, 0.0)u"nm"
     c4_cosine = SVector(2.0, 1.0, 0.0)u"nm"
-    a1 = CosineAngle(10.0 * kbT, 0.0)
-    a2 = CosineAngle(10.0 * kbT, π/2)
+    a1 = CosineAngle(k=10.0 * kbT, θ0=0.0)
+    a2 = CosineAngle(k=10.0 * kbT, θ0=π/2)
     fs = force(a1, c1_cosine, c2_cosine, c3_cosine, boundary_cosine)
     @test isapprox(
         fs.f1,
