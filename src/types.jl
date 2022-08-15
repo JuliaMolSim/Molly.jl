@@ -109,7 +109,7 @@ The types used should be bits types if the GPU is going to be used.
 # Arguments
 - `index::Int`: the index of the atom in the system.
 - `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
-- `mass::M=0.0u"u"`: the mass of the atom.
+- `mass::M=1.0u"u"`: the mass of the atom.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
