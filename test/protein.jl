@@ -155,7 +155,7 @@ end
 
     params_dic = extract_parameters(sys_nounits, ff_nounits)
     @test length(params_dic) == 639
-    atoms_grad, pis_grad, sis_grad = inject_gradients(sys_nounits, params_dic)
+    atoms_grad, pis_grad, sis_grad, gis_grad = inject_gradients(sys_nounits, params_dic)
     @test atoms_grad == sys_nounits.atoms
     @test pis_grad == sys_nounits.pairwise_inters
 
@@ -205,7 +205,7 @@ end
 
         params_dic_gpu = extract_parameters(sys_nounits, ff_nounits)
         @test params_dic == params_dic_gpu
-        atoms_grad, pis_grad, sis_grad = inject_gradients(sys_nounits, params_dic_gpu)
+        atoms_grad, pis_grad, sis_grad, gis_grad = inject_gradients(sys_nounits, params_dic_gpu)
         @test atoms_grad == sys_nounits.atoms
         @test pis_grad == sys_nounits.pairwise_inters
     end
