@@ -8,7 +8,8 @@ export
     StormerVerlet,
     Langevin,
     LangevinSplitting,
-    TemperatureREMD
+    TemperatureREMD,
+    HamiltonianREMD
 
 """
     SteepestDescentMinimizer(; <keyword arguments>)
@@ -464,7 +465,7 @@ Not currently compatible with automatic differentiation using Zygote.
 - `simulators::ST`: individual simulators for simulating each replica.
 - `exchange_time::ET`: the time interval between replica exchange attempts.
 """
-struct TemperatureREMD{N, T, S, DT, TP, ST, ET}
+struct TemperatureREMD{N, T, DT, TP, ST, ET}
     dt::DT
     temperatures::TP
     simulators::ST
@@ -476,7 +477,6 @@ function TemperatureREMD(;
                          temperatures,
                          simulators,
                          exchange_time)
-    S = eltype(simulators)
     T = eltype(temperatures)
     N = length(temperatures)
     DT = typeof(dt)
@@ -494,7 +494,7 @@ function TemperatureREMD(;
     simulators = Tuple(simulators[i] for i in 1:N)
     ST = typeof(simulators)
     
-    return TemperatureREMD{N, T, S, DT, TP, ST, ET}(dt, temperatures, simulators, exchange_time)
+    return TemperatureREMD{N, T, DT, TP, ST, ET}(dt, temperatures, simulators, exchange_time)
 end
 
 function simulate!(sys::ReplicaSystem{D, G, T},
@@ -562,27 +562,32 @@ Not currently compatible with automatic differentiation using Zygote.
 # Arguments
 - `dt::DT`: the time step of the simulation.
 - `temperature::T`: the temperatures of the simulation.
-- `simulator::S`: the base simulator for each replica.
+- `simulators::ST`: individual simulators for simulating each replica.
 - `exchange_time::ET`: the time interval between replica exchange attempts.
 """
-struct HamiltonianREMD{DT, T, S, ET}
+struct HamiltonianREMD{N, T, DT, ST, ET}
     dt::DT
     temperature::T
-    simulator::S
+    simulators::ST
     exchange_time::ET
 end
 
 function HamiltonianREMD(;
                          dt,
                          temperature,
-                         simulator,
+                         simulators,
                          exchange_time)
+    N = length(simulators)
+    DT = typeof(dt)
+    T = typeof(temperature)
+    ST = typeof(simulators)
+    ET = typeof(exchange_time)
 
     if exchange_time <= dt
         throw(ArgumentError("Exchange time ($exchange_time) must be greater than the time step ($dt)"))
     end
     
-    return HamiltonianREMD(dt, temperature, simulator, exchange_time)
+    return HamiltonianREMD{N, T, DT, ST, ET}(dt, temperature, simulators, exchange_time)
 end
 
 function simulate!(sys::ReplicaSystem{D, G, T},
@@ -605,8 +610,8 @@ function hremd_exchange!(sys::ReplicaSystem{D,G,T},
         k_b = sys.k
     end
 
-    T_n, T_m = temperature(sys.replicas[n]), temperature(sys.replicas[m])
-    β_n, β_m = inv(k_b * T_n), inv(k_b * T_m)
+    T_sim = sim.temperature
+    β_sim = inv(k_b * T_sim)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
                                     n_threads=n_threads)
     neighbors_m = find_neighbors(sys.replicas[m], sys.replicas[m].neighbor_finder;
@@ -618,15 +623,12 @@ function hremd_exchange!(sys::ReplicaSystem{D,G,T},
     V_n_f = potential_energy(sys.replicas[n], neighbors_m) # use already calculated neighbors
     V_m_f = potential_energy(sys.replicas[m], neighbors_n)
 
-    Δ = (β_m - β_n) * ((V_n_f - V_n_i) + (V_m_f - V_m_i))
+    Δ = β_sim * (V_n_f - V_n_i + V_m_f - V_m_i)
     should_exchange = Δ <= 0 || rand(rng) < exp(-Δ)
 
     if should_exchange
         # exchange velocities
         sys.replicas[n].velocities, sys.replicas[m].velocities = sys.replicas[m].velocities, sys.replicas[n].velocities
-        # scale velocities
-        sys.replicas[n].velocities .*= sqrt(T_n / T_m)
-        sys.replicas[m].velocities .*= sqrt(T_m / T_n)
     else # revert coordinate exchange
         sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
     end
@@ -659,7 +661,7 @@ function simulate_remd!(sys::ReplicaSystem{D,G,T},
 
     for cycle = 1:n_cycles
         @sync for idx in eachindex(remd_sim.simulators)
-            Threads.@spawn simulate!(sys.replicas[idx], remd_sim.simulators[idx], remaining_steps;
+            Threads.@spawn simulate!(sys.replicas[idx], remd_sim.simulators[idx], cycle_length;
                                      n_threads=thread_div[idx])
         end
 
