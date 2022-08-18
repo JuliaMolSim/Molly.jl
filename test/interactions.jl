@@ -7,7 +7,7 @@
     dr12 = vector(c1, c2, boundary)
     dr13 = vector(c1, c3, boundary)
 
-    for inter in (LennardJones(), Mie(m=6, n=12))
+    for inter in (LennardJones(), Mie(m=6, n=12), LennardJonesSoftCore(sc_softness=1, sc_lambda=0, sc_power=2))
         @test isapprox(
             force(inter, dr12, c1, c2, a1, a1, boundary),
             SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
@@ -52,27 +52,28 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
-    inter = Coulomb()
-    @test isapprox(
-        force(inter, dr12, c1, c2, a1, a1, boundary),
-        SVector(1543.727311, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
-        atol=1e-5u"kJ * mol^-1 * nm^-1",
-    )
-    @test isapprox(
-        force(inter, dr13, c1, c3, a1, a1, boundary),
-        SVector(868.3466125, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
-        atol=1e-5u"kJ * mol^-1 * nm^-1",
-    )
-    @test isapprox(
-        potential_energy(inter, dr12, c1, c2, a1, a1, boundary),
-        463.1181933u"kJ * mol^-1",
-        atol=1e-5u"kJ * mol^-1",
-    )
-    @test isapprox(
-        potential_energy(inter, dr13, c1, c3, a1, a1, boundary),
-        347.338645u"kJ * mol^-1",
-        atol=1e-5u"kJ * mol^-1",
-    )
+    for inter in (Coulomb(), CoulombSoftCore(sc_softness=1, sc_lambda=0, sc_power=2))
+        @test isapprox(
+            force(inter, dr12, c1, c2, a1, a1, boundary),
+            SVector(1543.727311, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+            atol=1e-5u"kJ * mol^-1 * nm^-1",
+        )
+        @test isapprox(
+            force(inter, dr13, c1, c3, a1, a1, boundary),
+            SVector(868.3466125, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+            atol=1e-5u"kJ * mol^-1 * nm^-1",
+        )
+        @test isapprox(
+            potential_energy(inter, dr12, c1, c2, a1, a1, boundary),
+            463.1181933u"kJ * mol^-1",
+            atol=1e-5u"kJ * mol^-1",
+        )
+        @test isapprox(
+            potential_energy(inter, dr13, c1, c3, a1, a1, boundary),
+            347.338645u"kJ * mol^-1",
+            atol=1e-5u"kJ * mol^-1",
+        )
+    end
 
     c1_grav = SVector(1.0, 1.0, 1.0)u"m"
     c2_grav = SVector(6.0, 1.0, 1.0)u"m"
