@@ -153,3 +153,144 @@ end
 
     return 4ϵ * (six_term ^ 2 - six_term)
 end
+
+struct LennardJonesSoftCore{S, C, A, L, P, W, WS, F, E} <: PairwiseInteraction
+    cutoff::C
+    sc_softness::A
+    sc_lambda::L
+    sc_power::P
+    nl_only::Bool
+    lorentz_mixing::Bool
+    weight_14::W
+    weight_solute_solvent::WS
+    force_units::F
+    energy_units::E
+end
+
+function LennardJonesSoftCore(;
+                        cutoff=NoCutoff(),
+                        sc_softness=1,
+                        sc_lambda=0,
+                        sc_power=2,
+                        nl_only=false,
+                        lorentz_mixing=true,
+                        weight_14=1,
+                        weight_solute_solvent=1,
+                        force_units=u"kJ * mol^-1 * nm^-1",
+                        energy_units=u"kJ * mol^-1",
+                        skip_shortcut=false)
+    return LennardJonesSoftCore{skip_shortcut, typeof(cutoff), typeof(sc_softness), typeof(sc_lambda), typeof(sc_power),
+                        typeof(weight_14), typeof(weight_solute_solvent), typeof(force_units), typeof(energy_units)}(
+        cutoff, nl_only, lorentz_mixing, weight_14, weight_solute_solvent, force_units, energy_units)
+end
+
+@inline @inbounds function force(inter::LennardJonesSoftCore{S, C},
+                                    dr,
+                                    coord_i,
+                                    coord_j,
+                                    atom_i,
+                                    atom_j,
+                                    boundary,
+                                    weight_14::Bool=false) where {S, C}
+    r2 = sum(abs2, dr)
+
+    if !S && (iszero(atom_i.ϵ) || iszero(atom_j.ϵ) || iszero(atom_i.σ) || iszero(atom_j.σ))
+        return ustrip.(zero(coord_i)) * inter.force_units
+    end
+
+    # Lorentz-Berthelot mixing rules use the arithmetic average for σ
+    # Otherwise use the geometric average
+    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
+    if (is_solute(atom_i) && !is_solute(atom_j)) || (is_solute(atom_j) && !is_solute(atom_i))
+        ϵ = inter.weight_solute_solvent * sqrt(atom_i.ϵ * atom_j.ϵ)
+    else
+        ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
+    end
+
+    cutoff = inter.cutoff
+    σ2 = σ^2
+    params = (σ2, ϵ, inter.sc_softness, inter.sc_lambda, inter.sc_power)
+
+    if cutoff_points(C) == 0
+        f = force_divr_nocutoff(inter, r2, inv(r2), params)
+    elseif cutoff_points(C) == 1
+        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
+
+        f = force_divr_cutoff(cutoff, r2, inter, params)
+    elseif cutoff_points(C) == 2
+        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
+
+        if r2 < cutoff.sqdist_activation
+            f = force_divr_nocutoff(inter, r2, inv(r2), params)
+        else
+            f = force_divr_cutoff(cutoff, r2, inter, params)
+        end
+    end
+
+    if weight_14
+        return f * dr * inter.weight_14
+    else
+        return f * dr
+    end
+end
+
+@fastmath function force_divr_nocutoff(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, α, λ, p))
+    inv_rsc6 = inv(r2^3 + α * σ2^3 * λ^p)  # rsc = (r2^3 + α * σ2^3 * λ^p)^(1/6)
+    six_term = σ2^3 * inv_rsc6
+
+    return (24ϵ * inv_rsc6^(1/3)) * (2 * six_term^2 - six_term) * sqrt(r2^5 * inv_rsc6^(5/3))
+end
+
+@inline @inbounds function potential_energy(inter::LennardJonesSoftCore{S, C},
+                                            dr,
+                                            coord_i,
+                                            coord_j,
+                                            atom_i,
+                                            atom_j,
+                                            boundary,
+                                            weight_14::Bool=false) where {S, C}
+    r2 = sum(abs2, dr)
+
+    if !S && (iszero(atom_i.ϵ) || iszero(atom_j.ϵ) || iszero(atom_i.σ) || iszero(atom_j.σ))
+        return ustrip(zero(coord_i[1])) * inter.energy_units
+    end
+
+    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
+    if (is_solute(atom_i) && !is_solute(atom_j)) || (is_solute(atom_j) && !is_solute(atom_i))
+        ϵ = inter.weight_solute_solvent * sqrt(atom_i.ϵ * atom_j.ϵ)
+    else
+        ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
+    end
+
+    cutoff = inter.cutoff
+    σ2 = σ^2
+    params = (σ2, ϵ, inter.sc_softness, inter.sc_lambda, inter.sc_power)
+
+    if cutoff_points(C) == 0
+        pe = potential(inter, r2, inv(r2), params)
+    elseif cutoff_points(C) == 1
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
+
+        pe = potential_cutoff(cutoff, r2, inter, params)
+    elseif cutoff_points(C) == 2
+        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
+
+        if r2 < cutoff.sqdist_activation
+            pe = potential(inter, r2, inv(r2), params)
+        else
+            pe = potential_cutoff(cutoff, r2, inter, params)
+        end
+    end
+
+    if weight_14
+        return pe * inter.weight_14
+    else
+        return pe
+    end
+end
+
+@fastmath function potential(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, α, λ, p))
+    six_term = σ2^3 * inv(r2^3 + α * σ2^3 * λ^p)
+
+    return 4ϵ * (six_term ^ 2 - six_term)
+end
