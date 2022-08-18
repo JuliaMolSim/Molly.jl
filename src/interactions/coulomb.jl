@@ -1,4 +1,4 @@
-export Coulomb
+export Coulomb, CoulombSoftCore
 
 @doc raw"""
     Coulomb(; cutoff, nl_only, weight_14, coulomb_const, force_units, energy_units)
@@ -116,6 +116,19 @@ end
     (coulomb_const * qi * qj) * √invr2
 end
 
+@doc raw"""
+    CoulombSoftCore(; cutoff, sc_softness, sc_lambda, sc_power, nl_only, lorentz_mixing, weight_14,
+                    coulomb_const, force_units, energy_units)
+
+The Coulomb electrostatic interaction between two atoms with a soft core.
+The potential energy is defined as
+```math
+V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha * sigma_{ij}^6 * \lambda^p)^{\frac{1}{6}}}
+```
+
+Here, ``\\alpha``, ``\\lambda``, and ``\\p`` are `sc_softness`, `sc_lambda`, and `sc_power` respectively which are used
+to adjust the functional form of the soft core of the potential.
+"""
 struct CoulombSoftCore{C, A, L, P, W, T, F, E} <: PairwiseInteraction
     cutoff::C
     sc_softness::A
@@ -140,9 +153,9 @@ function CoulombSoftCore(;
                     coulomb_const=coulombconst,
                     force_units=u"kJ * mol^-1 * nm^-1",
                     energy_units=u"kJ * mol^-1")
-    return Coulomb{typeof(cutoff), typeof(sc_softness), typeof(sc_lambda), typeof(sc_power), typeof(weight_14),
+    return CoulombSoftCore{typeof(cutoff), typeof(sc_softness), typeof(sc_lambda), typeof(sc_power), typeof(weight_14),
                    typeof(coulomb_const), typeof(force_units), typeof(energy_units)}(
-        cutoff, nl_only, lorentz_mixing, weight_14, coulomb_const, force_units, energy_units)
+        cutoff, sc_softness, sc_lambda, sc_power, nl_only, lorentz_mixing, weight_14, coulomb_const, force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::CoulombSoftCore{C},
@@ -187,7 +200,9 @@ end
 
 @fastmath function force_divr_nocutoff(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, α, λ, p))
     inv_rsc6 = inv(r2^3 + α * λ^p * σ^6)
-    (coulomb_const * qi * qj) * inv_rsc6^(1/3) * sqrt(r2^5 * inv_rsc6^(5/3)) * √invr2  # √invr2 is for normalizing dr
+
+    # √invr2 is for normalizing dr
+    (coulomb_const * qi * qj) * inv_rsc6^(1//3) * sqrt(r2^5 * inv_rsc6^(5//3)) * √invr2
 end
 
 @inline @inbounds function potential_energy(inter::CoulombSoftCore{C},
@@ -232,5 +247,5 @@ end
 
 @fastmath function potential(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, α, λ, p))
     inv_rsc6 = inv(r2^3 + α * λ^p * σ^6)
-    (coulomb_const * qi * qj) * inv_rsc6 ^ (1/6)
+    (coulomb_const * qi * qj) * inv_rsc6 ^ (1//6)
 end

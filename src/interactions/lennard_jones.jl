@@ -1,4 +1,4 @@
-export LennardJones
+export LennardJones, LennardJonesSoftCore
 
 @doc raw"""
     LennardJones(; cutoff, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
@@ -154,6 +154,26 @@ end
     return 4ϵ * (six_term ^ 2 - six_term)
 end
 
+@doc raw"""
+    LennardJonesSoftCore(; cutoff, sc_softness, sc_lambda, sc_power, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
+                 force_units, energy_units, skip_shortcut)
+
+The Lennard-Jones 6-12 interaction between two atoms with a soft core.
+The potential energy is defined as
+```math
+V(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}^{\text{sc}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}^{\text{sc}}}\right)^{6}\right]
+```
+and the force on each atom by
+```math
+\begin{aligned}
+\vec{F}_i &= 24\varepsilon_{ij} \left(2\frac{\sigma_{ij}^{12}}{(r_{ij}^{\text{sc}})^{13}} - \frac{\sigma_{ij}^6}{(r_{ij}^{\text{sc}})^{7}}\right) \left(\frac{r_{ij}}{r_{ij}^{\text{sc}}}\right)^5 \frac{\vec{r}_{ij}}{r_{ij}}
+\end{aligned}
+```
+
+where ``r_{ij}^{\\text{sc}} = \\left(r_{ij}^6 + \\alpha \\sigma_{ij}^6 \\lambda^p \\right)^{1/6}``. Here, ``\\alpha``,
+``\\lambda``, and ``\\p`` are `sc_softness`, `sc_lambda`, and `sc_power` respectively which are used
+to adjust the functional form of the soft core of the potential.
+"""
 struct LennardJonesSoftCore{S, C, A, L, P, W, WS, F, E} <: PairwiseInteraction
     cutoff::C
     sc_softness::A
@@ -181,7 +201,8 @@ function LennardJonesSoftCore(;
                         skip_shortcut=false)
     return LennardJonesSoftCore{skip_shortcut, typeof(cutoff), typeof(sc_softness), typeof(sc_lambda), typeof(sc_power),
                         typeof(weight_14), typeof(weight_solute_solvent), typeof(force_units), typeof(energy_units)}(
-        cutoff, nl_only, lorentz_mixing, weight_14, weight_solute_solvent, force_units, energy_units)
+        cutoff, sc_softness, sc_lambda, sc_power, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
+        force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::LennardJonesSoftCore{S, C},
@@ -238,7 +259,8 @@ end
     inv_rsc6 = inv(r2^3 + α * σ2^3 * λ^p)  # rsc = (r2^3 + α * σ2^3 * λ^p)^(1/6)
     six_term = σ2^3 * inv_rsc6
 
-    return (24ϵ * inv_rsc6^(1/3)) * (2 * six_term^2 - six_term) * sqrt(r2^5 * inv_rsc6^(5/3))
+    # √invr2 is for normalizing dr
+    return (24ϵ * inv_rsc6^(1//6)) * (2 * six_term^2 - six_term) * sqrt(r2^5 * inv_rsc6^(5//3)) * √invr2
 end
 
 @inline @inbounds function potential_energy(inter::LennardJonesSoftCore{S, C},
