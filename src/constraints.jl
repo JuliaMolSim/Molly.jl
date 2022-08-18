@@ -19,11 +19,14 @@ end
 
 Constrains a set of bonds to defined distances.
 """
-struct SHAKE{D, B}
+struct SHAKE{D, B, E}
     dists::D
     is::B
     js::B
+    tolerance::E
 end
+
+SHAKE(dists, is, js, tolerance=1e-10u"nm") = SHAKE{typeof(dists), typeof(tolerance)}(dists, is, js, tolerance)
 
 """
     apply_constraints!(sys, constraint, old_coords, dt)
@@ -46,7 +49,7 @@ function apply_constraints!(sys, constraint::SHAKE, old_coords, dt)
             # Distance vector after unconstrained update
             s01 = vector(sys.coords[i1], sys.coords[i0], sys.boundary)
         
-            if abs(ustrip(norm(s01) - constraint.dists[r])) > 1e-10
+            if abs(norm(s01) - constraint.dists[r]) > constraint.tolerance
                 m0 = mass(sys.atoms[i0])
                 m1 = mass(sys.atoms[i1])
                 a = (1/m0 + 1/m1)^2 * norm(r01)^2
@@ -78,7 +81,7 @@ function apply_constraints!(sys, constraint::SHAKE, old_coords, dt)
 
         lengths = [abs(norm(vector(sys.coords[constraint.is[r]], sys.coords[constraint.js[r]], sys.boundary)) - constraint.dists[r]) for r in 1:length(constraint.is)]
         
-        if ustrip(maximum(lengths)) < 1e-10
+        if maximum(lengths) < constraint.tolerance
             converged = true
         end
     end        
