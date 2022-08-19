@@ -117,7 +117,7 @@ end
 end
 
 @doc raw"""
-    CoulombSoftCore(; cutoff, sc_softness, sc_lambda, sc_power, nl_only, lorentz_mixing, weight_14,
+    CoulombSoftCore(; cutoff, α, λ, p, nl_only, lorentz_mixing, weight_14,
                     coulomb_const, force_units, energy_units)
 
 The Coulomb electrostatic interaction between two atoms with a soft core.
@@ -126,14 +126,14 @@ The potential energy is defined as
 V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha * sigma_{ij}^6 * \lambda^p)^{\frac{1}{6}}}
 ```
 
-Here, ``\\alpha``, ``\\lambda``, and ``\\p`` are `sc_softness`, `sc_lambda`, and `sc_power` respectively which are used
-to adjust the functional form of the soft core of the potential.
+Here, ``\\alpha``, ``\\lambda``, and ``\\p`` adjust the functional form of the soft core of the potential. For we 
+`alpha=1` or `lambda=1` we get the standard Coulomb potential.
 """
 struct CoulombSoftCore{C, A, L, P, W, T, F, E} <: PairwiseInteraction
     cutoff::C
-    sc_softness::A
-    sc_lambda::L
-    sc_power::P
+    α::A
+    λ::L
+    p::P
     nl_only::Bool
     lorentz_mixing::Bool
     weight_14::W
@@ -144,18 +144,18 @@ end
 
 function CoulombSoftCore(;
                     cutoff=NoCutoff(),
-                    sc_softness=1,
-                    sc_lambda=0,
-                    sc_power=2,
+                    α=1,
+                    λ=0,
+                    p=2,
                     nl_only=false,
                     lorentz_mixing=true,
                     weight_14=1,
                     coulomb_const=coulombconst,
                     force_units=u"kJ * mol^-1 * nm^-1",
                     energy_units=u"kJ * mol^-1")
-    return CoulombSoftCore{typeof(cutoff), typeof(sc_softness), typeof(sc_lambda), typeof(sc_power), typeof(weight_14),
+    return CoulombSoftCore{typeof(cutoff), typeof(α), typeof(λ), typeof(p), typeof(weight_14),
                    typeof(coulomb_const), typeof(force_units), typeof(energy_units)}(
-        cutoff, sc_softness, sc_lambda, sc_power, nl_only, lorentz_mixing, weight_14, coulomb_const, force_units, energy_units)
+        cutoff, α, λ, p, nl_only, lorentz_mixing, weight_14, coulomb_const, force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::CoulombSoftCore{C},
@@ -173,7 +173,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
 
-    params = (coulomb_const, qi, qj, σ, inter.sc_softness, inter.sc_lambda, inter.sc_power)
+    params = (coulomb_const, qi, qj, σ, inter.α, inter.λ, inter.p)
 
     if cutoff_points(C) == 0
         f = force_divr_nocutoff(inter, r2, inv(r2), params)
@@ -220,7 +220,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
 
-    params = (coulomb_const, qi, qj, σ, inter.sc_softness, inter.sc_lambda, inter.sc_power)
+    params = (coulomb_const, qi, qj, σ, inter.α, inter.λ, inter.p)
 
     if cutoff_points(C) == 0
         pe = potential(inter, r2, inv(r2), params)

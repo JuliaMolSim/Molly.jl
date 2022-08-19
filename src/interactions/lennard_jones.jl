@@ -155,7 +155,7 @@ end
 end
 
 @doc raw"""
-    LennardJonesSoftCore(; cutoff, sc_softness, sc_lambda, sc_power, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
+    LennardJonesSoftCore(; cutoff, α, λ, p, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
                  force_units, energy_units, skip_shortcut)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core.
@@ -171,14 +171,14 @@ and the force on each atom by
 ```
 
 where ``r_{ij}^{\\text{sc}} = \\left(r_{ij}^6 + \\alpha \\sigma_{ij}^6 \\lambda^p \\right)^{1/6}``. Here, ``\\alpha``,
-``\\lambda``, and ``\\p`` are `sc_softness`, `sc_lambda`, and `sc_power` respectively which are used
-to adjust the functional form of the soft core of the potential.
+``\\lambda``, and ``\\p`` adjust the functional form of the soft core of the potential. For we `alpha=1` or `lambda=1`
+we get the standard Lennard-Jones potential.
 """
 struct LennardJonesSoftCore{S, C, A, L, P, W, WS, F, E} <: PairwiseInteraction
     cutoff::C
-    sc_softness::A
-    sc_lambda::L
-    sc_power::P
+    α::A
+    λ::L
+    p::P
     nl_only::Bool
     lorentz_mixing::Bool
     weight_14::W
@@ -189,9 +189,9 @@ end
 
 function LennardJonesSoftCore(;
                         cutoff=NoCutoff(),
-                        sc_softness=1,
-                        sc_lambda=0,
-                        sc_power=2,
+                        α=1,
+                        λ=0,
+                        p=2,
                         nl_only=false,
                         lorentz_mixing=true,
                         weight_14=1,
@@ -199,9 +199,9 @@ function LennardJonesSoftCore(;
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
                         skip_shortcut=false)
-    return LennardJonesSoftCore{skip_shortcut, typeof(cutoff), typeof(sc_softness), typeof(sc_lambda), typeof(sc_power),
+    return LennardJonesSoftCore{skip_shortcut, typeof(cutoff), typeof(α), typeof(λ), typeof(p),
                         typeof(weight_14), typeof(weight_solute_solvent), typeof(force_units), typeof(energy_units)}(
-        cutoff, sc_softness, sc_lambda, sc_power, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
+        cutoff, α, λ, p, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
         force_units, energy_units)
 end
 
@@ -230,7 +230,7 @@ end
 
     cutoff = inter.cutoff
     σ2 = σ^2
-    params = (σ2, ϵ, inter.sc_softness, inter.sc_lambda, inter.sc_power)
+    params = (σ2, ϵ, inter.α, inter.λ, inter.p)
 
     if cutoff_points(C) == 0
         f = force_divr_nocutoff(inter, r2, inv(r2), params)
@@ -286,7 +286,7 @@ end
 
     cutoff = inter.cutoff
     σ2 = σ^2
-    params = (σ2, ϵ, inter.sc_softness, inter.sc_lambda, inter.sc_power)
+    params = (σ2, ϵ, inter.α, inter.λ, inter.p)
 
     if cutoff_points(C) == 0
         pe = potential(inter, r2, inv(r2), params)

@@ -7,7 +7,7 @@
     dr12 = vector(c1, c2, boundary)
     dr13 = vector(c1, c3, boundary)
 
-    for inter in (LennardJones(), Mie(m=6, n=12), LennardJonesSoftCore(sc_softness=1, sc_lambda=0, sc_power=2))
+    for inter in (LennardJones(), Mie(m=6, n=12), LennardJonesSoftCore(α=1, λ=0, p=2))
         @test isapprox(
             force(inter, dr12, c1, c2, a1, a1, boundary),
             SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
@@ -52,7 +52,7 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
-    for inter in (Coulomb(), CoulombSoftCore(sc_softness=1, sc_lambda=0, sc_power=2))
+    for inter in (Coulomb(), CoulombSoftCore(α=1, λ=0, p=2))
         @test isapprox(
             force(inter, dr12, c1, c2, a1, a1, boundary),
             SVector(1543.727311, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
