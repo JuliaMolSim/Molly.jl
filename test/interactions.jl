@@ -30,6 +30,28 @@
         )
     end
 
+    inter = LennardJonesSoftCore(α=1, λ=0.5, p=2)
+    @test isapprox(
+        force(inter, dr12, c1, c2, a1, a1, boundary),
+        SVector(6.144, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        force(inter, dr13, c1, c3, a1, a1, boundary),
+        SVector(-1.290499537, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr12, c1, c2, a1, a1, boundary),
+        -0.128u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr13, c1, c3, a1, a1, boundary),
+        -0.1130893709u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
+
     inter = SoftSphere()
     @test isapprox(
         force(inter, dr12, c1, c2, a1, a1, boundary),
@@ -74,6 +96,28 @@
             atol=1e-5u"kJ * mol^-1",
         )
     end
+
+    inter = CoulombSoftCore(α=1, λ=0.5, p=2)
+    @test isapprox(
+        force(inter, dr12, c1, c2, a1, a1, boundary),
+        SVector(1189.895726, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-5u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        force(inter, dr13, c1, c3, a1, a1, boundary),
+        SVector(825.3456507, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-5u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr12, c1, c2, a1, a1, boundary),
+        446.2108973u"kJ * mol^-1",
+        atol=1e-5u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr13, c1, c3, a1, a1, boundary),
+        344.8276396u"kJ * mol^-1",
+        atol=1e-5u"kJ * mol^-1",
+    )
 
     c1_grav = SVector(1.0, 1.0, 1.0)u"m"
     c2_grav = SVector(6.0, 1.0, 1.0)u"m"
