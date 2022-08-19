@@ -527,9 +527,11 @@ In Molly there are three types of interactions:
 
 The available pairwise interactions are:
 - [`LennardJones`](@ref)
+- [`LennardJonesSoftCore`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
 - [`Coulomb`](@ref)
+- [`CoulombSoftCore`](@ref)
 - [`CoulombReactionField`](@ref)
 - [`Gravity`](@ref)
 
