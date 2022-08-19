@@ -126,7 +126,7 @@ The potential energy is defined as
 V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha * sigma_{ij}^6 * \lambda^p)^{\frac{1}{6}}}
 ```
 
-Here, ``\\alpha``, ``\\lambda``, and ``\\p`` adjust the functional form of the soft core of the potential. For we 
+Here, ``\\alpha``, ``\\lambda``, and ``\\p`` adjust the functional form of the soft core of the potential. For 
 `alpha=1` or `lambda=1` we get the standard Coulomb potential.
 """
 struct CoulombSoftCore{C, A, L, P, W, T, F, E} <: PairwiseInteraction

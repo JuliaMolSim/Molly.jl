@@ -171,7 +171,7 @@ and the force on each atom by
 ```
 
 where ``r_{ij}^{\\text{sc}} = \\left(r_{ij}^6 + \\alpha \\sigma_{ij}^6 \\lambda^p \\right)^{1/6}``. Here, ``\\alpha``,
-``\\lambda``, and ``\\p`` adjust the functional form of the soft core of the potential. For we `alpha=1` or `lambda=1`
+``\\lambda``, and ``\\p`` adjust the functional form of the soft core of the potential. For `alpha=1` or `lambda=1`
 we get the standard Lennard-Jones potential.
 """
 struct LennardJonesSoftCore{S, C, A, L, P, W, WS, F, E} <: PairwiseInteraction
