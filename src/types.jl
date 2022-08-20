@@ -281,6 +281,8 @@ interface described there.
 - `general_inters::GI=()`: the general interactions in the system,
     i.e. interactions involving all atoms such as implicit solvent. Typically
     a `Tuple`.
+- `constraints::CN=()`: the constraints for bonds and angles in the system. Typically
+    a `Tuple`.
 - `coords::C`: the coordinates of the atoms in the system. Typically a
     vector of `SVector`s of 2 or 3 dimensions.
 - `velocities::V=zero(coords) * u"ps^-1"`: the velocities of the atoms in the
@@ -299,12 +301,13 @@ interface described there.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
-mutable struct System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
+mutable struct System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     pairwise_inters::PI
     specific_inter_lists::SI
     general_inters::GI
+    constraints::CN
     coords::C
     velocities::V
     boundary::B
@@ -321,6 +324,7 @@ function System(;
                 pairwise_inters=(),
                 specific_inter_lists=(),
                 general_inters=(),
+                constraints=(),
                 coords,
                 velocities=nothing,
                 boundary,
@@ -339,6 +343,7 @@ function System(;
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
+    CN = typeof(constraints)
     C = typeof(coords)
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
@@ -383,9 +388,9 @@ function System(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    return System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF, L, F, E, K}(
+    return System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, K}(
                     atoms, atoms_data, pairwise_inters, specific_inter_lists,
-                    general_inters, coords, vels, boundary, neighbor_finder,
+                    general_inters, constraints, coords, vels, boundary, neighbor_finder,
                     loggers, force_units, energy_units, k_converted)
 end
 
@@ -416,6 +421,8 @@ interface described there.
 - `general_inters::GI=()`: the general interactions in the system,
     i.e. interactions involving all atoms such as implicit solvent. Typically
     a `Tuple`.
+- `constraints::CN=()`: the constraints for bonds and angles in the system. Typically
+    a `Tuple`.
 - `n_replicas::Integer`: the number of replicas of the system.
 - `replica_coords`: the coordinates of the atoms in each replica.
 - `replica_velocities=[zero(replica_coords[1]) * u"ps^-1" for _ in 1:n_replicas]`:
@@ -436,12 +443,13 @@ interface described there.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
     GPU and taking gradients. Defaults to `isa(replica_coords[1], CuArray)`.
 """
-mutable struct ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, EL, F, E, K} <: AbstractSystem{D}
+mutable struct ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, CN, RS, B, EL, F, E, K} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     pairwise_inters::PI
     specific_inter_lists::SI
     general_inters::GI
+    constraints::CN
     n_replicas::Int
     replicas::RS
     boundary::B
@@ -457,6 +465,7 @@ function ReplicaSystem(;
                         pairwise_inters=(),
                         specific_inter_lists=(),
                         general_inters=(),
+                        constraints=(),
                         n_replicas,
                         replica_coords,
                         replica_velocities=nothing,
@@ -477,6 +486,7 @@ function ReplicaSystem(;
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
+    CN = typeof(constraints)
     C = typeof(replica_coords[1])
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
@@ -556,16 +566,16 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, G, T, CU, A, AD, PI, SI, GI, C, V, B, NF,
+    replicas = Tuple(System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF,
                             typeof(replica_loggers[i]), F, E, K}(
-            atoms, atoms_data, pairwise_inters, specific_inter_lists, general_inters,
-            replica_coords[i], replica_velocities[i], boundary, deepcopy(neighbor_finder),
+            atoms, atoms_data, pairwise_inters, specific_inter_lists,
+            general_inters, constraints, replica_coords[i], replica_velocities[i], boundary, deepcopy(neighbor_finder),
             replica_loggers[i], force_units, energy_units, k_converted) for i in 1:n_replicas)
     RS = typeof(replicas)
 
-    return ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, RS, B, EL, F, E, K}(
+    return ReplicaSystem{D, G, T, CU, A, AD, PI, SI, GI, CN, RS, B, EL, F, E, K}(
             atoms, atoms_data, pairwise_inters, specific_inter_lists,
-            general_inters, n_replicas, replicas, boundary, 
+            general_inters, constraints, n_replicas, replicas, boundary, 
             exchange_logger, force_units, energy_units, k_converted)
 end
 
