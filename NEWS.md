@@ -1,5 +1,25 @@
 # Molly.jl release notes
 
+## v0.13.0 - Aug 2022
+
+### Breaking changes
+- The minimum distance argument to `place_atoms` and `place_diatomics` is now the keyword argument `min_dist` with a default value of no distance. `place_diatomics` now places the molecules facing random directions, with the old behaviour available by setting `aligned=true`. `place_diatomics` now checks for sensible inputs and terminates after a certain number of failed attempts like `place_atoms`.
+- The argument order in `apply_coupling!` is switched from `apply_coupling!(system, simulator, coupling)` to `apply_coupling!(system, coupling, simulator)`.
+- The default mass of an `Atom` is changed from `0.0u"u"` to `1.0u"u"`.
+- The `AbstractNeighborFinder` abstract type is removed.
+- The `centre_coords` keyword argument when constructing a `System` from files is renamed to `center_coords`.
+- Center of mass motion is now removed before loggers are run at step zero of a simulation, matching the behaviour during the simulation steps.
+
+### Non-breaking changes
+- `visualize` shows the boundary as lines by default and has the `show_boundary`, `boundary_linewidth` and `boundary_color` keyword arguments added.
+
+### New features
+- Temperature replica exchange MD (REMD) can now be run in parallel. The `ReplicaSystem` struct is added to act as a container for multiple `System`s. The `TemperatureREMD` simulator and `ReplicaExchangeLogger` are added to set up and run replica exchange simulations.
+- `TriclinicBoundary` is added and can be used to simulate periodic boundary conditions in a triclinic box. A `TriclinicBoundary` can be constructed from either 3 basis vectors or 3 basis vector lengths and angles α/β/γ. The `box_center` function is added.
+
+### Bug fixes
+- Coordinates are now moved back inside the boundary before the first step of the simulation.
+
 ## v0.12.1 - Aug 2022
 
 - Updates are made to support the latest Zygote.jl and UnitfulChainRules.jl versions.

@@ -23,7 +23,7 @@ atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_at
 ```
 See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) docs for more information on the unit annotations.
 Molly re-exports Unitful.jl, [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) and [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) since they are often required to run simulations.
-You can use your own atom types in Molly, provided that the `mass` function is defined and any fields required by the interactions are present.
+You can use your own atom types in Molly, provided that the [`mass`](@ref) function is defined and any fields required by the interactions are present.
 Next, we'll need some starting coordinates and velocities.
 ```julia
 boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm") # Periodic boundary conditions
@@ -306,6 +306,67 @@ However it is not thoroughly tested with respect to ligands or special residues 
 The Gromacs setup procedure should be considered experimental.
 Currently Ewald summation methods, constraint algorithms, pressure coupling and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
 
+## Enhanced sampling
+
+Molly has the [`ReplicaSystem`](@ref) struct and simulators such as [`TemperatureREMD`](@ref) to carry out replica exchange molecular dynamics (REMD).
+On CPU these are run in parallel by dividing up the number of available threads.
+For example to run temperature REMD on a protein with 4 replicas and attempt exchanges every 1.0 ps:
+```julia
+using Statistics
+
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+ff = OpenMMForceField(
+    joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
+    joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
+    joinpath(data_dir, "force_fields", "his.xml"),
+)
+
+sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff)
+
+minimizer = SteepestDescentMinimizer()
+simulate!(sys, minimizer)
+
+n_replicas = 4
+
+rep_sys = ReplicaSystem(
+    atoms=sys.atoms,
+    atoms_data=sys.atoms_data,
+    pairwise_inters=sys.pairwise_inters,
+    specific_inter_lists=sys.specific_inter_lists,
+    general_inters=sys.general_inters,
+    n_replicas=n_replicas,
+    replica_coords=[copy(sys.coords) for _ in 1:n_replicas],
+    boundary=sys.boundary,
+    neighbor_finder=sys.neighbor_finder,
+    replica_loggers=[(temp=TemperatureLogger(10),) for _ in 1:n_replicas],
+)
+
+temps = [240.0u"K", 280.0u"K", 320.0u"K", 360.0u"K"]
+dt = 0.0005u"ps"
+simulators = [Langevin(dt=dt, temperature=temp, friction=1.0u"ps^-1") for temp in temps]
+
+sim = TemperatureREMD(
+    dt=dt,
+    temperatures=temps,
+    simulators=simulators,
+    exchange_time=1.0u"ps",
+)
+
+simulate!(rep_sys, sim, 40_000; assign_velocities=true)
+
+println(rep_sys.exchange_logger.n_attempts)
+# 30
+
+for i in 1:n_replicas
+    final_temps = values(rep_sys.replicas[i].loggers.temp)[(end - 10):end]
+    println(mean(final_temps))
+end
+# 240.1691457033836 K
+# 281.3783250460198 K
+# 320.44985840482974 K
+# 357.710520769689 K
+```
+
 ## Agent-based modelling
 
 Agent-based modelling (ABM) is conceptually similar to molecular dynamics.
@@ -323,8 +384,6 @@ mutable struct Person
     σ::Float64
     ϵ::Float64
 end
-
-Molly.mass(person::Person) = person.mass
 
 # Custom PairwiseInteraction
 struct SIRInteraction <: PairwiseInteraction
@@ -443,9 +502,21 @@ By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energ
 If you need to strip units for downstream analysis, use the `ustrip` function.
 It should be noted that charges are stored as dimensionless, i.e. 1.0 represents an atomic charge of +1.
 
-## Forces
+## Atom types
 
-Forces define how different parts of the system interact. The force on each particle in the system is derived from the potential corresponding to the interaction.
+Molly has a built-in [`Atom`](@ref) type with a few properties commonly used in molecular simulation defined.
+Custom atom types can be used just as well provided that either the [`mass`](@ref) function is defined on the type or the type has a `mass` field (the fallback for the [`mass`](@ref) function).
+The type should also have all fields required by the interactions.
+The list of atoms passed to the [`System`](@ref) constructor should be concretely typed.
+
+Custom atom types should generally be bits types, i.e. `isbitstype(MyAtom)` should be `true`, to work on the GPU.
+Additional non-bits type data for the atoms that is not directly used when calculating the interactions can be passed to the [`System`](@ref) constructor with the `atoms_data` keyword argument.
+For example the built-in [`AtomData`](@ref) type contains fields that are useful when writing trajectories such as the atom name.
+
+## Forces and energies
+
+Interactions define how different parts of the system interact.
+The force on each particle in the system is derived from the potential corresponding to the interaction.
 ```math
 \vec{F}_i = -\sum_j \frac{dV_{ij}(r_{ij})}{dr_{ij}}\frac{\vec{r}_{ij}}{r_{ij}}
 ```
@@ -457,9 +528,11 @@ In Molly there are three types of interactions:
 
 The available pairwise interactions are:
 - [`LennardJones`](@ref)
+- [`LennardJonesSoftCore`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
 - [`Coulomb`](@ref)
+- [`CoulombSoftCore`](@ref)
 - [`CoulombReactionField`](@ref)
 - [`Gravity`](@ref)
 
@@ -569,6 +642,7 @@ For 3 atom interactions use [`InteractionList3Atoms`](@ref) and pass 3 sets of i
 If using the GPU, the inner list of interactions should be moved to the GPU.
 The number in the interaction list and the return type from [`force`](@ref) must match, e.g. [`InteractionList3Atoms`](@ref) must always return [`SpecificForce3Atoms`](@ref) from the corresponding [`force`](@ref) function.
 If some atoms are required in the interaction for force calculation but have no force applied to them by the interaction, give a zero force vector for those atoms.
+Again a [`potential_energy`](@ref) function with the same arguments can be defined.
 
 ### General interactions
 
@@ -669,9 +743,11 @@ The available cutoffs are:
 
 The following interactions can use a cutoff:
 - [`LennardJones`](@ref)
+- [`LennardJonesSoftCore`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
 - [`Coulomb`](@ref)
+- [`CoulombSoftCore`](@ref)
 In addition, [`CoulombReactionField`](@ref) and the implicit solvent models have a `dist_cutoff` argument for a cutoff distance.
 
 ## Boundaries

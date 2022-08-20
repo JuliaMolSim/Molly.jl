@@ -1,4 +1,3 @@
-# See https://udel.edu/~arthij/MD.pdf for information on forces
 # See https://arxiv.org/pdf/1401.1181.pdf for applying forces to atoms
 # See OpenMM documentation and Gromacs manual for other aspects of forces
 

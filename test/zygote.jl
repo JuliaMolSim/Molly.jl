@@ -205,7 +205,9 @@
         )
         for (prefix, gzy, gfd, tol) in zip(("σ", "k"), grad_zygote, grad_fd, (tol_σ, tol_k))
             if abs(gfd) < 1e-13
-                @test isnothing(gzy) || abs(gzy) < 1e-10
+                @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy"
+                ztol = contains(name, "f32") ? 1e-8 : 1e-10
+                @test isnothing(gzy) || abs(gzy) < ztol
             else
                 frac_diff = abs(gzy - gfd) / abs(gfd)
                 @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy, fractional difference $frac_diff"

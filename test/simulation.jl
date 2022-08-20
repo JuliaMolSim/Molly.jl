@@ -61,8 +61,8 @@ end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     n_threads_list = run_parallel_tests ? (1, Threads.nthreads()) : (1,)
 
-    TV=typeof(velocity(10.0u"u", temp))
-    TP=typeof(0.2u"kJ * mol^-1")
+    TV = typeof(velocity(10.0u"u", temp))
+    TP = typeof(0.2u"kJ * mol^-1")
 
     V(sys, args...; kwargs...) = sys.velocities
     pot_obs(sys, neighbors; kwargs...) = potential_energy(sys, neighbors)
@@ -621,7 +621,7 @@ end
 
     repsys = ReplicaSystem(
         atoms=atoms,
-        coords=coords,
+        replica_coords=[copy(coords) for _ in 1:n_replicas],
         replica_velocities=nothing,
         n_replicas=n_replicas,
         boundary=boundary,
@@ -648,7 +648,7 @@ end
     @time simulate!(repsys, simulator, n_steps; assign_velocities=false)
 
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
-    @test efficiency > 0.3 # This is a fairly arbitrary threshold, but it's a good tests for very bad cases
+    @test efficiency > 0.2 # This is a fairly arbitrary threshold, but it's a good tests for very bad cases
 
     for id in eachindex(repsys.replicas)
         mean_temp = mean(values(repsys.replicas[id].loggers.temp))
