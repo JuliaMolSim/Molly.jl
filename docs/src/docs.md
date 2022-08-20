@@ -513,9 +513,10 @@ Custom atom types should generally be bits types, i.e. `isbitstype(MyAtom)` shou
 Additional non-bits type data for the atoms that is not directly used when calculating the interactions can be passed to the [`System`](@ref) constructor with the `atoms_data` keyword argument.
 For example the built-in [`AtomData`](@ref) type contains fields that are useful when writing trajectories such as the atom name.
 
-## Forces
+## Forces and energies
 
-Forces define how different parts of the system interact. The force on each particle in the system is derived from the potential corresponding to the interaction.
+Interactions define how different parts of the system interact.
+The force on each particle in the system is derived from the potential corresponding to the interaction.
 ```math
 \vec{F}_i = -\sum_j \frac{dV_{ij}(r_{ij})}{dr_{ij}}\frac{\vec{r}_{ij}}{r_{ij}}
 ```
@@ -527,9 +528,11 @@ In Molly there are three types of interactions:
 
 The available pairwise interactions are:
 - [`LennardJones`](@ref)
+- [`LennardJonesSoftCore`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
 - [`Coulomb`](@ref)
+- [`CoulombSoftCore`](@ref)
 - [`CoulombReactionField`](@ref)
 - [`Gravity`](@ref)
 
@@ -639,6 +642,7 @@ For 3 atom interactions use [`InteractionList3Atoms`](@ref) and pass 3 sets of i
 If using the GPU, the inner list of interactions should be moved to the GPU.
 The number in the interaction list and the return type from [`force`](@ref) must match, e.g. [`InteractionList3Atoms`](@ref) must always return [`SpecificForce3Atoms`](@ref) from the corresponding [`force`](@ref) function.
 If some atoms are required in the interaction for force calculation but have no force applied to them by the interaction, give a zero force vector for those atoms.
+Again a [`potential_energy`](@ref) function with the same arguments can be defined.
 
 ### General interactions
 
@@ -739,9 +743,11 @@ The available cutoffs are:
 
 The following interactions can use a cutoff:
 - [`LennardJones`](@ref)
+- [`LennardJonesSoftCore`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
 - [`Coulomb`](@ref)
+- [`CoulombSoftCore`](@ref)
 In addition, [`CoulombReactionField`](@ref) and the implicit solvent models have a `dist_cutoff` argument for a cutoff distance.
 
 ## Boundaries

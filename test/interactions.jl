@@ -7,7 +7,7 @@
     dr12 = vector(c1, c2, boundary)
     dr13 = vector(c1, c3, boundary)
 
-    for inter in (LennardJones(), Mie(m=6, n=12))
+    for inter in (LennardJones(), Mie(m=6, n=12), LennardJonesSoftCore(α=1, λ=0, p=2))
         @test isapprox(
             force(inter, dr12, c1, c2, a1, a1, boundary),
             SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
@@ -29,6 +29,28 @@
             atol=1e-9u"kJ * mol^-1",
         )
     end
+
+    inter = LennardJonesSoftCore(α=1, λ=0.5, p=2)
+    @test isapprox(
+        force(inter, dr12, c1, c2, a1, a1, boundary),
+        SVector(6.144, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        force(inter, dr13, c1, c3, a1, a1, boundary),
+        SVector(-1.290499537, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr12, c1, c2, a1, a1, boundary),
+        -0.128u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr13, c1, c3, a1, a1, boundary),
+        -0.1130893709u"kJ * mol^-1",
+        atol=1e-9u"kJ * mol^-1",
+    )
 
     inter = SoftSphere()
     @test isapprox(
@@ -52,25 +74,48 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
-    inter = Coulomb()
+    for inter in (Coulomb(), CoulombSoftCore(α=1, λ=0, p=2))
+        @test isapprox(
+            force(inter, dr12, c1, c2, a1, a1, boundary),
+            SVector(1543.727311, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+            atol=1e-5u"kJ * mol^-1 * nm^-1",
+        )
+        @test isapprox(
+            force(inter, dr13, c1, c3, a1, a1, boundary),
+            SVector(868.3466125, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+            atol=1e-5u"kJ * mol^-1 * nm^-1",
+        )
+        @test isapprox(
+            potential_energy(inter, dr12, c1, c2, a1, a1, boundary),
+            463.1181933u"kJ * mol^-1",
+            atol=1e-5u"kJ * mol^-1",
+        )
+        @test isapprox(
+            potential_energy(inter, dr13, c1, c3, a1, a1, boundary),
+            347.338645u"kJ * mol^-1",
+            atol=1e-5u"kJ * mol^-1",
+        )
+    end
+
+    inter = CoulombSoftCore(α=1, λ=0.5, p=2)
     @test isapprox(
         force(inter, dr12, c1, c2, a1, a1, boundary),
-        SVector(1543.727311, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        SVector(1189.895726, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
         atol=1e-5u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
         force(inter, dr13, c1, c3, a1, a1, boundary),
-        SVector(868.3466125, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        SVector(825.3456507, 0.0, 0.0)u"kJ * mol^-1 * nm^-1",
         atol=1e-5u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
         potential_energy(inter, dr12, c1, c2, a1, a1, boundary),
-        463.1181933u"kJ * mol^-1",
+        446.2108973u"kJ * mol^-1",
         atol=1e-5u"kJ * mol^-1",
     )
     @test isapprox(
         potential_energy(inter, dr13, c1, c3, a1, a1, boundary),
-        347.338645u"kJ * mol^-1",
+        344.8276396u"kJ * mol^-1",
         atol=1e-5u"kJ * mol^-1",
     )
 
@@ -230,8 +275,8 @@
     c2_cosine = SVector(2.0, 0.0, 0.0)u"nm"
     c3_cosine = SVector(3.0, 0.0, 0.0)u"nm"
     c4_cosine = SVector(2.0, 1.0, 0.0)u"nm"
-    a1 = CosineAngle(10.0 * kbT, 0.0)
-    a2 = CosineAngle(10.0 * kbT, π/2)
+    a1 = CosineAngle(k=10.0 * kbT, θ0=0.0)
+    a2 = CosineAngle(k=10.0 * kbT, θ0=π/2)
     fs = force(a1, c1_cosine, c2_cosine, c3_cosine, boundary_cosine)
     @test isapprox(
         fs.f1,

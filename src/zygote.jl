@@ -27,6 +27,15 @@ function Base.:-(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
     Atom{T, T, T, T}(0, x.charge - y.charge, x.mass - y.mass, x.σ - y.σ, x.ϵ - y.ϵ, false)
 end
 
+# For inject_gradients
+function Base.:+(x::NamedTuple{(:atoms, :atoms_data, :pairwise_inters, :specific_inter_lists,
+                    :general_inters, :coords, :velocities, :boundary, :neighbor_finder, :loggers,
+                    :force_units, :energy_units, :k), Tuple{Nothing, Vector{Nothing}, Nothing,
+                    Nothing, Nothing, Nothing, Nothing, SVector{D, T}, Nothing, Nothing,
+                    Nothing, Nothing, Nothing}}, y::Base.RefValue{Any}) where {D, T}
+    y
+end
+
 function Zygote.accum(x::LennardJones{S, C, W, WS, F, E}, y::LennardJones{S, C, W, WS, F, E}) where {S, C, W, WS, F, E}
     LennardJones{S, C, W, WS, F, E}(
         x.cutoff,
@@ -81,8 +90,20 @@ function Zygote.accum(x::Tuple{NTuple{N, Int}, NTuple{N, T}, NTuple{N, E}, Bool}
     ntuple(n -> 0, N), x[2] .+ y[2], x[3] .+ y[3], false
 end
 
-function Zygote.accum(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{D, T, Vector{T}}}}, y::SVector{D, T}) where {D, T}
+function Zygote.accum(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{3, T, Vector{T}}}}, y::SVector{3, T}) where T
     CubicBoundary(x.side_lengths .+ y)
+end
+
+function Zygote.accum(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{2, T, Vector{T}}}}, y::SVector{2, T}) where T
+    RectangularBoundary(x.side_lengths .+ y)
+end
+
+function Base.:+(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{3, T, Vector{T}}}}, y::CubicBoundary{T}) where T
+    CubicBoundary(x.side_lengths .+ y.side_lengths)
+end
+
+function Base.:+(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{2, T, Vector{T}}}}, y::RectangularBoundary{T}) where T
+    RectangularBoundary(x.side_lengths .+ y.side_lengths)
 end
 
 Base.zero(::Type{Atom{T, T, T, T}}) where {T} = Atom(0, zero(T), zero(T), zero(T), zero(T), false)

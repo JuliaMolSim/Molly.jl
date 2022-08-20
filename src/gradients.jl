@@ -94,9 +94,21 @@ function inject_gradients(sys, params_dic, gpu::Bool=isa(sys.coords, CuArray))
     else
         atoms_grad = inject_atom.(sys.atoms, sys.atoms_data, (params_dic,))
     end
-    pis_grad = inject_interaction.(sys.pairwise_inters, (params_dic,))
-    sis_grad = inject_interaction_list.(sys.specific_inter_lists, (params_dic,), gpu)
-    gis_grad = inject_interaction.(sys.general_inters, (params_dic,), (sys,))
+    if length(sys.pairwise_inters) > 0
+        pis_grad = inject_interaction.(sys.pairwise_inters, (params_dic,))
+    else
+        pis_grad = sys.pairwise_inters
+    end
+    if length(sys.specific_inter_lists) > 0
+        sis_grad = inject_interaction_list.(sys.specific_inter_lists, (params_dic,), gpu)
+    else
+        sis_grad = sys.specific_inter_lists
+    end
+    if length(sys.general_inters) > 0
+        gis_grad = inject_interaction.(sys.general_inters, (params_dic,), (sys,))
+    else
+        gis_grad = sys.general_inters
+    end
     return atoms_grad, pis_grad, sis_grad, gis_grad
 end
 

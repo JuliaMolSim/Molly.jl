@@ -14,7 +14,7 @@ struct CosineAngle{K, D} <: SpecificInteraction
     θ0::D
 end
 
-CosineAngle(; k, θ0) = CosineAngle{typeof(k), typeof{θ0}}(k, θ0)
+CosineAngle(; k, θ0) = CosineAngle{typeof(k), typeof(θ0)}(k, θ0)
 
 @inline @inbounds function force(a::CosineAngle, coords_i, coords_j, coords_k, boundary)
     # In 2D we use then eliminate the cross product
