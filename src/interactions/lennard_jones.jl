@@ -174,11 +174,12 @@ where ``r_{ij}^{\text{sc}} = \left(r_{ij}^6 + \alpha \sigma_{ij}^6 \lambda^p \ri
 ``\lambda``, and ``\p`` adjust the functional form of the soft core of the potential. For `alpha=0` or `lambda=0`
 we get the standard Lennard-Jones potential.
 """
-struct LennardJonesSoftCore{S, C, A, L, P, W, WS, F, E} <: PairwiseInteraction
+struct LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E} <: PairwiseInteraction
     cutoff::C
     α::A
     λ::L
     p::P
+    σ6_fac::R
     nl_only::Bool
     lorentz_mixing::Bool
     weight_14::W
@@ -199,9 +200,10 @@ function LennardJonesSoftCore(;
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
                         skip_shortcut=false)
-    return LennardJonesSoftCore{skip_shortcut, typeof(cutoff), typeof(α), typeof(λ), typeof(p),
+    σ6_fac = α*λ^p
+    return LennardJonesSoftCore{skip_shortcut, typeof(cutoff), typeof(α), typeof(λ), typeof(p), typeof(σ6_fac),
                         typeof(weight_14), typeof(weight_solute_solvent), typeof(force_units), typeof(energy_units)}(
-        cutoff, α, λ, p, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
+        cutoff, α, λ, p, σ6_fac, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
         force_units, energy_units)
 end
 
@@ -230,7 +232,7 @@ end
 
     cutoff = inter.cutoff
     σ2 = σ^2
-    params = (σ2, ϵ, inter.α, inter.λ, inter.p)
+    params = (σ2, ϵ, inter.σ6_fac)
 
     if cutoff_points(C) == 0
         f = force_divr_nocutoff(inter, r2, inv(r2), params)
@@ -255,12 +257,16 @@ end
     end
 end
 
-@fastmath function force_divr_nocutoff(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, α, λ, p))
-    inv_rsc6 = inv(r2^3 + α * σ2^3 * λ^p)  # rsc = (r2^3 + α * σ2^3 * λ^p)^(1/6)
+@fastmath function force_divr_nocutoff(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
+    inv_rsc6 = inv(r2^3 + σ2^3 * σ6_fac)  # rsc = (r2^3 + α * σ2^3 * λ^p)^(1/6)
+    inv_rsc  = √cbrt(inv_rsc6)
     six_term = σ2^3 * inv_rsc6
 
+    ff  = (24ϵ * inv_rsc)
+    ff *= (2 * six_term^2 - six_term)
+    ff *= √r2^5 * inv_rsc^5
     # √invr2 is for normalizing dr
-    return (24ϵ * inv_rsc6^(1//6)) * (2 * six_term^2 - six_term) * sqrt(r2^5 * inv_rsc6^(5//3)) * √invr2
+    return   ff * √invr2
 end
 
 @inline @inbounds function potential_energy(inter::LennardJonesSoftCore{S, C},
@@ -286,7 +292,7 @@ end
 
     cutoff = inter.cutoff
     σ2 = σ^2
-    params = (σ2, ϵ, inter.α, inter.λ, inter.p)
+    params = (σ2, ϵ, inter.σ6_fac)
 
     if cutoff_points(C) == 0
         pe = potential(inter, r2, inv(r2), params)
@@ -311,8 +317,8 @@ end
     end
 end
 
-@fastmath function potential(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, α, λ, p))
-    six_term = σ2^3 * inv(r2^3 + α * σ2^3 * λ^p)
+@fastmath function potential(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
+    six_term = σ2^3 * inv(r2^3 + σ2^3 * σ6_fac)
 
     return 4ϵ * (six_term ^ 2 - six_term)
 end
