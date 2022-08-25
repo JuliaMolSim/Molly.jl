@@ -34,7 +34,7 @@ function Mie(;
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 skip_shortcut=false)
-    mn_fac = convert(typeof(m), (n / (n - m)) * (n / m) ^ (m / (n - m)))
+    m, n, mn_fac = promote(m, n, (n / (n - m)) * (n / m) ^ (m / (n - m)))
     return Mie{skip_shortcut, typeof(cutoff), typeof(m), typeof(force_units), typeof(energy_units)}(
         m, n, cutoff, nl_only, lorentz_mixing, force_units, energy_units, mn_fac)
 end
