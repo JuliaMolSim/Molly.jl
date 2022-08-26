@@ -483,9 +483,6 @@ function ReplicaSystem(;
     CU = isa(replica_coords[1], CuArray)
     A = typeof(atoms)
     AD = typeof(atoms_data)
-    PI = typeof(pairwise_inters)
-    SI = typeof(specific_inter_lists)
-    GI = typeof(general_inters)
     C = typeof(replica_coords[1])
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
@@ -526,6 +523,10 @@ function ReplicaSystem(;
         throw(ArgumentError("Number of general interactions ($(length(replica_general_inters)))"
         * "does not match number of replicas ($(n_replicas))"))
     end
+
+    PI = eltype(replica_pairwise_inters)
+    SI = eltype(replica_specific_inter_lists)
+    GI = eltype(replica_general_inters)
     
     if !all(y -> typeof(y) == C, replica_coords)
         throw(ArgumentError("The coordinates for all the replicas are not of the same type"))

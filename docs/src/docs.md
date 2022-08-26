@@ -862,7 +862,7 @@ To define your own replica exchange simulator, first define a `struct`:
 struct MyREMDSimulator
     dt # Time step
     exchange_time # Time between exchanges
-    simulator # The simulator to use for each replica e.g. Langevin
+    simulators # A list of simulators to use for each replica e.g. Langevin
     # Other properties of the simulation
 end
 ```

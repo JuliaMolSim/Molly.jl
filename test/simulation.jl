@@ -217,7 +217,7 @@ end
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
     coords = place_atoms(n_atoms ÷ 2, boundary; min_dist=0.3u"nm")
-    for i in 1:length(coords)
+    for i in eachindex(coords)
         push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
     end
     bonds = InteractionList2Atoms(
@@ -506,11 +506,81 @@ end
 
     efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
     @test efficiency > 0.2 # This is a fairly arbitrary threshold, but it's a good tests for very bad cases
+    @test efficiency < 1.0 # Bad acceptance rate?
+    @info "Exchange Efficiency: $efficiency"
 
     for id in eachindex(repsys.replicas)
         mean_temp = mean(values(repsys.replicas[id].loggers.temp))
         @test (0.9 * temp_vals[id]) < mean_temp < (1.1 * temp_vals[id])
     end
+end
+
+@testset "Hamiltonian REMD" begin
+    n_atoms = 100
+    n_steps = 10_000
+    atom_mass = 10.0u"u"
+    atoms = [Atom(mass=atom_mass, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+
+    temp = 100.0u"K"
+    velocities = [velocity(10.0u"u", temp) for i in 1:n_atoms]
+
+    nb_matrix = trues(n_atoms, n_atoms)
+    for i in 1:(n_atoms ÷ 2)
+        nb_matrix[i, i + (n_atoms ÷ 2)] = false
+        nb_matrix[i + (n_atoms ÷ 2), i] = false
+    end
+    
+    neighbor_finder = DistanceNeighborFinder(
+        nb_matrix=nb_matrix,
+        n_steps=10,
+        dist_cutoff=1.5u"nm",
+    )
+
+    n_replicas = 4
+    λ_vals = [(i-1)*(1/n_replicas) for i in 1:n_replicas]
+    replica_pairwise_inters = [(LennardJonesSoftCore(α=1, λ=λ_vals[i], p=2, nl_only=true),) for i in 1:n_replicas]
+
+    replica_loggers = [(temp=TemperatureLogger(10), ) for i in 1:n_replicas]
+
+    repsys = ReplicaSystem(
+        atoms=atoms,
+        replica_coords=[copy(coords) for _ in 1:n_replicas],
+        replica_velocities=nothing,
+        n_replicas=n_replicas,
+        boundary=boundary,
+        replica_pairwise_inters=replica_pairwise_inters,
+        replica_loggers=replica_loggers,
+        neighbor_finder=neighbor_finder,
+    )
+
+    simulator = HamiltonianREMD(
+        dt=0.005u"ps",
+        temperature=temp,
+        simulators=[
+            Langevin(
+                dt=0.005u"ps",
+                temperature=temp,
+                friction=0.1u"ps^-1",
+            )
+            for _ in 1:n_replicas],
+        exchange_time=2.5u"ps",
+    )
+
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=true )
+    @time simulate!(repsys, simulator, n_steps; assign_velocities=false)
+
+    efficiency = repsys.exchange_logger.n_exchanges / repsys.exchange_logger.n_attempts
+    @test efficiency > 0.2 # This is a fairly arbitrary threshold, but it's a good tests for very bad cases
+    @test efficiency < 1.0 # Bad acceptance rate?
+    @info "Exchange Efficiency: $efficiency"
+    for id in eachindex(repsys.replicas)
+        mean_temp = mean(values(repsys.replicas[id].loggers.temp))
+        @test (0.9 * temp) < mean_temp < (1.1 * temp)
+    end
+
+    # TODO: Possibly more tests?
 end
 
 @testset "Different implementations" begin

@@ -517,12 +517,12 @@ function simulate!(sys::ReplicaSystem{D, G, T},
     simulate_remd!(sys, sim, n_steps, tremd_exchange!; rng=rng, n_threads=n_threads)
         end
 
-function tremd_exchange!(sys::ReplicaSystem{D,G,T},
+function tremd_exchange!(sys::ReplicaSystem{D, G, T},
                         sim::TemperatureREMD,
                         n::Integer,
                         m::Integer;
                         n_threads::Int=Threads.nthreads(),
-                        rng=Random.GLOBAL_RNG) where {D,G,T}
+                        rng=Random.GLOBAL_RNG) where {D, G, T}
     if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         k_b = sys.k * T(Unitful.Na)
     else
@@ -557,6 +557,8 @@ end
 
 A simulator for a parallel Hamiltonian replica exchange MD (H-REMD) simulation on a
 [`ReplicaSystem`](@ref). The corresponding replicas are expected to have the different Hamiltonians (due to different interactions or force fields).
+When calling [`simulate!`](@ref), the `assign_velocities` keyword argument determines
+whether to assign random velocities at the appropriate temperature for each replica.
 Not currently compatible with automatic differentiation using Zygote.
 
 # Arguments
@@ -593,17 +595,29 @@ end
 function simulate!(sys::ReplicaSystem{D, G, T},
                     sim::HamiltonianREMD,
                     n_steps::Integer;
+                    assign_velocities::Bool=false,
                     rng=Random.GLOBAL_RNG,
                     n_threads::Integer=Threads.nthreads()) where {D, G, T}
+    if sys.n_replicas != length(sim.simulators)
+        throw(ArgumentError("Number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
+                "and simulators in HamiltonianREMD ($(length(sim.simulators))) do not match."))
+    end
+
+    if assign_velocities
+        for i in eachindex(sys.replicas)
+            random_velocities!(sys.replicas[i], sim.temperature; rng=rng)
+        end
+    end
+    
     simulate_remd!(sys, sim, n_steps, hremd_exchange!; rng=rng, n_threads=n_threads)
 end
 
-function hremd_exchange!(sys::ReplicaSystem{D,G,T},
+function hremd_exchange!(sys::ReplicaSystem{D, G, T},
                         sim::HamiltonianREMD,
                         n::Integer,
                         m::Integer;
                         n_threads::Int=Threads.nthreads(),
-                        rng=Random.GLOBAL_RNG) where {D,G,T}
+                        rng=Random.GLOBAL_RNG) where {D, G, T}
     if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         k_b = sys.k * T(Unitful.Na)
     else
@@ -620,14 +634,13 @@ function hremd_exchange!(sys::ReplicaSystem{D,G,T},
     V_m_i = potential_energy(sys.replicas[m], neighbors_m)
 
     sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
-    V_n_f = potential_energy(sys.replicas[n], neighbors_m) # use already calculated neighbors
+    V_n_f = potential_energy(sys.replicas[n], neighbors_m) # using already calculated neighbors
     V_m_f = potential_energy(sys.replicas[m], neighbors_n)
 
     Δ = β_sim * (V_n_f - V_n_i + V_m_f - V_m_i)
     should_exchange = Δ <= 0 || rand(rng) < exp(-Δ)
 
-    if should_exchange
-        # exchange velocities
+    if should_exchange # exchange velocities
         sys.replicas[n].velocities, sys.replicas[m].velocities = sys.replicas[m].velocities, sys.replicas[n].velocities
     else # revert coordinate exchange
         sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
@@ -636,12 +649,12 @@ function hremd_exchange!(sys::ReplicaSystem{D,G,T},
     return Δ, should_exchange
 end
 
-function simulate_remd!(sys::ReplicaSystem{D,G,T},
+function simulate_remd!(sys::ReplicaSystem{D, G, T},
                         remd_sim,
                         n_steps::Int,
                         make_exchange!::Function;
                         rng=Random.GLOBAL_RNG,
-                        n_threads::Int=Threads.nthreads()) where {D,G,T}
+                        n_threads::Int=Threads.nthreads()) where {D, G, T}
     if sys.n_replicas != length(remd_sim.simulators)
         throw(ArgumentError("Number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
                 "and simulators in TemperatureREMD ($(length(remd_sim.simulators))) do not match."))
@@ -653,13 +666,12 @@ function simulate_remd!(sys::ReplicaSystem{D,G,T},
         thread_div = equal_parts(sys.n_replicas, sys.n_replicas)
     end
 
-    # calculate n_cycles and n_steps_per_cycle from dt and exchange_time
     n_cycles = convert(Int, (n_steps * remd_sim.dt) ÷ remd_sim.exchange_time)
     cycle_length = n_cycles > 0 ? n_steps ÷ n_cycles : 0
     remaining_steps = n_cycles > 0 ? n_steps % n_cycles : n_steps
     n_attempts = 0
 
-    for cycle = 1:n_cycles
+    for cycle in 1:n_cycles
         @sync for idx in eachindex(remd_sim.simulators)
             Threads.@spawn simulate!(sys.replicas[idx], remd_sim.simulators[idx], cycle_length;
                                      n_threads=thread_div[idx])
