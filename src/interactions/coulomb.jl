@@ -129,11 +129,12 @@ V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha * \sigma_{ij}^
 Here, ``\alpha``, ``\lambda``, and ``\p`` adjust the functional form of the soft core of the potential. For 
 `alpha=0` or `lambda=0` we get the standard Coulomb potential.
 """
-struct CoulombSoftCore{C, A, L, P, W, T, F, E} <: PairwiseInteraction
+struct CoulombSoftCore{C, A, L, P, R, W, T, F, E} <: PairwiseInteraction
     cutoff::C
     α::A
     λ::L
     p::P
+    σ6_fac::R
     nl_only::Bool
     lorentz_mixing::Bool
     weight_14::W
@@ -153,9 +154,10 @@ function CoulombSoftCore(;
                     coulomb_const=coulombconst,
                     force_units=u"kJ * mol^-1 * nm^-1",
                     energy_units=u"kJ * mol^-1")
-    return CoulombSoftCore{typeof(cutoff), typeof(α), typeof(λ), typeof(p), typeof(weight_14),
-                   typeof(coulomb_const), typeof(force_units), typeof(energy_units)}(
-        cutoff, α, λ, p, nl_only, lorentz_mixing, weight_14, coulomb_const, force_units, energy_units)
+    σ6_fac = α*λ^p
+    return CoulombSoftCore{typeof(cutoff), typeof(α), typeof(λ), typeof(p), typeof(σ6_fac),
+                           typeof(weight_14), typeof(coulomb_const), typeof(force_units), typeof(energy_units)}(
+        cutoff, α, λ, p, σ6_fac, nl_only, lorentz_mixing, weight_14, coulomb_const, force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::CoulombSoftCore{C},
@@ -173,7 +175,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
 
-    params = (coulomb_const, qi, qj, σ, inter.α, inter.λ, inter.p)
+    params = (coulomb_const, qi, qj, σ, inter.σ6_fac)
 
     if cutoff_points(C) == 0
         f = force_divr_nocutoff(inter, r2, inv(r2), params)
@@ -198,11 +200,14 @@ end
     end
 end
 
-@fastmath function force_divr_nocutoff(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, α, λ, p))
-    inv_rsc6 = inv(r2^3 + α * λ^p * σ^6)
+@fastmath function force_divr_nocutoff(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ6_fac))
+    inv_rsc6 = inv(r2^3 + σ6_fac * σ^6)
+    inv_rsc2 = cbrt(inv_rsc6)
+    inv_rsc3 = sqrt(inv_rsc6)
 
+    ff = (coulomb_const * qi * qj) * inv_rsc2 * sqrt(r2)^5 * inv_rsc2 * inv_rsc3
     # √invr2 is for normalizing dr
-    (coulomb_const * qi * qj) * inv_rsc6^(1//3) * sqrt(r2^5 * inv_rsc6^(5//3)) * √invr2
+    return ff * √invr2
 end
 
 @inline @inbounds function potential_energy(inter::CoulombSoftCore{C},
@@ -220,7 +225,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
 
-    params = (coulomb_const, qi, qj, σ, inter.α, inter.λ, inter.p)
+    params = (coulomb_const, qi, qj, σ, inter.σ6_fac)
 
     if cutoff_points(C) == 0
         pe = potential(inter, r2, inv(r2), params)
@@ -245,7 +250,7 @@ end
     end
 end
 
-@fastmath function potential(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, α, λ, p))
-    inv_rsc6 = inv(r2^3 + α * λ^p * σ^6)
-    (coulomb_const * qi * qj) * inv_rsc6 ^ (1//6)
+@fastmath function potential(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ6_fac))
+    inv_rsc6 = inv(r2^3 + σ6_fac * σ^6)
+    return (coulomb_const * qi * qj) * √cbrt(inv_rsc6)
 end
