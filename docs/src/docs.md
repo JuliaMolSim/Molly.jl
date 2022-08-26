@@ -810,6 +810,7 @@ The available simulators are:
 - [`Langevin`](@ref)
 - [`LangevinSplitting`](@ref)
 - [`TemperatureREMD`](@ref)
+- [`HamiltonianREMD`](@ref)
 
 The [`LangevinSplitting`](@ref) simulator can be used to define a variety of integrators such as velocity Verlet (splitting `"BAB"`), the Langevin implementation in [`Langevin`](@ref) (`"BAOA"`), and symplectic Euler integrators (`"AB"` and `"BA"`).
 
@@ -855,6 +856,55 @@ function Molly.simulate!(sys,
 end
 ```
 To use your custom simulator, give it as the second argument when calling [`simulate!`](@ref).
+
+To define your own replica exchange simulator, first define a `struct`:
+```julia
+struct MyREMDSimulator
+    dt # Time step
+    exchange_time # Time between exchanges
+    simulators # A list of simulators to use for each replica e.g. Langevin
+    # Other properties of the simulation
+end
+```
+Then, define the functions required for the simulation. This consists of first defining the function that carries out the exchange:
+```julia
+function my_exchange_fun!(sys::ReplicaSystem{D,G,T},
+                        sim::MyREMDSimulator,
+                        n::Integer,
+                        m::Integer;
+                        n_threads::Int=Threads.nthreads(),
+                        rng=Random.GLOBAL_RNG) where {D,G,T}
+    # Attempt to exchange the replicas with index n and m
+
+    # First define Δ for the REMD scheme
+    make_exchange = Δ <= 0 || rand(rng) < exp(-Δ)  # metroplis acceptance rate
+    if make_exchange
+        # exchange coordinates and velocities of replicas
+        # also scale the velocities to match the temperature if required
+    end
+
+    return Δ, make_exchange
+end
+```
+
+The above function returns `Δ` which is the argument of the acceptance rate that is logged by `ReplicaExchangeLogger`(@ref)
+and `make_exchange` which is a boolean indicating whether the exchange was successful.
+
+Then, define a method for the `simulate!` function to perform the parallel simulation, it uses `Molly.simulate_remd!` for this
+to which we pass our exchange function defined above:
+
+```julia
+function simulate!(sys::ReplicaSystem{D, G, T},
+                    sim::MyREMDSimulator,
+                    n_steps::Integer;
+                    rng=Random.GLOBAL_RNG,
+                    n_threads::Integer=Threads.nthreads()) where {D, G, T}
+
+    # Do any initial setup if necessary
+    
+    Molly.simulate_remd!(sys, sim, n_steps, my_exchange_fun!; rng=rng, n_threads=n_threads)
+end
+```
 
 Under the hood there are two implementations for the [`forces`](@ref) function used by [`accelerations`](@ref) and for [`potential_energy`](@ref): an in-place version geared towards CPUs and parallelism, and an out-of-place version geared towards GPUs and differentiable simulation.
 You can define different versions of a simulator for in-place and out-of-place systems by dispatching on `System{D, false}` or `System{D, true}` respectively.
