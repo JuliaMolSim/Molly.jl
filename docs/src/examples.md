@@ -404,3 +404,54 @@ axislegend(position=:rb)
 save("mie.png", f)
 ```
 ![Mie](images/mie.png)
+
+## Variations of soft-core Lennard-Jones Potential
+
+The softcore Lennard-Jones potential is parameterized by three parameters ``\alpha``, ``\lambda`` and ``p``. These
+parameters shift the value of ``r_{ij}`` to ``\left(r_{ij}^6 + \sigma_{ij} \alpha \lambda^{p} \right)^{\frac{1}{6}}``. This
+gives a soft core i.e. the potential does not diverges for ``r_{ij} \rightarrow 0``.
+```julia
+using Molly
+using GLMakie
+
+boundary = CubicBoundary(5.0, 5.0, 5.0)
+a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
+dists = collect(0.05:0.005:0.8)
+
+function energies(α, λ, p)
+    inter = LennardJonesSoftCore(α=α, λ=λ, p=p)
+    return map(dists) do dist
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
+    end
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel="Distance / nm",
+    ylabel="Potential energy / kJ * mol^-1",
+    title="Variations of the Soft-core Lennard-Jones potential",
+)
+for λ in [0.8, 0.9]
+    for α in [0.2, 0.4]
+        for p in [2]
+            lines!(
+                ax,
+                dists,
+                energies(α, λ, p),
+                label="α=$α, λ=$λ, p=$p",
+            )
+        end
+    end
+end
+
+axislegend(position=:rt)
+save("lennard_jones_sc.png", f)
+```
+![Lennard-Jones Softcore](images/lennard_jones_sc.png)
+
+The form of the potential will be approximately same as standard Lennard-Jones for ``r_{ij} > \sigma_{ij}`` (if some fractional
+values are used for ``\lambda`` and ``\alpha``).

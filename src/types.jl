@@ -408,6 +408,10 @@ the interaction arguments `replica_pairwise_inters`, `replica_specific_inter_lis
 This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
 interface described there.
 
+When using `ReplicaSystem` with [`CellListMapNeighborFinder`](@ref), The number of threads used for both the simulation
+of replicas and the neighbor finder should be set up to be same. This can be done by passing `nbatches=(min(n, 8), n)` to
+`CellListMapNeighborFinder` during construction where `n` is the number of threads to be used per replica.
+
 # Arguments
 - `atoms::A`: the atoms, or atom equivalents, in the system. Can be
     of any type but should be a bits type if the GPU is used.

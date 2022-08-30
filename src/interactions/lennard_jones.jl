@@ -161,7 +161,7 @@ end
 The Lennard-Jones 6-12 interaction between two atoms with a soft core.
 The potential energy is defined as
 ```math
-V(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}^{\text{sc}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}^{\text{sc}}}\right)^{6}\right]
+V(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}^{\text{sc}}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}^{\text{sc}}}\right)^{6}\right]
 ```
 and the force on each atom by
 ```math
@@ -171,7 +171,7 @@ and the force on each atom by
 ```
 
 where ``r_{ij}^{\text{sc}} = \left(r_{ij}^6 + \alpha \sigma_{ij}^6 \lambda^p \right)^{1/6}``. Here, ``\alpha``,
-``\lambda``, and ``\p`` adjust the functional form of the soft core of the potential. For `alpha=0` or `lambda=0`
+``\lambda``, and ``p`` adjust the functional form of the soft core of the potential. For `alpha=0` or `lambda=0`
 we get the standard Lennard-Jones potential.
 """
 struct LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E} <: PairwiseInteraction
