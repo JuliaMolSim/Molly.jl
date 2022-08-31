@@ -448,6 +448,10 @@ for λ in [0.8, 0.9]
     end
 end
 
+# Standard Lennard-Jones
+lines!(ax, dists, energies(0, 1, 2), label="standard LJ potential")
+
+ylims!(-5, 25)
 axislegend(position=:rt)
 save("lennard_jones_sc.png", f)
 ```
