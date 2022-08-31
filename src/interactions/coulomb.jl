@@ -123,11 +123,11 @@ end
 The Coulomb electrostatic interaction between two atoms with a soft core.
 The potential energy is defined as
 ```math
-V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha * \sigma_{ij}^6 * \lambda^p)^{\frac{1}{6}}}
+V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha  \sigma_{ij}^6  \lambda^p)^{\frac{1}{6}}}
 ```
 
-Here, ``\alpha``, ``\lambda``, and ``\p`` adjust the functional form of the soft core of the potential. For 
-`alpha=0` or `lambda=0` we get the standard Coulomb potential.
+Here, ``\alpha``, ``\lambda``, and ``p`` adjust the functional form of the soft core of the potential. For `α=0` or 
+`λ=0` we get the standard Coulomb potential.
 """
 struct CoulombSoftCore{C, A, L, P, R, W, T, F, E} <: PairwiseInteraction
     cutoff::C

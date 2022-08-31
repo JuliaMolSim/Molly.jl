@@ -887,7 +887,18 @@ function my_exchange_fun!(sys::ReplicaSystem{D,G,T},
 end
 ```
 
-The above function returns `Δ` which is the argument of the acceptance rate that is logged by `ReplicaExchangeLogger`(@ref)
+!!! tip "Correct Boltzman constant"
+    To get the correct exchange rates, the units of the boltzmann constant must be corrected when used in the exchange 
+    function:
+    ```julia
+    if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        k_b = sys.k * T(Unitful.Na)
+    else
+        k_b = sys.k
+    end
+    ```
+
+The above function returns `Δ` which is the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref)
 and `make_exchange` which is a boolean indicating whether the exchange was successful.
 
 Then, define a method for the `simulate!` function to perform the parallel simulation, it uses `Molly.simulate_remd!` for this
