@@ -30,12 +30,9 @@
 
     # Function is strange in order to work with gradients on the GPU
     function mean_min_separation(coords, boundary)
-        n_atoms = length(coords)
-        coords_rep = repeat(reshape(coords, n_atoms, 1), 1, n_atoms)
-        vec2arg(c1, c2) = vector(c1, c2, boundary)
-        diffs = vec2arg.(coords_rep, permutedims(coords_rep, (2, 1)))
+        diffs = displacements(coords, boundary)
         disps = Array(sum.(abs2_vec.(diffs)))
-        disps_diag = disps .+ Diagonal(100 * ones(typeof(boundary[1]), n_atoms))
+        disps_diag = disps .+ Diagonal(100 * ones(typeof(boundary[1]), length(coords)))
         return mean(sqrt.(minimum(disps_diag; dims=1)))
     end
 

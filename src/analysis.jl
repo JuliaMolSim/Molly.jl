@@ -62,7 +62,9 @@ for the periodic boundary conditions.
 function displacements(coords, boundary)
     n_atoms = length(coords)
     coords_rep = repeat(reshape(coords, n_atoms, 1), 1, n_atoms)
-    diffs = vector.(coords_rep, permutedims(coords_rep, (2, 1)), (boundary,))
+    # Makes gradient work with Zygote broadcasting additions
+    vec_2_arg(c1, c2) = vector(c1, c2, boundary)
+    diffs = vec_2_arg.(coords_rep, permutedims(coords_rep, (2, 1)))
     return diffs
 end
 
