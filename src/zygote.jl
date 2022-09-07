@@ -29,10 +29,11 @@ end
 
 # For inject_gradients
 function Base.:+(x::NamedTuple{(:atoms, :atoms_data, :pairwise_inters, :specific_inter_lists,
-                    :general_inters, :coords, :velocities, :boundary, :neighbor_finder, :loggers,
-                    :force_units, :energy_units, :k), Tuple{Nothing, Vector{Nothing}, Nothing,
-                    Nothing, Nothing, Nothing, Nothing, SVector{D, T}, Nothing, Nothing,
-                    Nothing, Nothing, Nothing}}, y::Base.RefValue{Any}) where {D, T}
+                    :general_inters, :constraints, :coords, :velocities, :boundary,
+                    :neighbor_finder, :loggers, :force_units, :energy_units, :k),
+                    Tuple{Nothing, Vector{Nothing}, Nothing, Nothing, Nothing, Nothing, Nothing,
+                    Nothing, SVector{D, T}, Nothing, Nothing, Nothing, Nothing, Nothing}},
+                    y::Base.RefValue{Any}) where {D, T}
     y
 end
 
