@@ -33,6 +33,7 @@ using Statistics
 include("types.jl")
 include("cutoffs.jl")
 include("spatial.jl")
+include("cuda.jl")
 include("force.jl")
 include("interactions/lennard_jones.jl")
 include("interactions/soft_sphere.jl")
