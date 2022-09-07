@@ -42,7 +42,8 @@ function find_neighbors(s::System{D, true},
                         kwargs...) where D
     step_n > 0 && return current_neighbors
     all_pairs = all_neighbors(length(s))
-    return NeighborListVec(NeighborsVec(), all_pairs)
+    return NeighborListVec{Vector{Int}, typeof(all_pairs.nbsi), Nothing,
+                           typeof(all_pairs.weights_14)}(NeighborsVec(), all_pairs)
 end
 
 """
@@ -167,8 +168,11 @@ function find_neighbors(s::System,
         atom_bounds_i = find_boundaries(nbsi_ordi, n_atoms)
         atom_bounds_j = find_boundaries(view(nbsj_ordi, sortperm_j), n_atoms)
 
-        close_pairs = NeighborsVec{typeof(weights_14_ordi)}(nbsi_ordi, nbsj_ordi,
-                        atom_bounds_i, atom_bounds_j, sortperm_j, weights_14_ordi)
+        nbsi_ordi_dev = move_array(nbsi_ordi, s)
+        nbsj_ordi_dev = move_array(nbsj_ordi, s)
+        close_pairs = NeighborsVec{typeof(nbsi_ordi_dev), typeof(weights_14_ordi)}(
+                        nbsi_ordi_dev, nbsj_ordi_dev, atom_bounds_i, atom_bounds_j,
+                        sortperm_j, weights_14_ordi)
     else
         close_pairs = NeighborsVec()
     end
@@ -179,7 +183,9 @@ function find_neighbors(s::System,
         all_pairs = NeighborsVec()
     end
 
-    return NeighborListVec(close_pairs, all_pairs)
+    return NeighborListVec{typeof(close_pairs.nbsi), typeof(all_pairs.nbsi),
+                           typeof(close_pairs.weights_14), typeof(all_pairs.weights_14)}(
+                                close_pairs, all_pairs)
 end
 
 function all_neighbors(n_atoms)
