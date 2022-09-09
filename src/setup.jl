@@ -782,23 +782,14 @@ function System(coord_file::AbstractString,
     coords = wrap_coords.(coords, (boundary_used,))
 
     atoms = [atoms...]
-    if gpu_diff_safe
-        neighbor_finder = DistanceVecNeighborFinder(
-            nb_matrix=gpu ? CuArray(nb_matrix) : nb_matrix,
-            matrix_14=gpu ? CuArray(matrix_14) : matrix_14,
-            n_steps=10,
-            dist_cutoff=T(dist_neighbors),
-        )
-    else
-        neighbor_finder = CellListMapNeighborFinder(
-            nb_matrix=nb_matrix,
-            matrix_14=matrix_14,
-            n_steps=10,
-            x0=coords,
-            unit_cell=boundary_used,
-            dist_cutoff=T(dist_neighbors),
-        )
-    end
+    neighbor_finder = CellListMapNeighborFinder(
+        nb_matrix=nb_matrix,
+        matrix_14=matrix_14,
+        n_steps=10,
+        x0=coords,
+        unit_cell=boundary_used,
+        dist_cutoff=T(dist_neighbors),
+    )
     if gpu
         atoms = CuArray(atoms)
         coords = CuArray(coords)
@@ -1150,23 +1141,14 @@ function System(T::Type,
 
     atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ, solute=a.solute) for a in atoms]
 
-    if gpu_diff_safe
-        neighbor_finder = DistanceVecNeighborFinder(
-            nb_matrix=gpu ? CuArray(nb_matrix) : nb_matrix,
-            matrix_14=gpu ? CuArray(matrix_14) : matrix_14,
-            n_steps=10,
-            dist_cutoff=T(dist_neighbors),
-        )
-    else
-        neighbor_finder = CellListMapNeighborFinder(
-            nb_matrix=nb_matrix,
-            matrix_14=matrix_14,
-            n_steps=10,
-            x0=coords,
-            unit_cell=boundary_used,
-            dist_cutoff=T(dist_neighbors),
-        )
-    end
+    neighbor_finder = CellListMapNeighborFinder(
+        nb_matrix=nb_matrix,
+        matrix_14=matrix_14,
+        n_steps=10,
+        x0=coords,
+        unit_cell=boundary_used,
+        dist_cutoff=T(dist_neighbors),
+    )
     if gpu
         atoms = CuArray(atoms)
         coords = CuArray(coords)

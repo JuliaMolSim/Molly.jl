@@ -1,12 +1,10 @@
 # CUDA.jl kernels
 
 function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, atoms_var, boundary,
-                                inters, neighbors_i_var, neighbors_j_var, ::Val{F},
-                                ::Val{M}) where {T, F, M}
+                                inters, neighbors_var, ::Val{F}, ::Val{M}) where {T, F, M}
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
-    neighbors_i = CUDA.Const(neighbors_i_var)
-    neighbors_j = CUDA.Const(neighbors_j_var)
+    neighbors = CUDA.Const(neighbors_var)
 
     tidx = threadIdx().x
     inter_ig = (blockIdx().x - 1) * blockDim().x + tidx
@@ -23,14 +21,14 @@ function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, a
     end
     sync_threads()
 
-    for (thread_i, inter_i) in enumerate(inter_ig:stride:length(neighbors_i))
+    for (thread_i, inter_i) in enumerate(inter_ig:stride:length(neighbors))
         si = (thread_i - 1) * blockDim().x + tidx
-        i, j = neighbors_i[inter_i], neighbors_j[inter_i]
+        i, j, weight_14 = neighbors[inter_i]
         coord_i, coord_j = coords[i], coords[j]
         dr = vector(coord_i, coord_j, boundary)
-        f = force(inters[1], dr, coord_i, coord_j, atoms[i], atoms[j], boundary)
+        f = force(inters[1], dr, coord_i, coord_j, atoms[i], atoms[j], boundary, weight_14)
         for inter in inters[2:end]
-            f += force(inter, dr, coord_i, coord_j, atoms[i], atoms[j], boundary)
+            f += force(inter, dr, coord_i, coord_j, atoms[i], atoms[j], boundary, weight_14)
         end
         if unit(f[1]) != F
             # This triggers an error but it isn't printed

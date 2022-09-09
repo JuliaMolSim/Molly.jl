@@ -180,17 +180,17 @@ function AtomData(;
 end
 
 """
-    NeighborList()
     NeighborList(n, list)
+    NeighborList()
 
-Structure to contain pre-allocated neighbor lists.
+Structure to contain neighbor lists.
 """
-mutable struct NeighborList
+mutable struct NeighborList{T}
     n::Int # Number of neighbors in list (n <= length(list))
-    list::Vector{Tuple{Int, Int, Bool}}
+    list::T
 end
 
-NeighborList() = NeighborList(0, [])
+NeighborList() = NeighborList{Vector{Tuple{Int, Int, Bool}}}(0, [])
 
 function Base.empty!(nl::NeighborList)
     nl.n = 0

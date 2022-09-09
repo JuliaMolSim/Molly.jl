@@ -88,7 +88,7 @@ function find_neighbors(s::System,
         end
     end
 
-    return NeighborList(length(neighbors_list), neighbors_list)
+    return NeighborList(length(neighbors_list), move_array(neighbors_list, s))
 end
 
 """
@@ -249,7 +249,7 @@ function find_neighbors(s::System,
         end
     end
 
-    return NeighborList(length(neighbors_list), neighbors_list)
+    return NeighborList(length(neighbors_list), move_array(neighbors_list, s))
 end
 
 """
@@ -359,15 +359,17 @@ function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{Neighb
     return neighbors
 end
 
-function find_neighbors(s::System,
+function find_neighbors(s::System{D, G, T, CU},
                         nf::CellListMapNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        n_threads=Threads.nthreads())
+                        n_threads=Threads.nthreads()) where {D, G, T, CU}
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
     if isnothing(current_neighbors)
         neighbors = NeighborList()
+    elseif CU
+        neighbors = NeighborList(current_neighbors.n, Array(current_neighbors.list))
     else
         neighbors = current_neighbors
     end
@@ -385,7 +387,7 @@ function find_neighbors(s::System,
 
     box = CellListMap.Box(clm_box_arg(s.boundary), nf.dist_cutoff; lcell=1)
     parallel = n_threads > 1
-    cl = UpdateCellList!(s.coords, box, cl, aux; parallel=parallel)
+    cl = UpdateCellList!(Array(s.coords), box, cl, aux; parallel=parallel)
 
     map_pairwise!(
         (x, y, i, j, d2, pairs) -> push_pair!(pairs, i, j, nf.nb_matrix, nf.matrix_14),
@@ -396,7 +398,11 @@ function find_neighbors(s::System,
     )
 
     nf.cl = cl
-    return neighbors
+    if CU
+        return NeighborList(neighbors.n, CuArray(neighbors.list))
+    else
+        return neighbors
+    end
 end
 
 function Base.show(io::IO, neighbor_finder::Union{DistanceNeighborFinder, DistanceVecNeighborFinder,
