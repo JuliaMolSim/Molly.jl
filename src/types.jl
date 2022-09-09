@@ -12,7 +12,6 @@ export
     mass,
     AtomData,
     NeighborList,
-    NeighborListVec,
     System,
     ReplicaSystem,
     is_gpu_diff_safe,
@@ -215,29 +214,6 @@ function Base.append!(nl::NeighborList, list::Base.AbstractVecOrTuple{Tuple{Int,
 end
 
 Base.append!(nl::NeighborList, nl_app::NeighborList) = append!(nl, @view(nl_app.list[1:nl_app.n]))
-
-struct NeighborsVec{I, W}
-    nbsi::I # Sorted ascending
-    nbsj::I
-    atom_bounds_i::Vector{Int}
-    atom_bounds_j::Vector{Int}
-    sortperm_j::Vector{Int}
-    weights_14::W
-end
-
-NeighborsVec() = NeighborsVec{Vector{Int}, Nothing}([], [], [], [], [], nothing)
-
-"""
-    NeighborListVec(close, all)
-
-Structure to contain neighbor lists for broadcasting.
-Each component may be present or absent depending on the interactions in
-the system.
-"""
-struct NeighborListVec{CI, AI, CW, AW}
-    close::NeighborsVec{CI, CW}
-    all::NeighborsVec{AI, AW}
-end
 
 # Convert the Boltzmann constant k to suitable units and float type
 function convert_k_units(T, k, energy_units)
