@@ -77,3 +77,149 @@ function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, a
     end
     return
 end
+
+function specific_force_kernel!(fs_mat, inter_list::InteractionList1Atoms, coords, boundary,
+                                val_force_units)
+    @cuda threads=256 blocks=64 specific_force_1_atoms_kernel!(fs_mat, coords,
+            boundary, inter_list.is, inter_list.inters, val_force_units)
+end
+
+function specific_force_kernel!(fs_mat, inter_list::InteractionList2Atoms, coords, boundary,
+                                val_force_units)
+    @cuda threads=256 blocks=64 specific_force_2_atoms_kernel!(fs_mat, coords,
+            boundary, inter_list.is, inter_list.js, inter_list.inters, val_force_units)
+end
+
+function specific_force_kernel!(fs_mat, inter_list::InteractionList3Atoms, coords, boundary,
+                                val_force_units)
+    @cuda threads=256 blocks=64 specific_force_3_atoms_kernel!(fs_mat, coords,
+            boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters,
+            val_force_units)
+end
+
+function specific_force_kernel!(fs_mat, inter_list::InteractionList4Atoms, coords, boundary,
+                                val_force_units)
+    @cuda threads=256 blocks=64 specific_force_4_atoms_kernel!(fs_mat, coords,
+            boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
+            inter_list.inters, val_force_units)
+end
+
+function specific_force_1_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
+                                        inters_var, ::Val{F}) where {T, F}
+    coords = CUDA.Const(coords_var)
+    is = CUDA.Const(is_var)
+    inters = CUDA.Const(inters_var)
+
+    tidx = threadIdx().x
+    inter_ig = (blockIdx().x - 1) * blockDim().x + tidx
+    stride = gridDim().x * blockDim().x
+
+    for (thread_i, inter_i) in enumerate(inter_ig:stride:length(is))
+        si = (thread_i - 1) * blockDim().x + tidx
+        i = is[inter_i]
+        fs = force(inters[inter_i], coords[i], boundary)
+        if unit(fs.f1[1]) != F
+            error("Wrong force unit returned, was expecting $F")
+        end
+        CUDA.atomic_add!(pointer(forces, 3i - 2), ustrip(fs.f1[1]))
+        CUDA.atomic_add!(pointer(forces, 3i - 1), ustrip(fs.f1[2]))
+        CUDA.atomic_add!(pointer(forces, 3i    ), ustrip(fs.f1[3]))
+    end
+    return
+end
+
+function specific_force_2_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
+                                        js_var, inters_var, ::Val{F}) where {T, F}
+    coords = CUDA.Const(coords_var)
+    is = CUDA.Const(is_var)
+    js = CUDA.Const(js_var)
+    inters = CUDA.Const(inters_var)
+
+    tidx = threadIdx().x
+    inter_ig = (blockIdx().x - 1) * blockDim().x + tidx
+    stride = gridDim().x * blockDim().x
+
+    for (thread_i, inter_i) in enumerate(inter_ig:stride:length(is))
+        si = (thread_i - 1) * blockDim().x + tidx
+        i, j = is[inter_i], js[inter_i]
+        fs = force(inters[inter_i], coords[i], coords[j], boundary)
+        if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
+            error("Wrong force unit returned, was expecting $F")
+        end
+        CUDA.atomic_add!(pointer(forces, 3i - 2), ustrip(fs.f1[1]))
+        CUDA.atomic_add!(pointer(forces, 3i - 1), ustrip(fs.f1[2]))
+        CUDA.atomic_add!(pointer(forces, 3i    ), ustrip(fs.f1[3]))
+        CUDA.atomic_add!(pointer(forces, 3j - 2), ustrip(fs.f2[1]))
+        CUDA.atomic_add!(pointer(forces, 3j - 1), ustrip(fs.f2[2]))
+        CUDA.atomic_add!(pointer(forces, 3j    ), ustrip(fs.f2[3]))
+    end
+    return
+end
+
+function specific_force_3_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
+                                        js_var, ks_var, inters_var, ::Val{F}) where {T, F}
+    coords = CUDA.Const(coords_var)
+    is = CUDA.Const(is_var)
+    js = CUDA.Const(js_var)
+    ks = CUDA.Const(ks_var)
+    inters = CUDA.Const(inters_var)
+
+    tidx = threadIdx().x
+    inter_ig = (blockIdx().x - 1) * blockDim().x + tidx
+    stride = gridDim().x * blockDim().x
+
+    for (thread_i, inter_i) in enumerate(inter_ig:stride:length(is))
+        si = (thread_i - 1) * blockDim().x + tidx
+        i, j, k = is[inter_i], js[inter_i], ks[inter_i]
+        fs = force(inters[inter_i], coords[i], coords[j], coords[k], boundary)
+        if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
+            error("Wrong force unit returned, was expecting $F")
+        end
+        CUDA.atomic_add!(pointer(forces, 3i - 2), ustrip(fs.f1[1]))
+        CUDA.atomic_add!(pointer(forces, 3i - 1), ustrip(fs.f1[2]))
+        CUDA.atomic_add!(pointer(forces, 3i    ), ustrip(fs.f1[3]))
+        CUDA.atomic_add!(pointer(forces, 3j - 2), ustrip(fs.f2[1]))
+        CUDA.atomic_add!(pointer(forces, 3j - 1), ustrip(fs.f2[2]))
+        CUDA.atomic_add!(pointer(forces, 3j    ), ustrip(fs.f2[3]))
+        CUDA.atomic_add!(pointer(forces, 3k - 2), ustrip(fs.f3[1]))
+        CUDA.atomic_add!(pointer(forces, 3k - 1), ustrip(fs.f3[2]))
+        CUDA.atomic_add!(pointer(forces, 3k    ), ustrip(fs.f3[3]))
+    end
+    return
+end
+
+function specific_force_4_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
+                                        js_var, ks_var, ls_var, inters_var, ::Val{F}) where {T, F}
+    coords = CUDA.Const(coords_var)
+    is = CUDA.Const(is_var)
+    js = CUDA.Const(js_var)
+    ks = CUDA.Const(ks_var)
+    ls = CUDA.Const(ls_var)
+    inters = CUDA.Const(inters_var)
+
+    tidx = threadIdx().x
+    inter_ig = (blockIdx().x - 1) * blockDim().x + tidx
+    stride = gridDim().x * blockDim().x
+
+    for (thread_i, inter_i) in enumerate(inter_ig:stride:length(is))
+        si = (thread_i - 1) * blockDim().x + tidx
+        i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
+        fs = force(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary)
+        if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
+            error("Wrong force unit returned, was expecting $F")
+        end
+        CUDA.atomic_add!(pointer(forces, 3i - 2), ustrip(fs.f1[1]))
+        CUDA.atomic_add!(pointer(forces, 3i - 1), ustrip(fs.f1[2]))
+        CUDA.atomic_add!(pointer(forces, 3i    ), ustrip(fs.f1[3]))
+        CUDA.atomic_add!(pointer(forces, 3j - 2), ustrip(fs.f2[1]))
+        CUDA.atomic_add!(pointer(forces, 3j - 1), ustrip(fs.f2[2]))
+        CUDA.atomic_add!(pointer(forces, 3j    ), ustrip(fs.f2[3]))
+        CUDA.atomic_add!(pointer(forces, 3k - 2), ustrip(fs.f3[1]))
+        CUDA.atomic_add!(pointer(forces, 3k - 1), ustrip(fs.f3[2]))
+        CUDA.atomic_add!(pointer(forces, 3k    ), ustrip(fs.f3[3]))
+        CUDA.atomic_add!(pointer(forces, 3l - 2), ustrip(fs.f3[1]))
+        CUDA.atomic_add!(pointer(forces, 3l - 1), ustrip(fs.f3[2]))
+        CUDA.atomic_add!(pointer(forces, 3l    ), ustrip(fs.f3[3]))
+    end
+    return
+end

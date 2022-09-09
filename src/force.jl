@@ -305,6 +305,8 @@ end
 
 function forces(s::System{D, true, T}, neighbors=nothing; n_threads::Integer=Threads.nthreads()) where {D, T}
     fs = ustrip_vec.(zero(s.coords))
+    fs_mat = CuArray(zeros(T, 3, length(s)))
+    virial = CuArray(zeros(T, 1))
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
@@ -314,18 +316,13 @@ function forces(s::System{D, true, T}, neighbors=nothing; n_threads::Integer=Thr
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nl) > 0 && length(neighbors.close.nbsi) > 0
-        fs_mat = CuArray(zeros(T, 3, length(s)))
-        virial = CuArray(zeros(T, 1))
-        CUDA.@sync @cuda threads=256 blocks=1600 pairwise_force_kernel!(
+        @cuda threads=256 blocks=1600 pairwise_force_kernel!(
                     fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
                     neighbors.close.nbsi, neighbors.close.nbsj, Val(s.force_units), Val(2000))
-        fs += CuArray(SVector{3, T}.(eachcol(Array(fs_mat))))
     end
 
     for inter_list in values(s.specific_inter_lists)
-        sparse_vec = specific_force(inter_list, s.coords, s.boundary, s.force_units, length(s))
-        # Move back to GPU if required
-        fs += convert(typeof(fs), ustrip_vec.(Array(sparse_vec)))
+        specific_force_kernel!(fs_mat, inter_list, s.coords, s.boundary, Val(s.force_units))
     end
 
     for inter in values(s.general_inters)
@@ -333,5 +330,6 @@ function forces(s::System{D, true, T}, neighbors=nothing; n_threads::Integer=Thr
         fs += ustrip_vec.(forces(inter, s, neighbors))
     end
 
+    fs += CuArray(SVector{3, T}.(eachcol(Array(fs_mat))))
     return fs * s.force_units
 end
