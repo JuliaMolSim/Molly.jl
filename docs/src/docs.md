@@ -639,7 +639,7 @@ specific_inter_lists = (
 )
 ```
 For 3 atom interactions use [`InteractionList3Atoms`](@ref) and pass 3 sets of indices.
-If using the GPU, the inner list of interactions should be moved to the GPU.
+If using the GPU, the inner list of indices and interactions should be moved to the GPU.
 The number in the interaction list and the return type from [`force`](@ref) must match, e.g. [`InteractionList3Atoms`](@ref) must always return [`SpecificForce3Atoms`](@ref) from the corresponding [`force`](@ref) function.
 If some atoms are required in the interaction for force calculation but have no force applied to them by the interaction, give a zero force vector for those atoms.
 Again a [`potential_energy`](@ref) function with the same arguments can be defined.

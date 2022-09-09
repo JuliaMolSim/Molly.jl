@@ -40,8 +40,8 @@ abstract type SpecificInteraction end
 
 A list of specific interactions that involve one atom such as position restraints.
 """
-struct InteractionList1Atoms{T}
-    is::Vector{Int}
+struct InteractionList1Atoms{I, T}
+    is::I
     types::Vector{String}
     inters::T
 end
@@ -52,9 +52,9 @@ end
 
 A list of specific interactions that involve two atoms such as bond potentials.
 """
-struct InteractionList2Atoms{T}
-    is::Vector{Int}
-    js::Vector{Int}
+struct InteractionList2Atoms{I, T}
+    is::I
+    js::I
     types::Vector{String}
     inters::T
 end
@@ -65,10 +65,10 @@ end
 
 A list of specific interactions that involve three atoms such as bond angle potentials.
 """
-struct InteractionList3Atoms{T}
-    is::Vector{Int}
-    js::Vector{Int}
-    ks::Vector{Int}
+struct InteractionList3Atoms{I, T}
+    is::I
+    js::I
+    ks::I
     types::Vector{String}
     inters::T
 end
@@ -79,22 +79,22 @@ end
 
 A list of specific interactions that involve four atoms such as torsion potentials.
 """
-struct InteractionList4Atoms{T}
-    is::Vector{Int}
-    js::Vector{Int}
-    ks::Vector{Int}
-    ls::Vector{Int}
+struct InteractionList4Atoms{I, T}
+    is::I
+    js::I
+    ks::I
+    ls::I
     types::Vector{String}
     inters::T
 end
 
-InteractionList1Atoms(T) = InteractionList1Atoms{Vector{T}}([], [], T[])
-InteractionList2Atoms(T) = InteractionList2Atoms{Vector{T}}([], [], [], T[])
-InteractionList3Atoms(T) = InteractionList3Atoms{Vector{T}}([], [], [], [], T[])
-InteractionList4Atoms(T) = InteractionList4Atoms{Vector{T}}([], [], [], [], [], T[])
+InteractionList1Atoms(T) = InteractionList1Atoms{Vector{Int32}, Vector{T}}([], [], T[])
+InteractionList2Atoms(T) = InteractionList2Atoms{Vector{Int32}, Vector{T}}([], [], [], T[])
+InteractionList3Atoms(T) = InteractionList3Atoms{Vector{Int32}, Vector{T}}([], [], [], [], T[])
+InteractionList4Atoms(T) = InteractionList4Atoms{Vector{Int32}, Vector{T}}([], [], [], [], [], T[])
 
 interaction_type(::InteractionList1Atoms{T}) where {T} = eltype(T)
-interaction_type(::InteractionList2Atoms{T}) where {T} = eltype(T)
+interaction_type(::InteractionList2Atoms{I, T}) where {I, T} = eltype(T)
 interaction_type(::InteractionList3Atoms{T}) where {T} = eltype(T)
 interaction_type(::InteractionList4Atoms{T}) where {T} = eltype(T)
 

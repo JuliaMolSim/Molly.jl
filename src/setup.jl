@@ -721,25 +721,38 @@ function System(coord_file::AbstractString,
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            bonds.is, bonds.js, bonds.types,
+            gpu ? CuArray(bonds.is) : bonds.is,
+            gpu ? CuArray(bonds.js) : bonds.js,
+            bonds.types,
             gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
         ))
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
-            angles.is, angles.js, angles.ks, angles.types,
+            gpu ? CuArray(angles.is) : angles.is,
+            gpu ? CuArray(angles.js) : angles.js,
+            gpu ? CuArray(angles.ks) : angles.ks,
+            angles.types,
             gpu ? CuArray([angles.inters...]) : [angles.inters...],
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            torsions.is, torsions.js, torsions.ks, torsions.ls, torsions.types,
+            gpu ? CuArray(torsions.is) : torsions.is,
+            gpu ? CuArray(torsions.js) : torsions.js,
+            gpu ? CuArray(torsions.ks) : torsions.ks,
+            gpu ? CuArray(torsions.ls) : torsions.ls,
+            torsions.types,
             gpu ? CuArray(torsion_inters_pad) : torsion_inters_pad,
         ))
     end
     if length(impropers.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            impropers.is, impropers.js, impropers.ks, impropers.ls, impropers.types,
+            gpu ? CuArray(impropers.is) : impropers.is,
+            gpu ? CuArray(impropers.js) : impropers.js,
+            gpu ? CuArray(impropers.ks) : impropers.ks,
+            gpu ? CuArray(impropers.ls) : impropers.ls,
+            impropers.types,
             gpu ? CuArray(improper_inters_pad) : improper_inters_pad,
         ))
     end
@@ -1108,19 +1121,28 @@ function System(T::Type,
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            bonds.is, bonds.js, bonds.types,
+            gpu ? CuArray(bonds.is) : bonds.is,
+            gpu ? CuArray(bonds.js) : bonds.js,
+            bonds.types,
             gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
         ))
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
-            angles.is, angles.js, angles.ks, angles.types,
+            gpu ? CuArray(angles.is) : angles.is,
+            gpu ? CuArray(angles.js) : angles.js,
+            gpu ? CuArray(angles.ks) : angles.ks,
+            angles.types,
             gpu ? CuArray([angles.inters...]) : [angles.inters...],
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            torsions.is, torsions.js, torsions.ks, torsions.ls, torsions.types,
+            gpu ? CuArray(torsions.is) : torsions.is,
+            gpu ? CuArray(torsions.js) : torsions.js,
+            gpu ? CuArray(torsions.ks) : torsions.ks,
+            gpu ? CuArray(torsions.ls) : torsions.ls,
+            torsions.types,
             gpu ? CuArray([torsions.inters...]) : [torsions.inters...],
         ))
     end
@@ -1219,7 +1241,7 @@ function add_position_restraints(sys,
     if length(k_array) != length(sys)
         throw(ArgumentError("The system has $(length(sys)) atoms but there are $(length(k_array)) k values"))
     end
-    is = Int[]
+    is = Int32[]
     types = String[]
     inters = HarmonicPositionRestraint[]
     atoms_data = length(sys.atoms_data) > 0 ? sys.atoms_data : fill(nothing, length(sys))
@@ -1231,7 +1253,7 @@ function add_position_restraints(sys,
             push!(inters, HarmonicPositionRestraint(k_res, x0))
         end
     end
-    restraints = InteractionList1Atoms(is, types, move_array([inters...], sys))
+    restraints = InteractionList1Atoms(move_array(is, sys), types, move_array([inters...], sys))
     sis = (sys.specific_inter_lists..., restraints)
     return System(
         atoms=deepcopy(sys.atoms),
