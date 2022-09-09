@@ -305,14 +305,15 @@ end
 
 function forces(s::System{D, true, T}, neighbors=nothing; n_threads::Integer=Threads.nthreads()) where {D, T}
     fs = ustrip_vec.(zero(s.coords))
-    fs_mat = CuArray(zeros(T, 3, length(s)))
+    n_atoms = length(s)
+    fs_mat = CuArray(zeros(T, 3, n_atoms))
     virial = CuArray(zeros(T, 1))
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
-        # neighbors.all won't work
-        fs += forces_inters(pairwise_inters_nonl, s.coords, s.atoms, neighbors.all,
-                            s.boundary, s.force_units, false)
+        CUDA.@sync @cuda threads=256 blocks=4000 pairwise_force_kernel!(
+                fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
+                NoNeighborList(n_atoms), Val(s.force_units), Val(2000))
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
