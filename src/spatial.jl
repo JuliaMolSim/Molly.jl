@@ -507,8 +507,8 @@ Remove the center of mass motion from a [`System`](@ref).
 """
 function remove_CM_motion!(sys)
     atom_masses = masses(sys)
-    cm_momentum = sum_svec(sys.velocities .* atom_masses)
-    cm_velocity = cm_momentum / sum(atom_masses)
+    cm_momentum = sum_svec(Array(sys.velocities .* atom_masses))
+    cm_velocity = cm_momentum / sum(Array(atom_masses))
     sys.velocities = sys.velocities .- (cm_velocity,)
     return sys
 end

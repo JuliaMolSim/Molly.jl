@@ -78,26 +78,26 @@ end
 
 function specific_force_kernel!(fs_mat, inter_list::InteractionList1Atoms, coords, boundary,
                                 val_force_units)
-    @cuda threads=256 blocks=64 specific_force_1_atoms_kernel!(fs_mat, coords,
+    CUDA.@sync @cuda threads=256 blocks=64 specific_force_1_atoms_kernel!(fs_mat, coords,
             boundary, inter_list.is, inter_list.inters, val_force_units)
 end
 
 function specific_force_kernel!(fs_mat, inter_list::InteractionList2Atoms, coords, boundary,
                                 val_force_units)
-    @cuda threads=256 blocks=64 specific_force_2_atoms_kernel!(fs_mat, coords,
+    CUDA.@sync @cuda threads=256 blocks=64 specific_force_2_atoms_kernel!(fs_mat, coords,
             boundary, inter_list.is, inter_list.js, inter_list.inters, val_force_units)
 end
 
 function specific_force_kernel!(fs_mat, inter_list::InteractionList3Atoms, coords, boundary,
                                 val_force_units)
-    @cuda threads=256 blocks=64 specific_force_3_atoms_kernel!(fs_mat, coords,
+    CUDA.@sync @cuda threads=256 blocks=64 specific_force_3_atoms_kernel!(fs_mat, coords,
             boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters,
             val_force_units)
 end
 
 function specific_force_kernel!(fs_mat, inter_list::InteractionList4Atoms, coords, boundary,
                                 val_force_units)
-    @cuda threads=256 blocks=64 specific_force_4_atoms_kernel!(fs_mat, coords,
+    CUDA.@sync @cuda threads=256 blocks=64 specific_force_4_atoms_kernel!(fs_mat, coords,
             boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
             inter_list.inters, val_force_units)
 end

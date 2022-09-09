@@ -317,9 +317,9 @@ function forces(s::System{D, true, T}, neighbors=nothing; n_threads::Integer=Thr
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nl) > 0 && neighbors.n > 0
-        @cuda threads=256 blocks=1600 pairwise_force_kernel!(
-                    fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-                    neighbors.list[1:neighbors.n], Val(s.force_units), Val(2000))
+        CUDA.@sync @cuda threads=256 blocks=1600 pairwise_force_kernel!(
+                fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
+                neighbors.list[1:neighbors.n], Val(s.force_units), Val(2000))
     end
 
     for inter_list in values(s.specific_inter_lists)
