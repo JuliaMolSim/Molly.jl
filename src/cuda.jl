@@ -221,3 +221,171 @@ function specific_force_4_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
     end
     return
 end
+
+function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, boundary, inters,
+                             neighbors_var, ::Val{E}, ::Val{M}) where {T, E, M}
+    coords = CUDA.Const(coords_var)
+    atoms = CUDA.Const(atoms_var)
+    neighbors = CUDA.Const(neighbors_var)
+
+    tidx = threadIdx().x
+    inter_ig = (blockIdx().x - 1) * blockDim().x + tidx
+    stride = gridDim().x * blockDim().x
+    shared_pes = CuStaticSharedArray(T, M)
+    shared_flags = CuStaticSharedArray(Bool, M)
+
+    if tidx == 1
+        for si in 1:M
+            shared_flags[si] = false
+        end
+    end
+    sync_threads()
+
+    for (thread_i, inter_i) in enumerate(inter_ig:stride:length(neighbors))
+        si = (thread_i - 1) * blockDim().x + tidx
+        i, j, weight_14 = neighbors[inter_i]
+        coord_i, coord_j = coords[i], coords[j]
+        dr = vector(coord_i, coord_j, boundary)
+        pe = potential_energy(inters[1], dr, coord_i, coord_j, atoms[i], atoms[j],
+                              boundary, weight_14)
+        for inter in inters[2:end]
+            pe += potential_energy(inter, dr, coord_i, coord_j, atoms[i], atoms[j],
+                                   boundary, weight_14)
+        end
+        if unit(pe) != E
+            error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
+        end
+        shared_pes[si] = ustrip(pe)
+        shared_flags[si] = true
+    end
+    sync_threads()
+
+    n_threads_sum = 16
+    n_mem_to_sum = M ÷ n_threads_sum # Should be exact, not currently checked
+    if tidx <= n_threads_sum
+        pe_sum = zero(T)
+        for si in (1 + (tidx - 1) * n_mem_to_sum):(tidx * n_mem_to_sum)
+            if !shared_flags[si]
+                break
+            end
+            pe_sum += shared_pes[si]
+        end
+        CUDA.atomic_add!(pointer(energy), pe_sum)
+    end
+    return
+end
+
+function specific_pe_kernel!(pe, inter_list::InteractionList1Atoms, coords, boundary, val_pe_units)
+    CUDA.@sync @cuda threads=256 blocks=64 specific_pe_1_atoms_kernel!(pe, coords,
+            boundary, inter_list.is, inter_list.inters, val_pe_units)
+end
+
+function specific_pe_kernel!(pe, inter_list::InteractionList2Atoms, coords, boundary, val_pe_units)
+    CUDA.@sync @cuda threads=256 blocks=64 specific_pe_2_atoms_kernel!(pe, coords,
+            boundary, inter_list.is, inter_list.js, inter_list.inters, val_pe_units)
+end
+
+function specific_pe_kernel!(pe, inter_list::InteractionList3Atoms, coords, boundary, val_pe_units)
+    CUDA.@sync @cuda threads=256 blocks=64 specific_pe_3_atoms_kernel!(pe, coords,
+            boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters, val_pe_units)
+end
+
+function specific_pe_kernel!(pe, inter_list::InteractionList4Atoms, coords, boundary, val_pe_units)
+    CUDA.@sync @cuda threads=256 blocks=64 specific_pe_4_atoms_kernel!(pe, coords,
+            boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
+            inter_list.inters, val_pe_units)
+end
+
+function specific_pe_1_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
+                                     inters_var, ::Val{E}) where {T, E}
+    coords = CUDA.Const(coords_var)
+    is = CUDA.Const(is_var)
+    inters = CUDA.Const(inters_var)
+
+    tidx = threadIdx().x
+    inter_ig = (blockIdx().x - 1) * blockDim().x + tidx
+    stride = gridDim().x * blockDim().x
+
+    for (thread_i, inter_i) in enumerate(inter_ig:stride:length(is))
+        si = (thread_i - 1) * blockDim().x + tidx
+        i = is[inter_i]
+        pe = potential_energy(inters[inter_i], coords[i], boundary)
+        if unit(pe) != E
+            error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
+        end
+        CUDA.atomic_add!(pointer(energy), pe)
+    end
+    return
+end
+
+function specific_pe_2_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
+                                     js_var, inters_var, ::Val{E}) where {T, E}
+    coords = CUDA.Const(coords_var)
+    is = CUDA.Const(is_var)
+    js = CUDA.Const(js_var)
+    inters = CUDA.Const(inters_var)
+
+    tidx = threadIdx().x
+    inter_ig = (blockIdx().x - 1) * blockDim().x + tidx
+    stride = gridDim().x * blockDim().x
+
+    for (thread_i, inter_i) in enumerate(inter_ig:stride:length(is))
+        si = (thread_i - 1) * blockDim().x + tidx
+        i, j = is[inter_i], js[inter_i]
+        pe = potential_energy(inters[inter_i], coords[i], coords[j], boundary)
+        if unit(pe) != E
+            error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
+        end
+        CUDA.atomic_add!(pointer(energy), ustrip(pe))
+    end
+    return
+end
+
+function specific_pe_3_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
+                                     js_var, ks_var, inters_var, ::Val{E}) where {T, E}
+    coords = CUDA.Const(coords_var)
+    is = CUDA.Const(is_var)
+    js = CUDA.Const(js_var)
+    ks = CUDA.Const(ks_var)
+    inters = CUDA.Const(inters_var)
+
+    tidx = threadIdx().x
+    inter_ig = (blockIdx().x - 1) * blockDim().x + tidx
+    stride = gridDim().x * blockDim().x
+
+    for (thread_i, inter_i) in enumerate(inter_ig:stride:length(is))
+        si = (thread_i - 1) * blockDim().x + tidx
+        i, j, k = is[inter_i], js[inter_i], ks[inter_i]
+        pe = potential_energy(inters[inter_i], coords[i], coords[j], coords[k], boundary)
+        if unit(pe) != E
+            error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
+        end
+        CUDA.atomic_add!(pointer(energy), ustrip(pe))
+    end
+    return
+end
+
+function specific_pe_4_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
+                                     js_var, ks_var, ls_var, inters_var, ::Val{E}) where {T, E}
+    coords = CUDA.Const(coords_var)
+    is = CUDA.Const(is_var)
+    js = CUDA.Const(js_var)
+    ks = CUDA.Const(ks_var)
+    ls = CUDA.Const(ls_var)
+    inters = CUDA.Const(inters_var)
+
+    tidx = threadIdx().x
+    inter_ig = (blockIdx().x - 1) * blockDim().x + tidx
+    stride = gridDim().x * blockDim().x
+
+    for (thread_i, inter_i) in enumerate(inter_ig:stride:length(is))
+        si = (thread_i - 1) * blockDim().x + tidx
+        i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
+        pe = potential_energy(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary)
+        if unit(pe) != E
+            error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
+        end
+        CUDA.atomic_add!(pointer(energy), ustrip(pe))
+    end
+    return
+end

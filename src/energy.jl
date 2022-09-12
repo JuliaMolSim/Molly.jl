@@ -136,29 +136,33 @@ function potential_energy(s::System{D, false, T}, neighbors=nothing) where {D, T
 end
 
 function potential_energy(s::System{D, true, T}, neighbors=nothing) where {D, T}
-    potential = zero(T) * s.energy_units
+    pe_vec = CuArray(zeros(T, 1))
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
-        potential += potential_energy_inters(pairwise_inters_nonl, s.coords, s.atoms,
-                        neighbors.all, s.boundary, s.energy_units, false)
+        CUDA.@sync @cuda threads=256 blocks=4000 pairwise_pe_kernel!(
+            pe_vec, s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
+            NoNeighborList(n_atoms), Val(s.energy_units), Val(2000))
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
-    if length(pairwise_inters_nl) > 0 && length(neighbors.close.nbsi) > 0
-        potential += potential_energy_inters(pairwise_inters_nl, s.coords, s.atoms,
-                        neighbors.close, s.boundary, s.energy_units, neighbors.close.weights_14)
+    if length(pairwise_inters_nl) > 0 && neighbors.n > 0
+        CUDA.@sync @cuda threads=256 blocks=1600 pairwise_pe_kernel!(
+            pe_vec, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
+            neighbors.list[1:neighbors.n], Val(s.energy_units), Val(2000))
     end
 
     for inter_list in values(s.specific_inter_lists)
-        potential += potential_energy(inter_list, s.coords, s.boundary)
+        specific_pe_kernel!(pe_vec, inter_list, s.coords, s.boundary, Val(s.energy_units))
     end
+
+    pe = Array(pe_vec)[1]
 
     for inter in values(s.general_inters)
-        potential += potential_energy(inter, s, neighbors)
+        pe += ustrip(s.energy_units, potential_energy(inter, s, neighbors))
     end
 
-    return uconvert(s.energy_units, potential)
+    return pe * s.energy_units
 end
 
 @views function potential_energy(inter_list::InteractionList1Atoms, coords, boundary)
