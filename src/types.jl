@@ -91,10 +91,10 @@ InteractionList2Atoms(T) = InteractionList2Atoms{Vector{Int32}, Vector{T}}([], [
 InteractionList3Atoms(T) = InteractionList3Atoms{Vector{Int32}, Vector{T}}([], [], [], [], T[])
 InteractionList4Atoms(T) = InteractionList4Atoms{Vector{Int32}, Vector{T}}([], [], [], [], [], T[])
 
-interaction_type(::InteractionList1Atoms{T}) where {T} = eltype(T)
+interaction_type(::InteractionList1Atoms{I, T}) where {I, T} = eltype(T)
 interaction_type(::InteractionList2Atoms{I, T}) where {I, T} = eltype(T)
-interaction_type(::InteractionList3Atoms{T}) where {T} = eltype(T)
-interaction_type(::InteractionList4Atoms{T}) where {T} = eltype(T)
+interaction_type(::InteractionList3Atoms{I, T}) where {I, T} = eltype(T)
+interaction_type(::InteractionList4Atoms{I, T}) where {I, T} = eltype(T)
 
 """
     Atom(; <keyword arguments>)

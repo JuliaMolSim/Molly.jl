@@ -41,7 +41,7 @@ function extract_parameters(sys, ff)
     end
 
     for inter in values(sys.specific_inter_lists)
-        if Molly.interaction_type(inter) <: HarmonicBond
+        if interaction_type(inter) <: HarmonicBond
             for bond_type in inter.types
                 key_prefix = "inter_HB_$(bond_type)_"
                 if !haskey(params_dic, key_prefix * "k")
@@ -50,7 +50,7 @@ function extract_parameters(sys, ff)
                     params_dic[key_prefix * "r0"] = bond.r0
                 end
             end
-        elseif Molly.interaction_type(inter) <: HarmonicAngle
+        elseif interaction_type(inter) <: HarmonicAngle
             for angle_type in inter.types
                 key_prefix = "inter_HA_$(angle_type)_"
                 if !haskey(params_dic, key_prefix * "k")
@@ -59,7 +59,7 @@ function extract_parameters(sys, ff)
                     params_dic[key_prefix * "θ0"] = angle.θ0
                 end
             end
-        elseif Molly.interaction_type(inter) <: PeriodicTorsion
+        elseif interaction_type(inter) <: PeriodicTorsion
             for (torsion_type, torsion_inter) in zip(inter.types, Array(inter.inters))
                 if torsion_inter.proper
                     key_prefix = "inter_PT_$(torsion_type)_"
