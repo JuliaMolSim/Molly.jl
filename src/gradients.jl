@@ -88,9 +88,10 @@ Allows gradients for individual parameters to be tracked.
 Returns atoms, pairwise interactions, specific interaction lists and general
 interactions.
 """
-function inject_gradients(sys, params_dic, gpu::Bool=isa(sys.coords, CuArray))
+function inject_gradients(sys, params_dic,
+                          gpu::Bool=isa(sys.coords, AT)) where AT <: Union{CuArray, ROCArray}
     if gpu
-        atoms_grad = CuArray(inject_atom.(Array(sys.atoms), sys.atoms_data, (params_dic,)))
+        atoms_grad = AT(inject_atom.(Array(sys.atoms), sys.atoms_data, (params_dic,)))
     else
         atoms_grad = inject_atom.(sys.atoms, sys.atoms_data, (params_dic,))
     end
@@ -100,7 +101,7 @@ function inject_gradients(sys, params_dic, gpu::Bool=isa(sys.coords, CuArray))
         pis_grad = sys.pairwise_inters
     end
     if length(sys.specific_inter_lists) > 0
-        sis_grad = inject_interaction_list.(sys.specific_inter_lists, (params_dic,), gpu)
+        sis_grad = inject_interaction_list.(sys.specific_inter_lists, (params_dic,), gpu, AT)
     else
         sis_grad = sys.specific_inter_lists
     end
@@ -127,36 +128,40 @@ function inject_atom(at, at_data, params_dic)
     )
 end
 
-function inject_interaction_list(inter::InteractionList1Atoms, params_dic, gpu)
+function inject_interaction_list(inter::InteractionList1Atoms, params_dic, gpu,
+                                 AT)
     if gpu
-        inters_grad = CuArray(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+        inters_grad = AT(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
     else
         inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
     end
     InteractionList1Atoms(inter.is, inter.types, inters_grad)
 end
 
-function inject_interaction_list(inter::InteractionList2Atoms, params_dic, gpu)
+function inject_interaction_list(inter::InteractionList2Atoms, params_dic, gpu,
+                                 AT)
     if gpu
-        inters_grad = CuArray(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+        inters_grad = AT(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
     else
         inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
     end
     InteractionList2Atoms(inter.is, inter.js, inter.types, inters_grad)
 end
 
-function inject_interaction_list(inter::InteractionList3Atoms, params_dic, gpu)
+function inject_interaction_list(inter::InteractionList3Atoms, params_dic, gpu,
+                                 AT)
     if gpu
-        inters_grad = CuArray(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+        inters_grad = AT(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
     else
         inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
     end
     InteractionList3Atoms(inter.is, inter.js, inter.ks, inter.types, inters_grad)
 end
 
-function inject_interaction_list(inter::InteractionList4Atoms, params_dic, gpu)
+function inject_interaction_list(inter::InteractionList4Atoms, params_dic, gpu,
+                                 AT)
     if gpu
-        inters_grad = CuArray(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+        inters_grad = AT(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
     else
         inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
     end

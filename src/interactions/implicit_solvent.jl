@@ -410,6 +410,10 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
         or = CuArray(offset_radii)
         sor = CuArray(scaled_offset_radii)
         is, js = CuArray(inds_i), CuArray(inds_j)
+    elseif isa(atoms, ROCArray)
+        or = ROCArray(offset_radii)
+        sor = ROCArray(scaled_offset_radii)
+        is, js = ROCArray(inds_i), ROCArrayArray(inds_j)
     else
         or = offset_radii
         sor = scaled_offset_radii
@@ -555,6 +559,12 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
         is, js = CuArray(inds_i), CuArray(inds_j)
         d0s, m0s = CuArray(table_d0), CuArray(table_m0)
         αs, βs, γs = CuArray(αs_cpu), CuArray(βs_cpu), CuArray(γs_cpu)
+    elseif isa(atoms, ROCArray)
+        or = ROCArray(offset_radii)
+        sor = ROCArray(scaled_offset_radii)
+        is, js = ROCArray(inds_i), ROCArray(inds_j)
+        d0s, m0s = ROCArray(table_d0), ROCArray(table_m0)
+        αs, βs, γs = ROCArray(αs_cpu), ROCArray(βs_cpu), ROCArray(γs_cpu)
     else
         or = offset_radii
         sor = scaled_offset_radii

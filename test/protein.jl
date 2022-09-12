@@ -161,53 +161,55 @@ end
 
     # Test the same simulation on the GPU
     if run_gpu_tests
-        sys = System(
-            joinpath(data_dir, "6mrr_equil.pdb"),
-            ff;
-            velocities=CuArray(deepcopy(velocities_start)),
-            gpu=true,
-            center_coords=false,
-        )
-        @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
-        @test temperature(sys) ≈ 329.3202932884933u"K"
+        for AT in gpu_array_types
+            sys = System(
+                joinpath(data_dir, "6mrr_equil.pdb"),
+                ff;
+                velocities=AT(deepcopy(velocities_start)),
+                gpu=true,
+                center_coords=false,
+            )
+            @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
+            @test temperature(sys) ≈ 329.3202932884933u"K"
 
-        neighbors = find_neighbors(sys)
-        @test isapprox(potential_energy(sys, neighbors), E_openmm; atol=1e-5u"kJ * mol^-1")
+            neighbors = find_neighbors(sys)
+            @test isapprox(potential_energy(sys, neighbors), E_openmm; atol=1e-5u"kJ * mol^-1")
 
-        simulate!(sys, simulator, n_steps)
+            simulate!(sys, simulator, n_steps)
 
-        coords_diff = Array(sys.coords) .- wrap_coords.(coords_openmm, (sys.boundary,))
-        vels_diff = Array(sys.velocities) .- vels_openmm
-        @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
-        @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
+            coords_diff = Array(sys.coords) .- wrap_coords.(coords_openmm, (sys.boundary,))
+            vels_diff = Array(sys.velocities) .- vels_openmm
+            @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
+            @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 
-        sys_nounits = System(
-            joinpath(data_dir, "6mrr_equil.pdb"),
-            ff_nounits;
-            velocities=CuArray(deepcopy(ustrip_vec.(velocities_start))),
-            units=false,
-            gpu=true,
-            center_coords=false,
-        )
-        @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
-        @test temperature(sys_nounits)u"K" ≈ 329.3202932884933u"K"
+            sys_nounits = System(
+                joinpath(data_dir, "6mrr_equil.pdb"),
+                ff_nounits;
+                velocities=AT(deepcopy(ustrip_vec.(velocities_start))),
+                units=false,
+                gpu=true,
+                center_coords=false,
+            )
+            @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
+            @test temperature(sys_nounits)u"K" ≈ 329.3202932884933u"K"
 
-        neighbors_nounits = find_neighbors(sys_nounits)
-        @test isapprox(potential_energy(sys_nounits, neighbors_nounits) * u"kJ * mol^-1",
-                        E_openmm; atol=1e-5u"kJ * mol^-1")
+            neighbors_nounits = find_neighbors(sys_nounits)
+            @test isapprox(potential_energy(sys_nounits, neighbors_nounits) * u"kJ * mol^-1",
+                            E_openmm; atol=1e-5u"kJ * mol^-1")
 
-        simulate!(sys_nounits, simulator_nounits, n_steps)
+            simulate!(sys_nounits, simulator_nounits, n_steps)
 
-        coords_diff = Array(sys_nounits.coords * u"nm") .- wrap_coords.(coords_openmm, (sys.boundary,))
-        vels_diff = Array(sys_nounits.velocities * u"nm * ps^-1") .- vels_openmm
-        @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
-        @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
+            coords_diff = Array(sys_nounits.coords * u"nm") .- wrap_coords.(coords_openmm, (sys.boundary,))
+            vels_diff = Array(sys_nounits.velocities * u"nm * ps^-1") .- vels_openmm
+            @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
+            @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 
-        params_dic_gpu = extract_parameters(sys_nounits, ff_nounits)
-        @test params_dic == params_dic_gpu
-        atoms_grad, pis_grad, sis_grad, gis_grad = inject_gradients(sys_nounits, params_dic_gpu)
-        @test atoms_grad == sys_nounits.atoms
-        @test pis_grad == sys_nounits.pairwise_inters
+            params_dic_gpu = extract_parameters(sys_nounits, ff_nounits)
+            @test params_dic == params_dic_gpu
+            atoms_grad, pis_grad, sis_grad, gis_grad = inject_gradients(sys_nounits, params_dic_gpu)
+            @test atoms_grad == sys_nounits.atoms
+            @test pis_grad == sys_nounits.pairwise_inters
+        end
     end
 end
 

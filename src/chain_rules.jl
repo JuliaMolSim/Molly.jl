@@ -109,7 +109,7 @@ function ChainRulesCore.rrule(::typeof(unsafe_getindex), arr, inds)
 end
 
 # Not faster on CPU
-function ChainRulesCore.rrule(::typeof(getindices_i), arr::CuArray, neighbors)
+function ChainRulesCore.rrule(::typeof(getindices_i), arr::AT, neighbors) where AT <: Union{CuArray, ROCArray}
     Y = getindices_i(arr, neighbors)
     @views @inbounds function getindices_i_pullback(Ȳ)
         return NoTangent(), accumulate_bounds(Ȳ, neighbors.atom_bounds_i), nothing
@@ -117,7 +117,7 @@ function ChainRulesCore.rrule(::typeof(getindices_i), arr::CuArray, neighbors)
     return Y, getindices_i_pullback
 end
 
-function ChainRulesCore.rrule(::typeof(getindices_j), arr::CuArray, neighbors)
+function ChainRulesCore.rrule(::typeof(getindices_j), arr::AT, neighbors) where AT <: Union{CuArray, ROCArray}
     Y = getindices_j(arr, neighbors)
     @views @inbounds function getindices_j_pullback(Ȳ)
         return NoTangent(), accumulate_bounds(Ȳ[neighbors.sortperm_j], neighbors.atom_bounds_j), nothing

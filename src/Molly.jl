@@ -7,6 +7,15 @@ import Chemfiles
 using Colors
 using Combinatorics
 using CUDA
+if has_cuda_gpu()
+    CUDA.allowscalar(false)
+end
+
+using AMDGPU
+if has_rocm_gpu()
+    AMDGPU.allowscalar(false)
+end
+
 using DataStructures
 using Distances
 using Distributions

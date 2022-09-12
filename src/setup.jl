@@ -13,6 +13,29 @@ export
     is_heavy_atom,
     add_position_restraints
 
+# Creating default Array Type (AT) for users who did not specify
+function find_array_type(AT)
+    if AT == AbstractArray
+        if !gpu
+            AT = Array
+        elseif has_rocm_gpu() && has_cuda_gpu()
+            @warn("Both AMD and NVIDIA gpus available!
+                  Defaulting to CuArray...
+                  If you would like to use your AMD GPU, please specify " *
+                  "System(...; AT = ROCArray)")
+            AT = CuArray
+        elseif has_cuda_gpu()
+            AT = CuArray
+        elseif has_rocm_gpu()
+            AT = ROCArray
+        end
+    elseif AT != Array && AT != CuArray && AT != ROCArray
+        @warn("Array Type " * string(typeof(AT)) * " not available! " *
+              "Please use Array, CuArray, or ROCArray.")
+    end
+    return AT
+end
+
 """
     place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100)
 
@@ -372,8 +395,11 @@ function System(coord_file::AbstractString,
                 implicit_solvent=nothing,
                 center_coords::Bool=true,
                 rename_terminal_res::Bool=true,
-                kappa=0.0u"nm^-1")
+                kappa=0.0u"nm^-1",
+                AT = AbstractArray)
     T = typeof(force_field.weight_14_coulomb)
+
+    AT = find_array_type(AT)
 
     # Chemfiles uses zero-based indexing, be careful
     trajectory = Chemfiles.Trajectory(coord_file)
@@ -721,26 +747,25 @@ function System(coord_file::AbstractString,
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            bonds.is, bonds.js, bonds.types,
-            gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
+            bonds.is, bonds.js, bonds.types, AT([bonds.inters...]),
         ))
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
             angles.is, angles.js, angles.ks, angles.types,
-            gpu ? CuArray([angles.inters...]) : [angles.inters...],
+            AT([angles.inters...]),
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
             torsions.is, torsions.js, torsions.ks, torsions.ls, torsions.types,
-            gpu ? CuArray(torsion_inters_pad) : torsion_inters_pad,
+            AT(torsion_inters_pad),
         ))
     end
     if length(impropers.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
             impropers.is, impropers.js, impropers.ks, impropers.ls, impropers.types,
-            gpu ? CuArray(improper_inters_pad) : improper_inters_pad,
+            AT(improper_inters_pad),
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
@@ -771,8 +796,8 @@ function System(coord_file::AbstractString,
     atoms = [atoms...]
     if gpu_diff_safe
         neighbor_finder = DistanceVecNeighborFinder(
-            nb_matrix=gpu ? CuArray(nb_matrix) : nb_matrix,
-            matrix_14=gpu ? CuArray(matrix_14) : matrix_14,
+            nb_matrix=AT(nb_matrix),
+            matrix_14=AT(matrix_14),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
@@ -787,8 +812,8 @@ function System(coord_file::AbstractString,
         )
     end
     if gpu
-        atoms = CuArray(atoms)
-        coords = CuArray(coords)
+        atoms = AT(atoms)
+        coords = AT(coords)
     end
 
     if isnothing(velocities)
@@ -845,7 +870,11 @@ function System(T::Type,
                 gpu_diff_safe::Bool=gpu,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
-                center_coords::Bool=true)
+                center_coords::Bool=true,
+                AT = AbstractArray)
+
+    AT = find_array_type(AT)
+
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
     bondtypes = Dict{String, HarmonicBond}()
@@ -1108,20 +1137,19 @@ function System(T::Type,
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            bonds.is, bonds.js, bonds.types,
-            gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
+            bonds.is, bonds.js, bonds.types, AT([bonds.inters...]),
         ))
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
             angles.is, angles.js, angles.ks, angles.types,
-            gpu ? CuArray([angles.inters...]) : [angles.inters...],
+            AT([angles.inters...]),
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
             torsions.is, torsions.js, torsions.ks, torsions.ls, torsions.types,
-            gpu ? CuArray([torsions.inters...]) : [torsions.inters...],
+            AT([torsions.inters...]),
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
@@ -1130,8 +1158,8 @@ function System(T::Type,
 
     if gpu_diff_safe
         neighbor_finder = DistanceVecNeighborFinder(
-            nb_matrix=gpu ? CuArray(nb_matrix) : nb_matrix,
-            matrix_14=gpu ? CuArray(matrix_14) : matrix_14,
+            nb_matrix=AT(nb_matrix),
+            matrix_14=AT(matrix_14),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
@@ -1146,8 +1174,8 @@ function System(T::Type,
         )
     end
     if gpu
-        atoms = CuArray(atoms)
-        coords = CuArray(coords)
+        atoms = AT(atoms)
+        coords = AT(coords)
     end
 
     if isnothing(velocities)

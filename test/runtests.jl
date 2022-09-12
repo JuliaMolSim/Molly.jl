@@ -42,15 +42,37 @@ else
     @warn "The parallel tests will not be run as Julia is running on 1 thread"
 end
 
-run_gpu_tests = CUDA.functional()
-if run_gpu_tests
+run_cuda_tests = CUDA.functional()
+if run_cuda_tests
     device!(parse(Int, DEVICE))
     @info "The GPU tests will be run on device $DEVICE"
 else
-    @warn "The GPU tests will not be run as a CUDA-enabled device is not available"
+    @warn "The CUDA tests will not be run as a CUDA-enabled device is not available"
 end
 
 CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
+
+run_rocm_tests = AMDGPU.functional()
+if run_rocm_tests
+    device!(parse(Int, DEVICE))
+    @info "The GPU tests will be run on device $DEVICE"
+else
+    @warn "The ROCM tests will not be run as a ROCM-enabled device is not availa
+ble"
+end
+
+AMDGPU.allowscalar(false)
+
+run_gpu_tests = run_cuda_tests || run_rocm_tests
+gpu_array_types = []
+if run_gpu_tests
+    if run_cuda_tests
+        push!(gpu_array_types, CuArray)
+    end
+    if run_cuda_tests
+        push!(gpu_array_types, ROCArray)
+    end
+end
 
 data_dir = normpath(@__DIR__, "..", "data")
 ff_dir = joinpath(data_dir, "force_fields")

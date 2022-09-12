@@ -189,8 +189,11 @@ end
     coords_1 = SVector{3, Float64}.(eachcol(cm_1)) / 10 * u"nm"
     coords_2 = SVector{3, Float64}.(eachcol(cm_2)) / 10 * u"nm"
     @test rmsd(coords_1, coords_2) ≈ 2.54859467758795u"Å"
-    if run_gpu_tests
+    if run_cuda_tests
         @test rmsd(CuArray(coords_1), CuArray(coords_2)) ≈ 2.54859467758795u"Å"
+    end
+    if run_rocm_tests
+        @test rmsd(ROCArray(coords_1), ROCArray(coords_2)) ≈ 2.54859467758795u"Å"
     end
 
     bb_atoms = BioStructures.collectatoms(struc[1], BioStructures.backboneselector)

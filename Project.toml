@@ -4,6 +4,7 @@ authors = ["Joe G Greener <jgreener@hotmail.co.uk>"]
 version = "0.13.0"
 
 [deps]
+AMDGPU = "21141c5a-9bdb-4563-92ae-f87d6854732e"
 AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
 BioStructures = "de9282ab-8554-53be-b2d6-f6c222edabfc"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"

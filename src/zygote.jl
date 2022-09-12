@@ -10,6 +10,8 @@ Zygote.accum(x::AbstractArray{<:SVector}, ys::AbstractArray{<:SizedVector}...) =
 
 Zygote.accum(x::Vector{<:SVector} , y::CuArray{<:SVector}) = Zygote.accum(CuArray(x), y)
 Zygote.accum(x::CuArray{<:SVector}, y::Vector{<:SVector} ) = Zygote.accum(x, CuArray(y))
+Zygote.accum(x::Vector{<:SVector} , y::ROCArray{<:SVector}) = Zygote.accum(ROCArray(x), y)
+Zygote.accum(x::ROCArray{<:SVector}, y::Vector{<:SVector} ) = Zygote.accum(x, ROCArray(y))
 
 Zygote.accum(x::SVector{D, T}, y::T) where {D, T} = x .+ y
 
@@ -136,12 +138,12 @@ end
 # Slower version than in Zygote but doesn't give wrong gradients on the GPU for repeated indices
 # Here we just move it to the CPU then move it back
 # See https://github.com/FluxML/Zygote.jl/pull/1131
-Zygote.∇getindex(x::CuArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> begin
+Zygote.∇getindex(x::AT, inds::Tuple{AbstractArray{<:Integer}}) where AT <: Union{CuArray, ROCArray} = dy -> begin
     inds1_cpu = Array(inds[1])
     dx = zeros(eltype(dy), length(x))
     dxv = view(dx, inds1_cpu)
     dxv .= Zygote.accum.(dxv, Zygote._droplike(Array(dy), dxv))
-    return Zygote._project(x, CuArray(dx)), nothing
+    return Zygote._project(x, AT(dx)), nothing
 end
 
 # Extend to add extra empty partials before (B) and after (A) the SVector partials
@@ -163,15 +165,15 @@ end
 sized_to_static(v::SizedVector{3, T, Vector{T}}) where {T} = SVector{3, T}(v[1], v[2], v[3])
 sized_to_static(v::SizedVector{2, T, Vector{T}}) where {T} = SVector{2, T}(v[1], v[2])
 
-function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg::CuArray) where {D, T}
-    CuArray(sized_to_static.(ȳ_in))
+function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg::AT) where {D, T, AT <: Union{CuArray, ROCArray}}
+    AT(sized_to_static.(ȳ_in))
 end
 
 function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg) where {D, T}
     sized_to_static.(ȳ_in)
 end
 
-modify_grad(ȳ_in, arg::CuArray) = CuArray(ȳ_in)
+modify_grad(ȳ_in, arg::AT) where AT <: Union{CuArray, ROCArray} = AT(ȳ_in)
 modify_grad(ȳ_in, arg) = ȳ_in
 
 # Dualize a value with extra partials
