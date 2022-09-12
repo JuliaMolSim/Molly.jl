@@ -291,16 +291,16 @@ function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{Neighb
     return neighbors
 end
 
-function find_neighbors(s::System{D, G, T, CU},
+function find_neighbors(s::System{D, G},
                         nf::CellListMapNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        n_threads=Threads.nthreads()) where {D, G, T, CU}
+                        n_threads=Threads.nthreads()) where {D, G}
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
     if isnothing(current_neighbors)
         neighbors = NeighborList()
-    elseif CU
+    elseif G
         neighbors = NeighborList(current_neighbors.n, Array(current_neighbors.list))
     else
         neighbors = current_neighbors
@@ -330,7 +330,7 @@ function find_neighbors(s::System{D, G, T, CU},
     )
 
     nf.cl = cl
-    if CU
+    if G
         return NeighborList(neighbors.n, CuArray(neighbors.list))
     else
         return neighbors

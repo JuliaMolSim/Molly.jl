@@ -60,8 +60,7 @@
         dists = distances(sys.coords, sys.boundary)
         dists_flat = dists[triu(trues(3, 3), 1)]
         @test all(x -> isapprox(x, 0.4u"nm"; atol=1e-3u"nm"), dists_flat)
-        neighbors = find_neighbors(sys)
-        @test isapprox(potential_energy(sys, neighbors), -3.0u"kJ * mol^-1";
+        @test isapprox(potential_energy(sys), -3.0u"kJ * mol^-1";
                         atol=1e-4u"kJ * mol^-1")
     end
 end

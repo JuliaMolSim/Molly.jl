@@ -142,7 +142,6 @@
                 velocities=gpu ? CuArray(vs) : vs,
                 boundary=boundary,
                 neighbor_finder=neighbor_finder,
-                gpu_diff_safe=true,
                 force_units=NoUnits,
                 energy_units=NoUnits,
             )

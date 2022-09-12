@@ -730,7 +730,7 @@ end
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-    function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::Bool)
+    function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
         n_atoms = 400
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
@@ -750,7 +750,7 @@ end
         cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
         pairwise_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
         if nl
-            if gpu_diff_safe
+            if gpu
                 neighbor_finder = DistanceVecNeighborFinder(
                     nb_matrix=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
                     n_steps=10,
@@ -787,10 +787,8 @@ end
             velocities=velocities,
             boundary=boundary,
             neighbor_finder=neighbor_finder,
-            gpu_diff_safe=gpu_diff_safe,
         )
 
-        @test is_gpu_diff_safe(s) == gpu_diff_safe
         @test float_type(s) == (f32 ? Float32 : Float64)
 
         n_threads = parallel ? Threads.nthreads() : 1
@@ -802,22 +800,22 @@ end
     end
 
     runs = [
-        ("in-place"        , [false, false, false, false, false]),
-        ("in-place NL"     , [true , false, false, false, false]),
-        ("in-place f32"    , [false, false, false, true , false]),
-        ("out-of-place"    , [false, false, true , false, false]),
-        ("out-of-place NL" , [true , false, true , false, false]),
-        ("out-of-place f32", [false, false, true , true , false]),
+        ("CPU"       , [false, false, false, false]),
+        ("CPU f32"   , [false, false, true , false]),
+        ("CPU NL"    , [true , false, false, false]),
+        ("CPU f32 NL", [true , false, true , false]),
     ]
     if run_parallel_tests
-        push!(runs, ("in-place parallel"   , [false, true , false, false, false]))
-        push!(runs, ("in-place NL parallel", [true , true , false, false, false]))
+        push!(runs, ("CPU parallel"       , [false, true , false, false]))
+        push!(runs, ("CPU parallel f32"   , [false, true , true , false]))
+        push!(runs, ("CPU parallel NL"    , [true , true , false, false]))
+        push!(runs, ("CPU parallel f32 NL", [true , true , true , false]))
     end
     if run_gpu_tests
-        push!(runs, ("out-of-place gpu"       , [false, false, true , false, true ]))
-        push!(runs, ("out-of-place gpu f32"   , [false, false, true , true , true ]))
-        push!(runs, ("out-of-place gpu NL"    , [true , false, true , false, true ]))
-        push!(runs, ("out-of-place gpu f32 NL", [true , false, true , true , true ]))
+        push!(runs, ("GPU"       , [false, false, false, true]))
+        push!(runs, ("GPU f32"   , [false, false, true , true]))
+        push!(runs, ("GPU NL"    , [true , false, false, true]))
+        push!(runs, ("GPU f32 NL", [true , false, true , true]))
     end
 
     final_coords_ref, E_start_ref = test_sim(runs[1][2]...)

@@ -14,7 +14,6 @@ export
     NeighborList,
     System,
     ReplicaSystem,
-    is_gpu_diff_safe,
     float_type,
     is_on_gpu,
     masses
@@ -293,10 +292,8 @@ interface described there.
     be set to `NoUnits` if units are not being used.
 - `k::K=Unitful.k`: the Boltzmann constant, which may be modified in some
     simulations.
-- `gpu_diff_safe::Bool`: whether to use the code path suitable for the
-    GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
 """
-mutable struct System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
+mutable struct System{D, G, T, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     pairwise_inters::PI
@@ -327,12 +324,10 @@ function System(;
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
-                k=Unitful.k,
-                gpu_diff_safe=isa(coords, CuArray))
+                k=Unitful.k)
     D = n_dimensions(boundary)
-    G = gpu_diff_safe
+    G = isa(coords, CuArray)
     T = float_type(boundary)
-    CU = isa(coords, CuArray)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     PI = typeof(pairwise_inters)
@@ -383,7 +378,7 @@ function System(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    return System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, K}(
+    return System{D, G, T, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, K}(
                     atoms, atoms_data, pairwise_inters, specific_inter_lists,
                     general_inters, constraints, coords, vels, boundary, neighbor_finder,
                     loggers, force_units, energy_units, k_converted)
@@ -450,10 +445,8 @@ of replicas and the neighbor finder should be set up to be same. This can be don
     be set to `NoUnits` if units are not being used.
 - `k::K=Unitful.k`: the Boltzmann constant, which may be modified in some
     simulations.
-- `gpu_diff_safe::Bool`: whether to use the code path suitable for the
-    GPU and taking gradients. Defaults to `isa(replica_coords[1], CuArray)`.
 """
-mutable struct ReplicaSystem{D, G, T, CU, A, AD, RS, B, EL, F, E, K} <: AbstractSystem{D}
+mutable struct ReplicaSystem{D, G, T, A, AD, RS, B, EL, F, E, K} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
     n_replicas::Int
@@ -485,12 +478,10 @@ function ReplicaSystem(;
                         replica_loggers=[() for _ in 1:n_replicas],
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
-                        k=Unitful.k,
-                        gpu_diff_safe=isa(replica_coords[1], CuArray))
+                        k=Unitful.k)
     D = n_dimensions(boundary)
-    G = gpu_diff_safe
+    G = isa(replica_coords[1], CuArray)
     T = float_type(boundary)
-    CU = isa(replica_coords[1], CuArray)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     C = typeof(replica_coords[1])
@@ -605,25 +596,24 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF, typeof(replica_loggers[i]), F, E, K}(
+    replicas = Tuple(System{D, G, T, A, AD, PI, SI, GI, CN, C, V, B, NF, typeof(replica_loggers[i]), F, E, K}(
             atoms, atoms_data, replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i], replica_coords[i], 
             replica_velocities[i], boundary, deepcopy(neighbor_finder), replica_loggers[i],
             force_units, energy_units, k_converted) for i in 1:n_replicas)
     RS = typeof(replicas)
 
-    return ReplicaSystem{D, G, T, CU, A, AD, RS, B, EL, F, E, K}(
+    return ReplicaSystem{D, G, T, A, AD, RS, B, EL, F, E, K}(
             atoms, atoms_data, n_replicas, replicas, boundary, 
             exchange_logger, force_units, energy_units, k_converted)
 end
 
 """
-    is_gpu_diff_safe(sys)
+    is_on_gpu(sys)
 
-Whether a [`System`](@ref) or [`ReplicaSystem`](@ref) uses the code path suitable
-for the GPU and for taking gradients.
+Whether a [`System`](@ref) or [`ReplicaSystem`](@ref) is on the GPU.
 """
-is_gpu_diff_safe(::Union{System{D, G}, ReplicaSystem{D, G}}) where {D, G} = G
+is_on_gpu(::Union{System{D, G}, ReplicaSystem{D, G}}) where {D, G} = G
 
 """
     float_type(sys)
@@ -634,13 +624,6 @@ The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses.
 float_type(::Union{System{D, G, T}, ReplicaSystem{D, G, T}}) where {D, G, T} = T
 
 """
-    is_on_gpu(sys)
-
-Whether a [`System`](@ref) or [`ReplicaSystem`](@ref) is on the GPU.
-"""
-is_on_gpu(::Union{System{D, G, T, CU}, ReplicaSystem{D, G, T, CU}}) where {D, G, T, CU} = CU
-
-"""
     masses(sys)
 
 The masses of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
@@ -648,8 +631,8 @@ The masses of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
 masses(s::Union{System, ReplicaSystem}) = mass.(s.atoms)
 
 # Move an array to the GPU depending on whether the system is on the GPU
-move_array(arr, ::System{D, G, T, false}) where {D, G, T} = arr
-move_array(arr, ::System{D, G, T, true }) where {D, G, T} = CuArray(arr)
+move_array(arr, ::System{D, false}) where {D} = arr
+move_array(arr, ::System{D, true }) where {D} = CuArray(arr)
 
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = eltype(s.atoms)
 

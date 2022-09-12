@@ -349,8 +349,6 @@ Gromacs file reading should be considered experimental.
 - `units::Bool=true`: whether to use Unitful quantities.
 - `gpu::Bool=false`: whether to move the relevant parts of the system onto
     the GPU.
-- `gpu_diff_safe::Bool`: whether to use the code path suitable for the
-    GPU and taking gradients, defaults to the value of `gpu`.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
 - `dist_neighbors=1.2u"nm"`: cutoff distance for the neighbor list, should be
     greater than `dist_cutoff`.
@@ -366,7 +364,6 @@ function System(coord_file::AbstractString,
                 loggers=(),
                 units::Bool=true,
                 gpu::Bool=false,
-                gpu_diff_safe::Bool=gpu,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 implicit_solvent=nothing,
@@ -782,7 +779,7 @@ function System(coord_file::AbstractString,
     coords = wrap_coords.(coords, (boundary_used,))
 
     atoms = [atoms...]
-    if gpu_diff_safe
+    if gpu
         neighbor_finder = DistanceVecNeighborFinder(
             nb_matrix=gpu ? CuArray(nb_matrix) : nb_matrix,
             matrix_14=gpu ? CuArray(matrix_14) : matrix_14,
@@ -843,7 +840,6 @@ function System(coord_file::AbstractString,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
         energy_units=units ? u"kJ * mol^-1" : NoUnits,
-        gpu_diff_safe=gpu_diff_safe,
     )
 end
 
@@ -855,7 +851,6 @@ function System(T::Type,
                 loggers=(),
                 units::Bool=true,
                 gpu::Bool=false,
-                gpu_diff_safe::Bool=gpu,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true)
@@ -1150,7 +1145,7 @@ function System(T::Type,
 
     atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ, solute=a.solute) for a in atoms]
 
-    if gpu_diff_safe
+    if gpu
         neighbor_finder = DistanceVecNeighborFinder(
             nb_matrix=gpu ? CuArray(nb_matrix) : nb_matrix,
             matrix_14=gpu ? CuArray(matrix_14) : matrix_14,
@@ -1194,7 +1189,6 @@ function System(T::Type,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
         energy_units=units ? u"kJ * mol^-1" : NoUnits,
-        gpu_diff_safe=gpu_diff_safe,
     )
 end
 
@@ -1269,6 +1263,5 @@ function add_position_restraints(sys,
         force_units=sys.force_units,
         energy_units=sys.energy_units,
         k=sys.k,
-        gpu_diff_safe=is_gpu_diff_safe(sys),
     )
 end

@@ -88,7 +88,6 @@ function loss(σ)
         loggers=loggers,
         force_units=NoUnits,
         energy_units=NoUnits,
-        gpu_diff_safe=true,
     )
 
     mms_start = mean_min_separation(s.coords, boundary)
@@ -213,7 +212,6 @@ function loss(θ)
         loggers=loggers,
         force_units=NoUnits,
         energy_units=NoUnits,
-        gpu_diff_safe=true,
     )
 
     simulate!(s, simulator, n_steps)
@@ -343,7 +341,6 @@ function loss()
         loggers=loggers,
         force_units=NoUnits,
         energy_units=NoUnits,
-        gpu_diff_safe=true,
     )
 
     simulate!(s, simulator, n_steps)

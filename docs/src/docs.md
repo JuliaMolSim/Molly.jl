@@ -69,7 +69,7 @@ simulate!(sys, simulator, 1_000)
 `atoms`, `coords` and `boundary` are the minimum required properties to define a [`System`](@ref), though you would generally want to add interactions to a [`System`](@ref) to do something useful with it.
 
 [`System`](@ref) implements the `AbstractSystem` [interface from AtomsBase.jl](https://juliamolsim.github.io/AtomsBase.jl/stable).
-The functions [`masses`](@ref), [`is_gpu_diff_safe`](@ref), [`is_on_gpu`](@ref) and [`float_type`](@ref) can be used on a [`System`](@ref).
+The functions [`masses`](@ref), [`is_on_gpu`](@ref) and [`float_type`](@ref) can be used on a [`System`](@ref).
 
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this behaviour can be changed by giving the keyword argument `n_threads` to [`simulate!`](@ref).
 For example, `n_threads=1` uses no parallelization.
@@ -868,12 +868,12 @@ end
 ```
 Then, define the functions required for the simulation. This consists of first defining the function that carries out the exchange:
 ```julia
-function my_exchange_fun!(sys::ReplicaSystem{D,G,T},
+function my_exchange_fun!(sys::ReplicaSystem,
                         sim::MyREMDSimulator,
                         n::Integer,
                         m::Integer;
                         n_threads::Int=Threads.nthreads(),
-                        rng=Random.GLOBAL_RNG) where {D,G,T}
+                        rng=Random.GLOBAL_RNG)
     # Attempt to exchange the replicas with index n and m
 
     # First define Δ for the REMD scheme
@@ -905,11 +905,11 @@ Then, define a method for the `simulate!` function to perform the parallel simul
 to which we pass our exchange function defined above:
 
 ```julia
-function simulate!(sys::ReplicaSystem{D, G, T},
+function simulate!(sys::ReplicaSystem,
                     sim::MyREMDSimulator,
                     n_steps::Integer;
                     rng=Random.GLOBAL_RNG,
-                    n_threads::Integer=Threads.nthreads()) where {D, G, T}
+                    n_threads::Integer=Threads.nthreads())
 
     # Do any initial setup if necessary
     

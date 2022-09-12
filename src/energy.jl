@@ -136,6 +136,7 @@ function potential_energy(s::System{D, false, T}, neighbors=nothing) where {D, T
 end
 
 function potential_energy(s::System{D, true, T}, neighbors=nothing) where {D, T}
+    n_atoms = length(s)
     pe_vec = CuArray(zeros(T, 1))
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
@@ -147,9 +148,10 @@ function potential_energy(s::System{D, true, T}, neighbors=nothing) where {D, T}
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nl) > 0 && neighbors.n > 0
+        nbs = @view neighbors.list[1:neighbors.n]
         CUDA.@sync @cuda threads=256 blocks=1600 pairwise_pe_kernel!(
             pe_vec, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-            neighbors.list[1:neighbors.n], Val(s.energy_units), Val(2000))
+            nbs, Val(s.energy_units), Val(2000))
     end
 
     for inter_list in values(s.specific_inter_lists)
