@@ -69,56 +69,6 @@ end
     return nothing
 end
 
-@inline @inbounds function force_nounit(inters, coord_i, coord_j, atom_i, atom_j,
-                                        boundary, force_units, weight_14::Bool=false)
-    dr = vector(coord_i, coord_j, boundary)
-    sum(inters) do inter
-        fdr = force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14)
-        check_force_units(fdr, force_units)
-        return ustrip.(fdr)
-    end
-end
-
-accumulateadd(x) = accumulate(+, x)
-
-# Accumulate values in an array based on the ordered boundaries in bounds
-# Used to speed up views with repeated indices on the GPU when you have the bounds
-@views @inbounds function accumulate_bounds(arr, bounds)
-    zf = zero(arr[1:1])
-    accum_pad = vcat(zf, accumulateadd(arr))
-    accum_bounds = accum_pad[bounds]
-    accum_bounds_offset = vcat(zf, accum_bounds[1:(end - 1)])
-    return accum_bounds .- accum_bounds_offset
-end
-
-# Uses the Zygote path which gives wrong gradients on the GPU for repeated indices
-# Hence only used when we know the indices don't contain repeats
-# See https://github.com/FluxML/Zygote.jl/pull/1131
-unsafe_getindex(arr, inds) = @view arr[inds]
-
-# Sum forces on neighboring atom pairs to get forces on each atom
-# Neighbor forces are accumulated and then atom forces extracted by subtraction
-#   at the atom boundaries
-# The forces are re-arranged for the other atom index and the process is repeated
-# This isn't pretty but it works on the GPU
-@views @inbounds function sum_forces(nb_forces, neighbors)
-    fs_accum_i = accumulate_bounds(nb_forces, neighbors.atom_bounds_i)
-    fs_accum_j = accumulate_bounds(unsafe_getindex(nb_forces, neighbors.sortperm_j), neighbors.atom_bounds_j)
-    return fs_accum_j .- fs_accum_i
-end
-
-# Functions defined to allow us to write rrules
-getindices_i(arr, neighbors) = @view arr[neighbors.nbsi]
-getindices_j(arr, neighbors) = @view arr[neighbors.nbsj]
-
-@views function forces_inters(inters, coords, atoms, neighbors, boundary, force_units, weights_14)
-    coords_i, atoms_i = getindices_i(coords, neighbors), getindices_i(atoms, neighbors)
-    coords_j, atoms_j = getindices_j(coords, neighbors), getindices_j(atoms, neighbors)
-    @inbounds nb_forces = force_nounit.((inters,), coords_i, coords_j, atoms_i, atoms_j,
-                                        (boundary,), force_units, weights_14)
-    return sum_forces(nb_forces, neighbors)
-end
-
 """
     SpecificForce1Atoms(f1)
 

@@ -435,39 +435,6 @@ function combine_dual_Atom(y1::SVector{3, T}, o1::SVector{3, Dual{Nothing, T, P}
     )
 end
 
-# For force_nounit
-@inline function Zygote.broadcast_forward(f,
-                                            arg1::A,
-                                            arg2::AbstractArray{SVector{D, T}},
-                                            arg3::AbstractArray{SVector{D, T}},
-                                            arg4::AbstractArray{<:Atom},
-                                            arg5::AbstractArray{<:Atom},
-                                            arg6,
-                                            arg7::Base.RefValue{<:Unitful.FreeUnits},
-                                            arg8) where {A, D, T}
-    out = dual_function_force_broadcast(f).(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
-    y = map(x -> value.(x), out)
-    function bc_fwd_back(ȳ_in)
-        ȳ = modify_grad(ȳ_in, arg2)
-        if A <: Tuple{Tuple{X, Y}} where {X <: LennardJones, Y <: Coulomb}
-            darg1 = unbroadcast(arg1, broadcast(combine_dual_PairwiseInteraction_coul, ȳ, out, 1))
-        elseif A <: Tuple{Tuple{X, Y}} where {X <: LennardJones, Y <: CoulombReactionField}
-            darg1 = unbroadcast(arg1, broadcast(combine_dual_PairwiseInteraction_crf , ȳ, out, 1))
-        end
-        darg2 = unbroadcast(arg2, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1,  7),
-                                sum_partials(o1, y1,  8), sum_partials(o1, y1,  9)), ȳ, out))
-        darg3 = unbroadcast(arg3, broadcast((y1, o1) -> SVector{D, T}(sum_partials(o1, y1, 10),
-                                sum_partials(o1, y1, 11), sum_partials(o1, y1, 12)), ȳ, out))
-        darg4 = unbroadcast(arg4, broadcast(combine_dual_Atom, ȳ, out, 13, 14, 15, 16))
-        darg5 = unbroadcast(arg5, broadcast(combine_dual_Atom, ȳ, out, 17, 18, 19, 20))
-        darg6 = nothing
-        darg7 = nothing
-        darg8 = nothing
-        return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6, darg7, darg8)
-    end
-    return y, bc_fwd_back
-end
-
 function dualize_fb(inter::HarmonicBond{K, D}) where {K, D}
     k, r0 = inter.k, inter.r0
     dual_k  = @dualize(k , 8, 1)
@@ -1055,12 +1022,6 @@ for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec, 
 end
 
 # Interactions not specified here run on the slow path on CPU
-@eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force_nounit), inters::Tuple{Tuple{X, Y}}, args...) where {X <: LennardJones, Y <: CoulombReactionField} = Zygote.broadcast_forward(f, inters, args...)
-@eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force_nounit), inters::Tuple{Tuple{X, Y}}, args...) where {X <: LennardJones, Y <: Coulomb             } = Zygote.broadcast_forward(f, inters, args...)
-
-@eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force_nounit), inters::Tuple{Tuple{X, Y}}, args...) where {X <: LennardJones, Y <: CoulombReactionField} = Zygote.broadcast_forward(f, inters, args...)
-@eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof(force_nounit), inters::Tuple{Tuple{X, Y}}, args...) where {X <: LennardJones, Y <: Coulomb             } = Zygote.broadcast_forward(f, inters, args...)
-
 @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{HarmonicBond{K, D}}      , args...) where {K, D}    = Zygote.broadcast_forward(f, inters, args...)
 @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{HarmonicAngle{K, D}}     , args...) where {K, D}    = Zygote.broadcast_forward(f, inters, args...)
 @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof(force), inters::Vector{PeriodicTorsion{N, T, E}}, args...) where {N, T, E} = Zygote.broadcast_forward(f, inters, args...)
