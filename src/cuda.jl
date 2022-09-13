@@ -215,9 +215,9 @@ function specific_force_4_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         CUDA.atomic_add!(pointer(forces, 3k - 2), ustrip(fs.f3[1]))
         CUDA.atomic_add!(pointer(forces, 3k - 1), ustrip(fs.f3[2]))
         CUDA.atomic_add!(pointer(forces, 3k    ), ustrip(fs.f3[3]))
-        CUDA.atomic_add!(pointer(forces, 3l - 2), ustrip(fs.f3[1]))
-        CUDA.atomic_add!(pointer(forces, 3l - 1), ustrip(fs.f3[2]))
-        CUDA.atomic_add!(pointer(forces, 3l    ), ustrip(fs.f3[3]))
+        CUDA.atomic_add!(pointer(forces, 3l - 2), ustrip(fs.f4[1]))
+        CUDA.atomic_add!(pointer(forces, 3l - 1), ustrip(fs.f4[2]))
+        CUDA.atomic_add!(pointer(forces, 3l    ), ustrip(fs.f4[3]))
     end
     return
 end
