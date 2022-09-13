@@ -67,13 +67,14 @@
             energy_units=NoUnits,
         )
         pairwise_inters = pis ? (lj, crf) : ()
-        bond_is, bond_js = collect(1:(n_atoms ÷ 2)), collect((1 + n_atoms ÷ 2):n_atoms)
+        bond_is = gpu ? CuArray(Int32.(collect(1:(n_atoms ÷ 2)))) : Int32.(collect(1:(n_atoms ÷ 2)))
+        bond_js = gpu ? CuArray(Int32.(collect((1 + n_atoms ÷ 2):n_atoms))) : Int32.(collect((1 + n_atoms ÷ 2):n_atoms))
         bond_dists = [norm(vector(Array(coords)[i], Array(coords)[i + n_atoms ÷ 2], boundary)) for i in 1:(n_atoms ÷ 2)]
         angles_inner = [HarmonicAngle(k=f32 ? 10.0f0 : 10.0, θ0=f32 ? 2.0f0 : 2.0) for i in 1:15]
         angles = InteractionList3Atoms(
-            collect(1:15),
-            collect(16:30),
-            collect(31:45),
+            gpu ? CuArray(Int32.(collect( 1:15))) : Int32.(collect( 1:15)),
+            gpu ? CuArray(Int32.(collect(16:30))) : Int32.(collect(16:30)),
+            gpu ? CuArray(Int32.(collect(31:45))) : Int32.(collect(31:45)),
             fill("", 15),
             gpu ? CuArray(angles_inner) : angles_inner,
         )
@@ -84,10 +85,10 @@
                 n_terms=6,
             ) for i in 1:10]
         torsions = InteractionList4Atoms(
-            collect(1:10),
-            collect(11:20),
-            collect(21:30),
-            collect(31:40),
+            gpu ? CuArray(Int32.(collect( 1:10))) : Int32.(collect( 1:10)),
+            gpu ? CuArray(Int32.(collect(11:20))) : Int32.(collect(11:20)),
+            gpu ? CuArray(Int32.(collect(21:30))) : Int32.(collect(21:30)),
+            gpu ? CuArray(Int32.(collect(31:40))) : Int32.(collect(31:40)),
             fill("", 10),
             gpu ? CuArray(torsions_inner) : torsions_inner,
         )
