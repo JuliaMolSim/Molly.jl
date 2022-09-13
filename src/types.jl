@@ -190,6 +190,8 @@ end
 
 NeighborList() = NeighborList{Vector{Tuple{Int, Int, Bool}}}(0, [])
 
+Base.length(nl::NeighborList) = nl.n
+
 function Base.empty!(nl::NeighborList)
     nl.n = 0
     return nl

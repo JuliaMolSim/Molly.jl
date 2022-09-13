@@ -50,7 +50,7 @@ function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, a
     n_mem_to_sum = M ÷ n_threads_sum # Should be exact, not currently checked
     if tidx <= n_threads_sum
         virial_sum = zero(T)
-        for si in (1 + (tidx - 1) * n_mem_to_sum):(tidx * n_mem_to_sum)
+        for si in ((tidx - 1) * n_mem_to_sum + 1):(tidx * n_mem_to_sum)
             i = shared_is[si]
             if iszero(i)
                 break
@@ -264,7 +264,7 @@ function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, b
     n_mem_to_sum = M ÷ n_threads_sum # Should be exact, not currently checked
     if tidx <= n_threads_sum
         pe_sum = zero(T)
-        for si in (1 + (tidx - 1) * n_mem_to_sum):(tidx * n_mem_to_sum)
+        for si in ((tidx - 1) * n_mem_to_sum + 1):(tidx * n_mem_to_sum)
             if !shared_flags[si]
                 break
             end

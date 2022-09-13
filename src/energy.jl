@@ -141,17 +141,20 @@ function potential_energy(s::System{D, true, T}, neighbors=nothing) where {D, T}
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
-        CUDA.@sync @cuda threads=256 blocks=4000 pairwise_pe_kernel!(
-            pe_vec, s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
-            NoNeighborList(n_atoms), Val(s.energy_units), Val(2000))
+        nbs = NoNeighborList(n_atoms)
+        n_threads, n_blocks = cuda_threads_blocks(length(nbs))
+        CUDA.@sync @cuda threads=n_threads blocks=n_blocks pairwise_pe_kernel!(
+                pe_vec, s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
+                nbs, Val(s.energy_units), Val(n_threads))
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
-    if length(pairwise_inters_nl) > 0 && neighbors.n > 0
+    if length(pairwise_inters_nl) > 0 && length(neighbors) > 0
         nbs = @view neighbors.list[1:neighbors.n]
-        CUDA.@sync @cuda threads=256 blocks=1600 pairwise_pe_kernel!(
-            pe_vec, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-            nbs, Val(s.energy_units), Val(2000))
+        n_threads, n_blocks = cuda_threads_blocks(length(neighbors))
+        CUDA.@sync @cuda threads=n_threads blocks=n_blocks pairwise_pe_kernel!(
+                pe_vec, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
+                nbs, Val(s.energy_units), Val(n_threads))
     end
 
     for inter_list in values(s.specific_inter_lists)

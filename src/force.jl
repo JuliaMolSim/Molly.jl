@@ -198,8 +198,9 @@ function forces(s::System{D, false}, neighbors=nothing;
                 if isnothing(neighbors)
                     error("An interaction uses the neighbor list but neighbors is nothing")
                 end
-                basesize = max(1, Int(ceil(neighbors.n / n_threads)))
-                chunks = [i:min(i + basesize - 1, neighbors.n) for i in 1:basesize:neighbors.n]
+                n_neighbors = length(neighbors)
+                basesize = max(1, Int(ceil(n_neighbors / n_threads)))
+                chunks = [i:min(i + basesize - 1, n_neighbors) for i in 1:basesize:n_neighbors]
                 Threads.@threads for (id, rng) in collect(enumerate(chunks))
                     for ni in rng
                         i, j, w = neighbors.list[ni]
@@ -253,6 +254,12 @@ function forces(s::System{D, false}, neighbors=nothing;
     return fs * s.force_units
 end
 
+function cuda_threads_blocks(n_neighbors)
+    n_threads = 256
+    n_blocks = cld(n_neighbors, n_threads)
+    return n_threads, n_blocks
+end
+
 function forces(s::System{D, true, T}, neighbors=nothing;
                 n_threads::Integer=Threads.nthreads()) where {D, T}
     n_atoms = length(s)
@@ -262,17 +269,20 @@ function forces(s::System{D, true, T}, neighbors=nothing;
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
-        CUDA.@sync @cuda threads=256 blocks=4000 pairwise_force_kernel!(
+        nbs = NoNeighborList(n_atoms)
+        n_threads, n_blocks = cuda_threads_blocks(length(nbs))
+        CUDA.@sync @cuda threads=n_threads blocks=n_blocks pairwise_force_kernel!(
                 fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
-                NoNeighborList(n_atoms), Val(s.force_units), Val(2000))
+                nbs, Val(s.force_units), Val(n_threads))
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
-    if length(pairwise_inters_nl) > 0 && neighbors.n > 0
+    if length(pairwise_inters_nl) > 0 && length(neighbors) > 0
         nbs = @view neighbors.list[1:neighbors.n]
-        CUDA.@sync @cuda threads=256 blocks=1600 pairwise_force_kernel!(
+        n_threads, n_blocks = cuda_threads_blocks(length(neighbors))
+        CUDA.@sync @cuda threads=n_threads blocks=n_blocks pairwise_force_kernel!(
                 fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-                nbs, Val(s.force_units), Val(2000))
+                nbs, Val(s.force_units), Val(n_threads))
     end
 
     for inter_list in values(s.specific_inter_lists)
