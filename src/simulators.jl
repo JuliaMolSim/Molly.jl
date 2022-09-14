@@ -115,17 +115,17 @@ The velocity Verlet integrator.
 # Arguments
 - `dt::T`: the time step of the simulation.
 - `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
-- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
-    every time step.
+- `remove_CM_motion=10`: remove the center of mass motion every this number of steps,
+    or set to `false` to not remove center of mass motion.
 """
 struct VelocityVerlet{T, C}
     dt::T
     coupling::C
-    remove_CM_motion::Bool
+    remove_CM_motion::Int
 end
 
-function VelocityVerlet(; dt, coupling=NoCoupling(), remove_CM_motion=true)
-    return VelocityVerlet(dt, coupling, remove_CM_motion)
+function VelocityVerlet(; dt, coupling=NoCoupling(), remove_CM_motion=10)
+    return VelocityVerlet(dt, coupling, Int(remove_CM_motion))
 end
 
 function simulate!(sys,
@@ -133,7 +133,7 @@ function simulate!(sys,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads())
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-    sim.remove_CM_motion && remove_CM_motion!(sys)
+    !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
@@ -150,7 +150,9 @@ function simulate!(sys,
 
         sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
-        sim.remove_CM_motion && remove_CM_motion!(sys)
+        if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
+            remove_CM_motion!(sys)
+        end
         apply_coupling!(sys, sim.coupling, sim)
         
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
@@ -174,17 +176,17 @@ behind the positions.
 # Arguments
 - `dt::T`: the time step of the simulation.
 - `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
-- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
-    every time step.
+- `remove_CM_motion=10`: remove the center of mass motion every this number of steps,
+    or set to `false` to not remove center of mass motion.
 """
 struct Verlet{T, C}
     dt::T
     coupling::C
-    remove_CM_motion::Bool
+    remove_CM_motion::Int
 end
 
-function Verlet(; dt, coupling=NoCoupling(), remove_CM_motion=true)
-    return Verlet(dt, coupling, remove_CM_motion)
+function Verlet(; dt, coupling=NoCoupling(), remove_CM_motion=10)
+    return Verlet(dt, coupling, Int(remove_CM_motion))
 end
 
 function simulate!(sys,
@@ -192,7 +194,7 @@ function simulate!(sys,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads())
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-    sim.remove_CM_motion && remove_CM_motion!(sys)
+    !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
 
@@ -206,7 +208,9 @@ function simulate!(sys,
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
-        sim.remove_CM_motion && remove_CM_motion!(sys)
+        if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
+            remove_CM_motion!(sys)
+        end
         apply_coupling!(sys, sim.coupling, sim)
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
@@ -288,22 +292,22 @@ behind the positions.
 - `dt::S`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
 - `friction::F`: the friction coefficient of the simulation.
-- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
-    every time step.
+- `remove_CM_motion=10`: remove the center of mass motion every this number of steps,
+    or set to `false` to not remove center of mass motion.
 """
 struct Langevin{S, K, F, T}
     dt::S
     temperature::K
     friction::F
-    remove_CM_motion::Bool
+    remove_CM_motion::Int
     vel_scale::T
     noise_scale::T
 end
 
-function Langevin(; dt, temperature, friction, remove_CM_motion=true)
+function Langevin(; dt, temperature, friction, remove_CM_motion=10)
     vel_scale = exp(-dt * friction)
     noise_scale = sqrt(1 - vel_scale^2)
-    return Langevin(dt, temperature, friction, remove_CM_motion, vel_scale, noise_scale)
+    return Langevin(dt, temperature, friction, Int(remove_CM_motion), vel_scale, noise_scale)
 end
 
 function simulate!(sys,
@@ -312,7 +316,7 @@ function simulate!(sys,
                     n_threads::Integer=Threads.nthreads(),
                     rng=Random.GLOBAL_RNG)    
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-    sim.remove_CM_motion && remove_CM_motion!(sys)
+    !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
 
@@ -330,7 +334,9 @@ function simulate!(sys,
         
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-        sim.remove_CM_motion && remove_CM_motion!(sys)
+        if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
+            remove_CM_motion!(sys)
+        end
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
@@ -363,20 +369,20 @@ Not currently compatible with automatic differentiation using Zygote.
 - `splitting::W`: the splitting specifier. Should be a string consisting of the
     characters `A`, `B` and `O`. Strings with no `O`s reduce to deterministic
     symplectic schemes.
-- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
-    every time step.
+- `remove_CM_motion=10`: remove the center of mass motion every this number of steps,
+    or set to `false` to not remove center of mass motion.
 """
 struct LangevinSplitting{S, K, F, W}
     dt::S
     temperature::K
     friction::F
     splitting::W
-    remove_CM_motion::Bool
+    remove_CM_motion::Int
 end
 
-function LangevinSplitting(; dt, temperature, friction, splitting, remove_CM_motion=true)
+function LangevinSplitting(; dt, temperature, friction, splitting, remove_CM_motion=10)
     LangevinSplitting{typeof(dt), typeof(temperature), typeof(friction), typeof(splitting)}(
-        dt, temperature, friction, splitting, remove_CM_motion)
+        dt, temperature, friction, splitting, Int(remove_CM_motion))
 end
 
 function simulate!(sys,
@@ -389,7 +395,7 @@ function simulate!(sys,
     σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
 
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-    sim.remove_CM_motion && remove_CM_motion!(sys)
+    !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
@@ -430,10 +436,13 @@ function simulate!(sys,
         for (step!, args) in step_arg_pairs
             step!(args..., neighbors)
         end
-        
+
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-        sim.remove_CM_motion && remove_CM_motion!(sys)
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+        if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
+            remove_CM_motion!(sys)
+        end
         run_loggers!(sys, neighbors, step_n)
         
         if step_n != n_steps
