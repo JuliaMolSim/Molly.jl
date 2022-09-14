@@ -14,24 +14,19 @@ export
     add_position_restraints
 
 # Creating default Array Type (AT) for users who did not specify
-function find_array_type(AT)
-    if AT == AbstractArray
-        if !gpu
-            AT = Array
-        elseif has_rocm_gpu() && has_cuda_gpu()
-            @warn("Both AMD and NVIDIA gpus available!
-                  Defaulting to CuArray...
-                  If you would like to use your AMD GPU, please specify " *
-                  "System(...; AT = ROCArray)")
-            AT = CuArray
-        elseif has_cuda_gpu()
-            AT = CuArray
-        elseif has_rocm_gpu()
-            AT = ROCArray
-        end
-    elseif AT != Array && AT != CuArray && AT != ROCArray
-        @warn("Array Type " * string(typeof(AT)) * " not available! " *
-              "Please use Array, CuArray, or ROCArray.")
+function configure_array_type(gpu)
+    if !gpu
+        AT = Array
+    elseif has_rocm_gpu() && has_cuda_gpu()
+        @warn("Both AMD and NVIDIA gpus available!\n"*
+              "Defaulting to CuArray...\n"*
+              "If you would like to use your AMD GPU, please specify " *
+              "System(...; AT = ROCArray)")
+        AT = CuArray
+    elseif has_cuda_gpu()
+        AT = CuArray
+    elseif has_rocm_gpu()
+        AT = ROCArray
     end
     return AT
 end
@@ -396,10 +391,8 @@ function System(coord_file::AbstractString,
                 center_coords::Bool=true,
                 rename_terminal_res::Bool=true,
                 kappa=0.0u"nm^-1",
-                AT = AbstractArray)
+                AT = configure_array_type(gpu))
     T = typeof(force_field.weight_14_coulomb)
-
-    AT = find_array_type(AT)
 
     # Chemfiles uses zero-based indexing, be careful
     trajectory = Chemfiles.Trajectory(coord_file)
@@ -871,9 +864,7 @@ function System(T::Type,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
-                AT = AbstractArray)
-
-    AT = find_array_type(AT)
+                AT = configure_array_type(gpu))
 
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()

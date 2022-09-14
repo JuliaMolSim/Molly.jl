@@ -319,6 +319,10 @@ mutable struct System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, 
     k::K
 end
 
+function find_array_type(a)
+    return typeof(a).name.wrapper
+end
+
 function System(;
                 atoms,
                 atoms_data=[],
@@ -334,12 +338,12 @@ function System(;
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=Unitful.k,
-                gpu_diff_safe=isa(coords, AT)) where AT <: Union{CuArray,
-                                                                 ROCArray}
+                AT=find_array_type(coords),
+                gpu_diff_safe=(AT <: Union{CuArray, ROCArray}))
     D = n_dimensions(boundary)
     G = gpu_diff_safe
     T = float_type(boundary)
-    CU = isa(coords, AT)
+    CU = AT <: Union{CuArray, ROCArray}
     A = typeof(atoms)
     AD = typeof(atoms_data)
     PI = typeof(pairwise_inters)
@@ -375,16 +379,16 @@ function System(;
     end
 
     if isa(atoms, AT) && !isa(coords, AT)
-        throw(ArgumentError("The atoms are on the GPU but the coordinates are not"))
+        throw(ArgumentError("The atoms and coordinates are on different devices!"))
     end
     if isa(coords, AT) && !isa(atoms, AT)
-        throw(ArgumentError("The coordinates are on the GPU but the atoms are not"))
+        throw(ArgumentError("The coordinates and atoms are on different devices!"))
     end
     if isa(atoms, AT) && !isa(vels, AT)
-        throw(ArgumentError("The atoms are on the GPU but the velocities are not"))
+        throw(ArgumentError("The atoms and velocities are on different devices!"))
     end
     if isa(vels, AT) && !isa(atoms, AT)
-        throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
+        throw(ArgumentError("The velocities and atoms are on different devices!"))
     end
 
     k_converted = convert_k_units(T, k, energy_units)
@@ -494,13 +498,12 @@ function ReplicaSystem(;
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
                         k=Unitful.k,
-                        gpu_diff_safe=isa(replica_coords[1],
-                                          AT)) where AT <: Union{CuArray,
-                                                                 ROCArray}
+                        AT=find_array_type(replica_coords[1]),
+                        gpu_diff_safe =  (AT <: Union{CuArray, ROCArray}))
     D = n_dimensions(boundary)
     G = gpu_diff_safe
     T = float_type(boundary)
-    CU = isa(replica_coords[1], AT)
+    CU = AT <: Union{CuArray, ROCArray}
     A = typeof(atoms)
     AD = typeof(atoms_data)
     C = typeof(replica_coords[1])
@@ -592,24 +595,24 @@ function ReplicaSystem(;
 
     n_cuarray = sum(y -> isa(y, AT), replica_coords)
     if !(n_cuarray == n_replicas || n_cuarray == 0)
-        throw(ArgumentError("The coordinates for $n_cuarray out of $n_replicas replicas are on GPU"))
+        throw(ArgumentError("The coordinates for $n_cuarray out of $n_replicas replicas are on a different device!"))
     end
     if isa(atoms, AT) && n_cuarray != n_replicas
-        throw(ArgumentError("The atoms are on the GPU but the coordinates are not"))
+        throw(ArgumentError("The atoms and coordinates are on different devices!"))
     end
     if n_cuarray == n_replicas && !isa(atoms, AT)
-        throw(ArgumentError("The coordinates are on the GPU but the atoms are not"))
+        throw(ArgumentError("The coordinates and atoms are on different devices!"))
     end
 
     n_cuarray = sum(y -> isa(y, AT), replica_velocities)
     if !(n_cuarray == n_replicas || n_cuarray == 0)
-        throw(ArgumentError("The velocities for $n_cuarray out of $n_replicas replicas are on GPU"))
+        throw(ArgumentError("The velocities for $n_cuarray out of $n_replicas replicas are on a different device!"))
     end
     if isa(atoms, AT) && n_cuarray != n_replicas
-        throw(ArgumentError("The atoms are on the GPU but the velocities are not"))
+        throw(ArgumentError("The atoms and velocities are on different devices!"))
     end
     if n_cuarray == n_replicas && !isa(atoms, AT)
-        throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
+        throw(ArgumentError("The velocities and atoms are on different devices!"))
     end
 
     k_converted = convert_k_units(T, k, energy_units)

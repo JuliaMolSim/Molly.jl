@@ -138,11 +138,12 @@ end
 # Slower version than in Zygote but doesn't give wrong gradients on the GPU for repeated indices
 # Here we just move it to the CPU then move it back
 # See https://github.com/FluxML/Zygote.jl/pull/1131
-Zygote.∇getindex(x::AT, inds::Tuple{AbstractArray{<:Integer}}) where AT <: Union{CuArray, ROCArray} = dy -> begin
+Zygote.∇getindex(x::Union{CuArray, ROCArray}, inds::Tuple{AbstractArray{<:Integer}}) = dy -> begin
     inds1_cpu = Array(inds[1])
     dx = zeros(eltype(dy), length(x))
     dxv = view(dx, inds1_cpu)
     dxv .= Zygote.accum.(dxv, Zygote._droplike(Array(dy), dxv))
+    AT = find_array_type(x)
     return Zygote._project(x, AT(dx)), nothing
 end
 
@@ -165,7 +166,8 @@ end
 sized_to_static(v::SizedVector{3, T, Vector{T}}) where {T} = SVector{3, T}(v[1], v[2], v[3])
 sized_to_static(v::SizedVector{2, T, Vector{T}}) where {T} = SVector{2, T}(v[1], v[2])
 
-function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg::AT) where {D, T, AT <: Union{CuArray, ROCArray}}
+function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg::Union{CuArray, ROCArray}) where {D, T}
+    AT = find_array_type(arg)
     AT(sized_to_static.(ȳ_in))
 end
 
@@ -173,7 +175,7 @@ function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg) wh
     sized_to_static.(ȳ_in)
 end
 
-modify_grad(ȳ_in, arg::AT) where AT <: Union{CuArray, ROCArray} = AT(ȳ_in)
+modify_grad(ȳ_in, arg::AT) where AT <: Union{CuArray, ROCArray} = find_array_type(arg)(ȳ_in)
 modify_grad(ȳ_in, arg) = ȳ_in
 
 # Dualize a value with extra partials

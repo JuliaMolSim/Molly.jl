@@ -88,8 +88,8 @@ Allows gradients for individual parameters to be tracked.
 Returns atoms, pairwise interactions, specific interaction lists and general
 interactions.
 """
-function inject_gradients(sys, params_dic,
-                          gpu::Bool=isa(sys.coords, AT)) where AT <: Union{CuArray, ROCArray}
+function inject_gradients(sys, params_dic; AT = find_array_type(sys.coords),
+                          gpu::Bool = (AT <: Union{CuArray, ROCArray}))
     if gpu
         atoms_grad = AT(inject_atom.(Array(sys.atoms), sys.atoms_data, (params_dic,)))
     else

@@ -2,6 +2,7 @@ using Molly
 using Aqua
 import BioStructures # Imported to avoid clashing names
 using CUDA
+using AMDGPU
 using FiniteDifferences
 using ForwardDiff
 using Zygote
@@ -54,8 +55,8 @@ CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
 
 run_rocm_tests = AMDGPU.functional()
 if run_rocm_tests
-    device!(parse(Int, DEVICE))
-    @info "The GPU tests will be run on device $DEVICE"
+    AMDGPU.default_device_id!(parse(Int, DEVICE)+1)
+    @info "The GPU tests will be run on device " * string(DEVICE + 1)
 else
     @warn "The ROCM tests will not be run as a ROCM-enabled device is not availa
 ble"
