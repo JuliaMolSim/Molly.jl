@@ -263,8 +263,7 @@ end
 function forces(s::System{D, true, T}, neighbors=nothing;
                 n_threads::Integer=Threads.nthreads()) where {D, T}
     n_atoms = length(s)
-    fs = ustrip_vec.(zero(s.coords))
-    fs_mat = CUDA.zeros(T, 3, n_atoms)
+    fs_mat = CUDA.zeros(T, D, n_atoms)
     virial = CUDA.zeros(T, 1)
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
@@ -289,11 +288,12 @@ function forces(s::System{D, true, T}, neighbors=nothing;
         specific_force_kernel!(fs_mat, inter_list, s.coords, s.boundary, Val(s.force_units))
     end
 
+    fs = reinterpret(SVector{D, T}, vec(fs_mat))
+
     for inter in values(s.general_inters)
         # Force type not checked
         fs += ustrip_vec.(forces(inter, s, neighbors))
     end
 
-    fs += CuArray(SVector{3, T}.(eachcol(Array(fs_mat))))
     return fs * s.force_units
 end
