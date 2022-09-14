@@ -390,7 +390,7 @@ function AtomsBase.velocity(mass, temp, k=mb_conversion_factor;
     return SVector([maxwell_boltzmann(mass, temp, k_strip; rng=rng) for i in 1:dims]...)
 end
 
-function velocity_3D(mass, temp, k=mb_conversion_factor; rng=Random.GLOBAL_RNG)
+function velocity_3D(mass, temp, k=mb_conversion_factor, rng=Random.GLOBAL_RNG)
     return SVector(
         maxwell_boltzmann(mass, temp, k; rng=rng),
         maxwell_boltzmann(mass, temp, k; rng=rng),
@@ -398,7 +398,7 @@ function velocity_3D(mass, temp, k=mb_conversion_factor; rng=Random.GLOBAL_RNG)
     )
 end
 
-function velocity_2D(mass, temp, k=mb_conversion_factor; rng=Random.GLOBAL_RNG)
+function velocity_2D(mass, temp, k=mb_conversion_factor, rng=Random.GLOBAL_RNG)
     return SVector(
         maxwell_boltzmann(mass, temp, k; rng=rng),
         maxwell_boltzmann(mass, temp, k; rng=rng),
@@ -430,13 +430,11 @@ Generate random velocities from the Maxwell-Boltzmann distribution
 for a [`System`](@ref).
 """
 function random_velocities(sys::AbstractSystem{3}, temp; rng=Random.GLOBAL_RNG)
-    vels = velocity_3D.(Array(masses(sys)), temp, sys.k; rng=rng)
-    return move_array(vels, sys)
+    return velocity_3D.(masses(sys), temp, sys.k, rng)
 end
 
 function random_velocities(sys::AbstractSystem{2}, temp; rng=Random.GLOBAL_RNG)
-    vels = velocity_2D.(Array(masses(sys)), temp, sys.k; rng=rng)
-    return move_array(vels, sys)
+    return velocity_2D.(masses(sys), temp, sys.k, rng)
 end
 
 """
