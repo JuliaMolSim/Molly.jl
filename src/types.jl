@@ -295,9 +295,10 @@ interface described there.
 - `k::K=Unitful.k`: the Boltzmann constant, which may be modified in some
     simulations.
 """
-mutable struct System{D, G, T, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
+mutable struct System{D, G, T, A, AD, M, PI, SI, GI, CN, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
     atoms::A
     atoms_data::AD
+    masses::M
     pairwise_inters::PI
     specific_inter_lists::SI
     general_inters::GI
@@ -377,11 +378,14 @@ function System(;
         throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
     end
 
+    atom_masses = mass.(atoms)
+    M = typeof(atom_masses)
+
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    return System{D, G, T, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, K}(
-                    atoms, atoms_data, pairwise_inters, specific_inter_lists,
+    return System{D, G, T, A, AD, M, PI, SI, GI, CN, C, V, B, NF, L, F, E, K}(
+                    atoms, atoms_data, atom_masses, pairwise_inters, specific_inter_lists,
                     general_inters, constraints, coords, vels, boundary, neighbor_finder,
                     loggers, force_units, energy_units, k_converted)
 end
@@ -595,11 +599,14 @@ function ReplicaSystem(;
         throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
     end
 
+    atom_masses = mass.(atoms)
+    M = typeof(atom_masses)
+
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, G, T, A, AD, PI, SI, GI, CN, C, V, B, NF, typeof(replica_loggers[i]), F, E, K}(
-            atoms, atoms_data, replica_pairwise_inters[i], replica_specific_inter_lists[i],
+    replicas = Tuple(System{D, G, T, A, AD, M, PI, SI, GI, CN, C, V, B, NF, typeof(replica_loggers[i]), F, E, K}(
+            atoms, atoms_data, atom_masses, replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i], replica_coords[i], 
             replica_velocities[i], boundary, deepcopy(neighbor_finder), replica_loggers[i],
             force_units, energy_units, k_converted) for i in 1:n_replicas)
@@ -630,7 +637,8 @@ float_type(::Union{System{D, G, T}, ReplicaSystem{D, G, T}}) where {D, G, T} = T
 
 The masses of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
 """
-masses(s::Union{System, ReplicaSystem}) = mass.(s.atoms)
+masses(s::System) = s.masses
+masses(s::ReplicaSystem) = mass.(s.atoms)
 
 # Move an array to the GPU depending on whether the system is on the GPU
 move_array(arr, ::System{D, false}) where {D} = arr
