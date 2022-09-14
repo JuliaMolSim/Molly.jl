@@ -137,7 +137,7 @@ end
 
 function potential_energy(s::System{D, true, T}, neighbors=nothing) where {D, T}
     n_atoms = length(s)
-    pe_vec = CuArray(zeros(T, 1))
+    pe_vec = CUDA.zeros(T, 1)
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0

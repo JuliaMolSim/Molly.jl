@@ -264,8 +264,8 @@ function forces(s::System{D, true, T}, neighbors=nothing;
                 n_threads::Integer=Threads.nthreads()) where {D, T}
     n_atoms = length(s)
     fs = ustrip_vec.(zero(s.coords))
-    fs_mat = CuArray(zeros(T, 3, n_atoms))
-    virial = CuArray(zeros(T, 1))
+    fs_mat = CUDA.zeros(T, 3, n_atoms)
+    virial = CUDA.zeros(T, 1)
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
