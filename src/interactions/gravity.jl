@@ -25,8 +25,7 @@ Gravity(; G=Unitful.G, nl_only=false) = Gravity{typeof(G)}(G, nl_only)
                                  boundary)
     r2 = sum(abs2, dr)
 
-    mi, mj = atom_i.mass, atom_j.mass
-    params = (inter.G, mi, mj)
+    params = (inter.G, mass(atom_i), mass(atom_j))
 
     f = force_divr_nocutoff(inter, r2, inv(r2), params)
     return f * dr
@@ -45,12 +44,10 @@ end
                                             boundary)
     r2 = sum(abs2, dr)
 
-    mi, mj = atom_i.mass, atom_j.mass
-    params = (inter.G, mi, mj)
+    params = (inter.G, mass(atom_i), mass(atom_j))
 
     potential(inter, r2, inv(r2), params)
 end
-
 
 @fastmath function potential(::Gravity, r2, invr2, (G, mi, mj))
     (-G * mi * mj) * √invr2

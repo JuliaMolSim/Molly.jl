@@ -23,7 +23,7 @@
     @test s.boundary == CubicBoundary(3.7146u"nm", 3.7146u"nm", 3.7146u"nm")
     show(devnull, first(s.atoms))
 
-    s.velocities = [velocity(a.mass, temp) .* 0.01 for a in s.atoms]
+    s.velocities = [velocity(mass(a), temp) .* 0.01 for a in s.atoms]
     @time simulate!(s, simulator, n_steps; n_threads=1)
 
     traj = read(temp_fp_pdb, BioStructures.PDB)
@@ -50,7 +50,7 @@ end
         coupling=AndersenThermostat(temp, 10.0f0u"ps"),
     )
 
-    s.velocities = [velocity(a.mass, Float32(temp)) .* 0.01f0 for a in s.atoms]
+    s.velocities = [velocity(mass(a), Float32(temp)) .* 0.01f0 for a in s.atoms]
     @time simulate!(s, simulator, n_steps; n_threads=1)
 end
 

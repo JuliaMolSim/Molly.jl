@@ -35,9 +35,8 @@ end
 function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, sim) where D
     for i in 1:length(sys)
         if rand() < (sim.dt / thermostat.coupling_const)
-            mass = sys.atoms[i].mass
-            sys.velocities[i] = velocity(mass, thermostat.temperature, sys.k;
-                                            dims=n_dimensions(sys))
+            sys.velocities[i] = velocity(mass(sys.atoms[i]), thermostat.temperature, sys.k;
+                                         dims=n_dimensions(sys))
         end
     end
     return sys
