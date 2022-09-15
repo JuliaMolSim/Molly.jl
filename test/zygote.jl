@@ -37,7 +37,7 @@
     end
 
     function test_grad(gpu::Bool, forward::Bool, f32::Bool, pis::Bool,
-                        sis::Bool, obc2::Bool, gbn2::Bool; AT = Array)
+                        sis::Bool, obc2::Bool, gbn2::Bool, array_type)
         n_atoms = 50
         n_steps = 100
         atom_mass = f32 ? 10.0f0 : 10.0
@@ -75,7 +75,7 @@
             collect(16:30),
             collect(31:45),
             fill("", 15),
-            gpu ? AT(angles_inner) : angles_inner,
+            gpu ? array_type(angles_inner) : angles_inner,
         )
         torsions_inner = [PeriodicTorsion(
                 periodicities=[1, 2, 3],
@@ -89,12 +89,12 @@
             collect(21:30),
             collect(31:40),
             fill("", 10),
-            gpu ? AT(torsions_inner) : torsions_inner,
+            gpu ? array_type(torsions_inner) : torsions_inner,
         )
         atoms_setup = [Atom(charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.0f0 : 0.0) for i in 1:n_atoms]
         if obc2
             imp_obc2 = ImplicitSolventOBC(
-                gpu ? AT(atoms_setup) : atoms_setup,
+                gpu ? array_type(atoms_setup) : atoms_setup,
                 [AtomData(element="O") for i in 1:n_atoms],
                 InteractionList2Atoms(bond_is, bond_js, [""], nothing);
                 use_OBC2=true,
@@ -102,7 +102,7 @@
             general_inters = (imp_obc2,)
         elseif gbn2
             imp_gbn2 = ImplicitSolventGBN2(
-                gpu ? AT(atoms_setup) : atoms_setup,
+                gpu ? array_type(atoms_setup) : atoms_setup,
                 [AtomData(element="O") for i in 1:n_atoms],
                 InteractionList2Atoms(bond_is, bond_js, [""], nothing),
             )
@@ -111,7 +111,7 @@
             general_inters = ()
         end
         neighbor_finder = DistanceVecNeighborFinder(
-            nb_matrix=gpu ? AT(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+            nb_matrix=gpu ? array_type(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
             n_steps=10,
             dist_cutoff=f32 ? 1.5f0 : 1.5,
         )
@@ -128,18 +128,18 @@
                 bond_is,
                 bond_js,
                 fill("", length(bonds_inner)),
-                gpu ? AT(bonds_inner) : bonds_inner,
+                gpu ? array_type(bonds_inner) : bonds_inner,
             )
             cs = deepcopy(forward ? coords_dual : coords)
             vs = deepcopy(forward ? velocities_dual : velocities)
 
             s = System(
-                atoms=gpu ? AT(atoms) : atoms,
+                atoms=gpu ? array_type(atoms) : atoms,
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=sis ? (bonds, angles, torsions) : (),
                 general_inters=general_inters,
-                coords=gpu ? AT(cs) : cs,
-                velocities=gpu ? AT(vs) : vs,
+                coords=gpu ? array_type(cs) : cs,
+                velocities=gpu ? array_type(vs) : vs,
                 boundary=boundary,
                 neighbor_finder=neighbor_finder,
                 gpu_diff_safe=true,
@@ -150,41 +150,41 @@
             simulate!(s, simulator, n_steps)
 
             return mean_min_separation(s.coords, boundary)
-        end
+        enu
 
         return loss
     end
 
     runs = [ #                gpu    fwd    f32    pis    sis    obc2   gbn2
-        ("cpu"             , [false, false, false, true , true , false, false], 0.1 , 0.25),
-        ("cpu forward"     , [false, true , false, true , true , false, false], 0.01, 0.01),
-        ("cpu f32"         , [false, false, true , true , true , false, false], 0.2 , 10.0),
-        ("cpu nospecific"  , [false, false, false, true , false, false, false], 0.1 , 0.0 ),
-        ("cpu nopairwise"  , [false, false, false, false, true , false, false], 0.0 , 0.25),
-        ("cpu obc2"        , [false, false, false, true , true , true , false], 0.1 , 0.25),
-        ("cpu gbn2"        , [false, false, false, true , true , false, true ], 0.1 , 0.25),
-        ("cpu gbn2 forward", [false, true , false, true , true , false, true ], 0.02, 0.02),
+        ("cpu"             , [false, false, false, true , true , false, false, Array], 0.1 , 0.25),
+        ("cpu forward"     , [false, true , false, true , true , false, false, Array], 0.01, 0.01),
+        ("cpu f32"         , [false, false, true , true , true , false, false, Array], 0.2 , 10.0),
+        ("cpu nospecific"  , [false, false, false, true , false, false, false, Array], 0.1 , 0.0 ),
+        ("cpu nopairwise"  , [false, false, false, false, true , false, false, Array], 0.0 , 0.25),
+        ("cpu obc2"        , [false, false, false, true , true , true , false, Array], 0.1 , 0.25),
+        ("cpu gbn2"        , [false, false, false, true , true , false, true , Array], 0.1 , 0.25),
+        ("cpu gbn2 forward", [false, true , false, true , true , false, true , Array], 0.02, 0.02),
     ]
     if run_gpu_tests #                         gpu    fwd    f32    pis    sis    obc2   gbn2
         if run_cuda_tests
-            push!(runs, ("cuda"             , [true , false, false, true , true , false, false, AT = CuArray], 0.25, 20.0))
-            push!(runs, ("cuda forward"     , [true , true , false, true , true , false, false, AT = CuArray], 0.01, 0.01))
-            push!(runs, ("cuda f32"         , [true , false, true , true , true , false, false, AT = CuArray], 0.5 , 50.0))
-            push!(runs, ("cuda nospecific"  , [true , false, false, true , false, false, false, AT = CuArray], 0.25, 0.0 ))
-            push!(runs, ("cuda nopairwise"  , [true , false, false, false, true , false, false, AT = CuArray], 0.0 , 10.0))
-            push!(runs, ("cuda obc2"        , [true , false, false, true , true , true , false, AT = CuArray], 0.25, 20.0))
-            push!(runs, ("cuda gbn2"        , [true , false, false, true , true , false, true , AT = CuArray], 0.25, 20.0))
-            push!(runs, ("cuda gbn2 forward", [true , true , false, true , true , false, true , AT = CuArray], 0.02, 0.02))
+            push!(runs, ("cuda"             , [true , false, false, true , true , false, false, CuArray], 0.25, 20.0))
+            push!(runs, ("cuda forward"     , [true , true , false, true , true , false, false, CuArray], 0.01, 0.01))
+            push!(runs, ("cuda f32"         , [true , false, true , true , true , false, false, CuArray], 0.5 , 50.0))
+            push!(runs, ("cuda nospecific"  , [true , false, false, true , false, false, false, CuArray], 0.25, 0.0 ))
+            push!(runs, ("cuda nopairwise"  , [true , false, false, false, true , false, false, CuArray], 0.0 , 10.0))
+            push!(runs, ("cuda obc2"        , [true , false, false, true , true , true , false, CuArray], 0.25, 20.0))
+            push!(runs, ("cuda gbn2"        , [true , false, false, true , true , false, true , CuArray], 0.25, 20.0))
+            push!(runs, ("cuda gbn2 forward", [true , true , false, true , true , false, true , CuArray], 0.02, 0.02))
         end
         if run_rocm_tests
-            push!(runs, ("rocm"             , [true , false, false, true , true , false, false, AT = ROCArray], 0.25, 20.0))
-            push!(runs, ("rocm forward"     , [true , true , false, true , true , false, false, AT = ROCArray], 0.01, 0.01))
-            push!(runs, ("rocm f32"         , [true , false, true , true , true , false, false, AT = ROCArray], 0.5 , 50.0))
-            push!(runs, ("rocm nospecific"  , [true , false, false, true , false, false, false, AT = ROCArray], 0.25, 0.0 ))
-            push!(runs, ("rocm nopairwise"  , [true , false, false, false, true , false, false, AT = ROCArray], 0.0 , 10.0))
-            push!(runs, ("rocm obc2"        , [true , false, false, true , true , true , false, AT = ROCArray], 0.25, 20.0))
-            push!(runs, ("rocm gbn2"        , [true , false, false, true , true , false, true , AT = ROCArray], 0.25, 20.0))
-            push!(runs, ("rocm gbn2 forward", [true , true , false, true , true , false, true , AT = ROCArray], 0.02, 0.02))
+            push!(runs, ("rocm"             , [true , false, false, true , true , false, false, ROCArray], 0.25, 20.0))
+            push!(runs, ("rocm forward"     , [true , true , false, true , true , false, false, ROCArray], 0.01, 0.01))
+            push!(runs, ("rocm f32"         , [true , false, true , true , true , false, false, ROCArray], 0.5 , 50.0))
+            push!(runs, ("rocm nospecific"  , [true , false, false, true , false, false, false, ROCArray], 0.25, 0.0 ))
+            push!(runs, ("rocm nopairwise"  , [true , false, false, false, true , false, false, ROCArray], 0.0 , 10.0))
+            push!(runs, ("rocm obc2"        , [true , false, false, true , true , true , false, ROCArray], 0.25, 20.0))
+            push!(runs, ("rocm gbn2"        , [true , false, false, true , true , false, true , ROCArray], 0.25, 20.0))
+            push!(runs, ("rocm gbn2 forward", [true , true , false, true , true , false, true , ROCArray], 0.02, 0.02))
         end
     end
 

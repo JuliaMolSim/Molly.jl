@@ -56,7 +56,7 @@ CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
 run_rocm_tests = AMDGPU.functional()
 if run_rocm_tests
     AMDGPU.default_device_id!(parse(Int, DEVICE)+1)
-    @info "The GPU tests will be run on device " * string(DEVICE + 1)
+    @info "The GPU tests will be run on device " * string(parse(Int, DEVICE) + 1)
 else
     @warn "The ROCM tests will not be run as a ROCM-enabled device is not availa
 ble"

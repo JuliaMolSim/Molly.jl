@@ -738,7 +738,7 @@ end
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-    function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::Bool; AT = Array)
+    function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::Bool, array_type)
         n_atoms = 400
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
@@ -751,7 +751,7 @@ end
             InteractionList2Atoms(collect(1:2:n_atoms),
             collect(2:2:n_atoms),
             fill("", length(bonds)),
-            gpu ? AT(bonds) : bonds,
+            gpu ? array_type(bonds) : bonds,
         ),)
 
         neighbor_finder = NoNeighborFinder()
@@ -760,7 +760,7 @@ end
         if nl
             if gpu_diff_safe
                 neighbor_finder = DistanceVecNeighborFinder(
-                    nb_matrix=gpu ? AT(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+                    nb_matrix=gpu ? array_type(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
                     n_steps=10,
                     dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
                 )
@@ -776,9 +776,9 @@ end
         show(devnull, neighbor_finder)
 
         if gpu
-            coords = AT(deepcopy(f32 ? starting_coords_f32 : starting_coords))
-            velocities = AT(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-            atoms = AT([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+            coords = array_type(deepcopy(f32 ? starting_coords_f32 : starting_coords))
+            velocities = array_type(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
+            atoms = array_type([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                                   ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
         else
             coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
@@ -810,29 +810,29 @@ end
     end
 
     runs = [
-        ("in-place"        , [false, false, false, false, false]),
-        ("in-place NL"     , [true , false, false, false, false]),
-        ("in-place f32"    , [false, false, false, true , false]),
-        ("out-of-place"    , [false, false, true , false, false]),
-        ("out-of-place NL" , [true , false, true , false, false]),
-        ("out-of-place f32", [false, false, true , true , false]),
+        ("in-place"        , [false, false, false, false, false, Array]),
+        ("in-place NL"     , [true , false, false, false, false, Array]),
+        ("in-place f32"    , [false, false, false, true , false, Array]),
+        ("out-of-place"    , [false, false, true , false, false, Array]),
+        ("out-of-place NL" , [true , false, true , false, false, Array]),
+        ("out-of-place f32", [false, false, true , true , false, Array]),
     ]
     if run_parallel_tests
-        push!(runs, ("in-place parallel"   , [false, true , false, false, false]))
-        push!(runs, ("in-place NL parallel", [true , true , false, false, false]))
+        push!(runs, ("in-place parallel"   , [false, true , false, false, false, Array]))
+        push!(runs, ("in-place NL parallel", [true , true , false, false, false, Array]))
     end
     if run_gpu_tests
         if run_cuda_tests
-            push!(runs, ("out-of-place gpu"       , [false, false, true , false, true, AT = CuArray]))
-            push!(runs, ("out-of-place gpu f32"   , [false, false, true , true , true, AT = CuArray]))
-            push!(runs, ("out-of-place gpu NL"    , [true , false, true , false, true, AT = CuArray]))
-            push!(runs, ("out-of-place gpu f32 NL", [true , false, true , true , true, AT = CuArray]))
+            push!(runs, ("out-of-place gpu"       , [false, false, true , false, true, CuArray]))
+            push!(runs, ("out-of-place gpu f32"   , [false, false, true , true , true, CuArray]))
+            push!(runs, ("out-of-place gpu NL"    , [true , false, true , false, true, CuArray]))
+            push!(runs, ("out-of-place gpu f32 NL", [true , false, true , true , true, CuArray]))
         end
         if run_rocm_tests
-            push!(runs, ("out-of-place gpu"       , [false, false, true , false, true, AT = ROCArray]))
-            push!(runs, ("out-of-place gpu f32"   , [false, false, true , true , true, AT = ROCArray]))
-            push!(runs, ("out-of-place gpu NL"    , [true , false, true , false, true, AT = ROCArray]))
-            push!(runs, ("out-of-place gpu f32 NL", [true , false, true , true , true, AT = ROCArray]))
+            push!(runs, ("out-of-place gpu"       , [false, false, true , false, true, ROCArray]))
+            push!(runs, ("out-of-place gpu f32"   , [false, false, true , true , true, ROCArray]))
+            push!(runs, ("out-of-place gpu NL"    , [true , false, true , false, true, ROCArray]))
+            push!(runs, ("out-of-place gpu f32 NL", [true , false, true , true , true, ROCArray]))
         end
     end
 
