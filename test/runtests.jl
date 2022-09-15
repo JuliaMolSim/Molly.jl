@@ -70,7 +70,7 @@ if run_gpu_tests
     if run_cuda_tests
         push!(gpu_array_types, CuArray)
     end
-    if run_cuda_tests
+    if run_rocm_tests
         push!(gpu_array_types, ROCArray)
     end
 end
@@ -90,8 +90,8 @@ if GROUP == "All"
         undefined_exports=false,
     )
 
-    include("basic.jl")
-    include("interactions.jl")
+    #include("basic.jl")
+    #include("interactions.jl")
     include("minimization.jl")
     include("simulation.jl")
     include("agent.jl")
