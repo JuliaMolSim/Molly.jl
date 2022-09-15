@@ -58,8 +58,7 @@ if run_rocm_tests
     AMDGPU.default_device_id!(parse(Int, DEVICE)+1)
     @info "The GPU tests will be run on device " * string(parse(Int, DEVICE) + 1)
 else
-    @warn "The ROCM tests will not be run as a ROCM-enabled device is not availa
-ble"
+    @warn "The ROCM tests will not be run as a ROCM-enabled device is not available"
 end
 
 AMDGPU.allowscalar(false)
@@ -90,8 +89,8 @@ if GROUP == "All"
         undefined_exports=false,
     )
 
-    #include("basic.jl")
-    #include("interactions.jl")
+    include("basic.jl")
+    include("interactions.jl")
     include("minimization.jl")
     include("simulation.jl")
     include("agent.jl")

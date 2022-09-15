@@ -662,9 +662,9 @@ masses(s::Union{System, ReplicaSystem}) = mass.(s.atoms)
 
 # Move an array to the GPU depending on whether the system is on the GPU
 move_array(arr, ::System{D, G, T, false}) where {D, G, T} = arr
-move_array(arr::AT, ::System{D, G, T, true }) where {AT <: Union{CuArray,
-                                                                 ROCArray},
-                                                     D, G, T} = AT(arr)
+function move_array(arr, sys::System{D, G, T, true }) where {D, G, T}
+    find_array_type(sys.coords)(arr)
+end
 
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = eltype(s.atoms)
 
