@@ -114,7 +114,7 @@ function DistanceVecNeighborFinder(;
         is = CuArray(hcat([collect(1:n_atoms) for i in 1:n_atoms]...))
         js = CuArray(permutedims(is, (2, 1)))
         m14 = CuArray(matrix_14)
-    elsif isa(nb_matrix, ROCArray)
+    elseif isa(nb_matrix, ROCArray)
         is = ROCArray(hcat([collect(1:n_atoms) for i in 1:n_atoms]...))
         js = ROCArray(permutedims(is, (2, 1)))
         m14 = ROCArray(matrix_14)
