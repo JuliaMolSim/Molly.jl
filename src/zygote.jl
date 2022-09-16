@@ -922,51 +922,6 @@ end
     return y, bc_fwd_back
 end
 
-@inline function Zygote.broadcast_forward(f::typeof(get_f1),
-                                            arg1::AbstractArray{<:SpecificForce2Atoms})
-    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=y1, f2=zero(y1)), ȳ)))
-end
-
-@inline function Zygote.broadcast_forward(f::typeof(get_f1),
-                                            arg1::AbstractArray{<:SpecificForce3Atoms})
-    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=y1, f2=zero(y1), f3=zero(y1)), ȳ)))
-end
-
-@inline function Zygote.broadcast_forward(f::typeof(get_f1),
-                                            arg1::AbstractArray{<:SpecificForce4Atoms})
-    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=y1, f2=zero(y1), f3=zero(y1), f4=zero(y1)), ȳ)))
-end
-
-@inline function Zygote.broadcast_forward(f::typeof(get_f2),
-                                            arg1::AbstractArray{<:SpecificForce2Atoms})
-    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=y1), ȳ)))
-end
-
-@inline function Zygote.broadcast_forward(f::typeof(get_f2),
-                                            arg1::AbstractArray{<:SpecificForce3Atoms})
-    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=y1, f3=zero(y1)), ȳ)))
-end
-
-@inline function Zygote.broadcast_forward(f::typeof(get_f2),
-                                            arg1::AbstractArray{<:SpecificForce4Atoms})
-    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=y1, f3=zero(y1), f4=zero(y1)), ȳ)))
-end
-
-@inline function Zygote.broadcast_forward(f::typeof(get_f3),
-                                            arg1::AbstractArray{<:SpecificForce3Atoms})
-    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=zero(y1), f3=y1), ȳ)))
-end
-
-@inline function Zygote.broadcast_forward(f::typeof(get_f3),
-                                            arg1::AbstractArray{<:SpecificForce4Atoms})
-    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=zero(y1), f3=y1, f4=zero(y1)), ȳ)))
-end
-
-@inline function Zygote.broadcast_forward(f::typeof(get_f4),
-                                            arg1::AbstractArray{<:SpecificForce4Atoms})
-    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (f1=zero(y1), f2=zero(y1), f3=zero(y1), f4=y1), ȳ)))
-end
-
 @inline function Zygote.broadcast_forward(f::typeof(get_I),
                                             arg1::AbstractArray{<:BornRadiiGBN2LoopResult})
     return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (I=y1, I_grad=zero(y1)), ȳ)))
@@ -1013,9 +968,8 @@ end
 
 # Use fast broadcast path on CPU
 for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec, :wrap_coords,
-            :get_f1, :get_f2, :get_f3, :get_f4, :born_radii_loop_OBC, :get_I, :get_I_grad,
-            :born_radii_loop_GBN2, :get_bi, :get_bj, :get_fi, :get_fj, :gb_force_loop_1,
-            :gb_force_loop_2, :gb_energy_loop)
+            :born_radii_loop_OBC, :get_I, :get_I_grad, :born_radii_loop_GBN2, :get_bi, :get_bj,
+            :get_fi, :get_fj, :gb_force_loop_1, :gb_force_loop_2, :gb_energy_loop)
     @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
     # Avoid ambiguous dispatch
     @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)

@@ -59,16 +59,6 @@ function force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14)
     return force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)
 end
 
-@inline @inbounds function force!(fs, inter, s::System, i::Integer, j::Integer, force_units, weight_14::Bool=false)
-    dr = vector(s.coords[i], s.coords[j], s.boundary)
-    fdr = force(inter, dr, s.coords[i], s.coords[j], s.atoms[i], s.atoms[j], s.boundary, weight_14)
-    check_force_units(fdr, force_units)
-    fdr_ustrip = ustrip.(fdr)
-    fs[i] -= fdr_ustrip
-    fs[j] += fdr_ustrip
-    return nothing
-end
-
 """
     SpecificForce1Atoms(f1)
 
@@ -134,43 +124,6 @@ Base.:+(x::SpecificForce2Atoms, y::SpecificForce2Atoms) = SpecificForce2Atoms(x.
 Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3)
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 
-get_f1(x) = x.f1
-get_f2(x) = x.f2
-get_f3(x) = x.f3
-get_f4(x) = x.f4
-
-@views function specific_force(inter_list::InteractionList1Atoms, coords, boundary, force_units, n_atoms)
-    sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], (boundary,)))
-    fis = get_f1.(sparse_fs)
-    check_force_units(first(first(fis)), force_units)
-    return sparsevec(inter_list.is, fis, n_atoms)
-end
-
-@views function specific_force(inter_list::InteractionList2Atoms, coords, boundary, force_units, n_atoms)
-    sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js], (boundary,)))
-    fis, fjs = get_f1.(sparse_fs), get_f2.(sparse_fs)
-    check_force_units(first(first(fis)), force_units)
-    return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms)
-end
-
-@views function specific_force(inter_list::InteractionList3Atoms, coords, boundary, force_units, n_atoms)
-    sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
-                                coords[inter_list.ks], (boundary,)))
-    fis, fjs, fks = get_f1.(sparse_fs), get_f2.(sparse_fs), get_f3.(sparse_fs)
-    check_force_units(first(first(fis)), force_units)
-    return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) +
-           sparsevec(inter_list.ks, fks, n_atoms)
-end
-
-@views function specific_force(inter_list::InteractionList4Atoms, coords, boundary, force_units, n_atoms)
-    sparse_fs = Array(force.(inter_list.inters, coords[inter_list.is], coords[inter_list.js],
-                                coords[inter_list.ks], coords[inter_list.ls], (boundary,)))
-    fis, fjs, fks, fls = get_f1.(sparse_fs), get_f2.(sparse_fs), get_f3.(sparse_fs), get_f4.(sparse_fs)
-    check_force_units(first(first(fis)), force_units)
-    return sparsevec(inter_list.is, fis, n_atoms) + sparsevec(inter_list.js, fjs, n_atoms) +
-           sparsevec(inter_list.ks, fks, n_atoms) + sparsevec(inter_list.ls, fls, n_atoms)
-end
-
 """
     forces(system, neighbors=nothing; n_threads=Threads.nthreads())
 
@@ -189,69 +142,108 @@ Custom general interaction types should implement this function.
 """
 function forces(s::System{D, false}, neighbors=nothing;
                 n_threads::Integer=Threads.nthreads()) where D
-    n_atoms = length(s)
-
-    if n_threads > 1
-        fs_chunks = [ustrip_vec.(zero(s.coords)) for i in 1:n_threads]
-        for inter in values(s.pairwise_inters)
-            if inter.nl_only
-                if isnothing(neighbors)
-                    error("An interaction uses the neighbor list but neighbors is nothing")
-                end
-                n_neighbors = length(neighbors)
-                basesize = max(1, Int(ceil(n_neighbors / n_threads)))
-                chunks = [i:min(i + basesize - 1, n_neighbors) for i in 1:basesize:n_neighbors]
-                Threads.@threads for (id, rng) in collect(enumerate(chunks))
-                    for ni in rng
-                        i, j, w = neighbors.list[ni]
-                        force!(fs_chunks[id], inter, s, i, j, s.force_units, w)
-                    end
-                end
-            else
-                basesize = max(1, Int(ceil(n_atoms / n_threads)))
-                chunks = [i:min(i + basesize - 1, n_atoms) for i in 1:basesize:n_atoms]
-                Threads.@threads for (id, rng) in collect(enumerate(chunks))
-                    for i in rng
-                        for j in 1:(i - 1)
-                            force!(fs_chunks[id], inter, s, i, j, s.force_units)
-                        end
-                    end
-                end
-            end
-        end
-        fs = sum(fs_chunks)
-    else
-        fs = ustrip_vec.(zero(s.coords))
-        for inter in values(s.pairwise_inters)
-            if inter.nl_only
-                if isnothing(neighbors)
-                    error("An interaction uses the neighbor list but neighbors is nothing")
-                end
-                for ni in 1:neighbors.n
-                    i, j, w = neighbors.list[ni]
-                    force!(fs, inter, s, i, j, s.force_units, w)
-                end
-            else
-                for i in 1:n_atoms
-                    for j in 1:(i - 1)
-                        force!(fs, inter, s, i, j, s.force_units)
-                    end
-                end
-            end
-        end
-    end
-
-    for inter_list in values(s.specific_inter_lists)
-        sparse_vec = specific_force(inter_list, s.coords, s.boundary, s.force_units, n_atoms)
-        fs += ustrip_vec.(Array(sparse_vec))
-    end
+    fs = forces_pair_spec(s, neighbors, n_threads)
 
     for inter in values(s.general_inters)
         # Force type not checked
-        fs += ustrip_vec.(forces(inter, s, neighbors))
+        fs += forces(inter, s, neighbors)
     end
 
+    return fs
+end
+
+function forces_pair_spec(s, neighbors, n_threads)
+    fs = ustrip_vec.(zero(s.coords))
+    forces_pair_spec!(fs, s.coords, s.atoms, s.pairwise_inters, s.specific_inter_lists,
+                      s.boundary, s.force_units, neighbors, n_threads)
     return fs * s.force_units
+end
+
+function forces_pair_spec!(fs, coords, atoms, pairwise_inters, specific_inter_lists,
+                           boundary, force_units, neighbors, n_threads) where D
+    n_atoms = length(coords)
+
+    pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(pairwise_inters))
+    if length(pairwise_inters_nonl) > 0
+        for i in 1:n_atoms
+            for j in (i + 1):n_atoms
+                dr = vector(coords[i], coords[j], boundary)
+                f = force(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
+                          atoms[j], boundary)
+                for inter in pairwise_inters_nonl[2:end]
+                    f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
+                end
+                check_force_units(f, force_units)
+                f_ustrip = ustrip.(f)
+                fs[i] -= f_ustrip
+                fs[j] += f_ustrip
+            end
+        end
+    end
+
+    pairwise_inters_nl = filter(inter -> inter.nl_only, values(pairwise_inters))
+    if length(pairwise_inters_nl) > 0
+        if isnothing(neighbors)
+            error("An interaction uses the neighbor list but neighbors is nothing")
+        end
+        for ni in 1:length(neighbors)
+            i, j, weight_14 = neighbors.list[ni]
+            dr = vector(coords[i], coords[j], boundary)
+            f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
+                      atoms[j], boundary)
+            for inter in pairwise_inters_nl[2:end]
+                f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
+            end
+            check_force_units(f, force_units)
+            f_ustrip = ustrip.(f)
+            fs[i] -= f_ustrip
+            fs[j] += f_ustrip
+        end
+    end
+
+    for inter_list in values(specific_inter_lists)
+        if inter_list isa InteractionList1Atoms
+            for (i, inter) in zip(inter_list.is, inter_list.inters)
+                sf = force(inter, coords[i], boundary)
+                check_force_units(sf.f1, force_units)
+                fs[i] += ustrip.(sf.f1)
+            end
+        elseif inter_list isa InteractionList2Atoms
+            for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
+                sf = force(inter, coords[i], coords[j], boundary)
+                check_force_units(sf.f1, force_units)
+                check_force_units(sf.f2, force_units)
+                fs[i] += ustrip.(sf.f1)
+                fs[j] += ustrip.(sf.f2)
+            end
+        elseif inter_list isa InteractionList3Atoms
+            for (i, j, k, inter) in zip(inter_list.is, inter_list.js, inter_list.ks,
+                                        inter_list.inters)
+                sf = force(inter, coords[i], coords[j], coords[k], boundary)
+                check_force_units(sf.f1, force_units)
+                check_force_units(sf.f2, force_units)
+                check_force_units(sf.f3, force_units)
+                fs[i] += ustrip.(sf.f1)
+                fs[j] += ustrip.(sf.f2)
+                fs[k] += ustrip.(sf.f3)
+            end
+        elseif inter_list isa InteractionList4Atoms
+            for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks,
+                                           inter_list.ls, inter_list.inters)
+                sf = force(inter, coords[i], coords[j], coords[k], coords[l], boundary)
+                check_force_units(sf.f1, force_units)
+                check_force_units(sf.f2, force_units)
+                check_force_units(sf.f3, force_units)
+                check_force_units(sf.f4, force_units)
+                fs[i] += ustrip.(sf.f1)
+                fs[j] += ustrip.(sf.f2)
+                fs[k] += ustrip.(sf.f3)
+                fs[l] += ustrip.(sf.f4)
+            end
+        end
+    end
+
+    return nothing
 end
 
 function cuda_threads_blocks(n_neighbors)
@@ -276,12 +268,17 @@ function forces(s::System{D, true, T}, neighbors=nothing;
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
-    if length(pairwise_inters_nl) > 0 && length(neighbors) > 0
-        nbs = @view neighbors.list[1:neighbors.n]
-        n_threads, n_blocks = cuda_threads_blocks(length(neighbors))
-        CUDA.@sync @cuda threads=n_threads blocks=n_blocks pairwise_force_kernel!(
-                fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-                nbs, Val(s.force_units), Val(n_threads))
+    if length(pairwise_inters_nl) > 0
+        if isnothing(neighbors)
+            error("An interaction uses the neighbor list but neighbors is nothing")
+        end
+        if length(neighbors) > 0
+            nbs = @view neighbors.list[1:neighbors.n]
+            n_threads, n_blocks = cuda_threads_blocks(length(neighbors))
+            CUDA.@sync @cuda threads=n_threads blocks=n_blocks pairwise_force_kernel!(
+                    fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
+                    nbs, Val(s.force_units), Val(n_threads))
+        end
     end
 
     for inter_list in values(s.specific_inter_lists)
