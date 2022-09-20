@@ -159,19 +159,20 @@ function forces_pair_spec(s, neighbors, n_threads)
     return fs * s.force_units
 end
 
-function forces_pair_spec!(fs, coords, atoms, pairwise_inters, specific_inter_lists,
-                           boundary, force_units, neighbors, n_threads) where D
-    n_atoms = length(coords)
-
-    pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(pairwise_inters))
-    if length(pairwise_inters_nonl) > 0
+@inbounds function forces_pair_spec!(fs, coords, atoms, pairwise_inters, specific_inter_lists,
+                                     boundary, force_units, neighbors, n_threads) where D
+    if sum(inter -> !inter.nl_only, pairwise_inters) > 0
+        n_atoms = length(coords)
         for i in 1:n_atoms
             for j in (i + 1):n_atoms
                 dr = vector(coords[i], coords[j], boundary)
-                f = force(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
-                          atoms[j], boundary)
-                for inter in pairwise_inters_nonl[2:end]
-                    f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
+                f = sum(pairwise_inters) do inter
+                    if !inter.nl_only
+                        return force(inter, dr, coords[i], coords[j], atoms[i],
+                                     atoms[j], boundary)
+                    else
+                        return zero(fs[1])
+                    end
                 end
                 check_force_units(f, force_units)
                 f_ustrip = ustrip.(f)
@@ -181,18 +182,20 @@ function forces_pair_spec!(fs, coords, atoms, pairwise_inters, specific_inter_li
         end
     end
 
-    pairwise_inters_nl = filter(inter -> inter.nl_only, values(pairwise_inters))
-    if length(pairwise_inters_nl) > 0
+    if sum(inter -> inter.nl_only, pairwise_inters) > 0
         if isnothing(neighbors)
             error("An interaction uses the neighbor list but neighbors is nothing")
         end
         for ni in 1:length(neighbors)
             i, j, weight_14 = neighbors.list[ni]
             dr = vector(coords[i], coords[j], boundary)
-            f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
-                      atoms[j], boundary)
-            for inter in pairwise_inters_nl[2:end]
-                f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
+            f = sum(pairwise_inters) do inter
+                if inter.nl_only
+                    return force(inter, dr, coords[i], coords[j], atoms[i],
+                                 atoms[j], boundary, weight_14)
+                else
+                    return zero(fs[1])
+                end
             end
             check_force_units(f, force_units)
             f_ustrip = ustrip.(f)
