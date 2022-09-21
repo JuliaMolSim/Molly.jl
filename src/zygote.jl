@@ -27,14 +27,35 @@ function Base.:-(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
     Atom{T, T, T, T}(0, x.charge - y.charge, x.mass - y.mass, x.σ - y.σ, x.ϵ - y.ϵ, false)
 end
 
-# For inject_gradients
-function Base.:+(x::NamedTuple{(:atoms, :atoms_data, :pairwise_inters, :specific_inter_lists,
-                    :general_inters, :constraints, :coords, :velocities, :boundary,
-                    :neighbor_finder, :loggers, :force_units, :energy_units, :k),
-                    Tuple{Nothing, Vector{Nothing}, Nothing, Nothing, Nothing, Nothing, Nothing,
-                    Nothing, SVector{D, T}, Nothing, Nothing, Nothing, Nothing, Nothing}},
-                    y::Base.RefValue{Any}) where {D, T}
-    y
+function Base.:+(r::Base.RefValue{Any}, y::NamedTuple{(:atoms, :atoms_data, :masses,
+                 :pairwise_inters, :specific_inter_lists, :general_inters, :constraints,
+                 :coords, :velocities, :boundary, :neighbor_finder, :loggers, :force_units,
+                 :energy_units, :k)}) where {D, T}
+    x = r.x
+    (
+        atoms=Zygote.accum(x.atoms, y.atoms),
+        atoms_data=Zygote.accum(x.atoms_data, y.atoms_data),
+        masses=Zygote.accum(x.masses, y.masses),
+        pairwise_inters=Zygote.accum(x.pairwise_inters, y.pairwise_inters),
+        specific_inter_lists=Zygote.accum(x.specific_inter_lists, y.specific_inter_lists),
+        general_inters=Zygote.accum(x.general_inters, y.general_inters),
+        constraints=Zygote.accum(x.constraints, y.constraints),
+        coords=Zygote.accum(x.coords, y.coords),
+        velocities=Zygote.accum(x.velocities, y.velocities),
+        boundary=nothing,
+        neighbor_finder=nothing,
+        loggers=nothing,
+        force_units=nothing,
+        energy_units=nothing,
+        k=Zygote.accum(x.k, y.k),
+    )
+end
+
+function Base.:+(y::NamedTuple{(:atoms, :atoms_data, :masses,
+                 :pairwise_inters, :specific_inter_lists, :general_inters, :constraints,
+                 :coords, :velocities, :boundary, :neighbor_finder, :loggers, :force_units,
+                 :energy_units, :k)}, r::Base.RefValue{Any}) where {D, T}
+    return r + y
 end
 
 function Zygote.accum(x::LennardJones{S, C, W, WS, F, E}, y::LennardJones{S, C, W, WS, F, E}) where {S, C, W, WS, F, E}

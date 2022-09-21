@@ -169,7 +169,7 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
             Const(neighbors),
             Const(n_threads),
         )
-        d_sys = System(
+        d_sys = Tangent{System}(
             atoms=d_atoms,
             coords=d_coords,
             boundary=CubicBoundary(z, z, z),
