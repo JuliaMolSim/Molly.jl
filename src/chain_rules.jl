@@ -133,3 +133,48 @@ function ChainRulesCore.rrule(::typeof(mean), arr::AbstractArray{SVector{D, T}})
     end
     return Y, mean_pullback
 end
+
+function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, neighbors,
+                              n_threads) where {D, G, T}
+    Y = forces_pair_spec(sys, neighbors, n_threads)
+    if sys.force_units != NoUnits
+        error("Taking gradients through simulations is not compatible with units, " *
+              "system force units are $(sys.force_units)")
+    end
+    function forces_pair_spec_pullback(d_forces)
+        fs = zero(sys.coords)
+        z = zero(T)
+        d_coords = zero(sys.coords)
+        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:length(sys)]
+        pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(sys.pairwise_inters))
+        pairwise_inters_nl   = filter(inter ->  inter.nl_only, values(sys.pairwise_inters))
+        sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
+        sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
+        sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
+        sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
+        Enzyme.autodiff(
+            forces_pair_spec!,
+            Const,
+            Duplicated(fs, d_forces),
+            Duplicated(sys.coords, d_coords),
+            Duplicated(sys.atoms, d_atoms),
+            Const(pairwise_inters_nonl),
+            Const(pairwise_inters_nl),
+            Const(sils_1_atoms),
+            Const(sils_2_atoms),
+            Const(sils_3_atoms),
+            Const(sils_4_atoms),
+            Const(sys.boundary),
+            Const(sys.force_units),
+            Const(neighbors),
+            Const(n_threads),
+        )
+        d_sys = System(
+            atoms=d_atoms,
+            coords=d_coords,
+            boundary=CubicBoundary(z, z, z),
+        )
+        return NoTangent(), d_sys, NoTangent(), NoTangent()
+    end
+    return Y, forces_pair_spec_pullback
+end

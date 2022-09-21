@@ -156,14 +156,19 @@ function forces_pair_spec(s, neighbors, n_threads)
     fs = ustrip_vec.(zero(s.coords))
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     pairwise_inters_nl   = filter(inter ->  inter.nl_only, values(s.pairwise_inters))
+    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(s.specific_inter_lists))
+    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(s.specific_inter_lists))
+    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(s.specific_inter_lists))
+    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(s.specific_inter_lists))
     forces_pair_spec!(fs, s.coords, s.atoms, pairwise_inters_nonl, pairwise_inters_nl,
-                      s.specific_inter_lists, s.boundary, s.force_units, neighbors, n_threads)
+                      sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, s.boundary,
+                      s.force_units, neighbors, n_threads)
     return fs * s.force_units
 end
 
-@inbounds function forces_pair_spec!(fs, coords, atoms,  pairwise_inters_nonl, pairwise_inters_nl,
-                                     specific_inter_lists, boundary, force_units, neighbors,
-                                     n_threads) where D
+@inbounds function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
+                                     sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
+                                     boundary, force_units, neighbors, n_threads)
     if length(pairwise_inters_nonl) > 0
         n_atoms = length(coords)
         for i in 1:n_atoms
@@ -199,45 +204,48 @@ end
         end
     end
 
-    for inter_list in values(specific_inter_lists)
-        if inter_list isa InteractionList1Atoms
-            for (i, inter) in zip(inter_list.is, inter_list.inters)
-                sf = force(inter, coords[i], boundary)
-                check_force_units(sf.f1, force_units)
-                fs[i] += ustrip.(sf.f1)
-            end
-        elseif inter_list isa InteractionList2Atoms
-            for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
-                sf = force(inter, coords[i], coords[j], boundary)
-                check_force_units(sf.f1, force_units)
-                check_force_units(sf.f2, force_units)
-                fs[i] += ustrip.(sf.f1)
-                fs[j] += ustrip.(sf.f2)
-            end
-        elseif inter_list isa InteractionList3Atoms
-            for (i, j, k, inter) in zip(inter_list.is, inter_list.js, inter_list.ks,
-                                        inter_list.inters)
-                sf = force(inter, coords[i], coords[j], coords[k], boundary)
-                check_force_units(sf.f1, force_units)
-                check_force_units(sf.f2, force_units)
-                check_force_units(sf.f3, force_units)
-                fs[i] += ustrip.(sf.f1)
-                fs[j] += ustrip.(sf.f2)
-                fs[k] += ustrip.(sf.f3)
-            end
-        elseif inter_list isa InteractionList4Atoms
-            for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks,
-                                           inter_list.ls, inter_list.inters)
-                sf = force(inter, coords[i], coords[j], coords[k], coords[l], boundary)
-                check_force_units(sf.f1, force_units)
-                check_force_units(sf.f2, force_units)
-                check_force_units(sf.f3, force_units)
-                check_force_units(sf.f4, force_units)
-                fs[i] += ustrip.(sf.f1)
-                fs[j] += ustrip.(sf.f2)
-                fs[k] += ustrip.(sf.f3)
-                fs[l] += ustrip.(sf.f4)
-            end
+    for inter_list in sils_1_atoms
+        for (i, inter) in zip(inter_list.is, inter_list.inters)
+            sf = force(inter, coords[i], boundary)
+            check_force_units(sf.f1, force_units)
+            fs[i] += ustrip.(sf.f1)
+        end
+    end
+
+    for inter_list in sils_2_atoms
+        for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
+            sf = force(inter, coords[i], coords[j], boundary)
+            check_force_units(sf.f1, force_units)
+            check_force_units(sf.f2, force_units)
+            fs[i] += ustrip.(sf.f1)
+            fs[j] += ustrip.(sf.f2)
+        end
+    end
+
+    for inter_list in sils_3_atoms
+        for (i, j, k, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.inters)
+            sf = force(inter, coords[i], coords[j], coords[k], boundary)
+            check_force_units(sf.f1, force_units)
+            check_force_units(sf.f2, force_units)
+            check_force_units(sf.f3, force_units)
+            fs[i] += ustrip.(sf.f1)
+            fs[j] += ustrip.(sf.f2)
+            fs[k] += ustrip.(sf.f3)
+        end
+    end
+
+    for inter_list in sils_4_atoms
+        for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
+                                       inter_list.inters)
+            sf = force(inter, coords[i], coords[j], coords[k], coords[l], boundary)
+            check_force_units(sf.f1, force_units)
+            check_force_units(sf.f2, force_units)
+            check_force_units(sf.f3, force_units)
+            check_force_units(sf.f4, force_units)
+            fs[i] += ustrip.(sf.f1)
+            fs[j] += ustrip.(sf.f2)
+            fs[k] += ustrip.(sf.f3)
+            fs[l] += ustrip.(sf.f4)
         end
     end
 
