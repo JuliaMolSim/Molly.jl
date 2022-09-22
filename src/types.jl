@@ -96,6 +96,86 @@ interaction_type(::InteractionList2Atoms{I, T}) where {I, T} = eltype(T)
 interaction_type(::InteractionList3Atoms{I, T}) where {I, T} = eltype(T)
 interaction_type(::InteractionList4Atoms{I, T}) where {I, T} = eltype(T)
 
+function Base.zero(inter_list::InteractionList1Atoms{I, T}) where {I, T}
+    n_inters = length(inter_list.is)
+    return InteractionList1Atoms{I, T}(
+        fill(0 , n_inters),
+        fill("", n_inters),
+        zero.(inter_list.inters),
+    )
+end
+
+function Base.zero(inter_list::InteractionList2Atoms{I, T}) where {I, T}
+    n_inters = length(inter_list.is)
+    return InteractionList2Atoms{I, T}(
+        fill(0 , n_inters),
+        fill(0 , n_inters),
+        fill("", n_inters),
+        zero.(inter_list.inters),
+    )
+end
+
+function Base.zero(inter_list::InteractionList3Atoms{I, T}) where {I, T}
+    n_inters = length(inter_list.is)
+    return InteractionList3Atoms{I, T}(
+        fill(0 , n_inters),
+        fill(0 , n_inters),
+        fill(0 , n_inters),
+        fill("", n_inters),
+        zero.(inter_list.inters),
+    )
+end
+
+function Base.zero(inter_list::InteractionList4Atoms{I, T}) where {I, T}
+    n_inters = length(inter_list.is)
+    return InteractionList4Atoms{I, T}(
+        fill(0 , n_inters),
+        fill(0 , n_inters),
+        fill(0 , n_inters),
+        fill(0 , n_inters),
+        fill("", n_inters),
+        zero.(inter_list.inters),
+    )
+end
+
+function Base.:+(il1::InteractionList1Atoms{I, T}, il2::InteractionList1Atoms{I, T}) where {I, T}
+    return InteractionList1Atoms{I, T}(
+        il1.is,
+        il1.types,
+        il1.inters .+ il2.inters,
+    )
+end
+
+function Base.:+(il1::InteractionList2Atoms{I, T}, il2::InteractionList2Atoms{I, T}) where {I, T}
+    return InteractionList2Atoms{I, T}(
+        il1.is,
+        il1.js,
+        il1.types,
+        il1.inters .+ il2.inters,
+    )
+end
+
+function Base.:+(il1::InteractionList3Atoms{I, T}, il2::InteractionList3Atoms{I, T}) where {I, T}
+    return InteractionList3Atoms{I, T}(
+        il1.is,
+        il1.js,
+        il1.ks,
+        il1.types,
+        il1.inters .+ il2.inters,
+    )
+end
+
+function Base.:+(il1::InteractionList4Atoms{I, T}, il2::InteractionList4Atoms{I, T}) where {I, T}
+    return InteractionList4Atoms{I, T}(
+        il1.is,
+        il1.js,
+        il1.ks,
+        il1.ls,
+        il1.types,
+        il1.inters .+ il2.inters,
+    )
+end
+
 """
     Atom(; <keyword arguments>)
 

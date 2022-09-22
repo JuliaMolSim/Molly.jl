@@ -31,6 +31,24 @@ function PeriodicTorsion(; periodicities, phases, ks, proper::Bool=true,
                                     tuple(ks_pad...), proper)
 end
 
+function Base.zero(::PeriodicTorsion{N, T, E}) where {N, T, E}
+    return PeriodicTorsion{N, T, E}(
+        ntuple(_ -> 0      , N),
+        ntuple(_ -> zero(T), N),
+        ntuple(_ -> zero(E), N),
+        false,
+    )
+end
+
+function Base.:+(p1::PeriodicTorsion{N, T, E}, p2::PeriodicTorsion{N, T, E}) where {N, T, E}
+    return PeriodicTorsion{N, T, E}(
+        p1.periodicities,
+        p1.phases .+ p2.phases,
+        p1.ks .+ p2.ks,
+        p1.proper,
+    )
+end
+
 @inline @inbounds function force(d::PeriodicTorsion, coords_i, coords_j, coords_k,
                                     coords_l, boundary)
     ab = vector(coords_i, coords_j, boundary)

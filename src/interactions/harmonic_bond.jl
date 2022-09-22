@@ -16,6 +16,10 @@ end
 
 HarmonicBond(; k, r0) = HarmonicBond{typeof(k), typeof(r0)}(k, r0)
 
+Base.zero(::HarmonicBond{K, D}) where {K, D} = HarmonicBond(k=zero(K), r0=zero(D))
+
+Base.:+(b1::HarmonicBond, b2::HarmonicBond) = HarmonicBond(k=b1.k + b2.k, r0=b1.r0 + b2.r0)
+
 @inline @inbounds function force(b::HarmonicBond, coord_i, coord_j, boundary)
     ab = vector(coord_i, coord_j, boundary)
     c = b.k * (norm(ab) - b.r0)

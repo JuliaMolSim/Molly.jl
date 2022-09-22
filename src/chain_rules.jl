@@ -49,6 +49,39 @@ function ChainRulesCore.rrule(T::Type{<:PairwiseInteraction}, vs...)
     return Y, PairwiseInteraction_pullback
 end
 
+function ChainRulesCore.rrule(T::Type{<:InteractionList1Atoms}, vs...)
+    Y = T(vs...)
+    function InteractionList1Atoms_pullback(Ȳ)
+        return NoTangent(), NoTangent(), NoTangent(), Ȳ.inters
+    end
+    return Y, InteractionList1Atoms_pullback
+end
+
+function ChainRulesCore.rrule(T::Type{<:InteractionList2Atoms}, vs...)
+    Y = T(vs...)
+    function InteractionList2Atoms_pullback(Ȳ)
+        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), Ȳ.inters
+    end
+    return Y, InteractionList2Atoms_pullback
+end
+
+function ChainRulesCore.rrule(T::Type{<:InteractionList3Atoms}, vs...)
+    Y = T(vs...)
+    function InteractionList3Atoms_pullback(Ȳ)
+        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), Ȳ.inters
+    end
+    return Y, InteractionList3Atoms_pullback
+end
+
+function ChainRulesCore.rrule(T::Type{<:InteractionList4Atoms}, vs...)
+    Y = T(vs...)
+    function InteractionList4Atoms_pullback(Ȳ)
+        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(),
+               Ȳ.inters
+    end
+    return Y, InteractionList4Atoms_pullback
+end
+
 function ChainRulesCore.rrule(T::Type{<:SpecificForce1Atoms}, vs...)
     Y = T(vs...)
     function SpecificForce1Atoms_pullback(Ȳ)
@@ -134,6 +167,32 @@ function ChainRulesCore.rrule(::typeof(mean), arr::AbstractArray{SVector{D, T}})
     return Y, mean_pullback
 end
 
+function ChainRulesCore.rrule(T::Type{<:HarmonicBond}, vs...)
+    Y = T(vs...)
+    function HarmonicBond_pullback(Ȳ)
+        return NoTangent(), Ȳ.k, Ȳ.r0
+    end
+    return Y, HarmonicBond_pullback
+end
+
+function ChainRulesCore.rrule(T::Type{<:HarmonicAngle}, vs...)
+    Y = T(vs...)
+    function HarmonicAngle_pullback(Ȳ)
+        return NoTangent(), Ȳ.k, Ȳ.θ0
+    end
+    return Y, HarmonicAngle_pullback
+end
+
+function ChainRulesCore.rrule(T::Type{<:PeriodicTorsion}, vs...)
+    Y = T(vs...)
+    function PeriodicTorsion_pullback(Ȳ)
+        return NoTangent(), NoTangent(), Ȳ.phases, Ȳ.ks, NoTangent()
+    end
+    return Y, PeriodicTorsion_pullback
+end
+
+duplicated_if_present(x, dx) = length(x) > 0 ? Duplicated(x, dx) : Const(x)
+
 function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, neighbors,
                               n_threads) where {D, G, T}
     Y = forces_pair_spec(sys, neighbors, n_threads)
@@ -152,7 +211,11 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
         sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
         sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
         sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
-        Enzyme.autodiff(
+        d_sils_1_atoms = zero.(sils_1_atoms)
+        d_sils_2_atoms = zero.(sils_2_atoms)
+        d_sils_3_atoms = zero.(sils_3_atoms)
+        d_sils_4_atoms = zero.(sils_4_atoms)
+        autodiff(
             forces_pair_spec!,
             Const,
             Duplicated(fs, d_forces),
@@ -160,10 +223,10 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
             Duplicated(sys.atoms, d_atoms),
             Const(pairwise_inters_nonl),
             Const(pairwise_inters_nl),
-            Const(sils_1_atoms),
-            Const(sils_2_atoms),
-            Const(sils_3_atoms),
-            Const(sils_4_atoms),
+            duplicated_if_present(sils_1_atoms, d_sils_1_atoms),
+            duplicated_if_present(sils_2_atoms, d_sils_2_atoms),
+            duplicated_if_present(sils_3_atoms, d_sils_3_atoms),
+            duplicated_if_present(sils_4_atoms, d_sils_4_atoms),
             Const(sys.boundary),
             Const(sys.force_units),
             Const(neighbors),
@@ -171,6 +234,8 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
         )
         d_sys = Tangent{System}(
             atoms=d_atoms,
+            specific_inter_lists=(d_sils_1_atoms..., d_sils_2_atoms..., d_sils_3_atoms...,
+                                  d_sils_4_atoms...),
             coords=d_coords,
             boundary=CubicBoundary(z, z, z),
         )
