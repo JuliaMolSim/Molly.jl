@@ -207,6 +207,8 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
         d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:length(sys)]
         pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(sys.pairwise_inters))
         pairwise_inters_nl   = filter(inter ->  inter.nl_only, values(sys.pairwise_inters))
+        d_pairwise_inters_nonl = zero.(pairwise_inters_nonl)
+        d_pairwise_inters_nl   = zero.(pairwise_inters_nl  )
         sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
         sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
         sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
@@ -221,8 +223,8 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
             Duplicated(fs, d_forces),
             Duplicated(sys.coords, d_coords),
             Duplicated(sys.atoms, d_atoms),
-            Const(pairwise_inters_nonl),
-            Const(pairwise_inters_nl),
+            duplicated_if_present(pairwise_inters_nonl, d_pairwise_inters_nonl),
+            duplicated_if_present(pairwise_inters_nl  , d_pairwise_inters_nl  ),
             duplicated_if_present(sils_1_atoms, d_sils_1_atoms),
             duplicated_if_present(sils_2_atoms, d_sils_2_atoms),
             duplicated_if_present(sils_3_atoms, d_sils_3_atoms),
@@ -234,6 +236,7 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
         )
         d_sys = Tangent{System}(
             atoms=d_atoms,
+            pairwise_inters=(d_pairwise_inters_nonl..., d_pairwise_inters_nl...),
             specific_inter_lists=(d_sils_1_atoms..., d_sils_2_atoms..., d_sils_3_atoms...,
                                   d_sils_4_atoms...),
             coords=d_coords,

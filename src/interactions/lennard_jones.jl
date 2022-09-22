@@ -44,6 +44,31 @@ end
 is_solute(at::Atom) = at.solute
 is_solute(at) = false
 
+function Base.zero(lj::LennardJones{S, C, W, WS, F, E}) where {S, C, W, WS, F, E}
+    return LennardJones{S, C, W, WS, F, E}(
+        lj.cutoff,
+        false,
+        false,
+        zero(W),
+        zero(WS),
+        lj.force_units,
+        lj.energy_units,
+    )
+end
+
+function Base.:+(l1::LennardJones{S, C, W, WS, F, E},
+                 l2::LennardJones{S, C, W, WS, F, E}) where {S, C, W, WS, F, E}
+    return LennardJones{S, C, W, WS, F, E}(
+        l1.cutoff,
+        l1.nl_only,
+        l1.lorentz_mixing,
+        l1.weight_14 + l2.weight_14,
+        l1.weight_solute_solvent + l2.weight_solute_solvent,
+        l1.force_units,
+        l1.energy_units,
+    )
+end
+
 @inline @inbounds function force(inter::LennardJones{S, C},
                                     dr,
                                     coord_i,

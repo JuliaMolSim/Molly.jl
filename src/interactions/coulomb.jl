@@ -31,6 +31,28 @@ function Coulomb(;
         cutoff, nl_only, weight_14, coulomb_const, force_units, energy_units)
 end
 
+function Base.zero(coul::Coulomb{C, W, T, F, E}) where {C, W, T, F, E}
+    return Coulomb{C, W, T, F, E}(
+        coul.cutoff,
+        false,
+        zero(W),
+        zero(T),
+        coul.force_units,
+        coul.energy_units,
+    )
+end
+
+function Base.:+(c1::Coulomb, c2::Coulomb)
+    return Coulomb(
+        c1.cutoff,
+        c1.nl_only,
+        c1.weight_14 + c2.weight_14,
+        c1.coulomb_const + c2.coulomb_const,
+        c1.force_units,
+        c1.energy_units,
+    )
+end
+
 @inline @inbounds function force(inter::Coulomb{C},
                                     dr,
                                     coord_i,
