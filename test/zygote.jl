@@ -36,8 +36,8 @@
         return mean(sqrt.(minimum(disps_diag; dims=1)))
     end
 
-    function test_grad(gpu::Bool, forward::Bool, f32::Bool, pis::Bool,
-                        sis::Bool, obc2::Bool, gbn2::Bool)
+    function test_grad(gpu::Bool, parallel::Bool, forward::Bool, f32::Bool, pis::Bool,
+                       sis::Bool, obc2::Bool, gbn2::Bool)
         n_atoms = 50
         n_steps = 100
         atom_mass = f32 ? 10.0f0 : 10.0
@@ -147,7 +147,7 @@
                 energy_units=NoUnits,
             )
 
-            simulate!(s, simulator, n_steps)
+            simulate!(s, simulator, n_steps; n_threads=(parallel ? Threads.nthreads() : 1))
 
             return mean_min_separation(s.coords, boundary)
         end
@@ -155,29 +155,34 @@
         return loss
     end
 
-    runs = [ #                gpu    fwd    f32    pis    sis    obc2   gbn2
-        ("cpu"             , [false, false, false, true , true , false, false], 0.1 , 0.25),
-        ("cpu forward"     , [false, true , false, true , true , false, false], 0.01, 0.01),
-        ("cpu f32"         , [false, false, true , true , true , false, false], 0.2 , 10.0),
-        ("cpu nospecific"  , [false, false, false, true , false, false, false], 0.1 , 0.0 ),
-        ("cpu nopairwise"  , [false, false, false, false, true , false, false], 0.0 , 0.25),
-        ("cpu obc2"        , [false, false, false, true , true , true , false], 0.1 , 0.25),
-        ("cpu gbn2"        , [false, false, false, true , true , false, true ], 0.1 , 0.25),
-        ("cpu gbn2 forward", [false, true , false, true , true , false, true ], 0.02, 0.02),
+    runs = [ #                gpu    par    fwd    f32    pis    sis    obc2   gbn2
+        ("CPU"             , [false, false, false, false, true , true , false, false], 0.1 , 0.25),
+        ("CPU forward"     , [false, false, true , false, true , true , false, false], 0.01, 0.01),
+        ("CPU f32"         , [false, false, false, true , true , true , false, false], 0.2 , 10.0),
+        ("CPU nospecific"  , [false, false, false, false, true , false, false, false], 0.1 , 0.0 ),
+        ("CPU nopairwise"  , [false, false, false, false, false, true , false, false], 0.0 , 0.25),
+        ("CPU obc2"        , [false, false, false, false, true , true , true , false], 0.1 , 0.25),
+        ("CPU gbn2"        , [false, false, false, false, true , true , false, true ], 0.1 , 0.25),
+        ("CPU gbn2 forward", [false, false, true , false, true , true , false, true ], 0.02, 0.02),
     ]
-    if run_gpu_tests #                    gpu    fwd    f32    pis    sis    obc2   gbn2
-        push!(runs, ("gpu"             , [true , false, false, true , true , false, false], 0.25, 20.0))
-        push!(runs, ("gpu forward"     , [true , true , false, true , true , false, false], 0.01, 0.01))
-        push!(runs, ("gpu f32"         , [true , false, true , true , true , false, false], 0.5 , 50.0))
-        push!(runs, ("gpu nospecific"  , [true , false, false, true , false, false, false], 0.25, 0.0 ))
-        push!(runs, ("gpu nopairwise"  , [true , false, false, false, true , false, false], 0.0 , 10.0))
-        push!(runs, ("gpu obc2"        , [true , false, false, true , true , true , false], 0.25, 20.0))
-        push!(runs, ("gpu gbn2"        , [true , false, false, true , true , false, true ], 0.25, 20.0))
-        push!(runs, ("gpu gbn2 forward", [true , true , false, true , true , false, true ], 0.02, 0.02))
+    if run_parallel_tests #                   gpu    par    fwd    f32    pis    sis    obc2   gbn2
+        push!(runs, ("CPU parallel"        , [false, true , false, false, true , true , false, false], 0.1 , 0.25))
+        push!(runs, ("CPU parallel forward", [false, true , true , false, true , true , false, false], 0.01, 0.01))
+        push!(runs, ("CPU parallel f32"    , [false, true , false, true , true , true , false, false], 0.2 , 10.0))
+    end
+    if run_gpu_tests #                        gpu    par    fwd    f32    pis    sis    obc2   gbn2
+        push!(runs, ("GPU"                 , [true , false, false, false, true , true , false, false], 0.25, 20.0))
+        push!(runs, ("GPU forward"         , [true , false, true , false, true , true , false, false], 0.01, 0.01))
+        push!(runs, ("GPU f32"             , [true , false, false, true , true , true , false, false], 0.5 , 50.0))
+        push!(runs, ("GPU nospecific"      , [true , false, false, false, true , false, false, false], 0.25, 0.0 ))
+        push!(runs, ("GPU nopairwise"      , [true , false, false, false, false, true , false, false], 0.0 , 10.0))
+        push!(runs, ("GPU obc2"            , [true , false, false, false, true , true , true , false], 0.25, 20.0))
+        push!(runs, ("GPU gbn2"            , [true , false, false, false, true , true , false, true ], 0.25, 20.0))
+        push!(runs, ("GPU gbn2 forward"    , [true , false, true , false, true , true , false, true ], 0.02, 0.02))
     end
 
     for (name, args, tol_σ, tol_r0) in runs
-        forward, f32 = args[2], args[3]
+        forward, f32 = args[3], args[4]
         σ  = f32 ? 0.4f0 : 0.4
         r0 = f32 ? 1.0f0 : 1.0
         f = test_grad(args...)

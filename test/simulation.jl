@@ -825,7 +825,7 @@ end
         final_coords_f64 = [Float64.(c) for c in Array(final_coords)]
         coord_diff = sum(sum(map(x -> abs.(x), final_coords_f64 .- final_coords_ref))) / (3 * n_atoms)
         E_diff = abs(Float64(E_start) - E_start_ref)
-        @info "$(rpad(name, 20)) - difference per coordinate $coord_diff - potential energy difference $E_diff"
+        @info "$(rpad(name, 19)) - difference per coordinate $coord_diff - potential energy difference $E_diff"
         @test coord_diff < 1e-4u"nm"
         @test E_diff < 5e-4u"kJ * mol^-1"
     end
