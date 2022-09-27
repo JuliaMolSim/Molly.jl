@@ -145,7 +145,6 @@ function forces(s::System{D, false}, neighbors=nothing;
     fs = forces_pair_spec(s, neighbors, n_threads)
 
     for inter in values(s.general_inters)
-        # Force type not checked
         fs += forces(inter, s, neighbors)
     end
 
