@@ -16,7 +16,7 @@
     dists = distances(sys.coords, sys.boundary)
     dists_flat = dists[triu(trues(3, 3), 1)]
     @test all(x -> isapprox(x, 0.4u"nm"; atol=1e-3u"nm"), dists_flat)
-    @test isapprox(potential_energy(sys), -3.0u"kJ * mol^-1";
+    @test isapprox(potential_energy(sys; n_threads=1), -3.0u"kJ * mol^-1";
                     atol=1e-4u"kJ * mol^-1")
 
     # No units
@@ -39,7 +39,7 @@
     dists = distances(sys.coords, sys.boundary) * u"nm"
     dists_flat = dists[triu(trues(3, 3), 1)]
     @test all(x -> isapprox(x, 0.4u"nm"; atol=1e-3u"nm"), dists_flat)
-    @test isapprox(potential_energy(sys) * u"kJ * mol^-1", -3.0u"kJ * mol^-1";
+    @test isapprox(potential_energy(sys; n_threads=1) * u"kJ * mol^-1", -3.0u"kJ * mol^-1";
                     atol=1e-4u"kJ * mol^-1")
 
     if run_gpu_tests

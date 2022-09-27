@@ -56,7 +56,7 @@ function simulate!(sys,
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     sim.run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
-    E = potential_energy(sys, neighbors)
+    E = potential_energy(sys, neighbors; n_threads=n_threads)
     println(sim.log_stream, "Step 0 - potential energy ",
             E, " - max force N/A - N/A")
     hn = sim.step_size
@@ -72,7 +72,7 @@ function simulate!(sys,
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                     n_threads=n_threads)
-        E_trial = potential_energy(sys, neighbors)
+        E_trial = potential_energy(sys, neighbors; n_threads=n_threads)
         if E_trial < E
             hn = 6 * hn / 5
             E = E_trial
@@ -544,7 +544,7 @@ function tremd_exchange!(sys::ReplicaSystem{D, G, T},
                         sim::TemperatureREMD,
                         n::Integer,
                         m::Integer;
-                        n_threads::Int=Threads.nthreads(),
+                        n_threads::Integer=Threads.nthreads(),
                         rng=Random.GLOBAL_RNG) where {D, G, T}
     if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         k_b = sys.k * T(Unitful.Na)
@@ -558,8 +558,8 @@ function tremd_exchange!(sys::ReplicaSystem{D, G, T},
                                     n_threads=n_threads)
     neighbors_m = find_neighbors(sys.replicas[m], sys.replicas[m].neighbor_finder;
                                     n_threads=n_threads)
-    V_n = potential_energy(sys.replicas[n], neighbors_n)
-    V_m = potential_energy(sys.replicas[m], neighbors_m)
+    V_n = potential_energy(sys.replicas[n], neighbors_n; n_threads=n_threads)
+    V_m = potential_energy(sys.replicas[m], neighbors_m; n_threads=n_threads)
     Δ = (β_m - β_n) * (V_n - V_m)
     should_exchange = Δ <= 0 || rand(rng) < exp(-Δ)
 
@@ -639,7 +639,7 @@ function hremd_exchange!(sys::ReplicaSystem{D, G, T},
                         sim::HamiltonianREMD,
                         n::Integer,
                         m::Integer;
-                        n_threads::Int=Threads.nthreads(),
+                        n_threads::Integer=Threads.nthreads(),
                         rng=Random.GLOBAL_RNG) where {D, G, T}
     if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         k_b = sys.k * T(Unitful.Na)
@@ -653,12 +653,12 @@ function hremd_exchange!(sys::ReplicaSystem{D, G, T},
                                     n_threads=n_threads)
     neighbors_m = find_neighbors(sys.replicas[m], sys.replicas[m].neighbor_finder;
                                     n_threads=n_threads)
-    V_n_i = potential_energy(sys.replicas[n], neighbors_n)
-    V_m_i = potential_energy(sys.replicas[m], neighbors_m)
+    V_n_i = potential_energy(sys.replicas[n], neighbors_n; n_threads=n_threads)
+    V_m_i = potential_energy(sys.replicas[m], neighbors_m; n_threads=n_threads)
 
     sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
-    V_n_f = potential_energy(sys.replicas[n], neighbors_m) # using already calculated neighbors
-    V_m_f = potential_energy(sys.replicas[m], neighbors_n)
+    V_n_f = potential_energy(sys.replicas[n], neighbors_m; n_threads=n_threads) # using already calculated neighbors
+    V_m_f = potential_energy(sys.replicas[m], neighbors_n; n_threads=n_threads)
 
     Δ = β_sim * (V_n_f - V_n_i + V_m_f - V_m_i)
     should_exchange = Δ <= 0 || rand(rng) < exp(-Δ)

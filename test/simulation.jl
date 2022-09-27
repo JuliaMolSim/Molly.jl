@@ -793,7 +793,7 @@ end
 
         n_threads = parallel ? Threads.nthreads() : 1
         neighbors = find_neighbors(s; n_threads=n_threads)
-        E_start = potential_energy(s, neighbors)
+        E_start = potential_energy(s, neighbors; n_threads=n_threads)
 
         simulate!(s, simulator, n_steps; n_threads=n_threads)
         return s.coords, E_start

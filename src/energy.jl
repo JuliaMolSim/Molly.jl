@@ -7,15 +7,16 @@ export
     potential_energy
 
 """
-    total_energy(s, neighbors=nothing)
+    total_energy(s, neighbors=nothing; n_threads=Threads.nthreads())
 
 Calculate the total energy of the system as the sum of the [`kinetic_energy`](@ref)
 and the [`potential_energy`](@ref).
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
-Not currently compatible with automatic differentiation using Zygote.
 """
-total_energy(s, neighbors=nothing) = kinetic_energy(s) + potential_energy(s, neighbors)
+function total_energy(s, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+    return kinetic_energy(s) + potential_energy(s, neighbors; n_threads=n_threads)
+end
 
 kinetic_energy_noconvert(s) = sum(masses(s) .* sum.(abs2, s.velocities)) / 2
 
@@ -58,13 +59,12 @@ function check_energy_units(E, energy_units)
 end
 
 """
-    potential_energy(s, neighbors=nothing)
+    potential_energy(s, neighbors=nothing; n_threads=Threads.nthreads())
 
 Calculate the potential energy of the system using the pairwise, specific and
 general interactions.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
-Not currently compatible with automatic differentiation using Zygote.
 
     potential_energy(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
                      atom_i, atom_j, boundary)
@@ -216,26 +216,27 @@ end
     return pe_sum
 end
 
-function potential_energy(s::System{D, true, T}, neighbors=nothing) where {D, T}
+function potential_energy(s::System{D, true, T}, neighbors=nothing;
+                          n_threads::Integer=Threads.nthreads()) where {D, T}
     n_atoms = length(s)
     pe_vec = CUDA.zeros(T, 1)
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
-        n_threads, n_blocks = cuda_threads_blocks(length(nbs))
-        CUDA.@sync @cuda threads=n_threads blocks=n_blocks pairwise_pe_kernel!(
+        n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
                 pe_vec, s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
-                nbs, Val(s.energy_units), Val(n_threads))
+                nbs, Val(s.energy_units), Val(n_threads_gpu))
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nl) > 0 && length(neighbors) > 0
         nbs = @view neighbors.list[1:neighbors.n]
-        n_threads, n_blocks = cuda_threads_blocks(length(neighbors))
-        CUDA.@sync @cuda threads=n_threads blocks=n_blocks pairwise_pe_kernel!(
+        n_threads_gpu, n_blocks = cuda_threads_blocks(length(neighbors))
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
                 pe_vec, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-                nbs, Val(s.energy_units), Val(n_threads))
+                nbs, Val(s.energy_units), Val(n_threads_gpu))
     end
 
     for inter_list in values(s.specific_inter_lists)

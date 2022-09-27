@@ -311,10 +311,10 @@ function forces(s::System{D, true, T}, neighbors=nothing;
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
-        n_threads, n_blocks = cuda_threads_blocks(length(nbs))
-        CUDA.@sync @cuda threads=n_threads blocks=n_blocks pairwise_force_kernel!(
+        n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel!(
                 fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
-                nbs, Val(s.force_units), Val(n_threads))
+                nbs, Val(s.force_units), Val(n_threads_gpu))
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
@@ -324,10 +324,10 @@ function forces(s::System{D, true, T}, neighbors=nothing;
         end
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]
-            n_threads, n_blocks = cuda_threads_blocks(length(neighbors))
-            CUDA.@sync @cuda threads=n_threads blocks=n_blocks pairwise_force_kernel!(
+            n_threads_gpu, n_blocks = cuda_threads_blocks(length(neighbors))
+            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel!(
                     fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-                    nbs, Val(s.force_units), Val(n_threads))
+                    nbs, Val(s.force_units), Val(n_threads_gpu))
         end
     end
 

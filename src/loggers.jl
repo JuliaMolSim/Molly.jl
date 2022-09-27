@@ -126,18 +126,16 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(velocities_wrap
             length(values(vl)) > 0 ? length(first(values(vl))) : "?", " atoms")
 end
 
-total_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = total_energy(s, neighbors)
-
 """
     TotalEnergyLogger(n_steps)
     TotalEnergyLogger(T, n_steps)
 
 Log the [`total_energy`](@ref) of the system throughout a simulation.
 """
-TotalEnergyLogger(T::DataType, n_steps) = GeneralObservableLogger(total_energy_wrapper, T, n_steps)
+TotalEnergyLogger(T::DataType, n_steps) = GeneralObservableLogger(total_energy, T, n_steps)
 TotalEnergyLogger(n_steps) = TotalEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
 
-function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(total_energy_wrapper)}) where T
+function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(total_energy)}) where T
     print(io, "TotalEnergyLogger{", eltype(values(el)), "} with n_steps ",
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
@@ -158,18 +156,16 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(kinetic_energy_
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-potential_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = potential_energy(s, neighbors)
-
 """
     PotentialEnergyLogger(n_steps)
     PotentialEnergyLogger(T, n_steps)
 
 Log the [`potential_energy`](@ref) of the system throughout a simulation.
 """
-PotentialEnergyLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(potential_energy_wrapper, T, n_steps)
+PotentialEnergyLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(potential_energy, T, n_steps)
 PotentialEnergyLogger(n_steps::Integer) = PotentialEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
 
-function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(potential_energy_wrapper)}) where T
+function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(potential_energy)}) where T
     print(io, "PotentialEnergyLogger{", eltype(values(el)), "} with n_steps ",
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
