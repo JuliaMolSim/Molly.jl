@@ -74,7 +74,6 @@ function Base.:+(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{2, T, Vector{
     RectangularBoundary(x.side_lengths .+ y.side_lengths)
 end
 
-Base.zero(::Type{Atom{T, T, T, T}}) where {T} = Atom(0, zero(T), zero(T), zero(T), zero(T), false)
 atom_or_empty(at::Atom, T) = at
 atom_or_empty(at::Nothing, T) = zero(Atom{T, T, T, T})
 

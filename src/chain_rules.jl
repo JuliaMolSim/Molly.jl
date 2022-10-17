@@ -369,3 +369,55 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), virial,
 
     return Y, pairwise_force_gpu_pullback
 end
+
+function grad_pairwise_pe_kernel!(pe_vec::CuDeviceVector{T}, d_pe_vec, coords, d_coords, atoms,
+                                  d_atoms, boundary, inters, d_inters, neighbors, val_energy_units,
+                                  shared_mem_size::Val{M}) where {T, M}
+    shared_pes = CuStaticSharedArray(T, M)
+    d_shared_pes = CuStaticSharedArray(T, M)
+    sync_threads()
+
+    Enzyme.autodiff_deferred(
+        pairwise_pe_kernel!,
+        Duplicated(pe_vec, d_pe_vec),
+        Duplicated(coords, d_coords),
+        Duplicated(atoms, d_atoms),
+        Const(boundary),
+        Duplicated(inters, d_inters),
+        Const(neighbors),
+        Const(val_energy_units),
+        Const(shared_mem_size),
+        Duplicated(shared_pes, d_shared_pes),
+    )
+    return nothing
+end
+
+function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{SVector{D, T}},
+                              atoms, boundary, pairwise_inters, nbs, energy_units) where {D, T}
+    if energy_units != NoUnits
+        error("Taking gradients through potential energy calculation is not compatible with " *
+              "units, system energy units are $energy_units")
+    end
+    Y = pairwise_pe_gpu(coords, atoms, boundary, pairwise_inters, nbs, energy_units)
+
+    function pairwise_pe_gpu_pullback(d_pe_vec_arg)
+        n_atoms = length(atoms)
+        z = zero(T)
+        pe_vec = CUDA.zeros(T, 1)
+        d_pe_vec = CuArray([d_pe_vec_arg[1]])
+        d_coords = zero(coords)
+        d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
+        d_pairwise_inters = zero.(pairwise_inters)
+        n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
+
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_pe_kernel!(pe_vec,
+                d_pe_vec, coords, d_coords, atoms, d_atoms, boundary,
+                pairwise_inters, d_pairwise_inters, nbs, Val(energy_units),
+                Val(n_threads_gpu))
+
+        return NoTangent(), d_coords, d_atoms, NoTangent(), d_pairwise_inters, NoTangent(),
+               NoTangent()
+    end
+
+    return Y, pairwise_pe_gpu_pullback
+end

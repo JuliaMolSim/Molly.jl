@@ -243,8 +243,19 @@ function specific_force_4_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
     return nothing
 end
 
+function pairwise_pe_gpu(coords::AbstractArray{SVector{D, T}}, atoms, boundary,
+                         pairwise_inters, nbs, energy_units) where {D, T}
+    pe_vec = CUDA.zeros(T, 1)
+    n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
+            pe_vec, coords, atoms, boundary, pairwise_inters,
+            nbs, Val(energy_units), Val(n_threads_gpu))
+    return pe_vec
+end
+
 function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, boundary, inters,
-                             neighbors_var, ::Val{E}, ::Val{M}) where {T, E, M}
+                             neighbors_var, ::Val{E}, ::Val{M},
+                             shared_pes_arg=nothing) where {T, E, M}
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
     neighbors = CUDA.Const(neighbors_var)
@@ -252,7 +263,7 @@ function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, b
     tidx = threadIdx().x
     inter_ig = (blockIdx().x - 1) * blockDim().x + tidx
     stride = gridDim().x * blockDim().x
-    shared_pes = CuStaticSharedArray(T, M)
+    shared_pes = isnothing(shared_pes_arg) ? CuStaticSharedArray(T, M) : shared_pes_arg
     shared_flags = CuStaticSharedArray(Bool, M)
 
     if tidx == 1

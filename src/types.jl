@@ -212,6 +212,11 @@ function Atom(;
     return Atom(index, charge, mass, σ, ϵ, solute)
 end
 
+function Base.zero(::Type{Atom{T, T, T, T}}) where T
+    z = zero(T)
+    return Atom(0, z, z, z, z, false)
+end
+
 """
     charge(atom)
 
