@@ -30,7 +30,7 @@ end
 function Base.:+(r::Base.RefValue{Any}, y::NamedTuple{(:atoms, :atoms_data, :masses,
                  :pairwise_inters, :specific_inter_lists, :general_inters, :constraints,
                  :coords, :velocities, :boundary, :neighbor_finder, :loggers, :force_units,
-                 :energy_units, :k)}) where {D, T}
+                 :energy_units, :k)})
     x = r.x
     (
         atoms=Zygote.accum(x.atoms, y.atoms),
@@ -54,7 +54,7 @@ end
 function Base.:+(y::NamedTuple{(:atoms, :atoms_data, :masses,
                  :pairwise_inters, :specific_inter_lists, :general_inters, :constraints,
                  :coords, :velocities, :boundary, :neighbor_finder, :loggers, :force_units,
-                 :energy_units, :k)}, r::Base.RefValue{Any}) where {D, T}
+                 :energy_units, :k)}, r::Base.RefValue{Any})
     return r + y
 end
 

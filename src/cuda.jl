@@ -1,7 +1,23 @@
 # CUDA.jl kernels
 
+function cuda_threads_blocks(n_neighbors)
+    n_threads = 256
+    n_blocks = cld(n_neighbors, n_threads)
+    return n_threads, n_blocks
+end
+
+function pairwise_force_gpu!(fs_mat, virial, coords, atoms, boundary, pairwise_inters,
+                             nbs, force_units)
+    n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel!(
+            fs_mat, virial, coords, atoms, boundary, pairwise_inters, nbs,
+            Val(force_units), Val(n_threads_gpu))
+    return fs_mat
+end
+
 function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, atoms_var, boundary,
-                                inters, neighbors_var, ::Val{F}, ::Val{M}) where {T, F, M}
+                                inters, neighbors_var, ::Val{F}, ::Val{M},
+                                shared_fs_arg=nothing) where {T, F, M}
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
     neighbors = CUDA.Const(neighbors_var)
@@ -9,7 +25,7 @@ function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, a
     tidx = threadIdx().x
     inter_ig = (blockIdx().x - 1) * blockDim().x + tidx
     stride = gridDim().x * blockDim().x
-    shared_fs = CuStaticSharedArray(T, (3, M))
+    shared_fs = isnothing(shared_fs_arg) ? CuStaticSharedArray(T, (3, M)) : shared_fs_arg
     shared_vs = CuStaticSharedArray(T, M)
     shared_is = CuStaticSharedArray(Int32, M)
     shared_js = CuStaticSharedArray(Int32, M)

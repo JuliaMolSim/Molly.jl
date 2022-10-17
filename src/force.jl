@@ -296,12 +296,6 @@ end
     return nothing
 end
 
-function cuda_threads_blocks(n_neighbors)
-    n_threads = 256
-    n_blocks = cld(n_neighbors, n_threads)
-    return n_threads, n_blocks
-end
-
 function forces(s::System{D, true, T}, neighbors=nothing;
                 n_threads::Integer=Threads.nthreads()) where {D, T}
     n_atoms = length(s)
@@ -311,10 +305,8 @@ function forces(s::System{D, true, T}, neighbors=nothing;
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
-        n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel!(
-                fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
-                nbs, Val(s.force_units), Val(n_threads_gpu))
+        pairwise_force_gpu!(fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
+                            nbs, s.force_units)
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
@@ -324,10 +316,8 @@ function forces(s::System{D, true, T}, neighbors=nothing;
         end
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]
-            n_threads_gpu, n_blocks = cuda_threads_blocks(length(neighbors))
-            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel!(
-                    fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-                    nbs, Val(s.force_units), Val(n_threads_gpu))
+            pairwise_force_gpu!(fs_mat, virial, s.coords, s.atoms, s.boundary, pairwise_inters_nl,
+                                nbs, s.force_units)
         end
     end
 

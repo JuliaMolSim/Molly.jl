@@ -1,5 +1,6 @@
 # Chain rules to allow differentiable simulations
 
+@non_differentiable CUDA.zeros(args...)
 @non_differentiable random_velocities(args...)
 @non_differentiable random_velocities!(args...)
 @non_differentiable check_force_units(args...)
@@ -146,7 +147,17 @@ function ChainRulesCore.rrule(::typeof(reinterpret),
                                 arr::AbstractArray{SVector{D, T}}) where {D, T}
     Y = reinterpret(T, arr)
     function reinterpret_pullback(Ȳ::Vector{T})
-        return NoTangent(), NoTangent(), SVector{D, T}.(eachcol(reshape(Ȳ, D, length(Ȳ) ÷ D)))
+        return NoTangent(), NoTangent(), reinterpret(SVector{D, T}, Ȳ)
+    end
+    return Y, reinterpret_pullback
+end
+
+function ChainRulesCore.rrule(::typeof(reinterpret),
+                                ::Type{SVector{D, T}},
+                                arr::AbstractVector{T}) where {D, T}
+    Y = reinterpret(SVector{D, T}, arr)
+    function reinterpret_pullback(Ȳ::AbstractArray{SVector{D, T}})
+        return NoTangent(), NoTangent(), reinterpret(T, Ȳ)
     end
     return Y, reinterpret_pullback
 end
@@ -298,4 +309,53 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), sys::System{
         return NoTangent(), d_sys, NoTangent(), NoTangent()
     end
     return Y, potential_energy_pair_spec_pullback
+end
+
+function grad_pairwise_force_kernel!(fs_mat::CuDeviceMatrix{T}, d_fs_mat, virial, d_virial, coords,
+                                     d_coords, atoms, d_atoms, boundary, inters, d_inters,
+                                     neighbors, force_units, shared_mem_size::Val{M}) where {T, M}
+    shared_fs = CuStaticSharedArray(T, (3, M))
+    d_shared_fs = CuStaticSharedArray(T, (3, M))
+    sync_threads()
+
+    Enzyme.autodiff_deferred(
+        pairwise_force_kernel!,
+        Duplicated(fs_mat, d_fs_mat),
+        Duplicated(virial, d_virial),
+        Duplicated(coords, d_coords),
+        Duplicated(atoms, d_atoms),
+        Const(boundary),
+        Duplicated(inters, d_inters),
+        Const(neighbors),
+        Const(force_unit),
+        Const(shared_mem_size),
+        Duplicated(shared_fs, d_shared_fs),
+    )
+    return
+end
+
+function ChainRulesCore.rrule(::typeof(pairwise_force_gpu!), fs_mat, virial, coords, atoms,
+                              boundary, pairwise_inters, nbs, force_units)
+    if force_units != NoUnits
+        error("Taking gradients through force calculation is not compatible with units, " *
+              "system force units are $force_units")
+    end
+    Y = pairwise_force_gpu!(fs_mat, virial, coords, atoms, boundary, pairwise_inters,
+                            nbs, force_units)
+    function pairwise_force_gpu!_pullback(d_fs_mat)
+        z = zero(T)
+        d_virial = zero(virial)
+        d_coords = zero(sys.coords)
+        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:length(sys)]
+        d_pairwise_inters = zero.(pairwise_inters)
+        n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
+
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_force_kernel!(fs_mat,
+                d_fs_mat, virial, d_virial, coords, d_coords, atoms, d_atoms, boundary, inters,
+                d_inters, neighbors, force_units, Val(shared_mem_size))
+
+        return NoTangent(), d_fs_mat, d_virial, d_coords, d_atoms, NoTangent(),
+               d_pairwise_inters, NoTangent(), NoTangent()
+    end
+    return Y, pairwise_force_gpu!_pullback
 end
