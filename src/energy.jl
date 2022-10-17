@@ -240,7 +240,7 @@ function potential_energy(s::System{D, true, T}, neighbors=nothing;
     end
 
     for inter_list in values(s.specific_inter_lists)
-        specific_pe_kernel!(pe_vec, inter_list, s.coords, s.boundary, Val(s.energy_units))
+        specific_pe_gpu!(pe_vec, inter_list, s.coords, s.boundary, s.energy_units)
     end
 
     pe = Array(pe_vec)[1]

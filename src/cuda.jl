@@ -6,8 +6,9 @@ function cuda_threads_blocks(n_neighbors)
     return n_threads, n_blocks
 end
 
-function pairwise_force_gpu!(fs_mat, virial, coords, atoms, boundary, pairwise_inters,
-                             nbs, force_units)
+function pairwise_force_gpu(virial, coords::AbstractArray{SVector{D, T}}, atoms, boundary,
+                            pairwise_inters, nbs, force_units) where {D, T}
+    fs_mat = CUDA.zeros(T, D, length(atoms))
     n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel!(
             fs_mat, virial, coords, atoms, boundary, pairwise_inters, nbs,
@@ -89,33 +90,37 @@ function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, a
         end
         CUDA.atomic_add!(pointer(virial), virial_sum)
     end
-    return
+    return nothing
 end
 
-function specific_force_kernel!(fs_mat, inter_list::InteractionList1Atoms, coords, boundary,
-                                val_force_units)
+function specific_force_gpu!(fs_mat, inter_list::InteractionList1Atoms, coords, boundary,
+                             force_units)
     CUDA.@sync @cuda threads=256 blocks=64 specific_force_1_atoms_kernel!(fs_mat, coords,
-            boundary, inter_list.is, inter_list.inters, val_force_units)
+            boundary, inter_list.is, inter_list.inters, Val(force_units))
+    return fs_mat
 end
 
-function specific_force_kernel!(fs_mat, inter_list::InteractionList2Atoms, coords, boundary,
-                                val_force_units)
+function specific_force_gpu!(fs_mat, inter_list::InteractionList2Atoms, coords, boundary,
+                             force_units)
     CUDA.@sync @cuda threads=256 blocks=64 specific_force_2_atoms_kernel!(fs_mat, coords,
-            boundary, inter_list.is, inter_list.js, inter_list.inters, val_force_units)
+            boundary, inter_list.is, inter_list.js, inter_list.inters, Val(force_units))
+    return fs_mat
 end
 
-function specific_force_kernel!(fs_mat, inter_list::InteractionList3Atoms, coords, boundary,
-                                val_force_units)
+function specific_force_gpu!(fs_mat, inter_list::InteractionList3Atoms, coords, boundary,
+                             force_units)
     CUDA.@sync @cuda threads=256 blocks=64 specific_force_3_atoms_kernel!(fs_mat, coords,
             boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters,
-            val_force_units)
+            Val(force_units))
+    return fs_mat
 end
 
-function specific_force_kernel!(fs_mat, inter_list::InteractionList4Atoms, coords, boundary,
-                                val_force_units)
+function specific_force_gpu!(fs_mat, inter_list::InteractionList4Atoms, coords, boundary,
+                             force_units)
     CUDA.@sync @cuda threads=256 blocks=64 specific_force_4_atoms_kernel!(fs_mat, coords,
             boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
-            inter_list.inters, val_force_units)
+            inter_list.inters, Val(force_units))
+    return fs_mat
 end
 
 function specific_force_1_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
@@ -139,7 +144,7 @@ function specific_force_1_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         CUDA.atomic_add!(pointer(forces, 3i - 1), ustrip(fs.f1[2]))
         CUDA.atomic_add!(pointer(forces, 3i    ), ustrip(fs.f1[3]))
     end
-    return
+    return nothing
 end
 
 function specific_force_2_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
@@ -167,7 +172,7 @@ function specific_force_2_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         CUDA.atomic_add!(pointer(forces, 3j - 1), ustrip(fs.f2[2]))
         CUDA.atomic_add!(pointer(forces, 3j    ), ustrip(fs.f2[3]))
     end
-    return
+    return nothing
 end
 
 function specific_force_3_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
@@ -199,7 +204,7 @@ function specific_force_3_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         CUDA.atomic_add!(pointer(forces, 3k - 1), ustrip(fs.f3[2]))
         CUDA.atomic_add!(pointer(forces, 3k    ), ustrip(fs.f3[3]))
     end
-    return
+    return nothing
 end
 
 function specific_force_4_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
@@ -235,7 +240,7 @@ function specific_force_4_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         CUDA.atomic_add!(pointer(forces, 3l - 1), ustrip(fs.f4[2]))
         CUDA.atomic_add!(pointer(forces, 3l    ), ustrip(fs.f4[3]))
     end
-    return
+    return nothing
 end
 
 function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, boundary, inters,
@@ -288,28 +293,32 @@ function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, b
         end
         CUDA.atomic_add!(pointer(energy), pe_sum)
     end
-    return
+    return nothing
 end
 
-function specific_pe_kernel!(pe, inter_list::InteractionList1Atoms, coords, boundary, val_pe_units)
+function specific_pe_gpu!(pe, inter_list::InteractionList1Atoms, coords, boundary, pe_units)
     CUDA.@sync @cuda threads=256 blocks=64 specific_pe_1_atoms_kernel!(pe, coords,
-            boundary, inter_list.is, inter_list.inters, val_pe_units)
+            boundary, inter_list.is, inter_list.inters, Val(pe_units))
+    return pe
 end
 
-function specific_pe_kernel!(pe, inter_list::InteractionList2Atoms, coords, boundary, val_pe_units)
+function specific_pe_gpu!(pe, inter_list::InteractionList2Atoms, coords, boundary, pe_units)
     CUDA.@sync @cuda threads=256 blocks=64 specific_pe_2_atoms_kernel!(pe, coords,
-            boundary, inter_list.is, inter_list.js, inter_list.inters, val_pe_units)
+            boundary, inter_list.is, inter_list.js, inter_list.inters, Val(pe_units))
+    return pe
 end
 
-function specific_pe_kernel!(pe, inter_list::InteractionList3Atoms, coords, boundary, val_pe_units)
+function specific_pe_gpu!(pe, inter_list::InteractionList3Atoms, coords, boundary, pe_units)
     CUDA.@sync @cuda threads=256 blocks=64 specific_pe_3_atoms_kernel!(pe, coords,
-            boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters, val_pe_units)
+            boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters, Val(pe_units))
+    return pe
 end
 
-function specific_pe_kernel!(pe, inter_list::InteractionList4Atoms, coords, boundary, val_pe_units)
+function specific_pe_gpu!(pe, inter_list::InteractionList4Atoms, coords, boundary, pe_units)
     CUDA.@sync @cuda threads=256 blocks=64 specific_pe_4_atoms_kernel!(pe, coords,
             boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
-            inter_list.inters, val_pe_units)
+            inter_list.inters, Val(pe_units))
+    return pe
 end
 
 function specific_pe_1_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
@@ -331,7 +340,7 @@ function specific_pe_1_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         end
         CUDA.atomic_add!(pointer(energy), pe)
     end
-    return
+    return nothing
 end
 
 function specific_pe_2_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
@@ -354,7 +363,7 @@ function specific_pe_2_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         end
         CUDA.atomic_add!(pointer(energy), ustrip(pe))
     end
-    return
+    return nothing
 end
 
 function specific_pe_3_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
@@ -378,7 +387,7 @@ function specific_pe_3_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         end
         CUDA.atomic_add!(pointer(energy), ustrip(pe))
     end
-    return
+    return nothing
 end
 
 function specific_pe_4_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
@@ -403,5 +412,5 @@ function specific_pe_4_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         end
         CUDA.atomic_add!(pointer(energy), ustrip(pe))
     end
-    return
+    return nothing
 end

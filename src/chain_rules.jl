@@ -211,6 +211,7 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
               "system force units are $(sys.force_units)")
     end
     Y = forces_pair_spec(sys, neighbors, n_threads)
+
     function forces_pair_spec_pullback(d_forces)
         fs = zero(sys.coords)
         z = zero(T)
@@ -255,6 +256,7 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
         )
         return NoTangent(), d_sys, NoTangent(), NoTangent()
     end
+
     return Y, forces_pair_spec_pullback
 end
 
@@ -265,6 +267,7 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), sys::System{
               "units, system energy units are $(sys.energy_units)")
     end
     Y = potential_energy_pair_spec(sys, neighbors, n_threads)
+
     function potential_energy_pair_spec_pullback(d_forces)
         z = zero(T)
         d_coords = zero(sys.coords)
@@ -308,12 +311,13 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), sys::System{
         )
         return NoTangent(), d_sys, NoTangent(), NoTangent()
     end
+
     return Y, potential_energy_pair_spec_pullback
 end
 
 function grad_pairwise_force_kernel!(fs_mat::CuDeviceMatrix{T}, d_fs_mat, virial, d_virial, coords,
                                      d_coords, atoms, d_atoms, boundary, inters, d_inters,
-                                     neighbors, force_units, shared_mem_size::Val{M}) where {T, M}
+                                     neighbors, val_force_units, shared_mem_size::Val{M}) where {T, M}
     shared_fs = CuStaticSharedArray(T, (3, M))
     d_shared_fs = CuStaticSharedArray(T, (3, M))
     sync_threads()
@@ -327,35 +331,41 @@ function grad_pairwise_force_kernel!(fs_mat::CuDeviceMatrix{T}, d_fs_mat, virial
         Const(boundary),
         Duplicated(inters, d_inters),
         Const(neighbors),
-        Const(force_unit),
+        Const(val_force_units),
         Const(shared_mem_size),
         Duplicated(shared_fs, d_shared_fs),
     )
-    return
+    return nothing
 end
 
-function ChainRulesCore.rrule(::typeof(pairwise_force_gpu!), fs_mat, virial, coords, atoms,
-                              boundary, pairwise_inters, nbs, force_units)
+function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), virial,
+                              coords::AbstractArray{SVector{D, T}}, atoms,
+                              boundary, pairwise_inters, nbs, force_units) where {D, T}
     if force_units != NoUnits
         error("Taking gradients through force calculation is not compatible with units, " *
               "system force units are $force_units")
     end
-    Y = pairwise_force_gpu!(fs_mat, virial, coords, atoms, boundary, pairwise_inters,
-                            nbs, force_units)
-    function pairwise_force_gpu!_pullback(d_fs_mat)
+    Y = pairwise_force_gpu(virial, coords, atoms, boundary, pairwise_inters,
+                           nbs, force_units)
+
+    function pairwise_force_gpu_pullback(d_fs_mat)
+        n_atoms = length(atoms)
         z = zero(T)
+        fs_mat = CUDA.zeros(T, D, n_atoms)
         d_virial = zero(virial)
-        d_coords = zero(sys.coords)
-        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:length(sys)]
+        d_coords = zero(coords)
+        d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
         d_pairwise_inters = zero.(pairwise_inters)
         n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_force_kernel!(fs_mat,
-                d_fs_mat, virial, d_virial, coords, d_coords, atoms, d_atoms, boundary, inters,
-                d_inters, neighbors, force_units, Val(shared_mem_size))
+                d_fs_mat, virial, d_virial, coords, d_coords, atoms, d_atoms, boundary,
+                pairwise_inters, d_pairwise_inters, nbs, Val(force_units),
+                Val(n_threads_gpu))
 
-        return NoTangent(), d_fs_mat, d_virial, d_coords, d_atoms, NoTangent(),
+        return NoTangent(), d_virial, d_coords, d_atoms, NoTangent(),
                d_pairwise_inters, NoTangent(), NoTangent()
     end
-    return Y, pairwise_force_gpu!_pullback
+
+    return Y, pairwise_force_gpu_pullback
 end
