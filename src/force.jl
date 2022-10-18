@@ -322,7 +322,7 @@ function forces(s::System{D, true, T}, neighbors=nothing;
     end
 
     for inter_list in values(s.specific_inter_lists)
-        specific_force_kernel!(fs_mat, inter_list, s.coords, s.boundary, Val(s.force_units))
+        fs_mat += specific_force_gpu(inter_list, s.coords, s.boundary, s.force_units)
     end
 
     fs = reinterpret(SVector{D, T}, vec(fs_mat))

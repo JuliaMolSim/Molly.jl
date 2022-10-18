@@ -356,7 +356,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), virial,
         d_coords = zero(coords)
         d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
         d_pairwise_inters = zero.(pairwise_inters)
-        n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
+        n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_force_kernel!(fs_mat,
                 d_fs_mat, virial, d_virial, coords, d_coords, atoms, d_atoms, boundary,
@@ -408,7 +408,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{S
         d_coords = zero(coords)
         d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
         d_pairwise_inters = zero.(pairwise_inters)
-        n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
+        n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_pe_kernel!(pe_vec,
                 d_pe_vec, coords, d_coords, atoms, d_atoms, boundary,
@@ -420,4 +420,223 @@ function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{S
     end
 
     return Y, pairwise_pe_gpu_pullback
+end
+
+function grad_specific_force_1_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, coords, d_coords,
+                                             boundary, is, inters, d_inters,
+                                             val_force_units)
+    Enzyme.autodiff_deferred(
+        specific_force_1_atoms_kernel!,
+        Duplicated(fs_mat, d_fs_mat),
+        Duplicated(coords, d_coords),
+        Const(boundary),
+        Const(is),
+        Duplicated(inters, d_inters),
+        Const(val_force_units),
+    )
+    return nothing
+end
+
+function grad_specific_force_2_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, coords, d_coords,
+                                             boundary, is, js, inters, d_inters,
+                                             val_force_units)
+    Enzyme.autodiff_deferred(
+        specific_force_2_atoms_kernel!,
+        Duplicated(fs_mat, d_fs_mat),
+        Duplicated(coords, d_coords),
+        Const(boundary),
+        Const(is),
+        Const(js),
+        Duplicated(inters, d_inters),
+        Const(val_force_units),
+    )
+    return nothing
+end
+
+function grad_specific_force_3_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, coords, d_coords,
+                                             boundary, is, js, ks, inters, d_inters,
+                                             val_force_units)
+    Enzyme.autodiff_deferred(
+        specific_force_3_atoms_kernel!,
+        Duplicated(fs_mat, d_fs_mat),
+        Duplicated(coords, d_coords),
+        Const(boundary),
+        Const(is),
+        Const(js),
+        Const(ks),
+        Duplicated(inters, d_inters),
+        Const(val_force_units),
+    )
+    return nothing
+end
+
+function grad_specific_force_4_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, coords, d_coords,
+                                             boundary, is, js, ks, ls, inters, d_inters,
+                                             val_force_units)
+    Enzyme.autodiff_deferred(
+        specific_force_4_atoms_kernel!,
+        Duplicated(fs_mat, d_fs_mat),
+        Duplicated(coords, d_coords),
+        Const(boundary),
+        Const(is),
+        Const(js),
+        Const(ks),
+        Const(ls),
+        Duplicated(inters, d_inters),
+        Const(val_force_units),
+    )
+    return nothing
+end
+
+function ChainRulesCore.rrule(::typeof(specific_force_gpu), inter_list,
+                              coords::AbstractArray{SVector{D, T}}, boundary,
+                              force_units) where {D, T}
+    if force_units != NoUnits
+        error("Taking gradients through force calculation is not compatible with units, " *
+              "system force units are $force_units")
+    end
+    Y = specific_force_gpu(inter_list, coords, boundary, force_units)
+
+    function specific_force_gpu_pullback(d_fs_mat)
+        fs_mat = CUDA.zeros(T, D, length(coords))
+        d_inter_list = zero(inter_list)
+        d_coords = zero(coords)
+        n_threads_gpu, n_blocks = cuda_threads_blocks_specific()
+
+        if inter_list isa InteractionList1Atoms
+            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_1_atoms_kernel!(
+                    fs_mat, d_fs_mat, coords, d_coords, boundary,
+                    inter_list.is,
+                    inter_list.inters, d_inter_list.inters, Val(force_units))
+        elseif inter_list isa InteractionList2Atoms
+            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_2_atoms_kernel!(
+                    fs_mat, d_fs_mat, coords, d_coords, boundary,
+                    inter_list.is, inter_list.js,
+                    inter_list.inters, d_inter_list.inters, Val(force_units))
+        elseif inter_list isa InteractionList3Atoms
+            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_3_atoms_kernel!(
+                    fs_mat, d_fs_mat, coords, d_coords, boundary,
+                    inter_list.is, inter_list.js, inter_list.ks,
+                    inter_list.inters, d_inter_list.inters, Val(force_units))
+        elseif inter_list isa InteractionList4Atoms
+            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_4_atoms_kernel!(
+                    fs_mat, d_fs_mat, coords, d_coords, boundary,
+                    inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
+                    inter_list.inters, d_inter_list.inters, Val(force_units))
+        end
+
+        return NoTangent(), d_inter_list, d_coords, NoTangent(), NoTangent()
+    end
+
+    return Y, specific_force_gpu_pullback
+end
+
+function grad_specific_pe_1_atoms_kernel!(energy::CuDeviceVector, d_energy, coords, d_coords,
+                                          boundary, is, inters, d_inters,
+                                          val_energy_units)
+    Enzyme.autodiff_deferred(
+        specific_pe_1_atoms_kernel!,
+        Duplicated(energy, d_energy),
+        Duplicated(coords, d_coords),
+        Const(boundary),
+        Const(is),
+        Duplicated(inters, d_inters),
+        Const(val_energy_units),
+    )
+    return nothing
+end
+
+function grad_specific_pe_2_atoms_kernel!(energy::CuDeviceVector, d_energy, coords, d_coords,
+                                          boundary, is, js, inters, d_inters,
+                                          val_energy_units)
+    Enzyme.autodiff_deferred(
+        specific_pe_2_atoms_kernel!,
+        Duplicated(energy, d_energy),
+        Duplicated(coords, d_coords),
+        Const(boundary),
+        Const(is),
+        Const(js),
+        Duplicated(inters, d_inters),
+        Const(val_energy_units),
+    )
+    return nothing
+end
+
+function grad_specific_pe_3_atoms_kernel!(energy::CuDeviceVector, d_energy, coords, d_coords,
+                                          boundary, is, js, ks, inters, d_inters,
+                                          val_energy_units)
+    Enzyme.autodiff_deferred(
+        specific_pe_3_atoms_kernel!,
+        Duplicated(energy, d_energy),
+        Duplicated(coords, d_coords),
+        Const(boundary),
+        Const(is),
+        Const(js),
+        Const(ks),
+        Duplicated(inters, d_inters),
+        Const(val_energy_units),
+    )
+    return nothing
+end
+
+function grad_specific_pe_4_atoms_kernel!(energy::CuDeviceVector, d_energy, coords, d_coords,
+                                          boundary, is, js, ks, ls, inters, d_inters,
+                                          val_energy_units)
+    Enzyme.autodiff_deferred(
+        specific_pe_4_atoms_kernel!,
+        Duplicated(energy, d_energy),
+        Duplicated(coords, d_coords),
+        Const(boundary),
+        Const(is),
+        Const(js),
+        Const(ks),
+        Const(ls),
+        Duplicated(inters, d_inters),
+        Const(val_energy_units),
+    )
+    return nothing
+end
+
+function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
+                              coords::AbstractArray{SVector{D, T}}, boundary,
+                              energy_units) where {D, T}
+    if energy_units != NoUnits
+        error("Taking gradients through potential energy calculation is not compatible with " *
+              "units, system energy units are $energy_units")
+    end
+    Y = specific_pe_gpu(inter_list, coords, boundary, energy_units)
+
+    function specific_pe_gpu_pullback(d_pe_vec_arg)
+        pe_vec = CUDA.zeros(T, 1)
+        d_pe_vec = CuArray([d_pe_vec_arg[1]])
+        d_inter_list = zero(inter_list)
+        d_coords = zero(coords)
+        n_threads_gpu, n_blocks = cuda_threads_blocks_specific()
+
+        if inter_list isa InteractionList1Atoms
+            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_pe_1_atoms_kernel!(
+                    pe_vec, d_pe_vec, coords, d_coords, boundary,
+                    inter_list.is,
+                    inter_list.inters, d_inter_list.inters, Val(energy_units))
+        elseif inter_list isa InteractionList2Atoms
+            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_pe_2_atoms_kernel!(
+                    pe_vec, d_pe_vec, coords, d_coords, boundary,
+                    inter_list.is, inter_list.js,
+                    inter_list.inters, d_inter_list.inters, Val(energy_units))
+        elseif inter_list isa InteractionList3Atoms
+            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_pe_3_atoms_kernel!(
+                    pe_vec, d_pe_vec, coords, d_coords, boundary,
+                    inter_list.is, inter_list.js, inter_list.ks,
+                    inter_list.inters, d_inter_list.inters, Val(energy_units))
+        elseif inter_list isa InteractionList4Atoms
+            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_pe_4_atoms_kernel!(
+                    pe_vec, d_pe_vec, coords, d_coords, boundary,
+                    inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
+                    inter_list.inters, d_inter_list.inters, Val(energy_units))
+        end
+
+        return NoTangent(), d_inter_list, d_coords, NoTangent(), NoTangent()
+    end
+
+    return Y, specific_pe_gpu_pullback
 end

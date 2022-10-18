@@ -1,15 +1,21 @@
 # CUDA.jl kernels
 
-function cuda_threads_blocks(n_neighbors)
+function cuda_threads_blocks_pairwise(n_neighbors)
     n_threads = 256
     n_blocks = cld(n_neighbors, n_threads)
+    return n_threads, n_blocks
+end
+
+function cuda_threads_blocks_specific()
+    n_threads = 256
+    n_blocks = 64
     return n_threads, n_blocks
 end
 
 function pairwise_force_gpu(virial, coords::AbstractArray{SVector{D, T}}, atoms, boundary,
                             pairwise_inters, nbs, force_units) where {D, T}
     fs_mat = CUDA.zeros(T, D, length(atoms))
-    n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel!(
             fs_mat, virial, coords, atoms, boundary, pairwise_inters, nbs,
             Val(force_units), Val(n_threads_gpu))
@@ -93,32 +99,40 @@ function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, a
     return nothing
 end
 
-function specific_force_gpu!(fs_mat, inter_list::InteractionList1Atoms, coords, boundary,
-                             force_units)
-    CUDA.@sync @cuda threads=256 blocks=64 specific_force_1_atoms_kernel!(fs_mat, coords,
-            boundary, inter_list.is, inter_list.inters, Val(force_units))
+function specific_force_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, T}},
+                            boundary, force_units) where {D, T}
+    fs_mat = CUDA.zeros(T, D, length(coords))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific()
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_1_atoms_kernel!(fs_mat,
+            coords, boundary, inter_list.is, inter_list.inters, Val(force_units))
     return fs_mat
 end
 
-function specific_force_gpu!(fs_mat, inter_list::InteractionList2Atoms, coords, boundary,
-                             force_units)
-    CUDA.@sync @cuda threads=256 blocks=64 specific_force_2_atoms_kernel!(fs_mat, coords,
-            boundary, inter_list.is, inter_list.js, inter_list.inters, Val(force_units))
+function specific_force_gpu(inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, T}},
+                            boundary, force_units) where {D, T}
+    fs_mat = CUDA.zeros(T, D, length(coords))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific()
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_2_atoms_kernel!(fs_mat,
+            coords, boundary, inter_list.is, inter_list.js, inter_list.inters, Val(force_units))
     return fs_mat
 end
 
-function specific_force_gpu!(fs_mat, inter_list::InteractionList3Atoms, coords, boundary,
-                             force_units)
-    CUDA.@sync @cuda threads=256 blocks=64 specific_force_3_atoms_kernel!(fs_mat, coords,
-            boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters,
+function specific_force_gpu(inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, T}},
+                            boundary, force_units) where {D, T}
+    fs_mat = CUDA.zeros(T, D, length(coords))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific()
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_3_atoms_kernel!(fs_mat,
+            coords, boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters,
             Val(force_units))
     return fs_mat
 end
 
-function specific_force_gpu!(fs_mat, inter_list::InteractionList4Atoms, coords, boundary,
-                             force_units)
-    CUDA.@sync @cuda threads=256 blocks=64 specific_force_4_atoms_kernel!(fs_mat, coords,
-            boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
+function specific_force_gpu(inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, T}},
+                            boundary, force_units) where {D, T}
+    fs_mat = CUDA.zeros(T, D, length(coords))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific()
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_4_atoms_kernel!(fs_mat,
+            coords, boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
             inter_list.inters, Val(force_units))
     return fs_mat
 end
@@ -246,7 +260,7 @@ end
 function pairwise_pe_gpu(coords::AbstractArray{SVector{D, T}}, atoms, boundary,
                          pairwise_inters, nbs, energy_units) where {D, T}
     pe_vec = CUDA.zeros(T, 1)
-    n_threads_gpu, n_blocks = cuda_threads_blocks(length(nbs))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
             pe_vec, coords, atoms, boundary, pairwise_inters,
             nbs, Val(energy_units), Val(n_threads_gpu))
@@ -307,29 +321,42 @@ function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, b
     return nothing
 end
 
-function specific_pe_gpu!(pe, inter_list::InteractionList1Atoms, coords, boundary, pe_units)
-    CUDA.@sync @cuda threads=256 blocks=64 specific_pe_1_atoms_kernel!(pe, coords,
-            boundary, inter_list.is, inter_list.inters, Val(pe_units))
-    return pe
+function specific_pe_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, T}},
+                         boundary, energy_units) where {D, T}
+    pe_vec = CUDA.zeros(T, 1)
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific()
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_pe_1_atoms_kernel!(pe_vec,
+            coords, boundary, inter_list.is, inter_list.inters, Val(energy_units))
+    return pe_vec
 end
 
-function specific_pe_gpu!(pe, inter_list::InteractionList2Atoms, coords, boundary, pe_units)
-    CUDA.@sync @cuda threads=256 blocks=64 specific_pe_2_atoms_kernel!(pe, coords,
-            boundary, inter_list.is, inter_list.js, inter_list.inters, Val(pe_units))
-    return pe
+function specific_pe_gpu(inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, T}},
+                         boundary, energy_units) where {D, T}
+    pe_vec = CUDA.zeros(T, 1)
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific()
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_pe_2_atoms_kernel!(pe_vec,
+            coords, boundary, inter_list.is, inter_list.js, inter_list.inters, Val(energy_units))
+    return pe_vec
 end
 
-function specific_pe_gpu!(pe, inter_list::InteractionList3Atoms, coords, boundary, pe_units)
-    CUDA.@sync @cuda threads=256 blocks=64 specific_pe_3_atoms_kernel!(pe, coords,
-            boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters, Val(pe_units))
-    return pe
+function specific_pe_gpu(inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, T}},
+                         boundary, energy_units) where {D, T}
+    pe_vec = CUDA.zeros(T, 1)
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific()
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_pe_3_atoms_kernel!(pe_vec,
+            coords, boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters,
+            Val(energy_units))
+    return pe_vec
 end
 
-function specific_pe_gpu!(pe, inter_list::InteractionList4Atoms, coords, boundary, pe_units)
-    CUDA.@sync @cuda threads=256 blocks=64 specific_pe_4_atoms_kernel!(pe, coords,
-            boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
-            inter_list.inters, Val(pe_units))
-    return pe
+function specific_pe_gpu(inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, T}},
+                         boundary, energy_units) where {D, T}
+    pe_vec = CUDA.zeros(T, 1)
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific()
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_pe_4_atoms_kernel!(pe_vec,
+            coords, boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
+            inter_list.inters, Val(energy_units))
+    return pe_vec
 end
 
 function specific_pe_1_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
