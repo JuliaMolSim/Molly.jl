@@ -333,14 +333,15 @@ function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, virial, d_virial, coords,
 end
 
 function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), virial,
-                              coords::AbstractArray{SVector{D, T}}, atoms,
-                              boundary, pairwise_inters, nbs, force_units) where {D, T}
+                              coords::AbstractArray{SVector{D, C}}, atoms,
+                              boundary, pairwise_inters, nbs, force_units,
+                              val_ft::Val{T}) where {D, C, T}
     if force_units != NoUnits
         error("Taking gradients through force calculation is not compatible with units, " *
               "system force units are $force_units")
     end
     Y = pairwise_force_gpu(virial, coords, atoms, boundary, pairwise_inters,
-                           nbs, force_units)
+                           nbs, force_units, val_ft)
 
     function pairwise_force_gpu_pullback(d_fs_mat)
         n_atoms = length(atoms)
@@ -385,13 +386,14 @@ function grad_pairwise_pe_kernel!(pe_vec::CuDeviceVector{T}, d_pe_vec, coords, d
     return nothing
 end
 
-function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{SVector{D, T}},
-                              atoms, boundary, pairwise_inters, nbs, energy_units) where {D, T}
+function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{SVector{D, C}},
+                              atoms, boundary, pairwise_inters, nbs, energy_units,
+                              val_ft::Val{T}) where {D, C, T}
     if energy_units != NoUnits
         error("Taking gradients through potential energy calculation is not compatible with " *
               "units, system energy units are $energy_units")
     end
-    Y = pairwise_pe_gpu(coords, atoms, boundary, pairwise_inters, nbs, energy_units)
+    Y = pairwise_pe_gpu(coords, atoms, boundary, pairwise_inters, nbs, energy_units, val_ft)
 
     function pairwise_pe_gpu_pullback(d_pe_vec_arg)
         n_atoms = length(atoms)
@@ -482,13 +484,13 @@ function grad_specific_force_4_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, c
 end
 
 function ChainRulesCore.rrule(::typeof(specific_force_gpu), inter_list,
-                              coords::AbstractArray{SVector{D, T}}, boundary,
-                              force_units) where {D, T}
+                              coords::AbstractArray{SVector{D, C}}, boundary,
+                              force_units, val_ft::Val{T}) where {D, C, T}
     if force_units != NoUnits
         error("Taking gradients through force calculation is not compatible with units, " *
               "system force units are $force_units")
     end
-    Y = specific_force_gpu(inter_list, coords, boundary, force_units)
+    Y = specific_force_gpu(inter_list, coords, boundary, force_units, val_ft)
 
     function specific_force_gpu_pullback(d_fs_mat)
         fs_mat = CUDA.zeros(T, D, length(coords))
@@ -591,13 +593,13 @@ function grad_specific_pe_4_atoms_kernel!(energy::CuDeviceVector, d_energy, coor
 end
 
 function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
-                              coords::AbstractArray{SVector{D, T}}, boundary,
-                              energy_units) where {D, T}
+                              coords::AbstractArray{SVector{D, C}}, boundary,
+                              energy_units, val_ft::Val{T}) where {D, C, T}
     if energy_units != NoUnits
         error("Taking gradients through potential energy calculation is not compatible with " *
               "units, system energy units are $energy_units")
     end
-    Y = specific_pe_gpu(inter_list, coords, boundary, energy_units)
+    Y = specific_pe_gpu(inter_list, coords, boundary, energy_units, val_ft)
 
     function specific_pe_gpu_pullback(d_pe_vec_arg)
         pe_vec = CUDA.zeros(T, 1)

@@ -306,7 +306,7 @@ function forces(s::System{D, true, T}, neighbors=nothing;
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
         fs_mat += pairwise_force_gpu(virial, s.coords, s.atoms, s.boundary,
-                                     pairwise_inters_nonl, nbs, s.force_units)
+                                     pairwise_inters_nonl, nbs, s.force_units, Val(T))
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
@@ -317,12 +317,12 @@ function forces(s::System{D, true, T}, neighbors=nothing;
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]
             fs_mat += pairwise_force_gpu(virial, s.coords, s.atoms, s.boundary,
-                                         pairwise_inters_nl, nbs, s.force_units)
+                                         pairwise_inters_nl, nbs, s.force_units, Val(T))
         end
     end
 
     for inter_list in values(s.specific_inter_lists)
-        fs_mat += specific_force_gpu(inter_list, s.coords, s.boundary, s.force_units)
+        fs_mat += specific_force_gpu(inter_list, s.coords, s.boundary, s.force_units, Val(T))
     end
 
     fs = reinterpret(SVector{D, T}, vec(fs_mat))
