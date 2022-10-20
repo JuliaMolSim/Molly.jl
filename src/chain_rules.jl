@@ -315,13 +315,9 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), sys::System{
     return Y, potential_energy_pair_spec_pullback
 end
 
-function grad_pairwise_force_kernel!(fs_mat::CuDeviceMatrix{T}, d_fs_mat, virial, d_virial, coords,
-                                     d_coords, atoms, d_atoms, boundary, inters, d_inters,
-                                     neighbors, val_force_units, shared_mem_size::Val{M}) where {T, M}
-    shared_fs = CuStaticSharedArray(T, (3, M))
-    d_shared_fs = CuStaticSharedArray(T, (3, M))
-    sync_threads()
-
+function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, virial, d_virial, coords, d_coords,
+                                     atoms, d_atoms, boundary, inters, d_inters,
+                                     neighbors, val_force_units)
     Enzyme.autodiff_deferred(
         pairwise_force_kernel!,
         Duplicated(fs_mat, d_fs_mat),
@@ -332,8 +328,6 @@ function grad_pairwise_force_kernel!(fs_mat::CuDeviceMatrix{T}, d_fs_mat, virial
         Duplicated(inters, d_inters),
         Const(neighbors),
         Const(val_force_units),
-        Const(shared_mem_size),
-        Duplicated(shared_fs, d_shared_fs),
     )
     return nothing
 end
@@ -360,8 +354,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), virial,
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_force_kernel!(fs_mat,
                 d_fs_mat, virial, d_virial, coords, d_coords, atoms, d_atoms, boundary,
-                pairwise_inters, d_pairwise_inters, nbs, Val(force_units),
-                Val(n_threads_gpu))
+                pairwise_inters, d_pairwise_inters, nbs, Val(force_units))
 
         return NoTangent(), d_virial, d_coords, d_atoms, NoTangent(),
                d_pairwise_inters, NoTangent(), NoTangent()
@@ -501,7 +494,7 @@ function ChainRulesCore.rrule(::typeof(specific_force_gpu), inter_list,
         fs_mat = CUDA.zeros(T, D, length(coords))
         d_inter_list = zero(inter_list)
         d_coords = zero(coords)
-        n_threads_gpu, n_blocks = cuda_threads_blocks_specific()
+        n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list.is))
 
         if inter_list isa InteractionList1Atoms
             CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_1_atoms_kernel!(
@@ -611,7 +604,7 @@ function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
         d_pe_vec = CuArray([d_pe_vec_arg[1]])
         d_inter_list = zero(inter_list)
         d_coords = zero(coords)
-        n_threads_gpu, n_blocks = cuda_threads_blocks_specific()
+        n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list.is))
 
         if inter_list isa InteractionList1Atoms
             CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_pe_1_atoms_kernel!(

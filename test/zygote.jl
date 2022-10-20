@@ -172,13 +172,11 @@
     end
     if run_gpu_tests #                        gpu    par    fwd    f32    pis    sis    obc2   gbn2
         push!(runs, ("GPU"                 , [true , false, false, false, true , true , false, false], 0.25, 20.0))
-        push!(runs, ("GPU forward"         , [true , false, true , false, true , true , false, false], 0.01, 0.01))
         push!(runs, ("GPU f32"             , [true , false, false, true , true , true , false, false], 0.5 , 50.0))
         push!(runs, ("GPU nospecific"      , [true , false, false, false, true , false, false, false], 0.25, 0.0 ))
         push!(runs, ("GPU nopairwise"      , [true , false, false, false, false, true , false, false], 0.0 , 10.0))
         push!(runs, ("GPU obc2"            , [true , false, false, false, true , true , true , false], 0.25, 20.0))
         push!(runs, ("GPU gbn2"            , [true , false, false, false, true , true , false, true ], 0.25, 20.0))
-        push!(runs, ("GPU gbn2 forward"    , [true , false, true , false, true , true , false, true ], 0.02, 0.02))
     end
 
     for (name, args, tol_σ, tol_r0) in runs
