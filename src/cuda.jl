@@ -38,24 +38,24 @@ function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, a
         for inter in inters[2:end]
             f += force(inter, dr, coord_i, coord_j, atoms[i], atoms[j], boundary, weight_14)
         end
-        dx, dy, dz = f[1], f[2], f[3]
-        if unit(dx) != F
+        if unit(f[1]) != F
             # This triggers an error but it isn't printed
             # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
             #   for how to throw a more meaningful error
             error("Wrong force unit returned, was expecting $F but got $(unit(f[1]))")
         end
+        dx, dy, dz = ustrip(f[1]), ustrip(f[2]), ustrip(f[3])
         if !iszero(dx)
-                CUDA.atomic_add!(pointer(forces, 3i - 2), -dx)
-                CUDA.atomic_add!(pointer(forces, 3j - 2),  dx)
+            CUDA.atomic_add!(pointer(forces, 3i - 2), -dx)
+            CUDA.atomic_add!(pointer(forces, 3j - 2),  dx)
         end
         if !iszero(dy)
-                CUDA.atomic_add!(pointer(forces, 3i - 1), -dy)
-                CUDA.atomic_add!(pointer(forces, 3j - 1),  dy)
+            CUDA.atomic_add!(pointer(forces, 3i - 1), -dy)
+            CUDA.atomic_add!(pointer(forces, 3j - 1),  dy)
         end
         if !iszero(dz)
-                CUDA.atomic_add!(pointer(forces, 3i    ), -dz)
-                CUDA.atomic_add!(pointer(forces, 3j    ),  dz)
+            CUDA.atomic_add!(pointer(forces, 3i    ), -dz)
+            CUDA.atomic_add!(pointer(forces, 3j    ),  dz)
         end
         rij_fij = ustrip(norm(dr) * norm(f))
         virial[] += rij_fij
@@ -328,7 +328,7 @@ function specific_pe_1_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         if unit(pe) != E
             error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        CUDA.atomic_add!(pointer(energy), pe)
+        CUDA.atomic_add!(pointer(energy), ustrip(pe))
     end
     return nothing
 end
