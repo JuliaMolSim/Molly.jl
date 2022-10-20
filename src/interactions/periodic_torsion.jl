@@ -49,8 +49,19 @@ function Base.:+(p1::PeriodicTorsion{N, T, E}, p2::PeriodicTorsion{N, T, E}) whe
     )
 end
 
+function periodic_torsion_force(periodicity, phase, k, ab, bc, cd, cross_ab_bc, cross_bc_cd,
+                                bc_norm, θ)
+    dEdθ = -k * periodicity * sin((periodicity * θ) - phase)
+    fi =  dEdθ * bc_norm * cross_ab_bc / dot(cross_ab_bc, cross_ab_bc)
+    fl = -dEdθ * bc_norm * cross_bc_cd / dot(cross_bc_cd, cross_bc_cd)
+    v = (dot(-ab, bc) / bc_norm^2) * fi - (dot(-cd, bc) / bc_norm^2) * fl
+    fj =  v - fi
+    fk = -v - fl
+    return SpecificForce4Atoms(fi, fj, fk, fl)
+end
+
 @inline @inbounds function force(d::PeriodicTorsion, coords_i, coords_j, coords_k,
-                                    coords_l, boundary)
+                                 coords_l, boundary)
     ab = vector(coords_i, coords_j, boundary)
     bc = vector(coords_j, coords_k, boundary)
     cd = vector(coords_k, coords_l, boundary)
@@ -62,13 +73,9 @@ end
         ustrip(dot(cross_ab_bc, cross_bc_cd)),
     )
     fs = sum(zip(d.periodicities, d.phases, d.ks)) do (periodicity, phase, k)
-        dEdθ = -k * periodicity * sin((periodicity * θ) - phase)
-        fi =  dEdθ * bc_norm * cross_ab_bc / dot(cross_ab_bc, cross_ab_bc)
-        fl = -dEdθ * bc_norm * cross_bc_cd / dot(cross_bc_cd, cross_bc_cd)
-        v = (dot(-ab, bc) / bc_norm^2) * fi - (dot(-cd, bc) / bc_norm^2) * fl
-        fj =  v - fi
-        fk = -v - fl
-        return SpecificForce4Atoms(fi, fj, fk, fl)
+        # In a function to work with Enzyme
+        return periodic_torsion_force(periodicity, phase, k, ab, bc, cd, cross_ab_bc, cross_bc_cd,
+                                      bc_norm, θ)
     end
     return fs
 end
