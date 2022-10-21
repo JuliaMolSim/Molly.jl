@@ -25,7 +25,9 @@
     forces_direct = force_direct.(dists)
     forces_grad = force_grad.(dists)
     @test all(isapprox.(forces_direct, forces_grad))
+end
 
+@testset "Differentiable simulation" begin
     abs2_vec(x) = abs2.(x)
 
     # Function is strange in order to work with gradients on the GPU
@@ -208,6 +210,9 @@
                 @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy"
                 ztol = contains(name, "f32") ? 1e-8 : 1e-10
                 @test isnothing(gzy) || abs(gzy) < ztol
+            elseif isnothing(gzy)
+                @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy"
+                @test !isnothing(gzy)
             else
                 frac_diff = abs(gzy - gfd) / abs(gfd)
                 @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy, fractional difference $frac_diff"
