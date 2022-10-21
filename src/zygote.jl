@@ -13,6 +13,8 @@ Zygote.accum(x::CuArray{<:SVector}, y::Vector{<:SVector} ) = Zygote.accum(x, CuA
 
 Zygote.accum(x::SVector{D, T}, y::T) where {D, T} = x .+ y
 
+Zygote.accum(u1::T, ::T) where {T <: Unitful.FreeUnits} = u1
+
 Base.:+(x::Real, y::SizedVector) = x .+ y
 Base.:+(x::SizedVector, y::Real) = x .+ y
 

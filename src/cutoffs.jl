@@ -142,3 +142,6 @@ end
     
     return (2t^3 - 3t^2 + 1) * Va + (t^3 - 2t^2 + t) * (cutoff.dist_cutoff-cutoff.dist_activation) * dVa
 end
+
+Base.:+(c1::T, ::T) where {T <: Union{NoCutoff, DistanceCutoff, ShiftedPotentialCutoff,
+                                      ShiftedForceCutoff, CubicSplineCutoff}} = c1
