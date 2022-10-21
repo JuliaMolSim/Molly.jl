@@ -358,7 +358,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), virial,
                 pairwise_inters, d_pairwise_inters, nbs, Val(force_units))
 
         return NoTangent(), d_virial, d_coords, d_atoms, NoTangent(),
-               d_pairwise_inters, NoTangent(), NoTangent()
+               d_pairwise_inters, NoTangent(), NoTangent(), NoTangent()
     end
 
     return Y, pairwise_force_gpu_pullback
@@ -411,7 +411,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{S
                 Val(n_threads_gpu))
 
         return NoTangent(), d_coords, d_atoms, NoTangent(), d_pairwise_inters, NoTangent(),
-               NoTangent()
+               NoTangent(), NoTangent()
     end
 
     return Y, pairwise_pe_gpu_pullback
@@ -520,7 +520,7 @@ function ChainRulesCore.rrule(::typeof(specific_force_gpu), inter_list,
                     inter_list.inters, d_inter_list.inters, Val(force_units))
         end
 
-        return NoTangent(), d_inter_list, d_coords, NoTangent(), NoTangent()
+        return NoTangent(), d_inter_list, d_coords, NoTangent(), NoTangent(), NoTangent()
     end
 
     return Y, specific_force_gpu_pullback
@@ -630,7 +630,7 @@ function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
                     inter_list.inters, d_inter_list.inters, Val(energy_units))
         end
 
-        return NoTangent(), d_inter_list, d_coords, NoTangent(), NoTangent()
+        return NoTangent(), d_inter_list, d_coords, NoTangent(), NoTangent(), NoTangent()
     end
 
     return Y, specific_pe_gpu_pullback
