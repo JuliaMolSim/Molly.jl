@@ -256,7 +256,7 @@ is_carboxylate_O(at_data) = at_data.atom_type == "O2"
 
 function atoms_bonded_to_N(atoms_data, bonds)
     bonded_to_N = falses(length(atoms_data))
-    for (i, j) in zip(bonds.is, bonds.js)
+    for (i, j) in zip(Array(bonds.is), Array(bonds.js))
         if atoms_data[i].element == "N"
             bonded_to_N[j] = true
         end
