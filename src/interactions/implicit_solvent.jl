@@ -334,9 +334,8 @@ Onufriev-Bashford-Case GBSA model.
 Should be used along with a [`Coulomb`](@ref) or [`CoulombReactionField`](@ref) interaction.
 The keyword argument `use_OBC2` determines whether to use parameter set
 I (`false`, the default) or II (`true`).
-The atom charges cannot change during the simulation when using this model.
 """
-struct ImplicitSolventOBC{T, D, V, K, S, F, I, DI, CI} <: AbstractGBSA
+struct ImplicitSolventOBC{T, D, V, K, S, F, I, DI} <: AbstractGBSA
     offset_radii::V
     scaled_offset_radii::V
     solvent_dielectric::T
@@ -357,8 +356,6 @@ struct ImplicitSolventOBC{T, D, V, K, S, F, I, DI, CI} <: AbstractGBSA
     oris::DI
     orjs::DI
     srjs::DI
-    charges_i::CI
-    charges_j::CI
 end
 
 function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
@@ -397,8 +394,8 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     end
 
     n_atoms = length(atoms)
-    inds_i = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
-    inds_j = permutedims(inds_i, (2, 1))
+    inds_j = hcat(1:n_atoms...)
+    inds_i = permutedims(inds_j, (2, 1))
 
     coulomb_const = units ? coulombconst : ustrip(coulombconst)
     if !iszero(solute_dielectric)
@@ -425,23 +422,19 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     oris = @view or[is]
     orjs = @view or[js]
     srjs = @view sor[js]
-    charges = charge.(atoms)
-    charges_i = @view charges[is]
-    charges_j = @view charges[js]
 
     if units
         return ImplicitSolventOBC{T, D, typeof(or), typeof(T(kappa)), typeof(T(sa_factor)),
-                        typeof(factor_solute), typeof(is), typeof(oris), typeof(charges_i)}(
+                        typeof(factor_solute), typeof(is), typeof(oris)}(
                     or, sor, solvent_dielectric, solute_dielectric, T(kappa), offset,
                     dist_cutoff, use_ACE, α, β, γ, probe_radius, T(sa_factor),
-                    factor_solute, factor_solvent, is, js, oris, orjs, srjs, charges_i, charges_j)
+                    factor_solute, factor_solvent, is, js, oris, orjs, srjs)
     else
         return ImplicitSolventOBC{T, T, typeof(or), typeof(T(ustrip(kappa))), T, T, typeof(is),
-                        typeof(oris), typeof(charges_i)}(
+                        typeof(oris)}(
                     or, sor, solvent_dielectric, solute_dielectric, T(ustrip(kappa)),
                     ustrip(offset), ustrip(dist_cutoff), use_ACE, α, β, γ, ustrip(probe_radius),
-                    ustrip(sa_factor), factor_solute, factor_solvent, is, js, oris, orjs, srjs,
-                    charges_i, charges_j)
+                    ustrip(sa_factor), factor_solute, factor_solvent, is, js, oris, orjs, srjs)
     end
 end
 
@@ -450,9 +443,8 @@ end
 
 GBn2 solvation model.
 Should be used along with a [`Coulomb`](@ref) or [`CoulombReactionField`](@ref) interaction.
-The atom charges cannot change during the simulation when using this model.
 """
-struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, TD, TM, DI, CI} <: AbstractGBSA
+struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, TD, TM, DI} <: AbstractGBSA
     offset_radii::VD
     scaled_offset_radii::VD
     solvent_dielectric::T
@@ -477,8 +469,6 @@ struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, TD, TM, DI, CI} <: Abstract
     oris::DI
     orjs::DI
     srjs::DI
-    charges_i::CI
-    charges_j::CI
 end
 
 function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
@@ -545,8 +535,8 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
     end
 
     n_atoms = length(atoms)
-    inds_i = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
-    inds_j = permutedims(inds_i, (2, 1))
+    inds_j = hcat(1:n_atoms...)
+    inds_i = permutedims(inds_j, (2, 1))
 
     table_d0_units = T.(lookup_table(data_d0, radii))
     table_m0_units = T.(lookup_table(data_m0, radii))
@@ -587,25 +577,20 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
     oris = @view or[is]
     orjs = @view or[js]
     srjs = @view sor[js]
-    charges = charge.(atoms)
-    charges_i = @view charges[is]
-    charges_j = @view charges[js]
 
     if units
         return ImplicitSolventGBN2{T, D, typeof(αs), typeof(or), typeof(T(kappa)), typeof(T(sa_factor)),
-                        typeof(factor_solute), typeof(is), typeof(d0s), typeof(m0s), typeof(oris),
-                        typeof(charges_i)}(
+                        typeof(factor_solute), typeof(is), typeof(d0s), typeof(m0s), typeof(oris)}(
                     or, sor, solvent_dielectric, solute_dielectric, T(kappa), offset, dist_cutoff,
                     use_ACE, αs, βs, γs, probe_radius, T(sa_factor), factor_solute,
-                    factor_solvent, is, js, d0s, m0s, neck_scale, neck_cut, oris, orjs, srjs,
-                    charges_i, charges_j)
+                    factor_solvent, is, js, d0s, m0s, neck_scale, neck_cut, oris, orjs, srjs)
     else
         return ImplicitSolventGBN2{T, T, typeof(αs), typeof(or), typeof(T(ustrip(kappa))), T, T,
-                        typeof(is), typeof(d0s), typeof(m0s), typeof(oris), typeof(charges_i)}(
+                        typeof(is), typeof(d0s), typeof(m0s), typeof(oris)}(
                     or, sor, solvent_dielectric, solute_dielectric, T(ustrip(kappa)), ustrip(offset),
                     ustrip(dist_cutoff), use_ACE, αs, βs, γs, ustrip(probe_radius), ustrip(sa_factor),
                     factor_solute, factor_solvent, is, js, d0s, m0s, neck_scale, ustrip(neck_cut),
-                    oris, orjs, srjs, charges_i, charges_j)
+                    oris, orjs, srjs)
     end
 end
 
@@ -817,8 +802,11 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing)
     coords_j = @view coords[inter.js]
     Bsi = @view Bs[inter.is]
     Bsj = @view Bs[inter.js]
-    loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, inter.charges_i,
-                                  inter.charges_j, Bsi, Bsj, inter.dist_cutoff, inter.factor_solute,
+    charges = charge.(atoms)
+    charges_i = @view charges[inter.is]
+    charges_j = @view charges[inter.js]
+    loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i,
+                                  charges_j, Bsi, Bsj, inter.dist_cutoff, inter.factor_solute,
                                   inter.factor_solvent, inter.kappa, (boundary,))
     born_forces = born_forces .+ dropdims(sum(get_bi.(loop_res_1); dims=2); dims=2)
     born_forces = born_forces .+ dropdims(sum(get_bj.(loop_res_1); dims=1); dims=1)
@@ -878,8 +866,11 @@ function potential_energy(inter::AbstractGBSA, sys, neighbors=nothing)
     coords_j = @view coords[inter.js]
     Bsi = @view Bs[inter.is]
     Bsj = @view Bs[inter.js]
-    return sum(gb_energy_loop.(coords_i, coords_j, inter.is, inter.js, inter.charges_i,
-                                inter.charges_j, Bsi, Bsj, inter.oris, inter.dist_cutoff,
+    charges = charge.(atoms)
+    charges_i = @view charges[inter.is]
+    charges_j = @view charges[inter.js]
+    return sum(gb_energy_loop.(coords_i, coords_j, inter.is, inter.js, charges_i,
+                                charges_j, Bsi, Bsj, inter.oris, inter.dist_cutoff,
                                 inter.factor_solute, inter.factor_solvent, inter.kappa,
                                 inter.offset, inter.probe_radius, inter.sa_factor, inter.use_ACE,
                                 (boundary,)))
