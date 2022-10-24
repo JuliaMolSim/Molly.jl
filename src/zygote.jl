@@ -21,12 +21,29 @@ Base.:+(x::SizedVector, y::Real) = x .+ y
 Base.:+(x::Real, y::Zygote.OneElement) = x .+ y
 Base.:+(x::Zygote.OneElement, y::Real) = x .+ y
 
+function Zygote.accum(x::CuArray{Atom{T, T, T, T}},
+                      y::Vector{NamedTuple{(:index, :charge, :mass, :σ, :ϵ, :solute)}}) where T
+    CuArray(Zygote.accum(Array(x), y))
+end
+
 function Base.:+(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
     Atom{T, T, T, T}(0, x.charge + y.charge, x.mass + y.mass, x.σ + y.σ, x.ϵ + y.ϵ, false)
 end
 
 function Base.:-(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
     Atom{T, T, T, T}(0, x.charge - y.charge, x.mass - y.mass, x.σ - y.σ, x.ϵ - y.ϵ, false)
+end
+
+function Base.:+(x::Atom{T, T, T, T}, y::NamedTuple{(:index, :charge, :mass, :σ, :ϵ, :solute),
+                    Tuple{Int, C, M, S, E, Bool}}) where {T, C, M, S, E}
+    Atom{T, T, T, T}(
+        0,
+        Zygote.accum(x.charge, y.charge),
+        Zygote.accum(x.mass, y.mass),
+        Zygote.accum(x.σ, y.σ),
+        Zygote.accum(x.ϵ, y.ϵ),
+        false,
+    )
 end
 
 function Base.:+(r::Base.RefValue{Any}, y::NamedTuple{(:atoms, :atoms_data, :masses,
