@@ -40,17 +40,19 @@ function place_atoms(n_atoms::Integer,
     while length(coords) < n_atoms
         new_coord = rand_coord(boundary)
         okay = true
-        for coord in coords
-            if sum(abs2, vector(coord, new_coord, boundary)) < min_dist_sq
-                okay = false
-                failed_attempts += 1
-                break
+        if min_dist > zero(min_dist)
+            for coord in coords
+                if sum(abs2, vector(coord, new_coord, boundary)) < min_dist_sq
+                    okay = false
+                    failed_attempts += 1
+                    break
+                end
             end
         end
         if okay
             push!(coords, new_coord)
             failed_attempts = 0
-        elseif failed_attempts > max_attempts
+        elseif failed_attempts >= max_attempts
             error("Failed to place atom $(length(coords) + 1) after $max_attempts (max_attempts) tries")
         end
     end
@@ -96,19 +98,21 @@ function place_diatomics(n_molecules::Integer,
         end
         new_coord_b = copy(new_coord_a) + shift
         okay = true
-        for coord in coords
-            if sum(abs2, vector(coord, new_coord_a, boundary)) < min_dist_sq ||
-                    sum(abs2, vector(coord, new_coord_b, boundary)) < min_dist_sq
-                okay = false
-                failed_attempts += 1
-                break
+        if min_dist > zero(min_dist)
+            for coord in coords
+                if sum(abs2, vector(coord, new_coord_a, boundary)) < min_dist_sq ||
+                        sum(abs2, vector(coord, new_coord_b, boundary)) < min_dist_sq
+                    okay = false
+                    failed_attempts += 1
+                    break
+                end
             end
         end
         if okay
             push!(coords, new_coord_a)
             push!(coords, new_coord_b)
             failed_attempts = 0
-        elseif failed_attempts > max_attempts
+        elseif failed_attempts >= max_attempts
             error("Failed to place atom $(length(coords) + 1) after $max_attempts (max_attempts) tries")
         end
     end
