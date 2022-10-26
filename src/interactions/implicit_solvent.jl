@@ -800,11 +800,11 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing)
 
     coords_i = @view coords[inter.is]
     coords_j = @view coords[inter.js]
-    Bsi = @view Bs[inter.is]
-    Bsj = @view Bs[inter.js]
     charges = charge.(atoms)
     charges_i = @view charges[inter.is]
     charges_j = @view charges[inter.js]
+    Bsi = @view Bs[inter.is]
+    Bsj = @view Bs[inter.js]
     loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i,
                                   charges_j, Bsi, Bsj, inter.dist_cutoff, inter.factor_solute,
                                   inter.factor_solvent, inter.kappa, (boundary,))
@@ -864,11 +864,11 @@ function potential_energy(inter::AbstractGBSA, sys, neighbors=nothing)
 
     coords_i = @view coords[inter.is]
     coords_j = @view coords[inter.js]
-    Bsi = @view Bs[inter.is]
-    Bsj = @view Bs[inter.js]
     charges = charge.(atoms)
     charges_i = @view charges[inter.is]
     charges_j = @view charges[inter.js]
+    Bsi = @view Bs[inter.is]
+    Bsj = @view Bs[inter.js]
     return sum(gb_energy_loop.(coords_i, coords_j, inter.is, inter.js, charges_i,
                                 charges_j, Bsi, Bsj, inter.oris, inter.dist_cutoff,
                                 inter.factor_solute, inter.factor_solvent, inter.kappa,

@@ -168,18 +168,19 @@ end
 @inbounds function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
                                      sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
                                      boundary, force_units, neighbors, n_threads)
+    n_atoms = length(coords)
     if n_threads > 1
         fs_chunks = [zero(fs) for _ in 1:n_threads]
 
         if length(pairwise_inters_nonl) > 0
-            n_atoms = length(coords)
             Threads.@threads for thread_id in 1:n_threads
                 for i in thread_id:n_threads:n_atoms
                     for j in (i + 1):n_atoms
                         dr = vector(coords[i], coords[j], boundary)
-                        f = sum(pairwise_inters_nonl) do inter
-                            force(inter, dr, coords[i], coords[j], atoms[i],
-                                atoms[j], boundary)
+                        f = force(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
+                                  atoms[j], boundary)
+                        for inter in pairwise_inters_nonl[2:end]
+                            f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
                         end
                         check_force_units(f, force_units)
                         f_ustrip = ustrip.(f)
@@ -198,9 +199,10 @@ end
                 for ni in thread_id:n_threads:length(neighbors)
                     i, j, weight_14 = neighbors.list[ni]
                     dr = vector(coords[i], coords[j], boundary)
-                    f = sum(pairwise_inters_nl) do inter
-                        force(inter, dr, coords[i], coords[j], atoms[i],
-                              atoms[j], boundary, weight_14)
+                    f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
+                              atoms[j], boundary)
+                    for inter in pairwise_inters_nl[2:end]
+                        f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
                     end
                     check_force_units(f, force_units)
                     f_ustrip = ustrip.(f)
@@ -213,13 +215,13 @@ end
         fs .+= sum(fs_chunks)
     else
         if length(pairwise_inters_nonl) > 0
-            n_atoms = length(coords)
             for i in 1:n_atoms
                 for j in (i + 1):n_atoms
                     dr = vector(coords[i], coords[j], boundary)
-                    f = sum(pairwise_inters_nonl) do inter
-                        force(inter, dr, coords[i], coords[j], atoms[i],
+                    f = force(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
                               atoms[j], boundary)
+                    for inter in pairwise_inters_nonl[2:end]
+                        f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
                     end
                     check_force_units(f, force_units)
                     f_ustrip = ustrip.(f)
@@ -236,9 +238,10 @@ end
             for ni in 1:length(neighbors)
                 i, j, weight_14 = neighbors.list[ni]
                 dr = vector(coords[i], coords[j], boundary)
-                f = sum(pairwise_inters_nl) do inter
-                    force(inter, dr, coords[i], coords[j], atoms[i],
-                        atoms[j], boundary, weight_14)
+                f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
+                          atoms[j], boundary)
+                for inter in pairwise_inters_nl[2:end]
+                    f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
                 end
                 check_force_units(f, force_units)
                 f_ustrip = ustrip.(f)
