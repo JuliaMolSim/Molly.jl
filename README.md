@@ -65,7 +65,7 @@ Simulation of a Lennard-Jones fluid:
 using Molly
 
 n_atoms = 100
-boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+boundary = CubicBoundary(2.0u"nm")
 temp = 298.0u"K"
 atom_mass = 10.0u"u"
 

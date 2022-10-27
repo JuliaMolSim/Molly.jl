@@ -100,7 +100,7 @@ body_masses = [
     0.642e24u"kg",
 ]
 
-boundary = CubicBoundary(1e9u"km", 1e9u"km", 1e9u"km")
+boundary = CubicBoundary(1e9u"km")
 
 # Convert the gravitational constant to the appropriate units
 inter = Gravity(G=convert(typeof(1.0u"km^3 * kg^-1 * d^-2"), Unitful.G))
@@ -272,7 +272,7 @@ using Zygote
 using GLMakie
 
 inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
-boundary = CubicBoundary(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
 function force_direct(dist)
@@ -321,7 +321,7 @@ It can also be compared to the harmonic bond potential.
 using Molly
 using GLMakie
 
-boundary = CubicBoundary(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0)
 dists = collect(0.12:0.005:2.0)
 
 function energies(inter)
@@ -367,7 +367,7 @@ When *m*=6 and *n*=12 this is equivalent to the Lennard-Jones potential.
 using Molly
 using GLMakie
 
-boundary = CubicBoundary(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 dists = collect(0.2:0.005:0.8)
 
@@ -414,7 +414,7 @@ gives a soft core i.e. the potential does not diverges for ``r_{ij} \rightarrow 
 using Molly
 using GLMakie
 
-boundary = CubicBoundary(5.0, 5.0, 5.0)
+boundary = CubicBoundary(5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 dists = collect(0.05:0.005:0.8)
 

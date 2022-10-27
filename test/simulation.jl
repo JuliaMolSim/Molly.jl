@@ -57,7 +57,7 @@ end
     atom_mass = 10.0u"u"
     n_steps = 20_000
     temp = 298.0u"K"
-    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    boundary = CubicBoundary(2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     n_threads_list = run_parallel_tests ? (1, Threads.nthreads()) : (1,)
 
@@ -156,7 +156,7 @@ end
     n_steps = 2_000
     temp = 298.0u"K"
     boundary = CubicBoundary(Inf * u"nm", Inf * u"nm", 2.0u"nm")
-    coords = place_atoms(n_atoms, CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm"); min_dist=0.3u"nm")
+    coords = place_atoms(n_atoms, CubicBoundary(2.0u"nm"); min_dist=0.3u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
     s = System(
@@ -184,7 +184,7 @@ end
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
-    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    boundary = CubicBoundary(2.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     simulators = [
         Verlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps")),
@@ -215,7 +215,7 @@ end
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
-    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    boundary = CubicBoundary(2.0u"nm")
     coords = place_atoms(n_atoms ÷ 2, boundary; min_dist=0.3u"nm")
     for i in eachindex(coords)
         push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
@@ -268,7 +268,7 @@ end
     n_atoms = 100
     n_steps = 20_000
     temp = 298.0u"K"
-    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    boundary = CubicBoundary(2.0u"nm")
     G = 10.0u"kJ * nm * u^-2 * mol^-1"
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     pairwise_inter_types = (
@@ -316,7 +316,7 @@ end
     n_atoms = 100
     n_steps = 2_000 # Does diverge for longer simulations or higher velocities
     temp = 298.0u"K"
-    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    boundary = CubicBoundary(2.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
     simulator = VelocityVerlet(dt=0.002u"ps")
@@ -388,7 +388,7 @@ end
         n_atoms = 10
         n_atoms_res = n_atoms ÷ 2
         n_steps = 2_000
-        boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+        boundary = CubicBoundary(2.0u"nm")
         starting_coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
         atoms = [Atom(charge=0.0, mass=10.0u"u", σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
         atoms_data = [AtomData(atom_type=(i <= n_atoms_res ? "A1" : "A2")) for i in 1:n_atoms]
@@ -420,7 +420,7 @@ end
     n_atoms = 100
     atom_mass = 10.0u"u"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    boundary = CubicBoundary(2.0u"nm")
 
     coords = place_atoms(n_atoms ÷ 2, boundary, min_dist=0.3u"nm")
 
@@ -489,7 +489,7 @@ end
     n_atoms = 30
     atom_mass = 10.0u"u"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    boundary = CubicBoundary(2.0u"nm")
 
     coords = place_atoms(n_atoms÷3, boundary, min_dist=0.3u"nm")
 
@@ -557,7 +557,7 @@ end
     n_atoms = 400
     n_steps = 2000
     temp = 300.0u"K"
-    boundary = CubicBoundary(10.0u"nm", 10.0u"nm", 10.0u"nm")
+    boundary = CubicBoundary(10.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
     s1 = System(
@@ -593,7 +593,7 @@ end
     n_steps = 10_000
     atom_mass = 10.0u"u"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    boundary = CubicBoundary(2.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
 
     pairwise_inters = (LennardJones(nl_only=true),)
@@ -657,7 +657,7 @@ end
     n_steps = 10_000
     atom_mass = 10.0u"u"
     atoms = [Atom(mass=atom_mass, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    boundary = CubicBoundary(2.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
 
     temp = 100.0u"K"
@@ -723,7 +723,7 @@ end
 @testset "Different implementations" begin
     n_atoms = 400
     atom_mass = 10.0u"u"
-    boundary = CubicBoundary(6.0u"nm", 6.0u"nm", 6.0u"nm")
+    boundary = CubicBoundary(6.0u"nm")
     temp = 1.0u"K"
     starting_coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm"; min_dist=0.2u"nm")
     starting_velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
@@ -734,7 +734,7 @@ end
         n_atoms = 400
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
-        boundary = f32 ? CubicBoundary(6.0f0u"nm", 6.0f0u"nm", 6.0f0u"nm") : CubicBoundary(6.0u"nm", 6.0u"nm", 6.0u"nm")
+        boundary = f32 ? CubicBoundary(6.0f0u"nm") : CubicBoundary(6.0u"nm")
         simulator = VelocityVerlet(dt=f32 ? 0.02f0u"ps" : 0.02u"ps")
         k = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
         r0 = f32 ? 0.2f0u"nm" : 0.2u"nm"

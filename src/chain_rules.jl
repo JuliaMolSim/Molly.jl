@@ -252,7 +252,7 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
             specific_inter_lists=(d_sils_1_atoms..., d_sils_2_atoms..., d_sils_3_atoms...,
                                   d_sils_4_atoms...),
             coords=d_coords,
-            boundary=CubicBoundary(z, z, z),
+            boundary=CubicBoundary(z),
         )
         return NoTangent(), d_sys, NoTangent(), NoTangent()
     end
@@ -307,7 +307,7 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), sys::System{
             specific_inter_lists=(d_sils_1_atoms..., d_sils_2_atoms..., d_sils_3_atoms...,
                                   d_sils_4_atoms...),
             coords=d_coords,
-            boundary=CubicBoundary(z, z, z),
+            boundary=CubicBoundary(z),
         )
         return NoTangent(), d_sys, NoTangent(), NoTangent()
     end

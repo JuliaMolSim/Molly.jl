@@ -1,6 +1,6 @@
 @testset "Gradients" begin
     inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
-    boundary = CubicBoundary(5.0, 5.0, 5.0)
+    boundary = CubicBoundary(5.0)
     a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
     function force_direct(dist)
@@ -43,7 +43,7 @@ end
         n_atoms = 50
         n_steps = 100
         atom_mass = f32 ? 10.0f0 : 10.0
-        boundary = f32 ? CubicBoundary(3.0f0, 3.0f0, 3.0f0) : CubicBoundary(3.0, 3.0, 3.0)
+        boundary = f32 ? CubicBoundary(3.0f0) : CubicBoundary(3.0)
         temp = f32 ? 1.0f0 : 1.0
         simulator = VelocityVerlet(
             dt=f32 ? 0.001f0 : 0.001,

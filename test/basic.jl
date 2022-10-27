@@ -121,7 +121,7 @@ end
             atoms=[Atom(), Atom(), Atom()],
             coords=[SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm",
                     SVector(5.0, 5.0, 5.0)u"nm"],
-            boundary=CubicBoundary(10.0u"nm", 10.0u"nm", 10.0u"nm"),
+            boundary=CubicBoundary(10.0u"nm"),
             neighbor_finder=nf,
         )
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
@@ -135,7 +135,7 @@ end
 
     # Test passing the boundary and coordinates as keyword arguments to CellListMapNeighborFinder
     coords = [SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm", SVector(5.0, 5.0, 5.0)u"nm"]
-    boundary = CubicBoundary(10.0u"nm", 10.0u"nm", 10.0u"nm")
+    boundary = CubicBoundary(10.0u"nm")
     neighbor_finder=CellListMapNeighborFinder(
         nb_matrix=trues(3, 3), n_steps=10, x0=coords,
         unit_cell=boundary, dist_cutoff=2.0u"nm",
@@ -202,7 +202,7 @@ end
 
 @testset "Replica System" begin
     n_atoms = 100
-    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm") 
+    boundary = CubicBoundary(2.0u"nm") 
     temp = 298.0u"K"
     atom_mass = 10.0u"u"
     

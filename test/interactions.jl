@@ -3,7 +3,7 @@
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
     c3 = SVector(1.4, 1.0, 1.0)u"nm"
     a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
-    boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+    boundary = CubicBoundary(2.0u"nm")
     dr12 = vector(c1, c2, boundary)
     dr13 = vector(c1, c3, boundary)
 
@@ -122,7 +122,7 @@
     c1_grav = SVector(1.0, 1.0, 1.0)u"m"
     c2_grav = SVector(6.0, 1.0, 1.0)u"m"
     a1_grav, a2_grav = Atom(mass=1e6u"kg"), Atom(mass=1e5u"kg")
-    boundary_grav = CubicBoundary(20.0u"m", 20.0u"m", 20.0u"m")
+    boundary_grav = CubicBoundary(20.0u"m")
     dr12_grav = vector(c1_grav, c2_grav, boundary_grav)
     inter = Gravity()
     @test isapprox(
@@ -231,7 +231,7 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
-    boundary_fene = CubicBoundary(20.0u"nm", 20.0u"nm", 20.0u"nm")
+    boundary_fene = CubicBoundary(20.0u"nm")
     c1_fene = SVector(2.3, 0.0, 0.0)u"nm"
     c2_fene = SVector(1.0, 0.0, 0.0)u"nm"
     kbT = 2.479u"kJ * mol^-1"
@@ -270,7 +270,7 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
-    boundary_cosine = CubicBoundary(10.0u"nm", 10.0u"nm", 10.0u"nm")
+    boundary_cosine = CubicBoundary(10.0u"nm")
     c1_cosine = SVector(1.0, 0.0, 0.0)u"nm"
     c2_cosine = SVector(2.0, 0.0, 0.0)u"nm"
     c3_cosine = SVector(3.0, 0.0, 0.0)u"nm"

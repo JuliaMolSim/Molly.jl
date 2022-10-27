@@ -26,7 +26,7 @@ Molly re-exports Unitful.jl, [StaticArrays.jl](https://github.com/JuliaArrays/St
 You can use your own atom types in Molly, provided that the [`mass`](@ref) function is defined and any fields required by the interactions are present.
 Next, we'll need some starting coordinates and velocities.
 ```julia
-boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm") # Periodic boundary conditions
+boundary = CubicBoundary(2.0u"nm") # Periodic boundary conditions with a 2 nm cube
 coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm") # Random placement without clashing
 
 temp = 100.0u"K"
@@ -95,7 +95,7 @@ using CUDA
 
 n_atoms = 100
 atom_mass = 10.0f0u"u"
-boundary = CubicBoundary(2.0f0u"nm", 2.0f0u"nm", 2.0f0u"nm")
+boundary = CubicBoundary(2.0f0u"nm")
 temp = 100.0f0u"K"
 atoms = CuArray([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
 coords = CuArray(place_atoms(n_atoms, boundary; min_dist=0.3u"nm"))
@@ -762,13 +762,15 @@ The available 2D boundaries are:
 
 Some examples of using boundaries:
 ```julia
+CubicBoundary(2.0u"nm"                             ) # Periodic cube with 2 nm sides
 CubicBoundary(2.0u"nm"   , 2.0u"nm"   , 2.0u"nm"   ) # Periodic cube with 2 nm sides
 CubicBoundary(4.0u"nm"   , 5.0u"nm"   , 6.0u"nm"   ) # Periodic cuboid
 CubicBoundary(2.0u"nm"   , 2.0u"nm"   , Inf * u"nm") # Infinite boundary in z direction
 CubicBoundary(Inf * u"nm", Inf * u"nm", Inf * u"nm") # Infinite boundary, no periodicity
+CubicBoundary(Inf * u"nm"                          ) # Infinite boundary, no periodicity
 
-RectangularBoundary(2.0u"nm")              # Periodic square
-RectangularBoundary(4.0u"nm", 5.0u"nm"   ) # Preiodic rectangle
+RectangularBoundary(2.0u"nm"             ) # Periodic square
+RectangularBoundary(4.0u"nm", 5.0u"nm"   ) # Periodic rectangle
 RectangularBoundary(2.0u"nm", Inf * u"nm") # Infinite boundary in y direction
 
 # Periodic triclinic from basis vectors
