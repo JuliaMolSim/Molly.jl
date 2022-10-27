@@ -21,7 +21,7 @@
     @test vector(
         SVector(4.0, 1.0),
         SVector(6.0, 9.0),
-        RectangularBoundary(SVector(10.0, 10.0)),
+        RectangularBoundary(10.0),
     ) == SVector(2.0, -2.0)
     @test vector(
         SVector(4.0, 1.0, 6.0)u"nm",

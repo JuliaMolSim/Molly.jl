@@ -205,7 +205,7 @@ coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
 velocities = [SVector(0.0f0, 1.0f0), SVector(0.0f0, -1.0f0)]
 pairwise_inters = (Gravity(nl_only=false, G=1.5f0),)
 simulator = VelocityVerlet(dt=0.002f0)
-boundary = RectangularBoundary(1.0f0, 1.0f0)
+boundary = RectangularBoundary(1.0f0)
 
 sys = System(
     atoms=atoms,
@@ -433,7 +433,7 @@ end
 SIRLogger(n_steps) = GeneralObservableLogger(fracs_SIR, Vector{Float64}, n_steps)
 
 temp = 1.0
-boundary = RectangularBoundary(10.0, 10.0)
+boundary = RectangularBoundary(10.0)
 n_steps = 1_000
 n_people = 500
 n_starting = 2
@@ -767,7 +767,8 @@ CubicBoundary(4.0u"nm"   , 5.0u"nm"   , 6.0u"nm"   ) # Periodic cuboid
 CubicBoundary(2.0u"nm"   , 2.0u"nm"   , Inf * u"nm") # Infinite boundary in z direction
 CubicBoundary(Inf * u"nm", Inf * u"nm", Inf * u"nm") # Infinite boundary, no periodicity
 
-RectangularBoundary(4.0u"nm", 5.0u"nm"   ) # Rectangle
+RectangularBoundary(2.0u"nm")              # Periodic square
+RectangularBoundary(4.0u"nm", 5.0u"nm"   ) # Preiodic rectangle
 RectangularBoundary(2.0u"nm", Inf * u"nm") # Infinite boundary in y direction
 
 # Periodic triclinic from basis vectors

@@ -204,7 +204,7 @@ end
 BondLogger(n_steps) = GeneralObservableLogger(bonds, BitVector, n_steps)
 
 n_atoms = 200
-boundary = RectangularBoundary(10.0, 10.0)
+boundary = RectangularBoundary(10.0)
 n_steps = 2_000
 temp = 1.0
 

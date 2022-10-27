@@ -38,9 +38,10 @@ Base.lastindex(b::CubicBoundary) = b.side_lengths[3]
 
 """
     RectangularBoundary(x, y)
-    RectangularBoundary(arr)
+    RectangularBoundary(x)
 
 Rectangular 2D bounding box defined by 2 side lengths.
+If one length is given then both sides will have that length.
 Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct RectangularBoundary{T}
@@ -48,7 +49,7 @@ struct RectangularBoundary{T}
 end
 
 RectangularBoundary(x, y) = RectangularBoundary(SVector{2}(x, y))
-RectangularBoundary(arr) = RectangularBoundary(SVector{2}(arr))
+RectangularBoundary(x::Number) = RectangularBoundary(SVector{2}(x, x))
 
 Base.getindex(b::RectangularBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::RectangularBoundary) = b.side_lengths[1]

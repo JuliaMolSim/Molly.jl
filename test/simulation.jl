@@ -2,7 +2,7 @@
     n_atoms = 10
     n_steps = 20_000
     temp = 298.0u"K"
-    boundary = RectangularBoundary(2.0u"nm", 2.0u"nm")
+    boundary = RectangularBoundary(2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     gen_temp_wrapper(s, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = temperature(s)
 
