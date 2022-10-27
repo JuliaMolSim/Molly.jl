@@ -200,9 +200,10 @@ end
                     i, j, weight_14 = neighbors.list[ni]
                     dr = vector(coords[i], coords[j], boundary)
                     f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
-                              atoms[j], boundary)
+                              atoms[j], boundary, weight_14)
                     for inter in pairwise_inters_nl[2:end]
-                        f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
+                        f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary,
+                                   weight_14)
                     end
                     check_force_units(f, force_units)
                     f_ustrip = ustrip.(f)
@@ -239,9 +240,10 @@ end
                 i, j, weight_14 = neighbors.list[ni]
                 dr = vector(coords[i], coords[j], boundary)
                 f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
-                          atoms[j], boundary)
+                          atoms[j], boundary, weight_14)
                 for inter in pairwise_inters_nl[2:end]
-                    f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
+                    f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary,
+                               weight_14)
                 end
                 check_force_units(f, force_units)
                 f_ustrip = ustrip.(f)
