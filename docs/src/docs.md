@@ -27,7 +27,7 @@ You can use your own atom types in Molly, provided that the [`mass`](@ref) funct
 Next, we'll need some starting coordinates and velocities.
 ```julia
 boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm") # Periodic boundary conditions
-coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm") # Random placement without clashing
+coords = place_atoms(n_atoms, boundary, 0.3u"nm") # Random placement without clashing
 
 temp = 100.0u"K"
 velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
