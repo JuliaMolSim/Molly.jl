@@ -133,7 +133,7 @@ function inject_interaction_list(inter::InteractionList1Atoms, params_dic, gpu)
     else
         inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
     end
-    InteractionList1Atoms(inter.is, inter.types, inters_grad)
+    InteractionList1Atoms(inter.is, inters_grad, inter.types)
 end
 
 function inject_interaction_list(inter::InteractionList2Atoms, params_dic, gpu)
@@ -142,7 +142,7 @@ function inject_interaction_list(inter::InteractionList2Atoms, params_dic, gpu)
     else
         inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
     end
-    InteractionList2Atoms(inter.is, inter.js, inter.types, inters_grad)
+    InteractionList2Atoms(inter.is, inter.js, inters_grad, inter.types)
 end
 
 function inject_interaction_list(inter::InteractionList3Atoms, params_dic, gpu)
@@ -151,7 +151,7 @@ function inject_interaction_list(inter::InteractionList3Atoms, params_dic, gpu)
     else
         inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
     end
-    InteractionList3Atoms(inter.is, inter.js, inter.ks, inter.types, inters_grad)
+    InteractionList3Atoms(inter.is, inter.js, inter.ks, inters_grad, inter.types)
 end
 
 function inject_interaction_list(inter::InteractionList4Atoms, params_dic, gpu)
@@ -160,8 +160,7 @@ function inject_interaction_list(inter::InteractionList4Atoms, params_dic, gpu)
     else
         inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
     end
-    InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls,
-                          inter.types, inters_grad)
+    InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, inters_grad, inter.types)
 end
 
 function inject_interaction(inter::LennardJones{S, C, W, WS, F, E}, params_dic) where {S, C, W, WS, F, E}

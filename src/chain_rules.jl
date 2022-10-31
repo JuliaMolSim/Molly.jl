@@ -53,7 +53,7 @@ end
 function ChainRulesCore.rrule(T::Type{<:InteractionList1Atoms}, vs...)
     Y = T(vs...)
     function InteractionList1Atoms_pullback(Ȳ)
-        return NoTangent(), NoTangent(), NoTangent(), Ȳ.inters
+        return NoTangent(), NoTangent(), Ȳ.inters, NoTangent()
     end
     return Y, InteractionList1Atoms_pullback
 end
@@ -61,7 +61,7 @@ end
 function ChainRulesCore.rrule(T::Type{<:InteractionList2Atoms}, vs...)
     Y = T(vs...)
     function InteractionList2Atoms_pullback(Ȳ)
-        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), Ȳ.inters
+        return NoTangent(), NoTangent(), NoTangent(), Ȳ.inters, NoTangent()
     end
     return Y, InteractionList2Atoms_pullback
 end
@@ -69,7 +69,7 @@ end
 function ChainRulesCore.rrule(T::Type{<:InteractionList3Atoms}, vs...)
     Y = T(vs...)
     function InteractionList3Atoms_pullback(Ȳ)
-        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), Ȳ.inters
+        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), Ȳ.inters, NoTangent()
     end
     return Y, InteractionList3Atoms_pullback
 end
@@ -77,8 +77,8 @@ end
 function ChainRulesCore.rrule(T::Type{<:InteractionList4Atoms}, vs...)
     Y = T(vs...)
     function InteractionList4Atoms_pullback(Ȳ)
-        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(),
-               Ȳ.inters
+        return NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent(), Ȳ.inters,
+               NoTangent()
     end
     return Y, InteractionList4Atoms_pullback
 end

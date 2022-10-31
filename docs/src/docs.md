@@ -135,7 +135,6 @@ Now we can use the built-in interaction list and bond types to place harmonic bo
 bonds = InteractionList2Atoms(
     collect(1:(n_atoms ÷ 2)),           # First atom indices
     collect((1 + n_atoms ÷ 2):n_atoms), # Second atom indices
-    repeat([""], n_atoms ÷ 2),          # Bond types
     [HarmonicBond(k=300_000.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm") for i in 1:(n_atoms ÷ 2)],
 )
 
@@ -633,7 +632,6 @@ specific_inter_lists = (
     InteractionList2Atoms(
         [1, 3],
         [2, 4],
-        ["", ""],
         [MySpecificInter(), MySpecificInter()],
     ),
 )
@@ -1087,7 +1085,6 @@ bonds = [HarmonicBond(k=10000u"kJ * mol^-1 * nm^-2", r0=0.2u"nm") for i in 1:(n_
 specific_inter_lists = (InteractionList2Atoms(
     collect(1:2:n_atoms),
     collect(2:2:n_atoms),
-    repeat([""], length(bonds)),
     bonds,
 ),)
 

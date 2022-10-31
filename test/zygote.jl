@@ -77,7 +77,6 @@ end
             gpu ? CuArray(Int32.(collect( 1:15))) : Int32.(collect( 1:15)),
             gpu ? CuArray(Int32.(collect(16:30))) : Int32.(collect(16:30)),
             gpu ? CuArray(Int32.(collect(31:45))) : Int32.(collect(31:45)),
-            fill("", 15),
             gpu ? CuArray(angles_inner) : angles_inner,
         )
         torsions_inner = [PeriodicTorsion(
@@ -91,7 +90,6 @@ end
             gpu ? CuArray(Int32.(collect(11:20))) : Int32.(collect(11:20)),
             gpu ? CuArray(Int32.(collect(21:30))) : Int32.(collect(21:30)),
             gpu ? CuArray(Int32.(collect(31:40))) : Int32.(collect(31:40)),
-            fill("", 10),
             gpu ? CuArray(torsions_inner) : torsions_inner,
         )
         atoms_setup = [Atom(charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.0f0 : 0.0) for i in 1:n_atoms]
@@ -99,7 +97,7 @@ end
             imp_obc2 = ImplicitSolventOBC(
                 gpu ? CuArray(atoms_setup) : atoms_setup,
                 [AtomData(element="O") for i in 1:n_atoms],
-                InteractionList2Atoms(bond_is, bond_js, [""], nothing);
+                InteractionList2Atoms(bond_is, bond_js, nothing);
                 use_OBC2=true,
             )
             general_inters = (imp_obc2,)
@@ -107,7 +105,7 @@ end
             imp_gbn2 = ImplicitSolventGBN2(
                 gpu ? CuArray(atoms_setup) : atoms_setup,
                 [AtomData(element="O") for i in 1:n_atoms],
-                InteractionList2Atoms(bond_is, bond_js, [""], nothing),
+                InteractionList2Atoms(bond_is, bond_js, nothing),
             )
             general_inters = (imp_gbn2,)
         else
@@ -130,7 +128,6 @@ end
             bonds = InteractionList2Atoms(
                 bond_is,
                 bond_js,
-                fill("", length(bonds_inner)),
                 gpu ? CuArray(bonds_inner) : bonds_inner,
             )
             cs = deepcopy(forward ? coords_dual : coords)

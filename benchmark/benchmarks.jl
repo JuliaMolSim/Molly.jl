@@ -76,7 +76,6 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
     specific_inter_lists = (InteractionList2Atoms(
         gpu ? CuArray(Int32.(collect(1:2:n_atoms))) : Int32.(collect(1:2:n_atoms)),
         gpu ? CuArray(Int32.(collect(2:2:n_atoms))) : Int32.(collect(2:2:n_atoms)),
-        fill("", length(bonds)),
         gpu ? CuArray(bonds) : bonds,
     ),)
 

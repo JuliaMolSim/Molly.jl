@@ -223,8 +223,8 @@ end
     bonds = InteractionList2Atoms(
         collect(1:(n_atoms ÷ 2)),
         collect((1 + n_atoms ÷ 2):n_atoms),
-        fill("", n_atoms ÷ 2),
         [HarmonicBond(k=300_000.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm") for i in 1:(n_atoms ÷ 2)],
+        fill("", n_atoms ÷ 2),
     )
     nb_matrix = trues(n_atoms, n_atoms)
     for i in 1:(n_atoms ÷ 2)
@@ -742,7 +742,6 @@ end
         specific_inter_lists = (InteractionList2Atoms(
             gpu ? CuArray(Int32.(collect(1:2:n_atoms))) : Int32.(collect(1:2:n_atoms)),
             gpu ? CuArray(Int32.(collect(2:2:n_atoms))) : Int32.(collect(2:2:n_atoms)),
-            fill("", length(bonds)),
             gpu ? CuArray(bonds) : bonds,
         ),)
 
