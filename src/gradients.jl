@@ -95,7 +95,8 @@ function inject_gradients(sys, params_dic, gpu::Bool=isa(sys.coords, CuArray))
         atoms_grad = inject_atom.(sys.atoms, sys.atoms_data, (params_dic,))
     end
     if length(sys.pairwise_inters) > 0
-        pis_grad = inject_interaction.(sys.pairwise_inters, (params_dic,))
+        # Broadcasting fails due to https://github.com/JuliaDiff/ChainRules.jl/issues/662
+        pis_grad = Tuple(inject_interaction(inter, params_dic) for inter in sys.pairwise_inters)
     else
         pis_grad = sys.pairwise_inters
     end
