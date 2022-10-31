@@ -1074,7 +1074,7 @@ atom_mass = 10.0u"u"
 atoms = [Atom(mass=atom_mass, σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 
 # Initialization
-boundary = SVector(6.0, 6.0, 6.0)u"nm"
+boundary = CubicBoundary(6.0u"nm")
 coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm"; min_dist=0.2u"nm")
 
 temp = 50.0u"K"

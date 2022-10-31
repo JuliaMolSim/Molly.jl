@@ -370,9 +370,9 @@ function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothi
 
     logger.sum_sq_A += dot(A, A)
     logger.sum_sq_B += dot(B, B)
-    
+
     buff_length = length(logger.history_A)
-    
+
     if n_threads > 1
         chunk_size = Int(ceil(buff_length / n_threads))
         ix_ranges = [i:min(i + chunk_size - 1, buff_length) for i in 1:chunk_size:buff_length]
