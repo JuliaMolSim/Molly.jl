@@ -119,7 +119,7 @@ end
     end
 end
 
-@fastmath function force_divr_nocutoff(::LennardJones, r2, invr2, (σ2, ϵ))
+function force_divr_nocutoff(::LennardJones, r2, invr2, (σ2, ϵ))
     six_term = (σ2 * invr2) ^ 3
 
     return (24ϵ * invr2) * (2 * six_term ^ 2 - six_term)
@@ -173,7 +173,7 @@ end
     end
 end
 
-@fastmath function potential(::LennardJones, r2, invr2, (σ2, ϵ))
+function potential(::LennardJones, r2, invr2, (σ2, ϵ))
     six_term = (σ2 * invr2) ^ 3
 
     return 4ϵ * (six_term ^ 2 - six_term)
@@ -282,7 +282,7 @@ end
     end
 end
 
-@fastmath function force_divr_nocutoff(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
+function force_divr_nocutoff(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
     inv_rsc6 = inv(r2^3 + σ2^3 * σ6_fac)  # rsc = (r2^3 + α * σ2^3 * λ^p)^(1/6)
     inv_rsc  = √cbrt(inv_rsc6)
     six_term = σ2^3 * inv_rsc6
@@ -342,7 +342,7 @@ end
     end
 end
 
-@fastmath function potential(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
+function potential(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
     six_term = σ2^3 * inv(r2^3 + σ2^3 * σ6_fac)
 
     return 4ϵ * (six_term ^ 2 - six_term)

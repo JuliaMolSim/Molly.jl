@@ -31,7 +31,7 @@ Gravity(; G=Unitful.G, nl_only=false) = Gravity{typeof(G)}(G, nl_only)
     return f * dr
 end
 
-@fastmath function force_divr_nocutoff(::Gravity, r2, invr2, (G, mi, mj))
+function force_divr_nocutoff(::Gravity, r2, invr2, (G, mi, mj))
     (-G * mi * mj) / √(r2 ^ 3)
 end
 
@@ -49,6 +49,6 @@ end
     potential(inter, r2, inv(r2), params)
 end
 
-@fastmath function potential(::Gravity, r2, invr2, (G, mi, mj))
+function potential(::Gravity, r2, invr2, (G, mi, mj))
     (-G * mi * mj) * √invr2
 end

@@ -39,7 +39,7 @@ function Mie(;
         m_p, n_p, cutoff, nl_only, lorentz_mixing, force_units, energy_units, mn_fac)
 end
 
-@fastmath @inbounds function force(inter::Mie{S, C, T},
+@inbounds function force(inter::Mie{S, C, T},
                                     dr,
                                     coord_i,
                                     coord_j,
@@ -84,7 +84,7 @@ end
     return f * dr
 end
 
-@fastmath function force_divr_nocutoff(::Mie, r2, invr2, (m, n, σ_r, const_mn))
+function force_divr_nocutoff(::Mie, r2, invr2, (m, n, σ_r, const_mn))
     return -const_mn / r2 * (m * σ_r ^ m - n * σ_r ^ n)
 end
 
@@ -129,6 +129,6 @@ end
     end
 end
 
-@fastmath function potential(::Mie, r2, invr2, (m, n, σ_r, const_mn))
+function potential(::Mie, r2, invr2, (m, n, σ_r, const_mn))
     return const_mn * (σ_r ^ n - σ_r ^ m)
 end

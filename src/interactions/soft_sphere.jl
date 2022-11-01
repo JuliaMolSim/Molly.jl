@@ -69,7 +69,7 @@ end
     return f * dr
 end
 
-@fastmath function force_divr_nocutoff(::SoftSphere, r2, invr2, (σ2, ϵ))
+function force_divr_nocutoff(::SoftSphere, r2, invr2, (σ2, ϵ))
     six_term = (σ2 * invr2) ^ 3
 
     return (24ϵ * invr2) * 2 * six_term ^ 2
@@ -112,7 +112,7 @@ end
     end
 end
 
-@fastmath function potential(::SoftSphere, r2, invr2, (σ2, ϵ))
+function potential(::SoftSphere, r2, invr2, (σ2, ϵ))
     six_term = (σ2 * invr2) ^ 3
 
     return 4ϵ * (six_term ^ 2)

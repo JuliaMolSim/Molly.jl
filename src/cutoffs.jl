@@ -84,7 +84,7 @@ function force_divr_cutoff(cutoff::ShiftedForceCutoff, r2, inter, params)
                                 inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
 end
 
-@fastmath function potential_cutoff(cutoff::ShiftedForceCutoff, r2, inter, params)
+function potential_cutoff(cutoff::ShiftedForceCutoff, r2, inter, params)
     invr2 = inv(r2)
     r = √r2
     rc = cutoff.dist_cutoff
@@ -122,7 +122,7 @@ end
 
 cutoff_points(::Type{CubicSplineCutoff{D, S, I}}) where {D, S, I} = 2
 
-@fastmath function force_divr_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
+function force_divr_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
     r = √r2
     t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff-cutoff.dist_activation)
 
@@ -133,7 +133,7 @@ cutoff_points(::Type{CubicSplineCutoff{D, S, I}}) where {D, S, I} = 2
 
 end
 
-@fastmath function potential_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
+function potential_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
     r = √r2
     t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff-cutoff.dist_activation)
 

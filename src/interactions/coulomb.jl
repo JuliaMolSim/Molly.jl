@@ -92,7 +92,7 @@ end
     end
 end
 
-@fastmath function force_divr_nocutoff(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
+function force_divr_nocutoff(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
     (coulomb_const * qi * qj) / √(r2 ^ 3)
 end
 
@@ -134,7 +134,7 @@ end
     end
 end
 
-@fastmath function potential(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
+function potential(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
     (coulomb_const * qi * qj) * √invr2
 end
 
@@ -222,7 +222,7 @@ end
     end
 end
 
-@fastmath function force_divr_nocutoff(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ6_fac))
+function force_divr_nocutoff(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ6_fac))
     inv_rsc6 = inv(r2^3 + σ6_fac * σ^6)
     inv_rsc2 = cbrt(inv_rsc6)
     inv_rsc3 = sqrt(inv_rsc6)
@@ -272,7 +272,7 @@ end
     end
 end
 
-@fastmath function potential(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ6_fac))
+function potential(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ6_fac))
     inv_rsc6 = inv(r2^3 + σ6_fac * σ^6)
     return (coulomb_const * qi * qj) * √cbrt(inv_rsc6)
 end
