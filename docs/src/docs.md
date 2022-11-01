@@ -652,7 +652,7 @@ end
 ```
 Next, you need to define the [`forces`](@ref) function (note this is different to the [`force`](@ref) function above).
 ```julia
-function Molly.forces(inter::MyGeneralInter, sys, neighbors=nothing)
+function Molly.forces(inter::MyGeneralInter, sys, neighbors=nothing; n_threads=Threads.nthreads())
     # Calculate the forces on all atoms using the interaction and the system
     # The output should have the same shape as the coordinates
     # For example, a neural network might do something like this

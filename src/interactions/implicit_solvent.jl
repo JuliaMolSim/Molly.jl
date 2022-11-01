@@ -786,7 +786,7 @@ function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, bounda
     end
 end
 
-function forces(inter::AbstractGBSA, sys, neighbors=nothing)
+function forces(inter::AbstractGBSA, sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     coords, atoms, boundary = sys.coords, sys.atoms, sys.boundary
     Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, boundary)
 
@@ -858,7 +858,8 @@ function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
     end
 end
 
-function potential_energy(inter::AbstractGBSA, sys, neighbors=nothing)
+function potential_energy(inter::AbstractGBSA, sys, neighbors=nothing;
+                          n_threads::Integer=Threads.nthreads())
     coords, atoms, boundary = sys.coords, sys.atoms, sys.boundary
     Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, boundary)
 
