@@ -18,11 +18,15 @@ Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustrip_vec.(coords)
 """
 ustrip_vec(x...) = ustrip.(x...)
 
-function check_force_units(fdr, force_units)
-    if unit(first(fdr)) != force_units
-        error("System force units are ", force_units, " but encountered force units ",
-                unit(first(fdr)))
+function check_force_units(force_units, sys_force_units)
+    if force_units != sys_force_units
+        error("System force units are ", sys_force_units, " but encountered force units ",
+              force_units)
     end
+end
+
+function check_force_units(fdr::AbstractArray, sys_force_units)
+    return check_force_units(unit(first(fdr)), sys_force_units)
 end
 
 """
@@ -333,8 +337,9 @@ function forces(s::System{D, true, T}, neighbors=nothing;
     fs = reinterpret(SVector{D, T}, vec(fs_mat))
 
     for inter in values(s.general_inters)
-        # Force type not checked
-        fs += ustrip_vec.(forces(inter, s, neighbors; n_threads=n_threads))
+        fs_gen = forces(inter, s, neighbors; n_threads=n_threads)
+        check_force_units(unit(eltype(eltype(fs_gen))), s.force_units)
+        fs += ustrip_vec.(fs_gen)
     end
 
     return fs * s.force_units
