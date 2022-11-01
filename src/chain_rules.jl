@@ -496,7 +496,7 @@ function ChainRulesCore.rrule(::typeof(specific_force_gpu), inter_list,
         fs_mat = CUDA.zeros(T, D, length(coords))
         d_inter_list = zero(inter_list)
         d_coords = zero(coords)
-        n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list.is))
+        n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
 
         if inter_list isa InteractionList1Atoms
             CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_1_atoms_kernel!(
@@ -606,7 +606,7 @@ function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
         d_pe_vec = CuArray([d_pe_vec_arg[1]])
         d_inter_list = zero(inter_list)
         d_coords = zero(coords)
-        n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list.is))
+        n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
 
         if inter_list isa InteractionList1Atoms
             CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_pe_1_atoms_kernel!(

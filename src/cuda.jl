@@ -66,7 +66,7 @@ end
 function specific_force_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
                             boundary, force_units, ::Val{T}) where {D, C, T}
     fs_mat = CUDA.zeros(T, D, length(coords))
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list.is))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_1_atoms_kernel!(fs_mat,
             coords, boundary, inter_list.is, inter_list.inters, Val(force_units))
     return fs_mat
@@ -75,7 +75,7 @@ end
 function specific_force_gpu(inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
                             boundary, force_units, ::Val{T}) where {D, C, T}
     fs_mat = CUDA.zeros(T, D, length(coords))
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list.is))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_2_atoms_kernel!(fs_mat,
             coords, boundary, inter_list.is, inter_list.js, inter_list.inters, Val(force_units))
     return fs_mat
@@ -84,7 +84,7 @@ end
 function specific_force_gpu(inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
                             boundary, force_units, ::Val{T}) where {D, C, T}
     fs_mat = CUDA.zeros(T, D, length(coords))
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list.is))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_3_atoms_kernel!(fs_mat,
             coords, boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters,
             Val(force_units))
@@ -94,7 +94,7 @@ end
 function specific_force_gpu(inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
                             boundary, force_units, ::Val{T}) where {D, C, T}
     fs_mat = CUDA.zeros(T, D, length(coords))
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list.is))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_4_atoms_kernel!(fs_mat,
             coords, boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
             inter_list.inters, Val(force_units))
@@ -278,7 +278,7 @@ end
 function specific_pe_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
                          boundary, energy_units, ::Val{T}) where {D, C, T}
     pe_vec = CUDA.zeros(T, 1)
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list.is))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_pe_1_atoms_kernel!(pe_vec,
             coords, boundary, inter_list.is, inter_list.inters, Val(energy_units))
     return pe_vec
@@ -287,7 +287,7 @@ end
 function specific_pe_gpu(inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
                          boundary, energy_units, ::Val{T}) where {D, C, T}
     pe_vec = CUDA.zeros(T, 1)
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list.is))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_pe_2_atoms_kernel!(pe_vec,
             coords, boundary, inter_list.is, inter_list.js, inter_list.inters, Val(energy_units))
     return pe_vec
@@ -296,7 +296,7 @@ end
 function specific_pe_gpu(inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
                          boundary, energy_units, ::Val{T}) where {D, C, T}
     pe_vec = CUDA.zeros(T, 1)
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list.is))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_pe_3_atoms_kernel!(pe_vec,
             coords, boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters,
             Val(energy_units))
@@ -306,7 +306,7 @@ end
 function specific_pe_gpu(inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
                          boundary, energy_units, ::Val{T}) where {D, C, T}
     pe_vec = CUDA.zeros(T, 1)
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list.is))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_pe_4_atoms_kernel!(pe_vec,
             coords, boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
             inter_list.inters, Val(energy_units))
