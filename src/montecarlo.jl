@@ -1,6 +1,6 @@
 export MetropolisMonteCarlo,
-    random_uniform_displacement!,
-    random_normal_displacement!
+    random_uniform_translation!,
+    random_normal_translation!
 
 """
     MetropolisMonteCarlo(; <keyword arguments>)
@@ -24,7 +24,7 @@ function MetropolisMonteCarlo(;temperature::T,
     return MetropolisMonteCarlo{T, M}(temperature, trial_moves, trial_args)
 end
 
-function Molly.simulate!(sys::System{D, G, T},
+function simulate!(sys::System{D, G, T},
                     sim::MetropolisMonteCarlo,
                     n_steps::Int;
                     n_threads::Int=Threads.nthreads()) where {D, G, T}
@@ -46,4 +46,28 @@ function Molly.simulate!(sys::System{D, G, T},
         end
         run_loggers!(sys, nothing, i; n_threads=n_threads)
     end
+end
+
+"""
+    random_uniform_translation!(sys; shift_scaling=1.0, length_units=unit(sys.coords[1][1]))
+
+Performs a random translation of the coordinates of a random atom in `sys`. The translation for each coordinate is independent and uniform in range [-0.5, 0.5] with units `length_units` and scaled by `shift_scaling`.
+"""
+function random_uniform_translation!(sys; shift_scaling=1.0, length_units=unit(sys.coords[1][1]))
+    natoms = length(sys)
+    rand_idx = rand(1:natoms)
+    delta = shift_scaling * (rand(float_type(sys), 3) .- 0.5) * length_units
+    sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ delta, sys.boundary)
+end
+
+"""
+    random_normal_translation!(sys; shift_scaling=1.0, length_units=unit(sys.coords[1][1]))
+
+Performs a random translation of the coordinates of a random atom in `sys`. The translation for each coordinatr independent and is generated from the standard normal distribution (i.e. mean 0 and standard deviation 1) with units `length_units` and scaled by `shift_scaling`.
+"""
+function random_normal_translation!(sys; shift_scaling=1.0, length_units=unit(sys.coords[1][1]))
+    natoms = length(sys)
+    rand_idx = rand(1:natoms)
+    delta = shift_scaling * (randn(float_type(sys), 3) .- 0.5) * length_units
+    sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ delta, sys.boundary)
 end
