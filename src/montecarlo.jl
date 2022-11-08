@@ -54,25 +54,44 @@ function simulate!(sys::System{D, G, T},
 end
 
 """
-	random_uniform_translation!(sys; shift_scaling=1.0, length_units=unit(sys.coords[1][1]))
+	random_uniform_translation!(sys::System; scaling=1.0, length_units=unit(sys.coords[1][1]))
 
-Performs a random translation of the coordinates of a random atom in `sys`. The translation for each coordinate is independent and uniform in range [-0.5, 0.5] with units `length_units` and scaled by `shift_scaling`.
+Performs a random translation of the coordinates of a randomly selected atom in `sys`. 
+The translation is generated using a uniformly selected direction and uniformly selected length 
+in range [-0.5, 0.5] scaled by `scaling` and with units `length_units`.
 """
-function random_uniform_translation!(sys; shift_scaling=1.0, length_units=unit(sys.coords[1][1]))
+function random_uniform_translation!(sys::System{D, G, T}; scaling::T=one(T),
+                                    length_units=unit(sys.coords[1][1])) where {D, G, T}
 	natoms = length(sys)
 	rand_idx = rand(1:natoms)
-    delta = shift_scaling * (rand(float_type(sys), 3) .- 0.5) * length_units
-	sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ delta, sys.boundary)
+    direction = random_unit_vector(T, D)
+    magnitude = rand(T) * scaling * length_units
+	sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)
 end
 
 """
-	random_normal_translation!(sys; shift_scaling=1.0, length_units=unit(sys.coords[1][1]))
+	random_normal_translation!(sys::System; shift_scaling=1.0, length_units=unit(sys.coords[1][1]))
 
-Performs a random translation of the coordinates of a random atom in `sys`. The translation for each coordinatr independent and is generated from the standard normal distribution (i.e. mean 0 and standard deviation 1) with units `length_units` and scaled by `shift_scaling`.
+Performs a random translation of the coordinates of a randomly selected atom in `sys`. 
+The translation is generated using a uniformly choosen direction and legth selected from 
+the standard normal distribution i.e. ``\mathrm{Normal}(0, 1)``, scaled by `scaling` 
+and with units `length_units`.
 """
-function random_normal_translation!(sys; shift_scaling=1.0, length_units=unit(sys.coords[1][1]))
+function random_normal_translation!(sys::System{D, G, T}; scaling::T=one(T),
+                                    length_units=unit(sys.coords[1][1])) where {D, G, T}
 	natoms = length(sys)
 	rand_idx = rand(1:natoms)
-    delta = shift_scaling * (randn(float_type(sys), 3) .- 0.5) * length_units
-	sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ delta, sys.boundary)
+    direction = random_unit_vector(T, D)
+    magnitude = randn(T) * scaling * length_units
+	sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)
+end
+
+"""
+    random_unit_vector(float_type::Type, dims::Int)
+
+Returns a random unit vector of in of length `dims` with elements of type `float_type`.
+"""
+function random_unit_vector(float_type, dims)
+    vec = randn(float_type, dims)
+    return vec / norm(vec)
 end
