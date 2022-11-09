@@ -1025,7 +1025,7 @@ end
 ```
 Then, define the logging function that is called every step by the simulator:
 ```julia
-function Molly.log_property!(logger::MyLogger, sys, neighbors, step_n; n_threads=Threads.nthreads())
+function Molly.log_property!(logger::MyLogger, sys, neighbors, step_n; n_threads=Threads.nthreads(), kwargs...)
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end

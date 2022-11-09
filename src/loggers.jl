@@ -18,15 +18,16 @@ export
     ReplicaExchangeLogger
 
 """
-    run_loggers!(system, neighbors=nothing, step_n=0; n_threads=Threads.nthreads())
+    run_loggers!(system, neighbors=nothing, step_n=0; n_threads=Threads.nthreads(), kwargs...)
 
 Run the loggers associated with the system.
 Ignored for gradient calculation during automatic differentiation.
+Additional keyword arguments can be passed to the loggers if required.
 """
 function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0;
-                      n_threads::Integer=Threads.nthreads())
+                      n_threads::Integer=Threads.nthreads(), kwargs...)
     for logger in values(s.loggers)
-        log_property!(logger, s, neighbors, step_n; n_threads=n_threads)
+        log_property!(logger, s, neighbors, step_n; n_threads=n_threads, kwargs...)
     end
 end
 
@@ -57,13 +58,13 @@ Return the stored observations in a logger.
 Base.values(logger::GeneralObservableLogger) = logger.history
 
 """
-    log_property!(logger, system, neighbors=nothing, step_n=0; n_threads=Threads.nthreads())
+    log_property!(logger, system, neighbors=nothing, step_n=0; n_threads=Threads.nthreads(), kwargs...)
 
 Log a property of the system thoughout a simulation.
 Custom loggers should implement this function.
 """
 function log_property!(logger::GeneralObservableLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+                        step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
     if (step_n % logger.n_steps) == 0
         obs = logger.observable(s, neighbors; n_threads=n_threads)
         push!(logger.history, obs)
@@ -351,7 +352,7 @@ function Base.show(io::IO, tcl::TimeCorrelationLogger{TA, TA2, TA, TA2, TAB, TFA
 end
 
 function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+                        step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
     A = logger.observableA(s, neighbors; n_threads=n_threads)
     if logger.observableA != logger.observableB
         B = logger.observableB(s, neighbors; n_threads=n_threads)
@@ -451,7 +452,7 @@ function Base.values(aol::AverageObservableLogger; std::Bool=true)
 end
 
 function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=nothing,
-                        step_n::Integer=0; n_threads::Integer=Threads.nthreads()) where T
+                        step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...) where T
     if (step_n % aol.n_steps) == 0
         obs = aol.observable(s, neighbors; n_threads=n_threads)
         push!(aol.current_block, obs)
@@ -508,7 +509,8 @@ function log_property!(rexl::ReplicaExchangeLogger,
                        step_n::Integer=0;
                        indices,
                        delta,
-                       n_threads::Integer=Threads.nthreads())
+                       n_threads::Integer=Threads.nthreads(),
+                       kwargs...)
     push!(rexl.indices, indices)
     push!(rexl.steps, step_n + rexl.end_step)
     push!(rexl.deltas, delta)
