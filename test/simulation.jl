@@ -720,6 +720,48 @@ end
     # TODO: Possibly more tests?
 end
 
+@testset "Metropolis Monte-Carlo" begin
+    n_atoms = 100
+    n_steps = 10_000
+    atom_mass = 10.0u"u"
+    atoms = [Atom(mass=atom_mass, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+    boundary = CubicBoundary(4.0u"nm", 4.0u"nm", 4.0u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+
+    temp = 198.0u"K"
+
+    nb_matrix = trues(n_atoms, n_atoms)
+    for i in 1:(n_atoms ÷ 2)
+        nb_matrix[i, i + (n_atoms ÷ 2)] = false
+        nb_matrix[i + (n_atoms ÷ 2), i] = false
+    end
+
+    neighbor_finder = DistanceNeighborFinder(
+        nb_matrix=nb_matrix,
+        n_steps=10,
+        dist_cutoff=1.5u"nm",
+    )
+
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        pairwise_inters=(Coulomb(), ),
+        loggers=(temp=TemperatureLogger(10), mcl=MonteCarloLogger(), ),
+        neighbor_finder=neighbor_finder,
+    )
+
+    simulator = MetropolisMonteCarlo(
+        temperature=temp,
+        trial_moves=random_normal_translation!,
+        trial_args=Dict(:scaling => 0.1, :length_units => u"nm")
+    )
+
+    @time simulate!(sys, simulator, n_steps; log_states=false)
+    @time simulate!(sys, simulator, n_steps; log_states=true)
+    @info "Acceptance Rate: $(sys.loggers.mcl.n_trials / sys.loggers.mcl.n_accept)"
+end
+
 @testset "Different implementations" begin
     n_atoms = 400
     atom_mass = 10.0u"u"

@@ -367,6 +367,45 @@ end
 # 357.710520769689 K
 ```
 
+## Monte-Carlo sampling
+Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte-Carlo sampling with Metropolis selection rates. For example to perform simulated annealing on charged particles to form a crystal lattice:
+```julia
+n_atoms = 100
+atom_mass = 10.0u"u"
+atom_charge = 1.0u"e"
+
+atoms = [Atom(mass=atom_mass, charge=atom_charge, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+boundary = RectangularBoundary(4.0u"nm", 4.0u"nm")
+
+coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
+
+pairwise_inters = (Coulomb(),)
+
+temp_vals = [1198u"K", 798.0u"K", 398.0u"K", 198.0u"K", 98.0u"K", 8.0u"K"]
+sys = System(
+    atoms=atoms,
+    pairwise_inters=pairwise_inters,
+    coords=coords,
+    boundary=boundary,
+    loggers=(coords=CoordinateLogger(n_atoms, dims=n_dimensions(boundary)),
+             mclogger=MonteCarloLogger()),
+)
+
+trial_args = Dict(:scaling => 0.1, :length_units => u"nm")
+for t in temp_mult
+    sim = MetropolisMonteCarlo(; 
+            temperature=t,
+            trial_moves=random_uniform_translation!,
+            trial_args=trial_args
+        )
+    
+    simulate!(sys, sim, 10_000)
+end
+
+visualize(sys.loggers.coords, boundary, "sim_annealing_montecarlo.gif")
+```
+![Monte-Carlo Simulated Annealing](images/sim_annealing_montecarlo.gif)
+
 ## Agent-based modelling
 
 Agent-based modelling (ABM) is conceptually similar to molecular dynamics.
