@@ -15,7 +15,8 @@ export
     TimeCorrelationLogger,
     AutoCorrelationLogger,
     AverageObservableLogger,
-    ReplicaExchangeLogger
+    ReplicaExchangeLogger,
+    MonteCarloLogger
 
 """
     run_loggers!(system, neighbors=nothing, step_n=0; n_threads=Threads.nthreads(), kwargs...)
@@ -478,8 +479,8 @@ function Base.show(io::IO, aol::AverageObservableLogger)
 end
 
 """
-    ReplicaExchangeLogger(n_steps)
-    ReplicaExchangeLogger(T, n_steps)
+    ReplicaExchangeLogger(n_replicas::Integer)
+    ReplicaExchangeLogger(T::DataType, n_replicas::Integer)
 
 A logger that records exchanges in a replica exchange simulation.
 The logged quantities include the number of exchange attempts (`n_attempts`),
@@ -497,7 +498,7 @@ mutable struct ReplicaExchangeLogger{T}
     end_step::Int
 end
 
-function ReplicaExchangeLogger(T, n_replicas::Integer)
+function ReplicaExchangeLogger(T::DataType, n_replicas::Integer)
     return ReplicaExchangeLogger{T}(n_replicas, 0, 0, Tuple{Int, Int}[], Int[], T[], 0)
 end
 
@@ -520,4 +521,34 @@ end
 function finish_logs!(rexl::ReplicaExchangeLogger; n_steps::Integer=0, n_attempts::Integer=0)
     rexl.end_step += n_steps
     rexl.n_attempts += n_attempts
+end
+
+@doc raw"""
+    MonteCarloLogger(T::DataType=DefaultFloat)
+
+A logger that records acceptances in a Monte-Carlo simulation.
+The logged quantities include the number of new selections (`n_select`),
+number of successful acceptances (`n_accept`), an array named `energy_rates` which stores 
+the value of ``\frac{E}{k_B T}`` i.e. the argument of the Boltzmann factor for the states 
+and a `BitVector` named `state_changed` that stores whether a new state was accepted for the logged step. 
+"""
+mutable struct MonteCarloLogger{T}
+    n_trials::Int
+    n_accept::Int
+    energy_rates::Vector{T}
+    state_changed::BitVector
+end
+
+MonteCarloLogger(T::DataType=DefaultFloat) = MonteCarloLogger{T}(0, 0, T[], BitVector())
+
+function log_property!(mcl::MonteCarloLogger,
+                       sys::System,
+                       neighbors=nothing,
+                       step_n::Integer=0;
+                       n_threads::Integer=Threads.nthreads(),
+                       kwargs...)
+    mcl.n_trials += 1
+    kwargs[:success] && (mcl.n_accept += 1)
+    push!(mcl.state_changed, kwargs[:success])
+    push!(mcl.energy_rates, kwargs[:energy_rate])
 end

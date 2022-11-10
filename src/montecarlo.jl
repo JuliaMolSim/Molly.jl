@@ -6,6 +6,8 @@ export MetropolisMonteCarlo,
     MetropolisMonteCarlo(; <keyword arguments>)
 
 A Monte Carlo simulator for [`System`](@ref) that uses the Metropolis algorithm to sample the configuration space.
+The method of `simulate!` for this simulator accepts an optional keyword argument `log_states::Bool=true` which 
+tells whether to run the loggers or not (for example, during equilibration).
 
 # Arguments
 - `temperature::T`: The temperature of the system.
@@ -27,7 +29,8 @@ end
 function simulate!(sys::System{D, G, T},
                     sim::MetropolisMonteCarlo,
                     n_steps::Int;
-                    n_threads::Int=Threads.nthreads()) where {D, G, T}
+                    n_threads::Int=Threads.nthreads(),
+                    log_states::Bool=true) where {D, G, T}
     if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         k_b = sys.k * T(Unitful.Na) 
     else
@@ -45,11 +48,14 @@ function simulate!(sys::System{D, G, T},
         ΔE = E_new - E_old
         δ = ΔE / (k_b * sim.temperature)
         if δ < 0 || rand() < exp(-δ)
+            log_states && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=true,
+                        energy_rate=E_new / (k_b * sim.temperature))
             E_old = E_new
         else
             sys.coords = coords_old
+            log_states && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=false,
+                        energy_rate=E_old / (k_b * sim.temperature))
         end
-        run_loggers!(sys, neighbors, i; n_threads=n_threads)
     end
 end
 
@@ -74,7 +80,7 @@ end
 
 Performs a random translation of the coordinates of a randomly selected atom in `sys`. 
 The translation is generated using a uniformly choosen direction and legth selected from 
-the standard normal distribution i.e. ``\mathrm{Normal}(0, 1)``, scaled by `scaling` 
+the standard normal distribution i.e. with mean 0 and standard deviation 1, scaled by `scaling` 
 and with units `length_units`.
 """
 function random_normal_translation!(sys::System{D, G, T}; scaling::T=one(T),
