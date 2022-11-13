@@ -11,8 +11,8 @@ tells whether to run the loggers or not (for example, during equilibration).
 
 # Arguments
 - `temperature::T`: The temperature of the system.
-- `log_interval::Int`: The interval at which to log the system state.
 - `trial_moves::UP`: A function that performs the trial moves.
+- `trial_args::Dict`: A dictionary of arguments to be passed to the trial moves.
 """
 struct MetropolisMonteCarlo{T, M}
     temperature::T
@@ -60,35 +60,35 @@ function simulate!(sys::System{D, G, T},
 end
 
 """
-	random_uniform_translation!(sys::System; scaling=1.0, length_units=unit(sys.coords[1][1]))
+	random_uniform_translation!(sys::System; shift_size=1.0*unit(sys.coords[1][1]))
 
 Performs a random translation of the coordinates of a randomly selected atom in `sys`. 
 The translation is generated using a uniformly selected direction and uniformly selected length 
-in range [-0.5, 0.5] scaled by `scaling` and with units `length_units`.
+in range [0, 1) scaled by `shift_size` which has appropriate legth units.
 """
-function random_uniform_translation!(sys::System{D, G, T}; scaling::T=one(T),
-                                    length_units=unit(sys.coords[1][1])) where {D, G, T}
+function random_uniform_translation!(sys::System{D, G, T};
+                                        shift_size=one(T)*unit(sys.coords[1][1])) where {D, G, T}
 	natoms = length(sys)
 	rand_idx = rand(1:natoms)
     direction = random_unit_vector(T, D)
-    magnitude = rand(T) * scaling * length_units
+    magnitude = rand(T) * shift_size
 	sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)
 end
 
 """
-	random_normal_translation!(sys::System; shift_scaling=1.0, length_units=unit(sys.coords[1][1]))
+	random_normal_translation!(sys::System; shift_size=1.0*unit(sys.coords[1][1]))
 
 Performs a random translation of the coordinates of a randomly selected atom in `sys`. 
 The translation is generated using a uniformly choosen direction and legth selected from 
-the standard normal distribution i.e. with mean 0 and standard deviation 1, scaled by `scaling` 
-and with units `length_units`.
+the standard normal distribution i.e. with mean 0 and standard deviation 1, scaled by `shift_size` 
+which has appropriate length units.
 """
-function random_normal_translation!(sys::System{D, G, T}; scaling::T=one(T),
-                                    length_units=unit(sys.coords[1][1])) where {D, G, T}
+function random_normal_translation!(sys::System{D, G, T};
+                                        shift_size=one(T)*unit(sys.coords[1][1])) where {D, G, T}
 	natoms = length(sys)
 	rand_idx = rand(1:natoms)
     direction = random_unit_vector(T, D)
-    magnitude = randn(T) * scaling * length_units
+    magnitude = randn(T) * shift_size
 	sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)
 end
 

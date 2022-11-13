@@ -391,8 +391,8 @@ sys = System(
              mclogger=MonteCarloLogger()),
 )
 
-trial_args = Dict(:scaling => 0.1, :length_units => u"nm")
-for t in temp_mult
+trial_args = Dict(:shift_size => 0.1u"nm")
+for t in temp_vals
     sim = MetropolisMonteCarlo(; 
             temperature=t,
             trial_moves=random_uniform_translation!,

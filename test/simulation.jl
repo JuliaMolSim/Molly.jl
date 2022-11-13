@@ -599,10 +599,6 @@ end
     pairwise_inters = (LennardJones(nl_only=true),)
 
     nb_matrix = trues(n_atoms, n_atoms)
-    for i in 1:(n_atoms ÷ 2)
-        nb_matrix[i, i + (n_atoms ÷ 2)] = false
-        nb_matrix[i + (n_atoms ÷ 2), i] = false
-    end
     
     neighbor_finder = DistanceNeighborFinder(
         nb_matrix=nb_matrix,
@@ -664,10 +660,6 @@ end
     velocities = [velocity(10.0u"u", temp) for i in 1:n_atoms]
 
     nb_matrix = trues(n_atoms, n_atoms)
-    for i in 1:(n_atoms ÷ 2)
-        nb_matrix[i, i + (n_atoms ÷ 2)] = false
-        nb_matrix[i + (n_atoms ÷ 2), i] = false
-    end
     
     neighbor_finder = DistanceNeighborFinder(
         nb_matrix=nb_matrix,
@@ -730,14 +722,8 @@ end
 
     temp = 198.0u"K"
 
-    nb_matrix = trues(n_atoms, n_atoms)
-    for i in 1:(n_atoms ÷ 2)
-        nb_matrix[i, i + (n_atoms ÷ 2)] = false
-        nb_matrix[i + (n_atoms ÷ 2), i] = false
-    end
-
     neighbor_finder = DistanceNeighborFinder(
-        nb_matrix=nb_matrix,
+        nb_matrix=trues(n_atoms, n_atoms),
         n_steps=10,
         dist_cutoff=1.5u"nm",
     )
@@ -747,19 +733,55 @@ end
         coords=coords,
         boundary=boundary,
         pairwise_inters=(Coulomb(), ),
-        loggers=(temp=TemperatureLogger(10), mcl=MonteCarloLogger(), ),
+        loggers=(
+            coords=CoordinateLogger(10), 
+            mcl=MonteCarloLogger(),
+            avgpe=AverageObservableLogger(Molly.potential_energy_wrapper, typeof(atoms[1].ϵ), 10),
+        ),
         neighbor_finder=neighbor_finder,
     )
 
-    simulator = MetropolisMonteCarlo(
+    simulator_uniform = MetropolisMonteCarlo(
         temperature=temp,
-        trial_moves=random_normal_translation!,
-        trial_args=Dict(:scaling => 0.1, :length_units => u"nm")
+        trial_moves=random_uniform_translation!,
+        trial_args=Dict(:shift_size => 0.1u"nm")
     )
 
-    @time simulate!(sys, simulator, n_steps; log_states=false)
-    @time simulate!(sys, simulator, n_steps; log_states=true)
-    @info "Acceptance Rate: $(sys.loggers.mcl.n_trials / sys.loggers.mcl.n_accept)"
+    simulator_gaussian = MetropolisMonteCarlo(
+        temperature=temp,
+        trial_moves=random_normal_translation!,
+        trial_args=Dict(:shift_size => 0.1u"nm")
+    )
+
+    @time simulate!(sys, simulator_uniform, n_steps; log_states=true)
+    @time simulate!(sys, simulator_gaussian, n_steps; log_states=true)
+
+    acceptance_rate = sys.loggers.mcl.n_accept / sys.loggers.mcl.n_trials
+    @info "Acceptance Rate: $acceptance_rate"
+    @test acceptance_rate > 0.2
+
+    @test sys.loggers.avgpe.block_averages[end] < sys.loggers.avgpe.block_averages[1]
+
+    neighbors = find_neighbors(sys, sys.neighbor_finder)
+
+    distance_sum = 0.0u"nm"
+    for i in 1:length(sys)
+        ci = sys.coords[i]
+        min_dist2 = Inf*u"nm^2"
+        for j in 1:length(sys)
+            if i == j
+                continue
+            end
+            r2 = sum(abs2, vector(ci, sys.coords[j], sys.boundary))
+            if r2 < min_dist2
+                min_dist2 = r2
+            end
+        end
+        distance_sum += sqrt(min_dist2)
+    end
+    mean_distance = distance_sum / length(sys)
+    wigner_seitz_radius = cbrt(3 * box_volume(sys.boundary) / (4π * length(sys)))
+    @test wigner_seitz_radius < mean_distance < 2 * wigner_seitz_radius
 end
 
 @testset "Different implementations" begin

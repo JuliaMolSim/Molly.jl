@@ -63,6 +63,7 @@ Base.values(logger::GeneralObservableLogger) = logger.history
 
 Log a property of the system thoughout a simulation.
 Custom loggers should implement this function.
+Additional keyword arguments can be passed to the logger if required.
 """
 function log_property!(logger::GeneralObservableLogger, s::System, neighbors=nothing,
                         step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
@@ -541,14 +542,16 @@ end
 
 MonteCarloLogger(T::DataType=DefaultFloat) = MonteCarloLogger{T}(0, 0, T[], BitVector())
 
-function log_property!(mcl::MonteCarloLogger,
-                       sys::System,
-                       neighbors=nothing,
-                       step_n::Integer=0;
-                       n_threads::Integer=Threads.nthreads(),
-                       kwargs...)
+function log_property!(mcl::MonteCarloLogger{T},
+                        sys::System,
+                        neighbors=nothing,
+                        step_n::Integer=0;
+                        success::Bool,
+                        energy_rate::T,
+                        n_threads::Integer=Threads.nthreads(),
+                        kwargs...) where {T}
     mcl.n_trials += 1
-    kwargs[:success] && (mcl.n_accept += 1)
-    push!(mcl.state_changed, kwargs[:success])
-    push!(mcl.energy_rates, kwargs[:energy_rate])
+    success && (mcl.n_accept += 1)
+    push!(mcl.state_changed, success)
+    push!(mcl.energy_rates, energy_rate)
 end
