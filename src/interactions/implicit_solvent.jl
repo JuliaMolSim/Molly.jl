@@ -398,12 +398,12 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     inds_i = permutedims(inds_j, (2, 1))
 
     coulomb_const = units ? coulombconst : ustrip(coulombconst)
-    if !iszero(solute_dielectric)
+    if !iszero_value(solute_dielectric)
         factor_solute = -T(coulomb_const) / T(solute_dielectric)
     else
         factor_solute = zero(T(coulomb_const))
     end
-    if !iszero(solvent_dielectric)
+    if !iszero_value(solvent_dielectric)
         factor_solvent = T(coulomb_const) / T(solvent_dielectric)
     else
         factor_solvent = zero(T(coulomb_const))
@@ -549,12 +549,12 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
     end
 
     coulomb_const = units ? coulombconst : ustrip(coulombconst)
-    if !iszero(solute_dielectric)
+    if !iszero_value(solute_dielectric)
         factor_solute = -T(coulomb_const) / T(solute_dielectric)
     else
         factor_solute = zero(T(coulomb_const))
     end
-    if !iszero(solvent_dielectric)
+    if !iszero_value(solvent_dielectric)
         factor_solvent = T(coulomb_const) / T(solvent_dielectric)
     else
         factor_solvent = zero(T(coulomb_const))
@@ -597,7 +597,7 @@ end
 function born_radii_loop_OBC(coord_i, coord_j, ori, srj, dist_cutoff, boundary)
     I = zero(coord_i[1] / unit(dist_cutoff)^2)
     r = norm(vector(coord_i, coord_j, boundary))
-    if iszero(r) || (!iszero(dist_cutoff) && r > dist_cutoff)
+    if iszero_value(r) || (!iszero_value(dist_cutoff) && r > dist_cutoff)
         return I
     end
     U = r + srj
@@ -653,7 +653,7 @@ function born_radii_loop_GBN2(coord_i::SVector{D, T}, coord_j, ori, orj, srj, di
     I = zero(coord_i[1] / unit(dist_cutoff)^2)
     I_grad = zero(coord_i[1] / unit(dist_cutoff)^3)
     r = norm(vector(coord_i, coord_j, boundary))
-    if iszero(r) || (!iszero(dist_cutoff) && r > dist_cutoff)
+    if iszero_value(r) || (!iszero_value(dist_cutoff) && r > dist_cutoff)
         return BornRadiiGBN2LoopResult(I, I_grad)
     end
     U = r + srj
@@ -730,7 +730,7 @@ function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, dis
     end
     dr = vector(coord_i, coord_j, boundary)
     r2 = sum(abs2, dr)
-    if !iszero(dist_cutoff) && r2 > dist_cutoff^2
+    if !iszero_value(dist_cutoff) && r2 > dist_cutoff^2
         zero_force = zero(factor_solute ./ coord_i .^ 2)
         return ForceLoopResult1(zero_force[1], zero_force[1], zero_force, zero_force)
     end
@@ -739,7 +739,7 @@ function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, dis
     exp_term = exp(-D)
     denominator2 = r2 + alpha2_ij * exp_term
     denominator = sqrt(denominator2)
-    if iszero(kappa)
+    if iszero_value(kappa)
         pre_factor = factor_solute + factor_solvent
     else
         pre_factor = factor_solute + exp(-kappa * denominator) * factor_solvent +
@@ -765,7 +765,7 @@ end
 function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, boundary)
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)
-    if iszero(r) || (!iszero(dist_cutoff) && r > dist_cutoff)
+    if iszero_value(r) || (!iszero_value(dist_cutoff) && r > dist_cutoff)
         zero_force = zero(bi ./ coord_i .^ 2)
         return ForceLoopResult2(zero_force, zero_force)
     end
@@ -825,7 +825,7 @@ function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
                         dist_cutoff, factor_solute, factor_solvent, kappa, offset,
                         probe_radius, sa_factor, use_ACE, boundary)
     if i == j
-        if iszero(kappa)
+        if iszero_value(kappa)
             pre_factor = factor_solute + factor_solvent
         else
             pre_factor = factor_solute + exp(-kappa * Bi) * factor_solvent
@@ -838,16 +838,16 @@ function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
         return E
     elseif j > i
         r2 = sum(abs2, vector(coord_i, coord_j, boundary))
-        if !iszero(dist_cutoff) && r2 > dist_cutoff^2
+        if !iszero_value(dist_cutoff) && r2 > dist_cutoff^2
             return zero(factor_solute / offset)
         end
         f = sqrt(r2 + Bi*Bj*exp(-r2/(4*Bi*Bj)))
-        if iszero(dist_cutoff)
+        if iszero_value(dist_cutoff)
             f_cutoff = 1/f
         else
             f_cutoff = (1/f - 1/dist_cutoff)
         end
-        if iszero(kappa)
+        if iszero_value(kappa)
             pre_factor = factor_solute + factor_solvent
         else
             pre_factor = factor_solute + exp(-kappa * f) * factor_solvent

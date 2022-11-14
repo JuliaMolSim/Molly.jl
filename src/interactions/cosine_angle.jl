@@ -21,7 +21,7 @@ CosineAngle(; k, θ0) = CosineAngle{typeof(k), typeof(θ0)}(k, θ0)
     ba = vector_pad3D(coords_j, coords_i, boundary)
     bc = vector_pad3D(coords_j, coords_k, boundary)
     cross_ba_bc = ba × bc
-    if iszero(cross_ba_bc)
+    if iszero_value(cross_ba_bc)
         zf = zero(a.k ./ ba)
         return SpecificForce3Atoms(zf, zf, zf)
     end

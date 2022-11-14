@@ -5,6 +5,9 @@
 using ForwardDiff: Chunk, Dual, dualize, partials, value
 using Zygote: unbroadcast
 
+iszero_value(x::Dual) = iszero(value(x))
+iszero_value(x) = iszero(x)
+
 Zygote.accum(x::AbstractArray{<:SizedVector}, ys::AbstractArray{<:SVector}...) = Zygote.accum.(convert(typeof(ys[1]), x), ys...)
 Zygote.accum(x::AbstractArray{<:SVector}, ys::AbstractArray{<:SizedVector}...) = Zygote.accum.(x, convert.(typeof(x), ys)...)
 
