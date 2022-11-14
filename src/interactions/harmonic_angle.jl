@@ -25,7 +25,7 @@ Base.:+(a1::HarmonicAngle, a2::HarmonicAngle) = HarmonicAngle(k=a1.k + a2.k, θ0
     ba = vector_pad3D(coords_j, coords_i, boundary)
     bc = vector_pad3D(coords_j, coords_k, boundary)
     cross_ba_bc = ba × bc
-    if iszero(cross_ba_bc)
+    if iszero_value(cross_ba_bc)
         zf = zero(a.k ./ trim3D(ba, boundary))
         return SpecificForce3Atoms(zf, zf, zf)
     end
