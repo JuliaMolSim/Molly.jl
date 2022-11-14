@@ -736,7 +736,7 @@ end
         loggers=(
             coords=CoordinateLogger(10), 
             mcl=MonteCarloLogger(),
-            avgpe=AverageObservableLogger(Molly.potential_energy_wrapper, typeof(atoms[1].ϵ), 10),
+            avgpe=AverageObservableLogger(potential_energy, typeof(atoms[1].ϵ), 10),
         ),
         neighbor_finder=neighbor_finder,
     )
