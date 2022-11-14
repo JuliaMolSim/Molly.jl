@@ -367,7 +367,9 @@ end
 ```
 
 ## Monte-Carlo sampling
-Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte-Carlo sampling with Metropolis selection rates. For example to perform simulated annealing on charged particles to form a crystal lattice:
+
+Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte-Carlo sampling with Metropolis selection rates.
+For example to perform simulated annealing on charged particles to form a crystal lattice:
 ```julia
 n_atoms = 100
 atom_mass = 10.0u"u"
@@ -380,14 +382,16 @@ coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
 
 pairwise_inters = (Coulomb(),)
 
-temp_vals = [1198u"K", 798.0u"K", 398.0u"K", 198.0u"K", 98.0u"K", 8.0u"K"]
+temp_vals = [1198.0, 798.0, 398.0, 198.0, 98.0, 8.0]u"K"
 sys = System(
     atoms=atoms,
     pairwise_inters=pairwise_inters,
     coords=coords,
     boundary=boundary,
-    loggers=(coords=CoordinateLogger(n_atoms, dims=n_dimensions(boundary)),
-             mclogger=MonteCarloLogger()),
+    loggers=(
+        coords=CoordinateLogger(n_atoms, dims=n_dimensions(boundary)),
+        mclogger=MonteCarloLogger(),
+    ),
 )
 
 trial_args = Dict(:shift_size => 0.1u"nm")
@@ -395,7 +399,7 @@ for t in temp_vals
     sim = MetropolisMonteCarlo(; 
             temperature=t,
             trial_moves=random_uniform_translation!,
-            trial_args=trial_args
+            trial_args=trial_args,
         )
     
     simulate!(sys, sim, 10_000)
@@ -404,6 +408,9 @@ end
 visualize(sys.loggers.coords, boundary, "sim_annealing_montecarlo.gif")
 ```
 ![Monte-Carlo Simulated Annealing](images/sim_annealing_montecarlo.gif)
+`trial_moves` should be a function that takes a [`System`](@ref) as its argument and optional keyword arguments `trial_args`.
+It should modify the coordinates as appropriate, accounting for any boundary conditions.
+[`random_uniform_translation!`](@ref) and [`random_normal_translation!`](@ref) are provided as common trial move functions.
 
 ## Agent-based modelling
 
@@ -851,6 +858,7 @@ The available simulators are:
 - [`LangevinSplitting`](@ref)
 - [`TemperatureREMD`](@ref)
 - [`HamiltonianREMD`](@ref)
+- [`MetropolisMonteCarlo`](@ref)
 
 The [`LangevinSplitting`](@ref) simulator can be used to define a variety of integrators such as velocity Verlet (splitting `"BAB"`), the Langevin implementation in [`Langevin`](@ref) (`"BAOA"`), and symplectic Euler integrators (`"AB"` and `"BA"`).
 
@@ -1051,6 +1059,7 @@ The available loggers are:
 - [`AutoCorrelationLogger`](@ref)
 - [`AverageObservableLogger`](@ref)
 - [`ReplicaExchangeLogger`](@ref)
+- [`MonteCarloLogger`](@ref)
 
 Many of the loggers can be initialised with just the number of steps between recorded values, e.g. `CoordinateLogger(10)`.
 An optional first argument is the type of the recorded value; the above is equivalent to `CoordinateLogger(typeof(1.0u"nm"), 10)` but if the simulation did not use units then `CoordinateLogger(Float64, 10)` would be required.
