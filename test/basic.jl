@@ -119,8 +119,11 @@ end
         nf = neighbor_finder(nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
         s = System(
             atoms=[Atom(), Atom(), Atom()],
-            coords=[SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm",
-                    SVector(5.0, 5.0, 5.0)u"nm"],
+            coords=[
+                SVector(1.0, 1.0, 1.0)u"nm",
+                SVector(2.0, 2.0, 2.0)u"nm",
+                SVector(5.0, 5.0, 5.0)u"nm",
+            ],
             boundary=CubicBoundary(10.0u"nm"),
             neighbor_finder=nf,
         )
@@ -134,7 +137,11 @@ end
     end
 
     # Test passing the boundary and coordinates as keyword arguments to CellListMapNeighborFinder
-    coords = [SVector(1.0, 1.0, 1.0)u"nm", SVector(2.0, 2.0, 2.0)u"nm", SVector(5.0, 5.0, 5.0)u"nm"]
+    coords = [
+        SVector(1.0, 1.0, 1.0)u"nm",
+        SVector(2.0, 2.0, 2.0)u"nm",
+        SVector(5.0, 5.0, 5.0)u"nm",
+    ]
     boundary = CubicBoundary(10.0u"nm")
     neighbor_finder=CellListMapNeighborFinder(
         nb_matrix=trues(3, 3), n_steps=10, x0=coords,
