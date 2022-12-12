@@ -307,10 +307,11 @@ function CellListMapNeighborFinder(;
                                    dist_cutoff::T) where T
     np = size(nb_matrix, 1)
     if isnothing(unit_cell)
+        twice_cutoff = nextfloat(2 * dist_cutoff)
         if unit(dist_cutoff) == NoUnits
-            side = max(2 * dist_cutoff, (np * 0.01) ^ (1 / 3))
+            side = max(twice_cutoff, (np * 0.01) ^ (1 / 3))
         else
-            side = max(2 * dist_cutoff, uconvert(unit(dist_cutoff), (np * 0.01u"nm^3") ^ (1 / 3)))
+            side = max(twice_cutoff, uconvert(unit(dist_cutoff), (np * 0.01u"nm^3") ^ (1 / 3)))
         end
         sides = SVector(side, side, side)
         box = CellListMap.Box(sides, dist_cutoff)
