@@ -373,40 +373,47 @@ Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte-Carlo 
 For example, to perform simulated annealing on charged particles to form a crystal lattice:
 ```julia
 n_atoms = 100
-atom_mass = 10.0u"u"
-atom_charge = 1.0u"e"
-
-atoms = [Atom(mass=atom_mass, charge=atom_charge, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+atoms = [Atom(mass=10.0u"u", charge=1.0) for i in 1:n_atoms]
 boundary = RectangularBoundary(4.0u"nm", 4.0u"nm")
 
 coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
-
 pairwise_inters = (Coulomb(),)
 
-temp_vals = [1198u"K", 798.0u"K", 398.0u"K", 198.0u"K", 98.0u"K", 8.0u"K"]
+temperatures = [1198.0, 798.0, 398.0, 198.0, 98.0, 8.0]u"K"
 sys = System(
     atoms=atoms,
     pairwise_inters=pairwise_inters,
     coords=coords,
     boundary=boundary,
-    loggers=(coords=CoordinateLogger(n_atoms, dims=n_dimensions(boundary)),
-             mclogger=MonteCarloLogger()),
+    loggers=(
+        coords=CoordinateLogger(n_atoms, dims=n_dimensions(boundary)),
+        montecarlo=MonteCarloLogger(),
+    ),
 )
 
 trial_args = Dict(:shift_size => 0.1u"nm")
-for t in temp_vals
+for t in temperatures
     sim = MetropolisMonteCarlo(; 
-            temperature=t,
-            trial_moves=random_uniform_translation!,
-            trial_args=trial_args
-        )
-    
+        temperature=t,
+        trial_moves=random_uniform_translation!,
+        trial_args=trial_args,
+    )
+
     simulate!(sys, sim, 10_000)
 end
 
-visualize(sys.loggers.coords, boundary, "sim_annealing_montecarlo.gif")
+println(sys.loggers.montecarlo.n_accept)
 ```
-![Monte-Carlo Simulated Annealing](images/sim_annealing_montecarlo.gif)
+```
+15234
+```
+
+```julia
+visualize(sys.loggers.coords, boundary, "sim_montecarlo.gif")
+```
+![Monte-Carlo simulation](images/sim_montecarlo.gif)
+
+The functions [`random_uniform_translation!`](@ref) and [`random_normal_translation!`](@ref) allow generation of trial moves, or a function can be provided by the user.
 
 ## Agent-based modelling
 
