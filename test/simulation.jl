@@ -708,8 +708,6 @@ end
         mean_temp = mean(values(repsys.replicas[id].loggers.temp))
         @test (0.9 * temp) < mean_temp < (1.1 * temp)
     end
-
-    # TODO: Possibly more tests?
 end
 
 @testset "Metropolis Monte-Carlo" begin

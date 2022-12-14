@@ -152,7 +152,7 @@ function simulate!(sys,
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim.coupling, sim)
-        
+
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
         if step_n != n_steps
@@ -310,7 +310,7 @@ function simulate!(sys,
                     sim::Langevin,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads(),
-                    rng=Random.GLOBAL_RNG)    
+                    rng=Random.GLOBAL_RNG)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     sim.remove_CM_motion && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -435,7 +435,7 @@ function simulate!(sys,
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         sim.remove_CM_motion && remove_CM_motion!(sys)
         run_loggers!(sys, neighbors, step_n)
-        
+
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                         n_threads=n_threads)

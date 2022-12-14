@@ -6,7 +6,7 @@
 In the last few years, the deep learning revolution has broadened to include the paradigm of [differentiable programming](https://en.wikipedia.org/wiki/Differentiable_programming).
 The concept of using automatic differentiation (AD) to obtain exact gradients through physical simulations has many interesting applications, including parameterising force fields and training neural networks to describe atomic potentials.
 
-There are some projects that explore differentiable molecular simulations such as [Jax, M.D.](https://github.com/google/jax-md), [TorchMD](https://github.com/torchmd/torchmd) and [mdgrad](https://github.com/torchmd/mdgrad).
+There are some projects that explore differentiable molecular simulations - see [Related software](@ref).
 However Julia provides a strong suite of AD tools, with [Zygote.jl](https://github.com/FluxML/Zygote.jl) allowing source-to-source transformations for much of the language.
 With Molly you can use the power of Zygote to obtain gradients through molecular simulations, even in the presence of complex interactions such as implicit solvation and stochasticity such as Langevin dynamics or the Andersen thermostat.
 Reverse and forward mode AD can be used on the CPU and the GPU.
