@@ -1,4 +1,6 @@
-export LennardJones, LennardJonesSoftCore
+export
+    LennardJones,
+    LennardJonesSoftCore
 
 @doc raw"""
     LennardJones(; cutoff, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
