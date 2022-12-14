@@ -433,7 +433,7 @@ function simulate!(sys,
         for (step!, args) in step_arg_pairs
             step!(args..., neighbors)
         end
-        
+
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         sim.remove_CM_motion && remove_CM_motion!(sys)
@@ -532,7 +532,7 @@ function simulate!(sys::ReplicaSystem{D, G, T},
     end
 
     simulate_remd!(sys, sim, n_steps, tremd_exchange!; rng=rng, n_threads=n_threads)
-        end
+end
 
 function tremd_exchange!(sys::ReplicaSystem{D, G, T},
                         sim::TemperatureREMD,

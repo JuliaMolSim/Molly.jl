@@ -405,11 +405,11 @@ save("mie.png", f)
 ```
 ![Mie](images/mie.png)
 
-## Variations of soft-core Lennard-Jones Potential
+## Variations of the soft-core LJ potential
 
-The softcore Lennard-Jones potential is parameterized by three parameters ``\alpha``, ``\lambda`` and ``p``. These
-parameters shift the value of ``r_{ij}`` to ``\left(r_{ij}^6 + \sigma_{ij} \alpha \lambda^{p} \right)^{\frac{1}{6}}``. This
-gives a soft core i.e. the potential does not diverges for ``r_{ij} \rightarrow 0``.
+The soft-core Lennard-Jones potential is parameterised by three parameters ``\alpha``, ``\lambda`` and ``p``.
+These parameters shift the value of ``r_{ij}`` to ``\left(r_{ij}^6 + \sigma_{ij} \alpha \lambda^{p} \right)^{\frac{1}{6}}``.
+This gives a soft core, i.e. the potential does not diverge for ``r_{ij} \rightarrow 0``.
 ```julia
 using Molly
 using GLMakie
@@ -433,7 +433,7 @@ ax = Axis(
     f[1, 1],
     xlabel="Distance / nm",
     ylabel="Potential energy / kJ * mol^-1",
-    title="Variations of the Soft-core Lennard-Jones potential",
+    title="Variations of the soft-core Lennard-Jones potential",
 )
 for λ in [0.8, 0.9]
     for α in [0.2, 0.4]
@@ -448,7 +448,6 @@ for λ in [0.8, 0.9]
     end
 end
 
-# Standard Lennard-Jones
 lines!(ax, dists, energies(0, 1, 2), label="standard LJ potential")
 
 ylims!(-5, 25)
@@ -457,5 +456,4 @@ save("lennard_jones_sc.png", f)
 ```
 ![Lennard-Jones Softcore](images/lennard_jones_sc.png)
 
-The form of the potential will be approximately same as standard Lennard-Jones for ``r_{ij} > \sigma_{ij}`` (if some fractional
-values are used for ``\lambda`` and ``\alpha``).
+The form of the potential is approximately the same as standard Lennard-Jones for ``r_{ij} > \sigma_{ij}`` if some fractional values are used for ``\lambda`` and ``\alpha``.

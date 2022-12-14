@@ -480,8 +480,8 @@ function Base.show(io::IO, aol::AverageObservableLogger)
 end
 
 """
-    ReplicaExchangeLogger(n_replicas::Integer)
-    ReplicaExchangeLogger(T::DataType, n_replicas::Integer)
+    ReplicaExchangeLogger(n_replicas)
+    ReplicaExchangeLogger(T, n_replicas)
 
 A logger that records exchanges in a replica exchange simulation.
 The logged quantities include the number of exchange attempts (`n_attempts`),
@@ -525,13 +525,15 @@ function finish_logs!(rexl::ReplicaExchangeLogger; n_steps::Integer=0, n_attempt
 end
 
 @doc raw"""
-    MonteCarloLogger(T::DataType=DefaultFloat)
+    MonteCarloLogger()
+    MonteCarloLogger(T)
 
 A logger that records acceptances in a Monte-Carlo simulation.
 The logged quantities include the number of new selections (`n_select`),
-number of successful acceptances (`n_accept`), an array named `energy_rates` which stores 
-the value of ``\frac{E}{k_B T}`` i.e. the argument of the Boltzmann factor for the states 
-and a `BitVector` named `state_changed` that stores whether a new state was accepted for the logged step. 
+the number of successful acceptances (`n_accept`), an array named `energy_rates` which stores
+the value of ``\frac{E}{k_B T}`` i.e. the argument of the Boltzmann factor for the states,
+and a `BitVector` named `state_changed` that stores whether a new state was accepted for the
+logged step.
 """
 mutable struct MonteCarloLogger{T}
     n_trials::Int
@@ -549,9 +551,11 @@ function log_property!(mcl::MonteCarloLogger{T},
                         success::Bool,
                         energy_rate::T,
                         n_threads::Integer=Threads.nthreads(),
-                        kwargs...) where {T}
+                        kwargs...) where T
     mcl.n_trials += 1
-    success && (mcl.n_accept += 1)
+    if success
+        mcl.n_accept += 1
+    end
     push!(mcl.state_changed, success)
     push!(mcl.energy_rates, energy_rate)
 end
