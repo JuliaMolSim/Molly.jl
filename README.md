@@ -22,6 +22,7 @@ Implemented features include:
 - Andersen, Berendsen and velocity rescaling thermostats.
 - Verlet, velocity Verlet, Störmer-Verlet and flexible Langevin integrators.
 - Steepest descent energy minimization.
+- Monte Carlo simulation.
 - Replica exchange molecular dynamics.
 - Periodic, triclinic and infinite boundary conditions in a cubic box.
 - Flexible loggers to track arbitrary properties throughout simulations.
