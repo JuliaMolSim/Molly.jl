@@ -696,7 +696,7 @@ end
     end
 end
 
-@testset "Metropolis Monte-Carlo" begin
+@testset "Metropolis Monte Carlo" begin
     n_atoms = 100
     n_steps = 10_000
     atom_mass = 10.0u"u"

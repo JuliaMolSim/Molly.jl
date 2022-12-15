@@ -366,9 +366,9 @@ end
 # 357.710520769689 K
 ```
 
-## Monte-Carlo sampling
+## Monte Carlo sampling
 
-Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte-Carlo sampling with Metropolis selection rates.
+Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte Carlo sampling with Metropolis selection rates.
 For example, to perform simulated annealing on charged particles to form a crystal lattice:
 ```julia
 n_atoms = 100
@@ -406,7 +406,7 @@ println(sys.loggers.montecarlo.n_accept)
 
 visualize(sys.loggers.coords, boundary, "sim_montecarlo.gif")
 ```
-![Monte-Carlo simulation](images/sim_montecarlo.gif)
+![Monte Carlo simulation](images/sim_montecarlo.gif)
 
 `trial_moves` should be a function that takes a [`System`](@ref) as its argument and optional keyword arguments `trial_args`.
 It should modify the coordinates as appropriate, accounting for any boundary conditions.
