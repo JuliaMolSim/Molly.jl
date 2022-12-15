@@ -9,6 +9,8 @@ For differentiable simulations there are a number of related packages:
 - [Jax, M.D.](https://github.com/google/jax-md)
 - [TorchMD](https://github.com/torchmd/torchmd)
 - [mdgrad](https://github.com/torchmd/mdgrad)
+- [DMFF](https://github.com/deepmodeling/DMFF)
+- [Time Machine](https://github.com/proteneer/timemachine)
 - [DiffTaichi](https://github.com/taichi-dev/difftaichi)
 
 In Julia there are a number of packages related to atomic simulation, some of which are involved with the [JuliaMolSim](https://juliamolsim.github.io) organisation:

@@ -1,5 +1,28 @@
 # Molly.jl release notes
 
+## v0.14.0 - Dec 2022
+
+### Breaking changes
+- The type parameters and fields of `System`, `ReplicaSystem`, `ImplicitSolventOBC` and `ImplicitSolventGBN2` are changed.
+- The type parameters of `TemperatureREMD` are changed.
+
+### Non-breaking changes
+- The `mass` function falls back to accessing the `mass` field, making it easier to define custom atom types.
+
+### New features
+- A Monte Carlo simulator that uses the Metropolis algorithm is added as `MetropolisMonteCarlo`. `MonteCarloLogger` is added to record acceptance information. `random_uniform_translation!` and `random_normal_translation!` are added to generate trial moves.
+- `HamiltonianREMD` is added to allow REMD with different interactions for each replica. `remd_exchange!` and `simulate_remd!` are added to allow custom REMD simulators to be defined by giving the exchange function. `replica_pairwise_inters`, `replica_specific_inter_lists` and `replica_general_inters` can now be given when constructing a `ReplicaSystem` to allow different interactions for each replica.
+- Soft core versions of the Lennard-Jones and Coulomb interactions are added as `LennardJonesSoftCore` and `CoulombSoftCore`.
+- Preliminary support for bonded constraints using the SHAKE algorithm is added via `SHAKE` and `apply_constraints!`. `constraints` can be used to define the constraints when constructing a `System`, with corresponding arguments for a `ReplicaSystem`. This feature is still under development and is not fully documented yet.
+- Additional keyword arguments can now be used in `log_property!`, making the logging of properties in custom simulators easier.
+- A section on related software is added to the documentation.
+
+### Performance improvements
+- Implicit solvent force and energy calculation are made faster and more memory efficient.
+
+### Bug fixes
+- A bug when constructing the `Mie` potential with certain parameters is fixed.
+
 ## v0.13.0 - Aug 2022
 
 ### Breaking changes

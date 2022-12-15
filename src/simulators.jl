@@ -9,7 +9,12 @@ export
     Langevin,
     LangevinSplitting,
     TemperatureREMD,
-    HamiltonianREMD
+    remd_exchange!,
+    HamiltonianREMD,
+    simulate_remd!,
+    MetropolisMonteCarlo,
+    random_uniform_translation!,
+    random_normal_translation!
 
 """
     SteepestDescentMinimizer(; <keyword arguments>)
@@ -154,7 +159,7 @@ function simulate!(sys,
             remove_CM_motion!(sys)
         end
         apply_coupling!(sys, sim.coupling, sim)
-        
+
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
         if step_n != n_steps
@@ -314,7 +319,7 @@ function simulate!(sys,
                     sim::Langevin,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads(),
-                    rng=Random.GLOBAL_RNG)    
+                    rng=Random.GLOBAL_RNG)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -444,7 +449,7 @@ function simulate!(sys,
             remove_CM_motion!(sys)
         end
         run_loggers!(sys, neighbors, step_n)
-        
+
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                         n_threads=n_threads)
@@ -528,7 +533,7 @@ function simulate!(sys::ReplicaSystem,
                     n_threads::Integer=Threads.nthreads())
     if sys.n_replicas != length(sim.simulators)
         throw(ArgumentError("Number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
-                "and simulators in TemperatureREMD ($(length(sim.simulators))) do not match."))
+                "and simulators in TemperatureREMD ($(length(sim.simulators))) do not match"))
     end
 
     if assign_velocities
@@ -537,10 +542,17 @@ function simulate!(sys::ReplicaSystem,
         end
     end
 
-    simulate_remd!(sys, sim, n_steps, tremd_exchange!; rng=rng, n_threads=n_threads)
+    simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
 end
 
-function tremd_exchange!(sys::ReplicaSystem{D, G, T},
+"""
+    remd_exchange!(sys, sim, n, m; rng=Random.GLOBAL_RNG, n_threads=Threads.nthreads())
+
+Attempt an exchange of replicas `n` and `m` in a [`ReplicaSystem`](@ref) during a REMD simulation.
+Successful exchanges should exchange coordinates and velocities as appropriate.
+Returns acceptance quantity `Δ` and a `Bool` indicating whether the exchange was successful.
+"""
+function remd_exchange!(sys::ReplicaSystem{D, G, T},
                         sim::TemperatureREMD,
                         n::Integer,
                         m::Integer;
@@ -564,10 +576,10 @@ function tremd_exchange!(sys::ReplicaSystem{D, G, T},
     should_exchange = Δ <= 0 || rand(rng) < exp(-Δ)
 
     if should_exchange
-        # exchange coordinates and velocities
+        # Exchange coordinates and velocities
         sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
         sys.replicas[n].velocities, sys.replicas[m].velocities = sys.replicas[m].velocities, sys.replicas[n].velocities
-        # scale velocities
+        # Scale velocities
         sys.replicas[n].velocities .*= sqrt(T_n / T_m)
         sys.replicas[m].velocities .*= sqrt(T_m / T_n)
     end
@@ -579,7 +591,8 @@ end
     HamiltonianREMD(; <keyword arguments>)
 
 A simulator for a parallel Hamiltonian replica exchange MD (H-REMD) simulation on a
-[`ReplicaSystem`](@ref). The corresponding replicas are expected to have the different Hamiltonians (due to different interactions or force fields).
+[`ReplicaSystem`](@ref).
+The replicas are expected to have different Hamiltonians, i.e. different interactions.
 When calling [`simulate!`](@ref), the `assign_velocities` keyword argument determines
 whether to assign random velocities at the appropriate temperature for each replica.
 Not currently compatible with automatic differentiation using Zygote.
@@ -623,7 +636,7 @@ function simulate!(sys::ReplicaSystem,
                     n_threads::Integer=Threads.nthreads())
     if sys.n_replicas != length(sim.simulators)
         throw(ArgumentError("Number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
-                "and simulators in HamiltonianREMD ($(length(sim.simulators))) do not match."))
+                "and simulators in HamiltonianREMD ($(length(sim.simulators))) do not match"))
     end
 
     if assign_velocities
@@ -632,10 +645,10 @@ function simulate!(sys::ReplicaSystem,
         end
     end
     
-    simulate_remd!(sys, sim, n_steps, hremd_exchange!; rng=rng, n_threads=n_threads)
+    simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
 end
 
-function hremd_exchange!(sys::ReplicaSystem{D, G, T},
+function remd_exchange!(sys::ReplicaSystem{D, G, T},
                         sim::HamiltonianREMD,
                         n::Integer,
                         m::Integer;
@@ -657,35 +670,42 @@ function hremd_exchange!(sys::ReplicaSystem{D, G, T},
     V_m_i = potential_energy(sys.replicas[m], neighbors_m; n_threads=n_threads)
 
     sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
-    V_n_f = potential_energy(sys.replicas[n], neighbors_m; n_threads=n_threads) # using already calculated neighbors
+    V_n_f = potential_energy(sys.replicas[n], neighbors_m; n_threads=n_threads) # Use already calculated neighbors
     V_m_f = potential_energy(sys.replicas[m], neighbors_n; n_threads=n_threads)
 
     Δ = β_sim * (V_n_f - V_n_i + V_m_f - V_m_i)
     should_exchange = Δ <= 0 || rand(rng) < exp(-Δ)
 
-    if should_exchange # exchange velocities
+    if should_exchange
+        # Exchange velocities
         sys.replicas[n].velocities, sys.replicas[m].velocities = sys.replicas[m].velocities, sys.replicas[n].velocities
-    else # revert coordinate exchange
+    else
+        # Revert coordinate exchange
         sys.replicas[n].coords, sys.replicas[m].coords = sys.replicas[m].coords, sys.replicas[n].coords
     end
 
     return Δ, should_exchange
 end
 
+"""
+    simulate_remd!(sys, remd_sim, n_steps; rng=Random.GLOBAL_RNG, n_threads=Threads.nthreads())
+
+Run a REMD simulation on a [`ReplicaSystem`](@ref) using a REMD simulator.
+"""
 function simulate_remd!(sys::ReplicaSystem,
                         remd_sim,
-                        n_steps::Int,
-                        make_exchange!::Function;
+                        n_steps::Integer;
                         rng=Random.GLOBAL_RNG,
-                        n_threads::Int=Threads.nthreads())
+                        n_threads::Integer=Threads.nthreads())
     if sys.n_replicas != length(remd_sim.simulators)
         throw(ArgumentError("Number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
-                "and simulators in TemperatureREMD ($(length(remd_sim.simulators))) do not match."))
+            "and simulators in the REMD simulator ($(length(remd_sim.simulators))) do not match"))
     end
 
     if n_threads > sys.n_replicas
         thread_div = equal_parts(n_threads, sys.n_replicas)
-    else # Use 1 thread per replica
+    else
+        # Use 1 thread per replica
         thread_div = equal_parts(sys.n_replicas, sys.n_replicas)
     end
 
@@ -705,7 +725,7 @@ function simulate_remd!(sys::ReplicaSystem,
         for n in (1 + cycle_parity):2:(sys.n_replicas - 1)
             n_attempts += 1
             m = n + 1
-            Δ, exchanged = make_exchange!(sys, remd_sim, n, m; rng=rng, n_threads=n_threads)
+            Δ, exchanged = remd_exchange!(sys, remd_sim, n, m; rng=rng, n_threads=n_threads)
             if exchanged && !isnothing(sys.exchange_logger)
                 log_property!(sys.exchange_logger, sys, nothing, cycle * cycle_length;
                                     indices=(n, m), delta=Δ, n_threads=n_threads)
@@ -728,9 +748,105 @@ function simulate_remd!(sys::ReplicaSystem,
 end
 
 # Calculate k almost equal patitions of n
-@inline function equal_parts(n::Int, k::Int)
+@inline function equal_parts(n, k)
     ndiv = n ÷ k
     nrem = n % k
-    n_parts = ntuple(i -> (i <= nrem) ? ndiv+1 : ndiv, k)
+    n_parts = ntuple(i -> (i <= nrem) ? ndiv + 1 : ndiv, k)
     return n_parts
+end
+
+"""
+    MetropolisMonteCarlo(; <keyword arguments>)
+
+A Monte Carlo simulator that uses the Metropolis algorithm to sample the configuration space.
+`simulate!` for this simulator accepts an optional keyword argument `log_states::Bool=true` which 
+determines whether to run the loggers or not (for example, during equilibration).
+
+# Arguments
+- `temperature::T`: the temperature of the system.
+- `trial_moves::M`: a function that performs the trial moves.
+- `trial_args::Dict`: a dictionary of arguments to be passed to the trial move function.
+"""
+struct MetropolisMonteCarlo{T, M}
+    temperature::T
+    trial_moves::M
+    trial_args::Dict
+end
+
+function MetropolisMonteCarlo(;
+                              temperature::T,
+                              trial_moves::M,
+                              trial_args::Dict=Dict()) where {T, M}
+    return MetropolisMonteCarlo{T, M}(temperature, trial_moves, trial_args)
+end
+
+function simulate!(sys::System{D, G, T},
+                   sim::MetropolisMonteCarlo,
+                   n_steps::Integer;
+                   n_threads::Integer=Threads.nthreads(),
+                   log_states::Bool=true) where {D, G, T}
+    if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        k_b = sys.k * T(Unitful.Na) 
+    else
+        k_b = sys.k
+    end
+
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    E_old = potential_energy(sys, neighbors)
+    for i in 1:n_steps
+        coords_old = copy(sys.coords)
+        sim.trial_moves(sys; sim.trial_args...) # Changes the coordinates of the system
+        neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+        E_new = potential_energy(sys, neighbors)
+
+        ΔE = E_new - E_old
+        δ = ΔE / (k_b * sim.temperature)
+        if δ < 0 || rand() < exp(-δ)
+            log_states && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=true,
+                                       energy_rate=E_new / (k_b * sim.temperature))
+            E_old = E_new
+        else
+            sys.coords = coords_old
+            log_states && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=false,
+                                       energy_rate=E_old / (k_b * sim.temperature))
+        end
+    end
+end
+
+"""
+    random_uniform_translation!(sys::System; shift_size=oneunit(eltype(eltype(sys.coords))))
+
+Performs a random translation of the coordinates of a randomly selected atom in a [`System`](@ref).
+The translation is generated using a uniformly selected direction and uniformly selected length 
+in range [0, 1) scaled by `shift_size` which should have appropriate length units.
+"""
+function random_uniform_translation!(sys::System{D, G, T};
+                                     shift_size=oneunit(eltype(eltype(sys.coords)))) where {D, G, T}
+    rand_idx = rand(1:length(sys))
+    direction = random_unit_vector(T, D)
+    magnitude = rand(T) * shift_size
+    sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)
+    return sys
+end
+
+"""
+    random_normal_translation!(sys::System; shift_size=oneunit(eltype(eltype(sys.coords))))
+
+Performs a random translation of the coordinates of a randomly selected atom in a [`System`](@ref). 
+The translation is generated using a uniformly choosen direction and length selected from 
+the standard normal distribution i.e. with mean 0 and standard deviation 1, scaled by `shift_size` 
+which should have appropriate length units.
+"""
+function random_normal_translation!(sys::System{D, G, T};
+                                    shift_size=oneunit(eltype(eltype(sys.coords)))) where {D, G, T}
+    rand_idx = rand(1:length(sys))
+    direction = random_unit_vector(T, D)
+    magnitude = randn(T) * shift_size
+    sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)
+    return sys
+end
+
+function random_unit_vector(float_type, dims)
+    vec = randn(float_type, dims)
+    return vec / norm(vec)
 end

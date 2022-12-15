@@ -503,9 +503,10 @@ the interaction arguments `replica_pairwise_inters`, `replica_specific_inter_lis
 This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
 interface described there.
 
-When using `ReplicaSystem` with [`CellListMapNeighborFinder`](@ref), The number of threads used for both the simulation
-of replicas and the neighbor finder should be set up to be same. This can be done by passing `nbatches=(min(n, 8), n)` to
-`CellListMapNeighborFinder` during construction where `n` is the number of threads to be used per replica.
+When using `ReplicaSystem` with [`CellListMapNeighborFinder`](@ref), the number of threads used for
+both the simulation of replicas and the neighbor finder should be set to be the same.
+This can be done by passing `nbatches=(min(n, 8), n)` to [`CellListMapNeighborFinder`](@ref) during
+construction where `n` is the number of threads to be used per replica.
 
 # Arguments
 - `atoms::A`: the atoms, or atom equivalents, in the system. Can be
@@ -514,25 +515,25 @@ of replicas and the neighbor finder should be set up to be same. This can be don
     be bits types and hence work on the GPU.
 - `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e. interactions 
     between all or most atom pairs such as electrostatics (to be used if same for all replicas).
-    Typically a `Tuple`. *Note: This is only used if no value is passed to the argument 
-    `replica_pairwise_inters`*.
+    Typically a `Tuple`. This is only used if no value is passed to the argument 
+    `replica_pairwise_inters`.
 - `replica_pairwise_inters=[() for _ in 1:n_replicas]`: the pairwise interactions for 
     each replica.
 - `specific_inter_lists::SI=()`: the specific interactions in the system, i.e. interactions 
     between specific atoms such as bonds or angles (to be used if same for all replicas). 
-    Typically a `Tuple`. *Note: This is only used if no value is passed to the argument 
-    `replica_specific_inter_lists`*.
+    Typically a `Tuple`. This is only used if no value is passed to the argument 
+    `replica_specific_inter_lists`.
 - `replica_specific_inter_lists=[() for _ in 1:n_replicas]`: the specific interactions in 
     each replica.
 - `general_inters::GI=()`: the general interactions in the system, i.e. interactions involving 
     all atoms such as implicit solvent (to be used if same for all replicas). Typically a `Tuple`. 
-    *Note: This is only used if no value is passed to the argument `replica_general_inters`*.
+    This is only used if no value is passed to the argument `replica_general_inters`.
 - `replica_general_inters=[() for _ in 1:n_replicas]`: the general interactions for 
     each replica.
 - `constraints::CN=()`: the constraints for bonds and angles in the system (to be used if same 
     for all replicas). Typically a `Tuple`.
 - `replica_constraints=[() for _ in 1:n_replicas]`: the constraints for bonds and angles in each
-    replica. *Note: This is only used if no value is passed to the argument `replica_constraints`*.
+    replica. This is only used if no value is passed to the argument `replica_constraints`.
 - `n_replicas::Integer`: the number of replicas of the system.
 - `replica_coords`: the coordinates of the atoms in each replica.
 - `replica_velocities=[zero(replica_coords[1]) * u"ps^-1" for _ in 1:n_replicas]`:
@@ -608,26 +609,26 @@ function ReplicaSystem(;
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)
     end
     EL = typeof(exchange_logger)
-    
+
     if isnothing(replica_pairwise_inters)
         replica_pairwise_inters = [pairwise_inters for _ in 1:n_replicas]
     elseif length(replica_pairwise_inters) != n_replicas
         throw(ArgumentError("Number of pairwise interactions ($(length(replica_pairwise_inters)))"
-        * "does not match number of replicas ($(n_replicas))"))
+                            * "does not match number of replicas ($n_replicas)"))
     end
 
     if isnothing(replica_specific_inter_lists)
         replica_specific_inter_lists = [specific_inter_lists for _ in 1:n_replicas]
     elseif length(replica_specific_inter_lists) != n_replicas
         throw(ArgumentError("Number of specific interaction lists ($(length(replica_specific_inter_lists)))"
-        * "does not match number of replicas ($(n_replicas))"))
+                            * "does not match number of replicas ($n_replicas)"))
     end
 
     if isnothing(replica_general_inters)
         replica_general_inters = [general_inters for _ in 1:n_replicas]
     elseif length(replica_general_inters) != n_replicas
         throw(ArgumentError("Number of general interactions ($(length(replica_general_inters)))"
-        * "does not match number of replicas ($(n_replicas))"))
+                            * "does not match number of replicas ($n_replicas)"))
     end
 
     PI = eltype(replica_pairwise_inters)
@@ -638,10 +639,10 @@ function ReplicaSystem(;
         replica_constraints = [constraints for _ in 1:n_replicas]
     elseif length(replica_constraints) != n_replicas
         throw(ArgumentError("Number of constraints ($(length(replica_general_inters)))"
-        * "does not match number of replicas ($(n_replicas))"))
+                            * "does not match number of replicas ($n_replicas)"))
     end
     CN = eltype(replica_constraints)
-    
+
     if !all(y -> typeof(y) == C, replica_coords)
         throw(ArgumentError("The coordinates for all the replicas are not of the same type"))
     end

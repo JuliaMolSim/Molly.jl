@@ -369,20 +369,16 @@ end
 ## Monte-Carlo sampling
 
 Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte-Carlo sampling with Metropolis selection rates.
-For example to perform simulated annealing on charged particles to form a crystal lattice:
+For example, to perform simulated annealing on charged particles to form a crystal lattice:
 ```julia
 n_atoms = 100
-atom_mass = 10.0u"u"
-atom_charge = 1.0u"e"
-
-atoms = [Atom(mass=atom_mass, charge=atom_charge, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-boundary = RectangularBoundary(4.0u"nm", 4.0u"nm")
+atoms = [Atom(mass=10.0u"u", charge=1.0) for i in 1:n_atoms]
+boundary = RectangularBoundary(4.0u"nm")
 
 coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
-
 pairwise_inters = (Coulomb(),)
 
-temp_vals = [1198.0, 798.0, 398.0, 198.0, 98.0, 8.0]u"K"
+temperatures = [1198.0, 798.0, 398.0, 198.0, 98.0, 8.0]u"K"
 sys = System(
     atoms=atoms,
     pairwise_inters=pairwise_inters,
@@ -390,24 +386,28 @@ sys = System(
     boundary=boundary,
     loggers=(
         coords=CoordinateLogger(n_atoms, dims=n_dimensions(boundary)),
-        mclogger=MonteCarloLogger(),
+        montecarlo=MonteCarloLogger(),
     ),
 )
 
 trial_args = Dict(:shift_size => 0.1u"nm")
-for t in temp_vals
+for t in temperatures
     sim = MetropolisMonteCarlo(; 
-            temperature=t,
-            trial_moves=random_uniform_translation!,
-            trial_args=trial_args,
-        )
-    
+        temperature=t,
+        trial_moves=random_uniform_translation!,
+        trial_args=trial_args,
+    )
+
     simulate!(sys, sim, 10_000)
 end
 
-visualize(sys.loggers.coords, boundary, "sim_annealing_montecarlo.gif")
+println(sys.loggers.montecarlo.n_accept)
+# 15234
+
+visualize(sys.loggers.coords, boundary, "sim_montecarlo.gif")
 ```
-![Monte-Carlo Simulated Annealing](images/sim_annealing_montecarlo.gif)
+![Monte-Carlo simulation](images/sim_montecarlo.gif)
+
 `trial_moves` should be a function that takes a [`System`](@ref) as its argument and optional keyword arguments `trial_args`.
 It should modify the coordinates as appropriate, accounting for any boundary conditions.
 [`random_uniform_translation!`](@ref) and [`random_normal_translation!`](@ref) are provided as common trial move functions.
@@ -914,30 +914,28 @@ struct MyREMDSimulator
     # Other properties of the simulation
 end
 ```
-Then, define the functions required for the simulation. This consists of first defining the function that carries out the exchange:
+Then define the function that carries out the exchange, [`remd_exchange!`](@ref):
 ```julia
-function my_exchange_fun!(sys::ReplicaSystem,
-                        sim::MyREMDSimulator,
-                        n::Integer,
-                        m::Integer;
-                        n_threads::Int=Threads.nthreads(),
-                        rng=Random.GLOBAL_RNG)
+function Molly.remd_exchange!(sys::ReplicaSystem,
+                              sim::MyREMDSimulator,
+                              n::Integer,
+                              m::Integer;
+                              n_threads::Integer=Threads.nthreads(),
+                              rng=Random.GLOBAL_RNG)
     # Attempt to exchange the replicas with index n and m
-
     # First define Δ for the REMD scheme
-    make_exchange = Δ <= 0 || rand(rng) < exp(-Δ)  # metroplis acceptance rate
+    make_exchange = Δ <= 0 || rand(rng) < exp(-Δ) # Example of Metropolis acceptance rate
     if make_exchange
-        # exchange coordinates and velocities of replicas
-        # also scale the velocities to match the temperature if required
+        # Exchange coordinates and velocities of replicas
+        # Also scale the velocities to match the temperature if required
     end
 
     return Δ, make_exchange
 end
 ```
 
-!!! tip "Correct Boltzman constant"
-    To get the correct exchange rates, the units of the boltzmann constant must be corrected when used in the exchange 
-    function:
+!!! tip "Correct Boltzmann constant"
+    To get the correct exchange rates, the units of the Boltzmann constant must be corrected when used in the exchange function:
     ```julia
     if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         k_b = sys.k * T(Unitful.Na)
@@ -946,22 +944,19 @@ end
     end
     ```
 
-The above function returns `Δ` which is the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref)
-and `make_exchange` which is a boolean indicating whether the exchange was successful.
+The above function returns `Δ` which is the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref) and a boolean indicating whether the exchange was successful.
 
-Then, define a method for the `simulate!` function to perform the parallel simulation, it uses `Molly.simulate_remd!` for this
-to which we pass our exchange function defined above:
-
+Then, define a method for the [`simulate!`](@ref) function to perform the parallel simulation.
+This does any initial setup such as assigning velocities then uses [`simulate_remd!`](@ref) to run the simulation:
 ```julia
-function simulate!(sys::ReplicaSystem,
-                    sim::MyREMDSimulator,
-                    n_steps::Integer;
-                    rng=Random.GLOBAL_RNG,
-                    n_threads::Integer=Threads.nthreads())
-
+function Molly.simulate!(sys::ReplicaSystem,
+                         sim::MyREMDSimulator,
+                         n_steps::Integer;
+                         rng=Random.GLOBAL_RNG,
+                         n_threads::Integer=Threads.nthreads())
     # Do any initial setup if necessary
-    
-    Molly.simulate_remd!(sys, sim, n_steps, my_exchange_fun!; rng=rng, n_threads=n_threads)
+
+    simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
 end
 ```
 
