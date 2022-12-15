@@ -128,9 +128,7 @@ The potential energy is defined as
 ```math
 V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha  \sigma_{ij}^6  \lambda^p)^{\frac{1}{6}}}
 ```
-
-Here, ``\alpha``, ``\lambda``, and ``p`` adjust the functional form of the soft core of the potential. For `α=0` or 
-`λ=0` we get the standard Coulomb potential.
+If ``\alpha`` or ``\lambda`` are zero this gives the standard [`Coulomb`](@ref) potential.
 """
 struct CoulombSoftCore{C, A, L, P, R, W, T, F, E} <: PairwiseInteraction
     cutoff::C
@@ -157,10 +155,12 @@ function CoulombSoftCore(;
                     coulomb_const=coulombconst,
                     force_units=u"kJ * mol^-1 * nm^-1",
                     energy_units=u"kJ * mol^-1")
-    σ6_fac = α*λ^p
+    σ6_fac = α * λ^p
     return CoulombSoftCore{typeof(cutoff), typeof(α), typeof(λ), typeof(p), typeof(σ6_fac),
-                           typeof(weight_14), typeof(coulomb_const), typeof(force_units), typeof(energy_units)}(
-        cutoff, α, λ, p, σ6_fac, nl_only, lorentz_mixing, weight_14, coulomb_const, force_units, energy_units)
+                           typeof(weight_14), typeof(coulomb_const), typeof(force_units),
+                           typeof(energy_units)}(
+        cutoff, α, λ, p, σ6_fac, nl_only, lorentz_mixing, weight_14, coulomb_const, force_units,
+        energy_units)
 end
 
 @inline @inbounds function force(inter::CoulombSoftCore{C},

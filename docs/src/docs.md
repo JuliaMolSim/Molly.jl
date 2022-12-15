@@ -911,19 +911,17 @@ struct MyREMDSimulator
     # Other properties of the simulation
 end
 ```
-Then, define the functions required for the simulation.
-This consists of first defining the function that carries out the exchange:
+Then define the function that carries out the exchange, [`remd_exchange!`](@ref):
 ```julia
-function my_exchange_fun!(sys::ReplicaSystem{D, G, T},
-                          sim::MyREMDSimulator,
-                          n::Integer,
-                          m::Integer;
-                          n_threads::Int=Threads.nthreads(),
-                          rng=Random.GLOBAL_RNG) where {D, G, T}
+function Molly.remd_exchange!(sys::ReplicaSystem,
+                              sim::MyREMDSimulator,
+                              n::Integer,
+                              m::Integer;
+                              n_threads::Int=Threads.nthreads(),
+                              rng=Random.GLOBAL_RNG)
     # Attempt to exchange the replicas with index n and m
-
     # First define Δ for the REMD scheme
-    make_exchange = Δ <= 0 || rand(rng) < exp(-Δ)  # Metroplis acceptance rate
+    make_exchange = Δ <= 0 || rand(rng) < exp(-Δ) # Example of Metropolis acceptance rate
     if make_exchange
         # Exchange coordinates and velocities of replicas
         # Also scale the velocities to match the temperature if required
@@ -934,8 +932,7 @@ end
 ```
 
 !!! tip "Correct Boltzmann constant"
-    To get the correct exchange rates, the units of the Boltzmann constant must be corrected when used in the exchange 
-    function:
+    To get the correct exchange rates, the units of the Boltzmann constant must be corrected when used in the exchange function:
     ```julia
     if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         k_b = sys.k * T(Unitful.Na)
@@ -944,18 +941,19 @@ end
     end
     ```
 
-The above function returns `Δ` which is the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref) and `make_exchange` which is a boolean indicating whether the exchange was successful.
+The above function returns `Δ` which is the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref) and a boolean indicating whether the exchange was successful.
 
-Then, define a method for the [`simulate!`](@ref) function to perform the parallel simulation, it uses `Molly.simulate_remd!` for this to which we pass our exchange function defined above:
+Then, define a method for the [`simulate!`](@ref) function to perform the parallel simulation.
+This does any initial setup such as assigning velocities then uses [`simulate_remd!`](@ref) to run the simulation:
 ```julia
-function simulate!(sys::ReplicaSystem{D, G, T},
-                   sim::MyREMDSimulator,
-                   n_steps::Integer;
-                   rng=Random.GLOBAL_RNG,
-                   n_threads::Integer=Threads.nthreads()) where {D, G, T}
+function Molly.simulate!(sys::ReplicaSystem{D, G, T},
+                         sim::MyREMDSimulator,
+                         n_steps::Integer;
+                         rng=Random.GLOBAL_RNG,
+                         n_threads::Integer=Threads.nthreads()) where {D, G, T}
     # Do any initial setup if necessary
 
-    Molly.simulate_remd!(sys, sim, n_steps, my_exchange_fun!; rng=rng, n_threads=n_threads)
+    simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
 end
 ```
 

@@ -429,36 +429,29 @@ end
     end
 
     temp = 100.0u"K"
-
     velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 
     nb_matrix = trues(n_atoms, n_atoms)
-
-    for i in (1:n_atoms÷2)
+    for i in 1:(n_atoms ÷ 2)
         nb_matrix[i, i + (n_atoms ÷ 2)] = false
         nb_matrix[i + (n_atoms ÷ 2), i] = false
     end
 
     neighbor_finder = DistanceNeighborFinder(nb_matrix=nb_matrix, n_steps=10, dist_cutoff=1.5u"nm")
-    
-    bond_lengths = [0.1u"nm" for i in 1:(n_atoms÷2)]
 
-    sh = SHAKE(bond_lengths, collect(1:(n_atoms÷2)), collect((1+n_atoms÷2):n_atoms))
-    
-    constraint_list = (sh,)
+    bond_lengths = [0.1u"nm" for i in 1:(n_atoms ÷ 2)]
+    sh = SHAKE(bond_lengths, collect(1:(n_atoms ÷ 2)), collect((1 + (n_atoms ÷ 2)):n_atoms))
+    constraints = (sh,)
 
     sys = System(
         atoms=atoms,
         pairwise_inters=(LennardJones(nl_only=true),),
-        constraints=constraint_list,
+        constraints=constraints,
         coords=coords,
         velocities=velocities,
         boundary=boundary,
         neighbor_finder=neighbor_finder,
-        loggers=Dict(
-            "temp" => TemperatureLogger(10),
-            "coords" => CoordinateLogger(10),
-        ),
+        loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
     )
 
     for i in 1:length(sys.coords)
@@ -491,40 +484,35 @@ end
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
 
-    coords = place_atoms(n_atoms÷3, boundary, min_dist=0.3u"nm")
+    coords = place_atoms(n_atoms ÷ 3, boundary, min_dist=0.3u"nm")
 
-    for i in 1:(n_atoms÷3)
+    for i in 1:(n_atoms ÷ 3)
         push!(coords, coords[i] .+ [0.13, 0.0, 0.0]u"nm")
     end
 
-    for i in 1:(n_atoms÷3)
+    for i in 1:(n_atoms ÷ 3)
         push!(coords, coords[i] .+ [0.26, 0.0, 0.0]u"nm")
     end
 
     temp = 100.0u"K"
-
     velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
 
     nb_matrix = trues(n_atoms, n_atoms)
-
-    for i in (1:n_atoms÷3)
-        nb_matrix[i, i + (n_atoms÷3)] = false
-        nb_matrix[i + (n_atoms÷3), i] = false
-
-        nb_matrix[i + (n_atoms÷3), i + (n_atoms*2÷3)] = false
-        nb_matrix[i + (n_atoms÷3) + 1, i + (n_atoms*2÷3)] = false
+    for i in 1:(n_atoms ÷ 3)
+        nb_matrix[i, i + (n_atoms ÷ 3)] = false
+        nb_matrix[i + (n_atoms ÷ 3), i] = false
+        nb_matrix[i + (n_atoms ÷ 3), i + 2 * (n_atoms ÷ 3)] = false
+        nb_matrix[i + 2 * (n_atoms ÷ 3), i + (n_atoms ÷ 3)] = false
     end
 
     neighbor_finder = DistanceNeighborFinder(nb_matrix=nb_matrix, n_steps=10, dist_cutoff=1.5u"nm")
 
-    bond_lengths = [0.1u"nm" for i in 1:2*(n_atoms÷3)]
-
+    bond_lengths = [0.1u"nm" for i in 1:(2 * (n_atoms ÷ 3))]
     sh = SHAKE(
         bond_lengths,
-        [collect(1:n_atoms÷3)..., collect((1+(n_atoms÷3)):2*(n_atoms÷3))...],
-        [collect((1+(n_atoms÷3)):(2*n_atoms÷3))..., collect((1+(2*n_atoms÷3)):n_atoms)...],
+        collect(1:(2 * (n_atoms ÷ 3))),
+        collect(((n_atoms ÷ 3) + 1):n_atoms),
     )
-
     constraints = (sh,)
 
     sys = System(
@@ -535,7 +523,7 @@ end
         velocities=velocities,
         boundary=boundary,
         neighbor_finder=neighbor_finder,
-        loggers=Dict("coords" => CoordinateLogger(10)),
+        loggers=(coords=CoordinateLogger(10),),
     )
 
     for i in 1:length(sys.coords)
@@ -659,10 +647,8 @@ end
     temp = 100.0u"K"
     velocities = [velocity(10.0u"u", temp) for i in 1:n_atoms]
 
-    nb_matrix = trues(n_atoms, n_atoms)
-    
     neighbor_finder = DistanceNeighborFinder(
-        nb_matrix=nb_matrix,
+        nb_matrix=trues(n_atoms, n_atoms),
         n_steps=10,
         dist_cutoff=1.5u"nm",
     )
@@ -717,7 +703,6 @@ end
     atoms = [Atom(mass=atom_mass, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(4.0u"nm", 4.0u"nm", 4.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-
     temp = 198.0u"K"
 
     neighbor_finder = DistanceNeighborFinder(
@@ -742,16 +727,16 @@ end
     simulator_uniform = MetropolisMonteCarlo(
         temperature=temp,
         trial_moves=random_uniform_translation!,
-        trial_args=Dict(:shift_size => 0.1u"nm")
+        trial_args=Dict(:shift_size => 0.1u"nm"),
     )
 
     simulator_gaussian = MetropolisMonteCarlo(
         temperature=temp,
         trial_moves=random_normal_translation!,
-        trial_args=Dict(:shift_size => 0.1u"nm")
+        trial_args=Dict(:shift_size => 0.1u"nm"),
     )
 
-    @time simulate!(sys, simulator_uniform, n_steps; log_states=true)
+    @time simulate!(sys, simulator_uniform , n_steps; log_states=true)
     @time simulate!(sys, simulator_gaussian, n_steps; log_states=true)
 
     acceptance_rate = sys.loggers.mcl.n_accept / sys.loggers.mcl.n_trials

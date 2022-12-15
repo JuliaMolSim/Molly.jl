@@ -157,8 +157,8 @@ end
 end
 
 @doc raw"""
-    LennardJonesSoftCore(; cutoff, α, λ, p, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
-                 force_units, energy_units, skip_shortcut)
+    LennardJonesSoftCore(; cutoff, α, λ, p, nl_only, lorentz_mixing, weight_14,
+                         weight_solute_solvent, force_units, energy_units, skip_shortcut)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core.
 The potential energy is defined as
@@ -167,14 +167,13 @@ V(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}^{\text{sc}}}
 ```
 and the force on each atom by
 ```math
-\begin{aligned}
 \vec{F}_i &= 24\varepsilon_{ij} \left(2\frac{\sigma_{ij}^{12}}{(r_{ij}^{\text{sc}})^{13}} - \frac{\sigma_{ij}^6}{(r_{ij}^{\text{sc}})^{7}}\right) \left(\frac{r_{ij}}{r_{ij}^{\text{sc}}}\right)^5 \frac{\vec{r}_{ij}}{r_{ij}}
-\end{aligned}
 ```
-
-where ``r_{ij}^{\text{sc}} = \left(r_{ij}^6 + \alpha \sigma_{ij}^6 \lambda^p \right)^{1/6}``. Here, ``\alpha``,
-``\lambda``, and ``p`` adjust the functional form of the soft core of the potential. For `α=0` or `λ=0`
-we get the standard Lennard-Jones potential.
+where
+```math
+r_{ij}^{\text{sc}} = \left(r_{ij}^6 + \alpha \sigma_{ij}^6 \lambda^p \right)^{1/6}
+```
+If ``\alpha`` or ``\lambda`` are zero this gives the standard [`LennardJones`](@ref) potential.
 """
 struct LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E} <: PairwiseInteraction
     cutoff::C
@@ -202,9 +201,10 @@ function LennardJonesSoftCore(;
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
                         skip_shortcut=false)
-    σ6_fac = α*λ^p
-    return LennardJonesSoftCore{skip_shortcut, typeof(cutoff), typeof(α), typeof(λ), typeof(p), typeof(σ6_fac),
-                        typeof(weight_14), typeof(weight_solute_solvent), typeof(force_units), typeof(energy_units)}(
+    σ6_fac = α * λ^p
+    return LennardJonesSoftCore{skip_shortcut, typeof(cutoff), typeof(α), typeof(λ), typeof(p),
+                                typeof(σ6_fac), typeof(weight_14), typeof(weight_solute_solvent),
+                                typeof(force_units), typeof(energy_units)}(
         cutoff, α, λ, p, σ6_fac, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
         force_units, energy_units)
 end
@@ -260,15 +260,13 @@ end
 end
 
 @fastmath function force_divr_nocutoff(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
-    inv_rsc6 = inv(r2^3 + σ2^3 * σ6_fac)  # rsc = (r2^3 + α * σ2^3 * λ^p)^(1/6)
+    inv_rsc6 = inv(r2^3 + σ2^3 * σ6_fac) # rsc = (r2^3 + α * σ2^3 * λ^p)^(1/6)
     inv_rsc  = √cbrt(inv_rsc6)
     six_term = σ2^3 * inv_rsc6
 
-    ff  = (24ϵ * inv_rsc)
-    ff *= (2 * six_term^2 - six_term)
-    ff *= √r2^5 * inv_rsc^5
+    ff  = (24ϵ * inv_rsc) * (2 * six_term^2 - six_term) * (√r2 * inv_rsc)^5
     # √invr2 is for normalizing dr
-    return   ff * √invr2
+    return ff * √invr2
 end
 
 @inline @inbounds function potential_energy(inter::LennardJonesSoftCore{S, C},
