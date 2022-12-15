@@ -284,7 +284,7 @@ end
     end
 end
 
-@fastmath function force_divr_nocutoff(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
+function force_divr_nocutoff(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
     inv_rsc6 = inv(r2^3 + σ2^3 * σ6_fac) # rsc = (r2^3 + α * σ2^3 * λ^p)^(1/6)
     inv_rsc  = √cbrt(inv_rsc6)
     six_term = σ2^3 * inv_rsc6
