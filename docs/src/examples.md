@@ -137,7 +137,7 @@ visualize(
 
 ## Polymer melt
 
-Here we use [`FENEBond`](@ref) and [`CosineAngle`](@ref) to simulate interacting polymers.
+Here we use [`FENEBond`](@ref), [`CosineAngle`](@ref) and [`LennardJones`](@ref) to simulate interacting polymers.
 We also analyse the end-to-end polymer distances and chain angles across the trajectory.
 ```julia
 using Molly
@@ -155,11 +155,10 @@ n_angles_mon = n_monomers - 2
 n_angles_tot = n_angles_mon * n_polymers
 
 starting_length = 1.1u"nm"
-r0 = 1.6u"nm"
 box_length = 20.0u"nm"
 boundary = CubicBoundary(box_length, box_length, box_length)
 
-# Random placement of polymer centers at start
+# Random placement of polymer centers at the start
 start_coords = place_atoms(n_polymers, boundary; min_dist=6.0u"nm")
 
 # Polymers start almost completely extended
@@ -179,23 +178,25 @@ coords = [coords...] # Ensure the array is strongly typed
 bond_is, bond_js = Int[], Int[]
 for pol_i in 1:n_polymers
     for bi in 1:n_bonds_mon
-        push!(bond_is, (pol_i - 1) * n_monomers + bi)
+        push!(bond_is, (pol_i - 1) * n_monomers + bi    )
         push!(bond_js, (pol_i - 1) * n_monomers + bi + 1)
     end
 end
 
+fene_k = 250.0u"kJ * mol^-1 * nm^-2"
+fene_r0 = 1.6u"nm"
 bonds = InteractionList2Atoms(
     bond_is,
     bond_js,
     repeat([""], n_bonds_tot),
-    [FENEBond(k=250.0u"kJ * mol^-1 * nm^-2", r0=r0, σ=1.0u"nm", ϵ=2.5u"kJ * mol^-1") for _ in 1:n_bonds_tot],
+    [FENEBond(k=fene_k, r0=fene_r0, σ=1.0u"nm", ϵ=2.5u"kJ * mol^-1") for _ in 1:n_bonds_tot],
 )
 
 # Create CosineAngles between adjacent monomers
 angle_is, angle_js, angle_ks = Int[], Int[], Int[]
 for pol_i in 1:n_polymers
     for bi in 1:n_angles_mon
-        push!(angle_is, (pol_i - 1) * n_monomers + bi)
+        push!(angle_is, (pol_i - 1) * n_monomers + bi    )
         push!(angle_js, (pol_i - 1) * n_monomers + bi + 1)
         push!(angle_ks, (pol_i - 1) * n_monomers + bi + 2)
     end
@@ -211,8 +212,8 @@ angles = InteractionList3Atoms(
 
 atoms = [Atom(mass=10.0u"u", σ=1.0u"nm", ϵ=0.5u"kJ * mol^-1") for _ in 1:n_atoms]
 
-# Since we are using a generic pairwise Lennard-Jones potential too we should
-#   exclude adjacent monomers
+# Since we are using a generic pairwise Lennard-Jones potential too we need to
+#   exclude adjacent monomers from the neighbor list
 nb_matrix = trues(n_atoms, n_atoms)
 for pol_i in 1:n_polymers
     for mon_i in 1:n_bonds_mon
@@ -282,7 +283,7 @@ xlims!(ax, low=0)
 ylims!(ax, low=0)
 save("polymer_dist.png", f)
 ```
-![Polymer distances](images/polymer_dist.gif)
+![Polymer distances](images/polymer_dist.png)
 ```julia
 # Calculate angles to adjacent monomers for second half of trajectory
 chain_angles = Float64[]
@@ -312,7 +313,7 @@ xlims!(ax, 0, 180)
 ylims!(ax, low=0)
 save("polymer_angle.png", f)
 ```
-![Polymer angles](images/polymer_angle.gif)
+![Polymer angles](images/polymer_angle.png)
 
 ## Making and breaking bonds
 

@@ -992,6 +992,7 @@ To use your custom coupler, give it as the `coupling` argument to the simulator.
 ## Neighbor finders
 
 Neighbor finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
+When using a neighbor finder you should in general also use a cutoff (see [Cutoffs](@ref)) with a cutoff distance less than the neighbor list distance.
 The available neighbor finders are:
 - [`NoNeighborFinder`](@ref)
 - [`CellListMapNeighborFinder`](@ref)
