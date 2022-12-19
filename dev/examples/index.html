@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Examples · Molly.jl</title><link href="https://fonts.googleapis.com/css?family=Lato|Roboto+Mono" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.11.1/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit">Molly.jl</span></div><form class="docs-search" action="../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../docs/">Documentation</a></li><li><a class="tocitem" href="../differentiable/">Differentiable simulation</a></li><li class="is-active"><a class="tocitem" href>Examples</a><ul class="internal"><li><a class="tocitem" href="#Simulated-annealing"><span>Simulated annealing</span></a></li><li><a class="tocitem" href="#Solar-system"><span>Solar system</span></a></li><li><a class="tocitem" href="#Making-and-breaking-bonds"><span>Making and breaking bonds</span></a></li><li><a class="tocitem" href="#Comparing-forces-to-AD"><span>Comparing forces to AD</span></a></li><li><a class="tocitem" href="#Variations-of-the-Morse-potential"><span>Variations of the Morse potential</span></a></li><li><a class="tocitem" href="#Variations-of-the-Mie-potential"><span>Variations of the Mie potential</span></a></li><li><a class="tocitem" href="#Variations-of-the-soft-core-LJ-potential"><span>Variations of the soft-core LJ potential</span></a></li></ul></li><li><a class="tocitem" href="../related/">Related software</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Examples</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Examples</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/examples.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="Molly-examples"><a class="docs-heading-anchor" href="#Molly-examples">Molly examples</a><a id="Molly-examples-1"></a><a class="docs-heading-anchor-permalink" href="#Molly-examples" title="Permalink"></a></h1><p>The best examples for learning how the package works are in the <a href="../docs/#Molly-documentation">Molly documentation</a> section. Here we give further examples showing what you can do with the package. Each is a self-contained block of code. Made something cool yourself? Make a PR to add it to this page.</p><h2 id="Simulated-annealing"><a class="docs-heading-anchor" href="#Simulated-annealing">Simulated annealing</a><a id="Simulated-annealing-1"></a><a class="docs-heading-anchor-permalink" href="#Simulated-annealing" title="Permalink"></a></h2><p>You can change the thermostat temperature of a simulation by changing the simulator. Here we reduce the temperature of a simulation in stages from 300 K to 0 K.</p><pre><code class="language-julia">using Molly
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Examples · Molly.jl</title><link href="https://fonts.googleapis.com/css?family=Lato|Roboto+Mono" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.11.1/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit">Molly.jl</span></div><form class="docs-search" action="../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../docs/">Documentation</a></li><li><a class="tocitem" href="../differentiable/">Differentiable simulation</a></li><li class="is-active"><a class="tocitem" href>Examples</a><ul class="internal"><li><a class="tocitem" href="#Simulated-annealing"><span>Simulated annealing</span></a></li><li><a class="tocitem" href="#Solar-system"><span>Solar system</span></a></li><li><a class="tocitem" href="#Polymer-melt"><span>Polymer melt</span></a></li><li><a class="tocitem" href="#Making-and-breaking-bonds"><span>Making and breaking bonds</span></a></li><li><a class="tocitem" href="#Comparing-forces-to-AD"><span>Comparing forces to AD</span></a></li><li><a class="tocitem" href="#Variations-of-the-Morse-potential"><span>Variations of the Morse potential</span></a></li><li><a class="tocitem" href="#Variations-of-the-Mie-potential"><span>Variations of the Mie potential</span></a></li><li><a class="tocitem" href="#Variations-of-the-soft-core-LJ-potential"><span>Variations of the soft-core LJ potential</span></a></li></ul></li><li><a class="tocitem" href="../related/">Related software</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Examples</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Examples</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/examples.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="Molly-examples"><a class="docs-heading-anchor" href="#Molly-examples">Molly examples</a><a id="Molly-examples-1"></a><a class="docs-heading-anchor-permalink" href="#Molly-examples" title="Permalink"></a></h1><p>The best examples for learning how the package works are in the <a href="../docs/#Molly-documentation">Molly documentation</a> section. Here we give further examples showing what you can do with the package. Each is a self-contained block of code. Made something cool yourself? Make a PR to add it to this page.</p><h2 id="Simulated-annealing"><a class="docs-heading-anchor" href="#Simulated-annealing">Simulated annealing</a><a id="Simulated-annealing-1"></a><a class="docs-heading-anchor-permalink" href="#Simulated-annealing" title="Permalink"></a></h2><p>You can change the thermostat temperature of a simulation by changing the simulator. Here we reduce the temperature of a simulation in stages from 300 K to 0 K.</p><pre><code class="language-julia">using Molly
 using GLMakie
 
 data_dir = joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;)
@@ -111,7 +111,169 @@ visualize(
     color=[:yellow, :grey, :orange, :blue, :red],
     markersize=[0.25, 0.08, 0.08, 0.08, 0.08],
     transparency=false,
-)</code></pre><p><img src="../images/sim_planets.gif" alt="Planet simulation"/></p><h2 id="Making-and-breaking-bonds"><a class="docs-heading-anchor" href="#Making-and-breaking-bonds">Making and breaking bonds</a><a id="Making-and-breaking-bonds-1"></a><a class="docs-heading-anchor-permalink" href="#Making-and-breaking-bonds" title="Permalink"></a></h2><p>There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation? In this case you can use a <a href="../api/#Molly.PairwiseInteraction"><code>PairwiseInteraction</code></a> to make, break and apply the bonds. The partners of the atom can be stored in the atom type. We make a logger to record when the bonds are present, allowing us to visualize them with the <code>connection_frames</code> keyword argument to <a href="../api/#Molly.visualize"><code>visualize</code></a> (this can take a while to plot).</p><pre><code class="language-julia">using Molly
+)</code></pre><p><img src="../images/sim_planets.gif" alt="Planet simulation"/></p><h2 id="Polymer-melt"><a class="docs-heading-anchor" href="#Polymer-melt">Polymer melt</a><a id="Polymer-melt-1"></a><a class="docs-heading-anchor-permalink" href="#Polymer-melt" title="Permalink"></a></h2><p>Here we use <a href="../api/#Molly.FENEBond"><code>FENEBond</code></a> and <a href="../api/#Molly.CosineAngle"><code>CosineAngle</code></a> to simulate interacting polymers. We also analyse the end-to-end polymer distances and chain angles across the trajectory.</p><pre><code class="language-julia">using Molly
+using GLMakie
+using Colors
+using LinearAlgebra
+
+# Simulate 10 polymers each consisting of 6 monomers
+n_polymers = 10
+n_monomers = 6
+n_atoms = n_monomers * n_polymers
+n_bonds_mon = n_monomers - 1
+n_bonds_tot = n_bonds_mon * n_polymers
+n_angles_mon = n_monomers - 2
+n_angles_tot = n_angles_mon * n_polymers
+
+starting_length = 1.1u&quot;nm&quot;
+r0 = 1.6u&quot;nm&quot;
+box_length = 20.0u&quot;nm&quot;
+boundary = CubicBoundary(box_length, box_length, box_length)
+
+# Random placement of polymer centers at start
+start_coords = place_atoms(n_polymers, boundary; min_dist=6.0u&quot;nm&quot;)
+
+# Polymers start almost completely extended
+coords = []
+for pol_i in 1:n_polymers
+    for mon_i in 1:n_monomers
+        push!(coords, start_coords[pol_i] .+ SVector(
+            starting_length * (mon_i - 1 - n_monomers / 2),
+            rand() * 0.1u&quot;nm&quot;,
+            rand() * 0.1u&quot;nm&quot;,
+        ))
+    end
+end
+coords = [coords...] # Ensure the array is strongly typed
+
+# Create FENEBonds between adjacent monomers
+bond_is, bond_js = Int[], Int[]
+for pol_i in 1:n_polymers
+    for bi in 1:n_bonds_mon
+        push!(bond_is, (pol_i - 1) * n_monomers + bi)
+        push!(bond_js, (pol_i - 1) * n_monomers + bi + 1)
+    end
+end
+
+bonds = InteractionList2Atoms(
+    bond_is,
+    bond_js,
+    repeat([&quot;&quot;], n_bonds_tot),
+    [FENEBond(k=250.0u&quot;kJ * mol^-1 * nm^-2&quot;, r0=r0, σ=1.0u&quot;nm&quot;, ϵ=2.5u&quot;kJ * mol^-1&quot;) for _ in 1:n_bonds_tot],
+)
+
+# Create CosineAngles between adjacent monomers
+angle_is, angle_js, angle_ks = Int[], Int[], Int[]
+for pol_i in 1:n_polymers
+    for bi in 1:n_angles_mon
+        push!(angle_is, (pol_i - 1) * n_monomers + bi)
+        push!(angle_js, (pol_i - 1) * n_monomers + bi + 1)
+        push!(angle_ks, (pol_i - 1) * n_monomers + bi + 2)
+    end
+end
+
+angles = InteractionList3Atoms(
+    angle_is,
+    angle_js,
+    angle_ks,
+    repeat([&quot;&quot;], n_angles_tot),
+    [CosineAngle(k=2.0u&quot;kJ * mol^-1&quot;, θ0=0.0) for _ in 1:n_angles_tot],
+)
+
+atoms = [Atom(mass=10.0u&quot;u&quot;, σ=1.0u&quot;nm&quot;, ϵ=0.5u&quot;kJ * mol^-1&quot;) for _ in 1:n_atoms]
+
+# Since we are using a generic pairwise Lennard-Jones potential too we should
+#   exclude adjacent monomers
+nb_matrix = trues(n_atoms, n_atoms)
+for pol_i in 1:n_polymers
+    for mon_i in 1:n_bonds_mon
+        i = (pol_i - 1) * n_monomers + mon_i
+        j = (pol_i - 1) * n_monomers + mon_i + 1
+        nb_matrix[i, j] = false
+        nb_matrix[j, i] = false
+    end
+end
+
+neighbor_finder = DistanceNeighborFinder(
+    nb_matrix=nb_matrix,
+    n_steps=10,
+    dist_cutoff=5.0u&quot;nm&quot;,
+)
+
+sys = System(
+    atoms=atoms,
+    pairwise_inters=(LennardJones(nl_only=true),),
+    specific_inter_lists=(bonds, angles),
+    coords=coords,
+    boundary=boundary,
+    neighbor_finder=neighbor_finder,
+    loggers=(coords=CoordinateLogger(200),),
+)
+
+sim = Langevin(dt=0.002u&quot;ps&quot;, temperature=300.0u&quot;K&quot;, friction=1.0u&quot;ps^-1&quot;)
+
+simulate!(sys, sim, 100_000)
+
+colors = distinguishable_colors(n_polymers, [RGB(1, 1, 1), RGB(0, 0, 0)]; dropseed=true)
+
+visualize(
+    sys.loggers.coords,
+    boundary,
+    &quot;sim_polymer.gif&quot;;
+    connections=zip(bond_is, bond_js),
+    color=repeat(colors; inner=n_monomers),
+    connection_color=repeat(colors; inner=n_bonds_mon),
+)</code></pre><p><img src="../images/sim_polymer.gif" alt="Polymer simulation"/></p><pre><code class="language-julia">logged_coords = values(sys.loggers.coords)
+n_frames = length(logged_coords)
+
+# Calculate end-to-end polymer distances for second half of trajectory
+end_to_end_dists = Float64[]
+for traj_coords in logged_coords[(n_frames ÷ 2):end]
+    for pol_i in 1:n_polymers
+        start_i = (pol_i - 1) * n_monomers + 1
+        end_i = pol_i * n_monomers
+        dist = norm(vector(traj_coords[start_i], traj_coords[end_i], boundary))
+        push!(end_to_end_dists, ustrip(dist))
+    end
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;End-to-end distance / nm&quot;,
+    ylabel=&quot;Density&quot;,
+    title=&quot;End-to-end polymer distance over the trajectory&quot;,
+)
+hist!(ax, end_to_end_dists, normalization=:pdf)
+xlims!(ax, low=0)
+ylims!(ax, low=0)
+save(&quot;polymer_dist.png&quot;, f)</code></pre><p><img src="images/polymer_dist.gif" alt="Polymer distances"/></p><pre><code class="language-julia"># Calculate angles to adjacent monomers for second half of trajectory
+chain_angles = Float64[]
+for traj_coords in logged_coords[(n_frames ÷ 2):end]
+    for pol_i in 1:n_polymers
+        for mon_i in 2:(n_monomers - 1)
+            angle = bond_angle(
+                traj_coords[(pol_i - 1) * n_monomers + mon_i - 1],
+                traj_coords[(pol_i - 1) * n_monomers + mon_i    ],
+                traj_coords[(pol_i - 1) * n_monomers + mon_i + 1],
+                boundary,
+            )
+            push!(chain_angles, rad2deg(angle))
+        end
+    end
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Angle with adjacent monomers / degrees&quot;,
+    ylabel=&quot;Density&quot;,
+    title=&quot;Chain angles over the trajectory&quot;,
+)
+hist!(ax, chain_angles, normalization=:pdf)
+xlims!(ax, 0, 180)
+ylims!(ax, low=0)
+save(&quot;polymer_angle.png&quot;, f)</code></pre><p><img src="images/polymer_angle.gif" alt="Polymer angles"/></p><h2 id="Making-and-breaking-bonds"><a class="docs-heading-anchor" href="#Making-and-breaking-bonds">Making and breaking bonds</a><a id="Making-and-breaking-bonds-1"></a><a class="docs-heading-anchor-permalink" href="#Making-and-breaking-bonds" title="Permalink"></a></h2><p>There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation? In this case you can use a <a href="../api/#Molly.PairwiseInteraction"><code>PairwiseInteraction</code></a> to make, break and apply the bonds. The partners of the atom can be stored in the atom type. We make a logger to record when the bonds are present, allowing us to visualize them with the <code>connection_frames</code> keyword argument to <a href="../api/#Molly.visualize"><code>visualize</code></a> (this can take a while to plot).</p><pre><code class="language-julia">using Molly
 using GLMakie
 using LinearAlgebra
 
@@ -382,4 +544,4 @@ lines!(ax, dists, energies(0, 1, 2), label=&quot;standard LJ potential&quot;)
 
 ylims!(-5, 25)
 axislegend(position=:rt)
-save(&quot;lennard_jones_sc.png&quot;, f)</code></pre><p><img src="../images/lennard_jones_sc.png" alt="Lennard-Jones Softcore"/></p><p>The form of the potential is approximately the same as standard Lennard-Jones for <span>$r_{ij} &gt; \sigma_{ij}$</span> if some fractional values are used for <span>$\lambda$</span> and <span>$\alpha$</span>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../related/">Related software »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Thursday 15 December 2022 16:59">Thursday 15 December 2022</span>. Using Julia version 1.8.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+save(&quot;lennard_jones_sc.png&quot;, f)</code></pre><p><img src="../images/lennard_jones_sc.png" alt="Lennard-Jones Softcore"/></p><p>The form of the potential is approximately the same as standard Lennard-Jones for <span>$r_{ij} &gt; \sigma_{ij}$</span> if some fractional values are used for <span>$\lambda$</span> and <span>$\alpha$</span>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../related/">Related software »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Monday 19 December 2022 18:18">Monday 19 December 2022</span>. Using Julia version 1.8.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
