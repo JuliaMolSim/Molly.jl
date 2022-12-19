@@ -135,6 +135,185 @@ visualize(
 ```
 ![Planet simulation](images/sim_planets.gif)
 
+## Polymer melt
+
+Here we use [`FENEBond`](@ref) and [`CosineAngle`](@ref) to simulate interacting polymers.
+We also analyse the end-to-end polymer distances and chain angles across the trajectory.
+```julia
+using Molly
+using GLMakie
+using Colors
+using LinearAlgebra
+
+# Simulate 10 polymers each consisting of 6 monomers
+n_polymers = 10
+n_monomers = 6
+n_atoms = n_monomers * n_polymers
+n_bonds_mon = n_monomers - 1
+n_bonds_tot = n_bonds_mon * n_polymers
+n_angles_mon = n_monomers - 2
+n_angles_tot = n_angles_mon * n_polymers
+
+starting_length = 1.1u"nm"
+r0 = 1.6u"nm"
+box_length = 20.0u"nm"
+boundary = CubicBoundary(box_length, box_length, box_length)
+
+# Random placement of polymer centers at start
+start_coords = place_atoms(n_polymers, boundary; min_dist=6.0u"nm")
+
+# Polymers start almost completely extended
+coords = []
+for pol_i in 1:n_polymers
+    for mon_i in 1:n_monomers
+        push!(coords, start_coords[pol_i] .+ SVector(
+            starting_length * (mon_i - 1 - n_monomers / 2),
+            rand() * 0.1u"nm",
+            rand() * 0.1u"nm",
+        ))
+    end
+end
+coords = [coords...] # Ensure the array is strongly typed
+
+# Create FENEBonds between adjacent monomers
+bond_is, bond_js = Int[], Int[]
+for pol_i in 1:n_polymers
+    for bi in 1:n_bonds_mon
+        push!(bond_is, (pol_i - 1) * n_monomers + bi)
+        push!(bond_js, (pol_i - 1) * n_monomers + bi + 1)
+    end
+end
+
+bonds = InteractionList2Atoms(
+    bond_is,
+    bond_js,
+    repeat([""], n_bonds_tot),
+    [FENEBond(k=250.0u"kJ * mol^-1 * nm^-2", r0=r0, σ=1.0u"nm", ϵ=2.5u"kJ * mol^-1") for _ in 1:n_bonds_tot],
+)
+
+# Create CosineAngles between adjacent monomers
+angle_is, angle_js, angle_ks = Int[], Int[], Int[]
+for pol_i in 1:n_polymers
+    for bi in 1:n_angles_mon
+        push!(angle_is, (pol_i - 1) * n_monomers + bi)
+        push!(angle_js, (pol_i - 1) * n_monomers + bi + 1)
+        push!(angle_ks, (pol_i - 1) * n_monomers + bi + 2)
+    end
+end
+
+angles = InteractionList3Atoms(
+    angle_is,
+    angle_js,
+    angle_ks,
+    repeat([""], n_angles_tot),
+    [CosineAngle(k=2.0u"kJ * mol^-1", θ0=0.0) for _ in 1:n_angles_tot],
+)
+
+atoms = [Atom(mass=10.0u"u", σ=1.0u"nm", ϵ=0.5u"kJ * mol^-1") for _ in 1:n_atoms]
+
+# Since we are using a generic pairwise Lennard-Jones potential too we should
+#   exclude adjacent monomers
+nb_matrix = trues(n_atoms, n_atoms)
+for pol_i in 1:n_polymers
+    for mon_i in 1:n_bonds_mon
+        i = (pol_i - 1) * n_monomers + mon_i
+        j = (pol_i - 1) * n_monomers + mon_i + 1
+        nb_matrix[i, j] = false
+        nb_matrix[j, i] = false
+    end
+end
+
+neighbor_finder = DistanceNeighborFinder(
+    nb_matrix=nb_matrix,
+    n_steps=10,
+    dist_cutoff=5.0u"nm",
+)
+
+sys = System(
+    atoms=atoms,
+    pairwise_inters=(LennardJones(nl_only=true),),
+    specific_inter_lists=(bonds, angles),
+    coords=coords,
+    boundary=boundary,
+    neighbor_finder=neighbor_finder,
+    loggers=(coords=CoordinateLogger(200),),
+)
+
+sim = Langevin(dt=0.002u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+
+simulate!(sys, sim, 100_000)
+
+colors = distinguishable_colors(n_polymers, [RGB(1, 1, 1), RGB(0, 0, 0)]; dropseed=true)
+
+visualize(
+    sys.loggers.coords,
+    boundary,
+    "sim_polymer.gif";
+    connections=zip(bond_is, bond_js),
+    color=repeat(colors; inner=n_monomers),
+    connection_color=repeat(colors; inner=n_bonds_mon),
+)
+```
+![Polymer simulation](images/sim_polymer.gif)
+```julia
+logged_coords = values(sys.loggers.coords)
+n_frames = length(logged_coords)
+
+# Calculate end-to-end polymer distances for second half of trajectory
+end_to_end_dists = Float64[]
+for traj_coords in logged_coords[(n_frames ÷ 2):end]
+    for pol_i in 1:n_polymers
+        start_i = (pol_i - 1) * n_monomers + 1
+        end_i = pol_i * n_monomers
+        dist = norm(vector(traj_coords[start_i], traj_coords[end_i], boundary))
+        push!(end_to_end_dists, ustrip(dist))
+    end
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel="End-to-end distance / nm",
+    ylabel="Density",
+    title="End-to-end polymer distance over the trajectory",
+)
+hist!(ax, end_to_end_dists, normalization=:pdf)
+xlims!(ax, low=0)
+ylims!(ax, low=0)
+save("polymer_dist.png", f)
+```
+![Polymer distances](images/polymer_dist.gif)
+```julia
+# Calculate angles to adjacent monomers for second half of trajectory
+chain_angles = Float64[]
+for traj_coords in logged_coords[(n_frames ÷ 2):end]
+    for pol_i in 1:n_polymers
+        for mon_i in 2:(n_monomers - 1)
+            angle = bond_angle(
+                traj_coords[(pol_i - 1) * n_monomers + mon_i - 1],
+                traj_coords[(pol_i - 1) * n_monomers + mon_i    ],
+                traj_coords[(pol_i - 1) * n_monomers + mon_i + 1],
+                boundary,
+            )
+            push!(chain_angles, rad2deg(angle))
+        end
+    end
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel="Angle with adjacent monomers / degrees",
+    ylabel="Density",
+    title="Chain angles over the trajectory",
+)
+hist!(ax, chain_angles, normalization=:pdf)
+xlims!(ax, 0, 180)
+ylims!(ax, low=0)
+save("polymer_angle.png", f)
+```
+![Polymer angles](images/polymer_angle.gif)
+
 ## Making and breaking bonds
 
 There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation?
