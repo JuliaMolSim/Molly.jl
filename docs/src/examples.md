@@ -155,8 +155,7 @@ n_angles_mon = n_monomers - 2
 n_angles_tot = n_angles_mon * n_polymers
 
 starting_length = 1.1u"nm"
-box_length = 20.0u"nm"
-boundary = CubicBoundary(box_length, box_length, box_length)
+boundary = CubicBoundary(20.0u"nm")
 
 # Random placement of polymer centers at the start
 start_coords = place_atoms(n_polymers, boundary; min_dist=6.0u"nm")
@@ -188,7 +187,6 @@ fene_r0 = 1.6u"nm"
 bonds = InteractionList2Atoms(
     bond_is,
     bond_js,
-    repeat([""], n_bonds_tot),
     [FENEBond(k=fene_k, r0=fene_r0, σ=1.0u"nm", ϵ=2.5u"kJ * mol^-1") for _ in 1:n_bonds_tot],
 )
 
@@ -206,7 +204,6 @@ angles = InteractionList3Atoms(
     angle_is,
     angle_js,
     angle_ks,
-    repeat([""], n_angles_tot),
     [CosineAngle(k=2.0u"kJ * mol^-1", θ0=0.0) for _ in 1:n_angles_tot],
 )
 
