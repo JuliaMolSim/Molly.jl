@@ -111,7 +111,7 @@ visualize(
     color=[:yellow, :grey, :orange, :blue, :red],
     markersize=[0.25, 0.08, 0.08, 0.08, 0.08],
     transparency=false,
-)</code></pre><p><img src="../images/sim_planets.gif" alt="Planet simulation"/></p><h2 id="Polymer-melt"><a class="docs-heading-anchor" href="#Polymer-melt">Polymer melt</a><a id="Polymer-melt-1"></a><a class="docs-heading-anchor-permalink" href="#Polymer-melt" title="Permalink"></a></h2><p>Here we use <a href="../api/#Molly.FENEBond"><code>FENEBond</code></a> and <a href="../api/#Molly.CosineAngle"><code>CosineAngle</code></a> to simulate interacting polymers. We also analyse the end-to-end polymer distances and chain angles across the trajectory.</p><pre><code class="language-julia">using Molly
+)</code></pre><p><img src="../images/sim_planets.gif" alt="Planet simulation"/></p><h2 id="Polymer-melt"><a class="docs-heading-anchor" href="#Polymer-melt">Polymer melt</a><a id="Polymer-melt-1"></a><a class="docs-heading-anchor-permalink" href="#Polymer-melt" title="Permalink"></a></h2><p>Here we use <a href="../api/#Molly.FENEBond"><code>FENEBond</code></a>, <a href="../api/#Molly.CosineAngle"><code>CosineAngle</code></a> and <a href="../api/#Molly.LennardJones"><code>LennardJones</code></a> to simulate interacting polymers. We also analyse the end-to-end polymer distances and chain angles across the trajectory.</p><pre><code class="language-julia">using Molly
 using GLMakie
 using Colors
 using LinearAlgebra
@@ -126,11 +126,10 @@ n_angles_mon = n_monomers - 2
 n_angles_tot = n_angles_mon * n_polymers
 
 starting_length = 1.1u&quot;nm&quot;
-r0 = 1.6u&quot;nm&quot;
 box_length = 20.0u&quot;nm&quot;
 boundary = CubicBoundary(box_length, box_length, box_length)
 
-# Random placement of polymer centers at start
+# Random placement of polymer centers at the start
 start_coords = place_atoms(n_polymers, boundary; min_dist=6.0u&quot;nm&quot;)
 
 # Polymers start almost completely extended
@@ -150,23 +149,25 @@ coords = [coords...] # Ensure the array is strongly typed
 bond_is, bond_js = Int[], Int[]
 for pol_i in 1:n_polymers
     for bi in 1:n_bonds_mon
-        push!(bond_is, (pol_i - 1) * n_monomers + bi)
+        push!(bond_is, (pol_i - 1) * n_monomers + bi    )
         push!(bond_js, (pol_i - 1) * n_monomers + bi + 1)
     end
 end
 
+fene_k = 250.0u&quot;kJ * mol^-1 * nm^-2&quot;
+fene_r0 = 1.6u&quot;nm&quot;
 bonds = InteractionList2Atoms(
     bond_is,
     bond_js,
     repeat([&quot;&quot;], n_bonds_tot),
-    [FENEBond(k=250.0u&quot;kJ * mol^-1 * nm^-2&quot;, r0=r0, σ=1.0u&quot;nm&quot;, ϵ=2.5u&quot;kJ * mol^-1&quot;) for _ in 1:n_bonds_tot],
+    [FENEBond(k=fene_k, r0=fene_r0, σ=1.0u&quot;nm&quot;, ϵ=2.5u&quot;kJ * mol^-1&quot;) for _ in 1:n_bonds_tot],
 )
 
 # Create CosineAngles between adjacent monomers
 angle_is, angle_js, angle_ks = Int[], Int[], Int[]
 for pol_i in 1:n_polymers
     for bi in 1:n_angles_mon
-        push!(angle_is, (pol_i - 1) * n_monomers + bi)
+        push!(angle_is, (pol_i - 1) * n_monomers + bi    )
         push!(angle_js, (pol_i - 1) * n_monomers + bi + 1)
         push!(angle_ks, (pol_i - 1) * n_monomers + bi + 2)
     end
@@ -182,8 +183,8 @@ angles = InteractionList3Atoms(
 
 atoms = [Atom(mass=10.0u&quot;u&quot;, σ=1.0u&quot;nm&quot;, ϵ=0.5u&quot;kJ * mol^-1&quot;) for _ in 1:n_atoms]
 
-# Since we are using a generic pairwise Lennard-Jones potential too we should
-#   exclude adjacent monomers
+# Since we are using a generic pairwise Lennard-Jones potential too we need to
+#   exclude adjacent monomers from the neighbor list
 nb_matrix = trues(n_atoms, n_atoms)
 for pol_i in 1:n_polymers
     for mon_i in 1:n_bonds_mon
@@ -247,7 +248,7 @@ ax = Axis(
 hist!(ax, end_to_end_dists, normalization=:pdf)
 xlims!(ax, low=0)
 ylims!(ax, low=0)
-save(&quot;polymer_dist.png&quot;, f)</code></pre><p><img src="images/polymer_dist.gif" alt="Polymer distances"/></p><pre><code class="language-julia"># Calculate angles to adjacent monomers for second half of trajectory
+save(&quot;polymer_dist.png&quot;, f)</code></pre><p><img src="../images/polymer_dist.png" alt="Polymer distances"/></p><pre><code class="language-julia"># Calculate angles to adjacent monomers for second half of trajectory
 chain_angles = Float64[]
 for traj_coords in logged_coords[(n_frames ÷ 2):end]
     for pol_i in 1:n_polymers
@@ -273,7 +274,7 @@ ax = Axis(
 hist!(ax, chain_angles, normalization=:pdf)
 xlims!(ax, 0, 180)
 ylims!(ax, low=0)
-save(&quot;polymer_angle.png&quot;, f)</code></pre><p><img src="images/polymer_angle.gif" alt="Polymer angles"/></p><h2 id="Making-and-breaking-bonds"><a class="docs-heading-anchor" href="#Making-and-breaking-bonds">Making and breaking bonds</a><a id="Making-and-breaking-bonds-1"></a><a class="docs-heading-anchor-permalink" href="#Making-and-breaking-bonds" title="Permalink"></a></h2><p>There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation? In this case you can use a <a href="../api/#Molly.PairwiseInteraction"><code>PairwiseInteraction</code></a> to make, break and apply the bonds. The partners of the atom can be stored in the atom type. We make a logger to record when the bonds are present, allowing us to visualize them with the <code>connection_frames</code> keyword argument to <a href="../api/#Molly.visualize"><code>visualize</code></a> (this can take a while to plot).</p><pre><code class="language-julia">using Molly
+save(&quot;polymer_angle.png&quot;, f)</code></pre><p><img src="../images/polymer_angle.png" alt="Polymer angles"/></p><h2 id="Making-and-breaking-bonds"><a class="docs-heading-anchor" href="#Making-and-breaking-bonds">Making and breaking bonds</a><a id="Making-and-breaking-bonds-1"></a><a class="docs-heading-anchor-permalink" href="#Making-and-breaking-bonds" title="Permalink"></a></h2><p>There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation? In this case you can use a <a href="../api/#Molly.PairwiseInteraction"><code>PairwiseInteraction</code></a> to make, break and apply the bonds. The partners of the atom can be stored in the atom type. We make a logger to record when the bonds are present, allowing us to visualize them with the <code>connection_frames</code> keyword argument to <a href="../api/#Molly.visualize"><code>visualize</code></a> (this can take a while to plot).</p><pre><code class="language-julia">using Molly
 using GLMakie
 using LinearAlgebra
 
@@ -544,4 +545,4 @@ lines!(ax, dists, energies(0, 1, 2), label=&quot;standard LJ potential&quot;)
 
 ylims!(-5, 25)
 axislegend(position=:rt)
-save(&quot;lennard_jones_sc.png&quot;, f)</code></pre><p><img src="../images/lennard_jones_sc.png" alt="Lennard-Jones Softcore"/></p><p>The form of the potential is approximately the same as standard Lennard-Jones for <span>$r_{ij} &gt; \sigma_{ij}$</span> if some fractional values are used for <span>$\lambda$</span> and <span>$\alpha$</span>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../related/">Related software »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Monday 19 December 2022 18:18">Monday 19 December 2022</span>. Using Julia version 1.8.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+save(&quot;lennard_jones_sc.png&quot;, f)</code></pre><p><img src="../images/lennard_jones_sc.png" alt="Lennard-Jones Softcore"/></p><p>The form of the potential is approximately the same as standard Lennard-Jones for <span>$r_{ij} &gt; \sigma_{ij}$</span> if some fractional values are used for <span>$\lambda$</span> and <span>$\alpha$</span>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../related/">Related software »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Monday 19 December 2022 19:03">Monday 19 December 2022</span>. Using Julia version 1.8.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
