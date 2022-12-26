@@ -130,11 +130,11 @@ struct OpenMMAtomType{M, S, E}
 end
 
 """
-    OpenMMResiduetype(name, types, charges, indices)
+    OpenMMResidueType(name, types, charges, indices)
 
 An OpenMM residue type.
 """
-struct OpenMMResiduetype{C}
+struct OpenMMResidueType{C}
     name::String
     types::Dict{String, String}
     charges::Dict{String, C}
@@ -165,7 +165,7 @@ Read one or more OpenMM force field XML files by passing them to the constructor
 """
 struct OpenMMForceField{T, M, D, E, K}
     atom_types::Dict{String, OpenMMAtomType{M, D, E}}
-    residue_types::Dict{String, OpenMMResiduetype{T}}
+    residue_types::Dict{String, OpenMMResidueType{T}}
     bond_types::Dict{Tuple{String, String}, HarmonicBond{K, D}}
     angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{E, T}}
     torsion_types::Dict{Tuple{String, String, String, String}, PeriodicTorsionType{T, E}}
@@ -176,7 +176,7 @@ end
 
 function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true)
     atom_types = Dict{String, OpenMMAtomType}()
-    residue_types = Dict{String, OpenMMResiduetype}()
+    residue_types = Dict{String, OpenMMResidueType}()
     bond_types = Dict{Tuple{String, String}, HarmonicBond}()
     angle_types = Dict{Tuple{String, String, String}, HarmonicAngle}()
     torsion_types = Dict{Tuple{String, String, String, String}, PeriodicTorsionType}()
@@ -215,7 +215,7 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
                             index += 1
                         end
                     end
-                    residue_types[name] = OpenMMResiduetype(name, types, charges, indices)
+                    residue_types[name] = OpenMMResidueType(name, types, charges, indices)
                 end
             elseif entry_name == "HarmonicBondForce"
                 for bond in eachelement(entry)
