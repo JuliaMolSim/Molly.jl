@@ -64,7 +64,6 @@ if GROUP == "All"
         Molly;
         ambiguities=(recursive=false),
         unbound_args=false,
-        undefined_exports=false,
         piracy=false,
     )
 
