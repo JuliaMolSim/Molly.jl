@@ -65,6 +65,7 @@ if GROUP == "All"
         ambiguities=(recursive=false),
         unbound_args=false,
         undefined_exports=false,
+        piracy=false,
     )
 
     include("basic.jl")
