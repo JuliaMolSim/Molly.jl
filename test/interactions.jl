@@ -74,6 +74,43 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
+    struct BuckinghamAtom{M, TA, TB, TC}
+        mass::M
+        A::TA
+        B::TB
+        C::TC
+    end
+
+    buck_c1 = SVector(10.0, 10.0, 10.0)u"Å"
+    buck_c2 = SVector(13.0, 10.0, 10.0)u"Å"
+    buck_c3 = SVector(14.0, 10.0, 10.0)u"Å"
+    buck_a1 = BuckinghamAtom(1.0u"u", 1400.0u"eV", 2.8u"Å^-1", 180.0u"eV * Å^6")
+    buck_boundary = CubicBoundary(20.0u"Å", 20.0u"Å", 20.0u"Å")
+    buck_dr12 = vector(buck_c1, buck_c2, buck_boundary)
+    buck_dr13 = vector(buck_c1, buck_c3, buck_boundary)
+
+    inter = Buckingham(force_units=u"eV * Å^-1", energy_units=u"eV")
+    @test isapprox(
+        force(inter, buck_dr12, buck_c1, buck_c2, buck_a1, buck_a1, buck_boundary),
+        SVector(0.3876527503, 0.0, 0.0)u"eV * Å^-1",
+        atol=1e-9u"eV * Å^-1",
+    )
+    @test isapprox(
+        force(inter, buck_dr13, buck_c1, buck_c3, buck_a1, buck_a1, buck_boundary),
+        SVector(-0.0123151202, 0.0, 0.0)u"eV * Å^-1",
+        atol=1e-9u"eV * Å^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, buck_dr12, buck_c1, buck_c2, buck_a1, buck_a1, buck_boundary),
+        0.0679006736u"eV",
+        atol=1e-9u"eV",
+    )
+    @test isapprox(
+        potential_energy(inter, buck_dr13, buck_c1, buck_c3, buck_a1, buck_a1, buck_boundary),
+        -0.0248014380u"eV",
+        atol=1e-9u"eV",
+    )
+
     for inter in (Coulomb(), CoulombSoftCore(α=1, λ=0, p=2))
         @test isapprox(
             force(inter, dr12, c1, c2, a1, a1, boundary),
