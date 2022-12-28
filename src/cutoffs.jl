@@ -130,7 +130,6 @@ cutoff_points(::Type{CubicSplineCutoff{D, S, I}}) where {D, S, I} = 2
     dVa = -force_divr_nocutoff(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params) * cutoff.dist_activation
     
     return -((6t^2 - 6t) * Va / (cutoff.dist_cutoff-cutoff.dist_activation) + (3t^2 - 4t + 1) * dVa)/r
-
 end
 
 @fastmath function potential_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)

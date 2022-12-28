@@ -575,6 +575,7 @@ The available pairwise interactions are:
 - [`LennardJonesSoftCore`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
+- [`Buckingham`](@ref)
 - [`Coulomb`](@ref)
 - [`CoulombSoftCore`](@ref)
 - [`CoulombReactionField`](@ref)
@@ -790,6 +791,7 @@ The following interactions can use a cutoff:
 - [`LennardJonesSoftCore`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
+- [`Buckingham`](@ref)
 - [`Coulomb`](@ref)
 - [`CoulombSoftCore`](@ref)
 In addition, [`CoulombReactionField`](@ref) and the implicit solvent models have a `dist_cutoff` argument for a cutoff distance.
