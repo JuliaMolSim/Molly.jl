@@ -315,6 +315,74 @@ save("polymer_angle.png", f)
 ```
 ![Polymer angles](images/polymer_angle.png)
 
+## Density functional theory
+
+[DFTK.jl](https://github.com/JuliaMolSim/DFTK.jl) can be used to calculate forces using density functional theory (DFT), allowing the simulation of quantum systems in Molly.
+This example uses the [DFTK.jl tutorial](https://docs.dftk.org/stable/guide/tutorial) to simulate two silicon atoms with atomic units.
+A general interaction is used since the whole force calculation is offloaded to DFTK.jl.
+```julia
+using Molly
+using DFTK
+
+struct DFTKInteraction{L, A}
+    lattice::L
+    atoms::A
+end
+
+# Define lattice and atomic positions
+a = 5.431u"Å"                 # Silicon lattice constant
+lattice = a / 2 * [[0 1 1.];  # Silicon lattice vectors
+                   [1 0 1.];  # specified column by column
+                   [1 1 0.]];
+
+# Load HGH pseudopotential for Silicon
+Si = ElementPsp(:Si, psp=load_psp("hgh/lda/Si-q4"))
+
+# Specify type of atoms
+atoms_dftk = [Si, Si]
+
+dftk_interaction = DFTKInteraction(lattice, atoms_dftk)
+
+function Molly.forces(inter::DFTKInteraction, sys, neighbors=nothing)
+    # Select model and basis
+    model = model_LDA(inter.lattice, inter.atoms, sys.coords)
+    kgrid = [4, 4, 4]     # k-point grid (Regular Monkhorst-Pack grid)
+    Ecut = 7              # kinetic energy cutoff
+    basis = PlaneWaveBasis(model; Ecut=Ecut, kgrid=kgrid)
+
+    # Run the SCF procedure to obtain the ground state
+    scfres = self_consistent_field(basis; tol=1e-5)
+
+    return compute_forces_cart(scfres)
+end
+
+atoms = repeat([Atom(mass=28.0)], 2)
+coords = [SVector(1/8, 1/8, 1/8), SVector(-1/8, -1/8, -1/8)]
+velocities = [randn(SVector{3, Float64}) * 0.1 for _ in 1:2]
+boundary = CubicBoundary(Inf, Inf, Inf)
+loggers = (coords=CoordinateLogger(Float64, 1),)
+
+sys = System(
+    atoms=atoms,
+    general_inters=(dftk_interaction,),
+    coords=coords,
+    velocities=velocities,
+    boundary=boundary,
+    loggers=loggers,
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+
+simulator = Verlet(dt=0.0005, remove_CM_motion=false)
+
+simulate!(sys, simulator, 100)
+
+values(sys.loggers.coords)[end]
+# 2-element Vector{SVector{3, Float64}}:
+#  [0.12060853912863925, 0.12292128337998731, 0.13100409788691614]
+#  [-0.13352575661477334, -0.11473039463130282, -0.13189544838731393]
+```
+
 ## Making and breaking bonds
 
 There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation?
