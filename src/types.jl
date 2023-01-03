@@ -689,3 +689,6 @@ function Base.show(io::IO, s::ReplicaSystem)
     print(io, "ReplicaSystem containing ",  s.n_replicas, " replicas with ", length(s),
           " atoms, boundary ", s.boundary)
 end
+
+# Take precedence over AtomsBase.jl show function
+Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io, s)
