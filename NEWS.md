@@ -1,5 +1,15 @@
 # Molly.jl release notes
 
+## v0.14.1 - Jan 2023
+
+### New features
+- The Buckingham potential is added as `Buckingham`.
+- Polymer melt and density functional theory examples are added to the documentation.
+
+### Bug fixes
+- A bug introduced by a new version of AtomsBase.jl is fixed. In addition, atoms in systems without `atoms_data` defined now return `:unknown` from `AtomsBase.atomic_symbol`.
+- A bug in the export of `OpenMMResidueType` is fixed.
+
 ## v0.14.0 - Dec 2022
 
 ### Breaking changes
