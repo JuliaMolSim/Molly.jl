@@ -102,9 +102,9 @@ end
         @test position(s, 5) == s.coords[5]
         @test velocity(s) == s.velocities
         @test velocity(s, 5) == s.velocities[5]
-        @test atomic_mass(s) == fill(atom_mass, 100)
+        @test atomic_mass(s) == fill(atom_mass, n_atoms)
         @test atomic_mass(s, 5) == atom_mass
-        @test atomic_symbol(s) == fill(:Ar, 100)
+        @test atomic_symbol(s) == fill(:Ar, n_atoms)
         @test atomic_symbol(s, 5) == :Ar
         @test typeof(boundary_conditions(s)) <: SVector
         @test bounding_box(s) == SVector(
@@ -171,6 +171,10 @@ end
         ),
         loggers=(coords=CoordinateLogger(100),),
     )
+
+    @test atomic_symbol(s) == fill(:unknown, n_atoms)
+    @test atomic_symbol(s, 5) == :unknown
+
     random_velocities!(s, temp)
 
     @time simulate!(s, simulator, n_steps)
