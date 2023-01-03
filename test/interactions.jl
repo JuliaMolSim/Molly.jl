@@ -361,4 +361,36 @@
         49.58u"kJ * mol^-1",
         atol=1e-9u"kJ * mol^-1",
     )
+
+    #################################
+    #Tests for Muller-Brown potential
+    #################################
+
+    #MB Paramaters
+    A = [-200.0,-100.0,-170.0,15.0]u"kJ * mol^-1"
+    a = [-1.0,-1.0,-6.5,0.7]u"nm^-2"
+    b = [0.0,0.0,11.0,0.6]u"nm^-2"
+    c = [-10,-10,-6.5,0.7]u"nm^-2"
+    x₀= [1,0,-0.5,-1]u"nm"
+    y₀= [0.0,0.5,1.5,1.0]u"nm"
+    #Define system
+    inter = MullerBrown(A,a,b,c,x₀,y₀)
+
+    local_min = SVector{2}([0.6234994049304005,0.028037758528718367])u"nm"
+    local_min2 = SVector{2}([-0.05001082299878202,0.46669410487256247])u"nm"
+
+
+    @test isapprox(
+        force(inter, local_min),
+        SVector(0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+
+    @test isapprox(
+        force(inter, local_min2),
+        0.0u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+
+
 end
