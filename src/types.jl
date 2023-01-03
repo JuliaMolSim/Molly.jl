@@ -673,8 +673,15 @@ AtomsBase.velocity(s::ReplicaSystem) = s.replicas[1].velocities
 AtomsBase.velocity(s::ReplicaSystem, i::Integer) = s.replicas[1].velocities[i]
 
 AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}, i::Integer) = mass(s.atoms[i])
-AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem}, i::Integer) = Symbol(s.atoms_data[i].element)
 AtomsBase.atomic_number(s::Union{System, ReplicaSystem}, i::Integer) = missing
+
+function AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem}, i::Integer)
+    if length(s.atoms_data) > 0
+        return Symbol(s.atoms_data[i].element)
+    else
+        return :unknown
+    end
+end
 
 AtomsBase.boundary_conditions(::Union{System{3}, ReplicaSystem{3}}) = SVector(Periodic(), Periodic(), Periodic())
 AtomsBase.boundary_conditions(::Union{System{2}, ReplicaSystem{2}}) = SVector(Periodic(), Periodic())
@@ -689,3 +696,6 @@ function Base.show(io::IO, s::ReplicaSystem)
     print(io, "ReplicaSystem containing ",  s.n_replicas, " replicas with ", length(s),
           " atoms, boundary ", s.boundary)
 end
+
+# Take precedence over AtomsBase.jl show function
+Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io, s)
