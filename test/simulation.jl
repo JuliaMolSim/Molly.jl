@@ -351,7 +351,7 @@ end
 
     #Particle should end up at local minima and stick because no thermostat
     local_min = SVector{2}([-0.05001082299878202,0.46669410487256247])u"nm"
-    @test isapprox(final_pos, local_min, atol=1e-7u"kJ * mol^-1 * nm^-1")
+    @test isapprox(final_pos, local_min, atol=1e-7u"nm")
 end
 
 
