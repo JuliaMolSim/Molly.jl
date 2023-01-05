@@ -361,4 +361,34 @@
         49.58u"kJ * mol^-1",
         atol=1e-9u"kJ * mol^-1",
     )
+
+    #################################
+    #Tests for Muller-Brown potential
+    #################################
+
+    #Define interaction w/ default params
+    inter = MullerBrown()
+
+    local_min = SVector(0.6234994049304005,0.028037758528718367)u"nm"
+    local_min2 = SVector(-0.05001082299878202,0.46669410487256247)u"nm"
+
+    @test isapprox(
+        Molly.force_muller_brown(inter, local_min),
+        SVector(0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+
+    @test isapprox(
+        Molly.force_muller_brown(inter, local_min2),
+        SVector(0.0, 0.0)u"kJ * mol^-1 * nm^-1",
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+
+    @test isapprox(
+        Molly.potential_muller_brown(inter, local_min),
+        -108.166724117u"kJ * mol^-1",
+        atol=1e-7u"kJ * mol^-1",
+    )
+
+
 end
