@@ -317,8 +317,9 @@ end
 end
 
 @testset "Muller-Brown infinite RectangularBoundary" begin
-
-    atoms = [Atom(mass=1.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")]
+ 
+    atom_mass = 1.0u"u"
+    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")]
     
     boundary = RectangularBoundary(Inf*u"nm", Inf*u"nm")
     
