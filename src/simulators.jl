@@ -841,3 +841,73 @@ function random_unit_vector(float_type, dims)
     vec = randn(float_type, dims)
     return vec / norm(vec)
 end
+
+
+
+"""
+    NoseHoover(; <keyword arguments>)
+
+    An NVT simulator that extends the traditional velocity verlet to also control the temperature of
+    the system. Finds the "version of dynamics" that is as close to the Hamiltonian as possible while maintaining temp.
+
+# Arguments
+- `dt::T`: the time step of the simulation.
+- `T_desired::K`: The temeprature targeted by the NoseHoover thermostat
+- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
+- `tau_damp::TD`: The temperature damping timescale, typically 100*dt
+- `zeta::Z`: Amount of damping requied to bring system to T_desired, based on damping timescale tau_damp.
+- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
+    every time step.
+"""
+struct NoseHoover{T, C, Z}
+    dt::T
+    T_desired::K
+    coupling::C
+    tau_damp::TD # units of time
+    zeta::Z # units of 1/time
+    remove_CM_motion::Bool
+end
+
+function NoseHoover(; dt, T_desired, coupling=NoCoupling(), zeta = 0.0, tau_damp = 100.0*dt, remove_CM_motion=true)
+    return NoseHoover(dt, T_desired, coupling, zeta, tau_damp, remove_CM_motion)
+end
+
+function simulate!(sys,
+        sim::NoseHoover,
+        n_steps::Integer;
+        n_threads::Integer=Threads.nthreads())
+
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+    sim.remove_CM_motion && remove_CM_motion!(sys)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+    accels_t = accelerations(sys, neighbors; n_threads=n_threads)
+    accels_t_dt = zero(accels_t)
+
+    for step_n in 1:n_steps
+        old_coords = copy(sys.coords)
+        sys.coords += sys.velocities .* sim.dt .+ ( (remove_molar.(accels_t) .- zeta.*sys.velocities).* sim.dt ^ 2) ./ 2
+
+        apply_constraints!(sys, old_coords, sim.dt)
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+
+        accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
+
+        T_inst = #how to get temp in here?
+        zeta += (sim.dt/(tau_damp^2))*((T_inst/T_desired) - 1)
+
+        sys.velocities += ((remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2)./(1 + (0.5*zeta*sim.dt)))
+
+        sim.remove_CM_motion && remove_CM_motion!(sys)
+        apply_coupling!(sys, sim.coupling, sim)
+
+        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
+
+        if step_n != n_steps
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                    n_threads=n_threads)
+            accels_t = accels_t_dt
+        end
+    end
+    return sys
+end
