@@ -843,7 +843,6 @@ function random_unit_vector(float_type, dims)
 end
 
 
-
 """
     NoseHoover(; <keyword arguments>)
 
@@ -893,7 +892,7 @@ function simulate!(sys,
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-        T_inst = #how to get temp in here?
+        T_inst = temperature(sys)
         zeta += (sim.dt/(tau_damp^2))*((T_inst/T_desired) - 1)
 
         sys.velocities += ((remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2)./(1 + (0.5*zeta*sim.dt)))
