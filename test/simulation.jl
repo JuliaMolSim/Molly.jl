@@ -922,3 +922,37 @@ end
         @test E_diff < 5e-4u"kJ * mol^-1"
     end
 end
+
+# @testset "NoseHoover Thermostat" begin
+
+#     n_atoms = 256
+#     atom_mass = 39.98u"u"
+#     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+
+#     boundary = CubicBoundary(20.0u"nm", 20.0u"nm", 20.0u"nm") # Periodic boundary conditions
+#     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm") # Random placement without clashing
+
+#     temp = 100.0u"K"
+#     velocities = [velocity(atom_mass, temp) for i in 1:n_atoms];
+
+#     sys = System(
+#             atoms=atoms,
+#             coords=coords,
+#             velocities=velocities,
+#             boundary=boundary,
+#             pairwise_inters=(LennardJones(),),
+#             loggers=(
+#                 temps=TemperatureLogger(10),
+#                 energies=TotalEnergyLogger(10),
+#                 coords = CoordinateLogger(10)
+#             ),
+#         )
+
+#     simulator = NoseHoover(
+#         dt=0.002u"ps",
+#         T_desired = temp
+#     )
+
+#     simulate!(sys, simulator, 1_000)
+
+# end

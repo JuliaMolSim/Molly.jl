@@ -8,6 +8,7 @@ export
     StormerVerlet,
     Langevin,
     LangevinSplitting,
+    NoseHoover,
     TemperatureREMD,
     remd_exchange!,
     HamiltonianREMD,
@@ -858,17 +859,16 @@ end
 - `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
     every time step.
 """
-struct NoseHoover{T, K, C, TD, Z}
+mutable struct NoseHoover{T, K, C, TD}
     dt::T
     T_desired::K
     coupling::C
     tau_damp::TD # units of time
-    zeta::Z # units of 1/time
     remove_CM_motion::Bool
 end
 
-function NoseHoover(; dt, T_desired, coupling=NoCoupling(), zeta = 0.0, tau_damp = 100.0*dt, remove_CM_motion=true)
-    return NoseHoover(dt, T_desired, coupling, zeta, tau_damp, remove_CM_motion)
+function NoseHoover(; dt, T_desired, coupling=NoCoupling(), tau_damp = 100.0*dt, remove_CM_motion=true)
+    return NoseHoover(dt, T_desired, coupling, tau_damp, remove_CM_motion)
 end
 
 function simulate!(sys,
@@ -883,19 +883,24 @@ function simulate!(sys,
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
 
+    zeta = zero(1/sim.dt)
+
     for step_n in 1:n_steps
         old_coords = copy(sys.coords)
-        sys.coords += sys.velocities .* sim.dt .+ ( (remove_molar.(accels_t) .- zeta.*sys.velocities).* sim.dt ^ 2) ./ 2
+        v_half = sys.velocities .+ (((remove_molar.(accels_t) .- (zeta.*sys.velocities)) .* sim.dt) ./ 2)
+        sys.coords += (sim.dt .* v_half)
 
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-        T_inst = temperature(sys)
-        zeta += (sim.dt/(tau_damp^2))*((T_inst/T_desired) - 1)
+        KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
+        df = 3 * length(sys) - 3
+        T_inst = uconvert(u"K", 2 * KE_half / (df * sys.k))
+        zeta += (sim.dt/(sim.tau_damp^2))*((T_inst/sim.T_desired) - 1)
 
-        sys.velocities += ((remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2)./(1 + (0.5*zeta*sim.dt)))
+        sys.velocities += (v_half .+ (remove_molar.(accels_t_dt) .* sim.dt ./ 2))./(1 + (0.5*sim.dt*zeta))
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim.coupling, sim)
