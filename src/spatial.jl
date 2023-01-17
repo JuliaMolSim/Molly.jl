@@ -411,7 +411,7 @@ end
     maxwell_boltzmann(mass, temperature; rng=Random.GLOBAL_RNG)
     maxwell_boltzmann(mass, temperature, k; rng=Random.GLOBAL_RNG)
 
-Generate a random speed along one dimension from the Maxwell-Boltzmann
+Generate a random velocity along one dimension from the Maxwell-Boltzmann
 distribution, with optional custom Boltzmann constant.
 """
 function maxwell_boltzmann(mass, temp, k; rng=Random.GLOBAL_RNG)

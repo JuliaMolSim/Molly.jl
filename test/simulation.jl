@@ -102,9 +102,9 @@ end
         @test position(s, 5) == s.coords[5]
         @test velocity(s) == s.velocities
         @test velocity(s, 5) == s.velocities[5]
-        @test atomic_mass(s) == fill(atom_mass, 100)
+        @test atomic_mass(s) == fill(atom_mass, n_atoms)
         @test atomic_mass(s, 5) == atom_mass
-        @test atomic_symbol(s) == fill(:Ar, 100)
+        @test atomic_symbol(s) == fill(:Ar, n_atoms)
         @test atomic_symbol(s, 5) == :Ar
         @test typeof(boundary_conditions(s)) <: SVector
         @test bounding_box(s) == SVector(
@@ -171,6 +171,10 @@ end
         ),
         loggers=(coords=CoordinateLogger(100),),
     )
+
+    @test atomic_symbol(s) == fill(:unknown, n_atoms)
+    @test atomic_symbol(s, 5) == :unknown
+
     random_velocities!(s, temp)
 
     @time simulate!(s, simulator, n_steps)
@@ -311,6 +315,45 @@ end
         @time simulate!(s, simulator, n_steps)
     end
 end
+
+@testset "Muller-Brown infinite RectangularBoundary" begin
+ 
+    atom_mass = 1.0u"u"
+    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")]
+    
+    boundary = RectangularBoundary(Inf*u"nm", Inf*u"nm")
+    
+    atom_coords = [SVector{2}(-0.5,0.25)]u"nm"
+    
+    
+    temp = 100.0u"K"
+    velocities = [velocity(atom_mass, temp,dims=2)]
+    
+    #Make sure logger is in 2 dimensions for Muller-Brown potential
+    sys = System(
+                atoms=atoms,
+                coords=atom_coords,
+                velocities=velocities,
+                boundary=boundary,
+                general_inters = (MullerBrown(),),
+                loggers=(
+                    coords=CoordinateLogger(100;dims=2),
+                ),
+            )
+    
+    simulator = VelocityVerlet(
+        dt=0.002u"ps",
+    )
+    
+    simulate!(sys, simulator, 100000)
+
+    final_pos = sys.loggers.coords.history[end][1]
+
+    #Particle should end up at local minima and stick because no thermostat
+    local_min = SVector(-0.05001082299878202,0.46669410487256247)u"nm"
+    @test isapprox(final_pos, local_min, atol=1e-7u"nm")
+end
+
 
 @testset "Units" begin
     n_atoms = 100
