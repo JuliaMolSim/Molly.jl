@@ -46,16 +46,16 @@ function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, a
         end
         dx, dy, dz = ustrip(f[1]), ustrip(f[2]), ustrip(f[3])
         if !iszero(dx)
-            CUDA.atomic_add!(pointer(forces, 3i - 2), -dx)
-            CUDA.atomic_add!(pointer(forces, 3j - 2),  dx)
+            Atomix.@atomic :monotonic forces[1, i] += -dx
+            Atomix.@atomic :monotonic forces[1, j] +=  dx
         end
         if !iszero(dy)
-            CUDA.atomic_add!(pointer(forces, 3i - 1), -dy)
-            CUDA.atomic_add!(pointer(forces, 3j - 1),  dy)
+            Atomix.@atomic :monotonic forces[2, i] += -dy
+            Atomix.@atomic :monotonic forces[2, j] +=  dy
         end
         if !iszero(dz)
-            CUDA.atomic_add!(pointer(forces, 3i    ), -dz)
-            CUDA.atomic_add!(pointer(forces, 3j    ),  dz)
+            Atomix.@atomic :monotonic forces[3, i] += -dz
+            Atomix.@atomic :monotonic forces[3, j] +=  dz
         end
         rij_fij = ustrip(norm(dr) * norm(f))
         virial[] += rij_fij
@@ -116,9 +116,9 @@ function specific_force_1_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         if unit(fs.f1[1]) != F
             error("Wrong force unit returned, was expecting $F")
         end
-        CUDA.atomic_add!(pointer(forces, 3i - 2), ustrip(fs.f1[1]))
-        CUDA.atomic_add!(pointer(forces, 3i - 1), ustrip(fs.f1[2]))
-        CUDA.atomic_add!(pointer(forces, 3i    ), ustrip(fs.f1[3]))
+        Atomix.@atomic :monotonic forces[1, i] += ustrip(fs.f1[1])
+        Atomix.@atomic :monotonic forces[2, i] += ustrip(fs.f1[2])
+        Atomix.@atomic :monotonic forces[3, i] += ustrip(fs.f1[3])
     end
     return nothing
 end
@@ -139,12 +139,12 @@ function specific_force_2_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
             error("Wrong force unit returned, was expecting $F")
         end
-        CUDA.atomic_add!(pointer(forces, 3i - 2), ustrip(fs.f1[1]))
-        CUDA.atomic_add!(pointer(forces, 3i - 1), ustrip(fs.f1[2]))
-        CUDA.atomic_add!(pointer(forces, 3i    ), ustrip(fs.f1[3]))
-        CUDA.atomic_add!(pointer(forces, 3j - 2), ustrip(fs.f2[1]))
-        CUDA.atomic_add!(pointer(forces, 3j - 1), ustrip(fs.f2[2]))
-        CUDA.atomic_add!(pointer(forces, 3j    ), ustrip(fs.f2[3]))
+        Atomix.@atomic :monotonic forces[1, i] += ustrip(fs.f1[1])
+        Atomix.@atomic :monotonic forces[2, i] += ustrip(fs.f1[2])
+        Atomix.@atomic :monotonic forces[3, i] += ustrip(fs.f1[3])
+        Atomix.@atomic :monotonic forces[1, j] += ustrip(fs.f2[1])
+        Atomix.@atomic :monotonic forces[2, j] += ustrip(fs.f2[2])
+        Atomix.@atomic :monotonic forces[3, j] += ustrip(fs.f2[3])
     end
     return nothing
 end
@@ -166,15 +166,15 @@ function specific_force_3_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
             error("Wrong force unit returned, was expecting $F")
         end
-        CUDA.atomic_add!(pointer(forces, 3i - 2), ustrip(fs.f1[1]))
-        CUDA.atomic_add!(pointer(forces, 3i - 1), ustrip(fs.f1[2]))
-        CUDA.atomic_add!(pointer(forces, 3i    ), ustrip(fs.f1[3]))
-        CUDA.atomic_add!(pointer(forces, 3j - 2), ustrip(fs.f2[1]))
-        CUDA.atomic_add!(pointer(forces, 3j - 1), ustrip(fs.f2[2]))
-        CUDA.atomic_add!(pointer(forces, 3j    ), ustrip(fs.f2[3]))
-        CUDA.atomic_add!(pointer(forces, 3k - 2), ustrip(fs.f3[1]))
-        CUDA.atomic_add!(pointer(forces, 3k - 1), ustrip(fs.f3[2]))
-        CUDA.atomic_add!(pointer(forces, 3k    ), ustrip(fs.f3[3]))
+        Atomix.@atomic :monotonic forces[1, i] += ustrip(fs.f1[1])
+        Atomix.@atomic :monotonic forces[2, i] += ustrip(fs.f1[2])
+        Atomix.@atomic :monotonic forces[3, i] += ustrip(fs.f1[3])
+        Atomix.@atomic :monotonic forces[1, j] += ustrip(fs.f2[1])
+        Atomix.@atomic :monotonic forces[2, j] += ustrip(fs.f2[2])
+        Atomix.@atomic :monotonic forces[3, j] += ustrip(fs.f2[3])
+        Atomix.@atomic :monotonic forces[1, k] += ustrip(fs.f3[1])
+        Atomix.@atomic :monotonic forces[2, k] += ustrip(fs.f3[2])
+        Atomix.@atomic :monotonic forces[3, k] += ustrip(fs.f3[3])
     end
     return nothing
 end
@@ -197,18 +197,18 @@ function specific_force_4_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
             error("Wrong force unit returned, was expecting $F")
         end
-        CUDA.atomic_add!(pointer(forces, 3i - 2), ustrip(fs.f1[1]))
-        CUDA.atomic_add!(pointer(forces, 3i - 1), ustrip(fs.f1[2]))
-        CUDA.atomic_add!(pointer(forces, 3i    ), ustrip(fs.f1[3]))
-        CUDA.atomic_add!(pointer(forces, 3j - 2), ustrip(fs.f2[1]))
-        CUDA.atomic_add!(pointer(forces, 3j - 1), ustrip(fs.f2[2]))
-        CUDA.atomic_add!(pointer(forces, 3j    ), ustrip(fs.f2[3]))
-        CUDA.atomic_add!(pointer(forces, 3k - 2), ustrip(fs.f3[1]))
-        CUDA.atomic_add!(pointer(forces, 3k - 1), ustrip(fs.f3[2]))
-        CUDA.atomic_add!(pointer(forces, 3k    ), ustrip(fs.f3[3]))
-        CUDA.atomic_add!(pointer(forces, 3l - 2), ustrip(fs.f4[1]))
-        CUDA.atomic_add!(pointer(forces, 3l - 1), ustrip(fs.f4[2]))
-        CUDA.atomic_add!(pointer(forces, 3l    ), ustrip(fs.f4[3]))
+        Atomix.@atomic :monotonic forces[1, i] += ustrip(fs.f1[1])
+        Atomix.@atomic :monotonic forces[2, i] += ustrip(fs.f1[2])
+        Atomix.@atomic :monotonic forces[3, i] += ustrip(fs.f1[3])
+        Atomix.@atomic :monotonic forces[1, j] += ustrip(fs.f2[1])
+        Atomix.@atomic :monotonic forces[2, j] += ustrip(fs.f2[2])
+        Atomix.@atomic :monotonic forces[3, j] += ustrip(fs.f2[3])
+        Atomix.@atomic :monotonic forces[1, k] += ustrip(fs.f3[1])
+        Atomix.@atomic :monotonic forces[2, k] += ustrip(fs.f3[2])
+        Atomix.@atomic :monotonic forces[3, k] += ustrip(fs.f3[3])
+        Atomix.@atomic :monotonic forces[1, l] += ustrip(fs.f4[1])
+        Atomix.@atomic :monotonic forces[2, l] += ustrip(fs.f4[2])
+        Atomix.@atomic :monotonic forces[3, l] += ustrip(fs.f4[3])
     end
     return nothing
 end
@@ -270,7 +270,7 @@ function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, b
             end
             pe_sum += shared_pes[si]
         end
-        CUDA.atomic_add!(pointer(energy), pe_sum)
+        Atomix.@atomic :monotonic energy[] += pe_sum
     end
     return nothing
 end
@@ -328,7 +328,7 @@ function specific_pe_1_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         if unit(pe) != E
             error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        CUDA.atomic_add!(pointer(energy), ustrip(pe))
+        Atomix.@atomic :monotonic energy[] += ustrip(pe)
     end
     return nothing
 end
@@ -349,7 +349,7 @@ function specific_pe_2_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         if unit(pe) != E
             error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        CUDA.atomic_add!(pointer(energy), ustrip(pe))
+        Atomix.@atomic :monotonic energy[] += ustrip(pe)
     end
     return nothing
 end
@@ -371,7 +371,7 @@ function specific_pe_3_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         if unit(pe) != E
             error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        CUDA.atomic_add!(pointer(energy), ustrip(pe))
+        Atomix.@atomic :monotonic energy[] += ustrip(pe)
     end
     return nothing
 end
@@ -394,7 +394,7 @@ function specific_pe_4_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         if unit(pe) != E
             error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        CUDA.atomic_add!(pointer(energy), ustrip(pe))
+        Atomix.@atomic :monotonic energy[] += ustrip(pe)
     end
     return nothing
 end

@@ -1,5 +1,6 @@
 module Molly
 
+using Atomix
 import BioStructures # Imported to avoid clashing names
 using CellListMap
 using ChainRulesCore
@@ -20,6 +21,7 @@ using Reexport
 using Requires
 using Unitful
 using UnitfulChainRules
+using UnsafeAtomicsLLVM
 using Zygote
 
 @reexport using AtomsBase

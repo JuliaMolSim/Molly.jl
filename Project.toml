@@ -4,6 +4,7 @@ authors = ["Joe G Greener <jgreener@hotmail.co.uk>"]
 version = "0.14.0"
 
 [deps]
+Atomix = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
 AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
 BioStructures = "de9282ab-8554-53be-b2d6-f6c222edabfc"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
@@ -30,9 +31,11 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 UnitfulChainRules = "f31437dd-25a7-4345-875f-756556e6935d"
+UnsafeAtomicsLLVM = "d80eeb9a-aca5-4d75-85e5-170c8b632249"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
+Atomix = "0.1"
 AtomsBase = "0.2"
 BioStructures = "1"
 CUDA = "3"
@@ -55,6 +58,7 @@ Requires = "1"
 StaticArrays = "1"
 Unitful = "1"
 UnitfulChainRules = "= 0.1.2"
+UnsafeAtomicsLLVM = "0.1"
 Zygote = "= 0.6.49"
 julia = "1.7"
 
