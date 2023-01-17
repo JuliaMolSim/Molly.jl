@@ -39,7 +39,8 @@ function MullerBrown(; A = SVector(-200.0,-100.0,-170.0,15.0)u"kJ * mol^-1",
 end
 
 #Total potential energy of system
-@inline @inbounds function potential_energy(inter::MullerBrown, sys, neighbors=nothing) 
+@inline @inbounds function potential_energy(inter::MullerBrown, sys, neighbors=nothing;
+                                            n_threads::Integer=Threads.nthreads())
     return sum(potential_muller_brown.(Ref(inter),sys.coords))
 end
 
@@ -61,7 +62,8 @@ end
 end
 
 #Force acting on each particle
-@inline @inbounds function forces(inter::MullerBrown, sys, neighbors=nothing) 
+@inline @inbounds function forces(inter::MullerBrown, sys, neighbors=nothing;
+                                  n_threads::Integer=Threads.nthreads())
     return force_muller_brown.(Ref(inter),sys.coords)
 end
 

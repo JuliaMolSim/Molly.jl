@@ -356,7 +356,7 @@ end
 atoms = fill(Atom(mass=28.0), 2)
 coords = [SVector(1/8, 1/8, 1/8), SVector(-1/8, -1/8, -1/8)]
 velocities = [randn(SVector{3, Float64}) * 0.1 for _ in 1:2]
-boundary = CubicBoundary(Inf, Inf, Inf)
+boundary = CubicBoundary(Inf)
 loggers = (coords=CoordinateLogger(Float64, 1),)
 
 sys = System(

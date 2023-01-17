@@ -313,6 +313,30 @@ function CoulombReactionField(;
         coulomb_const, force_units, energy_units)
 end
 
+function Base.zero(coul::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
+    return CoulombReactionField{D, S, W, T, F, E}(
+        zero(D),
+        zero(S),
+        false,
+        zero(W),
+        zero(T),
+        coul.force_units,
+        coul.energy_units,
+    )
+end
+
+function Base.:+(c1::CoulombReactionField, c2::CoulombReactionField)
+    return CoulombReactionField(
+        c1.dist_cutoff + c2.dist_cutoff,
+        c1.solvent_dielectric + c2.solvent_dielectric,
+        c1.nl_only,
+        c1.weight_14 + c2.weight_14,
+        c1.coulomb_const + c2.coulomb_const,
+        c1.force_units,
+        c1.energy_units,
+    )
+end
+
 @inline @inbounds function force(inter::CoulombReactionField,
                                     dr,
                                     coord_i,

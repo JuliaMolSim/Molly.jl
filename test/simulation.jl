@@ -321,7 +321,7 @@ end
     atom_mass = 1.0u"u"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")]
     
-    boundary = RectangularBoundary(Inf*u"nm", Inf*u"nm")
+    boundary = RectangularBoundary(Inf*u"nm")
     
     atom_coords = [SVector{2}(-0.5,0.25)]u"nm"
     
