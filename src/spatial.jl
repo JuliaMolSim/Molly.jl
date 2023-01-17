@@ -6,7 +6,7 @@ export
     TriclinicBoundary,
     box_volume,
     box_center,
-    rand_coord,
+    random_coord,
     vector_1D,
     vector,
     wrap_coord_1D,
@@ -255,14 +255,14 @@ function bounding_box_lines(boundary::TriclinicBoundary, dist_unit)
 end
 
 """
-    rand_coord(boundary)
+    random_coord(boundary)
 
 Generate a random coordinate uniformly distributed within a bounding box.
 """
-rand_coord(boundary::CubicBoundary      ) = rand(SVector{3, float_type(boundary)}) .* boundary
-rand_coord(boundary::RectangularBoundary) = rand(SVector{2, float_type(boundary)}) .* boundary
+random_coord(boundary::CubicBoundary      ) = rand(SVector{3, float_type(boundary)}) .* boundary
+random_coord(boundary::RectangularBoundary) = rand(SVector{2, float_type(boundary)}) .* boundary
 
-function rand_coord(boundary::TriclinicBoundary{T}) where T
+function random_coord(boundary::TriclinicBoundary{T}) where T
     return sum(rand(SVector{3, T}) .* boundary.basis_vectors)
 end
 

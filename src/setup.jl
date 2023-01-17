@@ -38,7 +38,7 @@ function place_atoms(n_atoms::Integer,
     coords = SArray[]
     failed_attempts = 0
     while length(coords) < n_atoms
-        new_coord = rand_coord(boundary)
+        new_coord = random_coord(boundary)
         okay = true
         if min_dist > zero(min_dist)
             for coord in coords
@@ -90,7 +90,7 @@ function place_diatomics(n_molecules::Integer,
     coords = SArray[]
     failed_attempts = 0
     while length(coords) < (n_molecules * 2)
-        new_coord_a = rand_coord(boundary)
+        new_coord_a = random_coord(boundary)
         if aligned
             shift = SVector{dims}([bond_length, [zero(bond_length) for d in 1:(dims - 1)]...])
         else
