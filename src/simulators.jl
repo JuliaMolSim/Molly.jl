@@ -859,8 +859,8 @@ end
 - `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
     every time step.
 """
-mutable struct NoseHoover{T, K, C, TD}
-    dt::T
+mutable struct NoseHoover{DT, K, C, TD}
+    dt::DT
     T_desired::K
     coupling::C
     tau_damp::TD # units of time
@@ -883,24 +883,27 @@ function simulate!(sys,
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
 
+    v_half = zero(sys.velocities)
     zeta = zero(1/sim.dt)
+    df = 3 * length(sys) - 3
 
     for step_n in 1:n_steps
+
+        v_half = sys.velocities .+ ((sim.dt/2).* (remove_molar.(accels_t) .- (zeta.*sys.velocities)))
+
         old_coords = copy(sys.coords)
-        v_half = sys.velocities .+ (((remove_molar.(accels_t) .- (zeta.*sys.velocities)) .* sim.dt) ./ 2)
         sys.coords += (sim.dt .* v_half)
 
+        KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
+        T_half = uconvert(u"K",2 * KE_half / (df * sys.k))
+        zeta += (sim.dt / (sim.tau_damp^2)) * ((T_half/sim.T_desired) - 1)
+        
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-        KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
-        df = 3 * length(sys) - 3
-        T_inst = uconvert(u"K", 2 * KE_half / (df * sys.k))
-        zeta += (sim.dt/(sim.tau_damp^2))*((T_inst/sim.T_desired) - 1)
-
-        sys.velocities += (v_half .+ (remove_molar.(accels_t_dt) .* sim.dt ./ 2))./(1 + (0.5*sim.dt*zeta))
+        sys.velocities = (v_half .+ (sim.dt/2)*(remove_molar.(accels_t_dt)))./(1 + (zeta*sim.dt/2))
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim.coupling, sim)
@@ -909,9 +912,10 @@ function simulate!(sys,
 
         if step_n != n_steps
             neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                    n_threads=n_threads)
+                                        n_threads=n_threads)
             accels_t = accels_t_dt
         end
     end
+
     return sys
 end

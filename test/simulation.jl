@@ -930,7 +930,7 @@ end
 #     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 
 #     boundary = CubicBoundary(20.0u"nm", 20.0u"nm", 20.0u"nm") # Periodic boundary conditions
-#     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm") # Random placement without clashing
+#     coords = place_atoms(n_atoms, boundary; min_dist=0.35u"nm") # Random placement without clashing
 
 #     temp = 100.0u"K"
 #     velocities = [velocity(atom_mass, temp) for i in 1:n_atoms];
