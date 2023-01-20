@@ -903,7 +903,7 @@ function simulate!(sys,
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities = (v_half .+ (sim.dt/2)*(remove_molar.(accels_t_dt)))./(1 + (zeta*sim.dt/2))
+        sys.velocities = (v_half .+ (sim.dt/2)*(remove_molar.(accels_t_dt)))./(1 + (0.5*zeta*sim.dt))
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim.coupling, sim)
