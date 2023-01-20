@@ -942,7 +942,7 @@ end
             boundary=boundary,
             pairwise_inters=(LennardJones(),),
             loggers=(
-                temps=TemperatureLogger(1)
+                temps=TemperatureLogger(1),
             ),
         )
 
