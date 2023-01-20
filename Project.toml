@@ -32,7 +32,7 @@ UnitfulChainRules = "f31437dd-25a7-4345-875f-756556e6935d"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
-AtomsBase = "0.2"
+AtomsBase = "0.2, 0.3"
 BioStructures = "1"
 CUDA = "3"
 CellListMap = "0.8.4"
