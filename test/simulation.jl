@@ -951,7 +951,7 @@ end
 
     simulator = NoseHoover(
         dt=0.002u"ps",
-        T_desired = temp
+        temperature = temp
     )
 
     simulate!(sys, simulator, 50_000)
