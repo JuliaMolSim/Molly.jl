@@ -956,6 +956,6 @@ end
 
     simulate!(sys, simulator, 50_000)
 
-    @test temp - 1.0u"K" < mean(sys.loggers.temps.history) < temp + 1.0u"K"
+    @test temp - 1.0u"K" < mean(values(sys.loggers.temps)) < temp + 1.0u"K"
 
 end

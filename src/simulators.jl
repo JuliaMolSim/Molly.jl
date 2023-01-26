@@ -855,20 +855,19 @@ end
 - `T_desired::K`: The temeprature targeted by the NoseHoover thermostat
 - `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
 - `tau_damp::TD`: The temperature damping timescale, typically 100*dt
-- `zeta::Z`: Amount of damping requied to bring system to T_desired, based on damping timescale tau_damp.
 - `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
     every time step.
 """
 mutable struct NoseHoover{DT, K, C, TD}
     dt::DT
-    T_desired::K
+    temperature::K
     coupling::C
-    tau_damp::TD # units of time
+    damping::TD # units of time
     remove_CM_motion::Bool
 end
 
-function NoseHoover(; dt, T_desired, coupling=NoCoupling(), tau_damp = 100.0*dt, remove_CM_motion=true)
-    return NoseHoover(dt, T_desired, coupling, tau_damp, remove_CM_motion)
+function NoseHoover(; dt, temperature, coupling=NoCoupling(), damping = 100*dt, remove_CM_motion=true)
+    return NoseHoover(dt, temperature, coupling, damping, remove_CM_motion)
 end
 
 function simulate!(sys,
@@ -896,14 +895,14 @@ function simulate!(sys,
 
         KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
         T_half = uconvert(u"K",2 * KE_half / (df * sys.k))
-        zeta += (sim.dt / (sim.tau_damp^2)) * ((T_half/sim.T_desired) - 1)
+        zeta += (sim.dt / (sim.damping^2)) * ((T_half/sim.temperature) - 1)
         
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities = (v_half .+ (sim.dt/2)*(remove_molar.(accels_t_dt)))./(1 + (0.5*zeta*sim.dt))
+        sys.velocities = (v_half .+ (sim.dt/2)*(remove_molar.(accels_t_dt)))./(1 + (zeta*sim.dt/2))
 
         sim.remove_CM_motion && remove_CM_motion!(sys)
         apply_coupling!(sys, sim.coupling, sim)
