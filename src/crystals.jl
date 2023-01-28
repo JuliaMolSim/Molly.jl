@@ -1,3 +1,8 @@
+export
+    SC,
+    FCC,
+    BCC
+
 
 abstract type BravaisLattice end
 
@@ -11,7 +16,7 @@ struct CubicBravaisLattice{PV,LC} <: BravaisLattice
 end
 
 function CubicBravaisLattice(a)
-    primitive_vectors = [1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0] * a
+    primitive_vectors = [1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0] .* a
     return CubicBravaisLattice{typeof(primitive_vectors),typeof(lattice_constant)}(
                 primitive_vectors, lattice_constant)
 end
@@ -102,26 +107,37 @@ function conventional(bl::BravaisLattice, num_unit_cells)
 end
 
 FC_supported_types = Union{CubicBravaisLattice, OrthorhombicBravaisLattice}
-function face_centered(bl::FC_supported_types)
+function face_centered(bl::FC_supported_types, num_unit_cells)
 
     return coords, boundary
 end
 
 Base_supported_types = Union{MonoclinicBravaisLattice, OrthorhombicBravaisLattice}
-function base_centered(bl::Base_supported_types)
+function base_centered(bl::Base_supported_types, num_unit_cells)
 
     return coords, boundary
 end
 
 BC_supported_types = Union{CubicBravaisLattice, OrthorhombicBravaisLattice, TetragonalBravaisLattice}
-function body_centered(bl::BC_supported_types)
+function body_centered(bl::BC_supported_types, num_unit_cells)
 
     return coords, boundary
 end
 
 
-function rotateAboutX!(v, θ)
+#####################################################
+# Implement some crystals
 
+SC(a, num_unit_cells) = conventional(CubicBravaisLattice(a, num_unit_cells))
+FCC(a, num_unit_cells) = face_centered(CubicBravaisLattice(a, num_unit_cells))
+BCC(a, num_unit_cells) = body_centered(CubicBravaisLattice(a, num_unit_cells))
+
+
+#####################################################
+# Helper functions
+
+function rotateAboutX!(v, θ)
+    
 end
 
 function rotateAboutY!(v, θ)
