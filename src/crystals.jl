@@ -1,18 +1,17 @@
+#Add support for vectors in N_unit_cells
 #Only supports 3d crystals, cant make something like graphene
 
 #stop float promotion in primitive vectors??
 
 export
-    SC,
-    FCC,
-    BCC
+    nothing
 
 #########
 # TYEPS #
 #########
 
 abstract type Lattice end
-abstract type BravaisLattice <: Lattice end #is this the right way to allow both LatticeWithBasis and a BravaisLattice to be passed to Crystal()?
+abstract type BravaisLattice <: Lattice end
 
 #Allows construction of non-bravais lattices (e.g. diamond)
 struct LatticeWithBasis{B} <: Lattice
@@ -96,10 +95,8 @@ end
 #####################################################
 
 struct HexagonalBravaisLattice{PV,LC,LA} <: BravaisLattice
-    edge_vectors::SVector{3, SVector{3, PV}}
-    a::LC
-    c::LC
-    α::LA
+    lattice_constants::SVector{3,LC}
+    lattice_angles::SVector{3,LA}
 end
 
 function HexagonalBravaisLattice(a,c,γ)
@@ -109,35 +106,66 @@ end
 #####################################################
 
 
-function Conventional(bl::BravaisLattice)
+function conventional(bl::BravaisLattice)
     primitive_vectors = MMatrix{3,3}([1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0])
     primitive_vectors .*= transpose(bl.lattice_constants)
+
+    if hasfield(bl, lattice_angles)
+        #rotate a-axis
+        rotateAboutB!(view(pv,1,:), 90u"°" - bl.lattice_angles[2])
+        rotateAboutC!(view(pv,1,:), 90u"°" - bl.lattice_angles[3])
+        #rotate b vector
+        rotateAboutA!(view(pv,2,:) ,90u"°" - bl.lattice_angles[1])
+        rotateAboutC!(view(pv,2,:), 90u"°" - bl.lattice_angles[3])
+        #rotate c vector
+        rotateAboutA!(view(pv,3,:), 90u"°" - bl.lattice_angles[1])
+        rotateAboutB!(view(pv,3,:), 90u"°" - bl.lattice_angles[2])
+    end
+
     return primitive_vectors
 end
 
 FC_supported_types = Union{CubicBravaisLattice, OrthorhombicBravaisLattice}
-function FaceCentered(bl::FC_supported_types)
+function face_centered(bl::FC_supported_types)
     primitive_vectors = MMatrix{3,3}([0.0 0.5 0.5; 0.5 0.0 0.5; 0.5 0.5 0.0])
     primitive_vectors .*= transpose(bl.lattice_constants)
     return primitive_vectors
 end
 
 BC_supported_types = Union{CubicBravaisLattice, OrthorhombicBravaisLattice, TetragonalBravaisLattice}
-function BodyCentered(bl::BC_supported_types)
+function body_centered(bl::BC_supported_types)
     primitive_vectors = MMatrix{3,3}([1.0 0.0 0.0; 0.0 1.0 0.0; 0.5  0.5  0.5])
     primitive_vectors .*= transpose(bl.lattice_constants)
     return primitive_vectors
 end
 
 Base_supported_types = Union{MonoclinicBravaisLattice, OrthorhombicBravaisLattice}
-function BaseCentered(bl::Base_supported_types)
+function base_centered(bl::Base_supported_types)
 
 end
 
 #####################################################
 
-function BuildCrystal(crystal::Crystal, num_unit_cells)
-    # Build crystal geometry
+function get_lattice_points(lattice::LatticeWithBasis, N_unit_cells)
+
+    lattice_points = MArray{Tuple{N_unit_cells,N_unit_cells,N_unit_cells},SVector{3}}(undef)
+end
+
+function get_lattice_points(lattice::BravaisLattice, N_unit_cells)
+
+    lattice_points = MArray{Tuple{N_unit_cells,N_unit_cells,N_unit_cells},SVector{3}}(undef)
+
+    for i in range(0,N_unit_cells), j in range(0,N_unit_cells), k in range(0,N_unit_cells)
+        lattice_points[i,j,k] = i*crystal.b
+    end
+end
+
+function build_crystal(crystal::Crystal, N_unit_cells)
+    @assert N_unit_cells > 0 "Number of unit cells should be positive"
+    # Generate coordiantes from lattice
+    lattice_points = get_lattice_points(crystal.lattice, N_unit_cells)
+
+    #Superimpose basis onto those points
 
     return atoms, coords, boundary
 end
@@ -180,14 +208,7 @@ end
 #####################################################
 # Helper functions
 
-function rotateAboutX!(v, θ)
-    
-end
+rotateAboutA!(v, θ) = copyto!(v, MMatrix{3,3}([1.0 0.0 0.0; 0.0 cos(θ) -sin(θ); 0  sin(θ)  cos(θ)]) * v)
+rotateAboutB!(v, θ) = copyto!(v, MMatrix{3,3}([cos(θ) 0.0 sin(θ); 0.0 1.0 0.0; -sin(θ) 0.0 cos(θ)]) * v)
+rotateAboutC!(v, θ) = copyto!(v, MMatrix{3,3}([cos(θ) -sin(θ) 0.0; sin(θ) cos(θ) 0.0; 0.0  0.0  1.0]) * v)
 
-function rotateAboutY!(v, θ)
-
-end
-
-function rotateAboutZ!(v, θ)
-
-end
