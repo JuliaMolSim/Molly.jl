@@ -11,16 +11,57 @@ export
 #########
 
 abstract type Lattice end
-abstract type BravaisLattice <: Lattice end
+abstract type CrystalFamily end
+
+@enum CenteringTypes primitive face_centered body_centered base_centered
+
+
+struct BravaisLattice{T} <: Lattice
+    crystal_family::CrystalFamily
+    centering_type::CenteringTypes
+    primitive_vectors::T
+end
+
+function is_valid_bravais_lattice(cf, ct)
+    if ct == face_centered
+        return typeof(cf) ∈ [Cubic, Orthorhombic]
+    elseif ct == body_centered
+        return typeof(cf) ∈ [Cubic, Orthorhombic, Tetragonal]
+    elseif ct == base_centered
+        return typeof(cf) ∈ [Monoclinic, Orthorhombic]
+    else #primitive
+        return true
+end
+
+function BravaisLattice(cf::CrystalFamily, ct::CenteringTypes)
+
+    @assert is_valid_bravais_lattice(cf,ct) "Not a valid bravais lattice, see https://en.wikipedia.org/wiki/Bravais_lattice#In_3_dimensions"
+
+    #Can i replace this with multiple dispatch? : get_primitive_vectors(cf, ct)
+            #if there is probably can remove assert above, and julia will jsut throw No signature found error
+    p_vec = nothing
+    if ct == primitive
+        p_vec = primitive!(cf)
+    elseif ct == face_centered
+        p_vec = face_centered!(cf)
+    elseif ct == body_centered
+        p_vec = body_centered!(cf)
+    else
+        p_vec = base_centered!(cf)
+    end
+
+     return BravaisLattice{typeof(p_vec)}(cf, ct, p_vec)
+end
+
 
 #Allows construction of non-bravais lattices (e.g. diamond)
-struct LatticeWithBasis{B} <: Lattice
+struct LatticeWithBasis{BV} <: Lattice
     lattice::BravaisLattice
-    basis_vectors::SMatrix{B,3}
+    basis_vectors::BV # 3 x N matrix
 end
 
 #Specific pattern at each bravais lattice point
-struct Basis{T}
+struct BasisAtom{T}
     position::SVector{3,T}
     atom::Atom
 end
@@ -30,117 +71,116 @@ struct Crystal
     basis::SVector{BasisAtom}
 end
 
+
 #####################################################
 
-struct CubicBravaisLattice{LC} <: BravaisLattice
+struct Cubic{LC} <: CrystalFamily
     lattice_constants::SVector{3,LC}
 end
 
-function CubicBravaisLattice(a)
-    return CubicBravaisLattice{typeof(lattice_constant)}(SVector(a,a,a))
+function Cubic(a)
+    return Cubic{typeof(lattice_constant)}(SVector(a,a,a))
 end
 
 #####################################################
 
-struct OrthorhombicBravaisLattice{LC} <: BravaisLattice
+struct Orthorhombic{LC} <: CrystalFamily
     lattice_constants::SVector{3,LC}
 end
 
-function OrthorhombicBravaisLattice(a,b,c)
-    return OrthorhombicBravaisLattice{typeof(a)}(SVector(a,b,c))
+function Orthorhombic(a,b,c)
+    return Orthorhombic{typeof(a)}(SVector(a,b,c))
 end
 
 #####################################################
 
-struct MonoclinicBravaisLattice{LC,LA} <: BravaisLattice
-    lattice_constants::SVector{3,LC}
-    lattice_angles::SVector{3,LA}
-end
-
-function MonoclinicBravaisLattice(a, b, c, β)
-    return MonoclinicBravaisLattice{typeof(a),typeof(β)}(SVector(a,b,c), SVector(90u"°", β, 90u"°"))
-end
-
-#####################################################
-
-struct TriclinicBravaisLattice{LC,LA} <: BravaisLattice
+struct Monoclinic{LC,LA} <: CrystalFamily
     lattice_constants::SVector{3,LC}
     lattice_angles::SVector{3,LA}
 end
 
-function TriclinicBravaisLattice(a, b, c, α, β, γ)
-    return TriclinicBravaisLattice{typeof(a),typeof(β)}(SVector(a,b,c), SVector(α, β, γ))
-end
-#####################################################
-
-struct TetragonalBravaisLattice{LC} <: BravaisLattice
-    lattice_constants::SVector{3,LC}
-end
-
-function TetragonalBravaisLattice(a, c)
-    return TetragonalBravaisLattice{typeof(a)}(SVector(a,a,c))
+function Monoclinic(a, b, c, β)
+    return Monoclinic{typeof(a),typeof(β)}(SVector(a,b,c), SVector(90u"°", β, 90u"°"))
 end
 
 #####################################################
 
-struct RhombohedralBravaisLattice{LC,LA} <: BravaisLattice
+struct Triclinic{LC,LA} <: CrystalFamily
     lattice_constants::SVector{3,LC}
     lattice_angles::SVector{3,LA}
 end
 
-function RhombohedralBravaisLattice(a, α)
-    return RhombohedralBravaisLattice{typeof(a),typeof(α)}(SVector(a,a,a),SVector(α, α, α))
+function Triclinic(a, b, c, α, β, γ)
+    return Triclinic{typeof(a),typeof(β)}(SVector(a,b,c), SVector(α, β, γ))
+end
+#####################################################
+
+struct Tetragonal{LC} <: CrystalFamily
+    lattice_constants::SVector{3,LC}
+end
+
+function Tetragonal(a, c)
+    return Tetragonal{typeof(a)}(SVector(a,a,c))
 end
 
 #####################################################
 
-struct HexagonalBravaisLattice{PV,LC,LA} <: BravaisLattice
+struct Rhombohedral{LC,LA} <: CrystalFamily
     lattice_constants::SVector{3,LC}
     lattice_angles::SVector{3,LA}
 end
 
-function HexagonalBravaisLattice(a,c,γ)
+function Rhombohedral(a, α)
+    return Rhombohedral{typeof(a),typeof(α)}(SVector(a,a,a),SVector(α, α, α))
+end
+
+#####################################################
+
+struct Hexagonal{LC,LA} <: CrystalFamily
+    lattice_constants::SVector{3,LC}
+    lattice_angles::SVector{3,LA}
+end
+
+function Hexagonal(a,c,γ)
     return HexagonalBravaisLattice{typeof(a),typeof(γ)}(SVector(a,a,c),SVector(90u"°", 90u"°", γ))
 end
 
 #####################################################
 
 
-function conventional(bl::BravaisLattice)
+function primitive!(cf::CrystalFamily)
     primitive_vectors = MMatrix{3,3}([1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0])
-    primitive_vectors .*= transpose(bl.lattice_constants)
+    primitive_vectors .*= transpose(cf.lattice_constants)
 
-    if hasfield(bl, lattice_angles)
+    if hasfield(cf, lattice_angles)
         #rotate a-axis
-        rotateAboutB!(view(pv,1,:), 90u"°" - bl.lattice_angles[2])
-        rotateAboutC!(view(pv,1,:), 90u"°" - bl.lattice_angles[3])
-        #rotate b vector
-        rotateAboutA!(view(pv,2,:) ,90u"°" - bl.lattice_angles[1])
-        rotateAboutC!(view(pv,2,:), 90u"°" - bl.lattice_angles[3])
-        #rotate c vector
-        rotateAboutA!(view(pv,3,:), 90u"°" - bl.lattice_angles[1])
-        rotateAboutB!(view(pv,3,:), 90u"°" - bl.lattice_angles[2])
+        rotateAboutB!(view(primitive_vectors,1,:), 90u"°" - cf.lattice_angles[2])
+        rotateAboutC!(view(primitive_vectors,1,:), 90u"°" - cf.lattice_angles[3])
+        #rotate b-axis
+        rotateAboutA!(view(primitive_vectors,2,:) ,90u"°" - cf.lattice_angles[1])
+        rotateAboutC!(view(primitive_vectors,2,:), 90u"°" - cf.lattice_angles[3])
+        #rotate c-axis
+        rotateAboutA!(view(primitive_vectors,3,:), 90u"°" - cf.lattice_angles[1])
+        rotateAboutB!(view(primitive_vectors,3,:), 90u"°" - cf.lattice_angles[2])
     end
 
     return primitive_vectors
 end
 
-FC_supported_types = Union{CubicBravaisLattice, OrthorhombicBravaisLattice}
-function face_centered(bl::FC_supported_types)
+function face_centered!(cf::CrystalFamily)
     primitive_vectors = MMatrix{3,3}([0.0 0.5 0.5; 0.5 0.0 0.5; 0.5 0.5 0.0])
-    primitive_vectors .*= transpose(bl.lattice_constants)
+    primitive_vectors .*= transpose(cf.lattice_constants)
     return primitive_vectors
 end
 
-BC_supported_types = Union{CubicBravaisLattice, OrthorhombicBravaisLattice, TetragonalBravaisLattice}
-function body_centered(bl::BC_supported_types)
+# BC_supported_types = Union{Cubic, Orthorhombic, Tetragonal}
+function body_centered!(cf::CrystalFamily)
     primitive_vectors = MMatrix{3,3}([1.0 0.0 0.0; 0.0 1.0 0.0; 0.5  0.5  0.5])
-    primitive_vectors .*= transpose(bl.lattice_constants)
+    primitive_vectors .*= transpose(cf.lattice_constants)
     return primitive_vectors
 end
 
-Base_supported_types = Union{MonoclinicBravaisLattice, OrthorhombicBravaisLattice}
-function base_centered(bl::Base_supported_types)
+function base_centered!(cf::CrystalFamily)
 
 end
 
@@ -148,24 +188,54 @@ end
 
 function get_lattice_points(lattice::LatticeWithBasis, N_unit_cells)
 
-    lattice_points = MArray{Tuple{N_unit_cells,N_unit_cells,N_unit_cells},SVector{3}}(undef)
+    n_basis_atoms = length(lattice.basis_vectors)
+    n_lattice_pts = n_basis_atoms * N_unit_cells
+
+    #Store in 1D?
+    lattice_points = MArray{Tuple{n_lattice_pts,n_lattice_pts,n_lattice_pts},SVector{3}}(undef)
+
+    for i in range(1,N_unit_cells), j in range(1,N_unit_cells), k in range(1,N_unit_cells)
+        for m in range(1,n_basis_atoms)
+            tmp = i.*lattice.primitive_vectors[1,:] .+ j.*lattice.primitive_vectors[2,:] .+ k.*lattice.primitive_vectors[3,:]
+            pt = tmp .+ lattice.basis_vectors[m]
+        end
+    end
 end
 
 function get_lattice_points(lattice::BravaisLattice, N_unit_cells)
 
+    #Store in 1D?
     lattice_points = MArray{Tuple{N_unit_cells,N_unit_cells,N_unit_cells},SVector{3}}(undef)
 
-    for i in range(0,N_unit_cells), j in range(0,N_unit_cells), k in range(0,N_unit_cells)
-        lattice_points[i,j,k] = i*crystal.b
+    for i in range(1,N_unit_cells), j in range(1,N_unit_cells), k in range(1,N_unit_cells)
+        lattice_points[i,j,k] = i.*lattice.primitive_vectors[1,:] .+ j.*lattice.primitive_vectors[2,:] .+ k.lattice.primitive_vectors[3,:]
     end
+
+    return lattice_points
 end
 
 function build_crystal(crystal::Crystal, N_unit_cells)
     @assert N_unit_cells > 0 "Number of unit cells should be positive"
-    # Generate coordiantes from lattice
-    lattice_points = get_lattice_points(crystal.lattice, N_unit_cells)
 
-    #Superimpose basis onto those points
+    lattice_points = get_lattice_points(crystal.lattice, N_unit_cells)
+    N_atoms = sum(length, lattice_points) * length(crystal.basis)
+
+    #Create flat arrays for atoms & coords
+    atoms = SVector{N_atoms,Atom}
+    coords = SVector{N_atoms,SVector{3}}
+
+    #Superimpose basis onto lattice points
+    i = 1
+    for lp in lattice_points
+        for basis in crystal.basis
+            coords[i] = lp .+ basis.position
+            atoms[i] = basis.atom
+            i += 1
+        end
+    end
+
+    #Create boundary that captures crystal
+    boundary = CubicBoundary()
 
     return atoms, coords, boundary
 end
@@ -178,31 +248,7 @@ end
 
 
 
-# #####################################################
-# # Implement some crystals
 
-
-
-# # Cubic Crystals
-# Cubic(a, num_unit_cells) = conventional(CubicBravaisLattice(a), num_unit_cells)
-# FCC(a, num_unit_cells) = face_centered(CubicBravaisLattice(a), num_unit_cells)
-# BCC(a, num_unit_cells) = body_centered(CubicBravaisLattice(a), num_unit_cells)
-
-# # Triclinic Crystals
-# Triclinic(a,b,c,α,β,γ,num_unit_cells) = conventional(TriclinicBravaisLattice(a,b,c,α,β,γ),num_unit_cells)
-
-# #Monoclinic Crystals
-# Monoclinic() = conventional()
-# BaseCenteredMonoclinic() = base_centered()
-
-# #Orthorhombic Crystals
-# Orthorhombic() = conventional()
-# BaseCenteredOrthorhombic() = base_centered()
-# BodyCenteredOrthorhombic() = body_centered()
-# FaceCenteredOrthorhombic() = face_centered()
-
-
-#Multi-Atom Basis Crystals
 
 
 #####################################################
