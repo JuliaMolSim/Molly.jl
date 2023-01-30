@@ -6,6 +6,7 @@
 export
     nothing
 
+ 
 #########
 # TYEPS #
 #########
@@ -20,6 +21,17 @@ struct BravaisLattice{T} <: Lattice
     crystal_family::CrystalFamily
     centering_type::CenteringTypes
     primitive_vectors::T
+end
+
+#Specific pattern at each bravais lattice point
+struct BasisAtom{T}
+    position::SVector{3,T}
+    atom::Atom
+end
+
+struct Crystal
+    lattice::Lattice
+    basis::SVector{BasisAtom}
 end
 
 function is_valid_bravais_lattice(cf, ct)
@@ -55,21 +67,12 @@ end
 
 
 #Allows construction of non-bravais lattices (e.g. diamond)
-struct LatticeWithBasis{BV} <: Lattice
-    lattice::BravaisLattice
-    basis_vectors::BV # 3 x N matrix
-end
+# struct LatticeWithBasis{BV} <: Lattice
+#     lattice::BravaisLattice
+#     basis_vectors::BV # 3 x N matrix
+# end
 
-#Specific pattern at each bravais lattice point
-struct BasisAtom{T}
-    position::SVector{3,T}
-    atom::Atom
-end
 
-struct Crystal
-    lattice::Lattice
-    basis::SVector{BasisAtom}
-end
 
 
 #####################################################
@@ -186,21 +189,21 @@ end
 
 #####################################################
 
-function get_lattice_points(lattice::LatticeWithBasis, N_unit_cells)
+# function get_lattice_points(lattice::LatticeWithBasis, N_unit_cells)
 
-    n_basis_atoms = length(lattice.basis_vectors)
-    n_lattice_pts = n_basis_atoms * N_unit_cells
+#     n_basis_atoms = length(lattice.basis_vectors)
+#     n_lattice_pts = n_basis_atoms * N_unit_cells
 
-    #Store in 1D?
-    lattice_points = MArray{Tuple{n_lattice_pts,n_lattice_pts,n_lattice_pts},SVector{3}}(undef)
+#     #Store in 1D?
+#     lattice_points = MArray{Tuple{n_lattice_pts,n_lattice_pts,n_lattice_pts},SVector{3}}(undef)
 
-    for i in range(1,N_unit_cells), j in range(1,N_unit_cells), k in range(1,N_unit_cells)
-        for m in range(1,n_basis_atoms)
-            tmp = i.*lattice.primitive_vectors[1,:] .+ j.*lattice.primitive_vectors[2,:] .+ k.*lattice.primitive_vectors[3,:]
-            pt = tmp .+ lattice.basis_vectors[m]
-        end
-    end
-end
+#     for i in range(1,N_unit_cells), j in range(1,N_unit_cells), k in range(1,N_unit_cells)
+#         for m in range(1,n_basis_atoms)
+#             tmp = i.*lattice.primitive_vectors[1,:] .+ j.*lattice.primitive_vectors[2,:] .+ k.*lattice.primitive_vectors[3,:]
+#             pt = tmp .+ lattice.basis_vectors[m]
+#         end
+#     end
+# end
 
 function get_lattice_points(lattice::BravaisLattice, N_unit_cells)
 
@@ -217,6 +220,7 @@ end
 function build_crystal(crystal::Crystal, N_unit_cells)
     @assert N_unit_cells > 0 "Number of unit cells should be positive"
 
+    #Probably a way to get LP an not allocate all this memory
     lattice_points = get_lattice_points(crystal.lattice, N_unit_cells)
     N_atoms = sum(length, lattice_points) * length(crystal.basis)
 
@@ -227,9 +231,9 @@ function build_crystal(crystal::Crystal, N_unit_cells)
     #Superimpose basis onto lattice points
     i = 1
     for lp in lattice_points
-        for basis in crystal.basis
-            coords[i] = lp .+ basis.position
-            atoms[i] = basis.atom
+        for basis_atom in crystal.basis
+            coords[i] = lp .+ basis_atom.position
+            atoms[i] = basis_atom.atom
             i += 1
         end
     end
@@ -241,16 +245,6 @@ function build_crystal(crystal::Crystal, N_unit_cells)
 end
 
 
-# These functions populate the conventional cell for the specific structures
-
-# cubic_unit_cell = [0.0, 0.0, 0.0; ]
-# return coords, boundary, atoms
-
-
-
-
-
-
 #####################################################
 # Helper functions
 
@@ -258,3 +252,12 @@ rotateAboutA!(v, θ) = copyto!(v, MMatrix{3,3}([1.0 0.0 0.0; 0.0 cos(θ) -sin(θ
 rotateAboutB!(v, θ) = copyto!(v, MMatrix{3,3}([cos(θ) 0.0 sin(θ); 0.0 1.0 0.0; -sin(θ) 0.0 cos(θ)]) * v)
 rotateAboutC!(v, θ) = copyto!(v, MMatrix{3,3}([cos(θ) -sin(θ) 0.0; sin(θ) cos(θ) 0.0; 0.0  0.0  1.0]) * v)
 
+
+#Implement common crystal structures
+
+function FCC(a,N_unit_cells)
+    bv = BravaisLattice(Cubic(a), face_centered::CenteringTypes)
+    basis = SVector(BasisAtom(SVector(0.0,0.0,0.0),Atom(mass=10u"u", σ=0.34u"nm", ϵ=1.005u"kJ * mol^-1"))
+    crys = Crystal(bv,basis)
+    return build_crystal(crys,N_unit_cells)
+end
