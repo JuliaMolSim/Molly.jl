@@ -163,23 +163,24 @@ end
 #####################################################
 
 
-function get_lattice_points(lattice::BravaisLattice, N_unit_cells)
+function get_lattice_points(lattice::BravaisLattice, Nx, Ny, Nz)
 
     #Store in 1D?
-    lattice_points = MArray{Tuple{N_unit_cells,N_unit_cells,N_unit_cells},SVector{3}}(undef)
+    lattice_points = SVector{Nx*Ny*Nz,SVector{3}}(undef)
 
-    for i in range(1,N_unit_cells), j in range(1,N_unit_cells), k in range(1,N_unit_cells)
-        lattice_points[i,j,k] = i.*lattice.primitive_vectors[1,:] .+ j.*lattice.primitive_vectors[2,:] .+ k.lattice.primitive_vectors[3,:]
+    for i in range(1,Nx), j in range(1,Ny), k in range(1,Nz)
+        idx = i + (j * Nx) + (k * Nx * Ny)
+        lattice_points[idx] = i.*lattice.primitive_vectors[1,:] .+ j.*lattice.primitive_vectors[2,:] .+ k.lattice.primitive_vectors[3,:]
     end
 
     return lattice_points
 end
 
-function build_crystal(crystal::Crystal, N_unit_cells)
+function replicate_unit_cell(crystal::Crystal, Nx, Ny, Nz)
     @assert N_unit_cells > 0 "Number of unit cells should be positive"
 
     #Probably a way to get LP an not allocate all this memory
-    lattice_points = get_lattice_points(crystal.lattice, N_unit_cells)
+    lattice_points = get_lattice_points(crystal.lattice, Nx, Ny, Nz)
     N_atoms = sum(length, lattice_points) * length(crystal.basis)
 
     #Create flat arrays for atoms & coords
@@ -212,10 +213,29 @@ rotateAboutC!(v, θ) = copyto!(v, MMatrix{3,3}([cos(θ) -sin(θ) 0.0; sin(θ) co
 
 
 #Implement common crystal structures
+struct FCC <: Crystal
+    lattice::Lattice
+    basis::SVector{BasisAtom}
+end
 
-function FCC(a,N_unit_cells)
-    bv = BravaisLattice(Cubic(a), face_centered::CenteringTypes)
-    basis = SVector(BasisAtom(SVector(0.0,0.0,0.0),Atom(mass=10u"u", σ=0.34u"nm", ϵ=1.005u"kJ * mol^-1"))
-    crys = Crystal(bv,basis)
-    return build_crystal(crys,N_unit_cells)
+function FCC(a, atom::Atom)
+    lattice = BravaisLattice(Cubic(a), FaceCentered())
+    basis = SVector(BasisAtom(SVector(0.0,0.0,0.0), atom))
+    return Crystal(lattice,basis)
+end
+
+struct BCC <: Crystal
+    
+end
+
+function BCC(a, atom::Atom)
+
+end
+
+struct Diamond <: Crystal
+
+end
+
+function Diamond(a, atom::Atom)
+
 end
