@@ -1,5 +1,7 @@
 #Add support for vectors in N_unit_cells
 #Only supports 3d crystals, cant make something like graphene
+#This framework should capture most of the crystals one would want to make
+    #but this framework is by no means generic enought to create anything
 
 #stop float promotion in primitive vectors??
 
@@ -13,9 +15,13 @@ export
 
 abstract type Lattice end
 abstract type CrystalFamily end
+abstract type CenteringType end
 
-@enum CenteringTypes primitive face_centered body_centered base_centered
-
+#Centering types for multiple dispatch
+struct Primitive <: CenteringType end
+struct FaceCentered <: CenteringType end
+struct BodyCentered <: CenteringType end
+struct BaseCentered <: CenteringType end
 
 struct BravaisLattice{T} <: Lattice
     crystal_family::CrystalFamily
@@ -23,9 +29,8 @@ struct BravaisLattice{T} <: Lattice
     primitive_vectors::T
 end
 
-#Specific pattern at each bravais lattice point
 struct BasisAtom{T}
-    position::SVector{3,T}
+    basis_vector::SVector{3,T}
     atom::Atom
 end
 
@@ -34,45 +39,11 @@ struct Crystal
     basis::SVector{BasisAtom}
 end
 
-function is_valid_bravais_lattice(cf, ct)
-    if ct == face_centered
-        return typeof(cf) ∈ [Cubic, Orthorhombic]
-    elseif ct == body_centered
-        return typeof(cf) ∈ [Cubic, Orthorhombic, Tetragonal]
-    elseif ct == base_centered
-        return typeof(cf) ∈ [Monoclinic, Orthorhombic]
-    else #primitive
-        return true
-end
 
 function BravaisLattice(cf::CrystalFamily, ct::CenteringTypes)
-
-    @assert is_valid_bravais_lattice(cf,ct) "Not a valid bravais lattice, see https://en.wikipedia.org/wiki/Bravais_lattice#In_3_dimensions"
-
-    #Can i replace this with multiple dispatch? : get_primitive_vectors(cf, ct)
-            #if there is probably can remove assert above, and julia will jsut throw No signature found error
-    p_vec = nothing
-    if ct == primitive
-        p_vec = primitive!(cf)
-    elseif ct == face_centered
-        p_vec = face_centered!(cf)
-    elseif ct == body_centered
-        p_vec = body_centered!(cf)
-    else
-        p_vec = base_centered!(cf)
-    end
-
-     return BravaisLattice{typeof(p_vec)}(cf, ct, p_vec)
+    p_vec = get_primitive_vectors(cf,ct)
+    return BravaisLattice{typeof(p_vec)}(cf, ct, p_vec)
 end
-
-
-#Allows construction of non-bravais lattices (e.g. diamond)
-# struct LatticeWithBasis{BV} <: Lattice
-#     lattice::BravaisLattice
-#     basis_vectors::BV # 3 x N matrix
-# end
-
-
 
 
 #####################################################
@@ -150,8 +121,7 @@ end
 
 #####################################################
 
-
-function primitive!(cf::CrystalFamily)
+function get_primitive_vectors(cf::CrystalFamily, ct::Primitive)
     primitive_vectors = MMatrix{3,3}([1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0])
     primitive_vectors .*= transpose(cf.lattice_constants)
 
@@ -170,40 +140,28 @@ function primitive!(cf::CrystalFamily)
     return primitive_vectors
 end
 
-function face_centered!(cf::CrystalFamily)
+FaceCenteredSupportedTypes = Union{Cubic, Orthorhombic}
+function get_primitive_vectors(cf::FaceCenteredSupportedTypes, ct::FaceCentered)
     primitive_vectors = MMatrix{3,3}([0.0 0.5 0.5; 0.5 0.0 0.5; 0.5 0.5 0.0])
     primitive_vectors .*= transpose(cf.lattice_constants)
     return primitive_vectors
 end
 
-# BC_supported_types = Union{Cubic, Orthorhombic, Tetragonal}
-function body_centered!(cf::CrystalFamily)
+BodyCenteredSupportedTypes = Union{Cubic, Orthorhombic, Tetragonal}
+function get_primitive_vectors(cf::BodyCenteredSupportedTypes, ct::BodyCentered)
     primitive_vectors = MMatrix{3,3}([1.0 0.0 0.0; 0.0 1.0 0.0; 0.5  0.5  0.5])
     primitive_vectors .*= transpose(cf.lattice_constants)
     return primitive_vectors
 end
 
-function base_centered!(cf::CrystalFamily)
+BaseCenteredSupportedTypes = Union{Monoclinic, Orthorhombic}
+function get_primitive_vectors(cf::BaseCenteredSupportedTypes, ct::BaseCentered)
 
 end
 
+
 #####################################################
 
-# function get_lattice_points(lattice::LatticeWithBasis, N_unit_cells)
-
-#     n_basis_atoms = length(lattice.basis_vectors)
-#     n_lattice_pts = n_basis_atoms * N_unit_cells
-
-#     #Store in 1D?
-#     lattice_points = MArray{Tuple{n_lattice_pts,n_lattice_pts,n_lattice_pts},SVector{3}}(undef)
-
-#     for i in range(1,N_unit_cells), j in range(1,N_unit_cells), k in range(1,N_unit_cells)
-#         for m in range(1,n_basis_atoms)
-#             tmp = i.*lattice.primitive_vectors[1,:] .+ j.*lattice.primitive_vectors[2,:] .+ k.*lattice.primitive_vectors[3,:]
-#             pt = tmp .+ lattice.basis_vectors[m]
-#         end
-#     end
-# end
 
 function get_lattice_points(lattice::BravaisLattice, N_unit_cells)
 
