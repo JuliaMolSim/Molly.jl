@@ -168,6 +168,7 @@ function get_lattice_points(lattice::BravaisLattice, Nx, Ny, Nz)
     #Store in 1D?
     lattice_points = SVector{Nx*Ny*Nz,SVector{3}}(undef)
 
+    #WRONG LOOP PARAMS
     for i in range(1,Nx), j in range(1,Ny), k in range(1,Nz)
         idx = i + (j * Nx) + (k * Nx * Ny)
         lattice_points[idx] = i.*lattice.primitive_vectors[1,:] .+ j.*lattice.primitive_vectors[2,:] .+ k.lattice.primitive_vectors[3,:]
@@ -199,6 +200,8 @@ function replicate_unit_cell(crystal::Crystal, Nx, Ny, Nz)
 
     #Create boundary that captures crystal
     boundary = CubicBoundary()
+    #return trinclinic if Triclinic crystasl
+
 
     return atoms, coords, boundary
 end
