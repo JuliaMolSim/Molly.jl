@@ -113,7 +113,7 @@ Base.length(inter_list::Union{InteractionList1Atoms, InteractionList2Atoms,
 function Base.zero(inter_list::InteractionList1Atoms{I, T}) where {I, T}
     n_inters = length(inter_list)
     return InteractionList1Atoms{I, T}(
-        fill(0 , n_inters),
+        fill(0, n_inters),
         zero.(inter_list.inters),
         fill("", n_inters),
     )
@@ -122,8 +122,8 @@ end
 function Base.zero(inter_list::InteractionList2Atoms{I, T}) where {I, T}
     n_inters = length(inter_list)
     return InteractionList2Atoms{I, T}(
-        fill(0 , n_inters),
-        fill(0 , n_inters),
+        fill(0, n_inters),
+        fill(0, n_inters),
         zero.(inter_list.inters),
         fill("", n_inters),
     )
@@ -132,9 +132,9 @@ end
 function Base.zero(inter_list::InteractionList3Atoms{I, T}) where {I, T}
     n_inters = length(inter_list)
     return InteractionList3Atoms{I, T}(
-        fill(0 , n_inters),
-        fill(0 , n_inters),
-        fill(0 , n_inters),
+        fill(0, n_inters),
+        fill(0, n_inters),
+        fill(0, n_inters),
         zero.(inter_list.inters),
         fill("", n_inters),
     )
@@ -143,10 +143,10 @@ end
 function Base.zero(inter_list::InteractionList4Atoms{I, T}) where {I, T}
     n_inters = length(inter_list)
     return InteractionList4Atoms{I, T}(
-        fill(0 , n_inters),
-        fill(0 , n_inters),
-        fill(0 , n_inters),
-        fill(0 , n_inters),
+        fill(0, n_inters),
+        fill(0, n_inters),
+        fill(0, n_inters),
+        fill(0, n_inters),
         zero.(inter_list.inters),
         fill("", n_inters),
     )
