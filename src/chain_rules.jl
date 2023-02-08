@@ -203,6 +203,10 @@ function ChainRulesCore.rrule(T::Type{<:PeriodicTorsion}, vs...)
 end
 
 duplicated_if_present(x, dx) = length(x) > 0 ? Duplicated(x, dx) : Const(x)
+active_if_present(x) = length(x) > 0 ? Active(x) : Const(x)
+
+nothing_to_tuple(x) = x
+nothing_to_tuple(::Nothing) = ()
 
 function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, neighbors,
                               n_threads) where {D, G, T}
@@ -219,8 +223,6 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
         d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:length(sys)]
         pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(sys.pairwise_inters))
         pairwise_inters_nl   = filter(inter ->  inter.nl_only, values(sys.pairwise_inters))
-        d_pairwise_inters_nonl = zero.(pairwise_inters_nonl)
-        d_pairwise_inters_nl   = zero.(pairwise_inters_nl  )
         sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
         sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
         sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
@@ -229,14 +231,14 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
         d_sils_2_atoms = zero.(sils_2_atoms)
         d_sils_3_atoms = zero.(sils_3_atoms)
         d_sils_4_atoms = zero.(sils_4_atoms)
-        autodiff(
+        grads = autodiff(
             forces_pair_spec!,
             Const,
-            Duplicated(fs, d_forces),
+            Duplicated(fs, convert(typeof(fs), d_forces)),
             Duplicated(sys.coords, d_coords),
             Duplicated(sys.atoms, d_atoms),
-            duplicated_if_present(pairwise_inters_nonl, d_pairwise_inters_nonl),
-            duplicated_if_present(pairwise_inters_nl  , d_pairwise_inters_nl  ),
+            active_if_present(pairwise_inters_nonl),
+            active_if_present(pairwise_inters_nl),
             duplicated_if_present(sils_1_atoms, d_sils_1_atoms),
             duplicated_if_present(sils_2_atoms, d_sils_2_atoms),
             duplicated_if_present(sils_3_atoms, d_sils_3_atoms),
@@ -248,7 +250,7 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
         )
         d_sys = Tangent{System}(
             atoms=d_atoms,
-            pairwise_inters=(d_pairwise_inters_nonl..., d_pairwise_inters_nl...),
+            pairwise_inters=(nothing_to_tuple(grads[1][4])..., nothing_to_tuple(grads[1][5])...),
             specific_inter_lists=(d_sils_1_atoms..., d_sils_2_atoms..., d_sils_3_atoms...,
                                   d_sils_4_atoms...),
             coords=d_coords,
@@ -274,8 +276,6 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), sys::System{
         d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:length(sys)]
         pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(sys.pairwise_inters))
         pairwise_inters_nl   = filter(inter ->  inter.nl_only, values(sys.pairwise_inters))
-        d_pairwise_inters_nonl = zero.(pairwise_inters_nonl)
-        d_pairwise_inters_nl   = zero.(pairwise_inters_nl  )
         sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
         sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
         sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
@@ -284,13 +284,13 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), sys::System{
         d_sils_2_atoms = zero.(sils_2_atoms)
         d_sils_3_atoms = zero.(sils_3_atoms)
         d_sils_4_atoms = zero.(sils_4_atoms)
-        autodiff(
+        grads = autodiff(
             potential_energy_pair_spec,
             Active,
             Duplicated(sys.coords, d_coords),
             Duplicated(sys.atoms, d_atoms),
-            duplicated_if_present(pairwise_inters_nonl, d_pairwise_inters_nonl),
-            duplicated_if_present(pairwise_inters_nl  , d_pairwise_inters_nl  ),
+            active_if_present(pairwise_inters_nonl),
+            active_if_present(pairwise_inters_nl),
             duplicated_if_present(sils_1_atoms, d_sils_1_atoms),
             duplicated_if_present(sils_2_atoms, d_sils_2_atoms),
             duplicated_if_present(sils_3_atoms, d_sils_3_atoms),
@@ -303,7 +303,7 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), sys::System{
         )
         d_sys = Tangent{System}(
             atoms=d_atoms,
-            pairwise_inters=(d_pairwise_inters_nonl..., d_pairwise_inters_nl...),
+            pairwise_inters=(nothing_to_tuple(grads[1][3])..., nothing_to_tuple(grads[1][4])...),
             specific_inter_lists=(d_sils_1_atoms..., d_sils_2_atoms..., d_sils_3_atoms...,
                                   d_sils_4_atoms...),
             coords=d_coords,
@@ -316,19 +316,24 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), sys::System{
 end
 
 function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, virial, d_virial, coords, d_coords,
-                                     atoms, d_atoms, boundary, inters, d_inters,
+                                     atoms, d_atoms, boundary, inters, grad_inters,
                                      neighbors, val_force_units)
-    Enzyme.autodiff_deferred(
+    grads = Enzyme.autodiff_deferred(
         pairwise_force_kernel!,
         Duplicated(fs_mat, d_fs_mat),
         Duplicated(virial, d_virial),
         Duplicated(coords, d_coords),
         Duplicated(atoms, d_atoms),
         Const(boundary),
-        Duplicated(inters, d_inters),
+        Active(inters),
         Const(neighbors),
         Const(val_force_units),
     )
+    sync_threads()
+
+    if threadIdx().x == 1 && blockIdx().x == 1
+        grad_inters[1] = grads[1][6]
+    end
     return nothing
 end
 
@@ -350,13 +355,14 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), virial,
         d_virial = zero(virial)
         d_coords = zero(coords)
         d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
-        d_pairwise_inters = zero.(pairwise_inters)
+        grad_pairwise_inters = CuArray([pairwise_inters])
         n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_force_kernel!(fs_mat,
                 d_fs_mat, virial, d_virial, coords, d_coords, atoms, d_atoms, boundary,
-                pairwise_inters, d_pairwise_inters, nbs, Val(force_units))
+                pairwise_inters, grad_pairwise_inters, nbs, Val(force_units))
 
+        d_pairwise_inters = Array(grad_pairwise_inters)[1]
         return NoTangent(), d_virial, d_coords, d_atoms, NoTangent(),
                d_pairwise_inters, NoTangent(), NoTangent(), NoTangent()
     end
@@ -365,24 +371,29 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), virial,
 end
 
 function grad_pairwise_pe_kernel!(pe_vec::CuDeviceVector{T}, d_pe_vec, coords, d_coords, atoms,
-                                  d_atoms, boundary, inters, d_inters, neighbors, val_energy_units,
-                                  shared_mem_size::Val{M}) where {T, M}
+                                  d_atoms, boundary, inters, grad_inters, neighbors,
+                                  val_energy_units, shared_mem_size::Val{M}) where {T, M}
     shared_pes = CuStaticSharedArray(T, M)
     d_shared_pes = CuStaticSharedArray(T, M)
     sync_threads()
 
-    Enzyme.autodiff_deferred(
+    grads = Enzyme.autodiff_deferred(
         pairwise_pe_kernel!,
         Duplicated(pe_vec, d_pe_vec),
         Duplicated(coords, d_coords),
         Duplicated(atoms, d_atoms),
         Const(boundary),
-        Duplicated(inters, d_inters),
+        Actove(inters),
         Const(neighbors),
         Const(val_energy_units),
         Const(shared_mem_size),
         Duplicated(shared_pes, d_shared_pes),
     )
+    sync_threads()
+
+    if threadIdx().x == 1 && blockIdx().x == 1
+        grad_inters[1] = grads[1][5]
+    end
     return nothing
 end
 
@@ -402,14 +413,15 @@ function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{S
         d_pe_vec = CuArray([d_pe_vec_arg[1]])
         d_coords = zero(coords)
         d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
-        d_pairwise_inters = zero.(pairwise_inters)
+        grad_pairwise_inters = CuArray([pairwise_inters])
         n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_pe_kernel!(pe_vec,
                 d_pe_vec, coords, d_coords, atoms, d_atoms, boundary,
-                pairwise_inters, d_pairwise_inters, nbs, Val(energy_units),
+                pairwise_inters, grad_pairwise_inters, nbs, Val(energy_units),
                 Val(n_threads_gpu))
 
+        d_pairwise_inters = Array(grad_pairwise_inters)[1]
         return NoTangent(), d_coords, d_atoms, NoTangent(), d_pairwise_inters, NoTangent(),
                NoTangent(), NoTangent()
     end
