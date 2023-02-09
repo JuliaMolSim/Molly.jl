@@ -63,6 +63,13 @@ function force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14)
     return force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)
 end
 
+# Allow GPU-specific force functions to be defined if required
+force_gpu(inter, dr, ci, cj, ai, aj, bnd, w14) = force(inter, dr, ci, cj, ai, aj, bnd, w14)
+force_gpu(inter, ci, bnd)             = force(inter, ci, bnd)
+force_gpu(inter, ci, cj, bnd)         = force(inter, ci, cj, bnd)
+force_gpu(inter, ci, cj, ck, bnd)     = force(inter, ci, cj, ck, bnd)
+force_gpu(inter, ci, cj, ck, cl, bnd) = force(inter, ci, cj, ck, cl, bnd)
+
 """
     SpecificForce1Atoms(f1)
 

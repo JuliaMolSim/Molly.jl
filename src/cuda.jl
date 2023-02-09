@@ -34,9 +34,9 @@ function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, a
         i, j, weight_14 = neighbors[inter_i]
         coord_i, coord_j = coords[i], coords[j]
         dr = vector(coord_i, coord_j, boundary)
-        f = force(inters[1], dr, coord_i, coord_j, atoms[i], atoms[j], boundary, weight_14)
+        f = force_gpu(inters[1], dr, coord_i, coord_j, atoms[i], atoms[j], boundary, weight_14)
         for inter in inters[2:end]
-            f += force(inter, dr, coord_i, coord_j, atoms[i], atoms[j], boundary, weight_14)
+            f += force_gpu(inter, dr, coord_i, coord_j, atoms[i], atoms[j], boundary, weight_14)
         end
         if unit(f[1]) != F
             # This triggers an error but it isn't printed
@@ -112,7 +112,7 @@ function specific_force_1_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
 
     if inter_i <= length(is)
         i = is[inter_i]
-        fs = force(inters[inter_i], coords[i], boundary)
+        fs = force_gpu(inters[inter_i], coords[i], boundary)
         if unit(fs.f1[1]) != F
             error("Wrong force unit returned, was expecting $F")
         end
@@ -135,7 +135,7 @@ function specific_force_2_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
 
     if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
-        fs = force(inters[inter_i], coords[i], coords[j], boundary)
+        fs = force_gpu(inters[inter_i], coords[i], coords[j], boundary)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
             error("Wrong force unit returned, was expecting $F")
         end
@@ -162,7 +162,7 @@ function specific_force_3_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
 
     if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
-        fs = force(inters[inter_i], coords[i], coords[j], coords[k], boundary)
+        fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
             error("Wrong force unit returned, was expecting $F")
         end
@@ -193,7 +193,7 @@ function specific_force_4_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
 
     if inter_i <= length(is)
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
-        fs = force(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary)
+        fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
             error("Wrong force unit returned, was expecting $F")
         end
