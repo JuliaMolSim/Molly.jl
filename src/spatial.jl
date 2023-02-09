@@ -439,6 +439,22 @@ function random_velocities(sys::AbstractSystem{2}, temp; rng=Random.GLOBAL_RNG)
     return velocity_2D.(masses(sys), temp, sys.k, rng)
 end
 
+function random_velocities(sys::System{3, true}, temp; rng=Random.GLOBAL_RNG)
+    if isbits(rng)
+        return velocity_3D.(masses(sys), temp, sys.k, rng)
+    else
+        return CuArray(velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
+    end
+end
+
+function random_velocities(sys::System{2, true}, temp; rng=Random.GLOBAL_RNG)
+    if isbits(rng)
+        return velocity_2D.(masses(sys), temp, sys.k, rng)
+    else
+        return CuArray(velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
+    end
+end
+
 """
     random_velocities!(sys, temp)
 
