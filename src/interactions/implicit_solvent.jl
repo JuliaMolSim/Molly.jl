@@ -786,9 +786,34 @@ function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, bounda
     end
 end
 
+function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, charges)
+    coords, boundary = sys.coords, sys.boundary
+    coords_i = @view coords[inter.is]
+    coords_j = @view coords[inter.js]
+    charges_i = @view charges[inter.is]
+    charges_j = @view charges[inter.js]
+    Bsi = @view Bs[inter.is]
+    Bsj = @view Bs[inter.js]
+    loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i,
+                                  charges_j, Bsi, Bsj, inter.dist_cutoff, inter.factor_solute,
+                                  inter.factor_solvent, inter.kappa, (boundary,))
+    born_forces_1 = born_forces .+ dropdims(sum(get_bi.(loop_res_1); dims=2); dims=2) .+
+                                   dropdims(sum(get_bj.(loop_res_1); dims=1); dims=1)
+    fs = dropdims(sum(get_fi.(loop_res_1); dims=2); dims=2) .+
+         dropdims(sum(get_fj.(loop_res_1); dims=1); dims=1)
+
+    born_forces_2 = born_forces_1 .* (Bs .^ 2) .* B_grads
+
+    bis = @view born_forces_2[inter.is]
+    loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, I_grads, inter.oris, inter.srjs,
+                                  inter.dist_cutoff, (boundary,))
+
+    return fs .+ dropdims(sum(get_fi.(loop_res_2); dims=2); dims=2) .+
+                 dropdims(sum(get_fj.(loop_res_2); dims=1); dims=1)
+end
+
 function forces(inter::AbstractGBSA, sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
-    coords, atoms, boundary = sys.coords, sys.atoms, sys.boundary
-    Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, boundary)
+    Bs, B_grads, I_grads = born_radii_and_grad(inter, sys.coords, sys.boundary)
 
     if inter.use_ACE
         radii = inter.offset_radii .+ inter.offset
@@ -798,27 +823,8 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing; n_threads::Integer=
         born_forces = zeros(typeof(inter.sa_factor * inter.dist_cutoff), length(sys))
     end
 
-    coords_i = @view coords[inter.is]
-    coords_j = @view coords[inter.js]
-    charges = charge.(atoms)
-    charges_i = @view charges[inter.is]
-    charges_j = @view charges[inter.js]
-    Bsi = @view Bs[inter.is]
-    Bsj = @view Bs[inter.js]
-    loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i,
-                                  charges_j, Bsi, Bsj, inter.dist_cutoff, inter.factor_solute,
-                                  inter.factor_solvent, inter.kappa, (boundary,))
-    born_forces = born_forces .+ dropdims(sum(get_bi.(loop_res_1); dims=2); dims=2)
-    born_forces = born_forces .+ dropdims(sum(get_bj.(loop_res_1); dims=1); dims=1)
-    fs = dropdims(sum(get_fi.(loop_res_1); dims=2); dims=2) .+ dropdims(sum(get_fj.(loop_res_1); dims=1); dims=1)
-
-    born_forces_2 = born_forces .* (Bs .^ 2) .* B_grads
-
-    bis = @view born_forces_2[inter.is]
-    loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, I_grads, inter.oris, inter.srjs,
-                                    inter.dist_cutoff, (boundary,))
-
-    return fs .+ dropdims(sum(get_fi.(loop_res_2); dims=2); dims=2) .+ dropdims(sum(get_fj.(loop_res_2); dims=1); dims=1)
+    charges = charge.(sys.atoms)
+    return forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, charges)
 end
 
 function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
