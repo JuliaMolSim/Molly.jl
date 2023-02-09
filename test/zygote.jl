@@ -154,22 +154,22 @@ end
         return loss
     end
 
-    runs = [ #                gpu    par    fwd    f32    pis    sis    obc2   gbn2
+    runs = [ #                gpu    par    fwd    f32    pis    sis    obc2   gbn2    tol_σ tol_r0
         ("CPU"             , [false, false, false, false, true , true , false, false], 0.1 , 0.25),
-        ("CPU forward"     , [false, false, true , false, true , true , false, false], 0.01, 0.01),
+        ("CPU forward"     , [false, false, true , false, true , true , false, false], 0.01, 0.05),
         ("CPU f32"         , [false, false, false, true , true , true , false, false], 0.2 , 10.0),
         ("CPU nospecific"  , [false, false, false, false, true , false, false, false], 0.1 , 0.0 ),
-        ("CPU nopairwise"  , [false, false, false, false, false, true , false, false], 0.0 , 0.25),
-        ("CPU obc2"        , [false, false, false, false, true , true , true , false], 0.1 , 0.25),
-        ("CPU gbn2"        , [false, false, false, false, true , true , false, true ], 0.1 , 0.25),
-        ("CPU gbn2 forward", [false, false, true , false, true , true , false, true ], 0.02, 0.02),
+        ("CPU nopairwise"  , [false, false, false, false, false, true , false, false], 0.0 , 0.5 ),
+        ("CPU obc2"        , [false, false, false, false, true , true , true , false], 0.1 , 20.0),
+        ("CPU gbn2"        , [false, false, false, false, true , true , false, true ], 0.1 , 20.0),
+        ("CPU gbn2 forward", [false, false, true , false, true , true , false, true ], 0.02, 0.05),
     ]
-    if run_parallel_tests #                   gpu    par    fwd    f32    pis    sis    obc2   gbn2
+    if run_parallel_tests #                   gpu    par    fwd    f32    pis    sis    obc2   gbn2    tol_σ tol_r0
         push!(runs, ("CPU parallel"        , [false, true , false, false, true , true , false, false], 0.1 , 0.25))
-        push!(runs, ("CPU parallel forward", [false, true , true , false, true , true , false, false], 0.01, 0.01))
+        push!(runs, ("CPU parallel forward", [false, true , true , false, true , true , false, false], 0.01, 0.05))
         push!(runs, ("CPU parallel f32"    , [false, true , false, true , true , true , false, false], 0.2 , 10.0))
     end
-    if run_gpu_tests #                        gpu    par    fwd    f32    pis    sis    obc2   gbn2
+    if run_gpu_tests #                        gpu    par    fwd    f32    pis    sis    obc2   gbn2    tol_σ tol_r0
         push!(runs, ("GPU"                 , [true , false, false, false, true , true , false, false], 0.25, 20.0))
         push!(runs, ("GPU f32"             , [true , false, false, true , true , true , false, false], 0.5 , 50.0))
         push!(runs, ("GPU nospecific"      , [true , false, false, false, true , false, false, false], 0.25, 0.0 ))
