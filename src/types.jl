@@ -320,15 +320,21 @@ struct NoNeighborList
     n_atoms::Int
 end
 
-Base.length(nl::NoNeighborList) = (nl.n_atoms * (nl.n_atoms - 1)) ÷ 2
+n_atoms_to_n_pairs(n_atoms::Integer) = (n_atoms * (n_atoms - 1)) ÷ 2
 
-function Base.getindex(nl::NoNeighborList, ind::Integer)
-    N = nl.n_atoms
+Base.length(nl::NoNeighborList) = n_atoms_to_n_pairs(nl.n_atoms)
+
+function pair_index(n_atoms::Integer, ind::Integer)
     kz = ind - 1
-    iz = N - 2 - Int(floor(sqrt(-8 * kz + 4 * N * (N - 1) - 7) / 2 - 0.5))
-    jz = kz + iz + 1 - (N * (N - 1)) ÷ 2 + ((N - iz) * ((N - iz) - 1)) ÷ 2
+    iz = n_atoms - 2 - Int(floor(sqrt(-8 * kz + 4 * n_atoms * (n_atoms - 1) - 7) / 2 - 0.5))
+    jz = kz + iz + 1 - (n_atoms * (n_atoms - 1)) ÷ 2 + ((n_atoms - iz) * ((n_atoms - iz) - 1)) ÷ 2
     i = iz + 1
     j = jz + 1
+    return i, j
+end
+
+function Base.getindex(nl::NoNeighborList, ind::Integer)
+    i, j = pair_index(nl.n_atoms, ind)
     return i, j, false
 end
 
