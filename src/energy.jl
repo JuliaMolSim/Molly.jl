@@ -229,10 +229,15 @@ function potential_energy(s::System{D, true, T}, neighbors=nothing;
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
-    if length(pairwise_inters_nl) > 0 && length(neighbors) > 0
-        nbs = @view neighbors.list[1:neighbors.n]
-        pe_vec += pairwise_pe_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-                                  nbs, s.energy_units, Val(T))
+    if length(pairwise_inters_nl) > 0
+        if isnothing(neighbors)
+            error("An interaction uses the neighbor list but neighbors is nothing")
+        end
+        if length(neighbors) > 0
+            nbs = @view neighbors.list[1:neighbors.n]
+            pe_vec += pairwise_pe_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nl,
+                                    nbs, s.energy_units, Val(T))
+        end
     end
 
     for inter_list in values(s.specific_inter_lists)
