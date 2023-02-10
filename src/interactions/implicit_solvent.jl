@@ -812,6 +812,148 @@ function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, charges)
                  dropdims(sum(get_fj.(loop_res_2); dims=1); dims=1)
 end
 
+function cuda_threads_blocks_gbsa(n_inters)
+    n_threads = 256
+    n_blocks = cld(n_inters, n_threads)
+    return n_threads, n_blocks
+end
+
+function forces_gbsa(sys::System{3, true, T}, inter, Bs, B_grads, I_grads, born_forces,
+                     charges) where T
+    n_atoms = length(sys)
+    fs_mat = CUDA.zeros(T, 3, n_atoms)
+    born_forces_ustrip = ustrip.(born_forces)
+
+    n_inters = n_atoms_to_n_pairs(n_atoms) + n_atoms
+    n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_1_kernel!(
+                fs_mat, born_forces_ustrip, sys.coords, sys.boundary, inter.dist_cutoff,
+                inter.factor_solute, inter.factor_solvent, inter.kappa, Bs, charges,
+                Val(sys.force_units))
+
+    n_inters = n_atoms ^ 2
+    n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_2_kernel!(
+                fs_mat, born_forces_ustrip, sys.coords, sys.boundary, inter.dist_cutoff,
+                inter.offset_radii, inter.scaled_offset_radii, Bs, B_grads, I_grads,
+                Val(sys.force_units))
+
+    fs = reinterpret(SVector{3, T}, vec(fs_mat)) * sys.force_units
+    return fs
+end
+
+function gbsa_force_1_kernel!(forces, born_forces, coords_var, boundary, dist_cutoff, factor_solute,
+                              factor_solvent, kappa, Bs_var, charges_var, ::Val{F}) where F
+    coords  = CUDA.Const(coords_var)
+    Bs      = CUDA.Const(Bs_var)
+    charges = CUDA.Const(charges_var)
+
+    n_atoms = length(coords)
+    n_inters_not_self = n_atoms_to_n_pairs(n_atoms)
+    n_inters = n_inters_not_self + n_atoms
+    tidx = threadIdx().x
+    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+
+    if inter_i <= n_inters
+        if inter_i <= n_inters_not_self
+            i, j = pair_index(n_atoms, inter_i)
+        else
+            i = inter_i - n_inters_not_self
+            j = i
+        end
+        dr = vector(coords[i], coords[j], boundary)
+        r2 = sum(abs2, dr)
+
+        if iszero_value(dist_cutoff) || r2 <= dist_cutoff^2
+            Bi, Bj = Bs[i], Bs[j]
+            alpha2_ij = Bi * Bj
+            D = r2 / (4 * alpha2_ij)
+            exp_term = exp(-D)
+            denominator2 = r2 + alpha2_ij * exp_term
+            denominator = sqrt(denominator2)
+            if iszero_value(kappa)
+                pre_factor = factor_solute + factor_solvent
+            else
+                pre_factor = factor_solute + exp(-kappa * denominator) * factor_solvent +
+                                kappa * denominator * exp(-kappa * denominator) * factor_solvent
+            end
+            Gpol = (pre_factor * charges[i] * charges[j]) / denominator
+            dGpol_dr = -Gpol * (1 - exp_term/4) / denominator2
+            dGpol_dalpha2_ij = -Gpol * exp_term * (1 + D) / (2 * denominator2)
+
+            change_born_force_i = dGpol_dalpha2_ij * Bj
+            Atomix.@atomic :monotonic born_forces[i] += change_born_force_i
+            if i != j
+                change_born_force_j = dGpol_dalpha2_ij * Bi
+                Atomix.@atomic :monotonic born_forces[j] += change_born_force_j
+                fdr = dr * dGpol_dr
+                if unit(fdr[1]) != F
+                    error("Wrong force unit returned, was expecting $F but got $(unit(fdr[1]))")
+                end
+                dx, dy, dz = ustrip(fdr[1]), ustrip(fdr[2]), ustrip(fdr[3])
+                Atomix.@atomic :monotonic forces[1, i] +=  dx
+                Atomix.@atomic :monotonic forces[1, j] += -dx
+                Atomix.@atomic :monotonic forces[2, i] +=  dy
+                Atomix.@atomic :monotonic forces[2, j] += -dy
+                Atomix.@atomic :monotonic forces[3, i] +=  dz
+                Atomix.@atomic :monotonic forces[3, j] += -dz
+            end
+        end
+    end
+    return nothing
+end
+
+function gbsa_force_2_kernel!(forces, born_forces, coords_var, boundary, dist_cutoff, or_var,
+                              sor_var, Bs_var, B_grads_var, I_grads_var, ::Val{F}) where F
+    coords  = CUDA.Const(coords_var)
+    or      = CUDA.Const(or_var)
+    sor     = CUDA.Const(sor_var)
+    Bs      = CUDA.Const(Bs_var)
+    B_grads = CUDA.Const(B_grads_var)
+    I_grads = CUDA.Const(I_grads_var)
+
+    n_atoms = length(coords)
+    n_inters = n_atoms ^ 2
+    tidx = threadIdx().x
+    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+
+    if inter_i <= n_inters
+        i = cld(inter_i, n_atoms)
+        j = (inter_i - 1) % n_atoms + 1
+        if i != j
+            dr = vector(coords[i], coords[j], boundary)
+            r = norm(dr)
+
+            if iszero_value(dist_cutoff) || r <= dist_cutoff
+                ori, srj = or[i], sor[j]
+                rsrj = r + srj
+                if ori < rsrj
+                    D = abs(r - srj)
+                    L = inv(max(ori, D))
+                    U = inv(rsrj)
+                    rinv = inv(r)
+                    r2inv = rinv^2
+                    t3 = (1 + (srj^2)*r2inv)*(L^2 - U^2)/8 + log(U/L)*r2inv/4
+                    bi = born_forces[i] * (Bs[i] ^ 2) * B_grads[i]
+                    de = bi * (t3 - I_grads[i, j]) * rinv
+                    fdr = -dr * de
+                    if unit(fdr[1]) != F
+                        error("Wrong force unit returned, was expecting $F but got $(unit(fdr[1]))")
+                    end
+                    dx, dy, dz = ustrip(fdr[1]), ustrip(fdr[2]), ustrip(fdr[3])
+                    Atomix.@atomic :monotonic forces[1, i] +=  dx
+                    Atomix.@atomic :monotonic forces[1, j] += -dx
+                    Atomix.@atomic :monotonic forces[2, i] +=  dy
+                    Atomix.@atomic :monotonic forces[2, j] += -dy
+                    Atomix.@atomic :monotonic forces[3, i] +=  dz
+                    Atomix.@atomic :monotonic forces[3, j] += -dz
+                end
+            end
+        end
+    end
+    return nothing
+end
+
 function forces(inter::AbstractGBSA, sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     Bs, B_grads, I_grads = born_radii_and_grad(inter, sys.coords, sys.boundary)
 
