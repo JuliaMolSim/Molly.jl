@@ -820,16 +820,18 @@ end
 
 function forces_gbsa(sys::System{D, true, T}, inter, Bs, B_grads, I_grads, born_forces,
                      charges) where {D, T}
-    fs_mat_1, born_forces_mod_ustrip = gbsa_force_1_gpu(sys, inter, Bs, charges)
+    fs_mat_1, born_forces_mod_ustrip = gbsa_force_1_gpu(sys, inter.dist_cutoff, inter.factor_solute,
+                                                inter.factor_solvent, inter.kappa, Bs, charges)
     born_forces_units = born_forces .+ born_forces_mod_ustrip * unit(eltype(born_forces))
-    fs_mat_2 = gbsa_force_2_gpu(sys, inter, Bs, B_grads, I_grads, born_forces_units,
+    fs_mat_2 = gbsa_force_2_gpu(sys, inter.dist_cutoff, Bs, B_grads, I_grads, born_forces_units,
                                 inter.offset_radii, inter.scaled_offset_radii)
     fs_mat = fs_mat_1 .+ fs_mat_2
     fs = reinterpret(SVector{D, T}, vec(fs_mat)) * sys.force_units
     return fs
 end
 
-function gbsa_force_1_gpu(sys::System{D, true, T}, inter, Bs, charges) where {D, T}
+function gbsa_force_1_gpu(sys::System{D, true, T}, dist_cutoff, factor_solute, factor_solvent,
+                          kappa, Bs, charges) where {D, T}
     n_atoms = length(sys)
     fs_mat = CUDA.zeros(T, D, n_atoms)
     born_forces_mod_ustrip = CUDA.zeros(T, n_atoms)
@@ -837,14 +839,14 @@ function gbsa_force_1_gpu(sys::System{D, true, T}, inter, Bs, charges) where {D,
     n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
 
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_1_kernel!(
-                fs_mat, born_forces_mod_ustrip, sys.coords, sys.boundary, inter.dist_cutoff,
-                inter.factor_solute, inter.factor_solvent, inter.kappa, Bs, charges,
+                fs_mat, born_forces_mod_ustrip, sys.coords, sys.boundary, dist_cutoff,
+                factor_solute, factor_solvent, kappa, Bs, charges,
                 Val(D), Val(sys.force_units))
 
     return fs_mat, born_forces_mod_ustrip
 end
 
-function gbsa_force_2_gpu(sys::System{D, true, T}, inter, Bs, B_grads, I_grads, born_forces,
+function gbsa_force_2_gpu(sys::System{D, true, T}, dist_cutoff, Bs, B_grads, I_grads, born_forces,
                           offset_radii, scaled_offset_radii) where {D, T}
     n_atoms = length(sys)
     fs_mat = CUDA.zeros(T, D, n_atoms)
@@ -852,7 +854,7 @@ function gbsa_force_2_gpu(sys::System{D, true, T}, inter, Bs, B_grads, I_grads, 
     n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
 
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_2_kernel!(
-                fs_mat, born_forces, sys.coords, sys.boundary, inter.dist_cutoff, offset_radii,
+                fs_mat, born_forces, sys.coords, sys.boundary, dist_cutoff, offset_radii,
                 scaled_offset_radii, Bs, B_grads, I_grads, Val(D), Val(sys.force_units))
 
     return fs_mat
