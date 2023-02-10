@@ -316,13 +316,12 @@ function forces(s::System{D, true, T}, neighbors=nothing;
                 n_threads::Integer=Threads.nthreads()) where {D, T}
     n_atoms = length(s)
     fs_mat = CUDA.zeros(T, D, n_atoms)
-    virial = CUDA.zeros(T, 1)
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
-        fs_mat += pairwise_force_gpu(virial, s.coords, s.atoms, s.boundary,
-                                     pairwise_inters_nonl, nbs, s.force_units, Val(T))
+        fs_mat += pairwise_force_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
+                                     nbs, s.force_units, Val(T))
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
@@ -332,8 +331,8 @@ function forces(s::System{D, true, T}, neighbors=nothing;
         end
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]
-            fs_mat += pairwise_force_gpu(virial, s.coords, s.atoms, s.boundary,
-                                         pairwise_inters_nl, nbs, s.force_units, Val(T))
+            fs_mat += pairwise_force_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nl,
+                                         nbs, s.force_units, Val(T))
         end
     end
 

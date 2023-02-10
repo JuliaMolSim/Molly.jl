@@ -315,13 +315,11 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), sys::System{
     return Y, potential_energy_pair_spec_pullback
 end
 
-function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, virial, d_virial, coords, d_coords,
-                                     atoms, d_atoms, boundary, inters, grad_inters,
-                                     neighbors, val_force_units)
+function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, d_atoms,
+                                     boundary, inters, grad_inters, neighbors, val_force_units)
     grads = Enzyme.autodiff_deferred(
         pairwise_force_kernel!,
         Duplicated(fs_mat, d_fs_mat),
-        Duplicated(virial, d_virial),
         Duplicated(coords, d_coords),
         Duplicated(atoms, d_atoms),
         Const(boundary),
@@ -337,34 +335,31 @@ function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, virial, d_virial, coords,
     return nothing
 end
 
-function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), virial,
-                              coords::AbstractArray{SVector{D, C}}, atoms,
-                              boundary, pairwise_inters, nbs, force_units,
+function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArray{SVector{D, C}},
+                              atoms, boundary, pairwise_inters, nbs, force_units,
                               val_ft::Val{T}) where {D, C, T}
     if force_units != NoUnits
         error("Taking gradients through force calculation is not compatible with units, " *
               "system force units are $force_units")
     end
-    Y = pairwise_force_gpu(virial, coords, atoms, boundary, pairwise_inters,
-                           nbs, force_units, val_ft)
+    Y = pairwise_force_gpu(coords, atoms, boundary, pairwise_inters, nbs, force_units, val_ft)
 
     function pairwise_force_gpu_pullback(d_fs_mat)
         n_atoms = length(atoms)
         z = zero(T)
         fs_mat = CUDA.zeros(T, D, n_atoms)
-        d_virial = zero(virial)
         d_coords = zero(coords)
         d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
         grad_pairwise_inters = CuArray([pairwise_inters])
         n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_force_kernel!(fs_mat,
-                d_fs_mat, virial, d_virial, coords, d_coords, atoms, d_atoms, boundary,
-                pairwise_inters, grad_pairwise_inters, nbs, Val(force_units))
+                d_fs_mat, coords, d_coords, atoms, d_atoms, boundary, pairwise_inters,
+                grad_pairwise_inters, nbs, Val(force_units))
 
         d_pairwise_inters = Array(grad_pairwise_inters)[1]
-        return NoTangent(), d_virial, d_coords, d_atoms, NoTangent(),
-               d_pairwise_inters, NoTangent(), NoTangent(), NoTangent()
+        return NoTangent(), d_coords, d_atoms, NoTangent(), d_pairwise_inters, NoTangent(),
+               NoTangent(), NoTangent()
     end
 
     return Y, pairwise_force_gpu_pullback

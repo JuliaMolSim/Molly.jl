@@ -12,16 +12,16 @@ function cuda_threads_blocks_specific(n_inters)
     return n_threads, n_blocks
 end
 
-function pairwise_force_gpu(virial, coords::AbstractArray{SVector{D, C}}, atoms, boundary,
+function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundary,
                             pairwise_inters, nbs, force_units, ::Val{T}) where {D, C, T}
     fs_mat = CUDA.zeros(T, D, length(atoms))
     n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel!(
-            fs_mat, virial, coords, atoms, boundary, pairwise_inters, nbs, Val(force_units))
+            fs_mat, coords, atoms, boundary, pairwise_inters, nbs, Val(force_units))
     return fs_mat
 end
 
-function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, atoms_var, boundary,
+function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, coords_var, atoms_var, boundary,
                                 inters, neighbors_var, ::Val{F}) where {T, F}
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
@@ -58,7 +58,6 @@ function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, virial, coords_var, a
             Atomix.@atomic :monotonic forces[3, j] +=  dz
         end
         rij_fij = ustrip(norm(dr) * norm(f))
-        virial[] += rij_fij
     end
     return nothing
 end
