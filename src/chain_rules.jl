@@ -380,7 +380,7 @@ function grad_pairwise_pe_kernel!(pe_vec::CuDeviceVector{T}, d_pe_vec, coords, d
         Duplicated(coords, d_coords),
         Duplicated(atoms, d_atoms),
         Const(boundary),
-        Actove(inters),
+        Active(inters),
         Const(neighbors),
         Const(val_energy_units),
         Const(shared_mem_size),
@@ -647,4 +647,141 @@ function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
     end
 
     return Y, specific_pe_gpu_pullback
+end
+
+function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
+                                   d_born_forces_mod_ustrip, coords, d_coords, boundary,
+                                   dist_cutoff, factor_solute, grad_factor_solute, factor_solvent,
+                                   grad_factor_solvent, kappa, grad_kappa, Bs, d_Bs,
+                                   charges, d_charges, val_dims, val_force_units)
+    grads = Enzyme.autodiff_deferred(
+        gbsa_force_1_kernel!,
+        Duplicated(fs_mat, d_fs_mat),
+        Duplicated(born_forces_mod_ustrip, d_born_forces_mod_ustrip),
+        Duplicated(coords, d_coords),
+        Const(boundary),
+        Const(dist_cutoff),
+        Active(factor_solute),
+        Active(factor_solvent),
+        Active(kappa),
+        Duplicated(Bs, d_Bs),
+        Duplicated(charges, d_charges),
+        Const(val_dims),
+        Const(val_force_units),
+    )
+    sync_threads()
+
+    if threadIdx().x == 1 && blockIdx().x == 1
+        grad_factor_solute[1]  = grads[1][6]
+        grad_factor_solvent[1] = grads[1][7]
+        grad_kappa[1]          = grads[1][8]
+    end
+    return nothing
+end
+
+function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), sys::System{D, true, T}, dist_cutoff,
+                              factor_solute, factor_solvent, kappa, Bs, charges) where {D, T}
+    if sys.force_units != NoUnits
+        error("Taking gradients through force calculation is not compatible with units, " *
+              "system force units are $(sys.force_units)")
+    end
+    Y = gbsa_force_1_gpu(sys, dist_cutoff, factor_solute, factor_solvent, kappa, Bs, charges)
+
+    function gbsa_force_1_gpu_pullback(d_args)
+        d_fs_mat, d_born_forces_mod_ustrip = d_args[1], d_args[2]
+        n_atoms = length(sys)
+        fs_mat = CUDA.zeros(T, D, n_atoms)
+        born_forces_mod_ustrip = CUDA.zeros(T, n_atoms)
+        d_coords = zero(sys.coords)
+        grad_factor_solute  = CUDA.zeros(T, 1)
+        grad_factor_solvent = CUDA.zeros(T, 1)
+        grad_kappa          = CUDA.zeros(T, 1)
+        d_Bs = zero(Bs)
+        d_charges = zero(charges)
+        n_inters = n_atoms_to_n_pairs(n_atoms) + n_atoms
+        n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_gbsa_force_1_kernel!(
+            fs_mat, d_fs_mat, born_forces_mod_ustrip, d_born_forces_mod_ustrip, sys.coords,
+            d_coords, sys.boundary, dist_cutoff, factor_solute, grad_factor_solute,
+            factor_solvent, grad_factor_solvent, kappa, grad_kappa, Bs, d_Bs, charges,
+            d_charges, Val(D), Val(sys.force_units))
+
+        z = zero(T)
+        d_sys = Tangent{System}(
+            atoms=CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms]),
+            coords=d_coords,
+            boundary=CubicBoundary(z),
+        )
+        d_factor_solute  = Array(grad_factor_solute )[1]
+        d_factor_solvent = Array(grad_factor_solvent)[1]
+        d_kappa          = Array(grad_kappa         )[1]
+        return NoTangent(), d_sys, NoTangent(), d_factor_solute, d_factor_solvent,
+               d_kappa, d_Bs, d_charges
+    end
+
+    return Y, gbsa_force_1_gpu_pullback
+end
+
+function grad_gbsa_force_2_kernel!(fs_mat, d_fs_mat, born_forces, d_born_forces, coords, d_coords,
+                                   boundary, dist_cutoff, or, d_or, sor, d_sor, Bs, d_Bs, B_grads,
+                                   d_B_grads, I_grads, d_I_grads, val_dims, val_force_units)
+    Enzyme.autodiff_deferred(
+        gbsa_force_2_kernel!,
+        Duplicated(fs_mat, d_fs_mat),
+        Duplicated(born_forces, d_born_forces),
+        Duplicated(coords, d_coords),
+        Const(boundary),
+        Const(dist_cutoff),
+        Duplicated(or, d_or),
+        Duplicated(sor, d_sor),
+        Duplicated(Bs, d_Bs),
+        Duplicated(B_grads, d_B_grads),
+        Duplicated(I_grads, d_I_grads),
+        Const(val_dims),
+        Const(val_force_units),
+    )
+    return nothing
+end
+
+function ChainRulesCore.rrule(::typeof(gbsa_force_2_gpu), sys::System{D, true, T}, dist_cutoff, Bs,
+                              B_grads, I_grads, born_forces, offset_radii,
+                              scaled_offset_radii) where {D, T}
+    if sys.force_units != NoUnits
+        error("Taking gradients through force calculation is not compatible with units, " *
+              "system force units are $(sys.force_units)")
+    end
+    Y = gbsa_force_2_gpu(sys, dist_cutoff, Bs, B_grads, I_grads, born_forces, offset_radii,
+                         scaled_offset_radii)
+
+    function gbsa_force_2_gpu_pullback(d_fs_mat)
+        n_atoms = length(sys)
+        fs_mat = CUDA.zeros(T, D, n_atoms)
+        d_coords = zero(sys.coords)
+        d_born_forces = zero(born_forces)
+        d_offset_radii = zero(offset_radii)
+        d_scaled_offset_radii = zero(scaled_offset_radii)
+        d_Bs = zero(Bs)
+        d_B_grads = zero(B_grads)
+        d_I_grads = zero(I_grads)
+        n_inters = n_atoms ^ 2
+        n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_gbsa_force_2_kernel!(
+            fs_mat, d_fs_mat, born_forces, d_born_forces, sys.coords, d_coords, sys.boundary,
+            dist_cutoff, offset_radii, d_offset_radii, scaled_offset_radii,
+            d_scaled_offset_radii, Bs, d_Bs, B_grads, d_B_grads, I_grads, d_I_grads,
+            Val(D), Val(sys.force_units))
+
+        z = zero(T)
+        d_sys = Tangent{System}(
+            atoms=CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms]),
+            coords=d_coords,
+            boundary=CubicBoundary(z),
+        )
+        return NoTangent(), d_sys, NoTangent(), d_Bs, d_B_grads, d_I_grads, d_born_forces,
+               d_offset_radii, d_scaled_offset_radii
+    end
+
+    return Y, gbsa_force_2_gpu_pullback
 end
