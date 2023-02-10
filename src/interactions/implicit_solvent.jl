@@ -831,10 +831,11 @@ function forces_gbsa(sys::System{3, true, T}, inter, Bs, B_grads, I_grads, born_
                 inter.factor_solute, inter.factor_solvent, inter.kappa, Bs, charges,
                 Val(sys.force_units))
 
+    born_forces_units = born_forces_ustrip * unit(eltype(born_forces))
     n_inters = n_atoms ^ 2
     n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_2_kernel!(
-                fs_mat, born_forces_ustrip, sys.coords, sys.boundary, inter.dist_cutoff,
+                fs_mat, born_forces_units, sys.coords, sys.boundary, inter.dist_cutoff,
                 inter.offset_radii, inter.scaled_offset_radii, Bs, B_grads, I_grads,
                 Val(sys.force_units))
 
@@ -842,8 +843,9 @@ function forces_gbsa(sys::System{3, true, T}, inter, Bs, B_grads, I_grads, born_
     return fs
 end
 
-function gbsa_force_1_kernel!(forces, born_forces, coords_var, boundary, dist_cutoff, factor_solute,
-                              factor_solvent, kappa, Bs_var, charges_var, ::Val{F}) where F
+function gbsa_force_1_kernel!(forces, born_forces_ustrip, coords_var, boundary, dist_cutoff,
+                              factor_solute, factor_solvent, kappa, Bs_var, charges_var,
+                              ::Val{F}) where F
     coords  = CUDA.Const(coords_var)
     Bs      = CUDA.Const(Bs_var)
     charges = CUDA.Const(charges_var)
@@ -882,10 +884,10 @@ function gbsa_force_1_kernel!(forces, born_forces, coords_var, boundary, dist_cu
             dGpol_dalpha2_ij = -Gpol * exp_term * (1 + D) / (2 * denominator2)
 
             change_born_force_i = dGpol_dalpha2_ij * Bj
-            Atomix.@atomic :monotonic born_forces[i] += change_born_force_i
+            Atomix.@atomic :monotonic born_forces_ustrip[i] += ustrip(change_born_force_i)
             if i != j
                 change_born_force_j = dGpol_dalpha2_ij * Bi
-                Atomix.@atomic :monotonic born_forces[j] += change_born_force_j
+                Atomix.@atomic :monotonic born_forces_ustrip[j] += ustrip(change_born_force_j)
                 fdr = dr * dGpol_dr
                 if unit(fdr[1]) != F
                     error("Wrong force unit returned, was expecting $F but got $(unit(fdr[1]))")

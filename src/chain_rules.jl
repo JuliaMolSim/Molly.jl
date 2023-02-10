@@ -330,7 +330,7 @@ function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, 
     sync_threads()
 
     if threadIdx().x == 1 && blockIdx().x == 1
-        grad_inters[1] = grads[1][6]
+        grad_inters[1] = grads[1][5]
     end
     return nothing
 end
