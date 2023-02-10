@@ -820,27 +820,42 @@ end
 
 function forces_gbsa(sys::System{3, true, T}, inter, Bs, B_grads, I_grads, born_forces,
                      charges) where T
+    fs_mat_1, born_forces_ustrip = gbsa_force_1_gpu(sys, inter, Bs, born_forces, charges)
+    born_forces_units = born_forces_ustrip * unit(eltype(born_forces))
+    fs_mat_2 = gbsa_force_2_gpu(sys, inter, Bs, B_grads, I_grads, born_forces_units,
+                                inter.offset_radii, inter.scaled_offset_radii)
+    fs_mat = fs_mat_1 .+ fs_mat_2
+    fs = reinterpret(SVector{3, T}, vec(fs_mat)) * sys.force_units
+    return fs
+end
+
+function gbsa_force_1_gpu(sys::System{3, true, T}, inter, Bs, born_forces, charges) where T
     n_atoms = length(sys)
     fs_mat = CUDA.zeros(T, 3, n_atoms)
     born_forces_ustrip = ustrip.(born_forces)
-
     n_inters = n_atoms_to_n_pairs(n_atoms) + n_atoms
     n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_1_kernel!(
                 fs_mat, born_forces_ustrip, sys.coords, sys.boundary, inter.dist_cutoff,
                 inter.factor_solute, inter.factor_solvent, inter.kappa, Bs, charges,
                 Val(sys.force_units))
 
-    born_forces_units = born_forces_ustrip * unit(eltype(born_forces))
+    return fs_mat, born_forces_ustrip
+end
+
+function gbsa_force_2_gpu(sys::System{3, true, T}, inter, Bs, B_grads, I_grads, born_forces,
+                          offset_radii, scaled_offset_radii) where T
+    n_atoms = length(sys)
+    fs_mat = CUDA.zeros(T, 3, n_atoms)
     n_inters = n_atoms ^ 2
     n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_2_kernel!(
-                fs_mat, born_forces_units, sys.coords, sys.boundary, inter.dist_cutoff,
-                inter.offset_radii, inter.scaled_offset_radii, Bs, B_grads, I_grads,
-                Val(sys.force_units))
 
-    fs = reinterpret(SVector{3, T}, vec(fs_mat)) * sys.force_units
-    return fs
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_2_kernel!(
+                fs_mat, born_forces, sys.coords, sys.boundary, inter.dist_cutoff,
+                offset_radii, scaled_offset_radii, Bs, B_grads, I_grads, Val(sys.force_units))
+
+    return fs_mat
 end
 
 function gbsa_force_1_kernel!(forces, born_forces_ustrip, coords_var, boundary, dist_cutoff,
