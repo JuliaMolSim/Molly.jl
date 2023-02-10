@@ -316,7 +316,8 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), sys::System{
 end
 
 function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, d_atoms,
-                                     boundary, inters, grad_inters, neighbors, val_force_units)
+                                     boundary, inters, grad_inters, neighbors, val_dims,
+                                     val_force_units)
     grads = Enzyme.autodiff_deferred(
         pairwise_force_kernel!,
         Duplicated(fs_mat, d_fs_mat),
@@ -325,6 +326,7 @@ function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, 
         Const(boundary),
         Active(inters),
         Const(neighbors),
+        Const(val_dims),
         Const(val_force_units),
     )
     sync_threads()
@@ -355,7 +357,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArra
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_force_kernel!(fs_mat,
                 d_fs_mat, coords, d_coords, atoms, d_atoms, boundary, pairwise_inters,
-                grad_pairwise_inters, nbs, Val(force_units))
+                grad_pairwise_inters, nbs, Val(D), Val(force_units))
 
         d_pairwise_inters = Array(grad_pairwise_inters)[1]
         return NoTangent(), d_coords, d_atoms, NoTangent(), d_pairwise_inters, NoTangent(),
@@ -426,7 +428,7 @@ end
 
 function grad_specific_force_1_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, coords, d_coords,
                                              boundary, is, inters, d_inters,
-                                             val_force_units)
+                                             val_dims, val_force_units)
     Enzyme.autodiff_deferred(
         specific_force_1_atoms_kernel!,
         Duplicated(fs_mat, d_fs_mat),
@@ -434,6 +436,7 @@ function grad_specific_force_1_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, c
         Const(boundary),
         Const(is),
         Duplicated(inters, d_inters),
+        Const(val_dims),
         Const(val_force_units),
     )
     return nothing
@@ -441,7 +444,7 @@ end
 
 function grad_specific_force_2_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, coords, d_coords,
                                              boundary, is, js, inters, d_inters,
-                                             val_force_units)
+                                             val_dims, val_force_units)
     Enzyme.autodiff_deferred(
         specific_force_2_atoms_kernel!,
         Duplicated(fs_mat, d_fs_mat),
@@ -450,6 +453,7 @@ function grad_specific_force_2_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, c
         Const(is),
         Const(js),
         Duplicated(inters, d_inters),
+        Const(val_dims),
         Const(val_force_units),
     )
     return nothing
@@ -457,7 +461,7 @@ end
 
 function grad_specific_force_3_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, coords, d_coords,
                                              boundary, is, js, ks, inters, d_inters,
-                                             val_force_units)
+                                             val_dims, val_force_units)
     Enzyme.autodiff_deferred(
         specific_force_3_atoms_kernel!,
         Duplicated(fs_mat, d_fs_mat),
@@ -467,6 +471,7 @@ function grad_specific_force_3_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, c
         Const(js),
         Const(ks),
         Duplicated(inters, d_inters),
+        Const(val_dims),
         Const(val_force_units),
     )
     return nothing
@@ -474,7 +479,7 @@ end
 
 function grad_specific_force_4_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, coords, d_coords,
                                              boundary, is, js, ks, ls, inters, d_inters,
-                                             val_force_units)
+                                             val_dims, val_force_units)
     Enzyme.autodiff_deferred(
         specific_force_4_atoms_kernel!,
         Duplicated(fs_mat, d_fs_mat),
@@ -485,6 +490,7 @@ function grad_specific_force_4_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, c
         Const(ks),
         Const(ls),
         Duplicated(inters, d_inters),
+        Const(val_dims),
         Const(val_force_units),
     )
     return nothing
@@ -509,22 +515,22 @@ function ChainRulesCore.rrule(::typeof(specific_force_gpu), inter_list,
             CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_1_atoms_kernel!(
                     fs_mat, d_fs_mat, coords, d_coords, boundary,
                     inter_list.is,
-                    inter_list.inters, d_inter_list.inters, Val(force_units))
+                    inter_list.inters, d_inter_list.inters, Val(D), Val(force_units))
         elseif inter_list isa InteractionList2Atoms
             CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_2_atoms_kernel!(
                     fs_mat, d_fs_mat, coords, d_coords, boundary,
                     inter_list.is, inter_list.js,
-                    inter_list.inters, d_inter_list.inters, Val(force_units))
+                    inter_list.inters, d_inter_list.inters, Val(D), Val(force_units))
         elseif inter_list isa InteractionList3Atoms
             CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_3_atoms_kernel!(
                     fs_mat, d_fs_mat, coords, d_coords, boundary,
                     inter_list.is, inter_list.js, inter_list.ks,
-                    inter_list.inters, d_inter_list.inters, Val(force_units))
+                    inter_list.inters, d_inter_list.inters, Val(D), Val(force_units))
         elseif inter_list isa InteractionList4Atoms
             CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_4_atoms_kernel!(
                     fs_mat, d_fs_mat, coords, d_coords, boundary,
                     inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
-                    inter_list.inters, d_inter_list.inters, Val(force_units))
+                    inter_list.inters, d_inter_list.inters, Val(D), Val(force_units))
         end
 
         return NoTangent(), d_inter_list, d_coords, NoTangent(), NoTangent(), NoTangent()

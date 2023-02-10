@@ -17,12 +17,12 @@ function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundar
     fs_mat = CUDA.zeros(T, D, length(atoms))
     n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel!(
-            fs_mat, coords, atoms, boundary, pairwise_inters, nbs, Val(force_units))
+            fs_mat, coords, atoms, boundary, pairwise_inters, nbs, Val(D), Val(force_units))
     return fs_mat
 end
 
 function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, coords_var, atoms_var, boundary,
-                                inters, neighbors_var, ::Val{F}) where {T, F}
+                                inters, neighbors_var, ::Val{D}, ::Val{F}) where {T, D, F}
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
     neighbors = CUDA.Const(neighbors_var)
@@ -44,20 +44,13 @@ function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, coords_var, atoms_var
             #   for how to throw a more meaningful error
             error("Wrong force unit returned, was expecting $F but got $(unit(f[1]))")
         end
-        dx, dy, dz = ustrip(f[1]), ustrip(f[2]), ustrip(f[3])
-        if !iszero(dx)
-            Atomix.@atomic :monotonic forces[1, i] += -dx
-            Atomix.@atomic :monotonic forces[1, j] +=  dx
+        for dim in 1:D
+            fval = ustrip(f[dim])
+            if !iszero(fval)
+                Atomix.@atomic :monotonic forces[dim, i] += -fval
+                Atomix.@atomic :monotonic forces[dim, j] +=  fval
+            end
         end
-        if !iszero(dy)
-            Atomix.@atomic :monotonic forces[2, i] += -dy
-            Atomix.@atomic :monotonic forces[2, j] +=  dy
-        end
-        if !iszero(dz)
-            Atomix.@atomic :monotonic forces[3, i] += -dz
-            Atomix.@atomic :monotonic forces[3, j] +=  dz
-        end
-        rij_fij = ustrip(norm(dr) * norm(f))
     end
     return nothing
 end
@@ -67,7 +60,7 @@ function specific_force_gpu(inter_list::InteractionList1Atoms, coords::AbstractA
     fs_mat = CUDA.zeros(T, D, length(coords))
     n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_1_atoms_kernel!(fs_mat,
-            coords, boundary, inter_list.is, inter_list.inters, Val(force_units))
+            coords, boundary, inter_list.is, inter_list.inters, Val(D), Val(force_units))
     return fs_mat
 end
 
@@ -76,7 +69,8 @@ function specific_force_gpu(inter_list::InteractionList2Atoms, coords::AbstractA
     fs_mat = CUDA.zeros(T, D, length(coords))
     n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_2_atoms_kernel!(fs_mat,
-            coords, boundary, inter_list.is, inter_list.js, inter_list.inters, Val(force_units))
+            coords, boundary, inter_list.is, inter_list.js, inter_list.inters, Val(D),
+            Val(force_units))
     return fs_mat
 end
 
@@ -86,7 +80,7 @@ function specific_force_gpu(inter_list::InteractionList3Atoms, coords::AbstractA
     n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_3_atoms_kernel!(fs_mat,
             coords, boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.inters,
-            Val(force_units))
+            Val(D), Val(force_units))
     return fs_mat
 end
 
@@ -96,12 +90,12 @@ function specific_force_gpu(inter_list::InteractionList4Atoms, coords::AbstractA
     n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_4_atoms_kernel!(fs_mat,
             coords, boundary, inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
-            inter_list.inters, Val(force_units))
+            inter_list.inters, Val(D), Val(force_units))
     return fs_mat
 end
 
 function specific_force_1_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
-                                        inters_var, ::Val{F}) where {T, F}
+                                        inters_var, ::Val{D}, ::Val{F}) where {T, D, F}
     coords = CUDA.Const(coords_var)
     is = CUDA.Const(is_var)
     inters = CUDA.Const(inters_var)
@@ -115,15 +109,15 @@ function specific_force_1_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         if unit(fs.f1[1]) != F
             error("Wrong force unit returned, was expecting $F")
         end
-        Atomix.@atomic :monotonic forces[1, i] += ustrip(fs.f1[1])
-        Atomix.@atomic :monotonic forces[2, i] += ustrip(fs.f1[2])
-        Atomix.@atomic :monotonic forces[3, i] += ustrip(fs.f1[3])
+        for dim in 1:D
+            Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
+        end
     end
     return nothing
 end
 
 function specific_force_2_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
-                                        js_var, inters_var, ::Val{F}) where {T, F}
+                                        js_var, inters_var, ::Val{D}, ::Val{F}) where {T, D, F}
     coords = CUDA.Const(coords_var)
     is = CUDA.Const(is_var)
     js = CUDA.Const(js_var)
@@ -138,18 +132,17 @@ function specific_force_2_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
             error("Wrong force unit returned, was expecting $F")
         end
-        Atomix.@atomic :monotonic forces[1, i] += ustrip(fs.f1[1])
-        Atomix.@atomic :monotonic forces[2, i] += ustrip(fs.f1[2])
-        Atomix.@atomic :monotonic forces[3, i] += ustrip(fs.f1[3])
-        Atomix.@atomic :monotonic forces[1, j] += ustrip(fs.f2[1])
-        Atomix.@atomic :monotonic forces[2, j] += ustrip(fs.f2[2])
-        Atomix.@atomic :monotonic forces[3, j] += ustrip(fs.f2[3])
+        for dim in 1:D
+            Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
+            Atomix.@atomic :monotonic forces[dim, j] += ustrip(fs.f2[dim])
+        end
     end
     return nothing
 end
 
 function specific_force_3_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
-                                        js_var, ks_var, inters_var, ::Val{F}) where {T, F}
+                                        js_var, ks_var, inters_var, ::Val{D},
+                                        ::Val{F}) where {T, D, F}
     coords = CUDA.Const(coords_var)
     is = CUDA.Const(is_var)
     js = CUDA.Const(js_var)
@@ -165,21 +158,18 @@ function specific_force_3_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
             error("Wrong force unit returned, was expecting $F")
         end
-        Atomix.@atomic :monotonic forces[1, i] += ustrip(fs.f1[1])
-        Atomix.@atomic :monotonic forces[2, i] += ustrip(fs.f1[2])
-        Atomix.@atomic :monotonic forces[3, i] += ustrip(fs.f1[3])
-        Atomix.@atomic :monotonic forces[1, j] += ustrip(fs.f2[1])
-        Atomix.@atomic :monotonic forces[2, j] += ustrip(fs.f2[2])
-        Atomix.@atomic :monotonic forces[3, j] += ustrip(fs.f2[3])
-        Atomix.@atomic :monotonic forces[1, k] += ustrip(fs.f3[1])
-        Atomix.@atomic :monotonic forces[2, k] += ustrip(fs.f3[2])
-        Atomix.@atomic :monotonic forces[3, k] += ustrip(fs.f3[3])
+        for dim in 1:D
+            Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
+            Atomix.@atomic :monotonic forces[dim, j] += ustrip(fs.f2[dim])
+            Atomix.@atomic :monotonic forces[dim, k] += ustrip(fs.f3[dim])
+        end
     end
     return nothing
 end
 
 function specific_force_4_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
-                                        js_var, ks_var, ls_var, inters_var, ::Val{F}) where {T, F}
+                                        js_var, ks_var, ls_var, inters_var, ::Val{D},
+                                        ::Val{F}) where {T, D, F}
     coords = CUDA.Const(coords_var)
     is = CUDA.Const(is_var)
     js = CUDA.Const(js_var)
@@ -196,18 +186,12 @@ function specific_force_4_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
             error("Wrong force unit returned, was expecting $F")
         end
-        Atomix.@atomic :monotonic forces[1, i] += ustrip(fs.f1[1])
-        Atomix.@atomic :monotonic forces[2, i] += ustrip(fs.f1[2])
-        Atomix.@atomic :monotonic forces[3, i] += ustrip(fs.f1[3])
-        Atomix.@atomic :monotonic forces[1, j] += ustrip(fs.f2[1])
-        Atomix.@atomic :monotonic forces[2, j] += ustrip(fs.f2[2])
-        Atomix.@atomic :monotonic forces[3, j] += ustrip(fs.f2[3])
-        Atomix.@atomic :monotonic forces[1, k] += ustrip(fs.f3[1])
-        Atomix.@atomic :monotonic forces[2, k] += ustrip(fs.f3[2])
-        Atomix.@atomic :monotonic forces[3, k] += ustrip(fs.f3[3])
-        Atomix.@atomic :monotonic forces[1, l] += ustrip(fs.f4[1])
-        Atomix.@atomic :monotonic forces[2, l] += ustrip(fs.f4[2])
-        Atomix.@atomic :monotonic forces[3, l] += ustrip(fs.f4[3])
+        for dim in 1:D
+            Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
+            Atomix.@atomic :monotonic forces[dim, j] += ustrip(fs.f2[dim])
+            Atomix.@atomic :monotonic forces[dim, k] += ustrip(fs.f3[dim])
+            Atomix.@atomic :monotonic forces[dim, l] += ustrip(fs.f4[dim])
+        end
     end
     return nothing
 end

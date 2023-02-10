@@ -818,49 +818,49 @@ function cuda_threads_blocks_gbsa(n_inters)
     return n_threads, n_blocks
 end
 
-function forces_gbsa(sys::System{3, true, T}, inter, Bs, B_grads, I_grads, born_forces,
-                     charges) where T
-    fs_mat_1, born_forces_ustrip = gbsa_force_1_gpu(sys, inter, Bs, born_forces, charges)
-    born_forces_units = born_forces_ustrip * unit(eltype(born_forces))
+function forces_gbsa(sys::System{D, true, T}, inter, Bs, B_grads, I_grads, born_forces,
+                     charges) where {D, T}
+    fs_mat_1, born_forces_mod_ustrip = gbsa_force_1_gpu(sys, inter, Bs, charges)
+    born_forces_units = born_forces .+ born_forces_mod_ustrip * unit(eltype(born_forces))
     fs_mat_2 = gbsa_force_2_gpu(sys, inter, Bs, B_grads, I_grads, born_forces_units,
                                 inter.offset_radii, inter.scaled_offset_radii)
     fs_mat = fs_mat_1 .+ fs_mat_2
-    fs = reinterpret(SVector{3, T}, vec(fs_mat)) * sys.force_units
+    fs = reinterpret(SVector{D, T}, vec(fs_mat)) * sys.force_units
     return fs
 end
 
-function gbsa_force_1_gpu(sys::System{3, true, T}, inter, Bs, born_forces, charges) where T
+function gbsa_force_1_gpu(sys::System{D, true, T}, inter, Bs, charges) where {D, T}
     n_atoms = length(sys)
-    fs_mat = CUDA.zeros(T, 3, n_atoms)
-    born_forces_ustrip = ustrip.(born_forces)
+    fs_mat = CUDA.zeros(T, D, n_atoms)
+    born_forces_mod_ustrip = CUDA.zeros(T, n_atoms)
     n_inters = n_atoms_to_n_pairs(n_atoms) + n_atoms
     n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
 
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_1_kernel!(
-                fs_mat, born_forces_ustrip, sys.coords, sys.boundary, inter.dist_cutoff,
+                fs_mat, born_forces_mod_ustrip, sys.coords, sys.boundary, inter.dist_cutoff,
                 inter.factor_solute, inter.factor_solvent, inter.kappa, Bs, charges,
-                Val(sys.force_units))
+                Val(D), Val(sys.force_units))
 
-    return fs_mat, born_forces_ustrip
+    return fs_mat, born_forces_mod_ustrip
 end
 
-function gbsa_force_2_gpu(sys::System{3, true, T}, inter, Bs, B_grads, I_grads, born_forces,
-                          offset_radii, scaled_offset_radii) where T
+function gbsa_force_2_gpu(sys::System{D, true, T}, inter, Bs, B_grads, I_grads, born_forces,
+                          offset_radii, scaled_offset_radii) where {D, T}
     n_atoms = length(sys)
-    fs_mat = CUDA.zeros(T, 3, n_atoms)
+    fs_mat = CUDA.zeros(T, D, n_atoms)
     n_inters = n_atoms ^ 2
     n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
 
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_2_kernel!(
-                fs_mat, born_forces, sys.coords, sys.boundary, inter.dist_cutoff,
-                offset_radii, scaled_offset_radii, Bs, B_grads, I_grads, Val(sys.force_units))
+                fs_mat, born_forces, sys.coords, sys.boundary, inter.dist_cutoff, offset_radii,
+                scaled_offset_radii, Bs, B_grads, I_grads, Val(D), Val(sys.force_units))
 
     return fs_mat
 end
 
-function gbsa_force_1_kernel!(forces, born_forces_ustrip, coords_var, boundary, dist_cutoff,
+function gbsa_force_1_kernel!(forces, born_forces_mod_ustrip, coords_var, boundary, dist_cutoff,
                               factor_solute, factor_solvent, kappa, Bs_var, charges_var,
-                              ::Val{F}) where F
+                              ::Val{D}, ::Val{F}) where {D, F}
     coords  = CUDA.Const(coords_var)
     Bs      = CUDA.Const(Bs_var)
     charges = CUDA.Const(charges_var)
@@ -884,8 +884,8 @@ function gbsa_force_1_kernel!(forces, born_forces_ustrip, coords_var, boundary, 
         if iszero_value(dist_cutoff) || r2 <= dist_cutoff^2
             Bi, Bj = Bs[i], Bs[j]
             alpha2_ij = Bi * Bj
-            D = r2 / (4 * alpha2_ij)
-            exp_term = exp(-D)
+            D_term = r2 / (4 * alpha2_ij)
+            exp_term = exp(-D_term)
             denominator2 = r2 + alpha2_ij * exp_term
             denominator = sqrt(denominator2)
             if iszero_value(kappa)
@@ -896,24 +896,22 @@ function gbsa_force_1_kernel!(forces, born_forces_ustrip, coords_var, boundary, 
             end
             Gpol = (pre_factor * charges[i] * charges[j]) / denominator
             dGpol_dr = -Gpol * (1 - exp_term/4) / denominator2
-            dGpol_dalpha2_ij = -Gpol * exp_term * (1 + D) / (2 * denominator2)
+            dGpol_dalpha2_ij = -Gpol * exp_term * (1 + D_term) / (2 * denominator2)
 
             change_born_force_i = dGpol_dalpha2_ij * Bj
-            Atomix.@atomic :monotonic born_forces_ustrip[i] += ustrip(change_born_force_i)
+            Atomix.@atomic :monotonic born_forces_mod_ustrip[i] += ustrip(change_born_force_i)
             if i != j
                 change_born_force_j = dGpol_dalpha2_ij * Bi
-                Atomix.@atomic :monotonic born_forces_ustrip[j] += ustrip(change_born_force_j)
+                Atomix.@atomic :monotonic born_forces_mod_ustrip[j] += ustrip(change_born_force_j)
                 fdr = dr * dGpol_dr
                 if unit(fdr[1]) != F
                     error("Wrong force unit returned, was expecting $F but got $(unit(fdr[1]))")
                 end
-                dx, dy, dz = ustrip(fdr[1]), ustrip(fdr[2]), ustrip(fdr[3])
-                Atomix.@atomic :monotonic forces[1, i] +=  dx
-                Atomix.@atomic :monotonic forces[1, j] += -dx
-                Atomix.@atomic :monotonic forces[2, i] +=  dy
-                Atomix.@atomic :monotonic forces[2, j] += -dy
-                Atomix.@atomic :monotonic forces[3, i] +=  dz
-                Atomix.@atomic :monotonic forces[3, j] += -dz
+                for dim in 1:D
+                    fval = ustrip(fdr[dim])
+                    Atomix.@atomic :monotonic forces[dim, i] +=  fval
+                    Atomix.@atomic :monotonic forces[dim, j] += -fval
+                end
             end
         end
     end
@@ -921,7 +919,8 @@ function gbsa_force_1_kernel!(forces, born_forces_ustrip, coords_var, boundary, 
 end
 
 function gbsa_force_2_kernel!(forces, born_forces, coords_var, boundary, dist_cutoff, or_var,
-                              sor_var, Bs_var, B_grads_var, I_grads_var, ::Val{F}) where F
+                              sor_var, Bs_var, B_grads_var, I_grads_var, ::Val{D},
+                              ::Val{F}) where {D, F}
     coords  = CUDA.Const(coords_var)
     or      = CUDA.Const(or_var)
     sor     = CUDA.Const(sor_var)
@@ -945,8 +944,7 @@ function gbsa_force_2_kernel!(forces, born_forces, coords_var, boundary, dist_cu
                 ori, srj = or[i], sor[j]
                 rsrj = r + srj
                 if ori < rsrj
-                    D = abs(r - srj)
-                    L = inv(max(ori, D))
+                    L = inv(max(ori, abs(r - srj)))
                     U = inv(rsrj)
                     rinv = inv(r)
                     r2inv = rinv^2
@@ -957,13 +955,11 @@ function gbsa_force_2_kernel!(forces, born_forces, coords_var, boundary, dist_cu
                     if unit(fdr[1]) != F
                         error("Wrong force unit returned, was expecting $F but got $(unit(fdr[1]))")
                     end
-                    dx, dy, dz = ustrip(fdr[1]), ustrip(fdr[2]), ustrip(fdr[3])
-                    Atomix.@atomic :monotonic forces[1, i] +=  dx
-                    Atomix.@atomic :monotonic forces[1, j] += -dx
-                    Atomix.@atomic :monotonic forces[2, i] +=  dy
-                    Atomix.@atomic :monotonic forces[2, j] += -dy
-                    Atomix.@atomic :monotonic forces[3, i] +=  dz
-                    Atomix.@atomic :monotonic forces[3, j] += -dz
+                    for dim in 1:D
+                        fval = ustrip(fdr[dim])
+                        Atomix.@atomic :monotonic forces[dim, i] +=  fval
+                        Atomix.@atomic :monotonic forces[dim, j] += -fval
+                    end
                 end
             end
         end
