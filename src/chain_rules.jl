@@ -679,20 +679,22 @@ function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
     return nothing
 end
 
-function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), sys::System{D, true, T}, dist_cutoff,
-                              factor_solute, factor_solvent, kappa, Bs, charges) where {D, T}
-    if sys.force_units != NoUnits
+function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), coords::AbstractArray{SVector{D, T}},
+                              boundary, dist_cutoff, factor_solute, factor_solvent, kappa, Bs,
+                              charges, force_units) where {D, T}
+    if force_units != NoUnits
         error("Taking gradients through force calculation is not compatible with units, " *
-              "system force units are $(sys.force_units)")
+              "system force units are $force_units")
     end
-    Y = gbsa_force_1_gpu(sys, dist_cutoff, factor_solute, factor_solvent, kappa, Bs, charges)
+    Y = gbsa_force_1_gpu(coords, boundary, dist_cutoff, factor_solute, factor_solvent, kappa,
+                         Bs, charges, force_units)
 
     function gbsa_force_1_gpu_pullback(d_args)
         d_fs_mat, d_born_forces_mod_ustrip = d_args[1], d_args[2]
-        n_atoms = length(sys)
+        n_atoms = length(coords)
         fs_mat = CUDA.zeros(T, D, n_atoms)
         born_forces_mod_ustrip = CUDA.zeros(T, n_atoms)
-        d_coords = zero(sys.coords)
+        d_coords = zero(coords)
         grad_factor_solute  = CUDA.zeros(T, 1)
         grad_factor_solvent = CUDA.zeros(T, 1)
         grad_kappa          = CUDA.zeros(T, 1)
@@ -702,22 +704,16 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), sys::System{D, true, T
         n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_gbsa_force_1_kernel!(
-            fs_mat, d_fs_mat, born_forces_mod_ustrip, d_born_forces_mod_ustrip, sys.coords,
-            d_coords, sys.boundary, dist_cutoff, factor_solute, grad_factor_solute,
+            fs_mat, d_fs_mat, born_forces_mod_ustrip, d_born_forces_mod_ustrip, coords,
+            d_coords, boundary, dist_cutoff, factor_solute, grad_factor_solute,
             factor_solvent, grad_factor_solvent, kappa, grad_kappa, Bs, d_Bs, charges,
-            d_charges, Val(D), Val(sys.force_units))
+            d_charges, Val(D), Val(force_units))
 
-        z = zero(T)
-        d_sys = Tangent{System}(
-            atoms=CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms]),
-            coords=d_coords,
-            boundary=CubicBoundary(z),
-        )
         d_factor_solute  = Array(grad_factor_solute )[1]
         d_factor_solvent = Array(grad_factor_solvent)[1]
         d_kappa          = Array(grad_kappa         )[1]
-        return NoTangent(), d_sys, NoTangent(), d_factor_solute, d_factor_solvent,
-               d_kappa, d_Bs, d_charges
+        return NoTangent(), d_coords, NoTangent(), NoTangent(), d_factor_solute,
+               d_factor_solvent, d_kappa, d_Bs, d_charges, NoTangent()
     end
 
     return Y, gbsa_force_1_gpu_pullback
@@ -744,20 +740,20 @@ function grad_gbsa_force_2_kernel!(fs_mat, d_fs_mat, born_forces, d_born_forces,
     return nothing
 end
 
-function ChainRulesCore.rrule(::typeof(gbsa_force_2_gpu), sys::System{D, true, T}, dist_cutoff, Bs,
-                              B_grads, I_grads, born_forces, offset_radii,
-                              scaled_offset_radii) where {D, T}
-    if sys.force_units != NoUnits
+function ChainRulesCore.rrule(::typeof(gbsa_force_2_gpu), coords::AbstractArray{SVector{D, T}},
+                              boundary, dist_cutoff, Bs, B_grads, I_grads, born_forces, offset_radii,
+                              scaled_offset_radii, force_units) where {D, T}
+    if force_units != NoUnits
         error("Taking gradients through force calculation is not compatible with units, " *
-              "system force units are $(sys.force_units)")
+              "system force units are $force_units")
     end
-    Y = gbsa_force_2_gpu(sys, dist_cutoff, Bs, B_grads, I_grads, born_forces, offset_radii,
-                         scaled_offset_radii)
+    Y = gbsa_force_2_gpu(coords, boundary, dist_cutoff, Bs, B_grads, I_grads, born_forces,
+                         offset_radii, scaled_offset_radii, force_units)
 
     function gbsa_force_2_gpu_pullback(d_fs_mat)
-        n_atoms = length(sys)
+        n_atoms = length(coords)
         fs_mat = CUDA.zeros(T, D, n_atoms)
-        d_coords = zero(sys.coords)
+        d_coords = zero(coords)
         d_born_forces = zero(born_forces)
         d_offset_radii = zero(offset_radii)
         d_scaled_offset_radii = zero(scaled_offset_radii)
@@ -768,19 +764,13 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_2_gpu), sys::System{D, true, T
         n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_gbsa_force_2_kernel!(
-            fs_mat, d_fs_mat, born_forces, d_born_forces, sys.coords, d_coords, sys.boundary,
+            fs_mat, d_fs_mat, born_forces, d_born_forces, coords, d_coords, boundary,
             dist_cutoff, offset_radii, d_offset_radii, scaled_offset_radii,
             d_scaled_offset_radii, Bs, d_Bs, B_grads, d_B_grads, I_grads, d_I_grads,
-            Val(D), Val(sys.force_units))
+            Val(D), Val(force_units))
 
-        z = zero(T)
-        d_sys = Tangent{System}(
-            atoms=CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms]),
-            coords=d_coords,
-            boundary=CubicBoundary(z),
-        )
-        return NoTangent(), d_sys, NoTangent(), d_Bs, d_B_grads, d_I_grads, d_born_forces,
-               d_offset_radii, d_scaled_offset_radii
+        return NoTangent(), d_coords, NoTangent(), NoTangent(), d_Bs, d_B_grads, d_I_grads,
+               d_born_forces, d_offset_radii, d_scaled_offset_radii, NoTangent()
     end
 
     return Y, gbsa_force_2_gpu_pullback
