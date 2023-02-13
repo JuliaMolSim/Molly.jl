@@ -253,7 +253,7 @@ function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, b
             end
             pe_sum += shared_pes[si]
         end
-        Atomix.@atomic :monotonic energy[] += pe_sum
+        Atomix.@atomic :monotonic energy[1] += pe_sum
     end
     return nothing
 end
@@ -311,7 +311,7 @@ function specific_pe_1_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         if unit(pe) != E
             error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic :monotonic energy[] += ustrip(pe)
+        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
     return nothing
 end
@@ -332,7 +332,7 @@ function specific_pe_2_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         if unit(pe) != E
             error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic :monotonic energy[] += ustrip(pe)
+        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
     return nothing
 end
@@ -354,7 +354,7 @@ function specific_pe_3_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         if unit(pe) != E
             error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic :monotonic energy[] += ustrip(pe)
+        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
     return nothing
 end
@@ -377,7 +377,7 @@ function specific_pe_4_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
         if unit(pe) != E
             error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic :monotonic energy[] += ustrip(pe)
+        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
     return nothing
 end
