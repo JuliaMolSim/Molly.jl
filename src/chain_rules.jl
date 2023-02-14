@@ -362,6 +362,11 @@ function grad_pairwise_pe_kernel!(pe_vec::CuDeviceVector{T}, d_pe_vec, coords, d
                                   val_energy_units, shared_mem_size::Val{M}) where {T, M}
     shared_pes = CuStaticSharedArray(T, M)
     d_shared_pes = CuStaticSharedArray(T, M)
+    if threadIdx().x == 1
+        for si in 1:M
+            d_shared_pes[si] = zero(T)
+        end
+    end
     sync_threads()
 
     grads = Enzyme.autodiff_deferred(
