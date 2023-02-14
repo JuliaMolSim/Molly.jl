@@ -256,54 +256,50 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), coords::AbstractArray{
     return Y, forces_pair_spec_pullback
 end
 
-function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), sys::System{D, G, T}, neighbors,
-                              n_threads) where {D, G, T}
-    if sys.energy_units != NoUnits
+function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), coords, atoms,
+                              pairwise_inters_nonl, pairwise_inters_nl, sils_1_atoms, sils_2_atoms,
+                              sils_3_atoms, sils_4_atoms, boundary, energy_units, neighbors,
+                              n_threads, ::Val{T}) where T
+    if energy_units != NoUnits
         error("Taking gradients through potential energy calculation is not compatible with " *
-              "units, system energy units are $(sys.energy_units)")
+              "units, system energy units are $energy_units")
     end
-    Y = potential_energy_pair_spec(sys, neighbors, n_threads)
+    Y = potential_energy_pair_spec(coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
+                                   sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, boundary,
+                                   energy_units, neighbors, n_threads, Val(T))
 
-    function potential_energy_pair_spec_pullback(d_forces)
+    function potential_energy_pair_spec_pullback(d_pe_vec)
+        pe_vec = zeros(T, 1)
         z = zero(T)
-        d_coords = zero(sys.coords)
-        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:length(sys)]
-        pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(sys.pairwise_inters))
-        pairwise_inters_nl   = filter(inter ->  inter.nl_only, values(sys.pairwise_inters))
-        sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
-        sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
-        sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
-        sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
+        d_coords = zero(coords)
+        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:length(coords)]
         d_sils_1_atoms = zero.(sils_1_atoms)
         d_sils_2_atoms = zero.(sils_2_atoms)
         d_sils_3_atoms = zero.(sils_3_atoms)
         d_sils_4_atoms = zero.(sils_4_atoms)
         grads = autodiff(
-            potential_energy_pair_spec,
-            Active,
-            Duplicated(sys.coords, d_coords),
-            Duplicated(sys.atoms, d_atoms),
+            potential_energy_pair_spec!,
+            Const,
+            Duplicated(pe_vec, d_pe_vec),
+            Duplicated(coords, d_coords),
+            Duplicated(atoms, d_atoms),
             active_if_present(pairwise_inters_nonl),
             active_if_present(pairwise_inters_nl),
             duplicated_if_present(sils_1_atoms, d_sils_1_atoms),
             duplicated_if_present(sils_2_atoms, d_sils_2_atoms),
             duplicated_if_present(sils_3_atoms, d_sils_3_atoms),
             duplicated_if_present(sils_4_atoms, d_sils_4_atoms),
-            Const(sys.boundary),
-            Const(sys.energy_units),
+            Const(boundary),
+            Const(energy_units),
             Const(neighbors),
             Const(n_threads),
             Const(Val(T)),
-        )
-        d_sys = Tangent{System}(
-            atoms=d_atoms,
-            pairwise_inters=(nothing_to_tuple(grads[1][3])..., nothing_to_tuple(grads[1][4])...),
-            specific_inter_lists=(d_sils_1_atoms..., d_sils_2_atoms..., d_sils_3_atoms...,
-                                  d_sils_4_atoms...),
-            coords=d_coords,
-            boundary=CubicBoundary(z),
-        )
-        return NoTangent(), d_sys, NoTangent(), NoTangent()
+        )[1]
+        d_pairwise_inters_nonl = nothing_to_notangent(grads[3])
+        d_pairwise_inters_nl   = nothing_to_notangent(grads[4])
+        return NoTangent(), d_coords, d_atoms, d_pairwise_inters_nonl, d_pairwise_inters_nl,
+               d_sils_1_atoms, d_sils_2_atoms, d_sils_3_atoms, d_sils_4_atoms,
+               NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
     end
 
     return Y, potential_energy_pair_spec_pullback

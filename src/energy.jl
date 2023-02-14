@@ -79,9 +79,18 @@ first and passed to the function.
 Calculate the potential energy due to a given interation type.
 Custom interaction types should implement this function.
 """
-function potential_energy(s::System{D, false}, neighbors=nothing;
-                          n_threads::Integer=Threads.nthreads()) where D
-    pe = potential_energy_pair_spec(s, neighbors, n_threads)
+function potential_energy(s::System{D, false, T}, neighbors=nothing;
+                          n_threads::Integer=Threads.nthreads()) where {D, T}
+    pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
+    pairwise_inters_nl   = filter(inter ->  inter.nl_only, values(s.pairwise_inters))
+    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(s.specific_inter_lists))
+    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(s.specific_inter_lists))
+    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(s.specific_inter_lists))
+    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(s.specific_inter_lists))
+
+    pe = potential_energy_pair_spec(s.coords, s.atoms, pairwise_inters_nonl, pairwise_inters_nl,
+                            sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, s.boundary,
+                            s.energy_units, neighbors, n_threads, Val(T))
 
     for inter in values(s.general_inters)
         pe += potential_energy(inter, s, neighbors; n_threads=n_threads)
@@ -90,20 +99,17 @@ function potential_energy(s::System{D, false}, neighbors=nothing;
     return pe
 end
 
-function potential_energy_pair_spec(s::System{D, false, T}, neighbors, n_threads) where {D, T}
-    pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
-    pairwise_inters_nl   = filter(inter ->  inter.nl_only, values(s.pairwise_inters))
-    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(s.specific_inter_lists))
-    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(s.specific_inter_lists))
-    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(s.specific_inter_lists))
-    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(s.specific_inter_lists))
-    pe = potential_energy_pair_spec(s.coords, s.atoms, pairwise_inters_nonl, pairwise_inters_nl,
-                    sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, s.boundary,
-                    s.energy_units, neighbors, n_threads, Val(T))
-    return pe * s.energy_units
+function potential_energy_pair_spec(coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
+                                    sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
+                                    boundary, energy_units, neighbors, n_threads, ::Val{T}) where T
+    pe_vec = zeros(T, 1)
+    potential_energy_pair_spec!(pe_vec, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
+                                sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, boundary,
+                                energy_units, neighbors, n_threads, Val(T))
+    return pe_vec * energy_units
 end
 
-@inbounds function potential_energy_pair_spec(coords, atoms, pairwise_inters_nonl,
+@inbounds function potential_energy_pair_spec!(pe_vec, coords, atoms, pairwise_inters_nonl,
                         pairwise_inters_nl, sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
                         boundary, energy_units, neighbors, n_threads, ::Val{T}) where T
     pe_sum = zero(T)
@@ -213,7 +219,8 @@ end
         end
     end
 
-    return pe_sum
+    pe_vec[1] = pe_sum
+    return nothing
 end
 
 function potential_energy(s::System{D, true, T}, neighbors=nothing;
