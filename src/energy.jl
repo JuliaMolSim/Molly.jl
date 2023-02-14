@@ -106,7 +106,7 @@ function potential_energy_pair_spec(coords, atoms, pairwise_inters_nonl, pairwis
     potential_energy_pair_spec!(pe_vec, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
                                 sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, boundary,
                                 energy_units, neighbors, n_threads, Val(T))
-    return pe_vec * energy_units
+    return pe_vec[1] * energy_units
 end
 
 @inbounds function potential_energy_pair_spec!(pe_vec, coords, atoms, pairwise_inters_nonl,
