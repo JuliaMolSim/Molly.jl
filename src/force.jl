@@ -153,7 +153,16 @@ Custom general interaction types should implement this function.
 """
 function forces(s::System{D, false}, neighbors=nothing;
                 n_threads::Integer=Threads.nthreads()) where D
-    fs = forces_pair_spec(s, neighbors, n_threads)
+    pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
+    pairwise_inters_nl   = filter(inter ->  inter.nl_only, values(s.pairwise_inters))
+    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(s.specific_inter_lists))
+    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(s.specific_inter_lists))
+    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(s.specific_inter_lists))
+    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(s.specific_inter_lists))
+
+    fs = forces_pair_spec(s.coords, s.atoms, pairwise_inters_nonl, pairwise_inters_nl,
+                          sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
+                          s.boundary, s.force_units, neighbors, n_threads)
 
     for inter in values(s.general_inters)
         fs += forces(inter, s, neighbors; n_threads=n_threads)
@@ -162,18 +171,14 @@ function forces(s::System{D, false}, neighbors=nothing;
     return fs
 end
 
-function forces_pair_spec(s, neighbors, n_threads)
-    fs = ustrip_vec.(zero(s.coords))
-    pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
-    pairwise_inters_nl   = filter(inter ->  inter.nl_only, values(s.pairwise_inters))
-    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(s.specific_inter_lists))
-    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(s.specific_inter_lists))
-    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(s.specific_inter_lists))
-    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(s.specific_inter_lists))
-    forces_pair_spec!(fs, s.coords, s.atoms, pairwise_inters_nonl, pairwise_inters_nl,
-                      sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, s.boundary,
-                      s.force_units, neighbors, n_threads)
-    return fs * s.force_units
+function forces_pair_spec(coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
+                          sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
+                          boundary, force_units, neighbors, n_threads)
+    fs = ustrip_vec.(zero(coords))
+    forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
+                      sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, boundary,
+                      force_units, neighbors, n_threads)
+    return fs * force_units
 end
 
 @inbounds function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,

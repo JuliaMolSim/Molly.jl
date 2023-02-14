@@ -205,28 +205,26 @@ end
 duplicated_if_present(x, dx) = length(x) > 0 ? Duplicated(x, dx) : Const(x)
 active_if_present(x) = length(x) > 0 ? Active(x) : Const(x)
 
-nothing_to_tuple(x) = x
-nothing_to_tuple(::Nothing) = ()
+nothing_to_notangent(x) = x
+nothing_to_notangent(::Nothing) = NoTangent()
 
-function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, neighbors,
-                              n_threads) where {D, G, T}
-    if sys.force_units != NoUnits
+function ChainRulesCore.rrule(::typeof(forces_pair_spec), coords::AbstractArray{SVector{D, T}},
+                              atoms, pairwise_inters_nonl, pairwise_inters_nl, sils_1_atoms,
+                              sils_2_atoms, sils_3_atoms, sils_4_atoms, boundary, force_units,
+                              neighbors, n_threads) where {D, T}
+    if force_units != NoUnits
         error("Taking gradients through force calculation is not compatible with units, " *
-              "system force units are $(sys.force_units)")
+              "system force units are $force_units")
     end
-    Y = forces_pair_spec(sys, neighbors, n_threads)
+    Y = forces_pair_spec(coords, atoms, pairwise_inters_nonl, pairwise_inters_nl, sils_1_atoms,
+                         sils_2_atoms, sils_3_atoms, sils_4_atoms, boundary, force_units,
+                         neighbors, n_threads)
 
     function forces_pair_spec_pullback(d_forces)
-        fs = zero(sys.coords)
+        fs = zero(coords)
         z = zero(T)
-        d_coords = zero(sys.coords)
-        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:length(sys)]
-        pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(sys.pairwise_inters))
-        pairwise_inters_nl   = filter(inter ->  inter.nl_only, values(sys.pairwise_inters))
-        sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
-        sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
-        sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
-        sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
+        d_coords = zero(coords)
+        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:length(coords)]
         d_sils_1_atoms = zero.(sils_1_atoms)
         d_sils_2_atoms = zero.(sils_2_atoms)
         d_sils_3_atoms = zero.(sils_3_atoms)
@@ -235,28 +233,24 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), sys::System{D, G, T}, 
             forces_pair_spec!,
             Const,
             Duplicated(fs, convert(typeof(fs), d_forces)),
-            Duplicated(sys.coords, d_coords),
-            Duplicated(sys.atoms, d_atoms),
+            Duplicated(coords, d_coords),
+            Duplicated(atoms, d_atoms),
             active_if_present(pairwise_inters_nonl),
             active_if_present(pairwise_inters_nl),
             duplicated_if_present(sils_1_atoms, d_sils_1_atoms),
             duplicated_if_present(sils_2_atoms, d_sils_2_atoms),
             duplicated_if_present(sils_3_atoms, d_sils_3_atoms),
             duplicated_if_present(sils_4_atoms, d_sils_4_atoms),
-            Const(sys.boundary),
-            Const(sys.force_units),
+            Const(boundary),
+            Const(force_units),
             Const(neighbors),
             Const(n_threads),
-        )
-        d_sys = Tangent{System}(
-            atoms=d_atoms,
-            pairwise_inters=(nothing_to_tuple(grads[1][4])..., nothing_to_tuple(grads[1][5])...),
-            specific_inter_lists=(d_sils_1_atoms..., d_sils_2_atoms..., d_sils_3_atoms...,
-                                  d_sils_4_atoms...),
-            coords=d_coords,
-            boundary=CubicBoundary(z),
-        )
-        return NoTangent(), d_sys, NoTangent(), NoTangent()
+        )[1]
+        d_pairwise_inters_nonl = nothing_to_notangent(grads[4])
+        d_pairwise_inters_nl   = nothing_to_notangent(grads[5])
+        return NoTangent(), d_coords, d_atoms, d_pairwise_inters_nonl, d_pairwise_inters_nl,
+               d_sils_1_atoms, d_sils_2_atoms, d_sils_3_atoms, d_sils_4_atoms,
+               NoTangent(), NoTangent(), NoTangent(), NoTangent()
     end
 
     return Y, forces_pair_spec_pullback
@@ -328,11 +322,11 @@ function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, 
         Const(neighbors),
         Const(val_dims),
         Const(val_force_units),
-    )
+    )[1]
     sync_threads()
 
     if threadIdx().x == 1 && blockIdx().x == 1
-        grad_inters[1] = grads[1][5]
+        grad_inters[1] = grads[5]
     end
     return nothing
 end
@@ -385,11 +379,11 @@ function grad_pairwise_pe_kernel!(pe_vec::CuDeviceVector{T}, d_pe_vec, coords, d
         Const(val_energy_units),
         Const(shared_mem_size),
         Duplicated(shared_pes, d_shared_pes),
-    )
+    )[1]
     sync_threads()
 
     if threadIdx().x == 1 && blockIdx().x == 1
-        grad_inters[1] = grads[1][5]
+        grad_inters[1] = grads[5]
     end
     return nothing
 end
@@ -668,13 +662,13 @@ function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
         Duplicated(charges, d_charges),
         Const(val_dims),
         Const(val_force_units),
-    )
+    )[1]
     sync_threads()
 
     if threadIdx().x == 1 && blockIdx().x == 1
-        grad_factor_solute[1]  = grads[1][6]
-        grad_factor_solvent[1] = grads[1][7]
-        grad_kappa[1]          = grads[1][8]
+        grad_factor_solute[1]  = grads[6]
+        grad_factor_solvent[1] = grads[7]
+        grad_kappa[1]          = grads[8]
     end
     return nothing
 end
