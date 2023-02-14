@@ -261,7 +261,7 @@ simulate!(sys, minimizer)
 random_velocities!(sys, 298.0u"K")
 simulator = Langevin(
     dt=0.001u"ps",
-    temperature=300.0u"K",
+    temperature=298.0u"K",
     friction=1.0u"ps^-1",
 )
 
