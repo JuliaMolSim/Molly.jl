@@ -11,6 +11,7 @@ export
     vector,
     wrap_coord_1D,
     wrap_coords,
+    random_velocity,
     maxwell_boltzmann,
     random_velocities,
     random_velocities!,
@@ -380,14 +381,13 @@ end
 const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
 
 """
-    velocity(mass, temperature; dims=3)
-    velocity(mass, temperature, k; dims=3)
+    random_velocity(mass, temperature; dims=3)
+    random_velocity(mass, temperature, k; dims=3)
 
 Generate a random velocity from the Maxwell-Boltzmann distribution, with
 optional custom Boltzmann constant.
 """
-function AtomsBase.velocity(mass, temp, k=mb_conversion_factor;
-                            dims::Integer=3, rng=Random.GLOBAL_RNG)
+function random_velocity(mass, temp, k=mb_conversion_factor; dims::Integer=3, rng=Random.GLOBAL_RNG)
     k_strip = (unit(mass) == NoUnits) ? ustrip(k) : k
     return SVector([maxwell_boltzmann(mass, temp, k_strip; rng=rng) for i in 1:dims]...)
 end

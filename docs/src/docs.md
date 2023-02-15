@@ -30,7 +30,7 @@ boundary = CubicBoundary(2.0u"nm") # Periodic boundary conditions with a 2 nm cu
 coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm") # Random placement without clashing
 
 temp = 100.0u"K"
-velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
+velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 ```
 We store the coordinates and velocities as [static arrays](https://github.com/JuliaArrays/StaticArrays.jl) for performance.
 They can be of 2 or 3 dimensions and of any number type, e.g. `Float64` or `Float32`.
@@ -99,7 +99,7 @@ boundary = CubicBoundary(2.0f0u"nm")
 temp = 100.0f0u"K"
 atoms = CuArray([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
 coords = CuArray(place_atoms(n_atoms, boundary; min_dist=0.3u"nm"))
-velocities = CuArray([velocity(atom_mass, temp) for i in 1:n_atoms])
+velocities = CuArray([random_velocity(atom_mass, temp) for i in 1:n_atoms])
 simulator = VelocityVerlet(dt=0.002f0u"ps")
 
 sys = System(
@@ -127,7 +127,7 @@ for i in 1:length(coords)
     push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
 end
 
-velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
+velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 ```
 We could have used [`place_diatomics`](@ref) instead here.
 Now we can use the built-in interaction list and bond types to place harmonic bonds between paired atoms.
@@ -484,7 +484,7 @@ n_people = 500
 n_starting = 2
 atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
 coords = place_atoms(n_people, boundary; min_dist=0.1)
-velocities = [velocity(1.0, temp; dims=2) for i in 1:n_people]
+velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
 pairwise_inters = (
     LennardJones=LennardJones(nl_only=true),
     SIR=SIRInteraction(false, 0.5, 0.06, 0.01),
@@ -991,7 +991,7 @@ function apply_coupling!(sys, coupling::MyCoupler, sim)
     return sys
 end
 ```
-The functions [`velocity`](@ref), [`maxwell_boltzmann`](@ref) and [`temperature`](@ref) may be useful here.
+The functions [`random_velocity`](@ref), [`maxwell_boltzmann`](@ref) and [`temperature`](@ref) may be useful here.
 To use your custom coupler, give it as the `coupling` argument to the simulator.
 
 ## Neighbor finders
@@ -1122,7 +1122,7 @@ boundary = CubicBoundary(6.0u"nm")
 coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm"; min_dist=0.2u"nm")
 
 temp = 50.0u"K"
-velocities = [velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms]
+velocities = [random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms]
 
 # Interaction potentials
 pairwise_inters = (SoftSphere(nl_only=true, cutoff=DistanceCutoff(0.6u"nm")),)

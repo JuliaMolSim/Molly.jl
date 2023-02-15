@@ -61,7 +61,7 @@ end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     n_threads_list = run_parallel_tests ? (1, Threads.nthreads()) : (1,)
 
-    TV = typeof(velocity(10.0u"u", temp))
+    TV = typeof(random_velocity(10.0u"u", temp))
     TP = typeof(0.2u"kJ * mol^-1")
 
     V(sys, args...; kwargs...) = sys.velocities
@@ -74,7 +74,7 @@ end
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR", element="Ar") for i in 1:n_atoms],
             pairwise_inters=(LennardJones(nl_only=true),),
             coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
-            velocities=[velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
+            velocities=[random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
             boundary=boundary,
             neighbor_finder=DistanceNeighborFinder(
                 nb_matrix=trues(n_atoms, n_atoms),
@@ -242,7 +242,7 @@ end
         pairwise_inters=(LennardJones(nl_only=true),),
         specific_inter_lists=(bonds,),
         coords=coords,
-        velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
+        velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
         boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
             nb_matrix=trues(n_atoms, n_atoms),
@@ -302,7 +302,7 @@ end
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             pairwise_inters=(inter,),
             coords=place_atoms(n_atoms, boundary; min_dist=0.2u"nm"),
-            velocities=[velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
+            velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             boundary=boundary,
             neighbor_finder=neighbor_finder,
             loggers=(
@@ -327,7 +327,7 @@ end
     
     
     temp = 100.0u"K"
-    velocities = [velocity(atom_mass, temp,dims=2)]
+    velocities = [random_velocity(atom_mass, temp,dims=2)]
     
     #Make sure logger is in 2 dimensions for Muller-Brown potential
     sys = System(
@@ -361,7 +361,7 @@ end
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-    velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
+    velocities = [random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
     simulator = VelocityVerlet(dt=0.002u"ps")
     simulator_nounits = VelocityVerlet(dt=0.002)
 
@@ -472,7 +472,7 @@ end
     end
 
     temp = 100.0u"K"
-    velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
+    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
     nb_matrix = trues(n_atoms, n_atoms)
     for i in 1:(n_atoms ÷ 2)
@@ -538,7 +538,7 @@ end
     end
 
     temp = 100.0u"K"
-    velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
+    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
     nb_matrix = trues(n_atoms, n_atoms)
     for i in 1:(n_atoms ÷ 3)
@@ -590,7 +590,7 @@ end
     temp = 300.0u"K"
     boundary = CubicBoundary(10.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-    velocities = [velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
+    velocities = [random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
     s1 = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         pairwise_inters=(LennardJones(nl_only=true),),
@@ -688,7 +688,7 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
 
     temp = 100.0u"K"
-    velocities = [velocity(10.0u"u", temp) for i in 1:n_atoms]
+    velocities = [random_velocity(10.0u"u", temp) for i in 1:n_atoms]
 
     neighbor_finder = DistanceNeighborFinder(
         nb_matrix=trues(n_atoms, n_atoms),
@@ -816,7 +816,7 @@ end
     boundary = CubicBoundary(6.0u"nm")
     temp = 1.0u"K"
     starting_coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm"; min_dist=0.2u"nm")
-    starting_velocities = [velocity(atom_mass, temp) for i in 1:n_atoms]
+    starting_velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
