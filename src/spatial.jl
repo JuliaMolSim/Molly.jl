@@ -91,12 +91,12 @@ end
 ispositive(x) = x > zero(x)
 
 function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
-    if !ispositive(bv[1][1]) || !iszero(bv[1][2]) || !iszero(bv[1][3])
+    if !ispositive(bv[1][1]) || !iszero_value(bv[1][2]) || !iszero_value(bv[1][3])
         throw(ArgumentError("First basis vector must be along the x-axis (no y or z component) " *
                             "and have a positive x component " * 
                             "when constructing a TriclinicBoundary, got $(bv[1])"))
     end
-    if !ispositive(bv[2][2]) || !iszero(bv[2][3])
+    if !ispositive(bv[2][2]) || !iszero_value(bv[2][3])
         throw(ArgumentError("Second basis vector must be in the xy plane (no z component) " *
                             "and have a positive y component " *
                             "when constructing a TriclinicBoundary, got $(bv[2])"))
