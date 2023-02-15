@@ -257,7 +257,7 @@ function CellListMapNeighborFinder(;
         box = CellListMap.Box(clm_box_arg(unit_cell), dist_cutoff)
     end
     if isnothing(x0)
-        x = [ustrip.(box.unit_cell_max) .* rand(SVector{3, T}) for _ in 1:np]
+        x = [ustrip.(diag(box.input_unit_cell.matrix)) .* rand(SVector{3, T}) for _ in 1:np]
     else
         x = x0
     end
