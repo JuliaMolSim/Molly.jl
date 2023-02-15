@@ -1,5 +1,10 @@
 # Molly.jl release notes
 
+## v0.14.2 - Feb 2023
+
+### New features
+- The Müller-Brown potential is added as `MullerBrown`.
+
 ## v0.14.1 - Jan 2023
 
 ### New features
