@@ -316,44 +316,31 @@ end
     end
 end
 
-@testset "Muller-Brown infinite RectangularBoundary" begin
- 
+@testset "Müller-Brown" begin
     atom_mass = 1.0u"u"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")]
-    
     boundary = RectangularBoundary(Inf*u"nm", Inf*u"nm")
-    
-    atom_coords = [SVector{2}(-0.5,0.25)]u"nm"
-    
-    
+    coords = [SVector(-0.5, 0.25)u"nm"]
     temp = 100.0u"K"
-    velocities = [velocity(atom_mass, temp,dims=2)]
-    
-    #Make sure logger is in 2 dimensions for Muller-Brown potential
+    velocities = [velocity(atom_mass, temp; dims=2)]
+
     sys = System(
-                atoms=atoms,
-                coords=atom_coords,
-                velocities=velocities,
-                boundary=boundary,
-                general_inters = (MullerBrown(),),
-                loggers=(
-                    coords=CoordinateLogger(100;dims=2),
-                ),
-            )
-    
-    simulator = VelocityVerlet(
-        dt=0.002u"ps",
+        atoms=atoms,
+        coords=coords,
+        velocities=velocities,
+        boundary=boundary,
+        general_inters=(MullerBrown(),),
+        loggers=(coords=CoordinateLogger(100; dims=2),),
     )
-    
-    simulate!(sys, simulator, 100000)
 
-    final_pos = sys.loggers.coords.history[end][1]
+    simulator = VelocityVerlet(dt=0.002u"ps")
+    simulate!(sys, simulator, 100_000)
 
-    #Particle should end up at local minima and stick because no thermostat
-    local_min = SVector(-0.05001082299878202,0.46669410487256247)u"nm"
+    # Particle should end up at local minimum and stick due to no thermostat
+    final_pos = values(sys.loggers.coords)[end][1]
+    local_min = SVector(-0.05001082299878202, 0.46669410487256247)u"nm"
     @test isapprox(final_pos, local_min, atol=1e-7u"nm")
 end
-
 
 @testset "Units" begin
     n_atoms = 100
