@@ -101,11 +101,12 @@ end
 
 function potential_energy_pair_spec(coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
                                     sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
-                                    boundary, energy_units, neighbors, n_threads, ::Val{T}) where T
+                                    boundary, energy_units, neighbors, n_threads,
+                                    val_ft::Val{T}) where T
     pe_vec = zeros(T, 1)
     potential_energy_pair_spec!(pe_vec, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
                                 sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, boundary,
-                                energy_units, neighbors, n_threads, Val(T))
+                                energy_units, neighbors, n_threads, val_ft)
     return pe_vec[1] * energy_units
 end
 
@@ -226,13 +227,14 @@ end
 function potential_energy(s::System{D, true, T}, neighbors=nothing;
                           n_threads::Integer=Threads.nthreads()) where {D, T}
     n_atoms = length(s)
+    val_ft = Val(T)
     pe_vec = CUDA.zeros(T, 1)
 
     pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
         pe_vec += pairwise_pe_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
-                                  nbs, s.energy_units, Val(T))
+                                  nbs, s.energy_units, val_ft)
     end
 
     pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
@@ -243,12 +245,12 @@ function potential_energy(s::System{D, true, T}, neighbors=nothing;
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]
             pe_vec += pairwise_pe_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-                                    nbs, s.energy_units, Val(T))
+                                    nbs, s.energy_units, val_ft)
         end
     end
 
     for inter_list in values(s.specific_inter_lists)
-        pe_vec += specific_pe_gpu(inter_list, s.coords, s.boundary, s.energy_units, Val(T))
+        pe_vec += specific_pe_gpu(inter_list, s.coords, s.boundary, s.energy_units, val_ft)
     end
 
     pe = Array(pe_vec)[1]

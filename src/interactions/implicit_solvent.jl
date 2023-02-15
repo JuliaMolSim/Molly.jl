@@ -826,15 +826,15 @@ function forces_gbsa(sys::System{D, true, T}, inter, Bs, B_grads, I_grads, born_
     born_forces_units = born_forces .+ born_forces_mod_ustrip * unit(eltype(born_forces))
     fs_mat_2 = gbsa_force_2_gpu(sys.coords, sys.boundary, inter.dist_cutoff, Bs, B_grads, I_grads,
                         born_forces_units, inter.offset_radii, inter.scaled_offset_radii,
-                        sys.force_units)
+                        sys.force_units, Val(T))
     fs_mat = fs_mat_1 .+ fs_mat_2
     fs = reinterpret(SVector{D, T}, vec(fs_mat)) * sys.force_units
     return fs
 end
 
-function gbsa_force_1_gpu(coords::AbstractArray{SVector{D, T}}, boundary, dist_cutoff,
-                          factor_solute, factor_solvent, kappa, Bs, charges,
-                          force_units) where {D, T}
+function gbsa_force_1_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_cutoff,
+                          factor_solute, factor_solvent, kappa, Bs, charges::AbstractArray{T},
+                          force_units) where {D, C, T}
     n_atoms = length(coords)
     fs_mat = CUDA.zeros(T, D, n_atoms)
     born_forces_mod_ustrip = CUDA.zeros(T, n_atoms)
@@ -849,9 +849,9 @@ function gbsa_force_1_gpu(coords::AbstractArray{SVector{D, T}}, boundary, dist_c
     return fs_mat, born_forces_mod_ustrip
 end
 
-function gbsa_force_2_gpu(coords::AbstractArray{SVector{D, T}}, boundary, dist_cutoff, Bs, B_grads,
+function gbsa_force_2_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_cutoff, Bs, B_grads,
                           I_grads, born_forces, offset_radii, scaled_offset_radii,
-                          force_units) where {D, T}
+                          force_units, ::Val{T}) where {D, C, T}
     n_atoms = length(coords)
     fs_mat = CUDA.zeros(T, D, n_atoms)
     n_inters = n_atoms ^ 2
