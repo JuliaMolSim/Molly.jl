@@ -392,7 +392,7 @@ function AtomsBase.velocity(mass, temp, k=mb_conversion_factor;
     return SVector([maxwell_boltzmann(mass, temp, k_strip; rng=rng) for i in 1:dims]...)
 end
 
-function velocity_3D(mass, temp, k=mb_conversion_factor, rng=Random.GLOBAL_RNG)
+function random_velocity_3D(mass, temp, k=mb_conversion_factor, rng=Random.GLOBAL_RNG)
     return SVector(
         maxwell_boltzmann(mass, temp, k; rng=rng),
         maxwell_boltzmann(mass, temp, k; rng=rng),
@@ -400,7 +400,7 @@ function velocity_3D(mass, temp, k=mb_conversion_factor, rng=Random.GLOBAL_RNG)
     )
 end
 
-function velocity_2D(mass, temp, k=mb_conversion_factor, rng=Random.GLOBAL_RNG)
+function random_velocity_2D(mass, temp, k=mb_conversion_factor, rng=Random.GLOBAL_RNG)
     return SVector(
         maxwell_boltzmann(mass, temp, k; rng=rng),
         maxwell_boltzmann(mass, temp, k; rng=rng),
@@ -432,26 +432,26 @@ Generate random velocities from the Maxwell-Boltzmann distribution
 for a [`System`](@ref).
 """
 function random_velocities(sys::AbstractSystem{3}, temp; rng=Random.GLOBAL_RNG)
-    return velocity_3D.(masses(sys), temp, sys.k, rng)
+    return random_velocity_3D.(masses(sys), temp, sys.k, rng)
 end
 
 function random_velocities(sys::AbstractSystem{2}, temp; rng=Random.GLOBAL_RNG)
-    return velocity_2D.(masses(sys), temp, sys.k, rng)
+    return random_velocity_2D.(masses(sys), temp, sys.k, rng)
 end
 
 function random_velocities(sys::System{3, true}, temp; rng=Random.GLOBAL_RNG)
     if isbits(rng)
-        return velocity_3D.(masses(sys), temp, sys.k, rng)
+        return random_velocity_3D.(masses(sys), temp, sys.k, rng)
     else
-        return CuArray(velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
+        return CuArray(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
     end
 end
 
 function random_velocities(sys::System{2, true}, temp; rng=Random.GLOBAL_RNG)
     if isbits(rng)
-        return velocity_2D.(masses(sys), temp, sys.k, rng)
+        return random_velocity_2D.(masses(sys), temp, sys.k, rng)
     else
-        return CuArray(velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
+        return CuArray(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
     end
 end
 
