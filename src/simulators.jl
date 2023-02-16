@@ -858,7 +858,7 @@ end
 - `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
     every time step.
 """
-mutable struct NoseHoover{DT, K, C, TD}
+struct NoseHoover{DT, K, C, TD}
     dt::DT
     temperature::K
     coupling::C
