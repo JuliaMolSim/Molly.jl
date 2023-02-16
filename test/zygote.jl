@@ -38,8 +38,8 @@ end
         return mean(sqrt.(minimum(disps_diag; dims=1)))
     end
 
-    function test_grad(gpu::Bool, parallel::Bool, forward::Bool, f32::Bool, pis::Bool,
-                       sis::Bool, obc2::Bool, gbn2::Bool)
+    function test_simulation_grad(gpu::Bool, parallel::Bool, forward::Bool, f32::Bool, pis::Bool,
+                                  sis::Bool, obc2::Bool, gbn2::Bool)
         n_atoms = 50
         n_steps = 100
         atom_mass = f32 ? 10.0f0 : 10.0
@@ -182,7 +182,7 @@ end
         forward, f32 = args[3], args[4]
         σ  = f32 ? 0.4f0 : 0.4
         r0 = f32 ? 1.0f0 : 1.0
-        f = test_grad(args...)
+        f = test_simulation_grad(args...)
         if forward
             # Run once to setup
             grad_zygote = (

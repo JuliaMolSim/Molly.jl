@@ -280,7 +280,7 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), coords, atom
         grads = autodiff(
             potential_energy_pair_spec!,
             Const,
-            Duplicated(pe_vec, d_pe_vec),
+            Duplicated(pe_vec, [d_pe_vec]),
             Duplicated(coords, d_coords),
             Duplicated(atoms, d_atoms),
             active_if_present(pairwise_inters_nonl),
