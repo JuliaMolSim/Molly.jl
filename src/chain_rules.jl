@@ -683,8 +683,9 @@ function ChainRulesCore.rrule(::typeof(gbsa_born_gpu), coords::AbstractArray{SVe
                       neck_cut, d0s, m0s, boundary, val_ft)
 
     function gbsa_born_gpu_pullback(d_args)
-        d_Is, d_I_grads = d_args[1], d_args[2]
         n_atoms = length(coords)
+        d_Is      = d_args[1] == ZeroTangent() ? CUDA.zeros(T, n_atoms)          : d_args[1]
+        d_I_grads = d_args[2] == ZeroTangent() ? CUDA.zeros(T, n_atoms, n_atoms) : d_args[2]
         Is = CUDA.zeros(T, n_atoms)
         I_grads = CUDA.zeros(T, n_atoms, n_atoms)
         d_coords = zero(coords)
@@ -751,8 +752,9 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), coords::AbstractArray{
                          Bs, charges, force_units)
 
     function gbsa_force_1_gpu_pullback(d_args)
-        d_fs_mat, d_born_forces_mod_ustrip = d_args[1], d_args[2]
         n_atoms = length(coords)
+        d_fs_mat                 = d_args[1] == ZeroTangent() ? CUDA.zeros(T, D, n_atoms) : d_args[1]
+        d_born_forces_mod_ustrip = d_args[2] == ZeroTangent() ? CUDA.zeros(T, n_atoms)    : d_args[2]
         fs_mat = CUDA.zeros(T, D, n_atoms)
         born_forces_mod_ustrip = CUDA.zeros(T, n_atoms)
         d_coords = zero(coords)
