@@ -644,6 +644,72 @@ function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
     return Y, specific_pe_gpu_pullback
 end
 
+function grad_gbsa_born_kernel!(Is, d_Is, I_grads, d_I_grads, coords, d_coords, offset_radii,
+                                d_offset_radii, scaled_offset_radii, d_scaled_offset_radii,
+                                dist_cutoff, offset, neck_scale, grad_neck_scale, neck_cut, d0s,
+                                d_d0s, m0s, d_m0s, boundary, val_coord_units)
+    grads = Enzyme.autodiff_deferred(
+        gbsa_born_kernel!,
+        Duplicated(Is, d_Is),
+        Duplicated(I_grads, d_I_grads),
+        Duplicated(coords, d_coords),
+        Duplicated(offset_radii, d_offset_radii),
+        Duplicated(scaled_offset_radii, d_scaled_offset_radii),
+        Const(dist_cutoff),
+        Const(offset),
+        Active(neck_scale),
+        Const(neck_cut),
+        Duplicated(d0s, d_d0s),
+        Duplicated(m0s, d_m0s),
+        Const(boundary),
+        Const(val_coord_units),
+    )[1]
+    sync_threads()
+
+    if threadIdx().x == 1 && blockIdx().x == 1
+        grad_neck_scale[1] = grads[8]
+    end
+    return nothing
+end
+
+function ChainRulesCore.rrule(::typeof(gbsa_born_gpu), coords::AbstractArray{SVector{D, C}},
+                              offset_radii, scaled_offset_radii, dist_cutoff, offset, neck_scale,
+                              neck_cut, d0s, m0s, boundary, val_ft::Val{T}) where {D, C, T}
+    if unit(C) != NoUnits
+        error("Taking gradients through force/energy calculation is not compatible with units, " *
+              "coordinate units are $(unit(C))")
+    end
+    Y = gbsa_born_gpu(coords, offset_radii, scaled_offset_radii, dist_cutoff, offset, neck_scale,
+                      neck_cut, d0s, m0s, boundary, val_ft)
+
+    function gbsa_born_gpu_pullback(d_args)
+        d_Is, d_I_grads = d_args[1], d_args[2]
+        n_atoms = length(coords)
+        Is = CUDA.zeros(T, n_atoms)
+        I_grads = CUDA.zeros(T, n_atoms, n_atoms)
+        d_coords = zero(coords)
+        d_offset_radii = zero(offset_radii)
+        d_scaled_offset_radii = zero(scaled_offset_radii)
+        grad_neck_scale = CUDA.zeros(T, 1)
+        d_d0s = zero(d0s)
+        d_m0s = zero(m0s)
+        n_inters = n_atoms ^ 2
+        n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_gbsa_born_kernel!(
+                Is, d_Is, I_grads, d_I_grads, coords, d_coords, offset_radii,
+                d_offset_radii, scaled_offset_radii, d_scaled_offset_radii,
+                dist_cutoff, offset, neck_scale, grad_neck_scale, neck_cut, d0s,
+                d_d0s, m0s, d_m0s, boundary, Val(C))
+
+        d_neck_scale = Array(grad_neck_scale)[1]
+        return NoTangent(), d_coords, d_offset_radii, d_scaled_offset_radii, NoTangent(),
+               NoTangent(), d_neck_scale, NoTangent(), d_d0s, d_m0s, NoTangent(), NoTangent()
+    end
+
+    return Y, gbsa_born_gpu_pullback
+end
+
 function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
                                    d_born_forces_mod_ustrip, coords, d_coords, boundary,
                                    dist_cutoff, factor_solute, grad_factor_solute, factor_solvent,
