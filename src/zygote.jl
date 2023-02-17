@@ -447,7 +447,7 @@ function dual_function_gb_force_loop_1(f::F) where F
         ds9  = arg9
         ds10 = Zygote.dual(arg10, (false, false, false, false, false, false, false, false, false, false, true , false, false))
         ds11 = Zygote.dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, true , false))
-        ds12 = Zygote.dual(arg12, (false, false, false, false, false, false, false, false, false, false, true , false, true ))
+        ds12 = Zygote.dual(arg12, (false, false, false, false, false, false, false, false, false, false, false, false, true ))
         ds13 = arg13
         return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10, ds11, ds12, ds13)
     end
@@ -561,7 +561,7 @@ function dual_function_gb_energy_loop(f::F) where F
         ds6  = Zygote.dual(arg6 , (false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false))
         ds7  = Zygote.dual(arg7 , (false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false))
         ds8  = Zygote.dual(arg8 , (false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false))
-        ds9  = Zygote.dual(arg9 , (false, false, false, false, false, false, false, false, false, true , true , false, false, false, false, false, false))
+        ds9  = Zygote.dual(arg9 , (false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false))
         ds10 = arg10
         ds11 = Zygote.dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false))
         ds12 = Zygote.dual(arg12, (false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false))
