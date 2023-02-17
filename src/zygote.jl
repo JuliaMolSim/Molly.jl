@@ -348,6 +348,29 @@ end
     return y, bc_fwd_back
 end
 
+# For born_radii_sum
+@inline function Zygote.broadcast_forward(f,
+                                            arg1::AbstractArray{T},
+                                            arg2::T,
+                                            arg3::AbstractArray{T},
+                                            arg4,
+                                            arg5,
+                                            arg6) where T
+    out = Zygote.dual_function(f).(arg1, arg2, arg3, arg4, arg5, arg6)
+    y = broadcast(o1 -> (value(o1[1]), value(o1[2])), out)
+    function bc_fwd_back(ȳ_in)
+        ȳ = modify_grad(ȳ_in, arg1)
+        darg1 = unbroadcast(arg1, broadcast((y1, o1) -> partials(o1[1], 1) * y1[1] + partials(o1[2], 1) * y1[2], ȳ, out))
+        darg2 = unbroadcast(arg2, broadcast((y1, o1) -> partials(o1[1], 2) * y1[1] + partials(o1[2], 2) * y1[2], ȳ, out))
+        darg3 = unbroadcast(arg3, broadcast((y1, o1) -> partials(o1[1], 3) * y1[1] + partials(o1[2], 3) * y1[2], ȳ, out))
+        darg4 = unbroadcast(arg4, broadcast((y1, o1) -> partials(o1[1], 4) * y1[1] + partials(o1[2], 4) * y1[2], ȳ, out))
+        darg5 = unbroadcast(arg5, broadcast((y1, o1) -> partials(o1[1], 5) * y1[1] + partials(o1[2], 5) * y1[2], ȳ, out))
+        darg6 = unbroadcast(arg6, broadcast((y1, o1) -> partials(o1[1], 6) * y1[1] + partials(o1[2], 6) * y1[2], ȳ, out))
+        return (nothing, nothing, darg1, darg2, darg3, darg4, darg5, darg6)
+    end
+    return y, bc_fwd_back
+end
+
 function dual_function_born_radii_loop_GBN2(f::F) where F
     function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12)
         ds1  = dualize(Nothing, arg1, Val(0), Val(11))
@@ -604,6 +627,14 @@ end
     return y, bc_fwd_back
 end
 
+@inline function Zygote.broadcast_forward(f::typeof(get_i1), arg1)
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (y1, zero(y1)), ȳ)))
+end
+
+@inline function Zygote.broadcast_forward(f::typeof(get_i2), arg1)
+    return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (zero(y1), y1), ȳ)))
+end
+
 @inline function Zygote.broadcast_forward(f::typeof(get_I),
                                             arg1::AbstractArray{<:BornRadiiGBN2LoopResult})
     return f.(arg1), ȳ -> (nothing, nothing, unbroadcast(arg1, broadcast(y1 -> (I=y1, I_grad=zero(y1)), ȳ)))
@@ -650,8 +681,8 @@ end
 
 # Use fast broadcast path on CPU
 for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec, :wrap_coords,
-            :born_radii_loop_OBC, :get_I, :get_I_grad, :born_radii_loop_GBN2, :get_bi, :get_bj,
-            :get_fi, :get_fj, :gb_force_loop_1, :gb_force_loop_2, :gb_energy_loop)
+            :born_radii_loop_OBC, :get_i1, :get_i2, :get_I, :get_I_grad, :born_radii_loop_GBN2,
+            :get_bi, :get_bj, :get_fi, :get_fj, :gb_force_loop_1, :gb_force_loop_2, :gb_energy_loop)
     @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
     # Avoid ambiguous dispatch
     @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)

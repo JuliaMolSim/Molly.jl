@@ -612,6 +612,20 @@ function born_radii_loop_OBC(coord_i, coord_j, ori, srj, dist_cutoff, boundary)
     return I
 end
 
+@inbounds get_i1(x) = x[1]
+@inbounds get_i2(x) = x[2]
+
+function born_radii_sum(or, offset, I, α, β, γ)
+    radius = or + offset
+    ψ = I * or
+    ψ2 = ψ^2
+    tanh_sum = tanh(α * ψ - β * ψ2 + γ * ψ2 * ψ)
+    B = inv(inv(or) - tanh_sum / radius)
+    grad_term = or * (α - 2 * β * ψ + 3 * γ * ψ2)
+    B_grad = (1 - tanh_sum^2) * grad_term / radius
+    return B, B_grad
+end
+
 """
     born_radii_and_grad(inter, coords, boundary)
 
@@ -627,16 +641,10 @@ function born_radii_and_grad(inter::ImplicitSolventOBC, coords, boundary)
     Is = dropdims(sum(loop_res; dims=2); dims=2)
     I_grads = zero(loop_res) ./ unit(inter.dist_cutoff)
 
-    ori = inter.offset_radii
-    radii = ori .+ inter.offset
-    ψs = Is .* ori
-    ψs2 = ψs .^ 2
-    α, β, γ = inter.α, inter.β, inter.γ
-    tanh_sums = tanh.(α .* ψs .- β .* ψs2 .+ γ .* ψs2 .* ψs)
-    Bs = 1 ./ (1 ./ ori .- tanh_sums ./ radii)
-    grad_terms = ori .* (α .- 2 .* β .* ψs .+ 3 .* γ .* ψs2)
-    B_grads = (1 .- tanh_sums .^ 2) .* grad_terms ./ radii
-
+    Bs_B_grads = born_radii_sum.(inter.offset_radii, inter.offset, Is,
+                                 inter.α, inter.β, inter.γ)
+    Bs      = get_i1.(Bs_B_grads)
+    B_grads = get_i2.(Bs_B_grads)
     return Bs, B_grads, I_grads
 end
 
@@ -690,16 +698,10 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2, coords, boundary)
     Is = dropdims(sum(get_I.(loop_res); dims=2); dims=2)
     I_grads = get_I_grad.(loop_res)
 
-    ori = inter.offset_radii
-    radii = ori .+ inter.offset
-    ψs = Is .* ori
-    ψs2 = ψs .^ 2
-    αs, βs, γs = inter.αs, inter.βs, inter.γs
-    tanh_sums = tanh.(αs .* ψs .- βs .* ψs2 .+ γs .* ψs2 .* ψs)
-    Bs = 1 ./ (1 ./ ori .- tanh_sums ./ radii)
-    grad_terms = ori .* (αs .- 2 .* βs .* ψs .+ 3 .* γs .* ψs2)
-    B_grads = (1 .- tanh_sums .^ 2) .* grad_terms ./ radii
-
+    Bs_B_grads = born_radii_sum.(inter.offset_radii, inter.offset, Is,
+                                 inter.αs, inter.βs, inter.γs)
+    Bs      = get_i1.(Bs_B_grads)
+    B_grads = get_i2.(Bs_B_grads)
     return Bs, B_grads, I_grads
 end
 
@@ -708,16 +710,10 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2{T}, coords::CuArray, bou
                                 inter.dist_cutoff, inter.offset, inter.neck_scale,
                                 inter.neck_cut, inter.d0s, inter.m0s, boundary, Val(T))
 
-    ori = inter.offset_radii
-    radii = ori .+ inter.offset
-    ψs = Is .* ori
-    ψs2 = ψs .^ 2
-    αs, βs, γs = inter.αs, inter.βs, inter.γs
-    tanh_sums = tanh.(αs .* ψs .- βs .* ψs2 .+ γs .* ψs2 .* ψs)
-    Bs = 1 ./ (1 ./ ori .- tanh_sums ./ radii)
-    grad_terms = ori .* (αs .- 2 .* βs .* ψs .+ 3 .* γs .* ψs2)
-    B_grads = (1 .- tanh_sums .^ 2) .* grad_terms ./ radii
-
+    Bs_B_grads = born_radii_sum.(inter.offset_radii, inter.offset, Is,
+                                 inter.αs, inter.βs, inter.γs)
+    Bs      = get_i1.(Bs_B_grads)
+    B_grads = get_i2.(Bs_B_grads)
     return Bs, B_grads, I_grads
 end
 
