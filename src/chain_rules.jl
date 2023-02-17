@@ -357,18 +357,9 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArra
     return Y, pairwise_force_gpu_pullback
 end
 
-function grad_pairwise_pe_kernel!(pe_vec::CuDeviceVector{T}, d_pe_vec, coords, d_coords, atoms,
+function grad_pairwise_pe_kernel!(pe_vec, d_pe_vec, coords, d_coords, atoms,
                                   d_atoms, boundary, inters, grad_inters, neighbors,
-                                  val_energy_units, shared_mem_size::Val{M}) where {T, M}
-    shared_pes = CuStaticSharedArray(T, M)
-    d_shared_pes = CuStaticSharedArray(T, M)
-    if threadIdx().x == 1
-        for si in 1:M
-            d_shared_pes[si] = zero(T)
-        end
-    end
-    sync_threads()
-
+                                  val_energy_units, shared_mem_size)
     grads = Enzyme.autodiff_deferred(
         pairwise_pe_kernel!,
         Duplicated(pe_vec, d_pe_vec),
@@ -379,7 +370,6 @@ function grad_pairwise_pe_kernel!(pe_vec::CuDeviceVector{T}, d_pe_vec, coords, d
         Const(neighbors),
         Const(val_energy_units),
         Const(shared_mem_size),
-        Duplicated(shared_pes, d_shared_pes),
     )[1]
     sync_threads()
 

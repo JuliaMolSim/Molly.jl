@@ -245,7 +245,7 @@ function potential_energy(s::System{D, true, T}, neighbors=nothing;
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]
             pe_vec += pairwise_pe_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-                                    nbs, s.energy_units, val_ft)
+                                      nbs, s.energy_units, val_ft)
         end
     end
 

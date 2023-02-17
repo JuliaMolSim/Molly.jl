@@ -207,23 +207,13 @@ function pairwise_pe_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundary,
 end
 
 function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, boundary, inters,
-                             neighbors_var, ::Val{E}, ::Val{M},
-                             shared_pes_arg=nothing) where {T, E, M}
+                             neighbors_var, ::Val{E}, ::Val{M}) where {T, E, M}
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
     neighbors = CUDA.Const(neighbors_var)
 
     tidx = threadIdx().x
     inter_i = (blockIdx().x - 1) * blockDim().x + tidx
-    shared_pes = isnothing(shared_pes_arg) ? CuStaticSharedArray(T, M) : shared_pes_arg
-    shared_flags = CuStaticSharedArray(Bool, M)
-
-    if tidx == 1
-        for si in 1:M
-            shared_flags[si] = false
-        end
-    end
-    sync_threads()
 
     if inter_i <= length(neighbors)
         i, j, weight_14 = neighbors[inter_i]
@@ -238,22 +228,7 @@ function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, b
         if unit(pe) != E
             error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        shared_pes[tidx] = ustrip(pe)
-        shared_flags[tidx] = true
-    end
-    sync_threads()
-
-    n_threads_sum = 16
-    n_mem_to_sum = M ÷ n_threads_sum # Should be exact, not currently checked
-    if tidx <= n_threads_sum
-        pe_sum = zero(T)
-        for si in ((tidx - 1) * n_mem_to_sum + 1):(tidx * n_mem_to_sum)
-            if !shared_flags[si]
-                break
-            end
-            pe_sum += shared_pes[si]
-        end
-        Atomix.@atomic :monotonic energy[1] += pe_sum
+        Atomix.@atomic :monotonic energy[1] += pe
     end
     return nothing
 end
