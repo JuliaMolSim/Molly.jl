@@ -615,7 +615,7 @@ end
 """
     born_radii_and_grad(inter, coords, boundary)
 
-Calculate Born radii and gradients of Born radii and surface area overlap
+Calculate Born radii, gradients of Born radii and surface area overlap
 with respect to atomic distance.
 Custom GBSA methods should implement this function.
 """
@@ -648,8 +648,8 @@ end
 get_I(r::BornRadiiGBN2LoopResult) = r.I
 get_I_grad(r::BornRadiiGBN2LoopResult) = r.I_grad
 
-function born_radii_loop_GBN2(coord_i::SVector{D, T}, coord_j, ori, orj, srj, dist_cutoff,
-                                offset, neck_scale, neck_cut, d0, m0, boundary) where {D, T}
+function born_radii_loop_GBN2(coord_i::SVector{D, C}, coord_j, ori, orj, srj, dist_cutoff,
+                                offset, neck_scale, neck_cut, d0, m0, boundary) where {D, C}
     I = zero(coord_i[1] / unit(dist_cutoff)^2)
     I_grad = zero(coord_i[1] / unit(dist_cutoff)^3)
     r = norm(vector(coord_i, coord_j, boundary))
@@ -668,7 +668,7 @@ function born_radii_loop_GBN2(coord_i::SVector{D, T}, coord_j, ori, orj, srj, di
     radius_i = ori + offset
     radius_j = orj + offset
     if r < (radius_i + radius_j + neck_cut)
-        if dimension(T) == u"𝐋"
+        if dimension(C) == u"𝐋"
             r_d0_strip = 10 * ustrip(u"nm", r - d0) # The integral uses Å
         else
             r_d0_strip = 10 * (r - d0)
@@ -701,6 +701,104 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2, coords, boundary)
     B_grads = (1 .- tanh_sums .^ 2) .* grad_terms ./ radii
 
     return Bs, B_grads, I_grads
+end
+
+function born_radii_and_grad(inter::ImplicitSolventGBN2{T}, coords::CuArray, boundary) where T
+    Is, I_grads = gbsa_born_gpu(coords, inter.offset_radii, inter.scaled_offset_radii,
+                                inter.dist_cutoff, inter.offset, inter.neck_scale,
+                                inter.neck_cut, inter.d0s, inter.m0s, boundary, Val(T))
+
+    ori = inter.offset_radii
+    radii = ori .+ inter.offset
+    ψs = Is .* ori
+    ψs2 = ψs .^ 2
+    αs, βs, γs = inter.αs, inter.βs, inter.γs
+    tanh_sums = tanh.(αs .* ψs .- βs .* ψs2 .+ γs .* ψs2 .* ψs)
+    Bs = 1 ./ (1 ./ ori .- tanh_sums ./ radii)
+    grad_terms = ori .* (αs .- 2 .* βs .* ψs .+ 3 .* γs .* ψs2)
+    B_grads = (1 .- tanh_sums .^ 2) .* grad_terms ./ radii
+
+    return Bs, B_grads, I_grads
+end
+
+function cuda_threads_blocks_gbsa(n_inters)
+    n_threads = 256
+    n_blocks = cld(n_inters, n_threads)
+    return n_threads, n_blocks
+end
+
+function gbsa_born_gpu(coords::AbstractArray{SVector{D, C}}, offset_radii, scaled_offset_radii,
+                       dist_cutoff, offset, neck_scale, neck_cut, d0s, m0s, boundary,
+                       ::Val{T}) where {D, C, T}
+    n_atoms = length(coords)
+    Is_nounits = CUDA.zeros(T, n_atoms)
+    I_grads_nounits = CUDA.zeros(T, n_atoms, n_atoms)
+    n_inters = n_atoms ^ 2
+    n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_born_kernel!(
+                Is_nounits, I_grads_nounits, coords, offset_radii, scaled_offset_radii,
+                dist_cutoff, offset, neck_scale, neck_cut, d0s, m0s, boundary, Val(C))
+
+    Is = Is_nounits * unit(dist_cutoff)^-1
+    I_grads = I_grads_nounits * unit(dist_cutoff)^-2
+    return Is, I_grads
+end
+
+function gbsa_born_kernel!(Is, I_grads, coords_var, offset_radii_var, scaled_offset_radii_var,
+                           dist_cutoff, offset, neck_scale, neck_cut, d0s_var, m0s_var, boundary,
+                           ::Val{C}) where C
+    coords              = CUDA.Const(coords_var)
+    offset_radii        = CUDA.Const(offset_radii_var)
+    scaled_offset_radii = CUDA.Const(scaled_offset_radii_var)
+    d0s                 = CUDA.Const(d0s_var)
+    m0s                 = CUDA.Const(m0s_var)
+
+    n_atoms = length(coords)
+    n_inters = n_atoms ^ 2
+    tidx = threadIdx().x
+    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+
+    if inter_i <= n_inters
+        i = cld(inter_i, n_atoms)
+        j = (inter_i - 1) % n_atoms + 1
+        if i != j
+            coord_i, coord_j = coords[i], coords[j]
+            r = norm(vector(coord_i, coord_j, boundary))
+            if iszero_value(dist_cutoff) || r <= dist_cutoff
+                I = zero(coord_i[1] / unit(dist_cutoff)^2)
+                I_grad = zero(coord_i[1] / unit(dist_cutoff)^3)
+                ori, orj = offset_radii[i], offset_radii[j]
+                srj = scaled_offset_radii[j]
+                d0, m0 = d0s[i, j], m0s[i, j]
+                U = r + srj
+                if ori < U
+                    D_ij = abs(r - srj)
+                    L = max(ori, D_ij)
+                    I += (1/L - 1/U + (r - (srj^2)/r)*(1/(U^2) - 1/(L^2))/4 + log(L/U)/(2*r)) / 2
+                    if ori < (srj - r)
+                        I += 2 * (1/ori - 1/L)
+                    end
+                end
+                radius_i = ori + offset
+                radius_j = orj + offset
+                if r < (radius_i + radius_j + neck_cut)
+                    if dimension(C) == u"𝐋"
+                        r_d0_strip = 10 * ustrip(u"nm", r - d0) # The integral uses Å
+                    else
+                        r_d0_strip = 10 * (r - d0)
+                    end
+                    denom = 1 + r_d0_strip^2 + 3 * r_d0_strip^6 / 10
+                    I += neck_scale * m0 / denom
+                    numer = 2 * r_d0_strip + 9 * r_d0_strip^5 / 5
+                    I_grad -= 10 * neck_scale * m0 * numer / (denom^2 * unit(dist_cutoff))
+                end
+                Atomix.@atomic :monotonic Is[i] += ustrip(unit(dist_cutoff)^-1, I)
+                I_grads[i, j] += ustrip(unit(dist_cutoff)^-2, I_grad)
+            end
+        end
+    end
+    return nothing
 end
 
 # Store the results of the ij broadcasts during force calculation
@@ -810,12 +908,6 @@ function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, charges)
 
     return fs .+ dropdims(sum(get_fi.(loop_res_2); dims=2); dims=2) .+
                  dropdims(sum(get_fj.(loop_res_2); dims=1); dims=1)
-end
-
-function cuda_threads_blocks_gbsa(n_inters)
-    n_threads = 256
-    n_blocks = cld(n_inters, n_threads)
-    return n_threads, n_blocks
 end
 
 function forces_gbsa(sys::System{D, true, T}, inter, Bs, B_grads, I_grads, born_forces,
