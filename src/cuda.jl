@@ -228,7 +228,7 @@ function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, b
         if unit(pe) != E
             error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic :monotonic energy[1] += pe
+        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
     return nothing
 end
