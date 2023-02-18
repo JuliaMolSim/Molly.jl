@@ -124,9 +124,11 @@ end
                 for i in thread_id:n_threads:n_atoms
                     for j in (i + 1):n_atoms
                         dr = vector(coords[i], coords[j], boundary)
-                        pe = sum(pairwise_inters_nonl) do inter
-                            potential_energy(inter, dr, coords[i], coords[j], atoms[i],
-                                             atoms[j], boundary)
+                        pe = potential_energy(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
+                                              atoms[j], boundary)
+                        for inter in pairwise_inters_nonl[2:end]
+                            pe += potential_energy(inter, dr, coords[i], coords[j], atoms[i],
+                                                   atoms[j], boundary)
                         end
                         check_energy_units(pe, energy_units)
                         pe_sum_chunks[thread_id] += ustrip(pe)
@@ -143,9 +145,11 @@ end
                 for ni in thread_id:n_threads:length(neighbors)
                     i, j, weight_14 = neighbors.list[ni]
                     dr = vector(coords[i], coords[j], boundary)
-                    pe = sum(pairwise_inters_nl) do inter
-                        potential_energy(inter, dr, coords[i], coords[j], atoms[i],
-                                         atoms[j], boundary, weight_14)
+                    pe = potential_energy(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
+                                          atoms[j], boundary, weight_14)
+                    for inter in pairwise_inters_nl[2:end]
+                        pe += potential_energy(inter, dr, coords[i], coords[j], atoms[i],
+                                               atoms[j], boundary, weight_14)
                     end
                     check_energy_units(pe, energy_units)
                     pe_sum_chunks[thread_id] += ustrip(pe)
@@ -160,9 +164,11 @@ end
             for i in 1:n_atoms
                 for j in (i + 1):n_atoms
                     dr = vector(coords[i], coords[j], boundary)
-                    pe = sum(pairwise_inters_nonl) do inter
-                        potential_energy(inter, dr, coords[i], coords[j], atoms[i],
-                                         atoms[j], boundary)
+                    pe = potential_energy(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
+                                          atoms[j], boundary)
+                    for inter in pairwise_inters_nonl[2:end]
+                        pe += potential_energy(inter, dr, coords[i], coords[j], atoms[i],
+                                               atoms[j], boundary)
                     end
                     check_energy_units(pe, energy_units)
                     pe_sum += ustrip(pe)
@@ -177,9 +183,11 @@ end
             for ni in 1:length(neighbors)
                 i, j, weight_14 = neighbors.list[ni]
                 dr = vector(coords[i], coords[j], boundary)
-                pe = sum(pairwise_inters_nl) do inter
-                    potential_energy(inter, dr, coords[i], coords[j], atoms[i],
-                                     atoms[j], boundary, weight_14)
+                pe = potential_energy(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
+                                      atoms[j], boundary, weight_14)
+                for inter in pairwise_inters_nl[2:end]
+                    pe += potential_energy(inter, dr, coords[i], coords[j], atoms[i],
+                                           atoms[j], boundary, weight_14)
                 end
                 check_energy_units(pe, energy_units)
                 pe_sum += ustrip(pe)
