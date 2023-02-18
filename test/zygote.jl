@@ -98,6 +98,7 @@ end
                 gpu ? CuArray(atoms_setup) : atoms_setup,
                 [AtomData(element="O") for i in 1:n_atoms],
                 InteractionList2Atoms(bond_is, bond_js, nothing);
+                kappa=(f32 ? 0.7f0 : 0.7),
                 use_OBC2=true,
             )
             general_inters = (imp_obc2,)
@@ -105,7 +106,8 @@ end
             imp_gbn2 = ImplicitSolventGBN2(
                 gpu ? CuArray(atoms_setup) : atoms_setup,
                 [AtomData(element="O") for i in 1:n_atoms],
-                InteractionList2Atoms(bond_is, bond_js, nothing),
+                InteractionList2Atoms(bond_is, bond_js, nothing);
+                kappa=(f32 ? 0.7f0 : 0.7),
             )
             general_inters = (imp_gbn2,)
         else
