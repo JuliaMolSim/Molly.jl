@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Examples · Molly.jl</title><link href="https://fonts.googleapis.com/css?family=Lato|Roboto+Mono" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.11.1/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit">Molly.jl</span></div><form class="docs-search" action="../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../docs/">Documentation</a></li><li><a class="tocitem" href="../differentiable/">Differentiable simulation</a></li><li class="is-active"><a class="tocitem" href>Examples</a><ul class="internal"><li><a class="tocitem" href="#Simulated-annealing"><span>Simulated annealing</span></a></li><li><a class="tocitem" href="#Solar-system"><span>Solar system</span></a></li><li><a class="tocitem" href="#Polymer-melt"><span>Polymer melt</span></a></li><li><a class="tocitem" href="#Density-functional-theory"><span>Density functional theory</span></a></li><li><a class="tocitem" href="#Making-and-breaking-bonds"><span>Making and breaking bonds</span></a></li><li><a class="tocitem" href="#Comparing-forces-to-AD"><span>Comparing forces to AD</span></a></li><li><a class="tocitem" href="#Variations-of-the-Morse-potential"><span>Variations of the Morse potential</span></a></li><li><a class="tocitem" href="#Variations-of-the-Mie-potential"><span>Variations of the Mie potential</span></a></li><li><a class="tocitem" href="#Variations-of-the-soft-core-LJ-potential"><span>Variations of the soft-core LJ potential</span></a></li></ul></li><li><a class="tocitem" href="../related/">Related software</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Examples</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Examples</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/examples.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="Molly-examples"><a class="docs-heading-anchor" href="#Molly-examples">Molly examples</a><a id="Molly-examples-1"></a><a class="docs-heading-anchor-permalink" href="#Molly-examples" title="Permalink"></a></h1><p>The best examples for learning how the package works are in the <a href="../docs/#Molly-documentation">Molly documentation</a> section. Here we give further examples showing what you can do with the package. Each is a self-contained block of code. Made something cool yourself? Make a PR to add it to this page.</p><h2 id="Simulated-annealing"><a class="docs-heading-anchor" href="#Simulated-annealing">Simulated annealing</a><a id="Simulated-annealing-1"></a><a class="docs-heading-anchor-permalink" href="#Simulated-annealing" title="Permalink"></a></h2><p>You can change the thermostat temperature of a simulation by changing the simulator. Here we reduce the temperature of a simulation in stages from 300 K to 0 K.</p><pre><code class="language-julia">using Molly
+using GLMakie
+
+data_dir = joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;)
+ff = OpenMMForceField(
+    joinpath(data_dir, &quot;force_fields&quot;, &quot;ff99SBildn.xml&quot;),
+    joinpath(data_dir, &quot;force_fields&quot;, &quot;tip3p_standard.xml&quot;),
+    joinpath(data_dir, &quot;force_fields&quot;, &quot;his.xml&quot;),
+)
+
+sys = System(
+    joinpath(data_dir, &quot;6mrr_equil.pdb&quot;),
+    ff;
+    loggers=(temp=TemperatureLogger(100),),
+)
+
+minimizer = SteepestDescentMinimizer()
+simulate!(sys, minimizer)
+
+temps = [300.0, 200.0, 100.0, 0.0]u&quot;K&quot;
+random_velocities!(sys, temps[1])
+
+for temp in temps
+    simulator = Langevin(
+        dt=0.001u&quot;ps&quot;,
+        temperature=temp,
+        friction=1.0u&quot;ps^-1&quot;,
+    )
+    simulate!(sys, simulator, 5_000)
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Step&quot;,
+    ylabel=&quot;Temperature&quot;,
+    title=&quot;Temperature change during simulated annealing&quot;,
+)
+for (i, temp) in enumerate(temps)
+    lines!(
+        ax,
+        [5100 * i - 5000, 5100 * i],
+        [ustrip(temp), ustrip(temp)],
+        linestyle=&quot;--&quot;,
+        color=:orange,
+    )
+end
+scatter!(
+    ax,
+    100 .* (1:length(values(sys.loggers.temp))),
+    ustrip.(values(sys.loggers.temp)),
+    markersize=5,
+)
+save(&quot;annealing.png&quot;, f)</code></pre><p><img src="../images/annealing.png" alt="Annealing"/></p><h2 id="Solar-system"><a class="docs-heading-anchor" href="#Solar-system">Solar system</a><a id="Solar-system-1"></a><a class="docs-heading-anchor-permalink" href="#Solar-system" title="Permalink"></a></h2><p>Orbits of the four closest planets to the sun can be simulated.</p><pre><code class="language-julia">using Molly
+using GLMakie
+
+# Using get_body_barycentric_posvel from Astropy
+coords = [
+    SVector(-1336052.8665050615,  294465.0896030796 ,  158690.88781384667)u&quot;km&quot;,
+    SVector(-58249418.70233503 , -26940630.286818042, -8491250.752464907 )u&quot;km&quot;,
+    SVector( 58624128.321813114, -81162437.2641475  , -40287143.05760552 )u&quot;km&quot;,
+    SVector(-99397467.7302648  , -105119583.06486066, -45537506.29775053 )u&quot;km&quot;,
+    SVector( 131714235.34070954, -144249196.60814604, -69730238.5084304  )u&quot;km&quot;,
+]
+
+velocities = [
+    SVector(-303.86327859262457, -1229.6540090943934, -513.791218405548  )u&quot;km * d^-1&quot;,
+    SVector( 1012486.9596885007, -3134222.279236384 , -1779128.5093088674)u&quot;km * d^-1&quot;,
+    SVector( 2504563.6403826815,  1567163.5923297722,  546718.234192132  )u&quot;km * d^-1&quot;,
+    SVector( 1915792.9709661514, -1542400.0057833872, -668579.962254351  )u&quot;km * d^-1&quot;,
+    SVector( 1690083.43357355  ,  1393597.7855017239,  593655.0037930267 )u&quot;km * d^-1&quot;,
+]
+
+body_masses = [
+    1.989e30u&quot;kg&quot;,
+    0.330e24u&quot;kg&quot;,
+    4.87e24u&quot;kg&quot; ,
+    5.97e24u&quot;kg&quot; ,
+    0.642e24u&quot;kg&quot;,
+]
+
+boundary = CubicBoundary(1e9u&quot;km&quot;, 1e9u&quot;km&quot;, 1e9u&quot;km&quot;)
+
+# Convert the gravitational constant to the appropriate units
+inter = Gravity(G=convert(typeof(1.0u&quot;km^3 * kg^-1 * d^-2&quot;), Unitful.G))
+
+sys = System(
+    atoms=[Atom(mass=m) for m in body_masses],
+    pairwise_inters=(inter,),
+    coords=coords .+ (SVector(5e8, 5e8, 5e8)u&quot;km&quot;,),
+    velocities=velocities,
+    boundary=boundary,
+    loggers=(coords=CoordinateLogger(typeof(1.0u&quot;km&quot;), 10),),
+    force_units=u&quot;kg * km * d^-2&quot;,
+    energy_units=u&quot;kg * km^2 * d^-2&quot;,
+)
+
+simulator = Verlet(
+    dt=0.1u&quot;d&quot;,
+    remove_CM_motion=false,
+)
+
+simulate!(sys, simulator, 3650) # 1 year
+
+visualize(
+    sys.loggers.coords,
+    boundary,
+    &quot;sim_planets.mp4&quot;;
+    trails=5,
+    color=[:yellow, :grey, :orange, :blue, :red],
+    markersize=[0.25, 0.08, 0.08, 0.08, 0.08],
+    transparency=false,
+)</code></pre><p><img src="../images/sim_planets.gif" alt="Planet simulation"/></p><h2 id="Polymer-melt"><a class="docs-heading-anchor" href="#Polymer-melt">Polymer melt</a><a id="Polymer-melt-1"></a><a class="docs-heading-anchor-permalink" href="#Polymer-melt" title="Permalink"></a></h2><p>Here we use <a href="../api/#Molly.FENEBond"><code>FENEBond</code></a>, <a href="../api/#Molly.CosineAngle"><code>CosineAngle</code></a> and <a href="../api/#Molly.LennardJones"><code>LennardJones</code></a> to simulate interacting polymers. We also analyse the end-to-end polymer distances and chain angles across the trajectory.</p><pre><code class="language-julia">using Molly
+using GLMakie
+using Colors
+using LinearAlgebra
+
+# Simulate 10 polymers each consisting of 6 monomers
+n_polymers = 10
+n_monomers = 6
+n_atoms = n_monomers * n_polymers
+n_bonds_mon = n_monomers - 1
+n_bonds_tot = n_bonds_mon * n_polymers
+n_angles_mon = n_monomers - 2
+n_angles_tot = n_angles_mon * n_polymers
+
+starting_length = 1.1u&quot;nm&quot;
+box_length = 20.0u&quot;nm&quot;
+boundary = CubicBoundary(box_length, box_length, box_length)
+
+# Random placement of polymer centers at the start
+start_coords = place_atoms(n_polymers, boundary; min_dist=6.0u&quot;nm&quot;)
+
+# Polymers start almost completely extended
+coords = []
+for pol_i in 1:n_polymers
+    for mon_i in 1:n_monomers
+        push!(coords, start_coords[pol_i] .+ SVector(
+            starting_length * (mon_i - 1 - n_monomers / 2),
+            rand() * 0.1u&quot;nm&quot;,
+            rand() * 0.1u&quot;nm&quot;,
+        ))
+    end
+end
+coords = [coords...] # Ensure the array is strongly typed
+
+# Create FENEBonds between adjacent monomers
+bond_is, bond_js = Int[], Int[]
+for pol_i in 1:n_polymers
+    for bi in 1:n_bonds_mon
+        push!(bond_is, (pol_i - 1) * n_monomers + bi    )
+        push!(bond_js, (pol_i - 1) * n_monomers + bi + 1)
+    end
+end
+
+fene_k = 250.0u&quot;kJ * mol^-1 * nm^-2&quot;
+fene_r0 = 1.6u&quot;nm&quot;
+bonds = InteractionList2Atoms(
+    bond_is,
+    bond_js,
+    repeat([&quot;&quot;], n_bonds_tot),
+    [FENEBond(k=fene_k, r0=fene_r0, σ=1.0u&quot;nm&quot;, ϵ=2.5u&quot;kJ * mol^-1&quot;) for _ in 1:n_bonds_tot],
+)
+
+# Create CosineAngles between adjacent monomers
+angle_is, angle_js, angle_ks = Int[], Int[], Int[]
+for pol_i in 1:n_polymers
+    for bi in 1:n_angles_mon
+        push!(angle_is, (pol_i - 1) * n_monomers + bi    )
+        push!(angle_js, (pol_i - 1) * n_monomers + bi + 1)
+        push!(angle_ks, (pol_i - 1) * n_monomers + bi + 2)
+    end
+end
+
+angles = InteractionList3Atoms(
+    angle_is,
+    angle_js,
+    angle_ks,
+    repeat([&quot;&quot;], n_angles_tot),
+    [CosineAngle(k=2.0u&quot;kJ * mol^-1&quot;, θ0=0.0) for _ in 1:n_angles_tot],
+)
+
+atoms = [Atom(mass=10.0u&quot;u&quot;, σ=1.0u&quot;nm&quot;, ϵ=0.5u&quot;kJ * mol^-1&quot;) for _ in 1:n_atoms]
+
+# Since we are using a generic pairwise Lennard-Jones potential too we need to
+#   exclude adjacent monomers from the neighbor list
+nb_matrix = trues(n_atoms, n_atoms)
+for pol_i in 1:n_polymers
+    for mon_i in 1:n_bonds_mon
+        i = (pol_i - 1) * n_monomers + mon_i
+        j = (pol_i - 1) * n_monomers + mon_i + 1
+        nb_matrix[i, j] = false
+        nb_matrix[j, i] = false
+    end
+end
+
+neighbor_finder = DistanceNeighborFinder(
+    nb_matrix=nb_matrix,
+    n_steps=10,
+    dist_cutoff=5.0u&quot;nm&quot;,
+)
+
+sys = System(
+    atoms=atoms,
+    pairwise_inters=(LennardJones(nl_only=true),),
+    specific_inter_lists=(bonds, angles),
+    coords=coords,
+    boundary=boundary,
+    neighbor_finder=neighbor_finder,
+    loggers=(coords=CoordinateLogger(200),),
+)
+
+sim = Langevin(dt=0.002u&quot;ps&quot;, temperature=300.0u&quot;K&quot;, friction=1.0u&quot;ps^-1&quot;)
+
+simulate!(sys, sim, 100_000)
+
+colors = distinguishable_colors(n_polymers, [RGB(1, 1, 1), RGB(0, 0, 0)]; dropseed=true)
+
+visualize(
+    sys.loggers.coords,
+    boundary,
+    &quot;sim_polymer.gif&quot;;
+    connections=zip(bond_is, bond_js),
+    color=repeat(colors; inner=n_monomers),
+    connection_color=repeat(colors; inner=n_bonds_mon),
+)</code></pre><p><img src="../images/sim_polymer.gif" alt="Polymer simulation"/></p><pre><code class="language-julia">logged_coords = values(sys.loggers.coords)
+n_frames = length(logged_coords)
+
+# Calculate end-to-end polymer distances for second half of trajectory
+end_to_end_dists = Float64[]
+for traj_coords in logged_coords[(n_frames ÷ 2):end]
+    for pol_i in 1:n_polymers
+        start_i = (pol_i - 1) * n_monomers + 1
+        end_i = pol_i * n_monomers
+        dist = norm(vector(traj_coords[start_i], traj_coords[end_i], boundary))
+        push!(end_to_end_dists, ustrip(dist))
+    end
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;End-to-end distance / nm&quot;,
+    ylabel=&quot;Density&quot;,
+    title=&quot;End-to-end polymer distance over the trajectory&quot;,
+)
+hist!(ax, end_to_end_dists, normalization=:pdf)
+xlims!(ax, low=0)
+ylims!(ax, low=0)
+save(&quot;polymer_dist.png&quot;, f)</code></pre><p><img src="../images/polymer_dist.png" alt="Polymer distances"/></p><pre><code class="language-julia"># Calculate angles to adjacent monomers for second half of trajectory
+chain_angles = Float64[]
+for traj_coords in logged_coords[(n_frames ÷ 2):end]
+    for pol_i in 1:n_polymers
+        for mon_i in 2:(n_monomers - 1)
+            angle = bond_angle(
+                traj_coords[(pol_i - 1) * n_monomers + mon_i - 1],
+                traj_coords[(pol_i - 1) * n_monomers + mon_i    ],
+                traj_coords[(pol_i - 1) * n_monomers + mon_i + 1],
+                boundary,
+            )
+            push!(chain_angles, rad2deg(angle))
+        end
+    end
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Angle with adjacent monomers / degrees&quot;,
+    ylabel=&quot;Density&quot;,
+    title=&quot;Chain angles over the trajectory&quot;,
+)
+hist!(ax, chain_angles, normalization=:pdf)
+xlims!(ax, 0, 180)
+ylims!(ax, low=0)
+save(&quot;polymer_angle.png&quot;, f)</code></pre><p><img src="../images/polymer_angle.png" alt="Polymer angles"/></p><h2 id="Density-functional-theory"><a class="docs-heading-anchor" href="#Density-functional-theory">Density functional theory</a><a id="Density-functional-theory-1"></a><a class="docs-heading-anchor-permalink" href="#Density-functional-theory" title="Permalink"></a></h2><p><a href="https://github.com/JuliaMolSim/DFTK.jl">DFTK.jl</a> can be used to calculate forces using density functional theory (DFT), allowing the simulation of quantum systems in Molly. This example uses the <a href="https://docs.dftk.org/stable/guide/tutorial">DFTK.jl tutorial</a> to simulate two silicon atoms with atomic units. A general interaction is used since the whole force calculation is offloaded to DFTK.jl.</p><pre><code class="language-julia">using Molly
+using DFTK
+
+struct DFTKInteraction{L, A}
+    lattice::L
+    atoms::A
+end
+
+# Define lattice and atomic positions
+a = 5.431u&quot;Å&quot;                 # Silicon lattice constant
+lattice = a / 2 * [[0 1 1.];  # Silicon lattice vectors
+                   [1 0 1.];  # specified column by column
+                   [1 1 0.]];
+
+# Load HGH pseudopotential for Silicon
+Si = ElementPsp(:Si, psp=load_psp(&quot;hgh/lda/Si-q4&quot;))
+
+# Specify type of atoms
+atoms_dftk = [Si, Si]
+
+dftk_interaction = DFTKInteraction(lattice, atoms_dftk)
+
+function Molly.forces(inter::DFTKInteraction, sys, neighbors=nothing)
+    # Select model and basis
+    model = model_LDA(inter.lattice, inter.atoms, sys.coords)
+    kgrid = [4, 4, 4]     # k-point grid (Regular Monkhorst-Pack grid)
+    Ecut = 7              # kinetic energy cutoff
+    basis = PlaneWaveBasis(model; Ecut=Ecut, kgrid=kgrid)
+
+    # Run the SCF procedure to obtain the ground state
+    scfres = self_consistent_field(basis; tol=1e-5)
+
+    return compute_forces_cart(scfres)
+end
+
+atoms = fill(Atom(mass=28.0), 2)
+coords = [SVector(1/8, 1/8, 1/8), SVector(-1/8, -1/8, -1/8)]
+velocities = [randn(SVector{3, Float64}) * 0.1 for _ in 1:2]
+boundary = CubicBoundary(Inf, Inf, Inf)
+loggers = (coords=CoordinateLogger(Float64, 1),)
+
+sys = System(
+    atoms=atoms,
+    general_inters=(dftk_interaction,),
+    coords=coords,
+    velocities=velocities,
+    boundary=boundary,
+    loggers=loggers,
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+
+simulator = Verlet(dt=0.0005, remove_CM_motion=false)
+
+simulate!(sys, simulator, 100)
+
+values(sys.loggers.coords)[end]
+# 2-element Vector{SVector{3, Float64}}:
+#  [0.12060853912863925, 0.12292128337998731, 0.13100409788691614]
+#  [-0.13352575661477334, -0.11473039463130282, -0.13189544838731393]</code></pre><h2 id="Making-and-breaking-bonds"><a class="docs-heading-anchor" href="#Making-and-breaking-bonds">Making and breaking bonds</a><a id="Making-and-breaking-bonds-1"></a><a class="docs-heading-anchor-permalink" href="#Making-and-breaking-bonds" title="Permalink"></a></h2><p>There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation? In this case you can use a <a href="../api/#Molly.PairwiseInteraction"><code>PairwiseInteraction</code></a> to make, break and apply the bonds. The partners of the atom can be stored in the atom type. We make a logger to record when the bonds are present, allowing us to visualize them with the <code>connection_frames</code> keyword argument to <a href="../api/#Molly.visualize"><code>visualize</code></a> (this can take a while to plot).</p><pre><code class="language-julia">using Molly
+using GLMakie
+using LinearAlgebra
+
+struct BondableAtom
+    i::Int
+    mass::Float64
+    σ::Float64
+    ϵ::Float64
+    partners::Set{Int}
+end
+
+struct BondableInteraction &lt;: PairwiseInteraction
+    nl_only::Bool
+    prob_formation::Float64
+    prob_break::Float64
+    dist_formation::Float64
+    k::Float64
+    r0::Float64
+end
+
+function Molly.force(inter::BondableInteraction,
+                        dr,
+                        coord_i,
+                        coord_j,
+                        atom_i,
+                        atom_j,
+                        boundary)
+    # Break bonds randomly
+    if atom_j.i in atom_i.partners &amp;&amp; rand() &lt; inter.prob_break
+        delete!(atom_i.partners, atom_j.i)
+        delete!(atom_j.partners, atom_i.i)
+    end
+    # Make bonds between close atoms randomly
+    r2 = sum(abs2, dr)
+    if r2 &lt; inter.r0 * inter.dist_formation &amp;&amp; rand() &lt; inter.prob_formation
+        push!(atom_i.partners, atom_j.i)
+        push!(atom_j.partners, atom_i.i)
+    end
+    # Apply the force of a harmonic bond
+    if atom_j.i in atom_i.partners
+        c = inter.k * (norm(dr) - inter.r0)
+        fdr = -c * normalize(dr)
+        return fdr
+    else
+        return zero(coord_i)
+    end
+end
+
+function bonds(sys::System, neighbors=nothing, n_threads::Integer=Threads.nthreads())
+    bonds = BitVector()
+    for i in 1:length(sys)
+        for j in 1:(i - 1)
+            push!(bonds, j in sys.atoms[i].partners)
+        end
+    end
+    return bonds
+end
+
+BondLogger(n_steps) = GeneralObservableLogger(bonds, BitVector, n_steps)
+
+n_atoms = 200
+boundary = RectangularBoundary(10.0, 10.0)
+n_steps = 2_000
+temp = 1.0
+
+atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
+coords = place_atoms(n_atoms, boundary; min_dist=0.1)
+velocities = [velocity(1.0, temp; dims=2) for i in 1:n_atoms]
+pairwise_inters = (
+    SoftSphere(nl_only=true),
+    BondableInteraction(true, 0.1, 0.1, 1.1, 2.0, 0.1),
+)
+neighbor_finder = DistanceNeighborFinder(
+    nb_matrix=trues(n_atoms, n_atoms),
+    n_steps=10,
+    dist_cutoff=2.0,
+)
+simulator = VelocityVerlet(
+    dt=0.02,
+    coupling=AndersenThermostat(temp, 5.0),
+)
+
+sys = System(
+    atoms=atoms,
+    pairwise_inters=pairwise_inters,
+    coords=coords,
+    velocities=velocities,
+    boundary=boundary,
+    neighbor_finder=neighbor_finder,
+    loggers=(
+        coords=CoordinateLogger(Float64, 20; dims=2),
+        bonds=BondLogger(20),
+    ),
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+
+simulate!(sys, simulator, n_steps)
+
+connections = Tuple{Int, Int}[]
+for i in 1:length(sys)
+    for j in 1:(i - 1)
+        push!(connections, (i, j))
+    end
+end
+
+visualize(
+    sys.loggers.coords,
+    boundary,
+    &quot;sim_mutbond.mp4&quot;;
+    connections=connections,
+    connection_frames=values(sys.loggers.bonds),
+    markersize=0.1,
+)</code></pre><p><img src="../images/sim_mutbond.gif" alt="Mutable bond simulation"/></p><h2 id="Comparing-forces-to-AD"><a class="docs-heading-anchor" href="#Comparing-forces-to-AD">Comparing forces to AD</a><a id="Comparing-forces-to-AD-1"></a><a class="docs-heading-anchor-permalink" href="#Comparing-forces-to-AD" title="Permalink"></a></h2><p>The force is the negative derivative of the potential energy with respect to position. MD packages, including Molly, implement the force functions directly for performance. However it is also possible to compute the forces using AD. Here we compare the two approaches for the Lennard-Jones potential and see that they give the same result.</p><pre><code class="language-julia">using Molly
+using Zygote
+using GLMakie
+
+inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
+boundary = CubicBoundary(5.0, 5.0, 5.0)
+a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
+
+function force_direct(dist)
+    c1 = SVector(1.0, 1.0, 1.0)
+    c2 = SVector(dist + 1.0, 1.0, 1.0)
+    vec = vector(c1, c2, boundary)
+    F = force(inter, vec, c1, c2, a1, a2, boundary)
+    return F[1]
+end
+
+function force_grad(dist)
+    grad = gradient(dist) do dist
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
+    end
+    return -grad[1]
+end
+
+dists = collect(0.2:0.01:1.2)
+forces_direct = force_direct.(dists)
+forces_grad = force_grad.(dists)
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Distance / nm&quot;,
+    ylabel=&quot;Force / kJ * mol^-1 * nm^-1&quot;,
+    title=&quot;Comparing gradients from direct calculation and AD&quot;,
+)
+scatter!(ax, dists, forces_direct, label=&quot;Direct&quot;, markersize=8)
+scatter!(ax, dists, forces_grad  , label=&quot;AD&quot;    , markersize=8, marker=&#39;x&#39;)
+xlims!(ax, low=0)
+ylims!(ax, -6.0, 10.0)
+axislegend()
+save(&quot;force_comparison.png&quot;, f)</code></pre><p><img src="../images/force_comparison.png" alt="Force comparison"/></p><h2 id="Variations-of-the-Morse-potential"><a class="docs-heading-anchor" href="#Variations-of-the-Morse-potential">Variations of the Morse potential</a><a id="Variations-of-the-Morse-potential-1"></a><a class="docs-heading-anchor-permalink" href="#Variations-of-the-Morse-potential" title="Permalink"></a></h2><p>The Morse potential for bonds has a parameter <em>a</em> that determines the width of the potential. It can also be compared to the harmonic bond potential.</p><pre><code class="language-julia">using Molly
+using GLMakie
+
+boundary = CubicBoundary(5.0, 5.0, 5.0)
+dists = collect(0.12:0.005:2.0)
+
+function energies(inter)
+    return map(dists) do dist
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        potential_energy(inter, c1, c2, boundary)
+    end
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Distance / nm&quot;,
+    ylabel=&quot;Potential energy / kJ * mol^-1&quot;,
+    title=&quot;Variations of the Morse potential&quot;,
+)
+lines!(
+    ax,
+    dists,
+    energies(HarmonicBond(k=20_000.0, r0=0.2)),
+    label=&quot;Harmonic&quot;,
+)
+for a in [2.5, 5.0, 10.0]
+    lines!(
+        ax,
+        dists,
+        energies(MorseBond(D=100.0, a=a, r0=0.2)),
+        label=&quot;Morse a=$a nm^-1&quot;,
+    )
+end
+ylims!(ax, 0.0, 120.0)
+axislegend(position=:rb)
+save(&quot;morse.png&quot;, f)</code></pre><p><img src="../images/morse.png" alt="Morse"/></p><h2 id="Variations-of-the-Mie-potential"><a class="docs-heading-anchor" href="#Variations-of-the-Mie-potential">Variations of the Mie potential</a><a id="Variations-of-the-Mie-potential-1"></a><a class="docs-heading-anchor-permalink" href="#Variations-of-the-Mie-potential" title="Permalink"></a></h2><p>The Mie potential is parameterised by <em>m</em> describing the attraction and <em>n</em> describing the repulsion. When <em>m</em>=6 and <em>n</em>=12 this is equivalent to the Lennard-Jones potential.</p><pre><code class="language-julia">using Molly
+using GLMakie
+
+boundary = CubicBoundary(5.0, 5.0, 5.0)
+a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
+dists = collect(0.2:0.005:0.8)
+
+function energies(m, n)
+    inter = Mie(m=m, n=n)
+    return map(dists) do dist
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
+    end
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Distance / nm&quot;,
+    ylabel=&quot;Potential energy / kJ * mol^-1&quot;,
+    title=&quot;Variations of the Mie potential&quot;,
+)
+for m in [4, 6]
+    for n in [10, 12]
+        lines!(
+            ax,
+            dists,
+            energies(Float64(m), Float64(n)),
+            label=&quot;m=$m, n=$n&quot;,
+        )
+    end
+end
+xlims!(ax, low=0.2)
+ylims!(ax, -0.6, 0.3)
+axislegend(position=:rb)
+save(&quot;mie.png&quot;, f)</code></pre><p><img src="../images/mie.png" alt="Mie"/></p><h2 id="Variations-of-the-soft-core-LJ-potential"><a class="docs-heading-anchor" href="#Variations-of-the-soft-core-LJ-potential">Variations of the soft-core LJ potential</a><a id="Variations-of-the-soft-core-LJ-potential-1"></a><a class="docs-heading-anchor-permalink" href="#Variations-of-the-soft-core-LJ-potential" title="Permalink"></a></h2><p>The soft-core Lennard-Jones potential is parameterised by three parameters <span>$\alpha$</span>, <span>$\lambda$</span> and <span>$p$</span>. These parameters shift the value of <span>$r_{ij}$</span> to <span>$\left(r_{ij}^6 + \sigma_{ij} \alpha \lambda^{p} \right)^{\frac{1}{6}}$</span>. This gives a soft core, i.e. the potential does not diverge for <span>$r_{ij} \rightarrow 0$</span>.</p><pre><code class="language-julia">using Molly
+using GLMakie
+
+boundary = CubicBoundary(5.0, 5.0, 5.0)
+a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
+dists = collect(0.05:0.005:0.8)
+
+function energies(α, λ, p)
+    inter = LennardJonesSoftCore(α=α, λ=λ, p=p)
+    return map(dists) do dist
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
+    end
+end
+
+f = Figure(resolution=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Distance / nm&quot;,
+    ylabel=&quot;Potential energy / kJ * mol^-1&quot;,
+    title=&quot;Variations of the soft-core Lennard-Jones potential&quot;,
+)
+for λ in [0.8, 0.9]
+    for α in [0.2, 0.4]
+        for p in [2]
+            lines!(
+                ax,
+                dists,
+                energies(α, λ, p),
+                label=&quot;α=$α, λ=$λ, p=$p&quot;,
+            )
+        end
+    end
+end
+
+lines!(ax, dists, energies(0, 1, 2), label=&quot;standard LJ potential&quot;)
+
+ylims!(-5, 25)
+axislegend(position=:rt)
+save(&quot;lennard_jones_sc.png&quot;, f)</code></pre><p><img src="../images/lennard_jones_sc.png" alt="Lennard-Jones Softcore"/></p><p>The form of the potential is approximately the same as standard Lennard-Jones for <span>$r_{ij} &gt; \sigma_{ij}$</span> if some fractional values are used for <span>$\lambda$</span> and <span>$\alpha$</span>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../related/">Related software »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Monday 20 February 2023 01:50">Monday 20 February 2023</span>. Using Julia version 1.8.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
