@@ -2,7 +2,8 @@
 #   fast broadcast/GPU path
 # Here be dragons
 
-using ForwardDiff: Chunk, Dual, dualize, partials, value
+using ForwardDiff: Chunk, Dual, partials, value
+using ForwardDiff.ForwardDiffStaticArraysExt: dualize
 using Zygote: unbroadcast
 
 iszero_value(x::Dual) = iszero(value(x))
@@ -187,7 +188,7 @@ Zygote.∇getindex(x::CuArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> be
 end
 
 # Extend to add extra empty partials before (B) and after (A) the SVector partials
-@generated function ForwardDiff.dualize(::Type{T}, x::StaticArray, ::Val{B}, ::Val{A}) where {T, B, A}
+@generated function ForwardDiff.ForwardDiffStaticArraysExt.dualize(::Type{T}, x::StaticArray, ::Val{B}, ::Val{A}) where {T, B, A}
     N = length(x)
     dx = Expr(:tuple, [:(Dual{T}(x[$i], chunk, Val{$i + $B}())) for i in 1:N]...)
     V = StaticArrays.similar_type(x, Dual{T, eltype(x), N + B + A})

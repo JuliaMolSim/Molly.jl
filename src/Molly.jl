@@ -1,5 +1,10 @@
 module Molly
 
+using Reexport
+@reexport using AtomsBase
+@reexport using StaticArrays
+@reexport using Unitful
+
 import BioStructures # Imported to avoid clashing names
 using CellListMap
 using ChainRulesCore
@@ -15,15 +20,10 @@ using FLoops
 using ForwardDiff
 using KernelDensity
 using NearestNeighbors
-using Reexport
 using Requires
 using Unitful
 using UnitfulChainRules
 using Zygote
-
-@reexport using AtomsBase
-@reexport using StaticArrays
-@reexport using Unitful
 
 using LinearAlgebra
 using Random
