@@ -33,7 +33,7 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
 AtomsBase = "0.2"
-BioStructures = "1"
+BioStructures = "1, 2"
 CUDA = "3"
 CellListMap = "0.8.4 - 0.8.10"
 ChainRulesCore = "1"
