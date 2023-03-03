@@ -10,7 +10,7 @@
 Much of science can be explained by the movement and interaction of molecules.
 Molecular dynamics (MD) is a computational technique used to explore these phenomena, from noble gases to biological macromolecules.
 Molly.jl is a pure Julia package for MD, and for the simulation of physical systems more broadly.
-The package is described in [a talk](https://youtu.be/trapn-yIv8g?t=1889) at the [JuliaMolSim](https://juliamolsim.github.io) minisymposium at JuliaCon 2022.
+The package is described in [a talk](https://youtu.be/trapn-yIv8g?t=1889) at the [JuliaMolSim](https://juliamolsim.github.io) minisymposium at JuliaCon 2022, and also in [a more recent talk](https://www.youtube.com/live/NB7xUHQNox8?feature=share&t=9018) at Enzyme Conference 2023.
 
 At the minute the package is a proof of concept for MD in Julia.
 **It is not production ready**, though it can do some cool things and is under active development.
