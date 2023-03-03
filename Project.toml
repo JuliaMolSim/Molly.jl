@@ -1,7 +1,7 @@
 name = "Molly"
 uuid = "aa0f7f06-fcc0-5ec4-a7f3-a573f33f9c4c"
 authors = ["Joe G Greener <jgreener@hotmail.co.uk>"]
-version = "0.14.2"
+version = "0.14.3"
 
 [deps]
 Atomix = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
@@ -37,7 +37,7 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 [compat]
 Atomix = "0.1"
 AtomsBase = "0.2"
-BioStructures = "1"
+BioStructures = "1, 2"
 CUDA = "3, 4"
 CellListMap = "0.8.11"
 ChainRulesCore = "1"
@@ -50,7 +50,7 @@ Distributions = "0.23, 0.24, 0.25"
 Enzyme = "0.11"
 EzXML = "1"
 FLoops = "0.2"
-ForwardDiff = "0.10"
+ForwardDiff = "0.10.35"
 KernelDensity = "0.5, 0.6"
 NearestNeighbors = "0.4"
 Reexport = "1"

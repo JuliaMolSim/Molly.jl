@@ -1,5 +1,11 @@
 # Molly.jl release notes
 
+## v0.14.3 - Feb 2023
+
+### Bug fixes
+
+- A bug introduced by a new version of ForwardDiff.jl is fixed.
+
 ## v0.14.2 - Feb 2023
 
 ### New features
