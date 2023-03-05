@@ -893,12 +893,12 @@ function simulate!(sys,
         old_coords = copy(sys.coords)
         sys.coords += (sim.dt .* v_half)
 
-        zeta_half = zeta + (sim.dt / (sim.damping^2))*((temperature(sys)/sim.temperature) -1)
+        zeta_half = zeta + (sim.dt / (2*(sim.damping^2)))*((temperature(sys)/sim.temperature) -1)
 
         KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
         T_half = uconvert(u"K",2 * KE_half / (df * sys.k))
         # zeta += (sim.dt / (sim.damping^2)) * ((T_half/sim.temperature) - 1)
-        zeta = zeta_half + (sim.dt / (sim.damping^2)) * ((T_half/sim.temperature) - 1)
+        zeta = zeta_half + (sim.dt / (2*(sim.damping^2))) * ((T_half/sim.temperature) - 1)
         
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
