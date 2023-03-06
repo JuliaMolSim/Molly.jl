@@ -8,6 +8,7 @@ export
     StormerVerlet,
     Langevin,
     LangevinSplitting,
+    NoseHoover,
     TemperatureREMD,
     remd_exchange!,
     HamiltonianREMD,
@@ -840,4 +841,83 @@ end
 function random_unit_vector(float_type, dims)
     vec = randn(float_type, dims)
     return vec / norm(vec)
+end
+
+
+"""
+    NoseHoover(; <keyword arguments>)
+
+    An NVT simulator that extends the traditional velocity verlet to also control the temperature of
+    the system. Finds the "version of dynamics" that is as close to the Hamiltonian as possible while maintaining temp.
+
+# Arguments
+- `dt::T`: the time step of the simulation.
+- `T_desired::K`: The temeprature targeted by the NoseHoover thermostat
+- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
+- `tau_damp::TD`: The temperature damping timescale, typically 100*dt
+- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
+    every time step.
+"""
+struct NoseHoover{DT, K, C, TD}
+    dt::DT
+    temperature::K
+    coupling::C
+    damping::TD # units of time
+    remove_CM_motion::Bool
+end
+
+function NoseHoover(; dt, temperature, coupling=NoCoupling(), damping = 100*dt, remove_CM_motion=true)
+    return NoseHoover(dt, temperature, coupling, damping, remove_CM_motion)
+end
+
+function simulate!(sys,
+        sim::NoseHoover,
+        n_steps::Integer;
+        n_threads::Integer=Threads.nthreads())
+
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+    sim.remove_CM_motion && remove_CM_motion!(sys)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+    accels_t = accelerations(sys, neighbors; n_threads=n_threads)
+    accels_t_dt = zero(accels_t)
+
+    v_half = zero(sys.velocities)
+    zeta = zero(1/sim.dt)
+    df = 3 * length(sys) - 3
+
+    for step_n in 1:n_steps
+
+        v_half = sys.velocities .+ ((sim.dt/2).* (remove_molar.(accels_t) .- (zeta.*sys.velocities)))
+
+        old_coords = copy(sys.coords)
+        sys.coords += (sim.dt .* v_half)
+
+        zeta_half = zeta + (sim.dt / (2*(sim.damping^2)))*((temperature(sys)/sim.temperature) -1)
+
+        KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
+        T_half = uconvert(u"K",2 * KE_half / (df * sys.k))
+        # zeta += (sim.dt / (sim.damping^2)) * ((T_half/sim.temperature) - 1)
+        zeta = zeta_half + (sim.dt / (2*(sim.damping^2))) * ((T_half/sim.temperature) - 1)
+        
+        apply_constraints!(sys, old_coords, sim.dt)
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+
+        accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
+
+        sys.velocities = (v_half .+ (sim.dt/2)*(remove_molar.(accels_t_dt)))./(1 + (zeta*sim.dt/2))
+
+        sim.remove_CM_motion && remove_CM_motion!(sys)
+        apply_coupling!(sys, sim.coupling, sim)
+
+        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
+
+        if step_n != n_steps
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                        n_threads=n_threads)
+            accels_t = accels_t_dt
+        end
+    end
+
+    return sys
 end
