@@ -654,11 +654,7 @@ function grad_gbsa_born_kernel!(Is, d_Is, I_grads, d_I_grads, coords, d_coords, 
         Const(boundary),
         Const(val_coord_units),
     )[1]
-    sync_threads()
-
-    if threadIdx().x == 1 && blockIdx().x == 1
-        grad_neck_scale[1] = grads[8]
-    end
+    Atomix.@atomic grad_neck_scale[1] += grads[8]
     return nothing
 end
 
@@ -721,13 +717,9 @@ function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
         Const(val_dims),
         Const(val_force_units),
     )[1]
-    sync_threads()
-
-    if threadIdx().x == 1 && blockIdx().x == 1
-        grad_factor_solute[1]  = grads[6]
-        grad_factor_solvent[1] = grads[7]
-        grad_kappa[1]          = grads[8]
-    end
+    Atomix.@atomic grad_factor_solute[1]  += grads[6]
+    Atomix.@atomic grad_factor_solvent[1] += grads[7]
+    Atomix.@atomic grad_kappa[1]          += grads[8]
     return nothing
 end
 
