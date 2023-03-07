@@ -357,9 +357,8 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArra
     return Y, pairwise_force_gpu_pullback
 end
 
-function grad_pairwise_pe_kernel!(pe_vec, d_pe_vec, coords, d_coords, atoms,
-                                  d_atoms, boundary, inters, grad_inters, neighbors,
-                                  val_energy_units, shared_mem_size)
+function grad_pairwise_pe_kernel!(pe_vec, d_pe_vec, coords, d_coords, atoms, d_atoms, boundary,
+                                  inters, grad_inters, neighbors, val_energy_units)
     grads = Enzyme.autodiff_deferred(
         pairwise_pe_kernel!,
         Duplicated(pe_vec, d_pe_vec),
@@ -369,7 +368,6 @@ function grad_pairwise_pe_kernel!(pe_vec, d_pe_vec, coords, d_coords, atoms,
         Active(inters),
         Const(neighbors),
         Const(val_energy_units),
-        Const(shared_mem_size),
     )[1]
     sync_threads()
 
@@ -400,8 +398,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{S
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_pe_kernel!(pe_vec,
                 d_pe_vec, coords, d_coords, atoms, d_atoms, boundary,
-                pairwise_inters, grad_pairwise_inters, nbs, Val(energy_units),
-                Val(n_threads_gpu))
+                pairwise_inters, grad_pairwise_inters, nbs, Val(energy_units))
 
         d_pairwise_inters = Array(grad_pairwise_inters)[1]
         return NoTangent(), d_coords, d_atoms, NoTangent(), d_pairwise_inters, NoTangent(),
@@ -411,7 +408,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{S
     return Y, pairwise_pe_gpu_pullback
 end
 
-function grad_specific_force_1_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, coords, d_coords,
+function grad_specific_force_1_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
                                              boundary, is, inters, d_inters,
                                              val_dims, val_force_units)
     Enzyme.autodiff_deferred(
@@ -427,7 +424,7 @@ function grad_specific_force_1_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, c
     return nothing
 end
 
-function grad_specific_force_2_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, coords, d_coords,
+function grad_specific_force_2_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
                                              boundary, is, js, inters, d_inters,
                                              val_dims, val_force_units)
     Enzyme.autodiff_deferred(
@@ -444,7 +441,7 @@ function grad_specific_force_2_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, c
     return nothing
 end
 
-function grad_specific_force_3_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, coords, d_coords,
+function grad_specific_force_3_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
                                              boundary, is, js, ks, inters, d_inters,
                                              val_dims, val_force_units)
     Enzyme.autodiff_deferred(
@@ -462,7 +459,7 @@ function grad_specific_force_3_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, c
     return nothing
 end
 
-function grad_specific_force_4_atoms_kernel!(fs_mat::CuDeviceMatrix, d_fs_mat, coords, d_coords,
+function grad_specific_force_4_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
                                              boundary, is, js, ks, ls, inters, d_inters,
                                              val_dims, val_force_units)
     Enzyme.autodiff_deferred(
@@ -524,7 +521,7 @@ function ChainRulesCore.rrule(::typeof(specific_force_gpu), inter_list,
     return Y, specific_force_gpu_pullback
 end
 
-function grad_specific_pe_1_atoms_kernel!(energy::CuDeviceVector, d_energy, coords, d_coords,
+function grad_specific_pe_1_atoms_kernel!(energy, d_energy, coords, d_coords,
                                           boundary, is, inters, d_inters,
                                           val_energy_units)
     Enzyme.autodiff_deferred(
@@ -539,7 +536,7 @@ function grad_specific_pe_1_atoms_kernel!(energy::CuDeviceVector, d_energy, coor
     return nothing
 end
 
-function grad_specific_pe_2_atoms_kernel!(energy::CuDeviceVector, d_energy, coords, d_coords,
+function grad_specific_pe_2_atoms_kernel!(energy, d_energy, coords, d_coords,
                                           boundary, is, js, inters, d_inters,
                                           val_energy_units)
     Enzyme.autodiff_deferred(
@@ -555,7 +552,7 @@ function grad_specific_pe_2_atoms_kernel!(energy::CuDeviceVector, d_energy, coor
     return nothing
 end
 
-function grad_specific_pe_3_atoms_kernel!(energy::CuDeviceVector, d_energy, coords, d_coords,
+function grad_specific_pe_3_atoms_kernel!(energy, d_energy, coords, d_coords,
                                           boundary, is, js, ks, inters, d_inters,
                                           val_energy_units)
     Enzyme.autodiff_deferred(
@@ -572,7 +569,7 @@ function grad_specific_pe_3_atoms_kernel!(energy::CuDeviceVector, d_energy, coor
     return nothing
 end
 
-function grad_specific_pe_4_atoms_kernel!(energy::CuDeviceVector, d_energy, coords, d_coords,
+function grad_specific_pe_4_atoms_kernel!(energy, d_energy, coords, d_coords,
                                           boundary, is, js, ks, ls, inters, d_inters,
                                           val_energy_units)
     Enzyme.autodiff_deferred(

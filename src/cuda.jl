@@ -21,8 +21,8 @@ function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundar
     return fs_mat
 end
 
-function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, coords_var, atoms_var, boundary,
-                                inters, neighbors_var, ::Val{D}, ::Val{F}) where {T, D, F}
+function pairwise_force_kernel!(forces, coords_var, atoms_var, boundary, inters,
+                                neighbors_var, ::Val{D}, ::Val{F}) where {D, F}
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
     neighbors = CUDA.Const(neighbors_var)
@@ -93,8 +93,8 @@ function specific_force_gpu(inter_list::InteractionList4Atoms, coords::AbstractA
     return fs_mat
 end
 
-function specific_force_1_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
-                                        inters_var, ::Val{D}, ::Val{F}) where {T, D, F}
+function specific_force_1_atoms_kernel!(forces, coords_var, boundary, is_var,
+                                        inters_var, ::Val{D}, ::Val{F}) where {D, F}
     coords = CUDA.Const(coords_var)
     is = CUDA.Const(is_var)
     inters = CUDA.Const(inters_var)
@@ -114,14 +114,14 @@ function specific_force_1_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
     return nothing
 end
 
-function specific_force_2_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
-                                        js_var, inters_var, ::Val{D}, ::Val{F}) where {T, D, F}
+function specific_force_2_atoms_kernel!(forces, coords_var, boundary, is_var, js_var,
+                                        inters_var, ::Val{D}, ::Val{F}) where {D, F}
     coords = CUDA.Const(coords_var)
     is = CUDA.Const(is_var)
     js = CUDA.Const(js_var)
     inters = CUDA.Const(inters_var)
 
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
@@ -137,9 +137,8 @@ function specific_force_2_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
     return nothing
 end
 
-function specific_force_3_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
-                                        js_var, ks_var, inters_var, ::Val{D},
-                                        ::Val{F}) where {T, D, F}
+function specific_force_3_atoms_kernel!(forces, coords_var, boundary, is_var, js_var, ks_var,
+                                        inters_var, ::Val{D}, ::Val{F}) where {D, F}
     coords = CUDA.Const(coords_var)
     is = CUDA.Const(is_var)
     js = CUDA.Const(js_var)
@@ -163,9 +162,8 @@ function specific_force_3_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
     return nothing
 end
 
-function specific_force_4_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, boundary, is_var,
-                                        js_var, ks_var, ls_var, inters_var, ::Val{D},
-                                        ::Val{F}) where {T, D, F}
+function specific_force_4_atoms_kernel!(forces, coords_var, boundary, is_var, js_var, ks_var, ls_var,
+                                        inters_var, ::Val{D}, ::Val{F}) where {D, F}
     coords = CUDA.Const(coords_var)
     is = CUDA.Const(is_var)
     js = CUDA.Const(js_var)
@@ -196,13 +194,12 @@ function pairwise_pe_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundary,
     pe_vec = CUDA.zeros(T, 1)
     n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
-            pe_vec, coords, atoms, boundary, pairwise_inters,
-            nbs, Val(energy_units), Val(n_threads_gpu))
+            pe_vec, coords, atoms, boundary, pairwise_inters, nbs, Val(energy_units))
     return pe_vec
 end
 
-function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, boundary, inters,
-                             neighbors_var, ::Val{E}, ::Val{M}) where {T, E, M}
+function pairwise_pe_kernel!(energy, coords_var, atoms_var, boundary, inters, neighbors_var,
+                             ::Val{E}) where E
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
     neighbors = CUDA.Const(neighbors_var)
@@ -265,8 +262,8 @@ function specific_pe_gpu(inter_list::InteractionList4Atoms, coords::AbstractArra
     return pe_vec
 end
 
-function specific_pe_1_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
-                                     inters_var, ::Val{E}) where {T, E}
+function specific_pe_1_atoms_kernel!(energy, coords_var, boundary, is_var,
+                                     inters_var, ::Val{E}) where E
     coords = CUDA.Const(coords_var)
     is = CUDA.Const(is_var)
     inters = CUDA.Const(inters_var)
@@ -284,8 +281,8 @@ function specific_pe_1_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
     return nothing
 end
 
-function specific_pe_2_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
-                                     js_var, inters_var, ::Val{E}) where {T, E}
+function specific_pe_2_atoms_kernel!(energy, coords_var, boundary, is_var, js_var,
+                                     inters_var, ::Val{E}) where E
     coords = CUDA.Const(coords_var)
     is = CUDA.Const(is_var)
     js = CUDA.Const(js_var)
@@ -304,8 +301,8 @@ function specific_pe_2_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
     return nothing
 end
 
-function specific_pe_3_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
-                                     js_var, ks_var, inters_var, ::Val{E}) where {T, E}
+function specific_pe_3_atoms_kernel!(energy, coords_var, boundary, is_var, js_var, ks_var,
+                                     inters_var, ::Val{E}) where E
     coords = CUDA.Const(coords_var)
     is = CUDA.Const(is_var)
     js = CUDA.Const(js_var)
@@ -325,8 +322,8 @@ function specific_pe_3_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
     return nothing
 end
 
-function specific_pe_4_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boundary, is_var,
-                                     js_var, ks_var, ls_var, inters_var, ::Val{E}) where {T, E}
+function specific_pe_4_atoms_kernel!(energy, coords_var, boundary, is_var, js_var, ks_var, ls_var,
+                                     inters_var, ::Val{E}) where E
     coords = CUDA.Const(coords_var)
     is = CUDA.Const(is_var)
     js = CUDA.Const(js_var)
