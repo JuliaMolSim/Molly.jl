@@ -752,8 +752,7 @@ function gbsa_born_kernel!(Is, I_grads, coords_var, offset_radii_var, scaled_off
 
     n_atoms = length(coords)
     n_inters = n_atoms ^ 2
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= n_inters
         i = cld(inter_i, n_atoms)
@@ -962,8 +961,7 @@ function gbsa_force_1_kernel!(forces, born_forces_mod_ustrip, coords_var, bounda
     n_atoms = length(coords)
     n_inters_not_self = n_atoms_to_n_pairs(n_atoms)
     n_inters = n_inters_not_self + n_atoms
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= n_inters
         if inter_i <= n_inters_not_self
@@ -1024,8 +1022,7 @@ function gbsa_force_2_kernel!(forces, born_forces, coords_var, boundary, dist_cu
 
     n_atoms = length(coords)
     n_inters = n_atoms ^ 2
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= n_inters
         i = cld(inter_i, n_atoms)

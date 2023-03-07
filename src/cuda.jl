@@ -27,8 +27,7 @@ function pairwise_force_kernel!(forces::CuDeviceMatrix{T}, coords_var, atoms_var
     atoms = CUDA.Const(atoms_var)
     neighbors = CUDA.Const(neighbors_var)
 
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= length(neighbors)
         i, j, weight_14 = neighbors[inter_i]
@@ -100,8 +99,7 @@ function specific_force_1_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
     is = CUDA.Const(is_var)
     inters = CUDA.Const(inters_var)
 
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= length(is)
         i = is[inter_i]
@@ -123,8 +121,7 @@ function specific_force_2_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
     js = CUDA.Const(js_var)
     inters = CUDA.Const(inters_var)
 
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().
 
     if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
@@ -149,8 +146,7 @@ function specific_force_3_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
     ks = CUDA.Const(ks_var)
     inters = CUDA.Const(inters_var)
 
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
@@ -177,8 +173,7 @@ function specific_force_4_atoms_kernel!(forces::CuDeviceMatrix{T}, coords_var, b
     ls = CUDA.Const(ls_var)
     inters = CUDA.Const(inters_var)
 
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= length(is)
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
@@ -212,8 +207,7 @@ function pairwise_pe_kernel!(energy::CuDeviceVector{T}, coords_var, atoms_var, b
     atoms = CUDA.Const(atoms_var)
     neighbors = CUDA.Const(neighbors_var)
 
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= length(neighbors)
         i, j, weight_14 = neighbors[inter_i]
@@ -277,8 +271,7 @@ function specific_pe_1_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
     is = CUDA.Const(is_var)
     inters = CUDA.Const(inters_var)
 
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= length(is)
         i = is[inter_i]
@@ -298,8 +291,7 @@ function specific_pe_2_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
     js = CUDA.Const(js_var)
     inters = CUDA.Const(inters_var)
 
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
@@ -320,8 +312,7 @@ function specific_pe_3_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
     ks = CUDA.Const(ks_var)
     inters = CUDA.Const(inters_var)
 
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
@@ -343,8 +334,7 @@ function specific_pe_4_atoms_kernel!(energy::CuDeviceVector{T}, coords_var, boun
     ls = CUDA.Const(ls_var)
     inters = CUDA.Const(inters_var)
 
-    tidx = threadIdx().x
-    inter_i = (blockIdx().x - 1) * blockDim().x + tidx
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     if inter_i <= length(is)
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
