@@ -13,7 +13,7 @@ using Statistics
 using Test
 
 @warn "This file does not include all the tests for Molly.jl due to CI time limits, " *
-        "see the test directory for more"
+      "see the test directory for more"
 
 # Allow testing of particular components
 const GROUP = get(ENV, "GROUP", "All")
@@ -25,7 +25,7 @@ end
 const DEVICE = get(ENV, "DEVICE", "0")
 
 # GLMakie doesn't work on CI or when running tests remotely
-run_visualize_tests = !haskey(ENV, "CI") && get(ENV, "VISTESTS", "1") != "0"
+const run_visualize_tests = !haskey(ENV, "CI") && get(ENV, "VISTESTS", "1") != "0"
 if run_visualize_tests
     using GLMakie
     @info "The visualization tests will be run as this is not CI"
@@ -35,14 +35,14 @@ else
     @warn "The visualization tests will not be run as this is CI"
 end
 
-run_parallel_tests = Threads.nthreads() > 1
+const run_parallel_tests = Threads.nthreads() > 1
 if run_parallel_tests
     @info "The parallel tests will be run as Julia is running on $(Threads.nthreads()) threads"
 else
     @warn "The parallel tests will not be run as Julia is running on 1 thread"
 end
 
-run_gpu_tests = CUDA.functional()
+const run_gpu_tests = CUDA.functional()
 if run_gpu_tests
     device!(parse(Int, DEVICE))
     @info "The GPU tests will be run on device $DEVICE"
@@ -52,11 +52,11 @@ end
 
 CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
 
-data_dir = normpath(@__DIR__, "..", "data")
-ff_dir = joinpath(data_dir, "force_fields")
+const data_dir = normpath(@__DIR__, "..", "data")
+const ff_dir = joinpath(data_dir, "force_fields")
 
-temp_fp_pdb = tempname(cleanup=true) * ".pdb"
-temp_fp_viz = tempname(cleanup=true) * ".mp4"
+const temp_fp_pdb = tempname(cleanup=true) * ".pdb"
+const temp_fp_viz = tempname(cleanup=true) * ".mp4"
 
 if GROUP == "All"
     # Some failures due to dependencies but there is an unbound args error
