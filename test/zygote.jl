@@ -220,3 +220,230 @@ end
         end
     end
 end
+
+@testset "Differentiable protein" begin
+    function create_sys(gpu)
+        ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...; units=false)
+        return System(
+            joinpath(data_dir, "6mrr_nowater.pdb"),
+            ff;
+            units=false,
+            gpu=gpu,
+            implicit_solvent="gbn2",
+        )
+    end
+
+    function test_energy_grad(gpu::Bool, parallel::Bool)
+        sys_ref = create_sys(gpu)
+    
+        function loss(params_dic)
+            n_threads = parallel ? Threads.nthreads() : 1
+            atoms, pairwise_inters, specific_inter_lists, general_inters = inject_gradients(
+                                                                                sys_ref, params_dic)
+
+            sys = System(
+                atoms=atoms,
+                pairwise_inters=pairwise_inters,
+                specific_inter_lists=specific_inter_lists,
+                general_inters=general_inters,
+                coords=sys_ref.coords,
+                boundary=sys_ref.boundary,
+                neighbor_finder=sys_ref.neighbor_finder,
+                force_units=NoUnits,
+                energy_units=NoUnits,
+            )
+
+            neighbors = find_neighbors(sys; n_threads=n_threads)
+            return potential_energy(sys, neighbors; n_threads=n_threads)
+        end
+
+        return loss
+    end
+
+    sum_abs(x) = sum(abs, x)
+
+    function test_force_grad(gpu::Bool, parallel::Bool)
+        sys_ref = create_sys(gpu)
+
+        function loss(params_dic)
+            n_threads = parallel ? Threads.nthreads() : 1
+            atoms, pairwise_inters, specific_inter_lists, general_inters = inject_gradients(
+                                                                                sys_ref, params_dic)
+
+            sys = System(
+                atoms=atoms,
+                pairwise_inters=pairwise_inters,
+                specific_inter_lists=specific_inter_lists,
+                general_inters=general_inters,
+                coords=sys_ref.coords,
+                boundary=sys_ref.boundary,
+                neighbor_finder=sys_ref.neighbor_finder,
+                force_units=NoUnits,
+                energy_units=NoUnits,
+            )
+
+            neighbors = find_neighbors(sys; n_threads=n_threads)
+            fs = forces(sys, neighbors; n_threads=n_threads)
+            return sum(sum_abs.(fs))
+        end
+
+        return loss
+    end
+
+    function test_sim_grad(gpu::Bool, parallel::Bool)
+        sys_ref = create_sys(gpu)
+
+        function loss(params_dic)
+            n_threads = parallel ? Threads.nthreads() : 1
+            atoms, pairwise_inters, specific_inter_lists, general_inters = inject_gradients(
+                                                                                sys_ref, params_dic)
+
+            sys = System(
+                atoms=atoms,
+                pairwise_inters=pairwise_inters,
+                specific_inter_lists=specific_inter_lists,
+                general_inters=general_inters,
+                coords=sys_ref.coords,
+                boundary=sys_ref.boundary,
+                neighbor_finder=sys_ref.neighbor_finder,
+                force_units=NoUnits,
+                energy_units=NoUnits,
+            )
+
+            simulator = Langevin(dt=0.001, temperature=300.0, friction=1.0)
+            n_steps = 5
+            rand_seed = 1000
+            simulate!(sys, simulator, n_steps; n_threads=n_threads, rng=Xoshiro(rand_seed))
+            return sum(sum_abs.(sys.coords))
+        end
+
+        return loss
+    end
+
+    params_dic = Dict(
+        "atom_C8_σ"                => 0.33996695084235345,
+        "atom_C8_ϵ"                => 0.4577296,
+        "atom_C9_σ"                => 0.33996695084235345,
+        "atom_C9_ϵ"                => 0.4577296,
+        "atom_CA_σ"                => 0.33996695084235345,
+        "atom_CA_ϵ"                => 0.359824,
+        "atom_CT_σ"                => 0.33996695084235345,
+        "atom_CT_ϵ"                => 0.4577296,
+        "atom_C_σ"                 => 0.33996695084235345,
+        "atom_C_ϵ"                 => 0.359824,
+        "atom_N3_σ"                => 0.32499985237759577,
+        "atom_N3_ϵ"                => 0.71128,
+        "atom_N_σ"                 => 0.32499985237759577,
+        "atom_N_ϵ"                 => 0.71128,
+        "atom_O2_σ"                => 0.2959921901149463,
+        "atom_O2_ϵ"                => 0.87864,
+        "atom_OH_σ"                => 0.30664733878390477,
+        "atom_OH_ϵ"                => 0.8803136,
+        "atom_O_σ"                 => 0.2959921901149463,
+        "atom_O_ϵ"                 => 0.87864,
+        "inter_CO_weight_14"       => 0.8333,
+        "inter_GB_neck_cut"        => 0.68,
+        "inter_GB_neck_scale"      => 0.826836,
+        "inter_GB_offset"          => 0.0195141,
+        "inter_GB_params_C_α"      => 0.733756,
+        "inter_GB_params_C_β"      => 0.506378,
+        "inter_GB_params_C_γ"      => 0.205844,
+        "inter_GB_params_N_α"      => 0.503364,
+        "inter_GB_params_N_β"      => 0.316828,
+        "inter_GB_params_N_γ"      => 0.192915,
+        "inter_GB_params_O_α"      => 0.867814,
+        "inter_GB_params_O_β"      => 0.876635,
+        "inter_GB_params_O_γ"      => 0.387882,
+        "inter_GB_probe_radius"    => 0.14,
+        "inter_GB_radius_C"        => 0.17,
+        "inter_GB_radius_N"        => 0.155,
+        "inter_GB_radius_O"        => 0.15,
+        "inter_GB_radius_O_CAR"    => 0.14,
+        "inter_GB_sa_factor"       => 28.3919551,
+        "inter_GB_screen_C"        => 1.058554,
+        "inter_GB_screen_N"        => 0.733599,
+        "inter_GB_screen_O"        => 1.061039,
+        "inter_LJ_weight_14"       => 0.5,
+        "inter_PT_-/C/CT/-_k_1"    => 0.0,
+        "inter_PT_-/C/N/-_k_1"     => -10.46,
+        "inter_PT_-/CA/CA/-_k_1"   => -15.167,
+        "inter_PT_-/CA/CT/-_k_1"   => 0.0,
+        "inter_PT_-/CT/C8/-_k_1"   => 0.64852,
+        "inter_PT_-/CT/C9/-_k_1"   => 0.64852,
+        "inter_PT_-/CT/CT/-_k_1"   => 0.6508444444444447,
+        "inter_PT_-/CT/N/-_k_1"    => 0.0,
+        "inter_PT_-/CT/N3/-_k_1"   => 0.6508444444444447,
+        "inter_PT_C/N/CT/C_k_1"    => -0.142256,
+        "inter_PT_C/N/CT/C_k_2"    => 1.40164,
+        "inter_PT_C/N/CT/C_k_3"    => 2.276096,
+        "inter_PT_C/N/CT/C_k_4"    => 0.33472,
+        "inter_PT_C/N/CT/C_k_5"    => 1.6736,
+        "inter_PT_CT/CT/C/N_k_1"   => 0.8368,
+        "inter_PT_CT/CT/C/N_k_2"   => 0.8368,
+        "inter_PT_CT/CT/C/N_k_3"   => 1.6736,
+        "inter_PT_CT/CT/N/C_k_1"   => 8.368,
+        "inter_PT_CT/CT/N/C_k_2"   => 8.368,
+        "inter_PT_CT/CT/N/C_k_3"   => 1.6736,
+        "inter_PT_H/N/C/O_k_1"     => 8.368,
+        "inter_PT_H/N/C/O_k_2"     => -10.46,
+        "inter_PT_H1/CT/C/O_k_1"   => 3.3472,
+        "inter_PT_H1/CT/C/O_k_2"   => -0.33472,
+        "inter_PT_HC/CT/C4/CT_k_1" => 0.66944,
+        "inter_PT_N/CT/C/N_k_1"    => 2.7196,
+        "inter_PT_N/CT/C/N_k_10"   => 0.1046,
+        "inter_PT_N/CT/C/N_k_11"   => -0.046024,
+        "inter_PT_N/CT/C/N_k_2"    => -0.824248,
+        "inter_PT_N/CT/C/N_k_3"    => 6.04588,
+        "inter_PT_N/CT/C/N_k_4"    => 2.004136,
+        "inter_PT_N/CT/C/N_k_5"    => -0.0799144,
+        "inter_PT_N/CT/C/N_k_6"    => -0.016736,
+        "inter_PT_N/CT/C/N_k_7"    => -1.06692,
+        "inter_PT_N/CT/C/N_k_8"    => 0.3138,
+        "inter_PT_N/CT/C/N_k_9"    => 0.238488,        
+    )
+
+    platform_runs = [("CPU", [false, false])]
+    if run_parallel_tests
+        push!(platform_runs, ("CPU parallel", [false, true]))
+    end
+    if run_gpu_tests
+        push!(platform_runs, ("GPU", [true, false]))
+    end
+    test_runs = [
+        ("Energy", test_energy_grad, 1e-8),
+        ("Force" , test_force_grad , 1e-8),
+        ("Sim"   , test_sim_grad   , 0.01),
+    ]
+    params_to_test = (
+        "inter_LJ_weight_14",
+        "atom_N_ϵ",
+        "inter_PT_C/N/CT/C_k_1",
+        "inter_GB_screen_O",
+        "inter_GB_neck_scale",
+    )
+
+    for (test_name, test_fn, test_tol) in test_runs
+        for (platform, args) in platform_runs
+            f = test_fn(args...)
+            grads_zygote = CUDA.allowscalar() do
+                gradient(f, params_dic)[1]
+            end
+            if platform != "CPU parallel" # Currently 2 gradients are missing for CPU parallel
+                @test count(!iszero, values(grads_zygote)) == 67
+            end
+            for param in params_to_test
+                gzy = grads_zygote[param]
+                gfd = central_fdm(6, 1)(params_dic[param]) do val
+                    dic = deepcopy(params_dic)
+                    dic[param] = val
+                    f(dic)
+                end
+                frac_diff = abs(gzy - gfd) / abs(gfd)
+                @info "$(rpad(test_name, 6)) - $(rpad(platform, 12)) - $(rpad(param, 21)) - FD $gfd, Zygote $gzy, fractional difference $frac_diff"
+                if !(platform == "CPU parallel" && param == "inter_LJ_weight_14")
+                    @test frac_diff < test_tol
+                end
+            end
+        end
+    end
+end
