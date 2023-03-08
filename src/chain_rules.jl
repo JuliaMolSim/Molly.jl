@@ -306,8 +306,11 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), coords, atom
 end
 
 function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, d_atoms,
-                                     boundary, inters, grad_inters, neighbors, val_dims,
-                                     val_force_units)
+                                     boundary, inters::I, grad_inters, neighbors, val_dims,
+                                     val_force_units, ::Val{N}) where {I, N}
+    shared_grad_inters = CuStaticSharedArray(I, N)
+    sync_threads()
+
     grads = Enzyme.autodiff_deferred(
         pairwise_force_kernel!,
         Duplicated(fs_mat, d_fs_mat),
@@ -319,10 +322,16 @@ function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, 
         Const(val_dims),
         Const(val_force_units),
     )[1]
+
+    shared_grad_inters[threadIdx().x] = grads[5]
     sync_threads()
 
-    if threadIdx().x == 1 && blockIdx().x == 1
-        grad_inters[1] = grads[5]
+    if threadIdx().x == 1
+        grad_inters_sum = shared_grad_inters[1]
+        for ti in 2:N
+            grad_inters_sum = map(+, grad_inters_sum, shared_grad_inters[ti])
+        end
+        grad_inters[blockIdx().x] = grad_inters_sum
     end
     return nothing
 end
@@ -342,14 +351,14 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArra
         fs_mat = CUDA.zeros(T, D, n_atoms)
         d_coords = zero(coords)
         d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
-        grad_pairwise_inters = CuArray([pairwise_inters])
         n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
+        grad_pairwise_inters = CuArray(fill(pairwise_inters, n_blocks))
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_force_kernel!(fs_mat,
                 d_fs_mat, coords, d_coords, atoms, d_atoms, boundary, pairwise_inters,
-                grad_pairwise_inters, nbs, Val(D), Val(force_units))
+                grad_pairwise_inters, nbs, Val(D), Val(force_units), Val(n_threads_gpu))
 
-        d_pairwise_inters = Array(grad_pairwise_inters)[1]
+        d_pairwise_inters = reduce((t1, t2) -> map(+, t1, t2), Array(grad_pairwise_inters))
         return NoTangent(), d_coords, d_atoms, NoTangent(), d_pairwise_inters, NoTangent(),
                NoTangent(), NoTangent()
     end
@@ -358,7 +367,11 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArra
 end
 
 function grad_pairwise_pe_kernel!(pe_vec, d_pe_vec, coords, d_coords, atoms, d_atoms, boundary,
-                                  inters, grad_inters, neighbors, val_energy_units)
+                                  inters::I, grad_inters, neighbors, val_energy_units,
+                                  ::Val{N}) where {I, N}
+    shared_grad_inters = CuStaticSharedArray(I, N)
+    sync_threads()
+
     grads = Enzyme.autodiff_deferred(
         pairwise_pe_kernel!,
         Duplicated(pe_vec, d_pe_vec),
@@ -369,10 +382,16 @@ function grad_pairwise_pe_kernel!(pe_vec, d_pe_vec, coords, d_coords, atoms, d_a
         Const(neighbors),
         Const(val_energy_units),
     )[1]
+
+    shared_grad_inters[threadIdx().x] = grads[5]
     sync_threads()
 
-    if threadIdx().x == 1 && blockIdx().x == 1
-        grad_inters[1] = grads[5]
+    if threadIdx().x == 1
+        grad_inters_sum = shared_grad_inters[1]
+        for ti in 2:N
+            grad_inters_sum = map(+, grad_inters_sum, shared_grad_inters[ti])
+        end
+        grad_inters[blockIdx().x] = grad_inters_sum
     end
     return nothing
 end
@@ -393,14 +412,14 @@ function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{S
         d_pe_vec = CuArray([d_pe_vec_arg[1]])
         d_coords = zero(coords)
         d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
-        grad_pairwise_inters = CuArray([pairwise_inters])
         n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
+        grad_pairwise_inters = CuArray(fill(pairwise_inters, n_blocks))
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_pe_kernel!(pe_vec,
-                d_pe_vec, coords, d_coords, atoms, d_atoms, boundary,
-                pairwise_inters, grad_pairwise_inters, nbs, Val(energy_units))
+                d_pe_vec, coords, d_coords, atoms, d_atoms, boundary, pairwise_inters,
+                grad_pairwise_inters, nbs, Val(energy_units), Val(n_threads_gpu))
 
-        d_pairwise_inters = Array(grad_pairwise_inters)[1]
+        d_pairwise_inters = reduce((t1, t2) -> map(+, t1, t2), Array(grad_pairwise_inters))
         return NoTangent(), d_coords, d_atoms, NoTangent(), d_pairwise_inters, NoTangent(),
                NoTangent(), NoTangent()
     end
