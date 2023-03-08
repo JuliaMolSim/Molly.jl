@@ -230,6 +230,7 @@ end
             units=false,
             gpu=gpu,
             implicit_solvent="gbn2",
+            kappa=0.7,
         )
     end
 
