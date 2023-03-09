@@ -342,6 +342,8 @@ templates is carried out.
 Read a Gromacs coordinate file and a Gromacs topology file with all
 includes collapsed into one file.
 Gromacs file reading should be considered experimental.
+The `implicit_solvent`, `kappa` and `rename_terminal_res` keyword arguments
+are not available when reading Gromacs files.
 
 # Arguments
 - `velocities=nothing`: the velocities of the atoms in the system, set to
@@ -356,10 +358,15 @@ Gromacs file reading should be considered experimental.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
 - `dist_neighbors=1.2u"nm"`: cutoff distance for the neighbor list, should be
     greater than `dist_cutoff`.
-- `implicit_solvent=nothing`: specify a string to add an implicit solvent
-    model, options are "obc1", "obc2" and "gbn2".
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
+- `implicit_solvent=nothing`: specify a string to add an implicit solvent
+    model, options are "obc1", "obc2" and "gbn2".
+- `kappa=0.0u"nm^-1"`: the kappa value for the implicit solvent model if one
+    is used.
+- `rename_terminal_res=true`: whether to rename the first and last residues
+    to match the appropriate atom templates, for example the first (N-terminal)
+    residue could be changed from "MET" to "NMET".
 """
 function System(coord_file::AbstractString,
                 force_field::OpenMMForceField;
@@ -370,10 +377,10 @@ function System(coord_file::AbstractString,
                 gpu::Bool=false,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
-                implicit_solvent=nothing,
                 center_coords::Bool=true,
-                rename_terminal_res::Bool=true,
-                kappa=0.0u"nm^-1")
+                implicit_solvent=nothing,
+                kappa=0.0u"nm^-1",
+                rename_terminal_res::Bool=true)
     T = typeof(force_field.weight_14_coulomb)
 
     # Chemfiles uses zero-based indexing, be careful

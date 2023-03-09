@@ -302,6 +302,9 @@ sys_res = add_position_restraints(
 
 The OpenMM setup procedure is tested against OpenMM in terms of matching forces and energies.
 However it is not thoroughly tested with respect to ligands or special residues and requires that atom names exactly match residue templates.
+By default, terminal residues are renamed to match the appropriate templates.
+For example, the first (N-terminal) residue could be changed from "MET" to "NMET".
+This can be turned off by giving `rename_terminal_res=false` to [`System`](@ref) if the residue names in the input file are appropriate.
 The Gromacs setup procedure should be considered experimental.
 Currently Ewald summation methods, constraint algorithms, pressure coupling and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
 
