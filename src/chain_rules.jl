@@ -323,10 +323,11 @@ function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, 
         Const(val_force_units),
     )[1]
 
-    shared_grad_inters[threadIdx().x] = grads[5]
+    tidx = threadIdx().x
+    shared_grad_inters[tidx] = grads[5]
     sync_threads()
 
-    if threadIdx().x == 1
+    if tidx == 1
         grad_inters_sum = shared_grad_inters[1]
         for ti in 2:N
             grad_inters_sum = map(+, grad_inters_sum, shared_grad_inters[ti])
@@ -383,10 +384,11 @@ function grad_pairwise_pe_kernel!(pe_vec, d_pe_vec, coords, d_coords, atoms, d_a
         Const(val_energy_units),
     )[1]
 
-    shared_grad_inters[threadIdx().x] = grads[5]
+    tidx = threadIdx().x
+    shared_grad_inters[tidx] = grads[5]
     sync_threads()
 
-    if threadIdx().x == 1
+    if tidx == 1
         grad_inters_sum = shared_grad_inters[1]
         for ti in 2:N
             grad_inters_sum = map(+, grad_inters_sum, shared_grad_inters[ti])
@@ -652,8 +654,11 @@ end
 
 function grad_gbsa_born_kernel!(Is, d_Is, I_grads, d_I_grads, coords, d_coords, offset_radii,
                                 d_offset_radii, scaled_offset_radii, d_scaled_offset_radii,
-                                dist_cutoff, offset, neck_scale, grad_neck_scale, neck_cut, d0s,
-                                d_d0s, m0s, d_m0s, boundary, val_coord_units)
+                                dist_cutoff, offset, neck_scale::T, grad_neck_scale, neck_cut, d0s,
+                                d_d0s, m0s, d_m0s, boundary, val_coord_units, ::Val{N}) where {T, N}
+    shared_grad_neck_scale = CuStaticSharedArray(T, N)
+    sync_threads()
+
     grads = Enzyme.autodiff_deferred(
         gbsa_born_kernel!,
         Duplicated(Is, d_Is),
@@ -670,7 +675,18 @@ function grad_gbsa_born_kernel!(Is, d_Is, I_grads, d_I_grads, coords, d_coords, 
         Const(boundary),
         Const(val_coord_units),
     )[1]
-    Atomix.@atomic grad_neck_scale[1] += grads[8]
+
+    tidx = threadIdx().x
+    shared_grad_neck_scale[tidx] = grads[8]
+    sync_threads()
+
+    if tidx == 1
+        grad_neck_scale_sum = shared_grad_neck_scale[1]
+        for ti in 2:N
+            grad_neck_scale_sum += shared_grad_neck_scale[ti]
+        end
+        Atomix.@atomic grad_neck_scale[1] += grad_neck_scale_sum
+    end
     return nothing
 end
 
@@ -703,7 +719,7 @@ function ChainRulesCore.rrule(::typeof(gbsa_born_gpu), coords::AbstractArray{SVe
                 Is, d_Is, I_grads, d_I_grads, coords, d_coords, offset_radii,
                 d_offset_radii, scaled_offset_radii, d_scaled_offset_radii,
                 dist_cutoff, offset, neck_scale, grad_neck_scale, neck_cut, d0s,
-                d_d0s, m0s, d_m0s, boundary, Val(C))
+                d_d0s, m0s, d_m0s, boundary, Val(C), Val(n_threads_gpu))
 
         d_neck_scale = Array(grad_neck_scale)[1]
         return NoTangent(), d_coords, d_offset_radii, d_scaled_offset_radii, NoTangent(),
@@ -715,9 +731,15 @@ end
 
 function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
                                    d_born_forces_mod_ustrip, coords, d_coords, boundary,
-                                   dist_cutoff, factor_solute, grad_factor_solute, factor_solvent,
-                                   grad_factor_solvent, kappa, grad_kappa, Bs, d_Bs,
-                                   charges, d_charges, val_dims, val_force_units)
+                                   dist_cutoff, factor_solute::T, grad_factor_solute,
+                                   factor_solvent::T, grad_factor_solvent, kappa::T, grad_kappa,
+                                   Bs, d_Bs, charges, d_charges, val_dims, val_force_units,
+                                   ::Val{N}) where {T, N}
+    shared_grad_factor_solute  = CuStaticSharedArray(T, N)
+    shared_grad_factor_solvent = CuStaticSharedArray(T, N)
+    shared_grad_kappa          = CuStaticSharedArray(T, N)
+    sync_threads()
+
     grads = Enzyme.autodiff_deferred(
         gbsa_force_1_kernel!,
         Duplicated(fs_mat, d_fs_mat),
@@ -733,9 +755,32 @@ function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
         Const(val_dims),
         Const(val_force_units),
     )[1]
-    Atomix.@atomic grad_factor_solute[1]  += grads[6]
-    Atomix.@atomic grad_factor_solvent[1] += grads[7]
-    Atomix.@atomic grad_kappa[1]          += grads[8]
+
+    tidx = threadIdx().x
+    shared_grad_factor_solute[tidx]  = grads[6]
+    shared_grad_factor_solvent[tidx] = grads[7]
+    shared_grad_kappa[tidx]          = grads[8]
+    sync_threads()
+
+    if tidx == 1
+        grad_factor_solute_sum = shared_grad_factor_solute[1]
+        for ti in 2:N
+            grad_factor_solute_sum += shared_grad_factor_solute[ti]
+        end
+        Atomix.@atomic grad_factor_solute[1] += grad_factor_solute_sum
+    elseif tidx == 2
+        grad_factor_solvent_sum = shared_grad_factor_solvent[1]
+        for ti in 2:N
+            grad_factor_solvent_sum += shared_grad_factor_solvent[ti]
+        end
+        Atomix.@atomic grad_factor_solvent[1] += grad_factor_solvent_sum
+    elseif tidx == 3
+        grad_kappa_sum = shared_grad_kappa[1]
+        for ti in 2:N
+            grad_kappa_sum += shared_grad_kappa[ti]
+        end
+        Atomix.@atomic grad_kappa[1] += grad_kappa_sum
+    end
     return nothing
 end
 
@@ -768,7 +813,7 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), coords::AbstractArray{
             fs_mat, d_fs_mat, born_forces_mod_ustrip, d_born_forces_mod_ustrip, coords,
             d_coords, boundary, dist_cutoff, factor_solute, grad_factor_solute,
             factor_solvent, grad_factor_solvent, kappa, grad_kappa, Bs, d_Bs, charges,
-            d_charges, Val(D), Val(force_units))
+            d_charges, Val(D), Val(force_units), Val(n_threads_gpu))
 
         d_factor_solute  = Array(grad_factor_solute )[1]
         d_factor_solvent = Array(grad_factor_solvent)[1]
