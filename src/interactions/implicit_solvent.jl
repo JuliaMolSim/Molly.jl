@@ -719,11 +719,7 @@ end
 
 function cuda_threads_blocks_gbsa(n_inters)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_IMPLICIT", "256"))
-    if get(ENV, "MOLLY_GPUNBLOCKS_POWER2", "0") == "1"
-        n_blocks = 2^Int(ceil(max(log2(n_inters / n_threads_gpu), 0)))
-    else
-        n_blocks = cld(n_inters, n_threads_gpu)
-    end
+    n_blocks = cld(n_inters, n_threads_gpu)
     return n_threads_gpu, n_blocks
 end
 

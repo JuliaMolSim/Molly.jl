@@ -2,21 +2,13 @@
 
 function cuda_threads_blocks_pairwise(n_neighbors)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "256"))
-    if get(ENV, "MOLLY_GPUNBLOCKS_POWER2", "0") == "1"
-        n_blocks = 2^Int(ceil(max(log2(n_neighbors / n_threads_gpu), 0)))
-    else
-        n_blocks = cld(n_neighbors, n_threads_gpu)
-    end
+    n_blocks = cld(n_neighbors, n_threads_gpu)
     return n_threads_gpu, n_blocks
 end
 
 function cuda_threads_blocks_specific(n_inters)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_SPECIFIC", "256"))
-    if get(ENV, "MOLLY_GPUNBLOCKS_POWER2", "0") == "1"
-        n_blocks = 2^Int(ceil(max(log2(n_inters / n_threads_gpu), 0)))
-    else
-        n_blocks = cld(n_inters, n_threads_gpu)
-    end
+    n_blocks = cld(n_inters, n_threads_gpu)
     return n_threads_gpu, n_blocks
 end
 
