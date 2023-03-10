@@ -718,7 +718,7 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2{T}, coords::CuArray, bou
 end
 
 function cuda_threads_blocks_gbsa(n_inters)
-    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_IMPLICIT", "256"))
+    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_IMPLICIT", "512"))
     n_blocks = cld(n_inters, n_threads_gpu)
     return n_threads_gpu, n_blocks
 end

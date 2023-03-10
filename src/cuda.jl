@@ -1,13 +1,13 @@
 # CUDA.jl kernels
 
 function cuda_threads_blocks_pairwise(n_neighbors)
-    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "256"))
+    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512"))
     n_blocks = cld(n_neighbors, n_threads_gpu)
     return n_threads_gpu, n_blocks
 end
 
 function cuda_threads_blocks_specific(n_inters)
-    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_SPECIFIC", "256"))
+    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_SPECIFIC", "128"))
     n_blocks = cld(n_inters, n_threads_gpu)
     return n_threads_gpu, n_blocks
 end
