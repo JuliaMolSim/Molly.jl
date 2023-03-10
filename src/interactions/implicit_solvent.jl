@@ -760,7 +760,7 @@ function gbsa_born_kernel!(Is, I_grads, coords_var, offset_radii_var, scaled_off
         if i != j
             coord_i, coord_j = coords[i], coords[j]
             r = norm(vector(coord_i, coord_j, boundary))
-            if iszero_value(dist_cutoff) || r <= dist_cutoff
+            if iszero(dist_cutoff) || r <= dist_cutoff
                 I = zero(coord_i[1] / unit(dist_cutoff)^2)
                 I_grad = zero(coord_i[1] / unit(dist_cutoff)^3)
                 ori, orj = offset_radii[i], offset_radii[j]
@@ -973,14 +973,14 @@ function gbsa_force_1_kernel!(forces, born_forces_mod_ustrip, coords_var, bounda
         dr = vector(coords[i], coords[j], boundary)
         r2 = sum(abs2, dr)
 
-        if iszero_value(dist_cutoff) || r2 <= dist_cutoff^2
+        if iszero(dist_cutoff) || r2 <= dist_cutoff^2
             Bi, Bj = Bs[i], Bs[j]
             alpha2_ij = Bi * Bj
             D_term = r2 / (4 * alpha2_ij)
             exp_term = exp(-D_term)
             denominator2 = r2 + alpha2_ij * exp_term
             denominator = sqrt(denominator2)
-            if iszero_value(kappa)
+            if iszero(kappa)
                 pre_factor = factor_solute + factor_solvent
             else
                 pre_factor = factor_solute + exp(-kappa * denominator) * factor_solvent +
@@ -1031,7 +1031,7 @@ function gbsa_force_2_kernel!(forces, born_forces, coords_var, boundary, dist_cu
             dr = vector(coords[i], coords[j], boundary)
             r = norm(dr)
 
-            if iszero_value(dist_cutoff) || r <= dist_cutoff
+            if iszero(dist_cutoff) || r <= dist_cutoff
                 ori, srj = or[i], sor[j]
                 rsrj = r + srj
                 if ori < rsrj

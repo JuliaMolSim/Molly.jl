@@ -45,10 +45,8 @@ function pairwise_force_kernel!(forces, coords_var, atoms_var, boundary, inters,
         end
         for dim in 1:D
             fval = ustrip(f[dim])
-            if !iszero(fval)
-                Atomix.@atomic :monotonic forces[dim, i] += -fval
-                Atomix.@atomic :monotonic forces[dim, j] +=  fval
-            end
+            Atomix.@atomic :monotonic forces[dim, i] += -fval
+            Atomix.@atomic :monotonic forces[dim, j] +=  fval
         end
     end
     return nothing
