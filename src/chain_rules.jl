@@ -685,7 +685,9 @@ function grad_gbsa_born_kernel!(Is, d_Is, I_grads, d_I_grads, coords, d_coords, 
         for ti in 2:N
             grad_neck_scale_sum += shared_grad_neck_scale[ti]
         end
-        Atomix.@atomic grad_neck_scale[1] += grad_neck_scale_sum
+        if !iszero(grad_neck_scale_sum)
+            Atomix.@atomic grad_neck_scale[1] += grad_neck_scale_sum
+        end
     end
     return nothing
 end
@@ -767,19 +769,25 @@ function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
         for ti in 2:N
             grad_factor_solute_sum += shared_grad_factor_solute[ti]
         end
-        Atomix.@atomic grad_factor_solute[1] += grad_factor_solute_sum
+        if !iszero(grad_factor_solute_sum)
+            Atomix.@atomic grad_factor_solute[1] += grad_factor_solute_sum
+        end
     elseif tidx == 2
         grad_factor_solvent_sum = shared_grad_factor_solvent[1]
         for ti in 2:N
             grad_factor_solvent_sum += shared_grad_factor_solvent[ti]
         end
-        Atomix.@atomic grad_factor_solvent[1] += grad_factor_solvent_sum
+        if !iszero(grad_factor_solvent_sum)
+            Atomix.@atomic grad_factor_solvent[1] += grad_factor_solvent_sum
+        end
     elseif tidx == 3
         grad_kappa_sum = shared_grad_kappa[1]
         for ti in 2:N
             grad_kappa_sum += shared_grad_kappa[ti]
         end
-        Atomix.@atomic grad_kappa[1] += grad_kappa_sum
+        if !iszero(grad_kappa_sum)
+            Atomix.@atomic grad_kappa[1] += grad_kappa_sum
+        end
     end
     return nothing
 end
