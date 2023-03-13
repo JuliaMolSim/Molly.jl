@@ -233,6 +233,7 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), coords::AbstractArray{
         d_sils_3_atoms = zero.(sils_3_atoms)
         d_sils_4_atoms = zero.(sils_4_atoms)
         grads = autodiff(
+            Enzyme.Reverse,
             forces_pair_spec!,
             Const,
             Duplicated(fs, convert(typeof(fs), d_forces)),
@@ -281,6 +282,7 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), coords, atom
         d_sils_3_atoms = zero.(sils_3_atoms)
         d_sils_4_atoms = zero.(sils_4_atoms)
         grads = autodiff(
+            Enzyme.Reverse,
             potential_energy_pair_spec!,
             Const,
             Duplicated(pe_vec, [d_pe_vec]),
@@ -315,7 +317,9 @@ function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, 
     sync_threads()
 
     grads = Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         pairwise_force_kernel!,
+        Const,
         Duplicated(fs_mat, d_fs_mat),
         Duplicated(coords, d_coords),
         Duplicated(atoms, d_atoms),
@@ -377,7 +381,9 @@ function grad_pairwise_pe_kernel!(pe_vec, d_pe_vec, coords, d_coords, atoms, d_a
     sync_threads()
 
     grads = Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         pairwise_pe_kernel!,
+        Const,
         Duplicated(pe_vec, d_pe_vec),
         Duplicated(coords, d_coords),
         Duplicated(atoms, d_atoms),
@@ -436,7 +442,9 @@ function grad_specific_force_1_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
                                              boundary, is, inters, d_inters,
                                              val_dims, val_force_units)
     Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         specific_force_1_atoms_kernel!,
+        Const,
         Duplicated(fs_mat, d_fs_mat),
         Duplicated(coords, d_coords),
         Const(boundary),
@@ -452,7 +460,9 @@ function grad_specific_force_2_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
                                              boundary, is, js, inters, d_inters,
                                              val_dims, val_force_units)
     Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         specific_force_2_atoms_kernel!,
+        Const,
         Duplicated(fs_mat, d_fs_mat),
         Duplicated(coords, d_coords),
         Const(boundary),
@@ -469,7 +479,9 @@ function grad_specific_force_3_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
                                              boundary, is, js, ks, inters, d_inters,
                                              val_dims, val_force_units)
     Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         specific_force_3_atoms_kernel!,
+        Const,
         Duplicated(fs_mat, d_fs_mat),
         Duplicated(coords, d_coords),
         Const(boundary),
@@ -487,7 +499,9 @@ function grad_specific_force_4_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
                                              boundary, is, js, ks, ls, inters, d_inters,
                                              val_dims, val_force_units)
     Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         specific_force_4_atoms_kernel!,
+        Const,
         Duplicated(fs_mat, d_fs_mat),
         Duplicated(coords, d_coords),
         Const(boundary),
@@ -549,7 +563,9 @@ function grad_specific_pe_1_atoms_kernel!(energy, d_energy, coords, d_coords,
                                           boundary, is, inters, d_inters,
                                           val_energy_units)
     Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         specific_pe_1_atoms_kernel!,
+        Const,
         Duplicated(energy, d_energy),
         Duplicated(coords, d_coords),
         Const(boundary),
@@ -564,7 +580,9 @@ function grad_specific_pe_2_atoms_kernel!(energy, d_energy, coords, d_coords,
                                           boundary, is, js, inters, d_inters,
                                           val_energy_units)
     Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         specific_pe_2_atoms_kernel!,
+        Const,
         Duplicated(energy, d_energy),
         Duplicated(coords, d_coords),
         Const(boundary),
@@ -580,7 +598,9 @@ function grad_specific_pe_3_atoms_kernel!(energy, d_energy, coords, d_coords,
                                           boundary, is, js, ks, inters, d_inters,
                                           val_energy_units)
     Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         specific_pe_3_atoms_kernel!,
+        Const,
         Duplicated(energy, d_energy),
         Duplicated(coords, d_coords),
         Const(boundary),
@@ -597,7 +617,9 @@ function grad_specific_pe_4_atoms_kernel!(energy, d_energy, coords, d_coords,
                                           boundary, is, js, ks, ls, inters, d_inters,
                                           val_energy_units)
     Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         specific_pe_4_atoms_kernel!,
+        Const,
         Duplicated(energy, d_energy),
         Duplicated(coords, d_coords),
         Const(boundary),
@@ -663,7 +685,9 @@ function grad_gbsa_born_kernel!(Is, d_Is, I_grads, d_I_grads, coords, d_coords, 
     sync_threads()
 
     grads = Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         gbsa_born_kernel!,
+        Const,
         Duplicated(Is, d_Is),
         Duplicated(I_grads, d_I_grads),
         Duplicated(coords, d_coords),
@@ -746,7 +770,9 @@ function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
     sync_threads()
 
     grads = Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         gbsa_force_1_kernel!,
+        Const,
         Duplicated(fs_mat, d_fs_mat),
         Duplicated(born_forces_mod_ustrip, d_born_forces_mod_ustrip),
         Duplicated(coords, d_coords),
@@ -840,7 +866,9 @@ function grad_gbsa_force_2_kernel!(fs_mat, d_fs_mat, born_forces, d_born_forces,
                                    boundary, dist_cutoff, or, d_or, sor, d_sor, Bs, d_Bs, B_grads,
                                    d_B_grads, I_grads, d_I_grads, val_dims, val_force_units)
     Enzyme.autodiff_deferred(
+        Enzyme.Reverse,
         gbsa_force_2_kernel!,
+        Const,
         Duplicated(fs_mat, d_fs_mat),
         Duplicated(born_forces, d_born_forces),
         Duplicated(coords, d_coords),
