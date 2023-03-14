@@ -429,7 +429,9 @@ end
             grads_zygote = CUDA.allowscalar() do
                 gradient(f, params_dic)[1]
             end
-            if platform != "CPU parallel" # Currently 2 gradients are missing for CPU parallel
+            # Currently 2 gradients are missing for CPU parallel due to active variables
+            # passed by value to jl_threadsfor not yet being supported by Enzyme
+            if platform != "CPU parallel"
                 @test count(!iszero, values(grads_zygote)) == 67
             end
             for param in params_to_test
