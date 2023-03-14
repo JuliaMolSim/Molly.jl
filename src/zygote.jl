@@ -198,7 +198,7 @@ function dual_function_svec_real(f::F) where F
     function (arg1::SVector{D, T}, arg2) where {D, T}
         ds1 = dualize(Nothing, arg1, Val(0), Val(1))
         # Leaving the integer type in here results in Float32 -> Float64 conversion
-        ds2 = Zygote.dual(arg2 isa Int ? T(arg2) : arg2, (false, false, false, true))
+        ds2 = Zygote.dual(arg2 isa Int ? T(arg2) : arg2, 4, Val(4))
         return f(ds1, ds2)
     end
 end
@@ -224,7 +224,7 @@ end
 
 function dual_function_real_svec(f::F) where F
     function (arg1, arg2::SVector{D, T}) where {D, T}
-        ds1 = Zygote.dual(arg1 isa Int ? T(arg1) : arg1, (true, false, false, false))
+        ds1 = Zygote.dual(arg1 isa Int ? T(arg1) : arg1, 1, Val(4))
         ds2 = dualize(Nothing, arg2, Val(1), Val(0))
         return f(ds1, ds2)
     end
@@ -290,8 +290,14 @@ end
 function dual_function_atom(f::F) where F
     function (arg1)
         c, m, σ, ϵ = arg1.charge, arg1.mass, arg1.σ, arg1.ϵ
-        ds1 = Atom(arg1.index, @dualize(c, 4, 1), @dualize(m, 4, 2), @dualize(σ, 4, 3),
-                    @dualize(ϵ, 4, 4), arg1.solute)
+        ds1 = Atom(
+            arg1.index,
+            @dualize(c, 4, 1),
+            @dualize(m, 4, 2),
+            @dualize(σ, 4, 3),
+            @dualize(ϵ, 4, 4),
+            arg1.solute,
+        )
         return f(ds1)
     end
 end
@@ -316,8 +322,8 @@ function dual_function_born_radii_loop_OBC(f::F) where F
     function (arg1, arg2, arg3, arg4, arg5, arg6)
         ds1 = dualize(Nothing, arg1, Val(0), Val(5))
         ds2 = dualize(Nothing, arg2, Val(3), Val(2))
-        ds3 = Zygote.dual(arg3, (false, false, false, false, false, false, true , false))
-        ds4 = Zygote.dual(arg4, (false, false, false, false, false, false, false, true ))
+        ds3 = Zygote.dual(arg3, 7, Val(8))
+        ds4 = Zygote.dual(arg4, 8, Val(8))
         ds5 = arg5
         ds6 = arg6
         return f(ds1, ds2, ds3, ds4, ds5, ds6)
@@ -376,15 +382,15 @@ function dual_function_born_radii_loop_GBN2(f::F) where F
     function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12)
         ds1  = dualize(Nothing, arg1, Val(0), Val(11))
         ds2  = dualize(Nothing, arg2, Val(3), Val(8))
-        ds3  = Zygote.dual(arg3,  (false, false, false, false, false, false, true , false, false, false, false, false, false, false))
-        ds4  = Zygote.dual(arg4,  (false, false, false, false, false, false, false, true , false, false, false, false, false, false))
-        ds5  = Zygote.dual(arg5,  (false, false, false, false, false, false, false, false, true , false, false, false, false, false))
+        ds3  = Zygote.dual(arg3,  7 , Val(14))
+        ds4  = Zygote.dual(arg4,  8 , Val(14))
+        ds5  = Zygote.dual(arg5,  9 , Val(14))
         ds6  = arg6
-        ds7  = Zygote.dual(arg7,  (false, false, false, false, false, false, false, false, false, true , false, false, false, false))
-        ds8  = Zygote.dual(arg8,  (false, false, false, false, false, false, false, false, false, false, true , false, false, false))
-        ds9  = Zygote.dual(arg9,  (false, false, false, false, false, false, false, false, false, false, false, true , false, false))
-        ds10 = Zygote.dual(arg10, (false, false, false, false, false, false, false, false, false, false, false, false, true , false))
-        ds11 = Zygote.dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, false, false, true ))
+        ds7  = Zygote.dual(arg7,  10, Val(14))
+        ds8  = Zygote.dual(arg8,  11, Val(14))
+        ds9  = Zygote.dual(arg9,  12, Val(14))
+        ds10 = Zygote.dual(arg10, 13, Val(14))
+        ds11 = Zygote.dual(arg11, 14, Val(14))
         ds12 = arg12
         return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10, ds11, ds12)
     end
@@ -441,14 +447,14 @@ function dual_function_gb_force_loop_1(f::F) where F
         ds2  = dualize(Nothing, arg2, Val(3), Val(7))
         ds3  = arg3
         ds4  = arg4
-        ds5  = Zygote.dual(arg5 , (false, false, false, false, false, false, true , false, false, false, false, false, false))
-        ds6  = Zygote.dual(arg6 , (false, false, false, false, false, false, false, true , false, false, false, false, false))
-        ds7  = Zygote.dual(arg7 , (false, false, false, false, false, false, false, false, true , false, false, false, false))
-        ds8  = Zygote.dual(arg8 , (false, false, false, false, false, false, false, false, false, true , false, false, false))
+        ds5  = Zygote.dual(arg5 , 7 , Val(13))
+        ds6  = Zygote.dual(arg6 , 8 , Val(13))
+        ds7  = Zygote.dual(arg7 , 9 , Val(13))
+        ds8  = Zygote.dual(arg8 , 10, Val(13))
         ds9  = arg9
-        ds10 = Zygote.dual(arg10, (false, false, false, false, false, false, false, false, false, false, true , false, false))
-        ds11 = Zygote.dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, true , false))
-        ds12 = Zygote.dual(arg12, (false, false, false, false, false, false, false, false, false, false, false, false, true ))
+        ds10 = Zygote.dual(arg10, 11, Val(13))
+        ds11 = Zygote.dual(arg11, 12, Val(13))
+        ds12 = Zygote.dual(arg12, 13, Val(13))
         ds13 = arg13
         return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10, ds11, ds12, ds13)
     end
@@ -506,10 +512,10 @@ function dual_function_gb_force_loop_2(f::F) where F
     function (arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)
         ds1 = dualize(Nothing, arg1, Val(0), Val(7))
         ds2 = dualize(Nothing, arg2, Val(3), Val(4))
-        ds3 = Zygote.dual(arg3, (false, false, false, false, false, false, true , false, false, false))
-        ds4 = Zygote.dual(arg4, (false, false, false, false, false, false, false, true , false, false))
-        ds5 = Zygote.dual(arg5, (false, false, false, false, false, false, false, false, true , false))
-        ds6 = Zygote.dual(arg6, (false, false, false, false, false, false, false, false, false, true ))
+        ds3 = Zygote.dual(arg3, 7 , Val(10))
+        ds4 = Zygote.dual(arg4, 8 , Val(10))
+        ds5 = Zygote.dual(arg5, 9 , Val(10))
+        ds6 = Zygote.dual(arg6, 10, Val(10))
         ds7 = arg7
         ds8 = arg8
         return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8)
@@ -558,18 +564,19 @@ function dual_function_gb_energy_loop(f::F) where F
         ds2  = dualize(Nothing, arg2, Val(3), Val(11))
         ds3  = arg3
         ds4  = arg4
-        ds5  = Zygote.dual(arg5 , (false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false))
-        ds6  = Zygote.dual(arg6 , (false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false))
-        ds7  = Zygote.dual(arg7 , (false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false))
-        ds8  = Zygote.dual(arg8 , (false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false))
-        ds9  = Zygote.dual(arg9 , (false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false))
+        # Using Zygote.dual errors on GPU so Dual is called explicitly
+        ds5  = Dual(arg5 , (false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false, false))
+        ds6  = Dual(arg6 , (false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false, false))
+        ds7  = Dual(arg7 , (false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false, false))
+        ds8  = Dual(arg8 , (false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false, false))
+        ds9  = Dual(arg9 , (false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false, false))
         ds10 = arg10
-        ds11 = Zygote.dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false))
-        ds12 = Zygote.dual(arg12, (false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false))
-        ds13 = Zygote.dual(arg13, (false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false))
-        ds14 = Zygote.dual(arg14, (false, false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false))
-        ds15 = Zygote.dual(arg15, (false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true , false))
-        ds16 = Zygote.dual(arg16, (false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true ))
+        ds11 = Dual(arg11, (false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false, false))
+        ds12 = Dual(arg12, (false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false, false))
+        ds13 = Dual(arg13, (false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false, false))
+        ds14 = Dual(arg14, (false, false, false, false, false, false, false, false, false, false, false, false, false, false, true , false, false))
+        ds15 = Dual(arg15, (false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true , false))
+        ds16 = Dual(arg16, (false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true ))
         ds17 = arg17
         ds18 = arg18
         return f(ds1, ds2, ds3, ds4, ds5, ds6, ds7, ds8, ds9, ds10,
