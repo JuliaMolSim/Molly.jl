@@ -852,7 +852,7 @@ end
 
 # Arguments
 - `dt::T`: the time step of the simulation.
-- `T_desired::K`: The temeprature targeted by the NoseHoover thermostat
+- `T_desired::K`: The temperature targeted by the NoseHoover thermostat
 - `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
 - `tau_damp::TD`: The temperature damping timescale, typically 100*dt
 - `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
