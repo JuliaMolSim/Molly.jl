@@ -13,17 +13,17 @@ using DelimitedFiles
 # Allow CUDA device to be specified
 const DEVICE = get(ENV, "DEVICE", "0")
 
-run_parallel_tests = Threads.nthreads() > 1
+const run_parallel_tests = Threads.nthreads() > 1
 if run_parallel_tests
     @info "The parallel benchmarks will be run as Julia is running on $(Threads.nthreads()) threads"
 else
     @warn "The parallel benchmarks will not be run as Julia is running on 1 thread"
 end
 
-run_gpu_tests = CUDA.functional()
+const run_gpu_tests = CUDA.functional()
 if run_gpu_tests
     device!(parse(Int, DEVICE))
-    @info "The GPU tests will be run on device $DEVICE"
+    @info "The GPU benchmarks will be run on device $DEVICE"
 else
     @warn "The GPU benchmarks will not be run as a CUDA-enabled device is not available"
 end
@@ -148,7 +148,7 @@ end
 
 for (name, args) in runs
     test_sim(args...) # Run once for setup
-    SUITE["simulation"][name] = @benchmarkable test_sim($(args[1]), $(args[2]), $(args[3]), $(args[4]), $(args[5]))
+    SUITE["simulation"][name] = @benchmarkable test_sim($(args[1]), $(args[2]), $(args[3]), $(args[4]))
 end
 
 data_dir = normpath(@__DIR__, "..", "data")
@@ -162,4 +162,4 @@ simulator = VelocityVerlet(dt=0.0005u"ps")
 n_steps = 25
 
 simulate!(s, simulator, n_steps; n_threads=Threads.nthreads())
-SUITE["protein"]["in-place NL parallel"] = @benchmarkable simulate!($(s), $(simulator), $(n_steps); n_threads=Threads.nthreads())
+SUITE["protein"]["CPU parallel NL"] = @benchmarkable simulate!($(s), $(simulator), $(n_steps); n_threads=Threads.nthreads())
