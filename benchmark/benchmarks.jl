@@ -59,10 +59,10 @@ SUITE["spatial"]["vector"   ] = @benchmarkable vector($(SVector(4.0, 1.0, 1.0)u"
 n_atoms = 400
 atom_mass = 10.0u"u"
 boundary = CubicBoundary(6.0u"nm")
-starting_coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm"; min_dist=0.2u"nm")
-starting_velocities = [random_velocity(atom_mass, 1.0u"K") for i in 1:n_atoms]
-starting_coords_f32 = [Float32.(c) for c in starting_coords]
-starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
+const starting_coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm"; min_dist=0.2u"nm")
+const starting_velocities = [random_velocity(atom_mass, 1.0u"K") for i in 1:n_atoms]
+const starting_coords_f32 = [Float32.(c) for c in starting_coords]
+const starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
 function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
     n_atoms = 400
