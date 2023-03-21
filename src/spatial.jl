@@ -30,12 +30,12 @@ struct CubicBoundary{T}
 end
 
 function CubicBoundary(x, y, z)
-    @assert all(a -> a > 0, [x, y, z]) "Side lengths need to be larger than 0"
+    @assert all(a -> a > 0*unit(a), [x, y, z]) "Side lengths need to be larger than 0"
     CubicBoundary(SVector{3}(x, y, z))
 end
 
 function CubicBoundary(arr)
-    @assert all(x -> x > 0, arr) "Side lengths need to be larger than 0"
+    @assert all(x -> x > 0*unit(x), arr) "Side lengths need to be larger than 0"
     CubicBoundary(SVector{3}(arr))
 end
 
@@ -55,11 +55,11 @@ struct RectangularBoundary{T}
 end
 
 function RectangularBoundary(x, y)
-    @assert all(a -> a > 0, [x, y]) "Side lengths need to be larger than 0"
+    @assert all(a -> a > 0*unit(a), [x, y]) "Side lengths need to be larger than 0"
     RectangularBoundary(SVector{2}(x, y))
 end
 function RectangularBoundary(arr)
-    @assert all(x -> x > 0, arr) "Side lengths need to be larger than 0"
+    @assert all(x -> x > 0*unit(x), arr) "Side lengths need to be larger than 0"
     RectangularBoundary(SVector{2}(arr))
 end
 
