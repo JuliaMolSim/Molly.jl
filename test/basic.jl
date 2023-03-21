@@ -46,11 +46,13 @@
     @test box_volume(b) == 120.0u"nm^3"
     @test box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
     @test_throws AssertionError CubicBoundary(-4.0u"nm", 5.0u"nm", 6.0u"nm")
+    @test_throws AssertionError CubicBoundary([0u"nm", 5.0u"nm", 6.0u"nm"])
 
     b = RectangularBoundary(4.0u"m", 5.0u"m")
     @test box_volume(b) == 20.0u"m^2"
     @test box_center(b) == SVector(2.0, 2.5)u"m"
     @test_throws AssertionError RectangularBoundary(-4.0u"nm", 5.0u"nm")
+    @test_throws AssertionError RectangularBoundary([0u"nm", 5.0u"nm"])
 
     b = TriclinicBoundary(SVector(2.2, 2.0, 1.8)u"nm", deg2rad.(SVector(50.0, 40.0, 60.0)))
     @test isapprox(b.basis_vectors[1], SVector(2.2      , 0.0      , 0.0      )u"nm", atol=1e-6u"nm")
