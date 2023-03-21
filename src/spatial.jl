@@ -29,8 +29,15 @@ struct CubicBoundary{T}
     side_lengths::SVector{3, T}
 end
 
-CubicBoundary(x, y, z) = CubicBoundary(SVector{3}(x, y, z))
-CubicBoundary(arr) = CubicBoundary(SVector{3}(arr))
+function CubicBoundary(x, y, z)
+    @assert all(a -> a > 0, [x, y, z]) "Side lengths need to be larger than 0"
+    CubicBoundary(SVector{3}(x, y, z))
+end
+
+function CubicBoundary(arr)
+    @assert all(x -> x > 0, arr) "Side lengths need to be larger than 0"
+    CubicBoundary(SVector{3}(arr))
+end
 
 Base.getindex(b::CubicBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::CubicBoundary) = b.side_lengths[1]
@@ -47,8 +54,14 @@ struct RectangularBoundary{T}
     side_lengths::SVector{2, T}
 end
 
-RectangularBoundary(x, y) = RectangularBoundary(SVector{2}(x, y))
-RectangularBoundary(arr) = RectangularBoundary(SVector{2}(arr))
+function RectangularBoundary(x, y)
+    @assert all(a -> a > 0, [x, y]) "Side lengths need to be larger than 0"
+    RectangularBoundary(SVector{2}(x, y))
+end
+function RectangularBoundary(arr)
+    @assert all(x -> x > 0, arr) "Side lengths need to be larger than 0"
+    RectangularBoundary(SVector{2}(arr))
+end
 
 Base.getindex(b::RectangularBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::RectangularBoundary) = b.side_lengths[1]
