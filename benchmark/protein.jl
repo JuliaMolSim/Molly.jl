@@ -6,6 +6,7 @@ using CUDA
 using DelimitedFiles
 
 const n_steps = 500
+const n_threads = Threads.nthreads()
 const data_dir = normpath(dirname(pathof(Molly)), "..", "data")
 const ff_dir = joinpath(data_dir, "force_fields")
 const openmm_dir = joinpath(data_dir, "openmm_6mrr")
@@ -40,22 +41,22 @@ function setup_system(gpu::Bool, f32::Bool, units::Bool)
 end
 
 runs = [
-    # run_name                   gpu    parr   f32    units
-    ("CPU"                     , false, false, false, true ),
-    ("CPU f32"                 , false, false, true , true ),
-    ("CPU f32 nounits"         , false, false, true , false),
-    ("CPU parallel"            , false, true , false, true ),
-    ("CPU parallel f32"        , false, true , true , true ),
-    ("CPU parallel f32 nounits", false, true , true , false),
-    ("GPU"                     , true , false, false, true ),
-    ("GPU f32"                 , true , false, true , true ),
-    ("GPU f32 nounits"         , true , false, true , false),
+    # run_name                             gpu    parr   f32    units
+    ("CPU 1 thread"                      , false, false, false, true ),
+    ("CPU 1 thread f32"                  , false, false, true , true ),
+    ("CPU 1 thread f32 nounits"          , false, false, true , false),
+    ("CPU $n_threads threads"            , false, true , false, true ),
+    ("CPU $n_threads threads f32"        , false, true , true , true ),
+    ("CPU $n_threads threads f32 nounits", false, true , true , false),
+    ("GPU"                               , true , false, false, true ),
+    ("GPU f32"                           , true , false, true , true ),
+    ("GPU f32 nounits"                   , true , false, true , false),
 ]
 
 for (run_name, gpu, parallel, f32, units) in runs
-    n_threads = parallel ? Threads.nthreads() : 1
+    n_threads_used = parallel ? n_threads : 1
     sys, sim = setup_system(gpu, f32, units)
-    simulate!(sys, sim, 5; n_threads=n_threads)
+    simulate!(sys, sim, 5; n_threads=n_threads_used)
     println(run_name)
-    @time simulate!(sys, sim, n_steps; n_threads=n_threads)
+    @time simulate!(sys, sim, n_steps; n_threads=n_threads_used)
 end
