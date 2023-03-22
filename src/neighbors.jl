@@ -72,7 +72,7 @@ function find_neighbors(s::System{D, false},
         for j in 1:(i - 1)
             r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
             if r2 <= sqdist_cutoff && nbi[j]
-                nn = (i, j, w14i[j])
+                nn = (j, i, w14i[j])
                 @reduce(neighbors_list = append!(Tuple{Int, Int, Bool}[], (nn,)))
             end
         end
@@ -174,7 +174,7 @@ function find_neighbors(s::System,
         idxs = inrange(btree, ci, dist_cutoff, true)
         for j in idxs
             if nbi[j] && i > j
-                nn = (i, j, w14i[j])
+                nn = (j, i, w14i[j])
                 @reduce(neighbors_list = append!(Tuple{Int, Int, Bool}[], (nn,)))
             end
         end
