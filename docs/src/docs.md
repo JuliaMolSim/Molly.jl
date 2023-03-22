@@ -1007,7 +1007,6 @@ The available neighbor finders are:
 - [`CellListMapNeighborFinder`](@ref)
 - [`TreeNeighborFinder`](@ref)
 - [`DistanceNeighborFinder`](@ref)
-- [`DistanceVecNeighborFinder`](@ref)
 
 To define your own neighbor finder, first define the `struct`:
 ```julia

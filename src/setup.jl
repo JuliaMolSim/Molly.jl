@@ -791,9 +791,9 @@ function System(coord_file::AbstractString,
 
     atoms = [atoms...]
     if gpu
-        neighbor_finder = DistanceVecNeighborFinder(
-            nb_matrix=gpu ? CuArray(nb_matrix) : nb_matrix,
-            matrix_14=gpu ? CuArray(matrix_14) : matrix_14,
+        neighbor_finder = DistanceNeighborFinder(
+            nb_matrix=CuArray(nb_matrix),
+            matrix_14=CuArray(matrix_14),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
@@ -1157,9 +1157,9 @@ function System(T::Type,
     atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ, solute=a.solute) for a in atoms]
 
     if gpu
-        neighbor_finder = DistanceVecNeighborFinder(
-            nb_matrix=gpu ? CuArray(nb_matrix) : nb_matrix,
-            matrix_14=gpu ? CuArray(matrix_14) : matrix_14,
+        neighbor_finder = DistanceNeighborFinder(
+            nb_matrix=CuArray(nb_matrix),
+            matrix_14=CuArray(matrix_14),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )

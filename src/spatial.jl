@@ -326,8 +326,6 @@ function vector(c1, c2, boundary::TriclinicBoundary{T, false}) where T
     return min_dr
 end
 
-square_distance(i, j, coords, boundary) = sum(abs2, vector(coords[i], coords[j], boundary))
-
 # Pad a vector to 3D to allow operations such as the cross product
 function vector_pad3D(c1::SVector{2, T}, c2::SVector{2, T}, boundary::RectangularBoundary{T}) where T
     SVector{3, T}(

@@ -10,7 +10,7 @@
 @non_differentiable cuda_threads_blocks_gbsa(args...)
 @non_differentiable lookup_table(args...)
 @non_differentiable find_neighbors(args...)
-@non_differentiable DistanceVecNeighborFinder(args...)
+@non_differentiable DistanceNeighborFinder(args...)
 @non_differentiable run_loggers!(args...)
 @non_differentiable visualize(args...)
 @non_differentiable place_atoms(args...)

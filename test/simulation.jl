@@ -826,19 +826,11 @@ end
         cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
         pairwise_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
         if nl
-            if gpu
-                neighbor_finder = DistanceVecNeighborFinder(
-                    nb_matrix=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
-                    n_steps=10,
-                    dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
-                )
-            else
-                neighbor_finder = DistanceNeighborFinder(
-                    nb_matrix=trues(n_atoms, n_atoms),
-                    n_steps=10,
-                    dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
-                )
-            end
+            neighbor_finder = DistanceNeighborFinder(
+                nb_matrix=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+                n_steps=10,
+                dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+            )
             pairwise_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
         end
         show(devnull, neighbor_finder)

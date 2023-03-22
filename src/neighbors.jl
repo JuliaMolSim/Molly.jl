@@ -4,7 +4,6 @@ export
     NoNeighborFinder,
     find_neighbors,
     DistanceNeighborFinder,
-    DistanceVecNeighborFinder,
     TreeNeighborFinder,
     CellListMapNeighborFinder
 
@@ -40,26 +39,28 @@ end
 
 Find close atoms by distance.
 """
-struct DistanceNeighborFinder{D}
-    nb_matrix::BitArray{2}
-    matrix_14::BitArray{2}
+struct DistanceNeighborFinder{B, D}
+    nb_matrix::B
+    matrix_14::B
     n_steps::Int
     dist_cutoff::D
+    neighbors::B # Used internally during neighbor calculation on the GPU
 end
 
 function DistanceNeighborFinder(;
                                 nb_matrix,
-                                matrix_14=falses(size(nb_matrix)),
+                                matrix_14=zero(nb_matrix),
                                 n_steps=10,
                                 dist_cutoff)
-    return DistanceNeighborFinder{typeof(dist_cutoff)}(nb_matrix, matrix_14, n_steps, dist_cutoff)
+    return DistanceNeighborFinder{typeof(nb_matrix), typeof(dist_cutoff)}(
+                nb_matrix, matrix_14, n_steps, dist_cutoff, zero(nb_matrix))
 end
 
-function find_neighbors(s::System,
+function find_neighbors(s::System{D, false},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        n_threads::Integer=Threads.nthreads())
+                        n_threads::Integer=Threads.nthreads()) where D
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
     sqdist_cutoff = nf.dist_cutoff ^ 2
@@ -77,59 +78,57 @@ function find_neighbors(s::System,
         end
     end
 
-    return NeighborList(length(neighbors_list), move_array(neighbors_list, s))
+    return NeighborList(length(neighbors_list), neighbors_list)
 end
 
-"""
-    DistanceVecNeighborFinder(; nb_matrix, matrix_14, n_steps, dist_cutoff)
-
-Find close atoms by distance in a GPU compatible manner.
-"""
-struct DistanceVecNeighborFinder{D, B, I}
-    nb_matrix::B
-    matrix_14::B
-    n_steps::Int
-    dist_cutoff::D
-    is::I
-    js::I
+function cuda_threads_blocks_dnf(n_inters)
+    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_DISTANCENF", "512"))
+    n_blocks = cld(n_inters, n_threads_gpu)
+    return n_threads_gpu, n_blocks
 end
 
-function DistanceVecNeighborFinder(;
-                                nb_matrix,
-                                matrix_14=falses(size(nb_matrix)),
-                                n_steps=10,
-                                dist_cutoff)
-    n_atoms = size(nb_matrix, 1)
-    if isa(nb_matrix, CuArray)
-        is = CuArray(hcat([collect(1:n_atoms) for i in 1:n_atoms]...))
-        js = CuArray(permutedims(is, (2, 1)))
-        m14 = CuArray(matrix_14)
-    else
-        is = hcat([collect(1:n_atoms) for i in 1:n_atoms]...)
-        js = permutedims(is, (2, 1))
-        m14 = matrix_14
+function distance_neighbor_finder_kernel!(neighbors, coords_var, nb_matrix_var,
+                                          boundary, sq_dist_neighbors)
+    coords    = CUDA.Const(coords_var)
+    nb_matrix = CUDA.Const(nb_matrix_var)
+
+    n_atoms = length(coords)
+    n_inters = n_atoms_to_n_pairs(n_atoms)
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+
+    @inbounds if inter_i <= n_inters
+        i, j = pair_index(n_atoms, inter_i)
+        if nb_matrix[i, j]
+            dr = vector(coords[i], coords[j], boundary)
+            r2 = sum(abs2, dr)
+            if r2 <= sq_dist_neighbors
+                neighbors[j, i] = true
+            end
+        end
     end
-    return DistanceVecNeighborFinder{typeof(dist_cutoff), typeof(nb_matrix), typeof(is)}(
-            nb_matrix, m14, n_steps, dist_cutoff, is, js)
+    return nothing
 end
 
 lists_to_tuple_list(i, j, w) = (i, j, w)
 
-function find_neighbors(s::System,
-                        nf::DistanceVecNeighborFinder,
+function find_neighbors(s::System{D, true},
+                        nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0;
-                        kwargs...)
+                        kwargs...) where D
     !iszero(step_n % nf.n_steps) && return current_neighbors
 
-    sqdists = square_distance.(nf.is, nf.js, (s.coords,), (s.boundary,))
-    close = sqdists .<= nf.dist_cutoff ^ 2
-    close_nb = close .* nf.nb_matrix
-    eligible = tril(close_nb, -1)
+    nf.neighbors .= false
+    n_inters = n_atoms_to_n_pairs(length(s))
+    n_threads_gpu, n_blocks = cuda_threads_blocks_dnf(n_inters)
 
-    fa = findall(!iszero, eligible)
-    nbsi, nbsj = getindex.(fa, 1), getindex.(fa, 2)
-    weights_14 = nf.matrix_14[fa]
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks distance_neighbor_finder_kernel!(
+        nf.neighbors, s.coords, nf.nb_matrix, s.boundary, nf.dist_cutoff^2,
+    )
+
+    pairs = findall(nf.neighbors)
+    nbsi, nbsj = getindex.(pairs, 1), getindex.(pairs, 2)
+    weights_14 = nf.matrix_14[pairs]
     nl = lists_to_tuple_list.(nbsi, nbsj, weights_14)
     return NeighborList(length(nl), nl)
 end
@@ -338,8 +337,8 @@ function find_neighbors(s::System{D, G},
     end
 end
 
-function Base.show(io::IO, neighbor_finder::Union{DistanceNeighborFinder, DistanceVecNeighborFinder,
-                                                  TreeNeighborFinder, CellListMapNeighborFinder})
+function Base.show(io::IO, neighbor_finder::Union{DistanceNeighborFinder,
+                                TreeNeighborFinder, CellListMapNeighborFinder})
     println(io, typeof(neighbor_finder))
     println(io, "  Size of nb_matrix = " , size(neighbor_finder.nb_matrix))
     println(io, "  n_steps = " , neighbor_finder.n_steps)
