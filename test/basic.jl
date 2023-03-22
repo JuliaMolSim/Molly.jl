@@ -173,19 +173,59 @@ end
     nf = CellListMapNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), dist_cutoff=dist_cutoff)
     sys = System(atoms=atoms, coords=coords, boundary=boundary, neighbor_finder=nf)
     neighbors = find_neighbors(sys)
-    neighbors_sorted = map(
-        x -> (x[1], x[2]),
-        sort(neighbors.list, lt=(x, y) -> x[1] < y[1] || (x[1] == y[1] && x[2] < y[2])),
-    )
-    neighbors_dist = Tuple{Int, Int}[]
+
+    function sort_nbs(nbs_dev)
+        nbs = Array(nbs_dev)
+        nbs_ij = map(t -> (min(t[1], t[2]), max(t[1], t[2]), t[3]), nbs)
+        return sort(
+            nbs_ij,
+            lt=(t1, t2) -> t1[1] < t2[1] || (t1[1] == t2[1] && t1[2] < t2[2]),
+        )
+    end
+
+    neighbors_dist = Tuple{Int, Int, Bool}[]
     for i in 1:n_atoms
         for j in (i + 1):n_atoms
             if norm(vector(coords[i], coords[j], boundary)) <= dist_cutoff
-                push!(neighbors_dist, (i, j))
+                push!(neighbors_dist, (i, j, false))
             end
         end
     end
-    @test neighbors_dist == neighbors_sorted
+    @test neighbors_dist == sort_nbs(neighbors.list)
+
+    # Test all neighbor finders agree for a larger system
+    ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+    dist_cutoff = 1.2u"nm"
+    sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; dist_neighbors=dist_cutoff)
+    neighbors_ref = find_neighbors(sys)
+    @test neighbors_ref.n == 4602420
+
+    identical_neighbors(nl1, nl2) = (nl1.n == nl2.n && sort_nbs(nl1.list) == sort_nbs(nl2.list))
+
+    for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
+        nf = neighbor_finder(
+            nb_matrix=sys.neighbor_finder.nb_matrix,
+            matrix_14=sys.neighbor_finder.matrix_14,
+            dist_cutoff=dist_cutoff,
+        )
+        for n_threads in n_threads_list
+            neighbors = find_neighbors(sys, nf; n_threads=n_threads)
+            @test identical_neighbors(neighbors, neighbors_ref)
+        end
+    end
+
+    if run_gpu_tests
+        sys_gpu = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=true)
+        for neighbor_finder in (DistanceNeighborFinder,)
+            nf_gpu = neighbor_finder(
+                nb_matrix=sys_gpu.neighbor_finder.nb_matrix,
+                matrix_14=sys_gpu.neighbor_finder.matrix_14,
+                dist_cutoff=dist_cutoff,
+            )
+            neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
+            @test identical_neighbors(neighbors_gpu, neighbors_ref)
+        end
+    end
 end
 
 @testset "Analysis" begin
