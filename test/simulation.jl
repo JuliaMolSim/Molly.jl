@@ -59,7 +59,6 @@ end
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
-    n_threads_list = run_parallel_tests ? (1, Threads.nthreads()) : (1,)
 
     TV = typeof(random_velocity(10.0u"u", temp))
     TP = typeof(0.2u"kJ * mol^-1")

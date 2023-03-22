@@ -55,7 +55,6 @@ end
 end
 
 @testset "OpenMM protein comparison" begin
-    openmm_dir = joinpath(data_dir, "openmm_6mrr")
     ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     show(devnull, ff)
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; center_coords=false)
@@ -212,7 +211,6 @@ end
 end
 
 @testset "Implicit solvent" begin
-    openmm_dir = joinpath(data_dir, "openmm_6mrr")
     ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...)
 
     gpu_list = run_gpu_tests ? (false, true) : (false,)

@@ -36,6 +36,7 @@ else
 end
 
 const run_parallel_tests = Threads.nthreads() > 1
+const n_threads_list = run_parallel_tests ? (1, Threads.nthreads()) : (1,)
 if run_parallel_tests
     @info "The parallel tests will be run as Julia is running on $(Threads.nthreads()) threads"
 else
@@ -53,7 +54,8 @@ end
 CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
 
 const data_dir = normpath(@__DIR__, "..", "data")
-const ff_dir = joinpath(data_dir, "force_fields")
+const ff_dir     = joinpath(data_dir, "force_fields")
+const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
 const temp_fp_pdb = tempname(cleanup=true) * ".pdb"
 const temp_fp_viz = tempname(cleanup=true) * ".mp4"
