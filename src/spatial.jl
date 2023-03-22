@@ -27,17 +27,15 @@ Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct CubicBoundary{T}
     side_lengths::SVector{3, T}
+    CubicBoundary(side_lengths::SVector{3, E}) where E = (
+        all(a -> a >= 0*unit(a),  side_lengths) ?
+        new{E}(side_lengths) :
+        throw(DomainError("Side lengths need to be positive, got $side_lengths"))
+    )
 end
 
-function CubicBoundary(x, y, z)
-    @assert all(a -> a > 0*unit(a), [x, y, z]) "Side lengths need to be larger than 0, got [$x,$y,$z]"
-    CubicBoundary(SVector{3}(x, y, z))
-end
-
-function CubicBoundary(arr)
-    @assert all(x -> x > 0*unit(x), arr) "Side lengths need to be larger than 0, got $arr"
-    CubicBoundary(SVector{3}(arr))
-end
+CubicBoundary(x, y, z) = CubicBoundary(SVector{3}(x, y, z))
+CubicBoundary(arr) = CubicBoundary(SVector{3}(arr))
 
 Base.getindex(b::CubicBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::CubicBoundary) = b.side_lengths[1]
@@ -52,16 +50,15 @@ Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct RectangularBoundary{T}
     side_lengths::SVector{2, T}
+    RectangularBoundary(side_lengths::SVector{2, E}) where E = (
+        all(a -> a >= 0 * unit(a), side_lengths) ?
+        new{E}(side_lengths) :
+        throw(DomainError("Side lengths need to be positive, got $side_lengths"))
+    )
 end
 
-function RectangularBoundary(x, y)
-    @assert all(a -> a > 0*unit(a), [x, y]) "Side lengths need to be larger than 0, got [$x, $y]"
-    RectangularBoundary(SVector{2}(x, y))
-end
-function RectangularBoundary(arr)
-    @assert all(x -> x > 0*unit(x), arr) "Side lengths need to be larger than 0, got $arr"
-    RectangularBoundary(SVector{2}(arr))
-end
+RectangularBoundary(x, y) = RectangularBoundary(SVector{2}(x, y))
+RectangularBoundary(arr) = RectangularBoundary(SVector{2}(arr))
 
 Base.getindex(b::RectangularBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::RectangularBoundary) = b.side_lengths[1]
