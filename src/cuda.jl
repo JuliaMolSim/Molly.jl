@@ -29,7 +29,7 @@ function pairwise_force_kernel!(forces, coords_var, atoms_var, boundary, inters,
 
     inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    if inter_i <= length(neighbors)
+    @inbounds if inter_i <= length(neighbors)
         i, j, weight_14 = neighbors[inter_i]
         coord_i, coord_j = coords[i], coords[j]
         dr = vector(coord_i, coord_j, boundary)
@@ -99,7 +99,7 @@ function specific_force_1_atoms_kernel!(forces, coords_var, boundary, is_var,
 
     inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    if inter_i <= length(is)
+    @inbounds if inter_i <= length(is)
         i = is[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], boundary)
         if unit(fs.f1[1]) != F
@@ -121,7 +121,7 @@ function specific_force_2_atoms_kernel!(forces, coords_var, boundary, is_var, js
 
     inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    if inter_i <= length(is)
+    @inbounds if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], boundary)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
@@ -145,7 +145,7 @@ function specific_force_3_atoms_kernel!(forces, coords_var, boundary, is_var, js
 
     inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    if inter_i <= length(is)
+    @inbounds if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
@@ -171,7 +171,7 @@ function specific_force_4_atoms_kernel!(forces, coords_var, boundary, is_var, js
 
     inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    if inter_i <= length(is)
+    @inbounds if inter_i <= length(is)
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
@@ -204,7 +204,7 @@ function pairwise_pe_kernel!(energy, coords_var, atoms_var, boundary, inters, ne
 
     inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    if inter_i <= length(neighbors)
+    @inbounds if inter_i <= length(neighbors)
         i, j, weight_14 = neighbors[inter_i]
         coord_i, coord_j = coords[i], coords[j]
         dr = vector(coord_i, coord_j, boundary)
@@ -268,7 +268,7 @@ function specific_pe_1_atoms_kernel!(energy, coords_var, boundary, is_var,
 
     inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    if inter_i <= length(is)
+    @inbounds if inter_i <= length(is)
         i = is[inter_i]
         pe = potential_energy(inters[inter_i], coords[i], boundary)
         if unit(pe) != E
@@ -288,7 +288,7 @@ function specific_pe_2_atoms_kernel!(energy, coords_var, boundary, is_var, js_va
 
     inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    if inter_i <= length(is)
+    @inbounds if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
         pe = potential_energy(inters[inter_i], coords[i], coords[j], boundary)
         if unit(pe) != E
@@ -309,7 +309,7 @@ function specific_pe_3_atoms_kernel!(energy, coords_var, boundary, is_var, js_va
 
     inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    if inter_i <= length(is)
+    @inbounds if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
         pe = potential_energy(inters[inter_i], coords[i], coords[j], coords[k], boundary)
         if unit(pe) != E
@@ -331,7 +331,7 @@ function specific_pe_4_atoms_kernel!(energy, coords_var, boundary, is_var, js_va
 
     inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-    if inter_i <= length(is)
+    @inbounds if inter_i <= length(is)
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
         pe = potential_energy(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary)
         if unit(pe) != E
