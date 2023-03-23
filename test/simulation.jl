@@ -412,7 +412,6 @@ end
 end
 
 @testset "Position restraints" begin
-    gpu_list = run_gpu_tests ? (false, true) : (false,)
     for gpu in gpu_list
         n_atoms = 10
         n_atoms_res = n_atoms ÷ 2

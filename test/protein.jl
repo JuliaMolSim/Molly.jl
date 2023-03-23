@@ -213,7 +213,6 @@ end
 @testset "Implicit solvent" begin
     ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...)
 
-    gpu_list = run_gpu_tests ? (false, true) : (false,)
     for gpu in gpu_list
         for solvent_model in ("obc2", "gbn2")
             sys = System(

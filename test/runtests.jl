@@ -44,6 +44,7 @@ else
 end
 
 const run_gpu_tests = CUDA.functional()
+const gpu_list = run_gpu_tests ? (false, true) : (false,)
 if run_gpu_tests
     device!(parse(Int, DEVICE))
     @info "The GPU tests will be run on device $DEVICE"
