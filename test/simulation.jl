@@ -115,8 +115,8 @@ end
         nf_tree = TreeNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=n_threads)
         neighbors_tree = find_neighbors(s, nf_tree; n_threads=n_threads)
-        @test length(neighbors.list) == length(neighbors_tree.list) &&
-                all(nn in neighbors_tree.list for nn in neighbors.list)
+        @test length(neighbors.list) == length(neighbors_tree.list)
+        @test all(nn in neighbors_tree.list for nn in neighbors.list)
 
         @time simulate!(s, simulator, n_steps; n_threads=n_threads)
 

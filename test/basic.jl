@@ -115,6 +115,8 @@
 end
 
 @testset "Neighbor lists" begin
+    reorder_neighbors(nbs) = map(t -> (min(t[1], t[2]), max(t[1], t[2]), t[3]), nbs)
+
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
         nf = neighbor_finder(nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
         s = System(
@@ -128,10 +130,10 @@ end
             neighbor_finder=nf,
         )
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
-        @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
+        @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
         if run_parallel_tests
             neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
-            @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
+            @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
         end
         show(devnull, nf)
     end
@@ -154,10 +156,10 @@ end
         neighbor_finder=neighbor_finder,
     )
     neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
-    @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
+    @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
     if run_parallel_tests
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
-        @test neighbors.list == [(2, 1, false)] || neighbors.list == [(1, 2, false)]
+        @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
     end
 
     # Test CellListMapNeighborFinder with TriclinicBoundary
@@ -176,18 +178,17 @@ end
 
     function sort_nbs(nbs_dev)
         nbs = Array(nbs_dev)
-        nbs_ij = map(t -> (min(t[1], t[2]), max(t[1], t[2]), t[3]), nbs)
         return sort(
-            nbs_ij,
+            reorder_neighbors(nbs),
             lt=(t1, t2) -> t1[1] < t2[1] || (t1[1] == t2[1] && t1[2] < t2[2]),
         )
     end
 
-    neighbors_dist = Tuple{Int, Int, Bool}[]
+    neighbors_dist = Tuple{Int32, Int32, Bool}[]
     for i in 1:n_atoms
         for j in (i + 1):n_atoms
             if norm(vector(coords[i], coords[j], boundary)) <= dist_cutoff
-                push!(neighbors_dist, (i, j, false))
+                push!(neighbors_dist, (Int32(i), Int32(j), false))
             end
         end
     end
@@ -198,7 +199,8 @@ end
     dist_cutoff = 1.2u"nm"
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; dist_neighbors=dist_cutoff)
     neighbors_ref = find_neighbors(sys)
-    @test neighbors_ref.n == 4602420
+    n_neighbors_ref = 4602420
+    @test length(neighbors_ref) == neighbors_ref.n == n_neighbors_ref
 
     identical_neighbors(nl1, nl2) = (nl1.n == nl2.n && sort_nbs(nl1.list) == sort_nbs(nl2.list))
 
@@ -210,6 +212,7 @@ end
         )
         for n_threads in n_threads_list
             neighbors = find_neighbors(sys, nf; n_threads=n_threads)
+            @test length(neighbors) == n_neighbors_ref
             @test identical_neighbors(neighbors, neighbors_ref)
         end
     end
@@ -223,6 +226,7 @@ end
                 dist_cutoff=dist_cutoff,
             )
             neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
+            @test length(neighbors_gpu) == n_neighbors_ref
             @test identical_neighbors(neighbors_gpu, neighbors_ref)
         end
     end

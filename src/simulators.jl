@@ -468,7 +468,7 @@ function A_step!(s, dt_eff, neighbors)
     s.coords = wrap_coords.(s.coords, (s.boundary,))
 end
 
-function B_step!(s, dt_eff, acceleration_vector, compute_forces::Bool, n_threads::Int, neighbors)
+function B_step!(s, dt_eff, acceleration_vector, compute_forces::Bool, n_threads::Integer, neighbors)
     if compute_forces
         acceleration_vector .= accelerations(s, neighbors, n_threads=n_threads)
     end

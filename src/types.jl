@@ -287,7 +287,7 @@ mutable struct NeighborList{T}
     list::T
 end
 
-NeighborList() = NeighborList{Vector{Tuple{Int, Int, Bool}}}(0, [])
+NeighborList() = NeighborList{Vector{Tuple{Int32, Int32, Bool}}}(0, [])
 
 Base.length(nl::NeighborList) = nl.n
 
@@ -296,7 +296,7 @@ function Base.empty!(nl::NeighborList)
     return nl
 end
 
-function Base.push!(nl::NeighborList, element::Tuple{Int, Int, Bool})
+function Base.push!(nl::NeighborList, element)
     nl.n += 1
     if nl.n > length(nl.list)
         push!(nl.list, element)
@@ -306,7 +306,7 @@ function Base.push!(nl::NeighborList, element::Tuple{Int, Int, Bool})
     return nl
 end
 
-function Base.append!(nl::NeighborList, list::Base.AbstractVecOrTuple{Tuple{Int, Int, Bool}})
+function Base.append!(nl::NeighborList, list)
     for element in list
         push!(nl, element)
     end

@@ -72,8 +72,8 @@ function find_neighbors(s::System{D, false},
         for j in 1:(i - 1)
             r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
             if r2 <= sqdist_cutoff && nbi[j]
-                nn = (j, i, w14i[j])
-                @reduce(neighbors_list = append!(Tuple{Int, Int, Bool}[], (nn,)))
+                nn = (Int32(j), Int32(i), w14i[j])
+                @reduce(neighbors_list = append!(Tuple{Int32, Int32, Bool}[], (nn,)))
             end
         end
     end
@@ -109,7 +109,7 @@ function distance_neighbor_finder_kernel!(neighbors, coords_var, nb_matrix_var,
     return nothing
 end
 
-lists_to_tuple_list(i, j, w) = (i, j, w)
+lists_to_tuple_list(i, j, w) = (Int32(i), Int32(j), w)
 
 function find_neighbors(s::System{D, true},
                         nf::DistanceNeighborFinder,
@@ -174,8 +174,8 @@ function find_neighbors(s::System,
         idxs = inrange(btree, ci, dist_cutoff, true)
         for j in idxs
             if nbi[j] && i > j
-                nn = (j, i, w14i[j])
-                @reduce(neighbors_list = append!(Tuple{Int, Int, Bool}[], (nn,)))
+                nn = (Int32(j), Int32(i), w14i[j])
+                @reduce(neighbors_list = append!(Tuple{Int32, Int32, Bool}[], (nn,)))
             end
         end
     end
@@ -265,7 +265,7 @@ function CellListMapNeighborFinder(;
     return CellListMapNeighborFinder{3, T}(
         nb_matrix, matrix_14, n_steps, dist_cutoff,
         cl, CellListMap.AuxThreaded(cl), 
-        [NeighborList(0, [(0, 0, false)]) for _ in 1:CellListMap.nbatches(cl)],
+        [NeighborList(0, [(Int32(0), Int32(0), false)]) for _ in 1:CellListMap.nbatches(cl)],
     )
 end
 
@@ -275,9 +275,9 @@ end
 Add pair to pair list. If the buffer size is large enough, update element, otherwise
 push new element to `neighbor.list`.
 """
-function push_pair!(neighbors::NeighborList, i, j, nb_matrix, matrix_14)
+function push_pair!(neighbors::NeighborList, i::Integer, j::Integer, nb_matrix, matrix_14)
     if nb_matrix[i, j]
-        push!(neighbors, (Int(i), Int(j), matrix_14[i, j]))
+        push!(neighbors, (Int32(i), Int32(j), matrix_14[i, j]))
     end
     return neighbors
 end
