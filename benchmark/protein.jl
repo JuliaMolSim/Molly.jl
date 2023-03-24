@@ -5,7 +5,7 @@ using CUDA
 
 using DelimitedFiles
 
-const n_steps = 500
+const n_steps = 1_000
 const n_threads = Threads.nthreads()
 const data_dir = normpath(dirname(pathof(Molly)), "..", "data")
 const ff_dir = joinpath(data_dir, "force_fields")
@@ -56,7 +56,7 @@ runs = [
 for (run_name, gpu, parallel, f32, units) in runs
     n_threads_used = parallel ? n_threads : 1
     sys, sim = setup_system(gpu, f32, units)
-    simulate!(sys, sim, 5; n_threads=n_threads_used)
+    simulate!(deepcopy(sys), sim, 20; n_threads=n_threads_used)
     println(run_name)
     @time simulate!(sys, sim, n_steps; n_threads=n_threads_used)
 end
