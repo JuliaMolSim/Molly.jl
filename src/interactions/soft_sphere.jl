@@ -35,8 +35,6 @@ end
                                     atom_i,
                                     atom_j,
                                     boundary) where {S, C}
-    r2 = sum(abs2, dr)
-
     if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip.(zero(coord_i)) * inter.force_units
     end
@@ -47,6 +45,7 @@ end
     ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
 
     cutoff = inter.cutoff
+    r2 = sum(abs2, dr)
     σ2 = σ^2
     params = (σ2, ϵ)
 
@@ -82,8 +81,6 @@ end
                                     atom_i,
                                     atom_j,
                                     boundary) where {S, C}
-    r2 = sum(abs2, dr)
-
     if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip(zero(coord_i[1])) * inter.energy_units
     end
@@ -92,6 +89,7 @@ end
     ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
 
     cutoff = inter.cutoff
+    r2 = sum(abs2, dr)
     σ2 = σ^2
     params = (σ2, ϵ)
 

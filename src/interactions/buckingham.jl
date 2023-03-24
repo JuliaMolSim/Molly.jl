@@ -48,8 +48,6 @@ end
                                     atom_j,
                                     boundary,
                                     weight_14::Bool=false) where C
-    r2 = sum(abs2, dr)
-
     if (iszero_value(atom_i.A) || iszero_value(atom_j.A)) &&
        (iszero_value(atom_i.C) || iszero_value(atom_j.C))
         return ustrip.(zero(coord_i)) * inter.force_units
@@ -60,6 +58,7 @@ end
     Cij = sqrt(atom_i.C * atom_j.C)
 
     cutoff = inter.cutoff
+    r2 = sum(abs2, dr)
     params = (Aij, Bij, Cij)
 
     if cutoff_points(C) == 0
@@ -98,8 +97,6 @@ end
                                             atom_j,
                                             boundary,
                                             weight_14::Bool=false) where C
-    r2 = sum(abs2, dr)
-
     if (iszero_value(atom_i.A) || iszero_value(atom_j.A)) &&
        (iszero_value(atom_i.C) || iszero_value(atom_j.C))
         return ustrip(zero(coord_i[1])) * inter.energy_units
@@ -110,6 +107,7 @@ end
     Cij = sqrt(atom_i.C * atom_j.C)
 
     cutoff = inter.cutoff
+    r2 = sum(abs2, dr)
     params = (Aij, Bij, Cij)
 
     if cutoff_points(C) == 0
