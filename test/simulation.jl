@@ -414,35 +414,37 @@ end
 
 @testset "Position restraints" begin
     gpu_list = run_gpu_tests ? (false, true) : (false,)
-    for gpu in gpu_list
-        n_atoms = 10
-        n_atoms_res = n_atoms ÷ 2
-        n_steps = 2_000
-        boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
-        starting_coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-        atoms = [Atom(charge=0.0, mass=10.0u"u", σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-        atoms_data = [AtomData(atom_type=(i <= n_atoms_res ? "A1" : "A2")) for i in 1:n_atoms]
-        sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
+    for AT in gpu_array_types
+        for gpu in gpu_list
+            n_atoms = 10
+            n_atoms_res = n_atoms ÷ 2
+            n_steps = 2_000
+            boundary = CubicBoundary(2.0u"nm", 2.0u"nm", 2.0u"nm")
+            starting_coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+            atoms = [Atom(charge=0.0, mass=10.0u"u", σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+            atoms_data = [AtomData(atom_type=(i <= n_atoms_res ? "A1" : "A2")) for i in 1:n_atoms]
+            sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
 
-        sys = System(
-            atoms=gpu ? CuArray(atoms) : atoms,
-            atoms_data=atoms_data,
-            pairwise_inters=(LennardJones(),),
-            coords=gpu ? CuArray(deepcopy(starting_coords)) : deepcopy(starting_coords),
-            boundary=boundary,
-            loggers=(coords=CoordinateLogger(100),),
-        )
+            sys = System(
+                atoms=gpu ? AT(atoms) : atoms,
+                atoms_data=atoms_data,
+                pairwise_inters=(LennardJones(),),
+                coords=gpu ? AT(deepcopy(starting_coords)) : deepcopy(starting_coords),
+                boundary=boundary,
+                loggers=(coords=CoordinateLogger(100),),
+            )
 
-        atom_selector(at, at_data) = at_data.atom_type == "A1"
+            atom_selector(at, at_data) = at_data.atom_type == "A1"
 
-        sys_res = add_position_restraints(sys, 100_000.0u"kJ * mol^-1 * nm^-2";
-                                          atom_selector=atom_selector)
+            sys_res = add_position_restraints(sys, 100_000.0u"kJ * mol^-1 * nm^-2";
+                                              atom_selector=atom_selector)
 
-        @time simulate!(sys_res, sim, n_steps)
+            @time simulate!(sys_res, sim, n_steps)
 
-        dists = norm.(vector.(starting_coords, Array(sys_res.coords), (boundary,)))
-        @test maximum(dists[1:n_atoms_res]) < 0.1u"nm"
-        @test median(dists[(n_atoms_res + 1):end]) > 0.2u"nm"
+            dists = norm.(vector.(starting_coords, Array(sys_res.coords), (boundary,)))
+            @test maximum(dists[1:n_atoms_res]) < 0.1u"nm"
+            @test median(dists[(n_atoms_res + 1):end]) > 0.2u"nm"
+        end
     end
 end
 
@@ -807,7 +809,7 @@ end
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-    function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::Bool)
+    function test_sim(nl::Bool, parallel::Bool, gpu_diff_safe::Bool, f32::Bool, gpu::Bool, array_type)
         n_atoms = 400
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
@@ -820,7 +822,7 @@ end
             InteractionList2Atoms(collect(1:2:n_atoms),
             collect(2:2:n_atoms),
             fill("", length(bonds)),
-            gpu ? CuArray(bonds) : bonds,
+            gpu ? array_type(bonds) : bonds,
         ),)
 
         neighbor_finder = NoNeighborFinder()
@@ -829,7 +831,7 @@ end
         if nl
             if gpu_diff_safe
                 neighbor_finder = DistanceVecNeighborFinder(
-                    nb_matrix=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+                    nb_matrix=gpu ? array_type(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
                     n_steps=10,
                     dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
                 )
@@ -845,9 +847,9 @@ end
         show(devnull, neighbor_finder)
 
         if gpu
-            coords = CuArray(deepcopy(f32 ? starting_coords_f32 : starting_coords))
-            velocities = CuArray(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-            atoms = CuArray([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+            coords = array_type(deepcopy(f32 ? starting_coords_f32 : starting_coords))
+            velocities = array_type(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
+            atoms = array_type([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                                   ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
         else
             coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
@@ -879,22 +881,30 @@ end
     end
 
     runs = [
-        ("in-place"        , [false, false, false, false, false]),
-        ("in-place NL"     , [true , false, false, false, false]),
-        ("in-place f32"    , [false, false, false, true , false]),
-        ("out-of-place"    , [false, false, true , false, false]),
-        ("out-of-place NL" , [true , false, true , false, false]),
-        ("out-of-place f32", [false, false, true , true , false]),
+        ("in-place"        , [false, false, false, false, false, Array]),
+        ("in-place NL"     , [true , false, false, false, false, Array]),
+        ("in-place f32"    , [false, false, false, true , false, Array]),
+        ("out-of-place"    , [false, false, true , false, false, Array]),
+        ("out-of-place NL" , [true , false, true , false, false, Array]),
+        ("out-of-place f32", [false, false, true , true , false, Array]),
     ]
     if run_parallel_tests
-        push!(runs, ("in-place parallel"   , [false, true , false, false, false]))
-        push!(runs, ("in-place NL parallel", [true , true , false, false, false]))
+        push!(runs, ("in-place parallel"   , [false, true , false, false, false, Array]))
+        push!(runs, ("in-place NL parallel", [true , true , false, false, false, Array]))
     end
     if run_gpu_tests
-        push!(runs, ("out-of-place gpu"       , [false, false, true , false, true ]))
-        push!(runs, ("out-of-place gpu f32"   , [false, false, true , true , true ]))
-        push!(runs, ("out-of-place gpu NL"    , [true , false, true , false, true ]))
-        push!(runs, ("out-of-place gpu f32 NL", [true , false, true , true , true ]))
+        if run_cuda_tests
+            push!(runs, ("out-of-place gpu"       , [false, false, true , false, true, CuArray]))
+            push!(runs, ("out-of-place gpu f32"   , [false, false, true , true , true, CuArray]))
+            push!(runs, ("out-of-place gpu NL"    , [true , false, true , false, true, CuArray]))
+            push!(runs, ("out-of-place gpu f32 NL", [true , false, true , true , true, CuArray]))
+        end
+        if run_rocm_tests
+            push!(runs, ("out-of-place gpu"       , [false, false, true , false, true, ROCArray]))
+            push!(runs, ("out-of-place gpu f32"   , [false, false, true , true , true, ROCArray]))
+            push!(runs, ("out-of-place gpu NL"    , [true , false, true , false, true, ROCArray]))
+            push!(runs, ("out-of-place gpu f32 NL", [true , false, true , true , true, ROCArray]))
+        end
     end
 
     final_coords_ref, E_start_ref = test_sim(runs[1][2]...)

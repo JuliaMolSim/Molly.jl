@@ -6,6 +6,11 @@ on:
   push:
     branches:
       - master
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
     tags: '*'
   schedule:
     - cron: '00 04 * * 1' # 4am every Monday
@@ -14,6 +19,7 @@ jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     runs-on: ${{ matrix.os }}
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +55,7 @@ jobs:
   docs:
     name: Documentation
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     steps:
       - uses: actions/checkout@v2
       - uses: julia-actions/setup-julia@v1

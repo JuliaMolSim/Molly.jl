@@ -299,7 +299,8 @@ interface described there.
 - `k::K=Unitful.k`: the Boltzmann constant, which may be modified in some
     simulations.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
-    GPU and taking gradients. Defaults to `isa(coords, CuArray)`.
+    GPU and taking gradients. Defaults to
+    `isa(coords, AT) where AT <: Union{CuArray, ROCArray}`.
 """
 mutable struct System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
     atoms::A
@@ -318,6 +319,10 @@ mutable struct System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, 
     k::K
 end
 
+function find_array_type(a)
+    return typeof(a).name.wrapper
+end
+
 function System(;
                 atoms,
                 atoms_data=[],
@@ -333,11 +338,12 @@ function System(;
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=Unitful.k,
-                gpu_diff_safe=isa(coords, CuArray))
+                AT=find_array_type(coords),
+                gpu_diff_safe=(AT <: Union{CuArray, ROCArray}))
     D = n_dimensions(boundary)
     G = gpu_diff_safe
     T = float_type(boundary)
-    CU = isa(coords, CuArray)
+    CU = AT <: Union{CuArray, ROCArray}
     A = typeof(atoms)
     AD = typeof(atoms_data)
     PI = typeof(pairwise_inters)
@@ -372,26 +378,26 @@ function System(;
         throw(ArgumentError("There are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
-    if isa(atoms, CuArray) && !isa(coords, CuArray)
-        throw(ArgumentError("The atoms are on the GPU but the coordinates are not"))
+    if isa(atoms, AT) && !isa(coords, AT)
+        throw(ArgumentError("The atoms and coordinates are on different devices!"))
     end
-    if isa(coords, CuArray) && !isa(atoms, CuArray)
-        throw(ArgumentError("The coordinates are on the GPU but the atoms are not"))
+    if isa(coords, AT) && !isa(atoms, AT)
+        throw(ArgumentError("The coordinates and atoms are on different devices!"))
     end
-    if isa(atoms, CuArray) && !isa(vels, CuArray)
-        throw(ArgumentError("The atoms are on the GPU but the velocities are not"))
+    if isa(atoms, AT) && !isa(vels, AT)
+        throw(ArgumentError("The atoms and velocities are on different devices!"))
     end
-    if isa(vels, CuArray) && !isa(atoms, CuArray)
-        throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
+    if isa(vels, AT) && !isa(atoms, AT)
+        throw(ArgumentError("The velocities and atoms are on different devices!"))
     end
 
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
     return System{D, G, T, CU, A, AD, PI, SI, GI, CN, C, V, B, NF, L, F, E, K}(
-                    atoms, atoms_data, pairwise_inters, specific_inter_lists,
-                    general_inters, constraints, coords, vels, boundary, neighbor_finder,
-                    loggers, force_units, energy_units, k_converted)
+                  atoms, atoms_data, pairwise_inters, specific_inter_lists,
+                  general_inters, constraints, coords, vels, boundary, neighbor_finder,
+                  loggers, force_units, energy_units, k_converted)
 end
 
 """
@@ -457,7 +463,8 @@ construction where `n` is the number of threads to be used per replica.
 - `k::K=Unitful.k`: the Boltzmann constant, which may be modified in some
     simulations.
 - `gpu_diff_safe::Bool`: whether to use the code path suitable for the
-    GPU and taking gradients. Defaults to `isa(replica_coords[1], CuArray)`.
+    GPU and taking gradients. Defaults to
+    `isa(replica_coords[1], AT) where AT <: Union{CuArray, ROCArray}`.
 """
 mutable struct ReplicaSystem{D, G, T, CU, A, AD, RS, B, EL, F, E, K} <: AbstractSystem{D}
     atoms::A
@@ -492,11 +499,12 @@ function ReplicaSystem(;
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
                         k=Unitful.k,
-                        gpu_diff_safe=isa(replica_coords[1], CuArray))
+                        AT=find_array_type(replica_coords[1]),
+                        gpu_diff_safe =  (AT <: Union{CuArray, ROCArray}))
     D = n_dimensions(boundary)
     G = gpu_diff_safe
     T = float_type(boundary)
-    CU = isa(replica_coords[1], CuArray)
+    CU = AT <: Union{CuArray, ROCArray}
     A = typeof(atoms)
     AD = typeof(atoms_data)
     C = typeof(replica_coords[1])
@@ -586,26 +594,26 @@ function ReplicaSystem(;
         throw(ArgumentError("There are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
-    n_cuarray = sum(y -> isa(y, CuArray), replica_coords)
+    n_cuarray = sum(y -> isa(y, AT), replica_coords)
     if !(n_cuarray == n_replicas || n_cuarray == 0)
-        throw(ArgumentError("The coordinates for $n_cuarray out of $n_replicas replicas are on GPU"))
+        throw(ArgumentError("The coordinates for $n_cuarray out of $n_replicas replicas are on a different device!"))
     end
-    if isa(atoms, CuArray) && n_cuarray != n_replicas
-        throw(ArgumentError("The atoms are on the GPU but the coordinates are not"))
+    if isa(atoms, AT) && n_cuarray != n_replicas
+        throw(ArgumentError("The atoms and coordinates are on different devices!"))
     end
-    if n_cuarray == n_replicas && !isa(atoms, CuArray)
-        throw(ArgumentError("The coordinates are on the GPU but the atoms are not"))
+    if n_cuarray == n_replicas && !isa(atoms, AT)
+        throw(ArgumentError("The coordinates and atoms are on different devices!"))
     end
 
-    n_cuarray = sum(y -> isa(y, CuArray), replica_velocities)
+    n_cuarray = sum(y -> isa(y, AT), replica_velocities)
     if !(n_cuarray == n_replicas || n_cuarray == 0)
-        throw(ArgumentError("The velocities for $n_cuarray out of $n_replicas replicas are on GPU"))
+        throw(ArgumentError("The velocities for $n_cuarray out of $n_replicas replicas are on a different device!"))
     end
-    if isa(atoms, CuArray) && n_cuarray != n_replicas
-        throw(ArgumentError("The atoms are on the GPU but the velocities are not"))
+    if isa(atoms, AT) && n_cuarray != n_replicas
+        throw(ArgumentError("The atoms and velocities are on different devices!"))
     end
-    if n_cuarray == n_replicas && !isa(atoms, CuArray)
-        throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
+    if n_cuarray == n_replicas && !isa(atoms, AT)
+        throw(ArgumentError("The velocities and atoms are on different devices!"))
     end
 
     k_converted = convert_k_units(T, k, energy_units)
@@ -655,7 +663,9 @@ masses(s::Union{System, ReplicaSystem}) = mass.(s.atoms)
 
 # Move an array to the GPU depending on whether the system is on the GPU
 move_array(arr, ::System{D, G, T, false}) where {D, G, T} = arr
-move_array(arr, ::System{D, G, T, true }) where {D, G, T} = CuArray(arr)
+function move_array(arr, sys::System{D, G, T, true }) where {D, G, T}
+    find_array_type(sys.coords)(arr)
+end
 
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = eltype(s.atoms)
 
