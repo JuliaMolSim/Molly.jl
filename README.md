@@ -39,17 +39,17 @@ Implemented features include:
 - Differentiable molecular simulation. This is a unique feature of the package and the focus of its current development.
 
 Features not yet implemented include:
-- Simulators such as metadynamics.
-- Other temperature or pressure coupling methods.
+- High GPU performance.
 - Particle mesh Ewald summation.
-- Protein preparation - solvent box, add hydrogens etc.
-- Quantum mechanical modelling.
 - Constrained bonds and angles.
+- Pressure coupling methods.
+- Protein preparation - solvent box, add hydrogens etc.
+- Simulators such as metadynamics.
+- Quantum mechanical modelling.
 - Domain decomposition algorithms.
 - Alchemical free energy calculations.
 - High test coverage.
 - API stability.
-- High GPU performance.
 
 ## Installation
 

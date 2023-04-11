@@ -12,6 +12,7 @@ makedocs(
         "Differentiable simulation" => "differentiable.md",
         "Examples"                  => "examples.md",
         "Related software"          => "related.md",
+        "Development"               => "development.md",
         "API"                       => "api.md",
     ]
 )
