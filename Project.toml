@@ -61,13 +61,3 @@ UnitfulChainRules = "= 0.1.2"
 UnsafeAtomicsLLVM = "0.1"
 Zygote = "0.6.56 - 0.6.57"
 julia = "1.7"
-
-[extras]
-Aqua = "4c88cf16-eb10-579e-8560-4a9242c79595"
-DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
-FiniteDifferences = "26cc04aa-876d-5657-8c51-4c34ba976000"
-GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
-
-[targets]
-test = ["Aqua", "DelimitedFiles", "FiniteDifferences", "GLMakie", "Test"]
