@@ -429,11 +429,7 @@ end
             grads_zygote = CUDA.allowscalar() do
                 gradient(f, params_dic)[1]
             end
-            # Currently 2 gradients are missing for CPU parallel due to active variables
-            # passed by value to jl_threadsfor not yet being supported by Enzyme
-            if platform != "CPU parallel"
-                @test count(!iszero, values(grads_zygote)) == 67
-            end
+            @test count(!iszero, values(grads_zygote)) == 67
             for param in params_to_test
                 gzy = grads_zygote[param]
                 gfd = central_fdm(6, 1)(params_dic[param]) do val
@@ -443,9 +439,7 @@ end
                 end
                 frac_diff = abs(gzy - gfd) / abs(gfd)
                 @info "$(rpad(test_name, 6)) - $(rpad(platform, 12)) - $(rpad(param, 21)) - FD $gfd, Zygote $gzy, fractional difference $frac_diff"
-                if !(platform == "CPU parallel" && param == "inter_LJ_weight_14")
-                    @test frac_diff < test_tol
-                end
+                @test frac_diff < test_tol
             end
         end
     end
