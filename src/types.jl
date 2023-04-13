@@ -750,10 +750,11 @@ masses(s::ReplicaSystem) = mass.(s.atoms)
 move_array(arr, ::System{D, false}) where {D} = arr
 move_array(arr, ::System{D, true }) where {D} = CuArray(arr)
 
-AtomsBase.species_type(s::Union{System, ReplicaSystem}) = eltype(s.atoms)
-
 Base.getindex(s::Union{System, ReplicaSystem}, i::Integer) = AtomView(s, i)
 Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)
+
+AtomsBase.species_type(s::Union{System, ReplicaSystem}) = typeof(s[1])
+AtomsBase.atomkeys(::Union{System, ReplicaSystem}) = ()
 
 AtomsBase.position(s::System) = s.coords
 AtomsBase.position(s::System, i::Integer) = s.coords[i]
@@ -765,8 +766,19 @@ AtomsBase.velocity(s::System, i::Integer) = s.velocities[i]
 AtomsBase.velocity(s::ReplicaSystem) = s.replicas[1].velocities
 AtomsBase.velocity(s::ReplicaSystem, i::Integer) = s.replicas[1].velocities[i]
 
+AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}) = masses(s)
 AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}, i::Integer) = mass(s.atoms[i])
+
+AtomsBase.atomic_number(s::Union{System, ReplicaSystem}) = fill(missing, length(s))
 AtomsBase.atomic_number(s::Union{System, ReplicaSystem}, i::Integer) = missing
+
+function AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem})
+    if length(s.atoms_data) > 0
+        return map(ad -> Symbol(ad.element), s.atoms_data)
+    else
+        return fill(:unknown, length(s))
+    end
+end
 
 function AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem}, i::Integer)
     if length(s.atoms_data) > 0

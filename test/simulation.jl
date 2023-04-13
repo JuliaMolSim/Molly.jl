@@ -95,8 +95,12 @@ end
         )
 
         # Test AtomsBase.jl interface
-        @test species_type(s) <: Atom
+        @test length(s) == n_atoms
+        @test species_type(s) <: AtomView
         @test typeof(s[5]) <: AtomView
+        @test length(s[2:4]) == 3
+        @test length(s[[2, 4]]) == 2
+        @test broadcast(a -> a.index, s) == collect(1:n_atoms)
         @test position(s) == s.coords
         @test position(s, 5) == s.coords[5]
         @test velocity(s) == s.velocities
@@ -111,6 +115,11 @@ end
             SVector(0.0, 2.0, 0.0)u"nm",
             SVector(0.0, 0.0, 2.0)u"nm",
         )
+        show(devnull, s[5])
+        show(devnull, s[2:4])
+        for a in s
+            show(devnull, a)
+        end
 
         nf_tree = TreeNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=n_threads)
@@ -635,6 +644,7 @@ end
         replica_loggers=replica_loggers,
         neighbor_finder=neighbor_finder,
     )
+    show(devnull, repsys)
 
     temp_vals = [120.0u"K", 180.0u"K", 240.0u"K", 300.0u"K"]
     simulator = TemperatureREMD(
