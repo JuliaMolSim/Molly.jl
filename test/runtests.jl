@@ -21,9 +21,6 @@ if GROUP == "Protein" || GROUP == "Zygote"
     @warn "Only running $GROUP tests as GROUP is set to $GROUP"
 end
 
-# Allow CUDA device to be specified
-const DEVICE = get(ENV, "DEVICE", "0")
-
 # GLMakie doesn't work on CI or when running tests remotely
 const run_visualize_tests = !haskey(ENV, "CI") && get(ENV, "VISTESTS", "1") != "0"
 if run_visualize_tests
@@ -43,7 +40,10 @@ else
     @warn "The parallel tests will not be run as Julia is running on 1 thread"
 end
 
-const run_gpu_tests = CUDA.functional()
+# Allow CUDA device to be specified
+const DEVICE = get(ENV, "DEVICE", "0")
+
+const run_gpu_tests = get(ENV, "GPUTESTS", "1") != "0" && CUDA.functional()
 const gpu_list = run_gpu_tests ? (false, true) : (false,)
 if run_gpu_tests
     device!(parse(Int, DEVICE))
