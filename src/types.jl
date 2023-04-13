@@ -2,6 +2,7 @@
 
 export
     PairwiseInteraction,
+    use_neighbors,
     SpecificInteraction,
     InteractionList1Atoms,
     InteractionList2Atoms,
@@ -25,6 +26,16 @@ A pairwise interaction that will apply to all or most atom pairs.
 Custom pairwise interactions should sub-type this type.
 """
 abstract type PairwiseInteraction end
+
+"""
+    use_neighbors(inter)
+
+Whether a pairwise interaction uses the neighbor list, default `false`.
+Custom pairwise interactions can define a method for this function.
+For built-in interactions such as [`LennardJones`](@ref) this function accesses
+the `use_neighbors` field of the struct.
+"""
+use_neighbors(::PairwiseInteraction) = false
 
 """
 A specific interaction between sets of specific atoms, e.g. a bond angle.

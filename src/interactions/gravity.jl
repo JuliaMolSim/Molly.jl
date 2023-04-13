@@ -16,6 +16,8 @@ end
 
 Gravity(; G=Unitful.G, use_neighbors=false) = Gravity{typeof(G)}(G, use_neighbors)
 
+use_neighbors(inter::Gravity) = inter.use_neighbors
+
 @inline @inbounds function force(inter::Gravity,
                                  dr,
                                  coord_i,

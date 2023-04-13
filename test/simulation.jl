@@ -298,7 +298,7 @@ end
     )
 
     @testset "$inter" for inter in pairwise_inter_types
-        if inter.use_neighbors
+        if use_neighbors(inter)
             neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=1.5u"nm")
         else

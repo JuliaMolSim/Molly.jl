@@ -153,8 +153,8 @@ Custom general interaction types should implement this function.
 """
 function forces(s::System{D, false}, neighbors=nothing;
                 n_threads::Integer=Threads.nthreads()) where D
-    pairwise_inters_nonl = filter(inter -> !inter.use_neighbors, values(s.pairwise_inters))
-    pairwise_inters_nl   = filter(inter ->  inter.use_neighbors, values(s.pairwise_inters))
+    pairwise_inters_nonl = filter(!use_neighbors, values(s.pairwise_inters))
+    pairwise_inters_nl   = filter( use_neighbors, values(s.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(s.specific_inter_lists))
     sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(s.specific_inter_lists))
     sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(s.specific_inter_lists))
@@ -323,14 +323,14 @@ function forces(s::System{D, true, T}, neighbors=nothing;
     val_ft = Val(T)
     fs_mat = CUDA.zeros(T, D, n_atoms)
 
-    pairwise_inters_nonl = filter(inter -> !inter.use_neighbors, values(s.pairwise_inters))
+    pairwise_inters_nonl = filter(!use_neighbors, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
         fs_mat += pairwise_force_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
                                      nbs, s.force_units, val_ft)
     end
 
-    pairwise_inters_nl = filter(inter -> inter.use_neighbors, values(s.pairwise_inters))
+    pairwise_inters_nl = filter(use_neighbors, values(s.pairwise_inters))
     if length(pairwise_inters_nl) > 0
         if isnothing(neighbors)
             error("An interaction uses the neighbor list but neighbors is nothing")

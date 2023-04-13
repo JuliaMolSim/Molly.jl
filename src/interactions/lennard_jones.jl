@@ -44,6 +44,8 @@ function LennardJones(;
         force_units, energy_units)
 end
 
+use_neighbors(inter::LennardJones) = inter.use_neighbors
+
 is_solute(at::Atom) = at.solute
 is_solute(at) = false
 
@@ -232,6 +234,8 @@ function LennardJonesSoftCore(;
         cutoff, α, λ, p, σ6_fac, use_neighbors, lorentz_mixing, weight_special,
         weight_solute_solvent, force_units, energy_units)
 end
+
+use_neighbors(inter::LennardJonesSoftCore) = inter.use_neighbors
 
 @inline @inbounds function force(inter::LennardJonesSoftCore{S, C},
                                     dr,

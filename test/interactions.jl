@@ -7,6 +7,9 @@
     dr12 = vector(c1, c2, boundary)
     dr13 = vector(c1, c3, boundary)
 
+    @test !use_neighbors(LennardJones())
+    @test  use_neighbors(LennardJones(use_neighbors=true))
+
     for inter in (LennardJones(), Mie(m=6, n=12), LennardJonesSoftCore(α=1, λ=0, p=2))
         @test isapprox(
             force(inter, dr12, c1, c2, a1, a1, boundary),

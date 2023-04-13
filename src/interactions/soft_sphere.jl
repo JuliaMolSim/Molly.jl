@@ -28,6 +28,8 @@ function SoftSphere(;
         cutoff, use_neighbors, lorentz_mixing, force_units, energy_units)
 end
 
+use_neighbors(inter::SoftSphere) = inter.use_neighbors
+
 @inline @inbounds function force(inter::SoftSphere{S, C},
                                     dr,
                                     coord_i,

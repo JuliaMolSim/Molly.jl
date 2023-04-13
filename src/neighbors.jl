@@ -11,8 +11,8 @@ export
     NoNeighborFinder()
 
 Placeholder neighbor finder that returns no neighbors.
-When using this neighbor finder, ensure that `use_neighbors` for the interactions is
-set to `false`.
+When using this neighbor finder, ensure that [`use_neighbors`](@ref) for the interactions
+returns `false`.
 """
 struct NoNeighborFinder end
 

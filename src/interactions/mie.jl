@@ -39,6 +39,8 @@ function Mie(;
         m_p, n_p, cutoff, use_neighbors, lorentz_mixing, force_units, energy_units, mn_fac)
 end
 
+use_neighbors(inter::Mie) = inter.use_neighbors
+
 @inbounds function force(inter::Mie{S, C, T},
                                     dr,
                                     coord_i,

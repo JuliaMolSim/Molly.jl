@@ -400,13 +400,14 @@ struct BondableAtom
 end
 
 struct BondableInteraction <: PairwiseInteraction
-    use_neighbors::Bool
     prob_formation::Float64
     prob_break::Float64
     dist_formation::Float64
     k::Float64
     r0::Float64
 end
+
+Molly.use_neighbors(::BondableInteraction) = true
 
 function Molly.force(inter::BondableInteraction,
                         dr,
@@ -458,7 +459,7 @@ coords = place_atoms(n_atoms, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
     SoftSphere(use_neighbors=true),
-    BondableInteraction(true, 0.1, 0.1, 1.1, 2.0, 0.1),
+    BondableInteraction(0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(
     eligible=trues(n_atoms, n_atoms),

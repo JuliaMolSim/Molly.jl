@@ -40,6 +40,8 @@ function Buckingham(;
         cutoff, use_neighbors, weight_special, force_units, energy_units)
 end
 
+use_neighbors(inter::Buckingham) = inter.use_neighbors
+
 @inline @inbounds function force(inter::Buckingham{C},
                                     dr,
                                     coord_i,

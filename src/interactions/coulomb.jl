@@ -34,6 +34,8 @@ function Coulomb(;
         cutoff, use_neighbors, weight_special, coulomb_const, force_units, energy_units)
 end
 
+use_neighbors(inter::Coulomb) = inter.use_neighbors
+
 function Base.zero(coul::Coulomb{C, W, T, F, E}) where {C, W, T, F, E}
     return Coulomb{C, W, T, F, E}(
         coul.cutoff,
@@ -185,6 +187,8 @@ function CoulombSoftCore(;
         force_units, energy_units)
 end
 
+use_neighbors(inter::CoulombSoftCore) = inter.use_neighbors
+
 @inline @inbounds function force(inter::CoulombSoftCore{C},
                                     dr,
                                     coord_i,
@@ -312,6 +316,8 @@ function CoulombReactionField(;
         dist_cutoff, solvent_dielectric, use_neighbors, weight_special,
         coulomb_const, force_units, energy_units)
 end
+
+use_neighbors(inter::CoulombReactionField) = inter.use_neighbors
 
 function Base.zero(coul::CoulombReactionField{D, S, W, T, F, E}) where {D, S, W, T, F, E}
     return CoulombReactionField{D, S, W, T, F, E}(
