@@ -55,7 +55,7 @@ end
 end
 
 @testset "OpenMM protein comparison" begin
-    ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     show(devnull, ff)
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; center_coords=false)
     neighbors = find_neighbors(sys)
@@ -125,7 +125,7 @@ end
     @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 
     # Test with no units
-    ff_nounits = OpenMMForceField(
+    ff_nounits = MolecularForceField(
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...;
         units=false,
     )
@@ -211,7 +211,7 @@ end
 end
 
 @testset "Implicit solvent" begin
-    ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...)
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...)
 
     for gpu in gpu_list
         for solvent_model in ("obc2", "gbn2")

@@ -240,7 +240,7 @@ This sets up a system in the same data structures as above and that is simulated
 Here we carry out an energy minimization, simulate with a Langevin integrator and use a [`StructureWriter`](@ref) to write the trajectory as a PDB file.
 ```julia
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
-ff = OpenMMForceField(
+ff = MolecularForceField(
     joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
     joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
     joinpath(data_dir, "force_fields", "his.xml"),
@@ -317,7 +317,7 @@ For example to run temperature REMD on a protein with 4 replicas and attempt exc
 using Statistics
 
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
-ff = OpenMMForceField(
+ff = MolecularForceField(
     joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
     joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
     joinpath(data_dir, "force_fields", "his.xml"),

@@ -195,7 +195,7 @@ end
     @test neighbors_dist == sort_nbs(neighbors.list)
 
     # Test all neighbor finders agree for a larger system
-    ff = OpenMMForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     dist_cutoff = 1.2u"nm"
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; dist_neighbors=dist_cutoff)
     neighbors_ref = find_neighbors(sys)

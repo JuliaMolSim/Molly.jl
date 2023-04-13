@@ -5,10 +5,10 @@
 export
     place_atoms,
     place_diatomics,
-    OpenMMAtomType,
-    OpenMMResidueType,
+    AtomType,
+    ResidueType,
     PeriodicTorsionType,
-    OpenMMForceField,
+    MolecularForceField,
     is_any_atom,
     is_heavy_atom,
     add_position_restraints
@@ -121,11 +121,11 @@ function place_diatomics(n_molecules::Integer,
 end
 
 """
-    OpenMMAtomType(type, element, mass, σ, ϵ)
+    AtomType(type, element, mass, σ, ϵ)
 
-An OpenMM atom type.
+An atom type.
 """
-struct OpenMMAtomType{M, S, E}
+struct AtomType{M, S, E}
     type::String
     element::String
     mass::M
@@ -134,11 +134,11 @@ struct OpenMMAtomType{M, S, E}
 end
 
 """
-    OpenMMResidueType(name, types, charges, indices)
+    ResidueType(name, types, charges, indices)
 
-An OpenMM residue type.
+A residue type.
 """
-struct OpenMMResidueType{C}
+struct ResidueType{C}
     name::String
     types::Dict{String, String}
     charges::Dict{String, C}
@@ -158,18 +158,18 @@ struct PeriodicTorsionType{T, E}
 end
 
 """
-    OpenMMForceField(ff_files...; units=true)
-    OpenMMForceField(T, ff_files...; units=true)
-    OpenMMForceField(atom_types, residue_types, bond_types, angle_types,
+    MolecularForceField(ff_files...; units=true)
+    MolecularForceField(T, ff_files...; units=true)
+    MolecularForceField(atom_types, residue_types, bond_types, angle_types,
                         torsion_types, torsion_order, weight_14_coulomb,
                         weight_14_lj)
 
-An OpenMM force field.
+A molecular force field.
 Read one or more OpenMM force field XML files by passing them to the constructor.
 """
-struct OpenMMForceField{T, M, D, E, K}
-    atom_types::Dict{String, OpenMMAtomType{M, D, E}}
-    residue_types::Dict{String, OpenMMResidueType{T}}
+struct MolecularForceField{T, M, D, E, K}
+    atom_types::Dict{String, AtomType{M, D, E}}
+    residue_types::Dict{String, ResidueType{T}}
     bond_types::Dict{Tuple{String, String}, HarmonicBond{K, D}}
     angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{E, T}}
     torsion_types::Dict{Tuple{String, String, String, String}, PeriodicTorsionType{T, E}}
@@ -178,9 +178,9 @@ struct OpenMMForceField{T, M, D, E, K}
     weight_14_lj::T
 end
 
-function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true)
-    atom_types = Dict{String, OpenMMAtomType}()
-    residue_types = Dict{String, OpenMMResidueType}()
+function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=true)
+    atom_types = Dict{String, AtomType}()
+    residue_types = Dict{String, ResidueType}()
     bond_types = Dict{Tuple{String, String}, HarmonicBond}()
     angle_types = Dict{Tuple{String, String, String}, HarmonicAngle}()
     torsion_types = Dict{Tuple{String, String, String, String}, PeriodicTorsionType}()
@@ -200,7 +200,7 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
                     mass = units ? parse(T, atom_type["mass"])u"u" : parse(T, atom_type["mass"])
                     σ = units ? T(-1u"nm") : T(-1) # Updated later
                     ϵ = units ? T(-1u"kJ * mol^-1") : T(-1) # Updated later
-                    atom_types[at_type] = OpenMMAtomType(at_type, element, mass, σ, ϵ)
+                    atom_types[at_type] = AtomType(at_type, element, mass, σ, ϵ)
                 end
             elseif entry_name == "Residues"
                 for residue in eachelement(entry)
@@ -219,7 +219,7 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
                             index += 1
                         end
                     end
-                    residue_types[name] = OpenMMResidueType(name, types, charges, indices)
+                    residue_types[name] = ResidueType(name, types, charges, indices)
                 end
             elseif entry_name == "HarmonicBondForce"
                 for bond in eachelement(entry)
@@ -275,8 +275,8 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
                         partial_type = atom_types[atom_type]
                         σ = units ? parse(T, atom_or_attr["sigma"])u"nm" : parse(T, atom_or_attr["sigma"])
                         ϵ = units ? parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_attr["epsilon"])
-                        complete_type = OpenMMAtomType(partial_type.type, partial_type.element,
-                                                        partial_type.mass, σ, ϵ)
+                        complete_type = AtomType(partial_type.type, partial_type.element,
+                                                 partial_type.mass, σ, ϵ)
                         atom_types[atom_type] = complete_type
                     end
                 end
@@ -292,14 +292,16 @@ function OpenMMForceField(T::Type, ff_files::AbstractString...; units::Bool=true
     else
         M, D, E, K = T, T, T, T
     end
-    return OpenMMForceField{T, M, D, E, K}(atom_types, residue_types, bond_types, angle_types,
+    return MolecularForceField{T, M, D, E, K}(atom_types, residue_types, bond_types, angle_types,
                 torsion_types, torsion_order, weight_14_coulomb, weight_14_lj)
 end
 
-OpenMMForceField(ff_files::AbstractString...; kwargs...) = OpenMMForceField(DefaultFloat, ff_files...; kwargs...)
+function MolecularForceField(ff_files::AbstractString...; kwargs...)
+    return MolecularForceField(DefaultFloat, ff_files...; kwargs...)
+end
 
-function Base.show(io::IO, ff::OpenMMForceField)
-    print(io, "OpenMMForceField with ", length(ff.atom_types), " atom types, ",
+function Base.show(io::IO, ff::MolecularForceField)
+    print(io, "MolecularForceField with ", length(ff.atom_types), " atom types, ",
             length(ff.residue_types), " residue types, ", length(ff.bond_types), " bond types, ",
             length(ff.angle_types), " angle types and ", length(ff.torsion_types), " torsion types")
 end
@@ -369,7 +371,7 @@ are not available when reading Gromacs files.
     residue could be changed from "MET" to "NMET".
 """
 function System(coord_file::AbstractString,
-                force_field::OpenMMForceField;
+                force_field::MolecularForceField;
                 velocities=nothing,
                 boundary=nothing,
                 loggers=(),

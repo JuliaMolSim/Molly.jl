@@ -15,7 +15,7 @@ using Molly
 using GLMakie
 
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
-ff = OpenMMForceField(
+ff = MolecularForceField(
     joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
     joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
     joinpath(data_dir, "force_fields", "his.xml"),

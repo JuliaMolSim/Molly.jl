@@ -13,7 +13,7 @@ const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
 function setup_system(gpu::Bool, f32::Bool, units::Bool)
     T = f32 ? Float32 : Float64
-    ff = OpenMMForceField(
+    ff = MolecularForceField(
         T,
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...;
         units=units,
