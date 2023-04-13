@@ -62,9 +62,9 @@ neighbor_finder = DistanceNeighborFinder(
     n_steps=10,
     dist_cutoff=1.5,
 )
-lj = LennardJones(nl_only=true, force_units=NoUnits, energy_units=NoUnits)
+lj = LennardJones(use_neighbors=true, force_units=NoUnits, energy_units=NoUnits)
 # Currently required for speed though here it does not affect the simulation
-crf = CoulombReactionField(dist_cutoff=1.5, nl_only=true, coulomb_const=0.0,
+crf = CoulombReactionField(dist_cutoff=1.5, use_neighbors=true, coulomb_const=0.0,
                            force_units=NoUnits, energy_units=NoUnits)
 pairwise_inters = (lj, crf)
 coords = place_atoms(n_atoms, boundary; min_dist=0.7)

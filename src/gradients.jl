@@ -168,7 +168,7 @@ function inject_interaction(inter::LennardJones{S, C, W, WS, F, E}, params_dic) 
     key_prefix = "inter_LJ_"
     LennardJones{S, C, W, WS, F, E}(
         inter.cutoff,
-        inter.nl_only,
+        inter.use_neighbors,
         inter.lorentz_mixing,
         dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
         dict_get(params_dic, key_prefix * "weight_solute_solvent", inter.weight_solute_solvent),
@@ -181,7 +181,7 @@ function inject_interaction(inter::Coulomb, params_dic)
     key_prefix = "inter_CO_"
     Coulomb(
         inter.cutoff,
-        inter.nl_only,
+        inter.use_neighbors,
         dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
         dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
         inter.force_units,
@@ -194,7 +194,7 @@ function inject_interaction(inter::CoulombReactionField, params_dic)
     CoulombReactionField(
         dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
         dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
-        inter.nl_only,
+        inter.use_neighbors,
         dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
         dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
         inter.force_units,

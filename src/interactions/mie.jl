@@ -1,7 +1,7 @@
 export Mie
 
 @doc raw"""
-    Mie(; m, n, cutoff, nl_only, lorentz_mixing, force_units, energy_units, skip_shortcut)
+    Mie(; m, n, cutoff, use_neighbors, lorentz_mixing, force_units, energy_units, skip_shortcut)
 
 The Mie generalized interaction between two atoms.
 When `m` equals 6 and `n` equals 12 this is equivalent to the Lennard-Jones interaction.
@@ -18,7 +18,7 @@ struct Mie{S, C, T, F, E} <: PairwiseInteraction
     m::T
     n::T
     cutoff::C
-    nl_only::Bool
+    use_neighbors::Bool
     lorentz_mixing::Bool
     force_units::F
     energy_units::E
@@ -29,14 +29,14 @@ function Mie(;
                 m,
                 n,
                 cutoff=NoCutoff(),
-                nl_only=false,
+                use_neighbors=false,
                 lorentz_mixing=true,
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 skip_shortcut=false)
     m_p, n_p, mn_fac = promote(m, n, (n / (n - m)) * (n / m) ^ (m / (n - m)))
     return Mie{skip_shortcut, typeof(cutoff), typeof(m_p), typeof(force_units), typeof(energy_units)}(
-        m_p, n_p, cutoff, nl_only, lorentz_mixing, force_units, energy_units, mn_fac)
+        m_p, n_p, cutoff, use_neighbors, lorentz_mixing, force_units, energy_units, mn_fac)
 end
 
 @inbounds function force(inter::Mie{S, C, T},

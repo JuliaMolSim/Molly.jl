@@ -8,7 +8,7 @@
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
         boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
@@ -71,7 +71,7 @@ end
         s = System(
             atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR", element="Ar") for i in 1:n_atoms],
-            pairwise_inters=(LennardJones(nl_only=true),),
+            pairwise_inters=(LennardJones(use_neighbors=true),),
             coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
             velocities=[random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
             boundary=boundary,
@@ -169,7 +169,7 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=coords,
         boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
@@ -206,7 +206,7 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=coords,
         boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
@@ -247,7 +247,7 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         specific_inter_lists=(bonds,),
         coords=coords,
         velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
@@ -284,21 +284,21 @@ end
     G = 10.0u"kJ * nm * u^-2 * mol^-1"
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
     pairwise_inter_types = (
-        LennardJones(nl_only=true), LennardJones(nl_only=false),
-        LennardJones(cutoff=DistanceCutoff(1.0u"nm"), nl_only=true),
-        LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), nl_only=true),
-        LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm"), nl_only=true),
-        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm"), nl_only=true),
-        SoftSphere(nl_only=true), SoftSphere(nl_only=false),
-        Mie(m=5, n=10, nl_only=true), Mie(m=5, n=10, nl_only=false),
-        Coulomb(nl_only=true), Coulomb(nl_only=false),
-        CoulombReactionField(dist_cutoff=1.0u"nm", nl_only=true),
-        CoulombReactionField(dist_cutoff=1.0u"nm", nl_only=false),
-        Gravity(G=G, nl_only=true), Gravity(G=G, nl_only=false),
+        LennardJones(use_neighbors=true), LennardJones(use_neighbors=false),
+        LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),
+        LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), use_neighbors=true),
+        LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm"), use_neighbors=true),
+        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm"), use_neighbors=true),
+        SoftSphere(use_neighbors=true), SoftSphere(use_neighbors=false),
+        Mie(m=5, n=10, use_neighbors=true), Mie(m=5, n=10, use_neighbors=false),
+        Coulomb(use_neighbors=true), Coulomb(use_neighbors=false),
+        CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=true),
+        CoulombReactionField(dist_cutoff=1.0u"nm", use_neighbors=false),
+        Gravity(G=G, use_neighbors=true), Gravity(G=G, use_neighbors=false),
     )
 
     @testset "$inter" for inter in pairwise_inter_types
-        if inter.nl_only
+        if inter.use_neighbors
             neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=1.5u"nm")
         else
@@ -365,7 +365,7 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=coords,
         velocities=velocities,
         boundary=boundary,
@@ -385,7 +385,7 @@ end
 
     s_nounits = System(
         atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=ustrip_vec.(coords),
         velocities=ustrip_vec.(velocities),
         boundary=CubicBoundary(ustrip.(boundary)),
@@ -482,7 +482,7 @@ end
 
     sys = System(
         atoms=atoms,
-        pairwise_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         constraints=constraints,
         coords=coords,
         velocities=velocities,
@@ -554,7 +554,7 @@ end
 
     sys = System(
         atoms=atoms,
-        pairwise_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         constraints=constraints,
         coords=coords,
         velocities=velocities,
@@ -587,7 +587,7 @@ end
     velocities = [random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
     s1 = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(nl_only=true),),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=coords,
         velocities=velocities,
         boundary=boundary,
@@ -621,7 +621,7 @@ end
     boundary = CubicBoundary(2.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
 
-    pairwise_inters = (LennardJones(nl_only=true),)
+    pairwise_inters = (LennardJones(use_neighbors=true),)
 
     eligible = trues(n_atoms, n_atoms)
     
@@ -693,7 +693,8 @@ end
 
     n_replicas = 4
     λ_vals = [0.0, 0.1, 0.25, 0.4]
-    replica_pairwise_inters = [(LennardJonesSoftCore(α=1, λ=λ_vals[i], p=2, nl_only=true),) for i in 1:n_replicas]
+    replica_pairwise_inters = [(LennardJonesSoftCore(α=1, λ=λ_vals[i], p=2, use_neighbors=true),)
+                               for i in 1:n_replicas]
 
     replica_loggers = [(temp=TemperatureLogger(10), ) for i in 1:n_replicas]
 
@@ -832,14 +833,14 @@ end
 
         neighbor_finder = NoNeighborFinder()
         cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
-        pairwise_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
+        pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
         if nl
             neighbor_finder = DistanceNeighborFinder(
                 eligible=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
                 n_steps=10,
                 dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
             )
-            pairwise_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
+            pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
         end
         show(devnull, neighbor_finder)
 

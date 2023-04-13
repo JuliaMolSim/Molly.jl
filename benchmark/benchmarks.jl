@@ -81,14 +81,14 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
 
     neighbor_finder = NoNeighborFinder()
     cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
-    pairwise_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
+    pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
     if nl
         neighbor_finder = DistanceNeighborFinder(
             eligible=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
             n_steps=10,
             dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
         )
-        pairwise_inters = (LennardJones(nl_only=true, cutoff=cutoff),)
+        pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
     end
 
     if gpu

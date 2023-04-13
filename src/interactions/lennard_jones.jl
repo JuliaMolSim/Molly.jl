@@ -3,7 +3,7 @@ export
     LennardJonesSoftCore
 
 @doc raw"""
-    LennardJones(; cutoff, nl_only, lorentz_mixing, weight_special, weight_solute_solvent,
+    LennardJones(; cutoff, use_neighbors, lorentz_mixing, weight_special, weight_solute_solvent,
                  force_units, energy_units, skip_shortcut)
 
 The Lennard-Jones 6-12 interaction between two atoms.
@@ -21,7 +21,7 @@ and the force on each atom by
 """
 struct LennardJones{S, C, W, WS, F, E} <: PairwiseInteraction
     cutoff::C
-    nl_only::Bool
+    use_neighbors::Bool
     lorentz_mixing::Bool
     weight_special::W
     weight_solute_solvent::WS
@@ -31,7 +31,7 @@ end
 
 function LennardJones(;
                         cutoff=NoCutoff(),
-                        nl_only=false,
+                        use_neighbors=false,
                         lorentz_mixing=true,
                         weight_special=1,
                         weight_solute_solvent=1,
@@ -40,7 +40,8 @@ function LennardJones(;
                         skip_shortcut=false)
     return LennardJones{skip_shortcut, typeof(cutoff), typeof(weight_special),
                         typeof(weight_solute_solvent), typeof(force_units), typeof(energy_units)}(
-        cutoff, nl_only, lorentz_mixing, weight_special, weight_solute_solvent, force_units, energy_units)
+        cutoff, use_neighbors, lorentz_mixing, weight_special, weight_solute_solvent,
+        force_units, energy_units)
 end
 
 is_solute(at::Atom) = at.solute
@@ -62,7 +63,7 @@ function Base.:+(l1::LennardJones{S, C, W, WS, F, E},
                  l2::LennardJones{S, C, W, WS, F, E}) where {S, C, W, WS, F, E}
     return LennardJones{S, C, W, WS, F, E}(
         l1.cutoff,
-        l1.nl_only,
+        l1.use_neighbors,
         l1.lorentz_mixing,
         l1.weight_special + l2.weight_special,
         l1.weight_solute_solvent + l2.weight_solute_solvent,
@@ -180,7 +181,7 @@ function potential(::LennardJones, r2, invr2, (σ2, ϵ))
 end
 
 @doc raw"""
-    LennardJonesSoftCore(; cutoff, α, λ, p, nl_only, lorentz_mixing, weight_special,
+    LennardJonesSoftCore(; cutoff, α, λ, p, use_neighbors, lorentz_mixing, weight_special,
                          weight_solute_solvent, force_units, energy_units, skip_shortcut)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core.
@@ -204,7 +205,7 @@ struct LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E} <: PairwiseInteractio
     λ::L
     p::P
     σ6_fac::R
-    nl_only::Bool
+    use_neighbors::Bool
     lorentz_mixing::Bool
     weight_special::W
     weight_solute_solvent::WS
@@ -217,7 +218,7 @@ function LennardJonesSoftCore(;
                         α=1,
                         λ=0,
                         p=2,
-                        nl_only=false,
+                        use_neighbors=false,
                         lorentz_mixing=true,
                         weight_special=1,
                         weight_solute_solvent=1,
@@ -228,8 +229,8 @@ function LennardJonesSoftCore(;
     return LennardJonesSoftCore{skip_shortcut, typeof(cutoff), typeof(α), typeof(λ), typeof(p),
                                 typeof(σ6_fac), typeof(weight_special), typeof(weight_solute_solvent),
                                 typeof(force_units), typeof(energy_units)}(
-        cutoff, α, λ, p, σ6_fac, nl_only, lorentz_mixing, weight_special, weight_solute_solvent,
-        force_units, energy_units)
+        cutoff, α, λ, p, σ6_fac, use_neighbors, lorentz_mixing, weight_special,
+        weight_solute_solvent, force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::LennardJonesSoftCore{S, C},

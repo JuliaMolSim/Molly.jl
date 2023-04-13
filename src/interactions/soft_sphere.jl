@@ -1,7 +1,7 @@
 export SoftSphere
 
 @doc raw"""
-    SoftSphere(; cutoff, nl_only, lorentz_mixing, force_units, energy_units, skip_shortcut)
+    SoftSphere(; cutoff, use_neighbors, lorentz_mixing, force_units, energy_units, skip_shortcut)
 
 The soft-sphere potential.
 The potential energy is defined as
@@ -11,7 +11,7 @@ V(r_{ij}) = 4\varepsilon_{ij} \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12}
 """
 struct SoftSphere{S, C, F, E} <: PairwiseInteraction
     cutoff::C
-    nl_only::Bool
+    use_neighbors::Bool
     lorentz_mixing::Bool
     force_units::F
     energy_units::E
@@ -19,13 +19,13 @@ end
 
 function SoftSphere(;
                     cutoff=NoCutoff(),
-                    nl_only=false,
+                    use_neighbors=false,
                     lorentz_mixing=true,
                     force_units=u"kJ * mol^-1 * nm^-1",
                     energy_units=u"kJ * mol^-1",
                     skip_shortcut=false)
     return SoftSphere{skip_shortcut, typeof(cutoff), typeof(force_units), typeof(energy_units)}(
-        cutoff, nl_only, lorentz_mixing, force_units, energy_units)
+        cutoff, use_neighbors, lorentz_mixing, force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::SoftSphere{S, C},

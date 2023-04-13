@@ -81,8 +81,8 @@ Custom interaction types should implement this function.
 """
 function potential_energy(s::System{D, false, T}, neighbors=nothing;
                           n_threads::Integer=Threads.nthreads()) where {D, T}
-    pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
-    pairwise_inters_nl   = filter(inter ->  inter.nl_only, values(s.pairwise_inters))
+    pairwise_inters_nonl = filter(inter -> !inter.use_neighbors, values(s.pairwise_inters))
+    pairwise_inters_nl   = filter(inter ->  inter.use_neighbors, values(s.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(s.specific_inter_lists))
     sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(s.specific_inter_lists))
     sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(s.specific_inter_lists))
@@ -238,14 +238,14 @@ function potential_energy(s::System{D, true, T}, neighbors=nothing;
     val_ft = Val(T)
     pe_vec = CUDA.zeros(T, 1)
 
-    pairwise_inters_nonl = filter(inter -> !inter.nl_only, values(s.pairwise_inters))
+    pairwise_inters_nonl = filter(inter -> !inter.use_neighbors, values(s.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
         pe_vec += pairwise_pe_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
                                   nbs, s.energy_units, val_ft)
     end
 
-    pairwise_inters_nl = filter(inter -> inter.nl_only, values(s.pairwise_inters))
+    pairwise_inters_nl = filter(inter -> inter.use_neighbors, values(s.pairwise_inters))
     if length(pairwise_inters_nl) > 0
         if isnothing(neighbors)
             error("An interaction uses the neighbor list but neighbors is nothing")

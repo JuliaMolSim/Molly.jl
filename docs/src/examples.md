@@ -229,7 +229,7 @@ neighbor_finder = DistanceNeighborFinder(
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=(LennardJones(nl_only=true),),
+    pairwise_inters=(LennardJones(use_neighbors=true),),
     specific_inter_lists=(bonds, angles),
     coords=coords,
     boundary=boundary,
@@ -400,7 +400,7 @@ struct BondableAtom
 end
 
 struct BondableInteraction <: PairwiseInteraction
-    nl_only::Bool
+    use_neighbors::Bool
     prob_formation::Float64
     prob_break::Float64
     dist_formation::Float64
@@ -457,7 +457,7 @@ atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = place_atoms(n_atoms, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
-    SoftSphere(nl_only=true),
+    SoftSphere(use_neighbors=true),
     BondableInteraction(true, 0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(

@@ -704,18 +704,18 @@ function System(coord_file::AbstractString,
 
     lj = LennardJones(
         cutoff=DistanceCutoff(T(dist_cutoff)),
-        nl_only=true,
+        use_neighbors=true,
         weight_special=force_field.weight_14_lj,
         force_units=force_units,
         energy_units=energy_units,
     )
     if isnothing(implicit_solvent)
         crf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(crf_solvent_dielectric),
-                                    nl_only=true, weight_special=force_field.weight_14_coulomb,
+                                    use_neighbors=true, weight_special=force_field.weight_14_coulomb,
                                     coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
                                     force_units=force_units, energy_units=energy_units)
     else
-        crf = Coulomb(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true,
+        crf = Coulomb(cutoff=DistanceCutoff(T(dist_cutoff)), use_neighbors=true,
                         weight_special=force_field.weight_14_coulomb,
                         coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
                         force_units=force_units, energy_units=energy_units)
@@ -1106,10 +1106,10 @@ function System(T::Type,
         special[j, i] = true
     end
 
-    lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true, weight_special=T(0.5),
-                        force_units=force_units, energy_units=energy_units)
+    lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), use_neighbors=true,
+                        weight_special=T(0.5), force_units=force_units, energy_units=energy_units)
     crf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(crf_solvent_dielectric),
-                                nl_only=true, weight_special=T(0.5),
+                                use_neighbors=true, weight_special=T(0.5),
                                 coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
                                 force_units=force_units, energy_units=energy_units)
 

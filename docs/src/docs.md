@@ -158,7 +158,7 @@ neighbor_finder = DistanceNeighborFinder(
     dist_cutoff=1.5u"nm",
 )
 
-pairwise_inters = (LennardJones(nl_only=true, cutoff=DistanceCutoff(1.2u"nm")),)
+pairwise_inters = (LennardJones(use_neighbors=true, cutoff=DistanceCutoff(1.2u"nm")),)
 ```
 Now we can simulate as before.
 ```julia
@@ -202,7 +202,7 @@ This example also shows the use of `Float32`, a 2D simulation and no specified u
 atoms = [Atom(mass=1.0f0), Atom(mass=1.0f0)]
 coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
 velocities = [SVector(0.0f0, 1.0f0), SVector(0.0f0, -1.0f0)]
-pairwise_inters = (Gravity(nl_only=false, G=1.5f0),)
+pairwise_inters = (Gravity(use_neighbors=false, G=1.5f0),)
 simulator = VelocityVerlet(dt=0.002f0)
 boundary = RectangularBoundary(1.0f0)
 
@@ -435,7 +435,7 @@ end
 
 # Custom PairwiseInteraction
 struct SIRInteraction <: PairwiseInteraction
-    nl_only::Bool
+    use_neighbors::Bool
     dist_infection::Float64
     prob_infection::Float64
     prob_recovery::Float64
@@ -489,7 +489,7 @@ atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for
 coords = place_atoms(n_people, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
 pairwise_inters = (
-    LennardJones=LennardJones(nl_only=true),
+    LennardJones=LennardJones(use_neighbors=true),
     SIR=SIRInteraction(false, 0.5, 0.06, 0.01),
 )
 neighbor_finder = DistanceNeighborFinder(
@@ -605,11 +605,11 @@ The available general interactions are:
 To define your own [`PairwiseInteraction`](@ref), first define the `struct`:
 ```julia
 struct MyPairwiseInter <: PairwiseInteraction
-    nl_only::Bool
+    use_neighbors::Bool
     # Any other properties, e.g. constants for the interaction or cutoff parameters
 end
 ```
-The `nl_only` property is required and determines whether the neighbor list is used to omit distant atoms (`true`) or whether all atom pairs are always considered (`false`).
+The `use_neighbors` property is required and determines whether the neighbor list is used to omit distant atoms (`true`) or whether all atom pairs are always considered (`false`).
 To work on the GPU the `struct` should be a bits type, i.e. `isbitstype(MyPairwiseInter)` should be `true`.
 
 Next, you need to define the [`force`](@ref) function acting between a pair of atoms.
@@ -1128,7 +1128,7 @@ temp = 50.0u"K"
 velocities = [random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms]
 
 # Interaction potentials
-pairwise_inters = (SoftSphere(nl_only=true, cutoff=DistanceCutoff(0.6u"nm")),)
+pairwise_inters = (SoftSphere(use_neighbors=true, cutoff=DistanceCutoff(0.6u"nm")),)
 
 bonds = [HarmonicBond(k=10000u"kJ * mol^-1 * nm^-2", r0=0.2u"nm") for i in 1:(n_atoms ÷ 2)]
 specific_inter_lists = (InteractionList2Atoms(

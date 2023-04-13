@@ -1,7 +1,7 @@
 export Buckingham
 
 @doc raw"""
-    Buckingham(; cutoff, nl_only, weight_special, force_units, energy_units)
+    Buckingham(; cutoff, use_neighbors, weight_special, force_units, energy_units)
 
 The Buckingham interaction between two atoms.
 The potential energy is defined as
@@ -24,7 +24,7 @@ so atoms that use this interaction should have fields `A`, `B` and `C` available
 """
 struct Buckingham{C, W, F, E} <: PairwiseInteraction
     cutoff::C
-    nl_only::Bool
+    use_neighbors::Bool
     weight_special::W
     force_units::F
     energy_units::E
@@ -32,12 +32,12 @@ end
 
 function Buckingham(;
                     cutoff=NoCutoff(),
-                    nl_only=false,
+                    use_neighbors=false,
                     weight_special=1,
                     force_units=u"kJ * mol^-1 * nm^-1",
                     energy_units=u"kJ * mol^-1")
     return Buckingham{typeof(cutoff), typeof(weight_special), typeof(force_units), typeof(energy_units)}(
-        cutoff, nl_only, weight_special, force_units, energy_units)
+        cutoff, use_neighbors, weight_special, force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::Buckingham{C},

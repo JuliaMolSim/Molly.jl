@@ -1,7 +1,7 @@
 export Gravity
 
 @doc raw"""
-    Gravity(; G, nl_only)
+    Gravity(; G, use_neighbors)
 
 The gravitational interaction between two atoms.
 The potential energy is defined as
@@ -11,10 +11,10 @@ V(r_{ij}) = -\frac{G m_i m_j}{r_{ij}}
 """
 struct Gravity{T} <: PairwiseInteraction
     G::T
-    nl_only::Bool
+    use_neighbors::Bool
 end
 
-Gravity(; G=Unitful.G, nl_only=false) = Gravity{typeof(G)}(G, nl_only)
+Gravity(; G=Unitful.G, use_neighbors=false) = Gravity{typeof(G)}(G, use_neighbors)
 
 @inline @inbounds function force(inter::Gravity,
                                  dr,

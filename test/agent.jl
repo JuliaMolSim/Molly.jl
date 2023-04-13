@@ -12,7 +12,7 @@
 
     # Custom PairwiseInteraction
     struct SIRInteraction <: PairwiseInteraction
-        nl_only::Bool
+        use_neighbors::Bool
         dist_infection::Float64
         prob_infection::Float64
         prob_recovery::Float64
@@ -66,7 +66,7 @@
     coords = place_atoms(n_people, boundary; min_dist=0.1)
     velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
     pairwise_inters = (
-        LennardJones=LennardJones(nl_only=true),
+        LennardJones=LennardJones(use_neighbors=true),
         SIR=SIRInteraction(false, 0.5, 0.06, 0.01),
     )
     neighbor_finder = DistanceNeighborFinder(

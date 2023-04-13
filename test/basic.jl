@@ -260,7 +260,7 @@ end
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     replica_velocities = nothing
-    pairwise_inters = (LennardJones(nl_only=true),)
+    pairwise_inters = (LennardJones(use_neighbors=true),)
     n_replicas = 4
 
     eligible = trues(n_atoms, n_atoms)
