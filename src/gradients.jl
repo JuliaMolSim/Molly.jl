@@ -25,17 +25,17 @@ function extract_parameters(sys, ff)
     for inter in values(sys.pairwise_inters)
         if inter isa LennardJones
             key_prefix = "inter_LJ_"
-            params_dic[key_prefix * "weight_14"] = inter.weight_14
+            params_dic[key_prefix * "weight_14"] = inter.weight_special
             params_dic[key_prefix * "weight_solute_solvent"] = inter.weight_solute_solvent
         elseif inter isa Coulomb
             key_prefix = "inter_CO_"
-            params_dic[key_prefix * "weight_14"] = inter.weight_14
+            params_dic[key_prefix * "weight_14"] = inter.weight_special
             params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
         elseif inter isa CoulombReactionField
             key_prefix = "inter_CRF_"
             params_dic[key_prefix * "dist_cutoff"] = inter.dist_cutoff
             params_dic[key_prefix * "solvent_dielectric"] = inter.solvent_dielectric
-            params_dic[key_prefix * "weight_14"] = inter.weight_14
+            params_dic[key_prefix * "weight_14"] = inter.weight_special
             params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
         end
     end
@@ -170,7 +170,7 @@ function inject_interaction(inter::LennardJones{S, C, W, WS, F, E}, params_dic) 
         inter.cutoff,
         inter.nl_only,
         inter.lorentz_mixing,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_14),
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
         dict_get(params_dic, key_prefix * "weight_solute_solvent", inter.weight_solute_solvent),
         inter.force_units,
         inter.energy_units,
@@ -182,7 +182,7 @@ function inject_interaction(inter::Coulomb, params_dic)
     Coulomb(
         inter.cutoff,
         inter.nl_only,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_14),
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
         dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
         inter.force_units,
         inter.energy_units,
@@ -195,7 +195,7 @@ function inject_interaction(inter::CoulombReactionField, params_dic)
         dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
         dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
         inter.nl_only,
-        dict_get(params_dic, key_prefix * "weight_14", inter.weight_14),
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
         dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
         inter.force_units,
         inter.energy_units,

@@ -1,7 +1,7 @@
 export Buckingham
 
 @doc raw"""
-    Buckingham(; cutoff, nl_only, weight_14, force_units, energy_units)
+    Buckingham(; cutoff, nl_only, weight_special, force_units, energy_units)
 
 The Buckingham interaction between two atoms.
 The potential energy is defined as
@@ -25,7 +25,7 @@ so atoms that use this interaction should have fields `A`, `B` and `C` available
 struct Buckingham{C, W, F, E} <: PairwiseInteraction
     cutoff::C
     nl_only::Bool
-    weight_14::W
+    weight_special::W
     force_units::F
     energy_units::E
 end
@@ -33,11 +33,11 @@ end
 function Buckingham(;
                     cutoff=NoCutoff(),
                     nl_only=false,
-                    weight_14=1,
+                    weight_special=1,
                     force_units=u"kJ * mol^-1 * nm^-1",
                     energy_units=u"kJ * mol^-1")
-    return Buckingham{typeof(cutoff), typeof(weight_14), typeof(force_units), typeof(energy_units)}(
-        cutoff, nl_only, weight_14, force_units, energy_units)
+    return Buckingham{typeof(cutoff), typeof(weight_special), typeof(force_units), typeof(energy_units)}(
+        cutoff, nl_only, weight_special, force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::Buckingham{C},
@@ -47,7 +47,7 @@ end
                                     atom_i,
                                     atom_j,
                                     boundary,
-                                    weight_14::Bool=false) where C
+                                    special::Bool=false) where C
     if (iszero_value(atom_i.A) || iszero_value(atom_j.A)) &&
        (iszero_value(atom_i.C) || iszero_value(atom_j.C))
         return ustrip.(zero(coord_i)) * inter.force_units
@@ -77,8 +77,8 @@ end
         end
     end
 
-    if weight_14
-        return f * dr * inter.weight_14
+    if special
+        return f * dr * inter.weight_special
     else
         return f * dr
     end
@@ -96,7 +96,7 @@ end
                                             atom_i,
                                             atom_j,
                                             boundary,
-                                            weight_14::Bool=false) where C
+                                            special::Bool=false) where C
     if (iszero_value(atom_i.A) || iszero_value(atom_j.A)) &&
        (iszero_value(atom_i.C) || iszero_value(atom_j.C))
         return ustrip(zero(coord_i[1])) * inter.energy_units
@@ -126,8 +126,8 @@ end
         end
     end
 
-    if weight_14
-        return pe * inter.weight_14
+    if special
+        return pe * inter.weight_special
     else
         return pe
     end

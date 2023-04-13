@@ -4,7 +4,7 @@ export
     CoulombReactionField
 
 @doc raw"""
-    Coulomb(; cutoff, nl_only, weight_14, coulomb_const, force_units, energy_units)
+    Coulomb(; cutoff, nl_only, weight_special, coulomb_const, force_units, energy_units)
 
 The Coulomb electrostatic interaction between two atoms.
 The potential energy is defined as
@@ -15,7 +15,7 @@ V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}}
 struct Coulomb{C, W, T, F, E} <: PairwiseInteraction
     cutoff::C
     nl_only::Bool
-    weight_14::W
+    weight_special::W
     coulomb_const::T
     force_units::F
     energy_units::E
@@ -26,12 +26,12 @@ const coulombconst = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
 function Coulomb(;
                     cutoff=NoCutoff(),
                     nl_only=false,
-                    weight_14=1,
+                    weight_special=1,
                     coulomb_const=coulombconst,
                     force_units=u"kJ * mol^-1 * nm^-1",
                     energy_units=u"kJ * mol^-1")
-    return Coulomb{typeof(cutoff), typeof(weight_14), typeof(coulomb_const), typeof(force_units), typeof(energy_units)}(
-        cutoff, nl_only, weight_14, coulomb_const, force_units, energy_units)
+    return Coulomb{typeof(cutoff), typeof(weight_special), typeof(coulomb_const), typeof(force_units), typeof(energy_units)}(
+        cutoff, nl_only, weight_special, coulomb_const, force_units, energy_units)
 end
 
 function Base.zero(coul::Coulomb{C, W, T, F, E}) where {C, W, T, F, E}
@@ -49,7 +49,7 @@ function Base.:+(c1::Coulomb, c2::Coulomb)
     return Coulomb(
         c1.cutoff,
         c1.nl_only,
-        c1.weight_14 + c2.weight_14,
+        c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
         c1.force_units,
         c1.energy_units,
@@ -63,7 +63,7 @@ end
                                     atom_i,
                                     atom_j,
                                     boundary,
-                                    weight_14::Bool=false) where C
+                                    special::Bool=false) where C
     r2 = sum(abs2, dr)
 
     cutoff = inter.cutoff
@@ -88,8 +88,8 @@ end
         end
     end
 
-    if weight_14
-        return f * dr * inter.weight_14
+    if special
+        return f * dr * inter.weight_special
     else
         return f * dr
     end
@@ -106,7 +106,7 @@ end
                                             atom_i,
                                             atom_j,
                                             boundary,
-                                            weight_14::Bool=false) where C
+                                            special::Bool=false) where C
     r2 = sum(abs2, dr)
 
     cutoff = inter.cutoff
@@ -130,8 +130,8 @@ end
         end
     end
 
-    if weight_14
-        return pe * inter.weight_14
+    if special
+        return pe * inter.weight_special
     else
         return pe
     end
@@ -142,7 +142,7 @@ function potential(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
 end
 
 @doc raw"""
-    CoulombSoftCore(; cutoff, α, λ, p, nl_only, lorentz_mixing, weight_14,
+    CoulombSoftCore(; cutoff, α, λ, p, nl_only, lorentz_mixing, weight_special,
                     coulomb_const, force_units, energy_units)
 
 The Coulomb electrostatic interaction between two atoms with a soft core.
@@ -160,7 +160,7 @@ struct CoulombSoftCore{C, A, L, P, R, W, T, F, E} <: PairwiseInteraction
     σ6_fac::R
     nl_only::Bool
     lorentz_mixing::Bool
-    weight_14::W
+    weight_special::W
     coulomb_const::T
     force_units::F
     energy_units::E
@@ -173,16 +173,16 @@ function CoulombSoftCore(;
                     p=2,
                     nl_only=false,
                     lorentz_mixing=true,
-                    weight_14=1,
+                    weight_special=1,
                     coulomb_const=coulombconst,
                     force_units=u"kJ * mol^-1 * nm^-1",
                     energy_units=u"kJ * mol^-1")
     σ6_fac = α * λ^p
     return CoulombSoftCore{typeof(cutoff), typeof(α), typeof(λ), typeof(p), typeof(σ6_fac),
-                           typeof(weight_14), typeof(coulomb_const), typeof(force_units),
+                           typeof(weight_special), typeof(coulomb_const), typeof(force_units),
                            typeof(energy_units)}(
-        cutoff, α, λ, p, σ6_fac, nl_only, lorentz_mixing, weight_14, coulomb_const, force_units,
-        energy_units)
+        cutoff, α, λ, p, σ6_fac, nl_only, lorentz_mixing, weight_special, coulomb_const,
+        force_units, energy_units)
 end
 
 @inline @inbounds function force(inter::CoulombSoftCore{C},
@@ -192,7 +192,7 @@ end
                                     atom_i,
                                     atom_j,
                                     boundary,
-                                    weight_14::Bool=false) where C
+                                    special::Bool=false) where C
     r2 = sum(abs2, dr)
 
     cutoff = inter.cutoff
@@ -218,8 +218,8 @@ end
         end
     end
 
-    if weight_14
-        return f * dr * inter.weight_14
+    if special
+        return f * dr * inter.weight_special
     else
         return f * dr
     end
@@ -242,7 +242,7 @@ end
                                             atom_i,
                                             atom_j,
                                             boundary,
-                                            weight_14::Bool=false) where C
+                                            special::Bool=false) where C
     r2 = sum(abs2, dr)
 
     cutoff = inter.cutoff
@@ -268,8 +268,8 @@ end
         end
     end
 
-    if weight_14
-        return pe * inter.weight_14
+    if special
+        return pe * inter.weight_special
     else
         return pe
     end
@@ -281,7 +281,7 @@ function potential(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ6
 end
 
 """
-    CoulombReactionField(; dist_cutoff, solvent_dielectric, nl_only, weight_14,
+    CoulombReactionField(; dist_cutoff, solvent_dielectric, nl_only, weight_special,
                             coulomb_const, force_units, energy_units)
 
 The Coulomb electrostatic interaction modified using the reaction field approximation
@@ -291,7 +291,7 @@ struct CoulombReactionField{D, S, W, T, F, E} <: PairwiseInteraction
     dist_cutoff::D
     solvent_dielectric::S
     nl_only::Bool
-    weight_14::W
+    weight_special::W
     coulomb_const::T
     force_units::F
     energy_units::E
@@ -303,13 +303,13 @@ function CoulombReactionField(;
                     dist_cutoff,
                     solvent_dielectric=crf_solvent_dielectric,
                     nl_only=false,
-                    weight_14=1,
+                    weight_special=1,
                     coulomb_const=coulombconst,
                     force_units=u"kJ * mol^-1 * nm^-1",
                     energy_units=u"kJ * mol^-1")
-    return CoulombReactionField{typeof(dist_cutoff), typeof(solvent_dielectric), typeof(weight_14),
+    return CoulombReactionField{typeof(dist_cutoff), typeof(solvent_dielectric), typeof(weight_special),
                                 typeof(coulomb_const), typeof(force_units), typeof(energy_units)}(
-        dist_cutoff, solvent_dielectric, nl_only, weight_14,
+        dist_cutoff, solvent_dielectric, nl_only, weight_special,
         coulomb_const, force_units, energy_units)
 end
 
@@ -330,7 +330,7 @@ function Base.:+(c1::CoulombReactionField, c2::CoulombReactionField)
         c1.dist_cutoff + c2.dist_cutoff,
         c1.solvent_dielectric + c2.solvent_dielectric,
         c1.nl_only,
-        c1.weight_14 + c2.weight_14,
+        c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
         c1.force_units,
         c1.energy_units,
@@ -344,7 +344,7 @@ end
                                     atom_i,
                                     atom_j,
                                     boundary,
-                                    weight_14::Bool=false)
+                                    special::Bool=false)
     r2 = sum(abs2, dr)
 
     if r2 > (inter.dist_cutoff ^ 2)
@@ -355,7 +355,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     r = √r2
     i, j = atom_i.index, atom_j.index
-    if weight_14
+    if special
         # 1-4 interactions do not use the reaction field approximation
         krf = (1 / (inter.dist_cutoff ^ 3)) * 0
     else
@@ -365,8 +365,8 @@ end
 
     f = (coulomb_const * qi * qj) * (inv(r) - 2 * krf * r2) * inv(r2)
 
-    if weight_14
-        return f * dr * inter.weight_14
+    if special
+        return f * dr * inter.weight_special
     else
         return f * dr
     end
@@ -379,7 +379,7 @@ end
                                             atom_i,
                                             atom_j,
                                             boundary,
-                                            weight_14::Bool=false)
+                                            special::Bool=false)
     r2 = sum(abs2, dr)
 
     if r2 > (inter.dist_cutoff ^ 2)
@@ -389,7 +389,7 @@ end
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = √r2
-    if weight_14
+    if special
         # 1-4 interactions do not use the reaction field approximation
         krf = (1 / (inter.dist_cutoff ^ 3)) * 0
         crf = (1 /  inter.dist_cutoff     ) * 0
@@ -400,8 +400,8 @@ end
 
     pe = (coulomb_const * qi * qj) * (inv(r) + krf * r2 - crf)
 
-    if weight_14
-        return pe * inter.weight_14
+    if special
+        return pe * inter.weight_special
     else
         return pe
     end

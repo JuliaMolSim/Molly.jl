@@ -45,7 +45,7 @@ end
     force(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
           atom_i, atom_j, boundary)
     force(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
-          atom_i, atom_j, boundary, weight_14)
+          atom_i, atom_j, boundary, special)
     force(inter::SpecificInteraction, coord_i, coord_j,
           boundary)
     force(inter::SpecificInteraction, coord_i, coord_j,
@@ -58,8 +58,8 @@ For [`PairwiseInteraction`](@ref)s returns a single force vector and for
 [`SpecificInteraction`](@ref)s returns a type such as [`SpecificForce2Atoms`](@ref).
 Custom pairwise and specific interaction types should implement this function.
 """
-function force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, weight_14)
-    # Fallback for interactions where the 1-4 weighting is not relevant
+function force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
+    # Fallback for interactions where special interactions are not relevant
     return force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)
 end
 
@@ -213,13 +213,13 @@ end
             end
             Threads.@threads for thread_id in 1:n_threads
                 for ni in thread_id:n_threads:length(neighbors)
-                    i, j, weight_14 = neighbors.list[ni]
+                    i, j, special = neighbors.list[ni]
                     dr = vector(coords[i], coords[j], boundary)
                     f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
-                              atoms[j], boundary, weight_14)
+                              atoms[j], boundary, special)
                     for inter in pairwise_inters_nl[2:end]
                         f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary,
-                                   weight_14)
+                                   special)
                     end
                     check_force_units(f, force_units)
                     f_ustrip = ustrip.(f)
@@ -253,13 +253,13 @@ end
                 error("An interaction uses the neighbor list but neighbors is nothing")
             end
             for ni in 1:length(neighbors)
-                i, j, weight_14 = neighbors.list[ni]
+                i, j, special = neighbors.list[ni]
                 dr = vector(coords[i], coords[j], boundary)
                 f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
-                          atoms[j], boundary, weight_14)
+                          atoms[j], boundary, special)
                 for inter in pairwise_inters_nl[2:end]
                     f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary,
-                               weight_14)
+                               special)
                 end
                 check_force_units(f, force_units)
                 f_ustrip = ustrip.(f)

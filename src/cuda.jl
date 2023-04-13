@@ -30,12 +30,12 @@ function pairwise_force_kernel!(forces, coords_var, atoms_var, boundary, inters,
     inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     @inbounds if inter_i <= length(neighbors)
-        i, j, weight_14 = neighbors[inter_i]
+        i, j, special = neighbors[inter_i]
         coord_i, coord_j = coords[i], coords[j]
         dr = vector(coord_i, coord_j, boundary)
-        f = force_gpu(inters[1], dr, coord_i, coord_j, atoms[i], atoms[j], boundary, weight_14)
+        f = force_gpu(inters[1], dr, coord_i, coord_j, atoms[i], atoms[j], boundary, special)
         for inter in inters[2:end]
-            f += force_gpu(inter, dr, coord_i, coord_j, atoms[i], atoms[j], boundary, weight_14)
+            f += force_gpu(inter, dr, coord_i, coord_j, atoms[i], atoms[j], boundary, special)
         end
         if unit(f[1]) != F
             # This triggers an error but it isn't printed
@@ -205,14 +205,14 @@ function pairwise_pe_kernel!(energy, coords_var, atoms_var, boundary, inters, ne
     inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
     @inbounds if inter_i <= length(neighbors)
-        i, j, weight_14 = neighbors[inter_i]
+        i, j, special = neighbors[inter_i]
         coord_i, coord_j = coords[i], coords[j]
         dr = vector(coord_i, coord_j, boundary)
         pe = potential_energy(inters[1], dr, coord_i, coord_j, atoms[i], atoms[j],
-                              boundary, weight_14)
+                              boundary, special)
         for inter in inters[2:end]
             pe += potential_energy(inter, dr, coord_i, coord_j, atoms[i], atoms[j],
-                                   boundary, weight_14)
+                                   boundary, special)
         end
         if unit(pe) != E
             error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")

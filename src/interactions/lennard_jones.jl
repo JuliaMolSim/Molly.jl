@@ -3,7 +3,7 @@ export
     LennardJonesSoftCore
 
 @doc raw"""
-    LennardJones(; cutoff, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
+    LennardJones(; cutoff, nl_only, lorentz_mixing, weight_special, weight_solute_solvent,
                  force_units, energy_units, skip_shortcut)
 
 The Lennard-Jones 6-12 interaction between two atoms.
@@ -23,7 +23,7 @@ struct LennardJones{S, C, W, WS, F, E} <: PairwiseInteraction
     cutoff::C
     nl_only::Bool
     lorentz_mixing::Bool
-    weight_14::W
+    weight_special::W
     weight_solute_solvent::WS
     force_units::F
     energy_units::E
@@ -33,14 +33,14 @@ function LennardJones(;
                         cutoff=NoCutoff(),
                         nl_only=false,
                         lorentz_mixing=true,
-                        weight_14=1,
+                        weight_special=1,
                         weight_solute_solvent=1,
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
                         skip_shortcut=false)
-    return LennardJones{skip_shortcut, typeof(cutoff), typeof(weight_14), typeof(weight_solute_solvent),
-                        typeof(force_units), typeof(energy_units)}(
-        cutoff, nl_only, lorentz_mixing, weight_14, weight_solute_solvent, force_units, energy_units)
+    return LennardJones{skip_shortcut, typeof(cutoff), typeof(weight_special),
+                        typeof(weight_solute_solvent), typeof(force_units), typeof(energy_units)}(
+        cutoff, nl_only, lorentz_mixing, weight_special, weight_solute_solvent, force_units, energy_units)
 end
 
 is_solute(at::Atom) = at.solute
@@ -64,7 +64,7 @@ function Base.:+(l1::LennardJones{S, C, W, WS, F, E},
         l1.cutoff,
         l1.nl_only,
         l1.lorentz_mixing,
-        l1.weight_14 + l2.weight_14,
+        l1.weight_special + l2.weight_special,
         l1.weight_solute_solvent + l2.weight_solute_solvent,
         l1.force_units,
         l1.energy_units,
@@ -78,7 +78,7 @@ end
                                     atom_i,
                                     atom_j,
                                     boundary,
-                                    weight_14::Bool=false) where {S, C}
+                                    special::Bool=false) where {S, C}
     if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip.(zero(coord_i)) * inter.force_units
     end
@@ -113,8 +113,8 @@ end
         end
     end
 
-    if weight_14
-        return f * dr * inter.weight_14
+    if special
+        return f * dr * inter.weight_special
     else
         return f * dr
     end
@@ -133,7 +133,7 @@ end
                                             atom_i,
                                             atom_j,
                                             boundary,
-                                            weight_14::Bool=false) where {S, C}
+                                            special::Bool=false) where {S, C}
     if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip(zero(coord_i[1])) * inter.energy_units
     end
@@ -166,8 +166,8 @@ end
         end
     end
 
-    if weight_14
-        return pe * inter.weight_14
+    if special
+        return pe * inter.weight_special
     else
         return pe
     end
@@ -180,7 +180,7 @@ function potential(::LennardJones, r2, invr2, (σ2, ϵ))
 end
 
 @doc raw"""
-    LennardJonesSoftCore(; cutoff, α, λ, p, nl_only, lorentz_mixing, weight_14,
+    LennardJonesSoftCore(; cutoff, α, λ, p, nl_only, lorentz_mixing, weight_special,
                          weight_solute_solvent, force_units, energy_units, skip_shortcut)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core.
@@ -206,7 +206,7 @@ struct LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E} <: PairwiseInteractio
     σ6_fac::R
     nl_only::Bool
     lorentz_mixing::Bool
-    weight_14::W
+    weight_special::W
     weight_solute_solvent::WS
     force_units::F
     energy_units::E
@@ -219,16 +219,16 @@ function LennardJonesSoftCore(;
                         p=2,
                         nl_only=false,
                         lorentz_mixing=true,
-                        weight_14=1,
+                        weight_special=1,
                         weight_solute_solvent=1,
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
                         skip_shortcut=false)
     σ6_fac = α * λ^p
     return LennardJonesSoftCore{skip_shortcut, typeof(cutoff), typeof(α), typeof(λ), typeof(p),
-                                typeof(σ6_fac), typeof(weight_14), typeof(weight_solute_solvent),
+                                typeof(σ6_fac), typeof(weight_special), typeof(weight_solute_solvent),
                                 typeof(force_units), typeof(energy_units)}(
-        cutoff, α, λ, p, σ6_fac, nl_only, lorentz_mixing, weight_14, weight_solute_solvent,
+        cutoff, α, λ, p, σ6_fac, nl_only, lorentz_mixing, weight_special, weight_solute_solvent,
         force_units, energy_units)
 end
 
@@ -239,7 +239,7 @@ end
                                     atom_i,
                                     atom_j,
                                     boundary,
-                                    weight_14::Bool=false) where {S, C}
+                                    special::Bool=false) where {S, C}
     if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip.(zero(coord_i)) * inter.force_units
     end
@@ -274,8 +274,8 @@ end
         end
     end
 
-    if weight_14
-        return f * dr * inter.weight_14
+    if special
+        return f * dr * inter.weight_special
     else
         return f * dr
     end
@@ -298,7 +298,7 @@ end
                                             atom_i,
                                             atom_j,
                                             boundary,
-                                            weight_14::Bool=false) where {S, C}
+                                            special::Bool=false) where {S, C}
     if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip(zero(coord_i[1])) * inter.energy_units
     end
@@ -331,8 +331,8 @@ end
         end
     end
 
-    if weight_14
-        return pe * inter.weight_14
+    if special
+        return pe * inter.weight_special
     else
         return pe
     end

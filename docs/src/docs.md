@@ -635,9 +635,9 @@ end
 `vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
-An optional final argument `weight_14` is a `Bool` determining whether the atom pair is in a 1-4 bonding arrangement (i-x-x-j).
-When simulating molecules, non-bonded interactions for these pairs are often weighted by a factor such as 0.5.
-For interactions where this is relevant, `weight_14` can be used to apply this weighting in the interaction.
+An optional final argument `special` is a `Bool` determining whether the atom pair interaction should be treated as special.
+When simulating molecules, for example, non-bonded interactions for atoms in a 1-4 bonding arrangement (i-x-x-j) are often weighted by a factor such as 0.5.
+For interactions where this is relevant, `special` can be used to apply this weighting in the interaction.
 
 To use your custom force in a simulation, add it to the list of pairwise interactions:
 ```julia
