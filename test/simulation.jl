@@ -12,7 +12,7 @@
         coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
         boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
-            nb_matrix=trues(n_atoms, n_atoms),
+            eligible=trues(n_atoms, n_atoms),
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
@@ -76,7 +76,7 @@ end
             velocities=[random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
             boundary=boundary,
             neighbor_finder=DistanceNeighborFinder(
-                nb_matrix=trues(n_atoms, n_atoms),
+                eligible=trues(n_atoms, n_atoms),
                 n_steps=10,
                 dist_cutoff=2.0u"nm",
             ),
@@ -121,7 +121,7 @@ end
             show(devnull, a)
         end
 
-        nf_tree = TreeNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
+        nf_tree = TreeNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10, dist_cutoff=2.0u"nm")
         neighbors = find_neighbors(s, s.neighbor_finder; n_threads=n_threads)
         neighbors_tree = find_neighbors(s, nf_tree; n_threads=n_threads)
         @test length(neighbors.list) == length(neighbors_tree.list)
@@ -173,7 +173,7 @@ end
         coords=coords,
         boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
-            nb_matrix=trues(n_atoms, n_atoms),
+            eligible=trues(n_atoms, n_atoms),
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
@@ -210,7 +210,7 @@ end
         coords=coords,
         boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
-            nb_matrix=trues(n_atoms, n_atoms),
+            eligible=trues(n_atoms, n_atoms),
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
@@ -238,10 +238,10 @@ end
         [HarmonicBond(k=300_000.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm") for i in 1:(n_atoms ÷ 2)],
         fill("", n_atoms ÷ 2),
     )
-    nb_matrix = trues(n_atoms, n_atoms)
+    eligible = trues(n_atoms, n_atoms)
     for i in 1:(n_atoms ÷ 2)
-        nb_matrix[i, i + (n_atoms ÷ 2)] = false
-        nb_matrix[i + (n_atoms ÷ 2), i] = false
+        eligible[i, i + (n_atoms ÷ 2)] = false
+        eligible[i + (n_atoms ÷ 2), i] = false
     end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=BerendsenThermostat(temp, 1.0u"ps"))
 
@@ -253,7 +253,7 @@ end
         velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
         boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
-            nb_matrix=trues(n_atoms, n_atoms),
+            eligible=trues(n_atoms, n_atoms),
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
@@ -299,7 +299,7 @@ end
 
     @testset "$inter" for inter in pairwise_inter_types
         if inter.nl_only
-            neighbor_finder = DistanceNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), n_steps=10,
+            neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
                                                         dist_cutoff=1.5u"nm")
         else
             neighbor_finder = NoNeighborFinder()
@@ -370,7 +370,7 @@ end
         velocities=velocities,
         boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
-            nb_matrix=trues(n_atoms, n_atoms),
+            eligible=trues(n_atoms, n_atoms),
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
@@ -390,7 +390,7 @@ end
         velocities=ustrip_vec.(velocities),
         boundary=CubicBoundary(ustrip.(boundary)),
         neighbor_finder=DistanceNeighborFinder(
-            nb_matrix=trues(n_atoms, n_atoms),
+            eligible=trues(n_atoms, n_atoms),
             n_steps=10,
             dist_cutoff=2.0,
         ),
@@ -468,13 +468,13 @@ end
     temp = 100.0u"K"
     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
-    nb_matrix = trues(n_atoms, n_atoms)
+    eligible = trues(n_atoms, n_atoms)
     for i in 1:(n_atoms ÷ 2)
-        nb_matrix[i, i + (n_atoms ÷ 2)] = false
-        nb_matrix[i + (n_atoms ÷ 2), i] = false
+        eligible[i, i + (n_atoms ÷ 2)] = false
+        eligible[i + (n_atoms ÷ 2), i] = false
     end
 
-    neighbor_finder = DistanceNeighborFinder(nb_matrix=nb_matrix, n_steps=10, dist_cutoff=1.5u"nm")
+    neighbor_finder = DistanceNeighborFinder(eligible=eligible, n_steps=10, dist_cutoff=1.5u"nm")
 
     bond_lengths = [0.1u"nm" for i in 1:(n_atoms ÷ 2)]
     sh = SHAKE(bond_lengths, collect(1:(n_atoms ÷ 2)), collect((1 + (n_atoms ÷ 2)):n_atoms))
@@ -534,15 +534,15 @@ end
     temp = 100.0u"K"
     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
-    nb_matrix = trues(n_atoms, n_atoms)
+    eligible = trues(n_atoms, n_atoms)
     for i in 1:(n_atoms ÷ 3)
-        nb_matrix[i, i + (n_atoms ÷ 3)] = false
-        nb_matrix[i + (n_atoms ÷ 3), i] = false
-        nb_matrix[i + (n_atoms ÷ 3), i + 2 * (n_atoms ÷ 3)] = false
-        nb_matrix[i + 2 * (n_atoms ÷ 3), i + (n_atoms ÷ 3)] = false
+        eligible[i, i + (n_atoms ÷ 3)] = false
+        eligible[i + (n_atoms ÷ 3), i] = false
+        eligible[i + (n_atoms ÷ 3), i + 2 * (n_atoms ÷ 3)] = false
+        eligible[i + 2 * (n_atoms ÷ 3), i + (n_atoms ÷ 3)] = false
     end
 
-    neighbor_finder = DistanceNeighborFinder(nb_matrix=nb_matrix, n_steps=10, dist_cutoff=1.5u"nm")
+    neighbor_finder = DistanceNeighborFinder(eligible=eligible, n_steps=10, dist_cutoff=1.5u"nm")
 
     bond_lengths = [0.1u"nm" for i in 1:(2 * (n_atoms ÷ 3))]
     sh = SHAKE(
@@ -592,7 +592,7 @@ end
         velocities=velocities,
         boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
-            nb_matrix=trues(n_atoms, n_atoms),
+            eligible=trues(n_atoms, n_atoms),
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
@@ -623,10 +623,10 @@ end
 
     pairwise_inters = (LennardJones(nl_only=true),)
 
-    nb_matrix = trues(n_atoms, n_atoms)
+    eligible = trues(n_atoms, n_atoms)
     
     neighbor_finder = DistanceNeighborFinder(
-        nb_matrix=nb_matrix,
+        eligible=eligible,
         n_steps=10,
         dist_cutoff=1.5u"nm",
     )
@@ -686,7 +686,7 @@ end
     velocities = [random_velocity(10.0u"u", temp) for i in 1:n_atoms]
 
     neighbor_finder = DistanceNeighborFinder(
-        nb_matrix=trues(n_atoms, n_atoms),
+        eligible=trues(n_atoms, n_atoms),
         n_steps=10,
         dist_cutoff=1.5u"nm",
     )
@@ -744,7 +744,7 @@ end
     temp = 198.0u"K"
 
     neighbor_finder = DistanceNeighborFinder(
-        nb_matrix=trues(n_atoms, n_atoms),
+        eligible=trues(n_atoms, n_atoms),
         n_steps=10,
         dist_cutoff=1.5u"nm",
     )
@@ -835,7 +835,7 @@ end
         pairwise_inters = (LennardJones(nl_only=false, cutoff=cutoff),)
         if nl
             neighbor_finder = DistanceNeighborFinder(
-                nb_matrix=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+                eligible=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
                 n_steps=10,
                 dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
             )

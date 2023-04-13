@@ -395,8 +395,8 @@ function System(coord_file::AbstractString,
     angles = InteractionList3Atoms(HarmonicAngle)
     torsions = InteractionList4Atoms(PeriodicTorsion)
     impropers = InteractionList4Atoms(PeriodicTorsion)
-    nb_matrix = trues(n_atoms, n_atoms)
-    matrix_14 = falses(n_atoms, n_atoms)
+    eligible = trues(n_atoms, n_atoms)
+    special = falses(n_atoms, n_atoms)
     torsion_n_terms = 6
 
     top_bonds     = Vector{Int}[is for is in eachcol(Int.(Chemfiles.bonds(    top)))]
@@ -474,7 +474,7 @@ function System(coord_file::AbstractString,
         push!(atoms, Atom(index=ai, charge=ch, mass=at.mass, σ=at.σ, ϵ=at.ϵ, solute=solute))
         push!(atoms_data, AtomData(atom_type=at_type, atom_name=atom_name, res_number=Chemfiles.id(res),
                                     res_name=Chemfiles.name(res), element=at.element))
-        nb_matrix[ai, ai] = false
+        eligible[ai, ai] = false
     end
 
     for (a1z, a2z) in top_bonds
@@ -494,8 +494,8 @@ function System(coord_file::AbstractString,
             push!(bonds.types, atom_types_to_string(atom_type_2, atom_type_1))
         end
         push!(bonds.inters, HarmonicBond(k=bond_type.k, r0=bond_type.r0))
-        nb_matrix[a1z + 1, a2z + 1] = false
-        nb_matrix[a2z + 1, a1z + 1] = false
+        eligible[a1z + 1, a2z + 1] = false
+        eligible[a2z + 1, a1z + 1] = false
     end
 
     for (a1z, a2z, a3z) in top_angles
@@ -519,8 +519,8 @@ function System(coord_file::AbstractString,
             push!(angles.types, atom_types_to_string(atom_type_3, atom_type_2, atom_type_1))
         end
         push!(angles.inters, HarmonicAngle(k=angle_type.k, θ0=angle_type.θ0))
-        nb_matrix[a1z + 1, a3z + 1] = false
-        nb_matrix[a3z + 1, a1z + 1] = false
+        eligible[a1z + 1, a3z + 1] = false
+        eligible[a3z + 1, a1z + 1] = false
     end
 
     for (a1z, a2z, a3z, a4z) in top_torsions
@@ -584,8 +584,8 @@ function System(coord_file::AbstractString,
                         proper=true,
             ))
         end
-        matrix_14[a1z + 1, a4z + 1] = true
-        matrix_14[a4z + 1, a1z + 1] = true
+        special[a1z + 1, a4z + 1] = true
+        special[a4z + 1, a1z + 1] = true
     end
 
     # Note the order here - Chemfiles puts the central atom second
@@ -792,15 +792,15 @@ function System(coord_file::AbstractString,
     atoms = [atoms...]
     if gpu
         neighbor_finder = DistanceNeighborFinder(
-            nb_matrix=CuArray(nb_matrix),
-            matrix_14=CuArray(matrix_14),
+            eligible=CuArray(eligible),
+            special=CuArray(special),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
     else
         neighbor_finder = CellListMapNeighborFinder(
-            nb_matrix=nb_matrix,
-            matrix_14=matrix_14,
+            eligible=eligible,
+            special=special,
             n_steps=10,
             x0=coords,
             unit_cell=boundary_used,
@@ -1079,26 +1079,26 @@ function System(T::Type,
 
     # Calculate matrix of pairs eligible for non-bonded interactions
     n_atoms = length(coords)
-    nb_matrix = trues(n_atoms, n_atoms)
+    eligible = trues(n_atoms, n_atoms)
     for i in 1:n_atoms
-        nb_matrix[i, i] = false
+        eligible[i, i] = false
     end
     for (i, j) in zip(bonds.is, bonds.js)
-        nb_matrix[i, j] = false
-        nb_matrix[j, i] = false
+        eligible[i, j] = false
+        eligible[j, i] = false
     end
     for (i, k) in zip(angles.is, angles.ks)
         # Assume bonding is already specified
-        nb_matrix[i, k] = false
-        nb_matrix[k, i] = false
+        eligible[i, k] = false
+        eligible[k, i] = false
     end
 
     # Calculate matrix of pairs eligible for halved non-bonded interactions
     # This applies to specified pairs in the topology file, usually 1-4 bonded
-    matrix_14 = falses(n_atoms, n_atoms)
+    special = falses(n_atoms, n_atoms)
     for (i, j) in pairs
-        matrix_14[i, j] = true
-        matrix_14[j, i] = true
+        special[i, j] = true
+        special[j, i] = true
     end
 
     lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), nl_only=true, weight_14=T(0.5),
@@ -1158,15 +1158,15 @@ function System(T::Type,
 
     if gpu
         neighbor_finder = DistanceNeighborFinder(
-            nb_matrix=CuArray(nb_matrix),
-            matrix_14=CuArray(matrix_14),
+            eligible=CuArray(eligible),
+            special=CuArray(special),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
     else
         neighbor_finder = CellListMapNeighborFinder(
-            nb_matrix=nb_matrix,
-            matrix_14=matrix_14,
+            eligible=eligible,
+            special=special,
             n_steps=10,
             x0=coords,
             unit_cell=boundary_used,

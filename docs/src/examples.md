@@ -211,18 +211,18 @@ atoms = [Atom(mass=10.0u"u", σ=1.0u"nm", ϵ=0.5u"kJ * mol^-1") for _ in 1:n_ato
 
 # Since we are using a generic pairwise Lennard-Jones potential too we need to
 #   exclude adjacent monomers from the neighbor list
-nb_matrix = trues(n_atoms, n_atoms)
+eligible = trues(n_atoms, n_atoms)
 for pol_i in 1:n_polymers
     for mon_i in 1:n_bonds_mon
         i = (pol_i - 1) * n_monomers + mon_i
         j = (pol_i - 1) * n_monomers + mon_i + 1
-        nb_matrix[i, j] = false
-        nb_matrix[j, i] = false
+        eligible[i, j] = false
+        eligible[j, i] = false
     end
 end
 
 neighbor_finder = DistanceNeighborFinder(
-    nb_matrix=nb_matrix,
+    eligible=eligible,
     n_steps=10,
     dist_cutoff=5.0u"nm",
 )
@@ -461,7 +461,7 @@ pairwise_inters = (
     BondableInteraction(true, 0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(
-    nb_matrix=trues(n_atoms, n_atoms),
+    eligible=trues(n_atoms, n_atoms),
     n_steps=10,
     dist_cutoff=2.0,
 )

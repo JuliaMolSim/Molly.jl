@@ -118,7 +118,7 @@ end
     reorder_neighbors(nbs) = map(t -> (min(t[1], t[2]), max(t[1], t[2]), t[3]), nbs)
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
-        nf = neighbor_finder(nb_matrix=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
+        nf = neighbor_finder(eligible=trues(3, 3), n_steps=10, dist_cutoff=2.0u"nm")
         s = System(
             atoms=[Atom(), Atom(), Atom()],
             coords=[
@@ -146,7 +146,7 @@ end
     ]
     boundary = CubicBoundary(10.0u"nm")
     neighbor_finder=CellListMapNeighborFinder(
-        nb_matrix=trues(3, 3), n_steps=10, x0=coords,
+        eligible=trues(3, 3), n_steps=10, x0=coords,
         unit_cell=boundary, dist_cutoff=2.0u"nm",
     )
     s = System(
@@ -172,7 +172,7 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=0.01u"nm")
     atoms = fill(Atom(), n_atoms)
     dist_cutoff = 0.6u"nm"
-    nf = CellListMapNeighborFinder(nb_matrix=trues(n_atoms, n_atoms), dist_cutoff=dist_cutoff)
+    nf = CellListMapNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=dist_cutoff)
     sys = System(atoms=atoms, coords=coords, boundary=boundary, neighbor_finder=nf)
     neighbors = find_neighbors(sys)
 
@@ -206,8 +206,8 @@ end
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
         nf = neighbor_finder(
-            nb_matrix=sys.neighbor_finder.nb_matrix,
-            matrix_14=sys.neighbor_finder.matrix_14,
+            eligible=sys.neighbor_finder.eligible,
+            special=sys.neighbor_finder.special,
             dist_cutoff=dist_cutoff,
         )
         for n_threads in n_threads_list
@@ -221,8 +221,8 @@ end
         sys_gpu = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=true)
         for neighbor_finder in (DistanceNeighborFinder,)
             nf_gpu = neighbor_finder(
-                nb_matrix=sys_gpu.neighbor_finder.nb_matrix,
-                matrix_14=sys_gpu.neighbor_finder.matrix_14,
+                eligible=sys_gpu.neighbor_finder.eligible,
+                special=sys_gpu.neighbor_finder.special,
                 dist_cutoff=dist_cutoff,
             )
             neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
@@ -263,14 +263,14 @@ end
     pairwise_inters = (LennardJones(nl_only=true),)
     n_replicas = 4
 
-    nb_matrix = trues(n_atoms, n_atoms)
+    eligible = trues(n_atoms, n_atoms)
     for i in 1:(n_atoms ÷ 2)
-        nb_matrix[i, i + (n_atoms ÷ 2)] = false
-        nb_matrix[i + (n_atoms ÷ 2), i] = false
+        eligible[i, i + (n_atoms ÷ 2)] = false
+        eligible[i + (n_atoms ÷ 2), i] = false
     end
     
     neighbor_finder = DistanceNeighborFinder(
-        nb_matrix=nb_matrix,
+        eligible=eligible,
         n_steps=10,
         dist_cutoff=1.5u"nm",
     )

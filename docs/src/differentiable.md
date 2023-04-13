@@ -58,7 +58,7 @@ atom_mass = 10.0
 boundary = CubicBoundary(3.0)
 temp = 1.0
 neighbor_finder = DistanceNeighborFinder(
-    nb_matrix=trues(n_atoms, n_atoms),
+    eligible=trues(n_atoms, n_atoms),
     n_steps=10,
     dist_cutoff=1.5,
 )

@@ -114,7 +114,7 @@ end
             general_inters = ()
         end
         neighbor_finder = DistanceNeighborFinder(
-            nb_matrix=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+            eligible=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
             n_steps=10,
             dist_cutoff=f32 ? 1.5f0 : 1.5,
         )

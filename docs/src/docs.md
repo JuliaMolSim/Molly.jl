@@ -146,14 +146,14 @@ The arguments are a 2D array of eligible interacting pairs, the number of steps 
 Since the neighbor finder is run every 10 steps we should also use a cutoff for the interaction with a cutoff distance less than the neighbor list distance.
 ```julia
 # All pairs apart from bonded pairs are eligible for non-bonded interactions
-nb_matrix = trues(n_atoms, n_atoms)
+eligible = trues(n_atoms, n_atoms)
 for i in 1:(n_atoms ÷ 2)
-    nb_matrix[i, i + (n_atoms ÷ 2)] = false
-    nb_matrix[i + (n_atoms ÷ 2), i] = false
+    eligible[i, i + (n_atoms ÷ 2)] = false
+    eligible[i + (n_atoms ÷ 2), i] = false
 end
 
 neighbor_finder = DistanceNeighborFinder(
-    nb_matrix=nb_matrix,
+    eligible=eligible,
     n_steps=10,
     dist_cutoff=1.5u"nm",
 )
@@ -493,7 +493,7 @@ pairwise_inters = (
     SIR=SIRInteraction(false, 0.5, 0.06, 0.01),
 )
 neighbor_finder = DistanceNeighborFinder(
-    nb_matrix=trues(n_people, n_people),
+    eligible=trues(n_people, n_people),
     n_steps=10,
     dist_cutoff=2.0,
 )
@@ -1011,13 +1011,13 @@ The available neighbor finders are:
 To define your own neighbor finder, first define the `struct`:
 ```julia
 struct MyNeighborFinder
-    nb_matrix::BitArray{2}
-    matrix_14::BitArray{2}
+    eligible::BitArray{2}
+    special::BitArray{2}
     n_steps::Int
     # Any other properties, e.g. a distance cutoff
 end
 ```
-Examples of three useful properties are given here: a matrix indicating atom pairs eligible for non-bonded interactions, a matrix indicating atoms in a 1-4 bonding arrangement, and a value determining how many time steps occur between each evaluation of the neighbor finder.
+Examples of three useful properties are given here: a matrix indicating atom pairs eligible for non-bonded interactions, a matrix indicating atoms in a special arrangement such as 1-4 bonding, and a value determining how many time steps occur between each evaluation of the neighbor finder.
 Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
 function find_neighbors(s,
@@ -1138,7 +1138,7 @@ specific_inter_lists = (InteractionList2Atoms(
 ),)
 
 # Define system
-nf = DistanceNeighborFinder(dist_cutoff=0.6u"nm", nb_matrix=trues(n_atoms, n_atoms))
+nf = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=0.6u"nm")
 
 sys = System(
     atoms=atoms,
