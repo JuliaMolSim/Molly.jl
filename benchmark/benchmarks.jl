@@ -10,15 +10,15 @@ using CUDA
 
 using DelimitedFiles
 
-# Allow CUDA device to be specified
-const DEVICE = get(ENV, "DEVICE", "0")
-
 const run_parallel_tests = Threads.nthreads() > 1
 if run_parallel_tests
     @info "The parallel benchmarks will be run as Julia is running on $(Threads.nthreads()) threads"
 else
     @warn "The parallel benchmarks will not be run as Julia is running on 1 thread"
 end
+
+# Allow CUDA device to be specified
+const DEVICE = get(ENV, "DEVICE", "0")
 
 const run_gpu_tests = CUDA.functional()
 if run_gpu_tests

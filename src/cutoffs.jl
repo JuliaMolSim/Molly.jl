@@ -16,7 +16,7 @@ struct NoCutoff end
 
 cutoff_points(::Type{NoCutoff}) = 0
 
-force_divr_cutoff(::NoCutoff, r2, inter, params) = force_divr_nocutoff(inter, r2, inv(r2), params)
+force_divr_cutoff(::NoCutoff, r2, inter, params) = force_divr(inter, r2, inv(r2), params)
 potential_cutoff(::NoCutoff, r2, inter, params) = potential(inter, r2, inv(r2), params)
 
 """
@@ -36,7 +36,7 @@ end
 
 cutoff_points(::Type{DistanceCutoff{D, S, I}}) where {D, S, I} = 1
 
-force_divr_cutoff(::DistanceCutoff, r2, inter, params) = force_divr_nocutoff(inter, r2, inv(r2), params)
+force_divr_cutoff(::DistanceCutoff, r2, inter, params) = force_divr(inter, r2, inv(r2), params)
 potential_cutoff(::DistanceCutoff, r2, inter, params) = potential(inter, r2, inv(r2), params)
 
 """
@@ -56,7 +56,9 @@ end
 
 cutoff_points(::Type{ShiftedPotentialCutoff{D, S, I}}) where {D, S, I} = 1
 
-force_divr_cutoff(::ShiftedPotentialCutoff, r2, inter, params) = force_divr_nocutoff(inter, r2, inv(r2), params)
+function force_divr_cutoff(::ShiftedPotentialCutoff, r2, inter, params)
+    return force_divr(inter, r2, inv(r2), params)
+end
 
 function potential_cutoff(cutoff::ShiftedPotentialCutoff, r2, inter, params)
     potential(inter, r2, inv(r2), params) - potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
@@ -80,15 +82,15 @@ end
 cutoff_points(::Type{ShiftedForceCutoff{D, S, I}}) where {D, S, I} = 1
 
 function force_divr_cutoff(cutoff::ShiftedForceCutoff, r2, inter, params)
-    return force_divr_nocutoff(inter, r2, inv(r2), params) - force_divr_nocutoff(
-                                inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
+    return force_divr(inter, r2, inv(r2), params) -
+           force_divr(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
 end
 
 function potential_cutoff(cutoff::ShiftedForceCutoff, r2, inter, params)
     invr2 = inv(r2)
     r = √r2
     rc = cutoff.dist_cutoff
-    fc = force_divr_nocutoff(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params) * r
+    fc = force_divr(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params) * r
 
     potential(inter, r2, invr2, params) + (r - rc) * fc -
         potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
@@ -127,7 +129,8 @@ function force_divr_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
     t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff-cutoff.dist_activation)
 
     Va = potential(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params)
-    dVa = -force_divr_nocutoff(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params) * cutoff.dist_activation
+    dVa = -force_divr(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params) *
+          cutoff.dist_activation
     
     return -((6t^2 - 6t) * Va / (cutoff.dist_cutoff-cutoff.dist_activation) + (3t^2 - 4t + 1) * dVa)/r
 end
@@ -137,10 +140,54 @@ function potential_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
     t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff-cutoff.dist_activation)
 
     Va = potential(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params)
-    dVa = -force_divr_nocutoff(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params) * cutoff.dist_activation
+    dVa = -force_divr(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params) *
+          cutoff.dist_activation
     
-    return (2t^3 - 3t^2 + 1) * Va + (t^3 - 2t^2 + t) * (cutoff.dist_cutoff-cutoff.dist_activation) * dVa
+    return (2t^3 - 3t^2 + 1) * Va + (t^3 - 2t^2 + t) *
+           (cutoff.dist_cutoff-cutoff.dist_activation) * dVa
 end
 
 Base.:+(c1::T, ::T) where {T <: Union{NoCutoff, DistanceCutoff, ShiftedPotentialCutoff,
                                       ShiftedForceCutoff, CubicSplineCutoff}} = c1
+
+function force_divr_with_cutoff(inter, r2, params, cutoff::C, coord_i::SVector{D, T},
+                                force_units) where {C, D, T}
+    if cutoff_points(C) == 0
+        return force_divr(inter, r2, inv(r2), params)
+    elseif cutoff_points(C) == 1
+        if r2 > cutoff.sqdist_cutoff
+            return ustrip(zero(T)) * force_units
+        else
+            return force_divr_cutoff(cutoff, r2, inter, params)
+        end
+    elseif cutoff_points(C) == 2
+        if r2 > cutoff.sqdist_cutoff
+            return ustrip(zero(T)) * force_units
+        elseif r2 < cutoff.sqdist_activation
+            return force_divr(inter, r2, inv(r2), params)
+        else
+            return force_divr_cutoff(cutoff, r2, inter, params)
+        end
+    end
+end
+
+function potential_with_cutoff(inter, r2, params, cutoff::C, coord_i::SVector{D, T},
+                               energy_units) where {C, D, T}
+    if cutoff_points(C) == 0
+        return potential(inter, r2, inv(r2), params)
+    elseif cutoff_points(C) == 1
+        if r2 > cutoff.sqdist_cutoff
+            return ustrip(zero(T)) * energy_units
+        else
+            return potential_cutoff(cutoff, r2, inter, params)
+        end
+    elseif cutoff_points(C) == 2
+        if r2 > cutoff.sqdist_cutoff
+            return ustrip(zero(T)) * energy_units
+        elseif r2 < cutoff.sqdist_activation
+            return potential(inter, r2, inv(r2), params)
+        else
+            return potential_cutoff(cutoff, r2, inter, params)
+        end
+    end
+end

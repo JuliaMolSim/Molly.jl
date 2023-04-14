@@ -48,7 +48,8 @@ use_neighbors(inter::Mie) = inter.use_neighbors
                                     atom_i,
                                     atom_j,
                                     boundary) where {S, C, T}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
+    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
+              iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip.(zero(coord_i)) * inter.force_units
     end
 
@@ -66,26 +67,11 @@ use_neighbors(inter::Mie) = inter.use_neighbors
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)
 
-    if cutoff_points(C) == 0
-        f = force_divr_nocutoff(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        f = force_divr_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        if r2 < cutoff.sqdist_activation
-            f = force_divr_nocutoff(inter, r2, inv(r2), params)
-        else
-            f = force_divr_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
     return f * dr
 end
 
-function force_divr_nocutoff(::Mie, r2, invr2, (m, n, σ_r, const_mn))
+function force_divr(::Mie, r2, invr2, (m, n, σ_r, const_mn))
     return -const_mn / r2 * (m * σ_r ^ m - n * σ_r ^ n)
 end
 
@@ -96,7 +82,8 @@ end
                                             atom_i,
                                             atom_j,
                                             boundary) where {S, C, T}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
+    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
+              iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip(zero(coord_i[1])) * inter.energy_units
     end
 
@@ -112,21 +99,7 @@ end
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)
 
-    if cutoff_points(C) == 0
-        potential(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        potential_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        if r2 < cutoff.sqdist_activation
-            potential(inter, r2, inv(r2), params)
-        else
-            potential_cutoff(cutoff, r2, inter, params)
-        end
-    end
+    return potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
 end
 
 function potential(::Mie, r2, invr2, (m, n, σ_r, const_mn))

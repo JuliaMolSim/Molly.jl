@@ -9,3 +9,7 @@ Various environmental variables can be set to modify the tests:
 - `GPUTESTS` determines whether to run the GPU tests, default `GPUTESTS=1`.
 - `DEVICE` determines which GPU to run on, default `DEVICE=0`.
 - `GROUP` can be used to run a subset of the tests, options `All`/`Protein`/`Zygote`, default `GROUP=All`.
+
+## Benchmarks
+
+The `benchmark` directory contains some benchmarks for the package.

@@ -82,7 +82,8 @@ end
                                     atom_j,
                                     boundary,
                                     special::Bool=false) where {S, C}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
+    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
+              iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip.(zero(coord_i)) * inter.force_units
     end
 
@@ -100,22 +101,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    if cutoff_points(C) == 0
-        f = force_divr_nocutoff(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        f = force_divr_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        if r2 < cutoff.sqdist_activation
-            f = force_divr_nocutoff(inter, r2, inv(r2), params)
-        else
-            f = force_divr_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
     if special
         return f * dr * inter.weight_special
     else
@@ -123,9 +109,8 @@ end
     end
 end
 
-function force_divr_nocutoff(::LennardJones, r2, invr2, (σ2, ϵ))
+function force_divr(::LennardJones, r2, invr2, (σ2, ϵ))
     six_term = (σ2 * invr2) ^ 3
-
     return (24ϵ * invr2) * (2 * six_term ^ 2 - six_term)
 end
 
@@ -137,7 +122,8 @@ end
                                             atom_j,
                                             boundary,
                                             special::Bool=false) where {S, C}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
+    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
+              iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip(zero(coord_i[1])) * inter.energy_units
     end
 
@@ -153,22 +139,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    if cutoff_points(C) == 0
-        pe = potential(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        pe = potential_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        if r2 < cutoff.sqdist_activation
-            pe = potential(inter, r2, inv(r2), params)
-        else
-            pe = potential_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -178,7 +149,6 @@ end
 
 function potential(::LennardJones, r2, invr2, (σ2, ϵ))
     six_term = (σ2 * invr2) ^ 3
-
     return 4ϵ * (six_term ^ 2 - six_term)
 end
 
@@ -245,7 +215,8 @@ use_neighbors(inter::LennardJonesSoftCore) = inter.use_neighbors
                                     atom_j,
                                     boundary,
                                     special::Bool=false) where {S, C}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
+    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
+              iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip.(zero(coord_i)) * inter.force_units
     end
 
@@ -263,22 +234,7 @@ use_neighbors(inter::LennardJonesSoftCore) = inter.use_neighbors
     σ2 = σ^2
     params = (σ2, ϵ, inter.σ6_fac)
 
-    if cutoff_points(C) == 0
-        f = force_divr_nocutoff(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        f = force_divr_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        if r2 < cutoff.sqdist_activation
-            f = force_divr_nocutoff(inter, r2, inv(r2), params)
-        else
-            f = force_divr_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
     if special
         return f * dr * inter.weight_special
     else
@@ -286,13 +242,11 @@ use_neighbors(inter::LennardJonesSoftCore) = inter.use_neighbors
     end
 end
 
-function force_divr_nocutoff(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
+function force_divr(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
     inv_rsc6 = inv(r2^3 + σ2^3 * σ6_fac) # rsc = (r2^3 + α * σ2^3 * λ^p)^(1/6)
     inv_rsc  = √cbrt(inv_rsc6)
     six_term = σ2^3 * inv_rsc6
-
     ff  = (24ϵ * inv_rsc) * (2 * six_term^2 - six_term) * (√r2 * inv_rsc)^5
-    # √invr2 is for normalizing dr
     return ff * √invr2
 end
 
@@ -304,7 +258,8 @@ end
                                             atom_j,
                                             boundary,
                                             special::Bool=false) where {S, C}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
+    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
+              iszero_value(atom_i.σ) ||iszero_value(atom_j.σ))
         return ustrip(zero(coord_i[1])) * inter.energy_units
     end
 
@@ -320,22 +275,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ, inter.σ6_fac)
 
-    if cutoff_points(C) == 0
-        pe = potential(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        pe = potential_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        if r2 < cutoff.sqdist_activation
-            pe = potential(inter, r2, inv(r2), params)
-        else
-            pe = potential_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -345,6 +285,5 @@ end
 
 function potential(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
     six_term = σ2^3 * inv(r2^3 + σ2^3 * σ6_fac)
-
     return 4ϵ * (six_term ^ 2 - six_term)
 end

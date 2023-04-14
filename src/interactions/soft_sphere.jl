@@ -37,7 +37,8 @@ use_neighbors(inter::SoftSphere) = inter.use_neighbors
                                     atom_i,
                                     atom_j,
                                     boundary) where {S, C}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
+    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
+              iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip.(zero(coord_i)) * inter.force_units
     end
 
@@ -51,28 +52,12 @@ use_neighbors(inter::SoftSphere) = inter.use_neighbors
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    if cutoff_points(C) == 0
-        f = force_divr_nocutoff(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        f = force_divr_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        if r2 < cutoff.sqdist_activation
-            f = force_divr_nocutoff(inter, r2, inv(r2), params)
-        else
-            f = force_divr_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
     return f * dr
 end
 
-function force_divr_nocutoff(::SoftSphere, r2, invr2, (σ2, ϵ))
+function force_divr(::SoftSphere, r2, invr2, (σ2, ϵ))
     six_term = (σ2 * invr2) ^ 3
-
     return (24ϵ * invr2) * 2 * six_term ^ 2
 end
 
@@ -83,7 +68,8 @@ end
                                     atom_i,
                                     atom_j,
                                     boundary) where {S, C}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) || iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
+    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
+              iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
         return ustrip(zero(coord_i[1])) * inter.energy_units
     end
 
@@ -95,25 +81,10 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    if cutoff_points(C) == 0
-        potential(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        potential_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        if r2 < cutoff.sqdist_activation
-            potential(inter, r2, inv(r2), params)
-        else
-            potential_cutoff(cutoff, r2, inter, params)
-        end
-    end
+    return potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
 end
 
 function potential(::SoftSphere, r2, invr2, (σ2, ϵ))
     six_term = (σ2 * invr2) ^ 3
-
     return 4ϵ * (six_term ^ 2)
 end

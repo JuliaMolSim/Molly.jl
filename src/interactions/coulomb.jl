@@ -67,29 +67,12 @@ end
                                     boundary,
                                     special::Bool=false) where C
     r2 = sum(abs2, dr)
-
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-
     params = (coulomb_const, qi, qj)
 
-    if cutoff_points(C) == 0
-        f = force_divr_nocutoff(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        f = force_divr_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        if r2 < cutoff.sqdist_activation
-            f = force_divr_nocutoff(inter, r2, inv(r2), params)
-        else
-            f = force_divr_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
     if special
         return f * dr * inter.weight_special
     else
@@ -97,8 +80,8 @@ end
     end
 end
 
-function force_divr_nocutoff(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
-    (coulomb_const * qi * qj) / √(r2 ^ 3)
+function force_divr(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
+    return (coulomb_const * qi * qj) / √(r2 ^ 3)
 end
 
 @inline @inbounds function potential_energy(inter::Coulomb{C},
@@ -110,28 +93,12 @@ end
                                             boundary,
                                             special::Bool=false) where C
     r2 = sum(abs2, dr)
-
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     params = (coulomb_const, qi, qj)
 
-    if cutoff_points(C) == 0
-        pe = potential(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        pe = potential_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        if r2 < cutoff.sqdist_activation
-            pe = potential(inter, r2, inv(r2), params)
-        else
-            pe = potential_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -140,7 +107,7 @@ end
 end
 
 function potential(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
-    (coulomb_const * qi * qj) * √invr2
+    return (coulomb_const * qi * qj) * √invr2
 end
 
 @doc raw"""
@@ -198,30 +165,13 @@ use_neighbors(inter::CoulombSoftCore) = inter.use_neighbors
                                     boundary,
                                     special::Bool=false) where C
     r2 = sum(abs2, dr)
-
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-
     params = (coulomb_const, qi, qj, σ, inter.σ6_fac)
 
-    if cutoff_points(C) == 0
-        f = force_divr_nocutoff(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        f = force_divr_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        if r2 < cutoff.sqdist_activation
-            f = force_divr_nocutoff(inter, r2, inv(r2), params)
-        else
-            f = force_divr_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
     if special
         return f * dr * inter.weight_special
     else
@@ -229,13 +179,11 @@ use_neighbors(inter::CoulombSoftCore) = inter.use_neighbors
     end
 end
 
-function force_divr_nocutoff(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ6_fac))
+function force_divr(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ6_fac))
     inv_rsc6 = inv(r2^3 + σ6_fac * σ^6)
     inv_rsc2 = cbrt(inv_rsc6)
     inv_rsc3 = sqrt(inv_rsc6)
-
     ff = (coulomb_const * qi * qj) * inv_rsc2 * sqrt(r2)^5 * inv_rsc2 * inv_rsc3
-    # √invr2 is for normalizing dr
     return ff * √invr2
 end
 
@@ -248,30 +196,13 @@ end
                                             boundary,
                                             special::Bool=false) where C
     r2 = sum(abs2, dr)
-
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-
     params = (coulomb_const, qi, qj, σ, inter.σ6_fac)
 
-    if cutoff_points(C) == 0
-        pe = potential(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        pe = potential_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        if r2 < cutoff.sqdist_activation
-            pe = potential(inter, r2, inv(r2), params)
-        else
-            pe = potential_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -352,7 +283,6 @@ end
                                     boundary,
                                     special::Bool=false)
     r2 = sum(abs2, dr)
-
     if r2 > (inter.dist_cutoff ^ 2)
         return ustrip.(zero(coord_i)) * inter.force_units
     end
@@ -360,13 +290,13 @@ end
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = √r2
-    i, j = atom_i.index, atom_j.index
     if special
         # 1-4 interactions do not use the reaction field approximation
         krf = (1 / (inter.dist_cutoff ^ 3)) * 0
     else
         # These values could be pre-computed but this way is easier for AD
-        krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1))
+        krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) /
+              (2 * inter.solvent_dielectric + 1))
     end
 
     f = (coulomb_const * qi * qj) * (inv(r) - 2 * krf * r2) * inv(r2)
@@ -387,7 +317,6 @@ end
                                             boundary,
                                             special::Bool=false)
     r2 = sum(abs2, dr)
-
     if r2 > (inter.dist_cutoff ^ 2)
         return ustrip(zero(coord_i[1])) * inter.energy_units
     end
@@ -400,8 +329,10 @@ end
         krf = (1 / (inter.dist_cutoff ^ 3)) * 0
         crf = (1 /  inter.dist_cutoff     ) * 0
     else
-        krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) / (2 * inter.solvent_dielectric + 1))
-        crf = (1 /  inter.dist_cutoff     ) * ((3 * inter.solvent_dielectric) / (2 * inter.solvent_dielectric + 1))
+        krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) /
+              (2 * inter.solvent_dielectric + 1))
+        crf = (1 /  inter.dist_cutoff     ) * ((3 * inter.solvent_dielectric) / 
+              (2 * inter.solvent_dielectric + 1))
     end
 
     pe = (coulomb_const * qi * qj) * (inv(r) + krf * r2 - crf)

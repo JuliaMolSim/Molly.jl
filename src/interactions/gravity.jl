@@ -26,15 +26,13 @@ use_neighbors(inter::Gravity) = inter.use_neighbors
                                  atom_j,
                                  boundary)
     r2 = sum(abs2, dr)
-
     params = (inter.G, mass(atom_i), mass(atom_j))
-
-    f = force_divr_nocutoff(inter, r2, inv(r2), params)
+    f = force_divr(inter, r2, inv(r2), params)
     return f * dr
 end
 
-function force_divr_nocutoff(::Gravity, r2, invr2, (G, mi, mj))
-    (-G * mi * mj) / √(r2 ^ 3)
+function force_divr(::Gravity, r2, invr2, (G, mi, mj))
+    return (-G * mi * mj) / √(r2 ^ 3)
 end
 
 @inline @inbounds function potential_energy(inter::Gravity,
@@ -45,12 +43,10 @@ end
                                             atom_j,
                                             boundary)
     r2 = sum(abs2, dr)
-
     params = (inter.G, mass(atom_i), mass(atom_j))
-
     potential(inter, r2, inv(r2), params)
 end
 
 function potential(::Gravity, r2, invr2, (G, mi, mj))
-    (-G * mi * mj) * √invr2
+    return (-G * mi * mj) * √invr2
 end

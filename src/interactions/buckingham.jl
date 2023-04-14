@@ -63,22 +63,7 @@ use_neighbors(inter::Buckingham) = inter.use_neighbors
     r2 = sum(abs2, dr)
     params = (Aij, Bij, Cij)
 
-    if cutoff_points(C) == 0
-        f = force_divr_nocutoff(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        f = force_divr_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip.(zero(coord_i)) * inter.force_units
-
-        if r2 < cutoff.sqdist_activation
-            f = force_divr_nocutoff(inter, r2, inv(r2), params)
-        else
-            f = force_divr_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
     if special
         return f * dr * inter.weight_special
     else
@@ -86,7 +71,7 @@ use_neighbors(inter::Buckingham) = inter.use_neighbors
     end
 end
 
-function force_divr_nocutoff(::Buckingham, r2, invr2, (A, B, C))
+function force_divr(::Buckingham, r2, invr2, (A, B, C))
     r = sqrt(r2)
     return A * B * exp(-B * r) / r - 6 * C * invr2^4
 end
@@ -112,22 +97,7 @@ end
     r2 = sum(abs2, dr)
     params = (Aij, Bij, Cij)
 
-    if cutoff_points(C) == 0
-        pe = potential(inter, r2, inv(r2), params)
-    elseif cutoff_points(C) == 1
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        pe = potential_cutoff(cutoff, r2, inter, params)
-    elseif cutoff_points(C) == 2
-        r2 > cutoff.sqdist_cutoff && return ustrip(zero(coord_i[1])) * inter.energy_units
-
-        if r2 < cutoff.sqdist_activation
-            pe = potential(inter, r2, inv(r2), params)
-        else
-            pe = potential_cutoff(cutoff, r2, inter, params)
-        end
-    end
-
+    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
     if special
         return pe * inter.weight_special
     else
