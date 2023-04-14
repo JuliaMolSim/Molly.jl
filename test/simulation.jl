@@ -613,6 +613,34 @@ end
     @test maximum(maximum(abs.(v)) for v in (s1.coords .- s2.coords)) < 1e-5u"nm"
 end
 
+@testset "Nosé-Hoover" begin
+    n_atoms = 256
+    atom_mass = 39.98u"u"
+    atoms = [Atom(mass=atom_mass, σ=0.34u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+    boundary = CubicBoundary(4.0u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.36u"nm")
+    temp = 100.0u"K"
+    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        velocities=velocities,
+        boundary=boundary,
+        pairwise_inters=(LennardJones(),),
+        loggers=(temp=TemperatureLogger(1),),
+    )
+
+    minimizer = SteepestDescentMinimizer()
+    simulate!(sys, minimizer)
+
+    simulator = NoseHoover(dt=0.002u"ps", temperature=temp)
+    simulate!(sys, simulator, 50_000)
+
+    @test (temp - 1.0u"K") < mean(values(sys.loggers.temp)) < (temp + 1.0u"K")
+    @test std(values(sys.loggers.temp)) > 2.0u"K"
+end
+
 @testset "Temperature REMD" begin
     n_atoms = 100
     n_steps = 10_000
@@ -906,41 +934,4 @@ end
         @test coord_diff < 1e-4u"nm"
         @test E_diff < 5e-4u"kJ * mol^-1"
     end
-end
-
-@testset "NoseHoover Thermostat" begin
-
-    n_atoms = 256
-    atom_mass = 39.98u"u"
-    atoms = [Atom(mass=atom_mass, σ=0.34u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    
-    boundary = CubicBoundary(4.0u"nm", 4.0u"nm", 4.0u"nm") # Periodic boundary conditions
-    coords = place_atoms(n_atoms, boundary; min_dist=0.36u"nm") # Random placement without clashing
-    
-    temp = 100.0u"K"
-    velocities = [velocity(atom_mass, temp) for i in 1:n_atoms];
-
-    sys = System(
-            atoms=atoms,
-            coords=coords,
-            velocities=velocities,
-            boundary=boundary,
-            pairwise_inters=(LennardJones(),),
-            loggers=(
-                temps=TemperatureLogger(1),
-            ),
-        )
-
-    minimizer = SteepestDescentMinimizer()
-    simulate!(sys, minimizer)
-
-    simulator = NoseHoover(
-        dt=0.002u"ps",
-        temperature = temp
-    )
-
-    simulate!(sys, simulator, 50_000)
-
-    @test temp - 1.0u"K" < mean(values(sys.loggers.temps)) < temp + 1.0u"K"
-
 end
