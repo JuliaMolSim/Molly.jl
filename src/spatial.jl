@@ -29,6 +29,12 @@ Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct CubicBoundary{T}
     side_lengths::SVector{3, T}
+    function CubicBoundary(side_lengths::SVector{3, E}) where E
+        if any(a -> a < zero(a),  side_lengths)
+            throw(DomainError("Side lengths can't be negative, got $side_lengths"))
+        end
+        new{E}(side_lengths)
+    end
 end
 
 CubicBoundary(x, y, z) = CubicBoundary(SVector{3}(x, y, z))
@@ -48,6 +54,12 @@ Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct RectangularBoundary{T}
     side_lengths::SVector{2, T}
+    function RectangularBoundary(side_lengths::SVector{2, E}) where E
+        if any(a -> a < zero(a), side_lengths)
+            throw(DomainError("Side lengths can't be negative, got $side_lengths"))
+        end
+        new{E}(side_lengths)
+    end
 end
 
 RectangularBoundary(x, y) = RectangularBoundary(SVector{2}(x, y))
