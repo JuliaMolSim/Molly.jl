@@ -866,12 +866,12 @@ function simulate!(sys::System{D, G, T},
     end
 
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    E_old = potential_energy(sys, neighbors)
+    E_old = potential_energy(sys, neighbors; n_threads=n_threads)
     for i in 1:n_steps
         coords_old = copy(sys.coords)
         sim.trial_moves(sys; sim.trial_args...) # Changes the coordinates of the system
         neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-        E_new = potential_energy(sys, neighbors)
+        E_new = potential_energy(sys, neighbors; n_threads=n_threads)
 
         ΔE = E_new - E_old
         δ = ΔE / (k_b * sim.temperature)
