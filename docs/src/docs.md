@@ -865,6 +865,7 @@ The available simulators are:
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
 - [`LangevinSplitting`](@ref)
+- [`NoseHoover`](@ref)
 - [`TemperatureREMD`](@ref)
 - [`HamiltonianREMD`](@ref)
 - [`MetropolisMonteCarlo`](@ref)
@@ -942,18 +943,15 @@ function Molly.remd_exchange!(sys::ReplicaSystem,
     return Δ, make_exchange
 end
 ```
-
-!!! tip "Correct Boltzmann constant"
-    To get the correct exchange rates, the units of the Boltzmann constant must be corrected when used in the exchange function:
-    ```julia
-    if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        k_b = sys.k * T(Unitful.Na)
-    else
-        k_b = sys.k
-    end
-    ```
-
-The above function returns `Δ` which is the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref) and a boolean indicating whether the exchange was successful.
+To get the correct exchange rates, the units of the Boltzmann constant must be corrected when used in the exchange function:
+```julia
+if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+    k_b = sys.k * T(Unitful.Na)
+else
+    k_b = sys.k
+end
+```
+The above function returns `Δ`, the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref), and a boolean indicating whether the exchange was successful.
 
 Then, define a method for the [`simulate!`](@ref) function to perform the parallel simulation.
 This does any initial setup such as assigning velocities then uses [`simulate_remd!`](@ref) to run the simulation:
