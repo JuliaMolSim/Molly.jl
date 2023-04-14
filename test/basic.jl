@@ -44,11 +44,13 @@
 
     b = CubicBoundary(4.0u"nm", 5.0u"nm", 6.0u"nm")
     @test box_volume(b) == 120.0u"nm^3"
+    @test box_volume(CubicBoundary(0.0u"m")) == 0.0u"m^3"
     @test box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
     @test_throws DomainError CubicBoundary(-4.0u"nm", 5.0u"nm", 6.0u"nm")
 
     b = RectangularBoundary(4.0u"m", 5.0u"m")
     @test box_volume(b) == 20.0u"m^2"
+    @test box_volume(RectangularBoundary(0.0u"m")) == 0.0u"m^2"
     @test box_center(b) == SVector(2.0, 2.5)u"m"
     @test_throws DomainError RectangularBoundary(-4.0u"nm", 5.0u"nm")
 
