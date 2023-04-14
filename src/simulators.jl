@@ -121,8 +121,8 @@ The velocity Verlet integrator.
 # Arguments
 - `dt::T`: the time step of the simulation.
 - `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
-- `remove_CM_motion=10`: remove the center of mass motion every this number of steps,
-    or set to `false` to not remove center of mass motion.
+- `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
+    set to `false` or `0` to not remove center of mass motion.
 """
 struct VelocityVerlet{T, C}
     dt::T
@@ -130,7 +130,7 @@ struct VelocityVerlet{T, C}
     remove_CM_motion::Int
 end
 
-function VelocityVerlet(; dt, coupling=NoCoupling(), remove_CM_motion=10)
+function VelocityVerlet(; dt, coupling=NoCoupling(), remove_CM_motion=1)
     return VelocityVerlet(dt, coupling, Int(remove_CM_motion))
 end
 
@@ -182,8 +182,8 @@ behind the positions.
 # Arguments
 - `dt::T`: the time step of the simulation.
 - `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
-- `remove_CM_motion=10`: remove the center of mass motion every this number of steps,
-    or set to `false` to not remove center of mass motion.
+- `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
+    set to `false` or `0` to not remove center of mass motion.
 """
 struct Verlet{T, C}
     dt::T
@@ -191,7 +191,7 @@ struct Verlet{T, C}
     remove_CM_motion::Int
 end
 
-function Verlet(; dt, coupling=NoCoupling(), remove_CM_motion=10)
+function Verlet(; dt, coupling=NoCoupling(), remove_CM_motion=1)
     return Verlet(dt, coupling, Int(remove_CM_motion))
 end
 
@@ -235,7 +235,7 @@ end
 The Störmer-Verlet integrator.
 The velocity calculation is accurate to O(dt).
 Does not currently work with coupling methods that alter the velocity.
-Does not currently remove the center of mass motion every time step.
+Does not currently remove the center of mass motion.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
@@ -298,8 +298,8 @@ behind the positions.
 - `dt::S`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
 - `friction::F`: the friction coefficient of the simulation.
-- `remove_CM_motion=10`: remove the center of mass motion every this number of steps,
-    or set to `false` to not remove center of mass motion.
+- `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
+    set to `false` or `0` to not remove center of mass motion.
 """
 struct Langevin{S, K, F, T}
     dt::S
@@ -310,7 +310,7 @@ struct Langevin{S, K, F, T}
     noise_scale::T
 end
 
-function Langevin(; dt, temperature, friction, remove_CM_motion=10)
+function Langevin(; dt, temperature, friction, remove_CM_motion=1)
     vel_scale = exp(-dt * friction)
     noise_scale = sqrt(1 - vel_scale^2)
     return Langevin(dt, temperature, friction, Int(remove_CM_motion), vel_scale, noise_scale)
@@ -375,8 +375,8 @@ Not currently compatible with automatic differentiation using Zygote.
 - `splitting::W`: the splitting specifier. Should be a string consisting of the
     characters `A`, `B` and `O`. Strings with no `O`s reduce to deterministic
     symplectic schemes.
-- `remove_CM_motion=10`: remove the center of mass motion every this number of steps,
-    or set to `false` to not remove center of mass motion.
+- `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
+    set to `false` or `0` to not remove center of mass motion.
 """
 struct LangevinSplitting{S, K, F, W}
     dt::S
@@ -386,7 +386,7 @@ struct LangevinSplitting{S, K, F, W}
     remove_CM_motion::Int
 end
 
-function LangevinSplitting(; dt, temperature, friction, splitting, remove_CM_motion=10)
+function LangevinSplitting(; dt, temperature, friction, splitting, remove_CM_motion=1)
     LangevinSplitting{typeof(dt), typeof(temperature), typeof(friction), typeof(splitting)}(
         dt, temperature, friction, splitting, Int(remove_CM_motion))
 end
