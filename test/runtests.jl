@@ -17,7 +17,7 @@ using Test
 
 # Allow testing of particular components
 const GROUP = get(ENV, "GROUP", "All")
-if GROUP == "Protein" || GROUP == "Zygote"
+if GROUP in ("Protein", "Zygote", "NotZygote")
     @warn "Only running $GROUP tests as GROUP is set to $GROUP"
 end
 
@@ -61,7 +61,7 @@ const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 const temp_fp_pdb = tempname(cleanup=true) * ".pdb"
 const temp_fp_viz = tempname(cleanup=true) * ".mp4"
 
-if GROUP == "All"
+if GROUP in ("All", "NotZygote")
     # Some failures due to dependencies but there is an unbound args error
     Aqua.test_all(
         Molly;
@@ -76,10 +76,10 @@ if GROUP == "All"
     include("agent.jl")
 end
 
-if GROUP == "All" || GROUP == "Protein"
+if GROUP in ("All", "Protein", "NotZygote")
     include("protein.jl")
 end
 
-if GROUP == "All" || GROUP == "Zygote"
+if GROUP in ("All", "Zygote")
     include("zygote.jl")
 end
