@@ -113,7 +113,7 @@ end
 
 function CubicSplineCutoff(dist_activation, dist_cutoff)
     if dist_cutoff <= dist_activation
-        error("The cutoff radius must be strictly larger than the activation radius")
+        error("the cutoff radius must be strictly larger than the activation radius")
     end
 
     D, S, I = typeof.([dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2)])

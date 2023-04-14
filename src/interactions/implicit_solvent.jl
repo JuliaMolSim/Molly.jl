@@ -997,7 +997,7 @@ function gbsa_force_1_kernel!(forces, born_forces_mod_ustrip, coords_var, bounda
                 Atomix.@atomic :monotonic born_forces_mod_ustrip[j] += ustrip(change_born_force_j)
                 fdr = dr * dGpol_dr
                 if unit(fdr[1]) != F
-                    error("Wrong force unit returned, was expecting $F but got $(unit(fdr[1]))")
+                    error("wrong force unit returned, was expecting $F but got $(unit(fdr[1]))")
                 end
                 for dim in 1:D
                     fval = ustrip(fdr[dim])
@@ -1044,7 +1044,7 @@ function gbsa_force_2_kernel!(forces, born_forces, coords_var, boundary, dist_cu
                     de = bi * (t3 - I_grads[i, j]) * rinv
                     fdr = -dr * de
                     if unit(fdr[1]) != F
-                        error("Wrong force unit returned, was expecting $F but got $(unit(fdr[1]))")
+                        error("wrong force unit returned, was expecting $F but got $(unit(fdr[1]))")
                     end
                     for dim in 1:D
                         fval = ustrip(fdr[dim])

@@ -34,7 +34,7 @@ function visualize(coord_logger,
         ax.aspect = DataAspect()
         max_connection_dist = sqrt(box_volume(boundary)) / 2
     else
-        throw(ArgumentError("Found $dims dimensions but can only visualize 2 or 3 dimensions"))
+        throw(ArgumentError("found $dims dimensions but can only visualize 2 or 3 dimensions"))
     end
 
     positions = Observable(PointType.(ustrip_vec.(coords_start)))

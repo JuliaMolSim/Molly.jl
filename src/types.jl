@@ -472,26 +472,26 @@ function System(;
     V = typeof(vels)
 
     if length(atoms) != length(coords)
-        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(coords)) coordinates"))
+        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(coords)) coordinates"))
     end
     if length(atoms) != length(vels)
-        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(vels)) velocities"))
+        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(vels)) velocities"))
     end
     if length(atoms_data) > 0 && length(atoms) != length(atoms_data)
-        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
+        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
     if isa(atoms, CuArray) && !isa(coords, CuArray)
-        throw(ArgumentError("The atoms are on the GPU but the coordinates are not"))
+        throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
     if isa(coords, CuArray) && !isa(atoms, CuArray)
-        throw(ArgumentError("The coordinates are on the GPU but the atoms are not"))
+        throw(ArgumentError("the coordinates are on the GPU but the atoms are not"))
     end
     if isa(atoms, CuArray) && !isa(vels, CuArray)
-        throw(ArgumentError("The atoms are on the GPU but the velocities are not"))
+        throw(ArgumentError("the atoms are on the GPU but the velocities are not"))
     end
     if isa(vels, CuArray) && !isa(atoms, CuArray)
-        throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
+        throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
 
     atom_masses = mass.(atoms)
@@ -630,21 +630,21 @@ function ReplicaSystem(;
     if isnothing(replica_pairwise_inters)
         replica_pairwise_inters = [pairwise_inters for _ in 1:n_replicas]
     elseif length(replica_pairwise_inters) != n_replicas
-        throw(ArgumentError("Number of pairwise interactions ($(length(replica_pairwise_inters)))"
+        throw(ArgumentError("number of pairwise interactions ($(length(replica_pairwise_inters)))"
                             * "does not match number of replicas ($n_replicas)"))
     end
 
     if isnothing(replica_specific_inter_lists)
         replica_specific_inter_lists = [specific_inter_lists for _ in 1:n_replicas]
     elseif length(replica_specific_inter_lists) != n_replicas
-        throw(ArgumentError("Number of specific interaction lists ($(length(replica_specific_inter_lists)))"
+        throw(ArgumentError("number of specific interaction lists ($(length(replica_specific_inter_lists)))"
                             * "does not match number of replicas ($n_replicas)"))
     end
 
     if isnothing(replica_general_inters)
         replica_general_inters = [general_inters for _ in 1:n_replicas]
     elseif length(replica_general_inters) != n_replicas
-        throw(ArgumentError("Number of general interactions ($(length(replica_general_inters)))"
+        throw(ArgumentError("number of general interactions ($(length(replica_general_inters)))"
                             * "does not match number of replicas ($n_replicas)"))
     end
 
@@ -655,65 +655,65 @@ function ReplicaSystem(;
     if isnothing(replica_constraints)
         replica_constraints = [constraints for _ in 1:n_replicas]
     elseif length(replica_constraints) != n_replicas
-        throw(ArgumentError("Number of constraints ($(length(replica_general_inters)))"
+        throw(ArgumentError("number of constraints ($(length(replica_general_inters)))"
                             * "does not match number of replicas ($n_replicas)"))
     end
     CN = eltype(replica_constraints)
 
     if !all(y -> typeof(y) == C, replica_coords)
-        throw(ArgumentError("The coordinates for all the replicas are not of the same type"))
+        throw(ArgumentError("the coordinates for all the replicas are not of the same type"))
     end
     if !all(y -> typeof(y) == V, replica_velocities)
-        throw(ArgumentError("The velocities for all the replicas are not of the same type"))
+        throw(ArgumentError("the velocities for all the replicas are not of the same type"))
     end
 
     if length(replica_coords) != n_replicas
-        throw(ArgumentError("There are $(length(replica_coords)) coordinates for replicas but $n_replicas replicas"))
+        throw(ArgumentError("there are $(length(replica_coords)) coordinates for replicas but $n_replicas replicas"))
     end
     if length(replica_velocities) != n_replicas
-        throw(ArgumentError("There are $(length(replica_velocities)) velocities for replicas but $n_replicas replicas"))
+        throw(ArgumentError("there are $(length(replica_velocities)) velocities for replicas but $n_replicas replicas"))
     end
     if length(replica_loggers) != n_replicas
-        throw(ArgumentError("There are $(length(replica_loggers)) loggers but $n_replicas replicas"))
+        throw(ArgumentError("there are $(length(replica_loggers)) loggers but $n_replicas replicas"))
     end
 
     if !all(y -> length(y) == length(replica_coords[1]), replica_coords)
-        throw(ArgumentError("Some replicas have different number of coordinates"))
+        throw(ArgumentError("some replicas have different number of coordinates"))
     end
     if !all(y -> length(y) == length(replica_velocities[1]), replica_velocities)
-        throw(ArgumentError("Some replicas have different number of velocities"))
+        throw(ArgumentError("some replicas have different number of velocities"))
     end
 
     if length(atoms) != length(replica_coords[1])
-        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(replica_coords[1])) coordinates"))
+        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(replica_coords[1])) coordinates"))
     end
     if length(atoms) != length(replica_velocities[1])
-        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(replica_velocities[1])) velocities"))
+        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(replica_velocities[1])) velocities"))
     end
     if length(atoms_data) > 0 && length(atoms) != length(atoms_data)
-        throw(ArgumentError("There are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
+        throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
     n_cuarray = sum(y -> isa(y, CuArray), replica_coords)
     if !(n_cuarray == n_replicas || n_cuarray == 0)
-        throw(ArgumentError("The coordinates for $n_cuarray out of $n_replicas replicas are on GPU"))
+        throw(ArgumentError("the coordinates for $n_cuarray out of $n_replicas replicas are on GPU"))
     end
     if isa(atoms, CuArray) && n_cuarray != n_replicas
-        throw(ArgumentError("The atoms are on the GPU but the coordinates are not"))
+        throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
     if n_cuarray == n_replicas && !isa(atoms, CuArray)
-        throw(ArgumentError("The coordinates are on the GPU but the atoms are not"))
+        throw(ArgumentError("the coordinates are on the GPU but the atoms are not"))
     end
 
     n_cuarray = sum(y -> isa(y, CuArray), replica_velocities)
     if !(n_cuarray == n_replicas || n_cuarray == 0)
-        throw(ArgumentError("The velocities for $n_cuarray out of $n_replicas replicas are on GPU"))
+        throw(ArgumentError("the velocities for $n_cuarray out of $n_replicas replicas are on GPU"))
     end
     if isa(atoms, CuArray) && n_cuarray != n_replicas
-        throw(ArgumentError("The atoms are on the GPU but the velocities are not"))
+        throw(ArgumentError("the atoms are on the GPU but the velocities are not"))
     end
     if n_cuarray == n_replicas && !isa(atoms, CuArray)
-        throw(ArgumentError("The velocities are on the GPU but the atoms are not"))
+        throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
 
     atom_masses = mass.(atoms)

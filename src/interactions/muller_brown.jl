@@ -35,7 +35,7 @@ function MullerBrown(; A=SVector(-200.0, -100.0, -170.0, 15.0)u"kJ * mol^-1",
                        force_units = u"kJ * mol^-1 * nm^-1",
                        energy_units = u"kJ * mol^-1")
     if any(arr -> length(arr) != 4, (A, a, b, c, x0, y0))
-        throw(ArgumentError("The length of each SVector for the Müller-Brown potential should be 4"))
+        throw(ArgumentError("the length of each SVector for the Müller-Brown potential should be 4"))
     end
 
     return MullerBrown{typeof(A), typeof(a), typeof(x0), typeof(force_units), typeof(energy_units)}(

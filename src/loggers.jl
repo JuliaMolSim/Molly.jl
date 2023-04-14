@@ -213,7 +213,7 @@ function log_property!(logger::StructureWriter, s::System, neighbors=nothing,
                         step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         if length(s) != length(s.atoms_data)
-            error("Number of atoms is ", length(s), " but number of atom data entries is ",
+            error("number of atoms is ", length(s), " but number of atom data entries is ",
                     length(s.atoms_data))
         end
         append_model!(logger, s)

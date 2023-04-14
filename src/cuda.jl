@@ -41,7 +41,7 @@ function pairwise_force_kernel!(forces, coords_var, atoms_var, boundary, inters,
             # This triggers an error but it isn't printed
             # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
             #   for how to throw a more meaningful error
-            error("Wrong force unit returned, was expecting $F but got $(unit(f[1]))")
+            error("wrong force unit returned, was expecting $F but got $(unit(f[1]))")
         end
         for dim in 1:D
             fval = ustrip(f[dim])
@@ -103,7 +103,7 @@ function specific_force_1_atoms_kernel!(forces, coords_var, boundary, is_var,
         i = is[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], boundary)
         if unit(fs.f1[1]) != F
-            error("Wrong force unit returned, was expecting $F")
+            error("wrong force unit returned, was expecting $F")
         end
         for dim in 1:D
             Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
@@ -125,7 +125,7 @@ function specific_force_2_atoms_kernel!(forces, coords_var, boundary, is_var, js
         i, j = is[inter_i], js[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], boundary)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
-            error("Wrong force unit returned, was expecting $F")
+            error("wrong force unit returned, was expecting $F")
         end
         for dim in 1:D
             Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
@@ -149,7 +149,7 @@ function specific_force_3_atoms_kernel!(forces, coords_var, boundary, is_var, js
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
-            error("Wrong force unit returned, was expecting $F")
+            error("wrong force unit returned, was expecting $F")
         end
         for dim in 1:D
             Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
@@ -175,7 +175,7 @@ function specific_force_4_atoms_kernel!(forces, coords_var, boundary, is_var, js
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
-            error("Wrong force unit returned, was expecting $F")
+            error("wrong force unit returned, was expecting $F")
         end
         for dim in 1:D
             Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
@@ -215,7 +215,7 @@ function pairwise_pe_kernel!(energy, coords_var, atoms_var, boundary, inters, ne
                                    boundary, special)
         end
         if unit(pe) != E
-            error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
+            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
         Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
@@ -272,7 +272,7 @@ function specific_pe_1_atoms_kernel!(energy, coords_var, boundary, is_var,
         i = is[inter_i]
         pe = potential_energy(inters[inter_i], coords[i], boundary)
         if unit(pe) != E
-            error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
+            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
         Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
@@ -292,7 +292,7 @@ function specific_pe_2_atoms_kernel!(energy, coords_var, boundary, is_var, js_va
         i, j = is[inter_i], js[inter_i]
         pe = potential_energy(inters[inter_i], coords[i], coords[j], boundary)
         if unit(pe) != E
-            error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
+            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
         Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
@@ -313,7 +313,7 @@ function specific_pe_3_atoms_kernel!(energy, coords_var, boundary, is_var, js_va
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
         pe = potential_energy(inters[inter_i], coords[i], coords[j], coords[k], boundary)
         if unit(pe) != E
-            error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
+            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
         Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
@@ -335,7 +335,7 @@ function specific_pe_4_atoms_kernel!(energy, coords_var, boundary, is_var, js_va
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
         pe = potential_energy(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary)
         if unit(pe) != E
-            error("Wrong energy unit returned, was expecting $E but got $(unit(pe))")
+            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
         Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end

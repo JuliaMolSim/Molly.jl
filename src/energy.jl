@@ -53,7 +53,7 @@ end
 
 function check_energy_units(E, energy_units)
     if unit(E) != energy_units
-        error("System energy units are ", energy_units, " but encountered energy units ",
+        error("system energy units are ", energy_units, " but encountered energy units ",
                 unit(E))
     end
 end
@@ -139,7 +139,7 @@ end
 
         if length(pairwise_inters_nl) > 0
             if isnothing(neighbors)
-                error("An interaction uses the neighbor list but neighbors is nothing")
+                error("an interaction uses the neighbor list but neighbors is nothing")
             end
             Threads.@threads for thread_id in 1:n_threads
                 for ni in thread_id:n_threads:length(neighbors)
@@ -178,7 +178,7 @@ end
 
         if length(pairwise_inters_nl) > 0
             if isnothing(neighbors)
-                error("An interaction uses the neighbor list but neighbors is nothing")
+                error("an interaction uses the neighbor list but neighbors is nothing")
             end
             for ni in 1:length(neighbors)
                 i, j, special = neighbors.list[ni]
@@ -248,7 +248,7 @@ function potential_energy(s::System{D, true, T}, neighbors=nothing;
     pairwise_inters_nl = filter(use_neighbors, values(s.pairwise_inters))
     if length(pairwise_inters_nl) > 0
         if isnothing(neighbors)
-            error("An interaction uses the neighbor list but neighbors is nothing")
+            error("an interaction uses the neighbor list but neighbors is nothing")
         end
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]

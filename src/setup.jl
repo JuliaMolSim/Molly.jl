@@ -27,12 +27,12 @@ function place_atoms(n_atoms::Integer,
                      min_dist=zero(length_type(boundary)),
                      max_attempts::Integer=100)
     if has_infinite_boundary(boundary)
-        throw(ArgumentError("One or more dimension has infinite boundaries, boundary is $boundary"))
+        throw(ArgumentError("one or more dimension has infinite boundaries, boundary is $boundary"))
     end
     dims = n_dimensions(boundary)
     max_atoms = box_volume(boundary) / (min_dist ^ dims)
     if n_atoms > max_atoms
-        throw(ArgumentError("Boundary $boundary too small for $n_atoms atoms with minimum distance $min_dist"))
+        throw(ArgumentError("boundary $boundary too small for $n_atoms atoms with minimum distance $min_dist"))
     end
     min_dist_sq = min_dist ^ 2
     coords = SArray[]
@@ -53,7 +53,7 @@ function place_atoms(n_atoms::Integer,
             push!(coords, new_coord)
             failed_attempts = 0
         elseif failed_attempts >= max_attempts
-            error("Failed to place atom $(length(coords) + 1) after $max_attempts (max_attempts) tries")
+            error("failed to place atom $(length(coords) + 1) after $max_attempts (max_attempts) tries")
         end
     end
     return [coords...]
@@ -79,12 +79,12 @@ function place_diatomics(n_molecules::Integer,
                          max_attempts::Integer=100,
                          aligned::Bool=false)
     if has_infinite_boundary(boundary)
-        throw(ArgumentError("One or more dimension has infinite boundaries, boundary is $boundary"))
+        throw(ArgumentError("one or more dimension has infinite boundaries, boundary is $boundary"))
     end
     dims = n_dimensions(boundary)
     max_molecules = box_volume(boundary) / ((min_dist + bond_length) ^ dims)
     if n_molecules > max_molecules
-        throw(ArgumentError("Boundary $boundary too small for $n_molecules diatomics with minimum distance $min_dist"))
+        throw(ArgumentError("boundary $boundary too small for $n_molecules diatomics with minimum distance $min_dist"))
     end
     min_dist_sq = min_dist ^ 2
     coords = SArray[]
@@ -113,7 +113,7 @@ function place_diatomics(n_molecules::Integer,
             push!(coords, new_coord_b)
             failed_attempts = 0
         elseif failed_attempts >= max_attempts
-            error("Failed to place atom $(length(coords) + 1) after $max_attempts (max_attempts) tries")
+            error("failed to place atom $(length(coords) + 1) after $max_attempts (max_attempts) tries")
         end
     end
     # Second atom in each molecule may be outside boundary
@@ -471,7 +471,7 @@ function System(coord_file::AbstractString,
         at = force_field.atom_types[at_type]
         solute = res_id_to_standard[res_id] || res_name in ("ACE", "NME")
         if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
-            error("Atom of type ", at.type, " has not had σ or ϵ set")
+            error("atom of type ", at.type, " has not had σ or ϵ set")
         end
         push!(atoms, Atom(index=ai, charge=ch, mass=at.mass, σ=at.σ, ϵ=at.ϵ, solute=solute))
         push!(atoms_data, AtomData(atom_type=at_type, atom_name=atom_name, res_number=Chemfiles.id(res),
@@ -839,7 +839,7 @@ function System(coord_file::AbstractString,
         elseif implicit_solvent == "gbn2"
             general_inters = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
         else
-            error("Unknown implicit solvent model: \"$implicit_solvent\"")
+            error("unknown implicit solvent model: \"$implicit_solvent\"")
         end
     else
         general_inters = ()
@@ -1251,7 +1251,7 @@ function add_position_restraints(sys,
                                  restrain_coords=sys.coords)
     k_array = isa(k, AbstractArray) ? k : fill(k, length(sys))
     if length(k_array) != length(sys)
-        throw(ArgumentError("The system has $(length(sys)) atoms but there are $(length(k_array)) k values"))
+        throw(ArgumentError("the system has $(length(sys)) atoms but there are $(length(k_array)) k values"))
     end
     is = Int32[]
     types = String[]

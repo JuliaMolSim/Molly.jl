@@ -20,7 +20,7 @@ ustrip_vec(x...) = ustrip.(x...)
 
 function check_force_units(force_units, sys_force_units)
     if force_units != sys_force_units
-        error("System force units are ", sys_force_units, " but encountered force units ",
+        error("system force units are ", sys_force_units, " but encountered force units ",
               force_units)
     end
 end
@@ -209,7 +209,7 @@ end
 
         if length(pairwise_inters_nl) > 0
             if isnothing(neighbors)
-                error("An interaction uses the neighbor list but neighbors is nothing")
+                error("an interaction uses the neighbor list but neighbors is nothing")
             end
             Threads.@threads for thread_id in 1:n_threads
                 for ni in thread_id:n_threads:length(neighbors)
@@ -250,7 +250,7 @@ end
 
         if length(pairwise_inters_nl) > 0
             if isnothing(neighbors)
-                error("An interaction uses the neighbor list but neighbors is nothing")
+                error("an interaction uses the neighbor list but neighbors is nothing")
             end
             for ni in 1:length(neighbors)
                 i, j, special = neighbors.list[ni]
@@ -333,7 +333,7 @@ function forces(s::System{D, true, T}, neighbors=nothing;
     pairwise_inters_nl = filter(use_neighbors, values(s.pairwise_inters))
     if length(pairwise_inters_nl) > 0
         if isnothing(neighbors)
-            error("An interaction uses the neighbor list but neighbors is nothing")
+            error("an interaction uses the neighbor list but neighbors is nothing")
         end
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]

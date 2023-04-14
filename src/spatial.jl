@@ -105,17 +105,17 @@ ispositive(x) = x > zero(x)
 
 function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
     if !ispositive(bv[1][1]) || !iszero_value(bv[1][2]) || !iszero_value(bv[1][3])
-        throw(ArgumentError("First basis vector must be along the x-axis (no y or z component) " *
+        throw(ArgumentError("first basis vector must be along the x-axis (no y or z component) " *
                             "and have a positive x component " * 
                             "when constructing a TriclinicBoundary, got $(bv[1])"))
     end
     if !ispositive(bv[2][2]) || !iszero_value(bv[2][3])
-        throw(ArgumentError("Second basis vector must be in the xy plane (no z component) " *
+        throw(ArgumentError("second basis vector must be in the xy plane (no z component) " *
                             "and have a positive y component " *
                             "when constructing a TriclinicBoundary, got $(bv[2])"))
     end
     if !ispositive(bv[3][3])
-        throw(ArgumentError("Third basis vector must have a positive z component " *
+        throw(ArgumentError("third basis vector must have a positive z component " *
                             "when constructing a TriclinicBoundary, got $(bv[3])"))
     end
     reciprocal_size = SVector{3}(inv(bv[1][1]), inv(bv[2][2]), inv(bv[3][3]))
@@ -137,11 +137,11 @@ end
 
 function TriclinicBoundary(bv_lengths::SVector{3}, angles::SVector{3}; kwargs...)
     if any(!ispositive, bv_lengths)
-        throw(ArgumentError("Basis vector lengths must be positive " *
+        throw(ArgumentError("basis vector lengths must be positive " *
                             "when constructing a TriclinicBoundary, got $bv_lengths"))
     end
     if !all(a -> 0 < a < π, angles)
-        throw(ArgumentError("Basis vector angles must be 0 to π radians " *
+        throw(ArgumentError("basis vector angles must be 0 to π radians " *
                             "when constructing a TriclinicBoundary, got $angles"))
     end
     α, β, γ = angles

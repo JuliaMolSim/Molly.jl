@@ -216,7 +216,7 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), coords::AbstractArray{
                               sils_2_atoms, sils_3_atoms, sils_4_atoms, boundary, force_units,
                               neighbors, n_threads) where {D, T}
     if force_units != NoUnits
-        error("Taking gradients through force calculation is not compatible with units, " *
+        error("taking gradients through force calculation is not compatible with units, " *
               "system force units are $force_units")
     end
     Y = forces_pair_spec(coords, atoms, pairwise_inters_nonl, pairwise_inters_nl, sils_1_atoms,
@@ -265,7 +265,7 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), coords, atom
                               sils_3_atoms, sils_4_atoms, boundary, energy_units, neighbors,
                               n_threads, val_ft::Val{T}) where T
     if energy_units != NoUnits
-        error("Taking gradients through potential energy calculation is not compatible with " *
+        error("taking gradients through potential energy calculation is not compatible with " *
               "units, system energy units are $energy_units")
     end
     Y = potential_energy_pair_spec(coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
@@ -348,7 +348,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArra
                               atoms, boundary, pairwise_inters, nbs, force_units,
                               val_ft::Val{T}) where {D, C, T}
     if force_units != NoUnits
-        error("Taking gradients through force calculation is not compatible with units, " *
+        error("taking gradients through force calculation is not compatible with units, " *
               "system force units are $force_units")
     end
     Y = pairwise_force_gpu(coords, atoms, boundary, pairwise_inters, nbs, force_units, val_ft)
@@ -411,7 +411,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{S
                               atoms, boundary, pairwise_inters, nbs, energy_units,
                               val_ft::Val{T}) where {D, C, T}
     if energy_units != NoUnits
-        error("Taking gradients through potential energy calculation is not compatible with " *
+        error("taking gradients through potential energy calculation is not compatible with " *
               "units, system energy units are $energy_units")
     end
     Y = pairwise_pe_gpu(coords, atoms, boundary, pairwise_inters, nbs, energy_units, val_ft)
@@ -520,7 +520,7 @@ function ChainRulesCore.rrule(::typeof(specific_force_gpu), inter_list,
                               coords::AbstractArray{SVector{D, C}}, boundary,
                               force_units, val_ft::Val{T}) where {D, C, T}
     if force_units != NoUnits
-        error("Taking gradients through force calculation is not compatible with units, " *
+        error("taking gradients through force calculation is not compatible with units, " *
               "system force units are $force_units")
     end
     Y = specific_force_gpu(inter_list, coords, boundary, force_units, val_ft)
@@ -637,7 +637,7 @@ function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
                               coords::AbstractArray{SVector{D, C}}, boundary,
                               energy_units, val_ft::Val{T}) where {D, C, T}
     if energy_units != NoUnits
-        error("Taking gradients through potential energy calculation is not compatible with " *
+        error("taking gradients through potential energy calculation is not compatible with " *
               "units, system energy units are $energy_units")
     end
     Y = specific_pe_gpu(inter_list, coords, boundary, energy_units, val_ft)
@@ -723,7 +723,7 @@ function ChainRulesCore.rrule(::typeof(gbsa_born_gpu), coords::AbstractArray{SVe
                               offset_radii, scaled_offset_radii, dist_cutoff, offset, neck_scale,
                               neck_cut, d0s, m0s, boundary, val_ft::Val{T}) where {D, C, T}
     if unit(C) != NoUnits
-        error("Taking gradients through force/energy calculation is not compatible with units, " *
+        error("taking gradients through force/energy calculation is not compatible with units, " *
               "coordinate units are $(unit(C))")
     end
     Y = gbsa_born_gpu(coords, offset_radii, scaled_offset_radii, dist_cutoff, offset, neck_scale,
@@ -825,7 +825,7 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), coords::AbstractArray{
                               boundary, dist_cutoff, factor_solute, factor_solvent, kappa, Bs,
                               charges::AbstractArray{T}, force_units) where {D, C, T}
     if force_units != NoUnits
-        error("Taking gradients through force calculation is not compatible with units, " *
+        error("taking gradients through force calculation is not compatible with units, " *
               "system force units are $force_units")
     end
     Y = gbsa_force_1_gpu(coords, boundary, dist_cutoff, factor_solute, factor_solvent, kappa,
@@ -889,7 +889,7 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_2_gpu), coords::AbstractArray{
                               boundary, dist_cutoff, Bs, B_grads, I_grads, born_forces, offset_radii,
                               scaled_offset_radii, force_units, val_ft::Val{T}) where {D, C, T}
     if force_units != NoUnits
-        error("Taking gradients through force calculation is not compatible with units, " *
+        error("taking gradients through force calculation is not compatible with units, " *
               "system force units are $force_units")
     end
     Y = gbsa_force_2_gpu(coords, boundary, dist_cutoff, Bs, B_grads, I_grads, born_forces,
