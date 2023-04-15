@@ -312,7 +312,7 @@ end
             )
 
             simulator = Langevin(dt=0.001, temperature=300.0, friction=1.0)
-            n_steps = 2
+            n_steps = 5
             rand_seed = 1000
             simulate!(sys, simulator, n_steps; n_threads=n_threads, rng=Xoshiro(rand_seed))
             return sum(sum_abs.(sys.coords))
@@ -413,8 +413,10 @@ end
     test_runs = [
         ("Energy", test_energy_grad, 1e-8),
         ("Force" , test_force_grad , 1e-8),
-        ("Sim"   , test_sim_grad   , 0.01),
     ]
+    if !running_CI
+        push!(test_runs, ("Sim", test_sim_grad, 0.01))
+    end
     params_to_test = (
         "inter_LJ_weight_14",
         "atom_N_ϵ",
