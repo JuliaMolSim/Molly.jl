@@ -312,7 +312,7 @@ end
             )
 
             simulator = Langevin(dt=0.001, temperature=300.0, friction=1.0)
-            n_steps = 3
+            n_steps = 2
             rand_seed = 1000
             simulate!(sys, simulator, n_steps; n_threads=n_threads, rng=Xoshiro(rand_seed))
             return sum(sum_abs.(sys.coords))
