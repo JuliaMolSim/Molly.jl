@@ -48,6 +48,7 @@
     show(devnull, s.loggers.gen_temp)
     show(devnull, s.loggers.avg_temp)
     t, σ = values(s.loggers.avg_temp)
+    @test values(s.loggers.avg_temp; std=false) == t
     @test isapprox(t, mean(values(s.loggers.temp)); atol=3σ)
     run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_viz)
 end
@@ -672,6 +673,12 @@ end
         replica_loggers=replica_loggers,
         neighbor_finder=neighbor_finder,
     )
+
+    @test !is_on_gpu(repsys)
+    @test float_type(repsys) == Float64
+    @test masses(repsys) == fill(atom_mass, n_atoms)
+    @test atomic_mass(repsys) == fill(atom_mass, n_atoms)
+    @test atomic_mass(s, 5) == atom_mass
     show(devnull, repsys)
 
     temp_vals = [120.0u"K", 180.0u"K", 240.0u"K", 300.0u"K"]
@@ -894,6 +901,7 @@ end
             neighbor_finder=neighbor_finder,
         )
 
+        @test is_on_gpu(s) == gpu
         @test float_type(s) == (f32 ? Float32 : Float64)
 
         n_threads = parallel ? Threads.nthreads() : 1
