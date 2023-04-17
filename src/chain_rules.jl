@@ -7,8 +7,8 @@
 @non_differentiable cuda_threads_blocks_specific(args...)
 @non_differentiable check_force_units(args...)
 @non_differentiable atoms_bonded_to_N(args...)
-@non_differentiable cuda_threads_blocks_gbsa(args...)
 @non_differentiable lookup_table(args...)
+@non_differentiable cuda_threads_blocks_gbsa(args...)
 @non_differentiable find_neighbors(args...)
 @non_differentiable DistanceNeighborFinder(args...)
 @non_differentiable run_loggers!(args...)
@@ -116,14 +116,6 @@ function ChainRulesCore.rrule(T::Type{<:SpecificForce4Atoms}, vs...)
         return NoTangent(), Ȳ.f1, Ȳ.f2, Ȳ.f3, Ȳ.f4
     end
     return Y, SpecificForce4Atoms_pullback
-end
-
-function ChainRulesCore.rrule(::typeof(sparsevec), is, vs, l)
-    Y = sparsevec(is, vs, l)
-    @views function sparsevec_pullback(Ȳ)
-        return NoTangent(), nothing, Ȳ[is], nothing
-    end
-    return Y, sparsevec_pullback
 end
 
 # Required for SVector gradients in RescaleThermostat

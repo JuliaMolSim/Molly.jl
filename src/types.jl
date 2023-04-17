@@ -15,8 +15,8 @@ export
     NeighborList,
     System,
     ReplicaSystem,
-    float_type,
     is_on_gpu,
+    float_type,
     masses
 
 const DefaultFloat = Float64
