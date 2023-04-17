@@ -97,6 +97,7 @@ end
 
         # Test AtomsBase.jl interface
         @test length(s) == n_atoms
+        @test eachindex(s) == Base.OneTo(n_atoms)
         @test species_type(s) <: AtomView
         @test typeof(s[5]) <: AtomView
         @test length(s[2:4]) == 3
@@ -677,8 +678,11 @@ end
     @test !is_on_gpu(repsys)
     @test float_type(repsys) == Float64
     @test masses(repsys) == fill(atom_mass, n_atoms)
+    @test length(repsys) == n_atoms
+    @test eachindex(repsys) == Base.OneTo(n_atoms)
+    @test species_type(repsys) <: AtomView
     @test atomic_mass(repsys) == fill(atom_mass, n_atoms)
-    @test atomic_mass(s, 5) == atom_mass
+    @test atomic_mass(repsys, 5) == atom_mass
     show(devnull, repsys)
 
     temp_vals = [120.0u"K", 180.0u"K", 240.0u"K", 300.0u"K"]

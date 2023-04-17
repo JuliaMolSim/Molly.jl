@@ -763,6 +763,7 @@ move_array(arr, ::System{D, true }) where {D} = CuArray(arr)
 
 Base.getindex(s::Union{System, ReplicaSystem}, i::Integer) = AtomView(s, i)
 Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)
+Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = typeof(s[1])
 AtomsBase.atomkeys(::Union{System, ReplicaSystem}) = ()
