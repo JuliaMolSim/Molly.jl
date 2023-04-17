@@ -41,8 +41,8 @@ CubicBoundary(x, y, z) = CubicBoundary(SVector{3}(x, y, z))
 CubicBoundary(x::Number) = CubicBoundary(SVector{3}(x, x, x))
 
 Base.getindex(b::CubicBoundary, i::Integer) = b.side_lengths[i]
-Base.firstindex(b::CubicBoundary) = b.side_lengths[1]
-Base.lastindex(b::CubicBoundary) = b.side_lengths[3]
+Base.firstindex(b::CubicBoundary) = 1
+Base.lastindex(b::CubicBoundary) = 3
 
 """
     RectangularBoundary(x, y)
@@ -66,8 +66,8 @@ RectangularBoundary(x, y) = RectangularBoundary(SVector{2}(x, y))
 RectangularBoundary(x::Number) = RectangularBoundary(SVector{2}(x, x))
 
 Base.getindex(b::RectangularBoundary, i::Integer) = b.side_lengths[i]
-Base.firstindex(b::RectangularBoundary) = b.side_lengths[1]
-Base.lastindex(b::RectangularBoundary) = b.side_lengths[2]
+Base.firstindex(b::RectangularBoundary) = 1
+Base.lastindex(b::RectangularBoundary) = 2
 
 """
     TriclinicBoundary(v1, v2, v3; approx_images=true)
@@ -160,8 +160,8 @@ TriclinicBoundary(v1, v2, v3; kwargs...) = TriclinicBoundary(SVector{3}(v1, v2, 
 TriclinicBoundary(arr; kwargs...) = TriclinicBoundary(SVector{3}(arr); kwargs...)
 
 Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
-Base.firstindex(b::TriclinicBoundary) = b.basis_vectors[1]
-Base.lastindex(b::TriclinicBoundary) = b.basis_vectors[3]
+Base.firstindex(b::TriclinicBoundary) = 1
+Base.lastindex(b::TriclinicBoundary) = 3
 
 """
     n_dimensions(boundary)
