@@ -46,12 +46,16 @@
     @test box_volume(b) == 120.0u"nm^3"
     @test box_volume(CubicBoundary(0.0u"m")) == 0.0u"m^3"
     @test box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
+    @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0, 6.0)u"nm"
+    @test Molly.axis_limits(CubicBoundary(4.0, 5.0, 6.0), CoordinateLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError CubicBoundary(-4.0u"nm", 5.0u"nm", 6.0u"nm")
 
     b = RectangularBoundary(4.0u"m", 5.0u"m")
     @test box_volume(b) == 20.0u"m^2"
     @test box_volume(RectangularBoundary(0.0u"m")) == 0.0u"m^2"
     @test box_center(b) == SVector(2.0, 2.5)u"m"
+    @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0)u"nm"
+    @test Molly.axis_limits(RectangularBoundary(4.0, 5.0), CoordinateLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError RectangularBoundary(-4.0u"nm", 5.0u"nm")
 
     b = TriclinicBoundary(SVector(2.2, 2.0, 1.8)u"nm", deg2rad.(SVector(50.0, 40.0, 60.0)))
@@ -61,6 +65,11 @@
 
     @test isapprox(box_volume(b), 3.89937463181886u"nm^3")
     @test isapprox(box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm", atol=1e-6u"nm")
+    @test isapprox(
+        Molly.cubic_bounding_box(b),
+        SVector(4.5788800, 2.2719630, 1.0233205)u"nm",
+        atol=1e-6u"nm",
+    )
 
     @test_throws ArgumentError TriclinicBoundary(
         SVector(2.0, 1.0, 0.0)u"nm",
