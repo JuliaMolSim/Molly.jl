@@ -32,22 +32,23 @@
     @test BioStructures.countatoms(first(traj)) == 5191
 end
 
-@testset "Peptide Float32" begin
+@testset "Peptide Float32 no units" begin
     n_steps = 100
-    temp = 298.0f0u"K"
+    temp = 298.0f0
     s = System(
         Float32,
         joinpath(data_dir, "5XER", "gmx_coords.gro"),
         joinpath(data_dir, "5XER", "gmx_top_ff.top");
         loggers=(
-            temp=TemperatureLogger(typeof(1.0f0u"K"), 10),
-            coords=CoordinateLogger(typeof(1.0f0u"nm"), 10),
-            energy=TotalEnergyLogger(typeof(1.0f0u"kJ * mol^-1"), 10),
+            temp=TemperatureLogger(Float32, 10),
+            coords=CoordinateLogger(Float32, 10),
+            energy=TotalEnergyLogger(Float32, 10),
         ),
+        units=false,
     )
     simulator = VelocityVerlet(
-        dt=0.0002f0u"ps",
-        coupling=AndersenThermostat(temp, 10.0f0u"ps"),
+        dt=0.0002f0,
+        coupling=AndersenThermostat(temp, 10.0f0),
     )
 
     s.velocities = [random_velocity(mass(a), Float32(temp)) .* 0.01f0 for a in s.atoms]
@@ -59,6 +60,9 @@ end
     show(devnull, ff)
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; center_coords=false)
     neighbors = find_neighbors(sys)
+
+    @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == length(sys)
+    @test count(i -> is_heavy_atom(sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 5502
 
     for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul", "all")
         if inter == "all"
