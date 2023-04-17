@@ -180,6 +180,14 @@ end
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
         @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 
+        # Test Andersen thermostat on GPU
+        simulator_and = Verlet(
+            dt=0.0005u"ps",
+            coupling=AndersenThermostat(321.0u"K", 10.0u"ps"),
+        )
+        simulate!(sys, simulator_and, n_steps)
+        @test temperature(sys) > 400.0u"K"
+
         sys_nounits = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff_nounits;
@@ -201,6 +209,13 @@ end
         vels_diff = Array(sys_nounits.velocities * u"nm * ps^-1") .- vels_openmm
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
         @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
+
+        simulator_and_nounits = Verlet(
+            dt=0.0005,
+            coupling=AndersenThermostat(321.0, 10.0),
+        )
+        simulate!(sys_nounits, simulator_and_nounits, n_steps)
+        @test temperature(sys_nounits) > 400.0
 
         params_dic_gpu = extract_parameters(sys_nounits, ff_nounits)
         @test params_dic == params_dic_gpu
