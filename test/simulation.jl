@@ -182,6 +182,7 @@ end
         loggers=(coords=CoordinateLogger(100),),
     )
 
+    @test Molly.has_infinite_boundary(boundary)
     @test atomic_symbol(s) == fill(:unknown, n_atoms)
     @test atomic_symbol(s, 5) == :unknown
 

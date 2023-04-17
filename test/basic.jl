@@ -45,6 +45,7 @@
     b = CubicBoundary(4.0u"nm", 5.0u"nm", 6.0u"nm")
     @test float_type(b) == Float64
     @test Molly.length_type(b) == typeof(1.0u"nm")
+    @test !Molly.has_infinite_boundary(b)
     @test box_volume(b) == 120.0u"nm^3"
     @test box_volume(CubicBoundary(0.0u"m")) == 0.0u"m^3"
     @test box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
@@ -55,6 +56,7 @@
     b = RectangularBoundary(4.0u"m", 5.0u"m")
     @test float_type(b) == Float64
     @test Molly.length_type(b) == typeof(1.0u"m")
+    @test !Molly.has_infinite_boundary(b)
     @test box_volume(b) == 20.0u"m^2"
     @test box_volume(RectangularBoundary(0.0u"m")) == 0.0u"m^2"
     @test box_center(b) == SVector(2.0, 2.5)u"m"
@@ -68,7 +70,10 @@
     @test isapprox(b.basis_vectors[1], SVector(2.2      , 0.0      , 0.0      )u"nm", atol=1e-6u"nm")
     @test isapprox(b.basis_vectors[2], SVector(1.0      , 1.7320508, 0.0      )u"nm", atol=1e-6u"nm")
     @test isapprox(b.basis_vectors[3], SVector(1.37888  , 0.5399122, 1.0233204)u"nm", atol=1e-6u"nm")
+    @test TriclinicBoundary(b.basis_vectors) == b
+    @test TriclinicBoundary([b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3]]) == b
 
+    @test bounding_box(b) == b.basis_vectors
     @test isapprox(box_volume(b), 3.89937463181886u"nm^3")
     @test isapprox(box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm", atol=1e-6u"nm")
     @test isapprox(
@@ -81,6 +86,10 @@
         SVector(2.0, 1.0, 0.0)u"nm",
         SVector(1.0, 2.0, 0.0)u"nm",
         SVector(1.0, 1.0, 2.0)u"nm",
+    )
+    @test_throws ArgumentError TriclinicBoundary(
+        SVector(-2.2, 2.0, 1.8)u"nm",
+        deg2rad.(SVector(20.0, 40.0, 60.0)),
     )
     @test_throws ArgumentError TriclinicBoundary(
         SVector(2.2, 2.0, 1.8)u"nm",
