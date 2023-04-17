@@ -16,9 +16,6 @@ struct NoCutoff end
 
 cutoff_points(::Type{NoCutoff}) = 0
 
-force_divr_cutoff(::NoCutoff, r2, inter, params) = force_divr(inter, r2, inv(r2), params)
-potential_cutoff(::NoCutoff, r2, inter, params) = potential(inter, r2, inv(r2), params)
-
 """
     DistanceCutoff(dist_cutoff)
 
