@@ -85,6 +85,7 @@ The approximation is correct for distances shorter than half the shortest box
 height/width.
 Setting the keyword argument `approx_images` to `false` means the exact closest
 image is found, which is slower.
+
 Not currently compatible with infinite boundaries.
 Not currently compatible with automatic differentiation using Zygote.
 """
@@ -166,7 +167,7 @@ Base.lastindex(b::TriclinicBoundary) = 3
 """
     n_dimensions(boundary)
 
-Number of dimensions of a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box.
+Number of dimensions of a bounding box.
 """
 AtomsBase.n_dimensions(::CubicBoundary) = 3
 AtomsBase.n_dimensions(::RectangularBoundary) = 2

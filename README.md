@@ -10,37 +10,34 @@
 Much of science can be explained by the movement and interaction of molecules.
 Molecular dynamics (MD) is a computational technique used to explore these phenomena, from noble gases to biological macromolecules.
 Molly.jl is a pure Julia package for MD, and for the simulation of physical systems more broadly.
-The package is described in [a talk](https://youtu.be/trapn-yIv8g?t=1889) at the [JuliaMolSim](https://juliamolsim.github.io) minisymposium at JuliaCon 2022, and also in [a more recent talk](https://www.youtube.com/live/NB7xUHQNox8?feature=share&t=9018) at Enzyme Conference 2023.
 
-At the minute the package is a proof of concept for MD in Julia.
-**It is not production ready**, though it can do some cool things and is under active development.
+The package is described in [a talk](https://youtu.be/trapn-yIv8g?t=1889) at the [JuliaMolSim](https://juliamolsim.github.io) minisymposium at JuliaCon 2022, and also in [a more recent talk](https://www.youtube.com/live/NB7xUHQNox8?feature=share&t=9018) at Enzyme Conference 2023.
 Implemented features include:
-- Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential, Buckingham potential.
-- Bonded interactions - harmonic and Morse bonds, bond angles, torsion angles, harmonic position restraints.
+- Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential, Buckingham potential, soft core variants.
+- Bonded interactions - harmonic and Morse bonds, bond angles, torsion angles, harmonic position restraints, FENE bonds.
 - Interface to allow definition of new interactions, simulators, thermostats, neighbor finders, loggers etc.
-- Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also some support for Gromacs files.
+- Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also experimental support for Gromacs files.
+- Verlet, velocity Verlet, Störmer-Verlet, flexible Langevin and Nosé-Hoover integrators.
 - Andersen, Berendsen and velocity rescaling thermostats.
-- Verlet, velocity Verlet, Störmer-Verlet and flexible Langevin integrators.
 - Steepest descent energy minimization.
 - Monte Carlo simulation.
 - Replica exchange molecular dynamics.
-- Periodic, triclinic and infinite boundary conditions in a cubic box.
+- Periodic, triclinic and infinite boundary conditions.
 - Flexible loggers to track arbitrary properties throughout simulations.
 - Cutoff algorithms for non-bonded interactions.
-- Various neighbor list implementations to speed up the calculation of non-bonded forces, including use of [CellListMap.jl](https://github.com/m3g/CellListMap.jl).
+- Various neighbor list implementations to speed up the calculation of non-bonded forces, including the use of [CellListMap.jl](https://github.com/m3g/CellListMap.jl).
 - Implicit solvent GBSA methods.
 - [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
 - Automatic multithreading.
 - GPU acceleration on CUDA-enabled devices.
-- Run with Float64 or Float32.
+- Run with Float64, Float32 or other float types.
 - Some analysis functions, e.g. RDF.
 - Visualise simulations as animations with [Makie.jl](https://makie.juliaplots.org/stable).
-- Physical agent-based modelling.
 - Differentiable molecular simulation. This is a unique feature of the package and the focus of its current development.
 
 Features not yet implemented include:
 - High GPU performance.
-- Particle mesh Ewald summation.
+- Ewald or particle mesh Ewald summation.
 - Constrained bonds and angles.
 - Pressure coupling methods.
 - Protein preparation - solvent box, add hydrogens etc.

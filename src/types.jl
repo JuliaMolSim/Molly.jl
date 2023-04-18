@@ -23,7 +23,7 @@ const DefaultFloat = Float64
 
 """
 A pairwise interaction that will apply to all or most atom pairs.
-Custom pairwise interactions should sub-type this type.
+Custom pairwise interactions should sub-type this abstract type.
 """
 abstract type PairwiseInteraction end
 
@@ -39,7 +39,7 @@ use_neighbors(::PairwiseInteraction) = false
 
 """
 A specific interaction between sets of specific atoms, e.g. a bond angle.
-Custom specific interactions should sub-type this type.
+Custom specific interactions should sub-type this abstract type.
 """
 abstract type SpecificInteraction end
 

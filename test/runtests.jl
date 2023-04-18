@@ -12,7 +12,7 @@ using Random
 using Statistics
 using Test
 
-@warn "This file does not include all the tests for Molly.jl due to CI time limits, " *
+@warn "This file does not include all the tests for Molly.jl, " *
       "see the test directory for more"
 
 # Allow testing of particular components

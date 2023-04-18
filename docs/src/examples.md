@@ -171,7 +171,7 @@ for pol_i in 1:n_polymers
         ))
     end
 end
-coords = [coords...] # Ensure the array is strongly typed
+coords = [coords...] # Ensure the array is concretely typed
 
 # Create FENEBonds between adjacent monomers
 bond_is, bond_js = Int[], Int[]
@@ -221,15 +221,19 @@ for pol_i in 1:n_polymers
     end
 end
 
+lj = LennardJones(
+    cutoff=DistanceCutoff(5.0u"nm"),
+    use_neighbors=true,
+)
 neighbor_finder = DistanceNeighborFinder(
     eligible=eligible,
     n_steps=10,
-    dist_cutoff=5.0u"nm",
+    dist_cutoff=5.5u"nm",
 )
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=(LennardJones(use_neighbors=true),),
+    pairwise_inters=(lj,),
     specific_inter_lists=(bonds, angles),
     coords=coords,
     boundary=boundary,
@@ -437,7 +441,7 @@ function Molly.force(inter::BondableInteraction,
     end
 end
 
-function bonds(sys::System, neighbors=nothing, n_threads::Integer=Threads.nthreads())
+function bonds(sys::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     bonds = BitVector()
     for i in 1:length(sys)
         for j in 1:(i - 1)
@@ -458,13 +462,18 @@ atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = place_atoms(n_atoms, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
-    SoftSphere(use_neighbors=true),
+    SoftSphere(
+        cutoff=DistanceCutoff(2.0),
+        use_neighbors=true,
+        force_units=NoUnits,
+        energy_units=NoUnits,
+    ),
     BondableInteraction(0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(
     eligible=trues(n_atoms, n_atoms),
     n_steps=10,
-    dist_cutoff=2.0,
+    dist_cutoff=2.2,
 )
 simulator = VelocityVerlet(
     dt=0.02,

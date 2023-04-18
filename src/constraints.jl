@@ -56,7 +56,7 @@ function apply_constraints!(sys, constraint::SHAKE, old_coords, dt)
                 D = (b^2 - 4*a*c)
                 
                 if ustrip(D) < 0.0
-                    @warn "SHAKE determinant negative. Setting to 0.0"
+                    @warn "SHAKE determinant negative, setting to 0.0"
                     D = zero(D)
                 end
 

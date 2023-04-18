@@ -8,7 +8,7 @@ The [Differentiable simulation with Molly](@ref) section describes taking gradie
 Molly takes a modular approach to molecular simulation.
 To run a simulation you create a [`System`](@ref) object and call [`simulate!`](@ref) on it.
 The different components of the system and simulation can be used as defined by the package, or you can define your own versions.
-An important principle of the package is that your custom components, particularly force functions, should be easy to define and just as performant as the built-in versions.
+An important principle of the package is that your custom components, particularly force and potential energy functions, should be easy to define and just as performant as the built-in versions.
 
 ## Simulation basics
 
@@ -39,12 +39,12 @@ You can also use a [`TriclinicBoundary`](@ref).
 Simulations in 2 dimensions should use a [`RectangularBoundary`](@ref).
 
 Now we can define our pairwise interactions, i.e. those between most or all atom pairs.
-Because we have defined the relevant parameters for the atoms, we can use the built-in Lennard-Jones type.
+Because we have defined the relevant parameters for the atoms, we can use the built-in [`LennardJones`](@ref) type.
 ```julia
 pairwise_inters = (LennardJones(),) # Don't forget the trailing comma!
 ```
 Finally, we can define the system and run the simulation.
-We use an Andersen thermostat to keep a constant temperature, and we log the temperature and coordinates every 10 steps.
+We use an [`AndersenThermostat`](@ref) to keep a constant temperature, and we log the temperature and coordinates every 10 steps.
 Periodic boundary conditions are automatically used with the cubic box we defined earlier.
 ```julia
 sys = System(
@@ -67,7 +67,6 @@ simulator = VelocityVerlet(
 simulate!(sys, simulator, 1_000)
 ```
 `atoms`, `coords` and `boundary` are the minimum required properties to define a [`System`](@ref), though you would generally want to add interactions to a [`System`](@ref) to do something useful with it.
-
 [`System`](@ref) implements the `AbstractSystem` [interface from AtomsBase.jl](https://juliamolsim.github.io/AtomsBase.jl/stable).
 The functions [`masses`](@ref), [`is_on_gpu`](@ref) and [`float_type`](@ref) can be used on a [`System`](@ref).
 
@@ -84,11 +83,11 @@ visualize(sys.loggers.coords, boundary, "sim_lj.mp4")
 
 ## GPU acceleration
 
-To run simulations on the GPU you will need to have a CUDA-compatible device and to have [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) installed.
+To run simulations on the GPU you will need to have a CUDA-compatible device.
+[CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) is used to run on the device.
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
 This example also shows setting up a simulation to run with `Float32`, which gives better performance on GPUs.
 Of course, you will need to determine whether this level of numerical accuracy is appropriate in your case.
-The GPU code path is currently designed to work with differentiable simulation and runs slower than related software, but this is an active area of development.
 ```julia
 using Molly
 using CUDA
@@ -114,14 +113,23 @@ sys = System(
     ),
 )
 
+simulate!(deepcopy(sys), simulator, 20) # Compile function
 simulate!(sys, simulator, 1_000)
 ```
+The device to run on can be changed with `device!`, e.g. `device!(1)`.
+The GPU code path is currently designed to work with differentiable simulation and runs slower than related software, but this is an active area of development.
+Nonetheless, GPU performance is significantly better than CPU performance and is good enough for many applications.
+
+The number of GPU threads used for the GPU kernels can be tuned with the environmental variables `MOLLY_GPUNTHREADS_PAIRWISE`, `MOLLY_GPUNTHREADS_SPECIFIC`, `MOLLY_GPUNTHREADS_DISTANCENF` and `MOLLY_GPUNTHREADS_IMPLICIT`.
+In general these should only be changed if GPU memory errors occur on smaller GPUs.
 
 ## Simulating diatomic molecules
 
 If we want to define specific interactions between atoms, for example bonds, we can do this as well.
 Using the same definitions as the first example, let's set up the coordinates so that paired atoms are 1 Å apart.
 ```julia
+atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+
 coords = place_atoms(n_atoms ÷ 2, boundary; min_dist=0.3u"nm")
 for i in 1:length(coords)
     push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u"nm")
@@ -140,10 +148,10 @@ bonds = InteractionList2Atoms(
 
 specific_inter_lists = (bonds,)
 ```
-This time, we are also going to use a neighbor list to speed up the Lennard Jones calculation.
+This time we are also going to use a neighbor list to speed up the Lennard-Jones calculation since we don't care about interactions beyond a certain distance.
 We can use the built-in [`DistanceNeighborFinder`](@ref).
 The arguments are a 2D array of eligible interacting pairs, the number of steps between each update and the distance cutoff to be classed as a neighbor.
-Since the neighbor finder is run every 10 steps we should also use a cutoff for the interaction with a cutoff distance less than the neighbor list distance.
+Since the neighbor finder is run every 10 steps we should also use a distance cutoff for the neighbor list that is larger than the cutoff for the interaction.
 ```julia
 # All pairs apart from bonded pairs are eligible for non-bonded interactions
 eligible = trues(n_atoms, n_atoms)
@@ -158,7 +166,8 @@ neighbor_finder = DistanceNeighborFinder(
     dist_cutoff=1.5u"nm",
 )
 
-pairwise_inters = (LennardJones(use_neighbors=true, cutoff=DistanceCutoff(1.2u"nm")),)
+cutoff = DistanceCutoff(1.2u"nm")
+pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
 ```
 Now we can simulate as before.
 ```julia
@@ -234,7 +243,7 @@ visualize(
 
 ## Simulating a protein
 
-The recommended way to run a macromolecular simulation is to read in a force field in [OpenMM XML format](http://docs.openmm.org/latest/userguide/application/05_creating_ffs.html) and read in a coordinate file in a format [supported by Chemfiles.jl](https://chemfiles.org/chemfiles/latest/formats.html).
+The recommended way to run a macromolecular simulation is to read in a force field in [OpenMM XML format](http://docs.openmm.org/latest/userguide/application/05_creating_ffs.html) to a [`MolecularForceField`](@ref) and then read in a coordinate file in a format [supported by Chemfiles.jl](https://chemfiles.org/chemfiles/latest/formats.html).
 Files for common force fields can be found at [OpenMM](https://github.com/openmm/openmm) and [OpenMM force fields](https://github.com/openmm/openmmforcefields).
 This sets up a system in the same data structures as above and that is simulated in the same way.
 Here we carry out an energy minimization, simulate with a Langevin integrator and use a [`StructureWriter`](@ref) to write the trajectory as a PDB file.
@@ -253,6 +262,7 @@ sys = System(
         energy=TotalEnergyLogger(10),
         writer=StructureWriter(10, "traj_6mrr_1ps.pdb", ["HOH"]),
     ),
+    gpu=false,
 )
 
 minimizer = SteepestDescentMinimizer()
@@ -265,13 +275,14 @@ simulator = Langevin(
     friction=1.0u"ps^-1",
 )
 
-simulate!(sys, simulator, 5_000; n_threads=Threads.nthreads())
+simulate!(sys, simulator, 5_000)
 ```
+To run on the GPU, set `gpu=true`.
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
 The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
 Other options include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_neighbors`).
 
-Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files.
+Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files. For example:
 ```julia
 sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
@@ -305,6 +316,7 @@ However it is not thoroughly tested with respect to ligands or special residues 
 By default, terminal residues are renamed to match the appropriate templates.
 For example, the first (N-terminal) residue could be changed from "MET" to "NMET".
 This can be turned off by giving `rename_terminal_res=false` to [`System`](@ref) if the residue names in the input file are appropriate.
+
 The Gromacs setup procedure should be considered experimental.
 Currently Ewald summation methods, constraint algorithms, pressure coupling and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
 
@@ -312,7 +324,7 @@ Currently Ewald summation methods, constraint algorithms, pressure coupling and 
 
 Molly has the [`ReplicaSystem`](@ref) struct and simulators such as [`TemperatureREMD`](@ref) to carry out replica exchange molecular dynamics (REMD).
 On CPU these are run in parallel by dividing up the number of available threads.
-For example to run temperature REMD on a protein with 4 replicas and attempt exchanges every 1.0 ps:
+For example, to run temperature REMD on a protein with 4 replicas and attempt exchanges every 1 ps:
 ```julia
 using Statistics
 
@@ -414,6 +426,7 @@ visualize(sys.loggers.coords, boundary, "sim_montecarlo.gif")
 `trial_moves` should be a function that takes a [`System`](@ref) as its argument and optional keyword arguments `trial_args`.
 It should modify the coordinates as appropriate, accounting for any boundary conditions.
 [`random_uniform_translation!`](@ref) and [`random_normal_translation!`](@ref) are provided as common trial move functions.
+[`MonteCarloLogger!`](@ref) records various properties throughout the simulation.
 
 ## Agent-based modelling
 
@@ -458,7 +471,7 @@ function Molly.force(inter::SIRInteraction,
         end
     end
     # Workaround to obtain a self-interaction
-    if atom_i.i == (atom_j.i + 1)
+    if atom_i.i == (atom_j.i - 1)
         # Recover randomly
         if atom_i.status == infected && rand() < inter.prob_recovery
             atom_i.status = recovered
@@ -467,7 +480,7 @@ function Molly.force(inter::SIRInteraction,
     return zero(coord_i)
 end
 
-# Custom Logger
+# Custom logger
 function fracs_SIR(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     counts_sir = [
         count(p -> p.status == susceptible, s.atoms),
@@ -487,10 +500,15 @@ n_starting = 2
 atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
 coords = place_atoms(n_people, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
-pairwise_inters = (
-    LennardJones=LennardJones(use_neighbors=true),
-    SIR=SIRInteraction(0.5, 0.06, 0.01),
+
+lj = LennardJones(
+    cutoff=DistanceCutoff(1.6),
+    use_neighbors=true,
+    force_units=NoUnits,
+    energy_units=NoUnits,
 )
+sir = SIRInteraction(0.5, 0.06, 0.01)
+pairwise_inters = (LennardJones=lj, SIR=sir)
 neighbor_finder = DistanceNeighborFinder(
     eligible=trues(n_people, n_people),
     n_steps=10,
@@ -522,17 +540,18 @@ visualize(sys.loggers.coords, boundary, "sim_agent.mp4"; markersize=0.1)
 ```
 ![Agent simulation](images/sim_agent.gif)
 
-We can use the logger to plot the fraction of people susceptible (blue), infected (orange) and recovered (green) over the course of the simulation:
+We can use the logger to plot the fraction of people susceptible, infected and recovered over the course of the simulation:
 
 ```julia
-using Plots
+using GLMakie
 
-sir_matrix = zeros(length(values(sys.loggers.SIR)), 3)
-for i = 1:101
-    sir_matrix[i, :] .= values(sys.loggers.SIR)[i][:]
-end
+f = Figure()
+ax = Axis(f[1, 1], xlabel="Snapshot", ylabel="Fraction")
 
-plot(sir_matrix)
+lines!([l[1] for l in values(sys.loggers.SIR)], label="Susceptible")
+lines!([l[2] for l in values(sys.loggers.SIR)], label="Infected")
+lines!([l[3] for l in values(sys.loggers.SIR)], label="Recovered")
+axislegend()
 ```
 
 ![Fraction SIR](images/fraction_sir.png)
@@ -540,12 +559,14 @@ plot(sir_matrix)
 ## Units
 
 Molly is fairly opinionated about using [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) units as shown above: you don't have to use them, but it is better if you do.
+Any consistent unit scheme can be used, or no units at all.
 Whilst you occasionally may run into friction with dimension mismatches, using units has the major advantages of catching whole classes of errors and letting you physically interpret the numbers in your system.
 The performance overhead of using units is minimal.
 Units are not currently compatible with differentiable simulations.
 
 All your interaction types need to return the same units of force and energy or the simulation will not run.
-By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_units` and `energy_units` arguments to [`System`](@ref).
+By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_units` and `energy_units` arguments to [`System`](@ref) and some interactions.
+These should be `NoUnits` if you are not using units.
 If you need to strip units for downstream analysis, use the `ustrip` function.
 It should be noted that charges are stored as dimensionless, i.e. 1.0 represents an atomic charge of +1.
 
@@ -553,12 +574,12 @@ It should be noted that charges are stored as dimensionless, i.e. 1.0 represents
 
 Molly has a built-in [`Atom`](@ref) type with a few properties commonly used in molecular simulation defined.
 Custom atom types can be used just as well provided that either the [`mass`](@ref) function is defined on the type or the type has a `mass` field (the fallback for the [`mass`](@ref) function).
-The type should also have all fields required by the interactions.
+The type should also have all fields required by any interactions.
 The list of atoms passed to the [`System`](@ref) constructor should be concretely typed.
 
 Custom atom types should generally be bits types, i.e. `isbitstype(MyAtom)` should be `true`, to work on the GPU.
 Additional non-bits type data for the atoms that is not directly used when calculating the interactions can be passed to the [`System`](@ref) constructor with the `atoms_data` keyword argument.
-For example the built-in [`AtomData`](@ref) type contains fields that are useful when writing trajectories such as the atom name.
+For example the built-in [`AtomData`](@ref) type contains fields such as the atom name that are useful when writing trajectories.
 
 ## Forces and energies
 
@@ -612,12 +633,12 @@ You can also define a [`use_neighbors`](@ref) method, which determines whether t
 Molly.use_neighbors(inter::MyPairwiseInter) = true
 ```
 This is `false` by default.
+If it is `true`, you must specify a neighbor finder when setting up the [`System`](@ref).
 For built-in interactions this function accesses the `use_neighbors` field of the struct.
 To work on the GPU the `struct` should be a bits type, i.e. `isbitstype(MyPairwiseInter)` should be `true`.
 
-Next, you need to define the [`force`](@ref) function acting between a pair of atoms.
-This has a set series of arguments.
-For example:
+Next, you need to define a method for the [`force`](@ref) function acting between a pair of atoms.
+This has a set series of arguments:
 ```julia
 function Molly.force(inter::MyPairwiseInter,
                         vec_ij,
@@ -638,22 +659,25 @@ end
 `vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
+
 An optional final argument `special` is a `Bool` determining whether the atom pair interaction should be treated as special.
+This is specified during neighbor finder construction.
 When simulating molecules, for example, non-bonded interactions for atoms in a 1-4 bonding arrangement (i-x-x-j) are often weighted by a factor such as 0.5.
 For interactions where this is relevant, `special` can be used to apply this weighting in the interaction.
+It can have a variety of uses depending on the context, for example if you have multiple interactions and want to exclude certain atom pairs from one of the interactions only.
 
 To use your custom force in a simulation, add it to the list of pairwise interactions:
 ```julia
-pairwise_inters = (MyPairwiseInter(true),)
+pairwise_inters = (MyPairwiseInter(),)
 ```
 Then create a [`System`](@ref) and simulate as above.
-Note that you can also use named tuples instead of tuples if you want to access interactions by name:
+Note that you can also use a named tuple instead of a tuple if you want to access interactions by name:
 ```julia
-pairwise_inters = (MyPairwiseInter=MyPairwiseInter(true),)
+pairwise_inters = (MyPairwiseInter=MyPairwiseInter(),)
 ```
 For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{PairwiseInteraction}`.
 
-If you wish to calculate potential energies or log the energy throughout a simulation, define the [`potential_energy`](@ref) function.
+If you wish to calculate potential energies or log the energy throughout a simulation, you will need to define a method for the [`potential_energy`](@ref) function.
 This has the same arguments as [`force`](@ref) and should return a single value corresponding to the potential energy.
 
 ### Specific interactions
@@ -664,8 +688,8 @@ struct MySpecificInter <: SpecificInteraction
     # Properties, e.g. a bond distance corresponding to the energy minimum
 end
 ```
-Next, you need to define the [`force`](@ref) function.
-The form of this will depend whether the interaction involves 1, 2, 3 or 4 atoms.
+Next, you need to define a method for the [`force`](@ref) function.
+The form of this will depend on whether the interaction involves 1, 2, 3 or 4 atoms.
 For example in the 2 atom case:
 ```julia
 function Molly.force(inter::MySpecificInter, coords_i, coords_j, boundary)
@@ -691,10 +715,10 @@ specific_inter_lists = (
 )
 ```
 For 3 atom interactions use [`InteractionList3Atoms`](@ref) and pass 3 sets of indices.
-If using the GPU, the inner list of indices and interactions should be moved to the GPU.
+If using the GPU, the inner list of indices and interactions should be moved to the GPU with `CuArray`.
 The number in the interaction list and the return type from [`force`](@ref) must match, e.g. [`InteractionList3Atoms`](@ref) must always return [`SpecificForce3Atoms`](@ref) from the corresponding [`force`](@ref) function.
 If some atoms are required in the interaction for force calculation but have no force applied to them by the interaction, give a zero force vector for those atoms.
-Again a [`potential_energy`](@ref) function with the same arguments can be defined.
+Again a method for the [`potential_energy`](@ref) function with the same arguments can be defined.
 
 ### General interactions
 
@@ -704,9 +728,12 @@ struct MyGeneralInter
     # Properties, e.g. a neural network model
 end
 ```
-Next, you need to define the [`forces`](@ref) function (note this is different to the [`force`](@ref) function above).
+Next, you need to define a method for the [`forces`](@ref) function (note this is different to the [`force`](@ref) function above).
 ```julia
-function Molly.forces(inter::MyGeneralInter, sys, neighbors=nothing; n_threads=Threads.nthreads())
+function Molly.forces(inter::MyGeneralInter,
+                        sys,
+                        neighbors=nothing;
+                        n_threads=Threads.nthreads())
     # Calculate the forces on all atoms using the interaction and the system
     # The output should have the same shape as the coordinates
     # For example, a neural network might do something like this
@@ -716,7 +743,7 @@ end
 The neighbors calculated from the neighbor list are available in this function, but may or may not be used depending on context.
 You could carry out your own neighbor finding in this function if required.
 Note that this function calculates forces not accelerations; if you have a neural network that calculates accelerations you should multiply these by `masses(sys)` to get the forces according to F=ma.
-A [`potential_energy`](@ref) function that takes the same arguments and returns a single value can also be defined.
+A method for the [`potential_energy`](@ref) function that takes the same arguments and returns a single value can also be defined.
 To use your custom force in a simulation, add it to the list of general interactions:
 ```julia
 general_inters = (MyGeneralInter(),)
@@ -781,7 +808,6 @@ V(r) - (r-r_c) V'(r_c) - V(r_c), r \le r_c \\
 This requires a more complicated change in the potential in order to satisfy the relation between them. This method is called the shifted force cutoff. The continuity of the force is desirable as it may give better energy conservation properties as shown in [Toxvaerd 2011](http://aip.scitation.org/doi/10.1063/1.3558787).
 
 There are also more complicated truncation methods that interpolate between the original potential and 0, but we will consider those two for the moment.
-
 The truncation approximations that we use can significantly alter the qualitative features of the simulation as shown in many articles in the molecular dynamics literature ([Fitzner 2017](https://aip.scitation.org/doi/full/10.1063/1.4997698), [van der Spoel 2006](https://pubs.acs.org/doi/10.1021/ct0502256) and others).
 
 Since the truncation algorithm is independent of the interaction for which is used, each compatible interaction is defined without including cutoffs.
@@ -878,8 +904,8 @@ struct MySimulator
     # Any properties, e.g. the time step or coupling methods
 end
 ```
-Then, define the function that carries out the simulation.
-This example shows some of the helper functions you can use:
+Then, define a method for [`simulate!`](@ref) that carries out the simulation.
+This example shows some helper functions that you can use:
 ```julia
 function Molly.simulate!(sys,
                             sim::MySimulator,
@@ -887,7 +913,6 @@ function Molly.simulate!(sys,
                             n_threads::Integer=Threads.nthreads())
     # Find neighbors like this
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
 
     for step_n in 1:n_steps
         # Calculate accelerations like this
@@ -895,6 +920,9 @@ function Molly.simulate!(sys,
 
         # Ensure coordinates stay within the simulation box like this
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+
+        # Example velocity update including appropriate unit conversion
+        sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         # Apply coupling like this
         apply_coupling!(sys, sim.coupling, sim)
@@ -913,6 +941,7 @@ function Molly.simulate!(sys,
     return sys
 end
 ```
+See more in the source code.
 To use your custom simulator, give it as the second argument when calling [`simulate!`](@ref).
 
 To define your own replica exchange simulator, first define a `struct`:
@@ -943,7 +972,7 @@ function Molly.remd_exchange!(sys::ReplicaSystem,
     return Δ, make_exchange
 end
 ```
-To get the correct exchange rates, the units of the Boltzmann constant must be corrected when used in the exchange function:
+To get the correct exchange rates, the units of the Boltzmann constant should be corrected when used in the exchange function:
 ```julia
 if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
     k_b = sys.k * T(Unitful.Na)
@@ -962,26 +991,23 @@ function Molly.simulate!(sys::ReplicaSystem,
                          rng=Random.GLOBAL_RNG,
                          n_threads::Integer=Threads.nthreads())
     # Do any initial setup if necessary
-
     simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
 end
 ```
 
-Under the hood there are two implementations for the [`forces`](@ref) function used by [`accelerations`](@ref) and for [`potential_energy`](@ref): an in-place version geared towards CPUs and parallelism, and an out-of-place version geared towards GPUs and differentiable simulation.
-You can define different versions of a simulator for in-place and out-of-place systems by dispatching on `System{D, false}` or `System{D, true}` respectively.
-This also applies to coupling methods and neighbor lists.
-You do not have to define two versions though: you may only intend to use the simulator one way, or the out-of-place version may be performant in all cases.
-
-The implementation to use is guessed when you call [`System`](@ref) based on whether `coords` is a `CuArray` but can be given explicitly with the `gpu_diff_safe` keyword argument, for example if you want to run differentiable simulations on the CPU.
-[`is_gpu_diff_safe`](@ref) will retrieve this property for a [`System`](@ref).
+Under the hood there are two implementations for the [`forces`](@ref) function, used by [`accelerations`](@ref), and for [`potential_energy`](@ref): a version geared towards CPUs and parallelism, and a version geared towards GPUs.
+You can define different versions of a simulator for CPU and GPU systems by dispatching on `System{D, false}` or `System{D, true}` respectively.
+This also applies to coupling methods, neighbor finders and analysis functions.
+You do not have to define two versions though: you may only intend to use the simulator one way, or one version may be performant in all cases.
 
 ## Coupling
 
-Temperature and pressure coupling allows properties to be controlled during a simulation.
+Some simulators can be modified by adding coupling methods to allow properties like temperature and pressure to be controlled during a simulation.
 The available couplers are:
 - [`AndersenThermostat`](@ref)
 - [`RescaleThermostat`](@ref)
 - [`BerendsenThermostat`](@ref)
+Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being [`NoCoupling`](@ref).
 
 To define your own coupling method, first define the `struct`:
 ```julia
@@ -998,51 +1024,6 @@ end
 ```
 The functions [`random_velocity`](@ref), [`maxwell_boltzmann`](@ref) and [`temperature`](@ref) may be useful here.
 To use your custom coupler, give it as the `coupling` argument to the simulator.
-
-## Neighbor finders
-
-Neighbor finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
-When using a neighbor finder you should in general also use a cutoff (see [Cutoffs](@ref)) with a cutoff distance less than the neighbor list distance.
-The available neighbor finders are:
-- [`NoNeighborFinder`](@ref)
-- [`CellListMapNeighborFinder`](@ref)
-- [`TreeNeighborFinder`](@ref)
-- [`DistanceNeighborFinder`](@ref)
-
-To define your own neighbor finder, first define the `struct`:
-```julia
-struct MyNeighborFinder
-    eligible::BitArray{2}
-    special::BitArray{2}
-    n_steps::Int
-    # Any other properties, e.g. a distance cutoff
-end
-```
-Examples of three useful properties are given here: a matrix indicating atom pairs eligible for non-bonded interactions, a matrix indicating atoms in a special arrangement such as 1-4 bonding, and a value determining how many time steps occur between each evaluation of the neighbor finder.
-Then, define the neighbor finding function that is called every step by the simulator:
-```julia
-function find_neighbors(s,
-                        nf::MyNeighborFinder,
-                        current_neighbors=nothing,
-                        step_n::Integer=0;
-                        n_threads::Integer=Threads.nthreads())
-    if step_n % nf.n_steps == 0
-        if isnothing(current_neighbors)
-            neighbors = NeighborList()
-        else
-            neighbors = current_neighbors
-        end
-        empty!(neighbors)
-        # Add to neighbors, for example
-        push!(neighbors, (1, 2, false)) # atom i, atom j and whether they are in a 1-4 bonding arrangement
-        return neighbors
-    else
-        return current_neighbors
-    end
-end
-```
-A different setup is used for the out-of-place implementation.
-To use your custom neighbor finder, give it as the `neighbor_finder` argument when creating the [`System`](@ref).
 
 ## Loggers
 
@@ -1066,33 +1047,42 @@ The available loggers are:
 Many of the loggers can be initialised with just the number of steps between recorded values, e.g. `CoordinateLogger(10)`.
 An optional first argument is the type of the recorded value; the above is equivalent to `CoordinateLogger(typeof(1.0u"nm"), 10)` but if the simulation did not use units then `CoordinateLogger(Float64, 10)` would be required.
 If the simulation is in 2D, giving `dims=2` as a keyword argument is required for some loggers.
+A logger's history can be accessed with `values(my_logger)`.
 
-To define your own logger, first define the `struct`:
+To define your own logger, first define the `struct` and a method for `values` to access the stored values:
 ```julia
 struct MyLogger
     n_steps::Int
-    # Any other properties, e.g. an Array to record values during the trajectory
+    history::Vector{Float64}
+    # Any other properties
 end
+
+Base.values(logger::MyLogger) = logger.history
 ```
 Then, define the logging function that is called every step by the simulator:
 ```julia
-function Molly.log_property!(logger::MyLogger, sys, neighbors, step_n; n_threads=Threads.nthreads(), kwargs...)
+function Molly.log_property!(logger::MyLogger,
+                                sys,
+                                neighbors,
+                                step_n;
+                                n_threads=Threads.nthreads(),
+                                kwargs...)
     if step_n % logger.n_steps == 0
         # Record some property or carry out some action
     end
 end
 ```
-The use of `n_steps` is optional and is an example of how to record a property every n steps through the simulation.
+The use of `n_steps` is optional and is an example of how to record a property periodically throughout the simulation.
 To use your custom logger, add it to the named tuple of loggers given when creating the [`System`](@ref):
 ```julia
-loggers = (mylogger=MyLogger(10),) # Don't forget the trailing comma!
+loggers = (mylogger=MyLogger(10, []),) # Don't forget the trailing comma!
 ```
 In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0.
 This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values.
 Loggers are currently ignored for the purposes of taking gradients, so if a logger is used in the gradient calculation the gradients will appear to be nothing.
 
 Many times, a logger will just record an observation to an `Array` containing a record of past observations.
-For this purpose, you can use the [`GeneralObservableLogger`](@ref) construct without defining a custom logging function. Simply define your observation function as
+For this purpose, you can use the [`GeneralObservableLogger`](@ref) without defining a custom logging function. Simply define your observation function as
 ```julia
 function my_observable(sys::System, neighbors; n_threads::Integer)
     # Probe the system for some desired property
@@ -1104,7 +1094,6 @@ A logger which records this property every `n_steps` can be constructed through
 my_logger = GeneralObservableLogger(my_observable, T, n_steps)
 ```
 where `T = typeof(observation)` is the type of the return value for `my_observable`.
-The logger's history can be accessed with `values(my_logger)`.
 [`AverageObservableLogger`](@ref) is similar but records a running average rather than storing observations.
 
 The [`TimeCorrelationLogger`](@ref) logger can be used to compute correlation functions of the form
@@ -1167,7 +1156,7 @@ simulate!(sys, simulator, 10_000)
 temperature(sys) = 48.76795299825687 K
 ```
 Good.
-Next we define our correlation logger, add it to the system's loggers and run a long simulation.
+Next we define our correlation logger, add it to the system's loggers and run a longer simulation.
 Note that we need to redeclare the system when adding a logger.
 ```julia
 # Velocity observable
@@ -1211,7 +1200,51 @@ plot(
 ```
 ![Velocity Autocorrelations](images/velocity_autocorrelations.png)\
 As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly.
-The oscillatory behavior is due to the contribution of the harmonic bond interactions.
+The oscillatory behavior is due to the harmonic bond interactions.
+
+## Neighbor finders
+
+Neighbor finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
+When using a neighbor finder you should in general also use a cutoff (see [Cutoffs](@ref)) with a cutoff distance less than the neighbor finder distance.
+The available neighbor finders are:
+- [`NoNeighborFinder`](@ref)
+- [`CellListMapNeighborFinder`](@ref)
+- [`TreeNeighborFinder`](@ref)
+- [`DistanceNeighborFinder`](@ref)
+
+To define your own neighbor finder, first define the `struct`:
+```julia
+struct MyNeighborFinder
+    eligible::BitArray{2}
+    special::BitArray{2}
+    n_steps::Int
+    # Any other properties, e.g. a distance cutoff
+end
+```
+Examples of three useful properties are given here: a matrix indicating atom pairs eligible for pairwise interactions, a matrix indicating atoms in a special arrangement such as 1-4 bonding, and a value determining how many time steps occur between each evaluation of the neighbor finder.
+Then, define the neighbor finding function that is called every step by the simulator:
+```julia
+function find_neighbors(s,
+                        nf::MyNeighborFinder,
+                        current_neighbors=nothing,
+                        step_n::Integer=0;
+                        n_threads::Integer=Threads.nthreads())
+    if step_n % nf.n_steps == 0
+        if isnothing(current_neighbors)
+            neighbors = NeighborList()
+        else
+            neighbors = current_neighbors
+        end
+        empty!(neighbors)
+        # Add to neighbors, for example
+        push!(neighbors, (1, 2, false)) # atom i, atom j and whether they are in a special interaction
+        return neighbors
+    else
+        return current_neighbors
+    end
+end
+```
+To use your custom neighbor finder, give it as the `neighbor_finder` argument when creating the [`System`](@ref).
 
 ## Analysis
 

@@ -21,6 +21,7 @@ export
     SteepestDescentMinimizer(; <keyword arguments>)
 
 Steepest descent energy minimization.
+
 Not currently compatible with automatic differentiation using Zygote.
 
 # Arguments
@@ -234,6 +235,7 @@ end
 
 The Störmer-Verlet integrator.
 The velocity calculation is accurate to O(dt).
+
 Does not currently work with coupling methods that alter the velocity.
 Does not currently remove the center of mass motion.
 
@@ -365,6 +367,7 @@ The [`Langevin`](@ref) and [`VelocityVerlet`](@ref) simulators without coupling
 correspond to the **BAOA** and **BAB** schemes respectively.
 For more information on the sampling properties of splitting schemes, see
 [Fass et al. 2018](https://doi.org/10.3390/e20050318).
+
 Not currently compatible with automatic differentiation using Zygote.
 
 # Arguments
@@ -559,6 +562,7 @@ The corresponding [`ReplicaSystem`](@ref) should have the same number of replica
 the number of temperatures in the simulator.
 When calling [`simulate!`](@ref), the `assign_velocities` keyword argument determines
 whether to assign random velocities at the appropriate temperature for each replica.
+
 Not currently compatible with automatic differentiation using Zygote.
 
 # Arguments
@@ -669,6 +673,7 @@ A simulator for a parallel Hamiltonian replica exchange MD (H-REMD) simulation o
 The replicas are expected to have different Hamiltonians, i.e. different interactions.
 When calling [`simulate!`](@ref), the `assign_velocities` keyword argument determines
 whether to assign random velocities at the appropriate temperature for each replica.
+    
 Not currently compatible with automatic differentiation using Zygote.
 
 # Arguments
