@@ -17,25 +17,33 @@
         prob_recovery::Float64
     end
 
-    # Custom Logger
+    # Custom logger
     struct SIRLogger
         n_steps::Int
         fracs_sir::Vector{Vector{Float64}}
     end
 
+    Base.values(logger::SIRLogger) = logger.fracs_sir
+
     # Custom force function
-    function Molly.force(inter::SIRInteraction, dr, coord_i, coord_j, atom_i, atom_j, boundary)
+    function Molly.force(inter::SIRInteraction,
+                            vec_ij,
+                            coord_i,
+                            coord_j,
+                            atom_i,
+                            atom_j,
+                            boundary)
         if (atom_i.status == infected && atom_j.status == susceptible) ||
                     (atom_i.status == susceptible && atom_j.status == infected)
             # Infect close people randomly
-            r2 = sum(abs2, dr)
-            if r2 < inter.dist_infection ^ 2 && rand() < inter.prob_infection
+            r2 = sum(abs2, vec_ij)
+            if r2 < inter.dist_infection^2 && rand() < inter.prob_infection
                 atom_i.status = infected
                 atom_j.status = infected
             end
         end
         # Workaround to obtain a self-interaction
-        if atom_i.i == (atom_j.i + 1)
+        if atom_i.i == (atom_j.i - 1)
             # Recover randomly
             if atom_i.status == infected && rand() < inter.prob_recovery
                 atom_i.status = recovered
@@ -44,8 +52,9 @@
         return zero(coord_i)
     end
 
-    # Custom logging function
-    function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n; n_threads=Threads.nthreads(), kwargs...)
+    # Test log_property! definition rather than just using GeneralObservableLogger
+    function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n;
+                                 n_threads=Threads.nthreads(), kwargs...)
         if step_n % logger.n_steps == 0
             counts_sir = [
                 count(p -> p.status == susceptible, s.atoms),
@@ -56,28 +65,35 @@
         end
     end
 
-    n_people = 500
-    n_steps = 1_000
-    boundary = RectangularBoundary(10.0)
     temp = 1.0
+    boundary = RectangularBoundary(10.0)
+    n_steps = 1_000
+    n_people = 500
     n_starting = 2
     atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
     coords = place_atoms(n_people, boundary; min_dist=0.1)
     velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
-    SIR = SIRInteraction(0.5, 0.06, 0.01)
-    @test !use_neighbors(SIR)
-    pairwise_inters = (
-        LennardJones=LennardJones(use_neighbors=true),
-        SIR=SIR,
+
+    lj = LennardJones(
+        cutoff=DistanceCutoff(1.6),
+        use_neighbors=true,
+        force_units=NoUnits,
+        energy_units=NoUnits,
     )
+    sir = SIRInteraction(0.5, 0.06, 0.01)
+    @test !use_neighbors(sir)
+    pairwise_inters = (LennardJones=lj, SIR=sir)
     neighbor_finder = DistanceNeighborFinder(
         eligible=trues(n_people, n_people),
         n_steps=10,
         dist_cutoff=2.0,
     )
-    simulator = VelocityVerlet(dt=0.02, coupling=AndersenThermostat(temp, 5.0))
+    simulator = VelocityVerlet(
+        dt=0.02,
+        coupling=AndersenThermostat(temp, 5.0),
+    )
 
-    s = System(
+    sys = System(
         atoms=atoms,
         pairwise_inters=pairwise_inters,
         coords=coords,
@@ -92,5 +108,10 @@
         energy_units=NoUnits,
     )
 
-    @time simulate!(s, simulator, n_steps; n_threads=1)
+    @time simulate!(sys, simulator, n_steps; n_threads=1)
+
+    s, i, r = values(sys.loggers.SIR)[end]
+    @test s < 0.9
+    @test i < 0.9
+    @test r > 0.1
 end
