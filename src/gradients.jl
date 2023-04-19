@@ -68,7 +68,7 @@ function extract_parameters(sys, ff)
                 end
                 if !haskey(params_dic, key_prefix * "phase_1")
                     torsion = ff.torsion_types[atom_types_to_tuple(torsion_type)]
-                    for i in 1:length(torsion.phases)
+                    for i in eachindex(torsion.phases)
                         params_dic[key_prefix * "phase_$i"] = torsion.phases[i]
                         params_dic[key_prefix * "k_$i"    ] = torsion.ks[i]
                     end

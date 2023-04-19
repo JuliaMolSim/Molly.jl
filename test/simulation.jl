@@ -464,7 +464,7 @@ end
 
     coords = place_atoms(n_atoms ÷ 2, boundary, min_dist=0.3u"nm")
 
-    for i in 1:length(coords)
+    for i in eachindex(coords)
         push!(coords, coords[i] .+ [0.15, 0.0, 0.0]u"nm")
     end
 
@@ -494,14 +494,14 @@ end
         loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
     )
 
-    for i in 1:length(sys.coords)
+    for i in eachindex(sys.coords)
         sys.coords[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"        
     end
 
     old_coords = sys.coords
     apply_constraints!(sys, sh, old_coords, 0.002u"ps")
 
-    lengths = map(1:length(sh.is)) do r
+    lengths = map(eachindex(sh.is)) do r
         return norm(vector(sys.coords[sh.is[r]], sys.coords[sh.js[r]], sys.boundary))
     end
 
@@ -511,7 +511,7 @@ end
 
     @time simulate!(sys, simulator, 1_000)
 
-    lengths = map(1:length(sh.is)) do r
+    lengths = map(eachindex(sh.is)) do r
         return norm(vector(sys.coords[sh.is[r]], sys.coords[sh.js[r]], sys.boundary))
     end
 
@@ -566,7 +566,7 @@ end
         loggers=(coords=CoordinateLogger(10),),
     )
 
-    for i in 1:length(sys.coords)
+    for i in eachindex(sys.coords)
         sys.coords[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
     end
 
@@ -574,7 +574,7 @@ end
 
     @time apply_constraints!(sys, sh, old_coords, 0.002u"ps")
 
-    lengths = map(1:length(sh.is)) do r
+    lengths = map(eachindex(sh.is)) do r
         return norm(vector(sys.coords[sh.is[r]], sys.coords[sh.js[r]], sys.boundary))
     end
 
@@ -827,10 +827,10 @@ end
     neighbors = find_neighbors(sys, sys.neighbor_finder)
 
     distance_sum = 0.0u"nm"
-    for i in 1:length(sys)
+    for i in eachindex(sys)
         ci = sys.coords[i]
         min_dist2 = Inf*u"nm^2"
-        for j in 1:length(sys)
+        for j in eachindex(sys)
             if i == j
                 continue
             end

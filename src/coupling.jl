@@ -33,7 +33,7 @@ struct AndersenThermostat{T, C}
 end
 
 function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, sim) where D
-    for i in 1:length(sys)
+    for i in eachindex(sys)
         if rand() < (sim.dt / thermostat.coupling_const)
             sys.velocities[i] = random_velocity(mass(sys.atoms[i]), thermostat.temperature, sys.k;
                                                 dims=n_dimensions(sys))

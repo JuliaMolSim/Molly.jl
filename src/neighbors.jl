@@ -65,7 +65,7 @@ function find_neighbors(s::System{D, false},
 
     sqdist_cutoff = nf.dist_cutoff ^ 2
 
-    @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in 1:length(s)
+    @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in eachindex(s)
         ci = s.coords[i]
         nbi = @view nf.eligible[:, i]
         w14i = @view nf.special[:, i]
@@ -167,7 +167,7 @@ function find_neighbors(s::System,
     btree = BallTree(ustrip_vec.(s.coords), PeriodicEuclidean(bv))
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
 
-    @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in 1:length(s)
+    @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in eachindex(s)
         ci = ustrip.(s.coords[i])
         nbi = @view nf.eligible[:, i]
         w14i = @view nf.special[:, i]
@@ -285,7 +285,7 @@ end
 # This is only called in the parallel case
 function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{NeighborList})
     neighbors.n = 0
-    for i in 1:length(neighbors_threaded)
+    for i in eachindex(neighbors_threaded)
         append!(neighbors, neighbors_threaded[i])
     end
     return neighbors
@@ -310,7 +310,7 @@ function find_neighbors(s::System{D, G},
     neighbors.n = 0
     neighbors_threaded = nf.neighbors_threaded
     if n_threads > 1
-        for i in 1:length(neighbors_threaded)
+        for i in eachindex(neighbors_threaded)
             neighbors_threaded[i].n = 0
         end
     else

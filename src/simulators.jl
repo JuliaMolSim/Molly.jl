@@ -673,7 +673,7 @@ A simulator for a parallel Hamiltonian replica exchange MD (H-REMD) simulation o
 The replicas are expected to have different Hamiltonians, i.e. different interactions.
 When calling [`simulate!`](@ref), the `assign_velocities` keyword argument determines
 whether to assign random velocities at the appropriate temperature for each replica.
-    
+
 Not currently compatible with automatic differentiation using Zygote.
 
 # Arguments
@@ -901,7 +901,7 @@ in range [0, 1) scaled by `shift_size` which should have appropriate length unit
 """
 function random_uniform_translation!(sys::System{D, G, T};
                                      shift_size=oneunit(eltype(eltype(sys.coords)))) where {D, G, T}
-    rand_idx = rand(1:length(sys))
+    rand_idx = rand(eachindex(sys))
     direction = random_unit_vector(T, D)
     magnitude = rand(T) * shift_size
     sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)
@@ -918,7 +918,7 @@ which should have appropriate length units.
 """
 function random_normal_translation!(sys::System{D, G, T};
                                     shift_size=oneunit(eltype(eltype(sys.coords)))) where {D, G, T}
-    rand_idx = rand(1:length(sys))
+    rand_idx = rand(eachindex(sys))
     direction = random_unit_vector(T, D)
     magnitude = randn(T) * shift_size
     sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)

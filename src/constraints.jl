@@ -36,7 +36,7 @@ function apply_constraints!(sys, constraint::SHAKE, old_coords, dt)
     converged = false
 
     while !converged
-        for r in 1:length(constraint.is)
+        for r in eachindex(constraint.is)
             # Atoms that are part of the bond
             i0 = constraint.is[r]
             i1 = constraint.js[r]
@@ -76,7 +76,7 @@ function apply_constraints!(sys, constraint::SHAKE, old_coords, dt)
     
         end
 
-        lengths = [abs(norm(vector(sys.coords[constraint.is[r]], sys.coords[constraint.js[r]], sys.boundary)) - constraint.dists[r]) for r in 1:length(constraint.is)]
+        lengths = [abs(norm(vector(sys.coords[constraint.is[r]], sys.coords[constraint.js[r]], sys.boundary)) - constraint.dists[r]) for r in eachindex(constraint.is)]
 
         if maximum(lengths) < constraint.tolerance
             converged = true

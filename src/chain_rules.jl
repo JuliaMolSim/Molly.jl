@@ -219,7 +219,7 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), coords::AbstractArray{
         fs = zero(coords)
         z = zero(T)
         d_coords = zero(coords)
-        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:length(coords)]
+        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in eachindex(coords)]
         d_sils_1_atoms = zero.(sils_1_atoms)
         d_sils_2_atoms = zero.(sils_2_atoms)
         d_sils_3_atoms = zero.(sils_3_atoms)
@@ -268,7 +268,7 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), coords, atom
         pe_vec = zeros(T, 1)
         z = zero(T)
         d_coords = zero(coords)
-        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:length(coords)]
+        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in eachindex(coords)]
         d_sils_1_atoms = zero.(sils_1_atoms)
         d_sils_2_atoms = zero.(sils_2_atoms)
         d_sils_3_atoms = zero.(sils_3_atoms)
