@@ -29,16 +29,16 @@ Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct CubicBoundary{T}
     side_lengths::SVector{3, T}
-    function CubicBoundary(side_lengths::SVector{3, D}) where D
-        if any(l -> l < zero(l), side_lengths)
-            throw(DomainError("side lengths can't be negative, got $side_lengths"))
+    function CubicBoundary(side_lengths::SVector{3, D}; check_positive::Bool=true) where D
+        if check_positive && any(l -> l <= zero(l), side_lengths)
+            throw(DomainError("side lengths must be positive, got $side_lengths"))
         end
         new{D}(side_lengths)
     end
 end
 
-CubicBoundary(x, y, z) = CubicBoundary(SVector{3}(x, y, z))
-CubicBoundary(x::Number) = CubicBoundary(SVector{3}(x, x, x))
+CubicBoundary(x, y, z; kwargs...) = CubicBoundary(SVector{3}(x, y, z); kwargs...)
+CubicBoundary(x::Number; kwargs...) = CubicBoundary(SVector{3}(x, x, x); kwargs...)
 
 Base.getindex(b::CubicBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::CubicBoundary) = 1
@@ -54,16 +54,16 @@ Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct RectangularBoundary{T}
     side_lengths::SVector{2, T}
-    function RectangularBoundary(side_lengths::SVector{2, D}) where D
-        if any(l -> l < zero(l), side_lengths)
-            throw(DomainError("side lengths can't be negative, got $side_lengths"))
+    function RectangularBoundary(side_lengths::SVector{2, D}; check_positive::Bool=true) where D
+        if check_positive && any(l -> l <= zero(l), side_lengths)
+            throw(DomainError("side lengths must be positive, got $side_lengths"))
         end
         new{D}(side_lengths)
     end
 end
 
-RectangularBoundary(x, y) = RectangularBoundary(SVector{2}(x, y))
-RectangularBoundary(x::Number) = RectangularBoundary(SVector{2}(x, x))
+RectangularBoundary(x, y; kwargs...) = RectangularBoundary(SVector{2}(x, y); kwargs...)
+RectangularBoundary(x::Number; kwargs...) = RectangularBoundary(SVector{2}(x, x); kwargs...)
 
 Base.getindex(b::RectangularBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::RectangularBoundary) = 1

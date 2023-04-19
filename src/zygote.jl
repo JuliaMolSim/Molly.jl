@@ -81,19 +81,19 @@ function Base.:+(y::NamedTuple{(:atoms, :atoms_data, :masses,
 end
 
 function Zygote.accum(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{3, T, Vector{T}}}}, y::SVector{3, T}) where T
-    CubicBoundary(SVector{3, T}(x.side_lengths .+ y))
+    CubicBoundary(SVector{3, T}(x.side_lengths .+ y); check_positive=false)
 end
 
 function Zygote.accum(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{2, T, Vector{T}}}}, y::SVector{2, T}) where T
-    RectangularBoundary(SVector{2, T}(x.side_lengths .+ y))
+    RectangularBoundary(SVector{2, T}(x.side_lengths .+ y); check_positive=false)
 end
 
 function Base.:+(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{3, T, Vector{T}}}}, y::CubicBoundary{T}) where T
-    CubicBoundary(SVector{3, T}(x.side_lengths .+ y.side_lengths))
+    CubicBoundary(SVector{3, T}(x.side_lengths .+ y.side_lengths); check_positive=false)
 end
 
 function Base.:+(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{2, T, Vector{T}}}}, y::RectangularBoundary{T}) where T
-    RectangularBoundary(SVector{2, T}(x.side_lengths .+ y.side_lengths))
+    RectangularBoundary(SVector{2, T}(x.side_lengths .+ y.side_lengths); check_positive=false)
 end
 
 atom_or_empty(at::Atom, T) = at

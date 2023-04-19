@@ -47,22 +47,24 @@
     @test Molly.length_type(b) == typeof(1.0u"nm")
     @test !Molly.has_infinite_boundary(b)
     @test box_volume(b) == 120.0u"nm^3"
-    @test box_volume(CubicBoundary(0.0u"m")) == 0.0u"m^3"
+    @test box_volume(CubicBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^3"
     @test box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0, 6.0)u"nm"
     @test Molly.axis_limits(CubicBoundary(4.0, 5.0, 6.0), CoordinateLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError CubicBoundary(-4.0u"nm", 5.0u"nm", 6.0u"nm")
+    @test_throws DomainError CubicBoundary( 4.0u"nm", 0.0u"nm", 6.0u"nm")
 
     b = RectangularBoundary(4.0u"m", 5.0u"m")
     @test float_type(b) == Float64
     @test Molly.length_type(b) == typeof(1.0u"m")
     @test !Molly.has_infinite_boundary(b)
     @test box_volume(b) == 20.0u"m^2"
-    @test box_volume(RectangularBoundary(0.0u"m")) == 0.0u"m^2"
+    @test box_volume(RectangularBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^2"
     @test box_center(b) == SVector(2.0, 2.5)u"m"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0)u"m"
     @test Molly.axis_limits(RectangularBoundary(4.0, 5.0), CoordinateLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError RectangularBoundary(-4.0u"nm", 5.0u"nm")
+    @test_throws DomainError RectangularBoundary( 4.0u"nm", 0.0u"nm")
 
     b = TriclinicBoundary(SVector(2.2, 2.0, 1.8)u"nm", deg2rad.(SVector(50.0, 40.0, 60.0)))
     @test float_type(b) == Float64
