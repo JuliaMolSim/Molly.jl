@@ -142,7 +142,7 @@ for pol_i in 1:n_polymers
         ))
     end
 end
-coords = [coords...] # Ensure the array is strongly typed
+coords = [coords...] # Ensure the array is concretely typed
 
 # Create FENEBonds between adjacent monomers
 bond_is, bond_js = Int[], Int[]
@@ -192,15 +192,19 @@ for pol_i in 1:n_polymers
     end
 end
 
+lj = LennardJones(
+    cutoff=DistanceCutoff(5.0u&quot;nm&quot;),
+    use_neighbors=true,
+)
 neighbor_finder = DistanceNeighborFinder(
     eligible=eligible,
     n_steps=10,
-    dist_cutoff=5.0u&quot;nm&quot;,
+    dist_cutoff=5.5u&quot;nm&quot;,
 )
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=(LennardJones(use_neighbors=true),),
+    pairwise_inters=(lj,),
     specific_inter_lists=(bonds, angles),
     coords=coords,
     boundary=boundary,
@@ -380,7 +384,7 @@ function Molly.force(inter::BondableInteraction,
     end
 end
 
-function bonds(sys::System, neighbors=nothing, n_threads::Integer=Threads.nthreads())
+function bonds(sys::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     bonds = BitVector()
     for i in 1:length(sys)
         for j in 1:(i - 1)
@@ -401,13 +405,18 @@ atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = place_atoms(n_atoms, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
-    SoftSphere(use_neighbors=true),
+    SoftSphere(
+        cutoff=DistanceCutoff(2.0),
+        use_neighbors=true,
+        force_units=NoUnits,
+        energy_units=NoUnits,
+    ),
     BondableInteraction(0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(
     eligible=trues(n_atoms, n_atoms),
     n_steps=10,
-    dist_cutoff=2.0,
+    dist_cutoff=2.2,
 )
 simulator = VelocityVerlet(
     dt=0.02,
@@ -602,4 +611,4 @@ lines!(ax, dists, energies(0, 1, 2), label=&quot;standard LJ potential&quot;)
 
 ylims!(-5, 25)
 axislegend(position=:rt)
-save(&quot;lennard_jones_sc.png&quot;, f)</code></pre><p><img src="../images/lennard_jones_sc.png" alt="Lennard-Jones Softcore"/></p><p>The form of the potential is approximately the same as standard Lennard-Jones for <span>$r_{ij} &gt; \sigma_{ij}$</span> if some fractional values are used for <span>$\lambda$</span> and <span>$\alpha$</span>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../related/">Related software »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Monday 17 April 2023 16:28">Monday 17 April 2023</span>. Using Julia version 1.8.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+save(&quot;lennard_jones_sc.png&quot;, f)</code></pre><p><img src="../images/lennard_jones_sc.png" alt="Lennard-Jones Softcore"/></p><p>The form of the potential is approximately the same as standard Lennard-Jones for <span>$r_{ij} &gt; \sigma_{ij}$</span> if some fractional values are used for <span>$\lambda$</span> and <span>$\alpha$</span>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../related/">Related software »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Wednesday 19 April 2023 15:21">Wednesday 19 April 2023</span>. Using Julia version 1.8.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
