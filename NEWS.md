@@ -1,9 +1,47 @@
 # Molly.jl release notes
 
+## v0.15.0 - Apr 2023
+
+The core of the package is rewritten to use CUDA.jl kernels on the GPU path for increased performance and GPU memory usage. Enzyme.jl is used along with Zygote.jl to differentiate through simulations on CPU and GPU for increased performance.
+
+### Breaking changes
+- The `nl_only` field of pairwise interactions is replaced with a `use_neighbors` function, which accesses a `use_neighbors` field of the struct for built-in interactions. Custom pairwise interactions can define a method for this function, which returns `false` by default.
+- The `weight_14` field of pairwise interactions has been renamed to `weight_special` and the `weight_14` argument to `force` has been renamed to `special`. The `nb_matrix` and `matrix_14` fields of neighbor finders have been renamed to `eligible` and `special` respectively.
+- `OpenMMForceField`, `OpenMMResidueType` and `OpenMMAtomType` are renamed to `MolecularForceField`, `ResidueType` and `AtomType` respectively.
+- The penultimate argument to `InteractionList1Atoms` etc., the interaction type names, is now an optional final argument that defaults to a vector of empty strings. The type parameters are also changed.
+- `velocity` is renamed to `random_velocity` and `rand_coord` is renamed to `random_coord`.
+- `DistanceVecNeighborFinder` and `NeighborListVec` are removed since `DistanceNeighborFinder` and `NeighborList` now work on the GPU and with automatic differentiation.
+- The `gpu_diff_safe` argument is no longer available when setting up a `System` since the CPU path is now differentiable. `is_gpu_diff_safe` is removed.
+- The type parameters of `System`, `ReplicaSystem`, `DistanceNeighborFinder` and `NeighborList` are changed.
+- The `@fastmath` macro is no longer used in the package.
+
+### Non-breaking changes
+- `DistanceNeighborFinder` and `TreeNeighborFinder` now return lists of neighboring pairs in ascending order of index.
+
+### New features
+- The Nosé-Hoover simulator is added as `NoseHoover`.
+- `potential_energy` and `total_energy` are now compatible with automatic differentiation on CPU and GPU. They can also now be run in parallel using the `n_threads` keyword argument, with this being the default behaviour.
+- `CubicBoundary` and `RectangularBoundary` can take a single value as an argument, indicating the same size in all dimensions. They must take positive side lengths.
+- The `remove_CM_motion` argument to simulators can be set to an integer, in which case the center of mass motion is removed every given number of steps. The default remains to remove the center of mass motion every step.
+- The `kappa` and `rename_terminal_res` keyword arguments are available as arguments when constructing a `System` from a file and a force field.
+- Differentiable simulation now works with any combination of built-in or custom interactions.
+- Differentiable simulation now works with multithreading on the CPU.
+- The number of GPU threads used for the CUDA.jl kernels can be tuned with the environmental variables `MOLLY_GPUNTHREADS_PAIRWISE`, `MOLLY_GPUNTHREADS_SPECIFIC`, `MOLLY_GPUNTHREADS_DISTANCENF` and `MOLLY_GPUNTHREADS_IMPLICIT`.
+- A section on development is added to the documentation and other areas of the documentation are expanded.
+
+### Performance improvements
+- Force calculation, energy calculation, simulation and implicit solvent force/energy calculation are all made faster on CPU and GPU.
+- GPU memory usage is reduced significantly, allowing the simulation of larger systems.
+- Differentiable simulation is made faster on CPU and GPU.
+
+### Bug fixes
+- Bugs in boundary and system indexing are fixed.
+- A bug in implicit solvent automatic differentiation is fixed.
+- A bug allowing incorrect units to be used in general interactions is fixed.
+
 ## v0.14.3 - Feb 2023
 
 ### Bug fixes
-
 - A bug introduced by a new version of ForwardDiff.jl is fixed.
 
 ## v0.14.2 - Feb 2023
