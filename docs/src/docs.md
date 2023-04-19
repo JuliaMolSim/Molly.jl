@@ -38,6 +38,17 @@ Setting individual dimensions in a [`CubicBoundary`](@ref) to `Inf * u"nm"` make
 You can also use a [`TriclinicBoundary`](@ref).
 Simulations in 2 dimensions should use a [`RectangularBoundary`](@ref).
 
+The [`vector`](@ref) function gets the vector from one coordinate to another accounting for periodic boundary conditions by using the minimum image convention:
+```julia
+vector(coords[1], coords[2], boundary)
+```
+```
+3-element SVector{3, Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}} with indices SOneTo(3):
+ -0.8619698558762985 nm
+ -0.9475020064484192 nm
+  0.8359421827141784 nm
+```
+
 Now we can define our pairwise interactions, i.e. those between most or all atom pairs.
 Because we have defined the relevant parameters for the atoms, we can use the built-in [`LennardJones`](@ref) type.
 ```julia
@@ -573,7 +584,8 @@ It should be noted that charges are stored as dimensionless, i.e. 1.0 represents
 ## Atom types
 
 Molly has a built-in [`Atom`](@ref) type with a few properties commonly used in molecular simulation defined.
-Custom atom types can be used just as well provided that either the [`mass`](@ref) function is defined on the type or the type has a `mass` field (the fallback for the [`mass`](@ref) function).
+The [`mass`](@ref) and [`charge`](@ref) functions can be used on an [`Atom`](@ref).
+Custom atom types can be used just as effectively provided that either the [`mass`](@ref) function is defined on the type or the type has a `mass` field (the fallback for the [`mass`](@ref) function).
 The type should also have all fields required by any interactions.
 The list of atoms passed to the [`System`](@ref) constructor should be concretely typed.
 
@@ -895,6 +907,9 @@ The available simulators are:
 - [`TemperatureREMD`](@ref)
 - [`HamiltonianREMD`](@ref)
 - [`MetropolisMonteCarlo`](@ref)
+
+Many of these require a time step `dt` as an argument.
+Many also remove the center of mass motion every time step, this can be tuned with the `remove_CM_motion` argument.
 
 The [`LangevinSplitting`](@ref) simulator can be used to define a variety of integrators such as velocity Verlet (splitting `"BAB"`), the Langevin implementation in [`Langevin`](@ref) (`"BAOA"`), and symplectic Euler integrators (`"AB"` and `"BA"`).
 
@@ -1249,7 +1264,7 @@ To use your custom neighbor finder, give it as the `neighbor_finder` argument wh
 ## Analysis
 
 Molly contains some tools for analysing the results of simulations.
-The available analysis functions are:
+Functions that may be useful for analysis include:
 - [`visualize`](@ref)
 - [`rdf`](@ref)
 - [`distances`](@ref)
@@ -1257,5 +1272,7 @@ The available analysis functions are:
 - [`velocity_autocorr`](@ref)
 - [`rmsd`](@ref)
 - [`radius_gyration`](@ref)
+- [`bond_angle`](@ref)
+- [`torsion_angle`](@ref)
 
 Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.

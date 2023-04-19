@@ -7,9 +7,10 @@ In the last few years, the deep learning revolution has broadened to include the
 The concept of using automatic differentiation (AD) to obtain exact gradients through physical simulations has many interesting applications, including parameterising force fields and training neural networks to describe atomic potentials.
 
 There are some projects that explore differentiable molecular simulations - see [Related software](@ref).
-However Julia provides a strong suite of AD tools, with [Zygote.jl](https://github.com/FluxML/Zygote.jl) allowing source-to-source transformations for much of the language.
-With Molly you can use the power of Zygote to obtain gradients through molecular simulations, even in the presence of complex interactions such as implicit solvation and stochasticity such as Langevin dynamics or the Andersen thermostat.
-Reverse and forward mode AD can be used on the CPU and the GPU.
+However Julia provides a strong suite of AD tools, with [Zygote.jl](https://github.com/FluxML/Zygote.jl) and [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) allowing source-to-source transformations for much of the language.
+With Molly you can use the power of Zygote and Enzyme to obtain gradients through molecular simulations, even in the presence of complex interactions such as implicit solvation and stochasticity such as Langevin dynamics or the Andersen thermostat.
+Reverse mode AD can be used on the CPU with multithreading and on the GPU; performance is typically within an order of magnitude of the primal run.
+Forward mode AD can also be used on the CPU.
 Pairwise, specific and general interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
 
 Differentiable simulation does not currently work with units and some components of the package.
@@ -60,21 +61,23 @@ temp = 1.0
 neighbor_finder = DistanceNeighborFinder(
     eligible=trues(n_atoms, n_atoms),
     n_steps=10,
-    dist_cutoff=1.5,
+    dist_cutoff=1.8,
 )
-lj = LennardJones(use_neighbors=true, force_units=NoUnits, energy_units=NoUnits)
-# Currently required for speed though here it does not affect the simulation
-crf = CoulombReactionField(dist_cutoff=1.5, use_neighbors=true, coulomb_const=0.0,
-                           force_units=NoUnits, energy_units=NoUnits)
-pairwise_inters = (lj, crf)
-coords = place_atoms(n_atoms, boundary; min_dist=0.7)
+lj = LennardJones(
+    cutoff=DistanceCutoff(1.5),
+    use_neighbors=true,
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+pairwise_inters = (lj,)
+coords = place_atoms(n_atoms, boundary; min_dist=0.6)
 velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 simulator = VelocityVerlet(
     dt=0.02,
     coupling=RescaleThermostat(temp),
 )
 
-function loss(σ)
+function loss(σ, coords, velocities)
     atoms = [Atom(0, 0.0, atom_mass, σ, 0.2, false) for i in 1:n_atoms]
     loggers = (coords=CoordinateLogger(Float64, 10),)
 
@@ -90,9 +93,9 @@ function loss(σ)
         energy_units=NoUnits,
     )
 
-    mms_start = mean_min_separation(s.coords, boundary)
+    mms_start = mean_min_separation(Array(s.coords), boundary)
     simulate!(s, simulator, n_steps)
-    mms_end = mean_min_separation(s.coords, boundary)
+    mms_end = mean_min_separation(Array(s.coords), boundary)
     loss_val = abs(mms_end - dist_true)
 
     Zygote.ignore() do
@@ -103,13 +106,9 @@ function loss(σ)
     return loss_val
 end
 ```
-Currently only the combination of `LennardJones` and `CoulombReactionField` or `Coulomb` works on the GPU or fast on the CPU.
-Other types work but run slower on the CPU.
-This will change in future.
-
 We can obtain the gradient of `loss` with respect to the atom property `σ`.
 ```julia
-grad = gradient(loss, σtrue)[1]
+grad = gradient(loss, σtrue, coords, velocities)[1]
 ```
 This gradient can be used in a training loop to optimise `σ`, starting from an arbitrary value.
 ```julia
@@ -119,9 +118,9 @@ function train()
 
     for epoch_n in 1:n_epochs
         printfmt("Epoch {:>2}  |  ", epoch_n)
-        coords = place_atoms(n_atoms, boundary; min_dist=0.7)
+        coords = place_atoms(n_atoms, boundary; min_dist=0.6)
         velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-        grad = gradient(loss, σlearn)[1]
+        grad = gradient(loss, σlearn, coords, velocities)[1]
         printfmt("Grad {:6.3f}\n", grad)
         σlearn -= grad * 1e-2
     end
@@ -150,10 +149,12 @@ The final value we get is 0.449, close to the theoretical value of 0.445 if all 
 The RDF looks as follows, with the purple line corresponding to the desired distance to the closest neighbor.
 ![LJ RDF](images/rdf_lj.png)
 
+To make this run on the GPU the appropriate objects should be transferred to the GPU with `CuArray`: `coords`, `velocities`, `atoms` and the `eligible` matrix for the neighbor finder.
+If using custom interactions or some built-in interactions you may need to define methods of `zero` and `+` for your interaction type.
+
 It is common to require a loss function formed from values throughout a simulation.
-In this case it is recommended to split up the simulation into a set of short simulations, each starting from the previous final coordinates and velocities.
-This runs the same simulation but makes the intermediate coordinates and velocities available for use in the loss function.
-It is recommended to have a single value to accumulate values of the loss function.
+In this case it is recommended to split up the simulation into a set of short simulations in the loss function, each starting from the previous final coordinates and velocities.
+This runs an identical simulation but makes the intermediate coordinates and velocities available for use in calculating the final loss.
 For example, the RMSD could be calculated from the coordinates every 100 steps and added to a variable that is then divided by the number of chunks to get a loss value corresponding to the mean RMSD over the simulation.
 Loggers are ignored for gradient calculation and should not be used in the loss function.
 
@@ -272,7 +273,7 @@ We can record the gradients for different values of `θ`:
 θs = collect(0:3:180)[2:end]
 grads = [gradient(loss, deg2rad(θ))[1] for θ in θs]
 ```
-The plot of these shows that the gradient has the expected sign either side of the correct value.
+The plot of these shows that the gradient has the expected sign either side of the correct value:
 ![Angle gradient](images/grad_angle.png)
 
 ## Neural network potentials
