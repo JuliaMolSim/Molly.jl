@@ -564,7 +564,6 @@ lines!([l[2] for l in values(sys.loggers.SIR)], label="Infected")
 lines!([l[3] for l in values(sys.loggers.SIR)], label="Recovered")
 axislegend()
 ```
-
 ![Fraction SIR](images/fraction_sir.png)
 
 ## Units
@@ -1202,16 +1201,11 @@ show(sys.loggers)
 ```
 Note we also could have used the convenience function [`AutoCorrelationLogger`](@ref) to define our logger since the two observables we are correlating are the same.
 ```julia
-using Plots, UnitfulRecipes
+using GLMakie
 
-t_range = (0:999) * u"ps"
-plot(
-    t_range,
-    values(sys.loggers.velocity_autocorrelation),
-    xlabel="time",
-    ylabel="correlation",
-    label="C(t)",
-)
+f = Figure()
+ax = Axis(f[1, 1], xlabel="Time / ps", ylabel="Correlation")
+plot(0:999, values(sys.loggers.velocity_autocorrelation))
 ```
 ![Velocity Autocorrelations](images/velocity_autocorrelations.png)\
 As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly.
