@@ -143,7 +143,7 @@ end
             end
             Threads.@threads for thread_id in 1:n_threads
                 for ni in thread_id:n_threads:length(neighbors)
-                    i, j, special = neighbors.list[ni]
+                    i, j, special = neighbors[ni]
                     dr = vector(coords[i], coords[j], boundary)
                     pe = potential_energy(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
                                           atoms[j], boundary, special)
@@ -180,8 +180,8 @@ end
             if isnothing(neighbors)
                 error("an interaction uses the neighbor list but neighbors is nothing")
             end
-            for ni in 1:length(neighbors)
-                i, j, special = neighbors.list[ni]
+            for ni in eachindex(neighbors)
+                i, j, special = neighbors[ni]
                 dr = vector(coords[i], coords[j], boundary)
                 pe = potential_energy(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
                                       atoms[j], boundary, special)

@@ -241,6 +241,7 @@ end
         for n_threads in n_threads_list
             neighbors = find_neighbors(sys, nf; n_threads=n_threads)
             @test length(neighbors) == n_neighbors_ref
+            @test neighbors[10] isa Tuple{Int32, Int32, Bool}
             @test identical_neighbors(neighbors, neighbors_ref)
         end
     end
@@ -255,6 +256,9 @@ end
             )
             neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
             @test length(neighbors_gpu) == n_neighbors_ref
+            CUDA.allowscalar() do
+                @test neighbors_gpu[10] isa Tuple{Int32, Int32, Bool}
+            end
             @test identical_neighbors(neighbors_gpu, neighbors_ref)
         end
     end

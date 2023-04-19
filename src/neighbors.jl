@@ -269,12 +269,9 @@ function CellListMapNeighborFinder(;
     )
 end
 
-"""
-    push_pair!(neighbor::NeighborList, i, j, eligible, special)
-
-Add pair to pair list. If the buffer size is large enough, update element, otherwise
-push new element to `neighbor.list`.
-"""
+# Add a pair to the pair list
+# If the buffer size is large enough update the element, otherwise push a new element
+#   to `neighbor.list`.
 function push_pair!(neighbors::NeighborList, i::Integer, j::Integer, eligible, special)
     if eligible[i, j]
         push!(neighbors, (Int32(i), Int32(j), special[i, j]))

@@ -28,8 +28,6 @@ else
     @warn "The GPU benchmarks will not be run as a CUDA-enabled device is not available"
 end
 
-CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
-
 const SUITE = BenchmarkGroup(
     [],
     "interactions" => BenchmarkGroup(),

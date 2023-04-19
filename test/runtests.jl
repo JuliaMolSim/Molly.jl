@@ -56,8 +56,6 @@ else
     @warn "The GPU tests will not be run as a CUDA-enabled device is not available"
 end
 
-CUDA.allowscalar(false) # Check that we never do scalar indexing on the GPU
-
 const data_dir = normpath(@__DIR__, "..", "data")
 const ff_dir     = joinpath(data_dir, "force_fields")
 const openmm_dir = joinpath(data_dir, "openmm_6mrr")

@@ -301,6 +301,10 @@ end
 NeighborList() = NeighborList{Vector{Tuple{Int32, Int32, Bool}}}(0, [])
 
 Base.length(nl::NeighborList) = nl.n
+Base.getindex(nl::NeighborList, ind::Integer) = nl.list[ind]
+Base.firstindex(::NeighborList) = 1
+Base.lastindex(nl::NeighborList) = length(nl)
+Base.eachindex(nl::NeighborList) = Base.OneTo(length(nl))
 
 function Base.empty!(nl::NeighborList)
     nl.n = 0
@@ -348,6 +352,10 @@ function Base.getindex(nl::NoNeighborList, ind::Integer)
     i, j = pair_index(nl.n_atoms, ind)
     return i, j, false
 end
+
+Base.firstindex(::NoNeighborList) = 1
+Base.lastindex(nl::NoNeighborList) = length(nl)
+Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
 CUDA.Const(nl::NoNeighborList) = nl
 
