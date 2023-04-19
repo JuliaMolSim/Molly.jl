@@ -5,7 +5,7 @@ There are further examples in the [Molly examples](@ref) section.
 For more information on specific types or functions, see the [Molly API](@ref) section or call `?function_name` in Julia.
 The [Differentiable simulation with Molly](@ref) section describes taking gradients through simulations.
 
-Molly takes a modular approach to molecular simulation.
+The package takes a modular approach to molecular simulation.
 To run a simulation you create a [`System`](@ref) object and call [`simulate!`](@ref) on it.
 The different components of the system and simulation can be used as defined by the package, or you can define your own versions.
 An important principle of the package is that your custom components, particularly force and potential energy functions, should be easy to define and just as performant as the built-in versions.
@@ -38,7 +38,7 @@ Setting individual dimensions in a [`CubicBoundary`](@ref) to `Inf * u"nm"` make
 You can also use a [`TriclinicBoundary`](@ref).
 Simulations in 2 dimensions should use a [`RectangularBoundary`](@ref).
 
-The [`vector`](@ref) function gets the vector from one coordinate to another accounting for periodic boundary conditions by using the minimum image convention:
+The [`vector`](@ref) function calculates the vector from one coordinate to another accounting for periodic boundary conditions by using the minimum image convention:
 ```julia
 vector(coords[1], coords[2], boundary)
 ```
@@ -156,7 +156,7 @@ simulate!(deepcopy(sys), simulator, 20) # Compile function
 simulate!(sys, simulator, 1_000)
 ```
 The device to run on can be changed with `device!`, e.g. `device!(1)`.
-The GPU code path is currently designed to work with differentiable simulation and runs slower than related software, but this is an active area of development.
+The GPU code path is currently designed to be compatible with differentiable simulation and runs slower than related software, but this is an active area of development.
 Nonetheless, GPU performance is significantly better than CPU performance and is good enough for many applications.
 
 The number of GPU threads used for the GPU kernels can be tuned with the environmental variables `MOLLY_GPUNTHREADS_PAIRWISE`, `MOLLY_GPUNTHREADS_SPECIFIC`, `MOLLY_GPUNTHREADS_DISTANCENF` and `MOLLY_GPUNTHREADS_IMPLICIT`.
@@ -241,13 +241,13 @@ visualize(
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
 The neighbors can be found using `find_neighbors(sys)`, which returns a [`NeighborList`](@ref).
-When using a neighbor finder, functions like [`forces`](@ref) and [`potential_energy`](@ref) require the neighbors to be passed as a second argument, e.g. `forces(sys, find_neighbors(sys))`.
+When using a neighbor finder, functions such as [`forces`](@ref) and [`potential_energy`](@ref) require the neighbors to be passed as a second argument, e.g. `forces(sys, find_neighbors(sys))`.
 
 ## Simulating gravity
 
 Molly is geared primarily to molecular simulation, but can also be used to simulate other physical systems.
 Let's set up a gravitational simulation.
-This example also shows the use of `Float32`, a 2D simulation and no specified units.
+This example also shows a 2D simulation and no specified units.
 ```julia
 atoms = [Atom(mass=1.0f0), Atom(mass=1.0f0)]
 coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
@@ -467,7 +467,7 @@ visualize(sys.loggers.coords, boundary, "sim_montecarlo.gif")
 `trial_moves` should be a function that takes a [`System`](@ref) as its argument and optional keyword arguments `trial_args`.
 It should modify the coordinates as appropriate, accounting for any boundary conditions.
 [`random_uniform_translation!`](@ref) and [`random_normal_translation!`](@ref) are provided as common trial move functions.
-[`MonteCarloLogger!`](@ref) records various properties throughout the simulation.
+[`MonteCarloLogger`](@ref) records various properties throughout the simulation.
 
 ## Agent-based modelling
 
@@ -606,8 +606,8 @@ Units are not currently compatible with differentiable simulations.
 
 All your interaction types need to return the same units of force and energy or the simulation will not run.
 By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energy, but this can be changed using the `force_units` and `energy_units` arguments to [`System`](@ref) and some interactions.
-These should be `NoUnits` if you are not using units.
-If you need to strip units for downstream analysis, use the `ustrip` function.
+These arguments should be `NoUnits` if you are not using units.
+If you need to strip units for downstream analysis, use the `ustrip` or [`ustrip_vec`](@ref) functions.
 It should be noted that charges are stored as dimensionless, i.e. 1.0 represents an atomic charge of +1.
 
 ## Atom types
@@ -938,7 +938,7 @@ The available simulators are:
 - [`MetropolisMonteCarlo`](@ref)
 
 Many of these require a time step `dt` as an argument.
-Many also remove the center of mass motion every time step, this can be tuned with the `remove_CM_motion` argument.
+Many also remove the center of mass motion every time step, which can be tuned with the `remove_CM_motion` argument.
 
 The [`LangevinSplitting`](@ref) simulator can be used to define a variety of integrators such as velocity Verlet (splitting `"BAB"`), the Langevin implementation in [`Langevin`](@ref) (`"BAOA"`), and symplectic Euler integrators (`"AB"` and `"BA"`).
 
@@ -1052,6 +1052,7 @@ The available couplers are:
 - [`RescaleThermostat`](@ref)
 - [`BerendsenThermostat`](@ref)
 Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being [`NoCoupling`](@ref).
+The appropriate coupling to use will depend on the situation.
 
 To define your own coupling method, first define the `struct`:
 ```julia
@@ -1235,7 +1236,7 @@ using GLMakie
 
 f = Figure()
 ax = Axis(f[1, 1], xlabel="Time / ps", ylabel="Correlation")
-plot(0:999, values(sys.loggers.velocity_autocorrelation))
+lines!(0:999, values(sys.loggers.velocity_autocorrelation))
 ```
 ![Velocity Autocorrelations](images/velocity_autocorrelations.png)\
 As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly.

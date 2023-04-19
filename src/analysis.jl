@@ -14,7 +14,7 @@ export
 
 Visualize a simulation as an animation.
 This function is only available when GLMakie is imported.
-GLMakie v0.6 or later should be used.
+GLMakie v0.8 or later should be used.
 It can take a while to run, depending on the length of the simulation and the
 number of atoms.
 
