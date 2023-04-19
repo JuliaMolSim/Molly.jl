@@ -281,11 +281,12 @@ The plot of these shows that the gradient has the expected sign either side of t
 Since gradients can be computed with Zygote, [Flux](https://fluxml.ai) models can also be incorporated into simulations.
 Here we show a neural network in the force function, though they can also be used in other parts of the simulation.
 This example also shows how gradients for multiple parameters can be obtained, in this case the parameters of the neural network.
-The jump from single to multiple parameters is important because single parameters can be easily optimised using other approaches, whereas differentiable simulation is well-placed to optimise many parameters simultaneously.
+The jump from single to multiple parameters is important because single parameters can be optimised using finite differencing, whereas differentiable simulation is well-placed to optimise many parameters simultaneously.
 
 We set up three pseudo-atoms and train a network to imitate the Julia logo by moving the bottom two atoms:
 ```julia
 using Molly
+using GLMakie
 using Zygote
 using Flux
 using Format
@@ -297,15 +298,19 @@ model = Chain(
     Dense(1, 5, relu),
     Dense(5, 1, tanh),
 )
-ps = params(model)
+ps = Flux.params(model)
 
-struct NNBond <: SpecificInteraction end
+struct NNBonds end
 
-function Molly.force(b::NNBond, coords_i, coords_j, boundary)
-    vec_ij = vector(coords_i, coords_j, boundary)
+function Molly.forces(inter::NNBonds,
+                        sys,
+                        neighbors=nothing;
+                        n_threads=Threads.nthreads())
+    vec_ij = vector(sys.coords[1], sys.coords[3], sys.boundary)
     dist = norm(vec_ij)
     f = model([dist])[1] * normalize(vec_ij)
-    return SpecificForce2Atoms(f, -f)
+    fs = [f, zero(f), -f]
+    return fs
 end
 
 n_steps = 400
@@ -327,13 +332,11 @@ simulator = VelocityVerlet(
 function loss()
     atoms = [Atom(0, 0.0f0, mass, 0.0f0, 0.0f0, false) for i in 1:n_atoms]
     loggers = (coords=CoordinateLogger(Float32, 10),)
-    specific_inter_lists = (
-        InteractionList2Atoms([1], [3], [NNBond()]),
-    )
+    general_inters = (NNBonds(),)
 
     s = System(
         atoms=atoms,
-        specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
         coords=deepcopy(coords),
         velocities=deepcopy(velocities),
         boundary=boundary,
@@ -351,7 +354,7 @@ function loss()
 
     Zygote.ignore() do
         printfmt("Dist end {:6.3f}  |  Loss {:6.3f}\n", dist_end, loss_val)
-        visualize(s.loggers.coords, boundary, "sim.mp4")
+        visualize(s.loggers.coords, boundary, "sim.mp4"; show_boundary=false)
     end
 
     return loss_val
