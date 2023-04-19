@@ -79,7 +79,35 @@ simulate!(sys, simulator, 1_000)
 ```
 `atoms`, `coords` and `boundary` are the minimum required properties to define a [`System`](@ref), though you would generally want to add interactions to a [`System`](@ref) to do something useful with it.
 [`System`](@ref) implements the `AbstractSystem` [interface from AtomsBase.jl](https://juliamolsim.github.io/AtomsBase.jl/stable).
-The functions [`masses`](@ref), [`is_on_gpu`](@ref) and [`float_type`](@ref) can be used on a [`System`](@ref).
+Various functions can be used on a [`System`](@ref):
+```julia
+potential_energy(sys) # -40.91077282719628 kJ mol^-1
+kinetic_energy(sys)   # 119.47758705080862 kJ mol^-1
+total_energy(sys)     #  78.56681422361234 kJ mol^-1
+
+forces(sys)
+accelerations(sys)
+
+masses(sys)
+temperature(sys) # 96.76667184796673 K
+random_velocities(sys, 300.0u"K")
+
+float_type(sys) # Float64
+is_on_gpu(sys)  # false
+
+# AtomsBase.jl interface
+atomic_mass(sys, 5) # 10.0 u
+position(sys, 10)
+
+# Access properties
+sys.atoms
+sys.coords
+sys.boundary
+sys.pairwise_inters
+sys.velocities
+sys.neighbor_finder
+sys.loggers
+```
 
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this behaviour can be changed by giving the keyword argument `n_threads` to [`simulate!`](@ref).
 For example, `n_threads=1` uses no parallelization.
@@ -212,6 +240,8 @@ visualize(
 )
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
+The neighbors can be found using `find_neighbors(sys)`, which returns a [`NeighborList`](@ref).
+When using a neighbor finder, functions like [`forces`](@ref) and [`potential_energy`](@ref) require the neighbors to be passed as a second argument, e.g. `forces(sys, find_neighbors(sys))`.
 
 ## Simulating gravity
 
