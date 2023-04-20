@@ -53,7 +53,7 @@ end
     force(inter::SpecificInteraction, coord_i, coord_j,
           coord_k, coord_l, boundary)
 
-Calculate the force between atoms due to a given interation type.
+Calculate the force between atoms due to a given interaction type.
 For [`PairwiseInteraction`](@ref)s returns a single force vector and for
 [`SpecificInteraction`](@ref)s returns a type such as [`SpecificForce2Atoms`](@ref).
 Custom pairwise and specific interaction types should implement this function.

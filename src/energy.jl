@@ -76,7 +76,7 @@ first and passed to the function.
                      coords_k, coords_l, boundary)
     potential_energy(inter, system, neighbors=nothing; n_threads=Threads.nthreads())
 
-Calculate the potential energy due to a given interation type.
+Calculate the potential energy due to a given interaction type.
 Custom interaction types should implement this function.
 """
 function potential_energy(s::System{D, false, T}, neighbors=nothing;
