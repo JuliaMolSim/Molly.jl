@@ -15,12 +15,13 @@ Placeholder coupler that does nothing.
 struct NoCoupling end
 
 """
-    apply_coupling!(system, coupling, simulator)
+    apply_coupling!(system, coupling, simulator, neighbors=nothing,
+                    step_n=0; n_threads=Threads.nthreads())
 
 Apply a coupler to modify a simulation.
 Custom couplers should implement this function.
 """
-apply_coupling!(sys, ::NoCoupling, sim) = sys
+apply_coupling!(sys, ::NoCoupling, sim, neighbors, step_n; kwargs...) = sys
 
 """
     AndersenThermostat(temperature, coupling_const)
@@ -32,7 +33,9 @@ struct AndersenThermostat{T, C}
     coupling_const::C
 end
 
-function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, sim) where D
+function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, sim,
+                         neighbors=nothing, step_n::Integer=0;
+                         n_threads::Integer=Threads.nthreads()) where D
     for i in eachindex(sys)
         if rand() < (sim.dt / thermostat.coupling_const)
             sys.velocities[i] = random_velocity(mass(sys.atoms[i]), thermostat.temperature, sys.k;
@@ -42,7 +45,9 @@ function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, 
     return sys
 end
 
-function apply_coupling!(sys::System{D, true, T}, thermostat::AndersenThermostat, sim) where {D, T}
+function apply_coupling!(sys::System{D, true, T}, thermostat::AndersenThermostat, sim,
+                         neighbors=nothing, step_n::Integer=0;
+                         n_threads::Integer=Threads.nthreads()) where {D, T}
     atoms_to_bump = T.(rand(length(sys)) .< (sim.dt / thermostat.coupling_const))
     atoms_to_leave = one(T) .- atoms_to_bump
     atoms_to_bump_dev = move_array(atoms_to_bump, sys)
@@ -68,7 +73,8 @@ struct RescaleThermostat{T}
     temperature::T
 end
 
-function apply_coupling!(sys, thermostat::RescaleThermostat, sim)
+function apply_coupling!(sys, thermostat::RescaleThermostat, sim, neighbors=nothing,
+                         step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     sys.velocities *= sqrt(thermostat.temperature / temperature(sys))
     return sys
 end
@@ -89,7 +95,8 @@ struct BerendsenThermostat{T, C}
     coupling_const::C
 end
 
-function apply_coupling!(sys, thermostat::BerendsenThermostat, sim)
+function apply_coupling!(sys, thermostat::BerendsenThermostat, sim, neighbors=nothing,
+                         step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temperature(sys)) - 1)
     sys.velocities *= sqrt(λ2)
     return sys

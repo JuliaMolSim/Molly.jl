@@ -160,7 +160,7 @@ function simulate!(sys,
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
-        apply_coupling!(sys, sim.coupling, sim)
+        apply_coupling!(sys, sim.coupling, sim, neighbors, step_n; n_threads=n_threads)
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
@@ -218,7 +218,7 @@ function simulate!(sys,
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
-        apply_coupling!(sys, sim.coupling, sim)
+        apply_coupling!(sys, sim.coupling, sim, neighbors, step_n; n_threads=n_threads)
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
@@ -276,7 +276,7 @@ function simulate!(sys,
         # This is accurate to O(dt)
         sys.velocities = vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt
 
-        apply_coupling!(sys, sim.coupling, sim)
+        apply_coupling!(sys, sim.coupling, sim, neighbors, step_n; n_threads=n_threads)
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
@@ -332,14 +332,14 @@ function simulate!(sys,
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
         sys.velocities += remove_molar.(accels_t) .* sim.dt
-        
+
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt / 2
         noise = random_velocities(sys, sim.temperature; rng=rng)
         sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
 
         sys.coords += sys.velocities .* sim.dt / 2
-        
+
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
@@ -539,7 +539,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer; n_threads::Integer=Th
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
-        apply_coupling!(sys, sim.coupling, sim)
+        apply_coupling!(sys, sim.coupling, sim, neighbors, step_n; n_threads=n_threads)
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
