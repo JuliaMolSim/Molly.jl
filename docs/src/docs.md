@@ -107,6 +107,10 @@ sys.pairwise_inters
 sys.velocities
 sys.neighbor_finder
 sys.loggers
+
+# For certain systems
+virial(sys)
+pressure(sys)
 ```
 
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this behaviour can be changed by giving the keyword argument `n_threads` to [`simulate!`](@ref).

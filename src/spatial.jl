@@ -18,7 +18,9 @@ export
     random_velocities!,
     bond_angle,
     torsion_angle,
-    remove_CM_motion!
+    remove_CM_motion!,
+    virial,
+    pressure
 
 """
     CubicBoundary(x, y, z)
@@ -553,4 +555,112 @@ function remove_CM_motion!(sys)
     cm_velocity = cm_momentum / sum(Array(atom_masses))
     sys.velocities = sys.velocities .- (cm_velocity,)
     return sys
+end
+
+@doc raw"""
+    virial(sys, neighbors=nothing)
+
+Calculate the virial of a system, defined as
+```math
+\Xi = -\frac{1}{2} \sum_{i,j>i} r_{ij} \cdot F_{ij}
+```
+If the interactions use neighbor lists, the neighbors should be computed
+first and passed to the function.
+
+This should only be used on systems containing just pairwise interactions, or
+where the specific and general interactions do not contribute to the pressure.
+Not currently compatible with automatic differentiation using Zygote.
+"""
+function virial(sys, neighbors=nothing; kwargs...)
+    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
+    pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
+    return virial(sys, neighbors, pairwise_inters_nonl, pairwise_inters_nl)
+end
+
+@inbounds function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
+                            pairwise_inters_nl) where {D, G, T}
+    if G
+        coords, atoms = Array(sys.coords), Array(sys.atoms)
+        if isnothing(neighbors_dev)
+            neighbors = neighbors_dev
+        else
+            neighbors = NeighborList(neighbors_dev.n, Array(neighbors_dev.list))
+        end
+    else
+        coords, atoms = sys.coords, sys.atoms
+        neighbors = neighbors_dev
+    end
+
+    boundary = sys.boundary
+    v = zero(T) * sys.energy_units
+
+    if length(pairwise_inters_nonl) > 0
+        n_atoms = length(sys)
+        for i in 1:n_atoms
+            for j in (i + 1):n_atoms
+                dr = vector(coords[i], coords[j], boundary)
+                f = force(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
+                          atoms[j], boundary)
+                for inter in pairwise_inters_nonl[2:end]
+                    f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
+                end
+                v -= dot(f, dr)
+            end
+        end
+    end
+
+    if length(pairwise_inters_nl) > 0
+        if isnothing(neighbors)
+            error("an interaction uses the neighbor list but neighbors is nothing")
+        end
+        for ni in eachindex(neighbors)
+            i, j, special = neighbors[ni]
+            dr = vector(coords[i], coords[j], boundary)
+            f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
+                      atoms[j], boundary, special)
+            for inter in pairwise_inters_nl[2:end]
+                f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary,
+                           special)
+            end
+            v -= dot(f, dr)
+        end
+    end
+
+    return -v / 2
+end
+
+@doc raw"""
+    pressure(sys, neighbors=nothing)
+
+Calculate the pressure of a system, defined as
+```math
+P = \frac{1}{V} \left( NkT - \frac{2}{D} \Xi \right)
+```
+where `V` is the system volume, `N` is the number of atoms, `k` is the Boltzmann constant,
+`T` is the system temperature, `D` is the number of dimensions and `Ξ` is the virial
+calculated using [`virial`](@ref).
+If the interactions use neighbor lists, the neighbors should be computed
+first and passed to the function.
+
+This should only be used on systems containing just pairwise interactions, or
+where the specific and general interactions do not contribute to the pressure.
+Not compatible with infinite boundaries.
+Not currently compatible with automatic differentiation using Zygote.
+"""
+function pressure(sys::System{D}, neighbors=nothing; kwargs...) where D
+    if has_infinite_boundary(sys.boundary)
+        error("pressure calculation not compatible with infinite boundaries")
+    end
+    NkT = length(sys) * sys.k * temperature(sys)
+    vir = energy_remove_mol(virial(sys, neighbors))
+    P = (NkT - (2 * vir) / D) / box_volume(sys.boundary)
+    if sys.energy_units == NoUnits || D != 3
+        # If implied energy units are (u * nm^2 * ps^-2) and everything is
+        #   consistent then this has implied units of (u * nm^-1 * ps^-2)
+        #   for 3 dimensions
+        return P
+    else
+        # Sensible unit to return by default for 3 dimensions
+        return uconvert(u"bar", P)
+    end
 end
