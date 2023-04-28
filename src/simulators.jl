@@ -305,22 +305,25 @@ behind the positions.
 - `dt::S`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
 - `friction::F`: the friction coefficient of the simulation.
+- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
 - `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
     set to `false` or `0` to not remove center of mass motion.
 """
-struct Langevin{S, K, F, T}
+struct Langevin{S, K, F, C, T}
     dt::S
     temperature::K
     friction::F
+    coupling::C
     remove_CM_motion::Int
     vel_scale::T
     noise_scale::T
 end
 
-function Langevin(; dt, temperature, friction, remove_CM_motion=1)
+function Langevin(; dt, temperature, friction, coupling=NoCoupling(), remove_CM_motion=1)
     vel_scale = exp(-dt * friction)
     noise_scale = sqrt(1 - vel_scale^2)
-    return Langevin(dt, temperature, friction, Int(remove_CM_motion), vel_scale, noise_scale)
+    return Langevin(dt, temperature, friction, coupling, Int(remove_CM_motion),
+                    vel_scale, noise_scale)
 end
 
 function simulate!(sys,
@@ -350,6 +353,8 @@ function simulate!(sys,
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
+
+        apply_coupling!(sys, sim.coupling, sim, neighbors, step_n; n_threads=n_threads)
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
