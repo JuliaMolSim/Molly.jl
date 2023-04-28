@@ -1066,7 +1066,10 @@ Then, define the function that implements the coupling every time step:
 function apply_coupling!(sys, coupling::MyCoupler, sim, neighbors, step_n;
                          n_threads=Threads.nthreads())
     # Do something to the simulation, e.g. scale the velocities
-    return sys
+    # Return whether the coupling has invalidated the currently stored forces,
+    #   for example by changing the coordinates
+    recompute_forces = false
+    return recompute_forces
 end
 ```
 The functions [`random_velocity`](@ref), [`maxwell_boltzmann`](@ref) and [`temperature`](@ref) may be useful here.

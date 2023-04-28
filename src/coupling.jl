@@ -21,7 +21,7 @@ struct NoCoupling end
 Apply a coupler to modify a simulation.
 Custom couplers should implement this function.
 """
-apply_coupling!(sys, ::NoCoupling, sim, neighbors, step_n; kwargs...) = sys
+apply_coupling!(sys, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
 
 """
     AndersenThermostat(temperature, coupling_const)
@@ -42,7 +42,7 @@ function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, 
                                                 dims=n_dimensions(sys))
         end
     end
-    return sys
+    return false
 end
 
 function apply_coupling!(sys::System{D, true, T}, thermostat::AndersenThermostat, sim,
@@ -54,7 +54,7 @@ function apply_coupling!(sys::System{D, true, T}, thermostat::AndersenThermostat
     atoms_to_leave_dev = move_array(atoms_to_leave, sys)
     vs = random_velocities(sys, thermostat.temperature)
     sys.velocities = sys.velocities .* atoms_to_leave_dev .+ vs .* atoms_to_bump_dev
-    return sys
+    return false
 end
 
 @doc raw"""
@@ -76,7 +76,7 @@ end
 function apply_coupling!(sys, thermostat::RescaleThermostat, sim, neighbors=nothing,
                          step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     sys.velocities *= sqrt(thermostat.temperature / temperature(sys))
-    return sys
+    return false
 end
 
 @doc raw"""
@@ -99,5 +99,5 @@ function apply_coupling!(sys, thermostat::BerendsenThermostat, sim, neighbors=no
                          step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temperature(sys)) - 1)
     sys.velocities *= sqrt(λ2)
-    return sys
+    return false
 end
