@@ -1,11 +1,33 @@
 # Temperature and pressure coupling methods
 
 export
-    NoCoupling,
     apply_coupling!,
+    NoCoupling,
     AndersenThermostat,
     RescaleThermostat,
     BerendsenThermostat
+
+"""
+    apply_coupling!(system, coupling, simulator, neighbors=nothing,
+                    step_n=0; n_threads=Threads.nthreads())
+
+Apply a coupler to modify a simulation.
+Returns whether the coupling has invalidated the currently stored forces, for
+example by changing the coordinates.
+If `coupling` is a tuple or named tuple then each coupler will be applied in turn.
+Custom couplers should implement this function.
+"""
+function apply_coupling!(sys, couplers::Union{Tuple, NamedTuple}, sim, neighbors,
+                         step_n; kwargs...)
+    recompute_forces = false
+    for coupler in couplers
+        rf = apply_coupling!(sys, coupler, sim, neighbors, step_n; kwargs...)
+        if rf
+            recompute_forces = true
+        end
+    end
+    return recompute_forces
+end
 
 """
     NoCoupling()
@@ -14,13 +36,6 @@ Placeholder coupler that does nothing.
 """
 struct NoCoupling end
 
-"""
-    apply_coupling!(system, coupling, simulator, neighbors=nothing,
-                    step_n=0; n_threads=Threads.nthreads())
-
-Apply a coupler to modify a simulation.
-Custom couplers should implement this function.
-"""
 apply_coupling!(sys, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
 
 """
