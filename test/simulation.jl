@@ -350,7 +350,7 @@ end
     # Particle should end up at local minimum and stick due to no thermostat
     final_pos = values(sys.loggers.coords)[end][1]
     local_min = SVector(-0.05001082299878202, 0.46669410487256247)u"nm"
-    @test isapprox(final_pos, local_min, atol=1e-7u"nm")
+    @test isapprox(final_pos, local_min; atol=1e-7u"nm")
 end
 
 @testset "Units" begin
@@ -420,7 +420,7 @@ end
 
     final_energy = last(values(s.loggers.energy))
     final_energy_nounits = last(values(s_nounits.loggers.energy)) * u"kJ * mol^-1"
-    @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
+    @test isapprox(final_energy, final_energy_nounits; atol=5e-4u"kJ * mol^-1")
 end
 
 @testset "Position restraints" begin

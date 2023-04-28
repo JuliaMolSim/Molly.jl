@@ -6,6 +6,7 @@ export
     TriclinicBoundary,
     box_volume,
     box_center,
+    scale_boundary,
     random_coord,
     vector_1D,
     vector,
@@ -71,6 +72,7 @@ Base.lastindex(b::RectangularBoundary) = 2
 
 """
     TriclinicBoundary(v1, v2, v3; approx_images=true)
+    TriclinicBoundary(SVector(v1, v2, v3); approx_images=true)
     TriclinicBoundary(SVector(l1, l2, l3), SVector(α, β, γ); approx_images=true)
     TriclinicBoundary(arr; approx_images=true)
 
@@ -226,6 +228,19 @@ function box_center(b::Union{CubicBoundary, RectangularBoundary})
 end
 
 box_center(b::TriclinicBoundary) = sum(b.basis_vectors) / 2
+
+"""
+    scale_boundary(boundary, scale_factor)
+
+Scale the sides a bounding box by a scaling factor.
+For a 3D bounding box the volume scales as the cube of the scaling factor.
+"""
+scale_boundary(b::CubicBoundary, scale) = CubicBoundary(b.side_lengths .* scale)
+scale_boundary(b::RectangularBoundary, scale) = RectangularBoundary(b.side_lengths .* scale)
+
+function scale_boundary(b::TriclinicBoundary, scale)
+    return TriclinicBoundary(b[1] .* scale, b[2] .* scale, b[3] .* scale)
+end
 
 # The minimum cubic box surrounding the bounding box, used for visualization
 cubic_bounding_box(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths

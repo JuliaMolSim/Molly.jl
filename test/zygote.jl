@@ -24,7 +24,7 @@
     dists = collect(0.2:0.01:1.2)
     forces_direct = force_direct.(dists)
     forces_grad = force_grad.(dists)
-    @test all(isapprox.(forces_direct, forces_grad))
+    @test all(forces_direct .≈ forces_grad)
 end
 
 @testset "Differentiable simulation" begin

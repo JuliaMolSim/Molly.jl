@@ -49,6 +49,8 @@
     @test box_volume(b) == 120.0u"nm^3"
     @test box_volume(CubicBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^3"
     @test box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
+    sb = scale_boundary(b, 1.1)
+    @test sb.side_lengths ≈ SVector(4.4, 5.5, 6.6)u"nm"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0, 6.0)u"nm"
     @test Molly.axis_limits(CubicBoundary(4.0, 5.0, 6.0), CoordinateLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError CubicBoundary(-4.0u"nm", 5.0u"nm", 6.0u"nm")
@@ -61,6 +63,8 @@
     @test box_volume(b) == 20.0u"m^2"
     @test box_volume(RectangularBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^2"
     @test box_center(b) == SVector(2.0, 2.5)u"m"
+    sb = scale_boundary(b, 0.9)
+    @test sb.side_lengths ≈ SVector(3.6, 4.5)u"m"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0)u"m"
     @test Molly.axis_limits(RectangularBoundary(4.0, 5.0), CoordinateLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError RectangularBoundary(-4.0u"nm", 5.0u"nm")
@@ -69,18 +73,21 @@
     b = TriclinicBoundary(SVector(2.2, 2.0, 1.8)u"nm", deg2rad.(SVector(50.0, 40.0, 60.0)))
     @test float_type(b) == Float64
     @test Molly.length_type(b) == typeof(1.0u"nm")
-    @test isapprox(b.basis_vectors[1], SVector(2.2      , 0.0      , 0.0      )u"nm", atol=1e-6u"nm")
-    @test isapprox(b.basis_vectors[2], SVector(1.0      , 1.7320508, 0.0      )u"nm", atol=1e-6u"nm")
-    @test isapprox(b.basis_vectors[3], SVector(1.37888  , 0.5399122, 1.0233204)u"nm", atol=1e-6u"nm")
+    @test isapprox(b.basis_vectors[1], SVector(2.2      , 0.0      , 0.0      )u"nm"; atol=1e-6u"nm")
+    @test isapprox(b.basis_vectors[2], SVector(1.0      , 1.7320508, 0.0      )u"nm"; atol=1e-6u"nm")
+    @test isapprox(b.basis_vectors[3], SVector(1.37888  , 0.5399122, 1.0233204)u"nm"; atol=1e-6u"nm")
     @test TriclinicBoundary(b.basis_vectors) == b
     @test TriclinicBoundary([b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3]]) == b
 
     @test bounding_box(b) == b.basis_vectors
-    @test isapprox(box_volume(b), 3.89937463181886u"nm^3")
-    @test isapprox(box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm", atol=1e-6u"nm")
+    @test box_volume(b) ≈ 3.89937463181886u"nm^3"
+    @test isapprox(box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm"; atol=1e-6u"nm")
+    sb = scale_boundary(b, 1.2)
+    @test [sb.α, sb.β, sb.γ] ≈ [b.α, b.β, b.γ]
+    @test box_volume(sb) ≈ box_volume(b) * 1.2^3
     @test isapprox(
         Molly.cubic_bounding_box(b),
-        SVector(4.5788800, 2.2719630, 1.0233205)u"nm",
+        SVector(4.5788800, 2.2719630, 1.0233205)u"nm";
         atol=1e-6u"nm",
     )
 
@@ -111,7 +118,7 @@
         dr_exact = vector(c1, c2, b_exact)
         if norm(dr_exact) <= correct_limit
             dr_approx = vector(c1, c2, b)
-            return isapprox(dr_exact, dr_approx)
+            return dr_exact ≈ dr_approx
         else
             return true
         end
@@ -126,7 +133,7 @@
     random_velocities!(sys, temp)
     starting_velocities = copy(sys.velocities)
     simulate!(sys, sim, 1_000)
-    @test all(isapprox.(sys.velocities, starting_velocities))
+    @test all(sys.velocities .≈ starting_velocities)
     @test wrap_coords.(sys.coords, (b,)) == sys.coords
 
     # Test that displacements match those expected from the starting velocity,
@@ -139,7 +146,7 @@
     end
     @test isapprox(
         maximum(max_disps),
-        norm(sys.velocities[argmax(max_disps)]) * sys.loggers.coords.n_steps * dt,
+        norm(sys.velocities[argmax(max_disps)]) * sys.loggers.coords.n_steps * dt;
         atol=1e-9u"nm",
     )
 end
@@ -282,7 +289,7 @@ end
     coords = SVector{3, Float64}.(eachcol(BioStructures.coordarray(bb_atoms))) / 10 * u"nm"
     bb_to_mass = Dict("C" => 12.011u"u", "N" => 14.007u"u", "O" => 15.999u"u")
     atoms = [Atom(mass=bb_to_mass[BioStructures.element(bb_atoms[i])]) for i in eachindex(bb_atoms)]
-    @test isapprox(radius_gyration(coords, atoms), 11.51225678195222u"Å", atol=1e-6u"nm")
+    @test isapprox(radius_gyration(coords, atoms), 11.51225678195222u"Å"; atol=1e-6u"nm")
 end
 
 @testset "Replica System" begin
