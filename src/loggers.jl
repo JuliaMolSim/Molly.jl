@@ -35,7 +35,7 @@ end
 """
     GeneralObservableLogger(observable::Function, T, n_steps)
 
-A logger which holds a record of regularly sampled observations of the system. 
+A logger which holds a record of regularly sampled observations of a system. 
 `observable` should return an object of type `T` and support the method
 `observable(s::System, neighbors; n_threads::Integer)::T`.
 """
@@ -61,7 +61,7 @@ Base.values(logger::GeneralObservableLogger) = logger.history
 """
     log_property!(logger, system, neighbors=nothing, step_n=0; n_threads=Threads.nthreads(), kwargs...)
 
-Log a property of the system throughout a simulation.
+Log a property of a system throughout a simulation.
 Custom loggers should implement this function.
 Additional keyword arguments can be passed to the logger if required.
 """
@@ -133,7 +133,7 @@ end
     TotalEnergyLogger(n_steps)
     TotalEnergyLogger(T, n_steps)
 
-Log the [`total_energy`](@ref) of the system throughout a simulation.
+Log the [`total_energy`](@ref) of a system throughout a simulation.
 """
 TotalEnergyLogger(T::DataType, n_steps) = GeneralObservableLogger(total_energy, T, n_steps)
 TotalEnergyLogger(n_steps) = TotalEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
@@ -149,7 +149,7 @@ kinetic_energy_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.
     KineticEnergyLogger(n_steps)
     KineticEnergyLogger(T, n_steps)
 
-Log the [`kinetic_energy`](@ref) of the system throughout a simulation.
+Log the [`kinetic_energy`](@ref) of a system throughout a simulation.
 """
 KineticEnergyLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(kinetic_energy_wrapper, T, n_steps)
 KineticEnergyLogger(n_steps::Integer) = KineticEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
@@ -163,7 +163,7 @@ end
     PotentialEnergyLogger(n_steps)
     PotentialEnergyLogger(T, n_steps)
 
-Log the [`potential_energy`](@ref) of the system throughout a simulation.
+Log the [`potential_energy`](@ref) of a system throughout a simulation.
 """
 PotentialEnergyLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(potential_energy, T, n_steps)
 PotentialEnergyLogger(n_steps::Integer) = PotentialEnergyLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)

@@ -600,6 +600,7 @@ axislegend()
 
 Molly is fairly opinionated about using [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) units as shown above: you don't have to use them, but it is better if you do.
 Any consistent unit scheme can be used, or no units at all.
+If you are not using units then no quantities can have Unitful annotations and you are responsible for ensuring a consistent unit system.
 Whilst you occasionally may run into friction with dimension mismatches, using units has the major advantages of catching whole classes of errors and letting you physically interpret the numbers in your system.
 The performance overhead of using units is minimal.
 Units are not currently compatible with differentiable simulations.
@@ -965,8 +966,9 @@ function Molly.simulate!(sys,
         # Ensure coordinates stay within the simulation box like this
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
-        # Example velocity update including appropriate unit conversion
-        sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
+        # Example velocity update
+        # Includes appropriate unit conversion for when the force units are per mol
+        sys.velocities += Molly.accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         # Apply coupling like this
         apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;

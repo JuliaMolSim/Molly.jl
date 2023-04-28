@@ -30,11 +30,22 @@ function check_force_units(fdr::AbstractArray, sys_force_units)
     return check_force_units(unit(first(fdr)), sys_force_units)
 end
 
+# Forces are often expressed per mol but this dimension needs removing for use in the integrator
+function accel_remove_mol(x)
+    fx = first(x)
+    if dimension(fx) == u"𝐋 * 𝐍^-1 * 𝐓^-2"
+        T = typeof(ustrip(fx))
+        return x / T(Unitful.Na)
+    else
+        return x
+    end
+end
+
 """
     accelerations(system, neighbors=nothing; n_threads=Threads.nthreads())
 
-Calculate the accelerations of all atoms using the pairwise, specific and
-general interactions and Newton's second law of motion.
+Calculate the accelerations of all atoms in a system using the pairwise,
+specific and general interactions and Newton's second law of motion.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
@@ -139,14 +150,14 @@ Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.
 """
     forces(system, neighbors=nothing; n_threads=Threads.nthreads())
 
-Calculate the forces on all atoms in the system using the pairwise, specific and
+Calculate the forces on all atoms in a system using the pairwise, specific and
 general interactions.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 
     forces(inter, system, neighbors=nothing; n_threads=Threads.nthreads())
 
-Calculate the forces on all atoms in the system arising from a general
+Calculate the forces on all atoms in a system arising from a general
 interaction.
 If the interaction uses neighbor lists, the neighbors should be computed
 first and passed to the function.

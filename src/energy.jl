@@ -9,7 +9,7 @@ export
 """
     total_energy(s, neighbors=nothing; n_threads=Threads.nthreads())
 
-Calculate the total energy of the system as the sum of the [`kinetic_energy`](@ref)
+Calculate the total energy of a system as the sum of the [`kinetic_energy`](@ref)
 and the [`potential_energy`](@ref).
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
@@ -23,7 +23,7 @@ kinetic_energy_noconvert(s) = sum(masses(s) .* sum.(abs2, s.velocities)) / 2
 """
     kinetic_energy(s)
 
-Calculate the kinetic energy of the system.
+Calculate the kinetic energy of a system.
 """
 function kinetic_energy(s::System{D, G, T}) where {D, G, T}
     ke = kinetic_energy_noconvert(s)
@@ -58,10 +58,19 @@ function check_energy_units(E, energy_units)
     end
 end
 
+function energy_remove_mol(x)
+    if dimension(x) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        T = typeof(ustrip(x))
+        return x / T(Unitful.Na)
+    else
+        return x
+    end
+end
+
 """
     potential_energy(s, neighbors=nothing; n_threads=Threads.nthreads())
 
-Calculate the potential energy of the system using the pairwise, specific and
+Calculate the potential energy of a system using the pairwise, specific and
 general interactions.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.

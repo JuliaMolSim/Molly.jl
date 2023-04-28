@@ -688,7 +688,7 @@ end
 end
 
 # Use fast broadcast path on CPU
-for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec, :wrap_coords,
+for op in (:+, :-, :*, :/, :mass, :charge, :accel_remove_mol, :ustrip, :ustrip_vec, :wrap_coords,
             :born_radii_loop_OBC, :get_i1, :get_i2, :get_I, :get_I_grad, :born_radii_loop_GBN2,
             :get_bi, :get_bj, :get_fi, :get_fj, :gb_force_loop_1, :gb_force_loop_2, :gb_energy_loop)
     @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)

@@ -103,17 +103,6 @@ function simulate!(sys,
     return sys
 end
 
-# Forces are often expressed per mol but this dimension needs removing for use in the integrator
-function remove_molar(x)
-    fx = first(x)
-    if dimension(fx) == u"𝐋 * 𝐍^-1 * 𝐓^-2"
-        T = typeof(ustrip(fx))
-        return x / T(Unitful.Na)
-    else
-        return x
-    end
-end
-
 """
     VelocityVerlet(; <keyword arguments>)
 
@@ -148,14 +137,14 @@ function simulate!(sys,
 
     for step_n in 1:n_steps
         old_coords = copy(sys.coords)
-        sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
+        sys.coords += sys.velocities .* sim.dt .+ (accel_remove_mol.(accels_t) .* sim.dt ^ 2) ./ 2
         
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
+        sys.velocities += accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -213,8 +202,8 @@ function simulate!(sys,
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities += remove_molar.(accels_t) .* sim.dt
-        
+        sys.velocities += accel_remove_mol.(accels_t) .* sim.dt
+
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt
         apply_constraints!(sys, old_coords, sim.dt)
@@ -270,9 +259,11 @@ function simulate!(sys,
         coords_copy = sys.coords
         if step_n == 1
             # Use the velocities at the first step since there is only one set of coordinates
-            sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
+            sys.coords += sys.velocities .* sim.dt .+
+                                        (accel_remove_mol.(accels_t) .* sim.dt ^ 2) ./ 2
         else
-            sys.coords += vector.(coords_last, sys.coords, (sys.boundary,)) .+ remove_molar.(accels_t) .* sim.dt ^ 2
+            sys.coords += vector.(coords_last, sys.coords, (sys.boundary,)) .+
+                                        accel_remove_mol.(accels_t) .* sim.dt ^ 2
         end
         
         apply_constraints!(sys, coords_copy, sim.dt)
@@ -339,7 +330,7 @@ function simulate!(sys,
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities += remove_molar.(accels_t) .* sim.dt
+        sys.velocities += accel_remove_mol.(accels_t) .* sim.dt
 
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt / 2
@@ -486,7 +477,7 @@ function B_step!(s, dt_eff, acceleration_vector, compute_forces::Bool, n_threads
     if compute_forces
         acceleration_vector .= accelerations(s, neighbors, n_threads=n_threads)
     end
-    s.velocities += dt_eff * remove_molar.(acceleration_vector)
+    s.velocities += dt_eff * accel_remove_mol.(acceleration_vector)
 end
 
 """
@@ -529,7 +520,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer; n_threads::Integer=Th
     df = 3 * length(sys) - 3
 
     for step_n in 1:n_steps
-        v_half = sys.velocities .+ (remove_molar.(accels_t) .- (sys.velocities .* zeta)) .* (sim.dt / 2)
+        v_half = sys.velocities .+ (accel_remove_mol.(accels_t) .- (sys.velocities .* zeta)) .* (sim.dt / 2)
         old_coords = copy(sys.coords)
         sys.coords += v_half .* sim.dt
 
@@ -543,7 +534,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer; n_threads::Integer=Th
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities = (v_half .+ remove_molar.(accels_t_dt) .* (sim.dt / 2)) ./
+        sys.velocities = (v_half .+ accel_remove_mol.(accels_t_dt) .* (sim.dt / 2)) ./
                          (1 + (zeta * sim.dt / 2))
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0

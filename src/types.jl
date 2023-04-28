@@ -366,7 +366,7 @@ function convert_k_units(T, k, energy_units)
             # Use user-supplied unitless Boltzmann constant
             k_converted = T(k)
         else
-            # Otherwise assume energy units are (u* nm^2 * ps^-2)
+            # Otherwise assume implied energy units are (u * nm^2 * ps^-2)
             k_converted = T(ustrip(u"u * nm^2 * ps^-2 * K^-1", k))
         end
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
