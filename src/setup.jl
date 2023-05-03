@@ -748,6 +748,9 @@ function System(coord_file::AbstractString,
             gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
             bonds.types,
         ))
+        topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
+    else
+        topology = nothing
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
@@ -858,6 +861,7 @@ function System(coord_file::AbstractString,
         boundary=boundary_used,
         velocities=vels,
         atoms_data=atoms_data,
+        topology=topology,
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
@@ -1146,6 +1150,9 @@ function System(T::Type,
             gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
             bonds.types,
         ))
+        topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
+    else
+        topology = nothing
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
@@ -1208,6 +1215,7 @@ function System(T::Type,
         boundary=boundary_used,
         velocities=vels,
         atoms_data=atoms_data,
+        topology=topology,
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
         neighbor_finder=neighbor_finder,

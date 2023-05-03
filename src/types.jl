@@ -12,6 +12,7 @@ export
     charge,
     mass,
     AtomData,
+    MolecularTopology,
     NeighborList,
     System,
     ReplicaSystem,
@@ -291,6 +292,41 @@ function AtomData(;
                     res_name="???",
                     element="?")
     return AtomData(atom_type, atom_name, res_number, res_name, element)
+end
+
+"""
+    MolecularTopology(bond_is, bond_js, n_atoms)
+    MolecularTopology(atom_molecule_inds, molecule_atom_counts)
+
+Topology information for a system.
+
+Stores the index of the molecule each atom belongs to and the number of
+atoms in each molecule.
+"""
+struct MolecularTopology
+    atom_molecule_inds::Vector{Int32}
+    molecule_atom_counts::Vector{Int32}
+end
+
+function bond_graph(bond_is, bond_js, n_atoms)
+    g = SimpleGraph(n_atoms)
+    for (i, j) in zip(bond_is, bond_js)
+        add_edge!(g, i, j)
+    end
+    return g
+end
+
+function MolecularTopology(bond_is, bond_js, n_atoms)
+    g = bond_graph(bond_is, bond_js, n_atoms)
+    cc = connected_components(g)
+    atom_molecule_inds = zeros(Int32, n_atoms)
+    for (mi, atom_inds) in enumerate(cc)
+        for ai in atom_inds
+            atom_molecule_inds[ai] = mi
+        end
+    end
+    molecule_atom_counts = length.(cc)
+    return MolecularTopology(atom_molecule_inds, molecule_atom_counts)
 end
 
 """

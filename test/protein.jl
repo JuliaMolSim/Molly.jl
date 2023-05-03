@@ -23,6 +23,11 @@
     @test s.boundary == CubicBoundary(3.7146u"nm")
     show(devnull, first(s.atoms))
 
+    @test length(s.topology.atom_molecule_inds) == length(s) == 5191
+    @test s.topology.atom_molecule_inds[10] == 1
+    @test length(s.topology.molecule_atom_counts) == 1678
+    @test s.topology.molecule_atom_counts[1] == 164
+
     s.velocities = [random_velocity(mass(a), temp) .* 0.01 for a in s.atoms]
     @time simulate!(s, simulator, n_steps; n_threads=1)
 
@@ -61,8 +66,12 @@ end
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; center_coords=false)
     neighbors = find_neighbors(sys)
 
-    @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == length(sys)
+    @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 15954
     @test count(i -> is_heavy_atom(sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 5502
+    @test length(sys.topology.atom_molecule_inds) == length(sys) == 15954
+    @test sys.topology.atom_molecule_inds[10] == 1
+    @test length(sys.topology.molecule_atom_counts) == 4929
+    @test sys.topology.molecule_atom_counts[1] == 1170
 
     for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul", "all")
         if inter == "all"

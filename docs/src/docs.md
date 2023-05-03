@@ -103,8 +103,9 @@ position(sys, 10)
 sys.atoms
 sys.coords
 sys.boundary
-sys.pairwise_inters
 sys.velocities
+sys.topology
+sys.pairwise_inters
 sys.neighbor_finder
 sys.loggers
 

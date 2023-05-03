@@ -20,6 +20,7 @@ using Enzyme
 using EzXML
 using FLoops
 using ForwardDiff
+using Graphs
 using KernelDensity
 using NearestNeighbors
 using Requires
