@@ -60,10 +60,10 @@ Periodic boundary conditions are automatically used with the cubic box we define
 ```julia
 sys = System(
     atoms=atoms,
-    pairwise_inters=pairwise_inters,
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
     loggers=(
         temp=TemperatureLogger(10),
         coords=CoordinateLogger(10),
@@ -146,10 +146,10 @@ simulator = VelocityVerlet(dt=0.002f0u"ps")
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=(LennardJones(),),
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=(LennardJones(),),
     loggers=(
         temp=TemperatureLogger(typeof(1.0f0u"K"), 10),
         coords=CoordinateLogger(typeof(1.0f0u"nm"), 10),
@@ -216,11 +216,11 @@ Now we can simulate as before.
 ```julia
 sys = System(
     atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
     pairwise_inters=pairwise_inters,
     specific_inter_lists=specific_inter_lists,
-    coords=coords,
-    velocities=velocities,
-    boundary=boundary,
     neighbor_finder=neighbor_finder,
     loggers=(
         temp=TemperatureLogger(10),
@@ -262,10 +262,10 @@ boundary = RectangularBoundary(1.0f0)
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=pairwise_inters,
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
     loggers=(coords=CoordinateLogger(Float32, 10; dims=2),),
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -389,13 +389,13 @@ n_replicas = 4
 
 rep_sys = ReplicaSystem(
     atoms=sys.atoms,
+    replica_coords=[copy(sys.coords) for _ in 1:n_replicas],
+    boundary=sys.boundary,
+    n_replicas=n_replicas,
     atoms_data=sys.atoms_data,
     pairwise_inters=sys.pairwise_inters,
     specific_inter_lists=sys.specific_inter_lists,
     general_inters=sys.general_inters,
-    n_replicas=n_replicas,
-    replica_coords=[copy(sys.coords) for _ in 1:n_replicas],
-    boundary=sys.boundary,
     neighbor_finder=sys.neighbor_finder,
     replica_loggers=[(temp=TemperatureLogger(10),) for _ in 1:n_replicas],
 )
@@ -441,9 +441,9 @@ pairwise_inters = (Coulomb(),)
 temperatures = [1198.0, 798.0, 398.0, 198.0, 98.0, 8.0]u"K"
 sys = System(
     atoms=atoms,
-    pairwise_inters=pairwise_inters,
     coords=coords,
     boundary=boundary,
+    pairwise_inters=pairwise_inters,
     loggers=(
         coords=CoordinateLogger(n_atoms, dims=n_dimensions(boundary)),
         montecarlo=MonteCarloLogger(),
@@ -566,10 +566,10 @@ simulator = VelocityVerlet(
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=pairwise_inters,
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
     neighbor_finder=neighbor_finder,
     loggers=(
         coords=CoordinateLogger(Float64, 10; dims=2),
@@ -1189,11 +1189,11 @@ nf = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=0.6u"n
 sys = System(
     atoms=atoms,
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
-    neighbor_finder=nf,
+    velocities=velocities,
     pairwise_inters=pairwise_inters,
     specific_inter_lists=specific_inter_lists,
+    neighbor_finder=nf,
 )
 ```
 
@@ -1224,11 +1224,11 @@ logger = TimeCorrelationLogger(V, V, V_Type, V_Type, n_atoms, 1_000)
 sys = System(
     atoms=atoms,
     coords=sys.coords,
-    velocities=sys.velocities,
     boundary=boundary,
-    neighbor_finder=nf,
+    velocities=sys.velocities,
     pairwise_inters=pairwise_inters,
     specific_inter_lists=specific_inter_lists,
+    neighbor_finder=nf,
     loggers=(velocity_autocorrelation=logger,)
 )
 simulate!(sys, simulator, 100_000)

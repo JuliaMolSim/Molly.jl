@@ -137,12 +137,12 @@ end
 
             s = System(
                 atoms=gpu ? CuArray(atoms) : atoms,
+                coords=gpu ? CuArray(cs) : cs,
+                boundary=boundary,
+                velocities=gpu ? CuArray(vs) : vs,
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=sis ? (bonds, angles, torsions) : (),
                 general_inters=general_inters,
-                coords=gpu ? CuArray(cs) : cs,
-                velocities=gpu ? CuArray(vs) : vs,
-                boundary=boundary,
                 neighbor_finder=neighbor_finder,
                 force_units=NoUnits,
                 energy_units=NoUnits,
@@ -244,11 +244,11 @@ end
 
             sys = System(
                 atoms=atoms,
+                coords=sys_ref.coords,
+                boundary=sys_ref.boundary,
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=specific_inter_lists,
                 general_inters=general_inters,
-                coords=sys_ref.coords,
-                boundary=sys_ref.boundary,
                 neighbor_finder=sys_ref.neighbor_finder,
                 force_units=NoUnits,
                 energy_units=NoUnits,
@@ -273,11 +273,11 @@ end
 
             sys = System(
                 atoms=atoms,
+                coords=sys_ref.coords,
+                boundary=sys_ref.boundary,
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=specific_inter_lists,
                 general_inters=general_inters,
-                coords=sys_ref.coords,
-                boundary=sys_ref.boundary,
                 neighbor_finder=sys_ref.neighbor_finder,
                 force_units=NoUnits,
                 energy_units=NoUnits,
@@ -301,11 +301,11 @@ end
 
             sys = System(
                 atoms=atoms,
+                coords=sys_ref.coords,
+                boundary=sys_ref.boundary,
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=specific_inter_lists,
                 general_inters=general_inters,
-                coords=sys_ref.coords,
-                boundary=sys_ref.boundary,
                 neighbor_finder=sys_ref.neighbor_finder,
                 force_units=NoUnits,
                 energy_units=NoUnits,

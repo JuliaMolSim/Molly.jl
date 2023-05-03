@@ -79,10 +79,10 @@ simulator = VelocityVerlet(
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=pairwise_inters,
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
     loggers=(temp=TemperatureLogger(100),),
 )
 

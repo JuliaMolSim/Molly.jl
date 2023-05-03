@@ -390,15 +390,24 @@ A physical system to be simulated.
 
 Properties unused in the simulation or in analysis can be left with their
 default values.
-`atoms`, `atoms_data`, `coords` and `velocities` should have the same length.
+The minimal required arguments are `atoms`, `coords` and `boundary`.
+`atoms` and `coords` should have the same length, along with `velocities` and
+`atoms_data` if these are provided.
 This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
 interface described there.
 
 # Arguments
 - `atoms::A`: the atoms, or atom equivalents, in the system. Can be
     of any type but should be a bits type if the GPU is used.
-- `atoms_data::AD`: other data associated with the atoms, allowing the atoms to
+- `coords::C`: the coordinates of the atoms in the system. Typically a
+    vector of `SVector`s of 2 or 3 dimensions.
+- `boundary::B`: the bounding box in which the simulation takes place.
+- `velocities::V=zero(coords) * u"ps^-1"`: the velocities of the atoms in the
+    system.
+- `atoms_data::AD=[]`: other data associated with the atoms, allowing the atoms to
     be bits types and hence work on the GPU.
+- `topology::TO=nothing`: topological information about the system such as which
+    atoms are in the same molecule.
 - `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
     interactions between all or most atom pairs such as electrostatics.
     Typically a `Tuple`.
@@ -410,66 +419,65 @@ interface described there.
     a `Tuple`.
 - `constraints::CN=()`: the constraints for bonds and angles in the system. Typically
     a `Tuple`.
-- `coords::C`: the coordinates of the atoms in the system. Typically a
-    vector of `SVector`s of 2 or 3 dimensions.
-- `velocities::V=zero(coords) * u"ps^-1"`: the velocities of the atoms in the
-    system.
-- `boundary::B`: the bounding box in which the simulation takes place.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `loggers::L=()`: the loggers that record properties of interest during a
     simulation.
+- `k::K=Unitful.k`: the Boltzmann constant, which may be modified in some
+    simulations.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
     be set to `NoUnits` if units are not being used.
-- `k::K=Unitful.k`: the Boltzmann constant, which may be modified in some
-    simulations.
 """
-mutable struct System{D, G, T, A, AD, M, PI, SI, GI, CN, C, V, B, NF, L, F, E, K} <: AbstractSystem{D}
+mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+                      L, K, F, E, M} <: AbstractSystem{D}
     atoms::A
+    coords::C
+    boundary::B
+    velocities::V
     atoms_data::AD
-    masses::M
+    topology::TO
     pairwise_inters::PI
     specific_inter_lists::SI
     general_inters::GI
     constraints::CN
-    coords::C
-    velocities::V
-    boundary::B
     neighbor_finder::NF
     loggers::L
+    k::K
     force_units::F
     energy_units::E
-    k::K
+    masses::M
 end
 
 function System(;
                 atoms,
+                coords,
+                boundary,
+                velocities=nothing,
                 atoms_data=[],
+                topology=nothing,
                 pairwise_inters=(),
                 specific_inter_lists=(),
                 general_inters=(),
                 constraints=(),
-                coords,
-                velocities=nothing,
-                boundary,
                 neighbor_finder=NoNeighborFinder(),
                 loggers=(),
+                k=Unitful.k,
                 force_units=u"kJ * mol^-1 * nm^-1",
-                energy_units=u"kJ * mol^-1",
-                k=Unitful.k)
+                energy_units=u"kJ * mol^-1")
     D = n_dimensions(boundary)
     G = isa(coords, CuArray)
     T = float_type(boundary)
     A = typeof(atoms)
+    C = typeof(coords)
+    B = typeof(boundary)
     AD = typeof(atoms_data)
+    TO = typeof(topology)
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
     CN = typeof(constraints)
-    C = typeof(coords)
-    B = typeof(boundary)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
@@ -479,6 +487,7 @@ function System(;
         if force_units == NoUnits
             vels = zero(coords)
         else
+            # Assume time units are ps
             vels = zero(coords) * u"ps^-1"
         end
     else
@@ -515,20 +524,22 @@ function System(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    return System{D, G, T, A, AD, M, PI, SI, GI, CN, C, V, B, NF, L, F, E, K}(
-                    atoms, atoms_data, atom_masses, pairwise_inters, specific_inter_lists,
-                    general_inters, constraints, coords, vels, boundary, neighbor_finder,
-                    loggers, force_units, energy_units, k_converted)
+    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, K, F, E, M}(
+                    atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
+                    specific_inter_lists, general_inters, constraints, neighbor_finder,
+                    loggers, k_converted, force_units, energy_units, atom_masses)
 end
 
 """
     ReplicaSystem(; <keyword arguments>)
 
 A wrapper for replicas in a replica exchange simulation.
+
 Each individual replica is a [`System`](@ref).
 Properties unused in the simulation or in analysis can be left with their default values.
-`atoms`, `atoms_data` and the elements in `replica_coords` and `replica_velocities`
-should have the same length.
+The minimal required arguments are `atoms`, `replica_coords`, `boundary` and `n_replicas`.
+`atoms` and the elements in `replica_coords` should have the same length, along with
+`atoms_data` and the elements in `replica_velocities` if these are provided.
 The number of elements in `replica_coords`, `replica_velocities`, `replica_loggers` and 
 the interaction arguments `replica_pairwise_inters`, `replica_specific_inter_lists`, 
 `replica_general_inters` and `replica_constraints` should be equal to `n_replicas`.
@@ -543,62 +554,72 @@ construction where `n` is the number of threads to be used per replica.
 # Arguments
 - `atoms::A`: the atoms, or atom equivalents, in the system. Can be
     of any type but should be a bits type if the GPU is used.
+- `replica_coords`: the coordinates of the atoms in each replica.
+- `boundary::B`: the bounding box in which the simulation takes place.
+- `n_replicas::Integer`: the number of replicas of the system.
+- `replica_velocities=[zero(replica_coords[1]) * u"ps^-1" for _ in 1:n_replicas]`:
+    the velocities of the atoms in each replica.
 - `atoms_data::AD`: other data associated with the atoms, allowing the atoms to
     be bits types and hence work on the GPU.
+- `topology::TO=nothing`: topological information about the system such as which
+    atoms are in the same molecule (to be used if the same for all replicas).
+    This is only used if no value is passed to the argument `replica_topology`.
+- `replica_topology=[nothing for _ in 1:n_replicas]`: the topological information for 
+    each replica.
 - `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e. interactions 
-    between all or most atom pairs such as electrostatics (to be used if same for all replicas).
+    between all or most atom pairs such as electrostatics (to be used if the same for all replicas).
     Typically a `Tuple`. This is only used if no value is passed to the argument 
     `replica_pairwise_inters`.
 - `replica_pairwise_inters=[() for _ in 1:n_replicas]`: the pairwise interactions for 
     each replica.
 - `specific_inter_lists::SI=()`: the specific interactions in the system, i.e. interactions 
-    between specific atoms such as bonds or angles (to be used if same for all replicas). 
+    between specific atoms such as bonds or angles (to be used if the same for all replicas). 
     Typically a `Tuple`. This is only used if no value is passed to the argument 
     `replica_specific_inter_lists`.
 - `replica_specific_inter_lists=[() for _ in 1:n_replicas]`: the specific interactions in 
     each replica.
 - `general_inters::GI=()`: the general interactions in the system, i.e. interactions involving 
-    all atoms such as implicit solvent (to be used if same for all replicas). Typically a `Tuple`. 
-    This is only used if no value is passed to the argument `replica_general_inters`.
+    all atoms such as implicit solvent (to be used if the same for all replicas). Typically a
+    `Tuple`. This is only used if no value is passed to the argument `replica_general_inters`.
 - `replica_general_inters=[() for _ in 1:n_replicas]`: the general interactions for 
     each replica.
-- `constraints::CN=()`: the constraints for bonds and angles in the system (to be used if same 
+- `constraints::CN=()`: the constraints for bonds and angles in the system (to be used if the same 
     for all replicas). Typically a `Tuple`.
 - `replica_constraints=[() for _ in 1:n_replicas]`: the constraints for bonds and angles in each
     replica. This is only used if no value is passed to the argument `replica_constraints`.
-- `n_replicas::Integer`: the number of replicas of the system.
-- `replica_coords`: the coordinates of the atoms in each replica.
-- `replica_velocities=[zero(replica_coords[1]) * u"ps^-1" for _ in 1:n_replicas]`:
-    the velocities of the atoms in each replica.
-- `boundary::B`: the bounding box in which the simulation takes place.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
-    close atoms and save on computation.
-- `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: the logger used to record
-    the exchange of replicas.
+    close atoms and save on computation. It is duplicated for each replica.
 - `replica_loggers=[() for _ in 1:n_replicas]`: the loggers for each replica 
     that record properties of interest during a simulation.
+- `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: the logger used to record
+    the exchange of replicas.
+- `k::K=Unitful.k`: the Boltzmann constant, which may be modified in some
+    simulations.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
     be set to `NoUnits` if units are not being used.
-- `k::K=Unitful.k`: the Boltzmann constant, which may be modified in some
-    simulations.
 """
-mutable struct ReplicaSystem{D, G, T, A, AD, RS, B, EL, F, E, K} <: AbstractSystem{D}
+mutable struct ReplicaSystem{D, G, T, A, AD, EL, K, F, E, R} <: AbstractSystem{D}
     atoms::A
-    atoms_data::AD
     n_replicas::Int
-    replicas::RS
-    boundary::B
+    atoms_data::AD
     exchange_logger::EL
+    k::K
     force_units::F
     energy_units::E
-    k::K
+    replicas::R
 end
 
 function ReplicaSystem(;
                         atoms,
+                        replica_coords,
+                        boundary,
+                        n_replicas,
+                        replica_velocities=nothing,
                         atoms_data=[],
+                        topology=nothing,
+                        replica_topology=nothing,
                         pairwise_inters=(),
                         replica_pairwise_inters=nothing,
                         specific_inter_lists=(),
@@ -607,26 +628,22 @@ function ReplicaSystem(;
                         replica_general_inters=nothing,
                         constraints=(),
                         replica_constraints=nothing,
-                        n_replicas,
-                        replica_coords,
-                        replica_velocities=nothing,
-                        boundary,
                         neighbor_finder=NoNeighborFinder(),
-                        exchange_logger=nothing,
                         replica_loggers=[() for _ in 1:n_replicas],
+                        exchange_logger=nothing,
+                        k=Unitful.k,
                         force_units=u"kJ * mol^-1 * nm^-1",
-                        energy_units=u"kJ * mol^-1",
-                        k=Unitful.k)
+                        energy_units=u"kJ * mol^-1")
     D = n_dimensions(boundary)
     G = isa(replica_coords[1], CuArray)
     T = float_type(boundary)
     A = typeof(atoms)
     AD = typeof(atoms_data)
+    F = typeof(force_units)
+    E = typeof(energy_units)
     C = typeof(replica_coords[1])
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
-    F = typeof(force_units)
-    E = typeof(energy_units)
 
     if isnothing(replica_velocities)
         if force_units == NoUnits
@@ -637,10 +654,13 @@ function ReplicaSystem(;
     end
     V = typeof(replica_velocities[1])
 
-    if isnothing(exchange_logger)
-        exchange_logger = ReplicaExchangeLogger(T, n_replicas)
+    if isnothing(replica_topology)
+        replica_topology = [topology for _ in 1:n_replicas]
+    elseif length(replica_topology) != n_replicas
+        throw(ArgumentError("number of topologies ($(length(replica_topology)))"
+                            * "does not match number of replicas ($n_replicas)"))
     end
-    EL = typeof(exchange_logger)
+    TO = eltype(replica_topology)
 
     if isnothing(replica_pairwise_inters)
         replica_pairwise_inters = [pairwise_inters for _ in 1:n_replicas]
@@ -648,6 +668,7 @@ function ReplicaSystem(;
         throw(ArgumentError("number of pairwise interactions ($(length(replica_pairwise_inters)))"
                             * "does not match number of replicas ($n_replicas)"))
     end
+    PI = eltype(replica_pairwise_inters)
 
     if isnothing(replica_specific_inter_lists)
         replica_specific_inter_lists = [specific_inter_lists for _ in 1:n_replicas]
@@ -655,6 +676,7 @@ function ReplicaSystem(;
         throw(ArgumentError("number of specific interaction lists ($(length(replica_specific_inter_lists)))"
                             * "does not match number of replicas ($n_replicas)"))
     end
+    SI = eltype(replica_specific_inter_lists)
 
     if isnothing(replica_general_inters)
         replica_general_inters = [general_inters for _ in 1:n_replicas]
@@ -662,9 +684,6 @@ function ReplicaSystem(;
         throw(ArgumentError("number of general interactions ($(length(replica_general_inters)))"
                             * "does not match number of replicas ($n_replicas)"))
     end
-
-    PI = eltype(replica_pairwise_inters)
-    SI = eltype(replica_specific_inter_lists)
     GI = eltype(replica_general_inters)
 
     if isnothing(replica_constraints)
@@ -674,6 +693,11 @@ function ReplicaSystem(;
                             * "does not match number of replicas ($n_replicas)"))
     end
     CN = eltype(replica_constraints)
+
+    if isnothing(exchange_logger)
+        exchange_logger = ReplicaExchangeLogger(T, n_replicas)
+    end
+    EL = typeof(exchange_logger)
 
     if !all(y -> typeof(y) == C, replica_coords)
         throw(ArgumentError("the coordinates for all the replicas are not of the same type"))
@@ -737,16 +761,18 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, G, T, A, AD, M, PI, SI, GI, CN, C, V, B, NF, typeof(replica_loggers[i]), F, E, K}(
-            atoms, atoms_data, atom_masses, replica_pairwise_inters[i], replica_specific_inter_lists[i],
-            replica_general_inters[i], replica_constraints[i], replica_coords[i], 
-            replica_velocities[i], boundary, deepcopy(neighbor_finder), replica_loggers[i],
-            force_units, energy_units, k_converted) for i in 1:n_replicas)
-    RS = typeof(replicas)
+    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+                            typeof(replica_loggers[i]), K, F, E, M}(
+            atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
+            replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
+            replica_general_inters[i], replica_constraints[i], 
+            deepcopy(neighbor_finder), replica_loggers[i], k_converted,
+            force_units, energy_units, atom_masses) for i in 1:n_replicas)
+    R = typeof(replicas)
 
-    return ReplicaSystem{D, G, T, A, AD, RS, B, EL, F, E, K}(
-            atoms, atoms_data, n_replicas, replicas, boundary, 
-            exchange_logger, force_units, energy_units, k_converted)
+    return ReplicaSystem{D, G, T, A, AD, EL, K, F, E, R}(
+            atoms, n_replicas, atoms_data, exchange_logger, k_converted,
+            force_units, energy_units, replicas)
 end
 
 """
@@ -815,10 +841,16 @@ function AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem}, i::Integer)
     end
 end
 
-AtomsBase.boundary_conditions(::Union{System{3}, ReplicaSystem{3}}) = SVector(Periodic(), Periodic(), Periodic())
-AtomsBase.boundary_conditions(::Union{System{2}, ReplicaSystem{2}}) = SVector(Periodic(), Periodic())
+function AtomsBase.boundary_conditions(::Union{System{3}, ReplicaSystem{3}})
+    return SVector(Periodic(), Periodic(), Periodic())
+end
 
-AtomsBase.bounding_box(s::Union{System, ReplicaSystem}) = bounding_box(s.boundary)
+function AtomsBase.boundary_conditions(::Union{System{2}, ReplicaSystem{2}})
+    return SVector(Periodic(), Periodic())
+end
+
+AtomsBase.bounding_box(s::System) = bounding_box(s.boundary)
+AtomsBase.bounding_box(s::ReplicaSystem) = bounding_box(s.replicas[1].boundary)
 
 function Base.show(io::IO, s::System)
     print(io, "System with ", length(s), " atoms, boundary ", s.boundary)
@@ -826,7 +858,7 @@ end
 
 function Base.show(io::IO, s::ReplicaSystem)
     print(io, "ReplicaSystem containing ",  s.n_replicas, " replicas with ", length(s),
-          " atoms, boundary ", s.boundary)
+          " atoms each")
 end
 
 # Take precedence over AtomsBase.jl show function

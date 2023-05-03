@@ -104,11 +104,11 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
 
     s = System(
         atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
-        coords=coords,
-        velocities=velocities,
-        boundary=boundary,
         neighbor_finder=neighbor_finder,
     )
 

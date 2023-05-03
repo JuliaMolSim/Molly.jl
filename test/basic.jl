@@ -316,48 +316,49 @@ end
         dist_cutoff=1.5u"nm",
     )
 
-    repsys = ReplicaSystem(;
-        n_replicas=n_replicas,
+    repsys = ReplicaSystem(
         atoms=atoms,
         replica_coords=[copy(coords) for _ in 1:n_replicas],
+        boundary=boundary,
+        n_replicas=n_replicas,
         replica_velocities=replica_velocities,
         pairwise_inters=pairwise_inters,
-        boundary=boundary,
     )
 
-    sys = System(;
+    sys = System(
         atoms=atoms,
         coords=coords,
+        boundary=boundary,
         velocities=nothing,
         pairwise_inters=pairwise_inters,
-        boundary=boundary,
     )
 
     for i in 1:n_replicas
-        @test all(
-            [getfield(repsys.replicas[i], f) for f in fieldnames(System)] .== [getfield(sys, f) for f in fieldnames(System)]
-        )
+        repsys_fields = [getfield(repsys.replicas[i], f) for f in fieldnames(System)]
+        sys_fields = [getfield(sys, f) for f in fieldnames(System)]
+        @test all(repsys_fields .== sys_fields)
     end
 
-    repsys2 = ReplicaSystem(;
-        n_replicas=n_replicas,
+    repsys2 = ReplicaSystem(
         atoms=atoms,
         replica_coords=[copy(coords) for _ in 1:n_replicas],
+        boundary=boundary,
+        n_replicas=n_replicas,
         replica_velocities=replica_velocities,
         pairwise_inters=pairwise_inters,
-        boundary=boundary,
-        replica_loggers=[(temp=TemperatureLogger(10), coords=CoordinateLogger(10)) for i in 1:n_replicas],
         neighbor_finder=neighbor_finder,
+        replica_loggers=[(temp=TemperatureLogger(10), coords=CoordinateLogger(10))
+                         for i in 1:n_replicas],
     )
 
-    sys2 = System(;
+    sys2 = System(
         atoms=atoms,
         coords=coords,
+        boundary=boundary,
         velocities=nothing,
         pairwise_inters=pairwise_inters,
-        boundary=boundary,
-        loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
         neighbor_finder=neighbor_finder,
+        loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
     )
 
     for i in 1:n_replicas

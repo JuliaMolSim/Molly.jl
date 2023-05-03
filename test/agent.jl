@@ -95,10 +95,10 @@
 
     sys = System(
         atoms=atoms,
-        pairwise_inters=pairwise_inters,
         coords=coords,
-        velocities=velocities,
         boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
         loggers=(
             coords=CoordinateLogger(Float64, 10; dims=2),

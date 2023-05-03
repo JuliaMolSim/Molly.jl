@@ -25,9 +25,9 @@ using Test
 
             sys = System(
                 atoms=(gpu ? CuArray(atoms) : atoms),
-                pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=false),),
                 coords=(gpu ? CuArray(coords) : coords),
                 boundary=boundary,
+                pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=false),),
                 loggers=(
                     coords=CoordinateLogger(100),
                     energy=TotalEnergyLogger(100),

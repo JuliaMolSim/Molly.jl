@@ -8,9 +8,9 @@
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
         boundary=boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -71,11 +71,11 @@ end
     for n_threads in n_threads_list
         s = System(
             atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+            coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
+            boundary=boundary,
+            velocities=[random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR", element="Ar") for i in 1:n_atoms],
             pairwise_inters=(LennardJones(use_neighbors=true),),
-            coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
-            velocities=[random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
-            boundary=boundary,
             neighbor_finder=DistanceNeighborFinder(
                 eligible=trues(n_atoms, n_atoms),
                 n_steps=10,
@@ -171,9 +171,9 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=coords,
         boundary=boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -209,9 +209,9 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=coords,
         boundary=boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -250,11 +250,11 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        coords=coords,
+        boundary=boundary,
+        velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
         pairwise_inters=(LennardJones(use_neighbors=true),),
         specific_inter_lists=(bonds,),
-        coords=coords,
-        velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
-        boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -311,10 +311,10 @@ end
         s = System(
             atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"u", σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-            pairwise_inters=(inter,),
             coords=place_atoms(n_atoms, boundary; min_dist=0.2u"nm"),
-            velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             boundary=boundary,
+            velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
+            pairwise_inters=(inter,),
             neighbor_finder=neighbor_finder,
             loggers=(
                 temp=TemperatureLogger(100),
@@ -338,8 +338,8 @@ end
     sys = System(
         atoms=atoms,
         coords=coords,
-        velocities=velocities,
         boundary=boundary,
+        velocities=velocities,
         general_inters=(MullerBrown(),),
         loggers=(coords=CoordinateLogger(100; dims=2),),
     )
@@ -368,10 +368,10 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=coords,
-        velocities=velocities,
         boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -388,10 +388,10 @@ end
 
     s_nounits = System(
         atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=ustrip_vec.(coords),
-        velocities=ustrip_vec.(velocities),
         boundary=CubicBoundary(ustrip.(boundary)),
+        velocities=ustrip_vec.(velocities),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -436,10 +436,10 @@ end
 
         sys = System(
             atoms=gpu ? CuArray(atoms) : atoms,
-            atoms_data=atoms_data,
-            pairwise_inters=(LennardJones(),),
             coords=gpu ? CuArray(deepcopy(starting_coords)) : deepcopy(starting_coords),
             boundary=boundary,
+            atoms_data=atoms_data,
+            pairwise_inters=(LennardJones(),),
             loggers=(coords=CoordinateLogger(100),),
         )
 
@@ -485,11 +485,11 @@ end
 
     sys = System(
         atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
         pairwise_inters=(LennardJones(use_neighbors=true),),
         constraints=constraints,
-        coords=coords,
-        velocities=velocities,
-        boundary=boundary,
         neighbor_finder=neighbor_finder,
         loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
     )
@@ -557,11 +557,11 @@ end
 
     sys = System(
         atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
         pairwise_inters=(LennardJones(use_neighbors=true),),
         constraints=constraints,
-        coords=coords,
-        velocities=velocities,
-        boundary=boundary,
         neighbor_finder=neighbor_finder,
         loggers=(coords=CoordinateLogger(10),),
     )
@@ -590,10 +590,10 @@ end
     velocities = [random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
     s1 = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=coords,
-        velocities=velocities,
         boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -628,8 +628,8 @@ end
     sys = System(
         atoms=atoms,
         coords=coords,
-        velocities=velocities,
         boundary=boundary,
+        velocities=velocities,
         pairwise_inters=(LennardJones(),),
         loggers=(temp=TemperatureLogger(1),),
     )
@@ -655,7 +655,7 @@ end
     pairwise_inters = (LennardJones(use_neighbors=true),)
 
     eligible = trues(n_atoms, n_atoms)
-    
+
     neighbor_finder = DistanceNeighborFinder(
         eligible=eligible,
         n_steps=10,
@@ -668,12 +668,12 @@ end
     repsys = ReplicaSystem(
         atoms=atoms,
         replica_coords=[copy(coords) for _ in 1:n_replicas],
-        replica_velocities=nothing,
-        n_replicas=n_replicas,
         boundary=boundary,
+        n_replicas=n_replicas,
+        replica_velocities=nothing,
         pairwise_inters=pairwise_inters,
-        replica_loggers=replica_loggers,
         neighbor_finder=neighbor_finder,
+        replica_loggers=replica_loggers,
     )
 
     @test !is_on_gpu(repsys)
@@ -684,6 +684,11 @@ end
     @test species_type(repsys) <: AtomView
     @test atomic_mass(repsys) == fill(atom_mass, n_atoms)
     @test atomic_mass(repsys, 5) == atom_mass
+    @test bounding_box(repsys) == SVector(
+        SVector(2.0, 0.0, 0.0)u"nm",
+        SVector(0.0, 2.0, 0.0)u"nm",
+        SVector(0.0, 0.0, 2.0)u"nm",
+    )
     show(devnull, repsys)
 
     temp_vals = [120.0u"K", 180.0u"K", 240.0u"K", 300.0u"K"]
@@ -741,12 +746,12 @@ end
     repsys = ReplicaSystem(
         atoms=atoms,
         replica_coords=[copy(coords) for _ in 1:n_replicas],
-        replica_velocities=nothing,
-        n_replicas=n_replicas,
         boundary=boundary,
+        n_replicas=n_replicas,
+        replica_velocities=nothing,
         replica_pairwise_inters=replica_pairwise_inters,
-        replica_loggers=replica_loggers,
         neighbor_finder=neighbor_finder,
+        replica_loggers=replica_loggers,
     )
 
     simulator = HamiltonianREMD(
@@ -795,12 +800,12 @@ end
         coords=coords,
         boundary=boundary,
         pairwise_inters=(Coulomb(), ),
+        neighbor_finder=neighbor_finder,
         loggers=(
             coords=CoordinateLogger(10), 
             mcl=MonteCarloLogger(),
             avgpe=AverageObservableLogger(potential_energy, typeof(atoms[1].ϵ), 10),
         ),
-        neighbor_finder=neighbor_finder,
     )
 
     simulator_uniform = MetropolisMonteCarlo(
@@ -898,11 +903,11 @@ end
 
         s = System(
             atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            velocities=velocities,
             pairwise_inters=pairwise_inters,
             specific_inter_lists=specific_inter_lists,
-            coords=coords,
-            velocities=velocities,
-            boundary=boundary,
             neighbor_finder=neighbor_finder,
         )
 

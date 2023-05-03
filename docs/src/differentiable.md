@@ -83,10 +83,10 @@ function loss(σ, coords, velocities)
 
     s = System(
         atoms=atoms,
-        pairwise_inters=pairwise_inters,
         coords=coords,
-        velocities=velocities,
         boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=NoUnits,
@@ -204,10 +204,10 @@ function loss(θ)
 
     s = System(
         atoms=atoms,
-        specific_inter_lists=specific_inter_lists,
         coords=deepcopy(coords),
-        velocities=deepcopy(velocities),
         boundary=boundary,
+        velocities=deepcopy(velocities),
+        specific_inter_lists=specific_inter_lists,
         loggers=loggers,
         force_units=NoUnits,
         energy_units=NoUnits,
@@ -336,10 +336,10 @@ function loss()
 
     s = System(
         atoms=atoms,
-        general_inters=general_inters,
         coords=deepcopy(coords),
-        velocities=deepcopy(velocities),
         boundary=boundary,
+        velocities=deepcopy(velocities),
+        general_inters=general_inters,
         loggers=loggers,
         force_units=NoUnits,
         energy_units=NoUnits,

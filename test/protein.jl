@@ -51,7 +51,7 @@ end
         coupling=AndersenThermostat(temp, 10.0f0),
     )
 
-    s.velocities = [random_velocity(mass(a), Float32(temp)) .* 0.01f0 for a in s.atoms]
+    s.velocities = [random_velocity(mass(a), temp) .* 0.01f0 for a in s.atoms]
     @time simulate!(s, simulator, n_steps; n_threads=1)
 end
 
@@ -91,10 +91,10 @@ end
 
         sys_part = System(
             atoms=sys.atoms,
-            pairwise_inters=pin,
-            specific_inter_lists=sils,
             coords=sys.coords,
             boundary=sys.boundary,
+            pairwise_inters=pin,
+            specific_inter_lists=sils,
             neighbor_finder=sys.neighbor_finder,
         )
 
