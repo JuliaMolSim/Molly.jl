@@ -4,6 +4,7 @@ export HarmonicAngle
     HarmonicAngle(; k, θ0)
 
 A harmonic bond angle between three atoms.
+
 `θ0` is in radians.
 The potential energy is defined as
 ```math

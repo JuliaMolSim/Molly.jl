@@ -27,6 +27,7 @@ export
     CubicBoundary(x)
 
 Cubic 3D bounding box defined by 3 side lengths.
+
 If one length is given then all sides will have that length.
 Setting one or more values to `Inf` gives no boundary in that dimension.
 """
@@ -52,6 +53,7 @@ Base.lastindex(b::CubicBoundary) = 3
     RectangularBoundary(x)
 
 Rectangular 2D bounding box defined by 2 side lengths.
+
 If one length is given then all sides will have that length.
 Setting one or more values to `Inf` gives no boundary in that dimension.
 """
@@ -80,9 +82,9 @@ Base.lastindex(b::RectangularBoundary) = 2
 
 Triclinic 3D bounding box defined by 3 `SVector{3}` basis vectors or basis vector
 lengths and angles α/β/γ in radians.
+
 The first basis vector must point along the x-axis and the second must lie in the
 xy plane.
-
 An approximation is used to find the closest periodic image when using the
 minimum image convention.
 The approximation is correct for distances shorter than half the shortest box
@@ -223,6 +225,7 @@ box_volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
     box_center(boundary)
 
 Calculate the center of a bounding box.
+
 Dimensions with infinite length return zero.
 """
 function box_center(b::Union{CubicBoundary, RectangularBoundary})
@@ -234,7 +237,8 @@ box_center(b::TriclinicBoundary) = sum(b.basis_vectors) / 2
 """
     scale_boundary(boundary, scale_factor)
 
-Scale the sides a bounding box by a scaling factor.
+Scale the sides of a bounding box by a scaling factor.
+
 For a 3D bounding box the volume scales as the cube of the scaling factor.
 """
 scale_boundary(b::CubicBoundary, scale) = CubicBoundary(b.side_lengths .* scale)
@@ -302,6 +306,7 @@ end
 
 Displacement between two 1D coordinate values from c1 to c2, accounting for
 periodic boundary conditions in a [`CubicBoundary`](@ref) or [`RectangularBoundary`](@ref).
+
 The minimum image convention is used, so the displacement is to the closest
 version of the coordinate accounting for the periodic boundaries.
 """
@@ -318,6 +323,7 @@ end
 
 Displacement between two coordinate values from c1 to c2, accounting for
 periodic boundary conditions.
+
 The minimum image convention is used, so the displacement is to the closest
 version of the coordinates accounting for the periodic boundaries.
 For the [`TriclinicBoundary`](@ref) an approximation is used to find the closest
@@ -503,6 +509,7 @@ acosbound(x::Real) = acos(clamp(x, -1, 1))
 
 Calculate the bond or pseudo-bond angle in radians between three
 coordinates or two vectors.
+
 The angle between j→i and j→k is returned in the range 0 to π.
 """
 function bond_angle(coords_i, coords_j, coords_k, boundary)
@@ -521,6 +528,7 @@ end
 
 Calculate the torsion angle in radians defined by four coordinates or
 three vectors.
+
 The angle between the planes defined by atoms (i, j, k) and (j, k, l) is
 returned in the range -π to π.
 """
@@ -560,7 +568,9 @@ end
 @doc raw"""
     virial(sys, neighbors=nothing)
 
-Calculate the virial of a system, defined as
+Calculate the virial of a system.
+
+The virial is defined as
 ```math
 \Xi = -\frac{1}{2} \sum_{i,j>i} r_{ij} \cdot F_{ij}
 ```
@@ -632,7 +642,9 @@ end
 @doc raw"""
     pressure(sys, neighbors=nothing)
 
-Calculate the pressure of a system, defined as
+Calculate the pressure of a system.
+
+The pressure is defined as
 ```math
 P = \frac{1}{V} \left( NkT - \frac{2}{D} \Xi \right)
 ```

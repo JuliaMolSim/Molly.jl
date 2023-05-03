@@ -16,6 +16,8 @@ export
 """
     place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100)
 
+Generate random coordinates.
+
 Obtain `n_atoms` coordinates in bounding box `boundary` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
 The keyword argument `max_attempts` determines the number of failed tries after
@@ -62,6 +64,8 @@ end
 """
     place_diatomics(n_molecules, boundary, bond_length; min_dist=nothing,
                     max_attempts=100, aligned=false)
+
+Generate random diatomic molecule coordinates.
 
 Obtain coordinates for `n_molecules` diatomics in bounding box `boundary`
 where no two points are closer than `min_dist` and the bond length is `bond_length`,
@@ -165,6 +169,7 @@ end
                         weight_14_lj)
 
 A molecular force field.
+
 Read one or more OpenMM force field XML files by passing them to the constructor.
 """
 struct MolecularForceField{T, M, D, E, K}
@@ -335,6 +340,7 @@ const standard_res_names = [keys(BioStructures.threeletter_to_aa)..., "HID", "HI
 
 Read a coordinate file in a file format readable by Chemfiles and apply a
 force field to it.
+
 Atom names should exactly match residue templates - no searching of residue
 templates is carried out.
 
@@ -343,15 +349,16 @@ templates is carried out.
 
 Read a Gromacs coordinate file and a Gromacs topology file with all
 includes collapsed into one file.
+
 Gromacs file reading should be considered experimental.
 The `implicit_solvent`, `kappa` and `rename_terminal_res` keyword arguments
 are not available when reading Gromacs files.
 
 # Arguments
-- `velocities=nothing`: the velocities of the atoms in the system, set to
-    zero by default.
 - `boundary=nothing`: the bounding box used for simulation, read from the
     file by default.
+- `velocities=nothing`: the velocities of the atoms in the system, set to
+    zero by default.
 - `loggers=()`: the loggers that record properties of interest during a
     simulation.
 - `units::Bool=true`: whether to use Unitful quantities.
@@ -372,8 +379,8 @@ are not available when reading Gromacs files.
 """
 function System(coord_file::AbstractString,
                 force_field::MolecularForceField;
-                velocities=nothing,
                 boundary=nothing,
+                velocities=nothing,
                 loggers=(),
                 units::Bool=true,
                 gpu::Bool=false,
@@ -864,8 +871,8 @@ end
 function System(T::Type,
                 coord_file::AbstractString,
                 top_file::AbstractString;
-                velocities=nothing,
                 boundary=nothing,
+                velocities=nothing,
                 loggers=(),
                 units::Bool=true,
                 gpu::Bool=false,
@@ -1239,6 +1246,7 @@ end
 
 Return a copy of a [`System`](@ref) with [`HarmonicPositionRestraint`](@ref)s added to restrain the
 atoms.
+
 The force constant `k` can be a single value or an array of equal length to the number of atoms
 in the system.
 The `atom_selector` function takes in each atom and atom data and determines whether to restrain

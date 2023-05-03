@@ -7,6 +7,7 @@ export
     Coulomb(; cutoff, use_neighbors, weight_special, coulomb_const, force_units, energy_units)
 
 The Coulomb electrostatic interaction between two atoms.
+
 The potential energy is defined as
 ```math
 V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}}
@@ -115,6 +116,7 @@ end
                     coulomb_const, force_units, energy_units)
 
 The Coulomb electrostatic interaction between two atoms with a soft core.
+
 The potential energy is defined as
 ```math
 V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha  \sigma_{ij}^6  \lambda^p)^{\frac{1}{6}}}

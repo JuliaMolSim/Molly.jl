@@ -12,8 +12,10 @@ export
                     step_n=0; n_threads=Threads.nthreads())
 
 Apply a coupler to modify a simulation.
+
 Returns whether the coupling has invalidated the currently stored forces, for
 example by changing the coordinates.
+This information is useful for some simulators.
 If `coupling` is a tuple or named tuple then each coupler will be applied in turn.
 Custom couplers should implement this function.
 """
@@ -41,7 +43,11 @@ apply_coupling!(sys, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
 """
     AndersenThermostat(temperature, coupling_const)
 
-Rescale random velocities according to the Andersen thermostat.
+The Andersen thermostat for controlling temperature.
+
+Velocities are randomly changed to velocities drawn from the Maxwell-Boltzmann
+distribution.
+See [Andersen 1980](https://doi.org/10.1063/1.439486).
 """
 struct AndersenThermostat{T, C}
     temperature::T
@@ -75,14 +81,15 @@ end
 @doc raw"""
     RescaleThermostat(temperature)
 
-The velocity rescaling thermostat that immediately rescales the velocities to
-match a target temperature.
-This thermostat should be used with caution as it can lead to simulation
-artifacts.
+The velocity rescaling thermostat for controlling temperature.
+
+Velocities are immediately rescaled to match a target temperature.
 The scaling factor for the velocities each step is
 ```math
 \lambda = \sqrt{\frac{T_0}{T}}
 ```
+This thermostat should be used with caution as it can lead to simulation
+artifacts.
 """
 struct RescaleThermostat{T}
     temperature::T
@@ -97,13 +104,14 @@ end
 @doc raw"""
     BerendsenThermostat(temperature, coupling_const)
 
-The Berendsen thermostat.
-This thermostat should be used with caution as it can lead to simulation
-artifacts.
+The Berendsen thermostat for controlling temperature.
+
 The scaling factor for the velocities each step is
 ```math
 \lambda^2 = 1 + \frac{\delta t}{\tau} \left( \frac{T_0}{T} - 1 \right)
 ```
+This thermostat should be used with caution as it can lead to simulation
+artifacts.
 """
 struct BerendsenThermostat{T, C}
     temperature::T

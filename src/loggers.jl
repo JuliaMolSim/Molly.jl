@@ -21,7 +21,8 @@ export
 """
     run_loggers!(system, neighbors=nothing, step_n=0; n_threads=Threads.nthreads(), kwargs...)
 
-Run the loggers associated with the system.
+Run the loggers associated with a system.
+
 Ignored for gradient calculation during automatic differentiation.
 Additional keyword arguments can be passed to the loggers if required.
 """
@@ -36,6 +37,7 @@ end
     GeneralObservableLogger(observable::Function, T, n_steps)
 
 A logger which holds a record of regularly sampled observations of a system. 
+
 `observable` should return an object of type `T` and support the method
 `observable(s::System, neighbors; n_threads::Integer)::T`.
 """
@@ -54,7 +56,7 @@ end
     values(logger::TimeCorrelationLogger; normalize::Bool=true)
     values(logger::AverageObservableLogger; std::Bool=true)
 
-Return the stored observations in a logger.
+Access the stored observations in a logger.
 """
 Base.values(logger::GeneralObservableLogger) = logger.history
 
@@ -62,6 +64,7 @@ Base.values(logger::GeneralObservableLogger) = logger.history
     log_property!(logger, system, neighbors=nothing, step_n=0; n_threads=Threads.nthreads(), kwargs...)
 
 Log a property of a system throughout a simulation.
+
 Custom loggers should implement this function.
 Additional keyword arguments can be passed to the logger if required.
 """
@@ -252,7 +255,9 @@ atom_record(at_data, i, coord) = BioStructures.AtomRecord(
                             TA::DataType, TB::DataType,
                             observable_length::Integer, n_correlation::Integer)
 
-A time correlation logger, which estimates statistical correlations of normalized form
+A time correlation logger.
+
+Estimates statistical correlations of normalized form
 ```math
 C(t)=\frac{\langle A_t\cdot B_0\rangle -\langle A\rangle\cdot \langle B\rangle}{\sqrt{\langle |A|^2\rangle\langle |B|^2\rangle}}
 ```
@@ -335,7 +340,7 @@ end
                             observable_length::Integer, n_correlation::Integer)
 
 An autocorrelation logger, equivalent to a [`TimeCorrelationLogger`](@ref) in the case
-`observableA == observableB`.
+that `observableA == observableB`.
 """
 function AutoCorrelationLogger(observable, TA, observable_length::Integer,
                                 n_correlation::Integer)
@@ -409,6 +414,7 @@ end
 
 A logger that periodically records observations of a system and keeps a running
 empirical average.
+
 While [`GeneralObservableLogger`](@ref) holds a full record of observations,
 [`AverageObservableLogger`](@ref) does not.
 In addition, calling `values(logger::AverageObservableLogger; std::Bool=true)`
@@ -480,6 +486,7 @@ end
     ReplicaExchangeLogger(T, n_replicas)
 
 A logger that records exchanges in a replica exchange simulation.
+
 The logged quantities include the number of exchange attempts (`n_attempts`),
 number of successful exchanges (`n_exchanges`), exchanged replica indices (`indices`),
 exchange steps (`steps`) and the value of Δ i.e. the argument of Metropolis rate for
@@ -525,6 +532,7 @@ end
     MonteCarloLogger(T)
 
 A logger that records acceptances in a Monte Carlo simulation.
+
 The logged quantities include the number of new selections (`n_select`),
 the number of successful acceptances (`n_accept`), an array named `energy_rates` which stores
 the value of ``\frac{E}{k_B T}`` i.e. the argument of the Boltzmann factor for the states,

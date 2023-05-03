@@ -55,6 +55,7 @@ end
     simulate!(system, simulator; n_threads=Threads.nthreads())
 
 Run a simulation on a system according to the rules of the given simulator.
+
 Custom simulators should implement this function.
 """
 function simulate!(sys,
@@ -171,6 +172,7 @@ end
     Verlet(; <keyword arguments>)
 
 The leapfrog Verlet integrator.
+
 This is a leapfrog integrator, so the velocities are offset by half a time step
 behind the positions.
 
@@ -228,6 +230,7 @@ end
     StormerVerlet(; <keyword arguments>)
 
 The Störmer-Verlet integrator.
+
 The velocity calculation is accurate to O(dt).
 
 Does not currently work with coupling methods that alter the velocity.
@@ -289,6 +292,7 @@ end
     Langevin(; <keyword arguments>)
 
 The Langevin integrator, based on the Langevin Middle Integrator in OpenMM.
+
 This is a leapfrog integrator, so the velocities are offset by half a time step
 behind the positions.
 
@@ -360,10 +364,11 @@ end
 """
     LangevinSplitting(; <keyword arguments>)
 
-The Langevin simulator using a general splitting scheme, consisting of a
-succession of **A**, **B** and **O** steps, corresponding respectively to
-updates in position, velocity for the potential part, and velocity for the
-thermal fluctuation-dissipation part.
+The Langevin simulator using a general splitting scheme.
+
+This consists of a succession of **A**, **B** and **O** steps, corresponding
+respectively to updates in position, velocity for the potential part, and velocity
+for the thermal fluctuation-dissipation part.
 The [`Langevin`](@ref) and [`VelocityVerlet`](@ref) simulators without coupling
 correspond to the **BAOA** and **BAB** schemes respectively.
 For more information on the sampling properties of splitting schemes, see
@@ -485,6 +490,7 @@ end
 
 The Nosé-Hoover integrator, a NVT simulator that extends velocity Verlet to control the
 temperature of the system.
+
 See [Evans and Holian 1985](https://doi.org/10.1063/1.449071).
 
 # Arguments
@@ -563,6 +569,7 @@ end
 
 A simulator for a parallel temperature replica exchange MD (T-REMD) simulation on a
 [`ReplicaSystem`](@ref).
+
 See [Sugita and Okamoto 1999](https://doi.org/10.1016/S0009-2614(99)01123-9).
 The corresponding [`ReplicaSystem`](@ref) should have the same number of replicas as
 the number of temperatures in the simulator.
@@ -633,6 +640,7 @@ end
     remd_exchange!(sys, sim, n, m; rng=Random.GLOBAL_RNG, n_threads=Threads.nthreads())
 
 Attempt an exchange of replicas `n` and `m` in a [`ReplicaSystem`](@ref) during a REMD simulation.
+
 Successful exchanges should exchange coordinates and velocities as appropriate.
 Returns acceptance quantity `Δ` and a `Bool` indicating whether the exchange was successful.
 """
@@ -676,6 +684,7 @@ end
 
 A simulator for a parallel Hamiltonian replica exchange MD (H-REMD) simulation on a
 [`ReplicaSystem`](@ref).
+
 The replicas are expected to have different Hamiltonians, i.e. different interactions.
 When calling [`simulate!`](@ref), the `assign_velocities` keyword argument determines
 whether to assign random velocities at the appropriate temperature for each replica.
@@ -844,6 +853,7 @@ end
     MetropolisMonteCarlo(; <keyword arguments>)
 
 A Monte Carlo simulator that uses the Metropolis algorithm to sample the configuration space.
+
 `simulate!` for this simulator accepts an optional keyword argument `log_states::Bool=true` which 
 determines whether to run the loggers or not (for example, during equilibration).
 
@@ -902,7 +912,8 @@ end
     random_uniform_translation!(sys::System; shift_size=oneunit(eltype(eltype(sys.coords))))
 
 Performs a random translation of the coordinates of a randomly selected atom in a [`System`](@ref).
-The translation is generated using a uniformly selected direction and uniformly selected length 
+
+The translation is generated using a uniformly selected direction and uniformly selected length
 in range [0, 1) scaled by `shift_size` which should have appropriate length units.
 """
 function random_uniform_translation!(sys::System{D, G, T};
@@ -917,9 +928,10 @@ end
 """
     random_normal_translation!(sys::System; shift_size=oneunit(eltype(eltype(sys.coords))))
 
-Performs a random translation of the coordinates of a randomly selected atom in a [`System`](@ref). 
-The translation is generated using a uniformly chosen direction and length selected from 
-the standard normal distribution i.e. with mean 0 and standard deviation 1, scaled by `shift_size` 
+Performs a random translation of the coordinates of a randomly selected atom in a [`System`](@ref).
+
+The translation is generated using a uniformly chosen direction and length selected from
+the standard normal distribution i.e. with mean 0 and standard deviation 1, scaled by `shift_size`
 which should have appropriate length units.
 """
 function random_normal_translation!(sys::System{D, G, T};

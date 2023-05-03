@@ -23,6 +23,7 @@ const DefaultFloat = Float64
 
 """
 A pairwise interaction that will apply to all or most atom pairs.
+
 Custom pairwise interactions should sub-type this abstract type.
 """
 abstract type PairwiseInteraction end
@@ -31,6 +32,7 @@ abstract type PairwiseInteraction end
     use_neighbors(inter)
 
 Whether a pairwise interaction uses the neighbor list, default `false`.
+
 Custom pairwise interactions can define a method for this function.
 For built-in interactions such as [`LennardJones`](@ref) this function accesses
 the `use_neighbors` field of the struct.
@@ -39,6 +41,7 @@ use_neighbors(::PairwiseInteraction) = false
 
 """
 A specific interaction between sets of specific atoms, e.g. a bond angle.
+
 Custom specific interactions should sub-type this abstract type.
 """
 abstract type SpecificInteraction end
@@ -205,6 +208,7 @@ end
     Atom(; <keyword arguments>)
 
 An atom and its associated information.
+
 Properties unused in the simulation or in analysis can be left with their
 default values.
 The types used should be bits types if the GPU is going to be used.
@@ -253,6 +257,7 @@ charge(atom) = atom.charge
     mass(atom)
 
 The mass of an [`Atom`](@ref).
+
 Custom atom types should implement this function unless they have a `mass` field
 defined, which the function accesses by default.
 """
@@ -267,6 +272,7 @@ end
     AtomData(atom_type, atom_name, res_number, res_name)
 
 Data associated with an atom.
+
 Storing this separately allows the [`Atom`](@ref) types to be bits types and hence
 work on the GPU.
 """
@@ -381,6 +387,7 @@ end
     System(; <keyword arguments>)
 
 A physical system to be simulated.
+
 Properties unused in the simulation or in analysis can be left with their
 default values.
 `atoms`, `atoms_data`, `coords` and `velocities` should have the same length.

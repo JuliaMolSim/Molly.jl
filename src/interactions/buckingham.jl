@@ -4,6 +4,7 @@ export Buckingham
     Buckingham(; cutoff, use_neighbors, weight_special, force_units, energy_units)
 
 The Buckingham interaction between two atoms.
+
 The potential energy is defined as
 ```math
 V(r_{ij}) = A_{ij} \exp(-B_{ij} r_{ij}) - \frac{C_{ij}}{r_{ij}^6}

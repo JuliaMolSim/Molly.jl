@@ -11,6 +11,7 @@ export
     NoNeighborFinder()
 
 Placeholder neighbor finder that returns no neighbors.
+
 When using this neighbor finder, ensure that [`use_neighbors`](@ref) for the interactions
 returns `false`.
 """
@@ -19,9 +20,10 @@ struct NoNeighborFinder end
 """
     find_neighbors(system; n_threads=Threads.nthreads())
     find_neighbors(system, neighbor_finder, current_neighbors=nothing,
-                    step_n=0; n_threads=Threads.nthreads())
+                   step_n=0; n_threads=Threads.nthreads())
 
 Obtain a list of close atoms in a [`System`](@ref).
+
 Custom neighbor finders should implement this function.
 """
 find_neighbors(s::System; kwargs...) = find_neighbors(s, s.neighbor_finder; kwargs...)
@@ -68,11 +70,11 @@ function find_neighbors(s::System{D, false},
     @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in eachindex(s)
         ci = s.coords[i]
         nbi = @view nf.eligible[:, i]
-        w14i = @view nf.special[:, i]
+        speci = @view nf.special[:, i]
         for j in 1:(i - 1)
             r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
             if r2 <= sqdist_cutoff && nbi[j]
-                nn = (Int32(j), Int32(i), w14i[j])
+                nn = (Int32(j), Int32(i), speci[j])
                 @reduce(neighbors_list = append!(Tuple{Int32, Int32, Bool}[], (nn,)))
             end
         end
@@ -137,6 +139,7 @@ end
     TreeNeighborFinder(; eligible, special, n_steps, dist_cutoff)
 
 Find close atoms by distance using a tree search.
+
 Can not be used if one or more dimensions has infinite boundaries.
 Can not be used with [`TriclinicBoundary`](@ref).
 """
@@ -170,11 +173,11 @@ function find_neighbors(s::System,
     @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in eachindex(s)
         ci = ustrip.(s.coords[i])
         nbi = @view nf.eligible[:, i]
-        w14i = @view nf.special[:, i]
+        speci = @view nf.special[:, i]
         idxs = inrange(btree, ci, dist_cutoff, true)
         for j in idxs
             if nbi[j] && i > j
-                nn = (Int32(j), Int32(i), w14i[j])
+                nn = (Int32(j), Int32(i), speci[j])
                 @reduce(neighbors_list = append!(Tuple{Int32, Int32, Bool}[], (nn,)))
             end
         end
@@ -186,7 +189,8 @@ end
 """
     CellListMapNeighborFinder(; eligible, special, n_steps, dist_cutoff, x0, unit_cell)
 
-Find close atoms by distance and store auxiliary arrays for in-place threading.
+Find close atoms by distance using a cell list algorithm from CellListMap.jl.
+
 `x0` and `unit_cell` are optional initial coordinates and system unit cell that improve the
 first approximation of the cell list structure.
 Can not be used if one or more dimensions has infinite boundaries.

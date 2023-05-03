@@ -11,6 +11,7 @@ export
 
 Calculate the total energy of a system as the sum of the [`kinetic_energy`](@ref)
 and the [`potential_energy`](@ref).
+
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
@@ -72,6 +73,7 @@ end
 
 Calculate the potential energy of a system using the pairwise, specific and
 general interactions.
+
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 
@@ -86,6 +88,7 @@ first and passed to the function.
     potential_energy(inter, system, neighbors=nothing; n_threads=Threads.nthreads())
 
 Calculate the potential energy due to a given interaction type.
+
 Custom interaction types should implement this function.
 """
 function potential_energy(s::System{D, false, T}, neighbors=nothing;
