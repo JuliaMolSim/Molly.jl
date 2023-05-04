@@ -17,6 +17,7 @@ using KernelDensity
 using NearestNeighbors
 using Reexport
 using Requires
+using SimpleCrystals
 using Unitful
 using UnitfulChainRules
 using Zygote
@@ -24,6 +25,7 @@ using Zygote
 @reexport using AtomsBase
 @reexport using StaticArrays
 @reexport using Unitful
+@reexport using SimpleCrystals
 
 using LinearAlgebra
 using Random
@@ -32,6 +34,7 @@ using Statistics
 
 include("types.jl")
 include("cutoffs.jl")
+include("crystals.jl")
 include("spatial.jl")
 include("force.jl")
 include("interactions/lennard_jones.jl")
