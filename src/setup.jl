@@ -369,6 +369,8 @@ are not available when reading Gromacs files.
     greater than `dist_cutoff`.
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
+- `use_cell_list::Bool=true`: whether to use [`CellListMapNeighborFinder`](@ref)
+    on CPU. If `false`, [`DistanceNeighborFinder`](@ref) is used.
 - `implicit_solvent=nothing`: specify a string to add an implicit solvent
     model, options are "obc1", "obc2" and "gbn2".
 - `kappa=0.0u"nm^-1"`: the kappa value for the implicit solvent model if one
@@ -387,6 +389,7 @@ function System(coord_file::AbstractString,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
+                use_cell_list::Bool=true,
                 implicit_solvent=nothing,
                 kappa=0.0u"nm^-1",
                 rename_terminal_res::Bool=true)
@@ -719,15 +722,24 @@ function System(coord_file::AbstractString,
         energy_units=energy_units,
     )
     if isnothing(implicit_solvent)
-        crf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(crf_solvent_dielectric),
-                                    use_neighbors=true, weight_special=force_field.weight_14_coulomb,
-                                    coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
-                                    force_units=force_units, energy_units=energy_units)
+        crf = CoulombReactionField(
+            dist_cutoff=T(dist_cutoff),
+            solvent_dielectric=T(crf_solvent_dielectric),
+            use_neighbors=true,
+            weight_special=force_field.weight_14_coulomb,
+            coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
+            force_units=force_units,
+            energy_units=energy_units,
+        )
     else
-        crf = Coulomb(cutoff=DistanceCutoff(T(dist_cutoff)), use_neighbors=true,
-                        weight_special=force_field.weight_14_coulomb,
-                        coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
-                        force_units=force_units, energy_units=energy_units)
+        crf = Coulomb(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=true,
+            weight_special=force_field.weight_14_coulomb,
+            coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
+            force_units=force_units,
+            energy_units=energy_units,
+        )
     end
     pairwise_inters = (lj, crf)
 
@@ -807,10 +819,10 @@ function System(coord_file::AbstractString,
     coords = wrap_coords.(coords, (boundary_used,))
 
     atoms = [atoms...]
-    if gpu
+    if gpu || !use_cell_list
         neighbor_finder = DistanceNeighborFinder(
-            eligible=CuArray(eligible),
-            special=CuArray(special),
+            eligible=(gpu ? CuArray(eligible) : eligible),
+            special=(gpu ? CuArray(special) : special),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
@@ -882,7 +894,8 @@ function System(T::Type,
                 gpu::Bool=false,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
-                center_coords::Bool=true)
+                center_coords::Bool=true,
+                use_cell_list::Bool=true)
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
     bondtypes = Dict{String, HarmonicBond}()
@@ -965,13 +978,13 @@ function System(T::Type,
             attype = atomnames[c[2]]
             ch = parse(T, c[7])
             if units
-                mass = parse(T, c[8])u"u"
+                atom_mass = parse(T, c[8])u"u"
             else
-                mass = parse(T, c[8])
+                atom_mass = parse(T, c[8])
             end
             solute = c[4] in standard_res_names
             atom_index = length(atoms) + 1
-            push!(atoms, Atom(index=atom_index, charge=ch, mass=mass, σ=atomtypes[attype].σ,
+            push!(atoms, Atom(index=atom_index, charge=ch, mass=atom_mass, σ=atomtypes[attype].σ,
                                 ϵ=atomtypes[attype].ϵ, solute=solute))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=c[5], res_number=parse(Int, c[3]),
                                         res_name=c[4]))
@@ -1119,12 +1132,22 @@ function System(T::Type,
         special[j, i] = true
     end
 
-    lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), use_neighbors=true,
-                        weight_special=T(0.5), force_units=force_units, energy_units=energy_units)
-    crf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(crf_solvent_dielectric),
-                                use_neighbors=true, weight_special=T(0.5),
-                                coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
-                                force_units=force_units, energy_units=energy_units)
+    lj = LennardJones(
+        cutoff=DistanceCutoff(T(dist_cutoff)),
+        use_neighbors=true,
+        weight_special=T(0.5),
+        force_units=force_units,
+        energy_units=energy_units,
+    )
+    crf = CoulombReactionField(
+        dist_cutoff=T(dist_cutoff),
+        solvent_dielectric=T(crf_solvent_dielectric),
+        use_neighbors=true,
+        weight_special=T(0.5),
+        coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
+        force_units=force_units,
+        energy_units=energy_units,
+    )
 
     if isnothing(boundary)
         box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
@@ -1177,10 +1200,10 @@ function System(T::Type,
 
     atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ, solute=a.solute) for a in atoms]
 
-    if gpu
+    if gpu || !use_cell_list
         neighbor_finder = DistanceNeighborFinder(
-            eligible=CuArray(eligible),
-            special=CuArray(special),
+            eligible=(gpu ? CuArray(eligible) : eligible),
+            special=(gpu ? CuArray(special) : special),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
