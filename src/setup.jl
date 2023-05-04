@@ -125,13 +125,15 @@ function place_diatomics(n_molecules::Integer,
 end
 
 """
-    AtomType(type, element, mass, σ, ϵ)
+    AtomType(type, class, element, charge, mass, σ, ϵ)
 
 An atom type.
 """
-struct AtomType{M, S, E}
+struct AtomType{C, M, S, E}
     type::String
+    class::String # Currently this is not used
     element::String
+    charge::Union{C, Missing}
     mass::M
     σ::S
     ϵ::E
@@ -145,7 +147,7 @@ A residue type.
 struct ResidueType{C}
     name::String
     types::Dict{String, String}
-    charges::Dict{String, C}
+    charges::Dict{String, Union{C, Missing}}
     indices::Dict{String, Int}
 end
 
@@ -166,14 +168,14 @@ end
     MolecularForceField(T, ff_files...; units=true)
     MolecularForceField(atom_types, residue_types, bond_types, angle_types,
                         torsion_types, torsion_order, weight_14_coulomb,
-                        weight_14_lj)
+                        weight_14_lj, attributes_from_residue)
 
 A molecular force field.
 
 Read one or more OpenMM force field XML files by passing them to the constructor.
 """
 struct MolecularForceField{T, M, D, E, K}
-    atom_types::Dict{String, AtomType{M, D, E}}
+    atom_types::Dict{String, AtomType{T, M, D, E}}
     residue_types::Dict{String, ResidueType{T}}
     bond_types::Dict{Tuple{String, String}, HarmonicBond{K, D}}
     angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{E, T}}
@@ -181,6 +183,7 @@ struct MolecularForceField{T, M, D, E, K}
     torsion_order::String
     weight_14_coulomb::T
     weight_14_lj::T
+    attributes_from_residue::Vector{String}
 end
 
 function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=true)
@@ -192,6 +195,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     torsion_order = ""
     weight_14_coulomb = one(T)
     weight_14_lj = one(T)
+    attributes_from_residue = String[]
 
     for ff_file in ff_files
         ff_xml = parsexml(read(ff_file))
@@ -201,17 +205,20 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
             if entry_name == "AtomTypes"
                 for atom_type in eachelement(entry)
                     at_type = atom_type["name"]
+                    at_class = atom_type["class"]
                     element = atom_type["element"]
-                    mass = units ? parse(T, atom_type["mass"])u"u" : parse(T, atom_type["mass"])
+                    ch = missing # Updated later or defined in residue
+                    atom_mass = units ? parse(T, atom_type["mass"])u"u" : parse(T, atom_type["mass"])
                     σ = units ? T(-1u"nm") : T(-1) # Updated later
                     ϵ = units ? T(-1u"kJ * mol^-1") : T(-1) # Updated later
-                    atom_types[at_type] = AtomType(at_type, element, mass, σ, ϵ)
+                    atom_types[at_type] = AtomType{T, typeof(atom_mass), typeof(σ), typeof(ϵ)}(
+                                                at_type, at_class, element, ch, atom_mass, σ, ϵ)
                 end
             elseif entry_name == "Residues"
                 for residue in eachelement(entry)
                     name = residue["name"]
                     types = Dict{String, String}()
-                    charges = Dict{String, T}()
+                    charges = Dict{String, Union{T, Missing}}()
                     indices = Dict{String, Int}()
                     index = 1
                     for atom_or_bond in eachelement(residue)
@@ -219,15 +226,25 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                         if atom_or_bond.name == "Atom"
                             atom_name = atom_or_bond["name"]
                             types[atom_name] = atom_or_bond["type"]
-                            charges[atom_name] = parse(T, atom_or_bond["charge"])
+                            if haskey(atom_or_bond, "charge")
+                                charges[atom_name] = parse(T, atom_or_bond["charge"])
+                            else
+                                charges[atom_name] = missing
+                            end
                             indices[atom_name] = index
                             index += 1
+                        elseif atom_or_bond.name == "VirtualSite"
+                            @warn "Virtual sites not currently supported, this entry will be ignored"
                         end
                     end
                     residue_types[name] = ResidueType(name, types, charges, indices)
                 end
             elseif entry_name == "HarmonicBondForce"
                 for bond in eachelement(entry)
+                    if haskey(bond, "class1")
+                        @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
+                        continue
+                    end
                     atom_type_1 = bond["type1"]
                     atom_type_2 = bond["type2"]
                     k = units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"])
@@ -236,6 +253,10 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 end
             elseif entry_name == "HarmonicAngleForce"
                 for angle in eachelement(entry)
+                    if haskey(angle, "class1")
+                        @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
+                        continue
+                    end
                     atom_type_1 = angle["type1"]
                     atom_type_2 = angle["type2"]
                     atom_type_3 = angle["type3"]
@@ -246,6 +267,10 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
             elseif entry_name == "PeriodicTorsionForce"
                 torsion_order = entry["ordering"]
                 for torsion in eachelement(entry)
+                    if haskey(torsion, "class1")
+                        @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
+                        continue
+                    end
                     proper = torsion.name == "Proper"
                     atom_type_1 = torsion["type1"]
                     atom_type_2 = torsion["type2"]
@@ -278,13 +303,32 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             continue
                         end
                         partial_type = atom_types[atom_type]
+                        ch = haskey(atom_or_attr, "charge") ? parse(T, atom_or_attr["charge"]) : missing
                         σ = units ? parse(T, atom_or_attr["sigma"])u"nm" : parse(T, atom_or_attr["sigma"])
                         ϵ = units ? parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_attr["epsilon"])
-                        complete_type = AtomType(partial_type.type, partial_type.element,
-                                                 partial_type.mass, σ, ϵ)
+                        complete_type = AtomType{T, typeof(partial_type.mass), typeof(σ), typeof(ϵ)}(
+                                    partial_type.type, partial_type.class, partial_type.element,
+                                    ch, partial_type.mass, σ, ϵ)
                         atom_types[atom_type] = complete_type
+                    elseif atom_or_attr.name == "UseAttributeFromResidue"
+                        if !(atom_or_attr["name"] in attributes_from_residue)
+                            push!(attributes_from_residue, atom_or_attr["name"])
+                        end
+                        if atom_or_attr["name"] != "charge"
+                            @warn "UseAttributeFromResidue only currently supported for charge, " *
+                                  "this entry will be ignored"
+                        end
                     end
                 end
+            elseif entry_name == "Patches"
+                @warn "Residue patches not currently supported, this entry will be ignored"
+            elseif entry_name == "Include"
+                @warn "File includes not currently supported, this entry will be ignored"
+            elseif entry_name in ("RBTorsionForce", "CMAPTorsionForce", "GBSAOBCForce",
+                                  "CustomBondForce", "CustomAngleForce", "CustomTorsionForce",
+                                  "CustomNonbondedForce", "CustomGBForce", "CustomHbondForce",
+                                  "CustomManyParticleForce", "LennardJonesForce")
+                @warn "$entry_name entries not currently supported, this entry will be ignored"
             end
         end
     end
@@ -298,7 +342,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
         M, D, E, K = T, T, T, T
     end
     return MolecularForceField{T, M, D, E, K}(atom_types, residue_types, bond_types, angle_types,
-                torsion_types, torsion_order, weight_14_coulomb, weight_14_lj)
+            torsion_types, torsion_order, weight_14_coulomb, weight_14_lj, attributes_from_residue)
 end
 
 function MolecularForceField(ff_files::AbstractString...; kwargs...)
@@ -471,14 +515,22 @@ function System(coord_file::AbstractString,
         end
     end
 
+    use_charge_from_residue = "charge" in force_field.attributes_from_residue
     for ai in 1:n_atoms
         atom_name = Chemfiles.name(Chemfiles.Atom(top, ai - 1))
         res = Chemfiles.residue_for_atom(top, ai - 1)
         res_id = get_res_id(res)
         res_name = residue_name(res, res_id_to_standard, rename_terminal_res)
         at_type = force_field.residue_types[res_name].types[atom_name]
-        ch = force_field.residue_types[res_name].charges[atom_name]
         at = force_field.atom_types[at_type]
+        if use_charge_from_residue
+            ch = force_field.residue_types[res_name].charges[atom_name]
+        else
+            ch = at.charge
+        end
+        if ismissing(ch)
+            error("atom of type ", at.type, " has not had charge set")
+        end
         solute = res_id_to_standard[res_id] || res_name in ("ACE", "NME")
         if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
             error("atom of type ", at.type, " has not had σ or ϵ set")
