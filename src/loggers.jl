@@ -11,6 +11,8 @@ export
     KineticEnergyLogger,
     PotentialEnergyLogger,
     ForceLogger,
+    VirialLogger,
+    PressureLogger,
     StructureWriter,
     TimeCorrelationLogger,
     AutoCorrelationLogger,
@@ -189,6 +191,42 @@ function Base.show(io::IO, fl::GeneralObservableLogger{T, typeof(forces)}) where
     print(io, "ForceLogger{", eltype(eltype(values(fl))), "} with n_steps ",
             fl.n_steps, ", ", length(values(fl)), " frames recorded for ",
             length(values(fl)) > 0 ? length(first(values(fl))) : "?", " atoms")
+end
+
+"""
+    VirialLogger(n_steps)
+    VirialLogger(T, n_steps)
+
+Log the [`virial`](@ref) of a system throughout a simulation.
+
+This should only be used on systems containing just pairwise interactions, or
+where the specific interactions, general interactions and constraints do not
+contribute to the virial.
+"""
+VirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(virial, T, n_steps)
+VirialLogger(n_steps::Integer) = VirialLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+
+function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial)}) where T
+    print(io, "VirialLogger{", eltype(values(vl)), "} with n_steps ",
+            vl.n_steps, ", ", length(values(vl)), " virials recorded")
+end
+
+"""
+    PressureLogger(n_steps)
+    PressureLogger(T, n_steps)
+
+Log the [`pressure`](@ref) of a system throughout a simulation.
+
+This should only be used on systems containing just pairwise interactions, or
+where the specific interactions, general interactions and constraints do not
+contribute to the pressure.
+"""
+PressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(pressure, T, n_steps)
+PressureLogger(n_steps::Integer) = PressureLogger(typeof(one(DefaultFloat)u"bar"), n_steps)
+
+function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(pressure)}) where T
+    print(io, "PressureLogger{", eltype(values(pl)), "} with n_steps ",
+            pl.n_steps, ", ", length(values(pl)), " pressures recorded")
 end
 
 """

@@ -578,7 +578,8 @@ If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 
 This should only be used on systems containing just pairwise interactions, or
-where the specific and general interactions do not contribute to the pressure.
+where the specific interactions, general interactions and constraints do not
+contribute to the virial.
 Not currently compatible with automatic differentiation using Zygote.
 """
 function virial(sys, neighbors=nothing; kwargs...)
@@ -655,7 +656,8 @@ If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 
 This should only be used on systems containing just pairwise interactions, or
-where the specific and general interactions do not contribute to the pressure.
+where the specific interactions, general interactions and constraints do not
+contribute to the pressure.
 Not compatible with infinite boundaries.
 Not currently compatible with automatic differentiation using Zygote.
 """
