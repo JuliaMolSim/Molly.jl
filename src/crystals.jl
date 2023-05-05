@@ -1,7 +1,15 @@
-export
-    nothing
 
- function LoadSimpleCrystalSystem(crystal::Crystal{D}) where D
+function System(crystal::Crystal{D};
+        pairwise_inters=(),
+        specific_inter_lists=(),
+        general_inters=(),
+        constraints=(),
+        velocities=nothing,
+        neighbor_finder=NoNeighborFinder(),
+        loggers=(),
+        force_units=u"kJ * mol^-1 * nm^-1",
+        energy_units=u"kJ * mol^-1",
+        k=Unitful.k) where D
 
 
     atoms = [Atom(index=i, charge=a.charge, mass=a.mass) for (i,a) in enumerate(crystal.atoms)]
@@ -11,33 +19,34 @@ export
 
     coords = SimpleCrystals.position(atoms, :)
 
-    #why did I name it lattice angle in 2D that is annoying ...
-    # I also have multiple things called Cubic -- BravaisLattice and the actual crystal, can it resolve types??
-    # Need triclinic 2D to support oblique and honeycomb
-    side_lengths = norm.(bounding_box(crystal))
-    if typeof(crystal.lattice.crystal_family) == Cubic
+    side_lengths = norm.(eachrow(bounding_box(crystal)))
+    if any(typeof(crystal.lattice.crystal_family) .<: [CubicLattice, OrthorhombicLattice, TetragonalLattice])
         boundary = CubicBoundary(side_lengths...)
-    elseif typeof(crystal.lattice.crystal_family) == Square
-        boundary = RectangularBoundary()
+    elseif any(typeof(crystal.lattice.crystal_family) .<: [SquareLattice, RectangularLattice])
+        boundary = RectangularBoundary(side_lengths...)
+    else if D == 2 #Honeycomb, Hex2D, & Oblique
+        error("$(crystal.lattice.crystal_family) is not supported as it would need a 2D triclinic boundary")
     else
-        boundary = TriclinicBoundary()
+        boundary = TriclinicBoundary(side_lengths, crystal.lattice_angles)
     end
 
-    # I feel like a system constructor that takes a Crystal object is the easiest way to do this
-    System(
+    #Call original constructor
+    return System(
         atoms = atoms,
         atoms_data = atoms_data,
-        pairwise_inters = nothing,
-        specific_inter_lists = nothing,
-        general_inters = nothing,
+        pairwise_inters = pairwise_inters,
+        specific_inter_lists = specific_inter_lists,
+        general_inters = general_inters,
+        constraints=constraints,
         coords = coords,
-        velocities = nothing,
+        velocities = velocities,
         boundary = boundary,
-        neighbor_finder = nothing,
-        loggers = nothing,
-        force_units = nothing,
-        energy_units = nothing,
-        k = nothing,
-        gpu_diff_safe = nothing,
+        neighbor_finder = neighbor_finder,
+        loggers = loggers,
+        force_units = force_units,
+        energy_units = energy_units,
+        k = k,
+        gpu_diff_safe = gpu_diff_safe=isa(coords, CuArray),
     )
- end
+
+end
