@@ -614,7 +614,7 @@ end
                 for inter in pairwise_inters_nonl[2:end]
                     f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
                 end
-                v -= dot(f, dr)
+                v += dot(f, dr)
             end
         end
     end
@@ -632,7 +632,7 @@ end
                 f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary,
                            special)
             end
-            v -= dot(f, dr)
+            v += dot(f, dr)
         end
     end
 
@@ -659,7 +659,7 @@ where the specific and general interactions do not contribute to the pressure.
 Not compatible with infinite boundaries.
 Not currently compatible with automatic differentiation using Zygote.
 """
-function pressure(sys::System{D}, neighbors=nothing; kwargs...) where D
+function pressure(sys::AbstractSystem{D}, neighbors=nothing; kwargs...) where D
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
