@@ -5,7 +5,8 @@ export
     NoCoupling,
     AndersenThermostat,
     RescaleThermostat,
-    BerendsenThermostat
+    BerendsenThermostat,
+    MonteCarloBarostat
 
 """
     apply_coupling!(system, coupling, simulator, neighbors=nothing,
@@ -123,4 +124,105 @@ function apply_coupling!(sys, thermostat::BerendsenThermostat, sim, neighbors=no
     λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temperature(sys)) - 1)
     sys.velocities *= sqrt(λ2)
     return false
+end
+
+@doc raw"""
+    MonteCarloBarostat(pressure, temperature, boundary; n_steps=25, n_iterations=1,
+                       scale_factor=0.01, scale_increment=1.1, max_volume_frac=0.3)
+
+The Monte Carlo barostat for controlling pressure.
+
+See [Chow and Ferguson 1995](https://doi.org/10.1016/0010-4655(95)00059-O),
+[Åqvist et al. 2004](https://doi.org/10.1016/j.cplett.2003.12.039) and the OpenMM
+source code.
+At regular intervals a Monte Carlo step is attempted by scaling the coordinates and
+the bounding box by a randomly chosen amount.
+The step is accepted or rejected based on
+```math
+\Delta W = \Delta E + P \Delta V - N k_B T \ln \left( \frac{V + \Delta V}{V} \right)
+```
+where `ΔE` is the change in potential energy, `P` is the equilibrium pressure, `ΔV` is
+the change in volume, `N` is the number of molecules in the system, `T` is the equilibrium
+temperature and `V` is the system volume.
+If `ΔW ≤ 0` the step is always accepted, if `ΔW > 0` the step is accepted with probability
+`exp(-ΔW/kT)`.
+
+The scale factor is modified over time to maintain an acceptance rate of around half.
+If the topology of the system is set then molecules are moved as a unit so properties
+such as bond lengths do not change.
+
+The barostat assumes that the simulation is being run at a constant temperature but
+does not actively control the temperature.
+It should be used alongside a temperature coupling method such as the [`Langevin`](@ref)
+simulator or [`AndersenThermostat`](@ref) coupling.
+The neighbor list is not updated when making trial moves or after accepted moves.
+"""
+mutable struct MonteCarloBarostat{T, P, K, V}
+    pressure::P
+    temperature::K
+    n_steps::Int
+    n_iterations::Int
+    volume_scale::V
+    scale_increment::T
+    max_volume_frac::T
+    n_attempted::Int
+    n_accepted::Int
+end
+
+function MonteCarloBarostat(P, T, boundary; n_steps=25, n_iterations=1, scale_factor=0.01,
+                            scale_increment=1.1, max_volume_frac=0.3)
+    volume_scale = box_volume(boundary) * float_type(boundary)(scale_factor)
+    return MonteCarloBarostat(P, T, n_steps, n_iterations, volume_scale, scale_increment,
+                              max_volume_frac, 0, 0)
+end
+
+function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim, neighbors=nothing,
+                         step_n::Integer=0; n_threads::Integer=Threads.nthreads()) where {D, G, T}
+    if !iszero(step_n % barostat.n_steps)
+        return false
+    end
+
+    kT = sys.k * barostat.temperature
+    n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
+    recompute_forces = false
+
+    for attempt_n in 1:barostat.n_iterations
+        E = potential_energy(sys, neighbors; n_threads=n_threads)
+        V = box_volume(sys.boundary)
+        dV = barostat.volume_scale * (2 * rand(T) - 1)
+        v_scale = (V + dV) / V
+        l_scale = cbrt(v_scale)
+        old_coords = copy(sys.coords)
+        old_boundary = sys.boundary
+        scale_coords!(sys, l_scale)
+
+        # Assume neighbors are unchanged by the change in coordinates
+        # This may not be valid for larger changes
+        E_trial = potential_energy(sys, neighbors; n_threads=n_threads)
+        dE = energy_remove_mol(E_trial - E)
+        dW = dE + uconvert(unit(dE), barostat.pressure * dV) - n_molecules * kT * log(v_scale)
+        if dW <= zero(dW) || rand(T) < exp(-dW / kT)
+            recompute_forces = true
+            barostat.n_accepted += 1
+        else
+            sys.coords = old_coords
+            sys.boundary = old_boundary
+        end
+        barostat.n_attempted += 1
+
+        # Modify size of volume change to keep accept/reject ratio roughly equal
+        if barostat.n_attempted >= 10
+            if barostat.n_accepted < 0.25 * barostat.n_attempted
+                barostat.volume_scale /= barostat.scale_increment
+                barostat.n_attempted = 0
+                barostat.n_accepted = 0
+            elseif barostat.n_accepted > 0.75 * barostat.n_attempted
+                barostat.volume_scale = min(barostat.volume_scale * barostat.scale_increment,
+                                            V * barostat.max_volume_frac)
+                barostat.n_attempted = 0
+                barostat.n_accepted = 0
+            end
+        end
+    end
+    return recompute_forces
 end

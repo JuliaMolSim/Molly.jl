@@ -1059,8 +1059,12 @@ The available couplers are:
 - [`AndersenThermostat`](@ref)
 - [`RescaleThermostat`](@ref)
 - [`BerendsenThermostat`](@ref)
-Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being [`NoCoupling`](@ref).
+- [`MonteCarloBarostat`](@ref)
+Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being [`NoCoupling`](@ref).
+
 The appropriate coupling to use will depend on the situation.
+For example, the [`MonteCarloBarostat`](@ref) for controlling pressure assumes a constant temperature but does not actively control the temperature.
+It should be used alongside a temperature coupling method such as the [`Langevin`](@ref) simulator or [`AndersenThermostat`](@ref) coupling.
 
 To define your own coupling method, first define the `struct`:
 ```julia
