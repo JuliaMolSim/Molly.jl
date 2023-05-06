@@ -514,6 +514,63 @@ function System(;
                     loggers, force_units, energy_units, k_converted)
 end
 
+# 2nd constructor when using Crystal object from SimpleCrystals.jl
+function System(crystal::Crystal{D};
+        pairwise_inters=(),
+        specific_inter_lists=(),
+        general_inters=(),
+        constraints=(),
+        velocities=nothing,
+        neighbor_finder=NoNeighborFinder(),
+        loggers=(),
+        force_units=u"kJ * mol^-1 * nm^-1",
+        energy_units=u"kJ * mol^-1",
+        k=Unitful.k) where D
+
+    # Parse atom data that isbits()
+    atoms = [Atom(index=i, charge=a.charge, mass=a.mass) for (i,a) in enumerate(crystal.atoms)]
+
+    # Parse other atom data
+    atoms_data = [AtomData(atom_type = nothing, atom_name = nothing, res_name = nothing,
+                     element = String(a.sym),) for a in crystal.atoms]
+
+    coords = SimpleCrystals.position(atoms, :)
+
+    # Build bounding box
+    side_lengths = norm.(eachrow(bounding_box(crystal)))
+    if any(typeof(crystal.lattice.crystal_family) .<: [CubicLattice, OrthorhombicLattice, TetragonalLattice])
+        boundary = CubicBoundary(side_lengths...)
+    elseif any(typeof(crystal.lattice.crystal_family) .<: [SquareLattice, RectangularLattice])
+        boundary = RectangularBoundary(side_lengths...)
+    elseif D == 2 #Honeycomb, Hex2D, & Oblique
+        error("$(crystal.lattice.crystal_family) is not supported as it would need a 2D triclinic boundary.
+             Try defining the crystal with a rectangular or square unit cell.")
+    else
+        boundary = TriclinicBoundary(side_lengths, crystal.lattice_angles)
+    end
+
+    #Call original constructor
+    return System(
+        atoms = atoms,
+        atoms_data = atoms_data,
+        pairwise_inters = pairwise_inters,
+        specific_inter_lists = specific_inter_lists,
+        general_inters = general_inters,
+        constraints=constraints,
+        coords = coords,
+        velocities = velocities,
+        boundary = boundary,
+        neighbor_finder = neighbor_finder,
+        loggers = loggers,
+        force_units = force_units,
+        energy_units = energy_units,
+        k = k,
+        gpu_diff_safe = gpu_diff_safe=isa(coords, CuArray),
+    )
+
+end
+
+
 """
     ReplicaSystem(; <keyword arguments>)
 
