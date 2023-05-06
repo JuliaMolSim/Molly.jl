@@ -23,7 +23,7 @@ using ForwardDiff
 using KernelDensity
 using NearestNeighbors
 using Requires
-using SimpleCrystals
+# using SimpleCrystals
 using Unitful
 using UnitfulChainRules
 using UnsafeAtomicsLLVM
@@ -36,7 +36,7 @@ using Statistics
 
 include("types.jl")
 include("cutoffs.jl")
-include("crystals.jl")
+# include("crystals.jl")
 include("spatial.jl")
 include("cuda.jl")
 include("force.jl")
