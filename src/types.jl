@@ -531,8 +531,8 @@ function System(crystal::Crystal{D};
     atoms = [Atom(index=i, charge=a.charge, mass=a.mass) for (i,a) in enumerate(crystal.atoms)]
 
     # Parse other atom data
-    atoms_data = [AtomData(atom_type = "", atom_name = "", res_number = 0,
-                     res_name = "", element = String(a.sym),) for a in crystal.atoms]
+    atoms_data = [AtomData(atom_type = "?", atom_name = "?", res_number = 1,
+                     res_name = "???", element = String(a.sym),) for a in crystal.atoms]
 
     coords = SimpleCrystals.position(crystal, :)
 
