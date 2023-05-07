@@ -531,10 +531,10 @@ function System(crystal::Crystal{D};
     atoms = [Atom(index=i, charge=a.charge, mass=a.mass) for (i,a) in enumerate(crystal.atoms)]
 
     # Parse other atom data
-    atoms_data = [AtomData(atom_type = nothing, atom_name = nothing, res_name = nothing,
-                     element = String(a.sym),) for a in crystal.atoms]
+    atoms_data = [AtomData(atom_type = "", atom_name = "", res_number = 0,
+                     res_name = "", element = String(a.sym),) for a in crystal.atoms]
 
-    coords = SimpleCrystals.position(atoms, :)
+    coords = SimpleCrystals.position(crystal, :)
 
     # Build bounding box
     side_lengths = norm.(eachrow(bounding_box(crystal)))
@@ -564,8 +564,7 @@ function System(crystal::Crystal{D};
         loggers = loggers,
         force_units = force_units,
         energy_units = energy_units,
-        k = k,
-        gpu_diff_safe = gpu_diff_safe=isa(coords, CuArray),
+        k = k
     )
 
 end
