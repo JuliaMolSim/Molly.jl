@@ -4,6 +4,7 @@ using Reexport
 @reexport using AtomsBase
 @reexport using StaticArrays
 @reexport using Unitful
+@reexport using SimpleCrystals
 
 using Atomix
 import BioStructures # Imported to avoid clashing names
