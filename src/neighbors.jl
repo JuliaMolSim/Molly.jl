@@ -19,8 +19,8 @@ struct NoNeighborFinder end
 
 """
     find_neighbors(system; n_threads=Threads.nthreads())
-    find_neighbors(system, neighbor_finder, current_neighbors=nothing,
-                   step_n=0; n_threads=Threads.nthreads())
+    find_neighbors(system, neighbor_finder, current_neighbors=nothing, step_n=0,
+                   force_recompute=false; n_threads=Threads.nthreads())
 
 Obtain a list of close atoms in a [`System`](@ref).
 
@@ -28,13 +28,7 @@ Custom neighbor finders should implement this function.
 """
 find_neighbors(s::System; kwargs...) = find_neighbors(s, s.neighbor_finder; kwargs...)
 
-function find_neighbors(s::System,
-                        nf::NoNeighborFinder,
-                        current_neighbors=nothing,
-                        step_n::Integer=0;
-                        kwargs...)
-    return nothing
-end
+find_neighbors(s::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
 
 """
     DistanceNeighborFinder(; eligible, special, n_steps, dist_cutoff)
@@ -61,9 +55,12 @@ end
 function find_neighbors(s::System{D, false},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
-                        step_n::Integer=0;
+                        step_n::Integer=0,
+                        force_recompute=false;
                         n_threads::Integer=Threads.nthreads()) where D
-    !iszero(step_n % nf.n_steps) && return current_neighbors
+    if !force_recompute && !iszero(step_n % nf.n_steps)
+        return current_neighbors
+    end
 
     sqdist_cutoff = nf.dist_cutoff ^ 2
 
@@ -116,9 +113,12 @@ lists_to_tuple_list(i, j, w) = (Int32(i), Int32(j), w)
 function find_neighbors(s::System{D, true},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
-                        step_n::Integer=0;
+                        step_n::Integer=0,
+                        force_recompute=false;
                         kwargs...) where D
-    !iszero(step_n % nf.n_steps) && return current_neighbors
+    if !force_recompute && !iszero(step_n % nf.n_steps)
+        return current_neighbors
+    end
 
     nf.neighbors .= false
     n_inters = n_atoms_to_n_pairs(length(s))
@@ -161,9 +161,12 @@ end
 function find_neighbors(s::System,
                         nf::TreeNeighborFinder,
                         current_neighbors=nothing,
-                        step_n::Integer=0;
+                        step_n::Integer=0,
+                        force_recompute=false;
                         n_threads::Integer=Threads.nthreads())
-    !iszero(step_n % nf.n_steps) && return current_neighbors
+    if !force_recompute && !iszero(step_n % nf.n_steps)
+        return current_neighbors
+    end
 
     dist_unit = unit(first(first(s.coords)))
     bv = ustrip.(dist_unit, s.boundary)
@@ -295,9 +298,12 @@ end
 function find_neighbors(s::System{D, G},
                         nf::CellListMapNeighborFinder,
                         current_neighbors=nothing,
-                        step_n::Integer=0;
+                        step_n::Integer=0,
+                        force_recompute=false;
                         n_threads=Threads.nthreads()) where {D, G}
-    !iszero(step_n % nf.n_steps) && return current_neighbors
+    if !force_recompute && !iszero(step_n % nf.n_steps)
+        return current_neighbors
+    end
 
     if isnothing(current_neighbors)
         neighbors = NeighborList()
