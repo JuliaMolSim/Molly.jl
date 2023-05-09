@@ -153,17 +153,15 @@ function simulate!(sys,
         recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads)
 
-        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
-
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        n_threads=n_threads)
-            if recompute_forces
-                accels_t = accelerations(sys, neighbors; n_threads=n_threads)
-            else
-                accels_t = accels_t_dt
-            end
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                   n_threads=n_threads)
+        if recompute_forces
+            accels_t = accelerations(sys, neighbors; n_threads=n_threads)
+        else
+            accels_t = accels_t_dt
         end
+
+        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
     end
     return sys
 end
@@ -214,14 +212,13 @@ function simulate!(sys,
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
-        apply_coupling!(sys, sim.coupling, sim, neighbors, step_n; n_threads=n_threads)
+        recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads)
+
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                   n_threads=n_threads)
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
-
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        n_threads=n_threads)
-        end
     end
     return sys
 end
@@ -275,15 +272,14 @@ function simulate!(sys,
         # This is accurate to O(dt)
         sys.velocities = vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt
 
-        apply_coupling!(sys, sim.coupling, sim, neighbors, step_n; n_threads=n_threads)
+        recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads)
+
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                   n_threads=n_threads)
+        coords_last = coords_copy
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
-
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        n_threads=n_threads)
-            coords_last = coords_copy
-        end
     end
     return sys
 end
@@ -349,14 +345,13 @@ function simulate!(sys,
             remove_CM_motion!(sys)
         end
 
-        apply_coupling!(sys, sim.coupling, sim, neighbors, step_n; n_threads=n_threads)
+        recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads)
+
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                   n_threads=n_threads)
 
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
-
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        n_threads=n_threads)
-        end
     end
     return sys
 end
@@ -458,12 +453,11 @@ function simulate!(sys,
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
-        run_loggers!(sys, neighbors, step_n)
 
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        n_threads=n_threads)
-        end
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                   n_threads=n_threads)
+
+        run_loggers!(sys, neighbors, step_n)
     end
     return sys
 end
@@ -549,17 +543,15 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer; n_threads::Integer=Th
         recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads)
 
-        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
-
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        n_threads=n_threads)
-            if recompute_forces
-                accels_t = accelerations(sys, neighbors; n_threads=n_threads)
-            else
-                accels_t = accels_t_dt
-            end
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                    n_threads=n_threads)
+        if recompute_forces
+            accels_t = accelerations(sys, neighbors; n_threads=n_threads)
+        else
+            accels_t = accels_t_dt
         end
+
+        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
     end
     return sys
 end

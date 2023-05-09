@@ -127,8 +127,9 @@ function apply_coupling!(sys, thermostat::BerendsenThermostat, sim, neighbors=no
 end
 
 @doc raw"""
-    MonteCarloBarostat(pressure, temperature, boundary; n_steps=25, n_iterations=1,
-                       scale_factor=0.01, scale_increment=1.1, max_volume_frac=0.3)
+    MonteCarloBarostat(pressure, temperature, boundary; n_steps=30, n_iterations=1,
+                       scale_factor=0.01, scale_increment=1.1, max_volume_frac=0.3,
+                       trial_find_neighbors=false)
 
 The Monte Carlo barostat for controlling pressure.
 
@@ -165,15 +166,16 @@ mutable struct MonteCarloBarostat{T, P, K, V}
     volume_scale::V
     scale_increment::T
     max_volume_frac::T
+    trial_find_neighbors::Bool
     n_attempted::Int
     n_accepted::Int
 end
 
-function MonteCarloBarostat(P, T, boundary; n_steps=25, n_iterations=1, scale_factor=0.01,
-                            scale_increment=1.1, max_volume_frac=0.3)
+function MonteCarloBarostat(P, T, boundary; n_steps=30, n_iterations=1, scale_factor=0.01,
+                            scale_increment=1.1, max_volume_frac=0.3, trial_find_neighbors=false)
     volume_scale = box_volume(boundary) * float_type(boundary)(scale_factor)
     return MonteCarloBarostat(P, T, n_steps, n_iterations, volume_scale, scale_increment,
-                              max_volume_frac, 0, 0)
+                              max_volume_frac, trial_find_neighbors, 0, 0)
 end
 
 function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim, neighbors=nothing,
@@ -196,9 +198,15 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
         old_boundary = sys.boundary
         scale_coords!(sys, l_scale)
 
-        # Assume neighbors are unchanged by the change in coordinates
-        # This may not be valid for larger changes
-        E_trial = potential_energy(sys, neighbors; n_threads=n_threads)
+        if barostat.trial_find_neighbors
+            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                             n_threads=n_threads)
+        else
+            # Assume neighbors are unchanged by the change in coordinates
+            # This may not be valid for larger changes
+            neighbors_trial = neighbors
+        end
+        E_trial = potential_energy(sys, neighbors_trial; n_threads=n_threads)
         dE = energy_remove_mol(E_trial - E)
         dW = dE + uconvert(unit(dE), barostat.pressure * dV) - n_molecules * kT * log(v_scale)
         if dW <= zero(dW) || rand(T) < exp(-dW / kT)

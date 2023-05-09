@@ -56,7 +56,7 @@ function find_neighbors(s::System{D, false},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
-                        force_recompute=false;
+                        force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads()) where D
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
@@ -114,7 +114,7 @@ function find_neighbors(s::System{D, true},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
-                        force_recompute=false;
+                        force_recompute::Bool=false;
                         kwargs...) where D
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
@@ -162,7 +162,7 @@ function find_neighbors(s::System,
                         nf::TreeNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
-                        force_recompute=false;
+                        force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads())
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
@@ -299,8 +299,8 @@ function find_neighbors(s::System{D, G},
                         nf::CellListMapNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
-                        force_recompute=false;
-                        n_threads=Threads.nthreads()) where {D, G}
+                        force_recompute::Bool=false;
+                        n_threads::Integer=Threads.nthreads()) where {D, G}
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end

@@ -976,8 +976,8 @@ function Molly.simulate!(sys,
         sys.velocities += Molly.accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         # Apply coupling like this
-        apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
-                        n_threads=n_threads)
+        recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads)
 
         # Remove center of mass motion like this
         remove_CM_motion!(sys)
@@ -986,7 +986,7 @@ function Molly.simulate!(sys,
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
         # Find new neighbors like this
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
     end
 
@@ -1283,9 +1283,10 @@ Then, define the neighbor finding function that is called every step by the simu
 function find_neighbors(s,
                         nf::MyNeighborFinder,
                         current_neighbors=nothing,
-                        step_n::Integer=0;
+                        step_n::Integer=0,
+                        force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads())
-    if step_n % nf.n_steps == 0
+    if force_recompute || step_n % nf.n_steps == 0
         if isnothing(current_neighbors)
             neighbors = NeighborList()
         else
