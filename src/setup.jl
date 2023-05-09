@@ -206,7 +206,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 for atom_type in eachelement(entry)
                     at_type = atom_type["name"]
                     at_class = atom_type["class"]
-                    element = atom_type["element"]
+                    element = haskey(atom_type, "element") ? atom_type["element"] : "?"
                     ch = missing # Updated later or defined in residue
                     atom_mass = units ? parse(T, atom_type["mass"])u"u" : parse(T, atom_type["mass"])
                     σ = units ? T(-1u"nm") : T(-1) # Updated later
@@ -265,7 +265,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     angle_types[(atom_type_1, atom_type_2, atom_type_3)] = HarmonicAngle(k, θ0)
                 end
             elseif entry_name == "PeriodicTorsionForce"
-                torsion_order = entry["ordering"]
+                torsion_order = haskey(entry, "ordering") ? entry["ordering"] : "default"
                 for torsion in eachelement(entry)
                     if haskey(torsion, "class1")
                         @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
@@ -296,6 +296,10 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 weight_14_lj = parse(T, entry["lj14scale"])
                 for atom_or_attr in eachelement(entry)
                     if atom_or_attr.name == "Atom"
+                        if !haskey(atom_or_attr, "type")
+                            @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
+                            continue
+                        end
                         # Update previous atom types
                         atom_type = atom_or_attr["type"]
                         if !haskey(atom_types, atom_type)
