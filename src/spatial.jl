@@ -26,9 +26,9 @@ export
     CubicBoundary(x, y, z)
     CubicBoundary(x)
 
-Cubic 3D bounding box defined by 3 side lengths.
+Cubic 3D bounding box defined by three side lengths.
 
-If one length is given then all sides will have that length.
+If one length is given then all three sides will have that length.
 Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct CubicBoundary{T}
@@ -52,9 +52,9 @@ Base.lastindex(b::CubicBoundary) = 3
     RectangularBoundary(x, y)
     RectangularBoundary(x)
 
-Rectangular 2D bounding box defined by 2 side lengths.
+Rectangular 2D bounding box defined by two side lengths.
 
-If one length is given then all sides will have that length.
+If one length is given then both sides will have that length.
 Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct RectangularBoundary{T}
@@ -186,6 +186,11 @@ float_type(b::TriclinicBoundary{T}) where {T} = T
 
 length_type(b::Union{CubicBoundary{T}, RectangularBoundary{T}}) where {T} = T
 length_type(b::TriclinicBoundary{T, A, D}) where {T, A, D} = D
+
+Unitful.ustrip(b::CubicBoundary) = CubicBoundary(ustrip.(b.side_lengths))
+Unitful.ustrip(u::Unitful.Units, b::CubicBoundary) = CubicBoundary(ustrip.(u, b.side_lengths))
+Unitful.ustrip(b::RectangularBoundary) = RectangularBoundary(ustrip.(b.side_lengths))
+Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(ustrip.(u, b.side_lengths))
 
 function AtomsBase.bounding_box(b::CubicBoundary)
     z = zero(b[1])

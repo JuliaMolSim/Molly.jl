@@ -45,6 +45,8 @@
     b = CubicBoundary(4.0u"nm", 5.0u"nm", 6.0u"nm")
     @test float_type(b) == Float64
     @test Molly.length_type(b) == typeof(1.0u"nm")
+    @test ustrip(b) == CubicBoundary(4.0, 5.0, 6.0)
+    @test ustrip(u"Å", b) == CubicBoundary(40.0, 50.0, 60.0)
     @test !Molly.has_infinite_boundary(b)
     @test box_volume(b) == 120.0u"nm^3"
     @test box_volume(CubicBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^3"
@@ -59,6 +61,8 @@
     b = RectangularBoundary(4.0u"m", 5.0u"m")
     @test float_type(b) == Float64
     @test Molly.length_type(b) == typeof(1.0u"m")
+    @test ustrip(b) == RectangularBoundary(4.0, 5.0)
+    @test ustrip(u"km", b) == RectangularBoundary(4E-3, 5E-3)
     @test !Molly.has_infinite_boundary(b)
     @test box_volume(b) == 20.0u"m^2"
     @test box_volume(RectangularBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^2"
