@@ -461,21 +461,22 @@ function simulate!(sys,
     return sys
 end
 
-function O_step!(s, α_eff, σ_eff, rng, temperature, neighbors)
-    noise = random_velocities(s, temperature; rng=rng)
-    s.velocities = α_eff .* s.velocities + σ_eff .* noise
+function O_step!(sys, α_eff, σ_eff, rng, temperature, neighbors)
+    noise = random_velocities(sys, temperature; rng=rng)
+    sys.velocities = α_eff .* sys.velocities + σ_eff .* noise
 end
 
-function A_step!(s, dt_eff, neighbors)
-    s.coords += s.velocities * dt_eff
-    s.coords = wrap_coords.(s.coords, (s.boundary,))
+function A_step!(sys, dt_eff, neighbors)
+    sys.coords += sys.velocities * dt_eff
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 end
 
-function B_step!(s, dt_eff, acceleration_vector, compute_forces::Bool, n_threads::Integer, neighbors)
+function B_step!(sys, dt_eff, acceleration_vector, compute_forces::Bool,
+                 n_threads::Integer, neighbors)
     if compute_forces
-        acceleration_vector .= accelerations(s, neighbors, n_threads=n_threads)
+        acceleration_vector .= accelerations(sys, neighbors; n_threads=n_threads)
     end
-    s.velocities += dt_eff * accel_remove_mol.(acceleration_vector)
+    sys.velocities += dt_eff * accel_remove_mol.(acceleration_vector)
 end
 
 """

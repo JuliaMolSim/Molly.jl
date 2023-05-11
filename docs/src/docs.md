@@ -1293,7 +1293,7 @@ end
 Examples of three useful properties are given here: a matrix indicating atom pairs eligible for pairwise interactions, a matrix indicating atoms in a special arrangement such as 1-4 bonding, and a value determining how many time steps occur between each evaluation of the neighbor finder.
 Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
-function find_neighbors(s,
+function find_neighbors(sys,
                         nf::MyNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,

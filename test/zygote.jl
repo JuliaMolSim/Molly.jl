@@ -135,7 +135,7 @@ end
             cs = deepcopy(forward ? coords_dual : coords)
             vs = deepcopy(forward ? velocities_dual : velocities)
 
-            s = System(
+            sys = System(
                 atoms=gpu ? CuArray(atoms) : atoms,
                 coords=gpu ? CuArray(cs) : cs,
                 boundary=boundary,
@@ -148,9 +148,9 @@ end
                 energy_units=NoUnits,
             )
 
-            simulate!(s, simulator, n_steps; n_threads=(parallel ? Threads.nthreads() : 1))
+            simulate!(sys, simulator, n_steps; n_threads=(parallel ? Threads.nthreads() : 1))
 
-            return mean_min_separation(s.coords, boundary)
+            return mean_min_separation(sys.coords, boundary)
         end
 
         return loss

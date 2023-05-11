@@ -102,7 +102,7 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
     end
 
 
-    s = System(
+    sys = System(
         atoms=atoms,
         coords=coords,
         boundary=boundary,
@@ -113,7 +113,7 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
     )
 
     n_threads = parallel ? Threads.nthreads() : 1
-    simulate!(s, simulator, n_steps; n_threads=n_threads)
+    simulate!(sys, simulator, n_steps; n_threads=n_threads)
     return s.coords
 end
 
@@ -147,9 +147,9 @@ openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
 ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
 velocities = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
-s = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; velocities=velocities)
-simulator = VelocityVerlet(dt=0.0005u"ps")
+sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; velocities=velocities)
+sim = VelocityVerlet(dt=0.0005u"ps")
 n_steps = 25
 
-simulate!(s, simulator, n_steps; n_threads=Threads.nthreads())
-SUITE["protein"]["CPU parallel NL"] = @benchmarkable simulate!($(s), $(simulator), $(n_steps); n_threads=Threads.nthreads())
+simulate!(sys, sim, n_steps; n_threads=Threads.nthreads())
+SUITE["protein"]["CPU parallel NL"] = @benchmarkable simulate!($(sys), $(sim), $(n_steps); n_threads=Threads.nthreads())
