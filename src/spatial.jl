@@ -99,10 +99,10 @@ Not currently compatible with automatic differentiation using Zygote.
 """
 struct TriclinicBoundary{T, A, D, I}
     basis_vectors::SVector{3, SVector{3, D}}
-    reciprocal_size::SVector{3, I}
     α::T
     β::T
     γ::T
+    reciprocal_size::SVector{3, I}
     tan_bprojyz_cprojyz::T
     tan_c_cprojxy::T
     cos_a_cprojxy::T
@@ -140,7 +140,7 @@ function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
     a_cprojxy = bond_angle(bv[1], SVector(bv[3][1], bv[3][2], zero(bv[3][3])))
     tan_a_b = tan(bond_angle(bv[1], bv[2]))
     return TriclinicBoundary{typeof(α), approx_images, eltype(eltype(bv)), eltype(reciprocal_size)}(
-                                bv, reciprocal_size, α, β, γ, tan_bprojyz_cprojyz, tan_c_cprojxy,
+                                bv, α, β, γ, reciprocal_size, tan_bprojyz_cprojyz, tan_c_cprojxy,
                                 cos(a_cprojxy), sin(a_cprojxy), tan_a_b)
 end
 
@@ -678,7 +678,7 @@ function pressure(sys::AbstractSystem{D}, neighbors=nothing; kwargs...) where D
     if sys.energy_units == NoUnits || D != 3
         # If implied energy units are (u * nm^2 * ps^-2) and everything is
         #   consistent then this has implied units of (u * nm^-1 * ps^-2)
-        #   for 3 dimensions
+        #   for 3 dimensions and (u * ps^-2) for 2 dimensions
         return P
     else
         # Sensible unit to return by default for 3 dimensions
@@ -693,6 +693,8 @@ Calculate the coordinates of the center of each molecule in a system.
 
 Accounts for periodic boundary conditions by using the circular mean.
 If `topology=nothing` then the coordinates are returned.
+
+Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
 """
 function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topology) where {D, C}
     if isnothing(topology)
@@ -734,6 +736,8 @@ Velocities are not scaled.
 If the topology of the system is set then atoms in the same molecule will be
 moved by the same amount according to the center of coordinates of the molecule.
 This can be disabled with `ignore_molecules=true`.
+
+Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
 """
 function scale_coords!(sys, scale_factor; ignore_molecules=false)
     if ignore_molecules || isnothing(sys.topology)

@@ -44,13 +44,13 @@ A logger which holds a record of regularly sampled observations of a system.
 `observable(s::System, neighbors; n_threads::Integer)::T`.
 """
 struct GeneralObservableLogger{T, F}
-    n_steps::Int
     observable::F
+    n_steps::Int
     history::Vector{T}
 end
 
 function GeneralObservableLogger(observable::Function, T::DataType, n_steps::Integer)
-    return GeneralObservableLogger{T, typeof(observable)}(n_steps, observable, T[])
+    return GeneralObservableLogger{T, typeof(observable)}(observable, n_steps, T[])
 end
 
 """

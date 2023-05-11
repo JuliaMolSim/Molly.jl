@@ -46,8 +46,7 @@ function SteepestDescentMinimizer(;
                                     tol=1000.0u"kJ * mol^-1 * nm^-1",
                                     run_loggers=false,
                                     log_stream=devnull)
-    return SteepestDescentMinimizer(step_size, max_steps, tol,
-                                    run_loggers, log_stream)
+    return SteepestDescentMinimizer(step_size, max_steps, tol, run_loggers, log_stream)
 end
 
 """
@@ -860,11 +859,8 @@ struct MetropolisMonteCarlo{T, M}
     trial_args::Dict
 end
 
-function MetropolisMonteCarlo(;
-                              temperature::T,
-                              trial_moves::M,
-                              trial_args::Dict=Dict()) where {T, M}
-    return MetropolisMonteCarlo{T, M}(temperature, trial_moves, trial_args)
+function MetropolisMonteCarlo(; temperature, trial_moves, trial_args=Dict())
+    return MetropolisMonteCarlo(temperature, trial_moves, trial_args)
 end
 
 function simulate!(sys::System{D, G, T},
