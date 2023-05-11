@@ -154,6 +154,19 @@
         atol=1e-9u"nm",
     )
 
+    coords = [SVector(1.95, 0.0, 0.0), SVector(0.05, 0.0, 0.0), SVector(0.15, 0.0, 0.0),
+              SVector(1.0 , 1.0, 1.0)]
+    boundary = CubicBoundary(2.0)
+    topology = MolecularTopology([1, 1, 1, 2], [3, 1])
+    mcs = molecule_centers(coords, boundary, topology)
+    @test mcs == [SVector(0.05, 0.0, 0.0), SVector(1.0, 1.0, 1.0)]
+
+    coords = [SVector(1.95, 0.0), SVector(0.05, 0.0), SVector(0.15, 0.0),
+              SVector(1.0 , 1.0)]
+    boundary = RectangularBoundary(2.0)
+    mcs = molecule_centers(coords, boundary, topology)
+    @test mcs == [SVector(0.05, 0.0), SVector(1.0, 1.0)]
+
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     for gpu in gpu_list
         sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=gpu, use_cell_list=false)
