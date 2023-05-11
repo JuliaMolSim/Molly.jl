@@ -1026,11 +1026,7 @@ end
 ```
 To get the correct exchange rates, the units of the Boltzmann constant should be corrected when used in the exchange function:
 ```julia
-if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-    k_b = sys.k * T(Unitful.Na)
-else
-    k_b = sys.k
-end
+k_b = Molly.energy_add_mol(sys.k, sys.energy_units)
 ```
 The above function returns `Δ`, the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref), and a boolean indicating whether the exchange was successful.
 

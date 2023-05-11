@@ -642,12 +642,7 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
                         rng=Random.GLOBAL_RNG) where {D, G, T}
-    if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        k_b = sys.k * T(Unitful.Na)
-    else
-        k_b = sys.k
-    end
-
+    k_b = energy_add_mol(sys.k, sys.energy_units)
     T_n, T_m = sim.temperatures[n], sim.temperatures[m]
     β_n, β_m = inv(k_b * T_n), inv(k_b * T_m)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
@@ -740,12 +735,7 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
                         rng=Random.GLOBAL_RNG) where {D, G, T}
-    if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        k_b = sys.k * T(Unitful.Na)
-    else
-        k_b = sys.k
-    end
-
+    k_b = energy_add_mol(sys.k, sys.energy_units)
     T_sim = sim.temperature
     β_sim = inv(k_b * T_sim)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
@@ -869,12 +859,7 @@ function simulate!(sys::System{D, G, T},
                    n_steps::Integer;
                    n_threads::Integer=Threads.nthreads(),
                    log_states::Bool=true) where {D, G, T}
-    if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        k_b = sys.k * T(Unitful.Na) 
-    else
-        k_b = sys.k
-    end
-
+    k_b = energy_add_mol(sys.k, sys.energy_units)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E_old = potential_energy(sys, neighbors; n_threads=n_threads)
     for i in 1:n_steps
