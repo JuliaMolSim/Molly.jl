@@ -20,7 +20,9 @@ export
     torsion_angle,
     remove_CM_motion!,
     virial,
-    pressure
+    pressure,
+    molecule_centers,
+    scale_coords!
 
 """
     CubicBoundary(x, y, z)
@@ -682,4 +684,89 @@ function pressure(sys::AbstractSystem{D}, neighbors=nothing; kwargs...) where D
         # Sensible unit to return by default for 3 dimensions
         return uconvert(u"bar", P)
     end
+end
+
+"""
+    molecule_centers(coords, boundary, topology)
+
+Calculate the coordinates of the center of each molecule in a system.
+
+Accounts for periodic boundary conditions by using the circular mean.
+If `topology=nothing` then the coordinates are returned.
+"""
+function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topology) where {D, C}
+    if isnothing(topology)
+        return coords
+    elseif boundary isa TriclinicBoundary
+        error("calculating molecule centers is not compatible with a TriclinicBoundary")
+    else
+        T = float_type(boundary)
+        pit = T(π)
+        twopit = 2 * pit
+        n_molecules = length(topology.molecule_atom_counts)
+        unit_circle_angles = broadcast(coords, Ref(boundary.side_lengths)) do c, sl
+            (c ./ sl) .* twopit .- pit
+        end
+        mol_sin_sums = zeros(SVector{D, T}, n_molecules)
+        mol_cos_sums = zeros(SVector{D, T}, n_molecules)
+        for (uca, mi) in zip(unit_circle_angles, topology.atom_molecule_inds)
+            mol_sin_sums[mi] += sin.(uca)
+            mol_cos_sums[mi] += cos.(uca)
+        end
+        frac_centers = zeros(SVector{D, T}, n_molecules)
+        for mi in 1:n_molecules
+            frac_centers[mi] = (atan.(mol_sin_sums[mi], mol_cos_sums[mi]) .+ pit) ./ twopit
+        end
+        return broadcast((c, b) -> c .* b, frac_centers, Ref(boundary.side_lengths))
+    end
+end
+
+function molecule_centers(coords::CuArray, boundary, topology)
+    return CuArray(molecule_centers(Array(coords), boundary, topology))
+end
+
+"""
+    scale_coords!(sys, scale_factor; ignore_molecules=false)
+
+Scale the coordinates and bounding box of a system by a scaling factor.
+
+Velocities are not scaled.
+If the topology of the system is set then atoms in the same molecule will be
+moved by the same amount according to the center of coordinates of the molecule.
+This can be disabled with `ignore_molecules=true`.
+"""
+function scale_coords!(sys, scale_factor; ignore_molecules=false)
+    if ignore_molecules || isnothing(sys.topology)
+        sys.boundary = scale_boundary(sys.boundary, scale_factor)
+        sys.coords = sys.coords .* scale_factor
+    elseif sys.boundary isa TriclinicBoundary
+        error("scaling coordinates by molecule is not compatible with a TriclinicBoundary")
+    else
+        atom_molecule_inds = sys.topology.atom_molecule_inds
+        coords_nounits = Array(ustrip_vec.(sys.coords))
+        coord_units = unit(eltype(eltype(sys.coords)))
+        boundary_nounits = ustrip(coord_units, sys.boundary)
+        mol_centers = molecule_centers(coords_nounits, boundary_nounits, sys.topology)
+        # Shift molecules to the center of the box and wrap
+        # This puts them all in the same periodic image which is required when scaling
+        # This won't work if the molecule can't fit in one box when centered,
+        #   but that would likely be a pathological case anyway
+        center_shifts = Ref(box_center(boundary_nounits)) .- mol_centers
+        for i in eachindex(sys)
+            coords_nounits[i] = wrap_coords(
+                    coords_nounits[i] .+ center_shifts[atom_molecule_inds[i]], boundary_nounits)
+        end
+        # Move all atoms in a molecule by the same amount according to the molecule center
+        # Then move the atoms back to the molecule center and wrap in the scaled boundary
+        shift_vecs = mol_centers .* (scale_factor - 1)
+        sys.boundary = scale_boundary(sys.boundary, scale_factor)
+        boundary_nounits = ustrip(sys.boundary)
+        for i in eachindex(sys)
+            mi = atom_molecule_inds[i]
+            coords_nounits[i] = wrap_coords(
+                    coords_nounits[i] .+ shift_vecs[mi] .- center_shifts[mi], boundary_nounits)
+        end
+        sys.coords = coords_nounits * coord_units
+    end
+    return sys
 end
