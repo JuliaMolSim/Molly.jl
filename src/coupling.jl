@@ -46,8 +46,8 @@ apply_coupling!(sys, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
 
 The Andersen thermostat for controlling temperature.
 
-Velocities are randomly changed to velocities drawn from the Maxwell-Boltzmann
-distribution.
+The velocity of each atom is randomly changed each time step with probability
+`dt / coupling_const` to a velocity drawn from the Maxwell-Boltzmann distribution.
 See [Andersen 1980](https://doi.org/10.1063/1.439486).
 """
 struct AndersenThermostat{T, C}
@@ -89,6 +89,7 @@ The scaling factor for the velocities each step is
 ```math
 \lambda = \sqrt{\frac{T_0}{T}}
 ```
+
 This thermostat should be used with caution as it can lead to simulation
 artifacts.
 """
@@ -111,6 +112,7 @@ The scaling factor for the velocities each step is
 ```math
 \lambda^2 = 1 + \frac{\delta t}{\tau} \left( \frac{T_0}{T} - 1 \right)
 ```
+
 This thermostat should be used with caution as it can lead to simulation
 artifacts.
 """
@@ -193,7 +195,7 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
         V = box_volume(sys.boundary)
         dV = barostat.volume_scale * (2 * rand(T) - 1)
         v_scale = (V + dV) / V
-        l_scale = cbrt(v_scale)
+        l_scale = (D == 2 ? sqrt(v_scale) : cbrt(v_scale))
         old_coords = copy(sys.coords)
         old_boundary = sys.boundary
         scale_coords!(sys, l_scale)
