@@ -695,6 +695,7 @@ Accounts for periodic boundary conditions by using the circular mean.
 If `topology=nothing` then the coordinates are returned.
 
 Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
+Not currently compatible with automatic differentiation using Zygote.
 """
 function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topology) where {D, C}
     if isnothing(topology)
@@ -738,6 +739,7 @@ moved by the same amount according to the center of coordinates of the molecule.
 This can be disabled with `ignore_molecules=true`.
 
 Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
+Not currently compatible with automatic differentiation using Zygote.
 """
 function scale_coords!(sys, scale_factor; ignore_molecules=false)
     if ignore_molecules || isnothing(sys.topology)
