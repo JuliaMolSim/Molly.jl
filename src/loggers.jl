@@ -232,7 +232,7 @@ end
 """
     StructureWriter(n_steps, filepath, excluded_res=String[])
 
-Write 3D output structures to the PDB file format throughout a simulation.
+Write 3D output structures to a file in the PDB format throughout a simulation.
 """
 mutable struct StructureWriter
     n_steps::Int

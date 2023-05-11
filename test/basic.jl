@@ -62,7 +62,7 @@
     @test float_type(b) == Float64
     @test Molly.length_type(b) == typeof(1.0u"m")
     @test ustrip(b) == RectangularBoundary(4.0, 5.0)
-    @test ustrip(u"km", b) == RectangularBoundary(4E-3, 5E-3)
+    @test ustrip(u"km", b) == RectangularBoundary(4e-3, 5e-3)
     @test !Molly.has_infinite_boundary(b)
     @test box_volume(b) == 20.0u"m^2"
     @test box_volume(RectangularBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^2"

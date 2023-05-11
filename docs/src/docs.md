@@ -1061,6 +1061,19 @@ The available couplers are:
 - [`BerendsenThermostat`](@ref)
 - [`MonteCarloBarostat`](@ref)
 Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being [`NoCoupling`](@ref).
+Couplers are given to the `coupling` keyword argument during simulator construction:
+```julia
+temp = 300.0u"K"
+press = 1.0u"bar"
+thermostat = AndersenThermostat(temp, 1.0u"ps")
+barostat = MonteCarloBarostat(press, temp, sys.boundary)
+
+# Velocity verlet with Andersen thermostat
+VelocityVerlet(dt=0.001u"ps", coupling=thermostat)
+
+# Velocity verlet with Andersen thermostat and Monte Carlo barostat
+VelocityVerlet(dt=0.001u"ps", coupling=(thermostat, barostat))
+```
 
 The appropriate coupling to use will depend on the situation.
 For example, the [`MonteCarloBarostat`](@ref) for controlling pressure assumes a constant temperature but does not actively control the temperature.
@@ -1084,7 +1097,7 @@ function apply_coupling!(sys, coupling::MyCoupler, sim, neighbors, step_n;
 end
 ```
 The functions [`random_velocity`](@ref), [`maxwell_boltzmann`](@ref) and [`temperature`](@ref) may be useful here.
-To use your custom coupler, give it as the `coupling` argument to the simulator.
+To use your custom coupler, give it as the `coupling` argument to the simulator as above.
 
 ## Loggers
 
