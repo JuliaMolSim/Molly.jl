@@ -153,6 +153,36 @@
         norm(sys.velocities[argmax(max_disps)]) * sys.loggers.coords.n_steps * dt;
         atol=1e-9u"nm",
     )
+
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+    for gpu in gpu_list
+        sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=gpu, use_cell_list=false)
+        mcs = molecule_centers(sys.coords, sys.boundary, sys.topology)
+        @test isapprox(Array(mcs)[1], mean(sys.coords[1:1170]); atol=0.04u"nm")
+
+        # Mark all pairs as ineligible for pairwise interactions and check that the
+        #   potential energy from the specific interactions does not change on scaling
+        no_nbs = falses(length(sys), length(sys))
+        sys.neighbor_finder = DistanceNeighborFinder(
+            eligible=(gpu ? CuArray(no_nbs) : no_nbs),
+            dist_cutoff=1.0u"nm",
+        )
+        coords_start = deepcopy(sys.coords)
+        pe_start = potential_energy(sys, find_neighbors(sys))
+        scale_factor = 1.02
+        n_scales = 10
+
+        for i in 1:n_scales
+            scale_coords!(sys, scale_factor)
+            @test potential_energy(sys, find_neighbors(sys)) ≈ pe_start
+        end
+        for i in 1:n_scales
+            scale_coords!(sys, inv(scale_factor))
+            @test potential_energy(sys, find_neighbors(sys)) ≈ pe_start
+        end
+        coords_diff = Array(sys.coords) .- Array(coords_start)
+        @test maximum(maximum(abs.(v)) for v in coords_diff) < 5e-4u"nm"
+    end
 end
 
 @testset "Neighbor lists" begin
