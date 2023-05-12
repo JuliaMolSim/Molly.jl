@@ -708,7 +708,7 @@ function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topolo
         twopit = 2 * pit
         n_molecules = length(topology.molecule_atom_counts)
         unit_circle_angles = broadcast(coords, Ref(boundary.side_lengths)) do c, sl
-            (c ./ sl) .* twopit .- pit
+            (c ./ sl) .* twopit .- pit # Run -π to π
         end
         mol_sin_sums = zeros(SVector{D, T}, n_molecules)
         mol_cos_sums = zeros(SVector{D, T}, n_molecules)

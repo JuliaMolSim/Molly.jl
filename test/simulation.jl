@@ -896,6 +896,7 @@ end
     @test 1.7u"bar" < mean(values(sys.loggers.pressure)) < 2.2u"bar"
     @test 0.1u"bar" < std( values(sys.loggers.pressure)) < 0.5u"bar"
     @test all(values(sys.loggers.box_size) .== 8.0u"nm")
+    @test sys.boundary == CubicBoundary(8.0u"nm")
 
     barostat = MonteCarloBarostat(press, temp, boundary)
     lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
@@ -936,6 +937,7 @@ end
             @test 0.1u"bar" < std( values(sys.loggers.pressure)) < 0.5u"bar"
             @test 9.5u"nm" < mean(values(sys.loggers.box_size)) < 10.5u"nm"
             @test 0.2u"nm" < std( values(sys.loggers.box_size)) < 1.0u"nm"
+            @test sys.boundary != CubicBoundary(8.0u"nm")
         end
     end
 end
