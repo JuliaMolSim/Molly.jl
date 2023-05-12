@@ -138,7 +138,7 @@ function simulate!(sys,
     for step_n in 1:n_steps
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt .+ (accel_remove_mol.(accels_t) .* sim.dt ^ 2) ./ 2
-        
+
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
@@ -464,11 +464,13 @@ end
 function O_step!(sys, α_eff, σ_eff, rng, temperature, neighbors)
     noise = random_velocities(sys, temperature; rng=rng)
     sys.velocities = α_eff .* sys.velocities + σ_eff .* noise
+    return sys
 end
 
 function A_step!(sys, dt_eff, neighbors)
     sys.coords += sys.velocities * dt_eff
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+    return sys
 end
 
 function B_step!(sys, dt_eff, acceleration_vector, compute_forces::Bool,
@@ -477,6 +479,7 @@ function B_step!(sys, dt_eff, acceleration_vector, compute_forces::Bool,
         acceleration_vector .= accelerations(sys, neighbors; n_threads=n_threads)
     end
     sys.velocities += dt_eff * accel_remove_mol.(acceleration_vector)
+    return sys
 end
 
 """
@@ -625,7 +628,7 @@ function simulate!(sys::ReplicaSystem,
         end
     end
 
-    simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
+    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
 end
 
 """
@@ -726,7 +729,7 @@ function simulate!(sys::ReplicaSystem,
         end
     end
     
-    simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
+    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
 end
 
 function remd_exchange!(sys::ReplicaSystem{D, G, T},
@@ -880,6 +883,7 @@ function simulate!(sys::System{D, G, T},
                                        energy_rate=E_old / (k_b * sim.temperature))
         end
     end
+    return sys
 end
 
 """

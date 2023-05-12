@@ -159,6 +159,7 @@ does not actively control the temperature.
 It should be used alongside a temperature coupling method such as the [`Langevin`](@ref)
 simulator or [`AndersenThermostat`](@ref) coupling.
 The neighbor list is not updated when making trial moves or after accepted moves.
+Note that the barostat can change the bounding box of the system.
 
 Not currently compatible with automatic differentiation using Zygote.
 """
