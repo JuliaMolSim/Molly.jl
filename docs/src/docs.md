@@ -292,7 +292,7 @@ visualize(
 The recommended way to run a macromolecular simulation is to read in a force field in [OpenMM XML format](http://docs.openmm.org/latest/userguide/application/05_creating_ffs.html) to a [`MolecularForceField`](@ref) and then read in a coordinate file in a format [supported by Chemfiles.jl](https://chemfiles.org/chemfiles/latest/formats.html).
 Files for common force fields can be found at [OpenMM](https://github.com/openmm/openmm) and [OpenMM force fields](https://github.com/openmm/openmmforcefields).
 This sets up a system in the same data structures as above and that is simulated in the same way.
-Here we carry out an energy minimization, simulate with a Langevin integrator and use a [`StructureWriter`](@ref) to write the trajectory as a PDB file.
+Here we carry out an energy minimization, simulate with a Langevin integrator in the NPT ensemble and use a [`StructureWriter`](@ref) to write the trajectory as a PDB file.
 ```julia
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff = MolecularForceField(
@@ -314,11 +314,13 @@ sys = System(
 minimizer = SteepestDescentMinimizer()
 simulate!(sys, minimizer)
 
-random_velocities!(sys, 298.0u"K")
+temp = 298.0u"K"
+random_velocities!(sys, temp)
 simulator = Langevin(
     dt=0.001u"ps",
-    temperature=298.0u"K",
+    temperature=temp,
     friction=1.0u"ps^-1",
+    coupling=MonteCarloBarostat(1.0u"bar", temp, sys.boundary),
 )
 
 simulate!(sys, simulator, 5_000)
@@ -362,9 +364,11 @@ However it is not thoroughly tested with respect to ligands or special residues 
 By default, terminal residues are renamed to match the appropriate templates.
 For example, the first (N-terminal) residue could be changed from "MET" to "NMET".
 This can be turned off by giving `rename_terminal_res=false` to [`System`](@ref) if the residue names in the input file are appropriate.
+Currently atom classes are not supported, only atom types.
+Residue patches, virtual sites, file includes and any force types other than `HarmonicBondForce`/`HarmonicAngleForce`/`PeriodicTorsionForce`/`NonbondedForce` are currently ignored.
 
 The Gromacs setup procedure should be considered experimental.
-Currently Ewald summation methods, constraint algorithms, pressure coupling and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
+Currently Ewald summation methods, constraint algorithms and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
 
 ## Enhanced sampling
 
@@ -1064,10 +1068,10 @@ press = 1.0u"bar"
 thermostat = AndersenThermostat(temp, 1.0u"ps")
 barostat = MonteCarloBarostat(press, temp, sys.boundary)
 
-# Velocity verlet with Andersen thermostat
+# Velocity Verlet with Andersen thermostat
 VelocityVerlet(dt=0.001u"ps", coupling=thermostat)
 
-# Velocity verlet with Andersen thermostat and Monte Carlo barostat
+# Velocity Verlet with Andersen thermostat and Monte Carlo barostat
 VelocityVerlet(dt=0.001u"ps", coupling=(thermostat, barostat))
 ```
 

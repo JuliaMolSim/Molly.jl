@@ -19,9 +19,10 @@ Implemented features include:
 - Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also experimental support for Gromacs files.
 - Verlet, velocity Verlet, Störmer-Verlet, flexible Langevin and Nosé-Hoover integrators.
 - Andersen, Berendsen and velocity rescaling thermostats.
+- Monte Carlo barostat.
 - Steepest descent energy minimization.
-- Monte Carlo simulation.
 - Replica exchange molecular dynamics.
+- Monte Carlo simulation.
 - Periodic, triclinic and infinite boundary conditions.
 - Flexible loggers to track arbitrary properties throughout simulations.
 - Cutoff algorithms for non-bonded interactions.
@@ -39,7 +40,6 @@ Features not yet implemented include:
 - High GPU performance.
 - Ewald or particle mesh Ewald summation.
 - Constrained bonds and angles.
-- Pressure coupling methods.
 - Protein preparation - solvent box, add hydrogens etc.
 - Simulators such as metadynamics.
 - Quantum mechanical modelling.
@@ -119,4 +119,4 @@ The above 1 ps simulation looks something like this when you view it in [VMD](ht
 
 Contributions are very welcome - see the [roadmap issue](https://github.com/JuliaMolSim/Molly.jl/issues/2) for more.
 
-Join the #molly channel on the [JuliaMolSim Zulip](https://juliamolsim.zulipchat.com/join/j5sqhiajbma5hw55hy6wtzv7) to discuss the usage and development of Molly.jl.
+Join the #molly channel on the [JuliaMolSim Zulip](https://juliamolsim.zulipchat.com/join/j5sqhiajbma5hw55hy6wtzv7) to discuss the usage and development of Molly.jl, or post on the [Julia Discourse](https://discourse.julialang.org).
