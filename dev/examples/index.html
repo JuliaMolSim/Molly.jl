@@ -87,10 +87,10 @@ inter = Gravity(G=convert(typeof(1.0u&quot;km^3 * kg^-1 * d^-2&quot;), Unitful.G
 
 sys = System(
     atoms=[Atom(mass=m) for m in body_masses],
-    pairwise_inters=(inter,),
     coords=coords .+ (SVector(5e8, 5e8, 5e8)u&quot;km&quot;,),
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=(inter,),
     loggers=(coords=CoordinateLogger(typeof(1.0u&quot;km&quot;), 10),),
     force_units=u&quot;kg * km * d^-2&quot;,
     energy_units=u&quot;kg * km^2 * d^-2&quot;,
@@ -204,10 +204,10 @@ neighbor_finder = DistanceNeighborFinder(
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=(lj,),
-    specific_inter_lists=(bonds, angles),
     coords=coords,
     boundary=boundary,
+    pairwise_inters=(lj,),
+    specific_inter_lists=(bonds, angles),
     neighbor_finder=neighbor_finder,
     loggers=(coords=CoordinateLogger(200),),
 )
@@ -318,10 +318,10 @@ loggers = (coords=CoordinateLogger(Float64, 1),)
 
 sys = System(
     atoms=atoms,
-    general_inters=(dftk_interaction,),
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    general_inters=(dftk_interaction,),
     loggers=loggers,
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -425,10 +425,10 @@ simulator = VelocityVerlet(
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=pairwise_inters,
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
     neighbor_finder=neighbor_finder,
     loggers=(
         coords=CoordinateLogger(Float64, 20; dims=2),
@@ -611,4 +611,4 @@ lines!(ax, dists, energies(0, 1, 2), label=&quot;standard LJ potential&quot;)
 
 ylims!(-5, 25)
 axislegend(position=:rt)
-save(&quot;lennard_jones_sc.png&quot;, f)</code></pre><p><img src="../images/lennard_jones_sc.png" alt="Lennard-Jones Softcore"/></p><p>The form of the potential is approximately the same as standard Lennard-Jones for <span>$r_{ij} &gt; \sigma_{ij}$</span> if some fractional values are used for <span>$\lambda$</span> and <span>$\alpha$</span>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../related/">Related software »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Thursday 20 April 2023 10:15">Thursday 20 April 2023</span>. Using Julia version 1.8.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+save(&quot;lennard_jones_sc.png&quot;, f)</code></pre><p><img src="../images/lennard_jones_sc.png" alt="Lennard-Jones Softcore"/></p><p>The form of the potential is approximately the same as standard Lennard-Jones for <span>$r_{ij} &gt; \sigma_{ij}$</span> if some fractional values are used for <span>$\lambda$</span> and <span>$\alpha$</span>.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../related/">Related software »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Friday 12 May 2023 16:01">Friday 12 May 2023</span>. Using Julia version 1.9.0.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
