@@ -514,7 +514,21 @@ function System(;
                     loggers, force_units, energy_units, k_converted)
 end
 
-# 2nd constructor when using Crystal object from SimpleCrystals.jl
+"""
+    System(crystal; <keyword arguments>)
+
+A physical system to be simulated, constructed from a SimpleCrystals.jl `Crystal` struct.
+Properties unused in the simulation or in analysis can be left with their
+default values.
+`atoms`, `atoms_data`, `coords` and `boundary` are automatically calcualted from the cyrstal struct.
+This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
+interface described there.
+
+To modify the properties of this system use the convenience constructor:
+    System(system; <keyword arguments>)
+
+# Arguments
+"""
 function System(crystal::Crystal{D};
         pairwise_inters=(),
         specific_inter_lists=(),
@@ -531,8 +545,7 @@ function System(crystal::Crystal{D};
     atoms = [Atom(index=i, charge=a.charge, mass=a.mass) for (i,a) in enumerate(crystal.atoms)]
 
     # Parse other atom data
-    atoms_data = [AtomData(atom_type = "?", atom_name = "?", res_number = 1,
-                     res_name = "???", element = String(a.sym),) for a in crystal.atoms]
+    atoms_data = [AtomData(element = String(a.sym),) for a in crystal.atoms]
 
     coords = SimpleCrystals.position(crystal, :)
 
@@ -546,6 +559,7 @@ function System(crystal::Crystal{D};
         error("$(crystal.lattice.crystal_family) is not supported as it would need a 2D triclinic boundary.
              Try defining the crystal with a rectangular or square unit cell.")
     else
+        @assert all(crystal.lattice_angles .< 90u"°") "All crystal lattice angles must be less than 90°"
         boundary = TriclinicBoundary(side_lengths, crystal.lattice_angles)
     end
 
@@ -568,7 +582,44 @@ function System(crystal::Crystal{D};
     )
 
 end
+"""
+Convenience constructor for re-assigning System properties & types
+"""
+function System(sys::System;
+    atoms = sys.atoms,
+    atoms_data = sys.atoms_data,
+    pairwise_inters = sys.pairwise_inters,
+    specific_inter_lists = sys.specific_inter_lists,
+    general_inters = sys.general_inters,
+    constraints = sys.constraints,
+    coords = sys.coords,
+    velocities = sys.velocities,
+    boundary = sys.boundary,
+    neighbor_finder = sys.neighbor_finder,
+    loggers = sys.loggers,
+    force_units = sys.force_units,
+    energy_units = sys.energy_units,
+    k = sys.k)
 
+    #Call the original constructor
+    return System(
+        atoms = atoms,
+        atoms_data = atoms_data,
+        pairwise_inters = pairwise_inters,
+        specific_inter_lists = specific_inter_lists,
+        general_inters = general_inters,
+        constraints=constraints,
+        coords = coords,
+        velocities = velocities,
+        boundary = boundary,
+        neighbor_finder = neighbor_finder,
+        loggers = loggers,
+        force_units = force_units,
+        energy_units = energy_units,
+        k = k
+    )
+
+end
 
 """
     ReplicaSystem(; <keyword arguments>)

@@ -948,3 +948,34 @@ end
         @test E_diff < 5e-4u"kJ * mol^-1"
     end
 end
+
+
+# @testset "Crystal Structures" begin
+
+#     #Simulate FCC Argon
+#     atom_type = :Ar
+#     a = 5.4u"Å"
+
+#     temp = 60.0u"K"
+#     fcc_crystal = FCC(a, atom_type, SVector(4,4,4))
+#     n_atoms = length(fcc_crystal)
+#     atom_mass = atomic_mass(fcc_crystal,1)
+
+#     @test n_atoms == 256
+
+#     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+
+#     sys = System(
+#         fcc_crystal,
+#         velocities=velocities,
+#         pairwise_inters=(LennardJones(),),
+#         loggers=(temps=TemperatureLogger(1),
+#                 energies=TotalEnergyLogger(1)),
+#     )
+
+#     simulator = NoseHoover(dt=0.002u"ps", temperature=temp)
+#     simulate!(sys, simulator, 50_000)
+
+#     # Check heat capacity is roughly correct
+
+# end
