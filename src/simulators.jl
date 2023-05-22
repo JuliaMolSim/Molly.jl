@@ -118,9 +118,10 @@ struct VelocityVerlet{T, C}
     dt::T
     coupling::C
     remove_CM_motion::Int
+    run_loggers::Bool
 end
 
-function VelocityVerlet(; dt, coupling=NoCoupling(), remove_CM_motion=1)
+function VelocityVerlet(; dt, coupling=NoCoupling(), run_loggers = true, remove_CM_motion=1)
     return VelocityVerlet(dt, coupling, Int(remove_CM_motion))
 end
 
@@ -131,7 +132,7 @@ function simulate!(sys,
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+    sim.run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
 
@@ -160,7 +161,7 @@ function simulate!(sys,
             accels_t = accels_t_dt
         end
 
-        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
+        sim.run_loggers && run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
     end
     return sys
 end
