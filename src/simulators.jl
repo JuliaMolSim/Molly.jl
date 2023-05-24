@@ -47,17 +47,18 @@ function SteepestDescentMinimizer(;
 end
 
 """
-    simulate!(system, simulator, n_steps; n_threads=Threads.nthreads(), run_loggers = Bool)
-    simulate!(system, simulator; n_threads=Threads.nthreads(), run_loggers = Bool)
+    simulate!(system, simulator, n_steps; n_threads=Threads.nthreads(), run_loggers = true)
+    simulate!(system, simulator; n_threads=Threads.nthreads(), run_loggers = true)
 
-Run a simulation on a system according to the rules of the given simulator.
+Run a simulation on a system according to the rules of the given simulator. `run_loggers` is true
+by default except for the `SteepestDescentMinimizer`.
 
 Custom simulators should implement this function.
 """
 function simulate!(sys,
                     sim::SteepestDescentMinimizer;
                     n_threads::Integer=Threads.nthreads(),
-                    run_loggers = false)
+                    run_loggers=false)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
@@ -126,7 +127,7 @@ function simulate!(sys,
                     sim::VelocityVerlet,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads(),
-                    run_loggers = true)
+                    run_loggers=true)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -192,7 +193,7 @@ function simulate!(sys,
                     sim::Verlet,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads(),
-                    run_loggers = true)
+                    run_loggers=true)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -247,7 +248,7 @@ function simulate!(sys,
                     sim::StormerVerlet,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads(),
-                    run_loggers = true)
+                    run_loggers=true)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
@@ -321,7 +322,7 @@ function simulate!(sys,
                     sim::Langevin,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads(),
-                    run_loggers = true,
+                    run_loggers=true,
                     rng=Random.GLOBAL_RNG)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
@@ -400,7 +401,7 @@ function simulate!(sys,
                     sim::LangevinSplitting,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads(),
-                    run_loggers = true,
+                    run_loggers=true,
                     rng=Random.GLOBAL_RNG)
     M_inv = inv.(masses(sys))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
@@ -513,7 +514,7 @@ function NoseHoover(; dt, temperature, damping=100*dt, coupling=NoCoupling(), re
 end
 
 function simulate!(sys, sim::NoseHoover, n_steps::Integer;
-                     n_threads::Integer=Threads.nthreads(), run_loggers = true)
+                     n_threads::Integer=Threads.nthreads(), run_loggers=true)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -620,7 +621,7 @@ function simulate!(sys::ReplicaSystem,
                     assign_velocities::Bool=false,
                     rng=Random.GLOBAL_RNG,
                     n_threads::Integer=Threads.nthreads(),
-                    run_loggers = true)
+                    run_loggers=true)
     if sys.n_replicas != length(sim.simulators)
         throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
                 "and simulators in TemperatureREMD ($(length(sim.simulators))) do not match"))
@@ -632,7 +633,7 @@ function simulate!(sys::ReplicaSystem,
         end
     end
 
-    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads, run_loggers)
+    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads, run_loggers=run_loggers)
 end
 
 """
@@ -734,7 +735,7 @@ function simulate!(sys::ReplicaSystem,
         end
     end
     
-    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads, run_loggers)
+    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads, run_loggers=run_loggers)
 end
 
 function remd_exchange!(sys::ReplicaSystem{D, G, T},
@@ -781,7 +782,7 @@ function simulate_remd!(sys::ReplicaSystem,
                         n_steps::Integer;
                         rng=Random.GLOBAL_RNG,
                         n_threads::Integer=Threads.nthreads(),
-                        run_loggers = true)
+                        run_loggers=true)
     if sys.n_replicas != length(remd_sim.simulators)
         throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
             "and simulators in the REMD simulator ($(length(remd_sim.simulators))) do not match"))
@@ -802,7 +803,7 @@ function simulate_remd!(sys::ReplicaSystem,
     for cycle in 1:n_cycles
         @sync for idx in eachindex(remd_sim.simulators)
             Threads.@spawn simulate!(sys.replicas[idx], remd_sim.simulators[idx], cycle_length;
-                                     n_threads=thread_div[idx])
+                                     n_threads=thread_div[idx], run_loggers=run_loggers)
         end
 
         # Alternate checking even pairs 2-3/4-5/6-7/... and odd pairs 1-2/3-4/5-6/...
@@ -821,7 +822,7 @@ function simulate_remd!(sys::ReplicaSystem,
     if remaining_steps > 0
         @sync for idx in eachindex(remd_sim.simulators)
             Threads.@spawn simulate!(sys.replicas[idx], remd_sim.simulators[idx], remaining_steps;
-                                     n_threads=thread_div[idx])
+                                     n_threads=thread_div[idx], run_loggers=run_loggers)
         end
     end
 
@@ -845,9 +846,6 @@ end
 
 A Monte Carlo simulator that uses the Metropolis algorithm to sample the configuration space.
 
-`simulate!` for this simulator accepts an optional keyword argument `log_states::Bool=true` which 
-determines whether to run the loggers or not (for example, during equilibration).
-
 # Arguments
 - `temperature::T`: the temperature of the system.
 - `trial_moves::M`: a function that performs the trial moves.
@@ -867,7 +865,7 @@ function simulate!(sys::System{D, G, T},
                    sim::MetropolisMonteCarlo,
                    n_steps::Integer;
                    n_threads::Integer=Threads.nthreads(),
-                   run_loggers = true) where {D, G, T}
+                   run_loggers=true) where {D, G, T}
     k_b = energy_add_mol(sys.k, sys.energy_units)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E_old = potential_energy(sys, neighbors; n_threads=n_threads)
