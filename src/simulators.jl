@@ -619,7 +619,8 @@ function simulate!(sys::ReplicaSystem,
                     n_steps::Integer;
                     assign_velocities::Bool=false,
                     rng=Random.GLOBAL_RNG,
-                    n_threads::Integer=Threads.nthreads())
+                    n_threads::Integer=Threads.nthreads(),
+                    run_loggers = true)
     if sys.n_replicas != length(sim.simulators)
         throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
                 "and simulators in TemperatureREMD ($(length(sim.simulators))) do not match"))
@@ -631,7 +632,7 @@ function simulate!(sys::ReplicaSystem,
         end
     end
 
-    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
+    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads, run_loggers)
 end
 
 """
@@ -720,7 +721,8 @@ function simulate!(sys::ReplicaSystem,
                     n_steps::Integer;
                     assign_velocities::Bool=false,
                     rng=Random.GLOBAL_RNG,
-                    n_threads::Integer=Threads.nthreads())
+                    n_threads::Integer=Threads.nthreads(),
+                    run_loggers = true)
     if sys.n_replicas != length(sim.simulators)
         throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
                 "and simulators in HamiltonianREMD ($(length(sim.simulators))) do not match"))
@@ -732,7 +734,7 @@ function simulate!(sys::ReplicaSystem,
         end
     end
     
-    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
+    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads, run_loggers)
 end
 
 function remd_exchange!(sys::ReplicaSystem{D, G, T},
@@ -770,7 +772,7 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
 end
 
 """
-    simulate_remd!(sys, remd_sim, n_steps; rng=Random.GLOBAL_RNG, n_threads=Threads.nthreads())
+    simulate_remd!(sys, remd_sim, n_steps; rng=Random.GLOBAL_RNG, n_threads=Threads.nthreads(), run_loggers = true)
 
 Run a REMD simulation on a [`ReplicaSystem`](@ref) using a REMD simulator.
 """
@@ -778,7 +780,8 @@ function simulate_remd!(sys::ReplicaSystem,
                         remd_sim,
                         n_steps::Integer;
                         rng=Random.GLOBAL_RNG,
-                        n_threads::Integer=Threads.nthreads())
+                        n_threads::Integer=Threads.nthreads(),
+                        run_loggers = true)
     if sys.n_replicas != length(remd_sim.simulators)
         throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
             "and simulators in the REMD simulator ($(length(remd_sim.simulators))) do not match"))
@@ -808,7 +811,7 @@ function simulate_remd!(sys::ReplicaSystem,
             n_attempts += 1
             m = n + 1
             Δ, exchanged = remd_exchange!(sys, remd_sim, n, m; rng=rng, n_threads=n_threads)
-            if exchanged && !isnothing(sys.exchange_logger)
+            if exchanged && !isnothing(sys.exchange_logger) && run_loggers
                 log_property!(sys.exchange_logger, sys, nothing, cycle * cycle_length;
                                     indices=(n, m), delta=Δ, n_threads=n_threads)
             end
@@ -822,7 +825,7 @@ function simulate_remd!(sys::ReplicaSystem,
         end
     end
 
-    if !isnothing(sys.exchange_logger)
+    if !isnothing(sys.exchange_logger) && run_loggers
         finish_logs!(sys.exchange_logger; n_steps=n_steps, n_attempts=n_attempts)
     end
 
