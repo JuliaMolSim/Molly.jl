@@ -820,8 +820,8 @@ end
         trial_args=Dict(:shift_size => 0.1u"nm"),
     )
 
-    @time simulate!(sys, simulator_uniform , n_steps; log_states=true)
-    @time simulate!(sys, simulator_gaussian, n_steps; log_states=true)
+    @time simulate!(sys, simulator_uniform , n_steps)
+    @time simulate!(sys, simulator_gaussian, n_steps)
 
     acceptance_rate = sys.loggers.mcl.n_accept / sys.loggers.mcl.n_trials
     @info "Acceptance Rate: $acceptance_rate"
