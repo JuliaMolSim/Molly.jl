@@ -7,6 +7,7 @@ export
                  force_units, energy_units, skip_shortcut)
 
 The Lennard-Jones 6-12 interaction between two atoms.
+
 The potential energy is defined as
 ```math
 V(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]
@@ -157,6 +158,7 @@ end
                          weight_solute_solvent, force_units, energy_units, skip_shortcut)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core.
+
 The potential energy is defined as
 ```math
 V(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}^{\text{sc}}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}^{\text{sc}}}\right)^{6}\right]

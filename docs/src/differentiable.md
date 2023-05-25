@@ -81,21 +81,21 @@ function loss(σ, coords, velocities)
     atoms = [Atom(0, 0.0, atom_mass, σ, 0.2, false) for i in 1:n_atoms]
     loggers = (coords=CoordinateLogger(Float64, 10),)
 
-    s = System(
+    sys = System(
         atoms=atoms,
-        pairwise_inters=pairwise_inters,
         coords=coords,
-        velocities=velocities,
         boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=NoUnits,
         energy_units=NoUnits,
     )
 
-    mms_start = mean_min_separation(Array(s.coords), boundary)
-    simulate!(s, simulator, n_steps)
-    mms_end = mean_min_separation(Array(s.coords), boundary)
+    mms_start = mean_min_separation(Array(sys.coords), boundary)
+    simulate!(sys, simulator, n_steps)
+    mms_end = mean_min_separation(Array(sys.coords), boundary)
     loss_val = abs(mms_end - dist_true)
 
     Zygote.ignore() do
@@ -202,21 +202,21 @@ function loss(θ)
         ),
     )
 
-    s = System(
+    sys = System(
         atoms=atoms,
-        specific_inter_lists=specific_inter_lists,
         coords=deepcopy(coords),
-        velocities=deepcopy(velocities),
         boundary=boundary,
+        velocities=deepcopy(velocities),
+        specific_inter_lists=specific_inter_lists,
         loggers=loggers,
         force_units=NoUnits,
         energy_units=NoUnits,
     )
 
-    simulate!(s, simulator, n_steps)
+    simulate!(sys, simulator, n_steps)
 
-    d1 = norm(vector(s.coords[1], s.coords[3], boundary))
-    d2 = norm(vector(s.coords[4], s.coords[6], boundary))
+    d1 = norm(vector(sys.coords[1], sys.coords[3], boundary))
+    d2 = norm(vector(sys.coords[4], sys.coords[6], boundary))
     dist_end = 0.5 * (d1 + d2)
     loss_val = abs(dist_end - dist_true)
 
@@ -334,27 +334,27 @@ function loss()
     loggers = (coords=CoordinateLogger(Float32, 10),)
     general_inters = (NNBonds(),)
 
-    s = System(
+    sys = System(
         atoms=atoms,
-        general_inters=general_inters,
         coords=deepcopy(coords),
-        velocities=deepcopy(velocities),
         boundary=boundary,
+        velocities=deepcopy(velocities),
+        general_inters=general_inters,
         loggers=loggers,
         force_units=NoUnits,
         energy_units=NoUnits,
     )
 
-    simulate!(s, simulator, n_steps)
+    simulate!(sys, simulator, n_steps)
 
-    dist_end = (norm(vector(s.coords[1], s.coords[2], boundary)) +
-                norm(vector(s.coords[2], s.coords[3], boundary)) +
-                norm(vector(s.coords[3], s.coords[1], boundary))) / 3
+    dist_end = (norm(vector(sys.coords[1], sys.coords[2], boundary)) +
+                norm(vector(sys.coords[2], sys.coords[3], boundary)) +
+                norm(vector(sys.coords[3], sys.coords[1], boundary))) / 3
     loss_val = abs(dist_end - dist_true)
 
     Zygote.ignore() do
         printfmt("Dist end {:6.3f}  |  Loss {:6.3f}\n", dist_end, loss_val)
-        visualize(s.loggers.coords, boundary, "sim.mp4"; show_boundary=false)
+        visualize(sys.loggers.coords, boundary, "sim.mp4"; show_boundary=false)
     end
 
     return loss_val

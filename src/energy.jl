@@ -7,32 +7,28 @@ export
     potential_energy
 
 """
-    total_energy(s, neighbors=nothing; n_threads=Threads.nthreads())
+    total_energy(system, neighbors=nothing; n_threads=Threads.nthreads())
 
-Calculate the total energy of the system as the sum of the [`kinetic_energy`](@ref)
+Calculate the total energy of a system as the sum of the [`kinetic_energy`](@ref)
 and the [`potential_energy`](@ref).
+
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
-function total_energy(s, neighbors=nothing; n_threads::Integer=Threads.nthreads())
-    return kinetic_energy(s) + potential_energy(s, neighbors; n_threads=n_threads)
+function total_energy(sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+    return kinetic_energy(sys) + potential_energy(sys, neighbors; n_threads=n_threads)
 end
 
-kinetic_energy_noconvert(s) = sum(masses(s) .* sum.(abs2, s.velocities)) / 2
+kinetic_energy_noconvert(sys) = sum(masses(sys) .* sum.(abs2, sys.velocities)) / 2
 
 """
-    kinetic_energy(s)
+    kinetic_energy(system)
 
-Calculate the kinetic energy of the system.
+Calculate the kinetic energy of a system.
 """
-function kinetic_energy(s::System{D, G, T}) where {D, G, T}
-    ke = kinetic_energy_noconvert(s)
-    # Convert energy to per mol if required
-    if dimension(s.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        return T(uconvert(s.energy_units, ke * Unitful.Na))
-    else
-        return T(uconvert(s.energy_units, ke))
-    end
+function kinetic_energy(sys::System{D, G, T}) where {D, G, T}
+    ke = kinetic_energy_noconvert(sys)
+    return uconvert(sys.energy_units, energy_add_mol(ke, sys.energy_units))
 end
 
 """
@@ -40,11 +36,11 @@ end
 
 Calculate the temperature of a system from the kinetic energy of the atoms.
 """
-function temperature(s)
-    ke = kinetic_energy_noconvert(s)
-    df = 3 * length(s) - 3
-    temp = 2 * ke / (df * s.k)
-    if s.energy_units == NoUnits
+function temperature(sys)
+    ke = kinetic_energy_noconvert(sys)
+    df = 3 * length(sys) - 3
+    temp = 2 * ke / (df * sys.k)
+    if sys.energy_units == NoUnits
         return temp
     else
         return uconvert(u"K", temp)
@@ -58,11 +54,30 @@ function check_energy_units(E, energy_units)
     end
 end
 
-"""
-    potential_energy(s, neighbors=nothing; n_threads=Threads.nthreads())
+function energy_remove_mol(x)
+    if dimension(x) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        T = typeof(ustrip(x))
+        return x / T(Unitful.Na)
+    else
+        return x
+    end
+end
 
-Calculate the potential energy of the system using the pairwise, specific and
+function energy_add_mol(x, energy_units)
+    if dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        T = typeof(ustrip(x))
+        return x * T(Unitful.Na)
+    else
+        return x
+    end
+end
+
+"""
+    potential_energy(system, neighbors=nothing; n_threads=Threads.nthreads())
+
+Calculate the potential energy of a system using the pairwise, specific and
 general interactions.
+
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 
@@ -77,6 +92,7 @@ first and passed to the function.
     potential_energy(inter, system, neighbors=nothing; n_threads=Threads.nthreads())
 
 Calculate the potential energy due to a given interaction type.
+
 Custom interaction types should implement this function.
 """
 function potential_energy(s::System{D, false, T}, neighbors=nothing;

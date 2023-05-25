@@ -13,6 +13,7 @@ export
 
 """
     ustrip_vec(x)
+    ustrip_vec(u, x)
 
 Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustrip_vec.(coords)`.
 """
@@ -29,11 +30,23 @@ function check_force_units(fdr::AbstractArray, sys_force_units)
     return check_force_units(unit(first(fdr)), sys_force_units)
 end
 
+# Forces are often expressed per mol but this dimension needs removing for use in the integrator
+function accel_remove_mol(x)
+    fx = first(x)
+    if dimension(fx) == u"𝐋 * 𝐍^-1 * 𝐓^-2"
+        T = typeof(ustrip(fx))
+        return x / T(Unitful.Na)
+    else
+        return x
+    end
+end
+
 """
     accelerations(system, neighbors=nothing; n_threads=Threads.nthreads())
 
-Calculate the accelerations of all atoms using the pairwise, specific and
-general interactions and Newton's second law of motion.
+Calculate the accelerations of all atoms in a system using the pairwise,
+specific and general interactions and Newton's second law of motion.
+
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
@@ -54,6 +67,7 @@ end
           coord_k, coord_l, boundary)
 
 Calculate the force between atoms due to a given interaction type.
+
 For [`PairwiseInteraction`](@ref)s returns a single force vector and for
 [`SpecificInteraction`](@ref)s returns a type such as [`SpecificForce2Atoms`](@ref).
 Custom pairwise and specific interaction types should implement this function.
@@ -64,7 +78,7 @@ function force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
 end
 
 # Allow GPU-specific force functions to be defined if required
-force_gpu(inter, dr, ci, cj, ai, aj, bnd, w14) = force(inter, dr, ci, cj, ai, aj, bnd, w14)
+force_gpu(inter, dr, ci, cj, ai, aj, bnd, spec) = force(inter, dr, ci, cj, ai, aj, bnd, spec)
 force_gpu(inter, ci, bnd)             = force(inter, ci, bnd)
 force_gpu(inter, ci, cj, bnd)         = force(inter, ci, cj, bnd)
 force_gpu(inter, ci, cj, ck, bnd)     = force(inter, ci, cj, ck, bnd)
@@ -138,15 +152,17 @@ Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.
 """
     forces(system, neighbors=nothing; n_threads=Threads.nthreads())
 
-Calculate the forces on all atoms in the system using the pairwise, specific and
+Calculate the forces on all atoms in a system using the pairwise, specific and
 general interactions.
+
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 
     forces(inter, system, neighbors=nothing; n_threads=Threads.nthreads())
 
-Calculate the forces on all atoms in the system arising from a general
+Calculate the forces on all atoms in a system arising from a general
 interaction.
+
 If the interaction uses neighbor lists, the neighbors should be computed
 first and passed to the function.
 Custom general interaction types should implement this function.

@@ -29,14 +29,12 @@ Not currently compatible with automatic differentiation using Zygote.
 - `max_steps::Int=1000`: the maximum number of steps.
 - `tol::F=1000.0u"kJ * mol^-1 * nm^-1"`: the maximum force below which to
     finish minimization.
-- `run_loggers::Bool=false`: whether to run the loggers during minimization.
 - `log_stream::L=devnull`: stream to print minimization progress to.
 """
 struct SteepestDescentMinimizer{D, F, L}
     step_size::D
     max_steps::Int
     tol::F
-    run_loggers::Bool
     log_stream::L
 end
 
@@ -44,25 +42,26 @@ function SteepestDescentMinimizer(;
                                     step_size=0.01u"nm",
                                     max_steps=1_000,
                                     tol=1000.0u"kJ * mol^-1 * nm^-1",
-                                    run_loggers=false,
                                     log_stream=devnull)
-    return SteepestDescentMinimizer(step_size, max_steps, tol,
-                                    run_loggers, log_stream)
+    return SteepestDescentMinimizer(step_size, max_steps, tol, log_stream)
 end
 
 """
-    simulate!(system, simulator, n_steps; n_threads=Threads.nthreads())
-    simulate!(system, simulator; n_threads=Threads.nthreads())
+    simulate!(system, simulator, n_steps; n_threads=Threads.nthreads(), run_loggers = true)
+    simulate!(system, simulator; n_threads=Threads.nthreads(), run_loggers = true)
 
-Run a simulation on a system according to the rules of the given simulator.
+Run a simulation on a system according to the rules of the given simulator. `run_loggers` is true
+by default except for the `SteepestDescentMinimizer`.
+
 Custom simulators should implement this function.
 """
 function simulate!(sys,
                     sim::SteepestDescentMinimizer;
-                    n_threads::Integer=Threads.nthreads())
+                    n_threads::Integer=Threads.nthreads(),
+                    run_loggers=false)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    sim.run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+    run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     E = potential_energy(sys, neighbors; n_threads=n_threads)
     println(sim.log_stream, "Step 0 - potential energy ",
             E, " - max force N/A - N/A")
@@ -93,7 +92,7 @@ function simulate!(sys,
                     E_trial, " - max force ", max_force, " - rejected")
         end
 
-        sim.run_loggers && run_loggers!(sys, neighbors, step_n;
+        run_loggers && run_loggers!(sys, neighbors, step_n;
                                         n_threads=n_threads)
 
         if max_force < sim.tol
@@ -101,17 +100,6 @@ function simulate!(sys,
         end
     end
     return sys
-end
-
-# Forces are often expressed per mol but this dimension needs removing for use in the integrator
-function remove_molar(x)
-    fx = first(x)
-    if dimension(fx) == u"𝐋 * 𝐍^-1 * 𝐓^-2"
-        T = typeof(ustrip(fx))
-        return x / T(Unitful.Na)
-    else
-        return x
-    end
 end
 
 """
@@ -138,37 +126,41 @@ end
 function simulate!(sys,
                     sim::VelocityVerlet,
                     n_steps::Integer;
-                    n_threads::Integer=Threads.nthreads())
+                    n_threads::Integer=Threads.nthreads(),
+                    run_loggers=true)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+    run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
 
     for step_n in 1:n_steps
         old_coords = copy(sys.coords)
-        sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
-        
+        sys.coords += sys.velocities .* sim.dt .+ (accel_remove_mol.(accels_t) .* sim.dt ^ 2) ./ 2
+
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
+        sys.velocities += accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
-        apply_coupling!(sys, sim.coupling, sim)
+        recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads)
 
-        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
-
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        n_threads=n_threads)
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                   n_threads=n_threads)
+        if recompute_forces
+            accels_t = accelerations(sys, neighbors; n_threads=n_threads)
+        else
             accels_t = accels_t_dt
         end
+
+        run_loggers && run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
     end
     return sys
 end
@@ -177,6 +169,7 @@ end
     Verlet(; <keyword arguments>)
 
 The leapfrog Verlet integrator.
+
 This is a leapfrog integrator, so the velocities are offset by half a time step
 behind the positions.
 
@@ -199,17 +192,18 @@ end
 function simulate!(sys,
                     sim::Verlet,
                     n_steps::Integer;
-                    n_threads::Integer=Threads.nthreads())
+                    n_threads::Integer=Threads.nthreads(),
+                    run_loggers=true)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+    run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities += remove_molar.(accels_t) .* sim.dt
-        
+        sys.velocities += accel_remove_mol.(accels_t) .* sim.dt
+
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt
         apply_constraints!(sys, old_coords, sim.dt)
@@ -218,14 +212,13 @@ function simulate!(sys,
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
-        apply_coupling!(sys, sim.coupling, sim)
+        recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads)
 
-        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                   n_threads=n_threads)
 
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        n_threads=n_threads)
-        end
+        run_loggers && run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
     end
     return sys
 end
@@ -234,6 +227,7 @@ end
     StormerVerlet(; <keyword arguments>)
 
 The Störmer-Verlet integrator.
+
 The velocity calculation is accurate to O(dt).
 
 Does not currently work with coupling methods that alter the velocity.
@@ -253,10 +247,11 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
 function simulate!(sys,
                     sim::StormerVerlet,
                     n_steps::Integer;
-                    n_threads::Integer=Threads.nthreads())
+                    n_threads::Integer=Threads.nthreads(),
+                    run_loggers=true)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+    run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     coords_last = sys.coords
 
     for step_n in 1:n_steps
@@ -265,9 +260,11 @@ function simulate!(sys,
         coords_copy = sys.coords
         if step_n == 1
             # Use the velocities at the first step since there is only one set of coordinates
-            sys.coords += sys.velocities .* sim.dt .+ (remove_molar.(accels_t) .* sim.dt ^ 2) ./ 2
+            sys.coords += sys.velocities .* sim.dt .+
+                                        (accel_remove_mol.(accels_t) .* sim.dt ^ 2) ./ 2
         else
-            sys.coords += vector.(coords_last, sys.coords, (sys.boundary,)) .+ remove_molar.(accels_t) .* sim.dt ^ 2
+            sys.coords += vector.(coords_last, sys.coords, (sys.boundary,)) .+
+                                        accel_remove_mol.(accels_t) .* sim.dt ^ 2
         end
         
         apply_constraints!(sys, coords_copy, sim.dt)
@@ -276,15 +273,14 @@ function simulate!(sys,
         # This is accurate to O(dt)
         sys.velocities = vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt
 
-        apply_coupling!(sys, sim.coupling, sim)
+        recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads)
 
-        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                   n_threads=n_threads)
+        coords_last = coords_copy
 
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        n_threads=n_threads)
-            coords_last = coords_copy
-        end
+        run_loggers && run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
     end
     return sys
 end
@@ -293,6 +289,7 @@ end
     Langevin(; <keyword arguments>)
 
 The Langevin integrator, based on the Langevin Middle Integrator in OpenMM.
+
 This is a leapfrog integrator, so the velocities are offset by half a time step
 behind the positions.
 
@@ -300,58 +297,63 @@ behind the positions.
 - `dt::S`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
 - `friction::F`: the friction coefficient of the simulation.
+- `coupling::C=NoCoupling()`: the coupling which applies during the simulation.
 - `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
     set to `false` or `0` to not remove center of mass motion.
 """
-struct Langevin{S, K, F, T}
+struct Langevin{S, K, F, C, T}
     dt::S
     temperature::K
     friction::F
+    coupling::C
     remove_CM_motion::Int
     vel_scale::T
     noise_scale::T
 end
 
-function Langevin(; dt, temperature, friction, remove_CM_motion=1)
+function Langevin(; dt, temperature, friction, coupling=NoCoupling(), remove_CM_motion=1)
     vel_scale = exp(-dt * friction)
     noise_scale = sqrt(1 - vel_scale^2)
-    return Langevin(dt, temperature, friction, Int(remove_CM_motion), vel_scale, noise_scale)
+    return Langevin(dt, temperature, friction, coupling, Int(remove_CM_motion),
+                    vel_scale, noise_scale)
 end
 
 function simulate!(sys,
                     sim::Langevin,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads(),
+                    run_loggers=true,
                     rng=Random.GLOBAL_RNG)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+    run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities += remove_molar.(accels_t) .* sim.dt
-        
+        sys.velocities += accel_remove_mol.(accels_t) .* sim.dt
+
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt / 2
         noise = random_velocities(sys, sim.temperature; rng=rng)
         sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
 
         sys.coords += sys.velocities .* sim.dt / 2
-        
+
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
 
-        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
+        recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads)
 
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        n_threads=n_threads)
-        end
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                   n_threads=n_threads)
+
+        run_loggers && run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
     end
     return sys
 end
@@ -359,10 +361,11 @@ end
 """
     LangevinSplitting(; <keyword arguments>)
 
-The Langevin simulator using a general splitting scheme, consisting of a
-succession of **A**, **B** and **O** steps, corresponding respectively to
-updates in position, velocity for the potential part, and velocity for the
-thermal fluctuation-dissipation part.
+The Langevin simulator using a general splitting scheme.
+
+This consists of a succession of **A**, **B** and **O** steps, corresponding
+respectively to updates in position, velocity for the potential part, and velocity
+for the thermal fluctuation-dissipation part.
 The [`Langevin`](@ref) and [`VelocityVerlet`](@ref) simulators without coupling
 correspond to the **BAOA** and **BAB** schemes respectively.
 For more information on the sampling properties of splitting schemes, see
@@ -398,6 +401,7 @@ function simulate!(sys,
                     sim::LangevinSplitting,
                     n_steps::Integer;
                     n_threads::Integer=Threads.nthreads(),
+                    run_loggers=true,
                     rng=Random.GLOBAL_RNG)
     M_inv = inv.(masses(sys))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
@@ -406,7 +410,7 @@ function simulate!(sys,
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+    run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
@@ -448,35 +452,37 @@ function simulate!(sys,
 
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
-        run_loggers!(sys, neighbors, step_n)
 
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        n_threads=n_threads)
-        end
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                   n_threads=n_threads)
+
+        run_loggers && run_loggers!(sys, neighbors, step_n)
     end
     return sys
 end
 
-function O_step!(s, α_eff, σ_eff, rng, temperature, neighbors)
-    noise = random_velocities(s, temperature; rng=rng)
-    s.velocities = α_eff .* s.velocities + σ_eff .* noise
+function O_step!(sys, α_eff, σ_eff, rng, temperature, neighbors)
+    noise = random_velocities(sys, temperature; rng=rng)
+    sys.velocities = α_eff .* sys.velocities + σ_eff .* noise
+    return sys
 end
 
-function A_step!(s, dt_eff, neighbors)
-    s.coords += s.velocities * dt_eff
-    s.coords = wrap_coords.(s.coords, (s.boundary,))
+function A_step!(sys, dt_eff, neighbors)
+    sys.coords += sys.velocities * dt_eff
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+    return sys
 end
 
-function B_step!(s, dt_eff, acceleration_vector, compute_forces::Bool, n_threads::Integer, neighbors)
+function B_step!(sys, dt_eff, acceleration_vector, compute_forces::Bool,
+                 n_threads::Integer, neighbors)
     if compute_forces
-        acceleration_vector .= accelerations(s, neighbors, n_threads=n_threads)
+        acceleration_vector .= accelerations(sys, neighbors; n_threads=n_threads)
     end
-    s.velocities += dt_eff * remove_molar.(acceleration_vector)
+    sys.velocities += dt_eff * accel_remove_mol.(acceleration_vector)
+    return sys
 end
 
 """
@@ -484,6 +490,7 @@ end
 
 The Nosé-Hoover integrator, a NVT simulator that extends velocity Verlet to control the
 temperature of the system.
+
 See [Evans and Holian 1985](https://doi.org/10.1063/1.449071).
 
 # Arguments
@@ -506,11 +513,12 @@ function NoseHoover(; dt, temperature, damping=100*dt, coupling=NoCoupling(), re
     return NoseHoover(dt, temperature, damping, coupling, Int(remove_CM_motion))
 end
 
-function simulate!(sys, sim::NoseHoover, n_steps::Integer; n_threads::Integer=Threads.nthreads())
+function simulate!(sys, sim::NoseHoover, n_steps::Integer;
+                     n_threads::Integer=Threads.nthreads(), run_loggers=true)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+    run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
 
@@ -519,7 +527,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer; n_threads::Integer=Th
     df = 3 * length(sys) - 3
 
     for step_n in 1:n_steps
-        v_half = sys.velocities .+ (remove_molar.(accels_t) .- (sys.velocities .* zeta)) .* (sim.dt / 2)
+        v_half = sys.velocities .+ (accel_remove_mol.(accels_t) .- (sys.velocities .* zeta)) .* (sim.dt / 2)
         old_coords = copy(sys.coords)
         sys.coords += v_half .* sim.dt
 
@@ -533,21 +541,24 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer; n_threads::Integer=Th
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities = (v_half .+ remove_molar.(accels_t_dt) .* (sim.dt / 2)) ./
+        sys.velocities = (v_half .+ accel_remove_mol.(accels_t_dt) .* (sim.dt / 2)) ./
                          (1 + (zeta * sim.dt / 2))
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
-        apply_coupling!(sys, sim.coupling, sim)
+        recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads)
 
-        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
-
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                                        n_threads=n_threads)
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                    n_threads=n_threads)
+        if recompute_forces
+            accels_t = accelerations(sys, neighbors; n_threads=n_threads)
+        else
             accels_t = accels_t_dt
         end
+
+        run_loggers && run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
     end
     return sys
 end
@@ -557,6 +568,7 @@ end
 
 A simulator for a parallel temperature replica exchange MD (T-REMD) simulation on a
 [`ReplicaSystem`](@ref).
+
 See [Sugita and Okamoto 1999](https://doi.org/10.1016/S0009-2614(99)01123-9).
 The corresponding [`ReplicaSystem`](@ref) should have the same number of replicas as
 the number of temperatures in the simulator.
@@ -608,7 +620,8 @@ function simulate!(sys::ReplicaSystem,
                     n_steps::Integer;
                     assign_velocities::Bool=false,
                     rng=Random.GLOBAL_RNG,
-                    n_threads::Integer=Threads.nthreads())
+                    n_threads::Integer=Threads.nthreads(),
+                    run_loggers=true)
     if sys.n_replicas != length(sim.simulators)
         throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
                 "and simulators in TemperatureREMD ($(length(sim.simulators))) do not match"))
@@ -620,13 +633,14 @@ function simulate!(sys::ReplicaSystem,
         end
     end
 
-    simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
+    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads, run_loggers=run_loggers)
 end
 
 """
     remd_exchange!(sys, sim, n, m; rng=Random.GLOBAL_RNG, n_threads=Threads.nthreads())
 
 Attempt an exchange of replicas `n` and `m` in a [`ReplicaSystem`](@ref) during a REMD simulation.
+
 Successful exchanges should exchange coordinates and velocities as appropriate.
 Returns acceptance quantity `Δ` and a `Bool` indicating whether the exchange was successful.
 """
@@ -636,12 +650,7 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
                         rng=Random.GLOBAL_RNG) where {D, G, T}
-    if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        k_b = sys.k * T(Unitful.Na)
-    else
-        k_b = sys.k
-    end
-
+    k_b = energy_add_mol(sys.k, sys.energy_units)
     T_n, T_m = sim.temperatures[n], sim.temperatures[m]
     β_n, β_m = inv(k_b * T_n), inv(k_b * T_m)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
@@ -670,6 +679,7 @@ end
 
 A simulator for a parallel Hamiltonian replica exchange MD (H-REMD) simulation on a
 [`ReplicaSystem`](@ref).
+
 The replicas are expected to have different Hamiltonians, i.e. different interactions.
 When calling [`simulate!`](@ref), the `assign_velocities` keyword argument determines
 whether to assign random velocities at the appropriate temperature for each replica.
@@ -712,7 +722,8 @@ function simulate!(sys::ReplicaSystem,
                     n_steps::Integer;
                     assign_velocities::Bool=false,
                     rng=Random.GLOBAL_RNG,
-                    n_threads::Integer=Threads.nthreads())
+                    n_threads::Integer=Threads.nthreads(),
+                    run_loggers = true)
     if sys.n_replicas != length(sim.simulators)
         throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
                 "and simulators in HamiltonianREMD ($(length(sim.simulators))) do not match"))
@@ -724,7 +735,7 @@ function simulate!(sys::ReplicaSystem,
         end
     end
     
-    simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
+    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads, run_loggers=run_loggers)
 end
 
 function remd_exchange!(sys::ReplicaSystem{D, G, T},
@@ -733,12 +744,7 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
                         rng=Random.GLOBAL_RNG) where {D, G, T}
-    if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        k_b = sys.k * T(Unitful.Na)
-    else
-        k_b = sys.k
-    end
-
+    k_b = energy_add_mol(sys.k, sys.energy_units)
     T_sim = sim.temperature
     β_sim = inv(k_b * T_sim)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
@@ -767,7 +773,7 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
 end
 
 """
-    simulate_remd!(sys, remd_sim, n_steps; rng=Random.GLOBAL_RNG, n_threads=Threads.nthreads())
+    simulate_remd!(sys, remd_sim, n_steps; rng=Random.GLOBAL_RNG, n_threads=Threads.nthreads(), run_loggers = true)
 
 Run a REMD simulation on a [`ReplicaSystem`](@ref) using a REMD simulator.
 """
@@ -775,7 +781,8 @@ function simulate_remd!(sys::ReplicaSystem,
                         remd_sim,
                         n_steps::Integer;
                         rng=Random.GLOBAL_RNG,
-                        n_threads::Integer=Threads.nthreads())
+                        n_threads::Integer=Threads.nthreads(),
+                        run_loggers=true)
     if sys.n_replicas != length(remd_sim.simulators)
         throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
             "and simulators in the REMD simulator ($(length(remd_sim.simulators))) do not match"))
@@ -796,7 +803,7 @@ function simulate_remd!(sys::ReplicaSystem,
     for cycle in 1:n_cycles
         @sync for idx in eachindex(remd_sim.simulators)
             Threads.@spawn simulate!(sys.replicas[idx], remd_sim.simulators[idx], cycle_length;
-                                     n_threads=thread_div[idx])
+                                     n_threads=thread_div[idx], run_loggers=run_loggers)
         end
 
         # Alternate checking even pairs 2-3/4-5/6-7/... and odd pairs 1-2/3-4/5-6/...
@@ -805,7 +812,7 @@ function simulate_remd!(sys::ReplicaSystem,
             n_attempts += 1
             m = n + 1
             Δ, exchanged = remd_exchange!(sys, remd_sim, n, m; rng=rng, n_threads=n_threads)
-            if exchanged && !isnothing(sys.exchange_logger)
+            if exchanged && !isnothing(sys.exchange_logger) && run_loggers
                 log_property!(sys.exchange_logger, sys, nothing, cycle * cycle_length;
                                     indices=(n, m), delta=Δ, n_threads=n_threads)
             end
@@ -815,11 +822,11 @@ function simulate_remd!(sys::ReplicaSystem,
     if remaining_steps > 0
         @sync for idx in eachindex(remd_sim.simulators)
             Threads.@spawn simulate!(sys.replicas[idx], remd_sim.simulators[idx], remaining_steps;
-                                     n_threads=thread_div[idx])
+                                     n_threads=thread_div[idx], run_loggers=run_loggers)
         end
     end
 
-    if !isnothing(sys.exchange_logger)
+    if !isnothing(sys.exchange_logger) && run_loggers
         finish_logs!(sys.exchange_logger; n_steps=n_steps, n_attempts=n_attempts)
     end
 
@@ -838,8 +845,6 @@ end
     MetropolisMonteCarlo(; <keyword arguments>)
 
 A Monte Carlo simulator that uses the Metropolis algorithm to sample the configuration space.
-`simulate!` for this simulator accepts an optional keyword argument `log_states::Bool=true` which 
-determines whether to run the loggers or not (for example, during equilibration).
 
 # Arguments
 - `temperature::T`: the temperature of the system.
@@ -852,24 +857,16 @@ struct MetropolisMonteCarlo{T, M}
     trial_args::Dict
 end
 
-function MetropolisMonteCarlo(;
-                              temperature::T,
-                              trial_moves::M,
-                              trial_args::Dict=Dict()) where {T, M}
-    return MetropolisMonteCarlo{T, M}(temperature, trial_moves, trial_args)
+function MetropolisMonteCarlo(; temperature, trial_moves, trial_args=Dict())
+    return MetropolisMonteCarlo(temperature, trial_moves, trial_args)
 end
 
 function simulate!(sys::System{D, G, T},
                    sim::MetropolisMonteCarlo,
                    n_steps::Integer;
                    n_threads::Integer=Threads.nthreads(),
-                   log_states::Bool=true) where {D, G, T}
-    if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        k_b = sys.k * T(Unitful.Na) 
-    else
-        k_b = sys.k
-    end
-
+                   run_loggers=true) where {D, G, T}
+    k_b = energy_add_mol(sys.k, sys.energy_units)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E_old = potential_energy(sys, neighbors; n_threads=n_threads)
     for i in 1:n_steps
@@ -881,22 +878,24 @@ function simulate!(sys::System{D, G, T},
         ΔE = E_new - E_old
         δ = ΔE / (k_b * sim.temperature)
         if δ < 0 || rand() < exp(-δ)
-            log_states && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=true,
+            run_loggers && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=true,
                                        energy_rate=E_new / (k_b * sim.temperature))
             E_old = E_new
         else
             sys.coords = coords_old
-            log_states && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=false,
+            run_loggers && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=false,
                                        energy_rate=E_old / (k_b * sim.temperature))
         end
     end
+    return sys
 end
 
 """
     random_uniform_translation!(sys::System; shift_size=oneunit(eltype(eltype(sys.coords))))
 
 Performs a random translation of the coordinates of a randomly selected atom in a [`System`](@ref).
-The translation is generated using a uniformly selected direction and uniformly selected length 
+
+The translation is generated using a uniformly selected direction and uniformly selected length
 in range [0, 1) scaled by `shift_size` which should have appropriate length units.
 """
 function random_uniform_translation!(sys::System{D, G, T};
@@ -911,9 +910,10 @@ end
 """
     random_normal_translation!(sys::System; shift_size=oneunit(eltype(eltype(sys.coords))))
 
-Performs a random translation of the coordinates of a randomly selected atom in a [`System`](@ref). 
-The translation is generated using a uniformly chosen direction and length selected from 
-the standard normal distribution i.e. with mean 0 and standard deviation 1, scaled by `shift_size` 
+Performs a random translation of the coordinates of a randomly selected atom in a [`System`](@ref).
+
+The translation is generated using a uniformly chosen direction and length selected from
+the standard normal distribution i.e. with mean 0 and standard deviation 1, scaled by `shift_size`
 which should have appropriate length units.
 """
 function random_normal_translation!(sys::System{D, G, T};

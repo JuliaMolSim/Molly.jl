@@ -1,5 +1,22 @@
 # Molly.jl release notes
 
+## v0.16.0 - May 2023
+
+### Breaking changes
+- `apply_coupling!` now returns whether the coupling has invalidated the currently stored forces, for example by changing the coordinates.
+- `find_neighbors` now takes another optional argument which determines whether the neighbor list should be forced to recompute, regardless of the step number.
+- The type parameters of `System`, `ReplicaSystem`, `AtomType` and `Langevin` are changed.
+
+### New features
+- The Monte Carlo barostat is added as `MonteCarloBarostat`, allowing pressure coupling during simulations.
+- The virial and pressure can be calculated for systems where only the pairwise interactions contribute to the virial using `virial` and `pressure`. Corresponding loggers are added as `VirialLogger` and `PressureLogger`.
+- The `scale_boundary`, `scale_coords!` and `molecule_centers` functions are added.
+- The `topology` keyword argument for `System` can provide information about which atoms are in the same molecule, with this information stored as a `MolecularTopology` when reading a `System` from a file. The corresponding keyword arguments `topology` and `replica_topology` are added to `ReplicaSystem`.
+- Multiple couplers can be given to the `coupling` argument of compatible simulators as a `Tuple` or a `NamedTuple`. `Langevin` is now compatible with couplers.
+- Warnings are given for skipped incompatible fields when reading OpenMM XML force field files. Using atom charges from residue templates is no longer required.
+- The `use_cell_list` keyword argument is added to the `System` constructor from files.
+- `Unitful.ustrip` is now defined for `CubicBoundary` and `RectangularBoundary`.
+
 ## v0.15.0 - Apr 2023
 
 The core of the package is rewritten to use CUDA.jl kernels on the GPU path for increased performance and GPU memory usage. Enzyme.jl is used along with Zygote.jl to differentiate through simulations on CPU and GPU for increased performance.

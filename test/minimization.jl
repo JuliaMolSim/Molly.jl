@@ -6,9 +6,9 @@
     ]
     sys = System(
         atoms=[Atom(σ=(0.4 / (2 ^ (1 / 6)))u"nm", ϵ=1.0u"kJ * mol^-1") for i in 1:3],
-        pairwise_inters=(LennardJones(),),
         coords=coords,
         boundary=CubicBoundary(5.0u"nm"),
+        pairwise_inters=(LennardJones(),),
     )
     sim = SteepestDescentMinimizer(tol=1.0u"kJ * mol^-1 * nm^-1")
 
@@ -27,9 +27,9 @@
     ]
     sys = System(
         atoms=[Atom(σ=0.4 / (2 ^ (1 / 6)), ϵ=1.0) for i in 1:3],
-        pairwise_inters=(LennardJones(force_units=NoUnits, energy_units=NoUnits),),
         coords=coords,
         boundary=CubicBoundary(5.0),
+        pairwise_inters=(LennardJones(force_units=NoUnits, energy_units=NoUnits),),
         force_units=NoUnits,
         energy_units=NoUnits,
     )
@@ -50,9 +50,9 @@
         ])
         sys = System(
             atoms=CuArray([Atom(σ=(0.4 / (2 ^ (1 / 6)))u"nm", ϵ=1.0u"kJ * mol^-1") for i in 1:3]),
-            pairwise_inters=(LennardJones(),),
             coords=coords,
             boundary=CubicBoundary(5.0u"nm"),
+            pairwise_inters=(LennardJones(),),
         )
         sim = SteepestDescentMinimizer(tol=1.0u"kJ * mol^-1 * nm^-1")
     

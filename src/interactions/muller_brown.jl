@@ -4,6 +4,7 @@ export MullerBrown
     MullerBrown(; A, a, b, c, x0, y0, force_units, energy_units)
 
 The Müller-Brown potential energy surface.
+
 The potential energy is defined as
 ```math
 V(x,y) = \sum_{n=1}^{4} A_k \exp[a_k(x-x_k^0)^2 + b_k(x-x_k^0)(y-y_k^0) + c_k(y-y_k^0)^2]

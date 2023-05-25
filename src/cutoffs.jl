@@ -100,23 +100,21 @@ Cutoff that interpolates the true potential and zero between an activation point
 and a cutoff point, using a cubic Hermite spline.
 """
 struct CubicSplineCutoff{D, S, I}
-    dist_cutoff::D
-    sqdist_cutoff::S
-    inv_sqdist_cutoff::I
     dist_activation::D
+    dist_cutoff::D
     sqdist_activation::S
     inv_sqdist_activation::I
+    sqdist_cutoff::S
+    inv_sqdist_cutoff::I
 end
 
 function CubicSplineCutoff(dist_activation, dist_cutoff)
     if dist_cutoff <= dist_activation
         error("the cutoff radius must be strictly larger than the activation radius")
     end
-
-    D, S, I = typeof.([dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2)])
-
-    return CubicSplineCutoff{D, S, I}(dist_cutoff, dist_cutoff^2, inv(dist_cutoff^2), dist_activation,
-                                        dist_activation^2, inv(dist_activation^2))
+    D, S, I = typeof(dist_cutoff), typeof(dist_cutoff^2), typeof(inv(dist_cutoff^2))
+    return CubicSplineCutoff{D, S, I}(dist_activation, dist_cutoff, dist_activation^2,
+                                      inv(dist_activation^2), dist_cutoff^2, inv(dist_cutoff^2))
 end
 
 cutoff_points(::Type{CubicSplineCutoff{D, S, I}}) where {D, S, I} = 2

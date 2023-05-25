@@ -60,10 +60,10 @@ Periodic boundary conditions are automatically used with the cubic box we define
 ```julia
 sys = System(
     atoms=atoms,
-    pairwise_inters=pairwise_inters,
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
     loggers=(
         temp=TemperatureLogger(10),
         coords=CoordinateLogger(10),
@@ -103,10 +103,15 @@ position(sys, 10)
 sys.atoms
 sys.coords
 sys.boundary
-sys.pairwise_inters
 sys.velocities
+sys.topology
+sys.pairwise_inters
 sys.neighbor_finder
 sys.loggers
+
+# For certain systems
+virial(sys)
+pressure(sys)
 ```
 
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this behaviour can be changed by giving the keyword argument `n_threads` to [`simulate!`](@ref).
@@ -142,10 +147,10 @@ simulator = VelocityVerlet(dt=0.002f0u"ps")
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=(LennardJones(),),
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=(LennardJones(),),
     loggers=(
         temp=TemperatureLogger(typeof(1.0f0u"K"), 10),
         coords=CoordinateLogger(typeof(1.0f0u"nm"), 10),
@@ -212,11 +217,11 @@ Now we can simulate as before.
 ```julia
 sys = System(
     atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
     pairwise_inters=pairwise_inters,
     specific_inter_lists=specific_inter_lists,
-    coords=coords,
-    velocities=velocities,
-    boundary=boundary,
     neighbor_finder=neighbor_finder,
     loggers=(
         temp=TemperatureLogger(10),
@@ -258,10 +263,10 @@ boundary = RectangularBoundary(1.0f0)
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=pairwise_inters,
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
     loggers=(coords=CoordinateLogger(Float32, 10; dims=2),),
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -287,7 +292,7 @@ visualize(
 The recommended way to run a macromolecular simulation is to read in a force field in [OpenMM XML format](http://docs.openmm.org/latest/userguide/application/05_creating_ffs.html) to a [`MolecularForceField`](@ref) and then read in a coordinate file in a format [supported by Chemfiles.jl](https://chemfiles.org/chemfiles/latest/formats.html).
 Files for common force fields can be found at [OpenMM](https://github.com/openmm/openmm) and [OpenMM force fields](https://github.com/openmm/openmmforcefields).
 This sets up a system in the same data structures as above and that is simulated in the same way.
-Here we carry out an energy minimization, simulate with a Langevin integrator and use a [`StructureWriter`](@ref) to write the trajectory as a PDB file.
+Here we carry out an energy minimization, simulate with a Langevin integrator in the NPT ensemble and use a [`StructureWriter`](@ref) to write the trajectory as a PDB file.
 ```julia
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff = MolecularForceField(
@@ -309,11 +314,13 @@ sys = System(
 minimizer = SteepestDescentMinimizer()
 simulate!(sys, minimizer)
 
-random_velocities!(sys, 298.0u"K")
+temp = 298.0u"K"
+random_velocities!(sys, temp)
 simulator = Langevin(
     dt=0.001u"ps",
-    temperature=298.0u"K",
+    temperature=temp,
     friction=1.0u"ps^-1",
+    coupling=MonteCarloBarostat(1.0u"bar", temp, sys.boundary),
 )
 
 simulate!(sys, simulator, 5_000)
@@ -357,9 +364,11 @@ However it is not thoroughly tested with respect to ligands or special residues 
 By default, terminal residues are renamed to match the appropriate templates.
 For example, the first (N-terminal) residue could be changed from "MET" to "NMET".
 This can be turned off by giving `rename_terminal_res=false` to [`System`](@ref) if the residue names in the input file are appropriate.
+Currently atom classes are not supported, only atom types.
+Residue patches, virtual sites, file includes and any force types other than `HarmonicBondForce`/`HarmonicAngleForce`/`PeriodicTorsionForce`/`NonbondedForce` are currently ignored.
 
 The Gromacs setup procedure should be considered experimental.
-Currently Ewald summation methods, constraint algorithms, pressure coupling and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
+Currently Ewald summation methods, constraint algorithms and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
 
 ## Enhanced sampling
 
@@ -385,13 +394,13 @@ n_replicas = 4
 
 rep_sys = ReplicaSystem(
     atoms=sys.atoms,
+    replica_coords=[copy(sys.coords) for _ in 1:n_replicas],
+    boundary=sys.boundary,
+    n_replicas=n_replicas,
     atoms_data=sys.atoms_data,
     pairwise_inters=sys.pairwise_inters,
     specific_inter_lists=sys.specific_inter_lists,
     general_inters=sys.general_inters,
-    n_replicas=n_replicas,
-    replica_coords=[copy(sys.coords) for _ in 1:n_replicas],
-    boundary=sys.boundary,
     neighbor_finder=sys.neighbor_finder,
     replica_loggers=[(temp=TemperatureLogger(10),) for _ in 1:n_replicas],
 )
@@ -437,9 +446,9 @@ pairwise_inters = (Coulomb(),)
 temperatures = [1198.0, 798.0, 398.0, 198.0, 98.0, 8.0]u"K"
 sys = System(
     atoms=atoms,
-    pairwise_inters=pairwise_inters,
     coords=coords,
     boundary=boundary,
+    pairwise_inters=pairwise_inters,
     loggers=(
         coords=CoordinateLogger(n_atoms, dims=n_dimensions(boundary)),
         montecarlo=MonteCarloLogger(),
@@ -562,10 +571,10 @@ simulator = VelocityVerlet(
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=pairwise_inters,
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
     neighbor_finder=neighbor_finder,
     loggers=(
         coords=CoordinateLogger(Float64, 10; dims=2),
@@ -600,6 +609,7 @@ axislegend()
 
 Molly is fairly opinionated about using [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) units as shown above: you don't have to use them, but it is better if you do.
 Any consistent unit scheme can be used, or no units at all.
+If you are not using units then no quantities can have Unitful annotations and you are responsible for ensuring a consistent unit system.
 Whilst you occasionally may run into friction with dimension mismatches, using units has the major advantages of catching whole classes of errors and letting you physically interpret the numbers in your system.
 The performance overhead of using units is minimal.
 Units are not currently compatible with differentiable simulations.
@@ -965,11 +975,13 @@ function Molly.simulate!(sys,
         # Ensure coordinates stay within the simulation box like this
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
-        # Example velocity update including appropriate unit conversion
-        sys.velocities += remove_molar.(accels_t .+ accels_t_dt) .* sim.dt / 2
+        # Example velocity update
+        # Includes appropriate unit conversion for when the force units are per mol
+        sys.velocities += Molly.accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
         # Apply coupling like this
-        apply_coupling!(sys, sim.coupling, sim)
+        recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads)
 
         # Remove center of mass motion like this
         remove_CM_motion!(sys)
@@ -978,7 +990,7 @@ function Molly.simulate!(sys,
         run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
         # Find new neighbors like this
-        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
     end
 
@@ -1018,11 +1030,7 @@ end
 ```
 To get the correct exchange rates, the units of the Boltzmann constant should be corrected when used in the exchange function:
 ```julia
-if dimension(sys.energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-    k_b = sys.k * T(Unitful.Na)
-else
-    k_b = sys.k
-end
+k_b = Molly.energy_add_mol(sys.k, sys.energy_units)
 ```
 The above function returns `Δ`, the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref), and a boolean indicating whether the exchange was successful.
 
@@ -1051,8 +1059,25 @@ The available couplers are:
 - [`AndersenThermostat`](@ref)
 - [`RescaleThermostat`](@ref)
 - [`BerendsenThermostat`](@ref)
-Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being [`NoCoupling`](@ref).
+- [`MonteCarloBarostat`](@ref)
+Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being [`NoCoupling`](@ref).
+Couplers are given to the `coupling` keyword argument during simulator construction:
+```julia
+temp = 300.0u"K"
+press = 1.0u"bar"
+thermostat = AndersenThermostat(temp, 1.0u"ps")
+barostat = MonteCarloBarostat(press, temp, sys.boundary)
+
+# Velocity Verlet with Andersen thermostat
+VelocityVerlet(dt=0.001u"ps", coupling=thermostat)
+
+# Velocity Verlet with Andersen thermostat and Monte Carlo barostat
+VelocityVerlet(dt=0.001u"ps", coupling=(thermostat, barostat))
+```
+
 The appropriate coupling to use will depend on the situation.
+For example, the [`MonteCarloBarostat`](@ref) for controlling pressure assumes a constant temperature but does not actively control the temperature.
+It should be used alongside a temperature coupling method such as the [`Langevin`](@ref) simulator or [`AndersenThermostat`](@ref) coupling.
 
 To define your own coupling method, first define the `struct`:
 ```julia
@@ -1062,13 +1087,17 @@ end
 ```
 Then, define the function that implements the coupling every time step:
 ```julia
-function apply_coupling!(sys, coupling::MyCoupler, sim)
+function apply_coupling!(sys, coupling::MyCoupler, sim, neighbors, step_n;
+                         n_threads=Threads.nthreads())
     # Do something to the simulation, e.g. scale the velocities
-    return sys
+    # Return whether the coupling has invalidated the currently stored forces,
+    #   for example by changing the coordinates
+    recompute_forces = false
+    return recompute_forces
 end
 ```
 The functions [`random_velocity`](@ref), [`maxwell_boltzmann`](@ref) and [`temperature`](@ref) may be useful here.
-To use your custom coupler, give it as the `coupling` argument to the simulator.
+To use your custom coupler, give it as the `coupling` argument to the simulator as above.
 
 ## Loggers
 
@@ -1178,11 +1207,11 @@ nf = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=0.6u"n
 sys = System(
     atoms=atoms,
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
-    neighbor_finder=nf,
+    velocities=velocities,
     pairwise_inters=pairwise_inters,
     specific_inter_lists=specific_inter_lists,
+    neighbor_finder=nf,
 )
 ```
 
@@ -1213,11 +1242,11 @@ logger = TimeCorrelationLogger(V, V, V_Type, V_Type, n_atoms, 1_000)
 sys = System(
     atoms=atoms,
     coords=sys.coords,
-    velocities=sys.velocities,
     boundary=boundary,
-    neighbor_finder=nf,
+    velocities=sys.velocities,
     pairwise_inters=pairwise_inters,
     specific_inter_lists=specific_inter_lists,
+    neighbor_finder=nf,
     loggers=(velocity_autocorrelation=logger,)
 )
 simulate!(sys, simulator, 100_000)
@@ -1264,12 +1293,13 @@ end
 Examples of three useful properties are given here: a matrix indicating atom pairs eligible for pairwise interactions, a matrix indicating atoms in a special arrangement such as 1-4 bonding, and a value determining how many time steps occur between each evaluation of the neighbor finder.
 Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
-function find_neighbors(s,
+function find_neighbors(sys,
                         nf::MyNeighborFinder,
                         current_neighbors=nothing,
-                        step_n::Integer=0;
+                        step_n::Integer=0,
+                        force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads())
-    if step_n % nf.n_steps == 0
+    if force_recompute || step_n % nf.n_steps == 0
         if isnothing(current_neighbors)
             neighbors = NeighborList()
         else

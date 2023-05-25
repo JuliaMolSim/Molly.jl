@@ -10,6 +10,7 @@ export
 """
 Generalized Born (GB) implicit solvent models augmented with the
 hydrophobic solvent accessible surface area (SA) term.
+
 Custom GBSA methods should sub-type this abstract type.
 """
 abstract type AbstractGBSA end
@@ -331,6 +332,7 @@ end
     ImplicitSolventOBC(atoms, atoms_data, bonds)
 
 Onufriev-Bashford-Case GBSA model.
+
 Should be used along with a [`Coulomb`](@ref) or [`CoulombReactionField`](@ref) interaction.
 The keyword argument `use_OBC2` determines whether to use parameter set
 I (`false`, the default) or II (`true`).
@@ -442,6 +444,7 @@ end
     ImplicitSolventGBN2(atoms, atoms_data, bonds)
 
 GBn2 solvation model.
+
 Should be used along with a [`Coulomb`](@ref) or [`CoulombReactionField`](@ref) interaction.
 """
 struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, TD, TM, DI} <: AbstractGBSA
@@ -631,6 +634,7 @@ end
 
 Calculate Born radii, gradients of Born radii and surface area overlap
 with respect to atomic distance.
+
 Custom GBSA methods should implement this function.
 """
 function born_radii_and_grad(inter::ImplicitSolventOBC, coords, boundary)

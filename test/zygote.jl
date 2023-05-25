@@ -24,7 +24,7 @@
     dists = collect(0.2:0.01:1.2)
     forces_direct = force_direct.(dists)
     forces_grad = force_grad.(dists)
-    @test all(isapprox.(forces_direct, forces_grad))
+    @test all(forces_direct .≈ forces_grad)
 end
 
 @testset "Differentiable simulation" begin
@@ -135,22 +135,22 @@ end
             cs = deepcopy(forward ? coords_dual : coords)
             vs = deepcopy(forward ? velocities_dual : velocities)
 
-            s = System(
+            sys = System(
                 atoms=gpu ? CuArray(atoms) : atoms,
+                coords=gpu ? CuArray(cs) : cs,
+                boundary=boundary,
+                velocities=gpu ? CuArray(vs) : vs,
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=sis ? (bonds, angles, torsions) : (),
                 general_inters=general_inters,
-                coords=gpu ? CuArray(cs) : cs,
-                velocities=gpu ? CuArray(vs) : vs,
-                boundary=boundary,
                 neighbor_finder=neighbor_finder,
                 force_units=NoUnits,
                 energy_units=NoUnits,
             )
 
-            simulate!(s, simulator, n_steps; n_threads=(parallel ? Threads.nthreads() : 1))
+            simulate!(sys, simulator, n_steps; n_threads=(parallel ? Threads.nthreads() : 1))
 
-            return mean_min_separation(s.coords, boundary)
+            return mean_min_separation(sys.coords, boundary)
         end
 
         return loss
@@ -244,11 +244,11 @@ end
 
             sys = System(
                 atoms=atoms,
+                coords=sys_ref.coords,
+                boundary=sys_ref.boundary,
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=specific_inter_lists,
                 general_inters=general_inters,
-                coords=sys_ref.coords,
-                boundary=sys_ref.boundary,
                 neighbor_finder=sys_ref.neighbor_finder,
                 force_units=NoUnits,
                 energy_units=NoUnits,
@@ -273,11 +273,11 @@ end
 
             sys = System(
                 atoms=atoms,
+                coords=sys_ref.coords,
+                boundary=sys_ref.boundary,
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=specific_inter_lists,
                 general_inters=general_inters,
-                coords=sys_ref.coords,
-                boundary=sys_ref.boundary,
                 neighbor_finder=sys_ref.neighbor_finder,
                 force_units=NoUnits,
                 energy_units=NoUnits,
@@ -301,11 +301,11 @@ end
 
             sys = System(
                 atoms=atoms,
+                coords=sys_ref.coords,
+                boundary=sys_ref.boundary,
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=specific_inter_lists,
                 general_inters=general_inters,
-                coords=sys_ref.coords,
-                boundary=sys_ref.boundary,
                 neighbor_finder=sys_ref.neighbor_finder,
                 force_units=NoUnits,
                 energy_units=NoUnits,

@@ -16,6 +16,8 @@ export
 """
     place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100)
 
+Generate random coordinates.
+
 Obtain `n_atoms` coordinates in bounding box `boundary` where no two
 points are closer than `min_dist`, accounting for periodic boundary conditions.
 The keyword argument `max_attempts` determines the number of failed tries after
@@ -62,6 +64,8 @@ end
 """
     place_diatomics(n_molecules, boundary, bond_length; min_dist=nothing,
                     max_attempts=100, aligned=false)
+
+Generate random diatomic molecule coordinates.
 
 Obtain coordinates for `n_molecules` diatomics in bounding box `boundary`
 where no two points are closer than `min_dist` and the bond length is `bond_length`,
@@ -121,13 +125,15 @@ function place_diatomics(n_molecules::Integer,
 end
 
 """
-    AtomType(type, element, mass, σ, ϵ)
+    AtomType(type, class, element, charge, mass, σ, ϵ)
 
 An atom type.
 """
-struct AtomType{M, S, E}
+struct AtomType{C, M, S, E}
     type::String
+    class::String # Currently this is not used
     element::String
+    charge::Union{C, Missing}
     mass::M
     σ::S
     ϵ::E
@@ -141,7 +147,7 @@ A residue type.
 struct ResidueType{C}
     name::String
     types::Dict{String, String}
-    charges::Dict{String, C}
+    charges::Dict{String, Union{C, Missing}}
     indices::Dict{String, Int}
 end
 
@@ -162,13 +168,14 @@ end
     MolecularForceField(T, ff_files...; units=true)
     MolecularForceField(atom_types, residue_types, bond_types, angle_types,
                         torsion_types, torsion_order, weight_14_coulomb,
-                        weight_14_lj)
+                        weight_14_lj, attributes_from_residue)
 
 A molecular force field.
+
 Read one or more OpenMM force field XML files by passing them to the constructor.
 """
 struct MolecularForceField{T, M, D, E, K}
-    atom_types::Dict{String, AtomType{M, D, E}}
+    atom_types::Dict{String, AtomType{T, M, D, E}}
     residue_types::Dict{String, ResidueType{T}}
     bond_types::Dict{Tuple{String, String}, HarmonicBond{K, D}}
     angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{E, T}}
@@ -176,6 +183,7 @@ struct MolecularForceField{T, M, D, E, K}
     torsion_order::String
     weight_14_coulomb::T
     weight_14_lj::T
+    attributes_from_residue::Vector{String}
 end
 
 function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=true)
@@ -187,6 +195,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     torsion_order = ""
     weight_14_coulomb = one(T)
     weight_14_lj = one(T)
+    attributes_from_residue = String[]
 
     for ff_file in ff_files
         ff_xml = parsexml(read(ff_file))
@@ -196,17 +205,20 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
             if entry_name == "AtomTypes"
                 for atom_type in eachelement(entry)
                     at_type = atom_type["name"]
-                    element = atom_type["element"]
-                    mass = units ? parse(T, atom_type["mass"])u"u" : parse(T, atom_type["mass"])
+                    at_class = atom_type["class"]
+                    element = haskey(atom_type, "element") ? atom_type["element"] : "?"
+                    ch = missing # Updated later or defined in residue
+                    atom_mass = units ? parse(T, atom_type["mass"])u"u" : parse(T, atom_type["mass"])
                     σ = units ? T(-1u"nm") : T(-1) # Updated later
                     ϵ = units ? T(-1u"kJ * mol^-1") : T(-1) # Updated later
-                    atom_types[at_type] = AtomType(at_type, element, mass, σ, ϵ)
+                    atom_types[at_type] = AtomType{T, typeof(atom_mass), typeof(σ), typeof(ϵ)}(
+                                                at_type, at_class, element, ch, atom_mass, σ, ϵ)
                 end
             elseif entry_name == "Residues"
                 for residue in eachelement(entry)
                     name = residue["name"]
                     types = Dict{String, String}()
-                    charges = Dict{String, T}()
+                    charges = Dict{String, Union{T, Missing}}()
                     indices = Dict{String, Int}()
                     index = 1
                     for atom_or_bond in eachelement(residue)
@@ -214,15 +226,25 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                         if atom_or_bond.name == "Atom"
                             atom_name = atom_or_bond["name"]
                             types[atom_name] = atom_or_bond["type"]
-                            charges[atom_name] = parse(T, atom_or_bond["charge"])
+                            if haskey(atom_or_bond, "charge")
+                                charges[atom_name] = parse(T, atom_or_bond["charge"])
+                            else
+                                charges[atom_name] = missing
+                            end
                             indices[atom_name] = index
                             index += 1
+                        elseif atom_or_bond.name == "VirtualSite"
+                            @warn "Virtual sites not currently supported, this entry will be ignored"
                         end
                     end
                     residue_types[name] = ResidueType(name, types, charges, indices)
                 end
             elseif entry_name == "HarmonicBondForce"
                 for bond in eachelement(entry)
+                    if haskey(bond, "class1")
+                        @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
+                        continue
+                    end
                     atom_type_1 = bond["type1"]
                     atom_type_2 = bond["type2"]
                     k = units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"])
@@ -231,6 +253,10 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 end
             elseif entry_name == "HarmonicAngleForce"
                 for angle in eachelement(entry)
+                    if haskey(angle, "class1")
+                        @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
+                        continue
+                    end
                     atom_type_1 = angle["type1"]
                     atom_type_2 = angle["type2"]
                     atom_type_3 = angle["type3"]
@@ -239,8 +265,12 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     angle_types[(atom_type_1, atom_type_2, atom_type_3)] = HarmonicAngle(k, θ0)
                 end
             elseif entry_name == "PeriodicTorsionForce"
-                torsion_order = entry["ordering"]
+                torsion_order = haskey(entry, "ordering") ? entry["ordering"] : "default"
                 for torsion in eachelement(entry)
+                    if haskey(torsion, "class1")
+                        @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
+                        continue
+                    end
                     proper = torsion.name == "Proper"
                     atom_type_1 = torsion["type1"]
                     atom_type_2 = torsion["type2"]
@@ -266,6 +296,10 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 weight_14_lj = parse(T, entry["lj14scale"])
                 for atom_or_attr in eachelement(entry)
                     if atom_or_attr.name == "Atom"
+                        if !haskey(atom_or_attr, "type")
+                            @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
+                            continue
+                        end
                         # Update previous atom types
                         atom_type = atom_or_attr["type"]
                         if !haskey(atom_types, atom_type)
@@ -273,13 +307,32 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             continue
                         end
                         partial_type = atom_types[atom_type]
+                        ch = haskey(atom_or_attr, "charge") ? parse(T, atom_or_attr["charge"]) : missing
                         σ = units ? parse(T, atom_or_attr["sigma"])u"nm" : parse(T, atom_or_attr["sigma"])
                         ϵ = units ? parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_attr["epsilon"])
-                        complete_type = AtomType(partial_type.type, partial_type.element,
-                                                 partial_type.mass, σ, ϵ)
+                        complete_type = AtomType{T, typeof(partial_type.mass), typeof(σ), typeof(ϵ)}(
+                                    partial_type.type, partial_type.class, partial_type.element,
+                                    ch, partial_type.mass, σ, ϵ)
                         atom_types[atom_type] = complete_type
+                    elseif atom_or_attr.name == "UseAttributeFromResidue"
+                        if !(atom_or_attr["name"] in attributes_from_residue)
+                            push!(attributes_from_residue, atom_or_attr["name"])
+                        end
+                        if atom_or_attr["name"] != "charge"
+                            @warn "UseAttributeFromResidue only currently supported for charge, " *
+                                  "this entry will be ignored"
+                        end
                     end
                 end
+            elseif entry_name == "Patches"
+                @warn "Residue patches not currently supported, this entry will be ignored"
+            elseif entry_name == "Include"
+                @warn "File includes not currently supported, this entry will be ignored"
+            elseif entry_name in ("RBTorsionForce", "CMAPTorsionForce", "GBSAOBCForce",
+                                  "CustomBondForce", "CustomAngleForce", "CustomTorsionForce",
+                                  "CustomNonbondedForce", "CustomGBForce", "CustomHbondForce",
+                                  "CustomManyParticleForce", "LennardJonesForce")
+                @warn "$entry_name entries not currently supported, this entry will be ignored"
             end
         end
     end
@@ -293,7 +346,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
         M, D, E, K = T, T, T, T
     end
     return MolecularForceField{T, M, D, E, K}(atom_types, residue_types, bond_types, angle_types,
-                torsion_types, torsion_order, weight_14_coulomb, weight_14_lj)
+            torsion_types, torsion_order, weight_14_coulomb, weight_14_lj, attributes_from_residue)
 end
 
 function MolecularForceField(ff_files::AbstractString...; kwargs...)
@@ -335,6 +388,7 @@ const standard_res_names = [keys(BioStructures.threeletter_to_aa)..., "HID", "HI
 
 Read a coordinate file in a file format readable by Chemfiles and apply a
 force field to it.
+
 Atom names should exactly match residue templates - no searching of residue
 templates is carried out.
 
@@ -343,15 +397,16 @@ templates is carried out.
 
 Read a Gromacs coordinate file and a Gromacs topology file with all
 includes collapsed into one file.
+
 Gromacs file reading should be considered experimental.
 The `implicit_solvent`, `kappa` and `rename_terminal_res` keyword arguments
 are not available when reading Gromacs files.
 
 # Arguments
-- `velocities=nothing`: the velocities of the atoms in the system, set to
-    zero by default.
 - `boundary=nothing`: the bounding box used for simulation, read from the
     file by default.
+- `velocities=nothing`: the velocities of the atoms in the system, set to
+    zero by default.
 - `loggers=()`: the loggers that record properties of interest during a
     simulation.
 - `units::Bool=true`: whether to use Unitful quantities.
@@ -362,6 +417,8 @@ are not available when reading Gromacs files.
     greater than `dist_cutoff`.
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
+- `use_cell_list::Bool=true`: whether to use [`CellListMapNeighborFinder`](@ref)
+    on CPU. If `false`, [`DistanceNeighborFinder`](@ref) is used.
 - `implicit_solvent=nothing`: specify a string to add an implicit solvent
     model, options are "obc1", "obc2" and "gbn2".
 - `kappa=0.0u"nm^-1"`: the kappa value for the implicit solvent model if one
@@ -372,14 +429,15 @@ are not available when reading Gromacs files.
 """
 function System(coord_file::AbstractString,
                 force_field::MolecularForceField;
-                velocities=nothing,
                 boundary=nothing,
+                velocities=nothing,
                 loggers=(),
                 units::Bool=true,
                 gpu::Bool=false,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
+                use_cell_list::Bool=true,
                 implicit_solvent=nothing,
                 kappa=0.0u"nm^-1",
                 rename_terminal_res::Bool=true)
@@ -461,14 +519,22 @@ function System(coord_file::AbstractString,
         end
     end
 
+    use_charge_from_residue = "charge" in force_field.attributes_from_residue
     for ai in 1:n_atoms
         atom_name = Chemfiles.name(Chemfiles.Atom(top, ai - 1))
         res = Chemfiles.residue_for_atom(top, ai - 1)
         res_id = get_res_id(res)
         res_name = residue_name(res, res_id_to_standard, rename_terminal_res)
         at_type = force_field.residue_types[res_name].types[atom_name]
-        ch = force_field.residue_types[res_name].charges[atom_name]
         at = force_field.atom_types[at_type]
+        if use_charge_from_residue
+            ch = force_field.residue_types[res_name].charges[atom_name]
+        else
+            ch = at.charge
+        end
+        if ismissing(ch)
+            error("atom of type ", at.type, " has not had charge set")
+        end
         solute = res_id_to_standard[res_id] || res_name in ("ACE", "NME")
         if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
             error("atom of type ", at.type, " has not had σ or ϵ set")
@@ -712,15 +778,24 @@ function System(coord_file::AbstractString,
         energy_units=energy_units,
     )
     if isnothing(implicit_solvent)
-        crf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(crf_solvent_dielectric),
-                                    use_neighbors=true, weight_special=force_field.weight_14_coulomb,
-                                    coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
-                                    force_units=force_units, energy_units=energy_units)
+        crf = CoulombReactionField(
+            dist_cutoff=T(dist_cutoff),
+            solvent_dielectric=T(crf_solvent_dielectric),
+            use_neighbors=true,
+            weight_special=force_field.weight_14_coulomb,
+            coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
+            force_units=force_units,
+            energy_units=energy_units,
+        )
     else
-        crf = Coulomb(cutoff=DistanceCutoff(T(dist_cutoff)), use_neighbors=true,
-                        weight_special=force_field.weight_14_coulomb,
-                        coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
-                        force_units=force_units, energy_units=energy_units)
+        crf = Coulomb(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=true,
+            weight_special=force_field.weight_14_coulomb,
+            coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
+            force_units=force_units,
+            energy_units=energy_units,
+        )
     end
     pairwise_inters = (lj, crf)
 
@@ -741,6 +816,9 @@ function System(coord_file::AbstractString,
             gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
             bonds.types,
         ))
+        topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
+    else
+        topology = nothing
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
@@ -797,10 +875,10 @@ function System(coord_file::AbstractString,
     coords = wrap_coords.(coords, (boundary_used,))
 
     atoms = [atoms...]
-    if gpu
+    if gpu || !use_cell_list
         neighbor_finder = DistanceNeighborFinder(
-            eligible=CuArray(eligible),
-            special=CuArray(special),
+            eligible=(gpu ? CuArray(eligible) : eligible),
+            special=(gpu ? CuArray(special) : special),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
@@ -847,13 +925,14 @@ function System(coord_file::AbstractString,
 
     return System(
         atoms=atoms,
+        coords=coords,
+        boundary=boundary_used,
+        velocities=vels,
         atoms_data=atoms_data,
+        topology=topology,
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
-        coords=coords,
-        velocities=vels,
-        boundary=boundary_used,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
@@ -864,14 +943,15 @@ end
 function System(T::Type,
                 coord_file::AbstractString,
                 top_file::AbstractString;
-                velocities=nothing,
                 boundary=nothing,
+                velocities=nothing,
                 loggers=(),
                 units::Bool=true,
                 gpu::Bool=false,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
-                center_coords::Bool=true)
+                center_coords::Bool=true,
+                use_cell_list::Bool=true)
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
     bondtypes = Dict{String, HarmonicBond}()
@@ -954,13 +1034,13 @@ function System(T::Type,
             attype = atomnames[c[2]]
             ch = parse(T, c[7])
             if units
-                mass = parse(T, c[8])u"u"
+                atom_mass = parse(T, c[8])u"u"
             else
-                mass = parse(T, c[8])
+                atom_mass = parse(T, c[8])
             end
             solute = c[4] in standard_res_names
             atom_index = length(atoms) + 1
-            push!(atoms, Atom(index=atom_index, charge=ch, mass=mass, σ=atomtypes[attype].σ,
+            push!(atoms, Atom(index=atom_index, charge=ch, mass=atom_mass, σ=atomtypes[attype].σ,
                                 ϵ=atomtypes[attype].ϵ, solute=solute))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=c[5], res_number=parse(Int, c[3]),
                                         res_name=c[4]))
@@ -1108,12 +1188,22 @@ function System(T::Type,
         special[j, i] = true
     end
 
-    lj = LennardJones(cutoff=DistanceCutoff(T(dist_cutoff)), use_neighbors=true,
-                        weight_special=T(0.5), force_units=force_units, energy_units=energy_units)
-    crf = CoulombReactionField(dist_cutoff=T(dist_cutoff), solvent_dielectric=T(crf_solvent_dielectric),
-                                use_neighbors=true, weight_special=T(0.5),
-                                coulomb_const=units ? T(coulombconst) : T(ustrip(coulombconst)),
-                                force_units=force_units, energy_units=energy_units)
+    lj = LennardJones(
+        cutoff=DistanceCutoff(T(dist_cutoff)),
+        use_neighbors=true,
+        weight_special=T(0.5),
+        force_units=force_units,
+        energy_units=energy_units,
+    )
+    crf = CoulombReactionField(
+        dist_cutoff=T(dist_cutoff),
+        solvent_dielectric=T(crf_solvent_dielectric),
+        use_neighbors=true,
+        weight_special=T(0.5),
+        coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
+        force_units=force_units,
+        energy_units=energy_units,
+    )
 
     if isnothing(boundary)
         box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
@@ -1139,6 +1229,9 @@ function System(T::Type,
             gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
             bonds.types,
         ))
+        topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
+    else
+        topology = nothing
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
@@ -1163,10 +1256,10 @@ function System(T::Type,
 
     atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ, solute=a.solute) for a in atoms]
 
-    if gpu
+    if gpu || !use_cell_list
         neighbor_finder = DistanceNeighborFinder(
-            eligible=CuArray(eligible),
-            special=CuArray(special),
+            eligible=(gpu ? CuArray(eligible) : eligible),
+            special=(gpu ? CuArray(special) : special),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
@@ -1197,12 +1290,13 @@ function System(T::Type,
 
     return System(
         atoms=atoms,
+        coords=coords,
+        boundary=boundary_used,
+        velocities=vels,
         atoms_data=atoms_data,
+        topology=topology,
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
-        coords=coords,
-        velocities=vels,
-        boundary=boundary_used,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
@@ -1239,6 +1333,7 @@ end
 
 Return a copy of a [`System`](@ref) with [`HarmonicPositionRestraint`](@ref)s added to restrain the
 atoms.
+
 The force constant `k` can be a single value or an array of equal length to the number of atoms
 in the system.
 The `atom_selector` function takes in each atom and atom data and determines whether to restrain
@@ -1269,17 +1364,19 @@ function add_position_restraints(sys,
     sis = (sys.specific_inter_lists..., restraints)
     return System(
         atoms=deepcopy(sys.atoms),
+        coords=deepcopy(sys.coords),
+        boundary=deepcopy(sys.boundary),
+        velocities=deepcopy(sys.velocities),
         atoms_data=deepcopy(sys.atoms_data),
+        topology=deepcopy(sys.topology),
         pairwise_inters=deepcopy(sys.pairwise_inters),
         specific_inter_lists=sis,
         general_inters=deepcopy(sys.general_inters),
-        coords=deepcopy(sys.coords),
-        velocities=deepcopy(sys.velocities),
-        boundary=deepcopy(sys.boundary),
+        constraints=deepcopy(sys.constraints),
         neighbor_finder=deepcopy(sys.neighbor_finder),
         loggers=deepcopy(sys.loggers),
+        k=sys.k,
         force_units=sys.force_units,
         energy_units=sys.energy_units,
-        k=sys.k,
     )
 end

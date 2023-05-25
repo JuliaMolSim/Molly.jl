@@ -8,9 +8,9 @@
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
         boundary=boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -71,11 +71,11 @@ end
     for n_threads in n_threads_list
         s = System(
             atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+            coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
+            boundary=boundary,
+            velocities=[random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
             atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR", element="Ar") for i in 1:n_atoms],
             pairwise_inters=(LennardJones(use_neighbors=true),),
-            coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
-            velocities=[random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
-            boundary=boundary,
             neighbor_finder=DistanceNeighborFinder(
                 eligible=trues(n_atoms, n_atoms),
                 n_steps=10,
@@ -171,9 +171,9 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=coords,
         boundary=boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -209,9 +209,9 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=coords,
         boundary=boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -250,11 +250,11 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        coords=coords,
+        boundary=boundary,
+        velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
         pairwise_inters=(LennardJones(use_neighbors=true),),
         specific_inter_lists=(bonds,),
-        coords=coords,
-        velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
-        boundary=boundary,
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -311,10 +311,10 @@ end
         s = System(
             atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"u", σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-            pairwise_inters=(inter,),
             coords=place_atoms(n_atoms, boundary; min_dist=0.2u"nm"),
-            velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
             boundary=boundary,
+            velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
+            pairwise_inters=(inter,),
             neighbor_finder=neighbor_finder,
             loggers=(
                 temp=TemperatureLogger(100),
@@ -338,8 +338,8 @@ end
     sys = System(
         atoms=atoms,
         coords=coords,
-        velocities=velocities,
         boundary=boundary,
+        velocities=velocities,
         general_inters=(MullerBrown(),),
         loggers=(coords=CoordinateLogger(100; dims=2),),
     )
@@ -350,7 +350,7 @@ end
     # Particle should end up at local minimum and stick due to no thermostat
     final_pos = values(sys.loggers.coords)[end][1]
     local_min = SVector(-0.05001082299878202, 0.46669410487256247)u"nm"
-    @test isapprox(final_pos, local_min, atol=1e-7u"nm")
+    @test isapprox(final_pos, local_min; atol=1e-7u"nm")
 end
 
 @testset "Units" begin
@@ -368,10 +368,10 @@ end
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=coords,
-        velocities=velocities,
         boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -388,10 +388,10 @@ end
 
     s_nounits = System(
         atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=ustrip_vec.(coords),
-        velocities=ustrip_vec.(velocities),
         boundary=CubicBoundary(ustrip.(boundary)),
+        velocities=ustrip_vec.(velocities),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -420,7 +420,7 @@ end
 
     final_energy = last(values(s.loggers.energy))
     final_energy_nounits = last(values(s_nounits.loggers.energy)) * u"kJ * mol^-1"
-    @test isapprox(final_energy, final_energy_nounits, atol=5e-4u"kJ * mol^-1")
+    @test isapprox(final_energy, final_energy_nounits; atol=5e-4u"kJ * mol^-1")
 end
 
 @testset "Position restraints" begin
@@ -436,10 +436,10 @@ end
 
         sys = System(
             atoms=gpu ? CuArray(atoms) : atoms,
-            atoms_data=atoms_data,
-            pairwise_inters=(LennardJones(),),
             coords=gpu ? CuArray(deepcopy(starting_coords)) : deepcopy(starting_coords),
             boundary=boundary,
+            atoms_data=atoms_data,
+            pairwise_inters=(LennardJones(),),
             loggers=(coords=CoordinateLogger(100),),
         )
 
@@ -485,11 +485,11 @@ end
 
     sys = System(
         atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
         pairwise_inters=(LennardJones(use_neighbors=true),),
         constraints=constraints,
-        coords=coords,
-        velocities=velocities,
-        boundary=boundary,
         neighbor_finder=neighbor_finder,
         loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
     )
@@ -557,11 +557,11 @@ end
 
     sys = System(
         atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
         pairwise_inters=(LennardJones(use_neighbors=true),),
         constraints=constraints,
-        coords=coords,
-        velocities=velocities,
-        boundary=boundary,
         neighbor_finder=neighbor_finder,
         loggers=(coords=CoordinateLogger(10),),
     )
@@ -590,10 +590,10 @@ end
     velocities = [random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
     s1 = System(
         atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        pairwise_inters=(LennardJones(use_neighbors=true),),
         coords=coords,
-        velocities=velocities,
         boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -628,8 +628,8 @@ end
     sys = System(
         atoms=atoms,
         coords=coords,
-        velocities=velocities,
         boundary=boundary,
+        velocities=velocities,
         pairwise_inters=(LennardJones(),),
         loggers=(temp=TemperatureLogger(1),),
     )
@@ -655,7 +655,7 @@ end
     pairwise_inters = (LennardJones(use_neighbors=true),)
 
     eligible = trues(n_atoms, n_atoms)
-    
+
     neighbor_finder = DistanceNeighborFinder(
         eligible=eligible,
         n_steps=10,
@@ -668,12 +668,12 @@ end
     repsys = ReplicaSystem(
         atoms=atoms,
         replica_coords=[copy(coords) for _ in 1:n_replicas],
-        replica_velocities=nothing,
-        n_replicas=n_replicas,
         boundary=boundary,
+        n_replicas=n_replicas,
+        replica_velocities=nothing,
         pairwise_inters=pairwise_inters,
-        replica_loggers=replica_loggers,
         neighbor_finder=neighbor_finder,
+        replica_loggers=replica_loggers,
     )
 
     @test !is_on_gpu(repsys)
@@ -684,6 +684,11 @@ end
     @test species_type(repsys) <: AtomView
     @test atomic_mass(repsys) == fill(atom_mass, n_atoms)
     @test atomic_mass(repsys, 5) == atom_mass
+    @test bounding_box(repsys) == SVector(
+        SVector(2.0, 0.0, 0.0)u"nm",
+        SVector(0.0, 2.0, 0.0)u"nm",
+        SVector(0.0, 0.0, 2.0)u"nm",
+    )
     show(devnull, repsys)
 
     temp_vals = [120.0u"K", 180.0u"K", 240.0u"K", 300.0u"K"]
@@ -741,12 +746,12 @@ end
     repsys = ReplicaSystem(
         atoms=atoms,
         replica_coords=[copy(coords) for _ in 1:n_replicas],
-        replica_velocities=nothing,
-        n_replicas=n_replicas,
         boundary=boundary,
+        n_replicas=n_replicas,
+        replica_velocities=nothing,
         replica_pairwise_inters=replica_pairwise_inters,
-        replica_loggers=replica_loggers,
         neighbor_finder=neighbor_finder,
+        replica_loggers=replica_loggers,
     )
 
     simulator = HamiltonianREMD(
@@ -795,12 +800,12 @@ end
         coords=coords,
         boundary=boundary,
         pairwise_inters=(Coulomb(), ),
+        neighbor_finder=neighbor_finder,
         loggers=(
             coords=CoordinateLogger(10), 
             mcl=MonteCarloLogger(),
             avgpe=AverageObservableLogger(potential_energy, typeof(atoms[1].ϵ), 10),
         ),
-        neighbor_finder=neighbor_finder,
     )
 
     simulator_uniform = MetropolisMonteCarlo(
@@ -815,8 +820,8 @@ end
         trial_args=Dict(:shift_size => 0.1u"nm"),
     )
 
-    @time simulate!(sys, simulator_uniform , n_steps; log_states=true)
-    @time simulate!(sys, simulator_gaussian, n_steps; log_states=true)
+    @time simulate!(sys, simulator_uniform , n_steps)
+    @time simulate!(sys, simulator_gaussian, n_steps)
 
     acceptance_rate = sys.loggers.mcl.n_accept / sys.loggers.mcl.n_trials
     @info "Acceptance Rate: $acceptance_rate"
@@ -844,6 +849,97 @@ end
     mean_distance = distance_sum / length(sys)
     wigner_seitz_radius = cbrt(3 * box_volume(sys.boundary) / (4π * length(sys)))
     @test wigner_seitz_radius < mean_distance < 2 * wigner_seitz_radius
+end
+
+@testset "Monte Carlo barostat" begin
+    # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
+    n_atoms = 25
+    n_steps = 1_000_000
+    atom_mass = 39.947u"u"
+    boundary = CubicBoundary(8.0u"nm")
+    temp = 288.15u"K"
+    press = 1.0u"bar"
+    dt = 0.0005u"ps"
+    friction = 1.0u"ps^-1"
+    lang = Langevin(dt=dt, temperature=temp, friction=friction)
+    atoms = fill(Atom(mass=atom_mass, σ=0.3345u"nm", ϵ=1.0451u"kJ * mol^-1"), n_atoms)
+    coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
+    n_log_steps = 500
+
+    box_size_wrapper(sys, neighbors; kwargs...) = sys.boundary.side_lengths[1]
+    BoundaryLogger(n_steps) = GeneralObservableLogger(box_size_wrapper, typeof(1.0u"nm"), n_steps)
+
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        pairwise_inters=(LennardJones(),),
+        loggers=(
+            temperature=TemperatureLogger(n_log_steps),
+            total_energy=TotalEnergyLogger(n_log_steps),
+            kinetic_energy=KineticEnergyLogger(n_log_steps),
+            potential_energy=PotentialEnergyLogger(n_log_steps),
+            virial=VirialLogger(n_log_steps),
+            pressure=PressureLogger(n_log_steps),
+            box_size=BoundaryLogger(n_log_steps),
+        ),
+    )
+
+    simulate!(deepcopy(sys), lang, 1_000; n_threads=1)
+    @time simulate!(sys, lang, n_steps; n_threads=1)
+
+    @test 280.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+    @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy  )) < 120.0u"kJ * mol^-1"
+    @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
+    @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
+    @test -5.0u"kJ * mol^-1" < mean(values(sys.loggers.virial)) < 5.0u"kJ * mol^-1"
+    @test 1.7u"bar" < mean(values(sys.loggers.pressure)) < 2.2u"bar"
+    @test 0.1u"bar" < std( values(sys.loggers.pressure)) < 0.5u"bar"
+    @test all(values(sys.loggers.box_size) .== 8.0u"nm")
+    @test sys.boundary == CubicBoundary(8.0u"nm")
+
+    barostat = MonteCarloBarostat(press, temp, boundary)
+    lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
+    vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
+
+    for sim in (lang_baro, vvand_baro)
+        for gpu in gpu_list
+            if gpu && sim == vvand_baro
+                continue
+            end
+            AT = gpu ? CuArray : Array
+
+            sys = System(
+                atoms=AT(atoms),
+                coords=AT(coords),
+                boundary=boundary,
+                pairwise_inters=(LennardJones(),),
+                loggers=(
+                    temperature=TemperatureLogger(n_log_steps),
+                    total_energy=TotalEnergyLogger(n_log_steps),
+                    kinetic_energy=KineticEnergyLogger(n_log_steps),
+                    potential_energy=PotentialEnergyLogger(n_log_steps),
+                    virial=VirialLogger(n_log_steps),
+                    pressure=PressureLogger(n_log_steps),
+                    box_size=BoundaryLogger(n_log_steps),
+                ),
+            )
+
+            simulate!(deepcopy(sys), sim, 1_000; n_threads=1)
+            @time simulate!(sys, sim, n_steps; n_threads=1)
+
+            @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+            @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy  )) < 120.0u"kJ * mol^-1"
+            @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
+            @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
+            @test -5.0u"kJ * mol^-1" < mean(values(sys.loggers.virial)) < 5.0u"kJ * mol^-1"
+            @test 0.8u"bar" < mean(values(sys.loggers.pressure)) < 1.2u"bar"
+            @test 0.1u"bar" < std( values(sys.loggers.pressure)) < 0.5u"bar"
+            @test 9.5u"nm" < mean(values(sys.loggers.box_size)) < 10.5u"nm"
+            @test 0.2u"nm" < std( values(sys.loggers.box_size)) < 1.0u"nm"
+            @test sys.boundary != CubicBoundary(8.0u"nm")
+        end
+    end
 end
 
 @testset "Different implementations" begin
@@ -898,11 +994,11 @@ end
 
         s = System(
             atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            velocities=velocities,
             pairwise_inters=pairwise_inters,
             specific_inter_lists=specific_inter_lists,
-            coords=coords,
-            velocities=velocities,
-            boundary=boundary,
             neighbor_finder=neighbor_finder,
         )
 

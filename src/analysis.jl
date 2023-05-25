@@ -13,6 +13,7 @@ export
     visualize(coord_logger, boundary, out_filepath; <keyword arguments>)
 
 Visualize a simulation as an animation.
+
 This function is only available when GLMakie is imported.
 GLMakie v0.8 or later should be used.
 It can take a while to run, depending on the length of the simulation and the
@@ -80,6 +81,7 @@ distances(coords, boundary) = norm.(displacements(coords, boundary))
     rdf(coords, boundary; npoints=200)
 
 Calculate the radial distribution function of a set of coordinates.
+
 This describes how density varies as a function of distance from each atom.
 Returns a list of distance bin centers and a list of the corresponding
 densities.
@@ -105,7 +107,8 @@ end
 """
     velocity_autocorr(vl, first_ind, last_ind)
 
-Calculate the autocorrelation function of velocity from the velocity logger. 
+Calculate the autocorrelation function of velocity from the velocity logger.
+
 This characterizes the similarity between velocities observed at different
 time instances.
 """
@@ -120,6 +123,7 @@ end
 
 Calculate the root-mean-square deviation (RMSD) of two sets of
 3D coordinates after superimposition by the Kabsch algorithm.
+
 Assumes the coordinates do not cross the bounding box, i.e. all
 coordinates in each set correspond to the same periodic image.
 """
@@ -147,6 +151,7 @@ sum_abs2(x) = sum(abs2, x)
     radius_gyration(coords, atoms)
 
 Calculate the radius of gyration of a set of coordinates.
+
 Assumes the coordinates do not cross the bounding box, i.e. all
 coordinates correspond to the same periodic image.
 """

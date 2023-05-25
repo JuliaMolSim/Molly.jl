@@ -11,6 +11,7 @@ export
     NoNeighborFinder()
 
 Placeholder neighbor finder that returns no neighbors.
+
 When using this neighbor finder, ensure that [`use_neighbors`](@ref) for the interactions
 returns `false`.
 """
@@ -18,61 +19,59 @@ struct NoNeighborFinder end
 
 """
     find_neighbors(system; n_threads=Threads.nthreads())
-    find_neighbors(system, neighbor_finder, current_neighbors=nothing,
-                    step_n=0; n_threads=Threads.nthreads())
+    find_neighbors(system, neighbor_finder, current_neighbors=nothing, step_n=0,
+                   force_recompute=false; n_threads=Threads.nthreads())
 
 Obtain a list of close atoms in a [`System`](@ref).
+
 Custom neighbor finders should implement this function.
 """
 find_neighbors(s::System; kwargs...) = find_neighbors(s, s.neighbor_finder; kwargs...)
 
-function find_neighbors(s::System,
-                        nf::NoNeighborFinder,
-                        current_neighbors=nothing,
-                        step_n::Integer=0;
-                        kwargs...)
-    return nothing
-end
+find_neighbors(s::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
 
 """
-    DistanceNeighborFinder(; eligible, special, n_steps, dist_cutoff)
+    DistanceNeighborFinder(; eligible, dist_cutoff, special, n_steps)
 
 Find close atoms by distance.
 """
 struct DistanceNeighborFinder{B, D}
     eligible::B
+    dist_cutoff::D
     special::B
     n_steps::Int
-    dist_cutoff::D
     neighbors::B # Used internally during neighbor calculation on the GPU
 end
 
 function DistanceNeighborFinder(;
                                 eligible,
+                                dist_cutoff,
                                 special=zero(eligible),
-                                n_steps=10,
-                                dist_cutoff)
+                                n_steps=10)
     return DistanceNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
-                eligible, special, n_steps, dist_cutoff, zero(eligible))
+                eligible, dist_cutoff, special, n_steps, zero(eligible))
 end
 
 function find_neighbors(s::System{D, false},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
-                        step_n::Integer=0;
+                        step_n::Integer=0,
+                        force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads()) where D
-    !iszero(step_n % nf.n_steps) && return current_neighbors
+    if !force_recompute && !iszero(step_n % nf.n_steps)
+        return current_neighbors
+    end
 
     sqdist_cutoff = nf.dist_cutoff ^ 2
 
     @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in eachindex(s)
         ci = s.coords[i]
         nbi = @view nf.eligible[:, i]
-        w14i = @view nf.special[:, i]
+        speci = @view nf.special[:, i]
         for j in 1:(i - 1)
             r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
             if r2 <= sqdist_cutoff && nbi[j]
-                nn = (Int32(j), Int32(i), w14i[j])
+                nn = (Int32(j), Int32(i), speci[j])
                 @reduce(neighbors_list = append!(Tuple{Int32, Int32, Bool}[], (nn,)))
             end
         end
@@ -114,9 +113,12 @@ lists_to_tuple_list(i, j, w) = (Int32(i), Int32(j), w)
 function find_neighbors(s::System{D, true},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
-                        step_n::Integer=0;
+                        step_n::Integer=0,
+                        force_recompute::Bool=false;
                         kwargs...) where D
-    !iszero(step_n % nf.n_steps) && return current_neighbors
+    if !force_recompute && !iszero(step_n % nf.n_steps)
+        return current_neighbors
+    end
 
     nf.neighbors .= false
     n_inters = n_atoms_to_n_pairs(length(s))
@@ -134,33 +136,37 @@ function find_neighbors(s::System{D, true},
 end
 
 """
-    TreeNeighborFinder(; eligible, special, n_steps, dist_cutoff)
+    TreeNeighborFinder(; eligible, dist_cutoff, special, n_steps)
 
 Find close atoms by distance using a tree search.
+
 Can not be used if one or more dimensions has infinite boundaries.
 Can not be used with [`TriclinicBoundary`](@ref).
 """
 struct TreeNeighborFinder{D}
     eligible::BitArray{2}
+    dist_cutoff::D
     special::BitArray{2}
     n_steps::Int
-    dist_cutoff::D
 end
 
 function TreeNeighborFinder(;
                             eligible,
-                            special=falses(size(eligible)),
-                            n_steps=10,
-                            dist_cutoff)
-    return TreeNeighborFinder{typeof(dist_cutoff)}(eligible, special, n_steps, dist_cutoff)
+                            dist_cutoff,
+                            special=zero(eligible),
+                            n_steps=10)
+    return TreeNeighborFinder{typeof(dist_cutoff)}(eligible, dist_cutoff, special, n_steps)
 end
 
 function find_neighbors(s::System,
                         nf::TreeNeighborFinder,
                         current_neighbors=nothing,
-                        step_n::Integer=0;
+                        step_n::Integer=0,
+                        force_recompute::Bool=false;
                         n_threads::Integer=Threads.nthreads())
-    !iszero(step_n % nf.n_steps) && return current_neighbors
+    if !force_recompute && !iszero(step_n % nf.n_steps)
+        return current_neighbors
+    end
 
     dist_unit = unit(first(first(s.coords)))
     bv = ustrip.(dist_unit, s.boundary)
@@ -170,11 +176,11 @@ function find_neighbors(s::System,
     @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in eachindex(s)
         ci = ustrip.(s.coords[i])
         nbi = @view nf.eligible[:, i]
-        w14i = @view nf.special[:, i]
+        speci = @view nf.special[:, i]
         idxs = inrange(btree, ci, dist_cutoff, true)
         for j in idxs
             if nbi[j] && i > j
-                nn = (Int32(j), Int32(i), w14i[j])
+                nn = (Int32(j), Int32(i), speci[j])
                 @reduce(neighbors_list = append!(Tuple{Int32, Int32, Bool}[], (nn,)))
             end
         end
@@ -184,9 +190,10 @@ function find_neighbors(s::System,
 end
 
 """
-    CellListMapNeighborFinder(; eligible, special, n_steps, dist_cutoff, x0, unit_cell)
+    CellListMapNeighborFinder(; eligible, dist_cutoff, special, n_steps, x0, unit_cell)
 
-Find close atoms by distance and store auxiliary arrays for in-place threading.
+Find close atoms by distance using a cell list algorithm from CellListMap.jl.
+
 `x0` and `unit_cell` are optional initial coordinates and system unit cell that improve the
 first approximation of the cell list structure.
 Can not be used if one or more dimensions has infinite boundaries.
@@ -206,8 +213,8 @@ julia> boundary
 CubicBoundary{Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}}(Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}[5.676 nm, 5.6627 nm, 6.2963 nm])
 
 julia> neighbor_finder = CellListMapNeighborFinder(
-           eligible=s.neighbor_finder.eligible, special=s.neighbor_finder.special, 
-           n_steps=10, dist_cutoff=1.2u"nm",
+           eligible=s.neighbor_finder.eligible, dist_cutoff=1.2u"nm",
+           special=s.neighbor_finder.special, n_steps=10,
            x0=coords, unit_cell=boundary,
        )
 CellListMapNeighborFinder{Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}, 3, Float64}
@@ -219,9 +226,9 @@ CellListMapNeighborFinder{Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋,
 """
 mutable struct CellListMapNeighborFinder{N, T}
     eligible::BitArray{2}
+    dist_cutoff::T
     special::BitArray{2}
     n_steps::Int
-    dist_cutoff::T
     # Auxiliary arrays for multi-threaded in-place updating of the lists
     cl::CellListMap.CellList{N, T}
     aux::CellListMap.AuxThreaded{N, T}
@@ -236,12 +243,12 @@ clm_box_arg(b::TriclinicBoundary) = hcat(b.basis_vectors...)
 # that the atomic density is similar to that of liquid water at ambient conditions.
 function CellListMapNeighborFinder(;
                                    eligible,
-                                   special=falses(size(eligible)),
+                                   dist_cutoff::T,
+                                   special=zero(eligible),
                                    n_steps=10,
                                    x0=nothing,
                                    unit_cell=nothing,
-                                   number_of_batches=(0, 0), # (0, 0): use default heuristic
-                                   dist_cutoff::T) where T
+                                   number_of_batches=(0, 0)) where T
     np = size(eligible, 1)
     if isnothing(unit_cell)
         twice_cutoff = nextfloat(2 * dist_cutoff)
@@ -263,7 +270,7 @@ function CellListMapNeighborFinder(;
     # Construct the cell list for the first time, to allocate 
     cl = CellList(x, box; parallel=true, nbatches=number_of_batches)
     return CellListMapNeighborFinder{3, T}(
-        eligible, special, n_steps, dist_cutoff,
+        eligible, dist_cutoff, special, n_steps,
         cl, CellListMap.AuxThreaded(cl), 
         [NeighborList(0, [(Int32(0), Int32(0), false)]) for _ in 1:CellListMap.nbatches(cl)],
     )
@@ -291,9 +298,12 @@ end
 function find_neighbors(s::System{D, G},
                         nf::CellListMapNeighborFinder,
                         current_neighbors=nothing,
-                        step_n::Integer=0;
-                        n_threads=Threads.nthreads()) where {D, G}
-    !iszero(step_n % nf.n_steps) && return current_neighbors
+                        step_n::Integer=0,
+                        force_recompute::Bool=false;
+                        n_threads::Integer=Threads.nthreads()) where {D, G}
+    if !force_recompute && !iszero(step_n % nf.n_steps)
+        return current_neighbors
+    end
 
     if isnothing(current_neighbors)
         neighbors = NeighborList()

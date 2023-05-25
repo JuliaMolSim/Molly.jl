@@ -107,10 +107,10 @@ inter = Gravity(G=convert(typeof(1.0u"km^3 * kg^-1 * d^-2"), Unitful.G))
 
 sys = System(
     atoms=[Atom(mass=m) for m in body_masses],
-    pairwise_inters=(inter,),
     coords=coords .+ (SVector(5e8, 5e8, 5e8)u"km",),
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=(inter,),
     loggers=(coords=CoordinateLogger(typeof(1.0u"km"), 10),),
     force_units=u"kg * km * d^-2",
     energy_units=u"kg * km^2 * d^-2",
@@ -233,10 +233,10 @@ neighbor_finder = DistanceNeighborFinder(
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=(lj,),
-    specific_inter_lists=(bonds, angles),
     coords=coords,
     boundary=boundary,
+    pairwise_inters=(lj,),
+    specific_inter_lists=(bonds, angles),
     neighbor_finder=neighbor_finder,
     loggers=(coords=CoordinateLogger(200),),
 )
@@ -365,10 +365,10 @@ loggers = (coords=CoordinateLogger(Float64, 1),)
 
 sys = System(
     atoms=atoms,
-    general_inters=(dftk_interaction,),
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    general_inters=(dftk_interaction,),
     loggers=loggers,
     force_units=NoUnits,
     energy_units=NoUnits,
@@ -482,10 +482,10 @@ simulator = VelocityVerlet(
 
 sys = System(
     atoms=atoms,
-    pairwise_inters=pairwise_inters,
     coords=coords,
-    velocities=velocities,
     boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
     neighbor_finder=neighbor_finder,
     loggers=(
         coords=CoordinateLogger(Float64, 20; dims=2),

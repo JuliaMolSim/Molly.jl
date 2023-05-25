@@ -23,6 +23,11 @@
     @test s.boundary == CubicBoundary(3.7146u"nm")
     show(devnull, first(s.atoms))
 
+    @test length(s.topology.atom_molecule_inds) == length(s) == 5191
+    @test s.topology.atom_molecule_inds[10] == 1
+    @test length(s.topology.molecule_atom_counts) == 1678
+    @test s.topology.molecule_atom_counts[1] == 164
+
     s.velocities = [random_velocity(mass(a), temp) .* 0.01 for a in s.atoms]
     @time simulate!(s, simulator, n_steps; n_threads=1)
 
@@ -33,8 +38,9 @@
 end
 
 @testset "Peptide Float32 no units" begin
-    n_steps = 100
+    n_steps = 1_000
     temp = 298.0f0
+    press = Float32(ustrip(u"u * nm^-1 * ps^-2", 1.0f0u"bar"))
     s = System(
         Float32,
         joinpath(data_dir, "5XER", "gmx_coords.gro"),
@@ -46,13 +52,15 @@ end
         ),
         units=false,
     )
-    simulator = VelocityVerlet(
-        dt=0.0002f0,
-        coupling=AndersenThermostat(temp, 10.0f0),
-    )
+    thermostat = AndersenThermostat(temp, 10.0f0)
+    barostat = MonteCarloBarostat(press, temp, s.boundary; n_steps=20)
+    simulator = VelocityVerlet(dt=0.0002f0, coupling=(thermostat, barostat))
 
-    s.velocities = [random_velocity(mass(a), Float32(temp)) .* 0.01f0 for a in s.atoms]
+    s.velocities = [random_velocity(mass(a), temp) .* 0.01f0 for a in s.atoms]
+    simulate!(deepcopy(s), simulator, 100; n_threads=1)
     @time simulate!(s, simulator, n_steps; n_threads=1)
+    @test s.boundary != CubicBoundary(3.7146f0)
+    @test 3.6f0 < s.boundary.side_lengths[1] < 3.8f0
 end
 
 @testset "OpenMM protein comparison" begin
@@ -61,8 +69,12 @@ end
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; center_coords=false)
     neighbors = find_neighbors(sys)
 
-    @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == length(sys)
+    @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 15954
     @test count(i -> is_heavy_atom(sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 5502
+    @test length(sys.topology.atom_molecule_inds) == length(sys) == 15954
+    @test sys.topology.atom_molecule_inds[10] == 1
+    @test length(sys.topology.molecule_atom_counts) == 4929
+    @test sys.topology.molecule_atom_counts[1] == 1170
 
     for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul", "all")
         if inter == "all"
@@ -91,10 +103,10 @@ end
 
         sys_part = System(
             atoms=sys.atoms,
-            pairwise_inters=pin,
-            specific_inter_lists=sils,
             coords=sys.coords,
             boundary=sys.boundary,
+            pairwise_inters=pin,
+            specific_inter_lists=sils,
             neighbor_finder=sys.neighbor_finder,
         )
 

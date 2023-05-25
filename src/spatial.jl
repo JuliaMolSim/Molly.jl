@@ -6,6 +6,7 @@ export
     TriclinicBoundary,
     box_volume,
     box_center,
+    scale_boundary,
     random_coord,
     vector_1D,
     vector,
@@ -17,14 +18,19 @@ export
     random_velocities!,
     bond_angle,
     torsion_angle,
-    remove_CM_motion!
+    remove_CM_motion!,
+    virial,
+    pressure,
+    molecule_centers,
+    scale_coords!
 
 """
     CubicBoundary(x, y, z)
     CubicBoundary(x)
 
-Cubic 3D bounding box defined by 3 side lengths.
-If one length is given then all sides will have that length.
+Cubic 3D bounding box defined by three side lengths.
+
+If one length is given then all three sides will have that length.
 Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct CubicBoundary{T}
@@ -48,8 +54,9 @@ Base.lastindex(b::CubicBoundary) = 3
     RectangularBoundary(x, y)
     RectangularBoundary(x)
 
-Rectangular 2D bounding box defined by 2 side lengths.
-If one length is given then all sides will have that length.
+Rectangular 2D bounding box defined by two side lengths.
+
+If one length is given then both sides will have that length.
 Setting one or more values to `Inf` gives no boundary in that dimension.
 """
 struct RectangularBoundary{T}
@@ -71,14 +78,15 @@ Base.lastindex(b::RectangularBoundary) = 2
 
 """
     TriclinicBoundary(v1, v2, v3; approx_images=true)
+    TriclinicBoundary(SVector(v1, v2, v3); approx_images=true)
     TriclinicBoundary(SVector(l1, l2, l3), SVector(α, β, γ); approx_images=true)
     TriclinicBoundary(arr; approx_images=true)
 
 Triclinic 3D bounding box defined by 3 `SVector{3}` basis vectors or basis vector
 lengths and angles α/β/γ in radians.
+
 The first basis vector must point along the x-axis and the second must lie in the
 xy plane.
-
 An approximation is used to find the closest periodic image when using the
 minimum image convention.
 The approximation is correct for distances shorter than half the shortest box
@@ -91,10 +99,10 @@ Not currently compatible with automatic differentiation using Zygote.
 """
 struct TriclinicBoundary{T, A, D, I}
     basis_vectors::SVector{3, SVector{3, D}}
-    reciprocal_size::SVector{3, I}
     α::T
     β::T
     γ::T
+    reciprocal_size::SVector{3, I}
     tan_bprojyz_cprojyz::T
     tan_c_cprojxy::T
     cos_a_cprojxy::T
@@ -132,7 +140,7 @@ function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
     a_cprojxy = bond_angle(bv[1], SVector(bv[3][1], bv[3][2], zero(bv[3][3])))
     tan_a_b = tan(bond_angle(bv[1], bv[2]))
     return TriclinicBoundary{typeof(α), approx_images, eltype(eltype(bv)), eltype(reciprocal_size)}(
-                                bv, reciprocal_size, α, β, γ, tan_bprojyz_cprojyz, tan_c_cprojxy,
+                                bv, α, β, γ, reciprocal_size, tan_bprojyz_cprojyz, tan_c_cprojxy,
                                 cos(a_cprojxy), sin(a_cprojxy), tan_a_b)
 end
 
@@ -181,6 +189,11 @@ float_type(b::TriclinicBoundary{T}) where {T} = T
 length_type(b::Union{CubicBoundary{T}, RectangularBoundary{T}}) where {T} = T
 length_type(b::TriclinicBoundary{T, A, D}) where {T, A, D} = D
 
+Unitful.ustrip(b::CubicBoundary) = CubicBoundary(ustrip.(b.side_lengths))
+Unitful.ustrip(u::Unitful.Units, b::CubicBoundary) = CubicBoundary(ustrip.(u, b.side_lengths))
+Unitful.ustrip(b::RectangularBoundary) = RectangularBoundary(ustrip.(b.side_lengths))
+Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(ustrip.(u, b.side_lengths))
+
 function AtomsBase.bounding_box(b::CubicBoundary)
     z = zero(b[1])
     bb = SVector{3}([
@@ -219,6 +232,7 @@ box_volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
     box_center(boundary)
 
 Calculate the center of a bounding box.
+
 Dimensions with infinite length return zero.
 """
 function box_center(b::Union{CubicBoundary, RectangularBoundary})
@@ -226,6 +240,20 @@ function box_center(b::Union{CubicBoundary, RectangularBoundary})
 end
 
 box_center(b::TriclinicBoundary) = sum(b.basis_vectors) / 2
+
+"""
+    scale_boundary(boundary, scale_factor)
+
+Scale the sides of a bounding box by a scaling factor.
+
+For a 3D bounding box the volume scales as the cube of the scaling factor.
+"""
+scale_boundary(b::CubicBoundary, scale) = CubicBoundary(b.side_lengths .* scale)
+scale_boundary(b::RectangularBoundary, scale) = RectangularBoundary(b.side_lengths .* scale)
+
+function scale_boundary(b::TriclinicBoundary, scale)
+    return TriclinicBoundary(b[1] .* scale, b[2] .* scale, b[3] .* scale)
+end
 
 # The minimum cubic box surrounding the bounding box, used for visualization
 cubic_bounding_box(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
@@ -285,6 +313,7 @@ end
 
 Displacement between two 1D coordinate values from c1 to c2, accounting for
 periodic boundary conditions in a [`CubicBoundary`](@ref) or [`RectangularBoundary`](@ref).
+
 The minimum image convention is used, so the displacement is to the closest
 version of the coordinate accounting for the periodic boundaries.
 """
@@ -301,6 +330,7 @@ end
 
 Displacement between two coordinate values from c1 to c2, accounting for
 periodic boundary conditions.
+
 The minimum image convention is used, so the displacement is to the closest
 version of the coordinates accounting for the periodic boundaries.
 For the [`TriclinicBoundary`](@ref) an approximation is used to find the closest
@@ -486,6 +516,7 @@ acosbound(x::Real) = acos(clamp(x, -1, 1))
 
 Calculate the bond or pseudo-bond angle in radians between three
 coordinates or two vectors.
+
 The angle between j→i and j→k is returned in the range 0 to π.
 """
 function bond_angle(coords_i, coords_j, coords_k, boundary)
@@ -504,6 +535,7 @@ end
 
 Calculate the torsion angle in radians defined by four coordinates or
 three vectors.
+
 The angle between the planes defined by atoms (i, j, k) and (j, k, l) is
 returned in the range -π to π.
 """
@@ -537,5 +569,210 @@ function remove_CM_motion!(sys)
     cm_momentum = sum_svec(Array(sys.velocities .* atom_masses))
     cm_velocity = cm_momentum / sum(Array(atom_masses))
     sys.velocities = sys.velocities .- (cm_velocity,)
+    return sys
+end
+
+@doc raw"""
+    virial(sys, neighbors=nothing)
+
+Calculate the virial of a system.
+
+The virial is defined as
+```math
+\Xi = -\frac{1}{2} \sum_{i,j>i} r_{ij} \cdot F_{ij}
+```
+If the interactions use neighbor lists, the neighbors should be computed
+first and passed to the function.
+
+This should only be used on systems containing just pairwise interactions, or
+where the specific interactions, general interactions and constraints do not
+contribute to the virial.
+Not currently compatible with automatic differentiation using Zygote.
+"""
+function virial(sys, neighbors=nothing; kwargs...)
+    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
+    pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
+    return virial(sys, neighbors, pairwise_inters_nonl, pairwise_inters_nl)
+end
+
+@inbounds function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
+                            pairwise_inters_nl) where {D, G, T}
+    if G
+        coords, atoms = Array(sys.coords), Array(sys.atoms)
+        if isnothing(neighbors_dev)
+            neighbors = neighbors_dev
+        else
+            neighbors = NeighborList(neighbors_dev.n, Array(neighbors_dev.list))
+        end
+    else
+        coords, atoms = sys.coords, sys.atoms
+        neighbors = neighbors_dev
+    end
+
+    boundary = sys.boundary
+    v = zero(T) * sys.energy_units
+
+    if length(pairwise_inters_nonl) > 0
+        n_atoms = length(sys)
+        for i in 1:n_atoms
+            for j in (i + 1):n_atoms
+                dr = vector(coords[i], coords[j], boundary)
+                f = force(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
+                          atoms[j], boundary)
+                for inter in pairwise_inters_nonl[2:end]
+                    f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
+                end
+                v += dot(f, dr)
+            end
+        end
+    end
+
+    if length(pairwise_inters_nl) > 0
+        if isnothing(neighbors)
+            error("an interaction uses the neighbor list but neighbors is nothing")
+        end
+        for ni in eachindex(neighbors)
+            i, j, special = neighbors[ni]
+            dr = vector(coords[i], coords[j], boundary)
+            f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
+                      atoms[j], boundary, special)
+            for inter in pairwise_inters_nl[2:end]
+                f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary,
+                           special)
+            end
+            v += dot(f, dr)
+        end
+    end
+
+    return -v / 2
+end
+
+@doc raw"""
+    pressure(sys, neighbors=nothing)
+
+Calculate the pressure of a system.
+
+The pressure is defined as
+```math
+P = \frac{1}{V} \left( NkT - \frac{2}{D} \Xi \right)
+```
+where `V` is the system volume, `N` is the number of atoms, `k` is the Boltzmann constant,
+`T` is the system temperature, `D` is the number of dimensions and `Ξ` is the virial
+calculated using [`virial`](@ref).
+If the interactions use neighbor lists, the neighbors should be computed
+first and passed to the function.
+
+This should only be used on systems containing just pairwise interactions, or
+where the specific interactions, general interactions and constraints do not
+contribute to the pressure.
+Not compatible with infinite boundaries.
+Not currently compatible with automatic differentiation using Zygote.
+"""
+function pressure(sys::AbstractSystem{D}, neighbors=nothing; kwargs...) where D
+    if has_infinite_boundary(sys.boundary)
+        error("pressure calculation not compatible with infinite boundaries")
+    end
+    NkT = length(sys) * sys.k * temperature(sys)
+    vir = energy_remove_mol(virial(sys, neighbors))
+    P = (NkT - (2 * vir) / D) / box_volume(sys.boundary)
+    if sys.energy_units == NoUnits || D != 3
+        # If implied energy units are (u * nm^2 * ps^-2) and everything is
+        #   consistent then this has implied units of (u * nm^-1 * ps^-2)
+        #   for 3 dimensions and (u * ps^-2) for 2 dimensions
+        return P
+    else
+        # Sensible unit to return by default for 3 dimensions
+        return uconvert(u"bar", P)
+    end
+end
+
+"""
+    molecule_centers(coords, boundary, topology)
+
+Calculate the coordinates of the center of each molecule in a system.
+
+Accounts for periodic boundary conditions by using the circular mean.
+If `topology=nothing` then the coordinates are returned.
+
+Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
+Not currently compatible with automatic differentiation using Zygote.
+"""
+function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topology) where {D, C}
+    if isnothing(topology)
+        return coords
+    elseif boundary isa TriclinicBoundary
+        error("calculating molecule centers is not compatible with a TriclinicBoundary")
+    else
+        T = float_type(boundary)
+        pit = T(π)
+        twopit = 2 * pit
+        n_molecules = length(topology.molecule_atom_counts)
+        unit_circle_angles = broadcast(coords, Ref(boundary.side_lengths)) do c, sl
+            (c ./ sl) .* twopit .- pit # Run -π to π
+        end
+        mol_sin_sums = zeros(SVector{D, T}, n_molecules)
+        mol_cos_sums = zeros(SVector{D, T}, n_molecules)
+        for (uca, mi) in zip(unit_circle_angles, topology.atom_molecule_inds)
+            mol_sin_sums[mi] += sin.(uca)
+            mol_cos_sums[mi] += cos.(uca)
+        end
+        frac_centers = zeros(SVector{D, T}, n_molecules)
+        for mi in 1:n_molecules
+            frac_centers[mi] = (atan.(mol_sin_sums[mi], mol_cos_sums[mi]) .+ pit) ./ twopit
+        end
+        return broadcast((c, b) -> c .* b, frac_centers, Ref(boundary.side_lengths))
+    end
+end
+
+function molecule_centers(coords::CuArray, boundary, topology)
+    return CuArray(molecule_centers(Array(coords), boundary, topology))
+end
+
+"""
+    scale_coords!(sys, scale_factor; ignore_molecules=false)
+
+Scale the coordinates and bounding box of a system by a scaling factor.
+
+Velocities are not scaled.
+If the topology of the system is set then atoms in the same molecule will be
+moved by the same amount according to the center of coordinates of the molecule.
+This can be disabled with `ignore_molecules=true`.
+
+Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
+Not currently compatible with automatic differentiation using Zygote.
+"""
+function scale_coords!(sys, scale_factor; ignore_molecules=false)
+    if ignore_molecules || isnothing(sys.topology)
+        sys.boundary = scale_boundary(sys.boundary, scale_factor)
+        sys.coords = sys.coords .* scale_factor
+    elseif sys.boundary isa TriclinicBoundary
+        error("scaling coordinates by molecule is not compatible with a TriclinicBoundary")
+    else
+        atom_molecule_inds = sys.topology.atom_molecule_inds
+        coords_nounits = Array(ustrip_vec.(sys.coords))
+        coord_units = unit(eltype(eltype(sys.coords)))
+        boundary_nounits = ustrip(coord_units, sys.boundary)
+        mol_centers = molecule_centers(coords_nounits, boundary_nounits, sys.topology)
+        # Shift molecules to the center of the box and wrap
+        # This puts them all in the same periodic image which is required when scaling
+        # This won't work if the molecule can't fit in one box when centered,
+        #   but that would likely be a pathological case anyway
+        center_shifts = Ref(box_center(boundary_nounits)) .- mol_centers
+        for i in eachindex(sys)
+            coords_nounits[i] = wrap_coords(
+                    coords_nounits[i] .+ center_shifts[atom_molecule_inds[i]], boundary_nounits)
+        end
+        # Move all atoms in a molecule by the same amount according to the molecule center
+        # Then move the atoms back to the molecule center and wrap in the scaled boundary
+        shift_vecs = mol_centers .* (scale_factor - 1)
+        sys.boundary = scale_boundary(sys.boundary, scale_factor)
+        boundary_nounits = ustrip(sys.boundary)
+        for i in eachindex(sys)
+            mi = atom_molecule_inds[i]
+            coords_nounits[i] = wrap_coords(
+                    coords_nounits[i] .+ shift_vecs[mi] .- center_shifts[mi], boundary_nounits)
+        end
+        sys.coords = coords_nounits * coord_units
+    end
     return sys
 end

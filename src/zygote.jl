@@ -49,34 +49,35 @@ function Base.:+(x::Atom{T, T, T, T}, y::NamedTuple{(:index, :charge, :mass, :σ
     )
 end
 
-function Base.:+(r::Base.RefValue{Any}, y::NamedTuple{(:atoms, :atoms_data, :masses,
-                 :pairwise_inters, :specific_inter_lists, :general_inters, :constraints,
-                 :coords, :velocities, :boundary, :neighbor_finder, :loggers, :force_units,
-                 :energy_units, :k)})
+function Base.:+(r::Base.RefValue{Any}, y::NamedTuple{(:atoms, :coords, :boundary,
+                 :velocities, :atoms_data, :topology, :pairwise_inters, :specific_inter_lists,
+                 :general_inters, :constraints, :neighbor_finder, :loggers, :k, :force_units,
+                 :energy_units, :masses)})
     x = r.x
     (
         atoms=Zygote.accum(x.atoms, y.atoms),
+        coords=Zygote.accum(x.coords, y.coords),
+        boundary=nothing,
+        velocities=Zygote.accum(x.velocities, y.velocities),
         atoms_data=Zygote.accum(x.atoms_data, y.atoms_data),
-        masses=Zygote.accum(x.masses, y.masses),
+        topology=nothing,
         pairwise_inters=Zygote.accum(x.pairwise_inters, y.pairwise_inters),
         specific_inter_lists=Zygote.accum(x.specific_inter_lists, y.specific_inter_lists),
         general_inters=Zygote.accum(x.general_inters, y.general_inters),
         constraints=Zygote.accum(x.constraints, y.constraints),
-        coords=Zygote.accum(x.coords, y.coords),
-        velocities=Zygote.accum(x.velocities, y.velocities),
-        boundary=nothing,
         neighbor_finder=nothing,
         loggers=nothing,
+        k=Zygote.accum(x.k, y.k),
         force_units=nothing,
         energy_units=nothing,
-        k=Zygote.accum(x.k, y.k),
+        masses=Zygote.accum(x.masses, y.masses),
     )
 end
 
-function Base.:+(y::NamedTuple{(:atoms, :atoms_data, :masses,
-                 :pairwise_inters, :specific_inter_lists, :general_inters, :constraints,
-                 :coords, :velocities, :boundary, :neighbor_finder, :loggers, :force_units,
-                 :energy_units, :k)}, r::Base.RefValue{Any})
+function Base.:+(y::NamedTuple{(:atoms, :coords, :boundary,
+                 :velocities, :atoms_data, :topology, :pairwise_inters, :specific_inter_lists,
+                 :general_inters, :constraints, :neighbor_finder, :loggers, :k, :force_units,
+                 :energy_units, :masses)}, r::Base.RefValue{Any})
     return r + y
 end
 
@@ -688,7 +689,7 @@ end
 end
 
 # Use fast broadcast path on CPU
-for op in (:+, :-, :*, :/, :mass, :charge, :remove_molar, :ustrip, :ustrip_vec, :wrap_coords,
+for op in (:+, :-, :*, :/, :mass, :charge, :accel_remove_mol, :ustrip, :ustrip_vec, :wrap_coords,
             :born_radii_loop_OBC, :get_i1, :get_i2, :get_I, :get_I_grad, :born_radii_loop_GBN2,
             :get_bi, :get_bj, :get_fi, :get_fj, :gb_force_loop_1, :gb_force_loop_2, :gb_energy_loop)
     @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)

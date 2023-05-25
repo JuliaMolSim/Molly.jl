@@ -45,10 +45,14 @@
     b = CubicBoundary(4.0u"nm", 5.0u"nm", 6.0u"nm")
     @test float_type(b) == Float64
     @test Molly.length_type(b) == typeof(1.0u"nm")
+    @test ustrip(b) == CubicBoundary(4.0, 5.0, 6.0)
+    @test ustrip(u"Å", b) == CubicBoundary(40.0, 50.0, 60.0)
     @test !Molly.has_infinite_boundary(b)
     @test box_volume(b) == 120.0u"nm^3"
     @test box_volume(CubicBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^3"
     @test box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
+    sb = scale_boundary(b, 1.1)
+    @test sb.side_lengths ≈ SVector(4.4, 5.5, 6.6)u"nm"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0, 6.0)u"nm"
     @test Molly.axis_limits(CubicBoundary(4.0, 5.0, 6.0), CoordinateLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError CubicBoundary(-4.0u"nm", 5.0u"nm", 6.0u"nm")
@@ -57,10 +61,14 @@
     b = RectangularBoundary(4.0u"m", 5.0u"m")
     @test float_type(b) == Float64
     @test Molly.length_type(b) == typeof(1.0u"m")
+    @test ustrip(b) == RectangularBoundary(4.0, 5.0)
+    @test ustrip(u"km", b) == RectangularBoundary(4e-3, 5e-3)
     @test !Molly.has_infinite_boundary(b)
     @test box_volume(b) == 20.0u"m^2"
     @test box_volume(RectangularBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^2"
     @test box_center(b) == SVector(2.0, 2.5)u"m"
+    sb = scale_boundary(b, 0.9)
+    @test sb.side_lengths ≈ SVector(3.6, 4.5)u"m"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0)u"m"
     @test Molly.axis_limits(RectangularBoundary(4.0, 5.0), CoordinateLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError RectangularBoundary(-4.0u"nm", 5.0u"nm")
@@ -69,18 +77,21 @@
     b = TriclinicBoundary(SVector(2.2, 2.0, 1.8)u"nm", deg2rad.(SVector(50.0, 40.0, 60.0)))
     @test float_type(b) == Float64
     @test Molly.length_type(b) == typeof(1.0u"nm")
-    @test isapprox(b.basis_vectors[1], SVector(2.2      , 0.0      , 0.0      )u"nm", atol=1e-6u"nm")
-    @test isapprox(b.basis_vectors[2], SVector(1.0      , 1.7320508, 0.0      )u"nm", atol=1e-6u"nm")
-    @test isapprox(b.basis_vectors[3], SVector(1.37888  , 0.5399122, 1.0233204)u"nm", atol=1e-6u"nm")
+    @test isapprox(b.basis_vectors[1], SVector(2.2      , 0.0      , 0.0      )u"nm"; atol=1e-6u"nm")
+    @test isapprox(b.basis_vectors[2], SVector(1.0      , 1.7320508, 0.0      )u"nm"; atol=1e-6u"nm")
+    @test isapprox(b.basis_vectors[3], SVector(1.37888  , 0.5399122, 1.0233204)u"nm"; atol=1e-6u"nm")
     @test TriclinicBoundary(b.basis_vectors) == b
     @test TriclinicBoundary([b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3]]) == b
 
     @test bounding_box(b) == b.basis_vectors
-    @test isapprox(box_volume(b), 3.89937463181886u"nm^3")
-    @test isapprox(box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm", atol=1e-6u"nm")
+    @test box_volume(b) ≈ 3.89937463181886u"nm^3"
+    @test isapprox(box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm"; atol=1e-6u"nm")
+    sb = scale_boundary(b, 1.2)
+    @test [sb.α, sb.β, sb.γ] ≈ [b.α, b.β, b.γ]
+    @test box_volume(sb) ≈ box_volume(b) * 1.2^3
     @test isapprox(
         Molly.cubic_bounding_box(b),
-        SVector(4.5788800, 2.2719630, 1.0233205)u"nm",
+        SVector(4.5788800, 2.2719630, 1.0233205)u"nm";
         atol=1e-6u"nm",
     )
 
@@ -111,7 +122,7 @@
         dr_exact = vector(c1, c2, b_exact)
         if norm(dr_exact) <= correct_limit
             dr_approx = vector(c1, c2, b)
-            return isapprox(dr_exact, dr_approx)
+            return dr_exact ≈ dr_approx
         else
             return true
         end
@@ -126,7 +137,7 @@
     random_velocities!(sys, temp)
     starting_velocities = copy(sys.velocities)
     simulate!(sys, sim, 1_000)
-    @test all(isapprox.(sys.velocities, starting_velocities))
+    @test all(sys.velocities .≈ starting_velocities)
     @test wrap_coords.(sys.coords, (b,)) == sys.coords
 
     # Test that displacements match those expected from the starting velocity,
@@ -139,9 +150,52 @@
     end
     @test isapprox(
         maximum(max_disps),
-        norm(sys.velocities[argmax(max_disps)]) * sys.loggers.coords.n_steps * dt,
+        norm(sys.velocities[argmax(max_disps)]) * sys.loggers.coords.n_steps * dt;
         atol=1e-9u"nm",
     )
+
+    coords = [SVector(1.95, 0.0, 0.0), SVector(0.05, 0.0, 0.0), SVector(0.15, 0.0, 0.0),
+              SVector(1.0 , 1.0, 1.0)]
+    boundary = CubicBoundary(2.0)
+    topology = MolecularTopology([1, 1, 1, 2], [3, 1])
+    mcs = molecule_centers(coords, boundary, topology)
+    @test mcs == [SVector(0.05, 0.0, 0.0), SVector(1.0, 1.0, 1.0)]
+
+    coords = [SVector(1.95, 0.0), SVector(0.05, 0.0), SVector(0.15, 0.0),
+              SVector(1.0 , 1.0)]
+    boundary = RectangularBoundary(2.0)
+    mcs = molecule_centers(coords, boundary, topology)
+    @test mcs == [SVector(0.05, 0.0), SVector(1.0, 1.0)]
+
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+    for gpu in gpu_list
+        sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=gpu, use_cell_list=false)
+        mcs = molecule_centers(sys.coords, sys.boundary, sys.topology)
+        @test isapprox(Array(mcs)[1], mean(sys.coords[1:1170]); atol=0.04u"nm")
+
+        # Mark all pairs as ineligible for pairwise interactions and check that the
+        #   potential energy from the specific interactions does not change on scaling
+        no_nbs = falses(length(sys), length(sys))
+        sys.neighbor_finder = DistanceNeighborFinder(
+            eligible=(gpu ? CuArray(no_nbs) : no_nbs),
+            dist_cutoff=1.0u"nm",
+        )
+        coords_start = deepcopy(sys.coords)
+        pe_start = potential_energy(sys, find_neighbors(sys))
+        scale_factor = 1.02
+        n_scales = 10
+
+        for i in 1:n_scales
+            scale_coords!(sys, scale_factor)
+            @test potential_energy(sys, find_neighbors(sys)) ≈ pe_start
+        end
+        for i in 1:n_scales
+            scale_coords!(sys, inv(scale_factor))
+            @test potential_energy(sys, find_neighbors(sys)) ≈ pe_start
+        end
+        coords_diff = Array(sys.coords) .- Array(coords_start)
+        @test maximum(maximum(abs.(v)) for v in coords_diff) < 5e-4u"nm"
+    end
 end
 
 @testset "Neighbor lists" begin
@@ -282,7 +336,7 @@ end
     coords = SVector{3, Float64}.(eachcol(BioStructures.coordarray(bb_atoms))) / 10 * u"nm"
     bb_to_mass = Dict("C" => 12.011u"u", "N" => 14.007u"u", "O" => 15.999u"u")
     atoms = [Atom(mass=bb_to_mass[BioStructures.element(bb_atoms[i])]) for i in eachindex(bb_atoms)]
-    @test isapprox(radius_gyration(coords, atoms), 11.51225678195222u"Å", atol=1e-6u"nm")
+    @test isapprox(radius_gyration(coords, atoms), 11.51225678195222u"Å"; atol=1e-6u"nm")
 end
 
 @testset "Replica System" begin
@@ -309,48 +363,49 @@ end
         dist_cutoff=1.5u"nm",
     )
 
-    repsys = ReplicaSystem(;
-        n_replicas=n_replicas,
+    repsys = ReplicaSystem(
         atoms=atoms,
         replica_coords=[copy(coords) for _ in 1:n_replicas],
+        boundary=boundary,
+        n_replicas=n_replicas,
         replica_velocities=replica_velocities,
         pairwise_inters=pairwise_inters,
-        boundary=boundary,
     )
 
-    sys = System(;
+    sys = System(
         atoms=atoms,
         coords=coords,
+        boundary=boundary,
         velocities=nothing,
         pairwise_inters=pairwise_inters,
-        boundary=boundary,
     )
 
     for i in 1:n_replicas
-        @test all(
-            [getfield(repsys.replicas[i], f) for f in fieldnames(System)] .== [getfield(sys, f) for f in fieldnames(System)]
-        )
+        repsys_fields = [getfield(repsys.replicas[i], f) for f in fieldnames(System)]
+        sys_fields = [getfield(sys, f) for f in fieldnames(System)]
+        @test all(repsys_fields .== sys_fields)
     end
 
-    repsys2 = ReplicaSystem(;
-        n_replicas=n_replicas,
+    repsys2 = ReplicaSystem(
         atoms=atoms,
         replica_coords=[copy(coords) for _ in 1:n_replicas],
+        boundary=boundary,
+        n_replicas=n_replicas,
         replica_velocities=replica_velocities,
         pairwise_inters=pairwise_inters,
-        boundary=boundary,
-        replica_loggers=[(temp=TemperatureLogger(10), coords=CoordinateLogger(10)) for i in 1:n_replicas],
         neighbor_finder=neighbor_finder,
+        replica_loggers=[(temp=TemperatureLogger(10), coords=CoordinateLogger(10))
+                         for i in 1:n_replicas],
     )
 
-    sys2 = System(;
+    sys2 = System(
         atoms=atoms,
         coords=coords,
+        boundary=boundary,
         velocities=nothing,
         pairwise_inters=pairwise_inters,
-        boundary=boundary,
-        loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
         neighbor_finder=neighbor_finder,
+        loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
     )
 
     for i in 1:n_replicas
