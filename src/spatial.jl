@@ -573,9 +573,10 @@ function remove_CM_motion!(sys)
 end
 
 @doc raw"""
-    virial(sys, neighbors=nothing)
+    virial(sys, neighbors=nothing; n_threads=Threads.nthreads())
+    virial(inter, sys, neighbors=nothing; n_threads=Threads.nthreads())
 
-Calculate the virial of a system.
+Calculate the virial of a system or the virial resulting from a general interaction.
 
 The virial is defined as
 ```math
@@ -583,16 +584,24 @@ The virial is defined as
 ```
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
+Custom general interaction types can implement this function.
 
 This should only be used on systems containing just pairwise interactions, or
-where the specific interactions, general interactions and constraints do not
-contribute to the virial.
-Not currently compatible with automatic differentiation using Zygote.
+where the specific interactions, constraints and general interactions without
+[`virial`](@ref) defined do not contribute to the virial.
+Not currently compatible with automatic differentiation using Zygote when
+using pairwise interactions.
 """
-function virial(sys, neighbors=nothing; kwargs...)
+function virial(sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
-    return virial(sys, neighbors, pairwise_inters_nonl, pairwise_inters_nl)
+    v = virial(sys, neighbors, pairwise_inters_nonl, pairwise_inters_nl)
+
+    for inter in values(sys.general_inters)
+        v += virial(inter, sys, neighbors; n_threads=n_threads)
+    end
+
+    return v
 end
 
 @inbounds function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
@@ -647,6 +656,11 @@ end
     return -v / 2
 end
 
+# Default for general interactions
+function virial(inter, sys::System{D, G, T}, neighbors=nothing; kwargs...) where {D, G, T}
+    return zero(T) * sys.energy_units
+end
+
 @doc raw"""
     pressure(sys, neighbors=nothing)
 
@@ -663,10 +677,11 @@ If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 
 This should only be used on systems containing just pairwise interactions, or
-where the specific interactions, general interactions and constraints do not
-contribute to the pressure.
+where the specific interactions, constraints and general interactions without
+[`virial`](@ref) defined do not contribute to the virial.
 Not compatible with infinite boundaries.
-Not currently compatible with automatic differentiation using Zygote.
+Not currently compatible with automatic differentiation using Zygote when
+using pairwise interactions.
 """
 function pressure(sys::AbstractSystem{D}, neighbors=nothing; kwargs...) where D
     if has_infinite_boundary(sys.boundary)

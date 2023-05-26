@@ -717,7 +717,7 @@ When simulating molecules, for example, non-bonded interactions for atoms in a 1
 For interactions where this is relevant, `special` can be used to apply this weighting in the interaction.
 It can have a variety of uses depending on the context, for example if you have multiple interactions and want to exclude certain atom pairs from one of the interactions only.
 
-To use your custom force in a simulation, add it to the list of pairwise interactions:
+To use your custom interaction in a simulation, add it to the list of pairwise interactions:
 ```julia
 pairwise_inters = (MyPairwiseInter(),)
 ```
@@ -755,7 +755,7 @@ function Molly.force(inter::MySpecificInter, coords_i, coords_j, boundary)
 end
 ```
 The 3 atom case would define `Molly.force(inter::MySpecificInter, coords_i, coords_j, coords_k, boundary)` and return `SpecificForce3Atoms(f1, f2, f3)`.
-To use your custom force, add it to the specific interaction lists along with the atom indices:
+To use your custom interaction, add it to the specific interaction lists along with the atom indices:
 ```julia
 specific_inter_lists = (
     InteractionList2Atoms(
@@ -794,8 +794,10 @@ end
 The neighbors calculated from the neighbor list are available in this function, but may or may not be used depending on context.
 You could carry out your own neighbor finding in this function if required.
 Note that this function calculates forces not accelerations; if you have a neural network that calculates accelerations you should multiply these by `masses(sys)` to get the forces according to F=ma.
+
 A method for the [`potential_energy`](@ref) function that takes the same arguments and returns a single value can also be defined.
-To use your custom force in a simulation, add it to the list of general interactions:
+A method for the [`virial`](@ref) function that takes the same arguments can also be defined, allowing virial and pressure calculation when using custom general interactions.
+To use your custom interaction in a simulation, add it to the list of general interactions:
 ```julia
 general_inters = (MyGeneralInter(),)
 ```
