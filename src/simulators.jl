@@ -47,12 +47,13 @@ function SteepestDescentMinimizer(;
 end
 
 """
-    simulate!(system, simulator, n_steps; n_threads=Threads.nthreads(), run_loggers = true)
-    simulate!(system, simulator; n_threads=Threads.nthreads(), run_loggers = true)
+    simulate!(system, simulator, n_steps; n_threads=Threads.nthreads(), run_loggers=true)
+    simulate!(system, simulator; n_threads=Threads.nthreads(), run_loggers=true)
 
-Run a simulation on a system according to the rules of the given simulator. `run_loggers` is true
-by default except for the `SteepestDescentMinimizer`.
+Run a simulation on a system according to the rules of the given simulator.
 
+`run_loggers` is `true` by default except for [`SteepestDescentMinimizer`](@ref), where
+it is `false`.
 Custom simulators should implement this function.
 """
 function simulate!(sys,
@@ -92,8 +93,7 @@ function simulate!(sys,
                     E_trial, " - max force ", max_force, " - rejected")
         end
 
-        run_loggers && run_loggers!(sys, neighbors, step_n;
-                                        n_threads=n_threads)
+        run_loggers && run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
         if max_force < sim.tol
             break
@@ -459,7 +459,7 @@ function simulate!(sys,
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                    n_threads=n_threads)
 
-        run_loggers && run_loggers!(sys, neighbors, step_n)
+        run_loggers && run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
     end
     return sys
 end
@@ -723,7 +723,7 @@ function simulate!(sys::ReplicaSystem,
                     assign_velocities::Bool=false,
                     rng=Random.GLOBAL_RNG,
                     n_threads::Integer=Threads.nthreads(),
-                    run_loggers = true)
+                    run_loggers=true)
     if sys.n_replicas != length(sim.simulators)
         throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
                 "and simulators in HamiltonianREMD ($(length(sim.simulators))) do not match"))
@@ -773,7 +773,8 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
 end
 
 """
-    simulate_remd!(sys, remd_sim, n_steps; rng=Random.GLOBAL_RNG, n_threads=Threads.nthreads(), run_loggers = true)
+    simulate_remd!(sys, remd_sim, n_steps; rng=Random.GLOBAL_RNG,
+                   n_threads=Threads.nthreads(), run_loggers=true)
 
 Run a REMD simulation on a [`ReplicaSystem`](@ref) using a REMD simulator.
 """
@@ -812,7 +813,7 @@ function simulate_remd!(sys::ReplicaSystem,
             n_attempts += 1
             m = n + 1
             Δ, exchanged = remd_exchange!(sys, remd_sim, n, m; rng=rng, n_threads=n_threads)
-            if exchanged && !isnothing(sys.exchange_logger) && run_loggers
+            if run_loggers && exchanged && !isnothing(sys.exchange_logger)
                 log_property!(sys.exchange_logger, sys, nothing, cycle * cycle_length;
                                     indices=(n, m), delta=Δ, n_threads=n_threads)
             end
@@ -826,7 +827,7 @@ function simulate_remd!(sys::ReplicaSystem,
         end
     end
 
-    if !isnothing(sys.exchange_logger) && run_loggers
+    if run_loggers && !isnothing(sys.exchange_logger)
         finish_logs!(sys.exchange_logger; n_steps=n_steps, n_attempts=n_attempts)
     end
 
@@ -879,12 +880,12 @@ function simulate!(sys::System{D, G, T},
         δ = ΔE / (k_b * sim.temperature)
         if δ < 0 || rand() < exp(-δ)
             run_loggers && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=true,
-                                       energy_rate=E_new / (k_b * sim.temperature))
+                                        energy_rate=E_new / (k_b * sim.temperature))
             E_old = E_new
         else
             sys.coords = coords_old
             run_loggers && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=false,
-                                       energy_rate=E_old / (k_b * sim.temperature))
+                                        energy_rate=E_old / (k_b * sim.temperature))
         end
     end
     return sys

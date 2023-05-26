@@ -962,9 +962,10 @@ Then, define a method for [`simulate!`](@ref) that carries out the simulation.
 This example shows some helper functions that you can use:
 ```julia
 function Molly.simulate!(sys,
-                            sim::MySimulator,
-                            n_steps::Integer;
-                            n_threads::Integer=Threads.nthreads())
+                         sim::MySimulator,
+                         n_steps::Integer;
+                         n_threads::Integer=Threads.nthreads(),
+                         run_loggers=true)
     # Find neighbors like this
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
 
@@ -987,7 +988,7 @@ function Molly.simulate!(sys,
         remove_CM_motion!(sys)
 
         # Apply the loggers like this
-        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
+        run_loggers && run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
 
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
