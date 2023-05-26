@@ -53,15 +53,15 @@
     end
 
     # Test log_property! definition rather than just using GeneralObservableLogger
-    function Molly.log_property!(logger::SIRLogger, s, neighbors, step_n;
+    function Molly.log_property!(logger::SIRLogger, sys, neighbors, step_n;
                                  n_threads=Threads.nthreads(), kwargs...)
         if step_n % logger.n_steps == 0
             counts_sir = [
-                count(p -> p.status == susceptible, s.atoms),
-                count(p -> p.status == infected   , s.atoms),
-                count(p -> p.status == recovered  , s.atoms)
+                count(p -> p.status == susceptible, sys.atoms),
+                count(p -> p.status == infected   , sys.atoms),
+                count(p -> p.status == recovered  , sys.atoms)
             ]
-            push!(logger.fracs_sir, counts_sir ./ length(s))
+            push!(logger.fracs_sir, counts_sir ./ length(sys))
         end
     end
 

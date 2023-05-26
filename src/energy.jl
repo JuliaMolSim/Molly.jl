@@ -95,21 +95,21 @@ Calculate the potential energy due to a given interaction type.
 
 Custom interaction types should implement this function.
 """
-function potential_energy(s::System{D, false, T}, neighbors=nothing;
+function potential_energy(sys::System{D, false, T}, neighbors=nothing;
                           n_threads::Integer=Threads.nthreads()) where {D, T}
-    pairwise_inters_nonl = filter(!use_neighbors, values(s.pairwise_inters))
-    pairwise_inters_nl   = filter( use_neighbors, values(s.pairwise_inters))
-    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(s.specific_inter_lists))
-    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(s.specific_inter_lists))
-    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(s.specific_inter_lists))
-    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(s.specific_inter_lists))
+    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
+    pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
+    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
+    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
+    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
+    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
 
-    pe = potential_energy_pair_spec(s.coords, s.atoms, pairwise_inters_nonl, pairwise_inters_nl,
-                            sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, s.boundary,
-                            s.energy_units, neighbors, n_threads, Val(T))
+    pe = potential_energy_pair_spec(sys.coords, sys.atoms, pairwise_inters_nonl, pairwise_inters_nl,
+                            sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, sys.boundary,
+                            sys.energy_units, neighbors, n_threads, Val(T))
 
-    for inter in values(s.general_inters)
-        pe += potential_energy(inter, s, neighbors; n_threads=n_threads)
+    for inter in values(sys.general_inters)
+        pe += potential_energy(inter, sys, neighbors; n_threads=n_threads)
     end
 
     return pe
@@ -248,42 +248,42 @@ end
     return nothing
 end
 
-function potential_energy(s::System{D, true, T}, neighbors=nothing;
+function potential_energy(sys::System{D, true, T}, neighbors=nothing;
                           n_threads::Integer=Threads.nthreads()) where {D, T}
-    n_atoms = length(s)
+    n_atoms = length(sys)
     val_ft = Val(T)
     pe_vec = CUDA.zeros(T, 1)
 
-    pairwise_inters_nonl = filter(!use_neighbors, values(s.pairwise_inters))
+    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
-        pe_vec += pairwise_pe_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
-                                  nbs, s.energy_units, val_ft)
+        pe_vec += pairwise_pe_gpu(sys.coords, sys.atoms, sys.boundary, pairwise_inters_nonl,
+                                  nbs, sys.energy_units, val_ft)
     end
 
-    pairwise_inters_nl = filter(use_neighbors, values(s.pairwise_inters))
+    pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nl) > 0
         if isnothing(neighbors)
             error("an interaction uses the neighbor list but neighbors is nothing")
         end
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]
-            pe_vec += pairwise_pe_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-                                      nbs, s.energy_units, val_ft)
+            pe_vec += pairwise_pe_gpu(sys.coords, sys.atoms, sys.boundary, pairwise_inters_nl,
+                                      nbs, sys.energy_units, val_ft)
         end
     end
 
-    for inter_list in values(s.specific_inter_lists)
-        pe_vec += specific_pe_gpu(inter_list, s.coords, s.boundary, s.energy_units, val_ft)
+    for inter_list in values(sys.specific_inter_lists)
+        pe_vec += specific_pe_gpu(inter_list, sys.coords, sys.boundary, sys.energy_units, val_ft)
     end
 
     pe = Array(pe_vec)[1]
 
-    for inter in values(s.general_inters)
-        pe += ustrip(s.energy_units, potential_energy(inter, s, neighbors; n_threads=n_threads))
+    for inter in values(sys.general_inters)
+        pe += ustrip(sys.energy_units, potential_energy(inter, sys, neighbors; n_threads=n_threads))
     end
 
-    return pe * s.energy_units
+    return pe * sys.energy_units
 end
 
 function potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, special)

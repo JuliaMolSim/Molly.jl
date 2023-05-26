@@ -50,8 +50,8 @@ specific and general interactions and Newton's second law of motion.
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
 """
-function accelerations(s, neighbors=nothing; n_threads::Integer=Threads.nthreads())
-    return forces(s, neighbors; n_threads=n_threads) ./ masses(s)
+function accelerations(sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+    return forces(sys, neighbors; n_threads=n_threads) ./ masses(sys)
 end
 
 """
@@ -167,21 +167,21 @@ If the interaction uses neighbor lists, the neighbors should be computed
 first and passed to the function.
 Custom general interaction types should implement this function.
 """
-function forces(s::System{D, false}, neighbors=nothing;
+function forces(sys::System{D, false}, neighbors=nothing;
                 n_threads::Integer=Threads.nthreads()) where D
-    pairwise_inters_nonl = filter(!use_neighbors, values(s.pairwise_inters))
-    pairwise_inters_nl   = filter( use_neighbors, values(s.pairwise_inters))
-    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(s.specific_inter_lists))
-    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(s.specific_inter_lists))
-    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(s.specific_inter_lists))
-    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(s.specific_inter_lists))
+    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
+    pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
+    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
+    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
+    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
+    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
 
-    fs = forces_pair_spec(s.coords, s.atoms, pairwise_inters_nonl, pairwise_inters_nl,
+    fs = forces_pair_spec(sys.coords, sys.atoms, pairwise_inters_nonl, pairwise_inters_nl,
                           sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
-                          s.boundary, s.force_units, neighbors, n_threads)
+                          sys.boundary, sys.force_units, neighbors, n_threads)
 
-    for inter in values(s.general_inters)
-        fs += forces(inter, s, neighbors; n_threads=n_threads)
+    for inter in values(sys.general_inters)
+        fs += forces(inter, sys, neighbors; n_threads=n_threads)
     end
 
     return fs
@@ -333,42 +333,42 @@ end
     return nothing
 end
 
-function forces(s::System{D, true, T}, neighbors=nothing;
+function forces(sys::System{D, true, T}, neighbors=nothing;
                 n_threads::Integer=Threads.nthreads()) where {D, T}
-    n_atoms = length(s)
+    n_atoms = length(sys)
     val_ft = Val(T)
     fs_mat = CUDA.zeros(T, D, n_atoms)
 
-    pairwise_inters_nonl = filter(!use_neighbors, values(s.pairwise_inters))
+    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
-        fs_mat += pairwise_force_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nonl,
-                                     nbs, s.force_units, val_ft)
+        fs_mat += pairwise_force_gpu(sys.coords, sys.atoms, sys.boundary, pairwise_inters_nonl,
+                                     nbs, sys.force_units, val_ft)
     end
 
-    pairwise_inters_nl = filter(use_neighbors, values(s.pairwise_inters))
+    pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nl) > 0
         if isnothing(neighbors)
             error("an interaction uses the neighbor list but neighbors is nothing")
         end
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]
-            fs_mat += pairwise_force_gpu(s.coords, s.atoms, s.boundary, pairwise_inters_nl,
-                                         nbs, s.force_units, val_ft)
+            fs_mat += pairwise_force_gpu(sys.coords, sys.atoms, sys.boundary, pairwise_inters_nl,
+                                         nbs, sys.force_units, val_ft)
         end
     end
 
-    for inter_list in values(s.specific_inter_lists)
-        fs_mat += specific_force_gpu(inter_list, s.coords, s.boundary, s.force_units, val_ft)
+    for inter_list in values(sys.specific_inter_lists)
+        fs_mat += specific_force_gpu(inter_list, sys.coords, sys.boundary, sys.force_units, val_ft)
     end
 
     fs = reinterpret(SVector{D, T}, vec(fs_mat))
 
-    for inter in values(s.general_inters)
-        fs_gen = forces(inter, s, neighbors; n_threads=n_threads)
-        check_force_units(unit(eltype(eltype(fs_gen))), s.force_units)
+    for inter in values(sys.general_inters)
+        fs_gen = forces(inter, sys, neighbors; n_threads=n_threads)
+        check_force_units(unit(eltype(eltype(fs_gen))), sys.force_units)
         fs += ustrip_vec.(fs_gen)
     end
 
-    return fs * s.force_units
+    return fs * sys.force_units
 end

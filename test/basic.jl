@@ -233,16 +233,16 @@ end
         eligible=trues(3, 3), n_steps=10, x0=coords,
         unit_cell=boundary, dist_cutoff=2.0u"nm",
     )
-    s = System(
+    sys = System(
         atoms=[Atom(), Atom(), Atom()],
         coords=coords,
         boundary=boundary,
         neighbor_finder=neighbor_finder,
     )
-    neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=1)
     @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
     if run_parallel_tests
-        neighbors = find_neighbors(s, s.neighbor_finder; n_threads=Threads.nthreads())
+        neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=Threads.nthreads())
         @test reorder_neighbors(neighbors.list) == [(Int32(1), Int32(2), false)]
     end
 

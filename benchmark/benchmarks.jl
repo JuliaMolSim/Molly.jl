@@ -114,7 +114,7 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
 
     n_threads = parallel ? Threads.nthreads() : 1
     simulate!(sys, simulator, n_steps; n_threads=n_threads)
-    return s.coords
+    return sys.coords
 end
 
 runs = [

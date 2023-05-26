@@ -26,9 +26,9 @@ Obtain a list of close atoms in a [`System`](@ref).
 
 Custom neighbor finders should implement this function.
 """
-find_neighbors(s::System; kwargs...) = find_neighbors(s, s.neighbor_finder; kwargs...)
+find_neighbors(sys::System; kwargs...) = find_neighbors(sys, sys.neighbor_finder; kwargs...)
 
-find_neighbors(s::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
+find_neighbors(sys::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
 
 """
     DistanceNeighborFinder(; eligible, dist_cutoff, special, n_steps)
@@ -52,7 +52,7 @@ function DistanceNeighborFinder(;
                 eligible, dist_cutoff, special, n_steps, zero(eligible))
 end
 
-function find_neighbors(s::System{D, false},
+function find_neighbors(sys::System{D, false},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
@@ -64,12 +64,12 @@ function find_neighbors(s::System{D, false},
 
     sqdist_cutoff = nf.dist_cutoff ^ 2
 
-    @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in eachindex(s)
-        ci = s.coords[i]
+    @floop ThreadedEx(basesize = length(sys) ÷ n_threads) for i in eachindex(sys)
+        ci = sys.coords[i]
         nbi = @view nf.eligible[:, i]
         speci = @view nf.special[:, i]
         for j in 1:(i - 1)
-            r2 = sum(abs2, vector(ci, s.coords[j], s.boundary))
+            r2 = sum(abs2, vector(ci, sys.coords[j], sys.boundary))
             if r2 <= sqdist_cutoff && nbi[j]
                 nn = (Int32(j), Int32(i), speci[j])
                 @reduce(neighbors_list = append!(Tuple{Int32, Int32, Bool}[], (nn,)))
@@ -110,7 +110,7 @@ end
 
 lists_to_tuple_list(i, j, w) = (Int32(i), Int32(j), w)
 
-function find_neighbors(s::System{D, true},
+function find_neighbors(sys::System{D, true},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
@@ -121,11 +121,11 @@ function find_neighbors(s::System{D, true},
     end
 
     nf.neighbors .= false
-    n_inters = n_atoms_to_n_pairs(length(s))
+    n_inters = n_atoms_to_n_pairs(length(sys))
     n_threads_gpu, n_blocks = cuda_threads_blocks_dnf(n_inters)
 
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks distance_neighbor_finder_kernel!(
-        nf.neighbors, s.coords, nf.eligible, s.boundary, nf.dist_cutoff^2,
+        nf.neighbors, sys.coords, nf.eligible, sys.boundary, nf.dist_cutoff^2,
     )
 
     pairs = findall(nf.neighbors)
@@ -158,7 +158,7 @@ function TreeNeighborFinder(;
     return TreeNeighborFinder{typeof(dist_cutoff)}(eligible, dist_cutoff, special, n_steps)
 end
 
-function find_neighbors(s::System,
+function find_neighbors(sys::System,
                         nf::TreeNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
@@ -168,13 +168,13 @@ function find_neighbors(s::System,
         return current_neighbors
     end
 
-    dist_unit = unit(first(first(s.coords)))
-    bv = ustrip.(dist_unit, s.boundary)
-    btree = BallTree(ustrip_vec.(s.coords), PeriodicEuclidean(bv))
+    dist_unit = unit(first(first(sys.coords)))
+    bv = ustrip.(dist_unit, sys.boundary)
+    btree = BallTree(ustrip_vec.(sys.coords), PeriodicEuclidean(bv))
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
 
-    @floop ThreadedEx(basesize = length(s) ÷ n_threads) for i in eachindex(s)
-        ci = ustrip.(s.coords[i])
+    @floop ThreadedEx(basesize = length(sys) ÷ n_threads) for i in eachindex(sys)
+        ci = ustrip.(sys.coords[i])
         nbi = @view nf.eligible[:, i]
         speci = @view nf.special[:, i]
         idxs = inrange(btree, ci, dist_cutoff, true)
@@ -186,7 +186,7 @@ function find_neighbors(s::System,
         end
     end
 
-    return NeighborList(length(neighbors_list), move_array(neighbors_list, s))
+    return NeighborList(length(neighbors_list), move_array(neighbors_list, sys))
 end
 
 """
@@ -295,7 +295,7 @@ function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{Neighb
     return neighbors
 end
 
-function find_neighbors(s::System{D, G},
+function find_neighbors(sys::System{D, G},
                         nf::CellListMapNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
@@ -324,13 +324,15 @@ function find_neighbors(s::System{D, G},
         neighbors_threaded[1].n = 0
     end
 
-    box = CellListMap.Box(clm_box_arg(s.boundary), nf.dist_cutoff; lcell=1)
+    box = CellListMap.Box(clm_box_arg(sys.boundary), nf.dist_cutoff; lcell=1)
     parallel = n_threads > 1
-    cl = UpdateCellList!(Array(s.coords), box, cl, aux; parallel=parallel)
+    cl = UpdateCellList!(Array(sys.coords), box, cl, aux; parallel=parallel)
 
     map_pairwise!(
         (x, y, i, j, d2, pairs) -> push_pair!(pairs, i, j, nf.eligible, nf.special),
-        neighbors, box, cl;
+        neighbors,
+        box,
+        cl;
         reduce=reduce_pairs,
         output_threaded=neighbors_threaded,
         parallel=parallel,

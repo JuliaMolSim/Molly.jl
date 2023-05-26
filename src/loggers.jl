@@ -28,10 +28,10 @@ Run the loggers associated with a system.
 Ignored for gradient calculation during automatic differentiation.
 Additional keyword arguments can be passed to the loggers if required.
 """
-function run_loggers!(s::System, neighbors=nothing, step_n::Integer=0;
+function run_loggers!(sys::System, neighbors=nothing, step_n::Integer=0;
                       n_threads::Integer=Threads.nthreads(), kwargs...)
-    for logger in values(s.loggers)
-        log_property!(logger, s, neighbors, step_n; n_threads=n_threads, kwargs...)
+    for logger in values(sys.loggers)
+        log_property!(logger, sys, neighbors, step_n; n_threads=n_threads, kwargs...)
     end
 end
 
@@ -100,7 +100,7 @@ function Base.show(io::IO, tl::GeneralObservableLogger{T, typeof(temperature_wra
             tl.n_steps, ", ", length(values(tl)), " temperatures recorded")
 end
 
-coordinates_wrapper(s, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = s.coords
+coordinates_wrapper(sys, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = sys.coords
 
 """
     CoordinateLogger(n_steps; dims=3)
@@ -117,7 +117,7 @@ function Base.show(io::IO, cl::GeneralObservableLogger{T, typeof(coordinates_wra
             length(values(cl)) > 0 ? length(first(values(cl))) : "?", " atoms")
 end
 
-velocities_wrapper(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = s.velocities
+velocities_wrapper(sys::System, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = sys.velocities
 
 """
     VelocityLogger(n_steps; dims=3)
@@ -250,14 +250,14 @@ function Base.show(io::IO, sw::StructureWriter)
             sw.filepath, "\", ", sw.structure_n, " frames written")
 end
 
-function log_property!(logger::StructureWriter, s::System, neighbors=nothing,
+function log_property!(logger::StructureWriter, sys::System, neighbors=nothing,
                         step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
-        if length(s) != length(s.atoms_data)
-            error("number of atoms is ", length(s), " but number of atom data entries is ",
-                    length(s.atoms_data))
+        if length(sys) != length(sys.atoms_data)
+            error("number of atoms is ", length(sys), " but number of atom data entries is ",
+                    length(sys.atoms_data))
         end
-        append_model!(logger, s)
+        append_model!(logger, sys)
     end
 end
 
