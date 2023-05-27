@@ -489,7 +489,8 @@ end
     NoseHoover(; <keyword arguments>)
 
 The Nosé-Hoover integrator, a NVT simulator that extends velocity Verlet to control the
-temperature of the system.
+temperature of the system. The current implementation is limited to ergodic systems.
+Future work will implement an improved scheme.
 
 See [Evans and Holian 1985](https://doi.org/10.1063/1.449071).
 
