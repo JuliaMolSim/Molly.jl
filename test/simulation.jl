@@ -1046,32 +1046,77 @@ end
 end
 
 
-# @testset "Crystal Structures" begin
+@testset "Crystal Structures" begin
 
-#     #Simulate FCC Argon
-#     atom_type = :Ar
-#     a = 5.4u"Å"
+    r_cut = 8.5u"Å"
+    a = 5.2468u"Å"
+    atom_type = :Ar
 
-#     temp = 60.0u"K"
-#     fcc_crystal = FCC(a, atom_type, SVector(4,4,4))
-#     n_atoms = length(fcc_crystal)
-#     atom_mass = atomic_mass(fcc_crystal,1)
+    temp = 10.0u"K"
+    fcc_crystal = FCC(a, atom_type, SVector(4,4,4))
 
-#     @test n_atoms == 256
+    n_atoms = length(fcc_crystal)
+    @test n_atoms == 256
+    atom_mass = atomic_mass(fcc_crystal,1)
+    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
-#     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
-#     sys = System(
-#         fcc_crystal,
-#         velocities=velocities,
-#         pairwise_inters=(LennardJones(),),
-#         loggers=(temps=TemperatureLogger(1),
-#                 energies=TotalEnergyLogger(1)),
-#     )
+    sys = System(
+        fcc_crystal,
+        velocities=velocities,
+        pairwise_inters=(LennardJones(cutoff = 
+            ShiftedForceCutoff(r_cut),
+            energy_units = u"kJ * mol^-1",
+            force_units = u"kJ * mol^-1 * Å^-1"),),
+        loggers=(tot_eng = TotalEnergyLogger(100)),
+        energy_units = u"kJ * mol^-1",
+        force_units = u"kJ * mol^-1 * Å^-1")
 
-#     simulator = NoseHoover(dt=0.002u"ps", temperature=temp)
-#     simulate!(sys, simulator, 50_000)
+    #Add sigma and epsilon to atoms -- not a huge fan of this
+    σ = 3.4u"Å"
+    ϵ = (4.184*0.24037)u"kJ * mol^-1"
+    updated_atoms = []
+    for i in range(1,length(sys.atoms))
+        push!(updated_atoms, Molly.Atom(index = sys.atoms[i].index, charge = sys.atoms[i].charge,
+        mass = sys.atoms[i].mass, σ = σ, ϵ = ϵ, solute = sys.atoms[i].solute))
+    end
 
-#     # Check heat capacity is roughly correct
+    sys = System(sys, atoms = [updated_atoms...])
 
-# end
+    # Equilibirate
+    simulator = Langevin(
+        dt=2u"fs",
+        temperature=temp,
+        friction=1.0u"ps^-1",
+    )
+
+    simulate!(sys, simulator, 100_000, run_loggers = false)
+    simulate!(sys, simulator, 200_000)
+ 
+    #Integrator is stochastic so give a wide berth on the tolerance
+    @test  -1850 < mean(values(sys.loggers.tot_eng)) < -1650
+
+
+    #Test Unsupported Crystals
+    hex_crystal = Hexagonal(a, :Ar, SVector(2,2))
+    try
+        sys = System(hex_crystal)
+    catch e
+        @test isa(e, ErrorException)
+    end
+
+    # Make an Invalid Crystals
+    function MyInvalidCrystal(a, atomic_symbol::Symbol, N::SVector{3}; charge = 0.0u"C")
+        lattice = BravaisLattice(MonoclinicLattice(a, a, a, 120u"°"), Primitive())
+        basis = [Atom(atomic_symbol, SVector(zero(a),zero(a),zero(a)), charge = charge)]
+    return Crystal(lattice,basis,N)
+    end
+    my_crystal = MyInvalidCrystal(a, :Ar, SVector(1,1,1))
+
+    try
+        sys = System(my_crystal)
+    catch e
+        @test isa(e, AssertionError)
+    end
+
+end

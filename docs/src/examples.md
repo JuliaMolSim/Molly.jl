@@ -712,3 +712,60 @@ save("lennard_jones_sc.png", f)
 ![Lennard-Jones Softcore](images/lennard_jones_sc.png)
 
 The form of the potential is approximately the same as standard Lennard-Jones for ``r_{ij} > \sigma_{ij}`` if some fractional values are used for ``\lambda`` and ``\alpha``.
+
+## Crystal Structures
+
+Molly makes use of ![SimpleCrystals.jl](https://github.com/ejmeitz/SimpleCrystals.jl) to generate crystal structrues for molecular simulation. All 3D Bravais lattices and most 2D Bravais lattices are supported as well as user defined Crystals through the SimpleCrystals API. The only unsupported crystal types are those with a triclinic 2D simulation domain or crystals with lattice angles larger than ``90\degree``.
+
+Molly provides a constructor for the ``System`` class that takes in a ``Crystal`` struct:
+
+```julia
+a = 5.2468u"Å"
+atom_type = :Ar
+
+temp = 10.0u"K"
+fcc_crystal = FCC(a, atom_type, SVector(4,4,4))
+
+n_atoms = length(fcc_crystal)
+atom_mass = atomic_mass(fcc_crystal,1)
+velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+
+r_cut = 8.5u"Å"
+sys = System(
+    fcc_crystal,
+    velocities=velocities,
+    pairwise_inters=(LennardJones(cutoff = 
+        ShiftedForceCutoff(r_cut),
+        energy_units = u"kJ * mol^-1",
+        force_units = u"kJ * mol^-1 * Å^-1"),),
+    loggers=(kinetic_eng = KineticEnergyLogger(100),
+            pot_eng = PotentialEnergyLogger(100)),
+           # coords = XYZLogger(100, "./test.xyz", false)),
+    energy_units = u"kJ * mol^-1",
+    force_units = u"kJ * mol^-1 * Å^-1")
+```
+
+Certain potentials such as ``LennardJones`` and ``Buckingham`` require extra atomic paramaters (e.g. ``\sigma``) that are not implemented by the SimpleCrystals API. These paramaters must be added to the ``System`` manually.
+
+```julia
+σ = 3.4u"Å"
+ϵ = (4.184*0.24037)u"kJ * mol^-1"
+updated_atoms = []
+for i in range(1,length(sys.atoms))
+    push!(updated_atoms, Molly.Atom(index = sys.atoms[i].index, charge = sys.atoms[i].charge,
+     mass = sys.atoms[i].mass, σ = σ, ϵ = ϵ, solute = sys.atoms[i].solute))
+end
+
+sys = System(sys, atoms = [updated_atoms...])
+```
+
+Now the system can be simulated using any of the available simulators:
+
+```julia
+simulator = Langevin(
+    dt=2u"fs",
+    temperature=temp,
+    friction=1.0u"ps^-1",
+)
+simulate!(sys, simulator, 200_000)
+```
