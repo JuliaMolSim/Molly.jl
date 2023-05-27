@@ -1053,11 +1053,11 @@ end
     atom_type = :Ar
 
     temp = 10.0u"K"
-    fcc_crystal = FCC(a, atom_type, SVector(4,4,4))
+    fcc_crystal = SimpleCrystals.FCC(a, atom_type, SVector(4,4,4))
 
-    n_atoms = length(fcc_crystal)
+    n_atoms = SimpleCrystals.length(fcc_crystal)
     @test n_atoms == 256
-    atom_mass = atomic_mass(fcc_crystal,1)
+    atom_mass = SimpleCrystals.atomic_mass(fcc_crystal, 1)
     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
 
@@ -1068,7 +1068,7 @@ end
             ShiftedForceCutoff(r_cut),
             energy_units = u"kJ * mol^-1",
             force_units = u"kJ * mol^-1 * Å^-1"),),
-        loggers=(tot_eng = TotalEnergyLogger(100)),
+        loggers=(tot_eng = TotalEnergyLogger(100),),
         energy_units = u"kJ * mol^-1",
         force_units = u"kJ * mol^-1 * Å^-1")
 
@@ -1098,7 +1098,7 @@ end
 
 
     #Test Unsupported Crystals
-    hex_crystal = Hexagonal(a, :Ar, SVector(2,2))
+    hex_crystal = SimpleCrystals.Hexagonal(a, :Ar, SVector(2,2))
     try
         sys = System(hex_crystal)
     catch e
@@ -1108,8 +1108,8 @@ end
     # Make an Invalid Crystals
     function MyInvalidCrystal(a, atomic_symbol::Symbol, N::SVector{3}; charge = 0.0u"C")
         lattice = BravaisLattice(MonoclinicLattice(a, a, a, 120u"°"), Primitive())
-        basis = [Atom(atomic_symbol, SVector(zero(a),zero(a),zero(a)), charge = charge)]
-    return Crystal(lattice,basis,N)
+        basis = [SimpleCrystals.Atom(atomic_symbol, SVector(zero(a),zero(a),zero(a)), charge = charge)]
+    return SimpleCrystals.Crystal(lattice,basis,N)
     end
     my_crystal = MyInvalidCrystal(a, :Ar, SVector(1,1,1))
 
