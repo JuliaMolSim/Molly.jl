@@ -1094,7 +1094,7 @@ end
     simulate!(sys, simulator, 200_000)
  
     #Integrator is stochastic so give a wide berth on the tolerance
-    @test  -1850 < mean(values(sys.loggers.tot_eng)) < -1650
+    @test  -1850 < ustrip(mean(values(sys.loggers.tot_eng))) < -1650
 
 
     #Test Unsupported Crystals
@@ -1105,7 +1105,7 @@ end
         @test isa(e, ErrorException)
     end
 
-    # Make an Invalid Crystals
+    # Make an Invalid Crystals (angle is too large)
     function MyInvalidCrystal(a, atomic_symbol::Symbol, N::SVector{3}; charge = 0.0u"C")
         lattice = BravaisLattice(MonoclinicLattice(a, a, a, 120u"°"), Primitive())
         basis = [SimpleCrystals.Atom(atomic_symbol, SVector(zero(a),zero(a),zero(a)), charge = charge)]
