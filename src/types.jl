@@ -844,6 +844,7 @@ Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = typeof(s[1])
 AtomsBase.atomkeys(::Union{System, ReplicaSystem}) = ()
+AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = false
 
 AtomsBase.position(s::System) = s.coords
 AtomsBase.position(s::System, i::Integer) = s.coords[i]
@@ -899,3 +900,34 @@ end
 
 # Take precedence over AtomsBase.jl show function
 Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io, s)
+
+"""
+Construct AtomsBase atomic_system from Molly System
+"""
+function AtomsBase.atomic_system(s::System)
+
+    atomsbase_atoms = map(sys) do atom_view
+        AtomsBase.Atom(atomic_number = atomic_number(atom_view), position = position(atom_view);
+                atomic_mass = atomic_mass(atom_view))
+    end
+
+    return atomic_system(atomsbase_atoms, bouding_box(s), boundary_conditions(s))
+end
+
+"""
+Construct AtomsBase periodic_system from Molly System
+"""
+function AtomsBase.periodic_system(s::System)
+
+    if all(periodicity(s))
+        atomsbase_atoms = map(sys) do atom_view
+            AtomsBase.Atom(atomic_number = atomic_number(atom_view), position = position(atom_view);
+                 atomic_mass = atomic_mass(atom_view))
+        end
+
+        return AtomsBase.periodic_system(atomsbase_atoms, bouding_box(s),
+                    atomic_mass = atom.atomic_mass)
+    else
+        error("Cannot construct periodic_system, system is not periodic. Try atomic_system.")
+    end
+end
