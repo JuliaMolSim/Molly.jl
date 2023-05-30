@@ -904,30 +904,34 @@ Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io
 """
 Construct AtomsBase atomic_system from Molly System
 """
-function AtomsBase.atomic_system(s::System)
+function AtomsBase.atomic_system(sys::System)
 
     atomsbase_atoms = map(sys) do atom_view
         AtomsBase.Atom(atomic_number = atomic_number(atom_view), position = position(atom_view);
                 atomic_mass = atomic_mass(atom_view))
     end
 
-    return atomic_system(atomsbase_atoms, bouding_box(s), boundary_conditions(s))
+    return atomic_system(atomsbase_atoms, bouding_box(sys), boundary_conditions(sys))
 end
 
 """
 Construct AtomsBase periodic_system from Molly System
 """
-function AtomsBase.periodic_system(s::System)
+function AtomsBase.periodic_system(sys::System)
 
-    if all(periodicity(s))
+    if all(periodicity(sys))
         atomsbase_atoms = map(sys) do atom_view
             AtomsBase.Atom(atomic_number = atomic_number(atom_view), position = position(atom_view);
                  atomic_mass = atomic_mass(atom_view))
         end
 
-        return AtomsBase.periodic_system(atomsbase_atoms, bouding_box(s),
+        return AtomsBase.periodic_system(atomsbase_atoms, bouding_box(sys),
                     atomic_mass = atom.atomic_mass)
     else
         error("Cannot construct periodic_system, system is not periodic. Try atomic_system.")
     end
+end
+
+function System(sys::AbstractSystem{D}; kwargs...)
+
 end
