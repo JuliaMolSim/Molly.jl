@@ -574,15 +574,7 @@ Properties unused in the simulation or in analysis can be left with their
 default values.
 `atoms`, `atoms_data`, `coords` and `boundary` are automatically calcualted from the cyrstal struct. Extra
 atom paramaters like `σ` will have to be added manually after construction using the convenience constructor:
-System(system; <keyword arguments>)
-
-
-This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
-interface described there.
-
-    
-
-# Arguments
+System(system; <keyword arguments>) 
 """
 function System(crystal::Crystal{D};
         pairwise_inters=(),
@@ -611,10 +603,12 @@ function System(crystal::Crystal{D};
     elseif any(typeof(crystal.lattice.crystal_family) .<: [SquareLattice, RectangularLattice])
         boundary = RectangularBoundary(side_lengths...)
     elseif D == 2 #Honeycomb, Hex2D, & Oblique
-        throw(error("$(crystal.lattice.crystal_family) is not supported as it would need a 2D triclinic boundary.
+        throw(ArgumentError("$(crystal.lattice.crystal_family) is not supported as it would need a 2D triclinic boundary.
              Try defining the crystal with a rectangular or square unit cell."))
     else #3D non-cubic systems
-        @assert all(crystal.lattice.crystal_family.lattice_angles .< 90u"°") "All crystal lattice angles must be less than 90°"
+        if !all(crystal.lattice.crystal_family.lattice_angles .< 90u"°")
+            throw(error("All crystal lattice angles must be less than 90°"))
+        end
         boundary = TriclinicBoundary(side_lengths, crystal.lattice_angles)
     end
 

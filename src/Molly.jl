@@ -4,7 +4,6 @@ using Reexport
 @reexport using AtomsBase
 @reexport using StaticArrays
 @reexport using Unitful
-@reexport using SimpleCrystals
 
 using Atomix
 import BioStructures # Imported to avoid clashing names
@@ -25,6 +24,7 @@ using Graphs
 using KernelDensity
 using NearestNeighbors
 using Requires
+using SimpleCrystals
 using Unitful
 using UnitfulChainRules
 using UnsafeAtomicsLLVM

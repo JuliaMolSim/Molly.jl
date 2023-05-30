@@ -720,7 +720,10 @@ Molly makes use of ![SimpleCrystals.jl](https://github.com/ejmeitz/SimpleCrystal
 Molly provides a constructor for the ``System`` class that takes in a ``Crystal`` struct:
 
 ```julia
-a = 5.2468u"Å"
+using Molly
+using SimpleCrystals
+
+a = 5.2468u"Å" #lattice parameter for FCC Argon @ 10K
 atom_type = :Ar
 
 temp = 10.0u"K"
@@ -739,13 +742,13 @@ sys = System(
         energy_units = u"kJ * mol^-1",
         force_units = u"kJ * mol^-1 * Å^-1"),),
     loggers=(kinetic_eng = KineticEnergyLogger(100),
-            pot_eng = PotentialEnergyLogger(100)),
-           # coords = XYZLogger(100, "./test.xyz", false)),
+            pot_eng = PotentialEnergyLogger(100),
+            ),
     energy_units = u"kJ * mol^-1",
     force_units = u"kJ * mol^-1 * Å^-1")
 ```
 
-Certain potentials such as ``LennardJones`` and ``Buckingham`` require extra atomic paramaters (e.g. ``\sigma``) that are not implemented by the SimpleCrystals API. These paramaters must be added to the ``System`` manually.
+Certain potentials such as [`LennardJones`](@ref) and [`Buckingham`](@ref) require extra atomic paramaters (e.g. ``\sigma``) that are not implemented by the SimpleCrystals API. These paramaters must be added to the [`System`](@ref) manually.
 
 ```julia
 σ = 3.4u"Å"

@@ -1094,16 +1094,13 @@ end
     simulate!(sys, simulator, 200_000)
  
     #Integrator is stochastic so give a wide berth on the tolerance
-    @test  -1850 < ustrip(mean(values(sys.loggers.tot_eng))) < -1650
+    @test  -1850u"kJ * mol^-1" < mean(values(sys.loggers.tot_eng)) < -1650u"kJ * mol^-1"
 
 
     #Test Unsupported Crystals
     hex_crystal = SimpleCrystals.Hexagonal(a, :Ar, SVector(2,2))
-    try
-        sys = System(hex_crystal)
-    catch e
-        @test isa(e, ErrorException)
-    end
+    @test_throws ArgumentError System(hex_crystal)
+
 
     # Make an Invalid Crystals (angle is too large)
     function MyInvalidCrystal(a, atomic_symbol::Symbol, N::SVector{3}; charge = 0.0u"C")
@@ -1112,11 +1109,7 @@ end
     return SimpleCrystals.Crystal(lattice,basis,N)
     end
     my_crystal = MyInvalidCrystal(a, :Ar, SVector(1,1,1))
+    @test_throws ErrorException System(my_crystal)
 
-    try
-        sys = System(my_crystal)
-    catch e
-        @test isa(e, AssertionError)
-    end
 
 end
