@@ -5,7 +5,7 @@ using CUDA
 using FiniteDifferences
 using ForwardDiff
 using Zygote
-import SimpleCrystals: MonoclinicLattice, BravaisLattice, Primitive, Crystal
+import SimpleCrystals
 
 using DelimitedFiles
 using LinearAlgebra
