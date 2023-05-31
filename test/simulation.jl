@@ -1098,7 +1098,7 @@ end
 
 
     #Test Unsupported Crystals
-    hex_crystal = SimpleCrystals.Hexagonal(a, :Ar, SVector(2,2))
+    hex_crystal = Hexagonal(a, :Ar, SVector(2,2))
     @test_throws ArgumentError System(hex_crystal)
 
 
@@ -1106,7 +1106,7 @@ end
     function MyInvalidCrystal(a, atomic_symbol::Symbol, N::SVector{3}; charge = 0.0u"C")
         lattice = BravaisLattice(MonoclinicLattice(a, a, a, 120u"°"), Primitive())
         basis = [SimpleCrystals.Atom(atomic_symbol, SVector(zero(a),zero(a),zero(a)), charge = charge)]
-    return SimpleCrystals.Crystal(lattice,basis,N)
+    return Crystal(lattice,basis,N)
     end
     my_crystal = MyInvalidCrystal(a, :Ar, SVector(1,1,1))
     @test_throws ErrorException System(my_crystal)

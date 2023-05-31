@@ -5,7 +5,7 @@ using CUDA
 using FiniteDifferences
 using ForwardDiff
 using Zygote
-import SimpleCrystals # Imported to avoid clashing names (Atom)
+using SimpleCrystals
 
 using DelimitedFiles
 using LinearAlgebra
