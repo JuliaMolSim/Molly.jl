@@ -18,9 +18,7 @@ export
     ReplicaSystem,
     is_on_gpu,
     float_type,
-    masses,
-    periodic_system,
-    atomic_system
+    masses
 
 const DefaultFloat = Float64
 
@@ -856,10 +854,12 @@ AtomsBase.keys(sys::ReplicaSystem) = (:atoms,:replica_coords,:boundary,
         :replica_specific_inter_lists,:general_inters,:replica_general_inters,
         :constraints,:replica_constraints,:neighbor_finder,:replica_loggers,
         :exchange_logger,:k,:force_units,:energy_units)
-AtomsBase.haskey(sys::System, x::Symbol) = hasfield(System, x)
-AtomsBase.haskey(sys::ReplicaSystem, x::Symbol) = hasfield(ReplicaSystem, x)
-Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) = hasfield(typeof(sys), x) ? getfield(sys, x) : error("No field `$x`. Allowed keys are $(keys(sys)).")
+AtomsBase.haskey(sys::Union{System, ReplicaSystem}, x::Symbol) = hasfield(typeof(sys), x)
+Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) = 
+    hasfield(typeof(sys), x) ? getfield(sys, x) : ArgumentError("No field `$x`. Allowed keys are $(keys(sys)).")
 Base.pairs(sys::Union{System, ReplicaSystem}) = (k => sys[k] for k in keys(sys))
+Base.get(sys::Union{System, ReplicaSystem}, x::Symbol, default) = 
+    hasfield(typeof(sys), x) ? getfield(sys, x) : return default
 
 AtomsBase.position(s::System) = s.coords
 AtomsBase.position(s::System, i::Integer) = s.coords[i]

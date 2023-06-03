@@ -41,10 +41,10 @@ function make_test_system_molly(D=3; drop_atprop=Symbol[], drop_sysprop=Symbol[]
     atargs = Dict(k => v[i] for (k, v) in pairs(atprop)
     if !(k in (:position, :velocity)))
     if haskey(atprop, :velocity)
-    Atom(atprop[:atomic_symbol][i], atprop[:position][i], atprop[:velocity][i];
+    AtomsBase.Atom(atprop[:atomic_symbol][i], atprop[:position][i], atprop[:velocity][i];
     atargs...)
     else
-    Atom(atprop[:atomic_symbol][i], atprop[:position][i]; atargs...)
+    AtomsBase.Atom(atprop[:atomic_symbol][i], atprop[:position][i]; atargs...)
     end
     end
     if cellmatrix == :lower_triangular
@@ -71,7 +71,7 @@ function make_test_system_molly(D=3; drop_atprop=Symbol[], drop_sysprop=Symbol[]
 end
 
 @testset "AbstractSystem -> Molly System" begin
-    system = make_test_system_molly().system
-    test_approx_eq(system, System(system)l cellmatrix = :diagonal)
+    system = make_test_system_molly(;cellmatrix = :diagonal).system
+    test_approx_eq(system, System(system))
 end
 
