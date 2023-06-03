@@ -6,6 +6,7 @@ version = "0.16.0"
 [deps]
 Atomix = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
 AtomsBase = "a963bdd2-2df7-4f54-a1ee-49d51e6be12a"
+AtomsBaseTesting = "ed7c10db-df7e-4efa-a7be-4f4190f7f227"
 BioStructures = "de9282ab-8554-53be-b2d6-f6c222edabfc"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 CellListMap = "69e1c6dd-3888-40e6-b3c8-31ac5f578864"

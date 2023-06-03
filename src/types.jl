@@ -18,7 +18,9 @@ export
     ReplicaSystem,
     is_on_gpu,
     float_type,
-    masses
+    masses,
+    periodic_system,
+    atomic_system
 
 const DefaultFloat = Float64
 
@@ -845,6 +847,19 @@ Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = typeof(s[1])
 AtomsBase.atomkeys(::Union{System, ReplicaSystem}) = ()
 AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = false
+AtomsBase.keys(sys::System) = (:atoms,:coords,:boundary,:velocities,:atoms_data,:topology,
+        :pairwise_inters,:specific_inter_lists,:general_inters,:constraints,:neighbor_finder,
+        :loggers, :k, :force_units, :energy_units)
+AtomsBase.keys(sys::ReplicaSystem) = (:atoms,:replica_coords,:boundary,
+        :n_replicas,:replica_velocities,:atoms_data,:topology,:replica_topology,
+        :pairwise_inters,:replica_pairwise_inters,:specific_inter_lists,
+        :replica_specific_inter_lists,:general_inters,:replica_general_inters,
+        :constraints,:replica_constraints,:neighbor_finder,:replica_loggers,
+        :exchange_logger,:k,:force_units,:energy_units)
+AtomsBase.haskey(sys::System, x::Symbol) = hasfield(System, x)
+AtomsBase.haskey(sys::ReplicaSystem, x::Symbol) = hasfield(ReplicaSystem, x)
+Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) = hasfield(typeof(sys), x) ? getfield(sys, x) : error("No field `$x`. Allowed keys are $(keys(sys)).")
+Base.pairs(sys::Union{System, ReplicaSystem}) = (k => sys[k] for k in keys(sys))
 
 AtomsBase.position(s::System) = s.coords
 AtomsBase.position(s::System, i::Integer) = s.coords[i]
@@ -901,37 +916,72 @@ end
 # Take precedence over AtomsBase.jl show function
 Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io, s)
 
-"""
-Construct AtomsBase atomic_system from Molly System
-"""
-function AtomsBase.atomic_system(sys::System)
 
-    atomsbase_atoms = map(sys) do atom_view
-        AtomsBase.Atom(atomic_number = atomic_number(atom_view), position = position(atom_view);
-                atomic_mass = atomic_mass(atom_view))
-    end
 
-    return atomic_system(atomsbase_atoms, bouding_box(sys), boundary_conditions(sys))
-end
-
+# Convert AtomsBase AbstractSystem to Molly system
 """
-Construct AtomsBase periodic_system from Molly System
-"""
-function AtomsBase.periodic_system(sys::System)
+Converts AtomsBase `AbstractSystem` to Molly `System``. To add kwargs not present in the
+AtomsBase interface (e.g. pair potentials) call the convenience constructor:
 
-    if all(periodicity(sys))
-        atomsbase_atoms = map(sys) do atom_view
-            AtomsBase.Atom(atomic_number = atomic_number(atom_view), position = position(atom_view);
-                 atomic_mass = atomic_mass(atom_view))
+`System(sys::System)`
+"""
+function System(sys::AbstractSystem{D}) where D
+
+    #Convert BC to Molly types
+    bb = bounding_box(sys)
+    boundary_conditions = AtomsBase.boundary_conditions(sys)
+    
+    #Check if box is cubic
+    angles = []
+    for i in range(1,D)
+        for j in range(i+1,D)
+            push!(angles, ustrip(dot(bb[i],bb[j])))
         end
-
-        return AtomsBase.periodic_system(atomsbase_atoms, bouding_box(sys),
-                    atomic_mass = atom.atomic_mass)
-    else
-        error("Cannot construct periodic_system, system is not periodic. Try atomic_system.")
     end
-end
+    isCubic = all(angles .== 0.0)
 
-function System(sys::AbstractSystem{D}; kwargs...)
+    box_lengths = norm.(bb)
+    box_lengths = convert(Vector, box_lengths)
+    box_lengths[typeof.(boundary_conditions) .== DirichletZero] .= Inf*unit(box_lengths[1])
+    if isCubic && D == 2
+        @warn "Molly RectangularBoundary assumes origin @ (0, 0, 0)"
+        molly_boundary = RectangularBoundary(box_lengths...)
+    elseif isCubic && D == 3
+        @warn "Molly CubicSystem assumes origin @ (0, 0, 0)"
+        molly_boundary = CubicBoundary(box_lengths...)
+    elseif D == 3
+        @warn "Molly TriclinicBoundary assumes origin @ (0, 0, 0)"
+        if any(ustrip.(box_lengths) .== Inf)
+            throw(ArgumentError("Triclinic domain does not support infinite boundaries"))
+        end
+        molly_boundary = TriclinicBoundary(bb...)
+    else
+        throw(ArgumentError("Molly does not support 2D triclinic domains"))
+    end
+
+    idx = 0
+    atoms = map(sys) do atom
+        idx += 1
+        Molly.Atom(; index = idx, charge = get(atom, :charge, 0.0), mass = atomic_mass(atom))
+    end
+
+    atoms_data = map(sys) do atom
+        AtomData(; element = String(atomic_symbol(atom)))
+    end
+
+    coords = map(sys) do atom
+        position(atom)
+    end
+
+    velocities = map(sys) do atom
+        velocity(atom)
+    end
+
+
+    return System(; atoms = atoms,
+                    coords = coords,
+                    boundary = molly_boundary,
+                    velocities = velocities,
+                    atoms_data = atoms_data)
 
 end
