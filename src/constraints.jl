@@ -83,3 +83,53 @@ function apply_constraints!(sys, constraint::SHAKE, old_coords, dt)
         end
     end
 end
+
+
+"""
+    RATTLE(dists, is, js)
+
+Constrains a set of bonds to defined distances in a way that the velocities also satisfy the constraints.
+"""
+struct RATTLE{D,B,E}
+    dists::D
+    is::B
+    js::B
+    tolerance::E
+end
+
+#This doesn't really fit in with the current interface in simulators.jl....I think that will need to change.
+#Do not see a general way to apply constraint algos
+function apply_constraints!(sys, constraint::RATTLE)
+
+    converged = zeros(length(constraint.dists))
+
+    while !all(converged)
+        for r in eachindex(constraint.is)
+            d_ij_sq = (constraint.dists[r])^2
+            m0 = mass(sys.atoms[i0])
+            m1 = mass(sys.atoms[i1])
+
+            # Atoms that are part of the bond
+            i0 = constraint.is[r]
+            i1 = constraint.js[r]
+
+            # Distance vector between the atoms after SHAKE constraint
+            r01 = vector(sys.coords[i1], sys.coords[i0], sys.boundary)
+
+            # Current velocity vector between atoms i,j
+            v01 = sys.velocities[i1] .- sys.velocities[i0]
+
+            #should there be abs() around dot???
+            if dot(r01, v01) > constraint.tolerance
+                k = r01 * (sys.velocities[i1] .- sys.velocities[i0])/(d_ij_sq*(1/m0 + 1/m1))
+                sys.velocities[i0] += k*r01/m0
+                sys.velocities[i1] -= k*r01/m1
+            else
+                converged[r] = true
+            end
+
+        end
+
+    end
+
+end
