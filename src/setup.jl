@@ -193,8 +193,8 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     angle_types = Dict{Tuple{String, String, String}, HarmonicAngle}()
     torsion_types = Dict{Tuple{String, String, String, String}, PeriodicTorsionType}()
     torsion_order = ""
-    weight_14_coulomb = one(T)
-    weight_14_lj = one(T)
+    weight_14_coulomb, weight_14_lj = one(T), one(T)
+    weight_14_coulomb_set, weight_14_lj_set = false, false
     attributes_from_residue = String[]
 
     for ff_file in ff_files
@@ -292,8 +292,22 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     torsion_types[(atom_type_1, atom_type_2, atom_type_3, atom_type_4)] = torsion_type
                 end
             elseif entry_name == "NonbondedForce"
-                weight_14_coulomb = parse(T, entry["coulomb14scale"])
-                weight_14_lj = parse(T, entry["lj14scale"])
+                if haskey(entry, "coulomb14scale")
+                    weight_14_coulomb_new = parse(T, entry["coulomb14scale"])
+                    if weight_14_coulomb_set && weight_14_coulomb_new != weight_14_coulomb
+                        error("found multiple NonbondedForce entries with different coulomb14scale values")
+                    end
+                    weight_14_coulomb = weight_14_coulomb_new
+                    weight_14_coulomb_set = true
+                end
+                if haskey(entry, "lj14scale")
+                    weight_14_lj_new = parse(T, entry["lj14scale"])
+                    if weight_14_lj_set && weight_14_lj_new != weight_14_lj
+                        error("found multiple NonbondedForce entries with different lj14scale values")
+                    end
+                    weight_14_lj = weight_14_lj_new
+                    weight_14_lj_set = true
+                end
                 for atom_or_attr in eachelement(entry)
                     if atom_or_attr.name == "Atom"
                         if !haskey(atom_or_attr, "type")
