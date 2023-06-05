@@ -567,6 +567,110 @@ function System(;
 end
 
 """
+    System(crystal; <keyword arguments>)
+
+A physical system to be simulated, constructed from a SimpleCrystals.jl `Crystal` struct.
+Properties unused in the simulation or in analysis can be left with their
+default values.
+`atoms`, `atoms_data`, `coords` and `boundary` are automatically calcualted from the cyrstal struct. Extra
+atom paramaters like `σ` will have to be added manually after construction using the convenience constructor:
+System(system; <keyword arguments>) 
+"""
+function System(crystal::Crystal{D};
+        pairwise_inters=(),
+        specific_inter_lists=(),
+        general_inters=(),
+        constraints=(),
+        velocities=nothing,
+        neighbor_finder=NoNeighborFinder(),
+        loggers=(),
+        force_units=u"kJ * mol^-1 * nm^-1",
+        energy_units=u"kJ * mol^-1",
+        k=Unitful.k) where D
+
+    # Parse atom data that isbits()
+    atoms = [Atom(index=i, charge=a.charge, mass=a.mass) for (i,a) in enumerate(crystal.atoms)]
+
+    # Parse other atom data
+    atoms_data = [AtomData(element = String(a.sym),) for a in crystal.atoms]
+
+    coords = SimpleCrystals.position(crystal, :)
+
+    # Build bounding box
+    side_lengths = norm.(eachrow(bounding_box(crystal)))
+    if any(typeof(crystal.lattice.crystal_family) .<: [CubicLattice, OrthorhombicLattice, TetragonalLattice])
+        boundary = CubicBoundary(side_lengths...)
+    elseif any(typeof(crystal.lattice.crystal_family) .<: [SquareLattice, RectangularLattice])
+        boundary = RectangularBoundary(side_lengths...)
+    elseif D == 2 #Honeycomb, Hex2D, & Oblique
+        throw(ArgumentError("$(crystal.lattice.crystal_family) is not supported as it would need a 2D triclinic boundary.
+             Try defining the crystal with a rectangular or square unit cell."))
+    else #3D non-cubic systems
+        if !all(crystal.lattice.crystal_family.lattice_angles .< 90u"°")
+            throw(error("All crystal lattice angles must be less than 90°"))
+        end
+        boundary = TriclinicBoundary(side_lengths, crystal.lattice_angles)
+    end
+
+    #Call original constructor
+    return System(
+        atoms = atoms,
+        atoms_data = atoms_data,
+        pairwise_inters = pairwise_inters,
+        specific_inter_lists = specific_inter_lists,
+        general_inters = general_inters,
+        constraints=constraints,
+        coords = coords,
+        velocities = velocities,
+        boundary = boundary,
+        neighbor_finder = neighbor_finder,
+        loggers = loggers,
+        force_units = force_units,
+        energy_units = energy_units,
+        k = k
+    )
+
+end
+"""
+Convenience constructor for re-assigning System properties & types
+"""
+function System(sys::System;
+    atoms = sys.atoms,
+    atoms_data = sys.atoms_data,
+    pairwise_inters = sys.pairwise_inters,
+    specific_inter_lists = sys.specific_inter_lists,
+    general_inters = sys.general_inters,
+    constraints = sys.constraints,
+    coords = sys.coords,
+    velocities = sys.velocities,
+    boundary = sys.boundary,
+    neighbor_finder = sys.neighbor_finder,
+    loggers = sys.loggers,
+    force_units = sys.force_units,
+    energy_units = sys.energy_units,
+    k = sys.k)
+
+    #Call the original constructor
+    return System(
+        atoms = atoms,
+        atoms_data = atoms_data,
+        pairwise_inters = pairwise_inters,
+        specific_inter_lists = specific_inter_lists,
+        general_inters = general_inters,
+        constraints=constraints,
+        coords = coords,
+        velocities = velocities,
+        boundary = boundary,
+        neighbor_finder = neighbor_finder,
+        loggers = loggers,
+        force_units = force_units,
+        energy_units = energy_units,
+        k = k
+    )
+
+end
+
+"""
     ReplicaSystem(; <keyword arguments>)
 
 A wrapper for replicas in a replica exchange simulation.

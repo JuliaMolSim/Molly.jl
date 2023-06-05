@@ -24,6 +24,7 @@ using Graphs
 using KernelDensity
 using NearestNeighbors
 using Requires
+using SimpleCrystals
 using Unitful
 using UnitfulChainRules
 using UnsafeAtomicsLLVM

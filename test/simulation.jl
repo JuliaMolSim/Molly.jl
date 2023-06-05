@@ -1044,3 +1044,72 @@ end
         @test E_diff < 5e-4u"kJ * mol^-1"
     end
 end
+
+
+@testset "Crystal Structures" begin
+
+    r_cut = 8.5u"Å"
+    a = 5.2468u"Å"
+    atom_type = :Ar
+
+    temp = 10.0u"K"
+    fcc_crystal = SimpleCrystals.FCC(a, atom_type, SVector(4,4,4))
+
+    n_atoms = SimpleCrystals.length(fcc_crystal)
+    @test n_atoms == 256
+    atom_mass = SimpleCrystals.atomic_mass(fcc_crystal, 1)
+    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+
+
+    sys = System(
+        fcc_crystal,
+        velocities=velocities,
+        pairwise_inters=(LennardJones(cutoff = 
+            ShiftedForceCutoff(r_cut),
+            energy_units = u"kJ * mol^-1",
+            force_units = u"kJ * mol^-1 * Å^-1"),),
+        loggers=(tot_eng = TotalEnergyLogger(100),),
+        energy_units = u"kJ * mol^-1",
+        force_units = u"kJ * mol^-1 * Å^-1")
+
+    #Add sigma and epsilon to atoms -- not a huge fan of this
+    σ = 3.4u"Å"
+    ϵ = (4.184*0.24037)u"kJ * mol^-1"
+    updated_atoms = []
+    for i in range(1,length(sys.atoms))
+        push!(updated_atoms, Molly.Atom(index = sys.atoms[i].index, charge = sys.atoms[i].charge,
+        mass = sys.atoms[i].mass, σ = σ, ϵ = ϵ, solute = sys.atoms[i].solute))
+    end
+
+    sys = System(sys, atoms = [updated_atoms...])
+
+    # Equilibirate
+    simulator = Langevin(
+        dt=2u"fs",
+        temperature=temp,
+        friction=1.0u"ps^-1",
+    )
+
+    simulate!(sys, simulator, 100_000, run_loggers = false)
+    simulate!(sys, simulator, 200_000)
+ 
+    #Integrator is stochastic so give a wide berth on the tolerance
+    @test  -1850u"kJ * mol^-1" < mean(values(sys.loggers.tot_eng)) < -1650u"kJ * mol^-1"
+
+
+    #Test Unsupported Crystals
+    hex_crystal = SimpleCrystals.Hexagonal(a, :Ar, SVector(2,2))
+    @test_throws ArgumentError System(hex_crystal)
+
+
+    # Make an Invalid Crystals (angle is too large)
+    function MyInvalidCrystal(a, atomic_symbol::Symbol, N::SVector{3}; charge = 0.0u"C")
+        lattice = SimpleCrystals.BravaisLattice(SimpleCrystals.MonoclinicLattice(a, a, a, 120u"°"), SimpleCrystals.Primitive())
+        basis = [SimpleCrystals.Atom(atomic_symbol, SVector(zero(a),zero(a),zero(a)), charge = charge)]
+    return SimpleCrystals.Crystal(lattice,basis,N)
+    end
+    my_crystal = MyInvalidCrystal(a, :Ar, SVector(1,1,1))
+    @test_throws ErrorException System(my_crystal)
+
+
+end
