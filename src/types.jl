@@ -567,6 +567,48 @@ function System(;
 end
 
 """
+    System(sys; <keyword arguments>)
+
+Convenience constructor for changing properties in a `System`.
+
+A copy of the `System` is returned with the provided keyword arguments modified.
+"""
+function System(sys::System;
+                atoms=sys.atoms,
+                coords=sys.coords,
+                boundary=sys.boundary,
+                velocities=sys.velocities,
+                atoms_data=sys.atoms_data,
+                topology=sys.topology,
+                pairwise_inters=sys.pairwise_inters,
+                specific_inter_lists=sys.specific_inter_lists,
+                general_inters=sys.general_inters,
+                constraints=sys.constraints,
+                neighbor_finder=sys.neighbor_finder,
+                loggers=sys.loggers,
+                k=sys.k,
+                force_units=sys.force_units,
+                energy_units=sys.energy_units)
+    return System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        atoms_data=atoms_data,
+        topology=topology,
+        pairwise_inters=pairwise_inters,
+        specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
+        constraints=constraints,
+        neighbor_finder=neighbor_finder,
+        loggers=loggers,
+        k=k,
+        force_units=force_units,
+        energy_units=energy_units,
+    )
+end
+
+"""
     System(crystal; <keyword arguments>)
 
 Construct a `System` from a SimpleCrystals.jl `Crystal` struct.
@@ -610,48 +652,6 @@ function System(crystal::Crystal{D};
         boundary = TriclinicBoundary(side_lengths, crystal.lattice_angles)
     end
 
-    return System(
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        velocities=velocities,
-        atoms_data=atoms_data,
-        topology=topology,
-        pairwise_inters=pairwise_inters,
-        specific_inter_lists=specific_inter_lists,
-        general_inters=general_inters,
-        constraints=constraints,
-        neighbor_finder=neighbor_finder,
-        loggers=loggers,
-        k=k,
-        force_units=force_units,
-        energy_units=energy_units,
-    )
-end
-
-"""
-    System(sys; <keyword arguments>)
-
-Convenience constructor for changing properties in a `System`.
-
-A copy of the `System` is returned with the provided keyword arguments modified.
-"""
-function System(sys::System;
-                atoms=sys.atoms,
-                coords=sys.coords,
-                boundary=sys.boundary,
-                velocities=sys.velocities,
-                atoms_data=sys.atoms_data,
-                topology=sys.topology,
-                pairwise_inters=sys.pairwise_inters,
-                specific_inter_lists=sys.specific_inter_lists,
-                general_inters=sys.general_inters,
-                constraints=sys.constraints,
-                neighbor_finder=sys.neighbor_finder,
-                loggers=sys.loggers,
-                k=sys.k,
-                force_units=sys.force_units,
-                energy_units=sys.energy_units)
     return System(
         atoms=atoms,
         coords=coords,
