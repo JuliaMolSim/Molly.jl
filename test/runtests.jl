@@ -4,8 +4,8 @@ import BioStructures # Imported to avoid clashing names
 using CUDA
 using FiniteDifferences
 using ForwardDiff
-using Zygote
 import SimpleCrystals
+using Zygote
 
 using DelimitedFiles
 using LinearAlgebra

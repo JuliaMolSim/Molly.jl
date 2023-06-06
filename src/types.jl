@@ -569,31 +569,29 @@ end
 """
     System(crystal; <keyword arguments>)
 
-A physical system to be simulated, constructed from a SimpleCrystals.jl `Crystal` struct.
+Construct a `System` from a SimpleCrystals.jl `Crystal` struct.
+
 Properties unused in the simulation or in analysis can be left with their
 default values.
-`atoms`, `atoms_data`, `coords` and `boundary` are automatically calcualted from the cyrstal struct. Extra
-atom paramaters like `σ` will have to be added manually after construction using the convenience constructor:
-System(system; <keyword arguments>) 
+`atoms`, `atoms_data`, `coords` and `boundary` are automatically calcualted from
+the `Crystal` struct.
+Extra atom paramaters like `σ` have to be added manually after construction using
+the convenience constructor `System(sys; <keyword arguments>)`.
 """
 function System(crystal::Crystal{D};
-        pairwise_inters=(),
-        specific_inter_lists=(),
-        general_inters=(),
-        constraints=(),
-        velocities=nothing,
-        neighbor_finder=NoNeighborFinder(),
-        loggers=(),
-        force_units=u"kJ * mol^-1 * nm^-1",
-        energy_units=u"kJ * mol^-1",
-        k=Unitful.k) where D
-
-    # Parse atom data that isbits()
-    atoms = [Atom(index=i, charge=a.charge, mass=a.mass) for (i,a) in enumerate(crystal.atoms)]
-
-    # Parse other atom data
-    atoms_data = [AtomData(element = String(a.sym),) for a in crystal.atoms]
-
+                velocities=nothing,
+                topology=nothing,
+                pairwise_inters=(),
+                specific_inter_lists=(),
+                general_inters=(),
+                constraints=(),
+                neighbor_finder=NoNeighborFinder(),
+                loggers=(),
+                k=Unitful.k,
+                force_units=u"kJ * mol^-1 * nm^-1",
+                energy_units=u"kJ * mol^-1") where D
+    atoms = [Atom(index=i, charge=a.charge, mass=a.mass) for (i, a) in enumerate(crystal.atoms)]
+    atoms_data = [AtomData(element=String(a.sym)) for a in crystal.atoms]
     coords = SimpleCrystals.position(crystal, :)
 
     # Build bounding box
@@ -602,72 +600,75 @@ function System(crystal::Crystal{D};
         boundary = CubicBoundary(side_lengths...)
     elseif any(typeof(crystal.lattice.crystal_family) .<: [SquareLattice, RectangularLattice])
         boundary = RectangularBoundary(side_lengths...)
-    elseif D == 2 #Honeycomb, Hex2D, & Oblique
-        throw(ArgumentError("$(crystal.lattice.crystal_family) is not supported as it would need a 2D triclinic boundary.
-             Try defining the crystal with a rectangular or square unit cell."))
-    else #3D non-cubic systems
+    elseif D == 2 # Honeycomb, Hex2D and Oblique
+        throw(ArgumentError("$(crystal.lattice.crystal_family) is not supported as it would need " *
+            "a 2D triclinic boundary, try defining the crystal with a rectangular or square unit cell"))
+    else # 3D non-cubic systems
         if !all(crystal.lattice.crystal_family.lattice_angles .< 90u"°")
-            throw(error("All crystal lattice angles must be less than 90°"))
+            throw(error("all crystal lattice angles must be less than 90°"))
         end
         boundary = TriclinicBoundary(side_lengths, crystal.lattice_angles)
     end
 
-    #Call original constructor
     return System(
-        atoms = atoms,
-        atoms_data = atoms_data,
-        pairwise_inters = pairwise_inters,
-        specific_inter_lists = specific_inter_lists,
-        general_inters = general_inters,
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        atoms_data=atoms_data,
+        topology=topology,
+        pairwise_inters=pairwise_inters,
+        specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
         constraints=constraints,
-        coords = coords,
-        velocities = velocities,
-        boundary = boundary,
-        neighbor_finder = neighbor_finder,
-        loggers = loggers,
-        force_units = force_units,
-        energy_units = energy_units,
-        k = k
+        neighbor_finder=neighbor_finder,
+        loggers=loggers,
+        k=k,
+        force_units=force_units,
+        energy_units=energy_units,
     )
-
 end
+
 """
-Convenience constructor for re-assigning System properties & types
+    System(sys; <keyword arguments>)
+
+Convenience constructor for changing properties in a `System`.
+
+A copy of the `System` is returned with the provided keyword arguments modified.
 """
 function System(sys::System;
-    atoms = sys.atoms,
-    atoms_data = sys.atoms_data,
-    pairwise_inters = sys.pairwise_inters,
-    specific_inter_lists = sys.specific_inter_lists,
-    general_inters = sys.general_inters,
-    constraints = sys.constraints,
-    coords = sys.coords,
-    velocities = sys.velocities,
-    boundary = sys.boundary,
-    neighbor_finder = sys.neighbor_finder,
-    loggers = sys.loggers,
-    force_units = sys.force_units,
-    energy_units = sys.energy_units,
-    k = sys.k)
-
-    #Call the original constructor
+                atoms=sys.atoms,
+                coords=sys.coords,
+                boundary=sys.boundary,
+                velocities=sys.velocities,
+                atoms_data=sys.atoms_data,
+                topology=sys.topology,
+                pairwise_inters=sys.pairwise_inters,
+                specific_inter_lists=sys.specific_inter_lists,
+                general_inters=sys.general_inters,
+                constraints=sys.constraints,
+                neighbor_finder=sys.neighbor_finder,
+                loggers=sys.loggers,
+                k=sys.k,
+                force_units=sys.force_units,
+                energy_units=sys.energy_units)
     return System(
-        atoms = atoms,
-        atoms_data = atoms_data,
-        pairwise_inters = pairwise_inters,
-        specific_inter_lists = specific_inter_lists,
-        general_inters = general_inters,
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        atoms_data=atoms_data,
+        topology=topology,
+        pairwise_inters=pairwise_inters,
+        specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
         constraints=constraints,
-        coords = coords,
-        velocities = velocities,
-        boundary = boundary,
-        neighbor_finder = neighbor_finder,
-        loggers = loggers,
-        force_units = force_units,
-        energy_units = energy_units,
-        k = k
+        neighbor_finder=neighbor_finder,
+        loggers=loggers,
+        k=k,
+        force_units=force_units,
+        energy_units=energy_units,
     )
-
 end
 
 """

@@ -29,6 +29,7 @@ Implemented features include:
 - Various neighbor list implementations to speed up the calculation of non-bonded forces, including the use of [CellListMap.jl](https://github.com/m3g/CellListMap.jl).
 - Implicit solvent GBSA methods.
 - [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
+- Set up crystal systems using [SimpleCrystals.jl](https://github.com/ejmeitz/SimpleCrystals.jl).
 - Automatic multithreading.
 - GPU acceleration on CUDA-enabled devices.
 - Run with Float64, Float32 or other float types.

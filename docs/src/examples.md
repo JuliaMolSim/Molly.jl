@@ -713,60 +713,64 @@ save("lennard_jones_sc.png", f)
 
 The form of the potential is approximately the same as standard Lennard-Jones for ``r_{ij} > \sigma_{ij}`` if some fractional values are used for ``\lambda`` and ``\alpha``.
 
-## Crystal Structures
+## Crystal structures
 
-Molly makes use of ![SimpleCrystals.jl](https://github.com/ejmeitz/SimpleCrystals.jl) to generate crystal structrues for molecular simulation. All 3D Bravais lattices and most 2D Bravais lattices are supported as well as user defined Crystals through the SimpleCrystals API. The only unsupported crystal types are those with a triclinic 2D simulation domain or crystals with lattice angles larger than ``90\degree``.
+Molly can make use of [SimpleCrystals.jl](https://github.com/ejmeitz/SimpleCrystals.jl) to generate crystal structures for simulation.
+All 3D Bravais lattices and most 2D Bravais lattices are supported as well as user-defined crystals through the SimpleCrystals API.
+The only unsupported crystal types are those with a triclinic 2D simulation domain or crystals with lattice angles larger than 90°.
 
-Molly provides a constructor for the ``System`` class that takes in a ``Crystal`` struct:
-
+Molly provides a constructor for [`System`](@ref) that takes in a `Crystal` struct:
 ```julia
 using Molly
 using SimpleCrystals
 
-a = 5.2468u"Å" #lattice parameter for FCC Argon @ 10K
+a = 5.2468u"Å" # Lattice parameter for FCC Argon at 10 K
 atom_type = :Ar
 
 temp = 10.0u"K"
-fcc_crystal = FCC(a, atom_type, SVector(4,4,4))
+fcc_crystal = FCC(a, atom_type, SVector(4, 4, 4))
 
 n_atoms = length(fcc_crystal)
-atom_mass = atomic_mass(fcc_crystal,1)
+atom_mass = atomic_mass(fcc_crystal, 1)
 velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
 r_cut = 8.5u"Å"
 sys = System(
     fcc_crystal,
     velocities=velocities,
-    pairwise_inters=(LennardJones(cutoff = 
-        ShiftedForceCutoff(r_cut),
-        energy_units = u"kJ * mol^-1",
-        force_units = u"kJ * mol^-1 * Å^-1"),),
-    loggers=(kinetic_eng = KineticEnergyLogger(100),
-            pot_eng = PotentialEnergyLogger(100),
-            ),
-    energy_units = u"kJ * mol^-1",
-    force_units = u"kJ * mol^-1 * Å^-1")
+    pairwise_inters=(LennardJones(
+        cutoff=ShiftedForceCutoff(r_cut),
+        energy_units=u"kJ * mol^-1",
+        force_units=u"kJ * mol^-1 * Å^-1",
+    ),),
+    loggers=(
+        kinetic_eng=KineticEnergyLogger(100),
+        pot_eng=PotentialEnergyLogger(100),
+    ),
+    energy_units=u"kJ * mol^-1",
+    force_units=u"kJ * mol^-1 * Å^-1",
+)
 ```
 
-Certain potentials such as [`LennardJones`](@ref) and [`Buckingham`](@ref) require extra atomic paramaters (e.g. ``\sigma``) that are not implemented by the SimpleCrystals API. These paramaters must be added to the [`System`](@ref) manually.
-
+Certain potentials such as [`LennardJones`](@ref) and [`Buckingham`](@ref) require extra atomic paramaters (e.g. `σ`) that are not implemented by the SimpleCrystals API.
+These paramaters must be added to the [`System`](@ref) manually:
 ```julia
 σ = 3.4u"Å"
-ϵ = (4.184*0.24037)u"kJ * mol^-1"
+ϵ = (4.184 * 0.24037)u"kJ * mol^-1"
 updated_atoms = []
-for i in range(1,length(sys.atoms))
-    push!(updated_atoms, Molly.Atom(index = sys.atoms[i].index, charge = sys.atoms[i].charge,
-     mass = sys.atoms[i].mass, σ = σ, ϵ = ϵ, solute = sys.atoms[i].solute))
+
+for i in eachindex(sys)
+    push!(updated_atoms, Molly.Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
+                            mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
 end
 
-sys = System(sys, atoms = [updated_atoms...])
+sys = System(sys, atoms=[updated_atoms...])
 ```
 
 Now the system can be simulated using any of the available simulators:
-
 ```julia
 simulator = Langevin(
-    dt=2u"fs",
+    dt=2.0u"fs",
     temperature=temp,
     friction=1.0u"ps^-1",
 )
