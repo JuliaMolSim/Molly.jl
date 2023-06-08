@@ -71,6 +71,7 @@ if GROUP in ("All", "NotZygote")
         unbound_args=false,
     )
 
+    include("atomsbase.jl")
     include("basic.jl")
     include("interactions.jl")
     include("minimization.jl")

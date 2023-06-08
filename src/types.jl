@@ -18,7 +18,8 @@ export
     ReplicaSystem,
     is_on_gpu,
     float_type,
-    masses
+    masses,
+    charges
 
 const DefaultFloat = Float64
 
@@ -247,6 +248,8 @@ function Base.zero(::Type{Atom{T, T, T, T}}) where T
     return Atom(0, z, z, z, z, false)
 end
 
+Base.getindex(at::Atom, x::Symbol) = hasfield(Atom, x) ? getfield(atom, x) : error("No field $x in Atom")
+
 """
     charge(atom)
 
@@ -283,6 +286,7 @@ struct AtomData
     res_number::Int
     res_name::String
     element::String
+    atomic_number::Int
 end
 
 function AtomData(;
@@ -290,8 +294,9 @@ function AtomData(;
                     atom_name="?",
                     res_number=1,
                     res_name="???",
-                    element="?")
-    return AtomData(atom_type, atom_name, res_number, res_name, element)
+                    element="?",
+                    atomic_number=missing)
+    return AtomData(atom_type, atom_name, res_number, res_name, element, atomic_number)
 end
 
 """
@@ -834,6 +839,14 @@ The masses of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
 masses(s::System) = s.masses
 masses(s::ReplicaSystem) = mass.(s.atoms)
 
+"""
+    charges(sys)
+
+The charges of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
+"""
+charges(s::Union{System, ReplicaSystem}) = charge.(s.atoms)
+
+
 # Move an array to the GPU depending on whether the system is on the GPU
 move_array(arr, ::System{D, false}) where {D} = arr
 move_array(arr, ::System{D, true }) where {D} = CuArray(arr)
@@ -843,8 +856,8 @@ Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)
 Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = typeof(s[1])
-AtomsBase.atomkeys(::Union{System, ReplicaSystem}) = ()
-AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = false
+AtomsBase.atomkeys(s::Union{System, ReplicaSystem}) = (:charge, :atomic_mass, :atomic_number)
+AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = x ∈ atomkeys(s)
 AtomsBase.keys(sys::System) = (:atoms,:coords,:boundary,:velocities,:atoms_data,:topology,
         :pairwise_inters,:specific_inter_lists,:general_inters,:constraints,:neighbor_finder,
         :loggers, :k, :force_units, :energy_units)
@@ -874,8 +887,7 @@ AtomsBase.velocity(s::ReplicaSystem, i::Integer) = s.replicas[1].velocities[i]
 AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}) = masses(s)
 AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}, i::Integer) = mass(s.atoms[i])
 
-AtomsBase.atomic_number(s::Union{System, ReplicaSystem}) = fill(missing, length(s))
-AtomsBase.atomic_number(s::Union{System, ReplicaSystem}, i::Integer) = missing
+
 
 function AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem})
     if length(s.atoms_data) > 0
@@ -888,6 +900,22 @@ end
 function AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem}, i::Integer)
     if length(s.atoms_data) > 0
         return Symbol(s.atoms_data[i].element)
+    else
+        return :unknown
+    end
+end
+
+function AtomsBase.atomic_number(s::Union{System, ReplicaSystem})
+    if length(s.atoms_data) > 0
+        return map(ad -> ad.atomic_number, s.atoms_data)
+    else
+        return fill(:unknown, length(s))
+    end
+end
+
+function AtomsBase.atomic_number(s::Union{System, ReplicaSystem}, i::Integer)
+    if length(s.atoms_data) > 0
+        return s.atoms_data[i].atomic_number
     else
         return :unknown
     end
@@ -940,9 +968,15 @@ function System(sys::AbstractSystem{D}) where D
     end
     isCubic = all(angles .== 0.0)
 
-    box_lengths = norm.(bb)
-    box_lengths = convert(Vector, box_lengths)
-    box_lengths[typeof.(boundary_conditions) .== DirichletZero] .= Inf*unit(box_lengths[1])
+    if !isinfinite(sys)
+        box_lengths = norm.(bb)
+    end
+    box_lengths = convert(Vector, box_lengths) #was SVector need to be mutable
+
+    if any(typeof.(boundary_conditions) .== DirichletZero)
+        raise(ArgumentError("Molly does not support DirichletZero boundary conditions."))
+    end
+
     if isCubic && D == 2
         @warn "Molly RectangularBoundary assumes origin @ (0, 0, 0)"
         molly_boundary = RectangularBoundary(box_lengths...)
@@ -966,7 +1000,7 @@ function System(sys::AbstractSystem{D}) where D
     end
 
     atoms_data = map(sys) do atom
-        AtomData(; element = String(atomic_symbol(atom)))
+        AtomData(; element = String(atomic_symbol(atom)), atomic_number = atomic_number(atom))
     end
 
     coords = map(sys) do atom

@@ -16,4 +16,5 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [compat]
 Aqua = "0.6"
+AtomsBase = "0.3.4"
 GLMakie = "0.8"
