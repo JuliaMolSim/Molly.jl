@@ -1,7 +1,7 @@
 # CUDA.jl kernels
 
 function cuda_threads_blocks_pairwise(n_neighbors)
-    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512"))
+    n_threads_gpu = min(n_neighbors, parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512")))
     n_blocks = cld(n_neighbors, n_threads_gpu)
     return n_threads_gpu, n_blocks
 end
@@ -15,9 +15,17 @@ end
 function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundary,
                             pairwise_inters, nbs, force_units, ::Val{T}) where {D, C, T}
     fs_mat = CUDA.zeros(T, D, length(atoms))
-    n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel!(
-            fs_mat, coords, atoms, boundary, pairwise_inters, nbs, Val(D), Val(force_units))
+
+    if typeof(nbs) == NoNeighborList
+        # Use 2D grid with 1D thread blocks
+        n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(atoms))
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=(n_blocks, n_blocks) pairwise_force_kernel_nonl!(
+                fs_mat, coords, atoms, boundary, pairwise_inters, nbs, Val(D), Val(force_units))
+    else
+        n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel!(
+                fs_mat, coords, atoms, boundary, pairwise_inters, nbs, Val(D), Val(force_units))
+    end
     return fs_mat
 end
 
@@ -50,6 +58,62 @@ function pairwise_force_kernel!(forces, coords_var, atoms_var, boundary, inters,
         end
     end
     return nothing
+end
+
+function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms_var, boundary, inters,
+                                neighbors_var, ::Val{D}, ::Val{F}) where {T, D, F}
+    coords = CUDA.Const(coords_var)
+    atoms = CUDA.Const(atoms_var)
+    n_atoms = length(atoms)
+
+    tix = threadIdx().x
+    block_x = blockIdx().x
+    block_y = blockIdx().y
+    threads = blockDim().x
+    block_start_i = (block_x - 1) * threads
+    block_start_j = (block_y - 1) * threads
+    i = block_start_i + tix
+
+    forces_shmem = @cuStaticSharedMem(T, (3, 1024))
+    for dim in 1:D
+        forces_shmem[dim, tix] = zero(T)
+    end
+
+    @inbounds if i <= n_atoms
+        atom_i, coord_i = atoms[i], coords[i]
+        for step=1:threads
+            j = block_start_j + step
+            if j <= n_atoms
+                if i != j
+                    atom_j, coord_j = atoms[j], coords[j]
+                    f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
+                    for dim in 1:D
+                        forces_shmem[dim, tix] += -ustrip(f[dim])
+                    end
+                end
+            else
+                break
+            end
+        end
+    end
+
+    for dim in 1:D
+        Atomix.@atomic :monotonic forces[dim, i] += forces_shmem[dim, tix]
+    end
+    return nothing
+end
+
+function sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j,
+                                    boundary, special, F)
+    dr = vector(coord_i, coord_j, boundary)
+    f = force_gpu(inters[1], dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
+    for inter in inters[2:end]
+        f += force_gpu(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
+    end
+    if unit(f[1]) != F
+        error("wrong force unit returned, was expecting $F but got $(unit(f[1]))")
+    end
+    return f
 end
 
 function specific_force_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
