@@ -70,9 +70,10 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     block_x = blockIdx().x
     block_y = blockIdx().y
     threads = blockDim().x
-    block_start_i = (block_x - 1) * threads
-    block_start_j = (block_y - 1) * threads
-    i = block_start_i + tix
+    block_start_i = (block_x - 1) * threads + 1
+    block_start_j = (block_y - 1) * threads + 1
+    block_end_j = min(n_atoms, block_start_j + threads - 1)
+    i = block_start_i + tix - 1
 
     forces_shmem = @cuStaticSharedMem(T, (3, 1024))
     for dim in 1:D
@@ -81,24 +82,19 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
 
     @inbounds if i <= n_atoms
         atom_i, coord_i = atoms[i], coords[i]
-        for step=1:threads
-            j = block_start_j + step
-            if j <= n_atoms
-                if i != j
-                    atom_j, coord_j = atoms[j], coords[j]
-                    f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
-                    for dim in 1:D
-                        forces_shmem[dim, tix] += -ustrip(f[dim])
-                    end
+        for j=block_start_j:block_end_j
+            if j != i
+                atom_j, coord_j = atoms[j], coords[j]
+                f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
+                for dim in 1:D
+                    forces_shmem[dim, tix] += -ustrip(f[dim])
                 end
-            else
-                break
             end
         end
     end
 
     for dim in 1:D
-        Atomix.@atomic :monotonic forces[dim, i] += forces_shmem[dim, tix]
+        CUDA.@atomic forces[dim, i] += forces_shmem[dim, tix]
     end
     return nothing
 end
