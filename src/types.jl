@@ -401,6 +401,83 @@ Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
 CUDA.Const(nl::NoNeighborList) = nl
 
+"""
+    SparseAdjacencyMatrix()
+
+A sparse adjacency matrix stored in CSR format. Column indices are not sorted.
+"""
+mutable struct SparseAdjacencyMatrix
+    columnidx::Vector{Int}
+    rowoffset::Vector{Int}
+    nnz::Int
+    n_atoms::Int
+    symmetric::Bool
+end
+
+function SparseAdjacencyMatrix(columnidx::Vector{Int}, rowoffset::Vector{Int}; symmetric=false)
+    nnz = length(columnidx)
+    n_atoms = length(rowoffset) - 1
+
+    if rowoffset[end] != nnz
+        throw(ArgumentError("rowoffset[end] != nnz"))
+    end
+
+    return SparseAdjacencyMatrix(columnidx, rowoffset, nnz, n_atoms, symmetric)
+end
+
+Base.zero(sam::SparseAdjacencyMatrix) = SparseAdjacencyMatrix(Int[], Int[], 0, sam.n_atoms, sam.symmetric)
+Base.length(sam::SparseAdjacencyMatrix) = sam.nnz
+
+function mark!(sam::SparseAdjacencyMatrix, row::Int, col::Int)
+    if !(row < sam.side || col < sam.side)
+        throw(BoundsError("Index ($row, $col) is out of bounds."))
+    end
+
+    row_end = sam.rowoffset[row+1]
+    sam.columnidx = [sam.columnidx[1:row_end]; col; sam.columnidx[row_end+1:end]]
+    sam.rowoffset[row+1:end] .+= 1
+    sam.nnz += 1
+    return nothing
+end
+
+function unmark!(sam::SparseAdjacencyMatrix, row::Int, col::Int)
+    if !(row < sam.side || col < sam.side)
+        throw(BoundsError("Index ($row, $col) is out of bounds."))
+    end
+
+    row_start = sam.rowoffset[row]
+    row_end = sam.rowoffset[row+1]
+    for i=row_start:row_end
+        if sam.columnidx[i] == col
+            sam.columnidx = [sam.columnidx[1:i-1]; sam.columnidx[i+1:end]]
+        end
+    end
+    sam.rowoffset[row+1:end] .-= 1
+    sam.nnz -= 1
+    return nothing
+end
+
+function mark_current_row!(sam::SparseAdjacencyMatrix, col::Int)
+    sam.nnz += 1
+    sam.rowoffset[end-1:end] .+= 1
+    push!(sam.columnidx, col)
+    return nothing
+end
+
+function unmark_current_row!(sam::SparseAdjacencyMatrix, col::Int)
+    sam.nnz -= 1
+    sam.rowoffset[end-1:end] .-= 1
+    pop!(sam.columnidx, col)
+    return nothing
+end
+
+function mark_new_row!(sam::SparseAdjacencyMatrix, col::Int)
+    sam.nnz += 1
+    push!(sam.rowoffset, sam.nnz)
+    push!(sam.columnidx, col)
+    return nothing
+end
+
 # Convert the Boltzmann constant k to suitable units and float type
 function convert_k_units(T, k, energy_units)
     if energy_units == NoUnits
