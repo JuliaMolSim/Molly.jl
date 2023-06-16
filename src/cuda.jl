@@ -72,7 +72,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     threads = blockDim().x
 
     forces_shmem = @cuStaticSharedMem(T, (3, 1024))
-    for dim in 1:D
+    @inbounds for dim in 1:D
         forces_shmem[dim, tix] = zero(T)
     end
 
@@ -90,21 +90,21 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     end
 
     # Binary tree accumulation
-    d = 1
+    d = Int32(1)
     while d < threads
         sync_threads()
-        idx = 2 * d * (tix - 1) + 1
+        idx = Int32(2) * d * (tix - Int32(1)) + Int32(1)
         @inbounds if idx <= threads && idx + d <= threads
             for dim in 1:D
                 forces_shmem[dim, idx] += forces_shmem[dim, idx+d]
             end
         end
-        d *= 2
+        d *= Int32(2)
     end
 
     # Accumulated force
     if tix == 1
-        for dim in 1:D
+        @inbounds for dim in 1:D
             forces[dim, i] = forces_shmem[dim, 1]
         end
     end
