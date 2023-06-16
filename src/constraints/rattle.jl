@@ -4,21 +4,17 @@ export RATTLE
 
 Constrains a set of bonds to defined distances in a way that the velocities also satisfy the constraints.
 """
-struct RATTLE{D,B,T,C,E} <: VelocityConstraintAlgorithm
-    A::D
-    b::B
-    dt::T
+struct RATTLE{C,E,V} <: VelocityConstraintAlgorithm
     is::C
     js::C
     tolerance::E
+    unconstrained_velocity_storage::V
 end
 
-function RATTLE(is, js, dt, tolerance=1e-10)
+function RATTLE(is, js, unconstrained_velocity_storage; tolerance=1e-10)
     @assert length(is) == length(js) "Constraint lengths do not match"
-    #Allocate storage for linear system
-    A = zeros(length(is), lengths(is))
-    b = zeros(length(is))
-    return RATTLE{typeof(dists), typeof(is), typeof(tolerance)}(A, b, dt, is, js, tolerance = tolerance)
+    return RATTLE{typeof(dists), typeof(is), typeof(tolerance), typeof(unconstrained_velocity_storage)}(
+        is, js, unconstrained_velocity_storage, tolerance = tolerance)
 end
 
 # Find isolated 2, 3 & 4 atom clusters

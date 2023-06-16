@@ -455,6 +455,8 @@ interface described there.
     a `Tuple`.
 - `constraints::CN=()`: the constraints for bonds and angles in the system. Typically
     a `Tuple`.
+- `constraint_algorithms::CA=NoSystemConstraints()` : the constraint algorithms used to apply
+    bond and angle constraints to the system. Either [`NoSystemConstraints()'](@ref) or [`SystemConstraints()`](@ref).
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `loggers::L=()`: the loggers that record properties of interest during a
@@ -466,7 +468,7 @@ interface described there.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
     be set to `NoUnits` if units are not being used.
 """
-mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, CA, NF,
                       L, K, F, E, M} <: AbstractSystem{D}
     atoms::A
     coords::C
@@ -478,6 +480,7 @@ mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
     specific_inter_lists::SI
     general_inters::GI
     constraints::CN
+    constraint_algorithms::CA
     neighbor_finder::NF
     loggers::L
     k::K
@@ -497,6 +500,7 @@ function System(;
                 specific_inter_lists=(),
                 general_inters=(),
                 constraints=(),
+                constraint_algorithms=NoSystemConstraints(),
                 neighbor_finder=NoNeighborFinder(),
                 loggers=(),
                 k=Unitful.k,
@@ -514,10 +518,17 @@ function System(;
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
     CN = typeof(constraints)
+    CA = typeof(constraint_algorithms)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
+
+    if constraint_algorithms == NoSystemConstraints()
+        constraint_algorithms = SystemConstraints(; position_constraint = NoSystemConstraints(),
+            velocity_constraint = NoSystemConstraints())
+    end
+
 
     if isnothing(velocities)
         if force_units == NoUnits
@@ -560,10 +571,10 @@ function System(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, K, F, E, M}(
+    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, CA, NF, L, K, F, E, M}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
-                    specific_inter_lists, general_inters, constraints, neighbor_finder,
-                    loggers, k_converted, force_units, energy_units, atom_masses)
+                    specific_inter_lists, general_inters, constraints, constraint_algorithms,
+                    neighbor_finder, loggers, k_converted, force_units, energy_units, atom_masses)
 end
 
 """
@@ -621,6 +632,8 @@ construction where `n` is the number of threads to be used per replica.
     each replica.
 - `constraints::CN=()`: the constraints for bonds and angles in the system (to be used if the same 
     for all replicas). Typically a `Tuple`.
+- `constraint_algorithms::CA=NoSystemConstraints()` : the constraint algorithms used to apply
+    bond and angle constraints to the system. Either [`NoSystemConstraints()'](@ref) or [`SystemConstraints()`](@ref).
 - `replica_constraints=[() for _ in 1:n_replicas]`: the constraints for bonds and angles in each
     replica. This is only used if no value is passed to the argument `replica_constraints`.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
@@ -663,6 +676,7 @@ function ReplicaSystem(;
                         general_inters=(),
                         replica_general_inters=nothing,
                         constraints=(),
+                        constraint_algorithms=(),
                         replica_constraints=nothing,
                         neighbor_finder=NoNeighborFinder(),
                         replica_loggers=[() for _ in 1:n_replicas],
@@ -680,6 +694,7 @@ function ReplicaSystem(;
     C = typeof(replica_coords[1])
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
+
 
     if isnothing(replica_velocities)
         if force_units == NoUnits
@@ -729,6 +744,14 @@ function ReplicaSystem(;
                             * "does not match number of replicas ($n_replicas)"))
     end
     CN = eltype(replica_constraints)
+
+    if isnothing(replica_constraint_algorithms)
+        replica_constraints_algorithms = [constraint_algorithms for _ in 1:n_replicas]
+    elseif length(replica_constraints_algorithms) != n_replicas
+        throw(ArgumentError("number of constraints ($(length(replica_general_inters)))"
+                            * "does not match number of replicas ($n_replicas)"))
+    end
+    CA = eltype(replica_constraints_algorithms)
 
     if isnothing(exchange_logger)
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)
@@ -797,11 +820,11 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, CA, NF,
                             typeof(replica_loggers[i]), K, F, E, M}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
-            replica_general_inters[i], replica_constraints[i], 
+            replica_general_inters[i], replica_constraints[i], replica_constraints_algorithms[i], 
             deepcopy(neighbor_finder), replica_loggers[i], k_converted,
             force_units, energy_units, atom_masses) for i in 1:n_replicas)
     R = typeof(replicas)

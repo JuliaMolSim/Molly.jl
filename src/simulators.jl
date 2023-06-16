@@ -136,10 +136,15 @@ function simulate!(sys,
     accels_t_dt = zero(accels_t)
 
     for step_n in 1:n_steps
+
+        v_half = sys.velocities .+ (0.5 .*accel_remove_mol.(accels_t) .* sim.dt)
+        apply_velocity_constraints!(sys, sys.constraints.velocity_constraint, ,v_half)
+
+
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt .+ (accel_remove_mol.(accels_t) .* sim.dt ^ 2) ./ 2
 
-        apply_constraints!(sys, old_coords, sim.dt)
+        apply_position_constraints!(sys, sys.constraints.position_constraint, ,old_coords)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)

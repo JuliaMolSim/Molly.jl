@@ -5,16 +5,18 @@ export SHAKE
 
 Constrains a set of bonds to defined distances.
 """
-struct SHAKE{D, B, E} <: PositionConstraintAlgorithm
+struct SHAKE{D, B, E, U} <: PositionConstraintAlgorithm
     dists::D
     is::B
     js::B
-    tolerance::E``
+    tolerance::E
+    unconstrained_position_storage::U
 end
 
-function SHAKE(dists, is, js, tolerance=1e-10u"nm")
+function SHAKE(dists, is, js, unconstrained_position_storage; tolerance=1e-10u"nm")
     @assert (length(is) == length(js)) && (length(dists) == length(js)) "Constraint lengths do not match"
-    return SHAKE{typeof(dists), typeof(tolerance)}(dists, is, js, tolerance)
+    return SHAKE{typeof(dists), typeof(is), typeof(tolerance), typeof(unconstrained_position_storage)}(
+        dists, is, js, unconstrained_position_storage; tolerance = tolerance)
 end
 
 """
@@ -78,7 +80,6 @@ function apply_constraints!(sys, constraint::SHAKE, constraint_cluster::SmallCon
         end
     end
 end
-
 
 function apply_constraints!(sys, constraint::SHAKE, constraint_cluster::LargeConstraintCluster, unconstrained_coords)
 
