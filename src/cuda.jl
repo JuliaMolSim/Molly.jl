@@ -18,8 +18,9 @@ function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundar
 
     if typeof(nbs) == NoNeighborList
         # Use 2D grid with 1D thread blocks
-        n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(atoms))
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=(n_blocks, n_blocks) pairwise_force_kernel_nonl!(
+        n_atoms = length(atoms)
+        n_threads_gpu, _ = cuda_threads_blocks_pairwise(length(atoms))
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_atoms pairwise_force_kernel_nonl!(
                 fs_mat, coords, atoms, boundary, pairwise_inters, nbs, Val(D), Val(force_units))
     else
         n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
@@ -67,25 +68,20 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     n_atoms = length(atoms)
 
     tix = threadIdx().x
-    block_x = blockIdx().x
-    block_y = blockIdx().y
+    i = blockIdx().x
     threads = blockDim().x
-    block_start_i = (block_x - 1) * threads + 1
-    block_start_j = (block_y - 1) * threads + 1
-    block_end_j = min(n_atoms, block_start_j + threads - 1)
-    i = block_start_i + tix - 1
 
     forces_shmem = @cuStaticSharedMem(T, (3, 1024))
     for dim in 1:D
         forces_shmem[dim, tix] = zero(T)
     end
 
+    # Calculate forces using a block stride loop
     @inbounds if i <= n_atoms
         atom_i, coord_i = atoms[i], coords[i]
-        for j=block_start_j:block_end_j
+        for j=tix:threads:n_atoms
             if j != i
-                atom_j, coord_j = atoms[j], coords[j]
-                f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
+                f = sum_pairwise_forces(inters, coord_i, coords[j], atom_i, atoms[j], boundary, false, F)
                 for dim in 1:D
                     forces_shmem[dim, tix] += -ustrip(f[dim])
                 end
@@ -93,9 +89,26 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
         end
     end
 
-    for dim in 1:D
-        CUDA.@atomic forces[dim, i] += forces_shmem[dim, tix]
+    # Binary tree accumulation
+    d = 1
+    while d < threads
+        sync_threads()
+        idx = 2 * d * (tix - 1) + 1
+        @inbounds if idx <= threads && idx + d <= threads
+            for dim in 1:D
+                forces_shmem[dim, idx] += forces_shmem[dim, idx+d]
+            end
+        end
+        d *= 2
     end
+
+    # Accumulated force
+    if tix == 1
+        for dim in 1:D
+            forces[dim, i] = forces_shmem[dim, 1]
+        end
+    end
+
     return nothing
 end
 
