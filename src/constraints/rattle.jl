@@ -44,7 +44,6 @@ function RATTLE_setup(constraint::RATTLE)
 
 end
 
-
 function apply_constraints!(sys, constraint::RATTLE, 
     constraint_cluster::SmallConstraintCluster, unconstrained_velocities)
 

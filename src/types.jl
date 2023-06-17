@@ -455,8 +455,8 @@ interface described there.
     a `Tuple`.
 - `constraints::CN=()`: the constraints for bonds and angles in the system. Typically
     a `Tuple`.
-- `constraint_algorithms::CA=NoSystemConstraints()` : the constraint algorithms used to apply
-    bond and angle constraints to the system. Either [`NoSystemConstraints()'](@ref) or [`SystemConstraints()`](@ref).
+- `constraint_algorithm::CA=NoSystemConstraints()` : The constraint algorithm used to apply
+    bond and angle constraints to the system.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `loggers::L=()`: the loggers that record properties of interest during a
@@ -480,7 +480,7 @@ mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, CA, NF,
     specific_inter_lists::SI
     general_inters::GI
     constraints::CN
-    constraint_algorithms::CA
+    constraint_algorithm::CA
     neighbor_finder::NF
     loggers::L
     k::K
@@ -500,7 +500,7 @@ function System(;
                 specific_inter_lists=(),
                 general_inters=(),
                 constraints=(),
-                constraint_algorithms=NoSystemConstraints(),
+                constraint_algorithm=NoSystemConstraints(),
                 neighbor_finder=NoNeighborFinder(),
                 loggers=(),
                 k=Unitful.k,
@@ -518,16 +518,11 @@ function System(;
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
     CN = typeof(constraints)
-    CA = typeof(constraint_algorithms)
+    CA = typeof(constraint_algorithm)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
-
-    if constraint_algorithms == NoSystemConstraints()
-        constraint_algorithms = SystemConstraints(; position_constraint = NoSystemConstraints(),
-            velocity_constraint = NoSystemConstraints())
-    end
 
 
     if isnothing(velocities)
@@ -541,6 +536,10 @@ function System(;
         vels = velocities
     end
     V = typeof(vels)
+
+    if length(constraints) > 0 && constraint_algorithm == NoSystemConstraints()
+        throw(ArgumentError("Constraints passed to System constructor but no constraint algorithm"))
+    end
 
     if length(atoms) != length(coords)
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(coords)) coordinates"))
@@ -632,10 +631,10 @@ construction where `n` is the number of threads to be used per replica.
     each replica.
 - `constraints::CN=()`: the constraints for bonds and angles in the system (to be used if the same 
     for all replicas). Typically a `Tuple`.
-- `constraint_algorithms::CA=NoSystemConstraints()` : the constraint algorithms used to apply
-    bond and angle constraints to the system. Either [`NoSystemConstraints()'](@ref) or [`SystemConstraints()`](@ref).
 - `replica_constraints=[() for _ in 1:n_replicas]`: the constraints for bonds and angles in each
     replica. This is only used if no value is passed to the argument `replica_constraints`.
+- `constraint_algorithm::CA=NoSystemConstraints()` : The constraint algorithms used to apply
+    bond and angle constraints to the system. It is duplicated for each replica.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation. It is duplicated for each replica.
 - `replica_loggers=[() for _ in 1:n_replicas]`: the loggers for each replica 
@@ -676,8 +675,8 @@ function ReplicaSystem(;
                         general_inters=(),
                         replica_general_inters=nothing,
                         constraints=(),
-                        constraint_algorithms=(),
                         replica_constraints=nothing,
+                        constraint_algorithm=NoSystemConstraints(),
                         neighbor_finder=NoNeighborFinder(),
                         replica_loggers=[() for _ in 1:n_replicas],
                         exchange_logger=nothing,
@@ -694,6 +693,7 @@ function ReplicaSystem(;
     C = typeof(replica_coords[1])
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
+    CA = typeof(constraint_algorithm)
 
 
     if isnothing(replica_velocities)
@@ -744,14 +744,6 @@ function ReplicaSystem(;
                             * "does not match number of replicas ($n_replicas)"))
     end
     CN = eltype(replica_constraints)
-
-    if isnothing(replica_constraint_algorithms)
-        replica_constraints_algorithms = [constraint_algorithms for _ in 1:n_replicas]
-    elseif length(replica_constraints_algorithms) != n_replicas
-        throw(ArgumentError("number of constraints ($(length(replica_general_inters)))"
-                            * "does not match number of replicas ($n_replicas)"))
-    end
-    CA = eltype(replica_constraints_algorithms)
 
     if isnothing(exchange_logger)
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)
@@ -824,7 +816,7 @@ function ReplicaSystem(;
                             typeof(replica_loggers[i]), K, F, E, M}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
-            replica_general_inters[i], replica_constraints[i], replica_constraints_algorithms[i], 
+            replica_general_inters[i], replica_constraints[i], deepcopy(constraint_algorithm), 
             deepcopy(neighbor_finder), replica_loggers[i], k_converted,
             force_units, energy_units, atom_masses) for i in 1:n_replicas)
     R = typeof(replicas)
