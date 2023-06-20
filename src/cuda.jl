@@ -1,4 +1,6 @@
 # CUDA.jl kernels
+const WARPSIZE = UInt32(32)
+const FULLMASK = 0xffffffff
 
 function cuda_threads_blocks_pairwise(n_neighbors)
     n_threads_gpu = min(n_neighbors, parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512")))
@@ -18,9 +20,8 @@ function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundar
 
     if typeof(nbs) == NoNeighborList
         # Use 2D grid with 1D thread blocks
-        n_atoms = length(atoms)
-        n_threads_gpu, _ = cuda_threads_blocks_pairwise(length(atoms))
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_atoms pairwise_force_kernel_nonl!(
+        n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(atoms))
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=(n_blocks, n_blocks) pairwise_force_kernel_nonl!(
                 fs_mat, coords, atoms, boundary, pairwise_inters, nbs, Val(D), Val(force_units))
     else
         n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
@@ -65,48 +66,51 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
                                 neighbors_var, ::Val{D}, ::Val{F}) where {T, D, F}
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
-    n_atoms = length(atoms)
 
-    tix = threadIdx().x
-    i = blockIdx().x
+    tidx = threadIdx().x
+    i_0_block = blockIdx().x
+    j_0_block = blockIdx().y
+    lane = (tidx - 1) % WARPSIZE + 1
+    warpidx = cld(tidx, WARPSIZE)
     threads = blockDim().x
 
+    # @cushow tidx i_0_block j_0_block lane warpidx threads
+
     forces_shmem = @cuStaticSharedMem(T, (3, 1024))
-    @inbounds for dim in 1:D
-        forces_shmem[dim, tix] = zero(T)
+    @inbounds for dim in 1:3
+        forces_shmem[dim, tidx] = zero(T)
     end
 
-    # Calculate forces using a block stride loop
-    @inbounds if i <= n_atoms
+    # iterate over horizontal tiles of size warpsize * warpsize to cover all j's
+    i_0_tile = i_0_block + (warpidx - 1) * WARPSIZE
+    j_0_tile = j_0_block
+    while j_0_tile < j_0_block + threads  # TODO: Check i, j in bounds
+        # Load data on the diagonal
+        i = i_0_tile + lane - 1
+        j = j_0_tile + lane - 1
         atom_i, coord_i = atoms[i], coords[i]
-        for j=tix:threads:n_atoms
-            if j != i
-                f = sum_pairwise_forces(inters, coord_i, coords[j], atom_i, atoms[j], boundary, false, F)
-                for dim in 1:D
-                    forces_shmem[dim, tix] += -ustrip(f[dim])
-                end
-            end
-        end
-    end
 
-    # Binary tree accumulation
-    d = Int32(1)
-    while d < threads
-        sync_threads()
-        idx = Int32(2) * d * (tix - Int32(1)) + Int32(1)
-        @inbounds if idx <= threads && idx + d <= threads
+        tilesteps = WARPSIZE
+        if i_0_tile == j_0_tile  # Don't compute i-i forces
+            j = j % (j_0_tile + WARPSIZE - 1) + 1
+            tilesteps -= 1
+        end
+
+        for _ in 1:tilesteps  
+            sync_warp()
+            atom_j, coord_j = atoms[j], coords[j]  # TODO: shuffle this as well
+            f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
             for dim in 1:D
-                forces_shmem[dim, idx] += forces_shmem[dim, idx+d]
+                forces_shmem[dim, tidx] += -ustrip(f[dim])
             end
+            j = shfl_sync(FULLMASK, j, lane + 1)
         end
-        d *= Int32(2)
+        j_0_tile += WARPSIZE
     end
 
-    # Accumulated force
-    if tix == 1
-        @inbounds for dim in 1:D
-            forces[dim, i] = forces_shmem[dim, 1]
-        end
+    sync_warp()
+    for dim in 1:D
+        forces[dim, i_0_block + tidx - 1] = forces_shmem[dim, tidx]
     end
 
     return nothing
