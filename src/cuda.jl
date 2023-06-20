@@ -68,11 +68,11 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     atoms = CUDA.Const(atoms_var)
 
     tidx = threadIdx().x
-    i_0_block = blockIdx().x
-    j_0_block = blockIdx().y
+    threads = blockDim().x
+    i_0_block = (blockIdx().x - 1) * threads + 1
+    j_0_block = (blockIdx().y - 1) * threads + 1
     lane = (tidx - 1) % WARPSIZE + 1
     warpidx = cld(tidx, WARPSIZE)
-    threads = blockDim().x
 
     # @cushow tidx i_0_block j_0_block lane warpidx threads
 
@@ -83,8 +83,8 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
 
     # iterate over horizontal tiles of size warpsize * warpsize to cover all j's
     i_0_tile = i_0_block + (warpidx - 1) * WARPSIZE
-    j_0_tile = j_0_block
-    while j_0_tile < j_0_block + threads  # TODO: Check i, j in bounds
+    tilerange = j_0_block:WARPSIZE:j_0_block + threads - 1
+    for j_0_tile in tilerange  # TODO: Ensure i, j in bounds
         # Load data on the diagonal
         i = i_0_tile + lane - 1
         j = j_0_tile + lane - 1
@@ -105,12 +105,11 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
             end
             j = shfl_sync(FULLMASK, j, lane + 1)
         end
-        j_0_tile += WARPSIZE
     end
 
     sync_warp()
-    for dim in 1:D
-        forces[dim, i_0_block + tidx - 1] = forces_shmem[dim, tidx]
+    @inbounds for dim in 1:D
+        Atomix.@atomic :monotonic forces[dim, i_0_block + tidx - 1] += forces_shmem[dim, tidx]
     end
 
     return nothing
