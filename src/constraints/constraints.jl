@@ -51,34 +51,15 @@ end
 
 
 """
-A group of constraints  where all atoms participating in the 
-cluster are not in another cluster.
+Atoms in a cluster do not participate in any other constraints outside of that cluster.
+"Small" clusters contain at most 4 bonds between 2,3,4 or 5 atoms around one central atom.
+Small clusters include: 1 bond, 2 bonds, 1 angle, 3 bonds, 1 bond 1 angle, 4 bonds
+Note that an angle constraints will be implemented as 3 distance constraints. These constraints
+use special methods that improve computational performance. Any constraint not listed above
+will come at a performance penatly.
 """
-abstract type ConstraintCluster end
-
-"""
-Cluster of at most 4 bonds between 2,3,4 or 5 atoms around one central atom.
-These atoms CANNOT participate in constraints outside of this cluster.
-Small clusters include: 
-    1 bond, 2 bonds, 1 angle, 3 bonds, 1 bond 1 angle, 4 bonds
-Note that an angle constraints will be implemented as 3 distance constraints.
-"""
-struct SmallConstraintCluster <: ConstraintCluster
-    constraints::Vector{<:Constraint}
-end
-
-function SmallConstraintCluster(constraints)
-    @assert length(cosntraints) <= 4 "Small constraint can only contain up to 4 constraints"
-    return SmallConstraintCluster(constraints)
-end 
-
-
-"""
-All constraints in the system that contain more than 5 atoms. These are much
-more expensive to solve than an isolated constraint.
-"""
-struct LargeConstraintCluster <: ConstraintCluster
-    constraints::Vector{<:Constraint}
+struct ConstraintCluster{N} <: ConstraintCluster
+    constraints::SVector{N, <:Constraint}
 end
 
 
@@ -124,27 +105,25 @@ function build_clusters(n_atoms, constraints)
         end
     end
 
+    #Build distance matrix??
+
     cc = connected_components(constraint_graph)
 
     clusters = Vector{<:ConstraintCluster}(undef, 0)
 
+
+    # NEED TO ADD DISTANCES TO CONSTRAINTS HERE
+
     #Loop through connected regions and convert to clusters
     for (cluster_idx, atom_idxs) in enumerate(cc)
-        if length(atom_ids) <= 4
-            for ai in atom_idxs
-                neigh_idxs = neighbors(constraint_graph, ai)
-                for neigh_idx in neigh_idxs
-                    push!(clusters, SmallConstraintCluster(ai, neigh_idx))
-                end
-            end
-        else
-            for ai in atom_idxs
-                neigh_idxs = neighbors(constraint_graph, ai)
-                for neigh_idx in neigh_idxs
-                    push!(clusters, LargeConstraintCluster(ai, neigh_idx))
-                end
+        for ai in atom_idxs
+            neigh_idxs = neighbors(constraint_graph, ai)
+            current_constraints = []
+            for neigh_idx in neigh_idxs
+                push!(current_constraints, DistanceConstraint([ai, neigh_idx]))
             end
         end
+        push!(clusters, ConstraintCluster(current_constraints))
     end
 
     return clusters
@@ -175,7 +154,7 @@ function apply_position_constraints!(sys, constraint_algo::ConstraintAlgorithms,
     constraint_clusters::ConstraintCluster, unconstrained_coords)
 
     for constraint_cluster in constraint_clusters
-        apply_constraints!(sys, constraint_algo, constraint_cluster, unconstrained_coords)
+        apply_position_constraint!(sys, constraint_algo, constraint_cluster, unconstrained_coords)
     end
 end
 
@@ -187,7 +166,7 @@ function apply_velocity_constraints!(sys, constraint_algo::ConstraintAlgorithms,
      constraint_clusters::ConstraintCluster, unconstrained_velocities)
 
     for constraint_cluster in constraint_clusters
-        apply_constraints!(sys, constraint_algo, constraint_cluster, unconstrained_velocities)
+        apply_velocity_constraint!(sys, constraint_algo, constraint_cluster, unconstrained_velocities)
     end
 end
 
