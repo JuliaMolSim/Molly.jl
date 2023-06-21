@@ -537,10 +537,6 @@ function System(;
     end
     V = typeof(vels)
 
-    if length(constraints) > 0 && constraint_algorithm == NoSystemConstraints()
-        throw(ArgumentError("Constraints passed to System constructor but no constraint algorithm"))
-    end
-
     if length(atoms) != length(coords)
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(coords)) coordinates"))
     end
@@ -549,6 +545,14 @@ function System(;
     end
     if length(atoms_data) > 0 && length(atoms) != length(atoms_data)
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
+    end
+
+    if length(constraints) > 0 && constraint_algorithm == NoSystemConstraints()
+        throw(ArgumentError("Constraints passed to System constructor but no constraint algorithm"))
+    elseif length(constraints) > 0
+        #Convert constraints, if passed, to clusters
+        constraints = constraint_setup(coords, constraints)
+        CN = typeof(constraints)
     end
 
     if isa(atoms, CuArray) && !isa(coords, CuArray)

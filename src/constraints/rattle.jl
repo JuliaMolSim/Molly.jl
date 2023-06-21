@@ -17,42 +17,28 @@ function RATTLE(is, js, unconstrained_velocity_storage; tolerance=1e-10)
         is, js, unconstrained_velocity_storage, tolerance = tolerance)
 end
 
-# Find isolated 2, 3 & 4 atom clusters
-function RATTLE_setup(constraint::RATTLE)
 
-    rattle2_pairs = []
-    # rattle3_pairs = []
-    # rattle4_pairs = []
-
-    #Exhasutive search through constraints to find conflicts -- will not scale to 3,4 bond clusters
-    for r1 in eachindex(constraint.is)
-        # Atoms that are part of the bond
-        i_r1 = constraint.is[r1]
-        j_r1 = constraint.js[r1]
-
-        is_isolated = i_r1 ∉ constraint.is[constraint.is .!= r1] &&
-                      i_r1 ∉ constraint.js &&
-                      j_r1 ∉ constraint.js[constraint.js .!= r1] &&
-                      j_r1 ∉ constraints.is
-
-        if is_isolated
-            push!(rattle2_pairs, r1)
-        end
-
-    end
-
+function apply_position_constraints!(sys, constraint::RATTLE, 
+    constraint_cluster::SmallConstraintCluster, unconstrained_coords)
 
 end
 
-function apply_constraints!(sys, constraint::RATTLE, 
+function apply_position_constraints!(sys, constraint::RATTLE, 
+    constraint_cluster::LargeConstraintCluster, unconstrained_coords)
+
+end
+
+function apply_velocity_constraints!(sys, constraint::RATTLE, 
     constraint_cluster::SmallConstraintCluster, unconstrained_velocities)
 
 end
 
-function apply_constraints!(sys, constraint::RATTLE, 
+function apply_velocity_constraints!(sys, constraint::RATTLE, 
     constraint_cluster::LargeConstraintCluster, unconstrained_velocities)
 
 end
+
+
 
 # This is just for half step of velocity
 # Rattle for a single distance constraint between atoms i and j

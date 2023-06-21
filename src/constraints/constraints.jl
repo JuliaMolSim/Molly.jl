@@ -14,8 +14,7 @@ An example of a constraint is [`SHAKE`](@ref).
 struct NoSystemConstraints end
 
 # Add new algorithms here later
-PositionConstraintAlgorithms = Union{SHAKE, RATTLE}
-VelocityConstraintAlgorithms = Union{RATTLE}
+ConstraintAlgorithms = Union{SHAKE, RATTLE}
 
 
 abstract type Constraint end
@@ -34,20 +33,20 @@ end
 # """
 # Constraint between three atoms that maintains a common angle (e.g. a water molecule)
 # # Arguments
-# - `atom_idxs::SVector{Int}` : The indices of atoms in the system participating in this constraint.
+# - `atom_idxs::SVector{2,Int}` : The indices of atoms in the system participating in this constraint.
 #     The first atom in this list is assumed to be the central atom if the `central_atom_idx` keyword is not specified
 # - `angle::A` : Angle between the atoms.
-# - `central_atom_idx::Int` : The index if the atom in `atom_idxs` that corresponds to the central atom of the constraint.
+# - `central_atom_idx::Int` : The index if the atom that corresponds to the central atom of the constraint.
 # """
 # struct AngleConstraint{A,D} <: Constraint
-#     atom_idxs::SVector{3,Int}
+#     edge_atom_idxs::SVector{2,Int}
+#     central_atom_idx::Int
 #     angle::A
 #     dists::D
-#     central_atom_idx::Int
 # end
 
-# function AngleConstraint(atom_idxs, angle, dists; central_atom = 1)
-#     return {typeof(angle), typeof(dists)}(atom_idxs, angle, dists; central_atom = central_atom)
+# function AngleConstraint(atom_idxs, angle, dists, central_atom)
+#     return {typeof(angle), typeof(dists)}(atom_idxs, angle, dists, central_atom)
 # end
 
 
@@ -97,11 +96,12 @@ end
 #     end
 # end
 
-function constraint_setup(sys)
-    angle_to_dist_constraints!(sys)
-    small_clusters, large_clusters = build_clusters(sys)
-    check_initial_constraints(sys, small_clusters, large_clusters)
-    return small_clusters, large_clusters
+function constraint_setup(coords, constraints)
+    n_atoms = length(coords)
+    # angle_to_dist_constraints!(sys)
+    clusters = build_clusters(n_atoms, constraints)
+    check_initial_constraints(coords, clusters)
+    return clusters
 end
 
 
@@ -111,15 +111,13 @@ Parse the constraints into small and large clusters.
 Small clusters can be solved faster whereas large
 clusters fall back to slower, generic methods.
 """
-function build_clusters(sys)
+function build_clusters(n_atoms, constraints)
 
-    # Build directed graph so we don't double count
-    # bonds when calling neighbors()
-    n_atoms = length(sys.atoms)
+    # Build directed graph so we don't double count bonds when calling neighbors()
     constraint_graph = SimpleDiGraph(n_atoms)
 
     # Add edges to graph
-    for constraint in sys.constraints
+    for constraint in constraints
         edge_added = add_edge!(constraint_graph, constraint.atom_idxs[1], constraint.atom_idxs[2])
         if !edge_added
             @warn "Duplicated constraint in System. It will be ignored."
@@ -128,8 +126,7 @@ function build_clusters(sys)
 
     cc = connected_components(constraint_graph)
 
-    small_clusters = Vector{SmallConstraintCluster}(undef,0)
-    large_clusters = Vector{LargeConstraintCluster}(undef,0)
+    clusters = Vector{<:ConstraintCluster}(undef, 0)
 
     #Loop through connected regions and convert to clusters
     for (cluster_idx, atom_idxs) in enumerate(cc)
@@ -137,30 +134,30 @@ function build_clusters(sys)
             for ai in atom_idxs
                 neigh_idxs = neighbors(constraint_graph, ai)
                 for neigh_idx in neigh_idxs
-                    push!(small_clusters, SmallConstraintCluster(ai, neigh_idx))
+                    push!(clusters, SmallConstraintCluster(ai, neigh_idx))
                 end
             end
         else
             for ai in atom_idxs
                 neigh_idxs = neighbors(constraint_graph, ai)
                 for neigh_idx in neigh_idxs
-                    push!(large_clusters, LargeConstraintCluster(ai, neigh_idx))
+                    push!(clusters, LargeConstraintCluster(ai, neigh_idx))
                 end
             end
         end
     end
 
-    return small_clusters, large_clusters
+    return clusters
 end
 
 """
 Verifies that the initial conditions of the system satisfy the constraints.
 """
-function check_initial_constraints(sys, small_clusters, large_clusters)
+function check_initial_constraints(coords, clusters)
 
-    for cluster in small_clusters
+    for cluster in clusters
         for constraint in cluster.constraints
-            r_actual = norm(sys.coords[constraint.atom_idxs[1]] .- sys.coords[constraint.atom_idxs[2]])
+            r_actual = norm(coords[constraint.atom_idxs[1]] .- coords[constraint.atom_idxs[2]])
             if !isapprox(r_actual, constraint.dist)
                 throw(ArgumentError("Constraint between atoms $(constraint.atom_idxs[1]) 
                     and $(constraint.atom_idxs[2]) is not satisfied by the initial conditions."))
@@ -168,38 +165,28 @@ function check_initial_constraints(sys, small_clusters, large_clusters)
         end
     end
 
-    for cluster in large_clusters
-        for constraint in cluster.constraints
-            r_actual = norm(sys.coords[constraint.atom_idxs[1]] .- sys.coords[constraint.atom_idxs[2]])
-            if !isapprox(r_actual, constraint.dist)
-                throw(ArgumentError("Constraint between atoms $(constraint.atom_idxs[1]) 
-                    and $(constraint.atom_idxs[2]) is not satisfied by the initial conditions."))
-            end
-        end
-    end
 end
 
 # For Verlet/Velocity Verlet position step
-function apply_position_constraints!(sys, constraint_algo::PositionConstraintAlgorithms, 
-    isolated_constraint_clusters::ConstraintCluster, unconstrained_coords)
+"""
+Updates the coordinates of a [`System`](@ref) based on the constraints.
+"""
+function apply_position_constraints!(sys, constraint_algo::ConstraintAlgorithms, 
+    constraint_clusters::ConstraintCluster, unconstrained_coords)
 
-    if typeof(constraint_algo) == RATTLE
-        for constraint_cluster in isolated_constraint_clusters
-            #WILL BREAK ATM -- FIX LATER
-            apply_constraints!(sys, SHAKE, constraint_cluster, unconstrained_coords)
-        end
-    else
-        for constraint_cluster in isolated_constraint_clusters
-            apply_constraints!(sys, constraint_algo, constraint_cluster, unconstrained_coords)
-        end
+    for constraint_cluster in constraint_clusters
+        apply_constraints!(sys, constraint_algo, constraint_cluster, unconstrained_coords)
     end
 end
 
 # For Velocity Verlet half step
-function apply_velocity_constraints!(sys, constraint_algo::VelocityConstraintAlgorithms,
-     isolated_constraint_clusters::ConstraintCluster, unconstrained_velocities)
+"""
+Updates the velocities of a [`System`](@ref) based on the constraints.
+"""
+function apply_velocity_constraints!(sys, constraint_algo::ConstraintAlgorithms,
+     constraint_clusters::ConstraintCluster, unconstrained_velocities)
 
-    for constraint_cluster in isolated_constraint_clusters
+    for constraint_cluster in constraint_clusters
         apply_constraints!(sys, constraint_algo, constraint_cluster, unconstrained_velocities)
     end
 end

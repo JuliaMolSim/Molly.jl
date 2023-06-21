@@ -19,12 +19,8 @@ function SHAKE(dists, is, js, unconstrained_position_storage; tolerance=1e-10u"n
         dists, is, js, unconstrained_position_storage; tolerance = tolerance)
 end
 
-"""
-    apply_constraint!(sys, constraint, unconstrained_coords)
-
-Updates the coordinates and/or velocities of a [`System`](@ref) based on the constraints.
-"""
-function apply_constraints!(sys, constraint::SHAKE, constraint_cluster::SmallConstraintCluster, unconstrained_coords)
+function apply_position_constraints!(sys, constraint::SHAKE, 
+    constraint_cluster::SmallConstraintCluster, unconstrained_coords)
 
     #IDENTIFY TYPE OF CLUSTER AND APPLY CORRECT VERSION OF SHAKE
 
@@ -81,7 +77,20 @@ function apply_constraints!(sys, constraint::SHAKE, constraint_cluster::SmallCon
     end
 end
 
-function apply_constraints!(sys, constraint::SHAKE, constraint_cluster::LargeConstraintCluster, unconstrained_coords)
+function apply_position_constraints!(sys, constraint::SHAKE, 
+    constraint_cluster::LargeConstraintCluster, unconstrained_coords)
 
     #implement M Shake??
+end
+
+
+#SHould these just be nothing, or do you arbitrarblty zero out the bond velocities???
+function apply_velocity_constraints!(sys, constraint::SHAKE, 
+    constraint_cluster::SmallConstraintCluster, unconstrained_velocities)
+
+end
+
+function apply_velocity_constraints!(sys, constraint::SHAKE, 
+    constraint_cluster::LargeConstraintCluster, unconstrained_velocities)
+
 end
