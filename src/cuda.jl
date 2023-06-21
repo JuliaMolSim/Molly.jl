@@ -2,6 +2,21 @@
 const WARPSIZE = UInt32(32)
 const FULLMASK = 0xffffffff
 
+macro shfl_multiple_sync(mask, target, vars...)
+    all_lines = map(vars) do v
+        Expr(:(=), esc(v),
+            Expr(
+                :call,
+                :shfl_sync,
+                esc(mask),
+                esc(v),
+                esc(target)
+            )
+        )
+    end
+    return Expr(:block, all_lines...)
+end
+
 function cuda_threads_blocks_pairwise(n_neighbors)
     n_threads_gpu = min(n_neighbors, parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512")))
     n_blocks = cld(n_neighbors, n_threads_gpu)
@@ -74,8 +89,6 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     lane = (tidx - 1) % WARPSIZE + 1
     warpidx = cld(tidx, WARPSIZE)
 
-    # @cushow tidx i_0_block j_0_block lane warpidx threads
-
     forces_shmem = @cuStaticSharedMem(T, (3, 1024))
     @inbounds for dim in 1:3
         forces_shmem[dim, tidx] = zero(T)
@@ -103,7 +116,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
             for dim in 1:D
                 forces_shmem[dim, tidx] += -ustrip(f[dim])
             end
-            j = shfl_sync(FULLMASK, j, lane + 1)
+            @shfl_multiple_sync(FULLMASK, lane + 1, j)
         end
     end
 
