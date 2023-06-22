@@ -4,15 +4,7 @@ const FULLMASK = 0xffffffff
 
 macro shfl_multiple_sync(mask, target, vars...)
     all_lines = map(vars) do v
-        Expr(:(=), esc(v),
-            Expr(
-                :call,
-                :shfl_sync,
-                esc(mask),
-                esc(v),
-                esc(target)
-            )
-        )
+        Expr(:(=), esc(v), Expr(:call, :shfl_sync, esc(mask), esc(v), esc(target)))
     end
     return Expr(:block, all_lines...)
 end
@@ -35,8 +27,9 @@ function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundar
 
     if typeof(nbs) == NoNeighborList
         # Use 2D grid with 1D thread blocks
-        n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(atoms))
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=(n_blocks, n_blocks) pairwise_force_kernel_nonl!(
+        n_threads_gpu, n_blocks_y = cuda_threads_blocks_pairwise(length(atoms))
+        n_blocks_x = cld(length(atoms), WARPSIZE)
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=(n_blocks_x, n_blocks_y) pairwise_force_kernel_nonl!(
                 fs_mat, coords, atoms, boundary, pairwise_inters, nbs, Val(D), Val(force_units))
     else
         n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
@@ -84,8 +77,8 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
 
     tidx = threadIdx().x
     threads = blockDim().x
-    i_0_block = (blockIdx().x - 1) * threads + 1
-    j_0_block = (blockIdx().y - 1) * threads + 1
+    i_0_block = (blockIdx().x - 1) * WARPSIZE
+    j_0_block = (blockIdx().y - 1) * threads
     lane = (tidx - 1) % WARPSIZE + 1
     warpidx = cld(tidx, WARPSIZE)
 
@@ -94,35 +87,32 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
         forces_shmem[dim, tidx] = zero(T)
     end
 
-    # iterate over horizontal tiles of size warpsize * warpsize to cover all j's
-    i_0_tile = i_0_block + (warpidx - 1) * WARPSIZE
-    tilerange = j_0_block:WARPSIZE:j_0_block + threads - 1
-    for j_0_tile in tilerange  # TODO: Ensure i, j in bounds
-        # Load data on the diagonal
-        i = i_0_tile + lane - 1
-        j = j_0_tile + lane - 1
-        atom_i, coord_i = atoms[i], coords[i]
+    # The current tile that the warp is Calculating
+    i_0_tile = i_0_block
+    j_0_tile = j_0_block + (warpidx - 1) * WARPSIZE
+    i = i_0_tile + lane
+    j = j_0_tile + lane
+    atom_i, coord_i = atoms[i], coords[i]
 
-        tilesteps = WARPSIZE
-        if i_0_tile == j_0_tile  # Don't compute i-i forces
-            j = j % (j_0_tile + WARPSIZE - 1) + 1
-            tilesteps -= 1
-        end
+    tilesteps = WARPSIZE
+    if i_0_tile == j_0_tile  # Don't compute i-i forces
+        j = j % (j_0_tile + WARPSIZE) + 1
+        tilesteps -= 1
+    end
 
-        for _ in 1:tilesteps  
-            sync_warp()
-            atom_j, coord_j = atoms[j], coords[j]  # TODO: shuffle this as well
-            f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
-            for dim in 1:D
-                forces_shmem[dim, tidx] += -ustrip(f[dim])
-            end
-            @shfl_multiple_sync(FULLMASK, lane + 1, j)
+    for _ in 1:tilesteps  
+        sync_warp()
+        atom_j, coord_j = atoms[j], coords[j]  # TODO: shuffle this as well
+        f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
+        for dim in 1:D
+            forces_shmem[dim, tidx] += -ustrip(f[dim])
         end
+        @shfl_multiple_sync(FULLMASK, lane + 1, j)
     end
 
     sync_warp()
     @inbounds for dim in 1:D
-        Atomix.@atomic :monotonic forces[dim, i_0_block + tidx - 1] += forces_shmem[dim, tidx]
+        Atomix.@atomic :monotonic forces[dim, i] += forces_shmem[dim, tidx]
     end
 
     return nothing
