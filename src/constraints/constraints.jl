@@ -1,10 +1,11 @@
 export
-    apply_position_constraints!, apply_velocity_constraints!, 
     DistanceConstraint, AngleConstraint, 
     NoSystemConstraints
 
-include("shake.jl")
-include("rattle.jl")
+"""
+Supertype for all constraint algorithms.
+"""
+abstract type ConstraintAlgorithm end
 
 
 """
@@ -13,10 +14,10 @@ An example of a constraint is [`SHAKE`](@ref).
 """
 struct NoSystemConstraints end
 
-# Add new algorithms here later
-ConstraintAlgorithms = Union{SHAKE, RATTLE}
 
-
+"""
+Supertype for all types of constraint.
+"""
 abstract type Constraint end
 
 """
@@ -58,7 +59,7 @@ Note that an angle constraints will be implemented as 3 distance constraints. Th
 use special methods that improve computational performance. Any constraint not listed above
 will come at a performance penatly.
 """
-struct ConstraintCluster{N} <: ConstraintCluster
+struct ConstraintCluster{N}
     constraints::SVector{N, <:Constraint}
 end
 
@@ -94,36 +95,39 @@ clusters fall back to slower, generic methods.
 """
 function build_clusters(n_atoms, constraints)
 
-    # Build directed graph so we don't double count bonds when calling neighbors()
     constraint_graph = SimpleDiGraph(n_atoms)
+    idx_dist_pairs = spzeros(n_atoms, n_atoms) * unit(constraints[1].dist)
 
-    # Add edges to graph
+    # Store constraints as directed edges, direction is arbitrary but necessary
     for constraint in constraints
         edge_added = add_edge!(constraint_graph, constraint.atom_idxs[1], constraint.atom_idxs[2])
-        if !edge_added
+        if edge_added
+            idx_dist_pairs[constraint.atom_idxs[1],constraint.atom_idxs[2]] = constraint.dist
+            idx_dist_pairs[constraint.atom_idxs[2],constraint.atom_idxs[1]] = constraint.dist
+        else
             @warn "Duplicated constraint in System. It will be ignored."
         end
     end
 
-    #Build distance matrix??
-
+    # Get groups of constraints that are connected to eachother 
     cc = connected_components(constraint_graph)
 
-    clusters = Vector{<:ConstraintCluster}(undef, 0)
-
-
-    # NEED TO ADD DISTANCES TO CONSTRAINTS HERE
+    # Initialze empty vector of clusters
+    clusters = Vector{ConstraintCluster}(undef, 0)
 
     #Loop through connected regions and convert to clusters
     for (cluster_idx, atom_idxs) in enumerate(cc)
+        # Loop atoms in connected region to build cluster
+        connected_constraints = Vector{DistanceConstraint}(undef, 0)
         for ai in atom_idxs
             neigh_idxs = neighbors(constraint_graph, ai)
-            current_constraints = []
             for neigh_idx in neigh_idxs
-                push!(current_constraints, DistanceConstraint([ai, neigh_idx]))
+                push!(connected_constraints,
+                     DistanceConstraint(SVector(ai, neigh_idx), idx_dist_pairs[ai,neigh_idx]))
             end
         end
-        push!(clusters, ConstraintCluster(current_constraints))
+        connected_constraints = convert(SVector{length(connected_constraints)}, connected_constraints)
+        push!(clusters, ConstraintCluster(connected_constraints))
     end
 
     return clusters
@@ -150,11 +154,11 @@ end
 """
 Updates the coordinates of a [`System`](@ref) based on the constraints.
 """
-function apply_position_constraints!(sys, constraint_algo::ConstraintAlgorithms, 
-    constraint_clusters::ConstraintCluster, unconstrained_coords)
+function apply_position_constraints!(sys, constraint_algo::ConstraintAlgorithm, 
+    constraint_clusters::ConstraintCluster)
 
     for constraint_cluster in constraint_clusters
-        apply_position_constraint!(sys, constraint_algo, constraint_cluster, unconstrained_coords)
+        apply_position_constraint!(sys, constraint_algo, constraint_cluster)
     end
 end
 
@@ -162,14 +166,15 @@ end
 """
 Updates the velocities of a [`System`](@ref) based on the constraints.
 """
-function apply_velocity_constraints!(sys, constraint_algo::ConstraintAlgorithms,
-     constraint_clusters::ConstraintCluster, unconstrained_velocities)
+function apply_velocity_constraints!(sys, constraint_algo::ConstraintAlgorithm,
+     constraint_clusters::ConstraintCluster)
 
     for constraint_cluster in constraint_clusters
-        apply_velocity_constraint!(sys, constraint_algo, constraint_cluster, unconstrained_velocities)
+        apply_velocity_constraint!(sys, constraint_algo, constraint_cluster)
     end
 end
 
 apply_position_constraints!(sys::System, constraint_algo::NoSystemConstraints, args...) = nothing
 apply_velocity_constraints!(sys::System, constraint_algo::NoSystemConstraints, args...) = nothing
+
 

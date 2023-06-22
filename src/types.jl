@@ -517,7 +517,6 @@ function System(;
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
-    CN = typeof(constraints)
     CA = typeof(constraint_algorithm)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
@@ -552,8 +551,8 @@ function System(;
     elseif length(constraints) > 0
         #Convert constraints, if passed, to clusters
         constraints = constraint_setup(coords, constraints)
-        CN = typeof(constraints)
     end
+    CN = typeof(constraints)
 
     if isa(atoms, CuArray) && !isa(coords, CuArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
@@ -576,7 +575,7 @@ function System(;
 
     return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, CA, NF, L, K, F, E, M}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
-                    specific_inter_lists, general_inters, constraints, constraint_algorithms,
+                    specific_inter_lists, general_inters, constraints, constraint_algorithm,
                     neighbor_finder, loggers, k_converted, force_units, energy_units, atom_masses)
 end
 
