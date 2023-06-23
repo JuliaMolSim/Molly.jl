@@ -11,7 +11,7 @@ using AtomsBaseTesting
                                 [0.0, 1.4654985, 0.0],
                                 [0.0, 0.0, 1.7928950]]u"Å");
     molly_sys = System(system)
-    @test test_approx_eq(system, molly_sys; common_only = true)
+    test_approx_eq(system, molly_sys; common_only = true)
 
 end
 
