@@ -11,12 +11,7 @@ using AtomsBaseTesting
                                 [0.0, 1.4654985, 0.0],
                                 [0.0, 0.0, 1.7928950]]u"Å");
     molly_sys = System(system)
-    test_approx_eq(system, molly_sys; common_only = true)
+    @test test_approx_eq(system, molly_sys; common_only = true)
 
-    #Test valid and invalid systems
-end
-
-@testset "AtomsBase Interface" begin
-    # Test some AtomsBase functions e.g. get on Molly system
 end
 

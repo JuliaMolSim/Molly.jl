@@ -852,11 +852,12 @@ move_array(arr, ::System{D, false}) where {D} = arr
 move_array(arr, ::System{D, true }) where {D} = CuArray(arr)
 
 Base.getindex(s::Union{System, ReplicaSystem}, i::Integer) = AtomView(s, i)
+
 Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)
 Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = typeof(s[1])
-AtomsBase.atomkeys(s::Union{System, ReplicaSystem}) = (:charge, :atomic_mass, :atomic_number)
+AtomsBase.atomkeys(s::Union{System, ReplicaSystem}) = (:position, :velocity, :atomic_mass, :atomic_number)
 AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = x ∈ atomkeys(s)
 AtomsBase.keys(sys::System) = (:atoms,:coords,:boundary,:velocities,:atoms_data,:topology,
         :pairwise_inters,:specific_inter_lists,:general_inters,:constraints,:neighbor_finder,
@@ -887,6 +888,15 @@ AtomsBase.velocity(s::ReplicaSystem, i::Integer) = s.replicas[1].velocities[i]
 AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}) = masses(s)
 AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}, i::Integer) = mass(s.atoms[i])
 
+# Base.getindex(sys::Union{System, ReplicaSystem}, i::Integer, x::Symbol) =
+#     getfield(getindex(sys, i), x)
+function Base.getindex(system::Union{System, ReplicaSystem}, i, x::Symbol)
+    if hasatomkey(system, x)
+      getproperty(AtomsBase, x)(system, i)  # uses the two-argument version
+    else
+      throw(KeyError("Key $(x) not present in system."))
+    end
+end
 
 
 function AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem})
