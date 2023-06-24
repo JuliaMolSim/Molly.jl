@@ -9,6 +9,12 @@ macro shfl_multiple_sync(mask, target, vars...)
     return Expr(:block, all_lines...)
 end
 
+CUDA.shfl_recurse(op, x::Quantity) = op(x.val) * unit(x)
+CUDA.shfl_recurse(op, x::SVector{1, C}) where C = SVector{1, C}(op(x[1]))
+CUDA.shfl_recurse(op, x::SVector{2, C}) where C = SVector{2, C}(op(x[1]), op(x[2]))
+CUDA.shfl_recurse(op, x::SVector{3, C}) where C = SVector{3, C}(op(x[1]), op(x[2]), op(x[3]))
+# CUDA.shfl_recurse(op, x::Atom) = Atom(op(x.index), op(x.charge), op(x.mass), op(x.σ), op(x.ϵ), op(x.solute))
+
 function cuda_threads_blocks_pairwise(n_neighbors)
     n_threads_gpu = min(n_neighbors, parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512")))
     n_blocks = cld(n_neighbors, n_threads_gpu)
@@ -87,7 +93,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
         forces_shmem[dim, tidx] = zero(T)
     end
 
-    # The current tile that the warp is Calculating
+    # The current tile that the warp is calculating
     i_0_tile = i_0_block
     j_0_tile = j_0_block + (warpidx - 1) * WARPSIZE
     i = i_0_tile + lane
@@ -95,19 +101,20 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     atom_i, coord_i = atoms[i], coords[i]
 
     tilesteps = WARPSIZE
-    if i_0_tile == j_0_tile  # Don't compute i-i forces
+    if i_0_tile == j_0_tile  # To not compute i-i forces
         j = j % (j_0_tile + WARPSIZE) + 1
         tilesteps -= 1
     end
+    coord_j = coords[j]
 
     for _ in 1:tilesteps  
         sync_warp()
-        atom_j, coord_j = atoms[j], coords[j]  # TODO: shuffle this as well
+        atom_j = atoms[j]  #! Shuffling this by reconstruction of Atom makes performance worse (see line ~16)
         f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
         for dim in 1:D
             forces_shmem[dim, tidx] += -ustrip(f[dim])
         end
-        @shfl_multiple_sync(FULLMASK, lane + 1, j)
+        @shfl_multiple_sync(FULLMASK, lane + 1, j, coord_j)
     end
 
     sync_warp()
