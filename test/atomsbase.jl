@@ -1,4 +1,4 @@
-using AtomsBase
+import AtomsBase: Periodic, AbstractSystem
 using AtomsBaseTesting
 
 

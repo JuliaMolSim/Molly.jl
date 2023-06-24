@@ -295,7 +295,7 @@ function AtomData(;
                     res_number=1,
                     res_name="???",
                     element="?",
-                    atomic_number=missing)
+                    atomic_number= -1)
     return AtomData(atom_type, atom_name, res_number, res_name, element, atomic_number)
 end
 
