@@ -20,14 +20,14 @@ save_velocities!(constraint_algo::SHAKE, v) = constraint_algo
 
 
 function apply_position_constraint!(sys, constraint_algo::SHAKE, 
-    constraint_cluster::ConstraintCluster)
+    constraint_cluster::ConstraintCluster{1})
 
-    SHAKE_algo(sys, constraint_cluster, constraint_algo.unupdated_coords)
+    SHAKE_update(sys, constraint_algo, constraint_cluster)
 
 end
 
 
-function apply_velocity_constraint!(sys, constraint::SHAKE, 
+function apply_velocity_constraint!(sys, constraint_algo::SHAKE, 
     constraint_cluster::ConstraintCluster)
 
     #TODO: SHould these just be nothing, or do you arbitrarblty zero out the bond velocities???
@@ -36,24 +36,24 @@ end
 
 
 #TODO: I do not think we actually need to iterate here its analytical solution
-function SHAKE_algo(sys, cluster::ConstraintCluster{1}, unupdated_coords)
+function SHAKE_update(sys, ca, cluster::ConstraintCluster{1})
 
     constraint = cluster.constraints[1]
 
     # Index of atoms in bond k
     k1, k2 = constraint.atom_idxs
 
-    converged = false
+    #converged = false
 
     #while !converged #TODO Dont think this is necessary
 
     # Distance vector between the atoms before unconstrained update
-    r01 = vector(unupdated_coords[k2], unupdated_coords[k1], sys.boundary)
+    r01 = vector(ca.unupdated_coords[k2], ca.unupdated_coords[k1], sys.boundary)
 
     # Distance vector after unconstrained update
     s01 = vector(sys.coords[k2], sys.coords[k1], sys.boundary)
 
-    if abs(norm(s01) - constraint.dist) > constraint.tolerance
+    if abs(norm(s01) - constraint.dist) > ca.tolerance
         m0 = mass(sys.atoms[k1])
         m1 = mass(sys.atoms[k2])
         a = (1/m0 + 1/m1)^2 * norm(r01)^2
@@ -84,20 +84,20 @@ function SHAKE_algo(sys, cluster::ConstraintCluster{1}, unupdated_coords)
 
 
     length = [abs(norm(vector(sys.coords[k2], sys.coords[k1], sys.boundary)) - constraint.dist)]
-
-    if maximum(length) < constraint.tolerance
-        converged = true
-    end
+    println(length)
+    # if maximum(length) < constraint.tolerance
+    #     converged = true
+    # end
     # end
 end
 
 # TODO: Manually implement matrix inversion
-SHAKE_algo(sys, cluster::ConstraintCluster{2}) = nothing
-SHAKE_algo(sys, cluster::ConstraintCluster{3}) = nothing
-SHAKE_algo(sys, cluster::ConstraintCluster{4}) = nothing
+SHAKE_update(sys, cluster::ConstraintCluster{2}) = nothing
+SHAKE_update(sys, cluster::ConstraintCluster{3}) = nothing
+SHAKE_update(sys, cluster::ConstraintCluster{4}) = nothing
 
 #Implement later, see:
 # https://onlinelibrary.wiley.com/doi/abs/10.1002/1096-987X(20010415)22:5%3C501::AID-JCC1021%3E3.0.CO;2-V
 # https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3285512/
 #Currently code is setup for independent constraints, but M-SHAKE does not care about that
-# SHAKE_algo(sys, cluster::ConstraintClusterP{D}) where {D >= 5} = nothing
+# SHAKE_update(sys, cluster::ConstraintClusterP{D}) where {D >= 5} = nothing

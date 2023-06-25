@@ -277,7 +277,6 @@ end
                     f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary,
                                special)
                 end
-                println("Force: $(f)")
                 check_force_units(f, force_units)
                 f_ustrip = ustrip.(f)
                 fs[i] -= f_ustrip

@@ -217,6 +217,8 @@ end
 
 apply_position_constraints!(sys::System, constraint_algo::NoSystemConstraints, args...) = nothing
 apply_velocity_constraints!(sys::System, constraint_algo::NoSystemConstraints, args...) = nothing
+save_positions!(constraint_algo::NoSystemConstraints, c) = nothing
+save_velocities!(constraint_algo::NoSystemConstraints, v) = nothing
 
 """
 Re-calculates the # of degrees of freedom in the system due to the constraints.
