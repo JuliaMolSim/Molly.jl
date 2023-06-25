@@ -546,11 +546,14 @@ function System(;
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
-    if length(constraints) > 0 && constraint_algorithm == NoSystemConstraints()
-        throw(ArgumentError("Constraints passed to System constructor but no constraint algorithm"))
-    elseif length(constraints) > 0
-        #Convert constraints, if passed, to clusters
-        constraints = constraint_setup(coords, constraints)
+    if length(constraints) > 0 
+        if constraint_algorithm == NoSystemConstraints()
+            throw(ArgumentError("Constraints passed to System constructor but no constraint algorithm"))
+        elseif neighbor_finder == NoNeighborFinder()
+            throw(ArgumentError("Constraints algorithms require neighbor lists."))
+        else
+        constraints, neighbor_finder = constraint_setup!(neighbor_finder, coords, constraints)
+        end
     end
     CN = typeof(constraints)
 

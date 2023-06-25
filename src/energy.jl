@@ -205,6 +205,9 @@ end
                     pe += potential_energy(inter, dr, coords[i], coords[j], atoms[i],
                                            atoms[j], boundary, special)
                 end
+                println(i, " ", j)
+                println(norm(dr))
+                println("Energy: $(pe)")
                 check_energy_units(pe, energy_units)
                 pe_sum += ustrip(pe)
             end

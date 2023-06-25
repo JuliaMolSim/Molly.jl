@@ -1,6 +1,6 @@
 export RATTLE
 """
-    RATTLE(tolerance, unconstrained_coords, unconstrained_velocities)
+    RATTLE(tolerance, coords, velocities)
 
 Constrains a set of bonds to defined distances in a way that the velocities also satisfy the constraints.
 
@@ -8,24 +8,24 @@ See [this paper](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3285512/) for a de
 system solved to satisfy the RATTLE algorithm.
 """
 struct RATTLE{UC,UV,T} <: ConstraintAlgorithm
-    unconstrained_coords::UC #Used as storage to avoid re-allocating arrays
-    unconstrained_velocities::UV
+    unupdated_coords::UC 
+    unconstrained_velocities::UV #Used as storage to avoid re-allocating arrays
     tolerance::T
 end
 
-function RATTLE(unconstrained_coords, unconstrained_velocities; tolerance=1e-10u"nm")
-    return RATTLE{typeof(unconstrained_coords), typeof(unconstrained_velocities),typeof(tolerance)}(
-            unconstrained_coords, unconstrained_velocities, tolerance = tolerance)
+function RATTLE(coords, unconstrained_velocities; tolerance=1e-10u"nm")
+    return RATTLE{typeof(unupdated_coords), typeof(unconstrained_velocities),typeof(tolerance)}(
+            unupdated_coords, unconstrained_velocities, tolerance = tolerance)
 end
 
-update_unconstrained_positions!(constraint_algo::RATTLE, uc) = (constraint_algo.unconstrained_coords .= uc)
-update_unconstrained_velocities!(constraint_algo::RATTLE, uv) = (constraint_algo.unconstrained_velocities .= uv)
+save_positions!(constraint_algo::RATTLE, c) = (constraint_algo.unupdated_coords .= c)
+save_velocities!(constraint_algo::RATTLE, v) = (constraint_algo.unconstrained_velocities .= v)
 
 
 function apply_position_constraint!(sys, constraint_algo::RATTLE, 
     constraint_cluster::ConstraintCluster)
 
-    SHAKE_algo(sys, constraint_cluster, constraint_cluster.unconstrained_coords)
+    SHAKE_algo(sys, constraint_cluster, constraint_algo.unupdated_coords)
 
 end
 

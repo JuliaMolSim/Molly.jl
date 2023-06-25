@@ -131,6 +131,7 @@ function simulate!(sys,
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+
     run_loggers && run_loggers!(sys, neighbors, 0; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
@@ -139,12 +140,11 @@ function simulate!(sys,
 
         #TODO: Figure out ordering of constraints, does first half step even need constraints?
         sys.velocities +=  (0.5 .*accel_remove_mol.(accels_t) .* sim.dt)
-        update_unconstrained_velocities!(sys.constraint_algorithm, sys.velocities)
+        save_velocities!(sys.constraint_algorithm, sys.velocities)
         apply_velocity_constraints!(sys, sys.constraint_algorithm, sys.constraints)
 
-
+        save_positions!(sys.constraint_algorithm, sys.coords)
         sys.coords += sys.velocities .* sim.dt
-        update_unconstrained_positions!(sys.constraint_algorithm, sys.coords)
         apply_position_constraints!(sys, sys.constraint_algorithm, sys.constraints)
 
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
@@ -152,7 +152,7 @@ function simulate!(sys,
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
         sys.velocities += accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
-        update_unconstrained_velocities!(sys.constraint_algorithm, sys.velocities)
+        save_velocities!(sys.constraint_algorithm, sys.velocities)
         apply_velocity_constraints!(sys, sys.constraint_algorithm, sys.constraints)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0

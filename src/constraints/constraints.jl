@@ -1,6 +1,7 @@
 export
     DistanceConstraint, AngleConstraint, 
-    NoSystemConstraints
+    NoSystemConstraints,
+    n_dof
 
 """
 Supertype for all constraint algorithms.
@@ -32,7 +33,8 @@ struct DistanceConstraint{D} <: Constraint
 end
 
 # """
-# Constraint between three atoms that maintains a common angle (e.g. a water molecule)
+# Constraint between three atoms that maintains a common angle (e.g. a water molecule).
+# 180° angles are not supported as they cause issues with RATTLE/SHAKE 
 # # Arguments
 # - `atom_idxs::SVector{2,Int}` : The indices of atoms in the system participating in this constraint.
 #     The first atom in this list is assumed to be the central atom if the `central_atom_idx` keyword is not specified
@@ -63,6 +65,19 @@ struct ConstraintCluster{N}
     constraints::SVector{N, <:Constraint}
 end
 
+Base.length(cc::ConstraintCluster) = length(cc.constraints)
+
+function num_unique_atoms(cc::ConstraintCluster)
+    atoms_ids = []
+    for constraint in cc.constraints
+        for atom_idx in constraint.atom_idxs
+            push!(atom_ids, atom_idx)
+        end
+    end
+
+    return length(unique(atoms_ids))
+end
+
 
 # """
 # Loops through all of the constraints in the system and converts the 
@@ -78,12 +93,38 @@ end
 #     end
 # end
 
-function constraint_setup(coords, constraints)
+"""
+1. Converts all angle constraints to distance constraints
+    a. Most of the code below assumes everything is a distance constraint
+2. Disables intra constraint interactions
+3. Builds graph of constraints to identify small clusters of constraints
+4. Checks that initial system geometry satisfies distance constraints
+"""
+function constraint_setup!(neighbor_finder, coords, constraints)
     n_atoms = length(coords)
     # angle_to_dist_constraints!(sys)
     clusters = build_clusters(n_atoms, constraints)
+    neighbor_finder = disable_intra_constraint_interactions!(neighbor_finder, clusters)
     check_initial_constraints(coords, clusters)
-    return clusters
+    return clusters, neighbor_finder
+end
+
+"""
+Disables interactions between atoms in a constraint. This prevents forces
+from blowing up as atoms in a bond are typically very close to eachother.
+"""
+function disable_intra_constraint_interactions!(neighbor_finder,
+     constraint_clsuters::AbstractVector{ConstraintCluster})
+
+    # Loop through constraints and modify eligible matrix
+    for cluster in constraint_clsuters
+        for constraint in cluster.constraints
+            neighbor_finder.eligible[constraint.atom_idxs[1], constraint.atom_idxs[2]] = false
+            neighbor_finder.eligible[constraint.atom_idxs[2], constraint.atom_idxs[1]] = false
+        end
+    end
+
+    return neighbor_finder
 end
 
 
@@ -155,7 +196,7 @@ end
 Updates the coordinates of a [`System`](@ref) based on the constraints.
 """
 function apply_position_constraints!(sys, constraint_algo::ConstraintAlgorithm, 
-    constraint_clusters::ConstraintCluster)
+    constraint_clusters::AbstractVector{ConstraintCluster})
 
     for constraint_cluster in constraint_clusters
         apply_position_constraint!(sys, constraint_algo, constraint_cluster)
@@ -167,7 +208,7 @@ end
 Updates the velocities of a [`System`](@ref) based on the constraints.
 """
 function apply_velocity_constraints!(sys, constraint_algo::ConstraintAlgorithm,
-     constraint_clusters::ConstraintCluster)
+     constraint_clusters::AbstractVector{ConstraintCluster})
 
     for constraint_cluster in constraint_clusters
         apply_velocity_constraint!(sys, constraint_algo, constraint_cluster)
@@ -177,4 +218,32 @@ end
 apply_position_constraints!(sys::System, constraint_algo::NoSystemConstraints, args...) = nothing
 apply_velocity_constraints!(sys::System, constraint_algo::NoSystemConstraints, args...) = nothing
 
+"""
+Re-calculates the # of degrees of freedom in the system due to the constraints.
+All constrained molecules with 3 or more atoms are assumed to be non-linear because
+180° bond angles are not supported. The table below shows the break down of 
+DoF for different types of structures in the system where D is the dimensionality. 
 
+DoF           | Monoatomic | Linear Molecule | Non-Linear Molecule |
+Translational |     D      |       D         |        D            |
+Rotational    |     0      |     D - 1       |        D            |
+Vibrational   |     0      |  D*N - (2D - 1) |    D*N - 2D         |
+Total         |     D      |      D*N        |       D*N           |
+
+"""
+function n_dof(sys::System{D}) where D
+
+    # Momentum only conserved in directions with PBC
+    total = D*length(sys) - (D - (num_infinte_boundary(sys.boundary)))
+
+    # Bond constraints remove vibrational DoFs
+    vibrational_dof_lost = 0
+    for cluster in sys.constraints
+        N = num_unique_atoms(cluster)
+        vibrational_dof_lost += ((N == 1) ? D*N - (2*D - 1) : D*(N - 2))
+    end
+
+    return total - vibrational_dof_lost
+
+end
+#TODO : STORE THE RESULT OF THIS SOMEWHERE AND USE WHEN CALC TEMP & NoseHoover
