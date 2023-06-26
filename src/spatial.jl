@@ -759,7 +759,9 @@ Not currently compatible with automatic differentiation using Zygote.
 function scale_coords!(sys, scale_factor; ignore_molecules=false)
     if ignore_molecules || isnothing(sys.topology)
         sys.boundary = scale_boundary(sys.boundary, scale_factor)
-        sys.coords = sys.coords .* scale_factor
+        for i in eachindex(sys.coords)
+            sys.coords[i] = sys.coords[i] .* scale_factor
+        end
     elseif sys.boundary isa TriclinicBoundary
         error("scaling coordinates by molecule is not compatible with a TriclinicBoundary")
     else
