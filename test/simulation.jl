@@ -949,9 +949,7 @@ end
     atom_mass = 39.947u"u"
     boundary = CubicBoundary(8.0u"nm")
     temp = 288.15u"K"
-    press_x = 1.0u"bar"
-    press_y = 1.0u"bar"
-    press_z = 1.0u"bar"
+    press = SVector(1.0u"bar", 1.0u"bar", 1.0u"bar")
     dt = 0.0005u"ps"
     friction = 1.0u"ps^-1"
     lang = Langevin(dt=dt, temperature=temp, friction=friction)
@@ -991,7 +989,7 @@ end
     @test all(values(sys.loggers.box_volume) .== 512.0u"nm^3")
     @test sys.boundary == CubicBoundary(8.0u"nm")
     
-    barostat = MonteCarloAnisotropicBarostat(press_x, press_y, press_z, temp, boundary)
+    barostat = MonteCarloAnisotropicBarostat(press, temp, boundary)
     lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
     vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
 

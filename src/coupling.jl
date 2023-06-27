@@ -242,8 +242,8 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
 end
 
 @doc raw"""
-    MonteCarloAnisotropicBarostat(pressure_X, pressure_Y, pressure_Z, temperature, boundary;
-                       n_steps=30, n_iterations=1, scale_factor=0.01, scale_increment=1.1,
+    MonteCarloAnisotropicBarostat(pressure, temperature, boundary; n_steps=30,
+                       n_iterations=1, scale_factor=0.01, scale_increment=1.1,
                        max_volume_frac=0.3, trial_find_neighbors=false)
 
 The Monte Carlo anisotropic barostat for controlling pressure.
@@ -273,13 +273,15 @@ It should be used alongside a temperature coupling method such as the [`Langevin
 simulator or [`AndersenThermostat`](@ref) coupling.
 The neighbor list is not updated when making trial moves or after accepted moves.
 Note that the barostat can change the bounding box of the system.
+`pressure` is a SVector of lenght 3 with components pressX, pressY, and pressZ
+representing the target pressure in each axis.
 To keep an axis fixed, set the corresponding pressure to `nothing`.
-For rectangular boundaries `pressure_Z` is not required.
+For rectangular boundaries `pressZ` is not required.
 
 Not currently compatible with automatic differentiation using Zygote.
 """
-mutable struct MonteCarloAnisotropicBarostat{T, P, K, V}
-    pressure::P
+mutable struct MonteCarloAnisotropicBarostat{D, T, P, K, V}
+  pressure::SVector{D,P}
     temperature::K
     n_steps::Int
     n_iterations::Int
@@ -292,9 +294,7 @@ mutable struct MonteCarloAnisotropicBarostat{T, P, K, V}
 end
 
 function MonteCarloAnisotropicBarostat(
-    pressure_X,
-    pressure_Y,
-    pressure_Z,
+    pressure::SVector{D},
     temperature,
     boundary;
     n_steps=30,
@@ -303,10 +303,10 @@ function MonteCarloAnisotropicBarostat(
     scale_increment=1.1,
     max_volume_frac=0.3,
     trial_find_neighbors=false,
-)
-    pressure = SVector(pressure_X, pressure_Y, pressure_Z)
+) where {D}
     volume_scale = box_volume(boundary) * float_type(boundary)(scale_factor)
-    volume_scale = fill(volume_scale, 3)
+    volume_scale = fill(volume_scale, D)
+    length(boundary.side_lengths) != D && error("pressure is not compatible with boundary")
 
     return MonteCarloAnisotropicBarostat(
         pressure,
@@ -317,44 +317,14 @@ function MonteCarloAnisotropicBarostat(
         scale_increment,
         max_volume_frac,
         trial_find_neighbors,
-        fill(0, 3),
-        fill(0, 3),
-    )
-end
-
-function MonteCarloAnisotropicBarostat(
-    pressure_X,
-    pressure_Y,
-    temperature,
-    boundary::RectangularBoundary;
-    n_steps=30,
-    n_iterations=1,
-    scale_factor=0.01,
-    scale_increment=1.1,
-    max_volume_frac=0.3,
-    trial_find_neighbors=false,
-)
-    pressure = SVector(pressure_X, pressure_Y)
-    volume_scale = box_volume(boundary) * float_type(boundary)(scale_factor)
-    volume_scale = fill(volume_scale, 2)
-
-    return MonteCarloAnisotropicBarostat(
-        pressure,
-        temperature,
-        n_steps,
-        n_iterations,
-        volume_scale,
-        scale_increment,
-        max_volume_frac,
-        trial_find_neighbors,
-        fill(0, 2),
-        fill(0, 2),
+        fill(0, D),
+        fill(0, D),
     )
 end
 
 function apply_coupling!(
     sys::System{D, G, T},
-    barostat::MonteCarloAnisotropicBarostat,
+    barostat::MonteCarloAnisotropicBarostat{D},
     sim,
     neighbors=nothing,
     step_n::Integer=0;
