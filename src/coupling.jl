@@ -242,7 +242,7 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
 end
 
 @doc raw"""
-    MonteCarloBarostat(pressure_X, pressure_Y, pressure_Z, temperature, boundary;
+    MonteCarloAnisotropicBarostat(pressure_X, pressure_Y, pressure_Z, temperature, boundary;
                        n_steps=30, n_iterations=1, scale_factor=0.01, scale_increment=1.1,
                        max_volume_frac=0.3, trial_find_neighbors=false)
 
@@ -304,7 +304,7 @@ function MonteCarloAnisotropicBarostat(
     max_volume_frac=0.3,
     trial_find_neighbors=false,
 )
-    pressure = [pressure_X, pressure_Y, pressure_Z]
+    pressure = SVector(pressure_X, pressure_Y, pressure_Z)
     volume_scale = box_volume(boundary) * float_type(boundary)(scale_factor)
     volume_scale = fill(volume_scale, 3)
 
