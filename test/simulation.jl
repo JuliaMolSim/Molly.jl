@@ -1002,7 +1002,7 @@ end
             end
             AT = gpu ? CuArray : Array
 
-            global sys = System(
+            sys = System(
                 atoms=AT(atoms),
                 coords=AT(coords),
                 boundary=boundary,
