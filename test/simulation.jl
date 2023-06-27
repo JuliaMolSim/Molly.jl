@@ -942,6 +942,99 @@ end
     end
 end
 
+@testset "Monte Carlo anisotropic barostat" begin
+    # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
+    n_atoms = 25
+    n_steps = 1_000_000
+    atom_mass = 39.947u"u"
+    boundary = CubicBoundary(8.0u"nm")
+    temp = 288.15u"K"
+    press_x = 1.0u"bar"
+    press_y = 1.0u"bar"
+    press_z = 1.0u"bar"
+    dt = 0.0005u"ps"
+    friction = 1.0u"ps^-1"
+    lang = Langevin(dt=dt, temperature=temp, friction=friction)
+    atoms = fill(Atom(mass=atom_mass, σ=0.3345u"nm", ϵ=1.0451u"kJ * mol^-1"), n_atoms)
+    coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
+    n_log_steps = 500
+    
+    box_volume_wrapper(sys, neighbors; kwargs...) = box_volume(sys.boundary)
+    VolumeLogger(n_steps) = GeneralObservableLogger(box_volume_wrapper, typeof(1.0u"nm^3"), n_steps)
+    
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        pairwise_inters=(LennardJones(),),
+        loggers=(
+            temperature=TemperatureLogger(n_log_steps),
+            total_energy=TotalEnergyLogger(n_log_steps),
+            kinetic_energy=KineticEnergyLogger(n_log_steps),
+            potential_energy=PotentialEnergyLogger(n_log_steps),
+            virial=VirialLogger(n_log_steps),
+            pressure=PressureLogger(n_log_steps),
+            box_volume=VolumeLogger(n_log_steps),
+        ),
+    )
+    
+    simulate!(deepcopy(sys), lang, 1_000; n_threads=1)
+    @time simulate!(sys, lang, n_steps; n_threads=1)
+    
+    @test 280.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+    @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy  )) < 120.0u"kJ * mol^-1"
+    @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
+    @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
+    @test -5.0u"kJ * mol^-1" < mean(values(sys.loggers.virial)) < 5.0u"kJ * mol^-1"
+    @test 1.7u"bar" < mean(values(sys.loggers.pressure)) < 2.2u"bar"
+    @test 0.1u"bar" < std( values(sys.loggers.pressure)) < 0.5u"bar"
+    @test all(values(sys.loggers.box_volume) .== 512.0u"nm^3")
+    @test sys.boundary == CubicBoundary(8.0u"nm")
+    
+    barostat = MonteCarloAnisotropicBarostat(press_x, press_y, press_z, temp, boundary)
+    lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
+    vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
+
+    for sim in (lang_baro, vvand_baro)
+        for gpu in gpu_list
+            if gpu && sim == vvand_baro
+                continue
+            end
+            AT = gpu ? CuArray : Array
+
+            global sys = System(
+                atoms=AT(atoms),
+                coords=AT(coords),
+                boundary=boundary,
+                pairwise_inters=(LennardJones(),),
+                loggers=(
+                    temperature=TemperatureLogger(n_log_steps),
+                    total_energy=TotalEnergyLogger(n_log_steps),
+                    kinetic_energy=KineticEnergyLogger(n_log_steps),
+                    potential_energy=PotentialEnergyLogger(n_log_steps),
+                    virial=VirialLogger(n_log_steps),
+                    pressure=PressureLogger(n_log_steps),
+                    box_volume=VolumeLogger(n_log_steps),
+                ),
+            )
+
+            simulate!(deepcopy(sys), sim, 1_000; n_threads=1)
+            @time simulate!(sys, sim, n_steps; n_threads=1)
+
+            @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+            @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy)) < 120.0u"kJ * mol^-1"
+            @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
+            @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
+            @test -5.0u"kJ * mol^-1" < mean(values(sys.loggers.virial)) < 5.0u"kJ * mol^-1"
+            @test 0.8u"bar" < mean(values(sys.loggers.pressure)) < 1.2u"bar"
+            @test 0.1u"bar" < std(values(sys.loggers.pressure)) < 0.5u"bar"
+            @test 900.0u"nm^3" < mean(values(sys.loggers.box_volume)) < 1100u"nm^3"
+            @test 80.0u"nm^3" < std(values(sys.loggers.box_volume)) < 120.0u"nm^3"
+            @test sys.boundary != CubicBoundary(8.0u"nm")
+        end
+    end
+end
+
 @testset "Crystals" begin
     r_cut = 8.5u"Å"
     a = 5.2468u"Å"
