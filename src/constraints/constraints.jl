@@ -195,11 +195,10 @@ end
 """
 Updates the coordinates of a [`System`](@ref) based on the constraints.
 """
-function apply_position_constraints!(sys, constraint_algo::ConstraintAlgorithm, 
-    constraint_clusters::AbstractVector{ConstraintCluster})
+function apply_position_constraints!(sys, accels_t, dt)
 
-    for constraint_cluster in constraint_clusters
-        apply_position_constraint!(sys, constraint_algo, constraint_cluster)
+    for constraint_cluster in sys.constraints
+        apply_position_constraint!(sys, sys.constraint_algorithm, constraint_cluster, accels_t, dt)
     end
 end
 
@@ -207,11 +206,10 @@ end
 """
 Updates the velocities of a [`System`](@ref) based on the constraints.
 """
-function apply_velocity_constraints!(sys, constraint_algo::ConstraintAlgorithm,
-     constraint_clusters::AbstractVector{ConstraintCluster})
+function apply_velocity_constraints!(sys)
 
-    for constraint_cluster in constraint_clusters
-        apply_velocity_constraint!(sys, constraint_algo, constraint_cluster)
+    for constraint_cluster in sys.constraints
+        apply_velocity_constraint!(sys, sys.constraint_algorithm, constraint_cluster)
     end
 end
 
@@ -233,6 +231,7 @@ Vibrational   |     0      |  D*N - (2D - 1) |    D*N - 2D         |
 Total         |     D      |      D*N        |       D*N           |
 
 """
+#TODO : STORE THE RESULT OF THIS SOMEWHERE AND USE WHEN CALC TEMP & NoseHoover
 function n_dof(sys::System{D}) where D
 
     # Momentum only conserved in directions with PBC
@@ -248,4 +247,3 @@ function n_dof(sys::System{D}) where D
     return total - vibrational_dof_lost
 
 end
-#TODO : STORE THE RESULT OF THIS SOMEWHERE AND USE WHEN CALC TEMP & NoseHoover

@@ -137,23 +137,25 @@ function simulate!(sys,
     accels_t_dt = zero(accels_t)
 
     for step_n in 1:n_steps
+        println("STEP: $(step_n)")
+        
+        #TODO: Figure out ordering of constraints -->
+            # Just apply at end of update?? update acelerations as well??
+        # sys.velocities +=  (0.5 .*accel_remove_mol.(accels_t) .* sim.dt)
+        # save_velocities!(sys.constraint_algorithm, sys.velocities)
+        # apply_velocity_constraints!(sys)
 
-        #TODO: Figure out ordering of constraints, does first half step even need constraints?
-        sys.velocities +=  (0.5 .*accel_remove_mol.(accels_t) .* sim.dt)
-        save_velocities!(sys.constraint_algorithm, sys.velocities)
-        apply_velocity_constraints!(sys, sys.constraint_algorithm, sys.constraints)
 
         save_positions!(sys.constraint_algorithm, sys.coords)
-        sys.coords += sys.velocities .* sim.dt
-        apply_position_constraints!(sys, sys.constraint_algorithm, sys.constraints)
-
+        sys.coords += (sys.velocities .* sim.dt) .+ (accel_remove_mol.(accels_t) .* sim.dt ^ 2) ./ 2
+        apply_position_constraints!(sys, accels_t, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
         sys.velocities += accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
-        save_velocities!(sys.constraint_algorithm, sys.velocities)
-        apply_velocity_constraints!(sys, sys.constraint_algorithm, sys.constraints)
+        # save_velocities!(sys.constraint_algorithm, sys.velocities)
+        # apply_velocity_constraints!(sys)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
