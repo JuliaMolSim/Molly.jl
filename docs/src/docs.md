@@ -1093,8 +1093,8 @@ end
 ```
 Then, define the function that implements the coupling every time step:
 ```julia
-function apply_coupling!(sys, coupling::MyCoupler, sim, neighbors, step_n;
-                         n_threads=Threads.nthreads())
+function Molly.apply_coupling!(sys, coupling::MyCoupler, sim, neighbors, step_n;
+                               n_threads=Threads.nthreads())
     # Do something to the simulation, e.g. scale the velocities
     # Return whether the coupling has invalidated the currently stored forces,
     #   for example by changing the coordinates
@@ -1299,12 +1299,12 @@ end
 Examples of three useful properties are given here: a matrix indicating atom pairs eligible for pairwise interactions, a matrix indicating atoms in a special arrangement such as 1-4 bonding, and a value determining how many time steps occur between each evaluation of the neighbor finder.
 Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
-function find_neighbors(sys,
-                        nf::MyNeighborFinder,
-                        current_neighbors=nothing,
-                        step_n::Integer=0,
-                        force_recompute::Bool=false;
-                        n_threads::Integer=Threads.nthreads())
+function Molly.find_neighbors(sys,
+                              nf::MyNeighborFinder,
+                              current_neighbors=nothing,
+                              step_n::Integer=0,
+                              force_recompute::Bool=false;
+                              n_threads::Integer=Threads.nthreads())
     if force_recompute || step_n % nf.n_steps == 0
         if isnothing(current_neighbors)
             neighbors = NeighborList()
