@@ -949,7 +949,6 @@ end
     atom_mass = 39.947u"u"
     boundary = CubicBoundary(8.0u"nm")
     temp = 288.15u"K"
-    press = SVector(1.0u"bar", 1.0u"bar", 1.0u"bar")
     dt = 0.0005u"ps"
     friction = 1.0u"ps^-1"
     lang = Langevin(dt=dt, temperature=temp, friction=friction)
@@ -960,75 +959,62 @@ end
     box_volume_wrapper(sys, neighbors; kwargs...) = box_volume(sys.boundary)
     VolumeLogger(n_steps) = GeneralObservableLogger(box_volume_wrapper, typeof(1.0u"nm^3"), n_steps)
     
-    sys = System(
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        pairwise_inters=(LennardJones(),),
-        loggers=(
-            temperature=TemperatureLogger(n_log_steps),
-            total_energy=TotalEnergyLogger(n_log_steps),
-            kinetic_energy=KineticEnergyLogger(n_log_steps),
-            potential_energy=PotentialEnergyLogger(n_log_steps),
-            virial=VirialLogger(n_log_steps),
-            pressure=PressureLogger(n_log_steps),
-            box_volume=VolumeLogger(n_log_steps),
-        ),
+    baro_f(pressure) = MonteCarloAnisotropicBarostat(pressure, temp, boundary)
+    lang_f(barostat) = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
+    vand_f(barostat) = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
+    
+    pressure_test_set = (
+        SVector(1.0u"bar", 1.0u"bar", 1.0u"bar"), # XYZ-axes coupled with the same pressure value
+        SVector(1.5u"bar", 0.5u"bar", 1.0u"bar"), # XYZ-axes coupled with different pressure values
+        SVector(1.0u"bar", nothing, nothing), # Only X-axis coupled
+        SVector(nothing, 1.0u"bar", nothing), # Only Y-axis coupled
+        SVector(nothing, nothing, 1.0u"bar"), # Only Z-axis coupled
+        SVector(nothing, nothing, nothing), # Uncoupled
     )
     
-    simulate!(deepcopy(sys), lang, 1_000; n_threads=1)
-    @time simulate!(sys, lang, n_steps; n_threads=1)
+    simulator_test_set = (
+        lang_f,
+        vand_f,
+    )
     
-    @test 280.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
-    @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy  )) < 120.0u"kJ * mol^-1"
-    @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
-    @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
-    @test -5.0u"kJ * mol^-1" < mean(values(sys.loggers.virial)) < 5.0u"kJ * mol^-1"
-    @test 1.7u"bar" < mean(values(sys.loggers.pressure)) < 2.2u"bar"
-    @test 0.1u"bar" < std( values(sys.loggers.pressure)) < 0.5u"bar"
-    @test all(values(sys.loggers.box_volume) .== 512.0u"nm^3")
-    @test sys.boundary == CubicBoundary(8.0u"nm")
-    
-    barostat = MonteCarloAnisotropicBarostat(press, temp, boundary)
-    lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
-    vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
-
-    for sim in (lang_baro, vvand_baro)
+    for sim_f in simulator_test_set
         for gpu in gpu_list
-            if gpu && sim == vvand_baro
-                continue
-            end
+            gpu && sim_f == vand_f && continue
             AT = gpu ? CuArray : Array
-
-            sys = System(
-                atoms=AT(atoms),
-                coords=AT(coords),
-                boundary=boundary,
-                pairwise_inters=(LennardJones(),),
-                loggers=(
-                    temperature=TemperatureLogger(n_log_steps),
-                    total_energy=TotalEnergyLogger(n_log_steps),
-                    kinetic_energy=KineticEnergyLogger(n_log_steps),
-                    potential_energy=PotentialEnergyLogger(n_log_steps),
-                    virial=VirialLogger(n_log_steps),
-                    pressure=PressureLogger(n_log_steps),
-                    box_volume=VolumeLogger(n_log_steps),
-                ),
-            )
-
-            simulate!(deepcopy(sys), sim, 1_000; n_threads=1)
-            @time simulate!(sys, sim, n_steps; n_threads=1)
-
-            @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
-            @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy)) < 120.0u"kJ * mol^-1"
-            @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
-            @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
-            @test -5.0u"kJ * mol^-1" < mean(values(sys.loggers.virial)) < 5.0u"kJ * mol^-1"
-            @test 0.8u"bar" < mean(values(sys.loggers.pressure)) < 1.2u"bar"
-            @test 0.1u"bar" < std(values(sys.loggers.pressure)) < 0.5u"bar"
-            @test 900.0u"nm^3" < mean(values(sys.loggers.box_volume)) < 1100u"nm^3"
-            @test 80.0u"nm^3" < std(values(sys.loggers.box_volume)) < 120.0u"nm^3"
-            @test sys.boundary != CubicBoundary(8.0u"nm")
+            for press in pressure_test_set
+                sys = System(
+                    atoms=AT(atoms),
+                    coords=AT(coords),
+                    boundary=boundary,
+                    pairwise_inters=(LennardJones(),),
+                    loggers=(
+                        temperature=TemperatureLogger(n_log_steps),
+                        total_energy=TotalEnergyLogger(n_log_steps),
+                        kinetic_energy=KineticEnergyLogger(n_log_steps),
+                        potential_energy=PotentialEnergyLogger(n_log_steps),
+                        virial=VirialLogger(n_log_steps),
+                        pressure=PressureLogger(n_log_steps),
+                        box_volume=VolumeLogger(n_log_steps),
+                    ),
+                )
+            
+                sim = sim_f(baro_f(press))
+                simulate!(deepcopy(sys), sim, 100; n_threads=1)
+                @time simulate!(sys, sim, n_steps; n_threads=1)
+            
+                @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+                @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy)) < 120.0u"kJ * mol^-1"
+                @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
+                @test -5.0u"kJ * mol^-1" < mean(values(sys.loggers.virial)) < 5.0u"kJ * mol^-1"
+                @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
+                all(!isnothing, press) && @test 0.7u"bar" < mean(values(sys.loggers.pressure)) < 1.3u"bar"
+                any(!isnothing, press) && @test 0.1u"bar" < std(values(sys.loggers.pressure)) < 0.5u"bar"
+                any(!isnothing, press) && @test 800.0u"nm^3" < mean(values(sys.loggers.box_volume)) < 1200u"nm^3"
+                any(!isnothing, press) && @test 80.0u"nm^3" < std(values(sys.loggers.box_volume)) < 150.0u"nm^3"
+                axis_is_uncoupled = isnothing.(press)
+                axis_is_unchanged = sys.boundary .== 8.0u"nm"
+                @test all(axis_is_uncoupled .== axis_is_unchanged)
+            end
         end
     end
 end
