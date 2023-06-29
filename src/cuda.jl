@@ -1,12 +1,24 @@
 # CUDA.jl kernels
 const WARPSIZE = UInt32(32)
-const FULLMASK = 0xffffffff
 
-macro shfl_multiple_sync(mask, target, vars...)
-    all_lines = map(vars) do v
-        Expr(:(=), esc(v), Expr(:call, :shfl_sync, esc(mask), esc(v), esc(target)))
+function get_leftmost_set_pos(mask::UInt32)
+    pos = 0
+    while (mask != 0)
+        mask >>= 1
+        pos += 1
     end
-    return Expr(:block, all_lines...)
+    return pos
+end
+
+macro shfl_multiple_sync(mask, target, width, vars...)
+    all_lines = map(vars) do v
+        Expr(:(=), v,
+            Expr(:call, :shfl_sync,
+                mask, v, target, width
+            )
+        )
+    end
+    return esc(Expr(:block, all_lines...))
 end
 
 CUDA.shfl_recurse(op, x::Quantity) = op(x.val) * unit(x)
@@ -33,9 +45,9 @@ function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundar
 
     if typeof(nbs) == NoNeighborList
         # Use 2D grid with 1D thread blocks
-        n_threads_gpu, n_blocks_y = cuda_threads_blocks_pairwise(length(atoms))
-        n_blocks_x = cld(length(atoms), WARPSIZE)
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=(n_blocks_x, n_blocks_y) pairwise_force_kernel_nonl!(
+        n_threads_gpu, n_blocks_j = cuda_threads_blocks_pairwise(length(atoms))
+        n_blocks_i = cld(length(atoms), WARPSIZE)
+        CUDA.@sync @cuda threads=n_threads_gpu blocks=(n_blocks_i, n_blocks_j) pairwise_force_kernel_nonl!(
                 fs_mat, coords, atoms, boundary, pairwise_inters, nbs, Val(D), Val(force_units))
     else
         n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
@@ -56,17 +68,7 @@ function pairwise_force_kernel!(forces, coords_var, atoms_var, boundary, inters,
     @inbounds if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
         coord_i, coord_j = coords[i], coords[j]
-        dr = vector(coord_i, coord_j, boundary)
-        f = force_gpu(inters[1], dr, coord_i, coord_j, atoms[i], atoms[j], boundary, special)
-        for inter in inters[2:end]
-            f += force_gpu(inter, dr, coord_i, coord_j, atoms[i], atoms[j], boundary, special)
-        end
-        if unit(f[1]) != F
-            # This triggers an error but it isn't printed
-            # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
-            #   for how to throw a more meaningful error
-            error("wrong force unit returned, was expecting $F but got $(unit(f[1]))")
-        end
+        f = sum_pairwise_forces(inters, coord_i, coord_j, atoms[i], atoms[j], boundary, special, F)
         for dim in 1:D
             fval = ustrip(f[dim])
             Atomix.@atomic :monotonic forces[dim, i] += -fval
@@ -102,19 +104,19 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
 
     tilesteps = WARPSIZE
     if i_0_tile == j_0_tile  # To not compute i-i forces
-        j = j % (j_0_tile + WARPSIZE) + 1
+        j = j_0_tile + lane %  WARPSIZE + 1
         tilesteps -= 1
     end
     coord_j = coords[j]
 
     for _ in 1:tilesteps  
         sync_warp()
-        atom_j = atoms[j]  #! Shuffling this by reconstruction of Atom makes performance worse (see line ~16)
+        atom_j = atoms[j]  # Shuffling this as in line ~15 makes performance worse
         f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
         for dim in 1:D
             forces_shmem[dim, tidx] += -ustrip(f[dim])
         end
-        @shfl_multiple_sync(FULLMASK, lane + 1, j, coord_j)
+        @shfl_multiple_sync(FULL_MASK, lane + 1, WARPSIZE, j, coord_j)
     end
 
     sync_warp()
