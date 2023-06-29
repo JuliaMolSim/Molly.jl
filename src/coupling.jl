@@ -273,15 +273,15 @@ It should be used alongside a temperature coupling method such as the [`Langevin
 simulator or [`AndersenThermostat`](@ref) coupling.
 The neighbor list is not updated when making trial moves or after accepted moves.
 Note that the barostat can change the bounding box of the system.
-`pressure` is a SVector of lenght 3 with components pressX, pressY, and pressZ
-representing the target pressure in each axis.
+For 3D systems, `pressure` is a SVector of lenght 3 with components pressX, pressY,
+and pressZ representing the target pressure in each axis.
+For 2D systems, `pressure` is a SVector of lenght 2 with components pressX and pressY.
 To keep an axis fixed, set the corresponding pressure to `nothing`.
-For rectangular boundaries `pressZ` is not required.
 
 Not currently compatible with automatic differentiation using Zygote.
 """
 mutable struct MonteCarloAnisotropicBarostat{D, T, P, K, V}
-  pressure::SVector{D,P}
+    pressure::SVector{D,P}
     temperature::K
     n_steps::Int
     n_iterations::Int
