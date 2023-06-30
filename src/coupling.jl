@@ -273,9 +273,9 @@ It should be used alongside a temperature coupling method such as the [`Langevin
 simulator or [`AndersenThermostat`](@ref) coupling.
 The neighbor list is not updated when making trial moves or after accepted moves.
 Note that the barostat can change the bounding box of the system.
-For 3D systems, `pressure` is a SVector of lenght 3 with components pressX, pressY,
+For 3D systems, `pressure` is a SVector of length 3 with components pressX, pressY,
 and pressZ representing the target pressure in each axis.
-For 2D systems, `pressure` is a SVector of lenght 2 with components pressX and pressY.
+For 2D systems, `pressure` is a SVector of length 2 with components pressX and pressY.
 To keep an axis fixed, set the corresponding pressure to `nothing`.
 
 Not currently compatible with automatic differentiation using Zygote.
@@ -304,9 +304,10 @@ function MonteCarloAnisotropicBarostat(
     max_volume_frac=0.3,
     trial_find_neighbors=false,
 ) where {D}
-    volume_scale = box_volume(boundary) * float_type(boundary)(scale_factor)
-    volume_scale = fill(volume_scale, D)
-    length(boundary.side_lengths) != D && error("pressure is not compatible with boundary")
+    volume_scale_factor = box_volume(boundary) * float_type(boundary)(scale_factor)
+    volume_scale = fill(volume_scale_factor, D)
+    length(boundary.side_lengths) != D && throw(ArgumentError("pressure vector length ($(D)) " *
+        "must match boundary dimensionality ($(length(boundary.side_lengths)))"))
 
     return MonteCarloAnisotropicBarostat(
         pressure,
@@ -338,17 +339,17 @@ function apply_coupling!(
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
 
-    axis = undef
-    while true
-        axis = rand(1:D)
-        !isnothing(barostat.pressure[axis]) && break
-    end
-    mask1 = falses(D)
-    mask2 = trues(D)
-    mask1[axis] = true
-    mask2[axis] = false
-
     for attempt_n in 1:barostat.n_iterations
+        axis = 0
+        while true
+            axis = rand(1:D)
+            !isnothing(barostat.pressure[axis]) && break
+        end
+        mask1 = falses(D)
+        mask2 = trues(D)
+        mask1[axis] = true
+        mask2[axis] = false
+
         E = potential_energy(sys, neighbors; n_threads=n_threads)
         V = box_volume(sys.boundary)
         dV = barostat.volume_scale[axis] * (2 * rand(T) - 1)

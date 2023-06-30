@@ -22,7 +22,8 @@ export
     virial,
     pressure,
     molecule_centers,
-    scale_coords!
+    scale_coords!,
+    scale_vec
 
 """
     CubicBoundary(x, y, z)
@@ -759,9 +760,7 @@ Not currently compatible with automatic differentiation using Zygote.
 function scale_coords!(sys, scale_factor; ignore_molecules=false)
     if ignore_molecules || isnothing(sys.topology)
         sys.boundary = scale_boundary(sys.boundary, scale_factor)
-        for i in eachindex(sys.coords)
-            sys.coords[i] = sys.coords[i] .* scale_factor
-        end
+        sys.coords = scale_vec(sys.coords, scale_factor)
     elseif sys.boundary isa TriclinicBoundary
         error("scaling coordinates by molecule is not compatible with a TriclinicBoundary")
     else
@@ -781,7 +780,7 @@ function scale_coords!(sys, scale_factor; ignore_molecules=false)
         end
         # Move all atoms in a molecule by the same amount according to the molecule center
         # Then move the atoms back to the molecule center and wrap in the scaled boundary
-        shift_vecs = mol_centers .* (scale_factor - 1)
+        shift_vecs = scale_vec(mol_centers, scale_factor .- 1)
         sys.boundary = scale_boundary(sys.boundary, scale_factor)
         boundary_nounits = ustrip(sys.boundary)
         for i in eachindex(sys)
@@ -793,3 +792,12 @@ function scale_coords!(sys, scale_factor; ignore_molecules=false)
     end
     return sys
 end
+
+"""
+    scale_vec(v, c)
+
+Broadcasted form of `.* c`, allowing scaling all the vectors in v by c, where c is
+either a constant or a vector.
+"""
+scale(v, c) = v .* c
+scale_vec(v, c) = scale.(v, Ref(c))

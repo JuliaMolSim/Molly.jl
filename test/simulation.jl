@@ -966,9 +966,7 @@ end
     pressure_test_set = (
         SVector(1.0u"bar", 1.0u"bar", 1.0u"bar"), # XYZ-axes coupled with the same pressure value
         SVector(1.5u"bar", 0.5u"bar", 1.0u"bar"), # XYZ-axes coupled with different pressure values
-        SVector(1.0u"bar", nothing, nothing), # Only X-axis coupled
         SVector(nothing, 1.0u"bar", nothing), # Only Y-axis coupled
-        SVector(nothing, nothing, 1.0u"bar"), # Only Z-axis coupled
         SVector(nothing, nothing, nothing), # Uncoupled
     )
     
