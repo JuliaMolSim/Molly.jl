@@ -136,26 +136,26 @@ function simulate!(sys,
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
 
+    #TODO: DO I need constraints up here? 
+    apply_position_constraints!(sys, accels_t, sim.dt)
+
     for step_n in 1:n_steps
-        println("STEP: $(step_n)")
         
-        #TODO: Figure out ordering of constraints -->
-            # Just apply at end of update?? update acelerations as well??
-        # sys.velocities +=  (0.5 .*accel_remove_mol.(accels_t) .* sim.dt)
-        # save_velocities!(sys.constraint_algorithm, sys.velocities)
-        # apply_velocity_constraints!(sys)
-
-
-        save_positions!(sys.constraint_algorithm, sys.coords)
+        # Position Update
         sys.coords += (sys.velocities .* sim.dt) .+ (accel_remove_mol.(accels_t) .* sim.dt ^ 2) ./ 2
-        apply_position_constraints!(sys, accels_t, sim.dt)
+        #Enforce PBC
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-
+        #Calculate new forces
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
+ 
+        #TODO This should be last thing that modifies accelerations acting this step
+        #Update positions, and modify forces to satisfy constraints
+        accels_t_dt = apply_position_constraints!(sys, accels_t_dt, sim.dt)
+
+        #Update velocities
         sys.velocities += accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
-        # save_velocities!(sys.constraint_algorithm, sys.velocities)
-        # apply_velocity_constraints!(sys)
+
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -170,6 +170,7 @@ function simulate!(sys,
         else
             accels_t = accels_t_dt
         end
+
 
         run_loggers && run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
     end
@@ -215,9 +216,14 @@ function simulate!(sys,
 
         sys.velocities += accel_remove_mol.(accels_t) .* sim.dt
 
-        old_coords = copy(sys.coords)
+        # old_coords = copy(sys.coords)
+        # sys.coords += sys.velocities .* sim.dt
+        # apply_constraints!(sys, old_coords, sim.dt)
+        # sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+
+        save_positions!(sys.constraint_algorithm, sys.coords)
         sys.coords += sys.velocities .* sim.dt
-        apply_constraints!(sys, old_coords, sim.dt)
+        apply_position_constraints!(sys, accels_t, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0

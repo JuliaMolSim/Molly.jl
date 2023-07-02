@@ -195,11 +195,15 @@ end
 """
 Updates the coordinates of a [`System`](@ref) based on the constraints.
 """
-function apply_position_constraints!(sys, accels_t, dt)
+function apply_position_constraints!(sys, accels, dt)
+
+    sys.constraint_algorithm = unconstrained_update!(sys.constraint_algorithm, sys, accels, dt)
 
     for constraint_cluster in sys.constraints
-        apply_position_constraint!(sys, sys.constraint_algorithm, constraint_cluster, accels_t, dt)
+        apply_position_constraint!(sys, sys.constraint_algorithm, constraint_cluster, accels, dt)
     end
+
+    return accels
 end
 
 # For Velocity Verlet half step
