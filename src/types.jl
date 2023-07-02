@@ -248,7 +248,7 @@ function Base.zero(::Type{Atom{T, T, T, T}}) where T
     return Atom(0, z, z, z, z, false)
 end
 
-Base.getindex(at::Atom, x::Symbol) = hasfield(Atom, x) ? getfield(atom, x) : error("No field $x in Atom")
+Base.getindex(at::Atom, x::Symbol) = hasfield(Atom, x) ? getfield(atom, x) : KeyError("No field $x in Atom")
 
 """
     charge(atom)
@@ -845,7 +845,7 @@ masses(s::ReplicaSystem) = mass.(s.atoms)
 The charges of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
 """
 charges(s::Union{System, ReplicaSystem}) = charge.(s.atoms)
-
+charge(s::Union{System, ReplicaSystem}, i::Integer) = charge(s.atoms[i])
 
 # Move an array to the GPU depending on whether the system is on the GPU
 move_array(arr, ::System{D, false}) where {D} = arr
@@ -857,23 +857,15 @@ Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)
 Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = typeof(s[1])
-AtomsBase.atomkeys(s::Union{System, ReplicaSystem}) = (:position, :velocity, :atomic_mass, :atomic_number)
+AtomsBase.atomkeys(s::Union{System, ReplicaSystem}) = (:position, :velocity, :atomic_mass, :atomic_number, :charge)
 AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = x ∈ atomkeys(s)
-AtomsBase.keys(sys::System) = (:atoms,:coords,:boundary,:velocities,:atoms_data,:topology,
-        :pairwise_inters,:specific_inter_lists,:general_inters,:constraints,:neighbor_finder,
-        :loggers, :k, :force_units, :energy_units)
-AtomsBase.keys(sys::ReplicaSystem) = (:atoms,:replica_coords,:boundary,
-        :n_replicas,:replica_velocities,:atoms_data,:topology,:replica_topology,
-        :pairwise_inters,:replica_pairwise_inters,:specific_inter_lists,
-        :replica_specific_inter_lists,:general_inters,:replica_general_inters,
-        :constraints,:replica_constraints,:neighbor_finder,:replica_loggers,
-        :exchange_logger,:k,:force_units,:energy_units)
+AtomsBase.keys(sys::Union{System, ReplicaSystem}) = fieldnames(sys)
 AtomsBase.haskey(sys::Union{System, ReplicaSystem}, x::Symbol) = hasfield(typeof(sys), x)
 Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) = 
-    hasfield(typeof(sys), x) ? getfield(sys, x) : ArgumentError("No field `$x`. Allowed keys are $(keys(sys)).")
+    hasfield(typeof(sys), x) ? getfield(sys, x) : KeyError("No field `$x`. Allowed keys are $(keys(sys)).")
 Base.pairs(sys::Union{System, ReplicaSystem}) = (k => sys[k] for k in keys(sys))
 Base.get(sys::Union{System, ReplicaSystem}, x::Symbol, default) = 
-    hasfield(typeof(sys), x) ? getfield(sys, x) : return default
+    haskey(sys, x) ? getfield(sys, x) : default
 
 AtomsBase.position(s::System) = s.coords
 AtomsBase.position(s::System, i::Integer) = s.coords[i]
@@ -888,11 +880,16 @@ AtomsBase.velocity(s::ReplicaSystem, i::Integer) = s.replicas[1].velocities[i]
 AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}) = masses(s)
 AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}, i::Integer) = mass(s.atoms[i])
 
-# Base.getindex(sys::Union{System, ReplicaSystem}, i::Integer, x::Symbol) =
-#     getfield(getindex(sys, i), x)
+
 function Base.getindex(system::Union{System, ReplicaSystem}, i, x::Symbol)
+    atomsbase_keys = (:position, :velocity, :atomic_mass, :atomic_number)
+    custom_keys = (:charge, )
     if hasatomkey(system, x)
-      getproperty(AtomsBase, x)(system, i)  # uses the two-argument version
+        if x ∈ atomsbase_keys
+            return getproperty(AtomsBase, x)(system, i)
+        elseif x ∈ custom_keys
+            return getproperty(Molly, x)(system, i)
+        end
     else
       throw(KeyError("Key $(x) not present in system."))
     end
@@ -919,7 +916,7 @@ function AtomsBase.atomic_number(s::Union{System, ReplicaSystem})
     if length(s.atoms_data) > 0
         return map(ad -> ad.atomic_number, s.atoms_data)
     else
-        return fill(:unknown, length(s))
+        return fill(-1, length(s))
     end
 end
 
@@ -927,7 +924,7 @@ function AtomsBase.atomic_number(s::Union{System, ReplicaSystem}, i::Integer)
     if length(s.atoms_data) > 0
         return s.atoms_data[i].atomic_number
     else
-        return :unknown
+        return -1
     end
 end
 
