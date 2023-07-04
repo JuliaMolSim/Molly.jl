@@ -248,6 +248,11 @@ end
 
 The Monte Carlo anisotropic barostat for controlling pressure.
 
+For 3D systems, `pressure` is a `SVector` of length 3 with components pressX, pressY,
+and pressZ representing the target pressure in each axis.
+For 2D systems, `pressure` is a `SVector` of length 2 with components pressX and pressY.
+To keep an axis fixed, set the corresponding pressure to `nothing`.
+
 See [Chow and Ferguson 1995](https://doi.org/10.1016/0010-4655(95)00059-O),
 [Åqvist et al. 2004](https://doi.org/10.1016/j.cplett.2003.12.039) and the OpenMM
 source code.
@@ -273,15 +278,11 @@ It should be used alongside a temperature coupling method such as the [`Langevin
 simulator or [`AndersenThermostat`](@ref) coupling.
 The neighbor list is not updated when making trial moves or after accepted moves.
 Note that the barostat can change the bounding box of the system.
-For 3D systems, `pressure` is a SVector of length 3 with components pressX, pressY,
-and pressZ representing the target pressure in each axis.
-For 2D systems, `pressure` is a SVector of length 2 with components pressX and pressY.
-To keep an axis fixed, set the corresponding pressure to `nothing`.
 
 Not currently compatible with automatic differentiation using Zygote.
 """
 mutable struct MonteCarloAnisotropicBarostat{D, T, P, K, V}
-    pressure::SVector{D,P}
+    pressure::SVector{D, P}
     temperature::K
     n_steps::Int
     n_iterations::Int
@@ -293,21 +294,21 @@ mutable struct MonteCarloAnisotropicBarostat{D, T, P, K, V}
     n_accepted::Vector{Int}
 end
 
-function MonteCarloAnisotropicBarostat(
-    pressure::SVector{D},
-    temperature,
-    boundary;
-    n_steps=30,
-    n_iterations=1,
-    scale_factor=0.01,
-    scale_increment=1.1,
-    max_volume_frac=0.3,
-    trial_find_neighbors=false,
-) where {D}
+function MonteCarloAnisotropicBarostat(pressure::SVector{D},
+                                       temperature,
+                                       boundary;
+                                       n_steps=30,
+                                       n_iterations=1,
+                                       scale_factor=0.01,
+                                       scale_increment=1.1,
+                                       max_volume_frac=0.3,
+                                       trial_find_neighbors=false) where D
     volume_scale_factor = box_volume(boundary) * float_type(boundary)(scale_factor)
     volume_scale = fill(volume_scale_factor, D)
-    length(boundary.side_lengths) != D && throw(ArgumentError("pressure vector length ($(D)) " *
-        "must match boundary dimensionality ($(length(boundary.side_lengths)))"))
+    if length(boundary.side_lengths) != D
+        throw(ArgumentError("pressure vector length ($(D)) must match boundary " *
+                            "dimensionality ($(length(boundary.side_lengths)))"))
+    end
 
     return MonteCarloAnisotropicBarostat(
         pressure,
@@ -318,20 +319,17 @@ function MonteCarloAnisotropicBarostat(
         scale_increment,
         max_volume_frac,
         trial_find_neighbors,
-        fill(0, D),
-        fill(0, D),
+        zeros(Int, D),
+        zeros(Int, D),
     )
 end
 
-function apply_coupling!(
-    sys::System{D, G, T},
-    barostat::MonteCarloAnisotropicBarostat{D},
-    sim,
-    neighbors=nothing,
-    step_n::Integer=0;
-    n_threads::Integer=Threads.nthreads()
-) where {D, G, T}
-
+function apply_coupling!(sys::System{D, G, T},
+                         barostat::MonteCarloAnisotropicBarostat{D},
+                         sim,
+                         neighbors=nothing,
+                         step_n::Integer=0;
+                         n_threads::Integer=Threads.nthreads()) where {D, G, T}
     !iszero(step_n % barostat.n_steps) && return false
     all(isnothing, barostat.pressure) && return false
 
@@ -381,13 +379,13 @@ function apply_coupling!(
 
         # Modify size of volume change to keep accept/reject ratio roughly equal
         if barostat.n_attempted[axis] >= 10
-          if barostat.n_accepted[axis] < 0.25 * barostat.n_attempted[axis]
-            barostat.volume_scale[axis] /= barostat.scale_increment
+            if barostat.n_accepted[axis] < 0.25 * barostat.n_attempted[axis]
+                barostat.volume_scale[axis] /= barostat.scale_increment
                 barostat.n_attempted[axis] = 0
                 barostat.n_accepted[axis] = 0
-              elseif barostat.n_accepted[axis] > 0.75 * barostat.n_attempted[axis]
+            elseif barostat.n_accepted[axis] > 0.75 * barostat.n_attempted[axis]
                 barostat.volume_scale[axis] = min(barostat.volume_scale[axis] * barostat.scale_increment,
-                                            V * barostat.max_volume_frac)
+                                                  V * barostat.max_volume_frac)
                 barostat.n_attempted[axis] = 0
                 barostat.n_accepted[axis] = 0
             end
