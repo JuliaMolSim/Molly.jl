@@ -136,8 +136,7 @@ function simulate!(sys,
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
 
-    #TODO: DO I need constraints up here? 
-    apply_position_constraints!(sys, accels_t, sim.dt)
+    accels_t = apply_position_constraints!(sys, accels_t, sim.dt, n_threads=n_threads)
 
     for step_n in 1:n_steps
         
@@ -150,12 +149,13 @@ function simulate!(sys,
 
  
         #TODO This should be last thing that modifies accelerations acting this step
-        #Update positions, and modify forces to satisfy constraints
-        accels_t_dt = apply_position_constraints!(sys, accels_t_dt, sim.dt)
+        #Modify forces so that next update satisfies the constraints
+        accels_t_dt = apply_position_constraints!(sys, accels_t_dt, sim.dt, n_threads=n_threads)
 
-        #Update velocities
         sys.velocities += accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
 
+        #TODO Directly update velocities
+        sys.velocities = apply_velocity_constraints!(sys)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)

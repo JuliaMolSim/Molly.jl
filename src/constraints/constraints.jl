@@ -191,16 +191,17 @@ function check_initial_constraints(coords, clusters)
 
 end
 
-# For Verlet/Velocity Verlet position step
 """
 Updates the coordinates of a [`System`](@ref) based on the constraints.
 """
-function apply_position_constraints!(sys, accels, dt)
+function apply_position_constraints!(sys, accels, dt, n_threads::Integer=Threads.nthreads())
 
-    sys.constraint_algorithm = unconstrained_update!(sys.constraint_algorithm, sys, accels, dt)
+    sys.constraint_algorithm = unconstrained_position_update!(sys.constraint_algorithm, sys, accels, dt)
 
-    for constraint_cluster in sys.constraints
-        apply_position_constraint!(sys, sys.constraint_algorithm, constraint_cluster, accels, dt)
+    Threads.@threads for thread_id in 1:n_threads
+        for i in thread_id:n_threads:length(sys.constraints)
+            apply_position_constraint!(sys, sys.constraint_algorithm, sys.constraints[i], accels, dt)
+        end
     end
 
     return accels
@@ -210,10 +211,12 @@ end
 """
 Updates the velocities of a [`System`](@ref) based on the constraints.
 """
-function apply_velocity_constraints!(sys)
+function apply_velocity_constraints!(sys, n_threads::Integer=Threads.nthreads())
 
-    for constraint_cluster in sys.constraints
-        apply_velocity_constraint!(sys, sys.constraint_algorithm, constraint_cluster)
+    Threads.@threads for thread_id in 1:n_threads
+        for i in thread_id:n_threads:length(sys.constraints)
+            apply_velocity_constraint!(sys, sys.constraint_algorithm, sys.constraints[i])
+        end
     end
 end
 

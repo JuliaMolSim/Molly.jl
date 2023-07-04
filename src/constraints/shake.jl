@@ -28,7 +28,7 @@ function apply_position_constraint!(sys, constraint_algo::SHAKE,
 end
 
 #Assumes NVE update
-function unconstrained_update!(constraint_algo, sys, accels, dt)
+function unconstrained_position_update!(constraint_algo, sys, accels, dt)
 
     #Move system coordinates into temporary storage
     save_positions!(constraint_algo, sys.coords)
