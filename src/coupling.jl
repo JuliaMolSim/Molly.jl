@@ -352,7 +352,7 @@ function apply_coupling!(sys::System{D, G, T},
         V = box_volume(sys.boundary)
         dV = barostat.volume_scale[axis] * (2 * rand(T) - 1)
         v_scale = (V + dV) / V
-        l_scale = SVector{D}(mask1 * (D == 2 ? sqrt(v_scale) : cbrt(v_scale)) + mask2)
+        l_scale = SVector{D}(mask1 * v_scale + mask2)
         old_coords = copy(sys.coords)
         old_boundary = sys.boundary
         scale_coords!(sys, l_scale)
