@@ -82,6 +82,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
                                 neighbors_var, ::Val{D}, ::Val{F}) where {T, D, F}
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
+    n_atoms = length(atoms)
 
     tidx = threadIdx().x
     threads = blockDim().x
@@ -99,29 +100,51 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     i_0_tile = i_0_block
     j_0_tile = j_0_block + (warpidx - 1) * WARPSIZE
     i = i_0_tile + lane
-    j = j_0_tile + lane
-    atom_i, coord_i = atoms[i], coords[i]
 
-    tilesteps = WARPSIZE
-    if i_0_tile == j_0_tile  # To not compute i-i forces
-        j = j_0_tile + lane %  WARPSIZE + 1
-        tilesteps -= 1
-    end
-    coord_j = coords[j]
+    if i_0_tile + WARPSIZE > n_atoms || j_0_tile + WARPSIZE > n_atoms
+        njs = min(WARPSIZE, n_atoms - j_0_tile)
+        j_start = j_0_tile + 1
+        j_end = j_0_tile + njs
+        if i <= n_atoms
+            atom_i, coord_i = atoms[i], coords[i]
+            for j in j_start:j_end
+                if i != j
+                    atom_j, coord_j = atoms[j], coords[j]
+                    f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
+                    for dim in 1:D
+                        forces_shmem[dim, tidx] += -ustrip(f[dim])
+                    end
+                end
+            end
 
-    for _ in 1:tilesteps  
-        sync_warp()
-        atom_j = atoms[j]  # Shuffling this as in line ~15 makes performance worse
-        f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
-        for dim in 1:D
-            forces_shmem[dim, tidx] += -ustrip(f[dim])
+            @inbounds for dim in 1:D
+                Atomix.@atomic :monotonic forces[dim, i] += forces_shmem[dim, tidx]
+            end
         end
-        @shfl_multiple_sync(FULL_MASK, lane + 1, WARPSIZE, j, coord_j)
-    end
+    else
+        j = j_0_tile + lane
+        tilesteps = WARPSIZE
+        if i_0_tile == j_0_tile  # To not compute i-i forces
+            j = j_0_tile + lane % WARPSIZE + 1
+            tilesteps -= 1
+        end
 
-    sync_warp()
-    @inbounds for dim in 1:D
-        Atomix.@atomic :monotonic forces[dim, i] += forces_shmem[dim, tidx]
+        atom_i, coord_i = atoms[i], coords[i]
+        coord_j = coords[j]
+        for _ in 1:tilesteps  
+            sync_warp()
+            atom_j = atoms[j]  # Shuffling this as in line ~15 makes performance worse
+            f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
+            for dim in 1:D
+                forces_shmem[dim, tidx] += -ustrip(f[dim])
+            end
+            @shfl_multiple_sync(FULL_MASK, lane + 1, WARPSIZE, j, coord_j)
+        end
+
+        sync_warp()
+        @inbounds for dim in 1:D
+            Atomix.@atomic :monotonic forces[dim, i] += forces_shmem[dim, tidx]
+        end
     end
 
     return nothing
