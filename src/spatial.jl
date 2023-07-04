@@ -421,7 +421,7 @@ function wrap_coords(v, boundary::TriclinicBoundary)
     return v_wrap
 end
 
-const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
+
 
 """
     random_velocity(mass, temperature; dims=3)
