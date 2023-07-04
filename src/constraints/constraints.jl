@@ -3,17 +3,21 @@ export
     NoSystemConstraints,
     n_dof
 
+
 """
 Supertype for all constraint algorithms.
 """
 abstract type ConstraintAlgorithm end
+abstract type PositionConstraintAlgorithm <: ConstraintAlgorithm end
+abstract type PositionAndVelocityConstraintAlgorithm <: ConstraintAlgorithm end
 
+ConstrainsPositions = Union{PositionConstraintAlgorithm, PositionAndVelocityConstraintAlgorithm}
 
 """
 Placeholder struct for [`System`](@ref) constructor when the system does not require constraints.
-An example of a constraint is [`SHAKE`](@ref).
+An example of a constraint algorithm is [`SHAKE`](@ref).
 """
-struct NoSystemConstraints end
+struct NoSystemConstraints <: ConstraintAlgorithm end
 
 
 """
@@ -194,36 +198,43 @@ end
 """
 Updates the coordinates of a [`System`](@ref) based on the constraints.
 """
-function apply_position_constraints!(sys, accels, dt, n_threads::Integer=Threads.nthreads())
+#TODO: constraint_algo is technically inside of sys, but I need it for dispatch
+function apply_position_constraints!(sys::System, constraint_algo::ConstrainsPositions,
+        accels, dt; n_threads::Integer=Threads.nthreads())
 
-    sys.constraint_algorithm = unconstrained_position_update!(sys.constraint_algorithm, sys, accels, dt)
+    constraint_algo = unconstrained_position_update!(constraint_algo, sys, accels, dt)
 
     Threads.@threads for thread_id in 1:n_threads
         for i in thread_id:n_threads:length(sys.constraints)
-            apply_position_constraint!(sys, sys.constraint_algorithm, sys.constraints[i], accels, dt)
+            apply_position_constraint!(sys, constraint_algo, sys.constraints[i], accels, dt)
         end
     end
 
-    return accels
+    return sys, accels
 end
 
 # For Velocity Verlet half step
 """
 Updates the velocities of a [`System`](@ref) based on the constraints.
 """
-function apply_velocity_constraints!(sys, n_threads::Integer=Threads.nthreads())
+function apply_velocity_constraints!(sys::System, constraint_algo::PositionAndVelocityConstraintAlgorithm;
+     n_threads::Integer=Threads.nthreads())
 
     Threads.@threads for thread_id in 1:n_threads
         for i in thread_id:n_threads:length(sys.constraints)
-            apply_velocity_constraint!(sys, sys.constraint_algorithm, sys.constraints[i])
+            apply_velocity_constraint!(sys, constraint_algo, sys.constraints[i])
         end
     end
+ 
+    return sys
 end
 
-apply_position_constraints!(sys::System, constraint_algo::NoSystemConstraints, args...) = nothing
-apply_velocity_constraints!(sys::System, constraint_algo::NoSystemConstraints, args...) = nothing
-save_positions!(constraint_algo::NoSystemConstraints, c) = nothing
-save_velocities!(constraint_algo::NoSystemConstraints, v) = nothing
+apply_position_constraints!(sys::System, constraint_algo::NoSystemConstraints, accels, dt; n_threads::Integer = 0) = sys, accels
+
+apply_velocity_constraints!(sys::System, constraint_algo::NoSystemConstraints; n_threads::Integer = 0) = sys
+apply_velocity_constraints!(sys::System, constraint_algo::PositionConstraintAlgorithm; n_threads::Integer = 0) = sys
+
+save_positions!(constraint_algo::NoSystemConstraints, c) = constraint_algo
 
 """
 Re-calculates the # of degrees of freedom in the system due to the constraints.

@@ -7,33 +7,30 @@ Constrains a set of bonds to defined distances in a way that the velocities also
 See [this paper](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3285512/) for a derivation of the linear
 system solved to satisfy the RATTLE algorithm.
 """
-struct RATTLE{CS,CV,T} <: ConstraintAlgorithm
+struct RATTLE{CS,T} <: PositionAndVelocityConstraintAlgorithm
     coord_storage::CS 
-    velocity_storage::CV  #TODO: remove? might just act on system velo directly
     tolerance::T
 end
 
-function RATTLE(coords, velocities; tolerance=1e-4)
-    return RATTLE{typeof(coords), typeof(velocities), typeof(tolerance)}(
-        coords, velocities, tolerance = tolerance)
+function RATTLE(coords; tolerance=1e-4)
+    return RATTLE{typeof(coords), typeof(tolerance)}(
+        coords, tolerance)
 end
 
 save_positions!(constraint_algo::RATTLE, c) = (constraint_algo.coord_storage .= c)
-save_velocities!(constraint_algo::RATTLE, v) = (constraint_algo.velocity_storage .= v)
 
 
 function apply_position_constraint!(sys, constraint_algo::RATTLE, 
-    constraint_cluster::ConstraintCluster)
+    constraint_cluster::ConstraintCluster{1}, accels, dt)
 
-    SHAKE_algo(sys, constraint_cluster, constraint_algo.unupdated_coords)
+    SHAKE_update!(sys, constraint_algo, constraint_cluster, accels, dt)
 
 end
-
 
 function apply_velocity_constraint!(sys, constraint_algo::RATTLE, 
     constraint_cluster::ConstraintCluster)
 
-    RATTLE_algo(sys, constraint_cluster, constraint_algo.unconstrained_velocities)
+    RATTLE_update!(sys, constraint_cluster)
 
 end
 
@@ -42,7 +39,7 @@ end
 RATTLE solution for a single distance constraint between atoms i and j,
 where atoms i and j do NOT participate in any other constraints.
 """
-function RATTLE_algo(sys, cluster::ConstraintCluster{1})
+function RATTLE_update!(sys, cluster::ConstraintCluster{1})
 
     constraint = cluster.constraints[1]
 
@@ -65,15 +62,15 @@ function RATTLE_algo(sys, cluster::ConstraintCluster{1})
     λₖ = -dot(r_k1k2,v_k1k2)/(dot(r_k1k2,r_k1k2)*(inv_m1 + inv_m2))
 
     # Correct velocities
-    sys.velocities[k1] .-= (inv_m1 .* λₖ .* r_k1k2)
-    sys.velocities[k2] .+= (inv_m2 .* λₖ .* r_k1k2)
+    sys.velocities[k1] -= (inv_m1 .* λₖ .* r_k1k2)
+    sys.velocities[k2] += (inv_m2 .* λₖ .* r_k1k2)
 
 end
 
 # TODO
-RATTLE_algo(sys, cluster::ConstraintCluster{2}, unconstrainted_velocities) = nothing
-RATTLE_algo(sys, cluster::ConstraintCluster{3}, unconstrainted_velocities) = nothing
-RATTLE_algo(sys, cluster::ConstraintCluster{4}, unconstrainted_velocities) = nothing
+RATTLE_update!(sys, ca::RATTLE, cluster::ConstraintCluster{2}) = nothing
+RATTLE_update!(sys, ca::RATTLE, cluster::ConstraintCluster{3}) = nothing
+RATTLE_update!(sys, ca::RATTLE, cluster::ConstraintCluster{4}) = nothing
 
 # Implement later
-# RATTLE_algo(sys, cluster::ConstraintCluster{D}) where {D >= 5} = nothing
+# RATTLE_update!(sys, cluster::ConstraintCluster{D}) where {D >= 5} = nothing

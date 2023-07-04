@@ -5,7 +5,7 @@ export SHAKE
 
 Constrains a set of bonds to defined distances.
 """
-struct SHAKE{UC, T} <: ConstraintAlgorithm
+struct SHAKE{UC, T} <: PositionConstraintAlgorithm
     coord_storage::UC #Used as storage to avoid re-allocating arrays
     tolerance::T
 end
@@ -34,6 +34,7 @@ function unconstrained_position_update!(constraint_algo, sys, accels, dt)
     save_positions!(constraint_algo, sys.coords)
 
     #Unconstrained update on stored coordinates
+    #TODO remove_mol might be unnecessary once units issues fixed
     constraint_algo.coord_storage .+= (sys.velocities .* dt) .+ (accel_remove_mol.(accels) .* dt ^ 2) ./ 2
 
     return constraint_algo
@@ -41,7 +42,7 @@ end
 
 #TODO: I do not think we actually need to iterate here its analytical solution
 #TODO: Modify forces instead of positions?
-function SHAKE_update!(sys, ca::SHAKE, cluster::ConstraintCluster{1}, accels, dt)
+function SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{1}, accels, dt)
 
     constraint = cluster.constraints[1]
 
@@ -83,6 +84,7 @@ function SHAKE_update!(sys, ca::SHAKE, cluster::ConstraintCluster{1}, accels, dt
         # println(unit(accels[k1][1]))
         # println(unit(((lambda/m1).*r01)[1]))
         # println(uconvert.(unit(accels[k1][1]), ((lambda/m1).*r01)))
+        # println(accel_remove_mol(accels[k1][1]))
         #TODO get unitful to play nice
         accels[k1] += ustrip.((1/418.4).*(lambda/m1).*r01) * unit(accels[k1][1])
         accels[k2] -= ustrip.((1/418.4).*(lambda/m2).*r01) * unit(accels[k2][1])
@@ -93,12 +95,12 @@ function SHAKE_update!(sys, ca::SHAKE, cluster::ConstraintCluster{1}, accels, dt
 end
 
 # TODO: Manually implement matrix inversion
-SHAKE_update!(sys, ca::SHAKE, cluster::ConstraintCluster{2}) = nothing
-SHAKE_update!(sys, ca::SHAKE, cluster::ConstraintCluster{3}) = nothing
-SHAKE_update!(sys, ca::SHAKE, cluster::ConstraintCluster{4}) = nothing
+SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{2}, accels, dt) = nothing
+SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{3}, accels, dt) = nothing
+SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{4}, accels, dt) = nothing
 
 #Implement later, see:
 # https://onlinelibrary.wiley.com/doi/abs/10.1002/1096-987X(20010415)22:5%3C501::AID-JCC1021%3E3.0.CO;2-V
 # https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3285512/
 #Currently code is setup for independent constraints, but M-SHAKE does not care about that
-# SHAKE_update!(sys, cluster::ConstraintClusterP{D}) where {D >= 5} = nothing
+# SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{D}, accels, dt) where {D >= 5} = nothing
