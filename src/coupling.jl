@@ -396,9 +396,10 @@ function apply_coupling!(sys::System{D, G, T},
 end
 
 @doc raw"""
-    MonteCarloMembraneBarostat(pressure, temperature, boundary; n_steps=30,
+    MonteCarloMembraneBarostat(pressure, tension, temperature, boundary; n_steps=30,
                        n_iterations=1, scale_factor=0.01, scale_increment=1.1,
-                       max_volume_frac=0.3, trial_find_neighbors=false)
+                       max_volume_frac=0.3, trial_find_neighbors=false,
+                       xy_isotropy=false, z_axis_fixed=false, constant_volume=false)
 
 The Monte Carlo membrane barostat for controlling pressure.
 
@@ -429,6 +430,12 @@ simulator or [`AndersenThermostat`](@ref) coupling.
 The neighbor list is not updated when making trial moves or after accepted moves.
 Note that the barostat can change the bounding box of the system.
 This barostat is only available for 3D systems.
+Set the `xy_isotropy` flag to `true` to scale the X and Y axes isotropically.
+Set the `z_axis_fixed` flag to `true` to uncouple the Z-axis and keep it fixed.
+Set the `constant_volume` flag to `true` to keep the system volume constant by
+scaling the Z-axis accordingly.
+In this barostat, the `z_axis_fixed` and `constant_volume` flags cannot be `true`
+simultaneously.
 
 Not currently compatible with automatic differentiation using Zygote.
 """
