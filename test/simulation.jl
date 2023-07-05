@@ -871,7 +871,7 @@ end
 
     sys = System(
         atoms=atoms,
-        coords=coords,
+        coords=deepcopy(coords),
         boundary=boundary,
         pairwise_inters=(LennardJones(),),
         loggers=(
@@ -911,7 +911,7 @@ end
 
             sys = System(
                 atoms=AT(atoms),
-                coords=AT(coords),
+                coords=AT(deepcopy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -978,7 +978,7 @@ end
 
             sys = System(
                 atoms=AT(atoms),
-                coords=AT(coords),
+                coords=AT(deepcopy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1049,7 +1049,7 @@ end
 
             sys = System(
                 atoms=AT(atoms),
-                coords=AT(coords),
+                coords=AT(deepcopy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
