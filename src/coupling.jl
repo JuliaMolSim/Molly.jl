@@ -306,9 +306,9 @@ function MonteCarloAnisotropicBarostat(pressure::SVector{D},
                                        trial_find_neighbors=false) where D
     volume_scale_factor = box_volume(boundary) * float_type(boundary)(scale_factor)
     volume_scale = fill(volume_scale_factor, D)
-    if length(boundary.side_lengths) != D
+    if n_dimensions(boundary) != D
         throw(ArgumentError("pressure vector length ($(D)) must match boundary " *
-                            "dimensionality ($(length(boundary.side_lengths)))"))
+                            "dimensionality ($(n_dimensions(boundary)))"))
     end
 
     return MonteCarloAnisotropicBarostat(
@@ -403,6 +403,12 @@ end
 
 The Monte Carlo membrane barostat for controlling pressure.
 
+Set the `xy_isotropy` flag to `true` to scale the x and y axes isotropically.
+Set the `z_axis_fixed` flag to `true` to uncouple the z-axis and keep it fixed.
+Set the `constant_volume` flag to `true` to keep the system volume constant by
+scaling the z-axis accordingly.
+The `z_axis_fixed` and `constant_volume` flags cannot be `true` simultaneously.
+
 See [Chow and Ferguson 1995](https://doi.org/10.1016/0010-4655(95)00059-O),
 [Åqvist et al. 2004](https://doi.org/10.1016/j.cplett.2003.12.039) and the OpenMM
 source code.
@@ -429,18 +435,12 @@ It should be used alongside a temperature coupling method such as the [`Langevin
 simulator or [`AndersenThermostat`](@ref) coupling.
 The neighbor list is not updated when making trial moves or after accepted moves.
 Note that the barostat can change the bounding box of the system.
-This barostat is only available for 3D systems.
-Set the `xy_isotropy` flag to `true` to scale the X and Y axes isotropically.
-Set the `z_axis_fixed` flag to `true` to uncouple the Z-axis and keep it fixed.
-Set the `constant_volume` flag to `true` to keep the system volume constant by
-scaling the Z-axis accordingly.
-In this barostat, the `z_axis_fixed` and `constant_volume` flags cannot be `true`
-simultaneously.
 
+This barostat is only available for 3D systems.
 Not currently compatible with automatic differentiation using Zygote.
 """
 mutable struct MonteCarloMembraneBarostat{T, P, K, V, S}
-    pressure::SVector{3,P}
+    pressure::SVector{3, P}
     tension::S
     temperature::K
     n_steps::Int
@@ -455,28 +455,28 @@ mutable struct MonteCarloMembraneBarostat{T, P, K, V, S}
     constant_volume::Bool
 end
 
-function MonteCarloMembraneBarostat(
-    pressure,
-    tension,
-    temperature,
-    boundary;
-    n_steps=30,
-    n_iterations=1,
-    scale_factor=0.01,
-    scale_increment=1.1,
-    max_volume_frac=0.3,
-    trial_find_neighbors=false,
-    xy_isotropy=false,
-    z_axis_fixed=false,
-    constant_volume=false,
-)
+function MonteCarloMembraneBarostat(pressure,
+                                    tension,
+                                    temperature,
+                                    boundary;
+                                    n_steps=30,
+                                    n_iterations=1,
+                                    scale_factor=0.01,
+                                    scale_increment=1.1,
+                                    max_volume_frac=0.3,
+                                    trial_find_neighbors=false,
+                                    xy_isotropy=false,
+                                    z_axis_fixed=false,
+                                    constant_volume=false)
     volume_scale_factor = box_volume(boundary) * float_type(boundary)(scale_factor)
     volume_scale = fill(volume_scale_factor, 3)
 
-    length(boundary.side_lengths) != 3 && throw(ArgumentError("boundary dimensionality " *
-        "($(length(boundary.side_lengths))) must be 3"))
-    z_axis_fixed && constant_volume && throw(ArgumentError("cannot keep z-axis fixed " *
-        "while making the volume constant"))
+    if n_dimensions(boundary) != 3
+        throw(ArgumentError("boundary dimensionality ($(n_dimensions(boundary))) must be 3"))
+    end
+    if z_axis_fixed && constant_volume
+        throw(ArgumentError("cannot keep z-axis fixed whilst keeping the volume constant"))
+    end
 
     pressX = pressure
     pressY = pressure
@@ -492,22 +492,19 @@ function MonteCarloMembraneBarostat(
         scale_increment,
         max_volume_frac,
         trial_find_neighbors,
-        fill(0, 3),
-        fill(0, 3),
+        zeros(Int, 3),
+        zeros(Int, 3),
         xy_isotropy,
         constant_volume,
     )
 end
 
-function apply_coupling!(
-    sys::System{D, G, T},
-    barostat::MonteCarloMembraneBarostat,
-    sim,
-    neighbors=nothing,
-    step_n::Integer=0;
-    n_threads::Integer=Threads.nthreads()
-) where {D, G, T}
-
+function apply_coupling!(sys::System{D, G, T},
+                         barostat::MonteCarloMembraneBarostat,
+                         sim,
+                         neighbors=nothing,
+                         step_n::Integer=0;
+                         n_threads::Integer=Threads.nthreads()) where {D, G, T}
     !iszero(step_n % barostat.n_steps) && return false
 
     kT = sys.k * barostat.temperature
@@ -525,10 +522,10 @@ function apply_coupling!(
         V = box_volume(sys.boundary)
         dV = barostat.volume_scale[axis] * (2 * rand(T) - 1)
         v_scale = (V + dV) / V
-        l_scale = SVector{D,T}(1.0, 1.0, 1.0)
+        l_scale = SVector{D, T}(one(T), one(T), one(T))
         if (axis == 1 || axis == 2) && barostat.xy_isotropy
             xy_scale = sqrt(v_scale)
-            l_scale = SVector{D}(xy_scale, xy_scale, T(1.0))
+            l_scale = SVector{D}(xy_scale, xy_scale, one(T))
         else
             mask1 = falses(D)
             mask2 = trues(D)
@@ -538,12 +535,12 @@ function apply_coupling!(
         end
 
         if barostat.constant_volume
-            l_scale = SVector{D}(l_scale[1], l_scale[2], inv(l_scale[1]*l_scale[2]))
-            v_scale = T(1.0)
+            l_scale = SVector{D}(l_scale[1], l_scale[2], inv(l_scale[1] * l_scale[2]))
+            v_scale = one(T)
             dV = zero(dV)
         end
 
-        dA = sys.boundary[1]*sys.boundary[2] * (l_scale[1]*l_scale[2] - T(1.0))
+        dA = sys.boundary[1] * sys.boundary[2] * (l_scale[1] * l_scale[2] - one(T))
 
         old_coords = copy(sys.coords)
         old_boundary = sys.boundary

@@ -1019,7 +1019,7 @@ end
     atom_mass = 39.947u"u"
     boundary = CubicBoundary(8.0u"nm")
     temp = 288.15u"K"
-    tens = 0.1u"bar*nm"
+    tens = 0.1u"bar * nm"
     press = 1.0u"bar"
     dt = 0.0005u"ps"
     friction = 1.0u"ps^-1"
@@ -1072,7 +1072,9 @@ end
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
             @test -5.0u"kJ * mol^-1" < mean(values(sys.loggers.virial)) < 5.0u"kJ * mol^-1"
             @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
-            barostat.xy_isotropy && @test sys.boundary[1] == sys.boundary[2]
+            if barostat.xy_isotropy
+                @test sys.boundary[1] == sys.boundary[2]
+            end
             if barostat.constant_volume
                 @test all(values(sys.loggers.box_volume) .≈ 512.0u"nm^3")
                 @test 1.6u"bar" < mean(values(sys.loggers.pressure)) < 2.2u"bar"

@@ -1067,6 +1067,7 @@ The available couplers are:
 - [`BerendsenThermostat`](@ref)
 - [`MonteCarloBarostat`](@ref)
 - [`MonteCarloAnisotropicBarostat`](@ref)
+- [`MonteCarloMembraneBarostat`](@ref)
 Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being [`NoCoupling`](@ref).
 Couplers are given to the `coupling` keyword argument during simulator construction:
 ```julia
