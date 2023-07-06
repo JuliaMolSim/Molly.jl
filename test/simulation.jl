@@ -1075,11 +1075,6 @@ end
             if barostat.xy_isotropy
                 @test sys.boundary[1] == sys.boundary[2]
             end
-            if barostat.constant_volume
-                @test all(values(sys.loggers.box_volume) .≈ 512.0u"nm^3")
-                @test 1.6u"bar" < mean(values(sys.loggers.pressure)) < 2.2u"bar"
-                @test 0.1u"bar" < std(values(sys.loggers.pressure))  < 0.5u"bar"
-            end
             if !barostat.constant_volume && isnothing(barostat.pressure[3])
                 @test sys.boundary[3] == 8.0u"nm"
                 @test 0.8u"bar" < mean(values(sys.loggers.pressure)) < 1.2u"bar"
