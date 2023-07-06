@@ -1,15 +1,6 @@
 # CUDA.jl kernels
 const WARPSIZE = UInt32(32)
 
-function get_leftmost_set_pos(mask::UInt32)
-    pos = 0
-    while (mask != 0)
-        mask >>= 1
-        pos += 1
-    end
-    return pos
-end
-
 macro shfl_multiple_sync(mask, target, width, vars...)
     all_lines = map(vars) do v
         Expr(:(=), v,
@@ -29,6 +20,7 @@ CUDA.shfl_recurse(op, x::SVector{3, C}) where C = SVector{3, C}(op(x[1]), op(x[2
 
 function cuda_threads_blocks_pairwise(n_neighbors)
     n_threads_gpu = min(n_neighbors, parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512")))
+    n_threads_gpu = cld(n_threads_gpu, WARPSIZE) * WARPSIZE  # Has to be a multiple of WARPSIZE
     n_blocks = cld(n_neighbors, n_threads_gpu)
     return n_threads_gpu, n_blocks
 end
@@ -88,7 +80,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     threads = blockDim().x
     i_0_block = (blockIdx().x - 1) * WARPSIZE
     j_0_block = (blockIdx().y - 1) * threads
-    lane = (tidx - 1) % WARPSIZE + 1
+    lane = laneid()
     warpidx = cld(tidx, WARPSIZE)
 
     forces_shmem = @cuStaticSharedMem(T, (3, 1024))
@@ -102,12 +94,11 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     i = i_0_tile + lane
 
     if i_0_tile + WARPSIZE > n_atoms || j_0_tile + WARPSIZE > n_atoms
-        njs = min(WARPSIZE, n_atoms - j_0_tile)
-        j_start = j_0_tile + 1
-        j_end = j_0_tile + njs
-        if i <= n_atoms
+        @inbounds if i <= n_atoms
+            njs = min(WARPSIZE, n_atoms - j_0_tile)
             atom_i, coord_i = atoms[i], coords[i]
-            for j in j_start:j_end
+            for del_j in 1:njs
+                j = j_0_tile + del_j
                 if i != j
                     atom_j, coord_j = atoms[j], coords[j]
                     f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
@@ -117,7 +108,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
                 end
             end
 
-            @inbounds for dim in 1:D
+            for dim in 1:D
                 Atomix.@atomic :monotonic forces[dim, i] += forces_shmem[dim, tidx]
             end
         end
@@ -131,7 +122,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
 
         atom_i, coord_i = atoms[i], coords[i]
         coord_j = coords[j]
-        for _ in 1:tilesteps  
+        @inbounds for _ in 1:tilesteps  
             sync_warp()
             atom_j = atoms[j]  # Shuffling this as in line ~15 makes performance worse
             f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, F)
@@ -141,7 +132,6 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
             @shfl_multiple_sync(FULL_MASK, lane + 1, WARPSIZE, j, coord_j)
         end
 
-        sync_warp()
         @inbounds for dim in 1:D
             Atomix.@atomic :monotonic forces[dim, i] += forces_shmem[dim, tidx]
         end
