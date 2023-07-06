@@ -517,6 +517,7 @@ function apply_coupling!(sys::System{D, G, T},
             axis = rand(1:D)
             !isnothing(barostat.pressure[axis]) && break
         end
+        axis = barostat.xy_isotropy && axis == 2 ? 1 : axis
 
         E = potential_energy(sys, neighbors; n_threads=n_threads)
         V = box_volume(sys.boundary)
