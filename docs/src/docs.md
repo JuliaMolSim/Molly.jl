@@ -1334,3 +1334,30 @@ Functions that may be useful for analysis include:
 - [`torsion_angle`](@ref)
 
 Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.
+
+## Constraint Algorithms
+
+Molly implements [`SHAKE`](@ref) and its extension, [`RATTLE`](@ref), to perform constrained molecular dynamics. These methods are useful
+for maintaining bond lengths and angles in an MD simulation which often allows for longer timesteps and therefore more efficient use of
+computing resources. The constraint satisfied by SHAKE are solely on the atomic coordinates:
+```math
+\begin{aligned}
+\vec{r}_{ij} \cdot \vec{r}_{ij} = d^2_{ij}
+\end{aligned}
+```
+whereas RATTLE also constrains the velocities:
+```math
+\begin{aligned}
+\vec{r}_{ij} \cdot \vec{v}_{ij} = 0
+\end{aligned}
+```
+Here $\vec{r}_{ij}$ is the vector between atoms i & j in a constraint, $d_{ij}$ is the bond length to be maintained and $\vec{v}_{ij}$ is difference of the velocity vectors for
+atoms i & j.
+
+SHAKE was originally derived for the Verlet integration scheme with RATTLE extending SHAKE to work for Velocity Verlet where the velocities are also integrated 
+[Ryckert 1976](http://physics.ujep.cz/~mlisal/md/shake.pdf) [Andersen 1982](https://www.sciencedirect.com/science/article/pii/0021999183900141). SHAKE & RATTLE should work for
+ensembles outside of NVE in Molly as they are implemented to apply correction forces after unconstrained coordinate and velocity integration. That said, always verify the results are what you expect as these algorithms were not originally derived for this purpose.
+
+In Molly, the SHAKE constraints for diatomic molecules are solved analytically while all larger constraints are solved iterively. The velocity constraints imposed by
+RATTLE form a linear system of equations which could be solved exactly; however, this operation is expensive for clusters of more than 4 constraints. Therefore, RATTLE constraints are solved by direct matrix inversion for small clusters (4 or fewer constraints) and iteratively otherwise. The number of constraints here does not refer to the total number of constraints in the system, rather the total number of constraints in an independent cluster/molecule. For example, a water molecule can be constrained by 2 distance constraints and 1 angle constraint which is only 3 constraints. However, a C-C backbone of an organic molecule like octane would need 7 constraints to maintain all of the C-C bond lengths. Constraining large clusters will result in a performance penalty.
+

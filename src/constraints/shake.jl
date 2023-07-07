@@ -18,9 +18,9 @@ end
 save_positions!(constraint_algo::SHAKE, c) = (constraint_algo.coord_storage .= c)
 save_velocities!(constraint_algo::SHAKE, v) = constraint_algo
 
-apply_velocity_constraint!(sys, constraint_algo::SHAKE, constraint_cluster::ConstraintCluster) = nothing
+apply_velocity_constraint!(sys::System, constraint_algo::SHAKE, constraint_cluster::ConstraintCluster) = nothing
 
-function apply_position_constraint!(sys, constraint_algo::SHAKE, 
+function apply_position_constraint!(sys::System, constraint_algo::SHAKE, 
     constraint_cluster::ConstraintCluster{1}, accels, dt)
 
     SHAKE_update!(sys, constraint_algo, constraint_cluster, accels, dt)
@@ -56,41 +56,35 @@ function SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{
     r01 = vector(sys.coords[k2], sys.coords[k1], sys.boundary)
 
 
-    if ustrip(abs(norm(s01) - constraint.dist)) > ca.tolerance
-
-        m1 = mass(sys.atoms[k1])
-        m2 = mass(sys.atoms[k2])
-        a = (1/m1 + 1/m2)^2 * norm(r01)^2
-        b = 2 * (1/m1 + 1/m2) * dot(r01, s01)
-        c = norm(s01)^2 - ((constraint.dist)^2)
-        D = (b^2 - 4*a*c)
-        
-        if ustrip(D) < 0.0
-            @warn "SHAKE determinant negative: $D, setting to 0.0"
-            # throw(error())
-            D = zero(D)
-        end
-
-        # Quadratic solution for g = 2*λ*dt^2
-        α1 = (-b + sqrt(D)) / (2*a)
-        α2 = (-b - sqrt(D)) / (2*a)
-
-        g = abs(α1) <= abs(α2) ? α1 : α2
-
-
-        lambda = g/(2*(dt^2))
-        # println(lambda)
-        # println(unit((g*r01/m1)[1]))
-        # println(unit(accels[k1][1]))
-        # println(unit(((lambda/m1).*r01)[1]))
-        # println(uconvert.(unit(accels[k1][1]), ((lambda/m1).*r01)))
-        # println(accel_remove_mol(accels[k1][1]))
-        #TODO get unitful to play nice
-        accels[k1] += ustrip.((1/418.4).*(lambda/m1).*r01) * unit(accels[k1][1])
-        accels[k2] -= ustrip.((1/418.4).*(lambda/m2).*r01) * unit(accels[k2][1])
-
-        # println(abs(norm(vector(sys.coords[k2], sys.coords[k1], sys.boundary)) - constraint.dist))
+    m1 = mass(sys.atoms[k1])
+    m2 = mass(sys.atoms[k2])
+    a = (1/m1 + 1/m2)^2 * norm(r01)^2
+    b = 2 * (1/m1 + 1/m2) * dot(r01, s01)
+    c = norm(s01)^2 - ((constraint.dist)^2)
+    D = (b^2 - 4*a*c)
+    
+    if ustrip(D) < 0.0
+        @warn "SHAKE determinant negative: $D, setting to 0.0"
+        D = zero(D)
     end
+
+    # Quadratic solution for g = 2*λ*dt^2
+    α1 = (-b + sqrt(D)) / (2*a)
+    α2 = (-b - sqrt(D)) / (2*a)
+
+    g = abs(α1) <= abs(α2) ? α1 : α2
+
+
+    lambda = g/(2*(dt^2))
+    # println(lambda)
+    # println(unit((g*r01/m1)[1]))
+    # println(unit(accels[k1][1]))
+    # println(unit(((lambda/m1).*r01)[1]))
+    # println(uconvert.(unit(accels[k1][1]), ((lambda/m1).*r01)))
+    # println(accel_remove_mol(accels[k1][1]))
+    #TODO get unitful to play nice
+    accels[k1] += ustrip.((1/418.4).*(lambda/m1).*r01) * unit(accels[k1][1])
+    accels[k2] -= ustrip.((1/418.4).*(lambda/m2).*r01) * unit(accels[k2][1])
 
 end
 

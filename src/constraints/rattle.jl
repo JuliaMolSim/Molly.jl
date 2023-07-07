@@ -1,4 +1,5 @@
 export RATTLE
+
 """
     RATTLE(tolerance, coords, velocities)
 
@@ -50,7 +51,6 @@ function RATTLE_update!(sys, cluster::ConstraintCluster{1})
     inv_m1 = 1/mass(sys.atoms[k1])
     inv_m2 = 1/mass(sys.atoms[k2])
 
-    #TODO before or after SHAKE applied?
     # Distance vector between the atoms after SHAKE constraint
     r_k1k2 = vector(sys.coords[k2], sys.coords[k1], sys.boundary)
 

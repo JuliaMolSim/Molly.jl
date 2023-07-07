@@ -1,5 +1,5 @@
 export
-    DistanceConstraint, AngleConstraint, 
+    DistanceConstraint, 
     NoSystemConstraints,
     n_dof
 
@@ -130,7 +130,6 @@ function disable_intra_constraint_interactions!(neighbor_finder,
 
     return neighbor_finder
 end
-
 
 
 """
