@@ -21,18 +21,26 @@ export
     MonteCarloLogger
 
 """
-    run_loggers!(system, neighbors=nothing, step_n=0; n_threads=Threads.nthreads(), kwargs...)
+    run_loggers!(system, neighbors=nothing, step_n=0, run_loggers=true;
+                 n_threads=Threads.nthreads(), kwargs...)
 
 Run the loggers associated with a system.
 
-Ignored for gradient calculation during automatic differentiation.
+`run_loggers` can be `true`, `false` or `:skipzero`, in which case the loggers
+are not run before the first step.
 Additional keyword arguments can be passed to the loggers if required.
+Ignored for gradient calculation during automatic differentiation.
 """
-function run_loggers!(sys::System, neighbors=nothing, step_n::Integer=0;
+function run_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, run_loggers=true;
                       n_threads::Integer=Threads.nthreads(), kwargs...)
-    for logger in values(sys.loggers)
-        log_property!(logger, sys, neighbors, step_n; n_threads=n_threads, kwargs...)
+    if run_loggers == true || (run_loggers == :skipzero && step_n != 0)
+        for logger in values(sys.loggers)
+            log_property!(logger, sys, neighbors, step_n; n_threads=n_threads, kwargs...)
+        end
+    elseif run_loggers != false && run_loggers != :skipzero
+        throw(ArgumentError("run_loggers must be true, false or :skipzero"))
     end
+    return sys
 end
 
 """

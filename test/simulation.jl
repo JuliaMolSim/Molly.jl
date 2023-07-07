@@ -188,8 +188,10 @@ end
 
     random_velocities!(s, temp)
 
-    @time simulate!(s, simulator, n_steps)
+    @time simulate!(s, simulator, n_steps ÷ 2)
+    @time simulate!(s, simulator, n_steps ÷ 2; run_loggers=:skipzero)
 
+    @test length(values(s.loggers.coords)) == 21
     @test maximum(distances(s.coords, boundary)) > 5.0u"nm"
 
     run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_viz)
@@ -1134,11 +1136,11 @@ end
         friction=1.0u"ps^-1",
     )
 
-    @time simulate!(sys, simulator, 25_000, run_loggers=false)
+    @time simulate!(sys, simulator, 25_000; run_loggers=false)
     @time simulate!(sys, simulator, 25_000)
  
-    # Integrator is stochastic so give a wide berth on the tolerance
-    @test  -1850u"kJ * mol^-1" < mean(values(sys.loggers.tot_eng)) < -1650u"kJ * mol^-1"
+    @test length(values(sys.loggers.tot_eng)) == 251
+    @test -1850u"kJ * mol^-1" < mean(values(sys.loggers.tot_eng)) < -1650u"kJ * mol^-1"
 
     # Test unsupported crystals
     hex_crystal = SimpleCrystals.Hexagonal(a, :Ar, SVector(2, 2))

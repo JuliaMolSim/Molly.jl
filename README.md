@@ -19,7 +19,7 @@ Implemented features include:
 - Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also experimental support for Gromacs files.
 - Verlet, velocity Verlet, Störmer-Verlet, flexible Langevin and Nosé-Hoover integrators.
 - Andersen, Berendsen and velocity rescaling thermostats.
-- Monte Carlo barostat.
+- Monte Carlo barostat and variants.
 - Steepest descent energy minimization.
 - Replica exchange molecular dynamics.
 - Monte Carlo simulation.

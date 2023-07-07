@@ -39,7 +39,7 @@ for temp in temps
         temperature=temp,
         friction=1.0u"ps^-1",
     )
-    simulate!(sys, simulator, 5_000)
+    simulate!(sys, simulator, 5_000; run_loggers=:skipzero)
 end
 
 f = Figure(resolution=(600, 400))
@@ -52,7 +52,7 @@ ax = Axis(
 for (i, temp) in enumerate(temps)
     lines!(
         ax,
-        [5100 * i - 5000, 5100 * i],
+        [5000 * i - 5000, 5000 * i],
         [ustrip(temp), ustrip(temp)],
         linestyle="--",
         color=:orange,
