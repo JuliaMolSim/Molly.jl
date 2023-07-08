@@ -964,11 +964,11 @@ function System(sys::AbstractSystem{D}) where D
 
     #Convert BC to Molly types
     bb = bounding_box(sys)
-    boundary_conditions = AtomsBase.boundary_conditions(sys)
+    bcs = AtomsBase.boundary_conditions(sys)
     
     #Check if box is cubic
     angles = []
-    for i in range(1,D)
+    for i in 1:D
         for j in range(i+1,D)
             push!(angles, ustrip(dot(bb[i],bb[j])))
         end
@@ -980,8 +980,8 @@ function System(sys::AbstractSystem{D}) where D
     end
     box_lengths = convert(Vector, box_lengths) #was SVector need to be mutable
 
-    if any(typeof.(boundary_conditions) .== DirichletZero)
-        raise(ArgumentError("Molly does not support DirichletZero boundary conditions."))
+    if any(typeof.(bcs) .== DirichletZero)
+        throw(ArgumentError("Molly does not support DirichletZero boundary conditions."))
     end
 
     if isCubic && D == 2
@@ -1010,19 +1010,13 @@ function System(sys::AbstractSystem{D}) where D
         AtomData(; element = String(atomic_symbol(atom)), atomic_number = atomic_number(atom))
     end
 
-    coords = map(sys) do atom
-        position(atom)
-    end
-
-    velocities = map(sys) do atom
-        velocity(atom)
-    end
-
+    coords = position(sys)
+    vels = velocity(sys)
 
     return System(; atoms = atoms,
                     coords = coords,
                     boundary = molly_boundary,
-                    velocities = velocities,
+                    velocities = vels,
                     atoms_data = atoms_data)
 
 end
