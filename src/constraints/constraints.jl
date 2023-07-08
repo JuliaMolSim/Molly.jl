@@ -72,14 +72,14 @@ end
 Base.length(cc::ConstraintCluster) = length(cc.constraints)
 
 function num_unique_atoms(cc::ConstraintCluster)
-    atoms_ids = []
+    atom_ids = []
     for constraint in cc.constraints
         for atom_idx in constraint.atom_idxs
             push!(atom_ids, atom_idx)
         end
     end
 
-    return length(unique(atoms_ids))
+    return length(unique(atom_ids))
 end
 
 
@@ -249,18 +249,23 @@ Total         |     D      |      D*N        |       D*N           |
 
 """
 #TODO : STORE THE RESULT OF THIS SOMEWHERE AND USE WHEN CALC TEMP & NoseHoover
-function n_dof(sys::System{D}) where D
+function n_dof(D::Int, N_atoms::Int, boundary, constraint_clusters)
 
     # Momentum only conserved in directions with PBC
-    total = D*length(sys) - (D - (num_infinte_boundary(sys.boundary)))
+    total = D*N_atoms - (D - (num_infinte_boundary(boundary)))
 
     # Bond constraints remove vibrational DoFs
     vibrational_dof_lost = 0
-    for cluster in sys.constraints
+    for cluster in constraint_clusters
         N = num_unique_atoms(cluster)
-        vibrational_dof_lost += ((N == 1) ? D*N - (2*D - 1) : D*(N - 2))
+        # If N > 2 assume non-linear
+        vibrational_dof_lost += ((N == 2) ? D*N - (2*D - 1) : D*(N - 2))
     end
 
     return total - vibrational_dof_lost
 
+end
+
+function n_dof(D::Int, N_atoms::Int, boundary)
+    return D*N_atoms - (D - (num_infinte_boundary(boundary)))
 end

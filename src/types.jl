@@ -484,6 +484,7 @@ mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, CA, NF,
     neighbor_finder::NF
     loggers::L
     k::K
+    df::Int
     force_units::F
     energy_units::E
     masses::M
@@ -552,8 +553,11 @@ function System(;
         elseif neighbor_finder == NoNeighborFinder()
             throw(ArgumentError("Constraints algorithms require neighbor lists."))
         else
-        constraints, neighbor_finder = constraint_setup!(neighbor_finder, coords, constraints)
+            constraints, neighbor_finder = constraint_setup!(neighbor_finder, coords, constraints)
+            df = n_dof(D, length(atoms), boundary, constraints)
         end
+    else
+        df = n_dof(D, length(atoms), boundary)
     end
     CN = typeof(constraints)
 
@@ -579,7 +583,7 @@ function System(;
     return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, CA, NF, L, K, F, E, M}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, constraint_algorithm,
-                    neighbor_finder, loggers, k_converted, force_units, energy_units, atom_masses)
+                    neighbor_finder, loggers, k_converted, df, force_units, energy_units, atom_masses)
 end
 
 """
@@ -660,6 +664,7 @@ mutable struct ReplicaSystem{D, G, T, A, AD, EL, K, F, E, R} <: AbstractSystem{D
     atoms_data::AD
     exchange_logger::EL
     k::K
+    df::Int
     force_units::F
     energy_units::E
     replicas::R
@@ -749,6 +754,7 @@ function ReplicaSystem(;
         throw(ArgumentError("number of constraints ($(length(replica_general_inters)))"
                             * "does not match number of replicas ($n_replicas)"))
     end
+    df = n_dof(D,length(atoms), boundary, constraints)
     CN = eltype(replica_constraints)
 
     if isnothing(exchange_logger)
@@ -823,7 +829,7 @@ function ReplicaSystem(;
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i], deepcopy(constraint_algorithm), 
-            deepcopy(neighbor_finder), replica_loggers[i], k_converted,
+            deepcopy(neighbor_finder), replica_loggers[i], k_converted, df,
             force_units, energy_units, atom_masses) for i in 1:n_replicas)
     R = typeof(replicas)
 
