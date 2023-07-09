@@ -1,6 +1,5 @@
 @derived_dimension MolarMass Unitful.𝐌/Unitful.𝐍 true
 
-#TODO remove unit checks in energy & force loops
 """
 Parses the length, mass, velocity, energy and force units and verifies they are correct and consistent
 with other parameters passed to the `System`.
@@ -15,8 +14,6 @@ function check_units(atoms, coords, velocities, energy_units, force_units, p_int
     return sys_units
 end
 
-
-
 function check_system_units(masses, coords, velocities, energy_units, force_units)
     
     length_dim, length_units = validate_coords(coords)
@@ -30,7 +27,6 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
     energyIsMolar = (energy_dim == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2")
     massIsMolar = (mass_dim == u"𝐌* 𝐍^-1")
     
-
     if allequal([energyIsMolar, massIsMolar, forceIsMolar])
         throw(ArgumentError("System was constructed with inconsistent energy, force & mass units. All must be molar, non-molar or unitless.
             For example, kcal & kg are allowed but kcal/mol and kg is not allowed."))
@@ -45,14 +41,34 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
             the others do have units. Molly does not permit mixing dimensionless and dimensioned data."))
     end
 
+    #Check derived units
+    if force_units != (energy_units / length_units)
+        throw(ArgumentError("Force unit was specified as $(force_units), but that unit could not be re-derived
+            from the length units in coords and the energy_units passed to `System`"))
+    end
 
     return NamedTuple{(:length, :velocity, :mass, :energy, :force)}((length_units,
         vel_units, mass_units, energy_units, force_units))
 
 end
 
+#TODO: THIS HAS ISSUES BECAUISE SOME OF THE INTERS DONT DEFINE THESE? Best we can do for now?
 function check_interaction_units(p_inters, s_inters, g_inters, sys_units::NamedTuple)
-    #TODO a bunch of the interactions dont have units
+
+    for inter in [p_inters;s_inters;g_inters]
+        if hasproperty(inter, :energy_units)
+            if inter.energy_units != sys_units[:energy]
+                throw(ArgumentError("Energy units passed to system do not match those passed to interactions"))
+            end
+        end
+
+        if hasproperty(inter, :force_units)
+            if inter.force_units != sys_units[:force]
+                throw(ArgumentError("Force units passed to system do not match those passed to interactions"))
+            end
+        end
+    end
+
 end
 
 function check_other_units(atoms, boundary, sys_units::NamedTuple)
@@ -70,7 +86,7 @@ function check_other_units(atoms, boundary, sys_units::NamedTuple)
     end
 
     if !all(sys_units[:energy] .== ϵ_units)
-        throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but length unit on coords was $(sys_units[:energy])"))
+        throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but system energy unit was $(sys_units[:energy])"))
     end
 end
 

@@ -493,9 +493,21 @@ function maxwell_boltzmann(mass::Unitful.Mass, temp::Unitful.Temperature; rng=Ra
     return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
 end
 
+function maxwell_boltzmann(mass::Unitful.Mass, temp::Unitful.Temperature, k::Unitful.Quantity; rng=Random.GLOBAL_RNG)
+    T = typeof(convert(AbstractFloat, ustrip(temp)))
+    σ = sqrt(k * temp / mass)
+    return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
+end
+
 function maxwell_boltzmann(mass::MolarMass, temp::Unitful.Temperature; rng=Random.GLOBAL_RNG)
     T = typeof(convert(AbstractFloat, ustrip(temp)))
     σ = sqrt(Unitful.k * Unitful.Na * temp / mass)
+    return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
+end
+
+function maxwell_boltzmann(mass::MolarMass, temp::Unitful.Temperature, k_molar::Unitful.Quantity; rng=Random.GLOBAL_RNG)
+    T = typeof(convert(AbstractFloat, ustrip(temp)))
+    σ = sqrt(k_molar * temp / mass)
     return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
 end
 
