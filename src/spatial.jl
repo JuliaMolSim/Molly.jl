@@ -421,18 +421,37 @@ function wrap_coords(v, boundary::TriclinicBoundary)
     return v_wrap
 end
 
+const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
+const mb_conversion_factor_molar = mb_conversion_factor * Unitful.Na
 
+@derived_dimension MolarMass Unitful.𝐌/Unitful.𝐍 true
 
 """
-    random_velocity(mass, temperature; dims=3)
-    random_velocity(mass, temperature, k; dims=3)
+    random_velocity(mass::Unitful.Mass, temperature::Unitful.Temperature; dims=3)
+    random_velocity(mass::MolarMass, temperature::Unitful.Temperature; dims=3)
+    random_velocity(mass::AbstractFloat, temperature::AbstractFloat, k::AbstractFloat; dims=3)
 
 Generate a random velocity from the Maxwell-Boltzmann distribution, with
 optional custom Boltzmann constant.
 """
-function random_velocity(mass, temp, k=mb_conversion_factor; dims::Integer=3, rng=Random.GLOBAL_RNG)
-    k_strip = (unit(mass) == NoUnits) ? ustrip(k) : k
-    return SVector([maxwell_boltzmann(mass, temp, k_strip; rng=rng) for i in 1:dims]...)
+function random_velocity(mass::Unitful.Mass, temp::Unitful.Temperature; dims::Integer=3, rng=Random.GLOBAL_RNG)
+    return SVector([maxwell_boltzmann(mass, temp; rng=rng) for i in 1:dims]...)
+end
+
+function random_velocity(mass::MolarMass, temp::Unitful.Temperature; dims::Integer=3, rng=Random.GLOBAL_RNG)
+    return SVector([maxwell_boltzmann(mass, temp; rng=rng) for i in 1:dims]...)
+end
+
+function random_velocity(mass::AbstractFloat, temp::AbstractFloat, k::AbstractFloat; dims::Integer=3, rng=Random.GLOBAL_RNG)
+    return SVector([maxwell_boltzmann(mass, temp, k; rng=rng) for i in 1:dims]...)
+end
+
+function random_velocity_3D(mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature, rng=Random.GLOBAL_RNG)
+    return SVector(
+        maxwell_boltzmann(mass, temp; rng=rng),
+        maxwell_boltzmann(mass, temp; rng=rng),
+        maxwell_boltzmann(mass, temp; rng=rng),
+    )
 end
 
 function random_velocity_3D(mass, temp, k=mb_conversion_factor, rng=Random.GLOBAL_RNG)
@@ -440,6 +459,13 @@ function random_velocity_3D(mass, temp, k=mb_conversion_factor, rng=Random.GLOBA
         maxwell_boltzmann(mass, temp, k; rng=rng),
         maxwell_boltzmann(mass, temp, k; rng=rng),
         maxwell_boltzmann(mass, temp, k; rng=rng),
+    )
+end
+
+function random_velocity_2D(mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature, rng=Random.GLOBAL_RNG)
+    return SVector(
+        maxwell_boltzmann(mass, temp; rng=rng),
+        maxwell_boltzmann(mass, temp; rng=rng),
     )
 end
 
@@ -451,21 +477,29 @@ function random_velocity_2D(mass, temp, k=mb_conversion_factor, rng=Random.GLOBA
 end
 
 """
-    maxwell_boltzmann(mass, temperature; rng=Random.GLOBAL_RNG)
+    maxwell_boltzmann(mass::Unitful.Mass, temperature::Unitful.Temperature; rng=Random.GLOBAL_RNG)
+    maxwell_boltzmann(mass::MolarMass, temperature::Unitful.Temperature; rng=Random.GLOBAL_RNG)
     maxwell_boltzmann(mass, temperature, k; rng=Random.GLOBAL_RNG)
 
 Generate a random velocity along one dimension from the Maxwell-Boltzmann
 distribution, with optional custom Boltzmann constant.
 """
-function maxwell_boltzmann(mass, temp, k; rng=Random.GLOBAL_RNG)
+
+function maxwell_boltzmann(mass::Unitful.Mass, temp::Unitful.Temperature; rng=Random.GLOBAL_RNG)
     T = typeof(convert(AbstractFloat, ustrip(temp)))
-    σ = sqrt(k * temp / mass)
+    σ = sqrt(Unitful.k * temp / mass)
     return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
 end
 
-function maxwell_boltzmann(mass, temp; rng=Random.GLOBAL_RNG)
-    k = unit(temp) == NoUnits ? ustrip(mb_conversion_factor) : mb_conversion_factor
-    return maxwell_boltzmann(mass, temp, k; rng=rng)
+function maxwell_boltzmann(mass::MolarMass, temp::Unitful.Temperature; rng=Random.GLOBAL_RNG)
+    T = typeof(convert(AbstractFloat, ustrip(temp)))
+    σ = sqrt(Unitful.k * Unitful.Na * temp / mass)
+    return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
+end
+
+function maxwell_boltzmann(mass::AbstractFloat, temp::AbstractFloat, k::AbstractFloat; rng=Random.GLOBAL_RNG)
+    σ = sqrt(k * temp / mass)
+    return rand(rng, Normal(0.0, σ))
 end
 
 """
