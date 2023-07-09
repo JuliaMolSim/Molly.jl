@@ -1,26 +1,43 @@
 @derived_dimension MolarMass Unitful.𝐌/Unitful.𝐍 true
 
+#TODO remove unit checks in energy & force loops
+"""
+Parses the length, mass, velocity, energy and force units and verifies they are correct and consistent
+with other parameters passed to the `System`.
+"""
+function check_units(atoms, coords, velocities, energy_units, force_units, p_inters, s_inters, g_inters, boundary)
+
+    sys_units = check_system_units(masses, coords, velocities, energy_units, force_units)
+
+    check_interaction_units(p_inters, s_inters, g_inters, sys_units)
+    check_other_units(atoms, boundary, sys_units)
+
+    return sys_units
+end
+
+
+
 function check_system_units(masses, coords, velocities, energy_units, force_units)
     
-    length_dim = validate_coords(coords)
-    vel_dim = validate_velocities(velocities)
+    length_dim, length_units = validate_coords(coords)
+    vel_dim, vel_units = validate_velocities(velocities)
     force_dim = dimension(force_units)
     energy_dim = dimension(energy_units)
-    mass_dim = validate_masses(masses)
+    mass_dim, mass_units = validate_masses(masses)
     validate_energy_units(energy_units)
 
-    forceIsMolar = #TODO Remove force_untis?
+    forceIsMolar = (force_dim == u"𝐋 * 𝐌 * 𝐍^-1 * 𝐓^-2")
     energyIsMolar = (energy_dim == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2")
     massIsMolar = (mass_dim == u"𝐌* 𝐍^-1")
     
 
-    if energyIsMolar == massIsMolar
-        throw(ArgumentError("System was constructed with inconsistent energy & mass units. Both must be molar, non-molar or unitless.
+    if allequal([energyIsMolar, massIsMolar, forceIsMolar])
+        throw(ArgumentError("System was constructed with inconsistent energy, force & mass units. All must be molar, non-molar or unitless.
             For example, kcal & kg are allowed but kcal/mol and kg is not allowed."))
     end
 
-    allNoDims = all([length_dim, vel_dim, energy_dim, mass_dim] .== NoDims)
-    anyNoDims = any([length_dim, vel_dim, energy_dim, mass_dim] .== NoDims)
+    allNoDims = all([length_dim, vel_dim, energy_dim, force_dim, mass_dim] .== NoDims)
+    anyNoDims = any([length_dim, vel_dim, energy_dim, force_dim, mass_dim] .== NoDims)
 
     # If something has NoDims, all other data must have NoDims
     if anyNoDims && !allNoDims
@@ -28,11 +45,33 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
             the others do have units. Molly does not permit mixing dimensionless and dimensioned data."))
     end
 
-        #TODO: Choose correct version of Boltzmann Constnat
 
-    #TODO: CHeck units passed to interactions & system
-        #TODO: Can i remove the need to pass this to both
-        #TODO: Change passed units to energy, length, mass? (infer in this func?)
+    return NamedTuple{(:length, :velocity, :mass, :energy, :force)}((length_units,
+        vel_units, mass_units, energy_units, force_units))
+
+end
+
+function check_interaction_units(p_inters, s_inters, g_inters, sys_units::NamedTuple)
+    #TODO a bunch of the interactions dont have units
+end
+
+function check_other_units(atoms, boundary, sys_units::NamedTuple)
+    box_units = unit(boundary)
+
+    if !all(sys_units[:length] .== box_units)
+        throw(ArgumentError("Simulation box constructed with $(box_units) but length unit on coords was $(sys_units[:length])"))
+    end
+
+    σ_units = unit.(getproperty.(atoms, :σ))
+    ϵ_units = unit.(getproperty.(atoms, :ϵ))
+
+    if !all(sys_units[:length] .== σ_units)
+        throw(ArgumentError("Atom σ has $(σ_units[1]) units but length unit on coords was $(sys_units[:length])"))
+    end
+
+    if !all(sys_units[:energy] .== ϵ_units)
+        throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but length unit on coords was $(sys_units[:energy])"))
+    end
 end
 
 
@@ -59,7 +98,7 @@ function validate_masses(masses)
             mass/amount or NoUnits. For example, 1.0u\"kg\", 1.0u\"kg/mol\", & 1.0 are valid masses."))
     end
 
-    return mass_dimension
+    return mass_dimension, mass_units[1]
 end
 
 function validate_coords(coords)
@@ -77,7 +116,7 @@ function validate_coords(coords)
             or NoUnits. For example, 1.0u\"m\" & 1.0 are valid positions."))
     end
 
-    return coord_dimension
+    return coord_dimension, coord_units[1][1]
 end
 
 function validate_velocities(velocities)
@@ -95,7 +134,7 @@ function validate_velocities(velocities)
             or NoUnits. For example, 1.0u\"m/s\" & 1.0 are valid velocities."))
     end
 
-    return velocity_dimension
+    return velocity_dimension, velocity_units[1][1]
 end
 
 # Convert the Boltzmann constant k to suitable units and float type
