@@ -1164,7 +1164,7 @@ This means that a logger that records a value every step for a simulation with 1
 Running loggers before the first step can be disabled by giving `run_loggers=:skipzero` as a keyword argument to [`simulate!`](@ref), which can be useful when splitting up simulations into multiple [`simulate!`](@ref) calls.
 For example, this runs the loggers 301 times:
 ```julia
-simulate!(sys, simulator, 100) # Default of run_loggers=true
+simulate!(sys, simulator, 100) # Default run_loggers=true
 simulate!(sys, simulator, 100; run_loggers=:skipzero)
 simulate!(sys, simulator, 100; run_loggers=:skipzero)
 ```
