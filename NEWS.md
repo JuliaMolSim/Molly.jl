@@ -8,7 +8,7 @@
 ### New features
 - The Monte Carlo anisotropic barostat is added as `MonteCarloAnisotropicBarostat`, allowing separate pressure coupling in each dimension.
 - The Monte Carlo membrane barostat is added as `MonteCarloMembraneBarostat`, allowing pressure coupling for systems involving a membrane.
-- A `System` constructor is added to create systems for a SimpleCrystals.jl `Crystal` struct.
+- A `System` constructor is added to create systems from a SimpleCrystals.jl `Crystal` struct.
 - A convenience constructor is added for `System` allowing an existing `System` to be copied with given properties changed.
 - `run_loggers` can be given as a keyword argument to `simulate!` to determine whether the loggers are run. The options are `true`, `false` or `:skipzero`, in which case the loggers are not run before the first step. `run_loggers` is `true` by default except for `SteepestDescentMinimizer`, where it is `false`. `run_loggers!` now has a fourth argument which determines whether the loggers are run, default `true`.
 - The scale factor given to `scale_coords!` can now be a `SVector` corresponding to the scaling factor for each axis in addition to a single number.
