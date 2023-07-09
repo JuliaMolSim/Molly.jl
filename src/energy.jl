@@ -47,30 +47,6 @@ function temperature(sys)
     end
 end
 
-function check_energy_units(E, energy_units)
-    if unit(E) != energy_units
-        error("system energy units are ", energy_units, " but encountered energy units ",
-                unit(E))
-    end
-end
-
-function energy_remove_mol(x)
-    if dimension(x) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        T = typeof(ustrip(x))
-        return x / T(Unitful.Na)
-    else
-        return x
-    end
-end
-
-function energy_add_mol(x, energy_units)
-    if dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        T = typeof(ustrip(x))
-        return x * T(Unitful.Na)
-    else
-        return x
-    end
-end
 
 """
     potential_energy(system, neighbors=nothing; n_threads=Threads.nthreads())

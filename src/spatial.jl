@@ -424,7 +424,6 @@ end
 const mb_conversion_factor = uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
 const mb_conversion_factor_molar = mb_conversion_factor * Unitful.Na
 
-@derived_dimension MolarMass Unitful.𝐌/Unitful.𝐍 true
 
 """
     random_velocity(mass::Unitful.Mass, temperature::Unitful.Temperature; dims=3)
