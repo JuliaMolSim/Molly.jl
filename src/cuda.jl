@@ -60,7 +60,8 @@ function pairwise_force_kernel!(forces, coords_var, atoms_var, boundary, inters,
     @inbounds if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
         coord_i, coord_j = coords[i], coords[j]
-        f = sum_pairwise_forces(inters, coord_i, coord_j, atoms[i], atoms[j], boundary, special, F)
+        atom_i, atom_j = atoms[i], atoms[j]
+        f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, special, F)
         for dim in 1:D
             fval = ustrip(f[dim])
             Atomix.@atomic :monotonic forces[dim, i] += -fval
@@ -143,14 +144,16 @@ end
 function sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j,
                                     boundary, special, F)
     dr = vector(coord_i, coord_j, boundary)
-    f = force_gpu(inters[1], dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
-    for inter in inters[2:end]
-        f += force_gpu(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
+    f_tuple = ntuple(length(inters)) do inter_type_i
+        force_gpu(inters[inter_type_i], dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
     end
+    f = sum(f_tuple)
     if unit(f[1]) != F
+        # This triggers an error but it isn't printed
+        # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
+        #   for how to throw a more meaningful error
         error("wrong force unit returned, was expecting $F but got $(unit(f[1]))")
     end
-    return f
 end
 
 function specific_force_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
