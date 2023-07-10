@@ -101,6 +101,7 @@ function distance_neighbor_finder_kernel!(neighbors, coords_var, eligible_var,
             dr = vector(coords[i], coords[j], boundary)
             r2 = sum(abs2, dr)
             if r2 <= sq_dist_neighbors
+                neighbors[i, j] = true
                 neighbors[j, i] = true
             end
         end
@@ -109,6 +110,7 @@ function distance_neighbor_finder_kernel!(neighbors, coords_var, eligible_var,
 end
 
 lists_to_tuple_list(i, j, w) = (Int32(i), Int32(j), w)
+lists_to_tuple_list2(j, w) = (Int32(j), w)
 
 function find_neighbors(sys::System{D, true},
                         nf::DistanceNeighborFinder,
@@ -128,11 +130,15 @@ function find_neighbors(sys::System{D, true},
         nf.neighbors, sys.coords, nf.eligible, sys.boundary, nf.dist_cutoff^2,
     )
 
-    pairs = findall(nf.neighbors)
-    nbsi, nbsj = getindex.(pairs, 1), getindex.(pairs, 2)
-    special = nf.special[pairs]
-    nl = lists_to_tuple_list.(nbsi, nbsj, special)
-    return NeighborList(length(nl), nl)
+    get_pairs = (i, row) -> begin
+        jvals = findall(row)
+        special = nf.special[i, jvals]
+        lists_to_tuple_list2.(jvals, special)
+    end
+
+    nll = @views [get_pairs(i, row) for (i, row) in enumerate(eachrow(nf.neighbors))]
+    nonz = length.(nll)
+    return NeighborListOfLists(sum(nonz), length(sys), maximum(nonz), nonz, nll)
 end
 
 """
