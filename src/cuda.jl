@@ -59,9 +59,7 @@ function pairwise_force_kernel!(forces, coords_var, atoms_var, boundary, inters,
 
     @inbounds if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
-        coord_i, coord_j = coords[i], coords[j]
-        atom_i, atom_j = atoms[i], atoms[j]
-        f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, special, F)
+        f = sum_pairwise_forces(inters, coords[i], coords[j], atoms[i], atom[j], boundary, special, F)
         for dim in 1:D
             fval = ustrip(f[dim])
             Atomix.@atomic :monotonic forces[dim, i] += -fval
@@ -154,6 +152,7 @@ function sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j,
         #   for how to throw a more meaningful error
         error("wrong force unit returned, was expecting $F but got $(unit(f[1]))")
     end
+    return f
 end
 
 function specific_force_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
