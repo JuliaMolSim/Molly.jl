@@ -1,15 +1,14 @@
-@derived_dimension MolarMass Unitful.𝐌/Unitful.𝐍 true
-
 """
 Parses the length, mass, velocity, energy and force units and verifies they are correct and consistent
 with other parameters passed to the `System`.
 """
-function check_units(atoms, coords, velocities, energy_units, force_units, p_inters, s_inters, g_inters, boundary)
-
+function check_units(atoms, coords, velocities, energy_units, force_units,
+                p_inters, s_inters, g_inters, boundary, constraints)
+    masses = mass.(atoms)
     sys_units = check_system_units(masses, coords, velocities, energy_units, force_units)
 
     check_interaction_units(p_inters, s_inters, g_inters, sys_units)
-    check_other_units(atoms, boundary, sys_units)
+    check_other_units(atoms, boundary, constraints, sys_units)
 
     return sys_units
 end
@@ -27,18 +26,18 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
     energyIsMolar = (energy_dim == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2")
     massIsMolar = (mass_dim == u"𝐌* 𝐍^-1")
     
-    if allequal([energyIsMolar, massIsMolar, forceIsMolar])
-        throw(ArgumentError("System was constructed with inconsistent energy, force & mass units. All must be molar, non-molar or unitless.
-            For example, kcal & kg are allowed but kcal/mol and kg is not allowed."))
+    if !allequal([energyIsMolar, massIsMolar, forceIsMolar])
+        throw(ArgumentError("""System was constructed with inconsistent energy, force & mass units.\
+         All must be molar, non-molar or unitless. For example, kcal & kg are allowed but kcal/mol\
+         and kg is not allowed. Units were: $([energy_units, mass_units, force_units])"""))
     end
 
-    allNoDims = all([length_dim, vel_dim, energy_dim, force_dim, mass_dim] .== NoDims)
-    anyNoDims = any([length_dim, vel_dim, energy_dim, force_dim, mass_dim] .== NoDims)
+    no_dim_arr = [dim == NoDims for dim in [length_dim, vel_dim, energy_dim, force_dim, mass_dim]]
 
     # If something has NoDims, all other data must have NoDims
-    if anyNoDims && !allNoDims
-        throw(ArgumentError("Either coords, velocities, masses or energy_units has NoDims/NoUnits but
-            the others do have units. Molly does not permit mixing dimensionless and dimensioned data."))
+    if any(no_dim_arr) && !all(no_dim_arr)
+        throw(ArgumentError("""Either coords, velocities, masses or energy_units has NoDims/NoUnits but\
+         the others do have units. Molly does not permit mixing dimensionless and dimensioned data."""))
     end
 
     #Check derived units
@@ -71,7 +70,7 @@ function check_interaction_units(p_inters, s_inters, g_inters, sys_units::NamedT
 
 end
 
-function check_other_units(atoms, boundary, sys_units::NamedTuple)
+function check_other_units(atoms, boundary, constraints, sys_units::NamedTuple)
     box_units = unit(boundary)
 
     if !all(sys_units[:length] .== box_units)
@@ -88,6 +87,9 @@ function check_other_units(atoms, boundary, sys_units::NamedTuple)
     if !all(sys_units[:energy] .== ϵ_units)
         throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but system energy unit was $(sys_units[:energy])"))
     end
+
+    #TODO: check constraint dists here once that is pulled
+
 end
 
 
@@ -118,7 +120,9 @@ function validate_masses(masses)
 end
 
 function validate_coords(coords)
-    coord_units = unit.(coords)
+    coord_units = map(coords) do coord
+        [unit(c) for c in coord]
+    end 
 
     if !allequal(coord_units)
         throw(ArgumentError("Atoms array constructed with mixed length units"))
@@ -136,7 +140,9 @@ function validate_coords(coords)
 end
 
 function validate_velocities(velocities)
-    velocity_units = unit.(velocities)
+    velocity_units = map(velocities) do vel
+        [unit(v) for v in vel]
+    end 
 
     if !allequal(velocity_units)
         throw(ArgumentError("Velocities have mixed units"))

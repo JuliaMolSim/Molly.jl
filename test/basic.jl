@@ -37,8 +37,8 @@
     @test wrap_coord_1D(12.0u"m" , 10.0u"m" ) == 2.0u"m"
     @test_throws ErrorException wrap_coord_1D(-2.0u"nm", 10.0)
 
-    vels_units   = [maxwell_boltzmann(12.0u"u", 300.0u"K") for _ in 1:1_000]
-    vels_nounits = [maxwell_boltzmann(12.0    , 300.0    ) for _ in 1:1_000]
+    vels_units   = [maxwell_boltzmann(12.0u"u", 300.0u"K", uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)) for _ in 1:1_000]
+    vels_nounits = [maxwell_boltzmann(12.0    , 300.0    , ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)) for _ in 1:1_000]
     @test 0.35u"nm * ps^-1" < std(vels_units) < 0.55u"nm * ps^-1"
     @test 0.35 < std(vels_nounits) < 0.55
 
@@ -128,7 +128,7 @@
         end
     end
 
-    atoms = fill(Atom(mass=1.0u"u"), n_atoms)
+    atoms = fill(Atom(mass=1.0u"g/mol"), n_atoms)
     loggers = (coords=CoordinateLogger(10),)
     temp = 100.0u"K"
     dt = 0.002u"ps"
@@ -418,4 +418,17 @@ end
         nf2 = [getproperty(sys2.neighbor_finder, p) for p in propertynames(sys2.neighbor_finder)]
         @test all(nf1 .== nf2)
     end
+end
+
+
+@testset "Unit checks" begin
+
+    #Test random-velocity functions
+
+    #Test system with incorrect units in boundary and coords
+
+    #Test system with mis-matched energy units in interaction and system
+
+    #Test cases with mixed units or other invalid units
+
 end

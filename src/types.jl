@@ -543,6 +543,9 @@ function System(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
+    sys_units = check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
+        specific_inter_lists, general_inters, boundary, constraints)
+
     return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, K, F, E, M}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, neighbor_finder,
@@ -987,3 +990,8 @@ end
 
 # Take precedence over AtomsBase.jl show function
 Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io, s)
+
+#Unit types to dispatch on
+@derived_dimension MolarMass Unitful.𝐌/Unitful.𝐍 true
+@derived_dimension BoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1 true
+@derived_dimension MolarBoltmzannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1*Unitful.𝐍^-1 true
