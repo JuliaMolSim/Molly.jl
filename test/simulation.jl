@@ -7,7 +7,7 @@
     gen_temp_wrapper(s, neighbors=nothing; n_threads::Integer=Threads.nthreads()) = temperature(s)
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
         boundary=boundary,
         pairwise_inters=(LennardJones(use_neighbors=true),),
@@ -26,7 +26,7 @@
     )
     random_velocities!(s, temp)
 
-    @test masses(s) == fill(10.0u"u", n_atoms)
+    @test masses(s) == fill(10.0u"g/mol", n_atoms)
     @test typeof(boundary_conditions(s)) <: SVector
     @test bounding_box(s) == SVector(
         SVector(2.0, 0.0)u"nm",
@@ -55,13 +55,13 @@ end
 
 @testset "Lennard-Jones" begin
     n_atoms = 100
-    atom_mass = 10.0u"u"
+    atom_mass = 10.0u"g/mol"
     n_steps = 20_000
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
-    TV = typeof(random_velocity(10.0u"u", temp))
+    TV = typeof(random_velocity(10.0u"g/mol", temp))
     TP = typeof(0.2u"kJ * mol^-1")
 
     V(sys, args...; kwargs...) = sys.velocities
@@ -170,7 +170,7 @@ end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         pairwise_inters=(LennardJones(use_neighbors=true),),
@@ -208,7 +208,7 @@ end
     ]
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         pairwise_inters=(LennardJones(use_neighbors=true),),
@@ -249,10 +249,10 @@ end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=BerendsenThermostat(temp, 1.0u"ps"))
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
-        velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
+        velocities=[random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms],
         pairwise_inters=(LennardJones(use_neighbors=true),),
         specific_inter_lists=(bonds,),
         neighbor_finder=DistanceNeighborFinder(
@@ -309,11 +309,11 @@ end
         end
 
         s = System(
-            atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"u", σ=0.2u"nm",
+            atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"g/mol", σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             coords=place_atoms(n_atoms, boundary; min_dist=0.2u"nm"),
             boundary=boundary,
-            velocities=[random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms],
+            velocities=[random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms],
             pairwise_inters=(inter,),
             neighbor_finder=neighbor_finder,
             loggers=(
@@ -328,7 +328,7 @@ end
 end
 
 @testset "Müller-Brown" begin
-    atom_mass = 1.0u"u"
+    atom_mass = 1.0u"g/mol"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")]
     boundary = RectangularBoundary(Inf*u"nm")
     coords = [SVector(-0.5, 0.25)u"nm"]
@@ -359,7 +359,7 @@ end
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-    velocities = [random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
+    velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
     simulator = VelocityVerlet(dt=0.002u"ps")
     simulator_nounits = VelocityVerlet(dt=0.002)
 
@@ -367,7 +367,7 @@ end
     V(sys::System, neighbors=nothing) = sys.velocities
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         velocities=velocities,
@@ -404,6 +404,7 @@ end
         ),
         force_units=NoUnits,
         energy_units=NoUnits,
+        k = ustrip(u"kJ * mol^-1 * K^-1", Unitful.k)
     )
 
     neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
@@ -430,7 +431,7 @@ end
         n_steps = 2_000
         boundary = CubicBoundary(2.0u"nm")
         starting_coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-        atoms = [Atom(charge=0.0, mass=10.0u"u", σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+        atoms = [Atom(charge=0.0, mass=10.0u"g/mol", σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
         atoms_data = [AtomData(atom_type=(i <= n_atoms_res ? "A1" : "A2")) for i in 1:n_atoms]
         sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
 
@@ -458,7 +459,7 @@ end
 
 @testset "SHAKE bond constraints" begin
     n_atoms = 100
-    atom_mass = 10.0u"u"
+    atom_mass = 10.0u"g/mol"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(2.0u"nm")
 
@@ -520,7 +521,7 @@ end
 
 @testset "SHAKE triatomic" begin
     n_atoms = 30
-    atom_mass = 10.0u"u"
+    atom_mass = 10.0u"g/mol"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(2.0u"nm")
 
@@ -587,9 +588,9 @@ end
     temp = 300.0u"K"
     boundary = CubicBoundary(10.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-    velocities = [random_velocity(10.0u"u", temp) .* 0.01 for i in 1:n_atoms]
+    velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
     s1 = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"u", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         velocities=velocities,
@@ -618,7 +619,7 @@ end
 
 @testset "Nosé-Hoover" begin
     n_atoms = 256
-    atom_mass = 39.98u"u"
+    atom_mass = 39.98u"g/mol"
     atoms = [Atom(mass=atom_mass, σ=0.34u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(4.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.36u"nm")
@@ -647,7 +648,7 @@ end
 @testset "Temperature REMD" begin
     n_atoms = 100
     n_steps = 10_000
-    atom_mass = 10.0u"u"
+    atom_mass = 10.0u"g/mol"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(2.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
@@ -722,13 +723,13 @@ end
 @testset "Hamiltonian REMD" begin
     n_atoms = 100
     n_steps = 10_000
-    atom_mass = 10.0u"u"
+    atom_mass = 10.0u"g/mol"
     atoms = [Atom(mass=atom_mass, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(2.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
 
     temp = 100.0u"K"
-    velocities = [random_velocity(10.0u"u", temp) for i in 1:n_atoms]
+    velocities = [random_velocity(10.0u"g/mol", temp) for i in 1:n_atoms]
 
     neighbor_finder = DistanceNeighborFinder(
         eligible=trues(n_atoms, n_atoms),
@@ -783,7 +784,7 @@ end
 @testset "Metropolis Monte Carlo" begin
     n_atoms = 100
     n_steps = 10_000
-    atom_mass = 10.0u"u"
+    atom_mass = 10.0u"g/mol"
     atoms = [Atom(mass=atom_mass, charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(4.0u"nm", 4.0u"nm", 4.0u"nm")
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
@@ -855,7 +856,7 @@ end
     # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
     n_atoms = 25
     n_steps = 1_000_000
-    atom_mass = 39.947u"u"
+    atom_mass = 39.947u"g/mol"
     boundary = CubicBoundary(8.0u"nm")
     temp = 288.15u"K"
     press = 1.0u"bar"
@@ -946,7 +947,7 @@ end
     # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
     n_atoms = 25
     n_steps = 1_000_000
-    atom_mass = 39.947u"u"
+    atom_mass = 39.947u"g/mol"
     boundary = CubicBoundary(8.0u"nm")
     temp = 288.15u"K"
     dt = 0.0005u"ps"
@@ -1088,7 +1089,7 @@ end
 
 @testset "Different implementations" begin
     n_atoms = 400
-    atom_mass = 10.0u"u"
+    atom_mass = 10.0u"g/mol"
     boundary = CubicBoundary(6.0u"nm")
     temp = 1.0u"K"
     starting_coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm"; min_dist=0.2u"nm")
@@ -1099,7 +1100,7 @@ end
     function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
         n_atoms = 400
         n_steps = 200
-        atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
+        atom_mass = f32 ? 10.0f0u"g/mol" : 10.0u"g/mol"
         boundary = f32 ? CubicBoundary(6.0f0u"nm") : CubicBoundary(6.0u"nm")
         simulator = VelocityVerlet(dt=f32 ? 0.02f0u"ps" : 0.02u"ps")
         k = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"

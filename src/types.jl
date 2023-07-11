@@ -235,7 +235,7 @@ end
 function Atom(;
                 index=1,
                 charge=0.0,
-                mass=1.0u"u",
+                mass=1.0u"g/mol",
                 σ=0.0u"nm",
                 ϵ=0.0u"kJ * mol^-1",
                 solute=false)

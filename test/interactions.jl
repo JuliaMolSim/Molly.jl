@@ -87,7 +87,7 @@
     buck_c1 = SVector(10.0, 10.0, 10.0)u"Å"
     buck_c2 = SVector(13.0, 10.0, 10.0)u"Å"
     buck_c3 = SVector(14.0, 10.0, 10.0)u"Å"
-    buck_a1 = BuckinghamAtom(1.0u"u", 1400.0u"eV", 2.8u"Å^-1", 180.0u"eV * Å^6")
+    buck_a1 = BuckinghamAtom(1.0u"g/mol", 1400.0u"eV", 2.8u"Å^-1", 180.0u"eV * Å^6")
     buck_boundary = CubicBoundary(20.0u"Å")
     buck_dr12 = vector(buck_c1, buck_c2, buck_boundary)
     buck_dr13 = vector(buck_c1, buck_c3, buck_boundary)

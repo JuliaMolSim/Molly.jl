@@ -651,9 +651,9 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
                         rng=Random.GLOBAL_RNG) where {D, G, T}
-    k_b = energy_add_mol(sys.k, sys.energy_units)
+    # k_b = energy_add_mol(sys.k, sys.energy_units)
     T_n, T_m = sim.temperatures[n], sim.temperatures[m]
-    β_n, β_m = inv(k_b * T_n), inv(k_b * T_m)
+    β_n, β_m = inv(sys.k * T_n), inv(sys.k * T_m)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
                                     n_threads=n_threads)
     neighbors_m = find_neighbors(sys.replicas[m], sys.replicas[m].neighbor_finder;
@@ -745,9 +745,9 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
                         rng=Random.GLOBAL_RNG) where {D, G, T}
-    k_b = energy_add_mol(sys.k, sys.energy_units)
+    # k_b = energy_add_mol(sys.k, sys.energy_units)
     T_sim = sim.temperature
-    β_sim = inv(k_b * T_sim)
+    β_sim = inv(sys.k * T_sim)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
                                     n_threads=n_threads)
     neighbors_m = find_neighbors(sys.replicas[m], sys.replicas[m].neighbor_finder;
@@ -868,7 +868,7 @@ function simulate!(sys::System{D, G, T},
                    n_steps::Integer;
                    n_threads::Integer=Threads.nthreads(),
                    run_loggers=true) where {D, G, T}
-    k_b = energy_add_mol(sys.k, sys.energy_units)
+    # k_b = energy_add_mol(sys.k, sys.energy_units)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E_old = potential_energy(sys, neighbors; n_threads=n_threads)
     for i in 1:n_steps
@@ -878,15 +878,15 @@ function simulate!(sys::System{D, G, T},
         E_new = potential_energy(sys, neighbors; n_threads=n_threads)
 
         ΔE = E_new - E_old
-        δ = ΔE / (k_b * sim.temperature)
+        δ = ΔE / (sys.k * sim.temperature)
         if δ < 0 || rand() < exp(-δ)
             run_loggers && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=true,
-                                        energy_rate=E_new / (k_b * sim.temperature))
+                                        energy_rate=E_new / (sys.k * sim.temperature))
             E_old = E_new
         else
             sys.coords = coords_old
             run_loggers && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=false,
-                                        energy_rate=E_old / (k_b * sim.temperature))
+                                        energy_rate=E_old / (sys.k * sim.temperature))
         end
     end
     return sys

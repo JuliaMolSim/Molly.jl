@@ -28,7 +28,7 @@ Calculate the kinetic energy of a system.
 """
 function kinetic_energy(sys::System{D, G, T}) where {D, G, T}
     ke = kinetic_energy_noconvert(sys)
-    return uconvert(sys.energy_units, energy_add_mol(ke, sys.energy_units))
+    return uconvert(sys.energy_units, ke)
 end
 
 """

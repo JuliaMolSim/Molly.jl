@@ -1,3 +1,13 @@
+export ustrip_vec
+
+"""
+    ustrip_vec(x)
+    ustrip_vec(u, x)
+
+Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustrip_vec.(coords)`.
+"""
+ustrip_vec(x...) = ustrip.(x...)
+
 """
 Parses the length, mass, velocity, energy and force units and verifies they are correct and consistent
 with other parameters passed to the `System`.
@@ -46,6 +56,12 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
             from the length units in coords and the energy_units passed to `System`"))
     end
 
+    #TODO: How do I check velocity units are length_units / time and not something stupid???
+    #TODO: time unit can be whatever, I just want to avoid velo being sqrt(J/kg)
+    # if vel_units != (length_units / ??)
+
+    # end
+
     return NamedTuple{(:length, :velocity, :mass, :energy, :force)}((length_units,
         vel_units, mass_units, energy_units, force_units))
 
@@ -54,7 +70,7 @@ end
 #TODO: THIS HAS ISSUES BECAUISE SOME OF THE INTERS DONT DEFINE THESE? Best we can do for now?
 function check_interaction_units(p_inters, s_inters, g_inters, sys_units::NamedTuple)
 
-    for inter in [p_inters;s_inters;g_inters]
+    for inter in [p_inters; s_inters; g_inters]
         if hasproperty(inter, :energy_units)
             if inter.energy_units != sys_units[:energy]
                 throw(ArgumentError("Energy units passed to system do not match those passed to interactions"))
@@ -184,7 +200,19 @@ function check_energy_units(E, energy_units)
     end
 end
 
-#TODO THESE SHOULD NOT BE NECESSARY ANYMORE
+function check_force_units(fdr::AbstractArray, sys_force_units)
+    return check_force_units(unit(first(fdr)), sys_force_units)
+end
+
+function check_force_units(force_units, sys_force_units)
+    if force_units != sys_force_units
+        error("system force units are ", sys_force_units, " but encountered force units ",
+              force_units)
+    end
+end
+
+
+#TODO NONE OF THESE SHOULD NOT BE NECESSARY ANYMORE CAUSE MASS WILL BE MOLAR
 function energy_remove_mol(x)
     if dimension(x) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         T = typeof(ustrip(x))
@@ -198,6 +226,17 @@ function energy_add_mol(x, energy_units)
     if dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         T = typeof(ustrip(x))
         return x * T(Unitful.Na)
+    else
+        return x
+    end
+end
+
+# Forces are often expressed per mol but this dimension needs removing for use in the integrator
+function accel_remove_mol(x)
+    fx = first(x)
+    if dimension(fx) == u"𝐋 * 𝐍^-1 * 𝐓^-2"
+        T = typeof(ustrip(fx))
+        return x / T(Unitful.Na)
     else
         return x
     end

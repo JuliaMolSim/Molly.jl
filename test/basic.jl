@@ -334,7 +334,7 @@ end
 
     bb_atoms = BioStructures.collectatoms(struc[1], BioStructures.backboneselector)
     coords = SVector{3, Float64}.(eachcol(BioStructures.coordarray(bb_atoms))) / 10 * u"nm"
-    bb_to_mass = Dict("C" => 12.011u"u", "N" => 14.007u"u", "O" => 15.999u"u")
+    bb_to_mass = Dict("C" => 12.011u"g/mol", "N" => 14.007u"g/mol", "O" => 15.999u"g/mol")
     atoms = [Atom(mass=bb_to_mass[BioStructures.element(bb_atoms[i])]) for i in eachindex(bb_atoms)]
     @test isapprox(radius_gyration(coords, atoms), 11.51225678195222u"Å"; atol=1e-6u"nm")
 end
@@ -343,7 +343,7 @@ end
     n_atoms = 100
     boundary = CubicBoundary(2.0u"nm") 
     temp = 298.0u"K"
-    atom_mass = 10.0u"u"
+    atom_mass = 10.0u"g/mol"
     
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
@@ -423,7 +423,9 @@ end
 
 @testset "Unit checks" begin
 
-    #Test random-velocity functions
+    #Test random-velocity functions with bad input
+
+    #Test unit ouput on random-velocity functions (right velo units or weird shit?)
 
     #Test system with incorrect units in boundary and coords
 

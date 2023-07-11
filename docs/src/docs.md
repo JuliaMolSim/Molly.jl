@@ -18,7 +18,7 @@ First, we'll need some atoms with the relevant parameters defined.
 using Molly
 
 n_atoms = 100
-atom_mass = 10.0u"u"
+atom_mass = 10.0u"g/mol"
 atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 ```
 See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) docs for more information on the unit annotations.
@@ -140,7 +140,7 @@ using Molly
 using CUDA
 
 n_atoms = 100
-atom_mass = 10.0f0u"u"
+atom_mass = 10.0f0u"g/mol"
 boundary = CubicBoundary(2.0f0u"nm")
 temp = 100.0f0u"K"
 atoms = CuArray([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
@@ -440,7 +440,7 @@ Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte Carlo 
 For example, to perform simulated annealing on charged particles to form a crystal lattice:
 ```julia
 n_atoms = 100
-atoms = [Atom(mass=10.0u"u", charge=1.0) for i in 1:n_atoms]
+atoms = [Atom(mass=10.0u"g/mol", charge=1.0) for i in 1:n_atoms]
 boundary = RectangularBoundary(4.0u"nm")
 
 coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
@@ -1188,7 +1188,7 @@ Let's look at a simple example, computing the velocity autocorrelation function 
 Let's start by defining the system.
 ```julia
 n_atoms = 400
-atom_mass = 10.0u"u"
+atom_mass = 10.0u"g/mol"
 atoms = [Atom(mass=atom_mass, σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 
 # Initialization
