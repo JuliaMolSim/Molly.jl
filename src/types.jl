@@ -286,7 +286,6 @@ struct AtomData
     res_number::Int
     res_name::String
     element::String
-    atomic_number::Int
 end
 
 function AtomData(;
@@ -294,9 +293,8 @@ function AtomData(;
                     atom_name="?",
                     res_number=1,
                     res_name="???",
-                    element="?",
-                    atomic_number= -1)
-    return AtomData(atom_type, atom_name, res_number, res_name, element, atomic_number)
+                    element="?")
+    return AtomData(atom_type, atom_name, res_number, res_name, element)
 end
 
 """
@@ -914,17 +912,23 @@ end
 
 function AtomsBase.atomic_number(s::Union{System, ReplicaSystem})
     if length(s.atoms_data) > 0
-        return map(ad -> ad.atomic_number, s.atoms_data)
+        return map(s.atoms_data) do ad
+            if ad.element != "?"
+                PeriodicTable.elements[Symbol(ad.element)].number
+            else
+                :unknown
+            end
+        end
     else
-        return fill(-1, length(s))
+        return fill(:unknown, length(s))
     end
 end
 
 function AtomsBase.atomic_number(s::Union{System, ReplicaSystem}, i::Integer)
-    if length(s.atoms_data) > 0
-        return s.atoms_data[i].atomic_number
+    if (length(s.atoms_data) > 0) && (s.atoms_data[i].element != "?")
+        return PeriodicTable.elements[Symbol(s.atoms_data[i].element)].number
     else
-        return -1
+        return :unknown
     end
 end
 
@@ -1000,14 +1004,11 @@ function System(sys::AbstractSystem{D}) where D
         throw(ArgumentError("Molly does not support 2D triclinic domains"))
     end
 
-    idx = 0
-    atoms = map(sys) do atom
-        idx += 1
-        Molly.Atom(; index = idx, charge = get(atom, :charge, 0.0), mass = atomic_mass(atom))
-    end
-
-    atoms_data = map(sys) do atom
-        AtomData(; element = String(atomic_symbol(atom)), atomic_number = atomic_number(atom))
+    atoms = Vector{Molly.Atom}(undef, (length(sys),))
+    atoms_data = Vector{Molly.AtomData}(undef, (length(sys),))
+    for (i, atom) in enumerate(sys)
+        atoms[i] = Molly.Atom(; index = i, charge = get(atom, :charge, 0.0), mass = atomic_mass(atom))
+        atoms_data[i] = AtomData(; element = String(atomic_symbol(atom)))
     end
 
     coords = position(sys)
