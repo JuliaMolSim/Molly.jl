@@ -18,7 +18,8 @@ export
     ReplicaSystem,
     is_on_gpu,
     float_type,
-    masses
+    masses,
+    charges
 
 const DefaultFloat = Float64
 
@@ -246,6 +247,8 @@ function Base.zero(::Type{Atom{T, T, T, T}}) where T
     z = zero(T)
     return Atom(0, z, z, z, z, false)
 end
+
+Base.getindex(at::Atom, x::Symbol) = hasfield(Atom, x) ? getfield(atom, x) : KeyError("No field $x in Atom")
 
 """
     charge(atom)
@@ -939,16 +942,33 @@ The masses of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
 masses(s::System) = s.masses
 masses(s::ReplicaSystem) = mass.(s.atoms)
 
+"""
+    charges(sys)
+
+The charges of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
+"""
+charges(s::Union{System, ReplicaSystem}) = charge.(s.atoms)
+charge(s::Union{System, ReplicaSystem}, i::Integer) = charge(s.atoms[i])
+
 # Move an array to the GPU depending on whether the system is on the GPU
 move_array(arr, ::System{D, false}) where {D} = arr
 move_array(arr, ::System{D, true }) where {D} = CuArray(arr)
 
 Base.getindex(s::Union{System, ReplicaSystem}, i::Integer) = AtomView(s, i)
+
 Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)
 Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = typeof(s[1])
-AtomsBase.atomkeys(::Union{System, ReplicaSystem}) = ()
+AtomsBase.atomkeys(s::Union{System, ReplicaSystem}) = (:position, :velocity, :atomic_mass, :atomic_number, :charge)
+AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = x ∈ atomkeys(s)
+AtomsBase.keys(sys::Union{System, ReplicaSystem}) = fieldnames(sys)
+AtomsBase.haskey(sys::Union{System, ReplicaSystem}, x::Symbol) = hasfield(typeof(sys), x)
+Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) = 
+    hasfield(typeof(sys), x) ? getfield(sys, x) : KeyError("No field `$x`. Allowed keys are $(keys(sys)).")
+Base.pairs(sys::Union{System, ReplicaSystem}) = (k => sys[k] for k in keys(sys))
+Base.get(sys::Union{System, ReplicaSystem}, x::Symbol, default) = 
+    haskey(sys, x) ? getfield(sys, x) : default
 
 AtomsBase.position(s::System) = s.coords
 AtomsBase.position(s::System, i::Integer) = s.coords[i]
@@ -963,8 +983,21 @@ AtomsBase.velocity(s::ReplicaSystem, i::Integer) = s.replicas[1].velocities[i]
 AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}) = masses(s)
 AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}, i::Integer) = mass(s.atoms[i])
 
-AtomsBase.atomic_number(s::Union{System, ReplicaSystem}) = fill(missing, length(s))
-AtomsBase.atomic_number(s::Union{System, ReplicaSystem}, i::Integer) = missing
+
+function Base.getindex(system::Union{System, ReplicaSystem}, i, x::Symbol)
+    atomsbase_keys = (:position, :velocity, :atomic_mass, :atomic_number)
+    custom_keys = (:charge, )
+    if hasatomkey(system, x)
+        if x ∈ atomsbase_keys
+            return getproperty(AtomsBase, x)(system, i)
+        elseif x ∈ custom_keys
+            return getproperty(Molly, x)(system, i)
+        end
+    else
+      throw(KeyError("Key $(x) not present in system."))
+    end
+end
+
 
 function AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem})
     if length(s.atoms_data) > 0
@@ -977,6 +1010,28 @@ end
 function AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem}, i::Integer)
     if length(s.atoms_data) > 0
         return Symbol(s.atoms_data[i].element)
+    else
+        return :unknown
+    end
+end
+
+function AtomsBase.atomic_number(s::Union{System, ReplicaSystem})
+    if length(s.atoms_data) > 0
+        return map(s.atoms_data) do ad
+            if ad.element != "?"
+                PeriodicTable.elements[Symbol(ad.element)].number
+            else
+                :unknown
+            end
+        end
+    else
+        return fill(:unknown, length(s))
+    end
+end
+
+function AtomsBase.atomic_number(s::Union{System, ReplicaSystem}, i::Integer)
+    if (length(s.atoms_data) > 0) && (s.atoms_data[i].element != "?")
+        return PeriodicTable.elements[Symbol(s.atoms_data[i].element)].number
     else
         return :unknown
     end
@@ -1004,3 +1059,70 @@ end
 
 # Take precedence over AtomsBase.jl show function
 Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io, s)
+
+
+
+# Convert AtomsBase AbstractSystem to Molly system
+"""
+Converts AtomsBase `AbstractSystem` to Molly `System``. To add kwargs not present in the
+AtomsBase interface (e.g. pair potentials) call the convenience constructor:
+
+`System(sys::System)`
+"""
+function System(sys::AbstractSystem{D}) where D
+
+    #Convert BC to Molly types
+    bb = bounding_box(sys)
+    bcs = AtomsBase.boundary_conditions(sys)
+    
+    #Check if box is cubic
+    angles = []
+    for i in 1:D
+        for j in range(i+1,D)
+            push!(angles, ustrip(dot(bb[i],bb[j])))
+        end
+    end
+    isCubic = all(angles .== 0.0)
+
+    if !isinfinite(sys)
+        box_lengths = norm.(bb)
+    end
+    box_lengths = convert(Vector, box_lengths) #was SVector need to be mutable
+
+    if any(typeof.(bcs) .== DirichletZero)
+        throw(ArgumentError("Molly does not support DirichletZero boundary conditions."))
+    end
+
+    if isCubic && D == 2
+        @warn "Molly RectangularBoundary assumes origin @ (0, 0, 0)"
+        molly_boundary = RectangularBoundary(box_lengths...)
+    elseif isCubic && D == 3
+        @warn "Molly CubicSystem assumes origin @ (0, 0, 0)"
+        molly_boundary = CubicBoundary(box_lengths...)
+    elseif D == 3
+        @warn "Molly TriclinicBoundary assumes origin @ (0, 0, 0)"
+        if any(ustrip.(box_lengths) .== Inf)
+            throw(ArgumentError("Triclinic domain does not support infinite boundaries"))
+        end
+        molly_boundary = TriclinicBoundary(bb...)
+    else
+        throw(ArgumentError("Molly does not support 2D triclinic domains"))
+    end
+
+    atoms = Vector{Molly.Atom}(undef, (length(sys),))
+    atoms_data = Vector{Molly.AtomData}(undef, (length(sys),))
+    for (i, atom) in enumerate(sys)
+        atoms[i] = Molly.Atom(; index = i, charge = get(atom, :charge, 0.0), mass = atomic_mass(atom))
+        atoms_data[i] = AtomData(; element = String(atomic_symbol(atom)))
+    end
+
+    coords = position(sys)
+    vels = velocity(sys)
+
+    return System(; atoms = atoms,
+                    coords = coords,
+                    boundary = molly_boundary,
+                    velocities = vels,
+                    atoms_data = atoms_data)
+
+end
