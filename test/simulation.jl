@@ -188,8 +188,10 @@ end
 
     random_velocities!(s, temp)
 
-    @time simulate!(s, simulator, n_steps)
+    @time simulate!(s, simulator, n_steps ÷ 2)
+    @time simulate!(s, simulator, n_steps ÷ 2; run_loggers=:skipzero)
 
+    @test length(values(s.loggers.coords)) == 21
     @test maximum(distances(s.coords, boundary)) > 5.0u"nm"
 
     run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_viz)
@@ -872,7 +874,7 @@ end
 
     sys = System(
         atoms=atoms,
-        coords=coords,
+        coords=deepcopy(coords),
         boundary=boundary,
         pairwise_inters=(LennardJones(),),
         loggers=(
@@ -912,7 +914,7 @@ end
 
             sys = System(
                 atoms=AT(atoms),
-                coords=AT(coords),
+                coords=AT(deepcopy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -979,7 +981,7 @@ end
 
             sys = System(
                 atoms=AT(atoms),
-                coords=AT(coords),
+                coords=AT(deepcopy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1009,6 +1011,78 @@ end
             axis_is_uncoupled = isnothing.(press)
             axis_is_unchanged = sys.boundary .== 8.0u"nm"
             @test all(axis_is_uncoupled .== axis_is_unchanged)
+        end
+    end
+end
+
+@testset "Monte Carlo membrane barostat" begin
+    # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
+    n_atoms = 25
+    n_steps = 1_000_000
+    atom_mass = 39.947u"u"
+    boundary = CubicBoundary(8.0u"nm")
+    temp = 288.15u"K"
+    tens = 0.1u"bar * nm"
+    press = 1.0u"bar"
+    dt = 0.0005u"ps"
+    friction = 1.0u"ps^-1"
+    lang = Langevin(dt=dt, temperature=temp, friction=friction)
+    atoms = fill(Atom(mass=atom_mass, σ=0.3345u"nm", ϵ=1.0451u"kJ * mol^-1"), n_atoms)
+    coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
+    n_log_steps = 500
+
+    box_volume_wrapper(sys, neighbors; kwargs...) = box_volume(sys.boundary)
+    VolumeLogger(n_steps) = GeneralObservableLogger(box_volume_wrapper, typeof(1.0u"nm^3"), n_steps)
+
+    lang_f(barostat) = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
+
+    barostat_test_set = (
+        MonteCarloMembraneBarostat(press, tens, temp, boundary),
+        MonteCarloMembraneBarostat(press, tens, temp, boundary; xy_isotropy=true),
+        MonteCarloMembraneBarostat(press, tens, temp, boundary; constant_volume=true),
+        MonteCarloMembraneBarostat(press, tens, temp, boundary; z_axis_fixed=true),
+    )
+
+    for gpu in gpu_list
+        AT = gpu ? CuArray : Array
+        for (barostat_i, barostat) in enumerate(barostat_test_set)
+            if gpu && barostat_i != 2
+                continue
+            end
+
+            sys = System(
+                atoms=AT(atoms),
+                coords=AT(deepcopy(coords)),
+                boundary=boundary,
+                pairwise_inters=(LennardJones(),),
+                loggers=(
+                    temperature=TemperatureLogger(n_log_steps),
+                    total_energy=TotalEnergyLogger(n_log_steps),
+                    kinetic_energy=KineticEnergyLogger(n_log_steps),
+                    potential_energy=PotentialEnergyLogger(n_log_steps),
+                    virial=VirialLogger(n_log_steps),
+                    pressure=PressureLogger(n_log_steps),
+                    box_volume=VolumeLogger(n_log_steps),
+                ),
+            )
+
+            sim = lang_f(barostat)
+            simulate!(deepcopy(sys), sim, 100; n_threads=1)
+            @time simulate!(sys, sim, n_steps; n_threads=1)
+
+            @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+            @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy)) < 120.0u"kJ * mol^-1"
+            @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
+            @test -5.0u"kJ * mol^-1" < mean(values(sys.loggers.virial)) < 5.0u"kJ * mol^-1"
+            @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
+            if barostat.xy_isotropy
+                @test sys.boundary[1] == sys.boundary[2]
+            end
+            if !barostat.constant_volume && isnothing(barostat.pressure[3])
+                @test sys.boundary[3] == 8.0u"nm"
+                @test 0.8u"bar" < mean(values(sys.loggers.pressure)) < 1.2u"bar"
+                @test 0.1u"bar" < std(values(sys.loggers.pressure))  < 0.5u"bar"
+            end
         end
     end
 end
@@ -1063,11 +1137,11 @@ end
         friction=1.0u"ps^-1",
     )
 
-    @time simulate!(sys, simulator, 25_000, run_loggers=false)
+    @time simulate!(sys, simulator, 25_000; run_loggers=false)
     @time simulate!(sys, simulator, 25_000)
  
-    # Integrator is stochastic so give a wide berth on the tolerance
-    @test  -1850u"kJ * mol^-1" < mean(values(sys.loggers.tot_eng)) < -1650u"kJ * mol^-1"
+    @test length(values(sys.loggers.tot_eng)) == 251
+    @test -1850u"kJ * mol^-1" < mean(values(sys.loggers.tot_eng)) < -1650u"kJ * mol^-1"
 
     # Test unsupported crystals
     hex_crystal = SimpleCrystals.Hexagonal(a, :Ar, SVector(2, 2))

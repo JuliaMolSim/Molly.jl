@@ -23,6 +23,7 @@ using ForwardDiff
 using Graphs
 using KernelDensity
 using NearestNeighbors
+using PeriodicTable
 using Requires
 using SimpleCrystals
 using Unitful

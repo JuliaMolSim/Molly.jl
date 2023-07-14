@@ -993,7 +993,7 @@ function Molly.simulate!(sys,
         remove_CM_motion!(sys)
 
         # Apply the loggers like this
-        run_loggers && run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
+        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
 
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
@@ -1067,6 +1067,7 @@ The available couplers are:
 - [`BerendsenThermostat`](@ref)
 - [`MonteCarloBarostat`](@ref)
 - [`MonteCarloAnisotropicBarostat`](@ref)
+- [`MonteCarloMembraneBarostat`](@ref)
 Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being [`NoCoupling`](@ref).
 Couplers are given to the `coupling` keyword argument during simulator construction:
 ```julia
@@ -1160,6 +1161,14 @@ loggers = (mylogger=MyLogger(10, []),) # Don't forget the trailing comma!
 ```
 In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0.
 This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values.
+Running loggers before the first step can be disabled by giving `run_loggers=:skipzero` as a keyword argument to [`simulate!`](@ref), which can be useful when splitting up simulations into multiple [`simulate!`](@ref) calls.
+For example, this runs the loggers 301 times:
+```julia
+simulate!(sys, simulator, 100) # Default run_loggers=true
+simulate!(sys, simulator, 100; run_loggers=:skipzero)
+simulate!(sys, simulator, 100; run_loggers=:skipzero)
+```
+Running loggers can be disabled entirely with `run_loggers=false`.
 Loggers are currently ignored for the purposes of taking gradients, so if a logger is used in the gradient calculation the gradients will appear to be nothing.
 
 Many times, a logger will just record an observation to an `Array` containing a record of past observations.
