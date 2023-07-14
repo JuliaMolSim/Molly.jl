@@ -178,6 +178,7 @@ end
 # Convert the Boltzmann constant k to suitable units and float type
 # Assumes temperature untis are Kelvin
 function convert_k_units(T, k, energy_units)
+
     if energy_units == NoUnits
         if unit(k) == NoUnits
             k_converted = T(k)
@@ -185,10 +186,25 @@ function convert_k_units(T, k, energy_units)
             throw(ArgumentError("energy_units was passed as NoUnits but units were provided on k: $(unit(k))"))
         end
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2" # Energy / Amount
-        k_converted = T(uconvert(energy_units * u"K^-1", k * Unitful.Na))
+        if dimension(k) == u"𝐋 ^2 * 𝐌 * 𝚯^-1 * 𝐓^-2" # add molar
+            k_converted = T(uconvert(energy_units * u"K^-1", k * Unitful.Na))
+        elseif dimension(k) == u"𝐋 ^2 * 𝐌 * 𝐍^-1 * 𝚯^-1 * 𝐓 ^-2" # already molar
+            k_converted = T(uconvert(energy_units * u"K^-1", k))
+        else
+            throw(ArgumentError("Units on k are not energy or energy/mol: $(unit(k))"))
+        end
+    elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐓^-2"
+        if dimension(k) == u"𝐋 ^2 * 𝐌 * 𝚯^-1 * 𝐓^-2" # already non-molar
+            k_converted = T(uconvert(energy_units * u"K^-1", k))
+        elseif dimension(k) == u"𝐋 ^2 * 𝐌 * 𝐍^-1 * 𝚯^-1 * 𝐓 ^-2" # remove molar
+            k_converted = T(uconvert(energy_units * u"K^-1", k / Unitful.Na))
+        else
+            throw(ArgumentError("Units on k are not energy or energy/mol: $(unit(k))"))
+        end
     else
-        k_converted = T(uconvert(energy_units * u"K^-1", k))
+        throw(ArgumentError("Energy units are not energy: $(energy_units)"))
     end
+
     return k_converted
 end
 
@@ -212,8 +228,9 @@ function check_force_units(force_units, sys_force_units)
 end
 
 
-#TODO NONE OF THESE SHOULD NOT BE NECESSARY ANYMORE CAUSE MASS WILL BE MOLAR
-function energy_remove_mol(x)
+#TODO NONE OF THESE SHOULD NOT BE NECESSARY ANYMORE CAUSE MASS & K WILL BE MOLAR
+#TODO remove acell_remove_mol from simulators
+function energy_remove_mol(x) #IS THIS RLLY STILL NEEDED IN MONTECARLO BAROSTAT??
     if dimension(x) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         T = typeof(ustrip(x))
         return x / T(Unitful.Na)

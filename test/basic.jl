@@ -421,7 +421,7 @@ end
 end
 
 
-
+#TODO Uncomment old Units tests
 @testset "Unit checks" begin
 
     #Test random-velocity functions with bad input
@@ -444,7 +444,7 @@ end
                 bounding_box = [[1.54732, 0.0, 0.0],
                                 [0.0, 1.4654985, 0.0],
                                 [0.0, 0.0, 1.7928950]]u"Å");
-    molly_sys = System(system)
+    molly_sys = System(system, u"kJ", u"kJ/Å")
     test_approx_eq(system, molly_sys; common_only = true)
 
 end

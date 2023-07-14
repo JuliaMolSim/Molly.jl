@@ -1061,7 +1061,7 @@ AtomsBase interface (e.g. pair potentials) call the convenience constructor:
 
 `System(sys::System)`
 """
-function System(sys::AbstractSystem{D}) where D
+function System(sys::AbstractSystem{D}, energy_units, force_units) where D
 
     #Convert BC to Molly types
     bb = bounding_box(sys)
@@ -1101,21 +1101,37 @@ function System(sys::AbstractSystem{D}) where D
         throw(ArgumentError("Molly does not support 2D triclinic domains"))
     end
 
+    length_unit = unit(first(position(sys,1)))
+
     atoms = Vector{Molly.Atom}(undef, (length(sys),))
     atoms_data = Vector{Molly.AtomData}(undef, (length(sys),))
     for (i, atom) in enumerate(sys)
-        atoms[i] = Molly.Atom(; index = i, charge = get(atom, :charge, 0.0), mass = atomic_mass(atom))
+        atoms[i] = Molly.Atom(; index = i, charge = get(atom, :charge, 0.0), mass = atomic_mass(atom),
+            σ = 0.0*length_unit, ϵ = 0.0*energy_units)
         atoms_data[i] = AtomData(; element = String(atomic_symbol(atom)))
     end
 
     coords = position(sys)
     vels = velocity(sys)
 
+   
+    mass_dim = dimension(atomic_mass(sys,1))
+
+    if mass_dim == u"𝐌" && dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        throw(ArgumentError("When constructing System from AbstractSystem,
+                energy units are molar but mass units are not"))
+    elseif mass_dim == u"𝐌 * 𝐍^-1" && dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐓^-2"
+        throw(ArgumentError("When constructing System from AbstractSystem,
+            mass units are molar but energy units are not"))
+    end
+
     return System(; atoms = atoms,
                     coords = coords,
                     boundary = molly_boundary,
                     velocities = vels,
-                    atoms_data = atoms_data)
+                    atoms_data = atoms_data,
+                    energy_units = energy_units,
+                    force_units = force_units)
 
 end
 

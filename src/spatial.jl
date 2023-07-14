@@ -751,7 +751,7 @@ function pressure(sys::AbstractSystem{D}, neighbors=nothing; kwargs...) where D
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
-    NkT = length(sys) * sys.k * temperature(sys)
+    NkT = energy_remove_mol(length(sys) * sys.k * temperature(sys))
     vir = energy_remove_mol(virial(sys, neighbors))
     P = (NkT - (2 * vir) / D) / box_volume(sys.boundary)
     if sys.energy_units == NoUnits || D != 3
