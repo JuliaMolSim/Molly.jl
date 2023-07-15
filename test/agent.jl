@@ -107,6 +107,7 @@
         ),
         force_units=NoUnits,
         energy_units=NoUnits,
+        k = ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
     )
 
     @time simulate!(sys, simulator, n_steps; n_threads=1)
