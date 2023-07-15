@@ -725,10 +725,10 @@ using Molly
 using SimpleCrystals
 
 a = 5.2468u"Å" # Lattice parameter for FCC Argon at 10 K
-atom_type = :Ar
+atom_mass = 39.948u"g/mol"
 
 temp = 10.0u"K"
-fcc_crystal = FCC(a, atom_type, SVector(4, 4, 4))
+fcc_crystal = FCC(a, atom_mass, SVector(4, 4, 4))
 
 n_atoms = length(fcc_crystal)
 atom_mass = atomic_mass(fcc_crystal, 1)
@@ -753,7 +753,7 @@ sys = System(
 ```
 
 Certain potentials such as [`LennardJones`](@ref) and [`Buckingham`](@ref) require extra atomic paramaters (e.g. `σ`) that are not implemented by the SimpleCrystals API.
-These paramaters must be added to the [`System`](@ref) manually:
+These paramaters must be added to the [`System`](@ref) manually by making use of the copy constructor:
 ```julia
 σ = 3.4u"Å"
 ϵ = (4.184 * 0.24037)u"kJ * mol^-1"

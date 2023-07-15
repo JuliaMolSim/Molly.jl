@@ -1089,16 +1089,17 @@ end
 end
 
 @testset "Crystals" begin
-    r_cut = 8.5u"Å"
-    a = 5.2468u"Å"
-    atom_type = :Ar
+    r_cut = 0.85u"nm"
+    a = 0.52468u"nm"
+    atom_mass = 39.948u"g/mol"
 
     temp = 10.0u"K"
-    fcc_crystal = SimpleCrystals.FCC(a, atom_type, SVector(4, 4, 4))
+
+
+    fcc_crystal = SimpleCrystals.FCC(a, atom_mass, SVector(4, 4, 4))
 
     n_atoms = SimpleCrystals.length(fcc_crystal)
     @test n_atoms == 256
-    atom_mass = uconvert(u"g/mol", SimpleCrystals.atomic_mass(fcc_crystal, 1)*Unitful.Na)
     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
     sys = System(
@@ -1107,11 +1108,11 @@ end
         pairwise_inters=(LennardJones(
             cutoff=ShiftedForceCutoff(r_cut),
             energy_units=u"kJ * mol^-1",
-            force_units=u"kJ * mol^-1 * Å^-1",
+            force_units=u"kJ * mol^-1 * nm^-1",
         ),),
         loggers=(tot_eng=TotalEnergyLogger(100),),
         energy_units=u"kJ * mol^-1",
-        force_units=u"kJ * mol^-1 * Å^-1",
+        force_units=u"kJ * mol^-1 * nm^-1",
     )
 
     sys_cp = System(sys)
@@ -1121,13 +1122,13 @@ end
     @test sys_mod.atoms  == sys.atoms
     @test sys_mod.coords == sys.coords .* 0.5
 
-    σ = 3.4u"Å"
+    σ = 0.34u"nm"
     ϵ = (4.184 * 0.24037)u"kJ * mol^-1"
     updated_atoms = []
 
     for i in eachindex(sys)
         push!(updated_atoms, Molly.Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
-                                mass=uconvert(u"g/mol", Unitful.Na*sys.atoms[i].mass), σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
+                                mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
     end
 
     sys = System(sys, atoms=[updated_atoms...])

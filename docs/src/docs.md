@@ -611,7 +611,7 @@ axislegend()
 ## Units
 
 Molly is fairly opinionated about using [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) units as shown above: you don't have to use them, but it is better if you do.
-Any consistent unit scheme can be used, or no units at all.
+Any consistent unit scheme can be used, or no units at all. Molly is most strict about the mixture of molar and non-molar types. For example, if your atom masses are defined as `g/mol` your energy and force units must also be molar.
 If you are not using units then no quantities can have Unitful annotations and you are responsible for ensuring a consistent unit system.
 Whilst you occasionally may run into friction with dimension mismatches, using units has the major advantages of catching whole classes of errors and letting you physically interpret the numbers in your system.
 The performance overhead of using units is minimal.
@@ -983,7 +983,7 @@ function Molly.simulate!(sys,
 
         # Example velocity update
         # Includes appropriate unit conversion for when the force units are per mol
-        sys.velocities += Molly.accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
+        sys.velocities += (accels_t .+ accels_t_dt) .* sim.dt / 2
 
         # Apply coupling like this
         recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
@@ -1034,10 +1034,7 @@ function Molly.remd_exchange!(sys::ReplicaSystem,
     return Δ, make_exchange
 end
 ```
-To get the correct exchange rates, the units of the Boltzmann constant should be corrected when used in the exchange function:
-```julia
-k_b = Molly.energy_add_mol(sys.k, sys.energy_units)
-```
+
 The above function returns `Δ`, the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref), and a boolean indicating whether the exchange was successful.
 
 Then, define a method for the [`simulate!`](@ref) function to perform the parallel simulation.
@@ -1236,7 +1233,7 @@ We leave the loggers empty until we thermalize the system using Langevin dynamic
 simulator = LangevinSplitting(
     dt=0.002u"ps",
     temperature=temp,
-    friction=10.0u"u* ps^-1",
+    friction=10.0u"g * mol^-1 * ps^-1",
     splitting="BAOAB",
 )
 simulate!(sys, simulator, 10_000)
