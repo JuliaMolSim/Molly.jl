@@ -1168,7 +1168,7 @@ simulate!(sys, simulator, 100) # Default run_loggers=true
 simulate!(sys, simulator, 100; run_loggers=:skipzero)
 simulate!(sys, simulator, 100; run_loggers=:skipzero)
 ```
-Running loggers can be disabled entirely with `run_loggers=false`.
+Running loggers can be disabled entirely with `run_loggers=false`, which is the default for [`SteepestDescentMinimizer`](@ref).
 Loggers are currently ignored for the purposes of taking gradients, so if a logger is used in the gradient calculation the gradients will appear to be nothing.
 
 Many times, a logger will just record an observation to an `Array` containing a record of past observations.
