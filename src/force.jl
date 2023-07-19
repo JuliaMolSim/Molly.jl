@@ -352,9 +352,10 @@ function forces(sys::System{D, true, T}, neighbors=nothing;
             error("an interaction uses the neighbor list but neighbors is nothing")
         end
         if length(neighbors) > 0
-            nbs = @view neighbors.list[1:neighbors.n]
-            fs_mat += pairwise_force_gpu(sys.coords, sys.atoms, sys.boundary, pairwise_inters_nl,
-                                         nbs, sys.force_units, val_ft)
+            nbs = neighbors.list
+            fs_mat += pairwise_force_gpu(sys.coords, sys.atoms, sys.boundary,
+                                         pairwise_inters_nl, nbs, sys.force_units,
+                                         val_ft; max_per_atom=max_per_column(neighbors))
         end
     end
 
