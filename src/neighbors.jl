@@ -110,7 +110,7 @@ function distance_neighbor_finder_kernel!(neighbors, coords_var, eligible_var,
 end
 
 lists_to_tuple_list(i, j, w) = (Int32(i), Int32(j), w)
-lists_to_tuple_list2(j, w) = (Int32(j), w)
+getindex_i32(x, i) = Int32(getindex(x, i))
 
 function find_neighbors(sys::System{D, true},
                         nf::DistanceNeighborFinder,
@@ -130,15 +130,22 @@ function find_neighbors(sys::System{D, true},
         nf.neighbors, sys.coords, nf.eligible, sys.boundary, nf.dist_cutoff^2,
     )
 
-    get_pairs = (i, row) -> begin
-        jvals = findall(row)
-        special = nf.special[i, jvals]
-        lists_to_tuple_list2.(jvals, special)
-    end
+    n_atoms = Int32(length(sys))
+    pairs = findall(nf.neighbors)
+    sort!(pairs, by=(x -> x[2])) # already sorted but just to make sure
+    nzVal = nf.special[pairs]
+    rowVal, colVal = getindex_i32.(pairs, 1), getindex_i32.(pairs, 2)
+    colPtr = zeros(Int32, n_atoms + 1)
+    colPtr[1] = 1
 
-    nll = @views [get_pairs(i, row) for (i, row) in enumerate(eachrow(nf.neighbors))]
-    nonz = length.(nll)
-    return NeighborListOfLists(sum(nonz), length(sys), maximum(nonz), nonz, nll)
+    map!(x -> count(==(x), colVal), (@view colPtr[2:end]), 1:n_atoms)
+    maxnjs = maximum(colPtr)
+    cumsum!(colPtr, colPtr)
+
+    sparse_csc = CUSPARSE.CuSparseMatrixCSC{Bool, Int32}(
+                    cu(colPtr), cu(rowVal),
+                    cu(nzVal), (n_atoms, n_atoms))
+    return NeighborListCSC(sparse_csc, maxnjs, colPtr[end] - 1)
 end
 
 """

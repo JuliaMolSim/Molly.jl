@@ -401,16 +401,19 @@ Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
 CUDA.Const(nl::NoNeighborList) = nl
 
-
-mutable struct NeighborListOfLists{T}
+struct NeighborListCSC{T}
     n::Int
-    n_atoms::Int
-    max_per_row::Int
-    nonz::Vector{Int}
+    max_pc::Int
     list::T
 end
 
-Base.length(nl::NeighborListOfLists) = nl.n
+NeighborListCSC(csc::T, mpc, n) where T = NeighborListCSC{T}(n, mpc, csc)
+Base.length(nl::NeighborListCSC) = nl.n
+max_per_column(nl::NeighborListCSC) = nl.max_pc
+
+function Base.show(io::IO, nl::NeighborListCSC)
+    print(io, "NeighborListCSC with ", nl.n, " pairs, stored internally using a ", typeof(nl.list))
+end
 
 # Convert the Boltzmann constant k to suitable units and float type
 function convert_k_units(T, k, energy_units)
