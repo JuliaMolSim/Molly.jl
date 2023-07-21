@@ -635,8 +635,8 @@ function System(crystal::Crystal{D};
                 k=Unitful.k,
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1") where D
-    atoms = [Atom(index=i, charge=a.charge, mass=a.mass) for (i, a) in enumerate(crystal.atoms)]
-    atoms_data = [AtomData(element=String(a.sym)) for a in crystal.atoms]
+    atoms = [Atom(index=i, charge=charge(a), mass=atomic_mass(a)) for (i, a) in enumerate(crystal.atoms)]
+    atoms_data = [AtomData(element=String(atomic_symbol(a))) for a in crystal.atoms]
     coords = SimpleCrystals.position(crystal, :)
 
     # Build bounding box
