@@ -640,7 +640,7 @@ function System(crystal::Crystal{D};
     coords = SimpleCrystals.position(crystal, :)
 
     # Build bounding box
-    side_lengths = norm.((bounding_box(crystal))
+    side_lengths = norm.(bounding_box(crystal))
     if any(typeof(crystal.lattice.crystal_family) .<: [CubicLattice, OrthorhombicLattice, TetragonalLattice])
         boundary = CubicBoundary(side_lengths...)
     elseif any(typeof(crystal.lattice.crystal_family) .<: [SquareLattice, RectangularLattice])
