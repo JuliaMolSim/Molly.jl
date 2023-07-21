@@ -961,7 +961,7 @@ Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = typeof(s[1])
 AtomsBase.atomkeys(s::Union{System, ReplicaSystem}) = (:position, :velocity, :atomic_mass, :atomic_number, :charge)
 AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = x in atomkeys(s)
-AtomsBase.keys(sys::Union{System, ReplicaSystem}) = fieldnames(sys)
+AtomsBase.keys(sys::Union{System, ReplicaSystem}) = fieldnames(typeof(sys))
 AtomsBase.haskey(sys::Union{System, ReplicaSystem}, x::Symbol) = hasfield(typeof(sys), x)
 Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) = 
     hasfield(typeof(sys), x) ? getfield(sys, x) : KeyError("no field `$x`, allowed keys are $(keys(sys))")
