@@ -635,12 +635,12 @@ function System(crystal::Crystal{D};
                 k=Unitful.k,
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1") where D
-    atoms = [Atom(index=i, charge=a.charge, mass=a.mass) for (i, a) in enumerate(crystal.atoms)]
-    atoms_data = [AtomData(element=String(a.sym)) for a in crystal.atoms]
+    atoms = [Atom(index=i, charge=charge(a), mass=atomic_mass(a)) for (i, a) in enumerate(crystal.atoms)]
+    atoms_data = [AtomData(element=String(atomic_symbol(a))) for a in crystal.atoms]
     coords = SimpleCrystals.position(crystal, :)
 
     # Build bounding box
-    side_lengths = norm.(eachrow(bounding_box(crystal)))
+    side_lengths = norm.(bounding_box(crystal))
     if any(typeof(crystal.lattice.crystal_family) .<: [CubicLattice, OrthorhombicLattice, TetragonalLattice])
         boundary = CubicBoundary(side_lengths...)
     elseif any(typeof(crystal.lattice.crystal_family) .<: [SquareLattice, RectangularLattice])
@@ -961,7 +961,7 @@ Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = typeof(s[1])
 AtomsBase.atomkeys(s::Union{System, ReplicaSystem}) = (:position, :velocity, :atomic_mass, :atomic_number, :charge)
 AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = x in atomkeys(s)
-AtomsBase.keys(sys::Union{System, ReplicaSystem}) = fieldnames(sys)
+AtomsBase.keys(sys::Union{System, ReplicaSystem}) = fieldnames(typeof(sys))
 AtomsBase.haskey(sys::Union{System, ReplicaSystem}, x::Symbol) = hasfield(typeof(sys), x)
 Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) = 
     hasfield(typeof(sys), x) ? getfield(sys, x) : KeyError("no field `$x`, allowed keys are $(keys(sys))")
