@@ -183,7 +183,8 @@ function convert_k_units(T, k, energy_units)
         if unit(k) == NoUnits
             k_converted = T(k)
         else
-            throw(ArgumentError("energy_units was passed as NoUnits but units were provided on k: $(unit(k))"))
+            @warn "Units will be stripped from Boltzmann constant: energy_units was passed as NoUnits and units were provided on k: $(unit(k))"
+            k_converted = T(ustrip(k))
         end
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2" # Energy / Amount
         if dimension(k) == u"𝐋 ^2 * 𝐌 * 𝚯^-1 * 𝐓^-2" # add molar

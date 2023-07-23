@@ -56,7 +56,8 @@ end
     barostat = MonteCarloBarostat(press, temp, s.boundary; n_steps=20)
     simulator = VelocityVerlet(dt=0.0002f0, coupling=(thermostat, barostat))
 
-    s.velocities = [random_velocity(mass(a), temp) .* 0.01f0 for a in s.atoms]
+    kB = ustrip(u"u * nm^2 * ps^-2 * K^-1",Unitful.k)
+    s.velocities = [random_velocity(mass(a), temp, kB) .* 0.01f0 for a in s.atoms]
     simulate!(deepcopy(s), simulator, 100; n_threads=1)
     @time simulate!(s, simulator, n_steps; n_threads=1)
     @test s.boundary != CubicBoundary(3.7146f0)
@@ -150,8 +151,9 @@ end
         ff_nounits;
         velocities=deepcopy(ustrip_vec.(velocities_start)),
         units=false,
-        center_coords=false,
+        center_coords=false
     )
+    
     simulator_nounits = VelocityVerlet(dt=0.0005)
     @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
     @test temperature(sys_nounits)u"K" ≈ 329.3202932884933u"K"
