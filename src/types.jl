@@ -248,7 +248,7 @@ function Base.zero(::Type{Atom{T, T, T, T}}) where T
     return Atom(0, z, z, z, z, false)
 end
 
-Base.getindex(at::Atom, x::Symbol) = hasfield(Atom, x) ? getfield(atom, x) : KeyError("No field $x in Atom")
+Base.getindex(at::Atom, x::Symbol) = hasfield(Atom, x) ? getfield(atom, x) : KeyError("no field $x in Atom")
 
 """
     charge(atom)
@@ -621,12 +621,12 @@ function System(crystal::Crystal{D};
                 k=Unitful.k,
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1") where D
-    atoms = [Atom(index=i, charge=a.charge, mass=a.mass) for (i, a) in enumerate(crystal.atoms)]
-    atoms_data = [AtomData(element=String(a.sym)) for a in crystal.atoms]
+    atoms = [Atom(index=i, charge=charge(a), mass=atomic_mass(a)) for (i, a) in enumerate(crystal.atoms)]
+    atoms_data = [AtomData(element=String(atomic_symbol(a))) for a in crystal.atoms]
     coords = SimpleCrystals.position(crystal, :)
 
     # Build bounding box
-    side_lengths = norm.(eachrow(bounding_box(crystal)))
+    side_lengths = norm.(bounding_box(crystal))
     if any(typeof(crystal.lattice.crystal_family) .<: [CubicLattice, OrthorhombicLattice, TetragonalLattice])
         boundary = CubicBoundary(side_lengths...)
     elseif any(typeof(crystal.lattice.crystal_family) .<: [SquareLattice, RectangularLattice])
@@ -931,7 +931,7 @@ masses(s::ReplicaSystem) = mass.(s.atoms)
 """
     charges(sys)
 
-The charges of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
+The partial charges of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref).
 """
 charges(s::Union{System, ReplicaSystem}) = charge.(s.atoms)
 charge(s::Union{System, ReplicaSystem}, i::Integer) = charge(s.atoms[i])
@@ -941,17 +941,16 @@ move_array(arr, ::System{D, false}) where {D} = arr
 move_array(arr, ::System{D, true }) where {D} = CuArray(arr)
 
 Base.getindex(s::Union{System, ReplicaSystem}, i::Integer) = AtomView(s, i)
-
 Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)
 Base.eachindex(s::Union{System, ReplicaSystem}) = Base.OneTo(length(s))
 
 AtomsBase.species_type(s::Union{System, ReplicaSystem}) = typeof(s[1])
 AtomsBase.atomkeys(s::Union{System, ReplicaSystem}) = (:position, :velocity, :atomic_mass, :atomic_number, :charge)
-AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = x ∈ atomkeys(s)
-AtomsBase.keys(sys::Union{System, ReplicaSystem}) = fieldnames(sys)
+AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = x in atomkeys(s)
+AtomsBase.keys(sys::Union{System, ReplicaSystem}) = fieldnames(typeof(sys))
 AtomsBase.haskey(sys::Union{System, ReplicaSystem}, x::Symbol) = hasfield(typeof(sys), x)
 Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) = 
-    hasfield(typeof(sys), x) ? getfield(sys, x) : KeyError("No field `$x`. Allowed keys are $(keys(sys)).")
+    hasfield(typeof(sys), x) ? getfield(sys, x) : KeyError("no field `$x`, allowed keys are $(keys(sys))")
 Base.pairs(sys::Union{System, ReplicaSystem}) = (k => sys[k] for k in keys(sys))
 Base.get(sys::Union{System, ReplicaSystem}, x::Symbol, default) = 
     haskey(sys, x) ? getfield(sys, x) : default
@@ -969,21 +968,19 @@ AtomsBase.velocity(s::ReplicaSystem, i::Integer) = s.replicas[1].velocities[i]
 AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}) = masses(s)
 AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}, i::Integer) = mass(s.atoms[i])
 
-
-function Base.getindex(system::Union{System, ReplicaSystem}, i, x::Symbol)
+function Base.getindex(sys::Union{System, ReplicaSystem}, i, x::Symbol)
     atomsbase_keys = (:position, :velocity, :atomic_mass, :atomic_number)
-    custom_keys = (:charge, )
-    if hasatomkey(system, x)
-        if x ∈ atomsbase_keys
-            return getproperty(AtomsBase, x)(system, i)
-        elseif x ∈ custom_keys
-            return getproperty(Molly, x)(system, i)
+    custom_keys = (:charge,)
+    if hasatomkey(sys, x)
+        if x in atomsbase_keys
+            return getproperty(AtomsBase, x)(sys, i)
+        elseif x in custom_keys
+            return getproperty(Molly, x)(sys, i)
         end
     else
-      throw(KeyError("Key $(x) not present in system."))
+        throw(KeyError("key $x not present in the system"))
     end
 end
-
 
 function AtomsBase.atomic_symbol(s::Union{System, ReplicaSystem})
     if length(s.atoms_data) > 0
@@ -1016,7 +1013,7 @@ function AtomsBase.atomic_number(s::Union{System, ReplicaSystem})
 end
 
 function AtomsBase.atomic_number(s::Union{System, ReplicaSystem}, i::Integer)
-    if (length(s.atoms_data) > 0) && (s.atoms_data[i].element != "?")
+    if length(s.atoms_data) > 0 && s.atoms_data[i].element != "?"
         return PeriodicTable.elements[Symbol(s.atoms_data[i].element)].number
     else
         return :unknown
@@ -1046,55 +1043,51 @@ end
 # Take precedence over AtomsBase.jl show function
 Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io, s)
 
-
 #Unit types to dispatch on
 @derived_dimension MolarMass Unitful.𝐌/Unitful.𝐍 true
 @derived_dimension BoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1 true
 @derived_dimension MolarBoltmzannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1*Unitful.𝐍^-1 true
 
 
-
 # Convert AtomsBase AbstractSystem to Molly system
 """
-Converts AtomsBase `AbstractSystem` to Molly `System``. To add kwargs not present in the
-AtomsBase interface (e.g. pair potentials) call the convenience constructor:
+    System(abstract_system)
 
-`System(sys::System)`
+Convert an AtomsBase `AbstractSystem` to a Molly `System`.
+
+To add properties not present in the AtomsBase interface (e.g. pair potentials) use the
+convenience constructor `System(sys::System)`.
 """
 function System(sys::AbstractSystem{D}, energy_units, force_units) where D
 
     #Convert BC to Molly types
     bb = bounding_box(sys)
     bcs = AtomsBase.boundary_conditions(sys)
-    
-    #Check if box is cubic
-    angles = []
-    for i in 1:D
-        for j in range(i+1,D)
-            push!(angles, ustrip(dot(bb[i],bb[j])))
-        end
-    end
-    isCubic = all(angles .== 0.0)
-
-    if !isinfinite(sys)
-        box_lengths = norm.(bb)
-    end
-    box_lengths = convert(Vector, box_lengths) #was SVector need to be mutable
 
     if any(typeof.(bcs) .== DirichletZero)
-        throw(ArgumentError("Molly does not support DirichletZero boundary conditions."))
+        throw(ArgumentError("Molly does not support DirichletZero boundary conditions"))
     end
 
-    if isCubic && D == 2
-        @warn "Molly RectangularBoundary assumes origin @ (0, 0, 0)"
+    # Check whether box is cubic
+    angles = []
+    for i in 1:D
+        for j in (i + 1):D
+            push!(angles, ustrip(dot(bb[i], bb[j])))
+        end
+    end
+    is_cubic = all(angles .== 0.0)
+    box_lengths = norm.(bb)
+
+    if is_cubic && D == 2
+        @warn "Molly RectangularBoundary assumes origin at (0, 0, 0)"
         molly_boundary = RectangularBoundary(box_lengths...)
-    elseif isCubic && D == 3
-        @warn "Molly CubicSystem assumes origin @ (0, 0, 0)"
+    elseif is_cubic && D == 3
+        @warn "Molly CubicSystem assumes origin at (0, 0, 0)"
         molly_boundary = CubicBoundary(box_lengths...)
     elseif D == 3
-        @warn "Molly TriclinicBoundary assumes origin @ (0, 0, 0)"
+        @warn "Molly TriclinicBoundary assumes origin at (0, 0, 0)"
         if any(ustrip.(box_lengths) .== Inf)
-            throw(ArgumentError("Triclinic domain does not support infinite boundaries"))
+            throw(ArgumentError("TriclinicBoundary does not support infinite boundaries"))
         end
         molly_boundary = TriclinicBoundary(bb...)
     else
@@ -1114,7 +1107,6 @@ function System(sys::AbstractSystem{D}, energy_units, force_units) where D
     coords = position(sys)
     vels = velocity(sys)
 
-   
     mass_dim = dimension(atomic_mass(sys,1))
 
     if mass_dim == u"𝐌" && dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"

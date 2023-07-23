@@ -218,7 +218,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 for residue in eachelement(entry)
                     name = residue["name"]
                     types = Dict{String, String}()
-                    charges = Dict{String, Union{T, Missing}}()
+                    atom_charges = Dict{String, Union{T, Missing}}()
                     indices = Dict{String, Int}()
                     index = 1
                     for atom_or_bond in eachelement(residue)
@@ -227,9 +227,9 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             atom_name = atom_or_bond["name"]
                             types[atom_name] = atom_or_bond["type"]
                             if haskey(atom_or_bond, "charge")
-                                charges[atom_name] = parse(T, atom_or_bond["charge"])
+                                atom_charges[atom_name] = parse(T, atom_or_bond["charge"])
                             else
-                                charges[atom_name] = missing
+                                atom_charges[atom_name] = missing
                             end
                             indices[atom_name] = index
                             index += 1
@@ -237,7 +237,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             @warn "Virtual sites not currently supported, this entry will be ignored"
                         end
                     end
-                    residue_types[name] = ResidueType(name, types, charges, indices)
+                    residue_types[name] = ResidueType(name, types, atom_charges, indices)
                 end
             elseif entry_name == "HarmonicBondForce"
                 for bond in eachelement(entry)

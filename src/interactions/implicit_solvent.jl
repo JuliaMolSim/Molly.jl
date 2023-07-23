@@ -883,12 +883,12 @@ function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, bounda
     end
 end
 
-function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, charges)
+function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
     coords, boundary = sys.coords, sys.boundary
     coords_i = @view coords[inter.is]
     coords_j = @view coords[inter.js]
-    charges_i = @view charges[inter.is]
-    charges_j = @view charges[inter.js]
+    charges_i = @view atom_charges[inter.is]
+    charges_j = @view atom_charges[inter.js]
     Bsi = @view Bs[inter.is]
     Bsj = @view Bs[inter.js]
     loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i,
@@ -910,9 +910,9 @@ function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, charges)
 end
 
 function forces_gbsa(sys::System{D, true, T}, inter, Bs, B_grads, I_grads, born_forces,
-                     charges) where {D, T}
+                     atom_charges) where {D, T}
     fs_mat_1, born_forces_mod_ustrip = gbsa_force_1_gpu(sys.coords, sys.boundary, inter.dist_cutoff,
-                        inter.factor_solute, inter.factor_solvent, inter.kappa, Bs, charges,
+                        inter.factor_solute, inter.factor_solvent, inter.kappa, Bs, atom_charges,
                         sys.force_units)
     born_forces_units = born_forces .+ born_forces_mod_ustrip * unit(eltype(born_forces))
     fs_mat_2 = gbsa_force_2_gpu(sys.coords, sys.boundary, inter.dist_cutoff, Bs, B_grads, I_grads,
@@ -924,7 +924,7 @@ function forces_gbsa(sys::System{D, true, T}, inter, Bs, B_grads, I_grads, born_
 end
 
 function gbsa_force_1_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_cutoff,
-                          factor_solute, factor_solvent, kappa, Bs, charges::AbstractArray{T},
+                          factor_solute, factor_solvent, kappa, Bs, atom_charges::AbstractArray{T},
                           force_units) where {D, C, T}
     n_atoms = length(coords)
     fs_mat = CUDA.zeros(T, D, n_atoms)
@@ -934,7 +934,7 @@ function gbsa_force_1_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_c
 
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_1_kernel!(
                 fs_mat, born_forces_mod_ustrip, coords, boundary, dist_cutoff,
-                factor_solute, factor_solvent, kappa, Bs, charges,
+                factor_solute, factor_solvent, kappa, Bs, atom_charges,
                 Val(D), Val(force_units))
 
     return fs_mat, born_forces_mod_ustrip
@@ -956,11 +956,11 @@ function gbsa_force_2_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_c
 end
 
 function gbsa_force_1_kernel!(forces, born_forces_mod_ustrip, coords_var, boundary, dist_cutoff,
-                              factor_solute, factor_solvent, kappa, Bs_var, charges_var,
+                              factor_solute, factor_solvent, kappa, Bs_var, atom_charges_var,
                               ::Val{D}, ::Val{F}) where {D, F}
     coords  = CUDA.Const(coords_var)
     Bs      = CUDA.Const(Bs_var)
-    charges = CUDA.Const(charges_var)
+    atom_charges = CUDA.Const(atom_charges_var)
 
     n_atoms = length(coords)
     n_inters_not_self = n_atoms_to_n_pairs(n_atoms)
@@ -990,7 +990,7 @@ function gbsa_force_1_kernel!(forces, born_forces_mod_ustrip, coords_var, bounda
                 pre_factor = factor_solute + exp(-kappa * denominator) * factor_solvent +
                                 kappa * denominator * exp(-kappa * denominator) * factor_solvent
             end
-            Gpol = (pre_factor * charges[i] * charges[j]) / denominator
+            Gpol = (pre_factor * atom_charges[i] * atom_charges[j]) / denominator
             dGpol_dr = -Gpol * (1 - exp_term/4) / denominator2
             dGpol_dalpha2_ij = -Gpol * exp_term * (1 + D_term) / (2 * denominator2)
 
@@ -1073,8 +1073,8 @@ function forces(inter::AbstractGBSA, sys, neighbors=nothing; n_threads::Integer=
         born_forces = zeros(typeof(inter.sa_factor * inter.dist_cutoff), length(sys))
     end
 
-    charges = charge.(sys.atoms)
-    return forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, charges)
+    atom_charges = charge.(sys.atoms)
+    return forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
 end
 
 function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
@@ -1121,9 +1121,9 @@ function potential_energy(inter::AbstractGBSA, sys, neighbors=nothing;
 
     coords_i = @view coords[inter.is]
     coords_j = @view coords[inter.js]
-    charges = charge.(atoms)
-    charges_i = @view charges[inter.is]
-    charges_j = @view charges[inter.js]
+    atom_charges = charge.(atoms)
+    charges_i = @view atom_charges[inter.is]
+    charges_j = @view atom_charges[inter.js]
     Bsi = @view Bs[inter.is]
     Bsj = @view Bs[inter.js]
     return sum(gb_energy_loop.(coords_i, coords_j, inter.is, inter.js, charges_i,
