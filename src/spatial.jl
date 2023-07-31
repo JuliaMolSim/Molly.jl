@@ -194,8 +194,6 @@ Unitful.ustrip(u::Unitful.Units, b::CubicBoundary) = CubicBoundary(ustrip.(u, b.
 Unitful.ustrip(b::RectangularBoundary) = RectangularBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(ustrip.(u, b.side_lengths))
 
-Unitful.unit(b::Union{CubicBoundary,RectangularBoundary}) = unit.(b.side_lengths)
-Unitful.unit(b::TriclinicBoundary) = unit.([b[1][1], b[2][2], b[3][3]])
 
 function AtomsBase.bounding_box(b::CubicBoundary)
     z = zero(b[1])

@@ -87,21 +87,28 @@ function check_interaction_units(p_inters, s_inters, g_inters, sys_units::NamedT
 end
 
 function check_other_units(atoms, boundary, constraints, sys_units::NamedTuple)
-    box_units = unit(boundary)
+
+    box_units = unit(length_type(boundary))
 
     if !all(sys_units[:length] .== box_units)
         throw(ArgumentError("Simulation box constructed with $(box_units) but length unit on coords was $(sys_units[:length])"))
     end
 
-    σ_units = unit.(getproperty.(atoms, :σ))
-    ϵ_units = unit.(getproperty.(atoms, :ϵ))
+    sigmas = getproperty.(atoms, :σ)
+    epsilons = getproperty.(atoms, :ϵ)
 
-    if !all(sys_units[:length] .== σ_units)
-        throw(ArgumentError("Atom σ has $(σ_units[1]) units but length unit on coords was $(sys_units[:length])"))
+    if !all(sigmas .== 0.0u"nm")
+        σ_units = unit.(sigmas)
+        if !all(sys_units[:length] .== σ_units)
+            throw(ArgumentError("Atom σ has $(σ_units[1]) units but length unit on coords was $(sys_units[:length])"))
+        end
     end
 
-    if !all(sys_units[:energy] .== ϵ_units)
-        throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but system energy unit was $(sys_units[:energy])"))
+    if !all(epsilons .== 0.0u"kJ * mol^-1")
+        ϵ_units = unit.(epsilons)
+        if !all(sys_units[:energy] .== ϵ_units)
+            throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but system energy unit was $(sys_units[:energy])"))
+        end
     end
 
     #TODO: check constraint dists here once that is pulled
