@@ -458,7 +458,7 @@ end
     #Inconsistent molar & non-molar quantities
     atoms = [Atom(mass=1.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ")]
     @test_throws ArgumentError System(atoms = atoms, coords = coords, boundary = b_right,
-        velocities = good_velo, energy_units = "kJ")
+        velocities = good_velo, energy_units = u"kJ")
 end
 
 @testset "AtomsBase conversion" begin
