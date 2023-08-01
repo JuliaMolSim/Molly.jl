@@ -62,19 +62,22 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
 
 end
 
-#TODO: THIS HAS ISSUES BECAUISE SOME OF THE INTERS DONT DEFINE THESE? Best we can do for now?
 function check_interaction_units(p_inters, s_inters, g_inters, sys_units::NamedTuple)
+    for inter_tuple in [p_inters, s_inters, g_inters]
+        for inter in inter_tuple
+            if hasproperty(inter, :energy_units)
+                println(sys_units[:energy])
+                println(inter.energy_units)
 
-    for inter in [p_inters; s_inters; g_inters]
-        if hasproperty(inter, :energy_units)
-            if inter.energy_units != sys_units[:energy]
-                throw(ArgumentError("Energy units passed to system do not match those passed to interactions"))
+                if inter.energy_units != sys_units[:energy]
+                    throw(ArgumentError("Energy units passed to system do not match those passed in an interaction"))
+                end
             end
-        end
 
-        if hasproperty(inter, :force_units)
-            if inter.force_units != sys_units[:force]
-                throw(ArgumentError("Force units passed to system do not match those passed to interactions"))
+            if hasproperty(inter, :force_units)
+                if inter.force_units != sys_units[:force]
+                    throw(ArgumentError("Force units passed to system do not match those passed in an interaction"))
+                end
             end
         end
     end
@@ -199,8 +202,6 @@ function convert_k_units(T, k, energy_units)
 end
 
 
-
-
 function check_energy_units(E, energy_units)
     if unit(E) != energy_units
         error("system energy units are ", energy_units, " but encountered energy units ",
@@ -220,7 +221,6 @@ function check_force_units(force_units, sys_force_units)
 end
 
 
-#TODO #IS THIS RLLY STILL NEEDED IN MONTECARLO BAROSTAT??
 function energy_remove_mol(x)
     if dimension(x) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
         T = typeof(ustrip(x))
@@ -230,7 +230,6 @@ function energy_remove_mol(x)
     end
 end
 
-#TODO NONE OF THESE SHOULD NOT BE NECESSARY ANYMORE CAUSE MASS & K WILL BE MOLAR
 # function energy_add_mol(x, energy_units)
 #     if dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
 #         T = typeof(ustrip(x))
