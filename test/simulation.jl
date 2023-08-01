@@ -355,77 +355,77 @@ end
     @test isapprox(final_pos, local_min; atol=1e-7u"nm")
 end
 
-# @testset "Units vs Unitless" begin
-#     n_atoms = 100
-#     n_steps = 2_000 # Does diverge for longer simulations or higher velocities
-#     temp = 298.0u"K"
-#     boundary = CubicBoundary(2.0u"nm")
-#     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-#     velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
-#     simulator = VelocityVerlet(dt=0.002u"ps")
-#     simulator_nounits = VelocityVerlet(dt=0.002)
+@testset "Units vs Unitless" begin
+    n_atoms = 100
+    n_steps = 2_000 # Does diverge for longer simulations or higher velocities
+    temp = 298.0u"K"
+    boundary = CubicBoundary(2.0u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
+    velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
+    simulator = VelocityVerlet(dt=0.002u"ps")
+    simulator_nounits = VelocityVerlet(dt=0.002)
 
-#     vtype = eltype(velocities)
-#     V(sys::System, neighbors=nothing) = sys.velocities
+    vtype = eltype(velocities)
+    V(sys::System, neighbors=nothing) = sys.velocities
 
-#     s = System(
-#         atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-#         coords=coords,
-#         boundary=boundary,
-#         velocities=velocities,
-#         pairwise_inters=(LennardJones(use_neighbors=true),),
-#         neighbor_finder=DistanceNeighborFinder(
-#             eligible=trues(n_atoms, n_atoms),
-#             n_steps=10,
-#             dist_cutoff=2.0u"nm",
-#         ),
-#         loggers=(
-#             temp=TemperatureLogger(100),
-#             coords=CoordinateLogger(100),
-#             energy=TotalEnergyLogger(100),
-#         ),
-#     )
+    s = System(
+        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        neighbor_finder=DistanceNeighborFinder(
+            eligible=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=2.0u"nm",
+        ),
+        loggers=(
+            temp=TemperatureLogger(100),
+            coords=CoordinateLogger(100),
+            energy=TotalEnergyLogger(100),
+        ),
+    )
 
-#     vtype_nounits = eltype(ustrip_vec.(velocities))
+    vtype_nounits = eltype(ustrip_vec.(velocities))
 
-#     s_nounits = System(
-#         atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
-#         coords=ustrip_vec.(coords),
-#         boundary=CubicBoundary(ustrip.(boundary)),
-#         velocities=ustrip_vec.(velocities),
-#         pairwise_inters=(LennardJones(use_neighbors=true,
-#              force_units = NoUnits, energy_units = NoUnits),),
-#         neighbor_finder=DistanceNeighborFinder(
-#             eligible=trues(n_atoms, n_atoms),
-#             n_steps=10,
-#             dist_cutoff=2.0,
-#         ),
-#         loggers=(
-#             temp=TemperatureLogger(Float64, 100),
-#             coords=CoordinateLogger(Float64, 100),
-#             energy=TotalEnergyLogger(Float64, 100),
-#         ),
-#         force_units=NoUnits,
-#         energy_units=NoUnits,
-#         k = ustrip(u"g * mol^-1 * nm^2 * ps^-2 * K^-1", Unitful.k*Unitful.Na)
-#     )
+    s_nounits = System(
+        atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
+        coords=ustrip_vec.(coords),
+        boundary=CubicBoundary(ustrip.(boundary)),
+        velocities=ustrip_vec.(u"nm/ps",velocities),
+        pairwise_inters=(LennardJones(use_neighbors=true,
+             force_units = NoUnits, energy_units = NoUnits),),
+        neighbor_finder=DistanceNeighborFinder(
+            eligible=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=2.0,
+        ),
+        loggers=(
+            temp=TemperatureLogger(Float64, 100),
+            coords=CoordinateLogger(Float64, 100),
+            energy=TotalEnergyLogger(Float64, 100),
+        ),
+        force_units=NoUnits,
+        energy_units=NoUnits,
+        k = ustrip(s.k)
+    )
 
-#     neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
-#     neighbors_nounits = find_neighbors(s_nounits, s_nounits.neighbor_finder; n_threads=1)
-#     a1 = accelerations(s, neighbors)
-#     a2 = accelerations(s_nounits, neighbors_nounits)u"kJ * nm^-1 * g^-1"
-#     @test all(all(a1[i] .≈ a2[i]) for i in eachindex(a1))
+    neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
+    neighbors_nounits = find_neighbors(s_nounits, s_nounits.neighbor_finder; n_threads=1)
+    a1 = accelerations(s, neighbors)
+    a2 = accelerations(s_nounits, neighbors_nounits)u"kJ * nm^-1 * g^-1"
+    @test all(all(a1[i] .≈ a2[i]) for i in eachindex(a1))
 
-#     simulate!(s, simulator, n_steps; n_threads=1)
-#     simulate!(s_nounits, simulator_nounits, n_steps; n_threads=1)
+    simulate!(s, simulator, n_steps; n_threads=1)
+    simulate!(s_nounits, simulator_nounits, n_steps; n_threads=1)
 
-#     coords_diff = last(values(s.loggers.coords)) .- last(values(s_nounits.loggers.coords)) * u"nm"
-#     @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8u"nm"
+    coords_diff = last(values(s.loggers.coords)) .- last(values(s_nounits.loggers.coords)) * u"nm"
+    @test median([maximum(abs.(c)) for c in coords_diff]) < 1e-8u"nm"
 
-#     final_energy = last(values(s.loggers.energy))
-#     final_energy_nounits = last(values(s_nounits.loggers.energy)) * u"kJ * mol^-1"
-#     @test isapprox(final_energy, final_energy_nounits; atol=5e-4u"kJ * mol^-1")
-# end
+    final_energy = last(values(s.loggers.energy))
+    final_energy_nounits = last(values(s_nounits.loggers.energy)) * u"kJ * mol^-1"
+    @test isapprox(final_energy, final_energy_nounits; atol=5e-4u"kJ * mol^-1")
+end
 
 @testset "Position restraints" begin
     for gpu in gpu_list
