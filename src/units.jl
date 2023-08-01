@@ -66,9 +66,6 @@ function check_interaction_units(p_inters, s_inters, g_inters, sys_units::NamedT
     for inter_tuple in [p_inters, s_inters, g_inters]
         for inter in inter_tuple
             if hasproperty(inter, :energy_units)
-                println(sys_units[:energy])
-                println(inter.energy_units)
-
                 if inter.energy_units != sys_units[:energy]
                     throw(ArgumentError("Energy units passed to system do not match those passed in an interaction"))
                 end
@@ -92,8 +89,9 @@ function check_other_units(atoms, boundary, constraints, sys_units::NamedTuple)
         throw(ArgumentError("Simulation box constructed with $(box_units) but length unit on coords was $(sys_units[:length])"))
     end
 
-    sigmas = getproperty.(atoms, :σ)
-    epsilons = getproperty.(atoms, :ϵ)
+
+    sigmas = getproperty.(atoms[hasproperty.(atoms, :σ)], :σ)
+    epsilons = getproperty.(atoms[hasproperty.(atoms, :ϵ)], :ϵ)
 
     if !all(sigmas .== 0.0u"nm")
         σ_units = unit.(sigmas)
