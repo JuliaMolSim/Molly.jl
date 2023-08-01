@@ -178,6 +178,20 @@ function validate_velocities(velocities)
     return velocity_dimension, velocity_units[1][1]
 end
 
+function default_k(energy_units)
+    if dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        k = Unitful.k * Unitful.Na
+    elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐓^-2"
+        k = Unitful.k
+    elseif energy_units == NoUnits
+        k = ustrip(Unitful.k)
+    else
+        throw(ArgumentError("energy_units $(energy_units) passed to System does not have dimension of energy."))
+    end
+
+    return k
+end
+
 # Convert the Boltzmann constant k to suitable units and float type
 # Assumes temperature untis are Kelvin
 function convert_k_units(T, k, energy_units)
@@ -190,9 +204,11 @@ function convert_k_units(T, k, energy_units)
             k_converted = T(ustrip(k))
         end
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        k_converted = T(uconvert(energy_units * u"K^-1", Unitful.k * Unitful.Na))
+        @assert (dimension(energy_units * u"K^-1") == dimension(k)) "energy_units ($(energy_units)) in System and Boltzmann constant units ($(unit(k))) are incompatible"
+        k_converted = T(uconvert(energy_units * u"K^-1", k))
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐓^-2"
-        k_converted = T(uconvert(energy_units * u"K^-1", Unitful.k))
+        @assert (dimension(energy_units * u"K^-1") == dimension(k)) "energy_units ($(energy_units)) in System and Boltzmann constant units ($(unit(k))) are incompatible"
+        k_converted = T(uconvert(energy_units * u"K^-1", k))
     else
         throw(ArgumentError("Energy units are not energy: $(energy_units)"))
     end

@@ -425,7 +425,7 @@ end
 """
     random_velocity(mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature; dims=3)
     random_velocity(mass::Union{Unitful.Mass,MolarMass}, temp::Unitful.Temperature,
-        k::Union{BoltzmannConstUnits, MolarBoltmzannConstUnits}; dims=3)
+        k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits}; dims=3)
     random_velocity(mass::AbstractFloat, temp::AbstractFloat, k::AbstractFloat; dims=3)
 
 Generate a random velocity from the Maxwell-Boltzmann distribution, with
@@ -436,7 +436,7 @@ function random_velocity(mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Tem
 end
 
 function random_velocity(mass::Union{Unitful.Mass,MolarMass}, temp::Unitful.Temperature,
-     k::Union{BoltzmannConstUnits, MolarBoltmzannConstUnits}; dims::Integer=3, rng=Random.GLOBAL_RNG)
+     k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits}; dims::Integer=3, rng=Random.GLOBAL_RNG)
     return SVector([maxwell_boltzmann(mass, temp, k; rng=rng) for i in 1:dims]...)
 end
 
@@ -453,7 +453,7 @@ function random_velocity_3D(mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.
 end
 
 function random_velocity_3D(mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
-     k::Union{BoltzmannConstUnits, MolarBoltmzannConstUnits}, rng=Random.GLOBAL_RNG)
+     k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits}, rng=Random.GLOBAL_RNG)
     return SVector(
         maxwell_boltzmann(mass, temp, k; rng=rng),
         maxwell_boltzmann(mass, temp, k; rng=rng),
@@ -477,7 +477,7 @@ function random_velocity_2D(mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.
 end
 
 function random_velocity_2D(mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
-     k::Union{BoltzmannConstUnits, MolarBoltmzannConstUnits}, rng=Random.GLOBAL_RNG)
+     k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits}, rng=Random.GLOBAL_RNG)
     return SVector(
         maxwell_boltzmann(mass, temp, k; rng=rng),
         maxwell_boltzmann(mass, temp, k; rng=rng),
@@ -517,7 +517,7 @@ function maxwell_boltzmann(mass::MolarMass, temp::Unitful.Temperature; rng=Rando
     return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
 end
 
-function maxwell_boltzmann(mass::MolarMass, temp::Unitful.Temperature, k_molar::MolarBoltmzannConstUnits; rng=Random.GLOBAL_RNG)
+function maxwell_boltzmann(mass::MolarMass, temp::Unitful.Temperature, k_molar::MolarBoltzmannConstUnits; rng=Random.GLOBAL_RNG)
     T = typeof(convert(AbstractFloat, ustrip(temp)))
     σ = sqrt(k_molar * temp / mass)
     return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
