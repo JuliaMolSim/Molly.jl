@@ -56,11 +56,6 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
             from the length units in coords and the energy_units passed to `System`"))
     end
 
-    #TODO: How do I check velocity units are length_units / time and not something stupid???
-    #TODO: time unit can be whatever, I just want to avoid velo being sqrt(J/kg)
-    # if vel_units != (length_units / ??)
-
-    # end
 
     return NamedTuple{(:length, :velocity, :mass, :energy, :force)}((length_units,
         vel_units, mass_units, energy_units, force_units))
@@ -185,36 +180,25 @@ end
 # Convert the Boltzmann constant k to suitable units and float type
 # Assumes temperature untis are Kelvin
 function convert_k_units(T, k, energy_units)
-
     if energy_units == NoUnits
         if unit(k) == NoUnits
+            # Use user-supplied unitless Boltzmann constant
             k_converted = T(k)
         else
             @warn "Units will be stripped from Boltzmann constant: energy_units was passed as NoUnits and units were provided on k: $(unit(k))"
             k_converted = T(ustrip(k))
         end
-    elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2" # Energy / Amount
-        if dimension(k) == u"𝐋 ^2 * 𝐌 * 𝚯^-1 * 𝐓^-2" # add molar
-            k_converted = T(uconvert(energy_units * u"K^-1", k * Unitful.Na))
-        elseif dimension(k) == u"𝐋 ^2 * 𝐌 * 𝐍^-1 * 𝚯^-1 * 𝐓 ^-2" # already molar
-            k_converted = T(uconvert(energy_units * u"K^-1", k))
-        else
-            throw(ArgumentError("Units on k are not energy or energy/mol: $(unit(k))"))
-        end
+    elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
+        k_converted = T(uconvert(energy_units * u"K^-1", Unitful.k * Unitful.Na))
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐓^-2"
-        if dimension(k) == u"𝐋 ^2 * 𝐌 * 𝚯^-1 * 𝐓^-2" # already non-molar
-            k_converted = T(uconvert(energy_units * u"K^-1", k))
-        elseif dimension(k) == u"𝐋 ^2 * 𝐌 * 𝐍^-1 * 𝚯^-1 * 𝐓 ^-2" # remove molar
-            k_converted = T(uconvert(energy_units * u"K^-1", k / Unitful.Na))
-        else
-            throw(ArgumentError("Units on k are not energy or energy/mol: $(unit(k))"))
-        end
+        k_converted = T(uconvert(energy_units * u"K^-1", Unitful.k))
     else
         throw(ArgumentError("Energy units are not energy: $(energy_units)"))
     end
-
     return k_converted
 end
+
+
 
 
 function check_energy_units(E, energy_units)
