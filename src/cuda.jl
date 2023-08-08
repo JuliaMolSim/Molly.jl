@@ -19,7 +19,7 @@ CUDA.shfl_recurse(op, x::SVector{3, C}) where C = SVector{3, C}(op(x[1]), op(x[2
 # CUDA.shfl_recurse(op, x::Atom) = Atom(op(x.index), op(x.charge), op(x.mass), op(x.σ), op(x.ϵ), op(x.solute))
 
 function cuda_threads_blocks_pairwise(n_neighbors)
-    n_threads_gpu = min(n_neighbors, parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512")))
+    n_threads_gpu = min(n_neighbors, parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "1024")))
     n_threads_gpu = cld(n_threads_gpu, WARPSIZE) * WARPSIZE  # Has to be a multiple of WARPSIZE
     n_blocks = cld(n_neighbors, n_threads_gpu)
     return n_threads_gpu, n_blocks
