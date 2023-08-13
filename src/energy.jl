@@ -136,8 +136,8 @@ end
 
         if length(pairwise_inters_nonl) > 0
             n_atoms = length(coords)
-            Threads.@threads for thread_id in 1:n_threads
-                for i in thread_id:n_threads:n_atoms
+            Threads.@threads for chunk_i in 1:n_threads
+                for i in chunk_i:n_threads:n_atoms
                     for j in (i + 1):n_atoms
                         dr = vector(coords[i], coords[j], boundary)
                         pe = potential_energy(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
@@ -147,7 +147,7 @@ end
                                                    atoms[j], boundary)
                         end
                         check_energy_units(pe, energy_units)
-                        pe_sum_chunks[thread_id] += ustrip(pe)
+                        pe_sum_chunks[chunk_i] += ustrip(pe)
                     end
                 end
             end
@@ -157,8 +157,8 @@ end
             if isnothing(neighbors)
                 error("an interaction uses the neighbor list but neighbors is nothing")
             end
-            Threads.@threads for thread_id in 1:n_threads
-                for ni in thread_id:n_threads:length(neighbors)
+            Threads.@threads for chunk_i in 1:n_threads
+                for ni in chunk_i:n_threads:length(neighbors)
                     i, j, special = neighbors[ni]
                     dr = vector(coords[i], coords[j], boundary)
                     pe = potential_energy(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
@@ -168,7 +168,7 @@ end
                                                atoms[j], boundary, special)
                     end
                     check_energy_units(pe, energy_units)
-                    pe_sum_chunks[thread_id] += ustrip(pe)
+                    pe_sum_chunks[chunk_i] += ustrip(pe)
                 end
             end
         end
