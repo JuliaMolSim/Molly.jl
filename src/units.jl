@@ -184,6 +184,7 @@ function default_k(energy_units)
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐓^-2"
         k = Unitful.k
     elseif energy_units == NoUnits
+        @warn "No Boltzmann constant passed to System, assuming energy is non-molar"
         k = ustrip(Unitful.k)
     else
         throw(ArgumentError("energy_units $(energy_units) passed to System does not have dimension of energy."))

@@ -951,6 +951,7 @@ function System(coord_file::AbstractString,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
         energy_units=units ? u"kJ * mol^-1" : NoUnits,
+        k = units ? Unitful.Na*Unitful.k : ustrip(u"kJ * K^-1 * mol^-1",Unitful.Na*Unitful.k)
     )
 end
 
@@ -1315,6 +1316,7 @@ function System(T::Type,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
         energy_units=units ? u"kJ * mol^-1" : NoUnits,
+        k = units ? Unitful.Na*Unitful.k : ustrip(u"kJ * K^-1 * mol^-1",Unitful.Na*Unitful.k)
     )
 end
 
