@@ -244,23 +244,3 @@ function energy_remove_mol(x)
         return x
     end
 end
-
-# function energy_add_mol(x, energy_units)
-#     if dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-#         T = typeof(ustrip(x))
-#         return x * T(Unitful.Na)
-#     else
-#         return x
-#     end
-# end
-
-# Forces are often expressed per mol but this dimension needs removing for use in the integrator
-# function accel_remove_mol(x)
-#     fx = first(x)
-#     if dimension(fx) == u"𝐋 * 𝐍^-1 * 𝐓^-2"
-#         T = typeof(ustrip(fx))
-#         return x / T(Unitful.Na)
-#     else
-#         return x
-#     end
-# end

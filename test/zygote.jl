@@ -67,8 +67,7 @@ end
             use_neighbors=true,
             coulomb_const=f32 ? Float32(ustrip(Molly.coulombconst)) : ustrip(Molly.coulombconst),
             force_units=NoUnits,
-            energy_units=NoUnits,
-            k = k
+            energy_units=NoUnits
         )
         pairwise_inters = pis ? (lj, crf) : ()
         bond_is = gpu ? CuArray(Int32.(collect(1:(n_atoms ÷ 2)))) : Int32.(collect(1:(n_atoms ÷ 2)))

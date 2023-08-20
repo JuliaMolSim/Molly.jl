@@ -880,12 +880,12 @@ function simulate!(sys::System{D, G, T},
         δ = ΔE / (sys.k * sim.temperature)
         if δ < 0 || rand() < exp(-δ)
 
-            run_loggers && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=true,
+            run_loggers!(sys, neighbors, i, run_loggers; n_threads=n_threads, success=true,
                                         energy_rate=E_new / (sys.k * sim.temperature))
             E_old = E_new
         else
             sys.coords = coords_old
-            run_loggers && run_loggers!(sys, neighbors, i; n_threads=n_threads, success=false,
+            run_loggers!(sys, neighbors, i, run_loggers; n_threads=n_threads, success=false,
                                         energy_rate=E_old / (sys.k * sim.temperature))
 
         end

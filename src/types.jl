@@ -453,7 +453,7 @@ interface described there.
     be set to `NoUnits` if units are not being used.
 """
 mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
-                      L, F, E, K, M} <: AbstractSystem{D}
+                      L, K, F, E, M} <: AbstractSystem{D}
     atoms::A
     coords::C
     boundary::B
@@ -549,7 +549,7 @@ function System(;
     sys_units = check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
         specific_inter_lists, general_inters, boundary, constraints)
 
-    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M}(
+    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, K, F, E, M}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, neighbor_finder,
                     loggers, force_units, energy_units, k_converted, atom_masses)
@@ -730,7 +730,7 @@ construction where `n` is the number of threads to be used per replica.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
     be set to `NoUnits` if units are not being used.
 """
-mutable struct ReplicaSystem{D, G, T, A, AD, EL, F, E, K, R} <: AbstractSystem{D}
+mutable struct ReplicaSystem{D, G, T, A, AD, EL, K, F, E, R} <: AbstractSystem{D}
     atoms::A
     n_replicas::Int
     atoms_data::AD
@@ -892,7 +892,7 @@ function ReplicaSystem(;
     K = typeof(k_converted)
 
     replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
-                            typeof(replica_loggers[i]), F, E, K, M}(
+                            typeof(replica_loggers[i]), K, F, E, M}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i], 
@@ -900,7 +900,7 @@ function ReplicaSystem(;
             force_units, energy_units, k_converted, atom_masses) for i in 1:n_replicas)
     R = typeof(replicas)
 
-    return ReplicaSystem{D, G, T, A, AD, EL, F, E, K, R}(
+    return ReplicaSystem{D, G, T, A, AD, EL, K, F, E, R}(
             atoms, n_replicas, atoms_data, exchange_logger,
             force_units, energy_units, k_converted, replicas)
 end
