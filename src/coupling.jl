@@ -191,7 +191,7 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
         return false
     end
 
-    kT = sys.k * barostat.temperature
+    kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
 
@@ -334,7 +334,7 @@ function apply_coupling!(sys::System{D, G, T},
     !iszero(step_n % barostat.n_steps) && return false
     all(isnothing, barostat.pressure) && return false
 
-    kT = sys.k * barostat.temperature
+    kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
 
@@ -507,7 +507,7 @@ function apply_coupling!(sys::System{D, G, T},
                          n_threads::Integer=Threads.nthreads()) where {D, G, T}
     !iszero(step_n % barostat.n_steps) && return false
 
-    kT = sys.k * barostat.temperature
+    kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
 

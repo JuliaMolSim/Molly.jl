@@ -6,7 +6,7 @@ using Test
 @testset "Lennard-Jones energy conservation" begin
     function test_energy_conservation(gpu::Bool, n_threads::Integer, n_steps::Integer)
         n_atoms = 2_000
-        atom_mass = 40.0u"u"
+        atom_mass = 40.0u"g/mol"
         temp = 1.0u"K"
         boundary = CubicBoundary(50.0u"nm")
         simulator = VelocityVerlet(dt=0.001u"ps", remove_CM_motion=false)

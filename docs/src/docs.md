@@ -18,7 +18,7 @@ First, we'll need some atoms with the relevant parameters defined.
 using Molly
 
 n_atoms = 100
-atom_mass = 10.0u"u"
+atom_mass = 10.0u"g/mol"
 atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 ```
 See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) docs for more information on the unit annotations.
@@ -140,7 +140,7 @@ using Molly
 using CUDA
 
 n_atoms = 100
-atom_mass = 10.0f0u"u"
+atom_mass = 10.0f0u"g/mol"
 boundary = CubicBoundary(2.0f0u"nm")
 temp = 100.0f0u"K"
 atoms = CuArray([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
@@ -440,7 +440,7 @@ Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte Carlo 
 For example, to perform simulated annealing on charged particles to form a crystal lattice:
 ```julia
 n_atoms = 100
-atoms = [Atom(mass=10.0u"u", charge=1.0) for i in 1:n_atoms]
+atoms = [Atom(mass=10.0u"g/mol", charge=1.0) for i in 1:n_atoms]
 boundary = RectangularBoundary(4.0u"nm")
 
 coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
@@ -611,7 +611,7 @@ axislegend()
 ## Units
 
 Molly is fairly opinionated about using [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) units as shown above: you don't have to use them, but it is better if you do.
-Any consistent unit scheme can be used, or no units at all.
+Any consistent unit scheme can be used, or no units at all. Molly is most strict about the mixture of molar and non-molar types. For example, if your atom masses are defined as `g/mol` your energy and force units must also be molar.
 If you are not using units then no quantities can have Unitful annotations and you are responsible for ensuring a consistent unit system.
 Whilst you occasionally may run into friction with dimension mismatches, using units has the major advantages of catching whole classes of errors and letting you physically interpret the numbers in your system.
 The performance overhead of using units is minimal.
@@ -983,7 +983,7 @@ function Molly.simulate!(sys,
 
         # Example velocity update
         # Includes appropriate unit conversion for when the force units are per mol
-        sys.velocities += Molly.accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
+        sys.velocities += (accels_t .+ accels_t_dt) .* sim.dt / 2
 
         # Apply coupling like this
         recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
@@ -1034,10 +1034,7 @@ function Molly.remd_exchange!(sys::ReplicaSystem,
     return Δ, make_exchange
 end
 ```
-To get the correct exchange rates, the units of the Boltzmann constant should be corrected when used in the exchange function:
-```julia
-k_b = Molly.energy_add_mol(sys.k, sys.energy_units)
-```
+
 The above function returns `Δ`, the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref), and a boolean indicating whether the exchange was successful.
 
 Then, define a method for the [`simulate!`](@ref) function to perform the parallel simulation.
@@ -1197,7 +1194,7 @@ Let's look at a simple example, computing the velocity autocorrelation function 
 Let's start by defining the system.
 ```julia
 n_atoms = 400
-atom_mass = 10.0u"u"
+atom_mass = 10.0u"g/mol"
 atoms = [Atom(mass=atom_mass, σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 
 # Initialization
@@ -1236,7 +1233,7 @@ We leave the loggers empty until we thermalize the system using Langevin dynamic
 simulator = LangevinSplitting(
     dt=0.002u"ps",
     temperature=temp,
-    friction=10.0u"u* ps^-1",
+    friction=10.0u"g * mol^-1 * ps^-1",
     splitting="BAOAB",
 )
 simulate!(sys, simulator, 10_000)

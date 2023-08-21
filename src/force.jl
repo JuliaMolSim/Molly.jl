@@ -2,7 +2,6 @@
 # See OpenMM documentation and Gromacs manual for other aspects of forces
 
 export
-    ustrip_vec,
     accelerations,
     force,
     SpecificForce1Atoms,
@@ -11,35 +10,6 @@ export
     SpecificForce4Atoms,
     forces
 
-"""
-    ustrip_vec(x)
-    ustrip_vec(u, x)
-
-Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustrip_vec.(coords)`.
-"""
-ustrip_vec(x...) = ustrip.(x...)
-
-function check_force_units(force_units, sys_force_units)
-    if force_units != sys_force_units
-        error("system force units are ", sys_force_units, " but encountered force units ",
-              force_units)
-    end
-end
-
-function check_force_units(fdr::AbstractArray, sys_force_units)
-    return check_force_units(unit(first(fdr)), sys_force_units)
-end
-
-# Forces are often expressed per mol but this dimension needs removing for use in the integrator
-function accel_remove_mol(x)
-    fx = first(x)
-    if dimension(fx) == u"𝐋 * 𝐍^-1 * 𝐓^-2"
-        T = typeof(ustrip(fx))
-        return x / T(Unitful.Na)
-    else
-        return x
-    end
-end
 
 """
     accelerations(system, neighbors=nothing; n_threads=Threads.nthreads())
