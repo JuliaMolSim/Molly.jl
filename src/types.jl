@@ -466,9 +466,9 @@ mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
     constraints::CN
     neighbor_finder::NF
     loggers::L
+    k::K
     force_units::F
     energy_units::E
-    k::K
     masses::M
 end
 
@@ -552,7 +552,7 @@ function System(;
     return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, K, F, E, M}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, neighbor_finder,
-                    loggers, force_units, energy_units, k_converted, atom_masses)
+                    loggers, k_converted, force_units, energy_units, atom_masses)
 end
 
 """
@@ -735,9 +735,9 @@ mutable struct ReplicaSystem{D, G, T, A, AD, EL, K, F, E, R} <: AbstractSystem{D
     n_replicas::Int
     atoms_data::AD
     exchange_logger::EL
+    k::K
     force_units::F
     energy_units::E
-    k::K
     replicas::R
 end
 
@@ -897,12 +897,12 @@ function ReplicaSystem(;
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i], 
             deepcopy(neighbor_finder), replica_loggers[i],
-            force_units, energy_units, k_converted, atom_masses) for i in 1:n_replicas)
+            k_converted, force_units, energy_units, atom_masses) for i in 1:n_replicas)
     R = typeof(replicas)
 
     return ReplicaSystem{D, G, T, A, AD, EL, K, F, E, R}(
             atoms, n_replicas, atoms_data, exchange_logger,
-            force_units, energy_units, k_converted, replicas)
+            k_converted, force_units, energy_units, replicas)
 end
 
 """

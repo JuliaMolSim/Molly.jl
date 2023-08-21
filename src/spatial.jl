@@ -523,7 +523,7 @@ end
 
 function maxwell_boltzmann(mass::AbstractFloat, temp::AbstractFloat, k::AbstractFloat; rng=Random.GLOBAL_RNG)
     σ = sqrt(k * temp / mass)
-    return rand(rng, Normal(0.0, σ))
+    return rand(rng, Normal(zero(σ), σ))
 end
 
 """

@@ -81,8 +81,8 @@ function check_interaction_units(p_inters, s_inters, g_inters, sys_units::NamedT
 
 end
 
-function check_other_units(atoms, boundary, constraints, sys_units::NamedTuple)
-
+function check_other_units(atoms_dev, boundary, constraints, sys_units::NamedTuple)
+    atoms = Array(atoms_dev)
     box_units = unit(length_type(boundary))
 
     if !all(sys_units[:length] .== box_units)
@@ -121,14 +121,14 @@ function validate_energy_units(energy_units)
 end
 
 function validate_masses(masses)
-    mass_units = unit.(masses)
+    mass_units = unit.(Array(masses))
 
     if !allequal(mass_units)
         throw(ArgumentError("Atoms array constructed with mixed mass units"))
     end
 
     valid_mass_dimensions = [u"𝐌", u"𝐌* 𝐍^-1", NoDims]
-    mass_dimension = dimension(masses[1])
+    mass_dimension = dimension(eltype(masses))
 
     if mass_dimension ∉ valid_mass_dimensions
         throw(ArgumentError("$(mass_dimension) are not mass units. Mass units must be mass or 
@@ -139,7 +139,7 @@ function validate_masses(masses)
 end
 
 function validate_coords(coords)
-    coord_units = map(coords) do coord
+    coord_units = map(Array(coords)) do coord
         [unit(c) for c in coord]
     end 
 
@@ -148,7 +148,7 @@ function validate_coords(coords)
     end
 
     valid_length_dimensions = [u"𝐋", NoDims]
-    coord_dimension = dimension(coords[1][1])
+    coord_dimension = dimension(zero(eltype(coords))[1])
 
     if coord_dimension ∉ valid_length_dimensions
         throw(ArgumentError("$(coord_dimension) are not length units. Length units must be length or 
@@ -159,7 +159,7 @@ function validate_coords(coords)
 end
 
 function validate_velocities(velocities)
-    velocity_units = map(velocities) do vel
+    velocity_units = map(Array(velocities)) do vel
         [unit(v) for v in vel]
     end 
 
@@ -168,7 +168,7 @@ function validate_velocities(velocities)
     end
 
     valid_velocity_dimensions = [u"𝐋 * 𝐓^-1", NoDims]
-    velocity_dimension = dimension(velocities[1][1])
+    velocity_dimension = dimension(zero(eltype(velocities))[1])
 
     if velocity_dimension ∉ valid_velocity_dimensions
         throw(ArgumentError("$(velocity_dimension) are not velocity units. Velocity units must be velocity or 
@@ -205,10 +205,14 @@ function convert_k_units(T, k, energy_units)
             k_converted = T(ustrip(k))
         end
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        @assert (dimension(energy_units * u"K^-1") == dimension(k)) "energy_units ($(energy_units)) in System and Boltzmann constant units ($(unit(k))) are incompatible"
+        if dimension(energy_units * u"K^-1") != dimension(k)
+            throw(ArgumentError("energy_units ($(energy_units)) in System and Boltzmann constant units ($(unit(k))) are incompatible"))
+        end
         k_converted = T(uconvert(energy_units * u"K^-1", k))
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐓^-2"
-        @assert (dimension(energy_units * u"K^-1") == dimension(k)) "energy_units ($(energy_units)) in System and Boltzmann constant units ($(unit(k))) are incompatible"
+        if dimension(energy_units * u"K^-1") != dimension(k)
+            throw(ArgumentError("energy_units ($(energy_units)) in System and Boltzmann constant units ($(unit(k))) are incompatible"))
+        end
         k_converted = T(uconvert(energy_units * u"K^-1", k))
     else
         throw(ArgumentError("Energy units are not energy: $(energy_units)"))
