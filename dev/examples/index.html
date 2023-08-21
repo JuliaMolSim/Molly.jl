@@ -178,7 +178,7 @@ angles = InteractionList3Atoms(
     [CosineAngle(k=2.0u&quot;kJ * mol^-1&quot;, θ0=0.0) for _ in 1:n_angles_tot],
 )
 
-atoms = [Atom(mass=10.0u&quot;u&quot;, σ=1.0u&quot;nm&quot;, ϵ=0.5u&quot;kJ * mol^-1&quot;) for _ in 1:n_atoms]
+atoms = [Atom(mass=10.0u&quot;g/mol&quot;, σ=1.0u&quot;nm&quot;, ϵ=0.5u&quot;kJ * mol^-1&quot;) for _ in 1:n_atoms]
 
 # Since we are using a generic pairwise Lennard-Jones potential too we need to
 #   exclude adjacent monomers from the neighbor list
@@ -615,10 +615,10 @@ save(&quot;lennard_jones_sc.png&quot;, f)</code></pre><p><img src="../images/len
 using SimpleCrystals
 
 a = 5.2468u&quot;Å&quot; # Lattice parameter for FCC Argon at 10 K
-atom_type = :Ar
+atom_mass = 39.948u&quot;g/mol&quot;
 
 temp = 10.0u&quot;K&quot;
-fcc_crystal = FCC(a, atom_type, SVector(4, 4, 4))
+fcc_crystal = FCC(a, atom_mass, SVector(4, 4, 4))
 
 n_atoms = length(fcc_crystal)
 atom_mass = atomic_mass(fcc_crystal, 1)
@@ -639,7 +639,7 @@ sys = System(
     ),
     energy_units=u&quot;kJ * mol^-1&quot;,
     force_units=u&quot;kJ * mol^-1 * Å^-1&quot;,
-)</code></pre><p>Certain potentials such as <a href="../api/#Molly.LennardJones"><code>LennardJones</code></a> and <a href="../api/#Molly.Buckingham"><code>Buckingham</code></a> require extra atomic paramaters (e.g. <code>σ</code>) that are not implemented by the SimpleCrystals API. These paramaters must be added to the <a href="../api/#Molly.System"><code>System</code></a> manually:</p><pre><code class="language-julia">σ = 3.4u&quot;Å&quot;
+)</code></pre><p>Certain potentials such as <a href="../api/#Molly.LennardJones"><code>LennardJones</code></a> and <a href="../api/#Molly.Buckingham"><code>Buckingham</code></a> require extra atomic paramaters (e.g. <code>σ</code>) that are not implemented by the SimpleCrystals API. These paramaters must be added to the <a href="../api/#Molly.System"><code>System</code></a> manually by making use of the copy constructor:</p><pre><code class="language-julia">σ = 3.4u&quot;Å&quot;
 ϵ = (4.184 * 0.24037)u&quot;kJ * mol^-1&quot;
 updated_atoms = []
 
@@ -653,4 +653,4 @@ sys = System(sys, atoms=[updated_atoms...])</code></pre><p>Now the system can be
     temperature=temp,
     friction=1.0u&quot;ps^-1&quot;,
 )
-simulate!(sys, simulator, 200_000)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../related/">Related software »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Friday 21 July 2023 23:56">Friday 21 July 2023</span>. Using Julia version 1.9.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+simulate!(sys, simulator, 200_000)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../related/">Related software »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Monday 21 August 2023 17:40">Monday 21 August 2023</span>. Using Julia version 1.9.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
