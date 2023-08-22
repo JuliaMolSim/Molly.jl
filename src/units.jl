@@ -184,7 +184,6 @@ function default_k(energy_units)
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐓^-2"
         k = Unitful.k
     elseif energy_units == NoUnits
-        @warn "No Boltzmann constant passed to System, assuming energy is non-molar"
         k = ustrip(Unitful.k)
     else
         throw(ArgumentError("energy_units $(energy_units) passed to System does not have dimension of energy."))
@@ -201,7 +200,9 @@ function convert_k_units(T, k, energy_units)
             # Use user-supplied unitless Boltzmann constant
             k_converted = T(k)
         else
-            @warn "Units will be stripped from Boltzmann constant: energy_units was passed as NoUnits and units were provided on k: $(unit(k))"
+            Zygote.ignore() do
+                @warn "Units will be stripped from Boltzmann constant: energy_units was passed as NoUnits and units were provided on k: $(unit(k))"
+            end
             k_converted = T(ustrip(k))
         end
     elseif dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
