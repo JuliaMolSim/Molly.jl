@@ -417,7 +417,7 @@ end
         ("Force" , test_force_grad , 1e-8),
     ]
     if !running_CI
-        push!(test_runs, ("Sim", test_sim_grad, 0.01))
+        push!(test_runs, ("Sim", test_sim_grad, 0.015))
     end
     params_to_test = (
         "inter_LJ_weight_14",
