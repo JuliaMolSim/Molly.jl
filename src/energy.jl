@@ -266,3 +266,10 @@ function potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary,
     # Fallback for interactions where special interactions are not relevant
     return potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)
 end
+
+# Allow GPU-specific potential energy functions to be defined if required
+potential_energy_gpu(inter::PairwiseInteraction, dr, ci, cj, ai, aj, bnd, spec) = potential_energy(inter, dr, ci, cj, ai, aj, bnd, spec)
+potential_energy_gpu(inter::SpecificInteraction, ci, bnd)             = potential_energy(inter, ci, bnd)
+potential_energy_gpu(inter::SpecificInteraction, ci, cj, bnd)         = potential_energy(inter, ci, cj, bnd)
+potential_energy_gpu(inter::SpecificInteraction, ci, cj, ck, bnd)     = potential_energy(inter, ci, cj, ck, bnd)
+potential_energy_gpu(inter::SpecificInteraction, ci, cj, ck, cl, bnd) = potential_energy(inter, ci, cj, ck, cl, bnd)
