@@ -148,9 +148,9 @@ end
         displacements(final_coords, boundary)
         distances(final_coords, boundary)
         rdf(final_coords, boundary)
-        @test dimension(velocity_autocorr(s.loggers.vels)) == u"𝐋^2 * 𝐓^-2"
+        @test unit(velocity_autocorr(s.loggers.vels)) == u"nm^2 * ps^-2"
         @test unit(first(values(s.loggers.potkin_correlation))) == NoUnits
-        @test dimension(first(values(s.loggers.velocity_autocorrelation; normalize=false))) == u"𝐋^2 * 𝐓^-2"
+        @test unit(first(values(s.loggers.velocity_autocorrelation; normalize=false))) == u"nm^2 * ps^-2"
 
         traj = read(temp_fp_pdb, BioStructures.PDB)
         rm(temp_fp_pdb)
@@ -355,7 +355,7 @@ end
     @test isapprox(final_pos, local_min; atol=1e-7u"nm")
 end
 
-@testset "Units vs Unitless" begin
+@testset "Units vs no units" begin
     n_atoms = 100
     n_steps = 2_000 # Does diverge for longer simulations or higher velocities
     temp = 298.0u"K"
@@ -393,8 +393,8 @@ end
         coords=ustrip_vec.(coords),
         boundary=CubicBoundary(ustrip.(boundary)),
         velocities=ustrip_vec.(u"nm/ps",velocities),
-        pairwise_inters=(LennardJones(use_neighbors=true,
-             force_units = NoUnits, energy_units = NoUnits),),
+        pairwise_inters=(LennardJones(use_neighbors=true, force_units=NoUnits,
+                                      energy_units=NoUnits),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -407,7 +407,6 @@ end
         ),
         force_units=NoUnits,
         energy_units=NoUnits,
-        k = ustrip(s.k)
     )
 
     neighbors = find_neighbors(s, s.neighbor_finder; n_threads=1)
@@ -1092,12 +1091,9 @@ end
     r_cut = 0.85u"nm"
     a = 0.52468u"nm"
     atom_mass = 39.948u"g/mol"
-
     temp = 10.0u"K"
 
-
     fcc_crystal = SimpleCrystals.FCC(a, atom_mass, SVector(4, 4, 4))
-
     n_atoms = SimpleCrystals.length(fcc_crystal)
     @test n_atoms == 256
     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]

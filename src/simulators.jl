@@ -139,7 +139,7 @@ function simulate!(sys,
 
     for step_n in 1:n_steps
         old_coords = copy(sys.coords)
-        sys.coords += sys.velocities .* sim.dt .+ ((accels_t .* sim.dt ^ 2) ./ 2)
+        sys.coords += sys.velocities .* sim.dt .+ (accels_t .* sim.dt ^ 2) ./ 2
 
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
@@ -262,11 +262,10 @@ function simulate!(sys,
         coords_copy = sys.coords
         if step_n == 1
             # Use the velocities at the first step since there is only one set of coordinates
-            sys.coords += sys.velocities .* sim.dt .+
-                                        ((accels_t .* sim.dt ^ 2) ./ 2)
+            sys.coords += sys.velocities .* sim.dt .+ (accels_t .* sim.dt ^ 2) ./ 2
         else
             sys.coords += vector.(coords_last, sys.coords, (sys.boundary,)) .+
-                                        accels_t .* sim.dt ^ 2
+                          accels_t .* sim.dt ^ 2
         end
         
         apply_constraints!(sys, coords_copy, sim.dt)
@@ -544,7 +543,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities = (v_half .+ (accels_t_dt .* (sim.dt / 2))) ./
+        sys.velocities = (v_half .+ accels_t_dt .* (sim.dt / 2)) ./
                          (1 + (zeta * sim.dt / 2))
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
@@ -881,13 +880,12 @@ function simulate!(sys::System{D, G, T},
         if δ < 0 || rand() < exp(-δ)
 
             run_loggers!(sys, neighbors, i, run_loggers; n_threads=n_threads, success=true,
-                                        energy_rate=E_new / (sys.k * sim.temperature))
+                         energy_rate=(E_new / (sys.k * sim.temperature)))
             E_old = E_new
         else
             sys.coords = coords_old
             run_loggers!(sys, neighbors, i, run_loggers; n_threads=n_threads, success=false,
-                                        energy_rate=E_old / (sys.k * sim.temperature))
-
+                         energy_rate=(E_old / (sys.k * sim.temperature)))
         end
     end
     return sys

@@ -445,8 +445,8 @@ interface described there.
     close atoms and save on computation.
 - `loggers::L=()`: the loggers that record properties of interest during a
     simulation.
-- `k::K=Unitful.k or Unitful.k*Unitful.Na`: the Boltzmann constant, which may be modified in some
-    simulations. k is chosen based on `energy_units` passed.
+- `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
+    modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
@@ -546,8 +546,8 @@ function System(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    sys_units = check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
-        specific_inter_lists, general_inters, boundary, constraints)
+    check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
+                specific_inter_lists, general_inters, boundary, constraints)
 
     return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, K, F, E, M}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
@@ -575,9 +575,9 @@ function System(sys::System;
                 constraints=sys.constraints,
                 neighbor_finder=sys.neighbor_finder,
                 loggers=sys.loggers,
+                k=sys.k,
                 force_units=sys.force_units,
-                energy_units=sys.energy_units,
-                k=sys.k)
+                energy_units=sys.energy_units)
     return System(
         atoms=atoms,
         coords=coords,
@@ -591,9 +591,9 @@ function System(sys::System;
         constraints=constraints,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
+        k=k,
         force_units=force_units,
         energy_units=energy_units,
-        k=k,
     )
 end
 
@@ -654,9 +654,9 @@ function System(crystal::Crystal{D};
         constraints=constraints,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
+        k=k,
         force_units=force_units,
         energy_units=energy_units,
-        k = k,
     )
 end
 
@@ -723,8 +723,8 @@ construction where `n` is the number of threads to be used per replica.
     that record properties of interest during a simulation.
 - `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: the logger used to record
     the exchange of replicas.
-- `k::K=Unitful.k`: the Boltzmann constant, which may be modified in some
-    simulations.
+- `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
+    modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
@@ -896,13 +896,13 @@ function ReplicaSystem(;
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i], 
-            deepcopy(neighbor_finder), replica_loggers[i],
-            k_converted, force_units, energy_units, atom_masses) for i in 1:n_replicas)
+            deepcopy(neighbor_finder), replica_loggers[i], k_converted,
+            force_units, energy_units, atom_masses) for i in 1:n_replicas)
     R = typeof(replicas)
 
     return ReplicaSystem{D, G, T, A, AD, EL, K, F, E, R}(
-            atoms, n_replicas, atoms_data, exchange_logger,
-            k_converted, force_units, energy_units, replicas)
+            atoms, n_replicas, atoms_data, exchange_logger, k_converted,
+            force_units, energy_units, replicas)
 end
 
 """
@@ -1043,13 +1043,6 @@ end
 # Take precedence over AtomsBase.jl show function
 Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io, s)
 
-#Unit types to dispatch on
-@derived_dimension MolarMass Unitful.𝐌/Unitful.𝐍 true
-@derived_dimension BoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1 true
-@derived_dimension MolarBoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1*Unitful.𝐍^-1 true
-
-
-# Convert AtomsBase AbstractSystem to Molly system
 """
     System(abstract_system)
 
@@ -1059,8 +1052,7 @@ To add properties not present in the AtomsBase interface (e.g. pair potentials) 
 convenience constructor `System(sys::System)`.
 """
 function System(sys::AbstractSystem{D}, energy_units, force_units) where D
-
-    #Convert BC to Molly types
+    # Convert BC to Molly types
     bb = bounding_box(sys)
     bcs = AtomsBase.boundary_conditions(sys)
 
@@ -1094,36 +1086,39 @@ function System(sys::AbstractSystem{D}, energy_units, force_units) where D
         throw(ArgumentError("Molly does not support 2D triclinic domains"))
     end
 
-    length_unit = unit(first(position(sys,1)))
-
-    atoms = Vector{Molly.Atom}(undef, (length(sys),))
-    atoms_data = Vector{Molly.AtomData}(undef, (length(sys),))
+    length_unit = unit(first(position(sys, 1)))
+    atoms = Vector{Atom}(undef, (length(sys),))
+    atoms_data = Vector{AtomData}(undef, (length(sys),))
     for (i, atom) in enumerate(sys)
-        atoms[i] = Molly.Atom(; index = i, charge = get(atom, :charge, 0.0), mass = atomic_mass(atom),
-            σ = 0.0*length_unit, ϵ = 0.0*energy_units)
-        atoms_data[i] = AtomData(; element = String(atomic_symbol(atom)))
+        atoms[i] = Atom(
+            index=i,
+            charge=get(atom, :charge, 0.0),
+            mass=atomic_mass(atom),
+            σ=(0.0 * length_unit),
+            ϵ=(0.0 * energy_units),
+        )
+        atoms_data[i] = AtomData(element=String(atomic_symbol(atom)))
     end
 
     coords = position(sys)
     vels = velocity(sys)
 
-    mass_dim = dimension(atomic_mass(sys,1))
-
+    mass_dim = dimension(atomic_mass(sys, 1))
     if mass_dim == u"𝐌" && dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        throw(ArgumentError("When constructing System from AbstractSystem,
-                energy units are molar but mass units are not"))
+        throw(ArgumentError("When constructing System from AbstractSystem, energy units " *
+                            "are molar but mass units are not"))
     elseif mass_dim == u"𝐌 * 𝐍^-1" && dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐓^-2"
-        throw(ArgumentError("When constructing System from AbstractSystem,
-            mass units are molar but energy units are not"))
+        throw(ArgumentError("When constructing System from AbstractSystem, mass units " *
+                            "are molar but energy units are not"))
     end
 
-    return System(; atoms = atoms,
-                    coords = coords,
-                    boundary = molly_boundary,
-                    velocities = vels,
-                    atoms_data = atoms_data,
-                    energy_units = energy_units,
-                    force_units = force_units)
-
+    return System(
+        atoms=atoms,
+        coords=coords,
+        boundary=molly_boundary,
+        velocities=vels,
+        atoms_data=atoms_data,
+        energy_units=energy_units,
+        force_units=force_units,
+    )
 end
-
