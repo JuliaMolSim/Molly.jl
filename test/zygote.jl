@@ -224,7 +224,7 @@ end
 end
 
 @testset "Differentiable protein" begin
-    function create_sys(gpu)
+    function create_sys(gpu::Bool)
         ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...; units=false)
         return System(
             joinpath(data_dir, "6mrr_nowater.pdb"),
