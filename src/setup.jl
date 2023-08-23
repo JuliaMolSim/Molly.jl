@@ -193,8 +193,8 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     angle_types = Dict{Tuple{String, String, String}, HarmonicAngle}()
     torsion_types = Dict{Tuple{String, String, String, String}, PeriodicTorsionType}()
     torsion_order = ""
-    weight_14_coulomb = one(T)
-    weight_14_lj = one(T)
+    weight_14_coulomb, weight_14_lj = one(T), one(T)
+    weight_14_coulomb_set, weight_14_lj_set = false, false
     attributes_from_residue = String[]
 
     for ff_file in ff_files
@@ -208,7 +208,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     at_class = atom_type["class"]
                     element = haskey(atom_type, "element") ? atom_type["element"] : "?"
                     ch = missing # Updated later or defined in residue
-                    atom_mass = units ? parse(T, atom_type["mass"])u"u" : parse(T, atom_type["mass"])
+                    atom_mass = units ? parse(T, atom_type["mass"])u"g/mol" : parse(T, atom_type["mass"])
                     σ = units ? T(-1u"nm") : T(-1) # Updated later
                     ϵ = units ? T(-1u"kJ * mol^-1") : T(-1) # Updated later
                     atom_types[at_type] = AtomType{T, typeof(atom_mass), typeof(σ), typeof(ϵ)}(
@@ -218,7 +218,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 for residue in eachelement(entry)
                     name = residue["name"]
                     types = Dict{String, String}()
-                    charges = Dict{String, Union{T, Missing}}()
+                    atom_charges = Dict{String, Union{T, Missing}}()
                     indices = Dict{String, Int}()
                     index = 1
                     for atom_or_bond in eachelement(residue)
@@ -227,9 +227,9 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             atom_name = atom_or_bond["name"]
                             types[atom_name] = atom_or_bond["type"]
                             if haskey(atom_or_bond, "charge")
-                                charges[atom_name] = parse(T, atom_or_bond["charge"])
+                                atom_charges[atom_name] = parse(T, atom_or_bond["charge"])
                             else
-                                charges[atom_name] = missing
+                                atom_charges[atom_name] = missing
                             end
                             indices[atom_name] = index
                             index += 1
@@ -237,7 +237,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             @warn "Virtual sites not currently supported, this entry will be ignored"
                         end
                     end
-                    residue_types[name] = ResidueType(name, types, charges, indices)
+                    residue_types[name] = ResidueType(name, types, atom_charges, indices)
                 end
             elseif entry_name == "HarmonicBondForce"
                 for bond in eachelement(entry)
@@ -292,8 +292,22 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     torsion_types[(atom_type_1, atom_type_2, atom_type_3, atom_type_4)] = torsion_type
                 end
             elseif entry_name == "NonbondedForce"
-                weight_14_coulomb = parse(T, entry["coulomb14scale"])
-                weight_14_lj = parse(T, entry["lj14scale"])
+                if haskey(entry, "coulomb14scale")
+                    weight_14_coulomb_new = parse(T, entry["coulomb14scale"])
+                    if weight_14_coulomb_set && weight_14_coulomb_new != weight_14_coulomb
+                        error("found multiple NonbondedForce entries with different coulomb14scale values")
+                    end
+                    weight_14_coulomb = weight_14_coulomb_new
+                    weight_14_coulomb_set = true
+                end
+                if haskey(entry, "lj14scale")
+                    weight_14_lj_new = parse(T, entry["lj14scale"])
+                    if weight_14_lj_set && weight_14_lj_new != weight_14_lj
+                        error("found multiple NonbondedForce entries with different lj14scale values")
+                    end
+                    weight_14_lj = weight_14_lj_new
+                    weight_14_lj_set = true
+                end
                 for atom_or_attr in eachelement(entry)
                     if atom_or_attr.name == "Atom"
                         if !haskey(atom_or_attr, "type")
@@ -338,7 +352,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     end
 
     if units
-        M = typeof(T(1u"u"))
+        M = typeof(T(1u"g/mol"))
         D = typeof(T(1u"nm"))
         E = typeof(T(1u"kJ * mol^-1"))
         K = typeof(T(1u"kJ * mol^-1 * nm^-2"))
@@ -937,6 +951,7 @@ function System(coord_file::AbstractString,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
         energy_units=units ? u"kJ * mol^-1" : NoUnits,
+        k = units ? Unitful.Na*Unitful.k : ustrip(u"kJ * K^-1 * mol^-1",Unitful.Na*Unitful.k)
     )
 end
 
@@ -1023,7 +1038,7 @@ function System(T::Type,
             # Take the first version of each atom type only
             if !haskey(atomtypes, atomname)
                 if units
-                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4])u"u",
+                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4])u"g/mol",
                             σ=parse(T, c[7])u"nm", ϵ=parse(T, c[8])u"kJ * mol^-1")
                 else
                     atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4]),
@@ -1034,7 +1049,7 @@ function System(T::Type,
             attype = atomnames[c[2]]
             ch = parse(T, c[7])
             if units
-                atom_mass = parse(T, c[8])u"u"
+                atom_mass = parse(T, c[8])u"g/mol"
             else
                 atom_mass = parse(T, c[8])
             end
@@ -1301,6 +1316,7 @@ function System(T::Type,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
         energy_units=units ? u"kJ * mol^-1" : NoUnits,
+        k = units ? Unitful.Na*Unitful.k : ustrip(u"kJ * K^-1 * mol^-1",Unitful.Na*Unitful.k)
     )
 end
 
@@ -1322,7 +1338,7 @@ Determines whether an [`Atom`](@ref) is a heavy atom, i.e. any element other tha
 """
 function is_heavy_atom(at, at_data)
     if isnothing(at_data) || at_data.element in ("?", "")
-        return mass(at) > 1.01u"u"
+        return mass(at) > 1.01u"g/mol"
     else
         return !(at_data.element in ("H", "D"))
     end

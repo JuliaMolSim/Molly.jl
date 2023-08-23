@@ -28,7 +28,7 @@ Calculate the kinetic energy of a system.
 """
 function kinetic_energy(sys::System{D, G, T}) where {D, G, T}
     ke = kinetic_energy_noconvert(sys)
-    return uconvert(sys.energy_units, energy_add_mol(ke, sys.energy_units))
+    return uconvert(sys.energy_units, ke)
 end
 
 """
@@ -46,30 +46,6 @@ function temperature(sys)
     end
 end
 
-function check_energy_units(E, energy_units)
-    if unit(E) != energy_units
-        error("system energy units are ", energy_units, " but encountered energy units ",
-                unit(E))
-    end
-end
-
-function energy_remove_mol(x)
-    if dimension(x) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        T = typeof(ustrip(x))
-        return x / T(Unitful.Na)
-    else
-        return x
-    end
-end
-
-function energy_add_mol(x, energy_units)
-    if dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        T = typeof(ustrip(x))
-        return x * T(Unitful.Na)
-    else
-        return x
-    end
-end
 
 """
     potential_energy(system, neighbors=nothing; n_threads=Threads.nthreads())
@@ -135,8 +111,8 @@ end
 
         if length(pairwise_inters_nonl) > 0
             n_atoms = length(coords)
-            Threads.@threads for thread_id in 1:n_threads
-                for i in thread_id:n_threads:n_atoms
+            Threads.@threads for chunk_i in 1:n_threads
+                for i in chunk_i:n_threads:n_atoms
                     for j in (i + 1):n_atoms
                         dr = vector(coords[i], coords[j], boundary)
                         pe = potential_energy(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
@@ -146,7 +122,7 @@ end
                                                    atoms[j], boundary)
                         end
                         check_energy_units(pe, energy_units)
-                        pe_sum_chunks[thread_id] += ustrip(pe)
+                        pe_sum_chunks[chunk_i] += ustrip(pe)
                     end
                 end
             end
@@ -156,8 +132,8 @@ end
             if isnothing(neighbors)
                 error("an interaction uses the neighbor list but neighbors is nothing")
             end
-            Threads.@threads for thread_id in 1:n_threads
-                for ni in thread_id:n_threads:length(neighbors)
+            Threads.@threads for chunk_i in 1:n_threads
+                for ni in chunk_i:n_threads:length(neighbors)
                     i, j, special = neighbors[ni]
                     dr = vector(coords[i], coords[j], boundary)
                     pe = potential_energy(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
@@ -167,7 +143,7 @@ end
                                                atoms[j], boundary, special)
                     end
                     check_energy_units(pe, energy_units)
-                    pe_sum_chunks[thread_id] += ustrip(pe)
+                    pe_sum_chunks[chunk_i] += ustrip(pe)
                 end
             end
         end

@@ -39,7 +39,7 @@ for temp in temps
         temperature=temp,
         friction=1.0u"ps^-1",
     )
-    simulate!(sys, simulator, 5_000)
+    simulate!(sys, simulator, 5_000; run_loggers=:skipzero)
 end
 
 f = Figure(resolution=(600, 400))
@@ -52,7 +52,7 @@ ax = Axis(
 for (i, temp) in enumerate(temps)
     lines!(
         ax,
-        [5100 * i - 5000, 5100 * i],
+        [5000 * i - 5000, 5000 * i],
         [ustrip(temp), ustrip(temp)],
         linestyle="--",
         color=:orange,
@@ -207,7 +207,7 @@ angles = InteractionList3Atoms(
     [CosineAngle(k=2.0u"kJ * mol^-1", θ0=0.0) for _ in 1:n_angles_tot],
 )
 
-atoms = [Atom(mass=10.0u"u", σ=1.0u"nm", ϵ=0.5u"kJ * mol^-1") for _ in 1:n_atoms]
+atoms = [Atom(mass=10.0u"g/mol", σ=1.0u"nm", ϵ=0.5u"kJ * mol^-1") for _ in 1:n_atoms]
 
 # Since we are using a generic pairwise Lennard-Jones potential too we need to
 #   exclude adjacent monomers from the neighbor list
@@ -712,3 +712,67 @@ save("lennard_jones_sc.png", f)
 ![Lennard-Jones Softcore](images/lennard_jones_sc.png)
 
 The form of the potential is approximately the same as standard Lennard-Jones for ``r_{ij} > \sigma_{ij}`` if some fractional values are used for ``\lambda`` and ``\alpha``.
+
+## Crystal structures
+
+Molly can make use of [SimpleCrystals.jl](https://github.com/ejmeitz/SimpleCrystals.jl) to generate crystal structures for simulation.
+All 3D Bravais lattices and most 2D Bravais lattices are supported as well as user-defined crystals through the SimpleCrystals API.
+The only unsupported crystal types are those with a triclinic 2D simulation domain or crystals with lattice angles larger than 90°.
+
+Molly provides a constructor for [`System`](@ref) that takes in a `Crystal` struct:
+```julia
+using Molly
+using SimpleCrystals
+
+a = 5.2468u"Å" # Lattice parameter for FCC Argon at 10 K
+atom_mass = 39.948u"g/mol"
+
+temp = 10.0u"K"
+fcc_crystal = FCC(a, atom_mass, SVector(4, 4, 4))
+
+n_atoms = length(fcc_crystal)
+atom_mass = atomic_mass(fcc_crystal, 1)
+velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+
+r_cut = 8.5u"Å"
+sys = System(
+    fcc_crystal,
+    velocities=velocities,
+    pairwise_inters=(LennardJones(
+        cutoff=ShiftedForceCutoff(r_cut),
+        energy_units=u"kJ * mol^-1",
+        force_units=u"kJ * mol^-1 * Å^-1",
+    ),),
+    loggers=(
+        kinetic_eng=KineticEnergyLogger(100),
+        pot_eng=PotentialEnergyLogger(100),
+    ),
+    energy_units=u"kJ * mol^-1",
+    force_units=u"kJ * mol^-1 * Å^-1",
+)
+```
+
+Certain potentials such as [`LennardJones`](@ref) and [`Buckingham`](@ref) require extra atomic paramaters (e.g. `σ`) that are not implemented by the SimpleCrystals API.
+These paramaters must be added to the [`System`](@ref) manually by making use of the copy constructor:
+```julia
+σ = 3.4u"Å"
+ϵ = (4.184 * 0.24037)u"kJ * mol^-1"
+updated_atoms = []
+
+for i in eachindex(sys)
+    push!(updated_atoms, Molly.Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
+                            mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
+end
+
+sys = System(sys, atoms=[updated_atoms...])
+```
+
+Now the system can be simulated using any of the available simulators:
+```julia
+simulator = Langevin(
+    dt=2.0u"fs",
+    temperature=temp,
+    friction=1.0u"ps^-1",
+)
+simulate!(sys, simulator, 200_000)
+```

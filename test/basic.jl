@@ -37,8 +37,8 @@
     @test wrap_coord_1D(12.0u"m" , 10.0u"m" ) == 2.0u"m"
     @test_throws ErrorException wrap_coord_1D(-2.0u"nm", 10.0)
 
-    vels_units   = [maxwell_boltzmann(12.0u"u", 300.0u"K") for _ in 1:1_000]
-    vels_nounits = [maxwell_boltzmann(12.0    , 300.0    ) for _ in 1:1_000]
+    vels_units   = [maxwell_boltzmann(12.0u"u", 300.0u"K", uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)) for _ in 1:1_000]
+    vels_nounits = [maxwell_boltzmann(12.0    , 300.0    , ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)) for _ in 1:1_000]
     @test 0.35u"nm * ps^-1" < std(vels_units) < 0.55u"nm * ps^-1"
     @test 0.35 < std(vels_nounits) < 0.55
 
@@ -128,7 +128,7 @@
         end
     end
 
-    atoms = fill(Atom(mass=1.0u"u"), n_atoms)
+    atoms = fill(Atom(mass=1.0u"g/mol"), n_atoms)
     loggers = (coords=CoordinateLogger(10),)
     temp = 100.0u"K"
     dt = 0.002u"ps"
@@ -334,7 +334,7 @@ end
 
     bb_atoms = BioStructures.collectatoms(struc[1], BioStructures.backboneselector)
     coords = SVector{3, Float64}.(eachcol(BioStructures.coordarray(bb_atoms))) / 10 * u"nm"
-    bb_to_mass = Dict("C" => 12.011u"u", "N" => 14.007u"u", "O" => 15.999u"u")
+    bb_to_mass = Dict("C" => 12.011u"g/mol", "N" => 14.007u"g/mol", "O" => 15.999u"g/mol")
     atoms = [Atom(mass=bb_to_mass[BioStructures.element(bb_atoms[i])]) for i in eachindex(bb_atoms)]
     @test isapprox(radius_gyration(coords, atoms), 11.51225678195222u"Å"; atol=1e-6u"nm")
 end
@@ -343,7 +343,7 @@ end
     n_atoms = 100
     boundary = CubicBoundary(2.0u"nm") 
     temp = 298.0u"K"
-    atom_mass = 10.0u"u"
+    atom_mass = 10.0u"g/mol"
     
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
@@ -418,4 +418,59 @@ end
         nf2 = [getproperty(sys2.neighbor_finder, p) for p in propertynames(sys2.neighbor_finder)]
         @test all(nf1 .== nf2)
     end
+end
+
+@testset "Invalid units" begin
+
+    #Test random-velocity functions with bad input
+    @test_throws MethodError random_velocity(10.0u"g/mol", 10u"K", Unitful.k)
+    @test_throws MethodError random_velocity(10.0u"g", 10u"K", Unitful.k * Unitful.Na)
+
+    #Test system with incorrect units in boundary and coords
+    b = CubicBoundary(10.0u"Å")
+    atoms = [Atom(mass=1.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")]
+    coords = place_atoms(1, b; min_dist=0.01u"nm")
+    @test_throws ArgumentError System(atoms = atoms,coords = coords, boundary = b)
+
+    #Incorrect just in boundary
+    b_wrong = CubicBoundary(10.0u"Å")
+    b_right = CubicBoundary(10.0u"nm")
+    atoms = [Atom(mass=1.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")]
+    coords = place_atoms(1, b_right; min_dist=0.01u"nm")
+    @test_throws ArgumentError System(atoms = atoms,coords = coords, boundary = b_wrong)
+
+    #Test system with mis-matched energy units in interaction and system
+    coords = place_atoms(1, b_right; min_dist=0.01u"nm")
+    lj = LennardJones(energy_units = "kcal/mol")
+    @test_throws ArgumentError System(atoms = atoms,coords = coords, boundary = b_right, pairwise_inters = (lj,))
+
+    #Test cases with mixed units or other invalid units
+    bad_velo = [random_velocity(1.0u"g/mol",10u"K",Unitful.k*Unitful.Na) .* 2u"g"]
+    @test_throws ArgumentError System(atoms = atoms,coords = coords, boundary = b_right, velocities = bad_velo)
+
+    bad_coord = place_atoms(1, b_right; min_dist=0.01u"nm") .* u"ps"
+    @test_throws ArgumentError System(atoms = atoms,coords = bad_coord, boundary = b_right)
+
+    good_velo = [random_velocity(1.0u"g/mol", 10u"K",Unitful.k*Unitful.Na)]
+    @test_throws ArgumentError System(atoms = atoms, coords = coords, boundary = b_right,
+        velocities = good_velo, energy_units = NoUnits, force_units = NoUnits)
+
+    #Inconsistent molar & non-molar quantities
+    atoms = [Atom(mass=1.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ")]
+    @test_throws ArgumentError System(atoms = atoms, coords = coords, boundary = b_right,
+        velocities = good_velo, energy_units = u"kJ")
+end
+
+@testset "AtomsBase conversion" begin
+    ab_sys_1 = make_test_system().system
+    # Update values to be something that works with Molly
+    ab_sys_2 = AbstractSystem(
+        ab_sys_1; 
+        boundary_conditions = [Periodic(), Periodic(), Periodic()],
+        bounding_box = [[1.54732, 0.0      , 0.0      ],
+                        [0.0    , 1.4654985, 0.0      ],
+                        [0.0    , 0.0      , 1.7928950]]u"Å",
+    )
+    molly_sys = System(ab_sys_2, u"kJ", u"kJ/Å")
+    test_approx_eq(ab_sys_2, molly_sys; common_only=true)
 end

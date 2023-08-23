@@ -1,9 +1,12 @@
 using Molly
 using Aqua
+import AtomsBase: Periodic, AbstractSystem
+using AtomsBaseTesting
 import BioStructures # Imported to avoid clashing names
 using CUDA
 using FiniteDifferences
 using ForwardDiff
+import SimpleCrystals
 using Zygote
 
 using DelimitedFiles

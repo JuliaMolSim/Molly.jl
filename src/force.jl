@@ -2,7 +2,6 @@
 # See OpenMM documentation and Gromacs manual for other aspects of forces
 
 export
-    ustrip_vec,
     accelerations,
     force,
     SpecificForce1Atoms,
@@ -11,35 +10,6 @@ export
     SpecificForce4Atoms,
     forces
 
-"""
-    ustrip_vec(x)
-    ustrip_vec(u, x)
-
-Broadcasted form of `ustrip` from Unitful.jl, allowing e.g. `ustrip_vec.(coords)`.
-"""
-ustrip_vec(x...) = ustrip.(x...)
-
-function check_force_units(force_units, sys_force_units)
-    if force_units != sys_force_units
-        error("system force units are ", sys_force_units, " but encountered force units ",
-              force_units)
-    end
-end
-
-function check_force_units(fdr::AbstractArray, sys_force_units)
-    return check_force_units(unit(first(fdr)), sys_force_units)
-end
-
-# Forces are often expressed per mol but this dimension needs removing for use in the integrator
-function accel_remove_mol(x)
-    fx = first(x)
-    if dimension(fx) == u"𝐋 * 𝐍^-1 * 𝐓^-2"
-        T = typeof(ustrip(fx))
-        return x / T(Unitful.Na)
-    else
-        return x
-    end
-end
 
 """
     accelerations(system, neighbors=nothing; n_threads=Threads.nthreads())
@@ -205,8 +175,8 @@ end
         fs_chunks = [zero(fs) for _ in 1:n_threads]
 
         if length(pairwise_inters_nonl) > 0
-            Threads.@threads for thread_id in 1:n_threads
-                for i in thread_id:n_threads:n_atoms
+            Threads.@threads for chunk_i in 1:n_threads
+                for i in chunk_i:n_threads:n_atoms
                     for j in (i + 1):n_atoms
                         dr = vector(coords[i], coords[j], boundary)
                         f = force(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
@@ -216,8 +186,8 @@ end
                         end
                         check_force_units(f, force_units)
                         f_ustrip = ustrip.(f)
-                        fs_chunks[thread_id][i] -= f_ustrip
-                        fs_chunks[thread_id][j] += f_ustrip
+                        fs_chunks[chunk_i][i] -= f_ustrip
+                        fs_chunks[chunk_i][j] += f_ustrip
                     end
                 end
             end
@@ -227,8 +197,8 @@ end
             if isnothing(neighbors)
                 error("an interaction uses the neighbor list but neighbors is nothing")
             end
-            Threads.@threads for thread_id in 1:n_threads
-                for ni in thread_id:n_threads:length(neighbors)
+            Threads.@threads for chunk_i in 1:n_threads
+                for ni in chunk_i:n_threads:length(neighbors)
                     i, j, special = neighbors[ni]
                     dr = vector(coords[i], coords[j], boundary)
                     f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
@@ -239,8 +209,8 @@ end
                     end
                     check_force_units(f, force_units)
                     f_ustrip = ustrip.(f)
-                    fs_chunks[thread_id][i] -= f_ustrip
-                    fs_chunks[thread_id][j] += f_ustrip
+                    fs_chunks[chunk_i][i] -= f_ustrip
+                    fs_chunks[chunk_i][j] += f_ustrip
                 end
             end
         end

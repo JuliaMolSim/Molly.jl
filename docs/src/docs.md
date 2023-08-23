@@ -18,7 +18,7 @@ First, we'll need some atoms with the relevant parameters defined.
 using Molly
 
 n_atoms = 100
-atom_mass = 10.0u"u"
+atom_mass = 10.0u"g/mol"
 atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 ```
 See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) docs for more information on the unit annotations.
@@ -112,6 +112,9 @@ sys.loggers
 # For certain systems
 virial(sys)
 pressure(sys)
+
+# Define a new system with certain properties changed
+System(sys; coords=(sys.coords .* 0.5))
 ```
 
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this behaviour can be changed by giving the keyword argument `n_threads` to [`simulate!`](@ref).
@@ -137,7 +140,7 @@ using Molly
 using CUDA
 
 n_atoms = 100
-atom_mass = 10.0f0u"u"
+atom_mass = 10.0f0u"g/mol"
 boundary = CubicBoundary(2.0f0u"nm")
 temp = 100.0f0u"K"
 atoms = CuArray([Atom(mass=atom_mass, σ=0.3f0u"nm", ϵ=0.2f0u"kJ * mol^-1") for i in 1:n_atoms])
@@ -437,7 +440,7 @@ Molly has the [`MetropolisMonteCarlo`](@ref) simulator to carry out Monte Carlo 
 For example, to perform simulated annealing on charged particles to form a crystal lattice:
 ```julia
 n_atoms = 100
-atoms = [Atom(mass=10.0u"u", charge=1.0) for i in 1:n_atoms]
+atoms = [Atom(mass=10.0u"g/mol", charge=1.0) for i in 1:n_atoms]
 boundary = RectangularBoundary(4.0u"nm")
 
 coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
@@ -608,7 +611,7 @@ axislegend()
 ## Units
 
 Molly is fairly opinionated about using [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) units as shown above: you don't have to use them, but it is better if you do.
-Any consistent unit scheme can be used, or no units at all.
+Any consistent unit scheme can be used, or no units at all. Molly is most strict about the mixture of molar and non-molar types. For example, if your atom masses are defined as `g/mol` your energy and force units must also be molar.
 If you are not using units then no quantities can have Unitful annotations and you are responsible for ensuring a consistent unit system.
 Whilst you occasionally may run into friction with dimension mismatches, using units has the major advantages of catching whole classes of errors and letting you physically interpret the numbers in your system.
 The performance overhead of using units is minimal.
@@ -980,7 +983,7 @@ function Molly.simulate!(sys,
 
         # Example velocity update
         # Includes appropriate unit conversion for when the force units are per mol
-        sys.velocities += Molly.accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
+        sys.velocities += (accels_t .+ accels_t_dt) .* sim.dt / 2
 
         # Apply coupling like this
         recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
@@ -990,7 +993,7 @@ function Molly.simulate!(sys,
         remove_CM_motion!(sys)
 
         # Apply the loggers like this
-        run_loggers && run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
+        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
 
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
@@ -1031,10 +1034,7 @@ function Molly.remd_exchange!(sys::ReplicaSystem,
     return Δ, make_exchange
 end
 ```
-To get the correct exchange rates, the units of the Boltzmann constant should be corrected when used in the exchange function:
-```julia
-k_b = Molly.energy_add_mol(sys.k, sys.energy_units)
-```
+
 The above function returns `Δ`, the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref), and a boolean indicating whether the exchange was successful.
 
 Then, define a method for the [`simulate!`](@ref) function to perform the parallel simulation.
@@ -1063,6 +1063,8 @@ The available couplers are:
 - [`RescaleThermostat`](@ref)
 - [`BerendsenThermostat`](@ref)
 - [`MonteCarloBarostat`](@ref)
+- [`MonteCarloAnisotropicBarostat`](@ref)
+- [`MonteCarloMembraneBarostat`](@ref)
 Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being [`NoCoupling`](@ref).
 Couplers are given to the `coupling` keyword argument during simulator construction:
 ```julia
@@ -1090,8 +1092,8 @@ end
 ```
 Then, define the function that implements the coupling every time step:
 ```julia
-function apply_coupling!(sys, coupling::MyCoupler, sim, neighbors, step_n;
-                         n_threads=Threads.nthreads())
+function Molly.apply_coupling!(sys, coupling::MyCoupler, sim, neighbors, step_n;
+                               n_threads=Threads.nthreads())
     # Do something to the simulation, e.g. scale the velocities
     # Return whether the coupling has invalidated the currently stored forces,
     #   for example by changing the coordinates
@@ -1156,6 +1158,14 @@ loggers = (mylogger=MyLogger(10, []),) # Don't forget the trailing comma!
 ```
 In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0.
 This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values.
+Running loggers before the first step can be disabled by giving `run_loggers=:skipzero` as a keyword argument to [`simulate!`](@ref), which can be useful when splitting up simulations into multiple [`simulate!`](@ref) calls.
+For example, this runs the loggers 301 times:
+```julia
+simulate!(sys, simulator, 100) # Default run_loggers=true
+simulate!(sys, simulator, 100; run_loggers=:skipzero)
+simulate!(sys, simulator, 100; run_loggers=:skipzero)
+```
+Running loggers can be disabled entirely with `run_loggers=false`, which is the default for [`SteepestDescentMinimizer`](@ref).
 Loggers are currently ignored for the purposes of taking gradients, so if a logger is used in the gradient calculation the gradients will appear to be nothing.
 
 Many times, a logger will just record an observation to an `Array` containing a record of past observations.
@@ -1184,7 +1194,7 @@ Let's look at a simple example, computing the velocity autocorrelation function 
 Let's start by defining the system.
 ```julia
 n_atoms = 400
-atom_mass = 10.0u"u"
+atom_mass = 10.0u"g/mol"
 atoms = [Atom(mass=atom_mass, σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 
 # Initialization
@@ -1223,7 +1233,7 @@ We leave the loggers empty until we thermalize the system using Langevin dynamic
 simulator = LangevinSplitting(
     dt=0.002u"ps",
     temperature=temp,
-    friction=10.0u"u* ps^-1",
+    friction=10.0u"g * mol^-1 * ps^-1",
     splitting="BAOAB",
 )
 simulate!(sys, simulator, 10_000)
@@ -1296,12 +1306,12 @@ end
 Examples of three useful properties are given here: a matrix indicating atom pairs eligible for pairwise interactions, a matrix indicating atoms in a special arrangement such as 1-4 bonding, and a value determining how many time steps occur between each evaluation of the neighbor finder.
 Then, define the neighbor finding function that is called every step by the simulator:
 ```julia
-function find_neighbors(sys,
-                        nf::MyNeighborFinder,
-                        current_neighbors=nothing,
-                        step_n::Integer=0,
-                        force_recompute::Bool=false;
-                        n_threads::Integer=Threads.nthreads())
+function Molly.find_neighbors(sys,
+                              nf::MyNeighborFinder,
+                              current_neighbors=nothing,
+                              step_n::Integer=0,
+                              force_recompute::Bool=false;
+                              n_threads::Integer=Threads.nthreads())
     if force_recompute || step_n % nf.n_steps == 0
         if isnothing(current_neighbors)
             neighbors = NeighborList()
