@@ -1231,8 +1231,9 @@ sys = System(
 
 We leave the loggers empty until we thermalize the system using Langevin dynamics.
 ```julia
+dt = 0.002u"ps"
 simulator = LangevinSplitting(
-    dt=0.002u"ps",
+    dt=dt,
     temperature=temp,
     friction=10.0u"g * mol^-1 * ps^-1",
     splitting="BAOAB",
@@ -1276,10 +1277,9 @@ show(sys.loggers)
 Note we also could have used the convenience function [`AutoCorrelationLogger`](@ref) to define our logger since the two observables we are correlating are the same.
 ```julia
 using GLMakie
-
 f = Figure()
 ax = Axis(f[1, 1], xlabel="Time / ps", ylabel="Correlation")
-lines!(0:999, values(sys.loggers.velocity_autocorrelation))
+lines!((1:1000) .* ustrip(dt), values(sys.loggers.velocity_autocorrelation))
 ```
 ![Velocity Autocorrelations](images/velocity_autocorrelations.png)\
 As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly.
