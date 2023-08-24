@@ -1094,12 +1094,12 @@ end
     temp = 10.0u"K"
 
     fcc_crystal = SimpleCrystals.FCC(a, atom_mass, SVector(4, 4, 4))
-    n_atoms = SimpleCrystals.length(fcc_crystal)
+    n_atoms = length(fcc_crystal)
     @test n_atoms == 256
     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
     sys = System(
-        fcc_crystal,
+        fcc_crystal;
         velocities=velocities,
         pairwise_inters=(LennardJones(
             cutoff=ShiftedForceCutoff(r_cut),
@@ -1123,11 +1123,11 @@ end
     updated_atoms = []
 
     for i in eachindex(sys)
-        push!(updated_atoms, Molly.Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
-                                mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
+        push!(updated_atoms, Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
+                                  mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
     end
 
-    sys = System(sys, atoms=[updated_atoms...])
+    sys = System(sys; atoms=[updated_atoms...])
 
     simulator = Langevin(
         dt=2.0u"fs",

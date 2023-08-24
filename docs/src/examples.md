@@ -722,49 +722,46 @@ The only unsupported crystal types are those with a triclinic 2D simulation doma
 Molly provides a constructor for [`System`](@ref) that takes in a `Crystal` struct:
 ```julia
 using Molly
-using SimpleCrystals
+import SimpleCrystals
 
-a = 5.2468u"Å" # Lattice parameter for FCC Argon at 10 K
+a = 0.52468u"nm" # Lattice parameter for FCC Argon at 10 K
 atom_mass = 39.948u"g/mol"
-
 temp = 10.0u"K"
-fcc_crystal = FCC(a, atom_mass, SVector(4, 4, 4))
+fcc_crystal = SimpleCrystals.FCC(a, atom_mass, SVector(4, 4, 4))
 
 n_atoms = length(fcc_crystal)
-atom_mass = atomic_mass(fcc_crystal, 1)
 velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
-r_cut = 8.5u"Å"
+r_cut = 0.85u"nm"
 sys = System(
-    fcc_crystal,
+    fcc_crystal;
     velocities=velocities,
     pairwise_inters=(LennardJones(
         cutoff=ShiftedForceCutoff(r_cut),
         energy_units=u"kJ * mol^-1",
-        force_units=u"kJ * mol^-1 * Å^-1",
+        force_units=u"kJ * mol^-1 * nm^-1",
     ),),
     loggers=(
         kinetic_eng=KineticEnergyLogger(100),
         pot_eng=PotentialEnergyLogger(100),
     ),
     energy_units=u"kJ * mol^-1",
-    force_units=u"kJ * mol^-1 * Å^-1",
+    force_units=u"kJ * mol^-1 * nm^-1",
 )
 ```
-
 Certain potentials such as [`LennardJones`](@ref) and [`Buckingham`](@ref) require extra atomic paramaters (e.g. `σ`) that are not implemented by the SimpleCrystals API.
 These paramaters must be added to the [`System`](@ref) manually by making use of the copy constructor:
 ```julia
-σ = 3.4u"Å"
+σ = 0.34u"nm"
 ϵ = (4.184 * 0.24037)u"kJ * mol^-1"
 updated_atoms = []
 
 for i in eachindex(sys)
-    push!(updated_atoms, Molly.Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
-                            mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
+    push!(updated_atoms, Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
+                              mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
 end
 
-sys = System(sys, atoms=[updated_atoms...])
+sys = System(sys; atoms=[updated_atoms...])
 ```
 
 Now the system can be simulated using any of the available simulators:
