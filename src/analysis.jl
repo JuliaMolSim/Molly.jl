@@ -7,7 +7,8 @@ export
     rdf,
     velocity_autocorr,
     rmsd,
-    radius_gyration
+    radius_gyration,
+    hydrodynamic_radius
 
 """
     visualize(coord_logger, boundary, out_filepath; <keyword arguments>)
@@ -161,4 +162,21 @@ function radius_gyration(coords, atoms)
     atom_masses = mass.(atoms)
     I = sum(sum_abs2.(vecs_to_center) .* atom_masses)
     return sqrt(I / sum(atom_masses))
+end
+
+@doc raw"""
+    hydrodynamic_radius(coords, boundary)
+
+Calculate the hydrodynamic radius of a set of coordinates.
+
+`R_{hyd}` is defined by
+```math
+\frac{1}{R_{hyd}} = \frac{1}{2N^2}\sum_{i \neq j} \frac{1}{r_{ij}}
+```
+"""
+function hydrodynamic_radius(coords, boundary)
+    dists = distances(coords, boundary)
+    sum_inv_dists = 2 * sum(triu(inv.(dists), 1))
+    inv_R_hyd = sum_inv_dists / (2 * length(coords)^2)
+    return inv(inv_R_hyd)
 end

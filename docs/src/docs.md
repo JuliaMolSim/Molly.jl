@@ -1341,6 +1341,7 @@ Functions that may be useful for analysis include:
 - [`velocity_autocorr`](@ref)
 - [`rmsd`](@ref)
 - [`radius_gyration`](@ref)
+- [`hydrodynamic_radius`](@ref)
 - [`bond_angle`](@ref)
 - [`torsion_angle`](@ref)
 
