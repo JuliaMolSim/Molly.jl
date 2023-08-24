@@ -611,7 +611,9 @@ axislegend()
 ## Units
 
 Molly is fairly opinionated about using [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) units as shown above: you don't have to use them, but it is better if you do.
-Any consistent unit scheme can be used, or no units at all. Molly is most strict about the mixture of molar and non-molar types. For example, if your atom masses are defined as `g/mol` your energy and force units must also be molar.
+Any consistent unit scheme can be used, or no units at all.
+Molly is most strict about the mixture of molar and non-molar types.
+For example, if your energy and force units are molar then your atom masses should be `g/mol` or similar.
 If you are not using units then no quantities can have Unitful annotations and you are responsible for ensuring a consistent unit system.
 Whilst you occasionally may run into friction with dimension mismatches, using units has the major advantages of catching whole classes of errors and letting you physically interpret the numbers in your system.
 The performance overhead of using units is minimal.
@@ -1034,7 +1036,6 @@ function Molly.remd_exchange!(sys::ReplicaSystem,
     return Δ, make_exchange
 end
 ```
-
 The above function returns `Δ`, the argument of the acceptance rate that is logged by [`ReplicaExchangeLogger`](@ref), and a boolean indicating whether the exchange was successful.
 
 Then, define a method for the [`simulate!`](@ref) function to perform the parallel simulation.

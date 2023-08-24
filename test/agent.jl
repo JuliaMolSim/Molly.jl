@@ -72,8 +72,7 @@
     n_starting = 2
     atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
     coords = place_atoms(n_people, boundary; min_dist=0.1)
-    velocities = [random_velocity(1.0, temp; dims=2)
-                     for i in 1:n_people]
+    velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
 
     lj = LennardJones(
         cutoff=DistanceCutoff(1.6),
@@ -107,7 +106,6 @@
         ),
         force_units=NoUnits,
         energy_units=NoUnits,
-        k = ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
     )
 
     @time simulate!(sys, simulator, n_steps; n_threads=1)

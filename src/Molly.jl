@@ -37,8 +37,8 @@ using SparseArrays
 using Statistics
 
 include("types.jl")
-include("spatial.jl")
 include("units.jl")
+include("spatial.jl")
 include("cutoffs.jl")
 include("cuda.jl")
 include("force.jl")

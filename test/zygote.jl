@@ -43,7 +43,6 @@ end
         n_atoms = 50
         n_steps = 100
         atom_mass = f32 ? 10.0f0 : 10.0
-        k = f32 ? ustrip(Float32, u"u * nm^2 * ps^-2 * K^-1", Unitful.k) : ustrip(Float64, u"u * nm^2 * ps^-2 * K^-1", Unitful.k)
         boundary = f32 ? CubicBoundary(3.0f0) : CubicBoundary(3.0)
         temp = f32 ? 1.0f0 : 1.0
         simulator = VelocityVerlet(
@@ -51,7 +50,7 @@ end
             coupling=RescaleThermostat(temp),
         )
         coords = place_atoms(n_atoms, boundary; min_dist=f32 ? 0.6f0 : 0.6, max_attempts=500)
-        velocities = [random_velocity(atom_mass, temp, k) for i in 1:n_atoms]
+        velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
         coords_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in coords]
         velocities_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in velocities]
         nb_cutoff = f32 ? 1.2f0 : 1.2
@@ -67,7 +66,7 @@ end
             use_neighbors=true,
             coulomb_const=f32 ? Float32(ustrip(Molly.coulombconst)) : ustrip(Molly.coulombconst),
             force_units=NoUnits,
-            energy_units=NoUnits
+            energy_units=NoUnits,
         )
         pairwise_inters = pis ? (lj, crf) : ()
         bond_is = gpu ? CuArray(Int32.(collect(1:(n_atoms ÷ 2)))) : Int32.(collect(1:(n_atoms ÷ 2)))
@@ -147,7 +146,6 @@ end
                 neighbor_finder=neighbor_finder,
                 force_units=NoUnits,
                 energy_units=NoUnits,
-                k = k
             )
 
             simulate!(sys, simulator, n_steps; n_threads=(parallel ? Threads.nthreads() : 1))
@@ -224,7 +222,7 @@ end
 end
 
 @testset "Differentiable protein" begin
-    function create_sys(gpu)
+    function create_sys(gpu::Bool)
         ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...; units=false)
         return System(
             joinpath(data_dir, "6mrr_nowater.pdb"),

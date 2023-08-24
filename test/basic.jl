@@ -37,10 +37,18 @@
     @test wrap_coord_1D(12.0u"m" , 10.0u"m" ) == 2.0u"m"
     @test_throws ErrorException wrap_coord_1D(-2.0u"nm", 10.0)
 
-    vels_units   = [maxwell_boltzmann(12.0u"u", 300.0u"K", uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)) for _ in 1:1_000]
-    vels_nounits = [maxwell_boltzmann(12.0    , 300.0    , ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)) for _ in 1:1_000]
-    @test 0.35u"nm * ps^-1" < std(vels_units) < 0.55u"nm * ps^-1"
-    @test 0.35 < std(vels_nounits) < 0.55
+    vels_units_1    = [maxwell_boltzmann(12.0u"u", 300.0u"K", uconvert(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)) for _ in 1:1_000]
+    vels_units_2    = [maxwell_boltzmann(12.0u"u", 300.0u"K") for _ in 1:1_000]
+    vels_molunits_1 = [maxwell_boltzmann(12.0u"g/mol", 300.0u"K", Unitful.k * Unitful.Na) for _ in 1:1_000]
+    vels_molunits_2 = [maxwell_boltzmann(12.0u"g/mol", 300.0u"K") for _ in 1:1_000]
+    vels_nounits_1  = [maxwell_boltzmann(12.0, 300.0, ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k)) for _ in 1:1_000]
+    vels_nounits_2  = [maxwell_boltzmann(12.0, 300.0) for _ in 1:1_000]
+    @test 0.35u"nm * ps^-1" < std(vels_units_1)    < 0.55u"nm * ps^-1"
+    @test 0.35u"nm * ps^-1" < std(vels_units_2)    < 0.55u"nm * ps^-1"
+    @test 0.35u"nm * ps^-1" < std(vels_molunits_1) < 0.55u"nm * ps^-1"
+    @test 0.35u"nm * ps^-1" < std(vels_molunits_2) < 0.55u"nm * ps^-1"
+    @test 0.35              < std(vels_nounits_1)  < 0.55
+    @test 0.35              < std(vels_nounits_2)  < 0.55
 
     b = CubicBoundary(4.0u"nm", 5.0u"nm", 6.0u"nm")
     @test float_type(b) == Float64
@@ -421,44 +429,44 @@ end
 end
 
 @testset "Invalid units" begin
-
-    #Test random-velocity functions with bad input
     @test_throws MethodError random_velocity(10.0u"g/mol", 10u"K", Unitful.k)
     @test_throws MethodError random_velocity(10.0u"g", 10u"K", Unitful.k * Unitful.Na)
 
-    #Test system with incorrect units in boundary and coords
+    # Incorrect units in boundary and coords
     b = CubicBoundary(10.0u"Å")
     atoms = [Atom(mass=1.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")]
     coords = place_atoms(1, b; min_dist=0.01u"nm")
-    @test_throws ArgumentError System(atoms = atoms,coords = coords, boundary = b)
+    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b)
 
-    #Incorrect just in boundary
+    # Incorrect just in boundary
     b_wrong = CubicBoundary(10.0u"Å")
     b_right = CubicBoundary(10.0u"nm")
     atoms = [Atom(mass=1.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")]
     coords = place_atoms(1, b_right; min_dist=0.01u"nm")
-    @test_throws ArgumentError System(atoms = atoms,coords = coords, boundary = b_wrong)
+    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_wrong)
 
-    #Test system with mis-matched energy units in interaction and system
+    # Mis-matched energy units in interaction and system
     coords = place_atoms(1, b_right; min_dist=0.01u"nm")
-    lj = LennardJones(energy_units = "kcal/mol")
-    @test_throws ArgumentError System(atoms = atoms,coords = coords, boundary = b_right, pairwise_inters = (lj,))
+    lj = LennardJones(energy_units="kcal/mol")
+    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,
+                                      pairwise_inters=(lj,))
 
-    #Test cases with mixed units or other invalid units
+    # Mixed units or other invalid units
     bad_velo = [random_velocity(1.0u"g/mol",10u"K",Unitful.k*Unitful.Na) .* 2u"g"]
-    @test_throws ArgumentError System(atoms = atoms,coords = coords, boundary = b_right, velocities = bad_velo)
+    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,
+                                      velocities=bad_velo)
 
     bad_coord = place_atoms(1, b_right; min_dist=0.01u"nm") .* u"ps"
-    @test_throws ArgumentError System(atoms = atoms,coords = bad_coord, boundary = b_right)
+    @test_throws ArgumentError System(atoms=atoms, coords=bad_coord, boundary=b_right)
 
     good_velo = [random_velocity(1.0u"g/mol", 10u"K",Unitful.k*Unitful.Na)]
-    @test_throws ArgumentError System(atoms = atoms, coords = coords, boundary = b_right,
-        velocities = good_velo, energy_units = NoUnits, force_units = NoUnits)
+    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,
+        velocities=good_velo, energy_units=NoUnits, force_units=NoUnits)
 
-    #Inconsistent molar & non-molar quantities
+    # Inconsistent molar and non-molar quantities
     atoms = [Atom(mass=1.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ")]
-    @test_throws ArgumentError System(atoms = atoms, coords = coords, boundary = b_right,
-        velocities = good_velo, energy_units = u"kJ")
+    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,
+        velocities=good_velo, energy_units=u"kJ")
 end
 
 @testset "AtomsBase conversion" begin
