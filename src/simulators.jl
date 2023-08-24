@@ -142,13 +142,9 @@ function simulate!(sys,
         accels_t, sim.dt, n_threads=n_threads)
 
     for step_n in 1:n_steps
-        old_coords = copy(sys.coords)
-        sys.coords += sys.velocities .* sim.dt .+ (accels_t .* sim.dt ^ 2) ./ 2
-
-    for step_n in 1:n_steps
         
         # Position Update
-        sys.coords += (sys.velocities .* sim.dt) .+ (accel_remove_mol.(accels_t) .* sim.dt ^ 2) ./ 2
+        sys.coords += sys.velocities .* sim.dt .+ ((accels_t .* sim.dt ^ 2) ./ 2)
         #Enforce PBC
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         #Calculate new forces
@@ -504,7 +500,7 @@ function B_step!(sys, dt_eff, acceleration_vector, compute_forces::Bool,
         acceleration_vector .= accelerations(sys, neighbors; n_threads=n_threads)
 
         sys, acceleration_vector = apply_position_constraints!(sys, sys.constraint_algorithm,
-            acceleration_vector, sim.dt, n_threads=n_threads)
+            acceleration_vector, dt_eff, n_threads=n_threads)
     end
     sys.velocities += dt_eff * acceleration_vector
     return sys

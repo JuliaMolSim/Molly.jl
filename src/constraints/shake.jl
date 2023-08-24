@@ -35,7 +35,7 @@ function unconstrained_position_update!(constraint_algo, sys, accels, dt)
 
     #Unconstrained update on stored coordinates
     #TODO remove_mol might be unnecessary once units issues fixed
-    constraint_algo.coord_storage .+= (sys.velocities .* dt) .+ (accel_remove_mol.(accels) .* dt ^ 2) ./ 2
+    constraint_algo.coord_storage .+= (sys.velocities .* dt) .+ (accels .* dt ^ 2) ./ 2
 
     return constraint_algo
 end
@@ -83,8 +83,10 @@ function SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{
     # println(uconvert.(unit(accels[k1][1]), ((lambda/m1).*r01)))
     # println(accel_remove_mol(accels[k1][1]))
     #TODO get unitful to play nice
-    accels[k1] += ustrip.((1/418.4).*(lambda/m1).*r01) * unit(accels[k1][1])
-    accels[k2] -= ustrip.((1/418.4).*(lambda/m2).*r01) * unit(accels[k2][1])
+    # accels[k1] += ustrip.((1/418.4).*(lambda/m1).*r01) * unit(accels[k1][1])
+    # accels[k2] -= ustrip.((1/418.4).*(lambda/m2).*r01) * unit(accels[k2][1])
+    accels[k1] += (lambda/m1).*r01
+    accels[k2] -= (lambda/m2).*r01
 
 end
 
