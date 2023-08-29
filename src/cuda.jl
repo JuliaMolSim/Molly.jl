@@ -1,5 +1,6 @@
 # CUDA.jl kernels
 const WARPSIZE = UInt32(32)
+const MAX_THREADS_PER_BLOCK = CUDA.attribute(device(), CUDA.DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK)
 
 macro shfl_multiple_sync(mask, target, width, vars...)
     all_lines = map(vars) do v
@@ -19,7 +20,7 @@ CUDA.shfl_recurse(op, x::SVector{3, C}) where C = SVector{3, C}(op(x[1]), op(x[2
 # CUDA.shfl_recurse(op, x::Atom) = Atom(op(x.index), op(x.charge), op(x.mass), op(x.σ), op(x.ϵ), op(x.solute))
 
 function cuda_threads_blocks_pairwise(n_neighbors)
-    n_threads_gpu = min(n_neighbors, parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "1024")))
+    n_threads_gpu = min(n_neighbors, parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "$MAX_THREADS_PER_BLOCK")))
     n_threads_gpu = cld(n_threads_gpu, WARPSIZE) * WARPSIZE  # Has to be a multiple of WARPSIZE
     n_blocks = cld(n_neighbors, n_threads_gpu)
     return n_threads_gpu, n_blocks
@@ -36,12 +37,20 @@ function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundar
                             max_per_atom=length(atoms)) where {D, C, T}
     fs_mat = CUDA.zeros(T, D, length(atoms))
     
-    n_threads_gpu, n_blocks_j = cuda_threads_blocks_pairwise(max_per_atom)
-    n_blocks_i = cld(length(atoms), WARPSIZE)
     if typeof(nbs) == NoNeighborList
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=(n_blocks_i, n_blocks_j) pairwise_force_kernel_nonl!(
-                fs_mat, coords, atoms, boundary, pairwise_inters, Val(D), Val(force_units))
+        kernel = @cuda launch=false pairwise_force_kernel_nonl!(
+            fs_mat, coords, atoms, boundary, pairwise_inters, Val(D), Val(force_units))
+        conf = launch_configuration(kernel.fun)
+        threads_basic = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "$MAX_THREADS_PER_BLOCK"))
+        nthreads = min(length(atoms), threads_basic, conf.threads)
+        nthreads = cld(nthreads, WARPSIZE) * WARPSIZE
+        n_blocks_i = cld(length(atoms), WARPSIZE)
+        n_blocks_j = cld(length(atoms), nthreads)
+        kernel(fs_mat, coords, atoms, boundary, pairwise_inters, Val(D), Val(force_units);
+            threads=nthreads, blocks=(n_blocks_i, n_blocks_j))
     else
+        n_threads_gpu, n_blocks_j = cuda_threads_blocks_pairwise(max_per_atom)
+        n_blocks_i = cld(length(atoms), WARPSIZE)
         CUDA.@sync @cuda threads=n_threads_gpu blocks=(n_blocks_i, n_blocks_j) pairwise_force_kernel_nl!(
                 fs_mat, coords, atoms, boundary, pairwise_inters, nbs, Val(D), Val(force_units))
     end
@@ -56,26 +65,28 @@ function pairwise_force_kernel_nl!(forces::AbstractArray{T}, coords_var, atoms_v
 
     tidx = threadIdx().x
     threads = blockDim().x
-    i_0_block = (blockIdx().x - 1) * WARPSIZE
+    i_0_block = (blockIdx().x - 1) * warpsize()
     j_0_block = (blockIdx().y - 1) * threads
-    lane = laneid()
-    warpidx = cld(tidx, WARPSIZE)
+    warpidx = cld(tidx, warpsize())
 
     forces_shmem = @cuStaticSharedMem(T, (3, 1024))
-    @inbounds for dim in 1:3
-        forces_shmem[dim, tidx] = zero(T)
+    @inbounds begin
+        forces_shmem[1, tidx] = zero(T)
+        forces_shmem[2, tidx] = zero(T)
+        forces_shmem[3, tidx] = zero(T)
     end
 
     # The current tile that the warp is calculating
     i_0_tile = i_0_block
-    j_0_tile = j_0_block + (warpidx - 1) * WARPSIZE
-    i = i_0_tile + lane
+    j_0_tile = j_0_block + (warpidx - 1) * warpsize()
+    i = i_0_tile + laneid()
 
     if i <= n_atoms
         iptr = neighbors.colPtr[i]
         nnzi = neighbors.colPtr[i+1] - neighbors.colPtr[i]
-        njs_tile = min(WARPSIZE, nnzi - j_0_tile)
+        njs_tile = min(warpsize(), nnzi - j_0_tile)
         atom_i, coord_i = atoms[i], coords[i]
+
         for del_j in 1:njs_tile
             j = neighbors.rowVal[iptr + j_0_tile + del_j - 1]
             special = neighbors.nzVal[iptr + j_0_tile + del_j - 1]
@@ -101,25 +112,20 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     n_atoms = length(atoms)
 
     tidx = threadIdx().x
-    threads = blockDim().x
-    i_0_block = (blockIdx().x - 1) * WARPSIZE
-    j_0_block = (blockIdx().y - 1) * threads
-    lane = laneid()
-    warpidx = cld(tidx, WARPSIZE)
+    i_0_tile = (blockIdx().x - 1) * warpsize()
+    j_0_block = (blockIdx().y - 1) * blockDim().x
+    warpidx = cld(tidx, warpsize())
+    j_0_tile = j_0_block + (warpidx - 1) * warpsize()
+    i = i_0_tile + laneid()
 
     forces_shmem = @cuStaticSharedMem(T, (3, 1024))
     @inbounds for dim in 1:3
         forces_shmem[dim, tidx] = zero(T)
     end
 
-    # The current tile that the warp is calculating
-    i_0_tile = i_0_block
-    j_0_tile = j_0_block + (warpidx - 1) * WARPSIZE
-    i = i_0_tile + lane
-
-    if i_0_tile + WARPSIZE > n_atoms || j_0_tile + WARPSIZE > n_atoms
+    if i_0_tile + warpsize() > n_atoms || j_0_tile + warpsize() > n_atoms
         @inbounds if i <= n_atoms
-            njs = min(WARPSIZE, n_atoms - j_0_tile)
+            njs = min(warpsize(), n_atoms - j_0_tile)
             atom_i, coord_i = atoms[i], coords[i]
             for del_j in 1:njs
                 j = j_0_tile + del_j
@@ -137,10 +143,10 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
             end
         end
     else
-        j = j_0_tile + lane
-        tilesteps = WARPSIZE
+        j = j_0_tile + laneid()
+        tilesteps = warpsize()
         if i_0_tile == j_0_tile  # To not compute i-i forces
-            j = j_0_tile + lane % WARPSIZE + 1
+            j = j_0_tile + laneid() % warpsize() + 1
             tilesteps -= 1
         end
 
@@ -153,7 +159,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
             for dim in 1:D
                 forces_shmem[dim, tidx] += -ustrip(f[dim])
             end
-            @shfl_multiple_sync(FULL_MASK, lane + 1, WARPSIZE, j, coord_j)
+            @shfl_multiple_sync(FULL_MASK, laneid() + 1, warpsize(), j, coord_j)
         end
 
         @inbounds for dim in 1:D
