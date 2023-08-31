@@ -49,56 +49,129 @@ function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundar
         kernel(fs_mat, coords, atoms, boundary, pairwise_inters, Val(D), Val(force_units);
             threads=nthreads, blocks=(n_blocks_i, n_blocks_j))
     else
-        n_threads_gpu, n_blocks_j = cuda_threads_blocks_pairwise(max_per_atom)
-        n_blocks_i = cld(length(atoms), WARPSIZE)
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=(n_blocks_i, n_blocks_j) pairwise_force_kernel_nl!(
+        threads_basic = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "$MAX_THREADS_PER_BLOCK"))
+        nthreads = min(max_per_atom, threads_basic)
+        nblocks = length(atoms)
+        CUDA.@sync @cuda threads=nthreads blocks=nblocks pairwise_force_kernel_nl!(
                 fs_mat, coords, atoms, boundary, pairwise_inters, nbs, Val(D), Val(force_units))
     end
     return fs_mat
 end
 
-function pairwise_force_kernel_nl!(forces::AbstractArray{T}, coords_var, atoms_var, boundary, inters,
-                                   neighbors, ::Val{D}, ::Val{F}) where {T, D, F}
+# function pairwise_force_kernel_nl!(forces::AbstractArray{T}, coords_var, atoms_var, boundary, inters,
+#                                    neighbors, ::Val{D}, ::Val{F}) where {T, D, F}
+#     coords = CUDA.Const(coords_var)
+#     atoms = CUDA.Const(atoms_var)
+#     n_atoms = length(atoms)
+
+#     tidx = threadIdx().x
+#     threads = blockDim().x
+#     i_0_block = (blockIdx().x - 1) * warpsize()
+#     j_0_block = (blockIdx().y - 1) * threads
+#     warpidx = cld(tidx, warpsize())
+
+#     forces_shmem = @cuStaticSharedMem(T, (3, 1024))
+#     @inbounds begin
+#         forces_shmem[1, tidx] = zero(T)
+#         forces_shmem[2, tidx] = zero(T)
+#         forces_shmem[3, tidx] = zero(T)
+#     end
+
+#     # The current tile that the warp is calculating
+#     i_0_tile = i_0_block
+#     j_0_tile = j_0_block + (warpidx - 1) * warpsize()
+#     i = i_0_tile + laneid()
+
+#     if i <= n_atoms
+#         iptr = neighbors.colPtr[i]
+#         nnzi = neighbors.colPtr[i+1] - neighbors.colPtr[i]
+#         njs_tile = min(warpsize(), nnzi - j_0_tile)
+#         atom_i, coord_i = atoms[i], coords[i]
+
+#         for del_j in 1:njs_tile
+#             j = neighbors.rowVal[iptr + j_0_tile + del_j - 1]
+#             special = neighbors.nzVal[iptr + j_0_tile + del_j - 1]
+#             atom_j, coord_j = atoms[j], coords[j]
+#             f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, special, Val(F))
+#             for dim in 1:D
+#                 forces_shmem[dim, tidx] += -ustrip(f[dim])
+#             end
+#         end
+
+#         for dim in 1:D
+#             Atomix.@atomic :monotonic forces[dim, i] += forces_shmem[dim, tidx]
+#         end
+#     end
+
+#     return nothing
+# end
+
+function pairwise_force_kernel_nl!(forces::AbstractArray{T}, coords_var::AbstractArray{C}, atoms_var::AbstractArray{A},
+                                   boundary, inters, neighbors, ::Val{D}, ::Val{F}) where {T, C, A, D, F}
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
-    n_atoms = length(atoms)
 
+    i = blockIdx().x
     tidx = threadIdx().x
     threads = blockDim().x
-    i_0_block = (blockIdx().x - 1) * warpsize()
-    j_0_block = (blockIdx().y - 1) * threads
-    warpidx = cld(tidx, warpsize())
 
     forces_shmem = @cuStaticSharedMem(T, (3, 1024))
+    atoms_shmem = @cuStaticSharedMem(A, (1025,))
     @inbounds begin
         forces_shmem[1, tidx] = zero(T)
         forces_shmem[2, tidx] = zero(T)
         forces_shmem[3, tidx] = zero(T)
     end
 
-    # The current tile that the warp is calculating
-    i_0_tile = i_0_block
-    j_0_tile = j_0_block + (warpidx - 1) * warpsize()
-    i = i_0_tile + laneid()
+    iptr = neighbors.colPtr[i]
+    nnzi = neighbors.colPtr[i+1] - neighbors.colPtr[i]
+    n_passes = cld(nnzi, threads)
 
-    if i <= n_atoms
-        iptr = neighbors.colPtr[i]
-        nnzi = neighbors.colPtr[i+1] - neighbors.colPtr[i]
-        njs_tile = min(warpsize(), nnzi - j_0_tile)
-        atom_i, coord_i = atoms[i], coords[i]
+    atoms_shmem[1] = atoms[i]
+    atom_i = atoms_shmem[1]
+    coord_i = coords[i]
 
-        for del_j in 1:njs_tile
-            j = neighbors.rowVal[iptr + j_0_tile + del_j - 1]
-            special = neighbors.nzVal[iptr + j_0_tile + del_j - 1]
-            atom_j, coord_j = atoms[j], coords[j]
+    for ipass in 1:n_passes
+        jptr = (ipass - 1) * threads + tidx
+        if jptr <= nnzi
+            j = neighbors.rowVal[iptr + jptr - 1]
+            atoms_shmem[tidx + 1] = atoms[j]
+
+            coord_j = coords[j]
+            atom_j = atoms_shmem[tidx + 1]
+
+            special = neighbors.nzVal[iptr + jptr - 1]
             f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, special, Val(F))
-            for dim in 1:D
-                forces_shmem[dim, tidx] += -ustrip(f[dim])
+            @inbounds for dim in 1:D
+                forces_shmem[dim, tidx] = -ustrip(f[dim])
             end
         end
+    end
+    
+    # for jptr in tidx:threads:nnzi
+    #     j = neighbors.rowVal[iptr + jptr - 1]
+    #     special = neighbors.nzVal[iptr + jptr - 1]
+    #     f = sum_pairwise_forces(inters, coord_i, coords[j], atom_i, atoms[j], boundary, special, Val(F))
+    #     @inbounds for dim in 1:D
+    #         forces_shmem[dim, tidx] = -ustrip(f[dim])
+    #     end
+    # end
 
-        for dim in 1:D
-            Atomix.@atomic :monotonic forces[dim, i] += forces_shmem[dim, tidx]
+    d = Int32(1)
+    while d < threads
+        sync_threads()
+        idx = 2 * d * (tidx - 1) + 1
+        if idx <= threads && idx + d <= threads
+            @inbounds for dim in 1:D
+                forces_shmem[dim, idx] += forces_shmem[dim, idx+d]
+            end
+        end
+        d *= Int32(2)
+    end
+
+    if tidx == 1
+        @inbounds for dim in 1:D
+            forces[dim, i] = forces_shmem[dim, 1]
         end
     end
 

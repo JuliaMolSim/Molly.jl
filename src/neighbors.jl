@@ -147,7 +147,7 @@ function find_neighbors(sys::System{D, true},
     nzVal = nf.special[pairs]
     rowVal, colVal = cu(getindex_i32.(pairs, 1)), cu(getindex_i32.(pairs, 2))
     colPtr = CUDA.zeros(Int32, n_atoms + 1)
-    colPtr[1] = 1
+    CUDA.@allowscalar colPtr[1] = 1
 
     count_kernel = @cuda launch=false count_occurances_kernel!(colPtr, cu(colVal))
     config = launch_configuration(count_kernel.fun)
