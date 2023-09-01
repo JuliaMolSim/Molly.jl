@@ -1,5 +1,19 @@
 # Molly.jl release notes
 
+## v0.18.0 - Sep 2023
+
+### Breaking changes
+- Molar units are made more consistent throughout the package. If force and energy units are molar then the atomic masses should have a molar dimension, e.g. `u"g/mol"` rather than `u"u"`. The default Boltzmann constant `k` is chosen based on the `energy_units` given to a `System`.
+
+### New features
+- A constructor for `System` is added to convert from an AtomsBase.jl `AbstractSystem`.
+- During `System` setup, checks are made for a consistent unit system and appropriate errors are thrown.
+- Calculation of the hydrodynamic radius is added as `hydrodynamic_radius`.
+- The `charges` function is added to give the partial charges of the atoms in a system.
+
+### Bug fixes
+- Issues with AtomsBase.jl integration are fixed.
+
 ## v0.17.0 - Jul 2023
 
 ### Breaking changes
