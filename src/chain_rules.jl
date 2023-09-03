@@ -754,7 +754,7 @@ function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
                                    d_born_forces_mod_ustrip, coords, d_coords, boundary,
                                    dist_cutoff, factor_solute::T, grad_factor_solute,
                                    factor_solvent::T, grad_factor_solvent, kappa::T, grad_kappa,
-                                   Bs, d_Bs, charges, d_charges, val_dims, val_force_units,
+                                   Bs, d_Bs, chs, d_chs, val_dims, val_force_units,
                                    ::Val{N}) where {T, N}
     shared_grad_factor_solute  = CuStaticSharedArray(T, N)
     shared_grad_factor_solvent = CuStaticSharedArray(T, N)
@@ -774,7 +774,7 @@ function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
         Active(factor_solvent),
         Active(kappa),
         Duplicated(Bs, d_Bs),
-        Duplicated(charges, d_charges),
+        Duplicated(chs, d_chs),
         Const(val_dims),
         Const(val_force_units),
     )[1]
@@ -815,13 +815,13 @@ end
 
 function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), coords::AbstractArray{SVector{D, C}},
                               boundary, dist_cutoff, factor_solute, factor_solvent, kappa, Bs,
-                              charges::AbstractArray{T}, force_units) where {D, C, T}
+                              chs::AbstractArray{T}, force_units) where {D, C, T}
     if force_units != NoUnits
         error("taking gradients through force calculation is not compatible with units, " *
               "system force units are $force_units")
     end
     Y = gbsa_force_1_gpu(coords, boundary, dist_cutoff, factor_solute, factor_solvent, kappa,
-                         Bs, charges, force_units)
+                         Bs, chs, force_units)
 
     function gbsa_force_1_gpu_pullback(d_args)
         n_atoms = length(coords)
@@ -834,21 +834,21 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), coords::AbstractArray{
         grad_factor_solvent = CUDA.zeros(T, 1)
         grad_kappa          = CUDA.zeros(T, 1)
         d_Bs = zero(Bs)
-        d_charges = zero(charges)
+        d_chs = zero(chs)
         n_inters = n_atoms_to_n_pairs(n_atoms) + n_atoms
         n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
 
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_gbsa_force_1_kernel!(
             fs_mat, d_fs_mat, born_forces_mod_ustrip, d_born_forces_mod_ustrip, coords,
             d_coords, boundary, dist_cutoff, factor_solute, grad_factor_solute,
-            factor_solvent, grad_factor_solvent, kappa, grad_kappa, Bs, d_Bs, charges,
-            d_charges, Val(D), Val(force_units), Val(n_threads_gpu))
+            factor_solvent, grad_factor_solvent, kappa, grad_kappa, Bs, d_Bs, chs,
+            d_chs, Val(D), Val(force_units), Val(n_threads_gpu))
 
         d_factor_solute  = Array(grad_factor_solute )[1]
         d_factor_solvent = Array(grad_factor_solvent)[1]
         d_kappa          = Array(grad_kappa         )[1]
         return NoTangent(), d_coords, NoTangent(), NoTangent(), d_factor_solute,
-               d_factor_solvent, d_kappa, d_Bs, d_charges, NoTangent()
+               d_factor_solvent, d_kappa, d_Bs, d_chs, NoTangent()
     end
 
     return Y, gbsa_force_1_gpu_pullback

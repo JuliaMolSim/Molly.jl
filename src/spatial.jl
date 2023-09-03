@@ -246,6 +246,8 @@ box_center(b::TriclinicBoundary) = sum(b.basis_vectors) / 2
 
 Scale the sides of a bounding box by a scaling factor.
 
+The scaling factor can be a single number or a `SVector` of the appropriate number
+of dimensions corresponding to the scaling factor for each axis.
 For a 3D bounding box the volume scales as the cube of the scaling factor.
 """
 scale_boundary(b::CubicBoundary, scale) = CubicBoundary(b.side_lengths .* scale)
@@ -743,11 +745,16 @@ function molecule_centers(coords::CuArray, boundary, topology)
     return CuArray(molecule_centers(Array(coords), boundary, topology))
 end
 
+# Allows scaling multiple vectors at once by broadcasting this function
+scale_vec(v, s) = v .* s
+
 """
     scale_coords!(sys, scale_factor; ignore_molecules=false)
 
 Scale the coordinates and bounding box of a system by a scaling factor.
 
+The scaling factor can be a single number or a `SVector` of the appropriate number
+of dimensions corresponding to the scaling factor for each axis.
 Velocities are not scaled.
 If the topology of the system is set then atoms in the same molecule will be
 moved by the same amount according to the center of coordinates of the molecule.
@@ -759,7 +766,7 @@ Not currently compatible with automatic differentiation using Zygote.
 function scale_coords!(sys, scale_factor; ignore_molecules=false)
     if ignore_molecules || isnothing(sys.topology)
         sys.boundary = scale_boundary(sys.boundary, scale_factor)
-        sys.coords = sys.coords .* scale_factor
+        sys.coords = scale_vec.(sys.coords, Ref(scale_factor))
     elseif sys.boundary isa TriclinicBoundary
         error("scaling coordinates by molecule is not compatible with a TriclinicBoundary")
     else
@@ -779,7 +786,7 @@ function scale_coords!(sys, scale_factor; ignore_molecules=false)
         end
         # Move all atoms in a molecule by the same amount according to the molecule center
         # Then move the atoms back to the molecule center and wrap in the scaled boundary
-        shift_vecs = mol_centers .* (scale_factor - 1)
+        shift_vecs = scale_vec.(mol_centers, Ref(scale_factor .- 1))
         sys.boundary = scale_boundary(sys.boundary, scale_factor)
         boundary_nounits = ustrip(sys.boundary)
         for i in eachindex(sys)

@@ -1,6 +1,7 @@
 # CUDA.jl kernels
 const WARPSIZE = UInt32(32)
 const MAX_THREADS_PER_BLOCK = CUDA.attribute(device(), CUDA.DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK)
+const MAX_THREADS_PER_BLOCK = CUDA.attribute(device(), CUDA.DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK)
 
 macro shfl_multiple_sync(mask, target, width, vars...)
     all_lines = map(vars) do v
@@ -31,9 +32,10 @@ function cuda_threads_blocks_specific(n_inters)
 end
 
 function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundary,
-                            pairwise_inters, nbs, force_units, ::Val{T}) where {D, C, T}
+                            pairwise_inters, nbs, force_units, ::Val{T};
+                            max_per_atom=length(atoms)) where {D, C, T}
     fs_mat = CUDA.zeros(T, D, length(atoms))
-
+    
     if typeof(nbs) == NoNeighborList
         kernel = @cuda launch=false pairwise_force_kernel_nonl!(
             fs_mat, coords, atoms, boundary, pairwise_inters, Val(D), Val(force_units))
@@ -42,6 +44,9 @@ function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundar
         nthreads = min(length(atoms), threads_basic, conf.threads)
         nthreads = cld(nthreads, WARPSIZE) * WARPSIZE
         n_blocks_i = cld(length(atoms), WARPSIZE)
+        n_blocks_j = cld(length(atoms), nthreads)
+        kernel(fs_mat, coords, atoms, boundary, pairwise_inters, Val(D), Val(force_units);
+            threads=nthreads, blocks=(n_blocks_i, n_blocks_j))
         n_blocks_j = cld(length(atoms), nthreads)
         kernel(fs_mat, coords, atoms, boundary, pairwise_inters, Val(D), Val(force_units);
             threads=nthreads, blocks=(n_blocks_i, n_blocks_j))
@@ -57,30 +62,87 @@ function pairwise_force_kernel_nl!(forces, coords_var, atoms_var, boundary, inte
                                 neighbors_var, ::Val{D}, ::Val{F}) where {D, F}
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
-    neighbors = CUDA.Const(neighbors_var)
 
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    i = blockIdx().x
+    tidx = threadIdx().x
+    threads = blockDim().x
 
-    @inbounds if inter_i <= length(neighbors)
-        i, j, special = neighbors[inter_i]
-        coord_i, coord_j = coords[i], coords[j]
-        f = sum_pairwise_forces(inters, coord_i, coord_j, atoms[i], atoms[j], boundary, special, F)
-        for dim in 1:D
-            fval = ustrip(f[dim])
-            Atomix.@atomic :monotonic forces[dim, i] += -fval
-            Atomix.@atomic :monotonic forces[dim, j] +=  fval
+    forces_shmem = @cuStaticSharedMem(T, (3, 1024))
+    atoms_shmem = @cuStaticSharedMem(A, (1025,))
+    @inbounds begin
+        forces_shmem[1, tidx] = zero(T)
+        forces_shmem[2, tidx] = zero(T)
+        forces_shmem[3, tidx] = zero(T)
+    end
+
+    iptr = neighbors.colPtr[i]
+    nnzi = neighbors.colPtr[i+1] - neighbors.colPtr[i]
+    n_passes = cld(nnzi, threads)
+
+    atoms_shmem[1] = atoms[i]
+    atom_i = atoms_shmem[1]
+    coord_i = coords[i]
+
+    for ipass in 1:n_passes
+        jptr = (ipass - 1) * threads + tidx
+        if jptr <= nnzi
+            j = neighbors.rowVal[iptr + jptr - 1]
+            atoms_shmem[tidx + 1] = atoms[j]
+
+            coord_j = coords[j]
+            atom_j = atoms_shmem[tidx + 1]
+
+            special = neighbors.nzVal[iptr + jptr - 1]
+            f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, special, Val(F))
+            @inbounds for dim in 1:D
+                forces_shmem[dim, tidx] = -ustrip(f[dim])
+            end
         end
     end
+    
+    # for jptr in tidx:threads:nnzi
+    #     j = neighbors.rowVal[iptr + jptr - 1]
+    #     special = neighbors.nzVal[iptr + jptr - 1]
+    #     f = sum_pairwise_forces(inters, coord_i, coords[j], atom_i, atoms[j], boundary, special, Val(F))
+    #     @inbounds for dim in 1:D
+    #         forces_shmem[dim, tidx] = -ustrip(f[dim])
+    #     end
+    # end
+
+    d = Int32(1)
+    while d < threads
+        sync_threads()
+        idx = 2 * d * (tidx - 1) + 1
+        if idx <= threads && idx + d <= threads
+            @inbounds for dim in 1:D
+                forces_shmem[dim, idx] += forces_shmem[dim, idx+d]
+            end
+        end
+        d *= Int32(2)
+    end
+
+    if tidx == 1
+        @inbounds for dim in 1:D
+            forces[dim, i] = forces_shmem[dim, 1]
+        end
+    end
+
     return nothing
 end
 
 function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms_var, boundary, inters,
+                                     ::Val{D}, ::Val{F}) where {T, D, F}
                                      ::Val{D}, ::Val{F}) where {T, D, F}
     coords = CUDA.Const(coords_var)
     atoms = CUDA.Const(atoms_var)
     n_atoms = length(atoms)
 
     tidx = threadIdx().x
+    i_0_tile = (blockIdx().x - 1) * warpsize()
+    j_0_block = (blockIdx().y - 1) * blockDim().x
+    warpidx = cld(tidx, warpsize())
+    j_0_tile = j_0_block + (warpidx - 1) * warpsize()
+    i = i_0_tile + laneid()
     i_0_tile = (blockIdx().x - 1) * warpsize()
     j_0_block = (blockIdx().y - 1) * blockDim().x
     warpidx = cld(tidx, warpsize())
@@ -93,13 +155,16 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     end
 
     if i_0_tile + warpsize() > n_atoms || j_0_tile + warpsize() > n_atoms
+    if i_0_tile + warpsize() > n_atoms || j_0_tile + warpsize() > n_atoms
         @inbounds if i <= n_atoms
+            njs = min(warpsize(), n_atoms - j_0_tile)
             njs = min(warpsize(), n_atoms - j_0_tile)
             atom_i, coord_i = atoms[i], coords[i]
             for del_j in 1:njs
                 j = j_0_tile + del_j
                 if i != j
                     atom_j, coord_j = atoms[j], coords[j]
+                    f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, Val(F))
                     f = sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j, boundary, false, Val(F))
                     for dim in 1:D
                         forces_shmem[dim, tidx] += -ustrip(f[dim])
@@ -114,7 +179,10 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     else
         j = j_0_tile + laneid()
         tilesteps = warpsize()
+        j = j_0_tile + laneid()
+        tilesteps = warpsize()
         if i_0_tile == j_0_tile  # To not compute i-i forces
+            j = j_0_tile + laneid() % warpsize() + 1
             j = j_0_tile + laneid() % warpsize() + 1
             tilesteps -= 1
         end
@@ -129,6 +197,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
                 forces_shmem[dim, tidx] += -ustrip(f[dim])
             end
             @shfl_multiple_sync(FULL_MASK, laneid() + 1, warpsize(), j, coord_j)
+            @shfl_multiple_sync(FULL_MASK, laneid() + 1, warpsize(), j, coord_j)
         end
 
         @inbounds for dim in 1:D
@@ -141,12 +210,20 @@ end
 
 @inline function sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j,
                                     boundary, special, ::Val{F}) where F
+@inline function sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j,
+                                    boundary, special, ::Val{F}) where F
     dr = vector(coord_i, coord_j, boundary)
+    f_tuple = ntuple(length(inters)) do inter_type_i
+        force_gpu(inters[inter_type_i], dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
     f_tuple = ntuple(length(inters)) do inter_type_i
         force_gpu(inters[inter_type_i], dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
     end
     f = sum(f_tuple)
+    f = sum(f_tuple)
     if unit(f[1]) != F
+        # This triggers an error but it isn't printed
+        # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
+        #   for how to throw a more meaningful error
         # This triggers an error but it isn't printed
         # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
         #   for how to throw a more meaningful error

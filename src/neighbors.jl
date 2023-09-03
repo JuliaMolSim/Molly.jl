@@ -101,6 +101,7 @@ function distance_neighbor_finder_kernel!(neighbors, coords_var, eligible_var,
             dr = vector(coords[i], coords[j], boundary)
             r2 = sum(abs2, dr)
             if r2 <= sq_dist_neighbors
+                neighbors[i, j] = true
                 neighbors[j, i] = true
             end
         end
@@ -109,6 +110,18 @@ function distance_neighbor_finder_kernel!(neighbors, coords_var, eligible_var,
 end
 
 lists_to_tuple_list(i, j, w) = (Int32(i), Int32(j), w)
+getindex_i32(x, i) = Int32(getindex(x, i))
+
+function count_occurances_kernel!(occs::AbstractArray{T},
+                                  vals::AbstractArray{F}) where {T, F}
+    i_0 = threadIdx().x + (blockIdx().x - 1) * blockDim().x
+    delta = blockDim().x * gridDim().x
+    @inbounds for i in i_0:delta:length(vals)
+        v = vals[i]
+        CUDA.@atomic occs[v+1] += Int32(1)
+    end
+    return nothing
+end
 
 function find_neighbors(sys::System{D, true},
                         nf::DistanceNeighborFinder,
@@ -128,11 +141,24 @@ function find_neighbors(sys::System{D, true},
         nf.neighbors, sys.coords, nf.eligible, sys.boundary, nf.dist_cutoff^2,
     )
 
-    pairs = findall(nf.neighbors)
-    nbsi, nbsj = getindex.(pairs, 1), getindex.(pairs, 2)
-    special = nf.special[pairs]
-    nl = lists_to_tuple_list.(nbsi, nbsj, special)
-    return NeighborList(length(nl), nl)
+    n_atoms = Int32(length(sys))
+    pairs = cu(findall(nf.neighbors))
+    sort!(pairs, by=(x -> x[2])) # already sorted but just to make sure
+    nzVal = nf.special[pairs]
+    rowVal, colVal = cu(getindex_i32.(pairs, 1)), cu(getindex_i32.(pairs, 2))
+    colPtr = CUDA.zeros(Int32, n_atoms + 1)
+    CUDA.@allowscalar colPtr[1] = 1
+
+    count_kernel = @cuda launch=false count_occurances_kernel!(colPtr, cu(colVal))
+    config = launch_configuration(count_kernel.fun)
+    count_kernel(colPtr, colVal; threads=config.threads, blocks=config.blocks)
+    maxnjs = maximum(colPtr)
+    cumsum!(colPtr, colPtr)
+
+    sparse_csc = CUSPARSE.CuSparseMatrixCSC{Bool, Int32}(
+                    colPtr, rowVal,
+                    nzVal, (n_atoms, n_atoms))
+    return NeighborListCSC(sparse_csc, maxnjs, colPtr[end] - 1)
 end
 
 """

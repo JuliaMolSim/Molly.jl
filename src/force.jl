@@ -205,8 +205,8 @@ end
         fs_chunks = [zero(fs) for _ in 1:n_threads]
 
         if length(pairwise_inters_nonl) > 0
-            Threads.@threads for thread_id in 1:n_threads
-                for i in thread_id:n_threads:n_atoms
+            Threads.@threads for chunk_i in 1:n_threads
+                for i in chunk_i:n_threads:n_atoms
                     for j in (i + 1):n_atoms
                         dr = vector(coords[i], coords[j], boundary)
                         f = force(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
@@ -216,8 +216,8 @@ end
                         end
                         check_force_units(f, force_units)
                         f_ustrip = ustrip.(f)
-                        fs_chunks[thread_id][i] -= f_ustrip
-                        fs_chunks[thread_id][j] += f_ustrip
+                        fs_chunks[chunk_i][i] -= f_ustrip
+                        fs_chunks[chunk_i][j] += f_ustrip
                     end
                 end
             end
@@ -227,8 +227,8 @@ end
             if isnothing(neighbors)
                 error("an interaction uses the neighbor list but neighbors is nothing")
             end
-            Threads.@threads for thread_id in 1:n_threads
-                for ni in thread_id:n_threads:length(neighbors)
+            Threads.@threads for chunk_i in 1:n_threads
+                for ni in chunk_i:n_threads:length(neighbors)
                     i, j, special = neighbors[ni]
                     dr = vector(coords[i], coords[j], boundary)
                     f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
@@ -239,8 +239,8 @@ end
                     end
                     check_force_units(f, force_units)
                     f_ustrip = ustrip.(f)
-                    fs_chunks[thread_id][i] -= f_ustrip
-                    fs_chunks[thread_id][j] += f_ustrip
+                    fs_chunks[chunk_i][i] -= f_ustrip
+                    fs_chunks[chunk_i][j] += f_ustrip
                 end
             end
         end
@@ -352,9 +352,10 @@ function forces(sys::System{D, true, T}, neighbors=nothing;
             error("an interaction uses the neighbor list but neighbors is nothing")
         end
         if length(neighbors) > 0
-            nbs = @view neighbors.list[1:neighbors.n]
-            fs_mat += pairwise_force_gpu(sys.coords, sys.atoms, sys.boundary, pairwise_inters_nl,
-                                         nbs, sys.force_units, val_ft)
+            nbs = neighbors.list
+            fs_mat += pairwise_force_gpu(sys.coords, sys.atoms, sys.boundary,
+                                         pairwise_inters_nl, nbs, sys.force_units,
+                                         val_ft; max_per_atom=max_per_column(neighbors))
         end
     end
 

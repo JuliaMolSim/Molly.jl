@@ -419,3 +419,17 @@ end
         @test all(nf1 .== nf2)
     end
 end
+
+@testset "AtomsBase conversion" begin
+    ab_sys_1 = make_test_system().system
+    # Update values to be something that works with Molly
+    ab_sys_2 = AbstractSystem(
+        ab_sys_1; 
+        boundary_conditions = [Periodic(), Periodic(), Periodic()],
+        bounding_box = [[1.54732, 0.0      , 0.0      ],
+                        [0.0    , 1.4654985, 0.0      ],
+                        [0.0    , 0.0      , 1.7928950]]u"Å",
+    )
+    molly_sys = System(ab_sys_2)
+    test_approx_eq(ab_sys_2, molly_sys; common_only=true)
+end
