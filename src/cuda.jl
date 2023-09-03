@@ -74,6 +74,51 @@ function pairwise_force_kernel_nl!(forces, coords_var, atoms_var, boundary, inte
     return nothing
 end
 
+"""
+**The No-neighborlist pairwise force summation kernel**: This kernel calculates all the pairwise forces in the system of
+`n_atoms` atoms, this is done by dividing the complete matrix of `n_atoms`×`n_atoms` interactions into small tiles. Most 
+of the tiles are of size `WARPSIZE`×`WARPSIZE`, but when `n_atoms` is not divisible by `WARPSIZE`, some tiles on the 
+edges are of a different size are dealt as a separate case. The force summation for the tiles are done in the following 
+way:
+1. `WARPSIZE`×`WARPSIZE` tiles: For such tiles each row is assiged to a different tread in a warp which calculates the 
+forces for the entire row in `WARPSIZE` steps (or `WARPSIZE - 1` steps for tiles on the diagonal of `n_atoms`×`n_atoms`
+matrix of interactions). This is done such that some data can be shuffled from `i+1`'th thread to `i`'th thread in each 
+subsequent iteration of the force calculation in a row. If `a, b, ...` are different atoms and `1, 2, ...` are order in 
+which each thread calculates the interatomic forces, then we can represent this scenario as (considering `WARPSIZE=8`):
+    ```
+
+    × | i j k l m n o p
+    --------------------
+    a | 1 2 3 4 5 6 7 8
+    b | 8 1 2 3 4 5 6 7
+    c | 7 8 1 2 3 4 5 6
+    d | 6 7 8 1 2 3 4 5
+    e | 5 6 7 8 1 2 3 4
+    f | 4 5 6 7 8 1 2 3
+    g | 3 4 5 6 7 8 1 2
+    h | 2 3 4 5 6 7 8 1
+
+
+    ```
+
+2. Edge tiles when `n_atoms` is not divisible by warpsize: In such cases, it is not possible to shuffle data generally
+so there is no need to order calculations for each thread diagonally and it is also a bit more complicated to do so.
+That's why the calculations are done in the following order:
+    ```
+
+    × | i j k l m n  
+    ----------------
+    a | 1 2 3 4 5 6
+    b | 1 2 3 4 5 6
+    c | 1 2 3 4 5 6
+    d | 1 2 3 4 5 6
+    e | 1 2 3 4 5 6
+    f | 1 2 3 4 5 6
+    g | 1 2 3 4 5 6
+    h | 1 2 3 4 5 6
+
+    ```
+"""
 function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms_var, boundary, inters,
                                      ::Val{D}, ::Val{F}) where {T, D, F}
     coords = CUDA.Const(coords_var)

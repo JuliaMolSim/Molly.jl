@@ -2,7 +2,6 @@
 # See OpenMM documentation and Gromacs manual for other aspects of forces
 
 export
-    ustrip_vec,
     accelerations,
     force,
     SpecificForce1Atoms,
