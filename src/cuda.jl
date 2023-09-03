@@ -63,8 +63,7 @@ function pairwise_force_kernel_nl!(forces, coords_var, atoms_var, boundary, inte
 
     @inbounds if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
-        coord_i, coord_j = coords[i], coords[j]
-        f = sum_pairwise_forces(inters, coord_i, coord_j, atoms[i], atoms[j], boundary, special, F)
+        f = sum_pairwise_forces(inters, coords[i], coords[j], atoms[i], atoms[j], boundary, special, Val(F))
         for dim in 1:D
             fval = ustrip(f[dim])
             Atomix.@atomic :monotonic forces[dim, i] += -fval
