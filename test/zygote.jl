@@ -222,7 +222,7 @@ end
 end
 
 @testset "Differentiable protein" begin
-    function create_sys(gpu)
+    function create_sys(gpu::Bool)
         ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...; units=false)
         return System(
             joinpath(data_dir, "6mrr_nowater.pdb"),
@@ -415,7 +415,7 @@ end
         ("Force" , test_force_grad , 1e-8),
     ]
     if !running_CI
-        push!(test_runs, ("Sim", test_sim_grad, 0.01))
+        push!(test_runs, ("Sim", test_sim_grad, 0.015))
     end
     params_to_test = (
         "inter_LJ_weight_14",

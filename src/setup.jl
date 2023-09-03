@@ -210,7 +210,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     at_class = atom_type["class"]
                     element = haskey(atom_type, "element") ? atom_type["element"] : "?"
                     ch = missing # Updated later or defined in residue
-                    atom_mass = units ? parse(T, atom_type["mass"])u"u" : parse(T, atom_type["mass"])
+                    atom_mass = units ? parse(T, atom_type["mass"])u"g/mol" : parse(T, atom_type["mass"])
                     σ = units ? T(-1u"nm") : T(-1) # Updated later
                     ϵ = units ? T(-1u"kJ * mol^-1") : T(-1) # Updated later
                     atom_types[at_type] = AtomType{T, typeof(atom_mass), typeof(σ), typeof(ϵ)}(
@@ -354,7 +354,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     end
 
     if units
-        M = typeof(T(1u"u"))
+        M = typeof(T(1u"g/mol"))
         D = typeof(T(1u"nm"))
         E = typeof(T(1u"kJ * mol^-1"))
         K = typeof(T(1u"kJ * mol^-1 * nm^-2"))
@@ -939,6 +939,7 @@ function System(coord_file::AbstractString,
         general_inters = ()
     end
 
+    k = units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k)
     return System(
         atoms=atoms,
         coords=coords,
@@ -953,6 +954,7 @@ function System(coord_file::AbstractString,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
         energy_units=units ? u"kJ * mol^-1" : NoUnits,
+        k=k,
     )
 end
 
@@ -1039,7 +1041,7 @@ function System(T::Type,
             # Take the first version of each atom type only
             if !haskey(atomtypes, atomname)
                 if units
-                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4])u"u",
+                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4])u"g/mol",
                             σ=parse(T, c[7])u"nm", ϵ=parse(T, c[8])u"kJ * mol^-1")
                 else
                     atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4]),
@@ -1050,7 +1052,7 @@ function System(T::Type,
             attype = atomnames[c[2]]
             ch = parse(T, c[7])
             if units
-                atom_mass = parse(T, c[8])u"u"
+                atom_mass = parse(T, c[8])u"g/mol"
             else
                 atom_mass = parse(T, c[8])
             end
@@ -1304,6 +1306,7 @@ function System(T::Type,
         vels = velocities
     end
 
+    k = units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k)
     return System(
         atoms=atoms,
         coords=coords,
@@ -1317,6 +1320,7 @@ function System(T::Type,
         loggers=loggers,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
         energy_units=units ? u"kJ * mol^-1" : NoUnits,
+        k=k,
     )
 end
 
@@ -1338,7 +1342,7 @@ Determines whether an [`Atom`](@ref) is a heavy atom, i.e. any element other tha
 """
 function is_heavy_atom(at, at_data)
     if isnothing(at_data) || at_data.element in ("?", "")
-        return mass(at) > 1.01u"u"
+        return mass(at) > 1.01u"g/mol"
     else
         return !(at_data.element in ("H", "D"))
     end

@@ -26,7 +26,7 @@
         SVector(1.4, 1.6, 1.0),
     ]
     sys = System(
-        atoms=[Atom(σ=0.4 / (2 ^ (1 / 6)), ϵ=1.0) for i in 1:3],
+        atoms=[Atom(σ=0.4 / (2 ^ (1 / 6)), ϵ=1.0, mass=1.0) for i in 1:3],
         coords=coords,
         boundary=CubicBoundary(5.0),
         pairwise_inters=(LennardJones(force_units=NoUnits, energy_units=NoUnits),),

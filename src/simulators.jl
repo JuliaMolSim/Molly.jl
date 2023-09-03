@@ -139,14 +139,14 @@ function simulate!(sys,
 
     for step_n in 1:n_steps
         old_coords = copy(sys.coords)
-        sys.coords += sys.velocities .* sim.dt .+ (accel_remove_mol.(accels_t) .* sim.dt ^ 2) ./ 2
+        sys.coords += sys.velocities .* sim.dt .+ (accels_t .* sim.dt ^ 2) ./ 2
 
         apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities += accel_remove_mol.(accels_t .+ accels_t_dt) .* sim.dt / 2
+        sys.velocities += (accels_t .+ accels_t_dt) .* sim.dt / 2
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -204,7 +204,7 @@ function simulate!(sys,
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities += accel_remove_mol.(accels_t) .* sim.dt
+        sys.velocities += accels_t .* sim.dt
 
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt
@@ -262,11 +262,10 @@ function simulate!(sys,
         coords_copy = sys.coords
         if step_n == 1
             # Use the velocities at the first step since there is only one set of coordinates
-            sys.coords += sys.velocities .* sim.dt .+
-                                        (accel_remove_mol.(accels_t) .* sim.dt ^ 2) ./ 2
+            sys.coords += sys.velocities .* sim.dt .+ (accels_t .* sim.dt ^ 2) ./ 2
         else
             sys.coords += vector.(coords_last, sys.coords, (sys.boundary,)) .+
-                                        accel_remove_mol.(accels_t) .* sim.dt ^ 2
+                          accels_t .* sim.dt ^ 2
         end
         
         apply_constraints!(sys, coords_copy, sim.dt)
@@ -334,7 +333,7 @@ function simulate!(sys,
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities += accel_remove_mol.(accels_t) .* sim.dt
+        sys.velocities += accels_t .* sim.dt
 
         old_coords = copy(sys.coords)
         sys.coords += sys.velocities .* sim.dt / 2
@@ -483,7 +482,7 @@ function B_step!(sys, dt_eff, acceleration_vector, compute_forces::Bool,
     if compute_forces
         acceleration_vector .= accelerations(sys, neighbors; n_threads=n_threads)
     end
-    sys.velocities += dt_eff * accel_remove_mol.(acceleration_vector)
+    sys.velocities += dt_eff * acceleration_vector
     return sys
 end
 
@@ -530,7 +529,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
     df = 3 * length(sys) - 3
 
     for step_n in 1:n_steps
-        v_half = sys.velocities .+ (accel_remove_mol.(accels_t) .- (sys.velocities .* zeta)) .* (sim.dt / 2)
+        v_half = sys.velocities .+ (accels_t .- (sys.velocities .* zeta)) .* (sim.dt / 2)
         old_coords = copy(sys.coords)
         sys.coords += v_half .* sim.dt
 
@@ -544,7 +543,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-        sys.velocities = (v_half .+ accel_remove_mol.(accels_t_dt) .* (sim.dt / 2)) ./
+        sys.velocities = (v_half .+ accels_t_dt .* (sim.dt / 2)) ./
                          (1 + (zeta * sim.dt / 2))
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
@@ -653,9 +652,8 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
                         rng=Random.GLOBAL_RNG) where {D, G, T}
-    k_b = energy_add_mol(sys.k, sys.energy_units)
     T_n, T_m = sim.temperatures[n], sim.temperatures[m]
-    β_n, β_m = inv(k_b * T_n), inv(k_b * T_m)
+    β_n, β_m = inv(sys.k * T_n), inv(sys.k * T_m)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
                                     n_threads=n_threads)
     neighbors_m = find_neighbors(sys.replicas[m], sys.replicas[m].neighbor_finder;
@@ -747,9 +745,8 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
                         rng=Random.GLOBAL_RNG) where {D, G, T}
-    k_b = energy_add_mol(sys.k, sys.energy_units)
     T_sim = sim.temperature
-    β_sim = inv(k_b * T_sim)
+    β_sim = inv(sys.k * T_sim)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
                                     n_threads=n_threads)
     neighbors_m = find_neighbors(sys.replicas[m], sys.replicas[m].neighbor_finder;
@@ -870,7 +867,6 @@ function simulate!(sys::System{D, G, T},
                    n_steps::Integer;
                    n_threads::Integer=Threads.nthreads(),
                    run_loggers=true) where {D, G, T}
-    k_b = energy_add_mol(sys.k, sys.energy_units)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E_old = potential_energy(sys, neighbors; n_threads=n_threads)
     for i in 1:n_steps
@@ -880,15 +876,16 @@ function simulate!(sys::System{D, G, T},
         E_new = potential_energy(sys, neighbors; n_threads=n_threads)
 
         ΔE = E_new - E_old
-        δ = ΔE / (k_b * sim.temperature)
+        δ = ΔE / (sys.k * sim.temperature)
         if δ < 0 || rand() < exp(-δ)
+
             run_loggers!(sys, neighbors, i, run_loggers; n_threads=n_threads, success=true,
-                         energy_rate=E_new / (k_b * sim.temperature))
+                         energy_rate=(E_new / (sys.k * sim.temperature)))
             E_old = E_new
         else
             sys.coords = coords_old
             run_loggers!(sys, neighbors, i, run_loggers; n_threads=n_threads, success=false,
-                         energy_rate=E_old / (k_b * sim.temperature))
+                         energy_rate=(E_old / (sys.k * sim.temperature)))
         end
     end
     return sys

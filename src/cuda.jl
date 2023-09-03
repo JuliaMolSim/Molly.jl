@@ -388,11 +388,11 @@ function pairwise_pe_kernel!(energy, coords_var, atoms_var, boundary, inters, ne
         i, j, special = neighbors[inter_i]
         coord_i, coord_j = coords[i], coords[j]
         dr = vector(coord_i, coord_j, boundary)
-        pe = potential_energy(inters[1], dr, coord_i, coord_j, atoms[i], atoms[j],
-                              boundary, special)
+        pe = potential_energy_gpu(inters[1], dr, coord_i, coord_j, atoms[i], atoms[j],
+                                  boundary, special)
         for inter in inters[2:end]
-            pe += potential_energy(inter, dr, coord_i, coord_j, atoms[i], atoms[j],
-                                   boundary, special)
+            pe += potential_energy_gpu(inter, dr, coord_i, coord_j, atoms[i], atoms[j],
+                                       boundary, special)
         end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
@@ -450,7 +450,7 @@ function specific_pe_1_atoms_kernel!(energy, coords_var, boundary, is_var,
 
     @inbounds if inter_i <= length(is)
         i = is[inter_i]
-        pe = potential_energy(inters[inter_i], coords[i], boundary)
+        pe = potential_energy_gpu(inters[inter_i], coords[i], boundary)
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
@@ -470,7 +470,7 @@ function specific_pe_2_atoms_kernel!(energy, coords_var, boundary, is_var, js_va
 
     @inbounds if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
-        pe = potential_energy(inters[inter_i], coords[i], coords[j], boundary)
+        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], boundary)
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
@@ -491,7 +491,7 @@ function specific_pe_3_atoms_kernel!(energy, coords_var, boundary, is_var, js_va
 
     @inbounds if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
-        pe = potential_energy(inters[inter_i], coords[i], coords[j], coords[k], boundary)
+        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary)
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
@@ -513,7 +513,7 @@ function specific_pe_4_atoms_kernel!(energy, coords_var, boundary, is_var, js_va
 
     @inbounds if inter_i <= length(is)
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
-        pe = potential_energy(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary)
+        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary)
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end

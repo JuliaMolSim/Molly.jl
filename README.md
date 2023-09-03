@@ -67,7 +67,7 @@ using Molly
 n_atoms = 100
 boundary = CubicBoundary(2.0u"nm")
 temp = 298.0u"K"
-atom_mass = 10.0u"u"
+atom_mass = 10.0u"g/mol"
 
 atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
@@ -121,3 +121,11 @@ The above 1 ps simulation looks something like this when you view it in [VMD](ht
 Contributions are very welcome - see the [roadmap issue](https://github.com/JuliaMolSim/Molly.jl/issues/2) for more.
 
 Join the #molly channel on the [JuliaMolSim Zulip](https://juliamolsim.zulipchat.com/join/j5sqhiajbma5hw55hy6wtzv7) to discuss the usage and development of Molly.jl, or post on the [Julia Discourse](https://discourse.julialang.org).
+
+## Citation
+
+If you use Molly, please cite the following paper ([bib entry here](https://github.com/JuliaMolSim/Molly.jl/blob/master/CITATION.bib)):
+
+Greener JG. Differentiable simulation to develop molecular dynamics force fields for disordered proteins, [bioRxiv](https://www.biorxiv.org/content/10.1101/2023.08.29.555352) (2023)
+
+A paper involving more contributors with further details on the software will be written at some point.

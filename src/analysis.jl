@@ -7,7 +7,8 @@ export
     rdf,
     velocity_autocorr,
     rmsd,
-    radius_gyration
+    radius_gyration,
+    hydrodynamic_radius
 
 """
     visualize(coord_logger, boundary, out_filepath; <keyword arguments>)
@@ -92,7 +93,7 @@ function rdf(coords, boundary; npoints::Integer=200)
     dists = distances(coords, boundary)
     dists_vec = [dists[i, j] for i in 1:n_atoms, j in 1:n_atoms if j > i]
     dist_unit = unit(first(dists_vec))
-    kd = kde(ustrip.(dists_vec), npoints=npoints)
+    kd = kde(ustrip.(dists_vec); npoints=npoints)
     ρ = n_atoms / box_volume(boundary)
     if dims == 3
         normalizing_factor = 4π .* ρ .* step(kd.x) .* kd.x .^ 2 .* dist_unit .^ 3
@@ -161,4 +162,25 @@ function radius_gyration(coords, atoms)
     atom_masses = mass.(atoms)
     I = sum(sum_abs2.(vecs_to_center) .* atom_masses)
     return sqrt(I / sum(atom_masses))
+end
+
+@doc raw"""
+    hydrodynamic_radius(coords, boundary)
+
+Calculate the hydrodynamic radius of a set of coordinates.
+
+``R_{hyd}`` is defined by
+```math
+\frac{1}{R_{hyd}} = \frac{1}{2N^2}\sum_{i \neq j} \frac{1}{r_{ij}}
+```
+"""
+function hydrodynamic_radius(coords::AbstractArray{SVector{D, T}}, boundary) where {D, T}
+    n_atoms = length(coords)
+    diag_cpu = Diagonal(ones(T, n_atoms))
+    diag = isa(coords, CuArray) ? CuArray(diag_cpu) : diag_cpu
+    # Other approaches to removing the diagonal Inf didn't work with Zygote
+    dists = distances(coords, boundary) .+ diag
+    sum_inv_dists = sum(inv.(dists)) - sum(inv(diag))
+    inv_R_hyd = sum_inv_dists / (2 * n_atoms^2)
+    return inv(inv_R_hyd)
 end

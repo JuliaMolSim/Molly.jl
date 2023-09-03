@@ -28,7 +28,7 @@ Calculate the kinetic energy of a system.
 """
 function kinetic_energy(sys::System{D, G, T}) where {D, G, T}
     ke = kinetic_energy_noconvert(sys)
-    return uconvert(sys.energy_units, energy_add_mol(ke, sys.energy_units))
+    return uconvert(sys.energy_units, ke)
 end
 
 """
@@ -47,30 +47,6 @@ function temperature(sys)
     end
 end
 
-function check_energy_units(E, energy_units)
-    if unit(E) != energy_units
-        error("system energy units are ", energy_units, " but encountered energy units ",
-                unit(E))
-    end
-end
-
-function energy_remove_mol(x)
-    if dimension(x) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        T = typeof(ustrip(x))
-        return x / T(Unitful.Na)
-    else
-        return x
-    end
-end
-
-function energy_add_mol(x, energy_units)
-    if dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        T = typeof(ustrip(x))
-        return x * T(Unitful.Na)
-    else
-        return x
-    end
-end
 
 """
     potential_energy(system, neighbors=nothing; n_threads=Threads.nthreads())
@@ -95,8 +71,8 @@ Calculate the potential energy due to a given interaction type.
 
 Custom interaction types should implement this function.
 """
-function potential_energy(sys::System{D, false, T}, neighbors=nothing;
-                          n_threads::Integer=Threads.nthreads()) where {D, T}
+function potential_energy(sys::System{D, false}, neighbors=nothing;
+                          n_threads::Integer=Threads.nthreads()) where D
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
@@ -104,9 +80,10 @@ function potential_energy(sys::System{D, false, T}, neighbors=nothing;
     sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
     sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
 
+    ft = typeof(ustrip(sys.coords[1][1])) # Allow types like those from Measurements.jl
     pe = potential_energy_pair_spec(sys.coords, sys.atoms, pairwise_inters_nonl, pairwise_inters_nl,
                             sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, sys.boundary,
-                            sys.energy_units, neighbors, n_threads, Val(T))
+                            sys.energy_units, neighbors, n_threads, Val(ft))
 
     for inter in values(sys.general_inters)
         pe += potential_energy(inter, sys, neighbors; n_threads=n_threads)
@@ -290,3 +267,10 @@ function potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary,
     # Fallback for interactions where special interactions are not relevant
     return potential_energy(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)
 end
+
+# Allow GPU-specific potential energy functions to be defined if required
+potential_energy_gpu(inter::PairwiseInteraction, dr, ci, cj, ai, aj, bnd, spec) = potential_energy(inter, dr, ci, cj, ai, aj, bnd, spec)
+potential_energy_gpu(inter::SpecificInteraction, ci, bnd)             = potential_energy(inter, ci, bnd)
+potential_energy_gpu(inter::SpecificInteraction, ci, cj, bnd)         = potential_energy(inter, ci, cj, bnd)
+potential_energy_gpu(inter::SpecificInteraction, ci, cj, ck, bnd)     = potential_energy(inter, ci, cj, ck, bnd)
+potential_energy_gpu(inter::SpecificInteraction, ci, cj, ck, cl, bnd) = potential_energy(inter, ci, cj, ck, cl, bnd)

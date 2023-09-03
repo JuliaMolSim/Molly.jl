@@ -55,7 +55,7 @@ SUITE["spatial"]["vector_1D"] = @benchmarkable vector_1D($(4.0u"nm"), $(6.0u"nm"
 SUITE["spatial"]["vector"   ] = @benchmarkable vector($(SVector(4.0, 1.0, 1.0)u"nm"), $(SVector(6.0, 4.0, 3.0)u"nm"), $(CubicBoundary(SVector(10.0, 5.0, 3.5)u"nm")))
 
 n_atoms = 400
-atom_mass = 10.0u"u"
+atom_mass = 10.0u"g/mol"
 boundary = CubicBoundary(6.0u"nm")
 const starting_coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm"; min_dist=0.2u"nm")
 const starting_velocities = [random_velocity(atom_mass, 1.0u"K") for i in 1:n_atoms]
@@ -65,7 +65,7 @@ const starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
     n_atoms = 400
     n_steps = 200
-    atom_mass = f32 ? 10.0f0u"u" : 10.0u"u"
+    atom_mass = f32 ? 10.0f0u"g/mol" : 10.0u"g/mol"
     boundary = f32 ? CubicBoundary(6.0f0u"nm") : CubicBoundary(6.0u"nm")
     simulator = VelocityVerlet(dt=f32 ? 0.02f0u"ps" : 0.02u"ps")
     k = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
