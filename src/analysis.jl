@@ -90,6 +90,7 @@ function hydrodynamic_radius(coords::AbstractArray{SVector{D, T}}, boundary) whe
     n_atoms = length(coords)
     diag_cpu = Diagonal(ones(T, n_atoms))
     diag = isa(coords, CuArray) ? CuArray(diag_cpu) : diag_cpu
+    diag = isa(coords, AbstractGPUArray) ? get_array_type(coords)((diag_cpu)) : diag_cpu
     dists = distances(coords, boundary) .+ diag
     sum_inv_dists = sum(inv.(dists)) - sum(inv(diag))
     inv_R_hyd = sum_inv_dists / (2 * n_atoms^2)
