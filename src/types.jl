@@ -404,7 +404,6 @@ Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
 CUDA.Const(nl::NoNeighborList) = nl
 
-
 """
     System(; <keyword arguments>)
 

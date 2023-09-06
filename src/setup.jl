@@ -38,6 +38,7 @@ function place_atoms(n_atoms::Integer,
     end
     min_dist_sq = min_dist ^ 2
     coords = SArray[]
+    sizehint!(coords, n_atoms)
     failed_attempts = 0
     while length(coords) < n_atoms
         new_coord = random_coord(boundary)
@@ -92,6 +93,7 @@ function place_diatomics(n_molecules::Integer,
     end
     min_dist_sq = min_dist ^ 2
     coords = SArray[]
+    sizehint!(coords, 2 * n_molecules)
     failed_attempts = 0
     while length(coords) < (n_molecules * 2)
         new_coord_a = random_coord(boundary)

@@ -310,7 +310,7 @@ function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, 
 
     grads = Enzyme.autodiff_deferred(
         Enzyme.Reverse,
-        pairwise_force_kernel!,
+        pairwise_force_kernel_nl!,
         Const,
         Duplicated(fs_mat, d_fs_mat),
         Duplicated(coords, d_coords),
