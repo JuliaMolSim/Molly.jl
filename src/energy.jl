@@ -78,8 +78,8 @@ function potential_energy(sys; n_threads::Integer=Threads.nthreads())
     return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function potential_energy(sys::System{D, false, T}, neighbors, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads()) where {D, T}
+function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
+                          n_threads::Integer=Threads.nthreads()) where {D, AT, T}
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
@@ -253,9 +253,9 @@ function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_a
     return pe
 end
 
-function potential_energy(sys::System{D, true, T}, neighbors, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads()) where {D, T}
-    pe_vec_nounits = CUDA.zeros(T, 1)
+function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
+                          n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
+    n_atoms = length(sys)
     val_ft = Val(T)
     buffers = init_forces_buffer!(sys, ustrip_vec.(zero(sys.coords)), 1)
 

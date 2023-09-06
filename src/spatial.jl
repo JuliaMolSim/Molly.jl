@@ -613,12 +613,12 @@ function random_velocities(sys::AtomsBase.AbstractSystem{2}, temp; rng=Random.de
     return random_velocity_2D.(masses(sys), temp, sys.k, rng)
 end
 
-function random_velocities(sys::System{3, true}, temp; rng=Random.default_rng())
-    return CuArray(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
+function random_velocities(sys::System{3, AT}, temp; rng=Random.default_rng()) where AT <: AbstractGPUArray
+    return AT(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
 end
 
-function random_velocities(sys::System{2, true}, temp; rng=Random.default_rng())
-    return CuArray(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
+function random_velocities(sys::System{2, AT}, temp; rng=Random.default_rng()) where AT <: AbstractGPUArray
+    return AT(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
 end
 
 """
@@ -634,6 +634,7 @@ function random_velocities!(sys, temp; rng=Random.default_rng())
 end
 
 function random_velocities!(vels, sys::AbstractSystem, temp; rng=Random.default_rng())
+    vs = random_velocities(sys, temp; rng=rng)
     vels .= random_velocities(sys, temp; rng=rng)
     return vels
 end
@@ -738,9 +739,9 @@ function virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nt
     return v
 end
 
-function virial(sys::System{D, G, T}, neighbors_dev, step_n, pairwise_inters_nonl,
-                            pairwise_inters_nl) where {D, G, T}
-    if G
+function virial(sys::System{D, AT, T}, neighbors_dev, step_n, pairwise_inters_nonl,
+                            pairwise_inters_nl) where {D, AT, T}
+    if AT <: AbstractGPUArray
         coords, velocities, atoms = Array(sys.coords), Array(sys.velocities), Array(sys.atoms)
         if isnothing(neighbors_dev)
             neighbors = neighbors_dev
@@ -792,7 +793,7 @@ function virial(sys::System{D, G, T}, neighbors_dev, step_n, pairwise_inters_non
 end
 
 # Default for general interactions
-function virial(inter, sys::System{D, G, T}, args...; kwargs...) where {D, G, T}
+function virial(inter, sys::System{D, AT, T}, args...; kwargs...) where {D, AT, T}
     return zero(T) * sys.energy_units
 end
 
@@ -874,8 +875,9 @@ function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topolo
     end
 end
 
-function molecule_centers(coords::CuArray, boundary, topology)
-    return CuArray(molecule_centers(Array(coords), boundary, topology))
+function molecule_centers(coords::AbstractGPUArray, boundary, topology)
+    array_type = get_array_type(coords)
+    return array_type(molecule_centers(Array(coords), boundary, topology))
 end
 
 # Allows scaling multiple vectors at once by broadcasting this function

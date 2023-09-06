@@ -11,7 +11,7 @@ const data_dir = normpath(dirname(pathof(Molly)), "..", "data")
 const ff_dir = joinpath(data_dir, "force_fields")
 const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
-function setup_system(gpu::Bool, f32::Bool, units::Bool)
+function setup_system(array_type::AbstractArray, f32::Bool, units::Bool)
     T = f32 ? Float32 : Float64
     ff = MolecularForceField(
         T,
@@ -27,7 +27,7 @@ function setup_system(gpu::Bool, f32::Bool, units::Bool)
     sys = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
-        velocities=gpu ? CuArray(velocities) : velocities,
+        velocities=array_type(velocities),
         units=units,
         gpu=gpu,
         dist_cutoff=(units ? dist_cutoff * u"nm" : dist_cutoff),
@@ -42,15 +42,15 @@ end
 
 runs = [
     # run_name                             gpu    parr   f32    units
-    ("CPU 1 thread"                      , false, false, false, true ),
-    ("CPU 1 thread f32"                  , false, false, true , true ),
-    ("CPU 1 thread f32 nounits"          , false, false, true , false),
-    ("CPU $n_threads threads"            , false, true , false, true ),
-    ("CPU $n_threads threads f32"        , false, true , true , true ),
-    ("CPU $n_threads threads f32 nounits", false, true , true , false),
-    ("GPU"                               , true , false, false, true ),
-    ("GPU f32"                           , true , false, true , true ),
-    ("GPU f32 nounits"                   , true , false, true , false),
+    ("CPU 1 thread"                      , Array, false, false, true ),
+    ("CPU 1 thread f32"                  , Array, false, true , true ),
+    ("CPU 1 thread f32 nounits"          , Array, false, true , false),
+    ("CPU $n_threads threads"            , Array, true , false, true ),
+    ("CPU $n_threads threads f32"        , Array, true , true , true ),
+    ("CPU $n_threads threads f32 nounits", Array, true , true , false),
+    ("GPU"                               , CuArray, false, false, true ),
+    ("GPU f32"                           , CuArray, false, true , true ),
+    ("GPU f32 nounits"                   , CuArray, false, true , false),
 ]
 
 for (run_name, gpu, parallel, f32, units) in runs

@@ -132,16 +132,17 @@ struct ForcesBuffer{F, C, M, R}
     compressed_special::R
 end
 
-function init_forces_buffer!(sys, forces_nounits::CuArray{SVector{D, T}}, n_threads) where {D, T}
+function init_forces_buffer!(sys, forces_nounits::AbstractGPUArray{SVector{D, T}}, n_threads) where {D, T}
     N = length(forces_nounits)
     C = eltype(eltype(sys.coords))
     n_blocks = cld(N, 32)
-    fs_mat = CUDA.zeros(T, D, N)
-    box_mins = CUDA.zeros(C, n_blocks, D) 
-    box_maxs = CUDA.zeros(C, n_blocks, D) 
-    Morton_seq = CUDA.zeros(Int32, N)
-    compressed_eligible = CUDA.zeros(UInt32, 32, n_blocks, n_blocks)
-    compressed_special = CUDA.zeros(UInt32, 32, n_blocks, n_blocks)
+    backend = get_backend(forces_nounits)
+    fs_mat = KernelAbstractions.zeros(backend, T, D, N)
+    box_mins = KernelAbstractions.zeros(backend, C, n_blocks, D) 
+    box_maxs = KernelAbstractions.zeros(backend, C, n_blocks, D) 
+    Morton_seq = KernelAbstractions.zeros(backend, Int32, N)
+    compressed_eligible = KernelAbstractions.zeros(backend, UInt32, 32, n_blocks, n_blocks)
+    compressed_special = KernelAbstractions.zeros(backend, UInt32, 32, n_blocks, n_blocks)
     if sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
     end
@@ -165,8 +166,8 @@ function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nt
     return forces_nounits .* sys.force_units
 end
 
-function forces_nounits!(fs_nounits, sys::System{D, false}, neighbors, fs_chunks=nothing,
-                         step_n::Integer=0; n_threads::Integer=Threads.nthreads()) where D
+function forces_nounits!(fs_nounits, sys::System{D, AT}, neighbors, fs_chunks=nothing,
+                         step_n::Integer=0; n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractArray}
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
@@ -367,9 +368,9 @@ function specific_forces!(fs_nounits, atoms, coords, velocities, boundary, force
     return fs_nounits
 end
 
-function forces_nounits!(fs_nounits, sys::System{D, true, T}, neighbors,
+function forces_nounits!(fs_nounits, sys::System{D, AT, T}, neighbors,
                          buffers, step_n::Integer=0;
-                         n_threads::Integer=Threads.nthreads()) where {D, T}
+                         n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
     fill!(buffers.fs_mat, zero(T))
     val_ft = Val(T)
 

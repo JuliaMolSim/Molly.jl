@@ -58,7 +58,7 @@ struct AndersenThermostat{T, C}
     coupling_const::C
 end
 
-function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, sim,
+function apply_coupling!(sys::System{D}, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng()) where D
@@ -71,10 +71,10 @@ function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, 
     return false
 end
 
-function apply_coupling!(sys::System{D, true, T}, thermostat::AndersenThermostat, sim,
+function apply_coupling!(sys::System{D, AT, T}, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {D, T}
+                         rng=Random.default_rng()) where {D, AT <: AbstractGPUArray, T}
     atoms_to_bump = T.(rand(rng, length(sys)) .< (sim.dt / thermostat.coupling_const))
     atoms_to_leave = one(T) .- atoms_to_bump
     atoms_to_bump_dev = move_array(atoms_to_bump, sys)
