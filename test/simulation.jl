@@ -427,7 +427,7 @@ end
 end
 
 @testset "Position restraints" begin
-    for gpu in gpu_list
+    for ArrayType in array_list
         n_atoms = 10
         n_atoms_res = n_atoms ÷ 2
         n_steps = 2_000
@@ -438,8 +438,8 @@ end
         sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
 
         sys = System(
-            atoms=gpu ? CuArray(atoms) : atoms,
-            coords=gpu ? CuArray(deepcopy(starting_coords)) : deepcopy(starting_coords),
+            atoms=ArrayType(atoms),
+            coords=ArrayType(deepcopy(starting_coords)),
             boundary=boundary,
             atoms_data=atoms_data,
             pairwise_inters=(LennardJones(),),
@@ -897,15 +897,14 @@ end
     vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
 
     for sim in (lang_baro, vvand_baro)
-        for gpu in gpu_list
-            if gpu && sim == vvand_baro
+        for ArrayType in array_list
+            if ArrayType <: AbstractGPUArray && sim == vvand_baro
                 continue
             end
-            AT = gpu ? CuArray : Array
 
             sys = System(
-                atoms=AT(atoms),
-                coords=AT(deepcopy(coords)),
+                atoms=ArrayType(atoms),
+                coords=ArrayType(deepcopy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -963,16 +962,15 @@ end
         SVector(nothing  , nothing  , nothing  ), # Uncoupled
     )
 
-    for gpu in gpu_list
-        AT = gpu ? CuArray : Array
+    for ArrayType in array_list
         for (press_i, press) in enumerate(pressure_test_set)
-            if gpu && press_i != 2
+            if ArrayType <: AbstractGPUArray && press_i != 2
                 continue
             end
 
             sys = System(
-                atoms=AT(atoms),
-                coords=AT(deepcopy(coords)),
+                atoms=ArrayType(atoms),
+                coords=ArrayType(deepcopy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1034,16 +1032,15 @@ end
         MonteCarloMembraneBarostat(press, tens, temp, boundary; z_axis_fixed=true),
     )
 
-    for gpu in gpu_list
-        AT = gpu ? CuArray : Array
+    for ArrayType in array_list
         for (barostat_i, barostat) in enumerate(barostat_test_set)
-            if gpu && barostat_i != 2
+            if ArrayType <: AbstractGPUArray && barostat_i != 2
                 continue
             end
 
             sys = System(
-                atoms=AT(atoms),
-                coords=AT(deepcopy(coords)),
+                atoms=ArrayType(atoms),
+                coords=ArrayType(deepcopy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1160,7 +1157,8 @@ end
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-    function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
+    function test_sim(nl::Bool, parallel::Bool, f32::Bool,
+                      ArrayType::Type{AT}) where AT <: AbstractArray
         n_atoms = 400
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"g/mol" : 10.0u"g/mol"
@@ -1170,9 +1168,9 @@ end
         r0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
         bonds = [HarmonicBond(k=k, r0=r0) for i in 1:(n_atoms ÷ 2)]
         specific_inter_lists = (InteractionList2Atoms(
-            gpu ? CuArray(Int32.(collect(1:2:n_atoms))) : Int32.(collect(1:2:n_atoms)),
-            gpu ? CuArray(Int32.(collect(2:2:n_atoms))) : Int32.(collect(2:2:n_atoms)),
-            gpu ? CuArray(bonds) : bonds,
+            ArrayType(Int32.(collect(1:2:n_atoms))),
+            ArrayType(Int32.(collect(2:2:n_atoms))),
+            ArrayType(bonds),
         ),)
 
         neighbor_finder = NoNeighborFinder()
@@ -1180,7 +1178,7 @@ end
         pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
         if nl
             neighbor_finder = DistanceNeighborFinder(
-                eligible=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+                eligible=ArrayType(trues(n_atoms, n_atoms)),
                 n_steps=10,
                 dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
             )
@@ -1188,17 +1186,10 @@ end
         end
         show(devnull, neighbor_finder)
 
-        if gpu
-            coords = CuArray(deepcopy(f32 ? starting_coords_f32 : starting_coords))
-            velocities = CuArray(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-            atoms = CuArray([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                                  ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
-        else
-            coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
-            velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
-            atoms = [Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                            ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
-        end
+        coords = ArrayType(deepcopy(f32 ? starting_coords_f32 : starting_coords))
+        velocities = ArrayType(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
+        atoms = ArrayType([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+                                ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
 
         s = System(
             atoms=atoms,
@@ -1210,7 +1201,7 @@ end
             neighbor_finder=neighbor_finder,
         )
 
-        @test is_on_gpu(s) == gpu
+        @test is_on_gpu(s) == (ArrayType <: AbstractGPUArray)
         @test float_type(s) == (f32 ? Float32 : Float64)
 
         n_threads = parallel ? Threads.nthreads() : 1
@@ -1221,23 +1212,30 @@ end
     end
 
     runs = [
-        ("CPU"       , [false, false, false, false]),
-        ("CPU f32"   , [false, false, true , false]),
-        ("CPU NL"    , [true , false, false, false]),
-        ("CPU f32 NL", [true , false, true , false]),
+        ("CPU"       , [false, false, false, Array]),
+        ("CPU f32"   , [false, false, true , Array]),
+        ("CPU NL"    , [true , false, false, Array]),
+        ("CPU f32 NL", [true , false, true , Array]),
     ]
     if run_parallel_tests
-        push!(runs, ("CPU parallel"       , [false, true , false, false]))
-        push!(runs, ("CPU parallel f32"   , [false, true , true , false]))
-        push!(runs, ("CPU parallel NL"    , [true , true , false, false]))
-        push!(runs, ("CPU parallel f32 NL", [true , true , true , false]))
+        push!(runs, ("CPU parallel"       , [false, true , false, Array]))
+        push!(runs, ("CPU parallel f32"   , [false, true , true , Array]))
+        push!(runs, ("CPU parallel NL"    , [true , true , false, Array]))
+        push!(runs, ("CPU parallel f32 NL", [true , true , true , Array]))
     end
-    if run_gpu_tests
-        push!(runs, ("GPU"       , [false, false, false, true]))
-        push!(runs, ("GPU f32"   , [false, false, true , true]))
-        push!(runs, ("GPU NL"    , [true , false, false, true]))
-        push!(runs, ("GPU f32 NL", [true , false, true , true]))
+    if run_cuda_tests
+        push!(runs, ("GPU"       , [false, false, false, CuArray]))
+        push!(runs, ("GPU f32"   , [false, false, true , CuArray]))
+        push!(runs, ("GPU NL"    , [true , false, false, CuArray]))
+        push!(runs, ("GPU f32 NL", [true , false, true , CuArray]))
     end
+    if run_rocm_tests
+        push!(runs, ("GPU"       , [false, false, false, ROCArray]))
+        push!(runs, ("GPU f32"   , [false, false, true , ROCArray]))
+        push!(runs, ("GPU NL"    , [true , false, false, ROCArray]))
+        push!(runs, ("GPU f32 NL", [true , false, true , ROCArray]))
+    end
+
 
     final_coords_ref, E_start_ref = test_sim(runs[1][2]...)
     # Check all simulations give the same result to within some error

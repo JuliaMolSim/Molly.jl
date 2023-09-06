@@ -13,7 +13,8 @@ using ChainRules
 using ChainRulesCore
 import Chemfiles
 using Combinatorics
-using CUDA
+using KernelAbstractions
+using GPUArrays
 using DataStructures
 using Distances
 using Distributions
@@ -41,7 +42,7 @@ include("types.jl")
 include("units.jl")
 include("spatial.jl")
 include("cutoffs.jl")
-include("cuda.jl")
+include("kernels.jl")
 include("force.jl")
 include("interactions/lennard_jones.jl")
 include("interactions/soft_sphere.jl")
