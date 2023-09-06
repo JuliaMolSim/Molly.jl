@@ -1,6 +1,9 @@
 # CUDA.jl kernels
 const WARPSIZE = UInt32(32)
-const MAX_THREADS_PER_BLOCK = CUDA.attribute(device(), CUDA.DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK)
+
+# if CUDA.functional()
+#     const MAX_THREADS_PER_BLOCK = CUDA.attribute(device(), CUDA.DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK)
+# end
 
 macro shfl_multiple_sync(mask, target, width, vars...)
     all_lines = map(vars) do v
