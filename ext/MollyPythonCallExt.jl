@@ -6,7 +6,7 @@ module MollyPythonCallExt
 using Molly
 using PythonCall
 import AtomsCalculators
-using CUDA
+using GPUArrays
 using StaticArrays
 using Unitful
 
@@ -91,7 +91,7 @@ end
 
 uconvert_vec(x...) = uconvert.(x...)
 
-function AtomsCalculators.forces(sys::System{D, G, T},
+function AtomsCalculators.forces(sys::System{D, AT, T},
                                  ase_calc::ASECalculator;
                                  kwargs...) where {D, G, T}
     update_ase_calc!(ase_calc, sys)
@@ -105,7 +105,7 @@ function AtomsCalculators.forces(sys::System{D, G, T},
     else
         fs_unit = uconvert_vec.(sys.force_units, fs * u"eV/Å")
     end
-    return G ? CuArray(fs_unit) : fs_unit
+    return AT <: AbstractGPUArray ? AT(fs_unit) : fs_unit
 end
 
 function AtomsCalculators.potential_energy(sys::System{D, G, T},
