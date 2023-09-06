@@ -175,11 +175,11 @@ end
     @test pis_grad == sys_nounits.pairwise_inters
 
     # Test the same simulation on the GPU
-    if run_gpu_tests
+    for ArrayType in array_list[2:end]
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
-            velocities=CuArray(deepcopy(velocities_start)),
+            velocities=ArrayType(deepcopy(velocities_start)),
             gpu=true,
             center_coords=false,
         )
@@ -207,7 +207,7 @@ end
         sys_nounits = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff_nounits;
-            velocities=CuArray(deepcopy(ustrip_vec.(velocities_start))),
+            velocities=ArrayType(deepcopy(ustrip_vec.(velocities_start))),
             units=false,
             gpu=true,
             center_coords=false,

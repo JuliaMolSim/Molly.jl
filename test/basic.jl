@@ -176,7 +176,7 @@
     @test mcs == [SVector(0.05, 0.0), SVector(1.0, 1.0)]
 
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
-    for gpu in gpu_list
+    for ArrayType in array_list
         sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=gpu, use_cell_list=false)
         mcs = molecule_centers(sys.coords, sys.boundary, sys.topology)
         @test isapprox(Array(mcs)[1], mean(sys.coords[1:1170]); atol=0.04u"nm")
@@ -185,7 +185,7 @@
         #   potential energy from the specific interactions does not change on scaling
         no_nbs = falses(length(sys), length(sys))
         sys.neighbor_finder = DistanceNeighborFinder(
-            eligible=(gpu ? CuArray(no_nbs) : no_nbs),
+            eligible=(ArrayType(no_nbs)),
             dist_cutoff=1.0u"nm",
         )
         coords_start = deepcopy(sys.coords)
@@ -336,7 +336,7 @@ end
     coords_1 = SVector{3, Float64}.(eachcol(cm_1)) / 10 * u"nm"
     coords_2 = SVector{3, Float64}.(eachcol(cm_2)) / 10 * u"nm"
     @test rmsd(coords_1, coords_2) ≈ 2.54859467758795u"Å"
-    if run_gpu_tests
+    if run_cuda_tests
         @test rmsd(CuArray(coords_1), CuArray(coords_2)) ≈ 2.54859467758795u"Å"
     end
 
