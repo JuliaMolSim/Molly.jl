@@ -1,6 +1,8 @@
 # Chain rules to allow differentiable simulations
 
-@non_differentiable molly_zeros(args...)
+@non_differentiable zeros(args...)
+@non_differentiable get_backend(args...)
+@non_differentiable get_array_type(args...)
 @non_differentiable random_velocities(args...)
 @non_differentiable random_velocities!(args...)
 @non_differentiable gpu_threads_blocks_pairwise(args...)
@@ -302,11 +304,13 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), coords, atom
     return Y, potential_energy_pair_spec_pullback
 end
 
-function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, d_atoms,
-                                     boundary, inters::I, grad_inters, neighbors, val_dims,
-                                     val_force_units, ::Val{N}) where {I, N}
-    shared_grad_inters = CuStaticSharedArray(I, N)
-    sync_threads()
+@kernel function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords,
+                                             atoms, d_atoms, boundary,
+                                             inters::I, grad_inters, neighbors,
+                                             val_dims, val_force_units,
+                                            ::Val{N}) where {I, N}
+    shared_grad_inters = @localmem I N
+    @synchronize()
 
     grads = Enzyme.autodiff_deferred(
         Enzyme.Reverse,
@@ -322,16 +326,17 @@ function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, 
         Const(val_force_units),
     )[1]
 
-    tidx = threadIdx().x
+    tidx = @index(Local, Linear)
     shared_grad_inters[tidx] = grads[5]
-    sync_threads()
+    @synchronize()
 
     if tidx == 1
+        bidx = @index(Group, Linear)
         grad_inters_sum = shared_grad_inters[1]
         for ti in 2:N
             grad_inters_sum = map(+, grad_inters_sum, shared_grad_inters[ti])
         end
-        grad_inters[blockIdx().x] = grad_inters_sum
+        grad_inters[bidx] = grad_inters_sum
     end
     return nothing
 end
@@ -701,12 +706,16 @@ function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
     return Y, specific_pe_gpu_pullback
 end
 
-function grad_gbsa_born_kernel!(Is, d_Is, I_grads, d_I_grads, coords, d_coords, offset_radii,
-                                d_offset_radii, scaled_offset_radii, d_scaled_offset_radii,
-                                dist_cutoff, offset, neck_scale::T, grad_neck_scale, neck_cut, d0s,
-                                d_d0s, m0s, d_m0s, boundary, val_coord_units, ::Val{N}) where {T, N}
+@kernel function grad_gbsa_born_kernel!(Is, d_Is, I_grads, d_I_grads, coords,
+                                        d_coords, offset_radii,
+                                        d_offset_radii, scaled_offset_radii,
+                                        d_scaled_offset_radii,
+                                        dist_cutoff, offset, neck_scale::T,
+                                        grad_neck_scale, neck_cut, d0s,
+                                        d_d0s, m0s, d_m0s, boundary,
+                                        val_coord_units, ::Val{N}) where {T, N}
     shared_grad_neck_scale = CuStaticSharedArray(T, N)
-    sync_threads()
+    @synchronize()
 
     grads = Enzyme.autodiff_deferred(
         Enzyme.Reverse,
@@ -727,9 +736,9 @@ function grad_gbsa_born_kernel!(Is, d_Is, I_grads, d_I_grads, coords, d_coords, 
         Const(val_coord_units),
     )[1]
 
-    tidx = threadIdx().x
+    tidx = @index(Local, Linear)
     shared_grad_neck_scale[tidx] = grads[8]
-    sync_threads()
+    @synchronize()
 
     if tidx == 1
         grad_neck_scale_sum = shared_grad_neck_scale[1]
@@ -754,25 +763,27 @@ function ChainRulesCore.rrule(::typeof(gbsa_born_gpu), coords::AbstractArray{SVe
                       neck_cut, d0s, m0s, boundary, val_ft)
 
     function gbsa_born_gpu_pullback(d_args)
+        backend = get_backend(coords)
         n_atoms = length(coords)
-        d_Is      = d_args[1] == ZeroTangent() ? CUDA.zeros(T, n_atoms)          : d_args[1]
-        d_I_grads = d_args[2] == ZeroTangent() ? CUDA.zeros(T, n_atoms, n_atoms) : d_args[2]
-        Is = CUDA.zeros(T, n_atoms)
-        I_grads = CUDA.zeros(T, n_atoms, n_atoms)
+        d_Is      = d_args[1] == ZeroTangent() ? zeros(backend, T, n_atoms)          : d_args[1]
+        d_I_grads = d_args[2] == ZeroTangent() ? zeros(backend, T, n_atoms, n_atoms) : d_args[2]
+        Is = zeros(backend, T, n_atoms)
+        I_grads = zeros(backend, T, n_atoms, n_atoms)
         d_coords = zero(coords)
         d_offset_radii = zero(offset_radii)
         d_scaled_offset_radii = zero(scaled_offset_radii)
-        grad_neck_scale = CUDA.zeros(T, 1)
+        grad_neck_scale = zeros(backend, T, 1)
         d_d0s = zero(d0s)
         d_m0s = zero(m0s)
         n_inters = n_atoms ^ 2
-        n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+        n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
 
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_gbsa_born_kernel!(
-                Is, d_Is, I_grads, d_I_grads, coords, d_coords, offset_radii,
+        kernel! = grad_gbsa_born_kernel!(backend, n_threads_gpu)
+        kernel!(Is, d_Is, I_grads, d_I_grads, coords, d_coords, offset_radii,
                 d_offset_radii, scaled_offset_radii, d_scaled_offset_radii,
                 dist_cutoff, offset, neck_scale, grad_neck_scale, neck_cut, d0s,
-                d_d0s, m0s, d_m0s, boundary, Val(C), Val(n_threads_gpu))
+                d_d0s, m0s, d_m0s, boundary, Val(C), Val(n_threads_gpu),
+                ndrange = n_inters)
 
         d_neck_scale = Array(grad_neck_scale)[1]
         return NoTangent(), d_coords, d_offset_radii, d_scaled_offset_radii, NoTangent(),
@@ -782,16 +793,21 @@ function ChainRulesCore.rrule(::typeof(gbsa_born_gpu), coords::AbstractArray{SVe
     return Y, gbsa_born_gpu_pullback
 end
 
-function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
-                                   d_born_forces_mod_ustrip, coords, d_coords, boundary,
-                                   dist_cutoff, factor_solute::T, grad_factor_solute,
-                                   factor_solvent::T, grad_factor_solvent, kappa::T, grad_kappa,
-                                   Bs, d_Bs, chs, d_chs, val_dims, val_force_units,
+@kernel function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat,
+                                           born_forces_mod_ustrip,
+                                           d_born_forces_mod_ustrip, coords,
+                                           d_coords, boundary,
+                                           dist_cutoff, factor_solute::T,
+                                           grad_factor_solute,
+                                           factor_solvent::T,
+                                           grad_factor_solvent, kappa::T,
+                                           grad_kappa, Bs, d_Bs, chs, d_chs,
+                                           val_dims, val_force_units,
                                    ::Val{N}) where {T, N}
-    shared_grad_factor_solute  = CuStaticSharedArray(T, N)
-    shared_grad_factor_solvent = CuStaticSharedArray(T, N)
-    shared_grad_kappa          = CuStaticSharedArray(T, N)
-    sync_threads()
+    shared_grad_factor_solute  = @localmem T N
+    shared_grad_factor_solvent = @localmem T N
+    shared_grad_kappa          = @localmem T N
+    @synchronize()
 
     grads = Enzyme.autodiff_deferred(
         Enzyme.Reverse,
@@ -811,11 +827,11 @@ function grad_gbsa_force_1_kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
         Const(val_force_units),
     )[1]
 
-    tidx = threadIdx().x
+    tidx = @index(Local, Linear)
     shared_grad_factor_solute[tidx]  = grads[6]
     shared_grad_factor_solvent[tidx] = grads[7]
     shared_grad_kappa[tidx]          = grads[8]
-    sync_threads()
+    @synchronize()
 
     if tidx == 1
         grad_factor_solute_sum = shared_grad_factor_solute[1]
@@ -856,25 +872,28 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), coords::AbstractArray{
                          Bs, chs, force_units)
 
     function gbsa_force_1_gpu_pullback(d_args)
+        backend = get_backend(coords)
         n_atoms = length(coords)
-        d_fs_mat                 = d_args[1] == ZeroTangent() ? CUDA.zeros(T, D, n_atoms) : d_args[1]
-        d_born_forces_mod_ustrip = d_args[2] == ZeroTangent() ? CUDA.zeros(T, n_atoms)    : d_args[2]
-        fs_mat = CUDA.zeros(T, D, n_atoms)
-        born_forces_mod_ustrip = CUDA.zeros(T, n_atoms)
+        d_fs_mat                 = d_args[1] == ZeroTangent() ? zeros(backend, T, D, n_atoms) : d_args[1]
+        d_born_forces_mod_ustrip = d_args[2] == ZeroTangent() ? zeros(backend, T, n_atoms)    : d_args[2]
+        fs_mat = zeros(backend, T, D, n_atoms)
+        born_forces_mod_ustrip = zeros(backend, T, n_atoms)
         d_coords = zero(coords)
-        grad_factor_solute  = CUDA.zeros(T, 1)
-        grad_factor_solvent = CUDA.zeros(T, 1)
-        grad_kappa          = CUDA.zeros(T, 1)
+        grad_factor_solute  = zeros(backend, T, 1)
+        grad_factor_solvent = zeros(backend, T, 1)
+        grad_kappa          = zeros(backend, T, 1)
         d_Bs = zero(Bs)
         d_chs = zero(chs)
         n_inters = n_atoms_to_n_pairs(n_atoms) + n_atoms
-        n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+        n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
 
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_gbsa_force_1_kernel!(
-            fs_mat, d_fs_mat, born_forces_mod_ustrip, d_born_forces_mod_ustrip, coords,
-            d_coords, boundary, dist_cutoff, factor_solute, grad_factor_solute,
-            factor_solvent, grad_factor_solvent, kappa, grad_kappa, Bs, d_Bs, chs,
-            d_chs, Val(D), Val(force_units), Val(n_threads_gpu))
+        kernel! = grad_gbsa_force_1_kernel!(backend, n_threads_gpu)
+        kernel!(fs_mat, d_fs_mat, born_forces_mod_ustrip,
+                d_born_forces_mod_ustrip, coords, d_coords, boundary,
+                dist_cutoff, factor_solute, grad_factor_solute,
+                factor_solvent, grad_factor_solvent, kappa, grad_kappa,
+                Bs, d_Bs, chs, d_chs, Val(D), Val(force_units),
+                Val(n_threads_gpu), ndrange = n_inters)
 
         d_factor_solute  = Array(grad_factor_solute )[1]
         d_factor_solvent = Array(grad_factor_solvent)[1]
@@ -886,9 +905,12 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), coords::AbstractArray{
     return Y, gbsa_force_1_gpu_pullback
 end
 
-function grad_gbsa_force_2_kernel!(fs_mat, d_fs_mat, born_forces, d_born_forces, coords, d_coords,
-                                   boundary, dist_cutoff, or, d_or, sor, d_sor, Bs, d_Bs, B_grads,
-                                   d_B_grads, I_grads, d_I_grads, val_dims, val_force_units)
+@kernel function grad_gbsa_force_2_kernel!(fs_mat, d_fs_mat, born_forces,
+                                           d_born_forces, coords, d_coords,
+                                           boundary, dist_cutoff, or, d_or,
+                                           sor, d_sor, Bs, d_Bs, B_grads,
+                                           d_B_grads, I_grads, d_I_grads,
+                                           val_dims, val_force_units)
     Enzyme.autodiff_deferred(
         Enzyme.Reverse,
         gbsa_force_2_kernel!,
@@ -920,8 +942,9 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_2_gpu), coords::AbstractArray{
                          offset_radii, scaled_offset_radii, force_units, val_ft)
 
     function gbsa_force_2_gpu_pullback(d_fs_mat)
+        backend = get_backend(coords)
         n_atoms = length(coords)
-        fs_mat = CUDA.zeros(T, D, n_atoms)
+        fs_mat = zeros(backend, T, D, n_atoms)
         d_coords = zero(coords)
         d_born_forces = zero(born_forces)
         d_offset_radii = zero(offset_radii)
@@ -930,13 +953,14 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_2_gpu), coords::AbstractArray{
         d_B_grads = zero(B_grads)
         d_I_grads = zero(I_grads)
         n_inters = n_atoms ^ 2
-        n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+        n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
 
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_gbsa_force_2_kernel!(
-            fs_mat, d_fs_mat, born_forces, d_born_forces, coords, d_coords, boundary,
-            dist_cutoff, offset_radii, d_offset_radii, scaled_offset_radii,
-            d_scaled_offset_radii, Bs, d_Bs, B_grads, d_B_grads, I_grads, d_I_grads,
-            Val(D), Val(force_units))
+        kernel! = grad_gbsa_force_2_kernel!(backend, n_threads_gpu)
+        kernel!(fs_mat, d_fs_mat, born_forces, d_born_forces, coords, d_coords,
+                boundary, dist_cutoff, offset_radii, d_offset_radii,
+                scaled_offset_radii, d_scaled_offset_radii, Bs, d_Bs, B_grads,
+                d_B_grads, I_grads, d_I_grads, Val(D), Val(force_units),
+                ndrange = n_inters)
 
         return NoTangent(), d_coords, NoTangent(), NoTangent(), d_Bs, d_B_grads, d_I_grads,
                d_born_forces, d_offset_radii, d_scaled_offset_radii, NoTangent(), NoTangent()

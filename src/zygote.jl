@@ -694,5 +694,5 @@ for op in (:+, :-, :*, :/, :mass, :charge, :ustrip, :ustrip_vec, :wrap_coords,
             :get_bi, :get_bj, :get_fi, :get_fj, :gb_force_loop_1, :gb_force_loop_2, :gb_energy_loop)
     @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
     # Avoid ambiguous dispatch
-    @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
+    #@eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
 end

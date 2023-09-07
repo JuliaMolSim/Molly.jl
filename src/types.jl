@@ -402,8 +402,6 @@ Base.firstindex(::NoNeighborList) = 1
 Base.lastindex(nl::NoNeighborList) = length(nl)
 Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
-CUDA.Const(nl::NoNeighborList) = nl
-
 
 """
     System(; <keyword arguments>)
