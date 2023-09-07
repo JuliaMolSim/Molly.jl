@@ -338,7 +338,6 @@ end
         end
         grad_inters[bidx] = grad_inters_sum
     end
-    return nothing
 end
 
 function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArray{SVector{D, C}},
@@ -407,7 +406,6 @@ end
         end
         grad_inters[bidx] = grad_inters_sum
     end
-    return nothing
 end
 
 function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{SVector{D, C}},
@@ -460,7 +458,6 @@ end
         Const(val_dims),
         Const(val_force_units),
     )
-    return nothing
 end
 
 @kernel function grad_specific_force_2_atoms_kernel!(fs_mat, d_fs_mat, coords,
@@ -480,7 +477,6 @@ end
         Const(val_dims),
         Const(val_force_units),
     )
-    return nothing
 end
 
 @kernel function grad_specific_force_3_atoms_kernel!(fs_mat, d_fs_mat, coords,
@@ -503,7 +499,6 @@ end
         Const(val_dims),
         Const(val_force_units),
     )
-    return nothing
 end
 
 @kernel function grad_specific_force_4_atoms_kernel!(fs_mat, d_fs_mat, coords,
@@ -527,7 +522,6 @@ end
         Const(val_dims),
         Const(val_force_units),
     )
-    return nothing
 end
 
 function ChainRulesCore.rrule(::typeof(specific_force_gpu), inter_list,
@@ -593,7 +587,6 @@ end
         Duplicated(inters, d_inters),
         Const(val_energy_units),
     )
-    return nothing
 end
 
 @kernel function grad_specific_pe_2_atoms_kernel!(energy, d_energy, coords,
@@ -612,7 +605,6 @@ end
         Duplicated(inters, d_inters),
         Const(val_energy_units),
     )
-    return nothing
 end
 
 @kernel function grad_specific_pe_3_atoms_kernel!(energy, d_energy, coords,
@@ -632,7 +624,6 @@ end
         Duplicated(inters, d_inters),
         Const(val_energy_units),
     )
-    return nothing
 end
 
 @kernel function grad_specific_pe_4_atoms_kernel!(energy, d_energy, coords,
@@ -653,7 +644,6 @@ end
         Duplicated(inters, d_inters),
         Const(val_energy_units),
     )
-    return nothing
 end
 
 function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
@@ -678,25 +668,25 @@ function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
             kernel! = grad_specific_pe_1_atoms_kernel!(backend,n_gpu_threads)
             kernel!(pe_vec, d_pe_vec, coords, d_coords, boundary,
                     inter_list.is,
-                    inter_list.inters, d_inter_list.inters, Val(energy_units)
+                    inter_list.inters, d_inter_list.inters, Val(energy_units),
                     ndrange = length(inter_list))
         elseif inter_list isa InteractionList2Atoms
             kernel! = grad_specific_pe_2_atoms_kernel!(backend,n_gpu_threads)
             kernel!(pe_vec, d_pe_vec, coords, d_coords, boundary,
                     inter_list.is, inter_list.js,
-                    inter_list.inters, d_inter_list.inters, Val(energy_units)
+                    inter_list.inters, d_inter_list.inters, Val(energy_units),
                     ndrange = length(inter_list))
         elseif inter_list isa InteractionList3Atoms
             kernel! = grad_specific_pe_3_atoms_kernel!(backend,n_gpu_threads)
             kernel!(pe_vec, d_pe_vec, coords, d_coords, boundary,
                     inter_list.is, inter_list.js, inter_list.ks,
-                    inter_list.inters, d_inter_list.inters, Val(energy_units)
+                    inter_list.inters, d_inter_list.inters, Val(energy_units),
                     ndrange = length(inter_list))
         elseif inter_list isa InteractionList4Atoms
             kernel! = grad_specific_pe_4_atoms_kernel!(backend,n_gpu_threads)
             kernel!(pe_vec, d_pe_vec, coords, d_coords, boundary,
                     inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
-                    inter_list.inters, d_inter_list.inters, Val(energy_units)
+                    inter_list.inters, d_inter_list.inters, Val(energy_units),
                     ndrange = length(inter_list))
         end
 
@@ -749,7 +739,6 @@ end
             Atomix.@atomic grad_neck_scale[1] += grad_neck_scale_sum
         end
     end
-    return nothing
 end
 
 function ChainRulesCore.rrule(::typeof(gbsa_born_gpu), coords::AbstractArray{SVector{D, C}},
@@ -858,7 +847,6 @@ end
             Atomix.@atomic grad_kappa[1] += grad_kappa_sum
         end
     end
-    return nothing
 end
 
 function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), coords::AbstractArray{SVector{D, C}},
@@ -928,7 +916,6 @@ end
         Const(val_dims),
         Const(val_force_units),
     )
-    return nothing
 end
 
 function ChainRulesCore.rrule(::typeof(gbsa_force_2_gpu), coords::AbstractArray{SVector{D, C}},

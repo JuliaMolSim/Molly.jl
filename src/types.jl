@@ -935,7 +935,7 @@ charges(s::Union{System, ReplicaSystem}) = charge.(s.atoms)
 charge(s::Union{System, ReplicaSystem}, i::Integer) = charge(s.atoms[i])
 
 # Move an array to the GPU depending on whether the system is on the GPU
-move_array(arr, ::System{D, AT}) where {D} = AT(arr)
+move_array(arr, ::System{D, AT}) where {D, AT} = AT(arr)
 
 Base.getindex(s::Union{System, ReplicaSystem}, i::Integer) = AtomView(s, i)
 Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)

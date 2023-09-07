@@ -24,7 +24,7 @@ Base.:+(x::SizedVector, y::Real) = x .+ y
 Base.:+(x::Real, y::Zygote.OneElement) = x .+ y
 Base.:+(x::Zygote.OneElement, y::Real) = x .+ y
 
-function Zygote.accum(x::AbstractGPUArrayArray{Atom{T, T, T, T}},
+function Zygote.accum(x::AbstractGPUArray{Atom{T, T, T, T}},
                       y::Vector{NamedTuple{(:index, :charge, :mass, :σ, :ϵ, :solute)}}) where T
     get_array_type(x)((Zygote.accum(Array(x), y)))
 end
@@ -125,7 +125,7 @@ end
 # Slower version than in Zygote but doesn't give wrong gradients on the GPU for repeated indices
 # Here we just move it to the CPU then move it back
 # See https://github.com/FluxML/Zygote.jl/pull/1131
-Zygote.∇getindex(x::AbstractGPUArrayArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> begin
+Zygote.∇getindex(x::AbstractGPUArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> begin
     inds1_cpu = Array(inds[1])
     dx = zeros(eltype(dy), length(x))
     dxv = view(dx, inds1_cpu)
@@ -155,7 +155,7 @@ sized_to_static(v::SizedVector{2, T, Vector{T}}) where {T} = SVector{2, T}(v[1],
 
 function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}},
                      arg::AbstractGPUArray) where {D, T}
-    get_array_type(arg)((sized_to_static.(ȳ_in))
+    get_array_type(arg)(sized_to_static.(ȳ_in))
 end
 
 function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg) where {D, T}

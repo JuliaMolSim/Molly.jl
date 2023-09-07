@@ -104,7 +104,6 @@ end
             end
         end
     end
-    return nothing
 end
 
 lists_to_tuple_list(i, j, w) = (Int32(i), Int32(j), w)

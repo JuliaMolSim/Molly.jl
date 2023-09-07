@@ -798,7 +798,6 @@ end
             end
         end
     end
-    return nothing
 end
 
 # Store the results of the ij broadcasts during force calculation
@@ -951,7 +950,7 @@ function gbsa_force_2_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_c
     n_inters = n_atoms ^ 2
     n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
 
-    kernel! = gbsa_force_2_kernel!(
+    kernel! = gbsa_force_2_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, born_forces, coords, boundary, dist_cutoff, offset_radii,
             scaled_offset_radii, Bs, B_grads, I_grads, Val(D), Val(force_units),
             ndrange = n_inters)
@@ -1014,7 +1013,6 @@ end
             end
         end
     end
-    return nothing
 end
 
 @kernel function gbsa_force_2_kernel!(forces, born_forces, @Const(coords_var),
@@ -1058,7 +1056,6 @@ end
             end
         end
     end
-    return nothing
 end
 
 function forces(inter::AbstractGBSA, sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())

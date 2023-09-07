@@ -961,7 +961,7 @@ function System(T::Type,
                 velocities=nothing,
                 loggers=(),
                 units::Bool=true,
-                ArrayType::AbstractArray = Array
+                ArrayType::AbstractArray = Array,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,

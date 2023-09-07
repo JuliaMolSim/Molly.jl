@@ -53,7 +53,6 @@ end
             Atomix.@atomic :monotonic forces[dim, j] +=  fval
         end
     end
-    return nothing
 end
 
 function specific_force_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
@@ -84,7 +83,7 @@ function specific_force_gpu(inter_list::InteractionList3Atoms, coords::AbstractA
     backend = get_backend(coords)
     fs_mat = zeros(backend, T, D, length(coords))
     n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
-    kernel! = n_blocks specific_force_3_atoms_kernel!(backend, n_threads_gpu)
+    kernel! = specific_force_3_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, coords, boundary, inter_list.is, inter_list.js,
             inter_list.ks, inter_list.inters, Val(D), Val(force_units),
             ndrange = length(inter_list))
@@ -103,7 +102,7 @@ function specific_force_gpu(inter_list::InteractionList4Atoms, coords::AbstractA
     return fs_mat
 end
 
-@kernel function specific_force_1_atoms_kernel!(forces, @Const(coords_var0,
+@kernel function specific_force_1_atoms_kernel!(forces, @Const(coords_var),
                                                 boundary, @Const(is_var),
                                                 @Const(inters_var), ::Val{D},
                                                 ::Val{F}) where {D, F}
@@ -120,7 +119,6 @@ end
             Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
         end
     end
-    return nothing
 end
 
 @kernel function specific_force_2_atoms_kernel!(forces, @Const(coords_var),
@@ -142,7 +140,6 @@ end
             Atomix.@atomic :monotonic forces[dim, j] += ustrip(fs.f2[dim])
         end
     end
-    return nothing
 end
 
 @kernel function specific_force_3_atoms_kernel!(forces, @Const(coords_var),
@@ -165,7 +162,6 @@ end
             Atomix.@atomic :monotonic forces[dim, k] += ustrip(fs.f3[dim])
         end
     end
-    return nothing
 end
 
 @kernel function specific_force_4_atoms_kernel!(forces, @Const(coords_var),
@@ -190,7 +186,6 @@ end
             Atomix.@atomic :monotonic forces[dim, l] += ustrip(fs.f4[dim])
         end
     end
-    return nothing
 end
 
 function pairwise_pe_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundary,
@@ -225,7 +220,6 @@ end
         end
         Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
-    return nothing
 end
 
 function specific_pe_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
@@ -289,7 +283,6 @@ end
         end
         Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
-    return nothing
 end
 
 @kernel function specific_pe_2_atoms_kernel!(energy, @Const(coords_var),
@@ -308,7 +301,6 @@ end
         end
         Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
-    return nothing
 end
 
 @kernel function specific_pe_3_atoms_kernel!(energy, @Const(coords_var),
@@ -327,7 +319,6 @@ end
         end
         Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
-    return nothing
 end
 
 @kernel function specific_pe_4_atoms_kernel!(energy, @Const(coords_var),
@@ -347,5 +338,4 @@ end
         end
         Atomix.@atomic :monotonic energy[1] += ustrip(pe)
     end
-    return nothing
 end
