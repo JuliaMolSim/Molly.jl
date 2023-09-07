@@ -450,7 +450,7 @@ interface described there.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
     be set to `NoUnits` if units are not being used.
 """
-mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
                       L, K, F, E, M} <: AbstractSystem{D}
     atoms::A
     coords::C
@@ -487,7 +487,7 @@ function System(;
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units))
     D = n_dimensions(boundary)
-    G = isa(coords, CuArray)
+    AT = get_array_type(coords)
     T = float_type(boundary)
     A = typeof(atoms)
     C = typeof(coords)
@@ -525,16 +525,16 @@ function System(;
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
-    if isa(atoms, CuArray) && !isa(coords, CuArray)
+    if isa(atoms, AbstractGPUArray) && !isa(coords, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
-    if isa(coords, CuArray) && !isa(atoms, CuArray)
+    if isa(coords, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the coordinates are on the GPU but the atoms are not"))
     end
-    if isa(atoms, CuArray) && !isa(vels, CuArray)
+    if isa(atoms, AbstractGPUArray) && !isa(vels, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the velocities are not"))
     end
-    if isa(vels, CuArray) && !isa(atoms, CuArray)
+    if isa(vels, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
 
@@ -763,7 +763,7 @@ function ReplicaSystem(;
                         energy_units=u"kJ * mol^-1",
                         k=default_k(energy_units))
     D = n_dimensions(boundary)
-    G = isa(replica_coords[1], CuArray)
+    G = isa(replica_coords[1], AbstractGPUArray)
     T = float_type(boundary)
     A = typeof(atoms)
     AD = typeof(atoms_data)
@@ -861,25 +861,25 @@ function ReplicaSystem(;
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
-    n_cuarray = sum(y -> isa(y, CuArray), replica_coords)
+    n_cuarray = sum(y -> isa(y, AbstractGPUArray), replica_coords)
     if !(n_cuarray == n_replicas || n_cuarray == 0)
         throw(ArgumentError("the coordinates for $n_cuarray out of $n_replicas replicas are on GPU"))
     end
-    if isa(atoms, CuArray) && n_cuarray != n_replicas
+    if isa(atoms, AbstractGPUArray) && n_cuarray != n_replicas
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
-    if n_cuarray == n_replicas && !isa(atoms, CuArray)
+    if n_cuarray == n_replicas && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the coordinates are on the GPU but the atoms are not"))
     end
 
-    n_cuarray = sum(y -> isa(y, CuArray), replica_velocities)
+    n_cuarray = sum(y -> isa(y, AbstractGPUArray), replica_velocities)
     if !(n_cuarray == n_replicas || n_cuarray == 0)
         throw(ArgumentError("the velocities for $n_cuarray out of $n_replicas replicas are on GPU"))
     end
-    if isa(atoms, CuArray) && n_cuarray != n_replicas
+    if isa(atoms, AbstractGPUArray) && n_cuarray != n_replicas
         throw(ArgumentError("the atoms are on the GPU but the velocities are not"))
     end
-    if n_cuarray == n_replicas && !isa(atoms, CuArray)
+    if n_cuarray == n_replicas && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
 
@@ -935,8 +935,7 @@ charges(s::Union{System, ReplicaSystem}) = charge.(s.atoms)
 charge(s::Union{System, ReplicaSystem}, i::Integer) = charge(s.atoms[i])
 
 # Move an array to the GPU depending on whether the system is on the GPU
-move_array(arr, ::System{D, false}) where {D} = arr
-move_array(arr, ::System{D, true }) where {D} = CuArray(arr)
+move_array(arr, ::System{D, AT}) where {D} = AT(arr)
 
 Base.getindex(s::Union{System, ReplicaSystem}, i::Integer) = AtomView(s, i)
 Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)

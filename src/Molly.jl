@@ -12,7 +12,8 @@ using ChainRulesCore
 import Chemfiles
 using Colors
 using Combinatorics
-using CUDA
+using KernelAbstractions
+using GPUArrays
 using DataStructures
 using Distances
 using Distributions

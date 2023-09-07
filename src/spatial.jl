@@ -556,7 +556,8 @@ function random_velocities(sys::System{3, true}, temp; rng=Random.GLOBAL_RNG)
     if isbits(rng)
         return random_velocity_3D.(masses(sys), temp, sys.k, rng)
     else
-        return CuArray(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
+        ArrayType = get_array_type(sys.coords)
+        return ArrayType(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
     end
 end
 
@@ -564,7 +565,8 @@ function random_velocities(sys::System{2, true}, temp; rng=Random.GLOBAL_RNG)
     if isbits(rng)
         return random_velocity_2D.(masses(sys), temp, sys.k, rng)
     else
-        return CuArray(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
+        ArrayType = get_array_type(sys.coords)
+        return ArrayType(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
     end
 end
 
@@ -811,8 +813,9 @@ function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topolo
     end
 end
 
-function molecule_centers(coords::CuArray, boundary, topology)
-    return CuArray(molecule_centers(Array(coords), boundary, topology))
+function molecule_centers(coords::AbstractGPUArray, boundary, topology)
+    ArrayType = get_array_type(coords)
+    return ArrayType(molecule_centers(Array(coords), boundary, topology))
 end
 
 # Allows scaling multiple vectors at once by broadcasting this function

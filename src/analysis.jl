@@ -177,7 +177,7 @@ Calculate the hydrodynamic radius of a set of coordinates.
 function hydrodynamic_radius(coords::AbstractArray{SVector{D, T}}, boundary) where {D, T}
     n_atoms = length(coords)
     diag_cpu = Diagonal(ones(T, n_atoms))
-    diag = isa(coords, CuArray) ? CuArray(diag_cpu) : diag_cpu
+    diag = isa(coords, AbstractGPUArray) ? get_array_type(coords)((diag_cpu)) : diag_cpu
     # Other approaches to removing the diagonal Inf didn't work with Zygote
     dists = distances(coords, boundary) .+ diag
     sum_inv_dists = sum(inv.(dists)) - sum(inv(diag))

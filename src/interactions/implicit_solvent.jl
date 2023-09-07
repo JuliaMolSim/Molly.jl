@@ -411,10 +411,11 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
         factor_solvent = zero(T(coulomb_const))
     end
 
-    if isa(atoms, CuArray)
-        or = CuArray(offset_radii)
-        sor = CuArray(scaled_offset_radii)
-        is, js = CuArray(inds_i), CuArray(inds_j)
+    if isa(atoms, AbstractGPUArray)
+        ArrayType = get_array_type(atoms)
+        or = ArrayType(offset_radii)
+        sor = ArrayType(scaled_offset_radii)
+        is, js = ArrayType(inds_i), ArrayType(inds_j)
     else
         or = offset_radii
         sor = scaled_offset_radii
@@ -563,12 +564,13 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
         factor_solvent = zero(T(coulomb_const))
     end
 
-    if isa(atoms, CuArray)
-        or = CuArray(offset_radii)
-        sor = CuArray(scaled_offset_radii)
-        is, js = CuArray(inds_i), CuArray(inds_j)
-        d0s, m0s = CuArray(table_d0), CuArray(table_m0)
-        αs, βs, γs = CuArray(αs_cpu), CuArray(βs_cpu), CuArray(γs_cpu)
+    if isa(atoms, AbstractGPUArray)
+        ArrayType = fine_array_type(atoms)
+        or = ArrayType(offset_radii)
+        sor = ArrayType(scaled_offset_radii)
+        is, js = ArrayType(inds_i), ArrayType(inds_j)
+        d0s, m0s = ArrayType(table_d0), ArrayType(table_m0)
+        αs, βs, γs = ArrayType(αs_cpu), ArrayType(βs_cpu), ArrayType(γs_cpu)
     else
         or = offset_radii
         sor = scaled_offset_radii
@@ -709,7 +711,7 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2, coords, boundary)
     return Bs, B_grads, I_grads
 end
 
-function born_radii_and_grad(inter::ImplicitSolventGBN2{T}, coords::CuArray, boundary) where T
+function born_radii_and_grad(inter::ImplicitSolventGBN2{T}, coords::AbstractGPUArray, boundary) where T
     Is, I_grads = gbsa_born_gpu(coords, inter.offset_radii, inter.scaled_offset_radii,
                                 inter.dist_cutoff, inter.offset, inter.neck_scale,
                                 inter.neck_cut, inter.d0s, inter.m0s, boundary, Val(T))
