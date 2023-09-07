@@ -721,42 +721,41 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2{T}, coords::CuArray, bou
     return Bs, B_grads, I_grads
 end
 
-function cuda_threads_blocks_gbsa(n_inters)
+function gpu_threads_blocks_gbsa(n_inters)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_IMPLICIT", "512"))
-    n_blocks = cld(n_inters, n_threads_gpu)
-    return n_threads_gpu, n_blocks
+    return n_threads_gpu
 end
 
 function gbsa_born_gpu(coords::AbstractArray{SVector{D, C}}, offset_radii, scaled_offset_radii,
                        dist_cutoff, offset, neck_scale, neck_cut, d0s, m0s, boundary,
                        ::Val{T}) where {D, C, T}
+    backend = get_backend(coords)
     n_atoms = length(coords)
-    Is_nounits = CUDA.zeros(T, n_atoms)
-    I_grads_nounits = CUDA.zeros(T, n_atoms, n_atoms)
+    Is_nounits = zeros(backend, T, n_atoms)
+    I_grads_nounits = zeros(backend, T, n_atoms, n_atoms)
     n_inters = n_atoms ^ 2
-    n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+    n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
 
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_born_kernel!(
-                Is_nounits, I_grads_nounits, coords, offset_radii, scaled_offset_radii,
-                dist_cutoff, offset, neck_scale, neck_cut, d0s, m0s, boundary, Val(C))
+    kernel! = gbsa_born_kernel!(backend, n_threads_gpu)
+    kernel!(Is_nounits, I_grads_nounits, coords, offset_radii,
+            scaled_offset_radii, dist_cutoff, offset, neck_scale,
+            neck_cut, d0s, m0s, boundary, Val(C), ndrange = n_inters)
 
     Is = Is_nounits * unit(dist_cutoff)^-1
     I_grads = I_grads_nounits * unit(dist_cutoff)^-2
     return Is, I_grads
 end
 
-function gbsa_born_kernel!(Is, I_grads, coords_var, offset_radii_var, scaled_offset_radii_var,
-                           dist_cutoff, offset, neck_scale, neck_cut, d0s_var, m0s_var, boundary,
-                           ::Val{C}) where C
-    coords              = CUDA.Const(coords_var)
-    offset_radii        = CUDA.Const(offset_radii_var)
-    scaled_offset_radii = CUDA.Const(scaled_offset_radii_var)
-    d0s                 = CUDA.Const(d0s_var)
-    m0s                 = CUDA.Const(m0s_var)
+@kernel function gbsa_born_kernel!(Is, I_grads, @Const(coords_var),
+                                   @Const(offset_radii_var),
+                                   @Const(scaled_offset_radii_var),
+                                   dist_cutoff, offset, neck_scale, neck_cut,
+                                   @Const(d0s_var), @Const(m0s_var), boundary,
+                                   ::Val{C}) where C
 
     n_atoms = length(coords)
     n_inters = n_atoms ^ 2
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    inter_i = @index(Global, Linear)
 
     @inbounds if inter_i <= n_inters
         i = cld(inter_i, n_atoms)
@@ -926,16 +925,17 @@ end
 function gbsa_force_1_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_cutoff,
                           factor_solute, factor_solvent, kappa, Bs, atom_charges::AbstractArray{T},
                           force_units) where {D, C, T}
+    backend = get_backend(coords)
     n_atoms = length(coords)
-    fs_mat = CUDA.zeros(T, D, n_atoms)
-    born_forces_mod_ustrip = CUDA.zeros(T, n_atoms)
+    fs_mat = zeros(backend, T, D, n_atoms)
+    born_forces_mod_ustrip = zeros(backend, T, n_atoms)
     n_inters = n_atoms_to_n_pairs(n_atoms) + n_atoms
-    n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+    n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
 
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_1_kernel!(
-                fs_mat, born_forces_mod_ustrip, coords, boundary, dist_cutoff,
-                factor_solute, factor_solvent, kappa, Bs, atom_charges,
-                Val(D), Val(force_units))
+    kernel! = gbsa_force_1_kernel!(backend, n_threads_gpu)
+    kernel!(fs_mat, born_forces_mod_ustrip, coords, boundary, dist_cutoff,
+            factor_solute, factor_solvent, kappa, Bs, atom_charges,
+            Val(D), Val(force_units), ndrange = n_inters)
 
     return fs_mat, born_forces_mod_ustrip
 end
@@ -943,29 +943,30 @@ end
 function gbsa_force_2_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_cutoff, Bs, B_grads,
                           I_grads, born_forces, offset_radii, scaled_offset_radii,
                           force_units, ::Val{T}) where {D, C, T}
+    backend = get_backend(coords)
     n_atoms = length(coords)
-    fs_mat = CUDA.zeros(T, D, n_atoms)
+    fs_mat = zeros(backend, T, D, n_atoms)
     n_inters = n_atoms ^ 2
-    n_threads_gpu, n_blocks = cuda_threads_blocks_gbsa(n_inters)
+    n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
 
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks gbsa_force_2_kernel!(
-                fs_mat, born_forces, coords, boundary, dist_cutoff, offset_radii,
-                scaled_offset_radii, Bs, B_grads, I_grads, Val(D), Val(force_units))
+    kernel! = gbsa_force_2_kernel!(
+    kernel!(fs_mat, born_forces, coords, boundary, dist_cutoff, offset_radii,
+            scaled_offset_radii, Bs, B_grads, I_grads, Val(D), Val(force_units),
+            ndrange = n_inters)
 
     return fs_mat
 end
 
-function gbsa_force_1_kernel!(forces, born_forces_mod_ustrip, coords_var, boundary, dist_cutoff,
-                              factor_solute, factor_solvent, kappa, Bs_var, atom_charges_var,
-                              ::Val{D}, ::Val{F}) where {D, F}
-    coords  = CUDA.Const(coords_var)
-    Bs      = CUDA.Const(Bs_var)
-    atom_charges = CUDA.Const(atom_charges_var)
+@kernel function gbsa_force_1_kernel!(forces, born_forces_mod_ustrip,
+                                      @Const(coords_var), boundary, dist_cutoff,
+                                      factor_solute, factor_solvent, kappa,
+                                      @Const(Bs_var), @Const(atom_charges_var),
+                                      ::Val{D}, ::Val{F}) where {D, F}
 
     n_atoms = length(coords)
     n_inters_not_self = n_atoms_to_n_pairs(n_atoms)
     n_inters = n_inters_not_self + n_atoms
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    inter_i = @index(Global, Linear)
 
     @inbounds if inter_i <= n_inters
         if inter_i <= n_inters_not_self
@@ -1014,19 +1015,15 @@ function gbsa_force_1_kernel!(forces, born_forces_mod_ustrip, coords_var, bounda
     return nothing
 end
 
-function gbsa_force_2_kernel!(forces, born_forces, coords_var, boundary, dist_cutoff, or_var,
-                              sor_var, Bs_var, B_grads_var, I_grads_var, ::Val{D},
-                              ::Val{F}) where {D, F}
-    coords  = CUDA.Const(coords_var)
-    or      = CUDA.Const(or_var)
-    sor     = CUDA.Const(sor_var)
-    Bs      = CUDA.Const(Bs_var)
-    B_grads = CUDA.Const(B_grads_var)
-    I_grads = CUDA.Const(I_grads_var)
+@kernel function gbsa_force_2_kernel!(forces, born_forces, @Const(coords_var),
+                                      boundary, dist_cutoff, @Const(or_var),
+                                      @Const(sor_var), @Const(Bs_var),
+                                      @Const(B_grads_var), @Const(I_grads_var),
+                                      ::Val{D}, ::Val{F}) where {D, F}
 
     n_atoms = length(coords)
     n_inters = n_atoms ^ 2
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    inter_i = @index(Global, Linear)
 
     @inbounds if inter_i <= n_inters
         i = cld(inter_i, n_atoms)

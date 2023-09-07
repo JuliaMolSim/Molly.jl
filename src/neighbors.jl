@@ -80,20 +80,19 @@ function find_neighbors(sys::System{D, false},
     return NeighborList(length(neighbors_list), neighbors_list)
 end
 
-function cuda_threads_blocks_dnf(n_inters)
+function gpu_threads_blocks_dnf(n_inters)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_DISTANCENF", "512"))
-    n_blocks = cld(n_inters, n_threads_gpu)
-    return n_threads_gpu, n_blocks
+    return n_threads_gpu
 end
 
-function distance_neighbor_finder_kernel!(neighbors, coords_var, eligible_var,
-                                          boundary, sq_dist_neighbors)
-    coords    = CUDA.Const(coords_var)
-    eligible = CUDA.Const(eligible_var)
+@kernel function distance_neighbor_finder_kernel!(neighbors,
+                                                  @Const(coords_var),
+                                                  @Const(eligible_var),
+                                                  boundary, sq_dist_neighbors)
 
     n_atoms = length(coords)
     n_inters = n_atoms_to_n_pairs(n_atoms)
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    inter_i = @index(Global, Linear)
 
     @inbounds if inter_i <= n_inters
         i, j = pair_index(n_atoms, inter_i)
@@ -122,11 +121,12 @@ function find_neighbors(sys::System{D, true},
 
     nf.neighbors .= false
     n_inters = n_atoms_to_n_pairs(length(sys))
-    n_threads_gpu, n_blocks = cuda_threads_blocks_dnf(n_inters)
+    n_threads_gpu, n_blocks = gpu_threads_blocks_dnf(n_inters)
 
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks distance_neighbor_finder_kernel!(
-        nf.neighbors, sys.coords, nf.eligible, sys.boundary, nf.dist_cutoff^2,
-    )
+    backend = get_backend(sys.ArrayType)
+    kernel! = distance_neighbor_finder_kernel!(backend, n_threads_gpu)
+    kernel!(nf.neighbors, sys.coords, nf.eligible, sys.boundary,
+            nf.dist_cutoff^2, ndrange = length(sys))
 
     pairs = findall(nf.neighbors)
     nbsi, nbsj = getindex.(pairs, 1), getindex.(pairs, 2)
@@ -340,7 +340,7 @@ function find_neighbors(sys::System{D, G},
 
     nf.cl = cl
     if G
-        return NeighborList(neighbors.n, CuArray(neighbors.list))
+        return NeighborList(neighbors.n, sys.ArrayType(neighbors.list))
     else
         return neighbors
     end

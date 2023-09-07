@@ -1,14 +1,14 @@
 # Chain rules to allow differentiable simulations
 
-@non_differentiable CUDA.zeros(args...)
+@non_differentiable molly_zeros(args...)
 @non_differentiable random_velocities(args...)
 @non_differentiable random_velocities!(args...)
-@non_differentiable cuda_threads_blocks_pairwise(args...)
-@non_differentiable cuda_threads_blocks_specific(args...)
+@non_differentiable gpu_threads_blocks_pairwise(args...)
+@non_differentiable gpu_threads_blocks_specific(args...)
 @non_differentiable check_force_units(args...)
 @non_differentiable atoms_bonded_to_N(args...)
 @non_differentiable lookup_table(args...)
-@non_differentiable cuda_threads_blocks_gbsa(args...)
+@non_differentiable gpu_threads_blocks_gbsa(args...)
 @non_differentiable find_neighbors(args...)
 @non_differentiable DistanceNeighborFinder(args...)
 @non_differentiable run_loggers!(args...)
@@ -346,17 +346,20 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArra
     Y = pairwise_force_gpu(coords, atoms, boundary, pairwise_inters, nbs, force_units, val_ft)
 
     function pairwise_force_gpu_pullback(d_fs_mat)
+        backend = get_backend(coords)
+        ArrayType = find_arrat_type(coords)
         n_atoms = length(atoms)
         z = zero(T)
-        fs_mat = CUDA.zeros(T, D, n_atoms)
+        fs_mat = zeros(backend, T, D, n_atoms)
         d_coords = zero(coords)
-        d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
-        n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
-        grad_pairwise_inters = CuArray(fill(pairwise_inters, n_blocks))
+        d_atoms = ArrayType([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
+        n_threads_gpu = gpu_threads_blocks_pairwise(length(nbs))
+        grad_pairwise_inters = ArrayType(fill(pairwise_inters, n_blocks))
 
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_force_kernel!(fs_mat,
-                d_fs_mat, coords, d_coords, atoms, d_atoms, boundary, pairwise_inters,
-                grad_pairwise_inters, nbs, Val(D), Val(force_units), Val(n_threads_gpu))
+        kernel! = grad_pairwise_force_kernel!(backend, n_gpu_threads)
+        kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, d_atoms, boundary,
+                pairwise_inters, grad_pairwise_inters, nbs, Val(D),
+                Val(force_units), Val(n_threads_gpu), ndrange = length(nbs))
 
         d_pairwise_inters = reduce((t1, t2) -> map(+, t1, t2), Array(grad_pairwise_inters))
         return NoTangent(), d_coords, d_atoms, NoTangent(), d_pairwise_inters, NoTangent(),
@@ -366,11 +369,13 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArra
     return Y, pairwise_force_gpu_pullback
 end
 
-function grad_pairwise_pe_kernel!(pe_vec, d_pe_vec, coords, d_coords, atoms, d_atoms, boundary,
-                                  inters::I, grad_inters, neighbors, val_energy_units,
-                                  ::Val{N}) where {I, N}
-    shared_grad_inters = CuStaticSharedArray(I, N)
-    sync_threads()
+@kernel function grad_pairwise_pe_kernel!(pe_vec, d_pe_vec, coords, d_coords,
+                                           atoms, d_atoms, boundary,
+                                           inters::I, grad_inters, neighbors,
+                                           val_energy_units,
+                                           ::Val{N}) where {I, N}
+    shared_grad_inters = @localmem I N
+    @synchronize()
 
     grads = Enzyme.autodiff_deferred(
         Enzyme.Reverse,
@@ -385,16 +390,17 @@ function grad_pairwise_pe_kernel!(pe_vec, d_pe_vec, coords, d_coords, atoms, d_a
         Const(val_energy_units),
     )[1]
 
-    tidx = threadIdx().x
+    tidx = @index(Local, Linear)
     shared_grad_inters[tidx] = grads[5]
-    sync_threads()
+    @synchronize()
 
     if tidx == 1
+        bidx = @index(Group, Linear)
         grad_inters_sum = shared_grad_inters[1]
         for ti in 2:N
             grad_inters_sum = map(+, grad_inters_sum, shared_grad_inters[ti])
         end
-        grad_inters[blockIdx().x] = grad_inters_sum
+        grad_inters[bidx] = grad_inters_sum
     end
     return nothing
 end
@@ -409,18 +415,21 @@ function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{S
     Y = pairwise_pe_gpu(coords, atoms, boundary, pairwise_inters, nbs, energy_units, val_ft)
 
     function pairwise_pe_gpu_pullback(d_pe_vec_arg)
+        backend = get_backend(coords)
+        ArrayType = get_array_type(coords)
         n_atoms = length(atoms)
         z = zero(T)
-        pe_vec = CUDA.zeros(T, 1)
-        d_pe_vec = CuArray([d_pe_vec_arg[1]])
+        pe_vec = zeros(backend, T, 1)
+        d_pe_vec = ArrayType([d_pe_vec_arg[1]])
         d_coords = zero(coords)
-        d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
-        n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
-        grad_pairwise_inters = CuArray(fill(pairwise_inters, n_blocks))
+        d_atoms = ArrayType([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
+        n_threads_gpu = gpu_threads_blocks_pairwise(length(nbs))
+        grad_pairwise_inters = ArrayType(fill(pairwise_inters, n_blocks))
 
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_pairwise_pe_kernel!(pe_vec,
-                d_pe_vec, coords, d_coords, atoms, d_atoms, boundary, pairwise_inters,
-                grad_pairwise_inters, nbs, Val(energy_units), Val(n_threads_gpu))
+        kernel! = grad_pairwise_pe_kernel!(backend, n_threads_gpu)
+        kernel!(pe_vec, d_pe_vec, coords, d_coords, atoms, d_atoms, boundary,
+                pairwise_inters, grad_pairwise_inters, nbs, Val(energy_units),
+                Val(n_threads_gpu), ndrange = length(nbs))
 
         d_pairwise_inters = reduce((t1, t2) -> map(+, t1, t2), Array(grad_pairwise_inters))
         return NoTangent(), d_coords, d_atoms, NoTangent(), d_pairwise_inters, NoTangent(),
@@ -430,9 +439,10 @@ function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{S
     return Y, pairwise_pe_gpu_pullback
 end
 
-function grad_specific_force_1_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
-                                             boundary, is, inters, d_inters,
-                                             val_dims, val_force_units)
+@kernel function grad_specific_force_1_atoms_kernel!(fs_mat, d_fs_mat, coords,
+                                                     d_coords, boundary, is,
+                                                     inters, d_inters, val_dims,
+                                                     val_force_units)
     Enzyme.autodiff_deferred(
         Enzyme.Reverse,
         specific_force_1_atoms_kernel!,
@@ -448,9 +458,10 @@ function grad_specific_force_1_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
     return nothing
 end
 
-function grad_specific_force_2_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
-                                             boundary, is, js, inters, d_inters,
-                                             val_dims, val_force_units)
+@kernel function grad_specific_force_2_atoms_kernel!(fs_mat, d_fs_mat, coords,
+                                                     d_coords, boundary, is,
+                                                     js, inters, d_inters,
+                                                     val_dims, val_force_units)
     Enzyme.autodiff_deferred(
         Enzyme.Reverse,
         specific_force_2_atoms_kernel!,
@@ -467,9 +478,12 @@ function grad_specific_force_2_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
     return nothing
 end
 
-function grad_specific_force_3_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
-                                             boundary, is, js, ks, inters, d_inters,
-                                             val_dims, val_force_units)
+@kernel function grad_specific_force_3_atoms_kernel!(fs_mat, d_fs_mat, coords,
+                                                     d_coords,
+                                                     boundary, is,
+                                                     js, ks, inters, d_inters,
+                                                     val_dims,
+                                                     val_force_units)
     Enzyme.autodiff_deferred(
         Enzyme.Reverse,
         specific_force_3_atoms_kernel!,
@@ -487,9 +501,12 @@ function grad_specific_force_3_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
     return nothing
 end
 
-function grad_specific_force_4_atoms_kernel!(fs_mat, d_fs_mat, coords, d_coords,
-                                             boundary, is, js, ks, ls, inters, d_inters,
-                                             val_dims, val_force_units)
+@kernel function grad_specific_force_4_atoms_kernel!(fs_mat, d_fs_mat, coords,
+                                                     d_coords,
+                                                     boundary, is,
+                                                     js, ks, ls, inters,
+                                                     d_inters, val_dims,
+                                                     val_force_units)
     Enzyme.autodiff_deferred(
         Enzyme.Reverse,
         specific_force_4_atoms_kernel!,
@@ -518,31 +535,36 @@ function ChainRulesCore.rrule(::typeof(specific_force_gpu), inter_list,
     Y = specific_force_gpu(inter_list, coords, boundary, force_units, val_ft)
 
     function specific_force_gpu_pullback(d_fs_mat)
-        fs_mat = CUDA.zeros(T, D, length(coords))
+        backend = get_backend(coords)
+        fs_mat = zeros(backend, T, D, length(coords))
         d_inter_list = zero(inter_list)
         d_coords = zero(coords)
-        n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
+        n_threads_gpu = get_threads_blocks_specific(length(inter_list))
 
         if inter_list isa InteractionList1Atoms
-            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_1_atoms_kernel!(
-                    fs_mat, d_fs_mat, coords, d_coords, boundary,
+            kernel! = grad_specific_force_1_atoms_kernel!(backend,n_threads_gpu)
+            kernel!(fs_mat, d_fs_mat, coords, d_coords, boundary,
                     inter_list.is,
-                    inter_list.inters, d_inter_list.inters, Val(D), Val(force_units))
+                    inter_list.inters, d_inter_list.inters, Val(D),
+                    Val(force_units), ndrange = length(inter_list))
         elseif inter_list isa InteractionList2Atoms
-            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_2_atoms_kernel!(
-                    fs_mat, d_fs_mat, coords, d_coords, boundary,
+            kernel! = grad_specific_force_2_atoms_kernel!(backend,n_threads_gpu)
+            kernel!(fs_mat, d_fs_mat, coords, d_coords, boundary,
                     inter_list.is, inter_list.js,
-                    inter_list.inters, d_inter_list.inters, Val(D), Val(force_units))
+                    inter_list.inters, d_inter_list.inters, Val(D),
+                    Val(force_units), ndrange = length(inter_list))
         elseif inter_list isa InteractionList3Atoms
-            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_3_atoms_kernel!(
-                    fs_mat, d_fs_mat, coords, d_coords, boundary,
+            kernel! = grad_specific_force_3_atoms_kernel!(backend,n_threads_gpu)
+            kernel!(fs_mat, d_fs_mat, coords, d_coords, boundary,
                     inter_list.is, inter_list.js, inter_list.ks,
-                    inter_list.inters, d_inter_list.inters, Val(D), Val(force_units))
+                    inter_list.inters, d_inter_list.inters, Val(D),
+                    Val(force_units), ndrange = length(inter_list))
         elseif inter_list isa InteractionList4Atoms
-            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_force_4_atoms_kernel!(
-                    fs_mat, d_fs_mat, coords, d_coords, boundary,
+            kernel! = grad_specific_force_4_atoms_kernel!(backend,n_threads_gpu)
+            kernel!(fs_mat, d_fs_mat, coords, d_coords, boundary,
                     inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
-                    inter_list.inters, d_inter_list.inters, Val(D), Val(force_units))
+                    inter_list.inters, d_inter_list.inters, Val(D),
+                    Val(force_units), ndrange = length(inter_list))
         end
 
         return NoTangent(), d_inter_list, d_coords, NoTangent(), NoTangent(), NoTangent()
@@ -551,9 +573,10 @@ function ChainRulesCore.rrule(::typeof(specific_force_gpu), inter_list,
     return Y, specific_force_gpu_pullback
 end
 
-function grad_specific_pe_1_atoms_kernel!(energy, d_energy, coords, d_coords,
-                                          boundary, is, inters, d_inters,
-                                          val_energy_units)
+@kernel function grad_specific_pe_1_atoms_kernel!(energy, d_energy, coords,
+                                                  d_coords, boundary, is,
+                                                  inters, d_inters,
+                                                  val_energy_units)
     Enzyme.autodiff_deferred(
         Enzyme.Reverse,
         specific_pe_1_atoms_kernel!,
@@ -568,9 +591,10 @@ function grad_specific_pe_1_atoms_kernel!(energy, d_energy, coords, d_coords,
     return nothing
 end
 
-function grad_specific_pe_2_atoms_kernel!(energy, d_energy, coords, d_coords,
-                                          boundary, is, js, inters, d_inters,
-                                          val_energy_units)
+@kernel function grad_specific_pe_2_atoms_kernel!(energy, d_energy, coords,
+                                                  d_coords, boundary,
+                                                  is, js, inters, d_inters,
+                                                  val_energy_units)
     Enzyme.autodiff_deferred(
         Enzyme.Reverse,
         specific_pe_2_atoms_kernel!,
@@ -586,9 +610,10 @@ function grad_specific_pe_2_atoms_kernel!(energy, d_energy, coords, d_coords,
     return nothing
 end
 
-function grad_specific_pe_3_atoms_kernel!(energy, d_energy, coords, d_coords,
-                                          boundary, is, js, ks, inters, d_inters,
-                                          val_energy_units)
+@kernel function grad_specific_pe_3_atoms_kernel!(energy, d_energy, coords,
+                                                  d_coords, boundary, is,
+                                                  js, ks, inters, d_inters,
+                                                  val_energy_units)
     Enzyme.autodiff_deferred(
         Enzyme.Reverse,
         specific_pe_3_atoms_kernel!,
@@ -605,9 +630,10 @@ function grad_specific_pe_3_atoms_kernel!(energy, d_energy, coords, d_coords,
     return nothing
 end
 
-function grad_specific_pe_4_atoms_kernel!(energy, d_energy, coords, d_coords,
-                                          boundary, is, js, ks, ls, inters, d_inters,
-                                          val_energy_units)
+@kernel function grad_specific_pe_4_atoms_kernel!(energy, d_energy, coords,
+                                                  d_coords, boundary, is,
+                                                  js, ks, ls, inters, d_inters,
+                                                  val_energy_units)
     Enzyme.autodiff_deferred(
         Enzyme.Reverse,
         specific_pe_4_atoms_kernel!,
@@ -635,32 +661,38 @@ function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
     Y = specific_pe_gpu(inter_list, coords, boundary, energy_units, val_ft)
 
     function specific_pe_gpu_pullback(d_pe_vec_arg)
-        pe_vec = CUDA.zeros(T, 1)
-        d_pe_vec = CuArray([d_pe_vec_arg[1]])
+        backend = get_backend(coords)
+        array_type = get_array_type(coords)
+        pe_vec = zeros(backend, T, 1)
+        d_pe_vec = ArrayType([d_pe_vec_arg[1]])
         d_inter_list = zero(inter_list)
         d_coords = zero(coords)
-        n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
+        n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
 
         if inter_list isa InteractionList1Atoms
-            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_pe_1_atoms_kernel!(
-                    pe_vec, d_pe_vec, coords, d_coords, boundary,
+            kernel! = grad_specific_pe_1_atoms_kernel!(backend,n_gpu_threads)
+            kernel!(pe_vec, d_pe_vec, coords, d_coords, boundary,
                     inter_list.is,
-                    inter_list.inters, d_inter_list.inters, Val(energy_units))
+                    inter_list.inters, d_inter_list.inters, Val(energy_units)
+                    ndrange = length(inter_list))
         elseif inter_list isa InteractionList2Atoms
-            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_pe_2_atoms_kernel!(
-                    pe_vec, d_pe_vec, coords, d_coords, boundary,
+            kernel! = grad_specific_pe_2_atoms_kernel!(backend,n_gpu_threads)
+            kernel!(pe_vec, d_pe_vec, coords, d_coords, boundary,
                     inter_list.is, inter_list.js,
-                    inter_list.inters, d_inter_list.inters, Val(energy_units))
+                    inter_list.inters, d_inter_list.inters, Val(energy_units)
+                    ndrange = length(inter_list))
         elseif inter_list isa InteractionList3Atoms
-            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_pe_3_atoms_kernel!(
-                    pe_vec, d_pe_vec, coords, d_coords, boundary,
+            kernel! = grad_specific_pe_3_atoms_kernel!(backend,n_gpu_threads)
+            kernel!(pe_vec, d_pe_vec, coords, d_coords, boundary,
                     inter_list.is, inter_list.js, inter_list.ks,
-                    inter_list.inters, d_inter_list.inters, Val(energy_units))
+                    inter_list.inters, d_inter_list.inters, Val(energy_units)
+                    ndrange = length(inter_list))
         elseif inter_list isa InteractionList4Atoms
-            CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks grad_specific_pe_4_atoms_kernel!(
-                    pe_vec, d_pe_vec, coords, d_coords, boundary,
+            kernel! = grad_specific_pe_4_atoms_kernel!(backend,n_gpu_threads)
+            kernel!(pe_vec, d_pe_vec, coords, d_coords, boundary,
                     inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
-                    inter_list.inters, d_inter_list.inters, Val(energy_units))
+                    inter_list.inters, d_inter_list.inters, Val(energy_units)
+                    ndrange = length(inter_list))
         end
 
         return NoTangent(), d_inter_list, d_coords, NoTangent(), NoTangent(), NoTangent()
