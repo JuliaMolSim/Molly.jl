@@ -43,7 +43,6 @@
                     atol=1e-4u"kJ * mol^-1")
 
     for ArrayType in array_list[2:end]
-    if run_gpu_tests
         coords = ArrayType([
             SVector(1.0, 1.0, 1.0)u"nm",
             SVector(1.6, 1.0, 1.0)u"nm",
@@ -52,6 +51,7 @@
         sys = System(
             atoms=ArrayType([Atom(σ=(0.4 / (2 ^ (1 / 6)))u"nm", ϵ=1.0u"kJ * mol^-1") for i in 1:3]),
             coords=coords,
+            ArrayType = ArrayType,
             boundary=CubicBoundary(5.0u"nm"),
             pairwise_inters=(LennardJones(),),
         )

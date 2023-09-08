@@ -71,8 +71,8 @@ Calculate the potential energy due to a given interaction type.
 
 Custom interaction types should implement this function.
 """
-function potential_energy(sys::System{D, false}, neighbors=nothing;
-                          n_threads::Integer=Threads.nthreads()) where D
+function potential_energy(sys::System{D, AT}, neighbors=nothing;
+                          n_threads::Integer=Threads.nthreads()) where {D, AT}
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
@@ -225,8 +225,8 @@ end
     return nothing
 end
 
-function potential_energy(sys::System{D, true, T}, neighbors=nothing;
-                          n_threads::Integer=Threads.nthreads()) where {D, T}
+function potential_energy(sys::System{D, AT, T}, neighbors=nothing;
+                          n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
     n_atoms = length(sys)
     val_ft = Val(T)
     pe_vec = zeros(get_backend(sys.coords), T, 1)

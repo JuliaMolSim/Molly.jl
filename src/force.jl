@@ -137,8 +137,8 @@ If the interaction uses neighbor lists, the neighbors should be computed
 first and passed to the function.
 Custom general interaction types should implement this function.
 """
-function forces(sys::System{D, false}, neighbors=nothing;
-                n_threads::Integer=Threads.nthreads()) where D
+function forces(sys::System{D, AT}, neighbors=nothing;
+                n_threads::Integer=Threads.nthreads()) where {D, AT}
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
@@ -303,8 +303,8 @@ end
     return nothing
 end
 
-function forces(sys::System{D, true, T}, neighbors=nothing;
-                n_threads::Integer=Threads.nthreads()) where {D, T}
+function forces(sys::System{D, AT, T}, neighbors=nothing;
+                n_threads::Integer=Threads.nthreads()) where {D, T, AT <: AbstractGPUArray}
     n_atoms = length(sys)
     val_ft = Val(T)
     fs_mat = zeros(get_backend(sys.coords), T, D, n_atoms)

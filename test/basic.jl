@@ -177,7 +177,7 @@
 
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     for ArrayType in array_list
-        sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=gpu, use_cell_list=false)
+        sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; ArrayType=ArrayType, use_cell_list=false)
         mcs = molecule_centers(sys.coords, sys.boundary, sys.topology)
         @test isapprox(Array(mcs)[1], mean(sys.coords[1:1170]); atol=0.04u"nm")
 
@@ -310,8 +310,9 @@ end
         end
     end
 
-    if run_gpu_tests
-        sys_gpu = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=true)
+    if run_cuda_tests
+        sys_gpu = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
+                         ArrayType=CuArray)
         for neighbor_finder in (DistanceNeighborFinder,)
             nf_gpu = neighbor_finder(
                 eligible=sys_gpu.neighbor_finder.eligible,
@@ -321,6 +322,24 @@ end
             neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
             @test length(neighbors_gpu) == n_neighbors_ref
             CUDA.allowscalar() do
+                @test neighbors_gpu[10] isa Tuple{Int32, Int32, Bool}
+            end
+            @test identical_neighbors(neighbors_gpu, neighbors_ref)
+        end
+    end
+
+    if run_rocm_tests
+        sys_gpu = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
+                         ArrayType=ROCArray)
+        for neighbor_finder in (DistanceNeighborFinder,)
+            nf_gpu = neighbor_finder(
+                eligible=sys_gpu.neighbor_finder.eligible,
+                special=sys_gpu.neighbor_finder.special,
+                dist_cutoff=dist_cutoff,
+            )
+            neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
+            @test length(neighbors_gpu) == n_neighbors_ref
+            AMDGPU.allowscalar() do
                 @test neighbors_gpu[10] isa Tuple{Int32, Int32, Bool}
             end
             @test identical_neighbors(neighbors_gpu, neighbors_ref)
@@ -338,6 +357,10 @@ end
     @test rmsd(coords_1, coords_2) ≈ 2.54859467758795u"Å"
     if run_cuda_tests
         @test rmsd(CuArray(coords_1), CuArray(coords_2)) ≈ 2.54859467758795u"Å"
+    end
+    if run_rocm_tests
+        @test rmsd(ROCArray(coords_1),
+                   ROCArray(coords_2)) ≈ 2.54859467758795u"Å"
     end
 
     bb_atoms = BioStructures.collectatoms(struc[1], BioStructures.backboneselector)

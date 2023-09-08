@@ -38,8 +38,10 @@ end
         return mean(sqrt.(minimum(disps_diag; dims=1)))
     end
 
-    function test_simulation_grad(ArrayType::AbstractArray, parallel::Bool, forward::Bool, f32::Bool, pis::Bool,
-                                  sis::Bool, obc2::Bool, gbn2::Bool)
+    function test_simulation_grad(ArrayType::Type{AT}, parallel::Bool,
+                                  forward::Bool, f32::Bool, pis::Bool,
+                                  sis::Bool, obc2::Bool,
+                                  gbn2::Bool) where AT <: AbstractArray
         n_atoms = 50
         n_steps = 100
         atom_mass = f32 ? 10.0f0 : 10.0
@@ -171,7 +173,7 @@ end
         push!(runs, ("CPU parallel forward", [Array, true , true , false, true , true , false, false], 0.01, 0.05))
         push!(runs, ("CPU parallel f32"    , [Array, true , false, true , true , true , false, false], 0.2 , 10.0))
     end
-    if run_gpu_tests #                        gpu       par    fwd    f32    pis    sis    obc2   gbn2    tol_σ tol_r0
+    if run_cuda_tests #                        gpu       par    fwd    f32    pis    sis    obc2   gbn2    tol_σ tol_r0
         push!(runs, ("GPU"                 , [CuArray , false, false, false, true , true , false, false], 0.25, 20.0))
         push!(runs, ("GPU f32"             , [CuArray , false, false, true , true , true , false, false], 0.5 , 50.0))
         push!(runs, ("GPU nospecific"      , [CuArray , false, false, false, true , false, false, false], 0.25, 0.0 ))
@@ -222,19 +224,20 @@ end
 end
 
 @testset "Differentiable protein" begin
-    function create_sys(ArrayType::AbstractArray)
+    function create_sys(ArrayType::Type{AT}) where AT <: AbstractArray
         ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...; units=false)
         return System(
             joinpath(data_dir, "6mrr_nowater.pdb"),
             ff;
             units=false,
-            gpu=gpu,
+            ArrayType = ArrayType,
             implicit_solvent="gbn2",
             kappa=0.7,
         )
     end
 
-    function test_energy_grad(ArrayType::AbstractArray, parallel::Bool)
+    function test_energy_grad(ArrayType::Type{AT},
+                              parallel::Bool) where AT <: AbstractArray
         sys_ref = create_sys(ArrayType)
     
         function loss(params_dic)
@@ -263,7 +266,8 @@ end
 
     sum_abs(x) = sum(abs, x)
 
-    function test_force_grad(ArrayType::AbstractArray, parallel::Bool)
+    function test_force_grad(ArrayType::Type{AT},
+                             parallel::Bool) where AT <: AbstractArray
         sys_ref = create_sys(ArrayType)
 
         function loss(params_dic)
@@ -291,7 +295,8 @@ end
         return loss
     end
 
-    function test_sim_grad(ArrayType::AbstractArray, parallel::Bool)
+    function test_sim_grad(ArrayType::Type{AT},
+                           parallel::Bool) where AT <: AbstractArray
         sys_ref = create_sys(ArrayType)
 
         function loss(params_dic)

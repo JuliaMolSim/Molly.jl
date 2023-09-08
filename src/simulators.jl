@@ -646,12 +646,12 @@ Attempt an exchange of replicas `n` and `m` in a [`ReplicaSystem`](@ref) during 
 Successful exchanges should exchange coordinates and velocities as appropriate.
 Returns acceptance quantity `Δ` and a `Bool` indicating whether the exchange was successful.
 """
-function remd_exchange!(sys::ReplicaSystem{D, G, T},
+function remd_exchange!(sys::ReplicaSystem{D, AT, T},
                         sim::TemperatureREMD,
                         n::Integer,
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
-                        rng=Random.GLOBAL_RNG) where {D, G, T}
+                        rng=Random.GLOBAL_RNG) where {D, AT, T}
     T_n, T_m = sim.temperatures[n], sim.temperatures[m]
     β_n, β_m = inv(sys.k * T_n), inv(sys.k * T_m)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
@@ -739,12 +739,12 @@ function simulate!(sys::ReplicaSystem,
     return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads, run_loggers=run_loggers)
 end
 
-function remd_exchange!(sys::ReplicaSystem{D, G, T},
+function remd_exchange!(sys::ReplicaSystem{D, AT, T},
                         sim::HamiltonianREMD,
                         n::Integer,
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
-                        rng=Random.GLOBAL_RNG) where {D, G, T}
+                        rng=Random.GLOBAL_RNG) where {D, AT, T}
     T_sim = sim.temperature
     β_sim = inv(sys.k * T_sim)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
@@ -862,11 +862,11 @@ function MetropolisMonteCarlo(; temperature, trial_moves, trial_args=Dict())
     return MetropolisMonteCarlo(temperature, trial_moves, trial_args)
 end
 
-function simulate!(sys::System{D, G, T},
+function simulate!(sys::System{D, AT, T},
                    sim::MetropolisMonteCarlo,
                    n_steps::Integer;
                    n_threads::Integer=Threads.nthreads(),
-                   run_loggers=true) where {D, G, T}
+                   run_loggers=true) where {D, AT, T}
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E_old = potential_energy(sys, neighbors; n_threads=n_threads)
     for i in 1:n_steps
@@ -899,8 +899,8 @@ Performs a random translation of the coordinates of a randomly selected atom in 
 The translation is generated using a uniformly selected direction and uniformly selected length
 in range [0, 1) scaled by `shift_size` which should have appropriate length units.
 """
-function random_uniform_translation!(sys::System{D, G, T};
-                                     shift_size=oneunit(eltype(eltype(sys.coords)))) where {D, G, T}
+function random_uniform_translation!(sys::System{D, AT, T};
+                                     shift_size=oneunit(eltype(eltype(sys.coords)))) where {D, AT, T}
     rand_idx = rand(eachindex(sys))
     direction = random_unit_vector(T, D)
     magnitude = rand(T) * shift_size
@@ -917,8 +917,8 @@ The translation is generated using a uniformly chosen direction and length selec
 the standard normal distribution i.e. with mean 0 and standard deviation 1, scaled by `shift_size`
 which should have appropriate length units.
 """
-function random_normal_translation!(sys::System{D, G, T};
-                                    shift_size=oneunit(eltype(eltype(sys.coords)))) where {D, G, T}
+function random_normal_translation!(sys::System{D, AT, T};
+                                    shift_size=oneunit(eltype(eltype(sys.coords)))) where {D, AT, T}
     rand_idx = rand(eachindex(sys))
     direction = random_unit_vector(T, D)
     magnitude = randn(T) * shift_size

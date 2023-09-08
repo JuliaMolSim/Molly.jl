@@ -907,7 +907,7 @@ end
 
     for sim in (lang_baro, vvand_baro)
         for ArrayType in array_list
-            if gpu && sim == vvand_baro
+            if ArrayType <: AbstractGPUArray && sim == vvand_baro
                 continue
             end
 
@@ -973,7 +973,7 @@ end
 
     for ArrayType in array_list
         for (press_i, press) in enumerate(pressure_test_set)
-            if gpu && press_i != 2
+            if ArrayType <: AbstractGPUArray && press_i != 2
                 continue
             end
 
@@ -1043,7 +1043,7 @@ end
 
     for ArrayType in array_list
         for (barostat_i, barostat) in enumerate(barostat_test_set)
-            if gpu && barostat_i != 2
+            if ArrayType <: AbstractGPUArray && barostat_i != 2
                 continue
             end
 
@@ -1166,7 +1166,8 @@ end
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-    function test_sim(nl::Bool, parallel::Bool, f32::Bool, ArrayType::AbstractArray)
+    function test_sim(nl::Bool, parallel::Bool, f32::Bool,
+                      ArrayType::Type{AT}) where AT <: AbstractArray
         n_atoms = 400
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"g/mol" : 10.0u"g/mol"
@@ -1186,7 +1187,7 @@ end
         pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
         if nl
             neighbor_finder = DistanceNeighborFinder(
-                eligible=ArrayType(trues(n_atoms, n_atoms)), n_atoms),
+                eligible=ArrayType(trues(n_atoms, n_atoms)),
                 n_steps=10,
                 dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
             )
@@ -1209,7 +1210,7 @@ end
             neighbor_finder=neighbor_finder,
         )
 
-        @test is_on_gpu(s) == gpu
+        @test is_on_gpu(s) == (ArrayType <: AbstractGPUArray)
         @test float_type(s) == (f32 ? Float32 : Float64)
 
         n_threads = parallel ? Threads.nthreads() : 1
@@ -1232,12 +1233,19 @@ end
         push!(runs, ("CPU parallel NL"    , [true , true , false, Array]))
         push!(runs, ("CPU parallel f32 NL", [true , true , true , Array]))
     end
-    if run_gpu_tests
+    if run_cuda_tests
         push!(runs, ("GPU"       , [false, false, false, CuArray]))
         push!(runs, ("GPU f32"   , [false, false, true , CuArray]))
         push!(runs, ("GPU NL"    , [true , false, false, CuArray]))
         push!(runs, ("GPU f32 NL", [true , false, true , CuArray]))
     end
+    if run_rocm_tests
+        push!(runs, ("GPU"       , [false, false, false, ROCArray]))
+        push!(runs, ("GPU f32"   , [false, false, true , ROCArray]))
+        push!(runs, ("GPU NL"    , [true , false, false, ROCArray]))
+        push!(runs, ("GPU f32 NL", [true , false, true , ROCArray]))
+    end
+
 
     final_coords_ref, E_start_ref = test_sim(runs[1][2]...)
     # Check all simulations give the same result to within some error

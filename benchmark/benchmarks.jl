@@ -62,7 +62,8 @@ const starting_velocities = [random_velocity(atom_mass, 1.0u"K") for i in 1:n_at
 const starting_coords_f32 = [Float32.(c) for c in starting_coords]
 const starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-function test_sim(nl::Bool, parallel::Bool, f32::Bool, ArrayType::AbstractArray)
+function test_sim(nl::Bool, parallel::Bool, f32::Bool,
+                  ArrayType::Type{AT}) where AT <: AbstractArray
     n_atoms = 400
     n_steps = 200
     atom_mass = f32 ? 10.0f0u"g/mol" : 10.0u"g/mol"

@@ -678,9 +678,9 @@ function virial(sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     return v
 end
 
-@inbounds function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
-                            pairwise_inters_nl) where {D, G, T}
-    if G
+@inbounds function virial(sys::System{D, AT, T}, neighbors_dev, pairwise_inters_nonl,
+                            pairwise_inters_nl) where {D, AT, T}
+    if AT <: AbstractGPUArray
         coords, atoms = Array(sys.coords), Array(sys.atoms)
         if isnothing(neighbors_dev)
             neighbors = neighbors_dev
@@ -731,7 +731,7 @@ end
 end
 
 # Default for general interactions
-function virial(inter, sys::System{D, G, T}, neighbors=nothing; kwargs...) where {D, G, T}
+function virial(inter, sys::System{D, AT, T}, neighbors=nothing; kwargs...) where {D, AT, T}
     return zero(T) * sys.energy_units
 end
 

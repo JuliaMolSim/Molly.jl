@@ -52,12 +52,12 @@ function DistanceNeighborFinder(;
                 eligible, dist_cutoff, special, n_steps, zero(eligible))
 end
 
-function find_neighbors(sys::System{D, false},
+function find_neighbors(sys::System{D, AT},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
-                        n_threads::Integer=Threads.nthreads()) where D
+                        n_threads::Integer=Threads.nthreads()) where {D, AT}
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
@@ -108,12 +108,12 @@ end
 
 lists_to_tuple_list(i, j, w) = (Int32(i), Int32(j), w)
 
-function find_neighbors(sys::System{D, true},
+function find_neighbors(sys::System{D, AT},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
-                        kwargs...) where D
+                        kwargs...) where {D, AT <: AbstractGPUArray}
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end

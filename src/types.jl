@@ -547,7 +547,7 @@ function System(;
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary, constraints)
 
-    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, K, F, E, M}(
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, K, F, E, M}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, neighbor_finder,
                     loggers, k_converted, force_units, energy_units, atom_masses)
@@ -728,7 +728,7 @@ construction where `n` is the number of threads to be used per replica.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
     be set to `NoUnits` if units are not being used.
 """
-mutable struct ReplicaSystem{D, G, T, A, AD, EL, K, F, E, R} <: AbstractSystem{D}
+mutable struct ReplicaSystem{D, AT, T, A, AD, EL, K, F, E, R} <: AbstractSystem{D}
     atoms::A
     n_replicas::Int
     atoms_data::AD
@@ -763,7 +763,7 @@ function ReplicaSystem(;
                         energy_units=u"kJ * mol^-1",
                         k=default_k(energy_units))
     D = n_dimensions(boundary)
-    G = isa(replica_coords[1], AbstractGPUArray)
+    AT = get_array_type(replica_coords[1])
     T = float_type(boundary)
     A = typeof(atoms)
     AD = typeof(atoms_data)
@@ -889,7 +889,7 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+    replicas = Tuple(System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
                             typeof(replica_loggers[i]), K, F, E, M}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
@@ -898,7 +898,7 @@ function ReplicaSystem(;
             force_units, energy_units, atom_masses) for i in 1:n_replicas)
     R = typeof(replicas)
 
-    return ReplicaSystem{D, G, T, A, AD, EL, K, F, E, R}(
+    return ReplicaSystem{D, AT, T, A, AD, EL, K, F, E, R}(
             atoms, n_replicas, atoms_data, exchange_logger, k_converted,
             force_units, energy_units, replicas)
 end
@@ -908,7 +908,7 @@ end
 
 Whether a [`System`](@ref) or [`ReplicaSystem`](@ref) is on the GPU.
 """
-is_on_gpu(::Union{System{D, G}, ReplicaSystem{D, G}}) where {D, G} = G
+is_on_gpu(::Union{System{D, AT}, ReplicaSystem{D, AT}}) where {D, AT} = AT <: AbstractGPUArray
 
 """
     float_type(sys)
@@ -916,7 +916,7 @@ is_on_gpu(::Union{System{D, G}, ReplicaSystem{D, G}}) where {D, G} = G
 
 The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses.
 """
-float_type(::Union{System{D, G, T}, ReplicaSystem{D, G, T}}) where {D, G, T} = T
+float_type(::Union{System{D, AT, T}, ReplicaSystem{D, AT, T}}) where {D, AT, T} = T
 
 """
     masses(sys)

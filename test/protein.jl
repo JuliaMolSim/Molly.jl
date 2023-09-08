@@ -180,7 +180,7 @@ end
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
             velocities=ArrayType(deepcopy(velocities_start)),
-            gpu=true,
+            ArrayType = ArrayType,
             center_coords=false,
         )
         @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
@@ -209,7 +209,7 @@ end
             ff_nounits;
             velocities=ArrayType(deepcopy(ustrip_vec.(velocities_start))),
             units=false,
-            gpu=true,
+            ArrayType = ArrayType,
             center_coords=false,
         )
         @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
@@ -244,13 +244,13 @@ end
 @testset "Implicit solvent" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...)
 
-    for gpu in gpu_list
+    for ArrayType in array_list
         for solvent_model in ("obc2", "gbn2")
             sys = System(
                 joinpath(data_dir, "6mrr_nowater.pdb"),
                 ff;
                 boundary=CubicBoundary(100.0u"nm"),
-                gpu=gpu,
+                ArrayType = ArrayType,
                 dist_cutoff=5.0u"nm",
                 dist_neighbors=5.0u"nm",
                 implicit_solvent=solvent_model,

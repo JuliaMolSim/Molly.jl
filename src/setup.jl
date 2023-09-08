@@ -447,7 +447,7 @@ function System(coord_file::AbstractString,
                 velocities=nothing,
                 loggers=(),
                 units::Bool=true,
-                ArrayType::AbstractArray = Array,
+                ArrayType::Type{AT} where AT <: AbstractArray = Array,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
@@ -961,7 +961,7 @@ function System(T::Type,
                 velocities=nothing,
                 loggers=(),
                 units::Bool=true,
-                ArrayType::AbstractArray = Array,
+                ArrayType::Type{AT} where AT <: AbstractArray = Array,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
@@ -1238,9 +1238,9 @@ function System(T::Type,
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            ArraType(bonds.is),
-            ArraType(bonds.js),
-            ArraType([bonds.inters...]),
+            ArrayType(bonds.is),
+            ArrayType(bonds.js),
+            ArrayType([bonds.inters...]),
             bonds.types,
         ))
         topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
@@ -1249,20 +1249,20 @@ function System(T::Type,
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
-            ArraType(angles.is),
-            ArraType(angles.js),
-            ArraType(angles.ks),
-            ArraType([angles.inters...]),
+            ArrayType(angles.is),
+            ArrayType(angles.js),
+            ArrayType(angles.ks),
+            ArrayType([angles.inters...]),
             angles.types,
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            ArraType(torsions.is),
-            ArraType(torsions.js),
-            ArraType(torsions.ks),
-            ArraType(torsions.ls),
-            ArraType([torsions.inters...]),
+            ArrayType(torsions.is),
+            ArrayType(torsions.js),
+            ArrayType(torsions.ks),
+            ArrayType(torsions.ls),
+            ArrayType([torsions.inters...]),
             torsions.types,
         ))
     end
