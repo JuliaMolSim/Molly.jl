@@ -86,8 +86,8 @@ function gpu_threads_blocks_dnf(n_inters)
 end
 
 @kernel function distance_neighbor_finder_kernel!(neighbors,
-                                                  @Const(coords_var),
-                                                  @Const(eligible_var),
+                                                  @Const(coords),
+                                                  @Const(eligible),
                                                   boundary, sq_dist_neighbors)
 
     n_atoms = length(coords)
@@ -120,12 +120,12 @@ function find_neighbors(sys::System{D, AT},
 
     nf.neighbors .= false
     n_inters = n_atoms_to_n_pairs(length(sys))
-    n_threads_gpu, n_blocks = gpu_threads_blocks_dnf(n_inters)
+    n_threads_gpu = gpu_threads_blocks_dnf(n_inters)
 
     backend = get_backend(sys.coords)
     kernel! = distance_neighbor_finder_kernel!(backend, n_threads_gpu)
     kernel!(nf.neighbors, sys.coords, nf.eligible, sys.boundary,
-            nf.dist_cutoff^2, ndrange = length(sys))
+            nf.dist_cutoff^2, ndrange = n_inters)
 
     pairs = findall(nf.neighbors)
     nbsi, nbsj = getindex.(pairs, 1), getindex.(pairs, 2)

@@ -1270,7 +1270,7 @@ function System(T::Type,
 
     atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ, solute=a.solute) for a in atoms]
 
-    if !(ArrayType <: Array) || !use_cell_list
+    if ArrayType <: AbstractGPUArray || !use_cell_list
         neighbor_finder = DistanceNeighborFinder(
             eligible=(ArrayType(eligible)),
             special=(ArrayType(special)),

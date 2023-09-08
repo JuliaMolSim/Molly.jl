@@ -16,18 +16,18 @@ end
 
 function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundary,
                             pairwise_inters, nbs, force_units, ::Val{T}) where {D, C, T}
-    fs_mat = zeros(typeof(coords), D, length(atoms))
-    n_threads_gpu, n_blocks = gpu_threads_blocks_pairwise(length(nbs))
     backend = get_backend(coords)
+    fs_mat = KernelAbstractions.zeros(backend, D, length(atoms))
+    n_threads_gpu, n_blocks = gpu_threads_blocks_pairwise(length(nbs))
     kernel! = pairwise_force_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, coords, atoms, boundary, pairwise_inters, nbs,
             Val(D), Val(force_units), ndrange = length(nbs))
     return fs_mat
 end
 
-@kernel function pairwise_force_kernel!(forces, @Const(coords_var),
-                                        @Const(atoms_var), boundary, inters,
-                                        @Const(neighbors_var), ::Val{D},
+@kernel function pairwise_force_kernel!(forces, @Const(coords),
+                                        @Const(atoms), boundary, inters,
+                                        @Const(neighbors), ::Val{D},
                                         ::Val{F}) where {D, F}
 
     inter_i = @index(Global, Linear)
@@ -58,7 +58,7 @@ end
 function specific_force_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
                             boundary, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    fs_mat = zeros(backend, T, D, length(coords))
+    fs_mat = KernelAbstractions.zeros(backend, T, D, length(coords))
     n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
     kernel! = specific_force_1_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, coords, boundary, inter_list.is, inter_list.inters,
@@ -69,7 +69,7 @@ end
 function specific_force_gpu(inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
                             boundary, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    fs_mat = zeros(backend, typeof(coords), T, D, length(coords))
+    fs_mat = KernelAbstractions.zeros(backend, typeof(coords), T, D, length(coords))
     n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
     kernel! = specific_force_2_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, coords, boundary, inter_list.is, inter_list.js,
@@ -81,7 +81,7 @@ end
 function specific_force_gpu(inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
                             boundary, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    fs_mat = zeros(backend, T, D, length(coords))
+    fs_mat = KernelAbstractions.zeros(backend, T, D, length(coords))
     n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
     kernel! = specific_force_3_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, coords, boundary, inter_list.is, inter_list.js,
@@ -93,7 +93,7 @@ end
 function specific_force_gpu(inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
                             boundary, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    fs_mat = zeros(backend, T, D, length(coords))
+    fs_mat = KernelAbstractions.zeros(backend, T, D, length(coords))
     n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
     kernel! = specific_force_4_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, coords, boundary, inter_list.is, inter_list.js,
@@ -102,9 +102,9 @@ function specific_force_gpu(inter_list::InteractionList4Atoms, coords::AbstractA
     return fs_mat
 end
 
-@kernel function specific_force_1_atoms_kernel!(forces, @Const(coords_var),
-                                                boundary, @Const(is_var),
-                                                @Const(inters_var), ::Val{D},
+@kernel function specific_force_1_atoms_kernel!(forces, @Const(coords),
+                                                boundary, @Const(is),
+                                                @Const(inters), ::Val{D},
                                                 ::Val{F}) where {D, F}
 
     inter_i = @index(Global, Linear)
@@ -121,10 +121,10 @@ end
     end
 end
 
-@kernel function specific_force_2_atoms_kernel!(forces, @Const(coords_var),
-                                                boundary, @Const(is_var),
-                                                @Const(js_var),
-                                                @Const(inters_var), ::Val{D},
+@kernel function specific_force_2_atoms_kernel!(forces, @Const(coords),
+                                                boundary, @Const(is),
+                                                @Const(js),
+                                                @Const(inters), ::Val{D},
                                                 ::Val{F}) where {D, F}
 
     inter_i = @index(Global, Linear)
@@ -142,10 +142,10 @@ end
     end
 end
 
-@kernel function specific_force_3_atoms_kernel!(forces, @Const(coords_var),
-                                                boundary, @Const(is_var),
-                                                @Const(js_var), @Const(ks_var),
-                                                @Const(inters_var), ::Val{D},
+@kernel function specific_force_3_atoms_kernel!(forces, @Const(coords),
+                                                boundary, @Const(is),
+                                                @Const(js), @Const(ks),
+                                                @Const(inters), ::Val{D},
                                                 ::Val{F}) where {D, F}
 
     inter_i = @index(Global, Linear)
@@ -164,11 +164,11 @@ end
     end
 end
 
-@kernel function specific_force_4_atoms_kernel!(forces, @Const(coords_var),
-                                                boundary, @Const(is_var),
-                                                @Const(js_var), @Const(ks_var),
-                                                @Const(ls_var),
-                                                @Const(inters_var), ::Val{D},
+@kernel function specific_force_4_atoms_kernel!(forces, @Const(coords),
+                                                boundary, @Const(is),
+                                                @Const(js), @Const(ks),
+                                                @Const(ls),
+                                                @Const(inters), ::Val{D},
                                                 ::Val{F}) where {D, F}
 
     inter_i = @index(Global, Linear)
@@ -191,7 +191,7 @@ end
 function pairwise_pe_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundary,
                          pairwise_inters, nbs, energy_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    pe_vec = zeros(backend, T, 1)
+    pe_vec = KernelAbstractions.zeros(backend, T, 1)
     n_threads_gpu = gpu_threads_blocks_pairwise(length(nbs))
     kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec, coords, atoms, boundary, pairwise_inters, nbs,
@@ -199,9 +199,9 @@ function pairwise_pe_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundary,
     return pe_vec
 end
 
-@kernel function pairwise_pe_kernel!(energy, @Const(coords_var),
-                                     @Const(atoms_var), boundary, inters,
-                                     @Const(neighbors_var), ::Val{E}) where E
+@kernel function pairwise_pe_kernel!(energy, @Const(coords),
+                                     @Const(atoms), boundary, inters,
+                                     @Const(neighbors), ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
 
@@ -225,7 +225,7 @@ end
 function specific_pe_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
                          boundary, energy_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    pe_vec = zeros(backend, T, 1)
+    pe_vec = KernelAbstractions.zeros(backend, T, 1)
     n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
     kernel! = specific_pe_1_atoms_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec, coords, boundary, inter_list.is, inter_list.inters,
@@ -236,7 +236,7 @@ end
 function specific_pe_gpu(inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
                          boundary, energy_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    pe_vec = zeros(backend, T, 1)
+    pe_vec = KernelAbstractions.zeros(backend, T, 1)
     n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
     kernel! = specific_pe_2_atoms_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec, coords, boundary, inter_list.is, inter_list.js,
@@ -247,9 +247,9 @@ end
 function specific_pe_gpu(inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
                          boundary, energy_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    pe_vec = zeros(backend, T, 1)
+    pe_vec = KernelAbstractions.zeros(backend, T, 1)
     n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
-    kernel! = specific_pe_3_atoms_kernel!(backend, n_hreads_gpu)
+    kernel! = specific_pe_3_atoms_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec, coords, boundary, inter_list.is, inter_list.js,
             inter_list.ks, inter_list.inters, Val(energy_units),
             ndrange = length(inter_list))
@@ -259,7 +259,7 @@ end
 function specific_pe_gpu(inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
                          boundary, energy_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    pe_vec = zeros(backend, T, 1)
+    pe_vec = KernelAbstractions.zeros(backend, T, 1)
     n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
     kernel! = specific_pe_4_atoms_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec, coords, boundary, inter_list.is, inter_list.js,
@@ -268,9 +268,9 @@ function specific_pe_gpu(inter_list::InteractionList4Atoms, coords::AbstractArra
     return pe_vec
 end
 
-@kernel function specific_pe_1_atoms_kernel!(energy, @Const(coords_var),
-                                             boundary, @Const(is_var),
-                                             @Const(inters_var),
+@kernel function specific_pe_1_atoms_kernel!(energy, @Const(coords),
+                                             boundary, @Const(is),
+                                             @Const(inters),
                                              ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
@@ -285,10 +285,10 @@ end
     end
 end
 
-@kernel function specific_pe_2_atoms_kernel!(energy, @Const(coords_var),
-                                             boundary, @Const(is_var),
-                                             @Const(js_var),
-                                             @Const(inters_var),
+@kernel function specific_pe_2_atoms_kernel!(energy, @Const(coords),
+                                             boundary, @Const(is),
+                                             @Const(js),
+                                             @Const(inters),
                                              ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
@@ -303,10 +303,10 @@ end
     end
 end
 
-@kernel function specific_pe_3_atoms_kernel!(energy, @Const(coords_var),
-                                             boundary, @Const(is_var),
-                                             @Const(js_var), @Const(ks_var),
-                                             @Const(inters_var),
+@kernel function specific_pe_3_atoms_kernel!(energy, @Const(coords),
+                                             boundary, @Const(is),
+                                             @Const(js), @Const(ks),
+                                             @Const(inters),
                                              ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
@@ -321,11 +321,11 @@ end
     end
 end
 
-@kernel function specific_pe_4_atoms_kernel!(energy, @Const(coords_var),
-                                             boundary, @Const(is_var),
-                                             @Const(js_var), @Const(ks_var),
-                                             @Const(ls_var),
-                                             @Const(inters_var),
+@kernel function specific_pe_4_atoms_kernel!(energy, @Const(coords),
+                                             boundary, @Const(is),
+                                             @Const(js), @Const(ks),
+                                             @Const(ls),
+                                             @Const(inters),
                                              ::Val{E}) where E
 
     inter_i = @index(Global, Linear)

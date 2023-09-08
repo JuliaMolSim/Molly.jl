@@ -733,8 +733,8 @@ function gbsa_born_gpu(coords::AbstractArray{SVector{D, C}}, offset_radii, scale
                        ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
     n_atoms = length(coords)
-    Is_nounits = zeros(backend, T, n_atoms)
-    I_grads_nounits = zeros(backend, T, n_atoms, n_atoms)
+    Is_nounits = KernelAbstractions.zeros(backend, T, n_atoms)
+    I_grads_nounits = KernelAbstractions.zeros(backend, T, n_atoms, n_atoms)
     n_inters = n_atoms ^ 2
     n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
 
@@ -748,11 +748,11 @@ function gbsa_born_gpu(coords::AbstractArray{SVector{D, C}}, offset_radii, scale
     return Is, I_grads
 end
 
-@kernel function gbsa_born_kernel!(Is, I_grads, @Const(coords_var),
-                                   @Const(offset_radii_var),
-                                   @Const(scaled_offset_radii_var),
+@kernel function gbsa_born_kernel!(Is, I_grads, @Const(coords),
+                                   @Const(offset_radii),
+                                   @Const(scaled_offset_radii),
                                    dist_cutoff, offset, neck_scale, neck_cut,
-                                   @Const(d0s_var), @Const(m0s_var), boundary,
+                                   @Const(d0s), @Const(m0s), boundary,
                                    ::Val{C}) where C
 
     n_atoms = length(coords)
@@ -928,8 +928,8 @@ function gbsa_force_1_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_c
                           force_units) where {D, C, T}
     backend = get_backend(coords)
     n_atoms = length(coords)
-    fs_mat = zeros(backend, T, D, n_atoms)
-    born_forces_mod_ustrip = zeros(backend, T, n_atoms)
+    fs_mat = KernelAbstractions.zeros(backend, T, D, n_atoms)
+    born_forces_mod_ustrip = KernelAbstractions.zeros(backend, T, n_atoms)
     n_inters = n_atoms_to_n_pairs(n_atoms) + n_atoms
     n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
 
@@ -946,7 +946,7 @@ function gbsa_force_2_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_c
                           force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
     n_atoms = length(coords)
-    fs_mat = zeros(backend, T, D, n_atoms)
+    fs_mat = KernelAbstractions.zeros(backend, T, D, n_atoms)
     n_inters = n_atoms ^ 2
     n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
 
@@ -959,9 +959,9 @@ function gbsa_force_2_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_c
 end
 
 @kernel function gbsa_force_1_kernel!(forces, born_forces_mod_ustrip,
-                                      @Const(coords_var), boundary, dist_cutoff,
+                                      @Const(coords), boundary, dist_cutoff,
                                       factor_solute, factor_solvent, kappa,
-                                      @Const(Bs_var), @Const(atom_charges_var),
+                                      @Const(Bs), @Const(atom_charges),
                                       ::Val{D}, ::Val{F}) where {D, F}
 
     n_atoms = length(coords)
@@ -1015,10 +1015,10 @@ end
     end
 end
 
-@kernel function gbsa_force_2_kernel!(forces, born_forces, @Const(coords_var),
-                                      boundary, dist_cutoff, @Const(or_var),
-                                      @Const(sor_var), @Const(Bs_var),
-                                      @Const(B_grads_var), @Const(I_grads_var),
+@kernel function gbsa_force_2_kernel!(forces, born_forces, @Const(coords),
+                                      boundary, dist_cutoff, @Const(or),
+                                      @Const(sor), @Const(Bs),
+                                      @Const(B_grads), @Const(I_grads),
                                       ::Val{D}, ::Val{F}) where {D, F}
 
     n_atoms = length(coords)

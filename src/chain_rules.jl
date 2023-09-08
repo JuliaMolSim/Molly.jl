@@ -354,7 +354,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArra
         ArrayType = find_arrat_type(coords)
         n_atoms = length(atoms)
         z = zero(T)
-        fs_mat = zeros(backend, T, D, n_atoms)
+        fs_mat = KernelAbstractions.zeros(backend, T, D, n_atoms)
         d_coords = zero(coords)
         d_atoms = ArrayType([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
         n_threads_gpu = gpu_threads_blocks_pairwise(length(nbs))
@@ -422,7 +422,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{S
         ArrayType = get_array_type(coords)
         n_atoms = length(atoms)
         z = zero(T)
-        pe_vec = zeros(backend, T, 1)
+        pe_vec = KernelAbstractions.zeros(backend, T, 1)
         d_pe_vec = ArrayType([d_pe_vec_arg[1]])
         d_coords = zero(coords)
         d_atoms = ArrayType([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
@@ -535,7 +535,7 @@ function ChainRulesCore.rrule(::typeof(specific_force_gpu), inter_list,
 
     function specific_force_gpu_pullback(d_fs_mat)
         backend = get_backend(coords)
-        fs_mat = zeros(backend, T, D, length(coords))
+        fs_mat = KernelAbstractions.zeros(backend, T, D, length(coords))
         d_inter_list = zero(inter_list)
         d_coords = zero(coords)
         n_threads_gpu = get_threads_blocks_specific(length(inter_list))
@@ -658,7 +658,7 @@ function ChainRulesCore.rrule(::typeof(specific_pe_gpu), inter_list,
     function specific_pe_gpu_pullback(d_pe_vec_arg)
         backend = get_backend(coords)
         array_type = get_array_type(coords)
-        pe_vec = zeros(backend, T, 1)
+        pe_vec = KernelAbstractions.zeros(backend, T, 1)
         d_pe_vec = ArrayType([d_pe_vec_arg[1]])
         d_inter_list = zero(inter_list)
         d_coords = zero(coords)
@@ -754,14 +754,14 @@ function ChainRulesCore.rrule(::typeof(gbsa_born_gpu), coords::AbstractArray{SVe
     function gbsa_born_gpu_pullback(d_args)
         backend = get_backend(coords)
         n_atoms = length(coords)
-        d_Is      = d_args[1] == ZeroTangent() ? zeros(backend, T, n_atoms)          : d_args[1]
-        d_I_grads = d_args[2] == ZeroTangent() ? zeros(backend, T, n_atoms, n_atoms) : d_args[2]
-        Is = zeros(backend, T, n_atoms)
-        I_grads = zeros(backend, T, n_atoms, n_atoms)
+        d_Is      = d_args[1] == ZeroTangent() ? KernelAbstractions.zeros(backend, T, n_atoms)          : d_args[1]
+        d_I_grads = d_args[2] == ZeroTangent() ? KernelAbstractions.zeros(backend, T, n_atoms, n_atoms) : d_args[2]
+        Is = KernelAbstractions.zeros(backend, T, n_atoms)
+        I_grads = KernelAbstractions.zeros(backend, T, n_atoms, n_atoms)
         d_coords = zero(coords)
         d_offset_radii = zero(offset_radii)
         d_scaled_offset_radii = zero(scaled_offset_radii)
-        grad_neck_scale = zeros(backend, T, 1)
+        grad_neck_scale = KernelAbstractions.zeros(backend, T, 1)
         d_d0s = zero(d0s)
         d_m0s = zero(m0s)
         n_inters = n_atoms ^ 2
@@ -862,14 +862,14 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_1_gpu), coords::AbstractArray{
     function gbsa_force_1_gpu_pullback(d_args)
         backend = get_backend(coords)
         n_atoms = length(coords)
-        d_fs_mat                 = d_args[1] == ZeroTangent() ? zeros(backend, T, D, n_atoms) : d_args[1]
-        d_born_forces_mod_ustrip = d_args[2] == ZeroTangent() ? zeros(backend, T, n_atoms)    : d_args[2]
-        fs_mat = zeros(backend, T, D, n_atoms)
-        born_forces_mod_ustrip = zeros(backend, T, n_atoms)
+        d_fs_mat                 = d_args[1] == ZeroTangent() ? KernelAbstractions.zeros(backend, T, D, n_atoms) : d_args[1]
+        d_born_forces_mod_ustrip = d_args[2] == ZeroTangent() ? KernelAbstractions.zeros(backend, T, n_atoms)    : d_args[2]
+        fs_mat = KernelAbstractions.zeros(backend, T, D, n_atoms)
+        born_forces_mod_ustrip = KernelAbstractions.zeros(backend, T, n_atoms)
         d_coords = zero(coords)
-        grad_factor_solute  = zeros(backend, T, 1)
-        grad_factor_solvent = zeros(backend, T, 1)
-        grad_kappa          = zeros(backend, T, 1)
+        grad_factor_solute  = KernelAbstractions.zeros(backend, T, 1)
+        grad_factor_solvent = KernelAbstractions.zeros(backend, T, 1)
+        grad_kappa          = KernelAbstractions.zeros(backend, T, 1)
         d_Bs = zero(Bs)
         d_chs = zero(chs)
         n_inters = n_atoms_to_n_pairs(n_atoms) + n_atoms
@@ -931,7 +931,7 @@ function ChainRulesCore.rrule(::typeof(gbsa_force_2_gpu), coords::AbstractArray{
     function gbsa_force_2_gpu_pullback(d_fs_mat)
         backend = get_backend(coords)
         n_atoms = length(coords)
-        fs_mat = zeros(backend, T, D, n_atoms)
+        fs_mat = KernelAbstractions.zeros(backend, T, D, n_atoms)
         d_coords = zero(coords)
         d_born_forces = zero(born_forces)
         d_offset_radii = zero(offset_radii)

@@ -51,7 +51,6 @@
         sys = System(
             atoms=ArrayType([Atom(σ=(0.4 / (2 ^ (1 / 6)))u"nm", ϵ=1.0u"kJ * mol^-1") for i in 1:3]),
             coords=coords,
-            ArrayType = ArrayType,
             boundary=CubicBoundary(5.0u"nm"),
             pairwise_inters=(LennardJones(),),
         )

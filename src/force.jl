@@ -307,7 +307,7 @@ function forces(sys::System{D, AT, T}, neighbors=nothing;
                 n_threads::Integer=Threads.nthreads()) where {D, T, AT <: AbstractGPUArray}
     n_atoms = length(sys)
     val_ft = Val(T)
-    fs_mat = zeros(get_backend(sys.coords), T, D, n_atoms)
+    fs_mat = KernelAbstractions.zeros(get_backend(sys.coords), T, D, n_atoms)
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
