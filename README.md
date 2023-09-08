@@ -129,3 +129,7 @@ If you use Molly, please cite the following paper ([bib entry here](https://gith
 Greener JG. Differentiable simulation to develop molecular dynamics force fields for disordered proteins, [bioRxiv](https://www.biorxiv.org/content/10.1101/2023.08.29.555352) (2023)
 
 A paper involving more contributors with further details on the software will be written at some point.
+
+## Interested?
+
+An [advert for a PhD position](https://www2.mrc-lmb.cam.ac.uk/students/international-phd-programme/projects/joe-greener) in Cambridge, UK that will involve significant coding in Molly is open until 5th December 2023. An advert for a postdoc will open in October 2023. Contact Joe Greener for more information.
