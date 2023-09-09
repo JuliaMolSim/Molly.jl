@@ -867,7 +867,8 @@ function scale_coords!(sys, scale_factor; ignore_molecules=false)
             coords_nounits[i] = wrap_coords(
                     coords_nounits[i] .+ shift_vecs[mi] .- center_shifts[mi], boundary_nounits)
         end
-        sys.coords = coords_nounits * coord_units
+        ArrayType = get_array_type(sys.coords)
+        sys.coords = ArrayType(coords_nounits * coord_units)
     end
     return sys
 end
