@@ -4,6 +4,7 @@ import AtomsBase: Periodic, AbstractSystem
 using AtomsBaseTesting
 import BioStructures # Imported to avoid clashing names
 using CUDA
+import Enzyme
 using FiniteDifferences
 using ForwardDiff
 import SimpleCrystals
@@ -65,6 +66,9 @@ const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
 const temp_fp_pdb = tempname(cleanup=true) * ".pdb"
 const temp_fp_viz = tempname(cleanup=true) * ".mp4"
+
+# Required for parallel gradient tests
+Enzyme.API.runtimeActivity!(true)
 
 if GROUP in ("All", "NotZygote")
     # Some failures due to dependencies but there is an unbound args error
