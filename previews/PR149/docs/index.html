@@ -1,0 +1,687 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Documentation · Molly.jl</title><link href="https://fonts.googleapis.com/css?family=Lato|Roboto+Mono" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.0/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.11.1/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit">Molly.jl</span></div><form class="docs-search" action="../search/"><input class="docs-search-query" id="documenter-search-query" name="q" type="text" placeholder="Search docs"/></form><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li class="is-active"><a class="tocitem" href>Documentation</a><ul class="internal"><li><a class="tocitem" href="#Simulation-basics"><span>Simulation basics</span></a></li><li><a class="tocitem" href="#GPU-acceleration"><span>GPU acceleration</span></a></li><li><a class="tocitem" href="#Simulating-diatomic-molecules"><span>Simulating diatomic molecules</span></a></li><li><a class="tocitem" href="#Simulating-gravity"><span>Simulating gravity</span></a></li><li><a class="tocitem" href="#Simulating-a-protein"><span>Simulating a protein</span></a></li><li><a class="tocitem" href="#Enhanced-sampling"><span>Enhanced sampling</span></a></li><li><a class="tocitem" href="#Monte-Carlo-sampling"><span>Monte Carlo sampling</span></a></li><li><a class="tocitem" href="#Agent-based-modelling"><span>Agent-based modelling</span></a></li><li><a class="tocitem" href="#Units"><span>Units</span></a></li><li><a class="tocitem" href="#Atom-types"><span>Atom types</span></a></li><li><a class="tocitem" href="#Forces-and-energies"><span>Forces and energies</span></a></li><li><a class="tocitem" href="#Cutoffs"><span>Cutoffs</span></a></li><li><a class="tocitem" href="#Boundaries"><span>Boundaries</span></a></li><li><a class="tocitem" href="#Simulators"><span>Simulators</span></a></li><li><a class="tocitem" href="#Coupling"><span>Coupling</span></a></li><li><a class="tocitem" href="#Loggers"><span>Loggers</span></a></li><li><a class="tocitem" href="#Neighbor-finders"><span>Neighbor finders</span></a></li><li><a class="tocitem" href="#Analysis"><span>Analysis</span></a></li></ul></li><li><a class="tocitem" href="../differentiable/">Differentiable simulation</a></li><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../related/">Related software</a></li><li><a class="tocitem" href="../development/">Development</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Documentation</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Documentation</a></li></ul></nav><div class="docs-right"><a class="docs-edit-link" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/docs.md" title="Edit on GitHub"><span class="docs-icon fab"></span><span class="docs-label is-hidden-touch">Edit on GitHub</span></a><a class="docs-settings-button fas fa-cog" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-sidebar-button fa fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a></div></header><article class="content" id="documenter-page"><h1 id="Molly-documentation"><a class="docs-heading-anchor" href="#Molly-documentation">Molly documentation</a><a id="Molly-documentation-1"></a><a class="docs-heading-anchor-permalink" href="#Molly-documentation" title="Permalink"></a></h1><p>This documentation will first introduce the main features of the package with some examples, then will give details on each component of a simulation. There are further examples in the <a href="../examples/#Molly-examples">Molly examples</a> section. For more information on specific types or functions, see the <a href="../api/#Molly-API">Molly API</a> section or call <code>?function_name</code> in Julia. The <a href="../differentiable/#Differentiable-simulation-with-Molly">Differentiable simulation with Molly</a> section describes taking gradients through simulations.</p><p>The package takes a modular approach to molecular simulation. To run a simulation you create a <a href="../api/#Molly.System"><code>System</code></a> object and call <a href="../api/#Molly.simulate!-Tuple{Any, SteepestDescentMinimizer}"><code>simulate!</code></a> on it. The different components of the system and simulation can be used as defined by the package, or you can define your own versions. An important principle of the package is that your custom components, particularly force and potential energy functions, should be easy to define and just as performant as the built-in versions.</p><h2 id="Simulation-basics"><a class="docs-heading-anchor" href="#Simulation-basics">Simulation basics</a><a id="Simulation-basics-1"></a><a class="docs-heading-anchor-permalink" href="#Simulation-basics" title="Permalink"></a></h2><p>Let&#39;s look at the simulation of a fluid acting under the <a href="https://en.wikipedia.org/wiki/Lennard-Jones_potential">Lennard-Jones</a> potential to start with. First, we&#39;ll need some atoms with the relevant parameters defined.</p><pre><code class="language-julia">using Molly
+
+n_atoms = 100
+atom_mass = 10.0u&quot;g/mol&quot;
+atoms = [Atom(mass=atom_mass, σ=0.3u&quot;nm&quot;, ϵ=0.2u&quot;kJ * mol^-1&quot;) for i in 1:n_atoms]</code></pre><p>See the <a href="https://github.com/PainterQubits/Unitful.jl">Unitful.jl</a> docs for more information on the unit annotations. Molly re-exports Unitful.jl, <a href="https://github.com/JuliaArrays/StaticArrays.jl">StaticArrays.jl</a> and <a href="https://github.com/JuliaMolSim/AtomsBase.jl">AtomsBase.jl</a> since they are often required to run simulations. You can use your own atom types in Molly, provided that the <a href="../api/#Molly.mass-Tuple{Any}"><code>mass</code></a> function is defined and any fields required by the interactions are present. Next, we&#39;ll need some starting coordinates and velocities.</p><pre><code class="language-julia">boundary = CubicBoundary(2.0u&quot;nm&quot;) # Periodic boundary conditions with a 2 nm cube
+coords = place_atoms(n_atoms, boundary; min_dist=0.3u&quot;nm&quot;) # Random placement without clashing
+
+temp = 100.0u&quot;K&quot;
+velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]</code></pre><p>We store the coordinates and velocities as <a href="https://github.com/JuliaArrays/StaticArrays.jl">static arrays</a> for performance. They can be of 2 or 3 dimensions and of any number type, e.g. <code>Float64</code> or <code>Float32</code>. Setting individual dimensions in a <a href="../api/#Molly.CubicBoundary"><code>CubicBoundary</code></a> to <code>Inf * u&quot;nm&quot;</code> makes the simulation have no boundary in that dimension. You can also use a <a href="../api/#Molly.TriclinicBoundary"><code>TriclinicBoundary</code></a>. Simulations in 2 dimensions should use a <a href="../api/#Molly.RectangularBoundary"><code>RectangularBoundary</code></a>.</p><p>The <a href="../api/#Molly.vector-Tuple{Any, Any, Union{CubicBoundary, RectangularBoundary}}"><code>vector</code></a> function calculates the vector from one coordinate to another accounting for periodic boundary conditions by using the minimum image convention:</p><pre><code class="language-julia">vector(coords[1], coords[2], boundary)</code></pre><pre><code class="language-none">3-element SVector{3, Quantity{Float64, 𝐋, Unitful.FreeUnits{(nm,), 𝐋, nothing}}} with indices SOneTo(3):
+ -0.8619698558762985 nm
+ -0.9475020064484192 nm
+  0.8359421827141784 nm</code></pre><p>Now we can define our pairwise interactions, i.e. those between most or all atom pairs. Because we have defined the relevant parameters for the atoms, we can use the built-in <a href="../api/#Molly.LennardJones"><code>LennardJones</code></a> type.</p><pre><code class="language-julia">pairwise_inters = (LennardJones(),) # Don&#39;t forget the trailing comma!</code></pre><p>Finally, we can define the system and run the simulation. We use an <a href="../api/#Molly.AndersenThermostat"><code>AndersenThermostat</code></a> to keep a constant temperature, and we log the temperature and coordinates every 10 steps. Periodic boundary conditions are automatically used with the cubic box we defined earlier.</p><pre><code class="language-julia">sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
+    loggers=(
+        temp=TemperatureLogger(10),
+        coords=CoordinateLogger(10),
+    ),
+)
+
+simulator = VelocityVerlet(
+    dt=0.002u&quot;ps&quot;,
+    coupling=AndersenThermostat(temp, 1.0u&quot;ps&quot;),
+)
+
+simulate!(sys, simulator, 1_000)</code></pre><p><code>atoms</code>, <code>coords</code> and <code>boundary</code> are the minimum required properties to define a <a href="../api/#Molly.System"><code>System</code></a>, though you would generally want to add interactions to a <a href="../api/#Molly.System"><code>System</code></a> to do something useful with it. <a href="../api/#Molly.System"><code>System</code></a> implements the <code>AbstractSystem</code> <a href="https://juliamolsim.github.io/AtomsBase.jl/stable">interface from AtomsBase.jl</a>. Various functions can be used on a <a href="../api/#Molly.System"><code>System</code></a>:</p><pre><code class="language-julia">potential_energy(sys) # -40.91077282719628 kJ mol^-1
+kinetic_energy(sys)   # 119.47758705080862 kJ mol^-1
+total_energy(sys)     #  78.56681422361234 kJ mol^-1
+
+forces(sys)
+accelerations(sys)
+
+masses(sys)
+temperature(sys) # 96.76667184796673 K
+random_velocities(sys, 300.0u&quot;K&quot;)
+
+float_type(sys) # Float64
+is_on_gpu(sys)  # false
+
+# AtomsBase.jl interface
+atomic_mass(sys, 5) # 10.0 u
+position(sys, 10)
+
+# Access properties
+sys.atoms
+sys.coords
+sys.boundary
+sys.velocities
+sys.topology
+sys.pairwise_inters
+sys.neighbor_finder
+sys.loggers
+
+# For certain systems
+virial(sys)
+pressure(sys)
+
+# Define a new system with certain properties changed
+System(sys; coords=(sys.coords .* 0.5))</code></pre><p>By default the simulation is run in parallel on the <a href="https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1">number of threads</a> available to Julia, but this behaviour can be changed by giving the keyword argument <code>n_threads</code> to <a href="../api/#Molly.simulate!-Tuple{Any, SteepestDescentMinimizer}"><code>simulate!</code></a>. For example, <code>n_threads=1</code> uses no parallelization.</p><p>The values stored by the loggers can be accessed using <code>values</code>, e.g. <code>values(sys.loggers.coords)</code>. An animation of the stored coordinates can be saved by using <a href="../api/#Molly.visualize"><code>visualize</code></a>, which is available when <a href="https://github.com/JuliaPlots/Makie.jl">GLMakie.jl</a> is imported.</p><pre><code class="language-julia">using GLMakie
+visualize(sys.loggers.coords, boundary, &quot;sim_lj.mp4&quot;)</code></pre><p><img src="../images/sim_lj.gif" alt="LJ simulation"/></p><h2 id="GPU-acceleration"><a class="docs-heading-anchor" href="#GPU-acceleration">GPU acceleration</a><a id="GPU-acceleration-1"></a><a class="docs-heading-anchor-permalink" href="#GPU-acceleration" title="Permalink"></a></h2><p>To run simulations on the GPU you will need to have a CUDA-compatible device. <a href="https://github.com/JuliaGPU/CUDA.jl">CUDA.jl</a> is used to run on the device. Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU. This example also shows setting up a simulation to run with <code>Float32</code>, which gives better performance on GPUs. Of course, you will need to determine whether this level of numerical accuracy is appropriate in your case.</p><pre><code class="language-julia">using Molly
+using CUDA
+
+n_atoms = 100
+atom_mass = 10.0f0u&quot;g/mol&quot;
+boundary = CubicBoundary(2.0f0u&quot;nm&quot;)
+temp = 100.0f0u&quot;K&quot;
+atoms = CuArray([Atom(mass=atom_mass, σ=0.3f0u&quot;nm&quot;, ϵ=0.2f0u&quot;kJ * mol^-1&quot;) for i in 1:n_atoms])
+coords = CuArray(place_atoms(n_atoms, boundary; min_dist=0.3u&quot;nm&quot;))
+velocities = CuArray([random_velocity(atom_mass, temp) for i in 1:n_atoms])
+simulator = VelocityVerlet(dt=0.002f0u&quot;ps&quot;)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=(LennardJones(),),
+    loggers=(
+        temp=TemperatureLogger(typeof(1.0f0u&quot;K&quot;), 10),
+        coords=CoordinateLogger(typeof(1.0f0u&quot;nm&quot;), 10),
+    ),
+)
+
+simulate!(deepcopy(sys), simulator, 20) # Compile function
+simulate!(sys, simulator, 1_000)</code></pre><p>The device to run on can be changed with <code>device!</code>, e.g. <code>device!(1)</code>. The GPU code path is currently designed to be compatible with differentiable simulation and runs slower than related software, but this is an active area of development. Nonetheless, GPU performance is significantly better than CPU performance and is good enough for many applications.</p><p>The number of GPU threads used for the GPU kernels can be tuned with the environmental variables <code>MOLLY_GPUNTHREADS_PAIRWISE</code>, <code>MOLLY_GPUNTHREADS_SPECIFIC</code>, <code>MOLLY_GPUNTHREADS_DISTANCENF</code> and <code>MOLLY_GPUNTHREADS_IMPLICIT</code>. In general these should only be changed if GPU memory errors occur on smaller GPUs.</p><h2 id="Simulating-diatomic-molecules"><a class="docs-heading-anchor" href="#Simulating-diatomic-molecules">Simulating diatomic molecules</a><a id="Simulating-diatomic-molecules-1"></a><a class="docs-heading-anchor-permalink" href="#Simulating-diatomic-molecules" title="Permalink"></a></h2><p>If we want to define specific interactions between atoms, for example bonds, we can do this as well. Using the same definitions as the first example, let&#39;s set up the coordinates so that paired atoms are 1 Å apart.</p><pre><code class="language-julia">atoms = [Atom(mass=atom_mass, σ=0.3u&quot;nm&quot;, ϵ=0.2u&quot;kJ * mol^-1&quot;) for i in 1:n_atoms]
+
+coords = place_atoms(n_atoms ÷ 2, boundary; min_dist=0.3u&quot;nm&quot;)
+for i in 1:length(coords)
+    push!(coords, coords[i] .+ [0.1, 0.0, 0.0]u&quot;nm&quot;)
+end
+
+velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]</code></pre><p>We could have used <a href="../api/#Molly.place_diatomics-Tuple{Integer, Any, Any}"><code>place_diatomics</code></a> instead here. Now we can use the built-in interaction list and bond types to place harmonic bonds between paired atoms.</p><pre><code class="language-julia">bonds = InteractionList2Atoms(
+    collect(1:(n_atoms ÷ 2)),           # First atom indices
+    collect((1 + n_atoms ÷ 2):n_atoms), # Second atom indices
+    [HarmonicBond(k=300_000.0u&quot;kJ * mol^-1 * nm^-2&quot;, r0=0.1u&quot;nm&quot;) for i in 1:(n_atoms ÷ 2)],
+)
+
+specific_inter_lists = (bonds,)</code></pre><p>This time we are also going to use a neighbor list to speed up the Lennard-Jones calculation since we don&#39;t care about interactions beyond a certain distance. We can use the built-in <a href="../api/#Molly.DistanceNeighborFinder"><code>DistanceNeighborFinder</code></a>. The arguments are a 2D array of eligible interacting pairs, the number of steps between each update and the distance cutoff to be classed as a neighbor. Since the neighbor finder is run every 10 steps we should also use a distance cutoff for the neighbor list that is larger than the cutoff for the interaction.</p><pre><code class="language-julia"># All pairs apart from bonded pairs are eligible for non-bonded interactions
+eligible = trues(n_atoms, n_atoms)
+for i in 1:(n_atoms ÷ 2)
+    eligible[i, i + (n_atoms ÷ 2)] = false
+    eligible[i + (n_atoms ÷ 2), i] = false
+end
+
+neighbor_finder = DistanceNeighborFinder(
+    eligible=eligible,
+    n_steps=10,
+    dist_cutoff=1.5u&quot;nm&quot;,
+)
+
+cutoff = DistanceCutoff(1.2u&quot;nm&quot;)
+pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)</code></pre><p>Now we can simulate as before.</p><pre><code class="language-julia">sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
+    specific_inter_lists=specific_inter_lists,
+    neighbor_finder=neighbor_finder,
+    loggers=(
+        temp=TemperatureLogger(10),
+        coords=CoordinateLogger(10),
+    ),
+)
+
+simulator = VelocityVerlet(
+    dt=0.002u&quot;ps&quot;,
+    coupling=AndersenThermostat(temp, 1.0u&quot;ps&quot;),
+)
+simulate!(sys, simulator, 1_000)</code></pre><p>This time when we view the trajectory we can add lines to show the bonds.</p><pre><code class="language-julia">visualize(
+    sys.loggers.coords,
+    boundary,
+    &quot;sim_diatomic.mp4&quot;;
+    connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
+)</code></pre><p><img src="../images/sim_diatomic.gif" alt="Diatomic simulation"/> The neighbors can be found using <code>find_neighbors(sys)</code>, which returns a <a href="../api/#Molly.NeighborList"><code>NeighborList</code></a>. When using a neighbor finder, functions such as <a href="../api/#Molly.forces-Union{Tuple{System{D, false}}, Tuple{D}, Tuple{System{D, false}, Any}} where D"><code>forces</code></a> and <a href="../api/#Molly.potential_energy-Union{Tuple{System{D, false}}, Tuple{D}, Tuple{System{D, false}, Any}} where D"><code>potential_energy</code></a> require the neighbors to be passed as a second argument, e.g. <code>forces(sys, find_neighbors(sys))</code>.</p><h2 id="Simulating-gravity"><a class="docs-heading-anchor" href="#Simulating-gravity">Simulating gravity</a><a id="Simulating-gravity-1"></a><a class="docs-heading-anchor-permalink" href="#Simulating-gravity" title="Permalink"></a></h2><p>Molly is geared primarily to molecular simulation, but can also be used to simulate other physical systems. Let&#39;s set up a gravitational simulation. This example also shows a 2D simulation and no specified units.</p><pre><code class="language-julia">atoms = [Atom(mass=1.0f0), Atom(mass=1.0f0)]
+coords = [SVector(0.3f0, 0.5f0), SVector(0.7f0, 0.5f0)]
+velocities = [SVector(0.0f0, 1.0f0), SVector(0.0f0, -1.0f0)]
+pairwise_inters = (Gravity(use_neighbors=false, G=1.5f0),)
+simulator = VelocityVerlet(dt=0.002f0)
+boundary = RectangularBoundary(1.0f0)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
+    loggers=(coords=CoordinateLogger(Float32, 10; dims=2),),
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+
+simulate!(sys, simulator, 2_000)</code></pre><p>When we view the simulation we can use some extra options:</p><pre><code class="language-julia">visualize(
+    sys.loggers.coords,
+    boundary,
+    &quot;sim_gravity.mp4&quot;;
+    trails=4,
+    framerate=15,
+    color=[:orange, :lightgreen],
+)</code></pre><p><img src="../images/sim_gravity.gif" alt="Gravity simulation"/></p><h2 id="Simulating-a-protein"><a class="docs-heading-anchor" href="#Simulating-a-protein">Simulating a protein</a><a id="Simulating-a-protein-1"></a><a class="docs-heading-anchor-permalink" href="#Simulating-a-protein" title="Permalink"></a></h2><p>The recommended way to run a macromolecular simulation is to read in a force field in <a href="http://docs.openmm.org/latest/userguide/application/05_creating_ffs.html">OpenMM XML format</a> to a <a href="../api/#Molly.MolecularForceField"><code>MolecularForceField</code></a> and then read in a coordinate file in a format <a href="https://chemfiles.org/chemfiles/latest/formats.html">supported by Chemfiles.jl</a>. Files for common force fields can be found at <a href="https://github.com/openmm/openmm">OpenMM</a> and <a href="https://github.com/openmm/openmmforcefields">OpenMM force fields</a>. This sets up a system in the same data structures as above and that is simulated in the same way. Here we carry out an energy minimization, simulate with a Langevin integrator in the NPT ensemble and use a <a href="../api/#Molly.StructureWriter"><code>StructureWriter</code></a> to write the trajectory as a PDB file.</p><pre><code class="language-julia">data_dir = joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;)
+ff = MolecularForceField(
+    joinpath(data_dir, &quot;force_fields&quot;, &quot;ff99SBildn.xml&quot;),
+    joinpath(data_dir, &quot;force_fields&quot;, &quot;tip3p_standard.xml&quot;),
+    joinpath(data_dir, &quot;force_fields&quot;, &quot;his.xml&quot;),
+)
+
+sys = System(
+    joinpath(data_dir, &quot;6mrr_equil.pdb&quot;),
+    ff;
+    loggers=(
+        energy=TotalEnergyLogger(10),
+        writer=StructureWriter(10, &quot;traj_6mrr_1ps.pdb&quot;, [&quot;HOH&quot;]),
+    ),
+    gpu=false,
+)
+
+minimizer = SteepestDescentMinimizer()
+simulate!(sys, minimizer)
+
+temp = 298.0u&quot;K&quot;
+random_velocities!(sys, temp)
+simulator = Langevin(
+    dt=0.001u&quot;ps&quot;,
+    temperature=temp,
+    friction=1.0u&quot;ps^-1&quot;,
+    coupling=MonteCarloBarostat(1.0u&quot;bar&quot;, temp, sys.boundary),
+)
+
+simulate!(sys, simulator, 5_000)</code></pre><p>To run on the GPU, set <code>gpu=true</code>. You can use an implicit solvent method by giving the <code>implicit_solvent</code> keyword argument to <a href="../api/#Molly.System"><code>System</code></a>. The options are <code>&quot;obc1&quot;</code>, <code>&quot;obc2&quot;</code> and <code>&quot;gbn2&quot;</code>, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model. Other options include overriding the boundary dimensions in the file (<code>boundary</code>) and modifying the non-bonded interaction and neighbor list cutoff distances (<code>dist_cutoff</code> and <code>dist_neighbors</code>).</p><p>Molly also has a rudimentary parser of <a href="http://www.gromacs.org">Gromacs</a> topology and coordinate files. For example:</p><pre><code class="language-julia">sys = System(
+    joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_coords.gro&quot;),
+    joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;, &quot;5XER&quot;, &quot;gmx_top_ff.top&quot;);
+    loggers=(
+        temp=TemperatureLogger(10),
+        writer=StructureWriter(10, &quot;traj_5XER_1ps.pdb&quot;),
+    ),
+)
+
+temp = 298.0u&quot;K&quot;
+random_velocities!(sys, temp)
+simulator = Verlet(
+    dt=0.0002u&quot;ps&quot;,
+    coupling=BerendsenThermostat(temp, 1.0u&quot;ps&quot;),
+)
+
+simulate!(sys, simulator, 5_000)</code></pre><p>Harmonic position restraints can be added to a <a href="../api/#Molly.System"><code>System</code></a> for equilibration using <a href="../api/#Molly.add_position_restraints-Tuple{Any, Any}"><code>add_position_restraints</code></a>:</p><pre><code class="language-julia">sys_res = add_position_restraints(
+    sys,
+    100_000.0u&quot;kJ * mol^-1 * nm^-2&quot;;
+    atom_selector=is_heavy_atom,
+)</code></pre><p>The OpenMM setup procedure is tested against OpenMM in terms of matching forces and energies. However it is not thoroughly tested with respect to ligands or special residues and requires that atom names exactly match residue templates. By default, terminal residues are renamed to match the appropriate templates. For example, the first (N-terminal) residue could be changed from &quot;MET&quot; to &quot;NMET&quot;. This can be turned off by giving <code>rename_terminal_res=false</code> to <a href="../api/#Molly.System"><code>System</code></a> if the residue names in the input file are appropriate. Currently atom classes are not supported, only atom types. Residue patches, virtual sites, file includes and any force types other than <code>HarmonicBondForce</code>/<code>HarmonicAngleForce</code>/<code>PeriodicTorsionForce</code>/<code>NonbondedForce</code> are currently ignored.</p><p>The Gromacs setup procedure should be considered experimental. Currently Ewald summation methods, constraint algorithms and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.</p><h2 id="Enhanced-sampling"><a class="docs-heading-anchor" href="#Enhanced-sampling">Enhanced sampling</a><a id="Enhanced-sampling-1"></a><a class="docs-heading-anchor-permalink" href="#Enhanced-sampling" title="Permalink"></a></h2><p>Molly has the <a href="../api/#Molly.ReplicaSystem"><code>ReplicaSystem</code></a> struct and simulators such as <a href="../api/#Molly.TemperatureREMD"><code>TemperatureREMD</code></a> to carry out replica exchange molecular dynamics (REMD). On CPU these are run in parallel by dividing up the number of available threads. For example, to run temperature REMD on a protein with 4 replicas and attempt exchanges every 1 ps:</p><pre><code class="language-julia">using Statistics
+
+data_dir = joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;)
+ff = MolecularForceField(
+    joinpath(data_dir, &quot;force_fields&quot;, &quot;ff99SBildn.xml&quot;),
+    joinpath(data_dir, &quot;force_fields&quot;, &quot;tip3p_standard.xml&quot;),
+    joinpath(data_dir, &quot;force_fields&quot;, &quot;his.xml&quot;),
+)
+
+sys = System(joinpath(data_dir, &quot;6mrr_equil.pdb&quot;), ff)
+
+minimizer = SteepestDescentMinimizer()
+simulate!(sys, minimizer)
+
+n_replicas = 4
+
+rep_sys = ReplicaSystem(
+    atoms=sys.atoms,
+    replica_coords=[copy(sys.coords) for _ in 1:n_replicas],
+    boundary=sys.boundary,
+    n_replicas=n_replicas,
+    atoms_data=sys.atoms_data,
+    pairwise_inters=sys.pairwise_inters,
+    specific_inter_lists=sys.specific_inter_lists,
+    general_inters=sys.general_inters,
+    neighbor_finder=sys.neighbor_finder,
+    replica_loggers=[(temp=TemperatureLogger(10),) for _ in 1:n_replicas],
+)
+
+temps = [240.0u&quot;K&quot;, 280.0u&quot;K&quot;, 320.0u&quot;K&quot;, 360.0u&quot;K&quot;]
+dt = 0.0005u&quot;ps&quot;
+simulators = [Langevin(dt=dt, temperature=temp, friction=1.0u&quot;ps^-1&quot;) for temp in temps]
+
+sim = TemperatureREMD(
+    dt=dt,
+    temperatures=temps,
+    simulators=simulators,
+    exchange_time=1.0u&quot;ps&quot;,
+)
+
+simulate!(rep_sys, sim, 40_000; assign_velocities=true)
+
+println(rep_sys.exchange_logger.n_attempts)
+# 30
+
+for i in 1:n_replicas
+    final_temps = values(rep_sys.replicas[i].loggers.temp)[(end - 10):end]
+    println(mean(final_temps))
+end
+# 240.1691457033836 K
+# 281.3783250460198 K
+# 320.44985840482974 K
+# 357.710520769689 K</code></pre><h2 id="Monte-Carlo-sampling"><a class="docs-heading-anchor" href="#Monte-Carlo-sampling">Monte Carlo sampling</a><a id="Monte-Carlo-sampling-1"></a><a class="docs-heading-anchor-permalink" href="#Monte-Carlo-sampling" title="Permalink"></a></h2><p>Molly has the <a href="../api/#Molly.MetropolisMonteCarlo"><code>MetropolisMonteCarlo</code></a> simulator to carry out Monte Carlo sampling with Metropolis selection rates. For example, to perform simulated annealing on charged particles to form a crystal lattice:</p><pre><code class="language-julia">n_atoms = 100
+atoms = [Atom(mass=10.0u&quot;g/mol&quot;, charge=1.0) for i in 1:n_atoms]
+boundary = RectangularBoundary(4.0u&quot;nm&quot;)
+
+coords = place_atoms(n_atoms, boundary; min_dist=0.2u&quot;nm&quot;)
+pairwise_inters = (Coulomb(),)
+
+temperatures = [1198.0, 798.0, 398.0, 198.0, 98.0, 8.0]u&quot;K&quot;
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    pairwise_inters=pairwise_inters,
+    loggers=(
+        coords=CoordinateLogger(n_atoms, dims=n_dimensions(boundary)),
+        montecarlo=MonteCarloLogger(),
+    ),
+)
+
+trial_args = Dict(:shift_size =&gt; 0.1u&quot;nm&quot;)
+for t in temperatures
+    sim = MetropolisMonteCarlo(; 
+        temperature=t,
+        trial_moves=random_uniform_translation!,
+        trial_args=trial_args,
+    )
+
+    simulate!(sys, sim, 10_000)
+end
+
+println(sys.loggers.montecarlo.n_accept)
+# 15234
+
+visualize(sys.loggers.coords, boundary, &quot;sim_montecarlo.gif&quot;)</code></pre><p><img src="../images/sim_montecarlo.gif" alt="Monte Carlo simulation"/></p><p><code>trial_moves</code> should be a function that takes a <a href="../api/#Molly.System"><code>System</code></a> as its argument and optional keyword arguments <code>trial_args</code>. It should modify the coordinates as appropriate, accounting for any boundary conditions. <a href="../api/#Molly.random_uniform_translation!-Union{Tuple{System{D, G, T}}, Tuple{T}, Tuple{G}, Tuple{D}} where {D, G, T}"><code>random_uniform_translation!</code></a> and <a href="../api/#Molly.random_normal_translation!-Union{Tuple{System{D, G, T}}, Tuple{T}, Tuple{G}, Tuple{D}} where {D, G, T}"><code>random_normal_translation!</code></a> are provided as common trial move functions. <a href="../api/#Molly.MonteCarloLogger"><code>MonteCarloLogger</code></a> records various properties throughout the simulation.</p><h2 id="Agent-based-modelling"><a class="docs-heading-anchor" href="#Agent-based-modelling">Agent-based modelling</a><a id="Agent-based-modelling-1"></a><a class="docs-heading-anchor-permalink" href="#Agent-based-modelling" title="Permalink"></a></h2><p>Agent-based modelling (ABM) is conceptually similar to molecular dynamics. Julia has <a href="https://juliadynamics.github.io/Agents.jl/stable/">Agents.jl</a> for ABM, but Molly can also be used to simulate arbitrary agent-based systems in continuous space. Here we simulate a toy <a href="https://en.wikipedia.org/wiki/Compartmental_models_in_epidemiology#The_SIR_model">SIR model</a> for disease spread. This example shows how atom properties can be mutable, i.e. change during the simulation, and includes custom forces and loggers (see below for more info).</p><pre><code class="language-julia">@enum Status susceptible infected recovered
+
+# Custom atom type
+mutable struct Person
+    i::Int
+    status::Status
+    mass::Float64
+    σ::Float64
+    ϵ::Float64
+end
+
+# Custom PairwiseInteraction
+struct SIRInteraction &lt;: PairwiseInteraction
+    dist_infection::Float64
+    prob_infection::Float64
+    prob_recovery::Float64
+end
+
+# Custom force function
+function Molly.force(inter::SIRInteraction,
+                        vec_ij,
+                        coord_i,
+                        coord_j,
+                        atom_i,
+                        atom_j,
+                        boundary)
+    if (atom_i.status == infected &amp;&amp; atom_j.status == susceptible) ||
+                (atom_i.status == susceptible &amp;&amp; atom_j.status == infected)
+        # Infect close people randomly
+        r2 = sum(abs2, vec_ij)
+        if r2 &lt; inter.dist_infection^2 &amp;&amp; rand() &lt; inter.prob_infection
+            atom_i.status = infected
+            atom_j.status = infected
+        end
+    end
+    # Workaround to obtain a self-interaction
+    if atom_i.i == (atom_j.i - 1)
+        # Recover randomly
+        if atom_i.status == infected &amp;&amp; rand() &lt; inter.prob_recovery
+            atom_i.status = recovered
+        end
+    end
+    return zero(coord_i)
+end
+
+# Custom logger
+function fracs_SIR(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+    counts_sir = [
+        count(p -&gt; p.status == susceptible, s.atoms),
+        count(p -&gt; p.status == infected   , s.atoms),
+        count(p -&gt; p.status == recovered  , s.atoms)
+    ]
+    return counts_sir ./ length(s)
+end
+
+SIRLogger(n_steps) = GeneralObservableLogger(fracs_SIR, Vector{Float64}, n_steps)
+
+temp = 1.0
+boundary = RectangularBoundary(10.0)
+n_steps = 1_000
+n_people = 500
+n_starting = 2
+atoms = [Person(i, i &lt;= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
+coords = place_atoms(n_people, boundary; min_dist=0.1)
+velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
+
+lj = LennardJones(
+    cutoff=DistanceCutoff(1.6),
+    use_neighbors=true,
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+sir = SIRInteraction(0.5, 0.06, 0.01)
+pairwise_inters = (LennardJones=lj, SIR=sir)
+neighbor_finder = DistanceNeighborFinder(
+    eligible=trues(n_people, n_people),
+    n_steps=10,
+    dist_cutoff=2.0,
+)
+simulator = VelocityVerlet(
+    dt=0.02,
+    coupling=AndersenThermostat(temp, 5.0),
+)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
+    neighbor_finder=neighbor_finder,
+    loggers=(
+        coords=CoordinateLogger(Float64, 10; dims=2),
+        SIR=SIRLogger(10),
+    ),
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+
+simulate!(sys, simulator, n_steps)
+
+visualize(sys.loggers.coords, boundary, &quot;sim_agent.mp4&quot;; markersize=0.1)</code></pre><p><img src="../images/sim_agent.gif" alt="Agent simulation"/></p><p>We can use the logger to plot the fraction of people susceptible, infected and recovered over the course of the simulation:</p><pre><code class="language-julia">using GLMakie
+
+f = Figure()
+ax = Axis(f[1, 1], xlabel=&quot;Snapshot&quot;, ylabel=&quot;Fraction&quot;)
+
+lines!([l[1] for l in values(sys.loggers.SIR)], label=&quot;Susceptible&quot;)
+lines!([l[2] for l in values(sys.loggers.SIR)], label=&quot;Infected&quot;)
+lines!([l[3] for l in values(sys.loggers.SIR)], label=&quot;Recovered&quot;)
+axislegend()</code></pre><p><img src="../images/fraction_sir.png" alt="Fraction SIR"/></p><h2 id="Units"><a class="docs-heading-anchor" href="#Units">Units</a><a id="Units-1"></a><a class="docs-heading-anchor-permalink" href="#Units" title="Permalink"></a></h2><p>Molly is fairly opinionated about using <a href="https://github.com/PainterQubits/Unitful.jl">Unitful.jl</a> units as shown above: you don&#39;t have to use them, but it is better if you do. Any consistent unit scheme can be used, or no units at all. Molly is most strict about the mixture of molar and non-molar types. For example, if your energy and force units are molar then your atom masses should be <code>g/mol</code> or similar. If you are not using units then no quantities can have Unitful annotations and you are responsible for ensuring a consistent unit system. Whilst you occasionally may run into friction with dimension mismatches, using units has the major advantages of catching whole classes of errors and letting you physically interpret the numbers in your system. The performance overhead of using units is minimal. Units are not currently compatible with differentiable simulations.</p><p>All your interaction types need to return the same units of force and energy or the simulation will not run. By default these are <code>kJ * mol^-1 * nm^-1</code> for force and <code>kJ * mol^-1</code> for energy, but this can be changed using the <code>force_units</code> and <code>energy_units</code> arguments to <a href="../api/#Molly.System"><code>System</code></a> and some interactions. These arguments should be <code>NoUnits</code> if you are not using units. If you need to strip units for downstream analysis, use the <code>ustrip</code> or <a href="../api/#Molly.ustrip_vec-Tuple"><code>ustrip_vec</code></a> functions. It should be noted that charges are stored as dimensionless, i.e. 1.0 represents an atomic charge of +1.</p><h2 id="Atom-types"><a class="docs-heading-anchor" href="#Atom-types">Atom types</a><a id="Atom-types-1"></a><a class="docs-heading-anchor-permalink" href="#Atom-types" title="Permalink"></a></h2><p>Molly has a built-in <a href="../api/#Molly.Atom"><code>Atom</code></a> type with a few properties commonly used in molecular simulation defined. The <a href="../api/#Molly.mass-Tuple{Any}"><code>mass</code></a> and <a href="../api/#Molly.charge-Tuple{Any}"><code>charge</code></a> functions can be used on an <a href="../api/#Molly.Atom"><code>Atom</code></a>. Custom atom types can be used just as effectively provided that either the <a href="../api/#Molly.mass-Tuple{Any}"><code>mass</code></a> function is defined on the type or the type has a <code>mass</code> field (the fallback for the <a href="../api/#Molly.mass-Tuple{Any}"><code>mass</code></a> function). The type should also have all fields required by any interactions. The list of atoms passed to the <a href="../api/#Molly.System"><code>System</code></a> constructor should be concretely typed.</p><p>Custom atom types should generally be bits types, i.e. <code>isbitstype(MyAtom)</code> should be <code>true</code>, to work on the GPU. Additional non-bits type data for the atoms that is not directly used when calculating the interactions can be passed to the <a href="../api/#Molly.System"><code>System</code></a> constructor with the <code>atoms_data</code> keyword argument. For example the built-in <a href="../api/#Molly.AtomData"><code>AtomData</code></a> type contains fields such as the atom name that are useful when writing trajectories.</p><h2 id="Forces-and-energies"><a class="docs-heading-anchor" href="#Forces-and-energies">Forces and energies</a><a id="Forces-and-energies-1"></a><a class="docs-heading-anchor-permalink" href="#Forces-and-energies" title="Permalink"></a></h2><p>Interactions define how different parts of the system interact. The force on each particle in the system is derived from the potential corresponding to the interaction.</p><p class="math-container">\[\vec{F}_i = -\sum_j \frac{dV_{ij}(r_{ij})}{dr_{ij}}\frac{\vec{r}_{ij}}{r_{ij}}\]</p><p>In Molly there are three types of interactions:</p><ul><li><a href="../api/#Molly.PairwiseInteraction"><code>PairwiseInteraction</code></a>s are present between all or most atom pairs, and account for example for non-bonded terms in molecular mechanics force fields.</li><li><a href="../api/#Molly.SpecificInteraction"><code>SpecificInteraction</code></a>s are present between specific atoms, and account for example for bonded terms in molecular mechanics force fields.</li><li>General interactions are a free-form interaction type that can access the whole system and outputs forces for all atoms. This is useful for neural network potentials, implicit solvent models and other cases that require maximum flexibility.</li></ul><p>The available pairwise interactions are:</p><ul><li><a href="../api/#Molly.LennardJones"><code>LennardJones</code></a></li><li><a href="../api/#Molly.LennardJonesSoftCore"><code>LennardJonesSoftCore</code></a></li><li><a href="../api/#Molly.SoftSphere"><code>SoftSphere</code></a></li><li><a href="../api/#Molly.Mie"><code>Mie</code></a></li><li><a href="../api/#Molly.Buckingham"><code>Buckingham</code></a></li><li><a href="../api/#Molly.Coulomb"><code>Coulomb</code></a></li><li><a href="../api/#Molly.CoulombSoftCore"><code>CoulombSoftCore</code></a></li><li><a href="../api/#Molly.CoulombReactionField"><code>CoulombReactionField</code></a></li><li><a href="../api/#Molly.Gravity"><code>Gravity</code></a></li></ul><p>The available specific interactions are:</p><ul><li><a href="../api/#Molly.HarmonicPositionRestraint"><code>HarmonicPositionRestraint</code></a> - 1 atom</li><li><a href="../api/#Molly.HarmonicBond"><code>HarmonicBond</code></a> - 2 atoms</li><li><a href="../api/#Molly.MorseBond"><code>MorseBond</code></a> - 2 atoms</li><li><a href="../api/#Molly.FENEBond"><code>FENEBond</code></a> - 2 atoms</li><li><a href="../api/#Molly.HarmonicAngle"><code>HarmonicAngle</code></a> - 3 atoms</li><li><a href="../api/#Molly.CosineAngle"><code>CosineAngle</code></a> - 3 atoms</li><li><a href="../api/#Molly.PeriodicTorsion"><code>PeriodicTorsion</code></a> - 4 atoms</li><li><a href="../api/#Molly.RBTorsion"><code>RBTorsion</code></a> - 4 atoms</li></ul><p>The available general interactions are:</p><ul><li><a href="../api/#Molly.ImplicitSolventOBC"><code>ImplicitSolventOBC</code></a></li><li><a href="../api/#Molly.ImplicitSolventGBN2"><code>ImplicitSolventGBN2</code></a></li><li><a href="../api/#Molly.MullerBrown"><code>MullerBrown</code></a></li></ul><h3 id="Pairwise-interactions"><a class="docs-heading-anchor" href="#Pairwise-interactions">Pairwise interactions</a><a id="Pairwise-interactions-1"></a><a class="docs-heading-anchor-permalink" href="#Pairwise-interactions" title="Permalink"></a></h3><p>To define your own <a href="../api/#Molly.PairwiseInteraction"><code>PairwiseInteraction</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyPairwiseInter &lt;: PairwiseInteraction
+    # Any properties, e.g. constants for the interaction or cutoff parameters
+end</code></pre><p>You can also define a <a href="../api/#Molly.use_neighbors-Tuple{PairwiseInteraction}"><code>use_neighbors</code></a> method, which determines whether the neighbor list is used to omit distant atoms (<code>true</code>) or whether all atom pairs are always considered (<code>false</code>):</p><pre><code class="language-julia">Molly.use_neighbors(inter::MyPairwiseInter) = true</code></pre><p>This is <code>false</code> by default. If it is <code>true</code>, you must specify a neighbor finder when setting up the <a href="../api/#Molly.System"><code>System</code></a>. For built-in interactions this function accesses the <code>use_neighbors</code> field of the struct. To work on the GPU the <code>struct</code> should be a bits type, i.e. <code>isbitstype(MyPairwiseInter)</code> should be <code>true</code>.</p><p>Next, you need to define a method for the <a href="../api/#Molly.force-NTuple{8, Any}"><code>force</code></a> function acting between a pair of atoms. This has a set series of arguments:</p><pre><code class="language-julia">function Molly.force(inter::MyPairwiseInter,
+                        vec_ij,
+                        coord_i,
+                        coord_j,
+                        atom_i,
+                        atom_j,
+                        boundary)
+    # Replace this with your force calculation
+    # A positive force causes the atoms to move apart
+    f = 0.0
+
+    # Obtain a vector for the force
+    fdr = f * normalize(vec_ij)
+    return fdr
+end</code></pre><p><code>vec_ij</code> is the vector between the closest images of atoms <code>i</code> and <code>j</code> accounting for the periodic boundary conditions. Atom properties can be accessed, e.g. <code>atom_i.σ</code>. Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.</p><p>An optional final argument <code>special</code> is a <code>Bool</code> determining whether the atom pair interaction should be treated as special. This is specified during neighbor finder construction. When simulating molecules, for example, non-bonded interactions for atoms in a 1-4 bonding arrangement (i-x-x-j) are often weighted by a factor such as 0.5. For interactions where this is relevant, <code>special</code> can be used to apply this weighting in the interaction. It can have a variety of uses depending on the context, for example if you have multiple interactions and want to exclude certain atom pairs from one of the interactions only.</p><p>To use your custom interaction in a simulation, add it to the list of pairwise interactions:</p><pre><code class="language-julia">pairwise_inters = (MyPairwiseInter(),)</code></pre><p>Then create a <a href="../api/#Molly.System"><code>System</code></a> and simulate as above. Note that you can also use a named tuple instead of a tuple if you want to access interactions by name:</p><pre><code class="language-julia">pairwise_inters = (MyPairwiseInter=MyPairwiseInter(),)</code></pre><p>For performance reasons it is best to <a href="https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1">avoid containers with abstract type parameters</a>, such as <code>Vector{PairwiseInteraction}</code>.</p><p>If you wish to calculate potential energies or log the energy throughout a simulation, you will need to define a method for the <a href="../api/#Molly.potential_energy-Union{Tuple{System{D, false}}, Tuple{D}, Tuple{System{D, false}, Any}} where D"><code>potential_energy</code></a> function. This has the same arguments as <a href="../api/#Molly.force-NTuple{8, Any}"><code>force</code></a> and should return a single value corresponding to the potential energy.</p><h3 id="Specific-interactions"><a class="docs-heading-anchor" href="#Specific-interactions">Specific interactions</a><a id="Specific-interactions-1"></a><a class="docs-heading-anchor-permalink" href="#Specific-interactions" title="Permalink"></a></h3><p>To define your own <a href="../api/#Molly.SpecificInteraction"><code>SpecificInteraction</code></a>, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MySpecificInter &lt;: SpecificInteraction
+    # Properties, e.g. a bond distance corresponding to the energy minimum
+end</code></pre><p>Next, you need to define a method for the <a href="../api/#Molly.force-NTuple{8, Any}"><code>force</code></a> function. The form of this will depend on whether the interaction involves 1, 2, 3 or 4 atoms. For example in the 2 atom case:</p><pre><code class="language-julia">function Molly.force(inter::MySpecificInter, coords_i, coords_j, boundary)
+    dr = vector(coords_i, coords_j, boundary)
+
+    # Replace this with your force calculation
+    # A positive force causes the atoms to move apart
+    f = 0.0
+
+    fdr = f * normalize(dr)
+    return SpecificForce2Atoms(-fdr, fdr)
+end</code></pre><p>The 3 atom case would define <code>Molly.force(inter::MySpecificInter, coords_i, coords_j, coords_k, boundary)</code> and return <code>SpecificForce3Atoms(f1, f2, f3)</code>. To use your custom interaction, add it to the specific interaction lists along with the atom indices:</p><pre><code class="language-julia">specific_inter_lists = (
+    InteractionList2Atoms(
+        [1, 3],
+        [2, 4],
+        [MySpecificInter(), MySpecificInter()],
+    ),
+)</code></pre><p>For 3 atom interactions use <a href="../api/#Molly.InteractionList3Atoms"><code>InteractionList3Atoms</code></a> and pass 3 sets of indices. If using the GPU, the inner list of indices and interactions should be moved to the GPU with <code>CuArray</code>. The number in the interaction list and the return type from <a href="../api/#Molly.force-NTuple{8, Any}"><code>force</code></a> must match, e.g. <a href="../api/#Molly.InteractionList3Atoms"><code>InteractionList3Atoms</code></a> must always return <a href="../api/#Molly.SpecificForce3Atoms"><code>SpecificForce3Atoms</code></a> from the corresponding <a href="../api/#Molly.force-NTuple{8, Any}"><code>force</code></a> function. If some atoms are required in the interaction for force calculation but have no force applied to them by the interaction, give a zero force vector for those atoms. Again a method for the <a href="../api/#Molly.potential_energy-Union{Tuple{System{D, false}}, Tuple{D}, Tuple{System{D, false}, Any}} where D"><code>potential_energy</code></a> function with the same arguments can be defined.</p><h3 id="General-interactions"><a class="docs-heading-anchor" href="#General-interactions">General interactions</a><a id="General-interactions-1"></a><a class="docs-heading-anchor-permalink" href="#General-interactions" title="Permalink"></a></h3><p>To define your own general interaction, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyGeneralInter
+    # Properties, e.g. a neural network model
+end</code></pre><p>Next, you need to define a method for the <a href="../api/#Molly.forces-Union{Tuple{System{D, false}}, Tuple{D}, Tuple{System{D, false}, Any}} where D"><code>forces</code></a> function (note this is different to the <a href="../api/#Molly.force-NTuple{8, Any}"><code>force</code></a> function above).</p><pre><code class="language-julia">function Molly.forces(inter::MyGeneralInter,
+                        sys,
+                        neighbors=nothing;
+                        n_threads=Threads.nthreads())
+    # Calculate the forces on all atoms using the interaction and the system
+    # The output should have the same shape as the coordinates
+    # For example, a neural network might do something like this
+    return inter.model(sys.coords, sys.atoms)
+end</code></pre><p>The neighbors calculated from the neighbor list are available in this function, but may or may not be used depending on context. You could carry out your own neighbor finding in this function if required. Note that this function calculates forces not accelerations; if you have a neural network that calculates accelerations you should multiply these by <code>masses(sys)</code> to get the forces according to F=ma.</p><p>A method for the <a href="../api/#Molly.potential_energy-Union{Tuple{System{D, false}}, Tuple{D}, Tuple{System{D, false}, Any}} where D"><code>potential_energy</code></a> function that takes the same arguments and returns a single value can also be defined. A method for the <a href="../api/#Molly.virial"><code>virial</code></a> function that takes the same arguments can also be defined, allowing virial and pressure calculation when using custom general interactions. To use your custom interaction in a simulation, add it to the list of general interactions:</p><pre><code class="language-julia">general_inters = (MyGeneralInter(),)</code></pre><p><code>general_inters=general_inters</code> can be given as a keyword argument when setting up the <a href="../api/#Molly.System"><code>System</code></a>.</p><h2 id="Cutoffs"><a class="docs-heading-anchor" href="#Cutoffs">Cutoffs</a><a id="Cutoffs-1"></a><a class="docs-heading-anchor-permalink" href="#Cutoffs" title="Permalink"></a></h2><p>The total potential energy of a system is given as a sum of the individual inter-particle potentials</p><p class="math-container">\[V(\vec{r}_1, \dotsc, \vec{r}_N) = \sum_{i&lt;j}V_{ij}(r_{ij})\]</p><p>The forces acting on the particles are given by</p><p class="math-container">\[\vec{F}_i = -\sum_j \frac{dV_{ij}(r_{ij})}{dr_{ij}}\frac{\vec{r}_{ij}}{r_{ij}}\]</p><p>In the case of the Lennard-Jones potential, the inter-particle potential is given by</p><p class="math-container">\[V_{ij}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]\]</p><p>and the forces are given by</p><p class="math-container">\[\begin{aligned}
+\vec{F}_i &amp;= 24\varepsilon_{ij} \left(2\frac{\sigma_{ij}^{12}}{r_{ij}^{13}} - \frac{\sigma_{ij}^6}{r_{ij}^{7}}\right) \frac{\vec{r}_{ij}}{r_{ij}} \\
+&amp;= \frac{24\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}^{6}}{r_{ij}^{6}}\right)^2 -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \vec{r}_{ij}
+\end{aligned}\]</p><p>As the potential, and thus also the force decreases rapidly with the distance, in almost every implementation of the Lennard-Jones force calculation there is a cutoff radius beyond which the force is set to 0.</p><p>While this is often a sensible approach, it introduces a discontinuity in the force function and it requires us to also modify the potential, as beyond the cutoff radius the force would be 0, but the derivative of the unmodified potential is not. One way to truncate the potential is to shift the potential by its cutoff value.</p><p class="math-container">\[\begin{aligned}
+\vec{F}_{SP}(\vec{r}) &amp;= \begin{cases}
+\vec{F}(\vec{r}), r &lt; r_c \\
+0, r &gt; r_c
+\end{cases} \\
+V_{SP}(r) &amp;= \begin{cases}
+V(r) - V(r_c), r \le r_c \\
+0, r &gt; r_c
+\end{cases}
+\end{aligned}\]</p><p>This way the potential function is continuous and the relation between forces and potentials is satisfied. This truncation method is called shifted potential cutoff.</p><p>Another option is to shift the force in order to make it continuous</p><p class="math-container">\[\begin{aligned}
+F_{SF}(r) &amp;= \begin{cases}
+F(r) - F(r_c), r \le r_c \\
+0, r &gt; r_c
+\end{cases} \\
+V_{SF}(r) &amp;= \begin{cases}
+V(r) - (r-r_c) V&#39;(r_c) - V(r_c), r \le r_c \\
+0, r &gt; r_c
+\end{cases}
+\end{aligned}\]</p><p>This requires a more complicated change in the potential in order to satisfy the relation between them. This method is called the shifted force cutoff. The continuity of the force is desirable as it may give better energy conservation properties as shown in <a href="http://aip.scitation.org/doi/10.1063/1.3558787">Toxvaerd 2011</a>.</p><p>There are also more complicated truncation methods that interpolate between the original potential and 0, but we will consider those two for the moment. The truncation approximations that we use can significantly alter the qualitative features of the simulation as shown in many articles in the molecular dynamics literature (<a href="https://aip.scitation.org/doi/full/10.1063/1.4997698">Fitzner 2017</a>, <a href="https://pubs.acs.org/doi/10.1021/ct0502256">van der Spoel 2006</a> and others).</p><p>Since the truncation algorithm is independent of the interaction for which is used, each compatible interaction is defined without including cutoffs. The corresponding interaction constructor has a <code>cutoff</code> field (default <a href="../api/#Molly.NoCutoff"><code>NoCutoff</code></a>) which is then used via dispatch to apply the chosen cutoff, e.g. <code>SoftSphere(cutoff=ShiftedPotentialCutoff(1.2u&quot;nm&quot;))</code>. The available cutoffs are:</p><ul><li><a href="../api/#Molly.NoCutoff"><code>NoCutoff</code></a></li><li><a href="../api/#Molly.DistanceCutoff"><code>DistanceCutoff</code></a></li><li><a href="../api/#Molly.ShiftedPotentialCutoff"><code>ShiftedPotentialCutoff</code></a></li><li><a href="../api/#Molly.ShiftedForceCutoff"><code>ShiftedForceCutoff</code></a></li><li><a href="../api/#Molly.CubicSplineCutoff"><code>CubicSplineCutoff</code></a></li></ul><p>The following interactions can use a cutoff:</p><ul><li><a href="../api/#Molly.LennardJones"><code>LennardJones</code></a></li><li><a href="../api/#Molly.LennardJonesSoftCore"><code>LennardJonesSoftCore</code></a></li><li><a href="../api/#Molly.SoftSphere"><code>SoftSphere</code></a></li><li><a href="../api/#Molly.Mie"><code>Mie</code></a></li><li><a href="../api/#Molly.Buckingham"><code>Buckingham</code></a></li><li><a href="../api/#Molly.Coulomb"><code>Coulomb</code></a></li><li><a href="../api/#Molly.CoulombSoftCore"><code>CoulombSoftCore</code></a></li></ul><p>In addition, <a href="../api/#Molly.CoulombReactionField"><code>CoulombReactionField</code></a> and the implicit solvent models have a <code>dist_cutoff</code> argument for a cutoff distance.</p><h2 id="Boundaries"><a class="docs-heading-anchor" href="#Boundaries">Boundaries</a><a id="Boundaries-1"></a><a class="docs-heading-anchor-permalink" href="#Boundaries" title="Permalink"></a></h2><p>Molly allows the use of various periodic and infinite boundary conditions. The available 3D boundaries are:</p><ul><li><a href="../api/#Molly.CubicBoundary"><code>CubicBoundary</code></a></li><li><a href="../api/#Molly.TriclinicBoundary"><code>TriclinicBoundary</code></a></li></ul><p>The available 2D boundaries are:</p><ul><li><a href="../api/#Molly.RectangularBoundary"><code>RectangularBoundary</code></a></li></ul><p>Some examples of using boundaries:</p><pre><code class="language-julia">CubicBoundary(2.0u&quot;nm&quot;                             ) # Periodic cube with 2 nm sides
+CubicBoundary(2.0u&quot;nm&quot;   , 2.0u&quot;nm&quot;   , 2.0u&quot;nm&quot;   ) # Periodic cube with 2 nm sides
+CubicBoundary(4.0u&quot;nm&quot;   , 5.0u&quot;nm&quot;   , 6.0u&quot;nm&quot;   ) # Periodic cuboid
+CubicBoundary(2.0u&quot;nm&quot;   , 2.0u&quot;nm&quot;   , Inf * u&quot;nm&quot;) # Infinite boundary in z direction
+CubicBoundary(Inf * u&quot;nm&quot;, Inf * u&quot;nm&quot;, Inf * u&quot;nm&quot;) # Infinite boundary, no periodicity
+CubicBoundary(Inf * u&quot;nm&quot;                          ) # Infinite boundary, no periodicity
+
+RectangularBoundary(2.0u&quot;nm&quot;             ) # Periodic square
+RectangularBoundary(4.0u&quot;nm&quot;, 5.0u&quot;nm&quot;   ) # Periodic rectangle
+RectangularBoundary(2.0u&quot;nm&quot;, Inf * u&quot;nm&quot;) # Infinite boundary in y direction
+
+# Periodic triclinic from basis vectors
+TriclinicBoundary(SVector(
+    SVector(2.2      , 0.0      , 0.0      )u&quot;nm&quot;,
+    SVector(1.0      , 1.7320508, 0.0      )u&quot;nm&quot;,
+    SVector(1.37888  , 0.5399122, 1.0233204)u&quot;nm&quot;,
+))
+
+# Periodic triclinic from basis vector lengths and angles α/β/γ
+b = TriclinicBoundary(
+    SVector(2.2, 2.0, 1.8)u&quot;nm&quot;,
+    deg2rad.(SVector(50.0, 40.0, 60.0)),
+)
+
+# Volume of bounding box
+box_volume(b) # 3.8993746318188633 nm^3
+
+# Random coordinate uniformly distributed within boundary
+random_coord(b) # SVector(2.651062310435411, 2.1702306804433973, 0.9518105403051831)u&quot;nm&quot;
+
+# Wrap a coordinate back into the boundary if it is outside
+wrap_coords(SVector(1.0, 1.0, 1.0)u&quot;nm&quot;, b) # SVector(3.2, 1.0, 1.0)u&quot;nm&quot;</code></pre><p>The <a href="../api/#Molly.box_center-Tuple{Union{CubicBoundary, RectangularBoundary}}"><code>box_center</code></a>, <a href="../api/#AtomsBase.n_dimensions-Tuple{CubicBoundary}"><code>n_dimensions</code></a>, <a href="../api/#Molly.float_type-Union{Tuple{Union{ReplicaSystem{D, G, T}, System{D, G, T}}}, Tuple{T}, Tuple{G}, Tuple{D}} where {D, G, T}"><code>float_type</code></a>, <a href="../api/#Molly.place_atoms-Tuple{Integer, Any}"><code>place_atoms</code></a> and <a href="../api/#Molly.place_diatomics-Tuple{Integer, Any, Any}"><code>place_diatomics</code></a> functions are also available for boundaries.</p><p>The appropriate boundary to use will depend on your simulation. For example, having different lengths in each dimension would usually only make sense in a situation where forces or restraints depended on the dimension.</p><h2 id="Simulators"><a class="docs-heading-anchor" href="#Simulators">Simulators</a><a id="Simulators-1"></a><a class="docs-heading-anchor-permalink" href="#Simulators" title="Permalink"></a></h2><p>Simulators define what type of simulation is run. This could be anything from a simple energy minimization to complicated replica exchange MD. The available simulators are:</p><ul><li><a href="../api/#Molly.SteepestDescentMinimizer"><code>SteepestDescentMinimizer</code></a></li><li><a href="../api/#Molly.VelocityVerlet"><code>VelocityVerlet</code></a></li><li><a href="../api/#Molly.Verlet"><code>Verlet</code></a></li><li><a href="../api/#Molly.StormerVerlet"><code>StormerVerlet</code></a></li><li><a href="../api/#Molly.Langevin"><code>Langevin</code></a></li><li><a href="../api/#Molly.LangevinSplitting"><code>LangevinSplitting</code></a></li><li><a href="../api/#Molly.NoseHoover"><code>NoseHoover</code></a></li><li><a href="../api/#Molly.TemperatureREMD"><code>TemperatureREMD</code></a></li><li><a href="../api/#Molly.HamiltonianREMD"><code>HamiltonianREMD</code></a></li><li><a href="../api/#Molly.MetropolisMonteCarlo"><code>MetropolisMonteCarlo</code></a></li></ul><p>Many of these require a time step <code>dt</code> as an argument. Many also remove the center of mass motion every time step, which can be tuned with the <code>remove_CM_motion</code> argument.</p><p>The <a href="../api/#Molly.LangevinSplitting"><code>LangevinSplitting</code></a> simulator can be used to define a variety of integrators such as velocity Verlet (splitting <code>&quot;BAB&quot;</code>), the Langevin implementation in <a href="../api/#Molly.Langevin"><code>Langevin</code></a> (<code>&quot;BAOA&quot;</code>), and symplectic Euler integrators (<code>&quot;AB&quot;</code> and <code>&quot;BA&quot;</code>).</p><p>To define your own simulator, first define a <code>struct</code>:</p><pre><code class="language-julia">struct MySimulator
+    # Any properties, e.g. the time step or coupling methods
+end</code></pre><p>Then, define a method for <a href="../api/#Molly.simulate!-Tuple{Any, SteepestDescentMinimizer}"><code>simulate!</code></a> that carries out the simulation. This example shows some helper functions that you can use:</p><pre><code class="language-julia">function Molly.simulate!(sys,
+                         sim::MySimulator,
+                         n_steps::Integer;
+                         n_threads::Integer=Threads.nthreads(),
+                         run_loggers=true)
+    # Find neighbors like this
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+
+    for step_n in 1:n_steps
+        # Calculate accelerations like this
+        accels_t = accelerations(sys, neighbors; n_threads=n_threads)
+
+        # Ensure coordinates stay within the simulation box like this
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+
+        # Example velocity update
+        # Includes appropriate unit conversion for when the force units are per mol
+        sys.velocities += (accels_t .+ accels_t_dt) .* sim.dt / 2
+
+        # Apply coupling like this
+        recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
+                                           n_threads=n_threads)
+
+        # Remove center of mass motion like this
+        remove_CM_motion!(sys)
+
+        # Apply the loggers like this
+        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
+
+        # Find new neighbors like this
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
+                                   n_threads=n_threads)
+    end
+
+    return sys
+end</code></pre><p>See more in the source code. To use your custom simulator, give it as the second argument when calling <a href="../api/#Molly.simulate!-Tuple{Any, SteepestDescentMinimizer}"><code>simulate!</code></a>.</p><p>To define your own replica exchange simulator, first define a <code>struct</code>:</p><pre><code class="language-julia">struct MyREMDSimulator
+    dt # Time step
+    exchange_time # Time between exchanges
+    simulators # A list of simulators to use for each replica e.g. Langevin
+    # Other properties of the simulation
+end</code></pre><p>Then define the function that carries out the exchange, <a href="../api/#Molly.remd_exchange!-Union{Tuple{T}, Tuple{G}, Tuple{D}, Tuple{ReplicaSystem{D, G, T}, TemperatureREMD, Integer, Integer}} where {D, G, T}"><code>remd_exchange!</code></a>:</p><pre><code class="language-julia">function Molly.remd_exchange!(sys::ReplicaSystem,
+                              sim::MyREMDSimulator,
+                              n::Integer,
+                              m::Integer;
+                              n_threads::Integer=Threads.nthreads(),
+                              rng=Random.GLOBAL_RNG)
+    # Attempt to exchange the replicas with index n and m
+    # First define Δ for the REMD scheme
+    make_exchange = Δ &lt;= 0 || rand(rng) &lt; exp(-Δ) # Example of Metropolis acceptance rate
+    if make_exchange
+        # Exchange coordinates and velocities of replicas
+        # Also scale the velocities to match the temperature if required
+    end
+
+    return Δ, make_exchange
+end</code></pre><p>The above function returns <code>Δ</code>, the argument of the acceptance rate that is logged by <a href="../api/#Molly.ReplicaExchangeLogger"><code>ReplicaExchangeLogger</code></a>, and a boolean indicating whether the exchange was successful.</p><p>Then, define a method for the <a href="../api/#Molly.simulate!-Tuple{Any, SteepestDescentMinimizer}"><code>simulate!</code></a> function to perform the parallel simulation. This does any initial setup such as assigning velocities then uses <a href="../api/#Molly.simulate_remd!-Tuple{ReplicaSystem, Any, Integer}"><code>simulate_remd!</code></a> to run the simulation:</p><pre><code class="language-julia">function Molly.simulate!(sys::ReplicaSystem,
+                         sim::MyREMDSimulator,
+                         n_steps::Integer;
+                         rng=Random.GLOBAL_RNG,
+                         n_threads::Integer=Threads.nthreads())
+    # Do any initial setup if necessary
+    simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
+end</code></pre><p>Under the hood there are two implementations for the <a href="../api/#Molly.forces-Union{Tuple{System{D, false}}, Tuple{D}, Tuple{System{D, false}, Any}} where D"><code>forces</code></a> function, used by <a href="../api/#Molly.accelerations"><code>accelerations</code></a>, and for <a href="../api/#Molly.potential_energy-Union{Tuple{System{D, false}}, Tuple{D}, Tuple{System{D, false}, Any}} where D"><code>potential_energy</code></a>: a version geared towards CPUs and parallelism, and a version geared towards GPUs. You can define different versions of a simulator for CPU and GPU systems by dispatching on <code>System{D, false}</code> or <code>System{D, true}</code> respectively. This also applies to coupling methods, neighbor finders and analysis functions. You do not have to define two versions though: you may only intend to use the simulator one way, or one version may be performant in all cases.</p><h2 id="Coupling"><a class="docs-heading-anchor" href="#Coupling">Coupling</a><a id="Coupling-1"></a><a class="docs-heading-anchor-permalink" href="#Coupling" title="Permalink"></a></h2><p>Some simulators can be modified by adding coupling methods to allow properties like temperature and pressure to be controlled during a simulation. The available couplers are:</p><ul><li><a href="../api/#Molly.AndersenThermostat"><code>AndersenThermostat</code></a></li><li><a href="../api/#Molly.RescaleThermostat"><code>RescaleThermostat</code></a></li><li><a href="../api/#Molly.BerendsenThermostat"><code>BerendsenThermostat</code></a></li><li><a href="../api/#Molly.MonteCarloBarostat"><code>MonteCarloBarostat</code></a></li><li><a href="../api/#Molly.MonteCarloAnisotropicBarostat"><code>MonteCarloAnisotropicBarostat</code></a></li><li><a href="../api/#Molly.MonteCarloMembraneBarostat"><code>MonteCarloMembraneBarostat</code></a></li></ul><p>Currently the <a href="../api/#Molly.VelocityVerlet"><code>VelocityVerlet</code></a>, <a href="../api/#Molly.Verlet"><code>Verlet</code></a>, <a href="../api/#Molly.StormerVerlet"><code>StormerVerlet</code></a>, <a href="../api/#Molly.Langevin"><code>Langevin</code></a> and <a href="../api/#Molly.NoseHoover"><code>NoseHoover</code></a> simulators support coupling methods, with the default being <a href="../api/#Molly.NoCoupling"><code>NoCoupling</code></a>. Couplers are given to the <code>coupling</code> keyword argument during simulator construction:</p><pre><code class="language-julia">temp = 300.0u&quot;K&quot;
+press = 1.0u&quot;bar&quot;
+thermostat = AndersenThermostat(temp, 1.0u&quot;ps&quot;)
+barostat = MonteCarloBarostat(press, temp, sys.boundary)
+
+# Velocity Verlet with Andersen thermostat
+VelocityVerlet(dt=0.001u&quot;ps&quot;, coupling=thermostat)
+
+# Velocity Verlet with Andersen thermostat and Monte Carlo barostat
+VelocityVerlet(dt=0.001u&quot;ps&quot;, coupling=(thermostat, barostat))</code></pre><p>The appropriate coupling to use will depend on the situation. For example, the <a href="../api/#Molly.MonteCarloBarostat"><code>MonteCarloBarostat</code></a> for controlling pressure assumes a constant temperature but does not actively control the temperature. It should be used alongside a temperature coupling method such as the <a href="../api/#Molly.Langevin"><code>Langevin</code></a> simulator or <a href="../api/#Molly.AndersenThermostat"><code>AndersenThermostat</code></a> coupling.</p><p>To define your own coupling method, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyCoupler
+    # Any properties, e.g. a target temperature or coupling constant
+end</code></pre><p>Then, define the function that implements the coupling every time step:</p><pre><code class="language-julia">function Molly.apply_coupling!(sys, coupling::MyCoupler, sim, neighbors, step_n;
+                               n_threads=Threads.nthreads())
+    # Do something to the simulation, e.g. scale the velocities
+    # Return whether the coupling has invalidated the currently stored forces,
+    #   for example by changing the coordinates
+    recompute_forces = false
+    return recompute_forces
+end</code></pre><p>The functions <a href="../api/#Molly.random_velocity-Tuple{Union{Union{Quantity{T, 𝐌, U}, Level{L, S, Quantity{T, 𝐌, U}} where {L, S}} where {T, U}, Union{Quantity{T, 𝐌 𝐍^-1, U}, Level{L, S, Quantity{T, 𝐌 𝐍^-1, U}} where {L, S}} where {T, U}}, Union{Quantity{T, 𝚯, U}, Level{L, S, Quantity{T, 𝚯, U}} where {L, S}} where {T, U}}"><code>random_velocity</code></a>, <a href="@ref"><code>maxwell_boltzmann</code></a> and <a href="../api/#Molly.temperature-Tuple{Any}"><code>temperature</code></a> may be useful here. To use your custom coupler, give it as the <code>coupling</code> argument to the simulator as above.</p><h2 id="Loggers"><a class="docs-heading-anchor" href="#Loggers">Loggers</a><a id="Loggers-1"></a><a class="docs-heading-anchor-permalink" href="#Loggers" title="Permalink"></a></h2><p>Loggers record properties of the simulation to allow monitoring and analysis. The available loggers are:</p><ul><li><a href="../api/#Molly.GeneralObservableLogger"><code>GeneralObservableLogger</code></a></li><li><a href="../api/#Molly.TemperatureLogger-Tuple{DataType, Integer}"><code>TemperatureLogger</code></a></li><li><a href="../api/#Molly.CoordinateLogger-Tuple{Any, Integer}"><code>CoordinateLogger</code></a></li><li><a href="../api/#Molly.VelocityLogger-Tuple{Any, Integer}"><code>VelocityLogger</code></a></li><li><a href="../api/#Molly.TotalEnergyLogger-Tuple{DataType, Any}"><code>TotalEnergyLogger</code></a></li><li><a href="../api/#Molly.KineticEnergyLogger-Tuple{Type, Integer}"><code>KineticEnergyLogger</code></a></li><li><a href="../api/#Molly.PotentialEnergyLogger-Tuple{Type, Integer}"><code>PotentialEnergyLogger</code></a></li><li><a href="../api/#Molly.ForceLogger-Tuple{Any, Integer}"><code>ForceLogger</code></a></li><li><a href="../api/#Molly.StructureWriter"><code>StructureWriter</code></a></li><li><a href="../api/#Molly.TimeCorrelationLogger"><code>TimeCorrelationLogger</code></a></li><li><a href="../api/#Molly.AutoCorrelationLogger-Tuple{Any, Any, Integer, Integer}"><code>AutoCorrelationLogger</code></a></li><li><a href="../api/#Molly.AverageObservableLogger"><code>AverageObservableLogger</code></a></li><li><a href="../api/#Molly.ReplicaExchangeLogger"><code>ReplicaExchangeLogger</code></a></li><li><a href="../api/#Molly.MonteCarloLogger"><code>MonteCarloLogger</code></a></li></ul><p>Many of the loggers can be initialised with just the number of steps between recorded values, e.g. <code>CoordinateLogger(10)</code>. An optional first argument is the type of the recorded value; the above is equivalent to <code>CoordinateLogger(typeof(1.0u&quot;nm&quot;), 10)</code> but if the simulation did not use units then <code>CoordinateLogger(Float64, 10)</code> would be required. If the simulation is in 2D, giving <code>dims=2</code> as a keyword argument is required for some loggers. A logger&#39;s history can be accessed with <code>values(my_logger)</code>.</p><p>To define your own logger, first define the <code>struct</code> and a method for <code>values</code> to access the stored values:</p><pre><code class="language-julia">struct MyLogger
+    n_steps::Int
+    history::Vector{Float64}
+    # Any other properties
+end
+
+Base.values(logger::MyLogger) = logger.history</code></pre><p>Then, define the logging function that is called every step by the simulator:</p><pre><code class="language-julia">function Molly.log_property!(logger::MyLogger,
+                                sys,
+                                neighbors,
+                                step_n;
+                                n_threads=Threads.nthreads(),
+                                kwargs...)
+    if step_n % logger.n_steps == 0
+        # Record some property or carry out some action
+    end
+end</code></pre><p>The use of <code>n_steps</code> is optional and is an example of how to record a property periodically throughout the simulation. To use your custom logger, add it to the named tuple of loggers given when creating the <a href="../api/#Molly.System"><code>System</code></a>:</p><pre><code class="language-julia">loggers = (mylogger=MyLogger(10, []),) # Don&#39;t forget the trailing comma!</code></pre><p>In addition to being run at the end of each step, loggers are run before the first step, i.e. at step 0. This means that a logger that records a value every step for a simulation with 100 steps will end up with 101 values. Running loggers before the first step can be disabled by giving <code>run_loggers=:skipzero</code> as a keyword argument to <a href="../api/#Molly.simulate!-Tuple{Any, SteepestDescentMinimizer}"><code>simulate!</code></a>, which can be useful when splitting up simulations into multiple <a href="../api/#Molly.simulate!-Tuple{Any, SteepestDescentMinimizer}"><code>simulate!</code></a> calls. For example, this runs the loggers 301 times:</p><pre><code class="language-julia">simulate!(sys, simulator, 100) # Default run_loggers=true
+simulate!(sys, simulator, 100; run_loggers=:skipzero)
+simulate!(sys, simulator, 100; run_loggers=:skipzero)</code></pre><p>Running loggers can be disabled entirely with <code>run_loggers=false</code>, which is the default for <a href="../api/#Molly.SteepestDescentMinimizer"><code>SteepestDescentMinimizer</code></a>. Loggers are currently ignored for the purposes of taking gradients, so if a logger is used in the gradient calculation the gradients will appear to be nothing.</p><p>Many times, a logger will just record an observation to an <code>Array</code> containing a record of past observations. For this purpose, you can use the <a href="../api/#Molly.GeneralObservableLogger"><code>GeneralObservableLogger</code></a> without defining a custom logging function. Simply define your observation function as</p><pre><code class="language-julia">function my_observable(sys::System, neighbors; n_threads::Integer)
+    # Probe the system for some desired property
+    return observation
+end</code></pre><p>A logger which records this property every <code>n_steps</code> can be constructed through </p><pre><code class="language-julia">my_logger = GeneralObservableLogger(my_observable, T, n_steps)</code></pre><p>where <code>T = typeof(observation)</code> is the type of the return value for <code>my_observable</code>. <a href="../api/#Molly.AverageObservableLogger"><code>AverageObservableLogger</code></a> is similar but records a running average rather than storing observations.</p><p>The <a href="../api/#Molly.TimeCorrelationLogger"><code>TimeCorrelationLogger</code></a> logger can be used to compute correlation functions of the form</p><p class="math-container">\[C(t) = \frac{\langle A_t \cdot B_0 \rangle}{\sqrt{\langle |A|^2 \rangle \langle |B|^2 \rangle}}\]</p><p>where <em>A</em> and <em>B</em> are scalar or vector centered observables and the brackets are ensemble averages. This includes the computations of autocorrelation functions, which can be used to gather insight into the dynamical properties of the system, for instance using Green-Kubo formulas, or the statistical properties of a sampling method.</p><p>Let&#39;s look at a simple example, computing the velocity autocorrelation function for a simple system consisting of diatomic molecules defined by <a href="../api/#Molly.HarmonicBond"><code>HarmonicBond</code></a> potentials between pairs of atoms, and an additional <a href="../api/#Molly.SoftSphere"><code>SoftSphere</code></a> potential between all pairs of atoms. Let&#39;s start by defining the system.</p><pre><code class="language-julia">n_atoms = 400
+atom_mass = 10.0u&quot;g/mol&quot;
+atoms = [Atom(mass=atom_mass, σ=0.2u&quot;nm&quot;, ϵ=0.2u&quot;kJ * mol^-1&quot;) for i in 1:n_atoms]
+
+# Initialization
+boundary = CubicBoundary(6.0u&quot;nm&quot;)
+coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u&quot;nm&quot;; min_dist=0.2u&quot;nm&quot;)
+
+temp = 50.0u&quot;K&quot;
+velocities = [random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms]
+
+# Interaction potentials
+pairwise_inters = (SoftSphere(use_neighbors=true, cutoff=DistanceCutoff(0.6u&quot;nm&quot;)),)
+
+bonds = [HarmonicBond(k=10000u&quot;kJ * mol^-1 * nm^-2&quot;, r0=0.2u&quot;nm&quot;) for i in 1:(n_atoms ÷ 2)]
+specific_inter_lists = (InteractionList2Atoms(
+    collect(1:2:n_atoms),
+    collect(2:2:n_atoms),
+    bonds,
+),)
+
+# Define system
+nf = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), dist_cutoff=0.6u&quot;nm&quot;)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
+    specific_inter_lists=specific_inter_lists,
+    neighbor_finder=nf,
+)</code></pre><p>We leave the loggers empty until we thermalize the system using Langevin dynamics.</p><pre><code class="language-julia">dt = 0.002u&quot;ps&quot;
+simulator = LangevinSplitting(
+    dt=dt,
+    temperature=temp,
+    friction=10.0u&quot;g * mol^-1 * ps^-1&quot;,
+    splitting=&quot;BAOAB&quot;,
+)
+simulate!(sys, simulator, 10_000)
+@show temperature(sys)</code></pre><pre><code class="language-console">temperature(sys) = 48.76795299825687 K</code></pre><p>Good. Next we define our correlation logger, add it to the system&#39;s loggers and run a longer simulation. Note that we need to redeclare the system when adding a logger.</p><pre><code class="language-julia"># Velocity observable
+# args and kwargs because more complex observables may require neighbors and parallelism
+V(s::System, args...; kwargs...) = s.velocities
+V_Type = eltype(sys.velocities)
+logger = TimeCorrelationLogger(V, V, V_Type, V_Type, n_atoms, 1_000)
+
+sys = System(
+    atoms=atoms,
+    coords=sys.coords,
+    boundary=boundary,
+    velocities=sys.velocities,
+    pairwise_inters=pairwise_inters,
+    specific_inter_lists=specific_inter_lists,
+    neighbor_finder=nf,
+    loggers=(velocity_autocorrelation=logger,)
+)
+simulate!(sys, simulator, 100_000)</code></pre><p>Check the output:</p><pre><code class="language-julia">show(sys.loggers)</code></pre><pre><code class="language-console">(velocity_autocorrelation = AutoCorrelationLogger with n_correlation 1000 and 100001 samples collected for observable V,)</code></pre><p>Note we also could have used the convenience function <a href="../api/#Molly.AutoCorrelationLogger-Tuple{Any, Any, Integer, Integer}"><code>AutoCorrelationLogger</code></a> to define our logger since the two observables we are correlating are the same.</p><pre><code class="language-julia">using GLMakie
+f = Figure()
+ax = Axis(f[1, 1], xlabel=&quot;Time / ps&quot;, ylabel=&quot;Correlation&quot;)
+lines!((1:1000) .* ustrip(dt), values(sys.loggers.velocity_autocorrelation))</code></pre><p><img src="../images/velocity_autocorrelations.png" alt="Velocity Autocorrelations"/><br/>As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly. The oscillatory behavior is due to the harmonic bond interactions.</p><h2 id="Neighbor-finders"><a class="docs-heading-anchor" href="#Neighbor-finders">Neighbor finders</a><a id="Neighbor-finders-1"></a><a class="docs-heading-anchor-permalink" href="#Neighbor-finders" title="Permalink"></a></h2><p>Neighbor finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted. When using a neighbor finder you should in general also use a cutoff (see <a href="#Cutoffs">Cutoffs</a>) with a cutoff distance less than the neighbor finder distance. The available neighbor finders are:</p><ul><li><a href="../api/#Molly.NoNeighborFinder"><code>NoNeighborFinder</code></a></li><li><a href="../api/#Molly.CellListMapNeighborFinder"><code>CellListMapNeighborFinder</code></a></li><li><a href="../api/#Molly.TreeNeighborFinder"><code>TreeNeighborFinder</code></a></li><li><a href="../api/#Molly.DistanceNeighborFinder"><code>DistanceNeighborFinder</code></a></li></ul><p>To define your own neighbor finder, first define the <code>struct</code>:</p><pre><code class="language-julia">struct MyNeighborFinder
+    eligible::BitArray{2}
+    special::BitArray{2}
+    n_steps::Int
+    # Any other properties, e.g. a distance cutoff
+end</code></pre><p>Examples of three useful properties are given here: a matrix indicating atom pairs eligible for pairwise interactions, a matrix indicating atoms in a special arrangement such as 1-4 bonding, and a value determining how many time steps occur between each evaluation of the neighbor finder. Then, define the neighbor finding function that is called every step by the simulator:</p><pre><code class="language-julia">function Molly.find_neighbors(sys,
+                              nf::MyNeighborFinder,
+                              current_neighbors=nothing,
+                              step_n::Integer=0,
+                              force_recompute::Bool=false;
+                              n_threads::Integer=Threads.nthreads())
+    if force_recompute || step_n % nf.n_steps == 0
+        if isnothing(current_neighbors)
+            neighbors = NeighborList()
+        else
+            neighbors = current_neighbors
+        end
+        empty!(neighbors)
+        # Add to neighbors, for example
+        push!(neighbors, (1, 2, false)) # atom i, atom j and whether they are in a special interaction
+        return neighbors
+    else
+        return current_neighbors
+    end
+end</code></pre><p>To use your custom neighbor finder, give it as the <code>neighbor_finder</code> argument when creating the <a href="../api/#Molly.System"><code>System</code></a>.</p><h2 id="Analysis"><a class="docs-heading-anchor" href="#Analysis">Analysis</a><a id="Analysis-1"></a><a class="docs-heading-anchor-permalink" href="#Analysis" title="Permalink"></a></h2><p>Molly contains some tools for analysing the results of simulations. Functions that may be useful for analysis include:</p><ul><li><a href="../api/#Molly.visualize"><code>visualize</code></a></li><li><a href="../api/#Molly.rdf-Tuple{Any, Any}"><code>rdf</code></a></li><li><a href="../api/#Molly.distances-Tuple{Any, Any}"><code>distances</code></a></li><li><a href="../api/#Molly.displacements-Tuple{Any, Any}"><code>displacements</code></a></li><li><a href="../api/#Molly.velocity_autocorr-Union{Tuple{GeneralObservableLogger{T, typeof(Molly.velocities_wrapper)}}, Tuple{T}, Tuple{GeneralObservableLogger{T, typeof(Molly.velocities_wrapper)}, Integer}, Tuple{GeneralObservableLogger{T, typeof(Molly.velocities_wrapper)}, Integer, Integer}} where T"><code>velocity_autocorr</code></a></li><li><a href="../api/#Molly.rmsd-Union{Tuple{T}, Tuple{D}, Tuple{AbstractArray{SVector{D, T}}, AbstractArray{SVector{D, T}}}} where {D, T}"><code>rmsd</code></a></li><li><a href="../api/#Molly.radius_gyration-Tuple{Any, Any}"><code>radius_gyration</code></a></li><li><a href="../api/#Molly.hydrodynamic_radius-Union{Tuple{T}, Tuple{D}, Tuple{AbstractArray{SVector{D, T}}, Any}} where {D, T}"><code>hydrodynamic_radius</code></a></li><li><a href="../api/#Molly.bond_angle-NTuple{4, Any}"><code>bond_angle</code></a></li><li><a href="../api/#Molly.torsion_angle-NTuple{5, Any}"><code>torsion_angle</code></a></li></ul><p>Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.</p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../differentiable/">Differentiable simulation »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> on <span class="colophon-date" title="Wednesday 20 September 2023 01:24">Wednesday 20 September 2023</span>. Using Julia version 1.9.3.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
