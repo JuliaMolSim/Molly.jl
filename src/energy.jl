@@ -47,7 +47,6 @@ function temperature(sys)
     end
 end
 
-
 """
     potential_energy(system, neighbors=nothing; n_threads=Threads.nthreads())
 

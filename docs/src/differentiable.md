@@ -43,7 +43,7 @@ end
 ```
 Now we can set up and run the simulation in a similar way to that described in the [Molly documentation](@ref).
 The difference is that we wrap the simulation in a `loss` function.
-This returns a single value that we want to obtain gradients with respect to, in this case the value of the above function at the end of the simulation.
+This returns a single value that we want to obtain gradients with respect to, in this case the difference between the value of the above function at the end of the simulation and a target distance.
 The `Zygote.ignore()` block allows us to ignore code for the purposes of obtaining gradients; you could add the [`visualize`](@ref) function there for example.
 ```julia
 using Zygote

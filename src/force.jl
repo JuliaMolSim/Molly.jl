@@ -10,7 +10,6 @@ export
     SpecificForce4Atoms,
     forces
 
-
 """
     accelerations(system, neighbors=nothing; n_threads=Threads.nthreads())
 

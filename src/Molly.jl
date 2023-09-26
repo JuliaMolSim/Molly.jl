@@ -27,6 +27,7 @@ using PeriodicTable
 using Requires
 using SimpleCrystals
 using Unitful
+using UnitfulAtomic
 using UnitfulChainRules
 using UnsafeAtomicsLLVM
 using Zygote

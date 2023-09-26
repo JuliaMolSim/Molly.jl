@@ -969,12 +969,11 @@ AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}, i::Integer) = mass(s.atom
 
 function Base.getindex(sys::Union{System, ReplicaSystem}, i, x::Symbol)
     atomsbase_keys = (:position, :velocity, :atomic_mass, :atomic_number)
-    custom_keys = (:charge,)
     if hasatomkey(sys, x)
         if x in atomsbase_keys
             return getproperty(AtomsBase, x)(sys, i)
-        elseif x in custom_keys
-            return getproperty(Molly, x)(sys, i)
+        elseif x == :charge
+            return getproperty(Molly, x)(sys, i) * u"e_au"
         end
     else
         throw(KeyError("key $x not present in the system"))
@@ -1091,7 +1090,7 @@ function System(sys::AbstractSystem{D}, energy_units, force_units) where D
     for (i, atom) in enumerate(sys)
         atoms[i] = Atom(
             index=i,
-            charge=get(atom, :charge, 0.0),
+            charge=ustrip(get(atom, :charge, 0.0)), # Remove e unit
             mass=atomic_mass(atom),
             σ=(0.0 * length_unit),
             ϵ=(0.0 * energy_units),
