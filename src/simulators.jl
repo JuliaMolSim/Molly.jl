@@ -930,3 +930,54 @@ function random_unit_vector(float_type, dims)
     vec = randn(float_type, dims)
     return vec / norm(vec)
 end
+
+
+"""
+    EulerMaruyama(; <keyword arguments>)
+
+A simulator for a stochastic differential equation (SDE) using the Euler-Maruyama method.
+
+# Arguments
+- `dt::S`: the time step of the simulation.
+- `temperature::K`: the equilibrium temperature of the simulation.
+- `friction::F`: the friction coefficient of the simulation.
+- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
+    every time step.
+"""
+@kwdef struct OverdampedLangevin{T,K,F}
+    dt::S
+    temperature::K
+    friction::F
+    remove_CM_motion::Bool
+end
+
+function simulate!(sys,
+    sim::OverdampedLangevin,
+    n_steps::Integer;
+    n_threads::Integer=Threads.nthreads(),
+    rng=Random.GLOBAL_RNG)
+
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+
+    sim.remove_CM_motion && remove_CM_motion!(sys)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+
+    for step_n in 1:n_steps
+        a = accelerations(sys, neighbors; n_threads=n_threads)
+        # noise = kB * T / M 
+        noise = random_velocities(sys, sim.temperature; rng=rng)
+        sys.coords +=  a ./ sim.friction .* sim.dt .+ sqrt(2 / sim.friction * sim.dt) .* noise
+        
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+        sim.remove_CM_motion && remove_CM_motion!(sys)
+
+        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
+
+        if step_n != n_steps
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                n_threads=n_threads)
+        end
+    end
+    return sys
+end
