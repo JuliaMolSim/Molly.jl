@@ -16,7 +16,7 @@ function Molly.forces(V::PotentialFunction,
     neighbors=nothing;
     n_threads=Threads.nthreads())
 
-    return ForwardDiff.gradient(V.f, sys.coords)
+    return - Zygote.gradient(V.f, sys.coords)
 end
 
 

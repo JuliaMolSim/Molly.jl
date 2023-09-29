@@ -933,9 +933,9 @@ end
 
 
 """
-    EulerMaruyama(; <keyword arguments>)
+    OverdampedLangevin(; <keyword arguments>)
 
-A simulator for a stochastic differential equation (SDE) using the Euler-Maruyama method.
+Simulates the overdamped Langevin equation using the Euler-Maruyama method.
 
 # Arguments
 - `dt::S`: the time step of the simulation.
@@ -945,10 +945,10 @@ A simulator for a stochastic differential equation (SDE) using the Euler-Maruyam
     every time step.
 """
 @kwdef struct OverdampedLangevin{T,K,F}
-    dt::S
+    dt::T
     temperature::K
     friction::F
-    remove_CM_motion::Bool
+    remove_CM_motion::Bool = true
 end
 
 function simulate!(sys,
