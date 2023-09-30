@@ -3,4 +3,4 @@ Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 Molly = "aa0f7f06-fcc0-5ec4-a7f3-a573f33f9c4c"
 
 [compat]
-Documenter = "0.25"
+Documenter = "1"

@@ -513,7 +513,6 @@ end
 Generate a random velocity along one dimension from the Maxwell-Boltzmann
 distribution, with optional custom Boltzmann constant.
 """
-
 function maxwell_boltzmann(atom_mass::Unitful.Mass, temp::Unitful.Temperature,
                            k::BoltzmannConstUnits=uconvert(u"g * nm^2 * ps^-2 * K^-1", Unitful.k);
                            rng=Random.GLOBAL_RNG)
