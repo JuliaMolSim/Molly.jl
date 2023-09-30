@@ -316,6 +316,10 @@ save("polymer_angle.png", f)
 ```
 ![Polymer angles](images/polymer_angle.png)
 
+## Machine learning potentials
+
+There is [an example](https://acesuit.github.io/ACEpotentials.jl/dev/tutorials/molly) of using ACE potentials in Molly.
+
 ## Density functional theory
 
 [DFTK.jl](https://github.com/JuliaMolSim/DFTK.jl) can be used to calculate forces using density functional theory (DFT), allowing the simulation of quantum systems in Molly.
