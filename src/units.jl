@@ -38,7 +38,7 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
     energy_is_molar = (energy_dim == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2")
     mass_is_molar = (mass_dim == u"𝐌* 𝐍^-1")
 
-    if !allequal([energy_is_molar, mass_is_molar, force_is_molar])
+    if !(energy_is_molar == mass_is_molar && energy_is_molar == force_is_molar)
         throw(ArgumentError("System was constructed with inconsistent energy, force and mass " *
             "units. All must be molar, non-molar or unitless. For example, kcal and kg is " *
             "allowed but kcal/mol and kg is not. Units were $([energy_units, mass_units, force_units])"))

@@ -2,11 +2,11 @@ using Documenter
 using Molly
 
 makedocs(
-    sitename = "Molly.jl",
-    format = Documenter.HTML(
-        prettyurls = get(ENV, "CI", nothing) == "true"
+    sitename="Molly.jl",
+    format=Documenter.HTML(
+        prettyurls=(get(ENV, "CI", nothing) == "true"),
     ),
-    pages = [
+    pages=[
         "Home"                      => "index.md",
         "Documentation"             => "docs.md",
         "Differentiable simulation" => "differentiable.md",
@@ -20,5 +20,5 @@ makedocs(
 
 deploydocs(
     repo="github.com/JuliaMolSim/Molly.jl.git",
-    push_preview = true
+    push_preview=true,
 )
