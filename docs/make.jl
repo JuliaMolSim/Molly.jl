@@ -8,7 +8,7 @@ makedocs(
     ),
     pages=[
         "Home"                      => "index.md",
-        "Documentation"             => "docs.md",
+        "Documentation"             => "documentation.md",
         "Differentiable simulation" => "differentiable.md",
         "Examples"                  => "examples.md",
         "Exercises"                 => "exercises.md",
