@@ -135,6 +135,133 @@ visualize(
 ```
 ![Planet simulation](images/sim_planets.gif)
 
+## Agent-based modelling
+
+Agent-based modelling (ABM) is conceptually similar to molecular dynamics.
+Julia has [Agents.jl](https://juliadynamics.github.io/Agents.jl/stable/) for ABM, but Molly can also be used to simulate arbitrary agent-based systems in continuous space.
+Here we simulate a toy [SIR model](https://en.wikipedia.org/wiki/Compartmental_models_in_epidemiology#The_SIR_model) for disease spread.
+This example shows how atom properties can be mutable, i.e. change during the simulation, and includes custom forces and loggers (see below for more info).
+```julia
+@enum Status susceptible infected recovered
+
+# Custom atom type
+mutable struct Person
+    i::Int
+    status::Status
+    mass::Float64
+    σ::Float64
+    ϵ::Float64
+end
+
+# Custom PairwiseInteraction
+struct SIRInteraction <: PairwiseInteraction
+    dist_infection::Float64
+    prob_infection::Float64
+    prob_recovery::Float64
+end
+
+# Custom force function
+function Molly.force(inter::SIRInteraction,
+                        vec_ij,
+                        coord_i,
+                        coord_j,
+                        atom_i,
+                        atom_j,
+                        boundary)
+    if (atom_i.status == infected && atom_j.status == susceptible) ||
+                (atom_i.status == susceptible && atom_j.status == infected)
+        # Infect close people randomly
+        r2 = sum(abs2, vec_ij)
+        if r2 < inter.dist_infection^2 && rand() < inter.prob_infection
+            atom_i.status = infected
+            atom_j.status = infected
+        end
+    end
+    # Workaround to obtain a self-interaction
+    if atom_i.i == (atom_j.i - 1)
+        # Recover randomly
+        if atom_i.status == infected && rand() < inter.prob_recovery
+            atom_i.status = recovered
+        end
+    end
+    return zero(coord_i)
+end
+
+# Custom logger
+function fracs_SIR(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+    counts_sir = [
+        count(p -> p.status == susceptible, s.atoms),
+        count(p -> p.status == infected   , s.atoms),
+        count(p -> p.status == recovered  , s.atoms)
+    ]
+    return counts_sir ./ length(s)
+end
+
+SIRLogger(n_steps) = GeneralObservableLogger(fracs_SIR, Vector{Float64}, n_steps)
+
+temp = 1.0
+boundary = RectangularBoundary(10.0)
+n_steps = 1_000
+n_people = 500
+n_starting = 2
+atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
+coords = place_atoms(n_people, boundary; min_dist=0.1)
+velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
+
+lj = LennardJones(
+    cutoff=DistanceCutoff(1.6),
+    use_neighbors=true,
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+sir = SIRInteraction(0.5, 0.06, 0.01)
+pairwise_inters = (LennardJones=lj, SIR=sir)
+neighbor_finder = DistanceNeighborFinder(
+    eligible=trues(n_people, n_people),
+    n_steps=10,
+    dist_cutoff=2.0,
+)
+simulator = VelocityVerlet(
+    dt=0.02,
+    coupling=AndersenThermostat(temp, 5.0),
+)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
+    neighbor_finder=neighbor_finder,
+    loggers=(
+        coords=CoordinateLogger(Float64, 10; dims=2),
+        SIR=SIRLogger(10),
+    ),
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+
+simulate!(sys, simulator, n_steps)
+
+visualize(sys.loggers.coords, boundary, "sim_agent.mp4"; markersize=0.1)
+```
+![Agent simulation](images/sim_agent.gif)
+
+We can use the logger to plot the fraction of people susceptible, infected and recovered over the course of the simulation:
+
+```julia
+using GLMakie
+
+f = Figure()
+ax = Axis(f[1, 1], xlabel="Snapshot", ylabel="Fraction")
+
+lines!([l[1] for l in values(sys.loggers.SIR)], label="Susceptible")
+lines!([l[2] for l in values(sys.loggers.SIR)], label="Infected")
+lines!([l[3] for l in values(sys.loggers.SIR)], label="Recovered")
+axislegend()
+```
+![Fraction SIR](images/fraction_sir.png)
+
 ## Polymer melt
 
 Here we use [`FENEBond`](@ref), [`CosineAngle`](@ref) and [`LennardJones`](@ref) to simulate interacting polymers.
