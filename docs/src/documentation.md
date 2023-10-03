@@ -21,7 +21,7 @@ n_atoms = 100
 atom_mass = 10.0u"g/mol"
 atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 ```
-See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) docs for more information on the unit annotations.
+See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) documentation for more information on the unit annotations.
 Molly re-exports Unitful.jl, [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) and [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) since they are often required to run simulations.
 You can use your own atom types in Molly, provided that the [`mass`](@ref) function is defined and any fields required by the interactions are present.
 Next, we'll need some starting coordinates and velocities.

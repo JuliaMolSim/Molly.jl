@@ -134,4 +134,4 @@ A paper involving more contributors with further details on the software will be
 
 ## Interested?
 
-An [advert for a PhD position](https://www2.mrc-lmb.cam.ac.uk/students/international-phd-programme/projects/joe-greener) in Cambridge, UK that will involve significant coding in Molly is open until 5th December 2023. An advert for a postdoc will open in October 2023. Contact Joe Greener for more information.
+An [advert for a postdoc position](https://www.findapostdoc.com/search/job-details.aspx?jobcode=11512) (closes 30/10/23) and an [advert for a PhD position](https://www2.mrc-lmb.cam.ac.uk/students/international-phd-programme/projects/joe-greener) (closes 05/12/23) in Cambridge, UK that will involve significant coding in Molly are open. Contact Joe Greener with informal enquiries.
