@@ -142,6 +142,8 @@ Julia has [Agents.jl](https://juliadynamics.github.io/Agents.jl/stable/) for ABM
 Here we simulate a toy [SIR model](https://en.wikipedia.org/wiki/Compartmental_models_in_epidemiology#The_SIR_model) for disease spread.
 This example shows how atom properties can be mutable, i.e. change during the simulation, and includes custom forces and loggers (see below for more info).
 ```julia
+using Molly
+
 @enum Status susceptible infected recovered
 
 # Custom atom type
