@@ -822,6 +822,7 @@ The available simulators are:
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
 - [`LangevinSplitting`](@ref)
+- [`OverdampedLangevin`](@ref)
 - [`NoseHoover`](@ref)
 - [`TemperatureREMD`](@ref)
 - [`HamiltonianREMD`](@ref)

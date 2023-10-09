@@ -496,50 +496,48 @@ Simulates the overdamped Langevin equation using the Euler-Maruyama method.
 - `dt::S`: the time step of the simulation.
 - `temperature::K`: the equilibrium temperature of the simulation.
 - `friction::F`: the friction coefficient of the simulation.
-- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
-    every time step.
+- `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
+    set to `false` or `0` to not remove center of mass motion.
 """
-@kwdef struct OverdampedLangevin{S,K,F}
+struct OverdampedLangevin{S, K, F}
     dt::S
     temperature::K
     friction::F
-    remove_CM_motion::Bool = true
+    remove_CM_motion::Int
+end
+
+function OverdampedLangevin(; dt, temperature, friction, remove_CM_motion=1)
+    return OverdampedLangevin(dt, temperature, friction, Int(remove_CM_motion))
 end
 
 function simulate!(sys,
-    sim::OverdampedLangevin,
-    n_steps::Integer;
-    n_threads::Integer=Threads.nthreads(),
-    rng=Random.GLOBAL_RNG)
-
+                    sim::OverdampedLangevin,
+                    n_steps::Integer;
+                    n_threads::Integer=Threads.nthreads(),
+                    run_loggers=true,
+                    rng=Random.GLOBAL_RNG)
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-
-    sim.remove_CM_motion && remove_CM_motion!(sys)
+    !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+    run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
 
     for step_n in 1:n_steps
-        a = accelerations(sys, neighbors; n_threads=n_threads)
-        # noise = kB * T / M 
+        accels_t = accelerations(sys, neighbors; n_threads=n_threads)
+
+        old_coords = copy(sys.coords)
         noise = random_velocities(sys, sim.temperature; rng=rng)
-        if !all(isfinite, reinterpret(Float64, a))
-            @show step_n
-            @show reinterpret(Float64, a)
+        sys.coords += (accels_t ./ sim.friction) .* sim.dt .+ sqrt((2 / sim.friction) * sim.dt) .* noise
 
-        end
-        sys.coords += a ./ sim.friction .* sim.dt .+ sqrt(2 / sim.friction * sim.dt) .* noise
-
-        @assert all(isfinite, reinterpret(Float64, sys.coords))
-
+        apply_constraints!(sys, old_coords, sim.dt)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-        sim.remove_CM_motion && remove_CM_motion!(sys)
-
-        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
-
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                n_threads=n_threads)
+        if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
+            remove_CM_motion!(sys)
         end
+
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                   n_threads=n_threads)
+
+        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
     end
     return sys
 end
