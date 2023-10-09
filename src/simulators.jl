@@ -8,6 +8,7 @@ export
     StormerVerlet,
     Langevin,
     LangevinSplitting,
+    OverdampedLangevin,
     NoseHoover,
     TemperatureREMD,
     remd_exchange!,
@@ -487,6 +488,63 @@ function B_step!(sys, dt_eff, acceleration_vector, compute_forces::Bool,
 end
 
 """
+    OverdampedLangevin(; <keyword arguments>)
+
+Simulates the overdamped Langevin equation using the Euler-Maruyama method.
+
+# Arguments
+- `dt::S`: the time step of the simulation.
+- `temperature::K`: the equilibrium temperature of the simulation.
+- `friction::F`: the friction coefficient of the simulation.
+- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
+    every time step.
+"""
+@kwdef struct OverdampedLangevin{S,K,F}
+    dt::S
+    temperature::K
+    friction::F
+    remove_CM_motion::Bool = true
+end
+
+function simulate!(sys,
+    sim::OverdampedLangevin,
+    n_steps::Integer;
+    n_threads::Integer=Threads.nthreads(),
+    rng=Random.GLOBAL_RNG)
+
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+
+    sim.remove_CM_motion && remove_CM_motion!(sys)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
+
+    for step_n in 1:n_steps
+        a = accelerations(sys, neighbors; n_threads=n_threads)
+        # noise = kB * T / M 
+        noise = random_velocities(sys, sim.temperature; rng=rng)
+        if !all(isfinite, reinterpret(Float64, a))
+            @show step_n
+            @show reinterpret(Float64, a)
+
+        end
+        sys.coords += a ./ sim.friction .* sim.dt .+ sqrt(2 / sim.friction * sim.dt) .* noise
+
+        @assert all(isfinite, reinterpret(Float64, sys.coords))
+
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+        sim.remove_CM_motion && remove_CM_motion!(sys)
+
+        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
+
+        if step_n != n_steps
+            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                n_threads=n_threads)
+        end
+    end
+    return sys
+end
+
+"""
     NoseHoover(; <keyword arguments>)
 
 The Nosé-Hoover integrator, a NVT simulator that extends velocity Verlet to control the
@@ -929,55 +987,4 @@ end
 function random_unit_vector(float_type, dims)
     vec = randn(float_type, dims)
     return vec / norm(vec)
-end
-
-
-"""
-    OverdampedLangevin(; <keyword arguments>)
-
-Simulates the overdamped Langevin equation using the Euler-Maruyama method.
-
-# Arguments
-- `dt::S`: the time step of the simulation.
-- `temperature::K`: the equilibrium temperature of the simulation.
-- `friction::F`: the friction coefficient of the simulation.
-- `remove_CM_motion::Bool=true`: whether to remove the center of mass motion
-    every time step.
-"""
-@kwdef struct OverdampedLangevin{T,K,F}
-    dt::T
-    temperature::K
-    friction::F
-    remove_CM_motion::Bool = true
-end
-
-function simulate!(sys,
-    sim::OverdampedLangevin,
-    n_steps::Integer;
-    n_threads::Integer=Threads.nthreads(),
-    rng=Random.GLOBAL_RNG)
-
-    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-
-    sim.remove_CM_motion && remove_CM_motion!(sys)
-    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0; n_threads=n_threads)
-
-    for step_n in 1:n_steps
-        a = accelerations(sys, neighbors; n_threads=n_threads)
-        # noise = kB * T / M 
-        noise = random_velocities(sys, sim.temperature; rng=rng)
-        sys.coords +=  a ./ sim.friction .* sim.dt .+ sqrt(2 / sim.friction * sim.dt) .* noise
-        
-        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-        sim.remove_CM_motion && remove_CM_motion!(sys)
-
-        run_loggers!(sys, neighbors, step_n; n_threads=n_threads)
-
-        if step_n != n_steps
-            neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
-                n_threads=n_threads)
-        end
-    end
-    return sys
 end
