@@ -207,6 +207,7 @@ end
         Verlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps")),
         StormerVerlet(dt=0.002u"ps"),
         Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
+        OverdampedLangevin(dt=0.002u"ps", temperature=temp, friction=10.0u"ps^-1"),
     ]
 
     s = System(
