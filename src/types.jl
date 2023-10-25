@@ -622,8 +622,8 @@ function System(crystal::Crystal{D};
                 k=default_k(energy_units)) where D
     atoms = [Atom(index=i, charge=charge(a), mass=atomic_mass(a)) for (i, a) in enumerate(crystal.atoms)]
     atoms_data = [AtomData(element=String(atomic_symbol(a))) for a in crystal.atoms]
-    coords = SimpleCrystals.position(crystal, :)
-
+    coords = [SVector{D}(SimpleCrystals.position(crystal, i)) for i in 1:length(crystal)]
+    
     # Build bounding box
     side_lengths = norm.(bounding_box(crystal))
     if any(typeof(crystal.lattice.crystal_family) .<: [CubicLattice, OrthorhombicLattice, TetragonalLattice])

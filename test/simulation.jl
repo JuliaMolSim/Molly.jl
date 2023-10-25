@@ -1153,7 +1153,7 @@ end
             SimpleCrystals.Primitive(),
         )
         z = zero(a)
-        basis = [SimpleCrystals.Atom(atomic_symbol, SVector(z, z, z), charge=charge)]
+        basis = [SimpleCrystals.Atom(atomic_symbol, [z, z, z], charge=charge)]
         return SimpleCrystals.Crystal(lattice, basis, N)
     end
     my_crystal = MyInvalidCrystal(a, :Ar, SVector(1, 1, 1))
