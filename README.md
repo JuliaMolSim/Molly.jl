@@ -53,14 +53,14 @@ Features not yet implemented include:
 
 ## Installation
 
-[Julia](https://julialang.org/downloads) is required, with Julia v1.8 or later required to get the latest version of Molly.
+[Julia](https://julialang.org/downloads) is required, with Julia v1.7 or later required to get the latest version of Molly.
 It is recommended to run on the current stable Julia release for the best performance.
 Install Molly from the Julia REPL.
 Enter the package mode by pressing `]` and run `add Molly`.
 
 ## Usage
 
-Some examples are given here, see [the documentation](https://juliamolsim.github.io/Molly.jl/stable/docs) for more on how to use the package.
+Some examples are given here, see [the documentation](https://juliamolsim.github.io/Molly.jl/stable/documentation) for more on how to use the package.
 
 Simulation of a Lennard-Jones fluid:
 ```julia
