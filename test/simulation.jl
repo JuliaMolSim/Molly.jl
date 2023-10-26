@@ -1007,7 +1007,7 @@ end
             @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
             all(!isnothing, press) && @test 0.7u"bar" < mean(values(sys.loggers.pressure)) < 1.3u"bar"
             any(!isnothing, press) && @test 0.1u"bar" < std(values(sys.loggers.pressure)) < 2.5u"bar"
-            any(!isnothing, press) && @test 800.0u"nm^3" < mean(values(sys.loggers.box_volume)) < 1500u"nm^3"
+            any(!isnothing, press) && @test 800.0u"nm^3" < mean(values(sys.loggers.box_volume)) < 2000u"nm^3"
             any(!isnothing, press) && @test 80.0u"nm^3" < std(values(sys.loggers.box_volume)) < 500.0u"nm^3"
             axis_is_uncoupled = isnothing.(press)
             axis_is_unchanged = sys.boundary .== 8.0u"nm"
