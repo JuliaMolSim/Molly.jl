@@ -8,6 +8,7 @@ using Reexport
 using Atomix
 import BioStructures # Imported to avoid clashing names
 using CellListMap
+using ChainRules
 using ChainRulesCore
 import Chemfiles
 using Colors

@@ -122,15 +122,12 @@ function Base.zero(::Type{Union{Nothing, SizedVector{D, T, Vector{T}}}}) where {
     zero(SizedVector{D, T, Vector{T}})
 end
 
-# Slower version than in Zygote but doesn't give wrong gradients on the GPU for repeated indices
-# Here we just move it to the CPU then move it back
-# See https://github.com/FluxML/Zygote.jl/pull/1131
-Zygote.∇getindex(x::CuArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> begin
-    inds1_cpu = Array(inds[1])
-    dx = zeros(eltype(dy), length(x))
-    dxv = view(dx, inds1_cpu)
-    dxv .= Zygote.accum.(dxv, Zygote._droplike(Array(dy), dxv))
-    return Zygote._project(x, CuArray(dx)), nothing
+# ChainRules._setindex_zero returns a union type with NoTangent via the default path
+# This causes a problem on the GPU
+function ChainRules.∇getindex(x::CuArray{<:StaticVector}, dy, inds...)
+    plain_inds = Base.to_indices(x, inds)
+    dx = ChainRules.∇getindex!(zero(x), dy, plain_inds...)
+    return ChainRules.ProjectTo(x)(dx)
 end
 
 # Modified version of ForwardDiff.ForwardDiffStaticArraysExt.dualize
