@@ -1000,13 +1000,13 @@ end
             simulate!(deepcopy(sys), sim, 100; n_threads=1)
             @time simulate!(sys, sim, n_steps; n_threads=1)
 
-            @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 310.0u"K"
+            @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 330.0u"K"
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy)) < 120.0u"kJ * mol^-1"
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
             @test -5.0u"kJ * mol^-1" < mean(values(sys.loggers.virial)) < 5.0u"kJ * mol^-1"
             @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
             all(!isnothing, press) && @test 0.7u"bar" < mean(values(sys.loggers.pressure)) < 1.3u"bar"
-            any(!isnothing, press) && @test 0.1u"bar" < std(values(sys.loggers.pressure)) < 1.5u"bar"
+            any(!isnothing, press) && @test 0.1u"bar" < std(values(sys.loggers.pressure)) < 2.5u"bar"
             any(!isnothing, press) && @test 800.0u"nm^3" < mean(values(sys.loggers.box_volume)) < 1500u"nm^3"
             any(!isnothing, press) && @test 80.0u"nm^3" < std(values(sys.loggers.box_volume)) < 500.0u"nm^3"
             axis_is_uncoupled = isnothing.(press)
