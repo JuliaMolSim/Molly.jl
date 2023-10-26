@@ -1,5 +1,16 @@
 # Molly.jl release notes
 
+## v0.18.1 - Oct 2023
+
+### New features
+- Simulation of overdamped Langevin dynamics is added as `OverdampedLangevin`.
+
+### Performance improvements
+- The performance of force calculation without a neighbor list on the GPU is significantly improved.
+
+### Bug fixes
+- A bug in compatibility with SimpleCrystals.jl is fixed.
+
 ## v0.18.0 - Sep 2023
 
 ### Breaking changes
