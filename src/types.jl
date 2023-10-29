@@ -538,7 +538,7 @@ function System(;
         elseif neighbor_finder == NoNeighborFinder()
             throw(ArgumentError("Constraints algorithms require neighbor lists."))
         else
-            constraints, neighbor_finder = constraint_setup!(neighbor_finder, coords, constraints)
+            constraints, neighbor_finder = constraint_setup!(neighbor_finder, coords, constraints, constraint_algorithm.init_posn_tol)
             df = n_dof(D, length(atoms), boundary, constraints)
         end
     else
@@ -594,6 +594,7 @@ function System(sys::System;
                 specific_inter_lists=sys.specific_inter_lists,
                 general_inters=sys.general_inters,
                 constraints=sys.constraints,
+                constraint_algorithm=sys.constraint_algorithm,
                 neighbor_finder=sys.neighbor_finder,
                 loggers=sys.loggers,
                 k=sys.k,
@@ -610,6 +611,7 @@ function System(sys::System;
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
         constraints=constraints,
+        constraint_algorithm=constraint_algorithm,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         k=k,

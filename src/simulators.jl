@@ -551,7 +551,6 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
 
     v_half = zero(sys.velocities)
     zeta = zero(inv(sim.dt))
-    df = 3 * length(sys) - 3
 
     for step_n in 1:n_steps
 
@@ -561,7 +560,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
 
         zeta_half = zeta + (sim.dt / (2 * (sim.damping^2))) * ((temperature(sys) / sim.temperature) - 1)
         KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
-        T_half = uconvert(u"K", 2 * KE_half / (df * sys.k))
+        T_half = uconvert(u"K", 2 * KE_half / (sys.df * sys.k))
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))

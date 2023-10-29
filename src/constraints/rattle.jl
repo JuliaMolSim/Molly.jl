@@ -8,14 +8,15 @@ Constrains a set of bonds to defined distances in a way that the velocities also
 See [this paper](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3285512/) for a derivation of the linear
 system solved to satisfy the RATTLE algorithm.
 """
-struct RATTLE{CS,T} <: PositionAndVelocityConstraintAlgorithm
+struct RATTLE{CS,T,I} <: PositionAndVelocityConstraintAlgorithm
     coord_storage::CS 
     tolerance::T
+    init_posn_tol::I
 end
 
-function RATTLE(coords; tolerance=1e-4)
-    return RATTLE{typeof(coords), typeof(tolerance)}(
-        coords, tolerance)
+function RATTLE(coords; tolerance=1e-4, init_posn_tol = 0.0)
+    return RATTLE{typeof(coords), typeof(tolerance), typeof(init_posn_tol)}(
+        coords, tolerance, init_posn_tol)
 end
 
 save_positions!(constraint_algo::RATTLE, c) = (constraint_algo.coord_storage .= c)

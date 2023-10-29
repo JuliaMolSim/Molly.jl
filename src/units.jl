@@ -105,6 +105,7 @@ function check_other_units(atoms_dev, boundary, constraints, sys_units::NamedTup
             throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but system energy unit was $(sys_units[:energy])"))
         end
     end
+
 end
 
 function validate_energy_units(energy_units)

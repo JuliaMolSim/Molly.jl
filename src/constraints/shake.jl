@@ -5,14 +5,15 @@ export SHAKE
 
 Constrains a set of bonds to defined distances.
 """
-struct SHAKE{UC, T} <: PositionConstraintAlgorithm
+struct SHAKE{UC, T, I} <: PositionConstraintAlgorithm
     coord_storage::UC #Used as storage to avoid re-allocating arrays
     tolerance::T
+    init_posn_tol::I
 end
 
-function SHAKE(coord_storage; tolerance=1e-4)
-    return SHAKE{typeof(coord_storage), typeof(tolerance)}(
-        coord_storage, tolerance)
+function SHAKE(coord_storage; tolerance=1e-4, init_posn_tol = 0.0)
+    return SHAKE{typeof(coord_storage), typeof(tolerance), typeof(init_posn_tol)}(
+        coord_storage, tolerance, init_posn_tol)
 end
 
 save_positions!(constraint_algo::SHAKE, c) = (constraint_algo.coord_storage .= c)

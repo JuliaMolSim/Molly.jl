@@ -32,7 +32,7 @@ Constraint between two atoms that maintains the distance between the two atoms.
 - `dist::D` : Euclidean distance between the two atoms.
 """
 struct DistanceConstraint{D} <: Constraint
-    atom_idxs::SVector{2,Int}
+    atom_idxs::SVector{2,<:Integer}
     dist::D
 end
 
@@ -66,7 +66,7 @@ use special methods that improve computational performance. Any constraint not l
 will come at a performance penatly.
 """
 struct ConstraintCluster{N}
-    constraints::SVector{N, <:Constraint}
+    constraints::SVector{N,<:Constraint}
 end
 
 Base.length(cc::ConstraintCluster) = length(cc.constraints)
@@ -104,12 +104,12 @@ end
 3. Builds graph of constraints to identify small clusters of constraints
 4. Checks that initial system geometry satisfies distance constraints
 """
-function constraint_setup!(neighbor_finder, coords, constraints)
+function constraint_setup!(neighbor_finder, coords, constraints, init_tol)
     n_atoms = length(coords)
     # angle_to_dist_constraints!(sys)
     clusters = build_clusters(n_atoms, constraints)
     neighbor_finder = disable_intra_constraint_interactions!(neighbor_finder, clusters)
-    check_initial_constraints(coords, clusters)
+    check_initial_constraints(coords, clusters, init_tol)
     return clusters, neighbor_finder
 end
 
@@ -133,7 +133,7 @@ end
 
 
 """
-Parse the constraints into small and large clusters. 
+Parse the constraints into clusters. 
 Small clusters can be solved faster whereas large
 clusters fall back to slower, generic methods.
 """
@@ -180,12 +180,12 @@ end
 """
 Verifies that the initial conditions of the system satisfy the constraints.
 """
-function check_initial_constraints(coords, clusters)
+function check_initial_constraints(coords, clusters, init_tol)
 
     for cluster in clusters
         for constraint in cluster.constraints
             r_actual = norm(coords[constraint.atom_idxs[1]] .- coords[constraint.atom_idxs[2]])
-            if !isapprox(r_actual, constraint.dist)
+            if !isapprox(r_actual, constraint.dist, atol = init_tol)
                 throw(ArgumentError("Constraint between atoms $(constraint.atom_idxs[1]) 
                     and $(constraint.atom_idxs[2]) is not satisfied by the initial conditions."))
             end
@@ -197,14 +197,13 @@ end
 """
 Updates the coordinates of a [`System`](@ref) based on the constraints.
 """
-#TODO: constraint_algo is technically inside of sys, but I need it for dispatch
 function apply_position_constraints!(sys::System, constraint_algo::ConstrainsPositions,
         accels, dt; n_threads::Integer=Threads.nthreads())
 
     constraint_algo = unconstrained_position_update!(constraint_algo, sys, accels, dt)
 
-    Threads.@threads for thread_id in 1:n_threads
-        for i in thread_id:n_threads:length(sys.constraints)
+    Threads.@threads for group_id in 1:n_threads
+        for i in group_id:n_threads:length(sys.constraints)
             apply_position_constraint!(sys, constraint_algo, sys.constraints[i], accels, dt)
         end
     end
@@ -219,8 +218,8 @@ Updates the velocities of a [`System`](@ref) based on the constraints.
 function apply_velocity_constraints!(sys::System, constraint_algo::PositionAndVelocityConstraintAlgorithm;
      n_threads::Integer=Threads.nthreads())
 
-    Threads.@threads for thread_id in 1:n_threads
-        for i in thread_id:n_threads:length(sys.constraints)
+    Threads.@threads for group_id in 1:n_threads
+        for i in group_id:n_threads:length(sys.constraints)
             apply_velocity_constraint!(sys, constraint_algo, sys.constraints[i])
         end
     end
@@ -248,7 +247,7 @@ Vibrational   |     0      |  D*N - (2D - 1) |    D*N - 2D         |
 Total         |     D      |      D*N        |       D*N           |
 
 """
-#TODO : STORE THE RESULT OF THIS SOMEWHERE AND USE WHEN CALC TEMP & NoseHoover
+#TODO : WHERE ELSE BESIDES TEMP & NoseHOVER IS DF USED
 function n_dof(D::Int, N_atoms::Int, boundary, constraint_clusters)
 
     # Momentum only conserved in directions with PBC
