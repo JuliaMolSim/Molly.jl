@@ -1,20 +1,28 @@
 export RATTLE
 
 """
-    RATTLE(tolerance, coords, velocities)
+RATTLE(coords; tolerance=1e-4, init_posn_tol = nothing)
 
 Constrains a set of bonds to defined distances in a way that the velocities also satisfy the constraints.
 
 See [this paper](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3285512/) for a derivation of the linear
 system solved to satisfy the RATTLE algorithm.
+
+# Arguments
+- coords: An empty array with same type and size as coords in sys, `similar(sys.coords)` is best
+- tolerance: Tolerance used to end iterative procedure when calculating constraint forces. This
+    is not a tolerance on the error in positions or velocities, but a lower `tolerance` should
+    result in smaller error. Default is `1e-4`.
+- init_posn_tol: Tolerance used when checking if system initial positions satisfy position constraints. 
+    Default is `nothing.`
 """
 struct RATTLE{CS,T,I} <: PositionAndVelocityConstraintAlgorithm
     coord_storage::CS 
     tolerance::T
-    init_posn_tol::I
+    init_posn_tol::Union{I,Nothing}
 end
 
-function RATTLE(coords; tolerance=1e-4, init_posn_tol = 0.0)
+function RATTLE(coords; tolerance=1e-4, init_posn_tol = nothing)
     return RATTLE{typeof(coords), typeof(tolerance), typeof(init_posn_tol)}(
         coords, tolerance, init_posn_tol)
 end

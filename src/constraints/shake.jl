@@ -1,17 +1,25 @@
 export SHAKE
 
 """
-    SHAKE(coords, tolerance)
+    SHAKE(coords, tolerance, init_posn_tol)
 
-Constrains a set of bonds to defined distances.
+A constraint algorithm to set of bonds distances in a simulation.
+
+# Arguments
+- coords: An empty array with same type and size as coords in sys, `similar(sys.coords)` is best
+- tolerance: Tolerance used to end iterative procedure when calculating constraint forces. This
+    is not a tolerance on the error in positions or velocities, but a lower `tolerance` should
+    result in smaller error. Default is `1e-4`.
+- init_posn_tol: Tolerance used when checking if system initial positions satisfy position constraints. 
+    Default is `nothing.`
 """
 struct SHAKE{UC, T, I} <: PositionConstraintAlgorithm
     coord_storage::UC #Used as storage to avoid re-allocating arrays
     tolerance::T
-    init_posn_tol::I
+    init_posn_tol::Union{I,Nothing}
 end
 
-function SHAKE(coord_storage; tolerance=1e-4, init_posn_tol = 0.0)
+function SHAKE(coord_storage; tolerance=1e-4, init_posn_tol = nothing)
     return SHAKE{typeof(coord_storage), typeof(tolerance), typeof(init_posn_tol)}(
         coord_storage, tolerance, init_posn_tol)
 end

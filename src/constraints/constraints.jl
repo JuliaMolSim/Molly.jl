@@ -154,24 +154,25 @@ function build_clusters(n_atoms, constraints)
     end
 
     # Get groups of constraints that are connected to eachother 
-    cc = connected_components(constraint_graph)
-
+    cc = connected_components(constraint_graph) #& this can return non-connected things sometimes??
     # Initialze empty vector of clusters
     clusters = Vector{ConstraintCluster}(undef, 0)
 
     #Loop through connected regions and convert to clusters
     for (cluster_idx, atom_idxs) in enumerate(cc)
         # Loop atoms in connected region to build cluster
-        connected_constraints = Vector{DistanceConstraint}(undef, 0)
-        for ai in atom_idxs
-            neigh_idxs = neighbors(constraint_graph, ai)
-            for neigh_idx in neigh_idxs
-                push!(connected_constraints,
-                     DistanceConstraint(SVector(ai, neigh_idx), idx_dist_pairs[ai,neigh_idx]))
+        if length(atom_idxs) > 1 #connected_components gives unconnected verticies as well
+            connected_constraints = Vector{DistanceConstraint}(undef, 0)
+            for ai in atom_idxs
+                neigh_idxs = neighbors(constraint_graph, ai)
+                for neigh_idx in neigh_idxs
+                    push!(connected_constraints,
+                        DistanceConstraint(SVector(ai, neigh_idx), idx_dist_pairs[ai,neigh_idx]))
+                end
             end
+            connected_constraints = convert(SVector{length(connected_constraints)}, connected_constraints)
+            push!(clusters, ConstraintCluster(connected_constraints))
         end
-        connected_constraints = convert(SVector{length(connected_constraints)}, connected_constraints)
-        push!(clusters, ConstraintCluster(connected_constraints))
     end
 
     return clusters
@@ -182,12 +183,14 @@ Verifies that the initial conditions of the system satisfy the constraints.
 """
 function check_initial_constraints(coords, clusters, init_tol)
 
-    for cluster in clusters
-        for constraint in cluster.constraints
-            r_actual = norm(coords[constraint.atom_idxs[1]] .- coords[constraint.atom_idxs[2]])
-            if !isapprox(r_actual, constraint.dist, atol = init_tol)
-                throw(ArgumentError("Constraint between atoms $(constraint.atom_idxs[1]) 
-                    and $(constraint.atom_idxs[2]) is not satisfied by the initial conditions."))
+    if init_tol !== nothing
+        for cluster in clusters
+            for constraint in cluster.constraints
+                r_actual = norm(coords[constraint.atom_idxs[1]] .- coords[constraint.atom_idxs[2]])
+                if !isapprox(r_actual, constraint.dist, atol = init_tol)
+                    throw(ArgumentError("Constraint between atoms $(constraint.atom_idxs[1]) 
+                        and $(constraint.atom_idxs[2]) is not satisfied by the initial conditions."))
+                end
             end
         end
     end
