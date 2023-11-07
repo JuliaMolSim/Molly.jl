@@ -667,6 +667,60 @@ end
     end
 end
 
+# @testset "SHAKE/RATTLE Protein Diatomic" begin
+
+#     # PROTEIN Test
+#     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+#     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; loggers = (coords_out=CoordinateLogger(5),), center_coords=false)
+#     neighbors = find_neighbors(sys)
+    
+#     #Find the alcohol groups
+#     OH_interactions = Pair[]
+#     two_body_inters = sys.specific_inter_lists[1]
+#     for (idx,inter_type) in enumerate(two_body_inters.types)
+#         if inter_type == "HO/OH"
+#             push!(OH_interactions, Pair(two_body_inters.is[idx], two_body_inters.js[idx]))
+#         end  
+#     end
+    
+#     #Double check I didnt leave in any water molecules
+#     @assert unique(first.(OH_interactions)) == first.(OH_interactions) "Some atoms in multiple bonds"
+    
+    
+#     # Go through atoms and restrain C-H bonds
+#     bond_length = 0.096u"nm"
+#     constraints = []
+    
+#     for OH in OH_interactions
+#         push!(constraints, DistanceConstraint(SVector(first(OH), last(OH)), bond_length))
+#     end
+    
+#     # constraint_algorithm = SHAKE(similar(coords))
+#     constraint_algorithm = SHAKE(similar(sys.coords), 1e-8, 1e-1u"Å")
+#     sys_constrainted = System(sys, constraint_algorithm = constraint_algorithm, constraints = constraints)
+#     # Run a short simulation with all interactions
+#     n_steps = 100
+#     simulator = VelocityVerlet(dt=0.0005u"ps")
+    
+#     simulate!(sys_constrainted, simulator, n_steps; n_threads=Threads.nthreads())
+    
+#     last_coords = values(sys_constrainted.loggers.coords_out)[end];
+#     for OH in OH_interactions
+#         println(norm(last_coords[first(OH)] .- last_coords[last(OH)]))
+#     end
+    
+    
+#     # RUN UNCONSTRAINED
+#     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+#     sys_uc = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; loggers = (coords_out=CoordinateLogger(5),), center_coords=false)
+#     simulate!(sys_uc, simulator, n_steps; n_threads=Threads.nthreads())
+    
+#     last_coords = values(sys_uc.loggers.coords_out)[end];
+#     for OH in OH_interactions
+#         println(norm(last_coords[first(OH)] .- last_coords[last(OH)]))
+#     end
+# end
+
 # @testset "SHAKE/RATTLE Multi-atomic" begin
     
 # end
