@@ -320,11 +320,14 @@ The minimum image convention is used, so the displacement is to the closest
 version of the coordinate accounting for the periodic boundaries.
 """
 function vector_1D(c1, c2, side_length)
-    if c1 < c2
-        return (c2 - c1) < (c1 - c2 + side_length) ? (c2 - c1) : (c2 - c1 - side_length)
-    else
-        return (c1 - c2) < (c2 - c1 + side_length) ? (c2 - c1) : (c2 - c1 + side_length)
-    end
+    v12 = c2 - c1
+    v12_p_sl = v12 + side_length
+    v12_m_sl = v12 - side_length
+    return ifelse(
+        v12 > zero(c1),
+        ifelse( v12 < -v12_m_sl, v12, v12_m_sl),
+        ifelse(-v12 <  v12_p_sl, v12, v12_p_sl),
+    )
 end
 
 """
@@ -338,12 +341,19 @@ version of the coordinates accounting for the periodic boundaries.
 For the [`TriclinicBoundary`](@ref) an approximation is used to find the closest
 version by default.
 """
-vector(c1, c2, boundary::Union{CubicBoundary, RectangularBoundary}) = vector_1D.(c1, c2, boundary)
+function vector(c1, c2, boundary::CubicBoundary)
+    return @inbounds SVector(
+        vector_1D(c1[1], c2[1], boundary.side_lengths[1]),
+        vector_1D(c1[2], c2[2], boundary.side_lengths[2]),
+        vector_1D(c1[3], c2[3], boundary.side_lengths[3]),
+    )
+end
 
-@generated function vector(c1::SVector{N}, c2::SVector{N}, boundary::Union{CubicBoundary, RectangularBoundary}) where N
-    quote
-        Base.Cartesian.@ncall $N SVector{$N} i -> vector_1D(c1[i], c2[i], boundary[i])
-    end
+function vector(c1, c2, boundary::RectangularBoundary)
+    return @inbounds SVector(
+        vector_1D(c1[1], c2[1], boundary.side_lengths[1]),
+        vector_1D(c1[2], c2[2], boundary.side_lengths[2]),
+    )
 end
 
 function vector(c1, c2, boundary::TriclinicBoundary{T, true}) where T
