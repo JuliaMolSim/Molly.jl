@@ -102,12 +102,12 @@ function potential_energy_pair_spec(coords, atoms, pairwise_inters_nonl, pairwis
     return pe_vec[1] * energy_units
 end
 
-@inbounds function potential_energy_pair_spec!(pe_vec, coords, atoms, pairwise_inters_nonl,
+function potential_energy_pair_spec!(pe_vec, coords, atoms, pairwise_inters_nonl,
                         pairwise_inters_nl, sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
                         boundary, energy_units, neighbors, n_threads, ::Val{T}) where T
     pe_sum = zero(T)
 
-    if n_threads > 1
+    @inbounds if n_threads > 1
         pe_sum_chunks = [zero(T) for _ in 1:n_threads]
 
         if length(pairwise_inters_nonl) > 0
@@ -187,7 +187,7 @@ end
         end
     end
 
-    for inter_list in sils_1_atoms
+    @inbounds for inter_list in sils_1_atoms
         for (i, inter) in zip(inter_list.is, inter_list.inters)
             pe = potential_energy(inter, coords[i], boundary)
             check_energy_units(pe, energy_units)
@@ -195,7 +195,7 @@ end
         end
     end
 
-    for inter_list in sils_2_atoms
+    @inbounds for inter_list in sils_2_atoms
         for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
             pe = potential_energy(inter, coords[i], coords[j], boundary)
             check_energy_units(pe, energy_units)
@@ -203,7 +203,7 @@ end
         end
     end
 
-    for inter_list in sils_3_atoms
+    @inbounds for inter_list in sils_3_atoms
         for (i, j, k, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.inters)
             pe = potential_energy(inter, coords[i], coords[j], coords[k], boundary)
             check_energy_units(pe, energy_units)
@@ -211,7 +211,7 @@ end
         end
     end
 
-    for inter_list in sils_4_atoms
+    @inbounds for inter_list in sils_4_atoms
         for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
                                        inter_list.inters)
             pe = potential_energy(inter, coords[i], coords[j], coords[k], coords[l], boundary)

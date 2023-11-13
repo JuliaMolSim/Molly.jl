@@ -18,7 +18,7 @@ end
 
 CosineAngle(; k, θ0) = CosineAngle{typeof(k), typeof(θ0)}(k, θ0)
 
-@inline @inbounds function force(a::CosineAngle, coords_i, coords_j, coords_k, boundary)
+@inline function force(a::CosineAngle, coords_i, coords_j, coords_k, boundary)
     # In 2D we use then eliminate the cross product
     ba = vector_pad3D(coords_j, coords_i, boundary)
     bc = vector_pad3D(coords_j, coords_k, boundary)
@@ -37,7 +37,7 @@ CosineAngle(; k, θ0) = CosineAngle{typeof(k), typeof(θ0)}(k, θ0)
     return SpecificForce3Atoms(fa, fb, fc)
 end
 
-@inline @inbounds function potential_energy(a::CosineAngle, coords_i, coords_j,
+@inline function potential_energy(a::CosineAngle, coords_i, coords_j,
                                             coords_k, boundary)
     θ = bond_angle(coords_i, coords_j, coords_k, boundary)
     return a.k * (1 + cos(θ - a.θ0))

@@ -78,7 +78,7 @@ end
 
 # The summation gives different errors with Enzyme on CPU and GPU
 #   so there are two similar implementations
-@inline @inbounds function force(d::PeriodicTorsion, coords_i, coords_j, coords_k,
+@inline function force(d::PeriodicTorsion, coords_i, coords_j, coords_k,
                                  coords_l, boundary)
     ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ = periodic_torsion_vectors(
                                         coords_i, coords_j, coords_k, coords_l, boundary)
@@ -90,7 +90,7 @@ end
     return fs
 end
 
-@inline @inbounds function force_gpu(d::PeriodicTorsion{N}, coords_i, coords_j, coords_k,
+@inline function force_gpu(d::PeriodicTorsion{N}, coords_i, coords_j, coords_k,
                                      coords_l, boundary) where N
     ab, bc, cd, cross_ab_bc, cross_bc_cd, bc_norm, θ = periodic_torsion_vectors(
                                         coords_i, coords_j, coords_k, coords_l, boundary)
@@ -107,7 +107,7 @@ end
     return SpecificForce4Atoms(fi_sum, fj_sum, fk_sum, fl_sum)
 end
 
-@inline @inbounds function potential_energy(d::PeriodicTorsion{N}, coords_i, coords_j, coords_k,
+@inline function potential_energy(d::PeriodicTorsion{N}, coords_i, coords_j, coords_k,
                                             coords_l, boundary) where N
     θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, boundary)
     k1 = d.ks[1]

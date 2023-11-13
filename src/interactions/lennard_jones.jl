@@ -75,7 +75,7 @@ function Base.:+(l1::LennardJones{S, C, W, WS, F, E},
     )
 end
 
-@inline @inbounds function force(inter::LennardJones{S, C},
+@inline function force(inter::LennardJones{S, C},
                                     dr,
                                     coord_i,
                                     coord_j,
@@ -115,7 +115,7 @@ function force_divr(::LennardJones, r2, invr2, (σ2, ϵ))
     return (24ϵ * invr2) * (2 * six_term ^ 2 - six_term)
 end
 
-@inline @inbounds function potential_energy(inter::LennardJones{S, C},
+@inline function potential_energy(inter::LennardJones{S, C},
                                             dr,
                                             coord_i,
                                             coord_j,
@@ -209,7 +209,7 @@ end
 
 use_neighbors(inter::LennardJonesSoftCore) = inter.use_neighbors
 
-@inline @inbounds function force(inter::LennardJonesSoftCore{S, C},
+@inline function force(inter::LennardJonesSoftCore{S, C},
                                     dr,
                                     coord_i,
                                     coord_j,
@@ -252,7 +252,7 @@ function force_divr(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
     return ff * √invr2
 end
 
-@inline @inbounds function potential_energy(inter::LennardJonesSoftCore{S, C},
+@inline function potential_energy(inter::LennardJonesSoftCore{S, C},
                                             dr,
                                             coord_i,
                                             coord_j,

@@ -19,7 +19,7 @@ Gravity(; G=Unitful.G, use_neighbors=false) = Gravity{typeof(G)}(G, use_neighbor
 
 use_neighbors(inter::Gravity) = inter.use_neighbors
 
-@inline @inbounds function force(inter::Gravity,
+@inline function force(inter::Gravity,
                                  dr,
                                  coord_i,
                                  coord_j,
@@ -36,7 +36,7 @@ function force_divr(::Gravity, r2, invr2, (G, mi, mj))
     return (-G * mi * mj) / √(r2 ^ 3)
 end
 
-@inline @inbounds function potential_energy(inter::Gravity,
+@inline function potential_energy(inter::Gravity,
                                             dr,
                                             coord_i,
                                             coord_j,

@@ -166,11 +166,11 @@ function forces_pair_spec(coords, atoms, pairwise_inters_nonl, pairwise_inters_n
     return fs * force_units
 end
 
-@inbounds function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
+function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
                                      sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
                                      boundary, force_units, neighbors, n_threads)
     n_atoms = length(coords)
-    if n_threads > 1
+    @inbounds if n_threads > 1
         fs_chunks = [zero(fs) for _ in 1:n_threads]
 
         if length(pairwise_inters_nonl) > 0
@@ -254,7 +254,7 @@ end
         end
     end
 
-    for inter_list in sils_1_atoms
+    @inbounds for inter_list in sils_1_atoms
         for (i, inter) in zip(inter_list.is, inter_list.inters)
             sf = force(inter, coords[i], boundary)
             check_force_units(sf.f1, force_units)
@@ -262,7 +262,7 @@ end
         end
     end
 
-    for inter_list in sils_2_atoms
+    @inbounds for inter_list in sils_2_atoms
         for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
             sf = force(inter, coords[i], coords[j], boundary)
             check_force_units(sf.f1, force_units)
@@ -272,7 +272,7 @@ end
         end
     end
 
-    for inter_list in sils_3_atoms
+    @inbounds for inter_list in sils_3_atoms
         for (i, j, k, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.inters)
             sf = force(inter, coords[i], coords[j], coords[k], boundary)
             check_force_units(sf.f1, force_units)
@@ -284,7 +284,7 @@ end
         end
     end
 
-    for inter_list in sils_4_atoms
+    @inbounds for inter_list in sils_4_atoms
         for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
                                        inter_list.inters)
             sf = force(inter, coords[i], coords[j], coords[k], coords[l], boundary)

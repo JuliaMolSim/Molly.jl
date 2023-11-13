@@ -22,7 +22,7 @@ Base.zero(::HarmonicAngle{K, D}) where {K, D} = HarmonicAngle(k=zero(K), θ0=zer
 
 Base.:+(a1::HarmonicAngle, a2::HarmonicAngle) = HarmonicAngle(k=(a1.k + a2.k), θ0=(a1.θ0 + a2.θ0))
 
-@inline @inbounds function force(a::HarmonicAngle, coords_i, coords_j, coords_k, boundary)
+@inline function force(a::HarmonicAngle, coords_i, coords_j, coords_k, boundary)
     # In 2D we use then eliminate the cross product
     ba = vector_pad3D(coords_j, coords_i, boundary)
     bc = vector_pad3D(coords_j, coords_k, boundary)
@@ -40,7 +40,7 @@ Base.:+(a1::HarmonicAngle, a2::HarmonicAngle) = HarmonicAngle(k=(a1.k + a2.k), �
     return SpecificForce3Atoms(fa, fb, fc)
 end
 
-@inline @inbounds function potential_energy(a::HarmonicAngle, coords_i, coords_j,
+@inline function potential_energy(a::HarmonicAngle, coords_i, coords_j,
                                             coords_k, boundary)
     θ = bond_angle(coords_i, coords_j, coords_k, boundary)
     return (a.k / 2) * (θ - a.θ0) ^ 2

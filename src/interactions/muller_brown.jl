@@ -43,12 +43,12 @@ function MullerBrown(; A=SVector(-200.0, -100.0, -170.0, 15.0)u"kJ * mol^-1",
         A, a, b, c, x0, y0, force_units, energy_units)
 end
 
-@inline @inbounds function potential_energy(inter::MullerBrown, sys, neighbors=nothing;
+@inline function potential_energy(inter::MullerBrown, sys, neighbors=nothing;
                                             n_threads::Integer=Threads.nthreads())
     return sum(potential_muller_brown.(Ref(inter), sys.coords))
 end
 
-@inline @inbounds function potential_muller_brown(inter::MullerBrown, coord::SVector{2})
+@inline function potential_muller_brown(inter::MullerBrown, coord::SVector{2})
     x, y = coord
     res = ustrip(zero(coord[1])) * inter.energy_units
 
@@ -63,12 +63,12 @@ end
     return res
 end
 
-@inline @inbounds function forces(inter::MullerBrown, sys, neighbors=nothing;
+@inline function forces(inter::MullerBrown, sys, neighbors=nothing;
                                   n_threads::Integer=Threads.nthreads())
     return force_muller_brown.(Ref(inter),sys.coords)
 end
 
-@inline @inbounds function force_muller_brown(inter::MullerBrown, coord::SVector{2})
+@inline function force_muller_brown(inter::MullerBrown, coord::SVector{2})
     x, y = coord
     res_x = ustrip(zero(coord[1])) * inter.force_units
     res_y = ustrip(zero(coord[1])) * inter.force_units

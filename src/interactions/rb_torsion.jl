@@ -14,7 +14,7 @@ end
 
 RBTorsion(; f1, f2, f3, f4) = RBTorsion{typeof(f1)}(f1, f2, f3, f4)
 
-@inline @inbounds function force(d::RBTorsion, coords_i, coords_j, coords_k,
+@inline function force(d::RBTorsion, coords_i, coords_j, coords_k,
                                     coords_l, boundary)
     ab = vector(coords_i, coords_j, boundary)
     bc = vector(coords_j, coords_k, boundary)
@@ -35,7 +35,7 @@ RBTorsion(; f1, f2, f3, f4) = RBTorsion{typeof(f1)}(f1, f2, f3, f4)
     return SpecificForce4Atoms(fi, fj, fk, fl)
 end
 
-@inline @inbounds function potential_energy(d::RBTorsion, coords_i, coords_j, coords_k,
+@inline function potential_energy(d::RBTorsion, coords_i, coords_j, coords_k,
                                             coords_l, boundary)
     θ = torsion_angle(coords_i, coords_j, coords_k, coords_l, boundary)
     return (d.f1 * (1 + cos(θ)) + d.f2 * (1 - cos(2θ)) + d.f3 * (1 + cos(3θ)) + d.f4) / 2

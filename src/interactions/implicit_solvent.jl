@@ -615,8 +615,8 @@ function born_radii_loop_OBC(coord_i, coord_j, ori, srj, dist_cutoff, boundary)
     return I
 end
 
-@inbounds get_i1(x) = x[1]
-@inbounds get_i2(x) = x[2]
+get_i1(x) = @inbounds x[1]
+get_i2(x) = @inbounds x[2]
 
 function born_radii_sum(or, offset, I, α, β, γ)
     radius = or + offset

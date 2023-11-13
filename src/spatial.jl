@@ -675,7 +675,7 @@ function virial(sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     return v
 end
 
-@inbounds function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
+function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
                             pairwise_inters_nl) where {D, G, T}
     if G
         coords, atoms = Array(sys.coords), Array(sys.atoms)
@@ -692,7 +692,7 @@ end
     boundary = sys.boundary
     v = zero(T) * sys.energy_units
 
-    if length(pairwise_inters_nonl) > 0
+    @inbounds if length(pairwise_inters_nonl) > 0
         n_atoms = length(sys)
         for i in 1:n_atoms
             for j in (i + 1):n_atoms
@@ -707,7 +707,7 @@ end
         end
     end
 
-    if length(pairwise_inters_nl) > 0
+    @inbounds if length(pairwise_inters_nl) > 0
         if isnothing(neighbors)
             error("an interaction uses the neighbor list but neighbors is nothing")
         end

@@ -31,7 +31,7 @@ end
 
 use_neighbors(inter::SoftSphere) = inter.use_neighbors
 
-@inline @inbounds function force(inter::SoftSphere{S, C},
+@inline function force(inter::SoftSphere{S, C},
                                     dr,
                                     coord_i,
                                     coord_j,
@@ -62,7 +62,7 @@ function force_divr(::SoftSphere, r2, invr2, (σ2, ϵ))
     return (24ϵ * invr2) * 2 * six_term ^ 2
 end
 
-@inbounds function potential_energy(inter::SoftSphere{S, C},
+function potential_energy(inter::SoftSphere{S, C},
                                     dr,
                                     coord_i,
                                     coord_j,

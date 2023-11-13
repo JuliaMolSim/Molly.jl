@@ -59,7 +59,7 @@ function Base.:+(c1::Coulomb, c2::Coulomb)
     )
 end
 
-@inline @inbounds function force(inter::Coulomb{C},
+@inline function force(inter::Coulomb{C},
                                     dr,
                                     coord_i,
                                     coord_j,
@@ -85,7 +85,7 @@ function force_divr(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
     return (coulomb_const * qi * qj) / √(r2 ^ 3)
 end
 
-@inline @inbounds function potential_energy(inter::Coulomb{C},
+@inline function potential_energy(inter::Coulomb{C},
                                             dr,
                                             coord_i,
                                             coord_j,
@@ -158,7 +158,7 @@ end
 
 use_neighbors(inter::CoulombSoftCore) = inter.use_neighbors
 
-@inline @inbounds function force(inter::CoulombSoftCore{C},
+@inline function force(inter::CoulombSoftCore{C},
                                     dr,
                                     coord_i,
                                     coord_j,
@@ -189,7 +189,7 @@ function force_divr(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ
     return ff * √invr2
 end
 
-@inline @inbounds function potential_energy(inter::CoulombSoftCore{C},
+@inline function potential_energy(inter::CoulombSoftCore{C},
                                             dr,
                                             coord_i,
                                             coord_j,
@@ -276,7 +276,7 @@ function Base.:+(c1::CoulombReactionField, c2::CoulombReactionField)
     )
 end
 
-@inline @inbounds function force(inter::CoulombReactionField,
+@inline function force(inter::CoulombReactionField,
                                     dr,
                                     coord_i,
                                     coord_j,
@@ -310,7 +310,7 @@ end
     end
 end
 
-@inline @inbounds function potential_energy(inter::CoulombReactionField,
+@inline function potential_energy(inter::CoulombReactionField,
                                             dr,
                                             coord_i,
                                             coord_j,
