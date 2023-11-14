@@ -1,5 +1,10 @@
 # Molly.jl release notes
 
+## v0.18.2 - Nov 2023
+
+### Performance improvements
+- The `vector` function for calculating the displacement between coordinates accounting for periodic boundary conditions is made faster, improving simulation performance on CPU and GPU.
+
 ## v0.18.1 - Oct 2023
 
 ### New features
