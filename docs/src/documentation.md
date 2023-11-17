@@ -328,6 +328,22 @@ simulator = Langevin(
 
 simulate!(sys, simulator, 5_000)
 ```
+The OpenMM setup procedure is tested against OpenMM in terms of matching forces and energies.
+However it is not thoroughly tested with respect to ligands or special residues and requires that atom names exactly match residue templates.
+By default, terminal residues are renamed to match the appropriate templates.
+For example, the first (N-terminal) residue could be changed from "MET" to "NMET".
+This can be turned off by giving `rename_terminal_res=false` to [`System`](@ref) if the residue names in the input file are appropriate.
+Currently atom classes are not supported, only atom types.
+Residue patches, virtual sites, file includes and any force types other than `HarmonicBondForce`/`HarmonicAngleForce`/`PeriodicTorsionForce`/`NonbondedForce` are currently ignored.
+
+!!! tip "Obtaining compatible structure files"
+    Future work will increase the features and robustness when reading in structure files. In the mean time, the following tips may help you to read in a file correctly and without errors:
+        - Make sure there are no missing residues or heavy atoms. Tools such as [MODELLER](https://salilab.org/modeller) and [SCWRL4](http://dunbrack.fccc.edu/lab/scwrl) can fix these issues.
+        - Remove the hydrogen atoms and add them back [using OpenMM](http://docs.openmm.org/latest/userguide/application/03_model_building_editing.html#adding-hydrogens), which will ensure they have atom names compatible with the OpenMM force field files.
+        - Make sure that all residue names match the corresponding residue template name and that all atom names match the appropriate atom in the residue template.
+        - Non-standard residues also require `CONECT` records for Chemfiles to assign bonds correctly, see for example [a compatible alanine dipeptide file](https://github.com/noeblassel/SINEQSummerSchool2023/blob/main/notebooks/dipeptide_nowater.pdb).
+    Some PDB files that read in fine can be found [here](https://github.com/greener-group/GB99dms/tree/main/structures/training/conf_1).
+
 To run on the GPU, set `gpu=true`.
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
 The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
@@ -362,16 +378,9 @@ sys_res = add_position_restraints(
 )
 ```
 
-The OpenMM setup procedure is tested against OpenMM in terms of matching forces and energies.
-However it is not thoroughly tested with respect to ligands or special residues and requires that atom names exactly match residue templates.
-By default, terminal residues are renamed to match the appropriate templates.
-For example, the first (N-terminal) residue could be changed from "MET" to "NMET".
-This can be turned off by giving `rename_terminal_res=false` to [`System`](@ref) if the residue names in the input file are appropriate.
-Currently atom classes are not supported, only atom types.
-Residue patches, virtual sites, file includes and any force types other than `HarmonicBondForce`/`HarmonicAngleForce`/`PeriodicTorsionForce`/`NonbondedForce` are currently ignored.
-
 The Gromacs setup procedure should be considered experimental.
 Currently Ewald summation methods, constraint algorithms and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
+Stay tuned for developments in this area.
 
 ## Enhanced sampling
 
