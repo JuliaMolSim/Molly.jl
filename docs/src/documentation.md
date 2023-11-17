@@ -340,10 +340,10 @@ Residue patches, virtual sites, file includes and any force types other than `Ha
 
     Future work will increase the features and robustness when reading in structure files. In the mean time, the following tips may help you to read in a file correctly and without errors:
 
-    - Make sure there are no missing residues or heavy atoms. Tools such as [MODELLER](https://salilab.org/modeller) and [SCWRL4](http://dunbrack.fccc.edu/lab/scwrl) can fix these issues.
-    - Remove the hydrogen atoms and add them back [using OpenMM](http://docs.openmm.org/latest/userguide/application/03_model_building_editing.html#adding-hydrogens), which will ensure they have atom names compatible with the OpenMM force field files.
-    - Make sure that all residue names match the corresponding residue template name and that all atom names match the appropriate atom in the residue template.
-    - Non-standard residues also require `CONECT` records for Chemfiles to assign bonds correctly, see for example [a compatible alanine dipeptide file](https://github.com/noeblassel/SINEQSummerSchool2023/blob/main/notebooks/dipeptide_nowater.pdb).
+    * Make sure there are no missing residues or heavy atoms. Tools such as [MODELLER](https://salilab.org/modeller) and [SCWRL4](http://dunbrack.fccc.edu/lab/scwrl) can fix these issues.
+    * Remove the hydrogen atoms and add them back [using OpenMM](http://docs.openmm.org/latest/userguide/application/03_model_building_editing.html#adding-hydrogens), which will ensure they have atom names compatible with the OpenMM force field files.
+    * Make sure that all residue names match the corresponding residue template name and that all atom names match the appropriate atom in the residue template.
+    * Non-standard residues also require `CONECT` records for Chemfiles to assign bonds correctly, see for example [a compatible alanine dipeptide file](https://github.com/noeblassel/SINEQSummerSchool2023/blob/main/notebooks/dipeptide_nowater.pdb).
 
     Some PDB files that read in fine can be found [here](https://github.com/greener-group/GB99dms/tree/main/structures/training/conf_1).
 

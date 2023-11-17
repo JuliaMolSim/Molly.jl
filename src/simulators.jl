@@ -591,7 +591,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
 
         zeta_half = zeta + (sim.dt / (2 * (sim.damping^2))) * ((temperature(sys) / sim.temperature) - 1)
         KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
-        T_half = uconvert(u"K", 2 * KE_half / (df * sys.k))
+        T_half = uconvert(unit(sim.temperature), 2 * KE_half / (df * sys.k))
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
         apply_constraints!(sys, old_coords, sim.dt)
