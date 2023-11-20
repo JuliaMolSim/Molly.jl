@@ -120,9 +120,12 @@ The above 1 ps simulation looks something like this when you view it in [VMD](ht
 
 ## Contributing
 
-Contributions are very welcome - see the [roadmap issue](https://github.com/JuliaMolSim/Molly.jl/issues/2) for more.
+Contributions are very welcome including reporting bugs, fixing bugs, adding new features, improving performance, adding tests and improving documentation.
+Feel free to open an issue or use the channels below to discuss your contribution.
+New features will generally require tests to be added as well.
+See the [roadmap issue](https://github.com/JuliaMolSim/Molly.jl/issues/2) for some discussion of recent progress and future plans.
 
-Join the #molly channel on the [JuliaMolSim Zulip](https://juliamolsim.zulipchat.com/join/j5sqhiajbma5hw55hy6wtzv7) to discuss the usage and development of Molly.jl, or post on the [Julia Discourse](https://discourse.julialang.org).
+Join the #juliamolsim channel on the [Julia Slack](https://join.slack.com/t/julialang/shared_invite/zt-26arhonkh-WYNI2rI2X85jcbkn6pRAjA), the #molly channel on the [JuliaMolSim Zulip](https://juliamolsim.zulipchat.com/join/j5sqhiajbma5hw55hy6wtzv7) or post on the [Julia Discourse](https://discourse.julialang.org) to discuss the usage and development of Molly.jl.
 
 ## Citation
 
