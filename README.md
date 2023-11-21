@@ -127,6 +127,8 @@ See the [roadmap issue](https://github.com/JuliaMolSim/Molly.jl/issues/2) for so
 
 Join the #juliamolsim channel on the [Julia Slack](https://join.slack.com/t/julialang/shared_invite/zt-26arhonkh-WYNI2rI2X85jcbkn6pRAjA), the #molly channel on the [JuliaMolSim Zulip](https://juliamolsim.zulipchat.com/join/j5sqhiajbma5hw55hy6wtzv7) or post on the [Julia Discourse](https://discourse.julialang.org) to discuss the usage and development of Molly.jl.
 
+Molly.jl follows the Contributor Covenant [code of conduct](CODE_OF_CONDUCT.md).
+
 ## Citation
 
 If you use Molly, please cite the following paper ([bib entry here](https://github.com/JuliaMolSim/Molly.jl/blob/master/CITATION.bib)):
