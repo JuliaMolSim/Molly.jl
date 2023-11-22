@@ -127,7 +127,7 @@ See the [roadmap issue](https://github.com/JuliaMolSim/Molly.jl/issues/2) for so
 
 Join the #juliamolsim channel on the [Julia Slack](https://join.slack.com/t/julialang/shared_invite/zt-26arhonkh-WYNI2rI2X85jcbkn6pRAjA), the #molly channel on the [JuliaMolSim Zulip](https://juliamolsim.zulipchat.com/join/j5sqhiajbma5hw55hy6wtzv7) or post on the [Julia Discourse](https://discourse.julialang.org) to discuss the usage and development of Molly.jl.
 
-Molly.jl follows the Contributor Covenant [code of conduct](CODE_OF_CONDUCT.md).
+Molly.jl follows the Contributor Covenant [code of conduct](https://github.com/JuliaMolSim/Molly.jl/blob/master/CODE_OF_CONDUCT.md).
 
 ## Citation
 
@@ -139,4 +139,6 @@ A paper involving more contributors with further details on the software will be
 
 ## Interested?
 
-An [advert for a PhD position](https://www2.mrc-lmb.cam.ac.uk/students/international-phd-programme/projects/joe-greener) (closes 05/12/23) in Cambridge, UK that will involve significant coding in Molly are open. Contact Joe Greener with informal enquiries.
+An [advert for a PhD position](https://www2.mrc-lmb.cam.ac.uk/students/international-phd-programme/projects/joe-greener) (closes 05/12/23) in Cambridge, UK that will involve significant coding in Molly is open.
+There is also the possibility of a postdoc position.
+Contact Joe Greener with informal enquiries.
