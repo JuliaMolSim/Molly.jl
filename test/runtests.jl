@@ -2,6 +2,8 @@ using Molly
 using Aqua
 import AtomsBase: Periodic, AbstractSystem
 using AtomsBaseTesting
+import AtomsCalculators
+using AtomsCalculators.AtomsCalculatorsTesting
 import BioStructures # Imported to avoid clashing names
 using CUDA
 import Enzyme

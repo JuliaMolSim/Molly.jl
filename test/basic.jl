@@ -485,3 +485,25 @@ end
     molly_sys = System(ab_sys_2, u"kJ", u"kJ/Å")
     test_approx_eq(ab_sys_2, molly_sys; common_only=true)
 end
+
+@testset "AtomsCalculators" begin
+    ab_sys = AbstractSystem(
+        make_test_system().system; 
+        boundary_conditions = [Periodic(), Periodic(), Periodic()],
+        bounding_box = [[1.54732, 0.0      , 0.0      ],
+                        [0.0    , 1.4654985, 0.0      ],
+                        [0.0    , 0.0      , 1.7928950]]u"Å",
+    )
+    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", force_units=u"kJ/Å", energy_units=u"kJ")
+    calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
+
+    pe = AtomsCalculators.potential_energy(ab_sys, calc)
+    @test unit(pe) == u"kJ"
+    fs = AtomsCalculators.forces(ab_sys, calc)
+    @test length(fs) == length(ab_sys)
+    @test unit(fs[1][1]) == u"kJ/Å"
+
+    # AtomsCalculators.AtomsCalculatorsTesting functions
+    test_potential_energy(ab_sys, calc)
+    test_forces(ab_sys, calc)
+end
