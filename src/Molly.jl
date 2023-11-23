@@ -6,6 +6,7 @@ using Reexport
 @reexport using Unitful
 
 using Atomix
+import AtomsCalculators
 import BioStructures # Imported to avoid clashing names
 using CellListMap
 using ChainRules

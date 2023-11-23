@@ -19,7 +19,8 @@ export
     is_on_gpu,
     float_type,
     masses,
-    charges
+    charges,
+    MollyCalculator
 
 const DefaultFloat = Float64
 
@@ -1119,4 +1120,100 @@ function System(sys::AbstractSystem{D}, energy_units, force_units) where D
         energy_units=energy_units,
         force_units=force_units,
     )
+end
+
+"""
+    MollyCalculator(; <keyword arguments>)
+
+A calculator for use with the AtomsCalculators.jl interface.
+
+`neighbors` can optionally be given as a keyword argument when calling the
+calculation functions to save on computation when the neighbors are the same
+for multiple calls.
+
+Not currently compatible with virial calculation.
+Not currently compatible with using atom properties such as `σ` and `ϵ`.
+
+# Arguments
+- `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
+    interactions between all or most atom pairs such as electrostatics.
+    Typically a `Tuple`.
+- `specific_inter_lists::SI=()`: the specific interactions in the system,
+    i.e. interactions between specific atoms such as bonds or angles. Typically
+    a `Tuple`.
+- `general_inters::GI=()`: the general interactions in the system,
+    i.e. interactions involving all atoms such as implicit solvent. Typically
+    a `Tuple`.
+- `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
+    close atoms and save on computation.
+- `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
+    Should be set to `NoUnits` if units are not being used.
+- `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
+    be set to `NoUnits` if units are not being used.
+- `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
+    modified in some simulations. `k` is chosen based on the `energy_units` given.
+- `n_threads::Integer=Threads.nthreads()`: the number of threads to use when
+    running the calculator.
+"""
+struct MollyCalculator{PI, SI, GI, NF, F, E, K}
+    pairwise_inters::PI
+    specific_inter_lists::SI
+    general_inters::GI
+    neighbor_finder::NF
+    force_units::F
+    energy_units::E
+    k::K
+    n_threads::Int
+end
+
+function MollyCalculator(;
+        pairwise_inters=(),
+        specific_inter_lists=(),
+        general_inters=(),
+        neighbor_finder=NoNeighborFinder(),
+        force_units=u"kJ * mol^-1 * nm^-1",
+        energy_units=u"kJ * mol^-1",
+        k=default_k(energy_units),
+        n_threads::Integer=Threads.nthreads(),
+    )
+    return MollyCalculator(pairwise_inters, specific_inter_lists, general_inters, neighbor_finder,
+                           force_units, energy_units, k, n_threads)
+end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.forces(
+        abstract_sys,
+        calc::MollyCalculator;
+        neighbors=nothing,
+        kwargs...,
+    )
+    sys_nointers = System(abstract_sys, calc.energy_units, calc.force_units)
+    sys = System(
+        sys_nointers;
+        pairwise_inters=calc.pairwise_inters,
+        specific_inter_lists=calc.specific_inter_lists,
+        general_inters=calc.general_inters,
+        neighbor_finder=calc.neighbor_finder,
+        k=calc.k,
+    )
+    nbs = isnothing(neighbors) ? find_neighbors(sys) : neighbors
+    return forces(sys, nbs; n_threads=calc.n_threads)
+end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
+        abstract_sys,
+        calc::MollyCalculator;
+        neighbors=nothing,
+        kwargs...,
+    )
+    sys_nointers = System(abstract_sys, calc.energy_units, calc.force_units)
+    sys = System(
+        sys_nointers;
+        pairwise_inters=calc.pairwise_inters,
+        specific_inter_lists=calc.specific_inter_lists,
+        general_inters=calc.general_inters,
+        neighbor_finder=calc.neighbor_finder,
+        k=calc.k,
+    )
+    nbs = isnothing(neighbors) ? find_neighbors(sys) : neighbors
+    return potential_energy(sys, nbs; n_threads=calc.n_threads)
 end
