@@ -701,6 +701,49 @@ save("force_comparison.png", f)
 ```
 ![Force comparison](images/force_comparison.png)
 
+## AtomsCalculators.jl compatibility
+
+The [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl) package provides a consistent interface that allows forces, energies etc. to be calculated with different packages.
+Here we set up an [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) system and a [`MollyCalculator`](@ref) and use them to compute various properties.
+```julia
+using Molly
+using AtomsBaseTesting
+using AtomsCalculators
+
+ab_sys = AbstractSystem(
+    make_test_system().system; 
+    boundary_conditions = [Periodic(), Periodic(), Periodic()],
+    bounding_box = [[1.54732, 0.0      , 0.0      ],
+                    [0.0    , 1.4654985, 0.0      ],
+                    [0.0    , 0.0      , 1.7928950]]u"Å",
+)
+coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", force_units=u"kJ/Å", energy_units=u"kJ")
+calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
+
+AtomsCalculators.potential_energy(ab_sys, calc)
+```
+```
+9.112207692184968e-21 kJ
+```
+```julia
+AtomsCalculators.forces(ab_sys, calc)
+```
+```
+5-element Vector{SVector{3, Quantity{Float64, 𝐋 𝐌 𝐓^-2, Unitful.FreeUnits{(Å^-1, kJ), 𝐋 𝐌 𝐓^-2, nothing}}}}:
+ [5.052086904272771e-21 kJ Å^-1, 1.0837307191961731e-20 kJ Å^-1, -5.366866699852613e-21 kJ Å^-1]
+ [5.252901001053284e-22 kJ Å^-1, -2.3267009382813732e-21 kJ Å^-1, 9.276115314848821e-21 kJ Å^-1]
+ [-8.613462805775053e-21 kJ Å^-1, 5.726650141840073e-21 kJ Å^-1, -2.072868074170469e-20 kJ Å^-1]
+ [3.0360858013969523e-21 kJ Å^-1, -1.423725639552043e-20 kJ Å^-1, 1.681943212670848e-20 kJ Å^-1]
+ [0.0 kJ Å^-1, 0.0 kJ Å^-1, 0.0 kJ Å^-1]
+```
+We can also convert the AtomsBase.jl system to a Molly [`System`](@ref):
+```julia
+System(ab_sys, u"kJ", u"kJ/Å")
+```
+```
+System with 5 atoms, boundary CubicBoundary{Quantity{Float64, 𝐋, Unitful.FreeUnits{(Å,), 𝐋, nothing}}}(Quantity{Float64, 𝐋, Unitful.FreeUnits{(Å,), 𝐋, nothing}}[1.54732 Å, 1.4654985 Å, 1.792895 Å])
+```
+
 ## Variations of the Morse potential
 
 The Morse potential for bonds has a parameter *a* that determines the width of the potential.
