@@ -1131,7 +1131,7 @@ A calculator for use with the AtomsCalculators.jl interface.
 calculation functions to save on computation when the neighbors are the same
 for multiple calls.
 In a similar way, `n_threads` can be given to determine the number of threads
-to use when running the calculator.
+to use when running the calculation function.
 
 Not currently compatible with virial calculation.
 Not currently compatible with using atom properties such as `σ` and `ϵ`.

@@ -78,7 +78,7 @@ if GROUP in ("All", "NotZygote")
         Molly;
         ambiguities=(recursive=false),
         unbound_args=false,
-        piracy=false,
+        piracies=false,
     )
 
     include("basic.jl")

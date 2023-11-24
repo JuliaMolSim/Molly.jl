@@ -717,6 +717,7 @@ ab_sys = AbstractSystem(
                     [0.0    , 1.4654985, 0.0      ],
                     [0.0    , 0.0      , 1.7928950]]u"Å",
 )
+
 coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", force_units=u"kJ/Å", energy_units=u"kJ")
 calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
 
