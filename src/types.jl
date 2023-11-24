@@ -1130,6 +1130,8 @@ A calculator for use with the AtomsCalculators.jl interface.
 `neighbors` can optionally be given as a keyword argument when calling the
 calculation functions to save on computation when the neighbors are the same
 for multiple calls.
+In a similar way, `n_threads` can be given to determine the number of threads
+to use when running the calculator.
 
 Not currently compatible with virial calculation.
 Not currently compatible with using atom properties such as `σ` and `ϵ`.
@@ -1152,8 +1154,6 @@ Not currently compatible with using atom properties such as `σ` and `ϵ`.
     be set to `NoUnits` if units are not being used.
 - `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
     modified in some simulations. `k` is chosen based on the `energy_units` given.
-- `n_threads::Integer=Threads.nthreads()`: the number of threads to use when
-    running the calculator.
 """
 struct MollyCalculator{PI, SI, GI, NF, F, E, K}
     pairwise_inters::PI
@@ -1163,7 +1163,6 @@ struct MollyCalculator{PI, SI, GI, NF, F, E, K}
     force_units::F
     energy_units::E
     k::K
-    n_threads::Int
 end
 
 function MollyCalculator(;
@@ -1174,10 +1173,9 @@ function MollyCalculator(;
         force_units=u"kJ * mol^-1 * nm^-1",
         energy_units=u"kJ * mol^-1",
         k=default_k(energy_units),
-        n_threads::Integer=Threads.nthreads(),
     )
     return MollyCalculator(pairwise_inters, specific_inter_lists, general_inters, neighbor_finder,
-                           force_units, energy_units, k, n_threads)
+                           force_units, energy_units, k)
 end
 
 # Doesn't work for Float32
@@ -1189,6 +1187,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         abstract_sys,
         calc::MollyCalculator;
         neighbors=nothing,
+        n_threads::Integer=Threads.nthreads(),
         kwargs...,
     )
     sys_nointers = System(abstract_sys, calc.energy_units, calc.force_units)
@@ -1201,13 +1200,14 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         k=calc.k,
     )
     nbs = isnothing(neighbors) ? find_neighbors(sys) : neighbors
-    return forces(sys, nbs; n_threads=calc.n_threads)
+    return forces(sys, nbs; n_threads=n_threads)
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         abstract_sys,
         calc::MollyCalculator;
         neighbors=nothing,
+        n_threads::Integer=Threads.nthreads(),
         kwargs...,
     )
     sys_nointers = System(abstract_sys, calc.energy_units, calc.force_units)
@@ -1220,5 +1220,5 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         k=calc.k,
     )
     nbs = isnothing(neighbors) ? find_neighbors(sys) : neighbors
-    return potential_energy(sys, nbs; n_threads=calc.n_threads)
+    return potential_energy(sys, nbs; n_threads=n_threads)
 end
