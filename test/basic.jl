@@ -502,6 +502,8 @@ end
     fs = AtomsCalculators.forces(ab_sys, calc)
     @test length(fs) == length(ab_sys)
     @test unit(fs[1][1]) == u"kJ/Å"
+    zfs = AtomsCalculators.zero_forces(ab_sys, calc)
+    @test zfs == fill(SVector(0.0, 0.0, 0.0)u"kJ/Å", length(ab_sys))
 
     # AtomsCalculators.AtomsCalculatorsTesting functions
     test_potential_energy(ab_sys, calc)

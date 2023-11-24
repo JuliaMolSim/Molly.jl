@@ -1180,6 +1180,11 @@ function MollyCalculator(;
                            force_units, energy_units, k, n_threads)
 end
 
+# Doesn't work for Float32
+function AtomsCalculators.promote_force_type(::Any, calc::MollyCalculator)
+    return typeof(SVector(1.0, 1.0, 1.0) * calc.force_units)
+end
+
 AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         abstract_sys,
         calc::MollyCalculator;
