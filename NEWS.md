@@ -1,5 +1,18 @@
 # Molly.jl release notes
 
+## v0.18.3 - Dec 2023
+
+### New features
+- Compatibility with AtomsCalculators.jl is added via `MollyCalculator`.
+- The documentation on setting up systems from structure files is improved.
+- A list of relevant publications is added to the documentation.
+
+### Community
+- The Contributor Covenant Code of Conduct is added to the project.
+
+### Bug fixes
+- A bug in the `NoseHoover` simulator when not using units is fixed.
+
 ## v0.18.2 - Nov 2023
 
 ### Performance improvements
