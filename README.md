@@ -140,6 +140,5 @@ A paper involving more contributors with further details on the software will be
 
 ## Interested?
 
-An [advert for a PhD position](https://www2.mrc-lmb.cam.ac.uk/students/international-phd-programme/projects/joe-greener) (closes 05/12/23) in Cambridge, UK that will involve significant coding in Molly is open.
-There is also the possibility of a postdoc position.
+There is the possibility of a postdoc position involving the development and use of Molly.
 Contact Joe Greener with informal enquiries.
