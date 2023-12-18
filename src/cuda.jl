@@ -130,7 +130,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms
     j_0_tile = j_0_block + (warpidx - 1) * warpsize()
     i = i_0_tile + laneid()
 
-    forces_shmem = @cuStaticSharedMem(T, (3, 1024))
+    forces_shmem = CuStaticSharedArray(T, (3, 1024))
     @inbounds for dim in 1:3
         forces_shmem[dim, tidx] = zero(T)
     end
