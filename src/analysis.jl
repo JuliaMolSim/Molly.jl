@@ -95,10 +95,11 @@ function rdf(coords, boundary; npoints::Integer=200)
     dist_unit = unit(first(dists_vec))
     kd = kde(ustrip.(dists_vec); npoints=npoints)
     ρ = n_atoms / box_volume(boundary)
+    T = float_type(boundary)
     if dims == 3
-        normalizing_factor = 4π .* ρ .* step(kd.x) .* kd.x .^ 2 .* dist_unit .^ 3
+        normalizing_factor = 4 .* T(π) .* ρ .* step(kd.x) .* kd.x .^ 2 .* dist_unit .^ 3
     elseif dims == 2
-        normalizing_factor = 2π .* ρ .* step(kd.x) .* kd.x .* dist_unit .^ 2
+        normalizing_factor = 2 .* T(π) .* ρ .* step(kd.x) .* kd.x .* dist_unit .^ 2
     end
     bin_centers = collect(kd.x) .* dist_unit
     density_weighted = kd.density ./ normalizing_factor
