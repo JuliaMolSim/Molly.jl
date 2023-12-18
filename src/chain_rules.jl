@@ -21,14 +21,6 @@
 @non_differentiable System(T::Type, coord_file::AbstractString, top_file::AbstractString)
 @non_differentiable System(coord_file::AbstractString, top_file::AbstractString)
 
-function ChainRulesCore.rrule(T::Type{<:SVector}, vs::Number...)
-    Y = T(vs...)
-    function SVector_pullback(Ȳ)
-        return NoTangent(), Ȳ...
-    end
-    return Y, SVector_pullback
-end
-
 function ChainRulesCore.rrule(T::Type{<:Atom}, vs...)
     Y = T(vs...)
     function Atom_pullback(Ȳ)
