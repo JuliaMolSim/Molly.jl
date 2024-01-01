@@ -1,5 +1,11 @@
 # Molly.jl release notes
 
+## v0.18.4 - Jan 2024
+
+### Bug fixes
+- A bug that prevented system setup on Julia 1.7 is fixed.
+- A type preservation bug in the `rdf` function is fixed.
+
 ## v0.18.3 - Dec 2023
 
 ### New features
