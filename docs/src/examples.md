@@ -457,6 +457,7 @@ A general interaction is used since the whole force calculation is offloaded to 
 ```julia
 using Molly
 using DFTK
+import AtomsCalculators
 
 struct DFTKInteraction{L, A}
     lattice::L
@@ -477,7 +478,7 @@ atoms_dftk = [Si, Si]
 
 dftk_interaction = DFTKInteraction(lattice, atoms_dftk)
 
-function Molly.forces(inter::DFTKInteraction, sys, neighbors=nothing)
+function AtomsCalculators.forces(sys, inter::DFTKInteraction; kwargs...)
     # Select model and basis
     model = model_LDA(inter.lattice, inter.atoms, sys.coords)
     kgrid = [4, 4, 4]     # k-point grid (Regular Monkhorst-Pack grid)
@@ -704,7 +705,7 @@ save("force_comparison.png", f)
 ## AtomsCalculators.jl compatibility
 
 The [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl) package provides a consistent interface that allows forces, energies etc. to be calculated with different packages.
-Here we set up an [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) system and a [`MollyCalculator`](@ref) and use them to compute various properties.
+Calculators can be used with a Molly [`System`](@ref) by giving them as `general_inters` during system setup. It is also possible to use a [`MollyCalculator`](@ref) to calculate properties on [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) systems:
 ```julia
 using Molly
 using AtomsBaseTesting

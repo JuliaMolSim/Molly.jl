@@ -126,15 +126,6 @@ general interactions.
 
 If the interactions use neighbor lists, the neighbors should be computed
 first and passed to the function.
-
-    forces(inter, system, neighbors=nothing; n_threads=Threads.nthreads())
-
-Calculate the forces on all atoms in a system arising from a general
-interaction.
-
-If the interaction uses neighbor lists, the neighbors should be computed
-first and passed to the function.
-Custom general interaction types should implement this function.
 """
 function forces(sys::System{D, false}, neighbors=nothing;
                 n_threads::Integer=Threads.nthreads()) where D
@@ -150,7 +141,7 @@ function forces(sys::System{D, false}, neighbors=nothing;
                           sys.boundary, sys.force_units, neighbors, n_threads)
 
     for inter in values(sys.general_inters)
-        fs += forces(inter, sys, neighbors; n_threads=n_threads)
+        fs += AtomsCalculators.forces(sys, inter; neighbors=neighbors, n_threads=n_threads)
     end
 
     return fs
@@ -334,7 +325,7 @@ function forces(sys::System{D, true, T}, neighbors=nothing;
     fs = reinterpret(SVector{D, T}, vec(fs_mat))
 
     for inter in values(sys.general_inters)
-        fs_gen = forces(inter, sys, neighbors; n_threads=n_threads)
+        fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, n_threads=n_threads)
         check_force_units(unit(eltype(eltype(fs_gen))), sys.force_units)
         fs += ustrip_vec.(fs_gen)
     end

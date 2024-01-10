@@ -437,8 +437,8 @@ interface described there.
     i.e. interactions between specific atoms such as bonds or angles. Typically
     a `Tuple`.
 - `general_inters::GI=()`: the general interactions in the system,
-    i.e. interactions involving all atoms such as implicit solvent. Typically
-    a `Tuple`.
+    i.e. interactions involving all atoms such as implicit solvent. Each should
+    implement the AtomsCalculators.jl interface. Typically a `Tuple`.
 - `constraints::CN=()`: the constraints for bonds and angles in the system. Typically
     a `Tuple`.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
@@ -709,8 +709,9 @@ construction where `n` is the number of threads to be used per replica.
 - `replica_specific_inter_lists=[() for _ in 1:n_replicas]`: the specific interactions in 
     each replica.
 - `general_inters::GI=()`: the general interactions in the system, i.e. interactions involving 
-    all atoms such as implicit solvent (to be used if the same for all replicas). Typically a
-    `Tuple`. This is only used if no value is passed to the argument `replica_general_inters`.
+    all atoms such as implicit solvent (to be used if the same for all replicas). Each should
+    implement the AtomsCalculators.jl interface. Typically a `Tuple`. This is only used if no
+    value is passed to the argument `replica_general_inters`.
 - `replica_general_inters=[() for _ in 1:n_replicas]`: the general interactions for 
     each replica.
 - `constraints::CN=()`: the constraints for bonds and angles in the system (to be used if the same 
@@ -1132,6 +1133,9 @@ calculation functions to save on computation when the neighbors are the same
 for multiple calls.
 In a similar way, `n_threads` can be given to determine the number of threads
 to use when running the calculation function.
+Note that this calculator is designed for using Molly in other contexts; if you
+want to use another calculator in Molly it can be given as `general_inters` when
+creating a [`System`](@ref).
 
 Not currently compatible with virial calculation.
 Not currently compatible with using atom properties such as `σ` and `ϵ`.
@@ -1144,8 +1148,8 @@ Not currently compatible with using atom properties such as `σ` and `ϵ`.
     i.e. interactions between specific atoms such as bonds or angles. Typically
     a `Tuple`.
 - `general_inters::GI=()`: the general interactions in the system,
-    i.e. interactions involving all atoms such as implicit solvent. Typically
-    a `Tuple`.
+    i.e. interactions involving all atoms such as implicit solvent. Each should
+    implement the AtomsCalculators.jl interface. Typically a `Tuple`.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.

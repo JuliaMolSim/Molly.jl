@@ -3,7 +3,7 @@ export MullerBrown
 @doc raw"""
     MullerBrown(; A, a, b, c, x0, y0, force_units, energy_units)
 
-The Müller-Brown potential energy surface.
+The Müller-Brown potential energy surface implemented as an AtomsCalculators.jl calculator.
 
 The potential energy is defined as
 ```math
@@ -43,8 +43,7 @@ function MullerBrown(; A=SVector(-200.0, -100.0, -170.0, 15.0)u"kJ * mol^-1",
         A, a, b, c, x0, y0, force_units, energy_units)
 end
 
-@inline function potential_energy(inter::MullerBrown, sys, neighbors=nothing;
-                                            n_threads::Integer=Threads.nthreads())
+function AtomsCalculators.potential_energy(sys, inter::MullerBrown; kwargs...)
     return sum(potential_muller_brown.(Ref(inter), sys.coords))
 end
 
@@ -63,9 +62,8 @@ end
     return res
 end
 
-@inline function forces(inter::MullerBrown, sys, neighbors=nothing;
-                                  n_threads::Integer=Threads.nthreads())
-    return force_muller_brown.(Ref(inter),sys.coords)
+function AtomsCalculators.forces(sys, inter::MullerBrown; kwargs...)
+    return force_muller_brown.(Ref(inter), sys.coords)
 end
 
 @inline function force_muller_brown(inter::MullerBrown, coord::SVector{2})

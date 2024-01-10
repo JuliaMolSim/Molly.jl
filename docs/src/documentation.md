@@ -533,7 +533,7 @@ The force on each particle in the system is derived from the potential correspon
 In Molly there are three types of interactions:
 - [`PairwiseInteraction`](@ref)s are present between all or most atom pairs, and account for example for non-bonded terms in molecular mechanics force fields.
 - [`SpecificInteraction`](@ref)s are present between specific atoms, and account for example for bonded terms in molecular mechanics force fields.
-- General interactions are a free-form interaction type that can access the whole system and outputs forces for all atoms. This is useful for neural network potentials, implicit solvent models and other cases that require maximum flexibility.
+- General interactions are a free-form interaction type that can access the whole system and outputs forces for all atoms. This is useful for neural network potentials, implicit solvent models and other cases that require maximum flexibility. General interactions should be compatible with the [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl) interface.
 
 The available pairwise interactions are:
 - [`LennardJones`](@ref)
@@ -669,12 +669,17 @@ struct MyGeneralInter
     # Properties, e.g. a neural network model
 end
 ```
-Next, you need to define a method for the [`forces`](@ref) function (note this is different to the [`force`](@ref) function above).
+Next, you need to define a method for the `AtomsCalculators.forces` function (note this is different to the [`force`](@ref) function above).
 ```julia
-function Molly.forces(inter::MyGeneralInter,
-                        sys,
-                        neighbors=nothing;
-                        n_threads=Threads.nthreads())
+import AtomsCalculators
+
+function AtomsCalculators.forces(sys,
+                                 inter::MyGeneralInter;
+                                 neighbors=nothing,
+                                 n_threads=Threads.nthreads(),
+                                 kwargs...)
+    # kwargs... is required, neighbors and n_threads can be omitted if not used
+
     # Calculate the forces on all atoms using the interaction and the system
     # The output should have the same shape as the coordinates
     # For example, a neural network might do something like this
@@ -685,8 +690,8 @@ The neighbors calculated from the neighbor list are available in this function, 
 You could carry out your own neighbor finding in this function if required.
 Note that this function calculates forces not accelerations; if you have a neural network that calculates accelerations you should multiply these by `masses(sys)` to get the forces according to F=ma.
 
-A method for the [`potential_energy`](@ref) function that takes the same arguments and returns a single value can also be defined.
-A method for the [`virial`](@ref) function that takes the same arguments can also be defined, allowing virial and pressure calculation when using custom general interactions.
+A method for the `AtomsCalculators.potential_energy` function that takes the same arguments and returns a single value can also be defined.
+A method for the [`virial`](@ref) function can also be defined, allowing virial and pressure calculation when using custom general interactions.
 To use your custom interaction in a simulation, add it to the list of general interactions:
 ```julia
 general_inters = (MyGeneralInter(),)

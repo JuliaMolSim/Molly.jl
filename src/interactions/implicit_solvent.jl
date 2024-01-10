@@ -331,7 +331,7 @@ end
 """
     ImplicitSolventOBC(atoms, atoms_data, bonds)
 
-Onufriev-Bashford-Case GBSA model.
+Onufriev-Bashford-Case GBSA model implemented as an AtomsCalculators.jl calculator.
 
 Should be used along with a [`Coulomb`](@ref) or [`CoulombReactionField`](@ref) interaction.
 The keyword argument `use_OBC2` determines whether to use parameter set
@@ -443,7 +443,7 @@ end
 """
     ImplicitSolventGBN2(atoms, atoms_data, bonds)
 
-GBn2 solvation model.
+GBn2 solvation model implemented as an AtomsCalculators.jl calculator.
 
 Should be used along with a [`Coulomb`](@ref) or [`CoulombReactionField`](@ref) interaction.
 """
@@ -1062,7 +1062,7 @@ function gbsa_force_2_kernel!(forces, born_forces, coords_var, boundary, dist_cu
     return nothing
 end
 
-function forces(inter::AbstractGBSA, sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+function AtomsCalculators.forces(sys, inter::AbstractGBSA; kwargs...)
     Bs, B_grads, I_grads = born_radii_and_grad(inter, sys.coords, sys.boundary)
 
     if inter.use_ACE
@@ -1114,8 +1114,7 @@ function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
     end
 end
 
-function potential_energy(inter::AbstractGBSA, sys, neighbors=nothing;
-                          n_threads::Integer=Threads.nthreads())
+function AtomsCalculators.potential_energy(sys, inter::AbstractGBSA; kwargs...)
     coords, atoms, boundary = sys.coords, sys.atoms, sys.boundary
     Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, boundary)
 

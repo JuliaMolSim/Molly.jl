@@ -289,6 +289,7 @@ using Molly
 using GLMakie
 using Zygote
 using Flux
+import AtomsCalculators
 using Format
 using LinearAlgebra
 
@@ -302,10 +303,7 @@ ps = Flux.params(model)
 
 struct NNBonds end
 
-function Molly.forces(inter::NNBonds,
-                        sys,
-                        neighbors=nothing;
-                        n_threads=Threads.nthreads())
+function AtomsCalculators.forces(sys, inter::NNBonds; kwargs...)
     vec_ij = vector(sys.coords[1], sys.coords[3], sys.boundary)
     dist = norm(vec_ij)
     f = model([dist])[1] * normalize(vec_ij)

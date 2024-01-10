@@ -64,7 +64,6 @@ first and passed to the function.
                      coords_k, boundary)
     potential_energy(inter::SpecificInteraction, coords_i, coords_j,
                      coords_k, coords_l, boundary)
-    potential_energy(inter, system, neighbors=nothing; n_threads=Threads.nthreads())
 
 Calculate the potential energy due to a given interaction type.
 
@@ -85,7 +84,7 @@ function potential_energy(sys::System{D, false}, neighbors=nothing;
                             sys.energy_units, neighbors, n_threads, Val(ft))
 
     for inter in values(sys.general_inters)
-        pe += potential_energy(inter, sys, neighbors; n_threads=n_threads)
+        pe += AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, n_threads=n_threads)
     end
 
     return pe
@@ -256,7 +255,10 @@ function potential_energy(sys::System{D, true, T}, neighbors=nothing;
     pe = Array(pe_vec)[1]
 
     for inter in values(sys.general_inters)
-        pe += ustrip(sys.energy_units, potential_energy(inter, sys, neighbors; n_threads=n_threads))
+        pe += ustrip(
+            sys.energy_units,
+            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, n_threads=n_threads),
+        )
     end
 
     return pe * sys.energy_units
