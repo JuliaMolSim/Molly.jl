@@ -26,6 +26,31 @@ Supertype for all types of constraint.
 abstract type Constraint end
 
 """
+Atoms in a cluster do not participate in any other constraints outside of that cluster.
+"Small" clusters contain at most 4 bonds between 2,3,4 or 5 atoms around one central atom.
+Small clusters include: 1 bond, 2 bonds, 1 angle, 3 bonds, 1 bond 1 angle, 4 bonds
+Note that an angle constraints will be implemented as 3 distance constraints. These constraints
+use special methods that improve computational performance. Any constraint not listed above
+will come at a performance penatly.
+"""
+struct ConstraintCluster{N}
+    constraints::SVector{N,<:Constraint}
+end
+
+Base.length(cc::ConstraintCluster) = length(cc.constraints)
+
+function num_unique_atoms(cc::ConstraintCluster)
+    atom_ids = []
+    for constraint in cc.constraints
+        for atom_idx in constraint.atom_idxs
+            push!(atom_ids, atom_idx)
+        end
+    end
+
+    return length(unique(atom_ids))
+end
+
+"""
 Constraint between two atoms that maintains the distance between the two atoms.
 # Arguments
 - `atom_idxs::SVector{Int}` : The indices of atoms in the system participating in this constraint
@@ -57,30 +82,6 @@ end
 # end
 
 
-"""
-Atoms in a cluster do not participate in any other constraints outside of that cluster.
-"Small" clusters contain at most 4 bonds between 2,3,4 or 5 atoms around one central atom.
-Small clusters include: 1 bond, 2 bonds, 1 angle, 3 bonds, 1 bond 1 angle, 4 bonds
-Note that an angle constraints will be implemented as 3 distance constraints. These constraints
-use special methods that improve computational performance. Any constraint not listed above
-will come at a performance penatly.
-"""
-struct ConstraintCluster{N}
-    constraints::SVector{N,<:Constraint}
-end
-
-Base.length(cc::ConstraintCluster) = length(cc.constraints)
-
-function num_unique_atoms(cc::ConstraintCluster)
-    atom_ids = []
-    for constraint in cc.constraints
-        for atom_idx in constraint.atom_idxs
-            push!(atom_ids, atom_idx)
-        end
-    end
-
-    return length(unique(atom_ids))
-end
 
 
 # """
@@ -200,18 +201,18 @@ end
 """
 Updates the coordinates of a [`System`](@ref) based on the constraints.
 """
-function apply_position_constraints!(sys::System, constraint_algo::ConstrainsPositions,
-        accels, dt; n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys::System, constraint_algo::ConstrainsPositions, accels, dt;
+     n_threads::Integer=Threads.nthreads())
 
     constraint_algo = unconstrained_position_update!(constraint_algo, sys, accels, dt)
 
     Threads.@threads for group_id in 1:n_threads
         for i in group_id:n_threads:length(sys.constraints)
-            apply_position_constraint!(sys, constraint_algo, sys.constraints[i], accels, dt)
+            apply_position_constraint!(sys, constraint_algo, sys.constraints[i])
         end
     end
 
-    return sys, accels
+    return sys
 end
 
 # For Velocity Verlet half step
@@ -230,10 +231,10 @@ function apply_velocity_constraints!(sys::System, constraint_algo::PositionAndVe
     return sys
 end
 
-apply_position_constraints!(sys::System, constraint_algo::NoSystemConstraints, accels, dt; n_threads::Integer = 0) = sys, accels
+apply_position_constraints!(sys::System, constraint_algo::NoSystemConstraints; n_threads::Integer = 1) = sys, accels
 
-apply_velocity_constraints!(sys::System, constraint_algo::NoSystemConstraints; n_threads::Integer = 0) = sys
-apply_velocity_constraints!(sys::System, constraint_algo::PositionConstraintAlgorithm; n_threads::Integer = 0) = sys
+apply_velocity_constraints!(sys::System, constraint_algo::NoSystemConstraints; n_threads::Integer = 1) = sys
+apply_velocity_constraints!(sys::System, constraint_algo::PositionConstraintAlgorithm; n_threads::Integer = 1) = sys
 
 save_positions!(constraint_algo::NoSystemConstraints, c) = constraint_algo
 

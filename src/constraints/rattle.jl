@@ -31,9 +31,9 @@ save_positions!(constraint_algo::RATTLE, c) = (constraint_algo.coord_storage .= 
 
 
 function apply_position_constraint!(sys, constraint_algo::RATTLE, 
-    constraint_cluster::ConstraintCluster{1}, accels, dt)
+    constraint_cluster::ConstraintCluster{1})
 
-    SHAKE_update!(sys, constraint_algo, constraint_cluster, accels, dt)
+    SHAKE_update!(sys, constraint_algo, constraint_cluster)
 
 end
 
