@@ -140,6 +140,8 @@ function simulate!(sys,
     
     for step_n in 1:n_steps
         
+        save_positions!(sys.constraint_algorithm, sys.coords)
+
         # Position Update
         sys.coords += sys.velocities .* sim.dt .+ ((accels_t .* sim.dt ^ 2) ./ 2)
 
@@ -153,7 +155,7 @@ function simulate!(sys,
         #Calculate new forces
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
  
-        sys.velocities += (accels_t .+ accels_t_dt) .* sim.dt / 2
+        sys.velocities += ((accels_t .+ accels_t_dt) .* sim.dt / 2)
 
         sys = apply_velocity_constraints!(sys, sys.constraint_algorithm, n_threads=n_threads)
 
@@ -216,6 +218,8 @@ function simulate!(sys,
 
         sys.velocities += accels_t .* sim.dt
         
+        save_positions!(sys.constraint_algorithm, sys.coords)
+
         sys.coords += sys.velocities .* sim.dt
 
         sys = apply_position_constraints!(sys, sys.constraint_algorithm,
@@ -272,6 +276,7 @@ function simulate!(sys,
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
         coords_copy = sys.coords
+        save_positions!(sys.constraint_algorithm, sys.coords)
         if step_n == 1
             # Use the velocities at the first step since there is only one set of coordinates
             sys.coords += sys.velocities .* sim.dt .+ (accels_t .* sim.dt ^ 2) ./ 2
@@ -348,6 +353,8 @@ function simulate!(sys,
 
         sys.velocities += accels_t .* sim.dt
 
+        save_positions!(sys.constraint_algorithm, sys.coords)
+
         sys.coords += sys.velocities .* sim.dt / 2
 
         sys = apply_position_constraints!(sys, sys.constraint_algorithm,
@@ -356,6 +363,8 @@ function simulate!(sys,
         noise = random_velocities(sys, sim.temperature; rng=rng)
 
         sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
+
+        save_positions!(sys.constraint_algorithm, sys.coords)
 
         sys.coords += sys.velocities .* sim.dt / 2
 
@@ -490,6 +499,9 @@ function O_step!(sys, α_eff, σ_eff, rng, temperature, neighbors)
 end
 
 function A_step!(sys, dt_eff, neighbors)
+
+    save_positions!(sys.constraint_algorithm, sys.coords)
+
     sys.coords += sys.velocities * dt_eff
 
     sys = apply_position_constraints!(sys, sys.constraint_algorithm,
@@ -557,6 +569,8 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
     for step_n in 1:n_steps
 
         v_half = sys.velocities .+ (accels_t .- (sys.velocities .* zeta)) .* (sim.dt / 2)
+
+        save_positions!(sys.constraint_algorithm, sys.coords)
 
         sys.coords += v_half .* sim.dt
 

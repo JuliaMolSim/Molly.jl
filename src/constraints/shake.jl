@@ -3,7 +3,7 @@ export SHAKE
 """
     SHAKE(coords, tolerance, init_posn_tol)
 
-A constraint algorithm to set of bonds distances in a simulation.
+A constraint algorithm to set bonds distances in a simulation.
 
 # Arguments
 - coords: An empty array with same type and size as coords in sys, `similar(sys.coords)` is best
@@ -36,18 +36,17 @@ function apply_position_constraint!(sys::System, constraint_algo::SHAKE,
 
 end
 
-#Assumes NVE update
-function unconstrained_position_update!(constraint_algo, sys, accels, dt)
+# Done in simulators now
+# function unconstrained_position_update!(constraint_algo, sys, accels, dt)
 
-    #Move system coordinates into temporary storage
-    save_positions!(constraint_algo, sys.coords)
+#     #Move system coordinates into temporary storage
+#     save_positions!(constraint_algo, sys.coords)
 
-    #Unconstrained update on stored coordinates
-    #TODO remove_mol might be unnecessary once units issues fixed
-    constraint_algo.coord_storage .+= (sys.velocities .* dt) .+ (accels .* dt ^ 2) ./ 2
+#     #Unconstrained update on stored coordinates
+#     constraint_algo.coord_storage .+= (sys.velocities .* dt) .+ (accels .* dt ^ 2) ./ 2
 
-    return constraint_algo
-end
+#     return constraint_algo
+# end
 
 #TODO: I do not think we actually need to iterate here its analytical solution
 #TODO: Modify forces instead of positions?
@@ -59,10 +58,10 @@ function SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{
     k1, k2 = constraint.atom_idxs
 
     # Distance vector after unconstrained update (s)
-    s12 = vector(ca.coord_storage[k2], ca.coord_storage[k1], sys.boundary) #& extra allocation
+    s12 = vector(sys.coords[k2], sys.coords[k1], sys.boundary) #& extra allocation
 
     # Distance vector between the atoms before unconstrained update (r)
-    r12 = vector(sys.coords[k2], sys.coords[k1], sys.boundary) #& extra allocation
+    r12 = vector(ca.coord_storage[k2], ca.coord_storage[k1], sys.boundary) #& extra allocation
 
 
     m1 = mass(sys.atoms[k1])
