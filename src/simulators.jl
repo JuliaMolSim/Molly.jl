@@ -213,6 +213,8 @@ function simulate!(sys,
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
 
+    using_constraints = (typeof(sys.constraint_algorithm) != NoSystemConstraints)
+
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
@@ -226,6 +228,8 @@ function simulate!(sys,
                  accels_t, sim.dt, n_threads=n_threads)
 
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+
+        using_constraints && sys.velocities .= (sys.coords .- sys.constraint_algorithm.coord_storage)./sim.dt
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)

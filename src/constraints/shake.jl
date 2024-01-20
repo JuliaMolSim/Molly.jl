@@ -64,11 +64,11 @@ function SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{
     r12 = vector(ca.coord_storage[k2], ca.coord_storage[k1], sys.boundary) #& extra allocation
 
 
-    m1 = mass(sys.atoms[k1])
-    m2 = mass(sys.atoms[k2])
-    a = (1/m1 + 1/m2)^2 * norm(r12)^2
-    b = 2 * (1/m1 + 1/m2) * dot(r12, s12)
-    c = norm(s12)^2 - ((constraint.dist)^2)
+    m1_inv = 1/mass(sys.atoms[k1])
+    m2_inv = 1/mass(sys.atoms[k2])
+    a = (m1_inv + m2_inv)^2 * norm(r12)^2 #* can remove sqrt in norm here
+    b = -2 * (m1_inv + m2_inv) * dot(r12, s12)
+    c = norm(s12)^2 - ((constraint.dist)^2) #* can remove sqrt in norm here
     D = (b^2 - 4*a*c)
     
     if ustrip(D) < 0.0
@@ -80,12 +80,11 @@ function SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{
     α1 = (-b + sqrt(D)) / (2*a)
     α2 = (-b - sqrt(D)) / (2*a)
 
-    g = abs(α1) <= abs(α2) ? α1 : α2
-
+    g = abs(α1) <= abs(α2) ? α1 : α2 #* why take smaller one?
 
     # Update positions
-    δri1 = r12 .* (g/m1)
-    δri2 = r12 .* (-g/m2)
+    δri1 = r12 .* (-g*m1_inv)
+    δri2 = r12 .* (g*m2_inv)
 
     sys.coords[k1] += δri1
     sys.coords[k2] += δri2
