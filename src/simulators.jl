@@ -227,9 +227,9 @@ function simulate!(sys,
         sys = apply_position_constraints!(sys, sys.constraint_algorithm,
                  accels_t, sim.dt, n_threads=n_threads)
 
-        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-
         using_constraints && sys.velocities .= (sys.coords .- sys.constraint_algorithm.coord_storage)./sim.dt
+
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)

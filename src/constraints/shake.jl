@@ -89,6 +89,7 @@ function SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{
     sys.coords[k1] += δri1
     sys.coords[k2] += δri2
 
+
     #Version that modifies accelerations
     # lambda = g/(2*(dt^2))
 
