@@ -6,18 +6,32 @@ export
 
 """
 Supertype for all constraint algorithms.
+
+Should implement the following methods:
+apply_position_constraints!(sys::System, constraint_algo::ConstraintAlgorithm, accels, dt;
+     n_threads::Integer=Threads.nthreads())
+apply_velocity_constraints!(sys::System, constraint_algo::ConstraintAlgorithm;
+     n_threads::Integer=Threads.nthreads())
+save_positions!(constraint_algo::ConstraintAlgorithm, c)
+reset_vel_correction!(ca::NoSystemConstraints, vals)
+addto_vel_correction!(ca::NoSystemConstraints, vals)
+apply_vel_correction!(sys::System, ca::ConstraintAlgorithm)
+
 """
 abstract type ConstraintAlgorithm end
-abstract type PositionConstraintAlgorithm <: ConstraintAlgorithm end
-abstract type PositionAndVelocityConstraintAlgorithm <: ConstraintAlgorithm end
-
-ConstrainsPositions = Union{PositionConstraintAlgorithm, PositionAndVelocityConstraintAlgorithm}
 
 """
 Placeholder struct for [`System`](@ref) constructor when the system does not require constraints.
-An example of a constraint algorithm is [`SHAKE`](@ref).
+An example of a constraint algorithm is [`SHAKE_RATTLE`](@ref).
 """
 struct NoSystemConstraints <: ConstraintAlgorithm end
+
+apply_position_constraints!(sys::System, ca::NoSystemConstraints; n_threads::Integer = 1) = sys
+apply_velocity_constraints!(sys::System, ca::NoSystemConstraints; n_threads::Integer = 1) = sys
+save_positions!(ca::NoSystemConstraints, c) = ca
+reset_vel_correction!(ca::NoSystemConstraints, vals) = ca
+addto_vel_correction!(ca::NoSystemConstraints, vals) = ca
+apply_vel_correction!(sys::System, ca::NoSystemConstraints) = sys
 
 
 """
@@ -198,45 +212,6 @@ function check_initial_constraints(coords, clusters, init_tol)
 end
 
 
-"""
-Updates the coordinates of a [`System`](@ref) based on the constraints.
-"""
-function apply_position_constraints!(sys::System, constraint_algo::ConstrainsPositions, accels, dt;
-     n_threads::Integer=Threads.nthreads())
-
-    # constraint_algo = unconstrained_position_update!(constraint_algo, sys, accels, dt)
-
-    Threads.@threads for group_id in 1:n_threads #& can only paralellize over independent clusters
-        for i in group_id:n_threads:length(sys.constraints)
-            apply_position_constraint!(sys, constraint_algo, sys.constraints[i])
-        end
-    end
-
-    return sys
-end
-
-# For Velocity Verlet half step
-"""
-Updates the velocities of a [`System`](@ref) based on the constraints.
-"""
-function apply_velocity_constraints!(sys::System, constraint_algo::PositionAndVelocityConstraintAlgorithm;
-     n_threads::Integer=Threads.nthreads())
-
-    Threads.@threads for group_id in 1:n_threads #& can only paralellize over independent clusters
-        for i in group_id:n_threads:length(sys.constraints)
-            apply_velocity_constraint!(sys, constraint_algo, sys.constraints[i])
-        end
-    end
- 
-    return sys
-end
-
-apply_position_constraints!(sys::System, constraint_algo::NoSystemConstraints; n_threads::Integer = 1) = sys, accels
-
-apply_velocity_constraints!(sys::System, constraint_algo::NoSystemConstraints; n_threads::Integer = 1) = sys
-apply_velocity_constraints!(sys::System, constraint_algo::PositionConstraintAlgorithm; n_threads::Integer = 1) = sys
-
-save_positions!(constraint_algo::NoSystemConstraints, c) = constraint_algo
 
 """
 Re-calculates the # of degrees of freedom in the system due to the constraints.

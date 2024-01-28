@@ -138,10 +138,6 @@ function simulate!(sys,
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
 
-    using_constraints = (typeof(sys.constraint_algorithm) != NoSystemConstraints)
-    if using_constraints
-        vel_correction = similar(sys.velocities) #* can we remove this allocation?
-    end
     
     for step_n in 1:n_steps
         
@@ -150,13 +146,14 @@ function simulate!(sys,
         # Position Update
         sys.coords += sys.velocities .* sim.dt .+ ((accels_t .* sim.dt ^ 2) ./ 2)
 
-        using_constraints && vel_correction .= -sys.coords ./ sim.dt
+        #* allocates extra arr for coords / dt???
+        reset_vel_correction!(sys.constraint_algorithm, -sys.coords ./ sim.dt)
 
-        #TODO constraints should be last thing that modifies accelerations acting this step
         sys = apply_position_constraints!(sys, sys.constraint_algorithm,
                  accels_t, sim.dt, n_threads=n_threads)
 
-        using_constraints && vel_correction .+= sys.coords ./ sim.dt 
+        #* also an extra allocation??
+        addto_vel_correction!(sys.constraint_algorithm, sys.coords ./ sim.dt)
 
         #Enforce PBC
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
@@ -164,7 +161,8 @@ function simulate!(sys,
         #Calculate new forces
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
         
-        sys.velocities += ((accels_t .+ accels_t_dt) .* sim.dt / 2) .+ vel_correction
+        sys.velocities += ((accels_t .+ accels_t_dt) .* sim.dt / 2)
+        apply_vel_correction!(sys, sys.constraint_algorithm)
 
         sys = apply_velocity_constraints!(sys, sys.constraint_algorithm, n_threads=n_threads)
 
@@ -236,8 +234,11 @@ function simulate!(sys,
         sys = apply_position_constraints!(sys, sys.constraint_algorithm,
                  accels_t, sim.dt, n_threads=n_threads)
 
-        # difference between constrainted t and constrainted t+dt 
+        # Can directly calculate velocity correction without extra storage 
         using_constraints && sys.velocities .= (sys.coords .- sys.constraint_algorithm.coord_storage)./sim.dt
+
+        #& ADD CONSTRAINT VELOCITIES HERE??
+
 
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 

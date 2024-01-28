@@ -1,49 +1,21 @@
-export RATTLE
 
-"""
-RATTLE(coords; tolerance=1e-4, init_posn_tol = nothing)
+# Since we update the positions instead of forces this correction is added
+# to velocities so that they are updated with the constraint forces.
+reset_vel_correction!(ca::SHAKE_RATTLE, vals) = ca.vel_storage .= vals
+addto_vel_correction!(ca::SHAKE_RATTLE, vals) = ca.vel_storage .+= vals
+apply_vel_correction!(sys::System, ca::SHAKE_RATTLE) = sys.velocities .= ca.vel_storage #& should these return sys/ca??
 
-Constrains a set of bonds to defined distances in a way that the velocities also satisfy the constraints.
+function apply_velocity_constraints!(sys::System, constraint_algo::SHAKE_RATTLE;
+     n_threads::Integer=Threads.nthreads())
 
-See [this paper](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3285512/) for a derivation of the linear
-system solved to satisfy the RATTLE algorithm.
-
-# Arguments
-- coords: An empty array with same type and size as coords in sys, `similar(sys.coords)` is best
-- tolerance: Tolerance used to end iterative procedure when calculating constraint forces. This
-    is not a tolerance on the error in positions or velocities, but a lower `tolerance` should
-    result in smaller error. Default is `1e-4`.
-- init_posn_tol: Tolerance used when checking if system initial positions satisfy position constraints. 
-    Default is `nothing.`
-"""
-struct RATTLE{CS,T,I} <: PositionAndVelocityConstraintAlgorithm
-    coord_storage::CS 
-    tolerance::T
-    init_posn_tol::Union{I,Nothing}
+    Threads.@threads for group_id in 1:n_threads #& can only paralellize over independent clusters
+        for i in group_id:n_threads:length(sys.constraints)
+            RATTLE_update!(sys, sys.constraints[i])
+        end
+    end
+ 
+    return sys
 end
-
-function RATTLE(coords; tolerance=1e-4, init_posn_tol = nothing)
-    return RATTLE{typeof(coords), typeof(tolerance), typeof(init_posn_tol)}(
-        coords, tolerance, init_posn_tol)
-end
-
-save_positions!(constraint_algo::RATTLE, c) = (constraint_algo.coord_storage .= c)
-
-
-function apply_position_constraint!(sys, constraint_algo::RATTLE, 
-    constraint_cluster::ConstraintCluster{1})
-
-    SHAKE_update!(sys, constraint_algo, constraint_cluster)
-
-end
-
-function apply_velocity_constraint!(sys, constraint_algo::RATTLE, 
-    constraint_cluster::ConstraintCluster)
-
-    RATTLE_update!(sys, constraint_cluster)
-
-end
-
 
 """
 RATTLE solution for a single distance constraint between atoms i and j,
@@ -75,11 +47,3 @@ function RATTLE_update!(sys, cluster::ConstraintCluster{1})
     sys.velocities[k2] += (inv_m2 .* λₖ .* r_k1k2)
 
 end
-
-# TODO
-RATTLE_update!(sys, ca::RATTLE, cluster::ConstraintCluster{2}) = nothing
-RATTLE_update!(sys, ca::RATTLE, cluster::ConstraintCluster{3}) = nothing
-RATTLE_update!(sys, ca::RATTLE, cluster::ConstraintCluster{4}) = nothing
-
-# Implement later
-# RATTLE_update!(sys, cluster::ConstraintCluster{D}) where {D >= 5} = nothing
