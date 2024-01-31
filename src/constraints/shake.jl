@@ -1,4 +1,4 @@
-export SHAKE
+export SHAKE_RATTLE
 
 """
 SHAKE_RATTLE(coords, tolerance, init_posn_tol)
@@ -45,7 +45,7 @@ function apply_position_constraints!(sys::System, constraint_algo::SHAKE_RATTLE,
 end
 
 
-function SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{1})
+function SHAKE_update!(sys, ca::SHAKE_RATTLE, cluster::ConstraintCluster{1})
 
     constraint = cluster.constraints[1]
 
@@ -94,7 +94,7 @@ function SHAKE_update!(sys, ca::Union{SHAKE,RATTLE}, cluster::ConstraintCluster{
 end
 
 
-# function SHAKE_updates!(sys, ca::SHAKE, clusters::ConstraintCluster{1})
+# function SHAKE_updates!(sys, ca::SHAKE_RATTLE, clusters::ConstraintCluster{1})
 #     converged = false
 
 #     while !converged

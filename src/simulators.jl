@@ -237,9 +237,6 @@ function simulate!(sys,
         # Can directly calculate velocity correction without extra storage 
         using_constraints && sys.velocities .= (sys.coords .- sys.constraint_algorithm.coord_storage)./sim.dt
 
-        #& ADD CONSTRAINT VELOCITIES HERE??
-
-
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
@@ -367,13 +364,9 @@ function simulate!(sys,
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)    
 
         sys.velocities += accels_t .* sim.dt
-
-        save_positions!(sys.constraint_algorithm, sys.coords)
+        sys = apply_velocity_constraints!(sys, sys.constraint_algorithm, n_threads=n_threads)
 
         sys.coords += sys.velocities .* sim.dt / 2
-
-        sys = apply_position_constraints!(sys, sys.constraint_algorithm,
-                 accels_t, sim.dt, n_threads=n_threads)
 
         noise = random_velocities(sys, sim.temperature; rng=rng)
 
@@ -383,8 +376,13 @@ function simulate!(sys,
 
         sys.coords += sys.velocities .* sim.dt / 2
 
+        reset_vel_correction!(sys.constraint_algorithm, -sys.coords ./ sim.dt)
+
         sys = apply_position_constraints!(sys, sys.constraint_algorithm,
                  accels_t, sim.dt, n_threads=n_threads)
+
+        addto_vel_correction!(sys.constraint_algorithm, sys.coords ./ sim.dt)
+        apply_vel_correction!(sys, sys.constraint_algorithm)
 
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0

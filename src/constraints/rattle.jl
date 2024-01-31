@@ -3,7 +3,7 @@
 # to velocities so that they are updated with the constraint forces.
 reset_vel_correction!(ca::SHAKE_RATTLE, vals) = ca.vel_storage .= vals
 addto_vel_correction!(ca::SHAKE_RATTLE, vals) = ca.vel_storage .+= vals
-apply_vel_correction!(sys::System, ca::SHAKE_RATTLE) = sys.velocities .= ca.vel_storage #& should these return sys/ca??
+apply_vel_correction!(sys::System, ca::SHAKE_RATTLE) = sys.velocities .+= ca.vel_storage #& should these return sys/ca??
 
 function apply_velocity_constraints!(sys::System, constraint_algo::SHAKE_RATTLE;
      n_threads::Integer=Threads.nthreads())
