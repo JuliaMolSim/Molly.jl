@@ -81,20 +81,30 @@ will come at a performance penatly.
 """
 struct ConstraintCluster{N}
     constraints::SVector{N,<:Constraint}
+    n_unique_atoms::Integer
 end
 
-Base.length(cc::ConstraintCluster) = length(cc.constraints)
+function ConstraintCluster(constraints)
 
-function num_unique_atoms(cc::ConstraintCluster)
+    #Count # of unique atoms in cluster
     atom_ids = []
-    for constraint in cc.constraints
+    for constraint in constraints
         for atom_idx in constraint.atom_idxs
             push!(atom_ids, atom_idx)
         end
     end
 
-    return length(unique(atom_ids))
+    #Not sure this is always true? not true for rings
+    # if length(unique(atom_ids)) < length(constraints)
+    #     throw(ArgumentError("System is overconstrained. There are more constraints than unique atoms\
+    #     in cluster with atoms: $(atom_ids)."))
+    # end
+
+    return ConstraintCluster{length(constraints)}(constraints, length(unique(atom_ids)))
+
 end
+
+Base.length(cc::ConstraintCluster) = length(cc.constraints)
 
 
 # """
@@ -229,20 +239,37 @@ Total         |     D      |      D*N        |       D*N           |
 function n_dof(D::Int, N_atoms::Int, boundary, constraint_clusters)
 
     # Momentum only conserved in directions with PBC
-    total = D*N_atoms - (D - (num_infinte_boundary(boundary)))
+    dof = 3*N_atoms
 
-    # Bond constraints remove vibrational DoFs
-    vibrational_dof_lost = 0
+    #Assumes constraints are a non-linear chain
     for cluster in constraint_clusters
-        N = num_unique_atoms(cluster)
-        # If N > 2 assume non-linear
-        vibrational_dof_lost += ((N == 2) ? D*N - (2*D - 1) : D*(N - 2))
+        dof -= length(cluster.constraints)
     end
 
-    return total - vibrational_dof_lost
+    return dof - (D - (num_infinte_boundary(boundary))) #& NEED TO ACCOUNT FOR THINGS NOT CONSTRAINED
 
 end
 
 function n_dof(D::Int, N_atoms::Int, boundary)
     return D*N_atoms - (D - (num_infinte_boundary(boundary)))
 end
+
+
+# function n_dof(D::Int, N_atoms::Int, boundary, constraint_clusters)
+
+#     # Momentum only conserved in directions with PBC
+#     total = D*N_atoms - (D - (num_infinte_boundary(boundary)))
+
+#     # Bond constraints remove vibrational DoFs
+#     vibrational_dof_lost = 0
+#     #Assumes constraints are a non-linear chain
+#     for cluster in constraint_clusters
+#         N = num_unique_atoms(cluster)
+#         # If N > 2 assume non-linear (e.g. breaks for CO2)
+#         vibrational_dof_lost += ((N == 2) ? D*N - (2*D - 1) : D*(N - 2))
+#         dof -= length(cluster.constraints)
+#     end
+
+#     return total - vibrational_dof_lost
+
+# end
