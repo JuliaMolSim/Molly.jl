@@ -204,9 +204,9 @@ nothing_to_notangent(x) = x
 nothing_to_notangent(::Nothing) = NoTangent()
 
 function ChainRulesCore.rrule(::typeof(forces_pair_spec), coords::AbstractArray{SVector{D, T}},
-                              atoms, pairwise_inters_nonl, pairwise_inters_nl, sils_1_atoms,
-                              sils_2_atoms, sils_3_atoms, sils_4_atoms, boundary, force_units,
-                              neighbors, n_threads) where {D, T}
+                              atoms::AbstractArray{A}, pairwise_inters_nonl, pairwise_inters_nl,
+                              sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, boundary,
+                              force_units, neighbors, n_threads) where {D, T, A}
     if force_units != NoUnits
         error("taking gradients through force calculation is not compatible with units, " *
               "system force units are $force_units")
@@ -219,7 +219,7 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), coords::AbstractArray{
         fs = zero(coords)
         z = zero(T)
         d_coords = zero(coords)
-        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in eachindex(coords)]
+        d_atoms = fill(zero(A), length(coords))
         d_sils_1_atoms = zero.(sils_1_atoms)
         d_sils_2_atoms = zero.(sils_2_atoms)
         d_sils_3_atoms = zero.(sils_3_atoms)
@@ -252,10 +252,10 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), coords::AbstractArray{
     return Y, forces_pair_spec_pullback
 end
 
-function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), coords, atoms,
+function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), coords, atoms::AbstractArray{A},
                               pairwise_inters_nonl, pairwise_inters_nl, sils_1_atoms, sils_2_atoms,
                               sils_3_atoms, sils_4_atoms, boundary, energy_units, neighbors,
-                              n_threads, val_ft::Val{T}) where T
+                              n_threads, val_ft::Val{T}) where {A, T}
     if energy_units != NoUnits
         error("taking gradients through potential energy calculation is not compatible with " *
               "units, system energy units are $energy_units")
@@ -268,7 +268,7 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), coords, atom
         pe_vec = zeros(T, 1)
         z = zero(T)
         d_coords = zero(coords)
-        d_atoms = [Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in eachindex(coords)]
+        d_atoms = fill(zero(A), length(coords))
         d_sils_1_atoms = zero.(sils_1_atoms)
         d_sils_2_atoms = zero.(sils_2_atoms)
         d_sils_3_atoms = zero.(sils_3_atoms)
@@ -337,8 +337,8 @@ function grad_pairwise_force_kernel!(fs_mat, d_fs_mat, coords, d_coords, atoms, 
 end
 
 function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArray{SVector{D, C}},
-                              atoms, boundary, pairwise_inters, nbs, force_units,
-                              val_ft::Val{T}) where {D, C, T}
+                              atoms::AbstractArray{A}, boundary, pairwise_inters, nbs, force_units,
+                              val_ft::Val{T}) where {D, C, A, T}
     if force_units != NoUnits
         error("taking gradients through force calculation is not compatible with units, " *
               "system force units are $force_units")
@@ -350,7 +350,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArra
         z = zero(T)
         fs_mat = CUDA.zeros(T, D, n_atoms)
         d_coords = zero(coords)
-        d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
+        d_atoms = CuArray(fill(zero(A), n_atoms))
         n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
         grad_pairwise_inters = CuArray(fill(pairwise_inters, n_blocks))
 
@@ -400,8 +400,8 @@ function grad_pairwise_pe_kernel!(pe_vec, d_pe_vec, coords, d_coords, atoms, d_a
 end
 
 function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{SVector{D, C}},
-                              atoms, boundary, pairwise_inters, nbs, energy_units,
-                              val_ft::Val{T}) where {D, C, T}
+                              atoms::AbstractArray{A}, boundary, pairwise_inters, nbs, energy_units,
+                              val_ft::Val{T}) where {D, C, A, T}
     if energy_units != NoUnits
         error("taking gradients through potential energy calculation is not compatible with " *
               "units, system energy units are $energy_units")
@@ -414,7 +414,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_pe_gpu), coords::AbstractArray{S
         pe_vec = CUDA.zeros(T, 1)
         d_pe_vec = CuArray([d_pe_vec_arg[1]])
         d_coords = zero(coords)
-        d_atoms = CuArray([Atom(charge=z, mass=z, σ=z, ϵ=z) for _ in 1:n_atoms])
+        d_atoms = CuArray(fill(zero(A), n_atoms))
         n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
         grad_pairwise_inters = CuArray(fill(pairwise_inters, n_blocks))
 
