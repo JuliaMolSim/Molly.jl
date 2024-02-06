@@ -209,6 +209,39 @@ end
 
 use_neighbors(inter::LennardJonesSoftCore) = inter.use_neighbors
 
+function Base.zero(lj::LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E}) where {S, C, A, L, P, R, W, WS, F, E}
+    return LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E}(
+        lj.cutoff,
+        zero(A),
+        zero(L),
+        zero(P),
+        zero(R),
+        false,
+        false,
+        zero(W),
+        zero(WS),
+        lj.force_units,
+        lj.energy_units,
+    )
+end
+
+function Base.:+(l1::LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E},
+                 l2::LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E}) where {S, C, A, L, P, R, W, WS, F, E}
+    return LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E}(
+        l1.cutoff,
+        l1.α + l2.α,
+        l1.λ + l2.λ,
+        l1.p + l2.p,
+        l1.σ6_fac + l2.σ6_fac,
+        l1.use_neighbors,
+        l1.lorentz_mixing,
+        l1.weight_special + l2.weight_special,
+        l1.weight_solute_solvent + l2.weight_solute_solvent,
+        l1.force_units,
+        l1.energy_units,
+    )
+end
+
 @inline function force(inter::LennardJonesSoftCore{S, C},
                                     dr,
                                     coord_i,
