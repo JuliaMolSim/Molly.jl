@@ -165,6 +165,14 @@ function ChainRulesCore.rrule(::typeof(mean), arr::AbstractArray{SVector{D, T}})
     return Y, mean_pullback
 end
 
+function ChainRulesCore.rrule(T::Type{<:DistanceCutoff}, dist_cutoff)
+    Y = T(dist_cutoff)
+    function DistanceCutoff_pullback(Ȳ)
+        return NoTangent(), NoTangent()
+    end
+    return Y, DistanceCutoff_pullback
+end
+
 function ChainRulesCore.rrule(T::Type{<:HarmonicBond}, vs...)
     Y = T(vs...)
     function HarmonicBond_pullback(Ȳ)
