@@ -29,14 +29,6 @@ function Zygote.accum(x::CuArray{Atom{T, T, T, T}},
     CuArray(Zygote.accum(Array(x), y))
 end
 
-function Base.:+(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
-    Atom{T, T, T, T}(0, x.charge + y.charge, x.mass + y.mass, x.σ + y.σ, x.ϵ + y.ϵ, false)
-end
-
-function Base.:-(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
-    Atom{T, T, T, T}(0, x.charge - y.charge, x.mass - y.mass, x.σ - y.σ, x.ϵ - y.ϵ, false)
-end
-
 function Base.:+(x::Atom{T, T, T, T}, y::NamedTuple{(:index, :charge, :mass, :σ, :ϵ, :solute),
                     Tuple{Int, C, M, S, E, Bool}}) where {T, C, M, S, E}
     Atom{T, T, T, T}(

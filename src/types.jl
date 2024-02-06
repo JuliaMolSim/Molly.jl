@@ -249,6 +249,14 @@ function Base.zero(::Type{Atom{T, T, T, T}}) where T
     return Atom(0, z, z, z, z, false)
 end
 
+function Base.:+(a1::Atom, a2::Atom)
+    return Atom(0, a1.charge + a2.charge, a1.mass + a2.mass, a1.σ + a2.σ, a1.ϵ + a2.ϵ, false)
+end
+
+function Base.:-(a1::Atom, a2::Atom)
+    return Atom(0, a1.charge - a2.charge, a1.mass - a2.mass, a1.σ - a2.σ, a1.ϵ - a2.ϵ, false)
+end
+
 Base.getindex(at::Atom, x::Symbol) = hasfield(Atom, x) ? getfield(atom, x) : KeyError("no field $x in Atom")
 
 """
