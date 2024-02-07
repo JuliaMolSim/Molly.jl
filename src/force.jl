@@ -11,15 +11,16 @@ export
     forces
 
 """
-    accelerations(system, neighbors=nothing; n_threads=Threads.nthreads())
+    accelerations(system, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
 
 Calculate the accelerations of all atoms in a system using the pairwise,
 specific and general interactions and Newton's second law of motion.
-
-If the interactions use neighbor lists, the neighbors should be computed
-first and passed to the function.
 """
-function accelerations(sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+function accelerations(sys; n_threads::Integer=Threads.nthreads())
+    return accelerations(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+end
+
+function accelerations(sys, neighbors; n_threads::Integer=Threads.nthreads())
     return forces(sys, neighbors; n_threads=n_threads) ./ masses(sys)
 end
 
@@ -119,15 +120,16 @@ Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 
 """
-    forces(system, neighbors=nothing; n_threads=Threads.nthreads())
+    forces(system, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
 
 Calculate the forces on all atoms in a system using the pairwise, specific and
 general interactions.
-
-If the interactions use neighbor lists, the neighbors should be computed
-first and passed to the function.
 """
-function forces(sys::System{D, false}, neighbors=nothing;
+function forces(sys; n_threads::Integer=Threads.nthreads())
+    return forces(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+end
+
+function forces(sys::System{D, false}, neighbors;
                 n_threads::Integer=Threads.nthreads()) where D
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
@@ -293,7 +295,7 @@ function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_int
     return nothing
 end
 
-function forces(sys::System{D, true, T}, neighbors=nothing;
+function forces(sys::System{D, true, T}, neighbors;
                 n_threads::Integer=Threads.nthreads()) where {D, T}
     n_atoms = length(sys)
     val_ft = Val(T)

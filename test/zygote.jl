@@ -254,8 +254,7 @@ end
                 energy_units=NoUnits,
             )
 
-            neighbors = find_neighbors(sys; n_threads=n_threads)
-            return potential_energy(sys, neighbors; n_threads=n_threads)
+            return potential_energy(sys; n_threads=n_threads)
         end
 
         return loss
@@ -283,8 +282,7 @@ end
                 energy_units=NoUnits,
             )
 
-            neighbors = find_neighbors(sys; n_threads=n_threads)
-            fs = forces(sys, neighbors; n_threads=n_threads)
+            fs = forces(sys; n_threads=n_threads)
             return sum(sum_abs.(fs))
         end
 

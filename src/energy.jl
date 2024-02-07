@@ -7,15 +7,16 @@ export
     potential_energy
 
 """
-    total_energy(system, neighbors=nothing; n_threads=Threads.nthreads())
+    total_energy(system, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
 
 Calculate the total energy of a system as the sum of the [`kinetic_energy`](@ref)
 and the [`potential_energy`](@ref).
-
-If the interactions use neighbor lists, the neighbors should be computed
-first and passed to the function.
 """
-function total_energy(sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+function total_energy(sys; n_threads::Integer=Threads.nthreads())
+    return total_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+end
+
+function total_energy(sys, neighbors; n_threads::Integer=Threads.nthreads())
     return kinetic_energy(sys) + potential_energy(sys, neighbors; n_threads=n_threads)
 end
 
@@ -48,13 +49,10 @@ function temperature(sys)
 end
 
 """
-    potential_energy(system, neighbors=nothing; n_threads=Threads.nthreads())
+    potential_energy(system, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
 
 Calculate the potential energy of a system using the pairwise, specific and
 general interactions.
-
-If the interactions use neighbor lists, the neighbors should be computed
-first and passed to the function.
 
     potential_energy(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
                      atom_i, atom_j, boundary)
@@ -69,7 +67,11 @@ Calculate the potential energy due to a given interaction type.
 
 Custom interaction types should implement this function.
 """
-function potential_energy(sys::System{D, false}, neighbors=nothing;
+function potential_energy(sys; n_threads::Integer=Threads.nthreads())
+    return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+end
+
+function potential_energy(sys::System{D, false}, neighbors;
                           n_threads::Integer=Threads.nthreads()) where D
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
@@ -223,7 +225,7 @@ function potential_energy_pair_spec!(pe_vec, coords, atoms, pairwise_inters_nonl
     return nothing
 end
 
-function potential_energy(sys::System{D, true, T}, neighbors=nothing;
+function potential_energy(sys::System{D, true, T}, neighbors;
                           n_threads::Integer=Threads.nthreads()) where {D, T}
     n_atoms = length(sys)
     val_ft = Val(T)

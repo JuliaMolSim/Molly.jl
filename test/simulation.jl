@@ -833,8 +833,6 @@ end
 
     @test sys.loggers.avgpe.block_averages[end] < sys.loggers.avgpe.block_averages[1]
 
-    neighbors = find_neighbors(sys, sys.neighbor_finder)
-
     distance_sum = 0.0u"nm"
     for i in eachindex(sys)
         ci = sys.coords[i]
@@ -1224,8 +1222,7 @@ end
         @test float_type(s) == (f32 ? Float32 : Float64)
 
         n_threads = parallel ? Threads.nthreads() : 1
-        neighbors = find_neighbors(s; n_threads=n_threads)
-        E_start = potential_energy(s, neighbors; n_threads=n_threads)
+        E_start = potential_energy(s; n_threads=n_threads)
 
         simulate!(s, simulator, n_steps; n_threads=n_threads)
         return s.coords, E_start
