@@ -435,6 +435,7 @@ are not available when reading Gromacs files.
     simulation box.
 - `use_cell_list::Bool=true`: whether to use [`CellListMapNeighborFinder`](@ref)
     on CPU. If `false`, [`DistanceNeighborFinder`](@ref) is used.
+- `data=nothing`: arbitrary data associated with the system.
 - `implicit_solvent=nothing`: specify a string to add an implicit solvent
     model, options are "obc1", "obc2" and "gbn2".
 - `kappa=0.0u"nm^-1"`: the kappa value for the implicit solvent model if one
@@ -454,6 +455,7 @@ function System(coord_file::AbstractString,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
                 use_cell_list::Bool=true,
+                data=nothing,
                 implicit_solvent=nothing,
                 kappa=0.0u"nm^-1",
                 rename_terminal_res::Bool=true)
@@ -955,6 +957,7 @@ function System(coord_file::AbstractString,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
         energy_units=units ? u"kJ * mol^-1" : NoUnits,
         k=k,
+        data=data,
     )
 end
 
@@ -969,7 +972,8 @@ function System(T::Type,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
-                use_cell_list::Bool=true)
+                use_cell_list::Bool=true,
+                data=nothing)
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
     bondtypes = Dict{String, HarmonicBond}()
@@ -1321,6 +1325,7 @@ function System(T::Type,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
         energy_units=units ? u"kJ * mol^-1" : NoUnits,
         k=k,
+        data=data,
     )
 end
 
@@ -1398,5 +1403,6 @@ function add_position_restraints(sys,
         force_units=sys.force_units,
         energy_units=sys.energy_units,
         k=sys.k,
+        data=sys.data,
     )
 end

@@ -459,9 +459,10 @@ interface described there.
     be set to `NoUnits` if units are not being used.
 - `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
     modified in some simulations. `k` is chosen based on the `energy_units` given.
+- `data::DA=nothing`: arbitrary data associated with the system.
 """
 mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
-                      L, F, E, K, M} <: AbstractSystem{D}
+                      L, F, E, K, M, DA} <: AbstractSystem{D}
     atoms::A
     coords::C
     boundary::B
@@ -478,6 +479,7 @@ mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
     energy_units::E
     k::K
     masses::M
+    data::DA
 end
 
 function System(;
@@ -495,7 +497,8 @@ function System(;
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
-                k=default_k(energy_units))
+                k=default_k(energy_units),
+                data=nothing)
     D = n_dimensions(boundary)
     G = isa(coords, CuArray)
     T = float_type(boundary)
@@ -512,6 +515,7 @@ function System(;
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
+    DA = typeof(data)
 
     if isnothing(velocities)
         if force_units == NoUnits
@@ -557,10 +561,10 @@ function System(;
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary, constraints)
 
-    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M}(
+    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, DA}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, neighbor_finder,
-                    loggers, force_units, energy_units, k_converted, atom_masses)
+                    loggers, force_units, energy_units, k_converted, atom_masses, data)
 end
 
 """
@@ -585,7 +589,8 @@ function System(sys::System;
                 loggers=sys.loggers,
                 force_units=sys.force_units,
                 energy_units=sys.energy_units,
-                k=sys.k)
+                k=sys.k,
+                data=sys.data)
     return System(
         atoms=atoms,
         coords=coords,
@@ -602,6 +607,7 @@ function System(sys::System;
         force_units=force_units,
         energy_units=energy_units,
         k=k,
+        data=data,
     )
 end
 
@@ -628,7 +634,8 @@ function System(crystal::Crystal{D};
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
-                k=default_k(energy_units)) where D
+                k=default_k(energy_units),
+                data=nothing) where D
     atoms = [Atom(index=i, charge=charge(a), mass=atomic_mass(a)) for (i, a) in enumerate(crystal.atoms)]
     atoms_data = [AtomData(element=String(atomic_symbol(a))) for a in crystal.atoms]
     coords = [SVector{D}(SimpleCrystals.position(crystal, i)) for i in 1:length(crystal)]
@@ -665,6 +672,7 @@ function System(crystal::Crystal{D};
         force_units=force_units,
         energy_units=energy_units,
         k=k,
+        data=data,
     )
 end
 
@@ -738,8 +746,9 @@ construction where `n` is the number of threads to be used per replica.
     be set to `NoUnits` if units are not being used.
 - `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
     modified in some simulations. `k` is chosen based on the `energy_units` given.
+- `data::DA=nothing`: arbitrary data associated with the replica system.
 """
-mutable struct ReplicaSystem{D, G, T, A, AD, EL, F, E, K, R} <: AbstractSystem{D}
+mutable struct ReplicaSystem{D, G, T, A, AD, EL, F, E, K, R, DA} <: AbstractSystem{D}
     atoms::A
     n_replicas::Int
     atoms_data::AD
@@ -748,6 +757,7 @@ mutable struct ReplicaSystem{D, G, T, A, AD, EL, F, E, K, R} <: AbstractSystem{D
     energy_units::E
     k::K
     replicas::R
+    data::DA
 end
 
 function ReplicaSystem(;
@@ -772,7 +782,8 @@ function ReplicaSystem(;
                         exchange_logger=nothing,
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
-                        k=default_k(energy_units))
+                        k=default_k(energy_units),
+                        data=nothing)
     D = n_dimensions(boundary)
     G = isa(replica_coords[1], CuArray)
     T = float_type(boundary)
@@ -780,6 +791,7 @@ function ReplicaSystem(;
     AD = typeof(atoms_data)
     F = typeof(force_units)
     E = typeof(energy_units)
+    DA = typeof(data)
     C = typeof(replica_coords[1])
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
@@ -901,17 +913,17 @@ function ReplicaSystem(;
     K = typeof(k_converted)
 
     replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
-                            typeof(replica_loggers[i]), F, E, K, M}(
+                            typeof(replica_loggers[i]), F, E, K, M, Nothing}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i], 
             deepcopy(neighbor_finder), replica_loggers[i], force_units, energy_units,
-            k_converted, atom_masses) for i in 1:n_replicas)
+            k_converted, atom_masses, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
 
-    return ReplicaSystem{D, G, T, A, AD, EL, F, E, K, R}(
+    return ReplicaSystem{D, G, T, A, AD, EL, F, E, K, R, DA}(
             atoms, n_replicas, atoms_data, exchange_logger, force_units,
-            energy_units, k_converted, replicas)
+            energy_units, k_converted, replicas, data)
 end
 
 """

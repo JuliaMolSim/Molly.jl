@@ -10,6 +10,7 @@
             energy=TotalEnergyLogger(10),
             writer=StructureWriter(10, temp_fp_pdb),
         ),
+        data="test_data_peptide",
     )
     simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
@@ -22,6 +23,7 @@
     @test length(s.specific_inter_lists) == 3
     @test s.boundary == CubicBoundary(3.7146u"nm")
     show(devnull, first(s.atoms))
+    @test s.data == "test_data_peptide"
 
     @test length(s.topology.atom_molecule_inds) == length(s) == 5191
     @test s.topology.atom_molecule_inds[10] == 1

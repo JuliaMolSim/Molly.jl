@@ -381,6 +381,7 @@ end
         n_replicas=n_replicas,
         replica_velocities=replica_velocities,
         pairwise_inters=pairwise_inters,
+        data="test_data_repsys",
     )
 
     sys = System(
@@ -389,7 +390,11 @@ end
         boundary=boundary,
         velocities=nothing,
         pairwise_inters=pairwise_inters,
+        data="test_data_sys",
     )
+
+    @test repsys.data == "test_data_repsys"
+    @test sys.data == "test_data_sys"
 
     for i in 1:n_replicas
         repsys_fields = [getfield(repsys.replicas[i], f) for f in fieldnames(System)]
