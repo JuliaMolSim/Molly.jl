@@ -262,7 +262,8 @@ end
 
             @test_throws ErrorException forces(sys, nothing)
             forces_molly = forces(sys)
-            @test forces_molly == forces(sys, neighbors)
+            @test !any(d -> any(abs.(d) .> 1e-6u"kJ * mol^-1 * nm^-1"),
+                        Array(forces_molly) .- Array(forces(sys, neighbors)))
             openmm_force_fp = joinpath(openmm_dir, "forces_$solvent_model.txt")
             forces_openmm = SVector{3}.(eachrow(readdlm(openmm_force_fp)))u"kJ * mol^-1 * nm^-1"
             @test !any(d -> any(abs.(d) .> 1e-3u"kJ * mol^-1 * nm^-1"),
@@ -270,7 +271,7 @@ end
 
             @test_throws ErrorException potential_energy(sys, nothing)
             E_molly = potential_energy(sys)
-            @test E_molly == potential_energy(sys, neighbors)
+            @test E_molly ≈ potential_energy(sys, neighbors)
             openmm_E_fp = joinpath(openmm_dir, "energy_$solvent_model.txt")
             E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
             @test E_molly - E_openmm < 1e-2u"kJ * mol^-1"

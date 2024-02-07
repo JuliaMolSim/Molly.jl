@@ -381,7 +381,6 @@ end
         n_replicas=n_replicas,
         replica_velocities=replica_velocities,
         pairwise_inters=pairwise_inters,
-        data="test_data_repsys",
     )
 
     sys = System(
@@ -390,11 +389,7 @@ end
         boundary=boundary,
         velocities=nothing,
         pairwise_inters=pairwise_inters,
-        data="test_data_sys",
     )
-
-    @test repsys.data == "test_data_repsys"
-    @test sys.data == "test_data_sys"
 
     for i in 1:n_replicas
         repsys_fields = [getfield(repsys.replicas[i], f) for f in fieldnames(System)]
@@ -412,6 +407,7 @@ end
         neighbor_finder=neighbor_finder,
         replica_loggers=[(temp=TemperatureLogger(10), coords=CoordinateLogger(10))
                          for i in 1:n_replicas],
+        data="test_data_repsys",
     )
 
     sys2 = System(
@@ -422,7 +418,11 @@ end
         pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
         loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
+        data="test_data_sys",
     )
+
+    @test repsys2.data == "test_data_repsys"
+    @test sys2.data == "test_data_sys"
 
     for i in 1:n_replicas
         l1 = repsys2.replicas[i].loggers
