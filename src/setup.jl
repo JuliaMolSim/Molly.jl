@@ -1395,8 +1395,8 @@ function add_position_restraints(sys,
         constraints=deepcopy(sys.constraints),
         neighbor_finder=deepcopy(sys.neighbor_finder),
         loggers=deepcopy(sys.loggers),
-        k=sys.k,
         force_units=sys.force_units,
         energy_units=sys.energy_units,
+        k=sys.k,
     )
 end
