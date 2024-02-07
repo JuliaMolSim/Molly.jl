@@ -420,13 +420,13 @@ chain_angles = Float64[]
 for traj_coords in logged_coords[(n_frames ÷ 2):end]
     for pol_i in 1:n_polymers
         for mon_i in 2:(n_monomers - 1)
-            angle = bond_angle(
+            ang = bond_angle(
                 traj_coords[(pol_i - 1) * n_monomers + mon_i - 1],
                 traj_coords[(pol_i - 1) * n_monomers + mon_i    ],
                 traj_coords[(pol_i - 1) * n_monomers + mon_i + 1],
                 boundary,
             )
-            push!(chain_angles, rad2deg(angle))
+            push!(chain_angles, rad2deg(ang))
         end
     end
 end

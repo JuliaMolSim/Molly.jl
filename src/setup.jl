@@ -254,16 +254,16 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     bond_types[(atom_type_1, atom_type_2)] = HarmonicBond(k, r0)
                 end
             elseif entry_name == "HarmonicAngleForce"
-                for angle in eachelement(entry)
-                    if haskey(angle, "class1")
+                for ang in eachelement(entry)
+                    if haskey(ang, "class1")
                         @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
                         continue
                     end
-                    atom_type_1 = angle["type1"]
-                    atom_type_2 = angle["type2"]
-                    atom_type_3 = angle["type3"]
-                    k = units ? parse(T, angle["k"])u"kJ * mol^-1" : parse(T, angle["k"])
-                    θ0 = parse(T, angle["angle"])
+                    atom_type_1 = ang["type1"]
+                    atom_type_2 = ang["type2"]
+                    atom_type_3 = ang["type3"]
+                    k = units ? parse(T, ang["k"])u"kJ * mol^-1" : parse(T, ang["k"])
+                    θ0 = parse(T, ang["angle"])
                     angle_types[(atom_type_1, atom_type_2, atom_type_3)] = HarmonicAngle(k, θ0)
                 end
             elseif entry_name == "PeriodicTorsionForce"
