@@ -1,5 +1,16 @@
 # Molly.jl release notes
 
+## v0.19.0 - Feb 2024
+
+### Breaking changes
+- General interactions are changed to use the AtomsCalculators.jl interface, allowing simulations to be run with calculators from other packages. A tuple of interactions compatible with the AtomsCalculators.jl interface should be given to `general_inters` when constructing a `System`. `ImplicitSolventOBC`, `ImplicitSolventGBN2` and `MullerBrown` are changed to be calculators.
+- The type parameters of `System` and `ReplicaSystem` are changed.
+
+### New features
+- `forces`, `accelerations`, `potential_energy`, `total_energy`, `virial` and `pressure` now calculate the neighbors by default when called without neighbors. If they are being reused, neighbors should be pre-computed as before for performance.
+- `System` and `ReplicaSystem` now have a `data` field, set with the `data` keyword argument to the constructors, that can be used to store arbitrary data. This data can be accessed inside simulators.
+- `LennardJonesSoftCore`, `CoulombSoftCore` and custom atom types are now compatible with gradients.
+
 ## v0.18.4 - Jan 2024
 
 ### Bug fixes

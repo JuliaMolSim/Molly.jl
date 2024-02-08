@@ -1,7 +1,7 @@
 name = "Molly"
 uuid = "aa0f7f06-fcc0-5ec4-a7f3-a573f33f9c4c"
 authors = ["Joe G Greener <jgreener@hotmail.co.uk>"]
-version = "0.18.4"
+version = "0.19.0"
 
 [deps]
 Atomix = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
