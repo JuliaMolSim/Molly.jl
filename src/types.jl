@@ -558,7 +558,7 @@ function System(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    if(!isbits(eltype(coords)) || !isbits(eltype(vels))
+    if(!isbits(eltype(coords)) || !isbits(eltype(vels)))
         @warn "Eltype of coords of velocities was not isbits. It is recomended to use Vector{SVector{}} for performance."
     end
 
