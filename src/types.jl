@@ -558,6 +558,10 @@ function System(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
+    if(!isbits(eltype(coords)) || !isbits(eltype(vels)))
+        @warn "Eltype of coords of velocities was not isbits. It is recomended to use a vector of SVector's for performance. Note using other structures could cause errors in the force calculation"
+    end
+
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary, constraints)
 
