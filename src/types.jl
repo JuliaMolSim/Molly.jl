@@ -559,7 +559,7 @@ function System(;
     K = typeof(k_converted)
 
     if(!isbits(eltype(coords)) || !isbits(eltype(vels)))
-        @warn "Eltype of coords of velocities was not isbits. It is recomended to use Vector{SVector{}} for performance."
+        @warn "Eltype of coords of velocities was not isbits. It is recomended to use a vector of SVector's for performance. Note using other structures could cause errors in the force calculation"
     end
 
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
