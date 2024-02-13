@@ -1,4 +1,4 @@
-<img src="docs/src/images/logo_molly.png" alt="Molly logo" width="200">
+<img src="docs/src/images/logo_molly.png" alt="Molly logo" width="400">
 
 [![Build status](https://github.com/JuliaMolSim/Molly.jl/workflows/CI/badge.svg)](https://github.com/JuliaMolSim/Molly.jl/actions)
 [![Coverage status](https://codecov.io/gh/JuliaMolSim/Molly.jl/branch/master/graph/badge.svg?token=RD9XF0W90L)](https://codecov.io/gh/JuliaMolSim/Molly.jl)
