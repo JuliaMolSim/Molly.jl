@@ -10,30 +10,28 @@ See [this paper](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3285512/) for a de
 system solved to satisfy the RATTLE algorithm.
 
 # Arguments
-- coord_storage: An empty array with same type and size as coords in sys, `similar(sys.coords)` is best
-- vel_storage: An empty array with the same type and size as velocities in sys, `similar(sys.velocities)` is best.
-    This argument can safely be passed as `nothing` if the integrator does not use velocity constraints like [`StormerVerlet`](@ref).
-- tolerance: Tolerance used to end iterative procedure when calculating constraints.
-    Default is 1e-4.
-- init_posn_tol: Tolerance used when checking if system initial positions satisfy position constraints. 
-    Default is `nothing.`
+- constraints::AbstractVector{<:Constraint}: A vector of constraints to be imposed on the system.
+- n_atoms::Integer: The number of atoms in the system.
+- dist_tolerance: Tolerance used to end iterative procedure when calculating constraints.
+    Should have same units as coords.
+- vel_tolerance: Tolerance used to end iterative procedure when calculating velocity constraints.
+    Should have same units as velocities*coords.
 """
-struct SHAKE_RATTLE{UC, VC, D, V, I} <: ConstraintAlgorithm
-    coord_storage::UC #Used as storage to avoid re-allocating arrays
-    vel_storage::Union{VC, Nothing}
+struct SHAKE_RATTLE{D, V} <: ConstraintAlgorithm
+    clusters::AbstractVector{<:ConstraintCluster}
     dist_tolerance::D
     vel_tolerance::V
-    init_posn_tol::Union{I,Nothing}
 end
 
-function SHAKE_RATTLE(coord_storage, vel_storage; dist_tolerance=1e-4, vel_tolerance = 1e-4, init_posn_tol = nothing)
-    return SHAKE_RATTLE{typeof(coord_storage), typeof(vel_storage), typeof(dist_tolerance),  typeof(vel_tolerance), typeof(init_posn_tol)}(
-        coord_storage, vel_storage, dist_tolerance, vel_tolerance, init_posn_tol)
+function SHAKE_RATTLE(constraints::AbstractVector{<:Constraint}, n_atoms, dist_tolerance, vel_tolerance)
+
+    #If this becomes a memory issue n_atoms could probably be number of atoms constrained
+    clusters = build_clusters(n_atoms, constraints)
+
+    return SHAKE_RATTLE{typeof(dist_tolerance), typeof(vel_tolerance)}(clusters, dist_tolerance, vel_tolerance)
 end
 
-save_positions!(constraint_algo::SHAKE_RATTLE, c) = (constraint_algo.coord_storage .= c)
-
-function apply_position_constraints!(sys::System, constraint_algo::SHAKE_RATTLE;
+function position_constraints!(sys::System, constraint_algo::SHAKE_RATTLE;
      n_threads::Integer=Threads.nthreads())
 
     # Threads.@threads for group_id in 1:n_threads #& can only paralellize over independent clusters
@@ -53,7 +51,7 @@ function SHAKE_updates!(sys, ca::SHAKE_RATTLE)
     converged = false
 
     while !converged
-        for cluster in sys.constraints #& illegal to parallelize this
+        for cluster in ca.clusters #& illegal to parallelize this
             for constraint in cluster.constraints
 
                 k1, k2 = constraint.atom_idxs
@@ -62,7 +60,7 @@ function SHAKE_updates!(sys, ca::SHAKE_RATTLE)
                 s12 = vector(sys.coords[k2], sys.coords[k1], sys.boundary) #& extra allocation
 
                 # Distance vector between the atoms before unconstrained update (r)
-                r12 = vector(ca.coord_storage[k2], ca.coord_storage[k1], sys.boundary) #& extra allocation
+                r12 = vector(sys.hidden_storage.ca_coord_storage[k2], sys.hidden_storage.ca_coord_storage[k1], sys.boundary) #& extra allocation
 
                 if abs(norm(s12) - constraint.dist) > ca.dist_tolerance
                     m1_inv = 1/mass(sys.atoms[k1])
@@ -95,7 +93,7 @@ function SHAKE_updates!(sys, ca::SHAKE_RATTLE)
         end
         
         max_err = typemin(float_type(sys))*unit(sys.coords[1][1])
-        for cluster in sys.constraints
+        for cluster in ca.clusters
             for constraint in cluster.constraints
                 k1, k2 = constraint.atom_idxs
                 err = abs(norm(vector(sys.coords[k2], sys.coords[k1], sys.boundary)) - constraint.dist)

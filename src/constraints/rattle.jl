@@ -6,7 +6,7 @@ addto_vel_correction!(ca::SHAKE_RATTLE, vals) = ca.vel_storage .+= vals
 apply_vel_correction!(sys::System, ca::SHAKE_RATTLE) = sys.velocities .+= ca.vel_storage #& should these return sys/ca??
 apply_vel_correction!(vels, ca::SHAKE_RATTLE) = vels .+= ca.vel_storage
 
-function apply_velocity_constraints!(sys::System, constraint_algo::SHAKE_RATTLE;
+function velocity_constraints!(sys::System, constraint_algo::SHAKE_RATTLE;
      n_threads::Integer=Threads.nthreads())
 
     # Threads.@threads for group_id in 1:n_threads #& can only paralellize over independent clusters
@@ -25,7 +25,7 @@ function RATTLE_updates!(sys, ca::SHAKE_RATTLE)
     converged = false
 
     while !converged
-        for cluster in sys.constraints #& illegal to parallelize this
+        for cluster in ca.clusters #& illegal to parallelize this
             for constraint in cluster.constraints
 
                 # Index of atoms in bond k
@@ -56,7 +56,7 @@ function RATTLE_updates!(sys, ca::SHAKE_RATTLE)
         end
 
         max_err = typemin(float_type(sys))*unit(sys.velocities[1][1])*unit(sys.coords[1][1])
-        for cluster in sys.constraints
+        for cluster in ca.clusters
             for constraint in cluster.constraints
                 k1, k2 = constraint.atom_idxs
                 err = abs(dot(vector(sys.coords[k2], sys.coords[k1], sys.boundary), (sys.velocities[k2] .- sys.velocities[k1])))

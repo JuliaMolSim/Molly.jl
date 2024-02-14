@@ -1,37 +1,14 @@
 export
-    DistanceConstraint, 
-    NoSystemConstraints,
-    n_dof
-
+    DistanceConstraint
 
 """
 Supertype for all constraint algorithms.
 
 Should implement the following methods:
-apply_position_constraints!(sys::System, constraint_algo::ConstraintAlgorithm, accels, dt;
-     n_threads::Integer=Threads.nthreads())
-apply_velocity_constraints!(sys::System, constraint_algo::ConstraintAlgorithm;
-     n_threads::Integer=Threads.nthreads())
-save_positions!(constraint_algo::ConstraintAlgorithm, c)
-reset_vel_correction!(ca::NoSystemConstraints, vals)
-addto_vel_correction!(ca::NoSystemConstraints, vals)
-apply_vel_correction!(sys::System, ca::ConstraintAlgorithm)
-
+position_constraints!(sys::System, constraint_algo::ConstraintAlgorithm, accels, dt; n_threads::Integer=Threads.nthreads())
+velocity_constraints!(sys::System, constraint_algo::ConstraintAlgorithm; n_threads::Integer=Threads.nthreads())
 """
 abstract type ConstraintAlgorithm end
-
-"""
-Placeholder struct for [`System`](@ref) constructor when the system does not require constraints.
-An example of a constraint algorithm is [`SHAKE_RATTLE`](@ref).
-"""
-struct NoSystemConstraints <: ConstraintAlgorithm end
-
-apply_position_constraints!(sys::System, ca::NoSystemConstraints; n_threads::Integer = 1) = sys
-apply_velocity_constraints!(sys::System, ca::NoSystemConstraints; n_threads::Integer = 1) = sys
-save_positions!(ca::NoSystemConstraints, c) = ca
-reset_vel_correction!(ca::NoSystemConstraints, vals) = ca
-addto_vel_correction!(ca::NoSystemConstraints, vals) = ca
-apply_vel_correction!(sys::System, ca::NoSystemConstraints) = sys
 
 
 """
@@ -121,21 +98,7 @@ Base.length(cc::ConstraintCluster) = length(cc.constraints)
 #     end
 # end
 
-"""
-1. Converts all angle constraints to distance constraints
-    a. Most of the code below assumes everything is a distance constraint
-2. Disables intra constraint interactions
-3. Builds graph of constraints to identify small clusters of constraints
-4. Checks that initial system geometry satisfies distance constraints
-"""
-function constraint_setup!(neighbor_finder, coords, constraints, init_tol)
-    n_atoms = length(coords)
-    # angle_to_dist_constraints!(sys)
-    clusters = build_clusters(n_atoms, constraints)
-    neighbor_finder = disable_intra_constraint_interactions!(neighbor_finder, clusters)
-    check_initial_constraints(coords, clusters, init_tol)
-    return clusters, neighbor_finder
-end
+##### Constraint Setup ######
 
 """
 Disables interactions between atoms in a constraint. This prevents forces
@@ -202,24 +165,72 @@ function build_clusters(n_atoms, constraints)
     return clusters
 end
 
-"""
-Verifies that the initial conditions of the system satisfy the constraints.
-"""
-function check_initial_constraints(coords, clusters, init_tol)
 
-    if init_tol !== nothing
-        for cluster in clusters
-            for constraint in cluster.constraints
-                r_actual = norm(coords[constraint.atom_idxs[1]] .- coords[constraint.atom_idxs[2]])
-                if !isapprox(r_actual, constraint.dist, atol = init_tol)
-                    throw(ArgumentError("Constraint between atoms $(constraint.atom_idxs[1]) 
-                        and $(constraint.atom_idxs[2]) is not satisfied by the initial conditions."))
-                end
-            end
-        end
-    end
+##### High Level Constraint Functions ######
+save_ca_positions!(sys::System, c) = (sys.hidden_storage.ca_coord_storage .= c)
+
+function apply_position_constraints!(sys::System; n_threads::Integer=Threads.nthreads())
+
+   for ca in sys.constraint_algorithms
+       position_constraints!(sys, ca, n_threads = n_threads)
+   end
+
+   return sys
 
 end
+
+function apply_position_constraints!(sys::System, apply_vel_correction::Val{true}, dt;
+     n_threads::Integer=Threads.nthreads())
+
+     sys.hidden_storage.ca_vel_storage .= -sys.coords ./ dt
+
+    for ca in sys.constraint_algorithms
+        position_constraints!(sys, ca, n_threads = n_threads)
+    end
+
+    sys.hidden_storage.ca_vel_storage .+= sys.coords ./ dt
+
+    sys.velocities .+= sys.hidden_storage.ca_vel_storage
+
+   return sys
+end
+
+
+function apply_velocity_constraints!(sys::System; n_threads::Integer=Threads.nthreads())
+    
+    for ca in sys.constraint_algorithms
+        velocity_constraints!(sys, ca, n_threads = n_threads)
+    end
+
+    return sys
+end
+
+# """
+# Verifies that the initial conditions of the system satisfy the constraints.
+# """
+# function check_initial_constraints(coords, clusters, init_tol)
+
+#     if init_tol !== nothing
+#         for cluster in clusters
+#             for constraint in cluster.constraints
+#                 r_actual = norm(coords[constraint.atom_idxs[1]] .- coords[constraint.atom_idxs[2]])
+#                 if !isapprox(r_actual, constraint.dist, atol = init_tol)
+#                     throw(ArgumentError("Constraint between atoms $(constraint.atom_idxs[1]) 
+#                         and $(constraint.atom_idxs[2]) is not satisfied by the initial conditions."))
+#                 end
+#             end
+#         end
+#     end
+
+# end
+
+# function check_position_constraints(sys)
+
+# end
+
+# function check_velocity_constraints(sys)
+
+# end
 
 
 
@@ -227,7 +238,8 @@ end
 Re-calculates the # of degrees of freedom in the system due to the constraints.
 All constrained molecules with 3 or more atoms are assumed to be non-linear because
 180° bond angles are not supported. The table below shows the break down of 
-DoF for different types of structures in the system where D is the dimensionality. 
+DoF for different types of structures in the system where D is the dimensionality.
+When using constraint algorithms the vibrational DoFs are removed from a molecule.
 
 DoF           | Monoatomic | Linear Molecule | Non-Linear Molecule |
 Translational |     D      |       D         |        D            |
@@ -236,40 +248,37 @@ Vibrational   |     0      |  D*N - (2D - 1) |    D*N - 2D         |
 Total         |     D      |      D*N        |       D*N           |
 
 """
-function n_dof(D::Int, N_atoms::Int, boundary, constraint_clusters)
+#& Im not sure this is generic
+function n_dof_lost(D::Int, constraint_clusters)
 
-    # Momentum only conserved in directions with PBC
-    dof = 3*N_atoms
-
+    # Bond constraints remove vibrational DoFs
+    vibrational_dof_lost = 0
     #Assumes constraints are a non-linear chain
     for cluster in constraint_clusters
-        dof -= length(cluster.constraints)
+        N = cluster.n_unique_atoms
+        # If N > 2 assume non-linear (e.g. breaks for CO2)
+        vibrational_dof_lost += ((N == 2) ? D*N - (2*D - 1) : D*(N - 2))
     end
 
-    return dof - (D - (num_infinte_boundary(boundary))) #& NEED TO ACCOUNT FOR THINGS NOT CONSTRAINED
+    return vibrational_dof_lost
 
 end
 
 function n_dof(D::Int, N_atoms::Int, boundary)
     return D*N_atoms - (D - (num_infinte_boundary(boundary)))
 end
-
-
 # function n_dof(D::Int, N_atoms::Int, boundary, constraint_clusters)
 
 #     # Momentum only conserved in directions with PBC
-#     total = D*N_atoms - (D - (num_infinte_boundary(boundary)))
+#     dof = 3*N_atoms
 
-#     # Bond constraints remove vibrational DoFs
-#     vibrational_dof_lost = 0
 #     #Assumes constraints are a non-linear chain
 #     for cluster in constraint_clusters
-#         N = num_unique_atoms(cluster)
-#         # If N > 2 assume non-linear (e.g. breaks for CO2)
-#         vibrational_dof_lost += ((N == 2) ? D*N - (2*D - 1) : D*(N - 2))
 #         dof -= length(cluster.constraints)
 #     end
 
-#     return total - vibrational_dof_lost
+#     return dof - (D - (num_infinte_boundary(boundary)))
 
 # end
+
+

@@ -141,18 +141,12 @@ function simulate!(sys,
     
     for step_n in 1:n_steps
         
-        save_positions!(sys.constraint_algorithm, sys.coords)
+        !(sys.constraint_algorithm, sys.coords)
 
         # Position Update
         sys.coords += sys.velocities .* sim.dt .+ ((accels_t .* sim.dt ^ 2) ./ 2)
 
-        #* allocates extra arr for coords / dt???
-        reset_vel_correction!(sys.constraint_algorithm, -sys.coords ./ sim.dt)
-
-        sys = apply_position_constraints!(sys, sys.constraint_algorithm, n_threads=n_threads)
-
-        #* also an extra allocation??
-        addto_vel_correction!(sys.constraint_algorithm, sys.coords ./ sim.dt)
+        sys = apply_position_constraints!(sys, Val(true), sim.dt, n_threads=n_threads)
 
         #Enforce PBC
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
@@ -161,9 +155,8 @@ function simulate!(sys,
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
         
         sys.velocities += ((accels_t .+ accels_t_dt) .* sim.dt / 2)
-        apply_vel_correction!(sys, sys.constraint_algorithm)
 
-        sys = apply_velocity_constraints!(sys, sys.constraint_algorithm, n_threads=n_threads)
+        sys = apply_velocity_constraints!(sys, n_threads=n_threads)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -219,21 +212,22 @@ function simulate!(sys,
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
 
-    using_constraints = (typeof(sys.constraint_algorithm) != NoSystemConstraints)
+    using_constraints = (length(sys.constraint_algorithms > 0))
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
         sys.velocities += accels_t .* sim.dt
         
-        save_positions!(sys.constraint_algorithm, sys.coords)
+        save_ca_positions!(sys, sys.coords)
 
         sys.coords += sys.velocities .* sim.dt
 
-        sys = apply_position_constraints!(sys, sys.constraint_algorithm, n_threads=n_threads)
+        sys = apply_position_constraints!(sys, n_threads=n_threads)
 
-        # Can directly calculate velocity correction without extra storage 
-        using_constraints && sys.velocities .= (sys.coords .- sys.constraint_algorithm.coord_storage)./sim.dt
+        if using_constraints
+            sys.velocities .= (sys.coords .- sys.constraint_algorithm.coord_storage)./sim.dt
+        end
 
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
@@ -286,7 +280,8 @@ function simulate!(sys,
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
         coords_copy = sys.coords
-        save_positions!(sys.constraint_algorithm, sys.coords)
+        save_ca_positions!(sys, sys.coords)
+
         if step_n == 1
             # Use the velocities at the first step since there is only one set of coordinates
             sys.coords += sys.velocities .* sim.dt .+ (accels_t .* sim.dt ^ 2) ./ 2
@@ -295,7 +290,7 @@ function simulate!(sys,
                           accels_t .* sim.dt ^ 2
         end
 
-        sys = apply_position_constraints!(sys, sys.constraint_algorithm, n_threads=n_threads)
+        sys = apply_position_constraints!(sys, n_threads=n_threads)
         
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         # This is accurate to O(dt)
@@ -361,7 +356,7 @@ function simulate!(sys,
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)    
 
         sys.velocities += accels_t .* sim.dt
-        sys = apply_velocity_constraints!(sys, sys.constraint_algorithm, n_threads=n_threads)
+        sys = apply_velocity_constraints!(sys, n_threads=n_threads)
 
         sys.coords += sys.velocities .* sim.dt / 2
 
@@ -369,16 +364,11 @@ function simulate!(sys,
 
         sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
 
-        save_positions!(sys.constraint_algorithm, sys.coords)
+        save_ca_positions!(sys, sys.coords)
 
         sys.coords += sys.velocities .* sim.dt / 2
 
-        reset_vel_correction!(sys.constraint_algorithm, -sys.coords ./ sim.dt)
-
-        sys = apply_position_constraints!(sys, sys.constraint_algorithm, n_threads=n_threads)
-
-        addto_vel_correction!(sys.constraint_algorithm, sys.coords ./ sim.dt)
-        apply_vel_correction!(sys, sys.constraint_algorithm)
+        sys = apply_position_constraints!(sys, Val(true), sim.dt, n_threads=n_threads)
 
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
@@ -573,20 +563,13 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
         #& this update done with unconstrainted forces
         v_half = sys.velocities .+ (accels_t .- (sys.velocities .* zeta)) .* (sim.dt / 2)
 
-        save_positions!(sys.constraint_algorithm, sys.coords)
+        save_ca_positions!(sys, sys.coords)
 
         sys.coords += v_half .* sim.dt
 
-        reset_vel_correction!(sys.constraint_algorithm, -sys.coords ./ sim.dt)
-
-        sys = apply_position_constraints!(sys, sys.constraint_algorithm, n_threads=n_threads)
-
-        addto_vel_correction!(sys.constraint_algorithm, sys.coords ./ sim.dt)
-
+        #* APPLY CONSTRAINTS B4 OR AFTER CALCULATING ZETA? this func modifies vels and therefore temp
+        sys = apply_position_constraints!(sys, Val(true), sim.dt, n_threads=n_threads)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
-
-        #& do before calculating zeta?
-        # apply_vel_correction!(v_half, sys.constraint_algorithm)
 
         zeta_half = zeta + (sim.dt / (2 * (sim.damping^2))) * ((temperature(sys) / sim.temperature) - 1)
         KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
@@ -595,13 +578,10 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
 
-
-        # apply_vel_correction!(v_half, sys.constraint_algorithm)
         sys.velocities = (v_half .+ accels_t_dt .* (sim.dt / 2)) ./
                          (1 + (zeta * sim.dt / 2))
 
-        # apply_vel_correction!(sys, sys.constraint_algorithm)
-        sys = apply_velocity_constraints!(sys, sys.constraint_algorithm, n_threads=n_threads)
+        sys = apply_velocity_constraints!(sys, n_threads=n_threads)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)

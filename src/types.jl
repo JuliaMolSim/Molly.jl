@@ -404,6 +404,11 @@ Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
 CUDA.Const(nl::NoNeighborList) = nl
 
+struct ExtraStorage{C,V}
+    ca_coord_storage::C
+    ca_vel_storage::V
+end
+
 
 """
     System(; <keyword arguments>)
@@ -439,8 +444,7 @@ interface described there.
 - `general_inters::GI=()`: the general interactions in the system,
     i.e. interactions involving all atoms such as implicit solvent. Typically
     a `Tuple`.
-- `constraints::CN=[]`: the constraints for bonds and angles in the system.
-- `constraint_algorithm::CA=NoSystemConstraints()` : The constraint algorithm used to apply
+- `constraint_algorithms::CA=()` : The constraint algorithm(s) used to apply
     bond and angle constraints to the system.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
@@ -453,7 +457,7 @@ interface described there.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
     be set to `NoUnits` if units are not being used.
 """
-mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, CA, NF,
+mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF,
                       L, K, F, E, M} <: AbstractSystem{D}
     atoms::A
     coords::C
@@ -464,8 +468,7 @@ mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, CA, NF,
     pairwise_inters::PI
     specific_inter_lists::SI
     general_inters::GI
-    constraints::CN
-    constraint_algorithm::CA
+    constraint_algorithms::CA
     neighbor_finder::NF
     loggers::L
     k::K
@@ -473,6 +476,7 @@ mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, CA, NF,
     force_units::F
     energy_units::E
     masses::M
+    hidden_storage::ExtraStorage{C,V}
 end
 
 function System(;
@@ -485,8 +489,7 @@ function System(;
                 pairwise_inters=(),
                 specific_inter_lists=(),
                 general_inters=(),
-                constraints=[],
-                constraint_algorithm=NoSystemConstraints(),
+                constraint_algorithms=(),
                 neighbor_finder=NoNeighborFinder(),
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
@@ -503,7 +506,7 @@ function System(;
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
-    CA = typeof(constraint_algorithm)
+    CA = typeof(constraint_algorithms)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
@@ -532,19 +535,22 @@ function System(;
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
-    if length(constraints) > 0 
-        if constraint_algorithm == NoSystemConstraints()
-            throw(ArgumentError("Constraints passed to System constructor but no constraint algorithm"))
-        elseif neighbor_finder == NoNeighborFinder()
+    df = n_dof(D, length(atoms), boundary)
+    if length(constraint_algorithms) > 0
+        if neighbor_finder == NoNeighborFinder()
             throw(ArgumentError("Constraints algorithms require neighbor lists."))
-        else
-            constraints, neighbor_finder = constraint_setup!(neighbor_finder, coords, constraints, constraint_algorithm.init_posn_tol)
-            df = n_dof(D, length(atoms), boundary, constraints)
         end
-    else
-        df = n_dof(D, length(atoms), boundary)
+        for ca in constraint_algorithms
+            neighbor_finder = disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
+            df -= n_dof_lost(D, ca.clusters)
+        end
+
+        #Build global storage for positions & velocities to be shared by constraint algorithms
+        ca_coord_storage = similar(coords)
+        ca_vel_storage = similar(vels)
     end
-    CN = typeof(constraints)
+
+    hidden_storage = ExtraStorage(ca_coord_storage, ca_vel_storage)
 
     if isa(atoms, CuArray) && !isa(coords, CuArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
@@ -567,13 +573,13 @@ function System(;
 
 
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
-                specific_inter_lists, general_inters, boundary, constraints)
+                specific_inter_lists, general_inters, boundary)
 
 
-    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, CA, NF, L, K, F, E, M}(
+    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF, L, K, F, E, M}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
-                    specific_inter_lists, general_inters, constraints, constraint_algorithm,
-                    neighbor_finder, loggers, k_converted, df, force_units, energy_units, atom_masses)
+                    specific_inter_lists, general_inters, constraint_algorithms,
+                    neighbor_finder, loggers, k_converted, df, force_units, energy_units, atom_masses, hidden_storage)
 end
 
 """
@@ -593,8 +599,7 @@ function System(sys::System;
                 pairwise_inters=sys.pairwise_inters,
                 specific_inter_lists=sys.specific_inter_lists,
                 general_inters=sys.general_inters,
-                constraints=sys.constraints,
-                constraint_algorithm=sys.constraint_algorithm,
+                constraint_algorithms=sys.constraint_algorithms,
                 neighbor_finder=sys.neighbor_finder,
                 loggers=sys.loggers,
                 k=sys.k,
@@ -610,8 +615,7 @@ function System(sys::System;
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
-        constraints=constraints,
-        constraint_algorithm=constraint_algorithm,
+        constraint_algorithms=constraint_algorithms,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         k=k,
@@ -638,7 +642,7 @@ function System(crystal::Crystal{D};
                 pairwise_inters=(),
                 specific_inter_lists=(),
                 general_inters=(),
-                constraints=(),
+                constraint_algorithms=(),
                 neighbor_finder=NoNeighborFinder(),
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
@@ -674,7 +678,7 @@ function System(crystal::Crystal{D};
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
-        constraints=constraints,
+        constraint_algorithms=constraint_algorithms,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         k=k,
@@ -736,8 +740,7 @@ construction where `n` is the number of threads to be used per replica.
     `Tuple`. This is only used if no value is passed to the argument `replica_general_inters`.
 - `replica_general_inters=[() for _ in 1:n_replicas]`: the general interactions for 
     each replica.
-- `constraints::CN=[]`: the constraints for bonds and angles in the system. It is duplicated for each replica.
-- `constraint_algorithm::CA=NoSystemConstraints()` : The constraint algorithms used to apply
+- `constraint_algorithms::CA=()` : The constraint algorithm(s) used to apply
     bond and angle constraints to the system. It is duplicated for each replica.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation. It is duplicated for each replica.
@@ -778,8 +781,7 @@ function ReplicaSystem(;
                         replica_specific_inter_lists=nothing,
                         general_inters=(),
                         replica_general_inters=nothing,
-                        constraints=[],
-                        constraint_algorithm=NoSystemConstraints(),
+                        constraint_algorithms=(),
                         neighbor_finder=NoNeighborFinder(),
                         replica_loggers=[() for _ in 1:n_replicas],
                         exchange_logger=nothing,
@@ -796,7 +798,7 @@ function ReplicaSystem(;
     C = typeof(replica_coords[1])
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
-    CA = typeof(constraint_algorithm)
+    CA = typeof(constraint_algorithms)
 
 
     if isnothing(replica_velocities)
@@ -840,19 +842,16 @@ function ReplicaSystem(;
     end
     GI = eltype(replica_general_inters)
 
-    if length(constraints) > 0 
-        if constraint_algorithm == NoSystemConstraints()
-            throw(ArgumentError("Constraints passed to System constructor but no constraint algorithm"))
-        elseif neighbor_finder == NoNeighborFinder()
+    df = n_dof(D, length(atoms), boundary)
+    if length(constraint_algorithms) > 0
+        if neighbor_finder == NoNeighborFinder()
             throw(ArgumentError("Constraints algorithms require neighbor lists."))
-        else
-            constraints, neighbor_finder = constraint_setup!(neighbor_finder, coords, constraints)
-            df = n_dof(D, length(atoms), boundary, constraints)
         end
-    else
-        df = n_dof(D, length(atoms), boundary)
+        for ca in constraint_algorithms
+            neighbor_finder = disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
+            df -= n_dof_lost(D, ca.clusters)
+        end
     end
-    CN = typeof(constraints)
 
 
     if isnothing(exchange_logger)
@@ -922,11 +921,11 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, CA, NF,
+    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF,
                             typeof(replica_loggers[i]), K, F, E, M}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
-            replica_general_inters[i], deepcopy(constraints), deepcopy(constraint_algorithm),
+            replica_general_inters[i], deepcopy(constraint_algorithms),
             deepcopy(neighbor_finder), replica_loggers[i],
             k_converted, df, force_units, energy_units, atom_masses) for i in 1:n_replicas)
 

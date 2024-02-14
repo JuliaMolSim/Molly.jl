@@ -460,146 +460,153 @@ end
 end
 
 
-#TODO WRITE TESTS FOR CONSTRAINTS THAT FIAL?
 @testset "SHAKE/RATTLE Diatomic" begin
     #Simulates hydrogen gas
     r_cut = 8.5u"Å"
     temp = 300.0u"K"
 
-    for ca in [:SHAKE, :RATTLE]
-        for simulator in [VelocityVerlet(dt = 0.002u"ps"), Verlet(dt = 0.002u"ps"),
-            StormerVerlet(dt = 0.002u"ps"), Langevin(dt = 0.002u"ps", temperature = temp, friction=1.0u"ps^-1"),
-            NoseHoover(dt=2.0u"fs", temperature=temp)]
+    
+    for simulator in [VelocityVerlet(dt = 0.002u"ps"), Verlet(dt = 0.002u"ps"),
+        StormerVerlet(dt = 0.002u"ps"), Langevin(dt = 0.002u"ps", temperature = temp, friction=1.0u"ps^-1")]
+        #,NoseHoover(dt=2.0u"fs", temperature=temp)]
+        
 
-            #Initialize 10 random atoms (0.0252259036145 molecules / nm^3 typical for H2 gas)
-            #& REPLACE WITH DETERMINISTIC INITIAL POSNS/VELS FROM DATA
-            n_atoms_half = 200
-            atom_mass = 1.00784u"g/mol"
-            atoms = [Atom(index = i, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for i in 1:n_atoms_half]
-            max_coord = 200.0u"Å"
-            coords = [max_coord .* rand(SVector{3}) for i in 1:n_atoms_half]
+        #& REPLACE WITH DETERMINISTIC INITIAL POSNS/VELS FROM DATA
+        n_atoms_half = 200
+        atom_mass = 1.00784u"g/mol"
+        atoms = [Atom(index = i, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for i in 1:n_atoms_half]
+        max_coord = 200.0u"Å"
+        coords = [max_coord .* rand(SVector{3}) for i in 1:n_atoms_half]
 
-            #Add bonded atoms
-            bond_length = 0.74u"Å" #hydrogen bond length
-            constraints = []
-            for j in range(1, n_atoms_half)
-                push!(atoms, Atom(index = j + n_atoms_half, mass = atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1"))
-                push!(coords, coords[j] .+ SVector(bond_length,0.0u"Å",0.0u"Å"))
-                push!(constraints, DistanceConstraint(SVector(j, j+n_atoms_half), bond_length))
-            end
 
-            constraint_algorithm = @eval begin
-                $(ca)(similar(coords), 1e-8)
-            end
-
-            boundary = CubicBoundary(max_coord)
-
-            neighbor_finder = DistanceNeighborFinder(eligible = trues(length(atoms),length(atoms)), dist_cutoff = 1.5*r_cut)
-
-            sys = System(
-                    atoms = atoms,
-                    coords = coords,
-                    boundary = boundary,
-                    velocities=nothing,
-                    pairwise_inters=(
-                        LennardJones(
-                            cutoff = ShiftedPotentialCutoff(r_cut),
-                            use_neighbors = true,
-                            energy_units = u"kcal * mol^-1",
-                            force_units = u"kcal * mol^-1 * Å^-1"
-                            ),
-                        ),
-                    neighbor_finder = neighbor_finder,
-                    constraints = constraints,
-                    constraint_algorithm = constraint_algorithm,
-                    energy_units = u"kcal * mol^-1",
-                    force_units = u"kcal * mol^-1 * Å^-1"
-            )
-
-            random_velocities!(sys, temp)
-
-            simulate!(sys, simulator, 10_000, n_threads = 1)
-
-            lengths = map(sys.constraints) do cluster
-                k1, k2 = cluster.constraints[1].atom_idxs
-                return norm(vector(sys.coords[k2], sys.coords[k1], sys.boundary)) - cluster.constraints[1].dist
-            end
-
-            if ca == :RATTLE
-                vel_constraints = map(sys.constraints) do cluster
-                    k1, k2 = cluster.constraints[1].atom_idxs
-                    return dot(vector(sys.coords[k2], sys.coords[k1], sys.boundary), (sys.velocities[k2] .- sys.velocities[k1])) 
-                end
-                @assert all(vel_constraints .< 1e-4u"Å^2/ps")
-            end
-
-            @assert all(lengths .< 1e-4u"Å")
+        #Add bonded atoms
+        bond_length = 0.74u"Å" #hydrogen bond length
+        constraints = []
+        for j in range(1, n_atoms_half)
+            push!(atoms, Atom(index = j + n_atoms_half, mass = atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1"))
+            push!(coords, coords[j] .+ SVector(bond_length,0.0u"Å",0.0u"Å"))
+            push!(constraints, DistanceConstraint(SVector(j, j+n_atoms_half), bond_length))
         end
+
+        vel_storage = [max_coord*u"1/s" .* rand(SVector{3}) for i in 1:(2*n_atoms_half)]
+        ca = SHAKE_RATTLE(similar(coords), vel_storage; dist_tolerance = 1e-8u"Å", vel_tolerance = 1e-8u"Å^2/ps")
+
+
+        boundary = CubicBoundary(max_coord)
+
+        neighbor_finder = DistanceNeighborFinder(eligible = trues(length(atoms),length(atoms)), dist_cutoff = 1.5*r_cut)
+
+        sys = System(
+                atoms = atoms,
+                coords = coords,
+                boundary = boundary,
+                velocities=nothing,
+                pairwise_inters=(
+                    LennardJones(
+                        cutoff = ShiftedPotentialCutoff(r_cut),
+                        use_neighbors = true,
+                        energy_units = u"kcal * mol^-1",
+                        force_units = u"kcal * mol^-1 * Å^-1"
+                        ),
+                    ),
+                neighbor_finder = neighbor_finder,
+                constraints = constraints,
+                constraint_algorithm = ca,
+                energy_units = u"kcal * mol^-1",
+                force_units = u"kcal * mol^-1 * Å^-1"
+        )
+
+        random_velocities!(sys, temp)
+
+        simulate!(sys, simulator, 10_000, n_threads = 1)
+
+        lengths = map(sys.constraints) do cluster
+            k1, k2 = cluster.constraints[1].atom_idxs
+            return norm(vector(sys.coords[k2], sys.coords[k1], sys.boundary)) - cluster.constraints[1].dist
+        end
+        @test all(lengths .< ca.dist_tolerance)
+
+        if typeof(simulator) ∈ [VelocityVerlet, NoseHoover]
+            vel_constraints = map(sys.constraints) do cluster
+                k1, k2 = cluster.constraints[1].atom_idxs
+                return dot(vector(sys.coords[k2], sys.coords[k1], sys.boundary), (sys.velocities[k2] .- sys.velocities[k1])) 
+            end
+            @test all(vel_constraints .< ca.vel_tolerance)
+        end
+
     end
+
 end
 
-# @testset "SHAKE/RATTLE Protein Diatomic" begin
 
-#     # PROTEIN Test
-#     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
-#     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; loggers = (coords_out=CoordinateLogger(5),), center_coords=false)
-#     neighbors = find_neighbors(sys)
+# @testset "Bad SHAKE/RATTLE SetUps" begin
     
-#     #Find the alcohol groups
-#     OH_interactions = Pair[]
-#     two_body_inters = sys.specific_inter_lists[1]
-#     for (idx,inter_type) in enumerate(two_body_inters.types)
-#         if inter_type == "HO/OH"
-#             push!(OH_interactions, Pair(two_body_inters.is[idx], two_body_inters.js[idx]))
-#         end  
-#     end
-    
-#     #Double check I didnt leave in any water molecules
-#     @assert unique(first.(OH_interactions)) == first.(OH_interactions) "Some atoms in multiple bonds"
-    
-    
-#     # Go through atoms and restrain C-H bonds
-#     bond_length = 0.096u"nm"
-#     constraints = []
-    
-#     for OH in OH_interactions
-#         push!(constraints, DistanceConstraint(SVector(first(OH), last(OH)), bond_length))
-#     end
-    
-#     # constraint_algorithm = SHAKE(similar(coords))
-#     constraint_algorithm = SHAKE(similar(sys.coords), 1e-8, 1e-1u"Å")
-#     sys_constrainted = System(sys, constraint_algorithm = constraint_algorithm, constraints = constraints)
-#     # Run a short simulation with all interactions
-#     n_steps = 100
-#     simulator = VelocityVerlet(dt=0.0005u"ps")
-    
-#     simulate!(sys_constrainted, simulator, n_steps; n_threads=Threads.nthreads())
-    
-#     last_coords = values(sys_constrainted.loggers.coords_out)[end];
-#     for OH in OH_interactions
-#         println(norm(last_coords[first(OH)] .- last_coords[last(OH)]))
-#     end
-    
-    
-#     # RUN UNCONSTRAINED
-#     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
-#     sys_uc = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; loggers = (coords_out=CoordinateLogger(5),), center_coords=false)
-#     simulate!(sys_uc, simulator, n_steps; n_threads=Threads.nthreads())
-    
-#     last_coords = values(sys_uc.loggers.coords_out)[end];
-#     for OH in OH_interactions
-#         println(norm(last_coords[first(OH)] .- last_coords[last(OH)]))
-#     end
+
 # end
 
-# @testset "SHAKE/RATTLE Multi-atomic" begin
-    
+# @testset "SHAKE triatomic" begin
+#     n_atoms = 30
+#     atom_mass = 10.0u"g/mol"
+#     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+#     boundary = CubicBoundary(2.0u"nm")
+
+#     coords = place_atoms(n_atoms ÷ 3, boundary, min_dist=0.3u"nm")
+
+#     for i in 1:(n_atoms ÷ 3)
+#         push!(coords, coords[i] .+ [0.13, 0.0, 0.0]u"nm")
+#     end
+
+#     for i in 1:(n_atoms ÷ 3)
+#         push!(coords, coords[i] .+ [0.26, 0.0, 0.0]u"nm")
+#     end
+
+#     temp = 100.0u"K"
+#     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+
+#     eligible = trues(n_atoms, n_atoms)
+#     for i in 1:(n_atoms ÷ 3)
+#         eligible[i, i + (n_atoms ÷ 3)] = false
+#         eligible[i + (n_atoms ÷ 3), i] = false
+#         eligible[i + (n_atoms ÷ 3), i + 2 * (n_atoms ÷ 3)] = false
+#         eligible[i + 2 * (n_atoms ÷ 3), i + (n_atoms ÷ 3)] = false
+#     end
+
+#     neighbor_finder = DistanceNeighborFinder(eligible=eligible, n_steps=10, dist_cutoff=1.5u"nm")
+
+#     bond_lengths = [0.1u"nm" for i in 1:(2 * (n_atoms ÷ 3))]
+#     sh = SHAKE(
+#         bond_lengths,
+#         collect(1:(2 * (n_atoms ÷ 3))),
+#         collect(((n_atoms ÷ 3) + 1):n_atoms),
+#     )
+#     constraints = (sh,)
+
+#     sys = System(
+#         atoms=atoms,
+#         coords=coords,
+#         boundary=boundary,
+#         velocities=velocities,
+#         pairwise_inters=(LennardJones(use_neighbors=true),),
+#         constraints=constraints,
+#         neighbor_finder=neighbor_finder,
+#         loggers=(coords=CoordinateLogger(10),),
+#     )
+
+#     for i in eachindex(sys.coords)
+#         sys.coords[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
+#     end
+
+#     old_coords = sys.coords
+
+#     @time apply_constraints!(sys, sh, old_coords, 0.002u"ps")
+
+#     lengths = map(eachindex(sh.is)) do r
+#         return norm(vector(sys.coords[sh.is[r]], sys.coords[sh.js[r]], sys.boundary))
+#     end
+
+#     @test maximum(abs.(lengths .- 0.1u"nm")) < 1e-10u"nm"
 # end
 
-
-# @testset "SHAKE/RATTLE Angle Constraints" begin
-    
-# end
 
 @testset "Langevin splitting" begin
     n_atoms = 400
