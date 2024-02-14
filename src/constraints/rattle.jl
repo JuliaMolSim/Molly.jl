@@ -55,21 +55,7 @@ function RATTLE_updates!(sys, ca::SHAKE_RATTLE)
             end
         end
 
-        max_err = typemin(float_type(sys))*unit(sys.velocities[1][1])*unit(sys.coords[1][1])
-        for cluster in ca.clusters
-            for constraint in cluster.constraints
-                k1, k2 = constraint.atom_idxs
-                err = abs(dot(vector(sys.coords[k2], sys.coords[k1], sys.boundary), (sys.velocities[k2] .- sys.velocities[k1])))
-                if max_err < err
-                    max_err = err
-                end
-            end
-        end
-
-        if max_err < ca.vel_tolerance
-            converged = true
-        end
-
+        converged = check_velocity_constraints(sys, ca)
     end
 
 end

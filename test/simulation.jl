@@ -464,35 +464,27 @@ end
     #Simulates hydrogen gas
     r_cut = 8.5u"Å"
     temp = 300.0u"K"
+    atom_mass = 1.00794u"g/mol"
 
-    
+    n_atoms = 400
+    hydrogen_data = readdlm(joinpath(data_dir, "initial_hydrogen_data.atom"), skipstart = 9)
+    coords_matrix = hydrogen_data[:,2:4]
+    vel_matrix = hydrogen_data[:,5:7]
+
     for simulator in [VelocityVerlet(dt = 0.002u"ps"), Verlet(dt = 0.002u"ps"),
         StormerVerlet(dt = 0.002u"ps"), Langevin(dt = 0.002u"ps", temperature = temp, friction=1.0u"ps^-1")]
         #,NoseHoover(dt=2.0u"fs", temperature=temp)]
         
-
-        #& REPLACE WITH DETERMINISTIC INITIAL POSNS/VELS FROM DATA
-        n_atoms_half = 200
-        atom_mass = 1.00784u"g/mol"
-        atoms = [Atom(index = i, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for i in 1:n_atoms_half]
-        max_coord = 200.0u"Å"
-        coords = [max_coord .* rand(SVector{3}) for i in 1:n_atoms_half]
-
-
         #Add bonded atoms
         bond_length = 0.74u"Å" #hydrogen bond length
-        constraints = []
-        for j in range(1, n_atoms_half)
-            push!(atoms, Atom(index = j + n_atoms_half, mass = atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1"))
-            push!(coords, coords[j] .+ SVector(bond_length,0.0u"Å",0.0u"Å"))
-            push!(constraints, DistanceConstraint(SVector(j, j+n_atoms_half), bond_length))
-        end
+        constraints = [DistanceConstraint(SVector(j, j+1), bond_length) for j in range(1, n_atoms, step = 2)]
+        atoms = [Atom(index = j, mass = atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in range(1,n_atoms)]
+        coords = [SVector(coords_matrix[j,1]u"Å",coords_matrix[j,2]u"Å",coords_matrix[j,3]u"Å") for j in range(1,n_atoms)]
+        velocities = [1000*SVector(vel_matrix[j,:]u"Å/ps"...) for j in range(1,n_atoms)]
+        
+        ca = SHAKE_RATTLE(constraints, length(atoms), 1e-8u"Å",  1e-8u"Å^2/ps")
 
-        vel_storage = [max_coord*u"1/s" .* rand(SVector{3}) for i in 1:(2*n_atoms_half)]
-        ca = SHAKE_RATTLE(similar(coords), vel_storage; dist_tolerance = 1e-8u"Å", vel_tolerance = 1e-8u"Å^2/ps")
-
-
-        boundary = CubicBoundary(max_coord)
+        boundary = CubicBoundary(200.0u"Å")
 
         neighbor_finder = DistanceNeighborFinder(eligible = trues(length(atoms),length(atoms)), dist_cutoff = 1.5*r_cut)
 
@@ -500,7 +492,7 @@ end
                 atoms = atoms,
                 coords = coords,
                 boundary = boundary,
-                velocities=nothing,
+                velocities=velocities,
                 pairwise_inters=(
                     LennardJones(
                         cutoff = ShiftedPotentialCutoff(r_cut),
@@ -510,28 +502,17 @@ end
                         ),
                     ),
                 neighbor_finder = neighbor_finder,
-                constraints = constraints,
-                constraint_algorithm = ca,
+                constraint_algorithms = (ca,),
                 energy_units = u"kcal * mol^-1",
                 force_units = u"kcal * mol^-1 * Å^-1"
         )
 
-        random_velocities!(sys, temp)
-
         simulate!(sys, simulator, 10_000, n_threads = 1)
 
-        lengths = map(sys.constraints) do cluster
-            k1, k2 = cluster.constraints[1].atom_idxs
-            return norm(vector(sys.coords[k2], sys.coords[k1], sys.boundary)) - cluster.constraints[1].dist
-        end
-        @test all(lengths .< ca.dist_tolerance)
+        @test (check_position_constraints(sys, ca) == true)
 
         if typeof(simulator) ∈ [VelocityVerlet, NoseHoover]
-            vel_constraints = map(sys.constraints) do cluster
-                k1, k2 = cluster.constraints[1].atom_idxs
-                return dot(vector(sys.coords[k2], sys.coords[k1], sys.boundary), (sys.velocities[k2] .- sys.velocities[k1])) 
-            end
-            @test all(vel_constraints .< ca.vel_tolerance)
+            @test (check_velocity_constraints(sys, ca) == true)
         end
 
     end

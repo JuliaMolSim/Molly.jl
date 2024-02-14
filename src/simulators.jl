@@ -141,7 +141,7 @@ function simulate!(sys,
     
     for step_n in 1:n_steps
         
-        !(sys.constraint_algorithm, sys.coords)
+        save_ca_positions!(sys, sys.coords)
 
         # Position Update
         sys.coords += sys.velocities .* sim.dt .+ ((accels_t .* sim.dt ^ 2) ./ 2)
@@ -212,7 +212,7 @@ function simulate!(sys,
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
 
-    using_constraints = (length(sys.constraint_algorithms > 0))
+    using_constraints = (length(sys.constraint_algorithms) > 0)
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
@@ -226,7 +226,7 @@ function simulate!(sys,
         sys = apply_position_constraints!(sys, n_threads=n_threads)
 
         if using_constraints
-            sys.velocities .= (sys.coords .- sys.constraint_algorithm.coord_storage)./sim.dt
+            sys.velocities .= (sys.coords .- sys.hidden_storage.ca_coord_storage)./sim.dt
         end
 
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))

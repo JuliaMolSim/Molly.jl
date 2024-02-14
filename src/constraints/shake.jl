@@ -92,20 +92,7 @@ function SHAKE_updates!(sys, ca::SHAKE_RATTLE)
     
         end
         
-        max_err = typemin(float_type(sys))*unit(sys.coords[1][1])
-        for cluster in ca.clusters
-            for constraint in cluster.constraints
-                k1, k2 = constraint.atom_idxs
-                err = abs(norm(vector(sys.coords[k2], sys.coords[k1], sys.boundary)) - constraint.dist)
-                if max_err < err
-                    max_err = err
-                end
-            end
-        end
-
-        if max_err < ca.dist_tolerance
-            converged = true
-        end
+        converged = check_position_constraints(sys, ca)
     end
 end
 

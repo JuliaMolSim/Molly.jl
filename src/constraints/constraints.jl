@@ -1,5 +1,7 @@
 export
-    DistanceConstraint
+    DistanceConstraint,
+    check_position_constraints,
+    check_velocity_constraints
 
 """
 Supertype for all constraint algorithms.
@@ -167,7 +169,11 @@ end
 
 
 ##### High Level Constraint Functions ######
-save_ca_positions!(sys::System, c) = (sys.hidden_storage.ca_coord_storage .= c)
+function save_ca_positions!(sys::System, c)
+    if length(sys.constraint_algorithms) > 0
+        sys.hidden_storage.ca_coord_storage .= c
+    end
+end
 
 function apply_position_constraints!(sys::System; n_threads::Integer=Threads.nthreads())
 
@@ -182,15 +188,17 @@ end
 function apply_position_constraints!(sys::System, apply_vel_correction::Val{true}, dt;
      n_threads::Integer=Threads.nthreads())
 
-     sys.hidden_storage.ca_vel_storage .= -sys.coords ./ dt
+     if length(sys.constraint_algorithms) > 0
+        sys.hidden_storage.ca_vel_storage .= -sys.coords ./ dt
 
-    for ca in sys.constraint_algorithms
-        position_constraints!(sys, ca, n_threads = n_threads)
+        for ca in sys.constraint_algorithms
+            position_constraints!(sys, ca, n_threads = n_threads)
+        end
+
+        sys.hidden_storage.ca_vel_storage .+= sys.coords ./ dt
+
+        sys.velocities .+= sys.hidden_storage.ca_vel_storage
     end
-
-    sys.hidden_storage.ca_vel_storage .+= sys.coords ./ dt
-
-    sys.velocities .+= sys.hidden_storage.ca_vel_storage
 
    return sys
 end
@@ -224,13 +232,37 @@ end
 
 # end
 
-# function check_position_constraints(sys)
+function check_position_constraints(sys::System, ca::ConstraintAlgorithm)
 
-# end
+    max_err = typemin(float_type(sys))*unit(sys.coords[1][1])
+    for cluster in ca.clusters
+        for constraint in cluster.constraints
+            k1, k2 = constraint.atom_idxs
+            err = abs(norm(vector(sys.coords[k2], sys.coords[k1], sys.boundary)) - constraint.dist)
+            if max_err < err
+                max_err = err
+            end
+        end
+    end
 
-# function check_velocity_constraints(sys)
+    return (max_err < ca.dist_tolerance)
+end
 
-# end
+function check_velocity_constraints(sys::System, ca::ConstraintAlgorithm)
+
+    max_err = typemin(float_type(sys))*unit(sys.velocities[1][1])*unit(sys.coords[1][1])
+    for cluster in ca.clusters
+        for constraint in cluster.constraints
+            k1, k2 = constraint.atom_idxs
+            err = abs(dot(vector(sys.coords[k2], sys.coords[k1], sys.boundary), (sys.velocities[k2] .- sys.velocities[k1])))
+            if max_err < err
+                max_err = err
+            end
+        end
+    end
+
+    return (max_err < ca.vel_tolerance)
+end
 
 
 
