@@ -560,15 +560,13 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
 
     for step_n in 1:n_steps
 
-        #& this update done with unconstrainted forces
         v_half = sys.velocities .+ (accels_t .- (sys.velocities .* zeta)) .* (sim.dt / 2)
 
-        save_ca_positions!(sys, sys.coords)
+        #save_ca_positions!(sys, sys.coords)
 
         sys.coords += v_half .* sim.dt
 
-        #* APPLY CONSTRAINTS B4 OR AFTER CALCULATING ZETA? this func modifies vels and therefore temp
-        sys = apply_position_constraints!(sys, Val(true), sim.dt, n_threads=n_threads)
+        #sys = apply_position_constraints!(sys, Val(true), sim.dt, n_threads=n_threads)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         zeta_half = zeta + (sim.dt / (2 * (sim.damping^2))) * ((temperature(sys) / sim.temperature) - 1)
@@ -581,7 +579,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
         sys.velocities = (v_half .+ accels_t_dt .* (sim.dt / 2)) ./
                          (1 + (zeta * sim.dt / 2))
 
-        sys = apply_velocity_constraints!(sys, n_threads=n_threads)
+        #sys = apply_velocity_constraints!(sys, n_threads=n_threads)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
