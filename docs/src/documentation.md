@@ -1260,7 +1260,7 @@ Here $\vec{r}_{ij}$ is the vector between atoms i & j in a constraint, $d_{ij}$ 
 atoms i & j.
 
 SHAKE was originally derived for the Verlet integration scheme with RATTLE extending SHAKE to work for Velocity Verlet where the velocities are also integrated 
-[Ryckert 1976](http://physics.ujep.cz/~mlisal/md/shake.pdf) [Andersen 1982](https://www.sciencedirect.com/science/article/pii/0021999183900141).  Certain simulators do not support SHAKE or RATTLE. For example, [Verlet](@ref), [StormerVerlet](@ref), and [Langevin](@ref) do not support RATTLE and [MetropolisMonteCarlo](@ref) & [SteepestDescentMinimizer](@ref) do not support either SHAKE or RATTLE. Using SHAKE or RATTLE with these simulators will not stop the simulation, the constraints will just not be applied. Other simulators like [NoseHoover](@ref) and [LangevinSplitting](@ref) are capable of supporting constraints they are just not implemented.
+[Ryckert 1976](http://physics.ujep.cz/~mlisal/md/shake.pdf) [Andersen 1982](https://www.sciencedirect.com/science/article/pii/0021999183900141).  Certain simulators do not support SHAKE or RATTLE. For example, [`Verlet`](@ref), [`StormerVerlet`](@ref), and [`Langevin`](@ref) do not support RATTLE and [`MetropolisMonteCarlo`](@ref) & [`SteepestDescentMinimizer`](@ref) do not support either SHAKE or RATTLE. Using SHAKE or RATTLE with these simulators will not stop the simulation, the constraints will just not be applied. Other simulators like [`NoseHoover`](@ref) and [`LangevinSplitting`](@ref) are capable of supporting constraints they are just not implemented.
 
 | Simulator                  | SHAKE | RATTLE |
 | -------------------------- | ----- | ------ |
