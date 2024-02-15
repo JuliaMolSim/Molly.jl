@@ -135,6 +135,135 @@ visualize(
 ```
 ![Planet simulation](images/sim_planets.gif)
 
+## Agent-based modelling
+
+Agent-based modelling (ABM) is conceptually similar to molecular dynamics.
+Julia has [Agents.jl](https://juliadynamics.github.io/Agents.jl/stable/) for ABM, but Molly can also be used to simulate arbitrary agent-based systems in continuous space.
+Here we simulate a toy [SIR model](https://en.wikipedia.org/wiki/Compartmental_models_in_epidemiology#The_SIR_model) for disease spread.
+This example shows how atom properties can be mutable, i.e. change during the simulation, and includes custom forces and loggers (see below for more info).
+```julia
+using Molly
+
+@enum Status susceptible infected recovered
+
+# Custom atom type
+mutable struct Person
+    i::Int
+    status::Status
+    mass::Float64
+    σ::Float64
+    ϵ::Float64
+end
+
+# Custom PairwiseInteraction
+struct SIRInteraction <: PairwiseInteraction
+    dist_infection::Float64
+    prob_infection::Float64
+    prob_recovery::Float64
+end
+
+# Custom force function
+function Molly.force(inter::SIRInteraction,
+                        vec_ij,
+                        coord_i,
+                        coord_j,
+                        atom_i,
+                        atom_j,
+                        boundary)
+    if (atom_i.status == infected && atom_j.status == susceptible) ||
+                (atom_i.status == susceptible && atom_j.status == infected)
+        # Infect close people randomly
+        r2 = sum(abs2, vec_ij)
+        if r2 < inter.dist_infection^2 && rand() < inter.prob_infection
+            atom_i.status = infected
+            atom_j.status = infected
+        end
+    end
+    # Workaround to obtain a self-interaction
+    if atom_i.i == (atom_j.i - 1)
+        # Recover randomly
+        if atom_i.status == infected && rand() < inter.prob_recovery
+            atom_i.status = recovered
+        end
+    end
+    return zero(coord_i)
+end
+
+# Custom logger
+function fracs_SIR(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+    counts_sir = [
+        count(p -> p.status == susceptible, s.atoms),
+        count(p -> p.status == infected   , s.atoms),
+        count(p -> p.status == recovered  , s.atoms)
+    ]
+    return counts_sir ./ length(s)
+end
+
+SIRLogger(n_steps) = GeneralObservableLogger(fracs_SIR, Vector{Float64}, n_steps)
+
+temp = 1.0
+boundary = RectangularBoundary(10.0)
+n_steps = 1_000
+n_people = 500
+n_starting = 2
+atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
+coords = place_atoms(n_people, boundary; min_dist=0.1)
+velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
+
+lj = LennardJones(
+    cutoff=DistanceCutoff(1.6),
+    use_neighbors=true,
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+sir = SIRInteraction(0.5, 0.06, 0.01)
+pairwise_inters = (LennardJones=lj, SIR=sir)
+neighbor_finder = DistanceNeighborFinder(
+    eligible=trues(n_people, n_people),
+    n_steps=10,
+    dist_cutoff=2.0,
+)
+simulator = VelocityVerlet(
+    dt=0.02,
+    coupling=AndersenThermostat(temp, 5.0),
+)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
+    neighbor_finder=neighbor_finder,
+    loggers=(
+        coords=CoordinateLogger(Float64, 10; dims=2),
+        SIR=SIRLogger(10),
+    ),
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+
+simulate!(sys, simulator, n_steps)
+
+visualize(sys.loggers.coords, boundary, "sim_agent.mp4"; markersize=0.1)
+```
+![Agent simulation](images/sim_agent.gif)
+
+We can use the logger to plot the fraction of people susceptible, infected and recovered over the course of the simulation:
+
+```julia
+using GLMakie
+
+f = Figure()
+ax = Axis(f[1, 1], xlabel="Snapshot", ylabel="Fraction")
+
+lines!([l[1] for l in values(sys.loggers.SIR)], label="Susceptible")
+lines!([l[2] for l in values(sys.loggers.SIR)], label="Infected")
+lines!([l[3] for l in values(sys.loggers.SIR)], label="Recovered")
+axislegend()
+```
+![Fraction SIR](images/fraction_sir.png)
+
 ## Polymer melt
 
 Here we use [`FENEBond`](@ref), [`CosineAngle`](@ref) and [`LennardJones`](@ref) to simulate interacting polymers.
@@ -291,13 +420,13 @@ chain_angles = Float64[]
 for traj_coords in logged_coords[(n_frames ÷ 2):end]
     for pol_i in 1:n_polymers
         for mon_i in 2:(n_monomers - 1)
-            angle = bond_angle(
+            ang = bond_angle(
                 traj_coords[(pol_i - 1) * n_monomers + mon_i - 1],
                 traj_coords[(pol_i - 1) * n_monomers + mon_i    ],
                 traj_coords[(pol_i - 1) * n_monomers + mon_i + 1],
                 boundary,
             )
-            push!(chain_angles, rad2deg(angle))
+            push!(chain_angles, rad2deg(ang))
         end
     end
 end
@@ -316,6 +445,10 @@ save("polymer_angle.png", f)
 ```
 ![Polymer angles](images/polymer_angle.png)
 
+## Machine learning potentials
+
+There is [an example](https://acesuit.github.io/ACEpotentials.jl/dev/tutorials/molly) of using ACE potentials in Molly.
+
 ## Density functional theory
 
 [DFTK.jl](https://github.com/JuliaMolSim/DFTK.jl) can be used to calculate forces using density functional theory (DFT), allowing the simulation of quantum systems in Molly.
@@ -324,6 +457,7 @@ A general interaction is used since the whole force calculation is offloaded to 
 ```julia
 using Molly
 using DFTK
+import AtomsCalculators
 
 struct DFTKInteraction{L, A}
     lattice::L
@@ -344,7 +478,7 @@ atoms_dftk = [Si, Si]
 
 dftk_interaction = DFTKInteraction(lattice, atoms_dftk)
 
-function Molly.forces(inter::DFTKInteraction, sys, neighbors=nothing)
+function AtomsCalculators.forces(sys, inter::DFTKInteraction; kwargs...)
     # Select model and basis
     model = model_LDA(inter.lattice, inter.atoms, sys.coords)
     kgrid = [4, 4, 4]     # k-point grid (Regular Monkhorst-Pack grid)
@@ -568,6 +702,50 @@ save("force_comparison.png", f)
 ```
 ![Force comparison](images/force_comparison.png)
 
+## AtomsCalculators.jl compatibility
+
+The [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl) package provides a consistent interface that allows forces, energies etc. to be calculated with different packages.
+Calculators can be used with a Molly [`System`](@ref) by giving them as `general_inters` during system setup. It is also possible to use a [`MollyCalculator`](@ref) to calculate properties on [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) systems:
+```julia
+using Molly
+using AtomsBaseTesting
+using AtomsCalculators
+
+ab_sys = AbstractSystem(
+    make_test_system().system; 
+    boundary_conditions = [Periodic(), Periodic(), Periodic()],
+    bounding_box = [[1.54732, 0.0      , 0.0      ],
+                    [0.0    , 1.4654985, 0.0      ],
+                    [0.0    , 0.0      , 1.7928950]]u"Å",
+)
+
+coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", force_units=u"kJ/Å", energy_units=u"kJ")
+calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
+
+AtomsCalculators.potential_energy(ab_sys, calc)
+```
+```
+9.112207692184968e-21 kJ
+```
+```julia
+AtomsCalculators.forces(ab_sys, calc)
+```
+```
+5-element Vector{SVector{3, Quantity{Float64, 𝐋 𝐌 𝐓^-2, Unitful.FreeUnits{(Å^-1, kJ), 𝐋 𝐌 𝐓^-2, nothing}}}}:
+ [5.052086904272771e-21 kJ Å^-1, 1.0837307191961731e-20 kJ Å^-1, -5.366866699852613e-21 kJ Å^-1]
+ [5.252901001053284e-22 kJ Å^-1, -2.3267009382813732e-21 kJ Å^-1, 9.276115314848821e-21 kJ Å^-1]
+ [-8.613462805775053e-21 kJ Å^-1, 5.726650141840073e-21 kJ Å^-1, -2.072868074170469e-20 kJ Å^-1]
+ [3.0360858013969523e-21 kJ Å^-1, -1.423725639552043e-20 kJ Å^-1, 1.681943212670848e-20 kJ Å^-1]
+ [0.0 kJ Å^-1, 0.0 kJ Å^-1, 0.0 kJ Å^-1]
+```
+We can also convert the AtomsBase.jl system to a Molly [`System`](@ref):
+```julia
+System(ab_sys, u"kJ", u"kJ/Å")
+```
+```
+System with 5 atoms, boundary CubicBoundary{Quantity{Float64, 𝐋, Unitful.FreeUnits{(Å,), 𝐋, nothing}}}(Quantity{Float64, 𝐋, Unitful.FreeUnits{(Å,), 𝐋, nothing}}[1.54732 Å, 1.4654985 Å, 1.792895 Å])
+```
+
 ## Variations of the Morse potential
 
 The Morse potential for bonds has a parameter *a* that determines the width of the potential.
@@ -722,49 +900,46 @@ The only unsupported crystal types are those with a triclinic 2D simulation doma
 Molly provides a constructor for [`System`](@ref) that takes in a `Crystal` struct:
 ```julia
 using Molly
-using SimpleCrystals
+import SimpleCrystals
 
-a = 5.2468u"Å" # Lattice parameter for FCC Argon at 10 K
+a = 0.52468u"nm" # Lattice parameter for FCC Argon at 10 K
 atom_mass = 39.948u"g/mol"
-
 temp = 10.0u"K"
-fcc_crystal = FCC(a, atom_mass, SVector(4, 4, 4))
+fcc_crystal = SimpleCrystals.FCC(a, atom_mass, SVector(4, 4, 4))
 
 n_atoms = length(fcc_crystal)
-atom_mass = atomic_mass(fcc_crystal, 1)
 velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
-r_cut = 8.5u"Å"
+r_cut = 0.85u"nm"
 sys = System(
-    fcc_crystal,
+    fcc_crystal;
     velocities=velocities,
     pairwise_inters=(LennardJones(
         cutoff=ShiftedForceCutoff(r_cut),
         energy_units=u"kJ * mol^-1",
-        force_units=u"kJ * mol^-1 * Å^-1",
+        force_units=u"kJ * mol^-1 * nm^-1",
     ),),
     loggers=(
         kinetic_eng=KineticEnergyLogger(100),
         pot_eng=PotentialEnergyLogger(100),
     ),
     energy_units=u"kJ * mol^-1",
-    force_units=u"kJ * mol^-1 * Å^-1",
+    force_units=u"kJ * mol^-1 * nm^-1",
 )
 ```
-
 Certain potentials such as [`LennardJones`](@ref) and [`Buckingham`](@ref) require extra atomic paramaters (e.g. `σ`) that are not implemented by the SimpleCrystals API.
 These paramaters must be added to the [`System`](@ref) manually by making use of the copy constructor:
 ```julia
-σ = 3.4u"Å"
+σ = 0.34u"nm"
 ϵ = (4.184 * 0.24037)u"kJ * mol^-1"
 updated_atoms = []
 
 for i in eachindex(sys)
-    push!(updated_atoms, Molly.Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
-                            mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
+    push!(updated_atoms, Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
+                              mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
 end
 
-sys = System(sys, atoms=[updated_atoms...])
+sys = System(sys; atoms=[updated_atoms...])
 ```
 
 Now the system can be simulated using any of the available simulators:
