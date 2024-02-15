@@ -1242,7 +1242,7 @@ Julia is a language well-suited to implementing all kinds of analysis for molecu
 
 ## Constraint Algorithms
 
-Molly implements [`SHAKE`](@ref) and its extension, [`RATTLE`](@ref), to perform constrained molecular dynamics. These methods are useful
+Molly implements SHAKE and its extension, RATTLE (see [`SHAKE_RATTLE`](@ref)), to perform constrained molecular dynamics. These methods are useful
 for maintaining bond lengths and angles in an MD simulation which often allows for longer timesteps and therefore more efficient use of
 computing resources. The constraint satisfied by SHAKE are solely on the atomic coordinates:
 ```math
