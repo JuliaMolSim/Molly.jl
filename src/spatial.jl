@@ -322,11 +322,14 @@ The minimum image convention is used, so the displacement is to the closest
 version of the coordinate accounting for the periodic boundaries.
 """
 function vector_1D(c1, c2, side_length)
-    if c1 < c2
-        return (c2 - c1) < (c1 - c2 + side_length) ? (c2 - c1) : (c2 - c1 - side_length)
-    else
-        return (c1 - c2) < (c2 - c1 + side_length) ? (c2 - c1) : (c2 - c1 + side_length)
-    end
+    v12 = c2 - c1
+    v12_p_sl = v12 + side_length
+    v12_m_sl = v12 - side_length
+    return ifelse(
+        v12 > zero(c1),
+        ifelse( v12 < -v12_m_sl, v12, v12_m_sl),
+        ifelse(-v12 <  v12_p_sl, v12, v12_p_sl),
+    )
 end
 
 """
@@ -340,12 +343,19 @@ version of the coordinates accounting for the periodic boundaries.
 For the [`TriclinicBoundary`](@ref) an approximation is used to find the closest
 version by default.
 """
-vector(c1, c2, boundary::Union{CubicBoundary, RectangularBoundary}) = vector_1D.(c1, c2, boundary)
+function vector(c1, c2, boundary::CubicBoundary)
+    return @inbounds SVector(
+        vector_1D(c1[1], c2[1], boundary.side_lengths[1]),
+        vector_1D(c1[2], c2[2], boundary.side_lengths[2]),
+        vector_1D(c1[3], c2[3], boundary.side_lengths[3]),
+    )
+end
 
-@generated function vector(c1::SVector{N}, c2::SVector{N}, boundary::Union{CubicBoundary, RectangularBoundary}) where N
-    quote
-        Base.Cartesian.@ncall $N SVector{$N} i -> vector_1D(c1[i], c2[i], boundary[i])
-    end
+function vector(c1, c2, boundary::RectangularBoundary)
+    return @inbounds SVector(
+        vector_1D(c1[1], c2[1], boundary.side_lengths[1]),
+        vector_1D(c1[2], c2[2], boundary.side_lengths[2]),
+    )
 end
 
 function vector(c1, c2, boundary::TriclinicBoundary{T, true}) where T
@@ -515,7 +525,6 @@ end
 Generate a random velocity along one dimension from the Maxwell-Boltzmann
 distribution, with optional custom Boltzmann constant.
 """
-
 function maxwell_boltzmann(atom_mass::Unitful.Mass, temp::Unitful.Temperature,
                            k::BoltzmannConstUnits=uconvert(u"g * nm^2 * ps^-2 * K^-1", Unitful.k);
                            rng=Random.GLOBAL_RNG)
@@ -647,8 +656,8 @@ function remove_CM_motion!(sys)
 end
 
 @doc raw"""
-    virial(sys, neighbors=nothing; n_threads=Threads.nthreads())
-    virial(inter, sys, neighbors=nothing; n_threads=Threads.nthreads())
+    virial(sys, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
+    virial(inter, sys, neighbors; n_threads=Threads.nthreads())
 
 Calculate the virial of a system or the virial resulting from a general interaction.
 
@@ -656,8 +665,6 @@ The virial is defined as
 ```math
 \Xi = -\frac{1}{2} \sum_{i,j>i} r_{ij} \cdot F_{ij}
 ```
-If the interactions use neighbor lists, the neighbors should be computed
-first and passed to the function.
 Custom general interaction types can implement this function.
 
 This should only be used on systems containing just pairwise interactions, or
@@ -666,7 +673,11 @@ where the specific interactions, constraints and general interactions without
 Not currently compatible with automatic differentiation using Zygote when
 using pairwise interactions.
 """
-function virial(sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+function virial(sys; n_threads::Integer=Threads.nthreads())
+    return virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+end
+
+function virial(sys, neighbors; n_threads::Integer=Threads.nthreads())
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     v = virial(sys, neighbors, pairwise_inters_nonl, pairwise_inters_nl)
@@ -678,7 +689,7 @@ function virial(sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
     return v
 end
 
-@inbounds function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
+function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
                             pairwise_inters_nl) where {D, G, T}
     if G
         coords, atoms = Array(sys.coords), Array(sys.atoms)
@@ -695,7 +706,7 @@ end
     boundary = sys.boundary
     v = zero(T) * sys.energy_units
 
-    if length(pairwise_inters_nonl) > 0
+    @inbounds if length(pairwise_inters_nonl) > 0
         n_atoms = length(sys)
         for i in 1:n_atoms
             for j in (i + 1):n_atoms
@@ -710,7 +721,7 @@ end
         end
     end
 
-    if length(pairwise_inters_nl) > 0
+    @inbounds if length(pairwise_inters_nl) > 0
         if isnothing(neighbors)
             error("an interaction uses the neighbor list but neighbors is nothing")
         end
@@ -736,7 +747,7 @@ function virial(inter, sys::System{D, G, T}, neighbors=nothing; kwargs...) where
 end
 
 @doc raw"""
-    pressure(sys, neighbors=nothing)
+    pressure(sys, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
 
 Calculate the pressure of a system.
 
@@ -747,8 +758,6 @@ P = \frac{1}{V} \left( NkT - \frac{2}{D} \Xi \right)
 where `V` is the system volume, `N` is the number of atoms, `k` is the Boltzmann constant,
 `T` is the system temperature, `D` is the number of dimensions and `Ξ` is the virial
 calculated using [`virial`](@ref).
-If the interactions use neighbor lists, the neighbors should be computed
-first and passed to the function.
 
 This should only be used on systems containing just pairwise interactions, or
 where the specific interactions, constraints and general interactions without
@@ -757,12 +766,17 @@ Not compatible with infinite boundaries.
 Not currently compatible with automatic differentiation using Zygote when
 using pairwise interactions.
 """
-function pressure(sys::AbstractSystem{D}, neighbors=nothing; kwargs...) where D
+function pressure(sys; n_threads::Integer=Threads.nthreads())
+    return pressure(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+end
+
+function pressure(sys::AbstractSystem{D}, neighbors;
+                  n_threads::Integer=Threads.nthreads()) where D
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
     NkT = energy_remove_mol(length(sys) * sys.k * temperature(sys))
-    vir = energy_remove_mol(virial(sys, neighbors))
+    vir = energy_remove_mol(virial(sys, neighbors; n_threads=n_threads))
     P = (NkT - (2 * vir) / D) / box_volume(sys.boundary)
     if sys.energy_units == NoUnits || D != 3
         # If implied energy units are (u * nm^2 * ps^-2) and everything is

@@ -54,9 +54,9 @@ function extract_parameters(sys, ff)
             for angle_type in inter.types
                 key_prefix = "inter_HA_$(angle_type)_"
                 if !haskey(params_dic, key_prefix * "k")
-                    angle = ff.angle_types[atom_types_to_tuple(angle_type)]
-                    params_dic[key_prefix * "k" ] = angle.k
-                    params_dic[key_prefix * "θ0"] = angle.θ0
+                    ang = ff.angle_types[atom_types_to_tuple(angle_type)]
+                    params_dic[key_prefix * "k" ] = ang.k
+                    params_dic[key_prefix * "θ0"] = ang.θ0
                 end
             end
         elseif interaction_type(inter) <: PeriodicTorsion

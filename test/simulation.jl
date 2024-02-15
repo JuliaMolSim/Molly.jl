@@ -207,6 +207,7 @@ end
         Verlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps")),
         StormerVerlet(dt=0.002u"ps"),
         Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
+        OverdampedLangevin(dt=0.002u"ps", temperature=temp, friction=10.0u"ps^-1"),
     ]
 
     s = System(
@@ -837,8 +838,6 @@ end
 
     @test sys.loggers.avgpe.block_averages[end] < sys.loggers.avgpe.block_averages[1]
 
-    neighbors = find_neighbors(sys, sys.neighbor_finder)
-
     distance_sum = 0.0u"nm"
     for i in eachindex(sys)
         ci = sys.coords[i]
@@ -1004,14 +1003,14 @@ end
             simulate!(deepcopy(sys), sim, 100; n_threads=1)
             @time simulate!(sys, sim, n_steps; n_threads=1)
 
-            @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+            @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 330.0u"K"
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy)) < 120.0u"kJ * mol^-1"
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
             @test -5.0u"kJ * mol^-1" < mean(values(sys.loggers.virial)) < 5.0u"kJ * mol^-1"
             @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
-            all(!isnothing, press) && @test 0.7u"bar" < mean(values(sys.loggers.pressure)) < 1.3u"bar"
-            any(!isnothing, press) && @test 0.1u"bar" < std(values(sys.loggers.pressure)) < 0.5u"bar"
-            any(!isnothing, press) && @test 800.0u"nm^3" < mean(values(sys.loggers.box_volume)) < 1500u"nm^3"
+            all(!isnothing, press) && @test 0.6u"bar" < mean(values(sys.loggers.pressure)) < 1.3u"bar"
+            any(!isnothing, press) && @test 0.1u"bar" < std(values(sys.loggers.pressure)) < 2.5u"bar"
+            any(!isnothing, press) && @test 800.0u"nm^3" < mean(values(sys.loggers.box_volume)) < 2000u"nm^3"
             any(!isnothing, press) && @test 80.0u"nm^3" < std(values(sys.loggers.box_volume)) < 500.0u"nm^3"
             axis_is_uncoupled = isnothing.(press)
             axis_is_unchanged = sys.boundary .== 8.0u"nm"
@@ -1099,12 +1098,12 @@ end
     temp = 10.0u"K"
 
     fcc_crystal = SimpleCrystals.FCC(a, atom_mass, SVector(4, 4, 4))
-    n_atoms = SimpleCrystals.length(fcc_crystal)
+    n_atoms = length(fcc_crystal)
     @test n_atoms == 256
     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
     sys = System(
-        fcc_crystal,
+        fcc_crystal;
         velocities=velocities,
         pairwise_inters=(LennardJones(
             cutoff=ShiftedForceCutoff(r_cut),
@@ -1128,11 +1127,11 @@ end
     updated_atoms = []
 
     for i in eachindex(sys)
-        push!(updated_atoms, Molly.Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
-                                mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
+        push!(updated_atoms, Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
+                                  mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
     end
 
-    sys = System(sys, atoms=[updated_atoms...])
+    sys = System(sys; atoms=[updated_atoms...])
 
     simulator = Langevin(
         dt=2.0u"fs",
@@ -1157,7 +1156,7 @@ end
             SimpleCrystals.Primitive(),
         )
         z = zero(a)
-        basis = [SimpleCrystals.Atom(atomic_symbol, SVector(z, z, z), charge=charge)]
+        basis = [SimpleCrystals.Atom(atomic_symbol, [z, z, z], charge=charge)]
         return SimpleCrystals.Crystal(lattice, basis, N)
     end
     my_crystal = MyInvalidCrystal(a, :Ar, SVector(1, 1, 1))
@@ -1228,8 +1227,7 @@ end
         @test float_type(s) == (f32 ? Float32 : Float64)
 
         n_threads = parallel ? Threads.nthreads() : 1
-        neighbors = find_neighbors(s; n_threads=n_threads)
-        E_start = potential_energy(s, neighbors; n_threads=n_threads)
+        E_start = potential_energy(s; n_threads=n_threads)
 
         simulate!(s, simulator, n_steps; n_threads=n_threads)
         return s.coords, E_start

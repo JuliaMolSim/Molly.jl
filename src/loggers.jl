@@ -241,6 +241,8 @@ end
     StructureWriter(n_steps, filepath, excluded_res=String[])
 
 Write 3D output structures to a file in the PDB format throughout a simulation.
+
+The [`System`](@ref) should have `atoms_data` defined.
 """
 mutable struct StructureWriter
     n_steps::Int
@@ -263,7 +265,7 @@ function log_property!(logger::StructureWriter, sys::System, neighbors=nothing,
     if step_n % logger.n_steps == 0
         if length(sys) != length(sys.atoms_data)
             error("number of atoms is ", length(sys), " but number of atom data entries is ",
-                    length(sys.atoms_data))
+                  length(sys.atoms_data), ", StructureWriter requires them to be the same")
         end
         append_model!(logger, sys)
     end

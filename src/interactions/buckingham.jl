@@ -43,7 +43,7 @@ end
 
 use_neighbors(inter::Buckingham) = inter.use_neighbors
 
-@inline @inbounds function force(inter::Buckingham{C},
+@inline function force(inter::Buckingham{C},
                                     dr,
                                     coord_i,
                                     coord_j,
@@ -77,7 +77,7 @@ function force_divr(::Buckingham, r2, invr2, (A, B, C))
     return A * B * exp(-B * r) / r - 6 * C * invr2^4
 end
 
-@inline @inbounds function potential_energy(inter::Buckingham{C},
+@inline function potential_energy(inter::Buckingham{C},
                                             dr,
                                             coord_i,
                                             coord_j,

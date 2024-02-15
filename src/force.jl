@@ -10,17 +10,17 @@ export
     SpecificForce4Atoms,
     forces
 
-
 """
-    accelerations(system, neighbors=nothing; n_threads=Threads.nthreads())
+    accelerations(system, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
 
 Calculate the accelerations of all atoms in a system using the pairwise,
 specific and general interactions and Newton's second law of motion.
-
-If the interactions use neighbor lists, the neighbors should be computed
-first and passed to the function.
 """
-function accelerations(sys, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+function accelerations(sys; n_threads::Integer=Threads.nthreads())
+    return accelerations(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+end
+
+function accelerations(sys, neighbors; n_threads::Integer=Threads.nthreads())
     return forces(sys, neighbors; n_threads=n_threads) ./ masses(sys)
 end
 
@@ -120,24 +120,16 @@ Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 
 """
-    forces(system, neighbors=nothing; n_threads=Threads.nthreads())
+    forces(system, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
 
 Calculate the forces on all atoms in a system using the pairwise, specific and
 general interactions.
-
-If the interactions use neighbor lists, the neighbors should be computed
-first and passed to the function.
-
-    forces(inter, system, neighbors=nothing; n_threads=Threads.nthreads())
-
-Calculate the forces on all atoms in a system arising from a general
-interaction.
-
-If the interaction uses neighbor lists, the neighbors should be computed
-first and passed to the function.
-Custom general interaction types should implement this function.
 """
-function forces(sys::System{D, false}, neighbors=nothing;
+function forces(sys; n_threads::Integer=Threads.nthreads())
+    return forces(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+end
+
+function forces(sys::System{D, false}, neighbors;
                 n_threads::Integer=Threads.nthreads()) where D
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
@@ -151,7 +143,7 @@ function forces(sys::System{D, false}, neighbors=nothing;
                           sys.boundary, sys.force_units, neighbors, n_threads)
 
     for inter in values(sys.general_inters)
-        fs += forces(inter, sys, neighbors; n_threads=n_threads)
+        fs += AtomsCalculators.forces(sys, inter; neighbors=neighbors, n_threads=n_threads)
     end
 
     return fs
@@ -167,11 +159,11 @@ function forces_pair_spec(coords, atoms, pairwise_inters_nonl, pairwise_inters_n
     return fs * force_units
 end
 
-@inbounds function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
+function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
                                      sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
                                      boundary, force_units, neighbors, n_threads)
     n_atoms = length(coords)
-    if n_threads > 1
+    @inbounds if n_threads > 1
         fs_chunks = [zero(fs) for _ in 1:n_threads]
 
         if length(pairwise_inters_nonl) > 0
@@ -255,7 +247,7 @@ end
         end
     end
 
-    for inter_list in sils_1_atoms
+    @inbounds for inter_list in sils_1_atoms
         for (i, inter) in zip(inter_list.is, inter_list.inters)
             sf = force(inter, coords[i], boundary)
             check_force_units(sf.f1, force_units)
@@ -263,7 +255,7 @@ end
         end
     end
 
-    for inter_list in sils_2_atoms
+    @inbounds for inter_list in sils_2_atoms
         for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
             sf = force(inter, coords[i], coords[j], boundary)
             check_force_units(sf.f1, force_units)
@@ -273,7 +265,7 @@ end
         end
     end
 
-    for inter_list in sils_3_atoms
+    @inbounds for inter_list in sils_3_atoms
         for (i, j, k, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.inters)
             sf = force(inter, coords[i], coords[j], coords[k], boundary)
             check_force_units(sf.f1, force_units)
@@ -285,7 +277,7 @@ end
         end
     end
 
-    for inter_list in sils_4_atoms
+    @inbounds for inter_list in sils_4_atoms
         for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
                                        inter_list.inters)
             sf = force(inter, coords[i], coords[j], coords[k], coords[l], boundary)
@@ -303,7 +295,7 @@ end
     return nothing
 end
 
-function forces(sys::System{D, true, T}, neighbors=nothing;
+function forces(sys::System{D, true, T}, neighbors;
                 n_threads::Integer=Threads.nthreads()) where {D, T}
     n_atoms = length(sys)
     val_ft = Val(T)
@@ -335,7 +327,7 @@ function forces(sys::System{D, true, T}, neighbors=nothing;
     fs = reinterpret(SVector{D, T}, vec(fs_mat))
 
     for inter in values(sys.general_inters)
-        fs_gen = forces(inter, sys, neighbors; n_threads=n_threads)
+        fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, n_threads=n_threads)
         check_force_units(unit(eltype(eltype(fs_gen))), sys.force_units)
         fs += ustrip_vec.(fs_gen)
     end

@@ -19,7 +19,8 @@ export
     is_on_gpu,
     float_type,
     masses,
-    charges
+    charges,
+    MollyCalculator
 
 const DefaultFloat = Float64
 
@@ -248,6 +249,14 @@ function Base.zero(::Type{Atom{T, T, T, T}}) where T
     return Atom(0, z, z, z, z, false)
 end
 
+function Base.:+(a1::Atom, a2::Atom)
+    return Atom(0, a1.charge + a2.charge, a1.mass + a2.mass, a1.σ + a2.σ, a1.ϵ + a2.ϵ, false)
+end
+
+function Base.:-(a1::Atom, a2::Atom)
+    return Atom(0, a1.charge - a2.charge, a1.mass - a2.mass, a1.σ - a2.σ, a1.ϵ - a2.ϵ, false)
+end
+
 Base.getindex(at::Atom, x::Symbol) = hasfield(Atom, x) ? getfield(atom, x) : KeyError("no field $x in Atom")
 
 """
@@ -404,7 +413,6 @@ Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
 CUDA.Const(nl::NoNeighborList) = nl
 
-
 """
     System(; <keyword arguments>)
 
@@ -437,23 +445,24 @@ interface described there.
     i.e. interactions between specific atoms such as bonds or angles. Typically
     a `Tuple`.
 - `general_inters::GI=()`: the general interactions in the system,
-    i.e. interactions involving all atoms such as implicit solvent. Typically
-    a `Tuple`.
+    i.e. interactions involving all atoms such as implicit solvent. Each should
+    implement the AtomsCalculators.jl interface. Typically a `Tuple`.
 - `constraint_algorithms::CA=()` : The constraint algorithm(s) used to apply
     bond and angle constraints to the system.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `loggers::L=()`: the loggers that record properties of interest during a
     simulation.
-- `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
-    modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
     be set to `NoUnits` if units are not being used.
+- `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
+    modified in some simulations. `k` is chosen based on the `energy_units` given.
+- `data::DA=nothing`: arbitrary data associated with the system.
 """
 mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF,
-                      L, K, F, E, M} <: AbstractSystem{D}
+                      L, F, E, K, M, DA} <: AbstractSystem{D}
     atoms::A
     coords::C
     boundary::B
@@ -466,11 +475,12 @@ mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF,
     constraint_algorithms::CA
     neighbor_finder::NF
     loggers::L
-    k::K
     df::Int
     force_units::F
     energy_units::E
+    k::K
     masses::M
+    data::DA
 end
 
 function System(;
@@ -488,7 +498,8 @@ function System(;
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
-                k=default_k(energy_units))
+                k=default_k(energy_units),
+                data=nothing)
     D = n_dimensions(boundary)
     G = isa(coords, CuArray)
     T = float_type(boundary)
@@ -505,6 +516,7 @@ function System(;
     L = typeof(loggers)
     F = typeof(force_units)
     E = typeof(energy_units)
+    DA = typeof(data)
 
 
     if isnothing(velocities)
@@ -561,14 +573,18 @@ function System(;
     K = typeof(k_converted)
 
 
+    if(!isbits(eltype(coords)) || !isbits(eltype(vels)))
+        @warn "Eltype of coords of velocities was not isbits. It is recomended to use a vector of SVector's for performance. Note using other structures could cause errors in the force calculation"
+    end
+
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
-                specific_inter_lists, general_inters, boundary)
+                specific_inter_lists, general_inters, boundary, constraints)
 
 
-    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF, L, K, F, E, M}(
+    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF, L, F, E, K, M, DA}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraint_algorithms,
-                    neighbor_finder, loggers, k_converted, df, force_units, energy_units, atom_masses)
+                    neighbor_finder, loggers, df, force_units, energy_units, k_converted, atom_masses, data)
 end
 
 """
@@ -591,9 +607,10 @@ function System(sys::System;
                 constraint_algorithms=sys.constraint_algorithms,
                 neighbor_finder=sys.neighbor_finder,
                 loggers=sys.loggers,
-                k=sys.k,
                 force_units=sys.force_units,
-                energy_units=sys.energy_units)
+                energy_units=sys.energy_units,
+                k=sys.k,
+                data=sys.data)
     return System(
         atoms=atoms,
         coords=coords,
@@ -607,9 +624,10 @@ function System(sys::System;
         constraint_algorithms=constraint_algorithms,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
-        k=k,
         force_units=force_units,
         energy_units=energy_units,
+        k=k,
+        data=data,
     )
 end
 
@@ -636,10 +654,11 @@ function System(crystal::Crystal{D};
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
-                k=default_k(energy_units)) where D
+                k=default_k(energy_units),
+                data=nothing) where D
     atoms = [Atom(index=i, charge=charge(a), mass=atomic_mass(a)) for (i, a) in enumerate(crystal.atoms)]
     atoms_data = [AtomData(element=String(atomic_symbol(a))) for a in crystal.atoms]
-    coords = SimpleCrystals.position(crystal, :)
+    coords = [SVector{D}(SimpleCrystals.position(crystal, i)) for i in 1:length(crystal)]
 
     # Build bounding box
     side_lengths = norm.(bounding_box(crystal))
@@ -670,9 +689,10 @@ function System(crystal::Crystal{D};
         constraint_algorithms=constraint_algorithms,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
-        k=k,
         force_units=force_units,
         energy_units=energy_units,
+        k=k,
+        data=data,
     )
 end
 
@@ -725,8 +745,9 @@ construction where `n` is the number of threads to be used per replica.
 - `replica_specific_inter_lists=[() for _ in 1:n_replicas]`: the specific interactions in 
     each replica.
 - `general_inters::GI=()`: the general interactions in the system, i.e. interactions involving 
-    all atoms such as implicit solvent (to be used if the same for all replicas). Typically a
-    `Tuple`. This is only used if no value is passed to the argument `replica_general_inters`.
+    all atoms such as implicit solvent (to be used if the same for all replicas). Each should
+    implement the AtomsCalculators.jl interface. Typically a `Tuple`. This is only used if no
+    value is passed to the argument `replica_general_inters`.
 - `replica_general_inters=[() for _ in 1:n_replicas]`: the general interactions for 
     each replica.
 - `constraint_algorithms::CA=()` : The constraint algorithm(s) used to apply
@@ -737,22 +758,24 @@ construction where `n` is the number of threads to be used per replica.
     that record properties of interest during a simulation.
 - `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: the logger used to record
     the exchange of replicas.
-- `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
-    modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
     Should be set to `NoUnits` if units are not being used.
 - `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
     be set to `NoUnits` if units are not being used.
+- `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
+    modified in some simulations. `k` is chosen based on the `energy_units` given.
+- `data::DA=nothing`: arbitrary data associated with the replica system.
 """
-mutable struct ReplicaSystem{D, G, T, A, AD, EL, K, F, E, R} <: AbstractSystem{D}
+mutable struct ReplicaSystem{D, G, T, A, AD, EL, F, E, K, R, DA} <: AbstractSystem{D}
     atoms::A
     n_replicas::Int
     atoms_data::AD
     exchange_logger::EL
-    k::K
     force_units::F
     energy_units::E
+    k::K
     replicas::R
+    data::DA
 end
 
 function ReplicaSystem(;
@@ -776,7 +799,8 @@ function ReplicaSystem(;
                         exchange_logger=nothing,
                         force_units=u"kJ * mol^-1 * nm^-1",
                         energy_units=u"kJ * mol^-1",
-                        k=default_k(energy_units))
+                        k=default_k(energy_units),
+                        data=nothing)
     D = n_dimensions(boundary)
     G = isa(replica_coords[1], CuArray)
     T = float_type(boundary)
@@ -784,6 +808,7 @@ function ReplicaSystem(;
     AD = typeof(atoms_data)
     F = typeof(force_units)
     E = typeof(energy_units)
+    DA = typeof(data)
     C = typeof(replica_coords[1])
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
@@ -911,19 +936,17 @@ function ReplicaSystem(;
     K = typeof(k_converted)
 
     replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF,
-                            typeof(replica_loggers[i]), K, F, E, M}(
+                            typeof(replica_loggers[i]), F, E, K, M, Nothing}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
-            replica_general_inters[i], deepcopy(constraint_algorithms),
-            deepcopy(neighbor_finder), replica_loggers[i],
-            k_converted, df, force_units, energy_units, atom_masses) for i in 1:n_replicas)
-
-
+            replica_general_inters[i], deepcopy(constraint_algorithms), 
+            deepcopy(neighbor_finder), replica_loggers[i], k_converted,
+            force_units, energy_units, atom_masses, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
 
-    return ReplicaSystem{D, G, T, A, AD, EL, K, F, E, R}(
-            atoms, n_replicas, atoms_data, exchange_logger, k_converted,
-            force_units, energy_units, replicas)
+    return ReplicaSystem{D, G, T, A, AD, EL, F, E, K, R, DA}(
+            atoms, n_replicas, atoms_data, exchange_logger, force_units,
+            energy_units, k_converted, replicas, data)
 end
 
 """
@@ -991,12 +1014,11 @@ AtomsBase.atomic_mass(s::Union{System, ReplicaSystem}, i::Integer) = mass(s.atom
 
 function Base.getindex(sys::Union{System, ReplicaSystem}, i, x::Symbol)
     atomsbase_keys = (:position, :velocity, :atomic_mass, :atomic_number)
-    custom_keys = (:charge,)
     if hasatomkey(sys, x)
         if x in atomsbase_keys
             return getproperty(AtomsBase, x)(sys, i)
-        elseif x in custom_keys
-            return getproperty(Molly, x)(sys, i)
+        elseif x == :charge
+            return getproperty(Molly, x)(sys, i) * u"e_au"
         end
     else
         throw(KeyError("key $x not present in the system"))
@@ -1113,7 +1135,7 @@ function System(sys::AbstractSystem{D}, energy_units, force_units) where D
     for (i, atom) in enumerate(sys)
         atoms[i] = Atom(
             index=i,
-            charge=get(atom, :charge, 0.0),
+            charge=ustrip(get(atom, :charge, 0.0)), # Remove e unit
             mass=atomic_mass(atom),
             σ=(0.0 * length_unit),
             ϵ=(0.0 * energy_units),
@@ -1142,4 +1164,108 @@ function System(sys::AbstractSystem{D}, energy_units, force_units) where D
         energy_units=energy_units,
         force_units=force_units,
     )
+end
+
+"""
+    MollyCalculator(; <keyword arguments>)
+
+A calculator for use with the AtomsCalculators.jl interface.
+
+`neighbors` can optionally be given as a keyword argument when calling the
+calculation functions to save on computation when the neighbors are the same
+for multiple calls.
+In a similar way, `n_threads` can be given to determine the number of threads
+to use when running the calculation function.
+Note that this calculator is designed for using Molly in other contexts; if you
+want to use another calculator in Molly it can be given as `general_inters` when
+creating a [`System`](@ref).
+
+Not currently compatible with virial calculation.
+Not currently compatible with using atom properties such as `σ` and `ϵ`.
+
+# Arguments
+- `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
+    interactions between all or most atom pairs such as electrostatics.
+    Typically a `Tuple`.
+- `specific_inter_lists::SI=()`: the specific interactions in the system,
+    i.e. interactions between specific atoms such as bonds or angles. Typically
+    a `Tuple`.
+- `general_inters::GI=()`: the general interactions in the system,
+    i.e. interactions involving all atoms such as implicit solvent. Each should
+    implement the AtomsCalculators.jl interface. Typically a `Tuple`.
+- `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
+    close atoms and save on computation.
+- `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
+    Should be set to `NoUnits` if units are not being used.
+- `energy_units::E=u"kJ * mol^-1"`: the units of energy of the system. Should
+    be set to `NoUnits` if units are not being used.
+- `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
+    modified in some simulations. `k` is chosen based on the `energy_units` given.
+"""
+struct MollyCalculator{PI, SI, GI, NF, F, E, K}
+    pairwise_inters::PI
+    specific_inter_lists::SI
+    general_inters::GI
+    neighbor_finder::NF
+    force_units::F
+    energy_units::E
+    k::K
+end
+
+function MollyCalculator(;
+        pairwise_inters=(),
+        specific_inter_lists=(),
+        general_inters=(),
+        neighbor_finder=NoNeighborFinder(),
+        force_units=u"kJ * mol^-1 * nm^-1",
+        energy_units=u"kJ * mol^-1",
+        k=default_k(energy_units),
+    )
+    return MollyCalculator(pairwise_inters, specific_inter_lists, general_inters, neighbor_finder,
+                           force_units, energy_units, k)
+end
+
+# Doesn't work for Float32
+function AtomsCalculators.promote_force_type(::Any, calc::MollyCalculator)
+    return typeof(SVector(1.0, 1.0, 1.0) * calc.force_units)
+end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.forces(
+        abstract_sys,
+        calc::MollyCalculator;
+        neighbors=nothing,
+        n_threads::Integer=Threads.nthreads(),
+        kwargs...,
+    )
+    sys_nointers = System(abstract_sys, calc.energy_units, calc.force_units)
+    sys = System(
+        sys_nointers;
+        pairwise_inters=calc.pairwise_inters,
+        specific_inter_lists=calc.specific_inter_lists,
+        general_inters=calc.general_inters,
+        neighbor_finder=calc.neighbor_finder,
+        k=calc.k,
+    )
+    nbs = isnothing(neighbors) ? find_neighbors(sys) : neighbors
+    return forces(sys, nbs; n_threads=n_threads)
+end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
+        abstract_sys,
+        calc::MollyCalculator;
+        neighbors=nothing,
+        n_threads::Integer=Threads.nthreads(),
+        kwargs...,
+    )
+    sys_nointers = System(abstract_sys, calc.energy_units, calc.force_units)
+    sys = System(
+        sys_nointers;
+        pairwise_inters=calc.pairwise_inters,
+        specific_inter_lists=calc.specific_inter_lists,
+        general_inters=calc.general_inters,
+        neighbor_finder=calc.neighbor_finder,
+        k=calc.k,
+    )
+    nbs = isnothing(neighbors) ? find_neighbors(sys) : neighbors
+    return potential_energy(sys, nbs; n_threads=n_threads)
 end

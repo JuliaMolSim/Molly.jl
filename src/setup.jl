@@ -38,6 +38,7 @@ function place_atoms(n_atoms::Integer,
     end
     min_dist_sq = min_dist ^ 2
     coords = SArray[]
+    sizehint!(coords, n_atoms)
     failed_attempts = 0
     while length(coords) < n_atoms
         new_coord = random_coord(boundary)
@@ -92,6 +93,7 @@ function place_diatomics(n_molecules::Integer,
     end
     min_dist_sq = min_dist ^ 2
     coords = SArray[]
+    sizehint!(coords, 2 * n_molecules)
     failed_attempts = 0
     while length(coords) < (n_molecules * 2)
         new_coord_a = random_coord(boundary)
@@ -252,16 +254,16 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     bond_types[(atom_type_1, atom_type_2)] = HarmonicBond(k, r0)
                 end
             elseif entry_name == "HarmonicAngleForce"
-                for angle in eachelement(entry)
-                    if haskey(angle, "class1")
+                for ang in eachelement(entry)
+                    if haskey(ang, "class1")
                         @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
                         continue
                     end
-                    atom_type_1 = angle["type1"]
-                    atom_type_2 = angle["type2"]
-                    atom_type_3 = angle["type3"]
-                    k = units ? parse(T, angle["k"])u"kJ * mol^-1" : parse(T, angle["k"])
-                    θ0 = parse(T, angle["angle"])
+                    atom_type_1 = ang["type1"]
+                    atom_type_2 = ang["type2"]
+                    atom_type_3 = ang["type3"]
+                    k = units ? parse(T, ang["k"])u"kJ * mol^-1" : parse(T, ang["k"])
+                    θ0 = parse(T, ang["angle"])
                     angle_types[(atom_type_1, atom_type_2, atom_type_3)] = HarmonicAngle(k, θ0)
                 end
             elseif entry_name == "PeriodicTorsionForce"
@@ -433,6 +435,7 @@ are not available when reading Gromacs files.
     simulation box.
 - `use_cell_list::Bool=true`: whether to use [`CellListMapNeighborFinder`](@ref)
     on CPU. If `false`, [`DistanceNeighborFinder`](@ref) is used.
+- `data=nothing`: arbitrary data associated with the system.
 - `implicit_solvent=nothing`: specify a string to add an implicit solvent
     model, options are "obc1", "obc2" and "gbn2".
 - `kappa=0.0u"nm^-1"`: the kappa value for the implicit solvent model if one
@@ -452,6 +455,7 @@ function System(coord_file::AbstractString,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
                 use_cell_list::Bool=true,
+                data=nothing,
                 implicit_solvent=nothing,
                 kappa=0.0u"nm^-1",
                 rename_terminal_res::Bool=true)
@@ -953,6 +957,7 @@ function System(coord_file::AbstractString,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
         energy_units=units ? u"kJ * mol^-1" : NoUnits,
         k=k,
+        data=data,
     )
 end
 
@@ -967,7 +972,8 @@ function System(T::Type,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
-                use_cell_list::Bool=true)
+                use_cell_list::Bool=true,
+                data=nothing)
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
     bondtypes = Dict{String, HarmonicBond}()
@@ -1319,6 +1325,7 @@ function System(T::Type,
         force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
         energy_units=units ? u"kJ * mol^-1" : NoUnits,
         k=k,
+        data=data,
     )
 end
 
@@ -1393,8 +1400,9 @@ function add_position_restraints(sys,
         constraint_algorithms=deepcopy(sys.constraint_algorithms),
         neighbor_finder=deepcopy(sys.neighbor_finder),
         loggers=deepcopy(sys.loggers),
-        k=sys.k,
         force_units=sys.force_units,
         energy_units=sys.energy_units,
+        k=sys.k,
+        data=sys.data,
     )
 end

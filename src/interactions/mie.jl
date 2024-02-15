@@ -42,7 +42,7 @@ end
 
 use_neighbors(inter::Mie) = inter.use_neighbors
 
-@inbounds function force(inter::Mie{S, C, T},
+function force(inter::Mie{S, C, T},
                                     dr,
                                     coord_i,
                                     coord_j,
@@ -76,7 +76,7 @@ function force_divr(::Mie, r2, invr2, (m, n, σ_r, const_mn))
     return -const_mn / r2 * (m * σ_r ^ m - n * σ_r ^ n)
 end
 
-@inline @inbounds function potential_energy(inter::Mie{S, C, T},
+@inline function potential_energy(inter::Mie{S, C, T},
                                             dr,
                                             coord_i,
                                             coord_j,

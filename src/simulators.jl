@@ -8,6 +8,7 @@ export
     StormerVerlet,
     Langevin,
     LangevinSplitting,
+    OverdampedLangevin,
     NoseHoover,
     TemperatureREMD,
     remd_exchange!,
@@ -534,6 +535,61 @@ function B_step!(sys, dt_eff, acceleration_vector, compute_forces::Bool,
 end
 
 """
+    OverdampedLangevin(; <keyword arguments>)
+
+Simulates the overdamped Langevin equation using the Euler-Maruyama method.
+
+# Arguments
+- `dt::S`: the time step of the simulation.
+- `temperature::K`: the equilibrium temperature of the simulation.
+- `friction::F`: the friction coefficient of the simulation.
+- `remove_CM_motion=1`: remove the center of mass motion every this number of steps,
+    set to `false` or `0` to not remove center of mass motion.
+"""
+struct OverdampedLangevin{S, K, F}
+    dt::S
+    temperature::K
+    friction::F
+    remove_CM_motion::Int
+end
+
+function OverdampedLangevin(; dt, temperature, friction, remove_CM_motion=1)
+    return OverdampedLangevin(dt, temperature, friction, Int(remove_CM_motion))
+end
+
+function simulate!(sys,
+                    sim::OverdampedLangevin,
+                    n_steps::Integer;
+                    n_threads::Integer=Threads.nthreads(),
+                    run_loggers=true,
+                    rng=Random.GLOBAL_RNG)
+    sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+    !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
+    neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
+    run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
+
+    for step_n in 1:n_steps
+        accels_t = accelerations(sys, neighbors; n_threads=n_threads)
+
+        old_coords = copy(sys.coords)
+        noise = random_velocities(sys, sim.temperature; rng=rng)
+        sys.coords += (accels_t ./ sim.friction) .* sim.dt .+ sqrt((2 / sim.friction) * sim.dt) .* noise
+
+        apply_constraints!(sys, old_coords, sim.dt)
+        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+        if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
+            remove_CM_motion!(sys)
+        end
+
+        neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
+                                   n_threads=n_threads)
+
+        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
+    end
+    return sys
+end
+
+"""
     NoseHoover(; <keyword arguments>)
 
 The Nosé-Hoover integrator, a NVT simulator that extends velocity Verlet to control the
@@ -586,7 +642,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
 
         zeta_half = zeta + (sim.dt / (2 * (sim.damping^2))) * ((temperature(sys) / sim.temperature) - 1)
         KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
-        T_half = uconvert(u"K", 2 * KE_half / (sys.df * sys.k))
+        T_half = uconvert(unit(sim.temperature), 2 * KE_half / (sys.df * sys.k))
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)

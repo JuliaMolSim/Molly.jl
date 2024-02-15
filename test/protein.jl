@@ -10,6 +10,7 @@
             energy=TotalEnergyLogger(10),
             writer=StructureWriter(10, temp_fp_pdb),
         ),
+        data="test_data_peptide",
     )
     simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
@@ -22,6 +23,7 @@
     @test length(s.specific_inter_lists) == 3
     @test s.boundary == CubicBoundary(3.7146u"nm")
     show(devnull, first(s.atoms))
+    @test s.data == "test_data_peptide"
 
     @test length(s.topology.atom_molecule_inds) == length(s) == 5191
     @test s.topology.atom_molecule_inds[10] == 1
@@ -258,15 +260,18 @@ end
             )
             neighbors = find_neighbors(sys)
 
-            @test_throws ErrorException forces(sys)
-            forces_molly = forces(sys, neighbors)
+            @test_throws ErrorException forces(sys, nothing)
+            forces_molly = forces(sys)
+            @test !any(d -> any(abs.(d) .> 1e-6u"kJ * mol^-1 * nm^-1"),
+                        Array(forces_molly) .- Array(forces(sys, neighbors)))
             openmm_force_fp = joinpath(openmm_dir, "forces_$solvent_model.txt")
             forces_openmm = SVector{3}.(eachrow(readdlm(openmm_force_fp)))u"kJ * mol^-1 * nm^-1"
             @test !any(d -> any(abs.(d) .> 1e-3u"kJ * mol^-1 * nm^-1"),
                         Array(forces_molly) .- forces_openmm)
 
-            @test_throws ErrorException potential_energy(sys)
-            E_molly = potential_energy(sys, neighbors)
+            @test_throws ErrorException potential_energy(sys, nothing)
+            E_molly = potential_energy(sys)
+            @test E_molly ≈ potential_energy(sys, neighbors)
             openmm_E_fp = joinpath(openmm_dir, "energy_$solvent_model.txt")
             E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
             @test E_molly - E_openmm < 1e-2u"kJ * mol^-1"
@@ -275,8 +280,7 @@ end
                 sim = SteepestDescentMinimizer(tol=400.0u"kJ * mol^-1 * nm^-1")
                 coords_start = deepcopy(sys.coords)
                 simulate!(sys, sim)
-                neighbors = find_neighbors(sys)
-                @test potential_energy(sys, neighbors) < E_molly
+                @test potential_energy(sys) < E_molly
                 @test rmsd(coords_start, sys.coords) < 0.1u"nm"
             end
         end

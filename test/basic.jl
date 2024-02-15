@@ -345,6 +345,9 @@ end
     bb_to_mass = Dict("C" => 12.011u"g/mol", "N" => 14.007u"g/mol", "O" => 15.999u"g/mol")
     atoms = [Atom(mass=bb_to_mass[BioStructures.element(bb_atoms[i])]) for i in eachindex(bb_atoms)]
     @test isapprox(radius_gyration(coords, atoms), 11.51225678195222u"Å"; atol=1e-6u"nm")
+    boundary = CubicBoundary(10.0u"nm")
+    coords_wrap = wrap_coords.(coords, (boundary,))
+    @test isapprox(hydrodynamic_radius(coords_wrap, boundary), 21.00006825680275u"Å"; atol=1e-6u"nm")
 end
 
 @testset "Replica System" begin
@@ -404,6 +407,7 @@ end
         neighbor_finder=neighbor_finder,
         replica_loggers=[(temp=TemperatureLogger(10), coords=CoordinateLogger(10))
                          for i in 1:n_replicas],
+        data="test_data_repsys",
     )
 
     sys2 = System(
@@ -414,7 +418,11 @@ end
         pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
         loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
+        data="test_data_sys",
     )
+
+    @test repsys2.data == "test_data_repsys"
+    @test sys2.data == "test_data_sys"
 
     for i in 1:n_replicas
         l1 = repsys2.replicas[i].loggers
@@ -481,4 +489,28 @@ end
     )
     molly_sys = System(ab_sys_2, u"kJ", u"kJ/Å")
     test_approx_eq(ab_sys_2, molly_sys; common_only=true)
+end
+
+@testset "AtomsCalculators" begin
+    ab_sys = AbstractSystem(
+        make_test_system().system; 
+        boundary_conditions = [Periodic(), Periodic(), Periodic()],
+        bounding_box = [[1.54732, 0.0      , 0.0      ],
+                        [0.0    , 1.4654985, 0.0      ],
+                        [0.0    , 0.0      , 1.7928950]]u"Å",
+    )
+    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", force_units=u"kJ/Å", energy_units=u"kJ")
+    calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
+
+    pe = AtomsCalculators.potential_energy(ab_sys, calc)
+    @test unit(pe) == u"kJ"
+    fs = AtomsCalculators.forces(ab_sys, calc)
+    @test length(fs) == length(ab_sys)
+    @test unit(fs[1][1]) == u"kJ/Å"
+    zfs = AtomsCalculators.zero_forces(ab_sys, calc)
+    @test zfs == fill(SVector(0.0, 0.0, 0.0)u"kJ/Å", length(ab_sys))
+
+    # AtomsCalculators.AtomsCalculatorsTesting functions
+    test_potential_energy(ab_sys, calc)
+    test_forces(ab_sys, calc)
 end

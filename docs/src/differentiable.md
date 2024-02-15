@@ -1,7 +1,7 @@
 # Differentiable simulation with Molly
 
 !!! note
-    There are still many rough edges when taking gradients through simulations. Please open an issue if you run into an error and remember the golden rule of AD: always check your gradients against finite differencing.
+    There are still many rough edges when taking gradients through simulations. Please open an issue if you run into an error and remember the golden rule of AD: check your gradients against finite differencing if you want to make sure they are correct.
 
 In the last few years, the deep learning revolution has broadened to include the paradigm of [differentiable programming](https://en.wikipedia.org/wiki/Differentiable_programming).
 The concept of using automatic differentiation (AD) to obtain exact gradients through physical simulations has many interesting applications, including parameterising force fields and training neural networks to describe atomic potentials.
@@ -43,7 +43,7 @@ end
 ```
 Now we can set up and run the simulation in a similar way to that described in the [Molly documentation](@ref).
 The difference is that we wrap the simulation in a `loss` function.
-This returns a single value that we want to obtain gradients with respect to, in this case the value of the above function at the end of the simulation.
+This returns a single value that we want to obtain gradients with respect to, in this case the difference between the value of the above function at the end of the simulation and a target distance.
 The `Zygote.ignore()` block allows us to ignore code for the purposes of obtaining gradients; you could add the [`visualize`](@ref) function there for example.
 ```julia
 using Zygote
@@ -289,6 +289,7 @@ using Molly
 using GLMakie
 using Zygote
 using Flux
+import AtomsCalculators
 using Format
 using LinearAlgebra
 
@@ -302,10 +303,7 @@ ps = Flux.params(model)
 
 struct NNBonds end
 
-function Molly.forces(inter::NNBonds,
-                        sys,
-                        neighbors=nothing;
-                        n_threads=Threads.nthreads())
+function AtomsCalculators.forces(sys, inter::NNBonds; kwargs...)
     vec_ij = vector(sys.coords[1], sys.coords[3], sys.boundary)
     dist = norm(vec_ij)
     f = model([dist])[1] * normalize(vec_ij)
@@ -400,6 +398,12 @@ Epoch 20  |  Dist end  1.003  |  Loss  0.003
 After training it looks much better:
 ![Logo after](images/logo_after.gif)
 You could replace the simple network here with a much more complicated model and it would theoretically be able to train, even if it might prove practically difficult (see discussion below).
+
+## Biomolecular force fields
+
+Molly was used to train the [GB99dms force field](https://www.biorxiv.org/content/10.1101/2023.08.29.555352) for implicit solvent molecular dynamics of proteins.
+This involved doing differentiable simulations of one million steps with a loss function based on the residue-residue distance match to explicit solvent simulations.
+The [code is available](https://github.com/greener-group/GB99dms).
 
 ## Molecular loss functions
 

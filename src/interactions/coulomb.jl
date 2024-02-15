@@ -59,7 +59,7 @@ function Base.:+(c1::Coulomb, c2::Coulomb)
     )
 end
 
-@inline @inbounds function force(inter::Coulomb{C},
+@inline function force(inter::Coulomb{C},
                                     dr,
                                     coord_i,
                                     coord_j,
@@ -85,7 +85,7 @@ function force_divr(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
     return (coulomb_const * qi * qj) / √(r2 ^ 3)
 end
 
-@inline @inbounds function potential_energy(inter::Coulomb{C},
+@inline function potential_energy(inter::Coulomb{C},
                                             dr,
                                             coord_i,
                                             coord_j,
@@ -158,7 +158,39 @@ end
 
 use_neighbors(inter::CoulombSoftCore) = inter.use_neighbors
 
-@inline @inbounds function force(inter::CoulombSoftCore{C},
+function Base.zero(coul::CoulombSoftCore{C, A, L, P, R, W, T, F, E}) where {C, A, L, P, R, W, T, F, E}
+    return CoulombSoftCore{C, A, L, P, R, W, T, F, E}(
+        coul.cutoff,
+        zero(A),
+        zero(L),
+        zero(P),
+        zero(R),
+        false,
+        false,
+        zero(W),
+        zero(T),
+        coul.force_units,
+        coul.energy_units,
+    )
+end
+
+function Base.:+(c1::CoulombSoftCore, c2::CoulombSoftCore)
+    return CoulombSoftCore(
+        c1.cutoff,
+        c1.α + c2.α,
+        c1.λ + c2.λ,
+        c1.p + c2.p,
+        c1.σ6_fac + c2.σ6_fac,
+        c1.use_neighbors,
+        c1.lorentz_mixing,
+        c1.weight_special + c2.weight_special,
+        c1.coulomb_const + c2.coulomb_const,
+        c1.force_units,
+        c1.energy_units,
+    )
+end
+
+@inline function force(inter::CoulombSoftCore{C},
                                     dr,
                                     coord_i,
                                     coord_j,
@@ -189,7 +221,7 @@ function force_divr(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ
     return ff * √invr2
 end
 
-@inline @inbounds function potential_energy(inter::CoulombSoftCore{C},
+@inline function potential_energy(inter::CoulombSoftCore{C},
                                             dr,
                                             coord_i,
                                             coord_j,
@@ -276,7 +308,7 @@ function Base.:+(c1::CoulombReactionField, c2::CoulombReactionField)
     )
 end
 
-@inline @inbounds function force(inter::CoulombReactionField,
+@inline function force(inter::CoulombReactionField,
                                     dr,
                                     coord_i,
                                     coord_j,
@@ -310,7 +342,7 @@ end
     end
 end
 
-@inline @inbounds function potential_energy(inter::CoulombReactionField,
+@inline function potential_energy(inter::CoulombReactionField,
                                             dr,
                                             coord_i,
                                             coord_j,

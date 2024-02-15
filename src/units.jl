@@ -38,18 +38,19 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
     energy_is_molar = (energy_dim == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2")
     mass_is_molar = (mass_dim == u"𝐌* 𝐍^-1")
 
-    if !allequal([energy_is_molar, mass_is_molar, force_is_molar])
-        throw(ArgumentError("""system was constructed with inconsistent energy, force & mass units.\
-         All must be molar, non-molar or unitless. For example, kcal & kg are allowed but kcal/mol\
-         and kg is not allowed. Units were: $([energy_units, mass_units, force_units])"""))
+    if !(energy_is_molar == mass_is_molar && energy_is_molar == force_is_molar)
+        throw(ArgumentError("System was constructed with inconsistent energy, force and mass " *
+            "units. All must be molar, non-molar or unitless. For example, kcal and kg is " *
+            "allowed but kcal/mol and kg is not. Units were $([energy_units, mass_units, force_units])"))
     end
 
     no_dim_arr = [dim == NoDims for dim in [length_dim, vel_dim, energy_dim, force_dim, mass_dim]]
 
     # If something has NoDims, all other data must have NoDims
     if any(no_dim_arr) && !all(no_dim_arr)
-        throw(ArgumentError("""either coords, velocities, masses or energy_units has NoDims/NoUnits but\
-         the others do have units. Molly does not permit mixing dimensionless and dimensioned data."""))
+        throw(ArgumentError("either coords, velocities, masses or energy_units has " *
+            "NoDims/NoUnits but the others do have units. Molly does not permit mixing " *
+            "data with and without units."))
     end
 
     # Check derived units

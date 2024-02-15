@@ -1,5 +1,65 @@
 # Molly.jl release notes
 
+## v0.19.0 - Feb 2024
+
+### Breaking changes
+- General interactions are changed to use the AtomsCalculators.jl interface, allowing simulations to be run with calculators from other packages. A tuple of interactions compatible with the AtomsCalculators.jl interface should be given to `general_inters` when constructing a `System`. `ImplicitSolventOBC`, `ImplicitSolventGBN2` and `MullerBrown` are changed to be calculators.
+- The type parameters of `System` and `ReplicaSystem` are changed.
+
+### New features
+- `forces`, `accelerations`, `potential_energy`, `total_energy`, `virial` and `pressure` now calculate the neighbors by default when called without neighbors. If they are being reused, neighbors should be pre-computed as before for performance.
+- `System` and `ReplicaSystem` now have a `data` field, set with the `data` keyword argument to the constructors, that can be used to store arbitrary data. This data can be accessed inside simulators.
+- `LennardJonesSoftCore`, `CoulombSoftCore` and custom atom types are now compatible with gradients.
+
+## v0.18.4 - Jan 2024
+
+### Bug fixes
+- A bug that prevented system setup on Julia 1.7 is fixed.
+- A type preservation bug in the `rdf` function is fixed.
+
+## v0.18.3 - Dec 2023
+
+### New features
+- Compatibility with AtomsCalculators.jl is added via `MollyCalculator`.
+- The documentation on setting up systems from structure files is improved.
+- A list of relevant publications is added to the documentation.
+
+### Community
+- The Contributor Covenant Code of Conduct is added to the project.
+
+### Bug fixes
+- A bug in the `NoseHoover` simulator when not using units is fixed.
+
+## v0.18.2 - Nov 2023
+
+### Performance improvements
+- The `vector` function for calculating the displacement between coordinates accounting for periodic boundary conditions is made faster, improving simulation performance on CPU and GPU.
+
+## v0.18.1 - Oct 2023
+
+### New features
+- Simulation of overdamped Langevin dynamics is added as `OverdampedLangevin`.
+
+### Performance improvements
+- The performance of force calculation without a neighbor list on the GPU is significantly improved.
+
+### Bug fixes
+- A bug in compatibility with SimpleCrystals.jl is fixed.
+
+## v0.18.0 - Sep 2023
+
+### Breaking changes
+- Molar units are made more consistent throughout the package. If force and energy units are molar then the atomic masses should have a molar dimension, e.g. `u"g/mol"` rather than `u"u"`. The default Boltzmann constant `k` is chosen based on the `energy_units` given to a `System`.
+
+### New features
+- A constructor for `System` is added to convert from an AtomsBase.jl `AbstractSystem`.
+- During `System` setup, checks are made for a consistent unit system and appropriate errors are thrown.
+- Calculation of the hydrodynamic radius is added as `hydrodynamic_radius`.
+- The `charges` function is added to give the partial charges of the atoms in a system.
+
+### Bug fixes
+- Issues with AtomsBase.jl integration are fixed.
+
 ## v0.17.0 - Jul 2023
 
 ### Breaking changes

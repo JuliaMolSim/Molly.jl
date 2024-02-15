@@ -6,8 +6,10 @@ using Reexport
 @reexport using Unitful
 
 using Atomix
+import AtomsCalculators
 import BioStructures # Imported to avoid clashing names
 using CellListMap
+using ChainRules
 using ChainRulesCore
 import Chemfiles
 using Colors
@@ -27,6 +29,7 @@ using PeriodicTable
 using Requires
 using SimpleCrystals
 using Unitful
+using UnitfulAtomic
 using UnitfulChainRules
 using UnsafeAtomicsLLVM
 using Zygote
@@ -35,6 +38,10 @@ using LinearAlgebra
 using Random
 using SparseArrays
 using Statistics
+
+if VERSION < v"1.8.0-DEV.1494"
+    allequal(itr) = isempty(itr) ? true : all(isequal(first(itr)), itr)
+end
 
 include("types.jl")
 include("units.jl")

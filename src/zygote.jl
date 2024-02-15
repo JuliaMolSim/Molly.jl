@@ -29,14 +29,6 @@ function Zygote.accum(x::CuArray{Atom{T, T, T, T}},
     CuArray(Zygote.accum(Array(x), y))
 end
 
-function Base.:+(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
-    Atom{T, T, T, T}(0, x.charge + y.charge, x.mass + y.mass, x.σ + y.σ, x.ϵ + y.ϵ, false)
-end
-
-function Base.:-(x::Atom{T, T, T, T}, y::Atom{T, T, T, T}) where T
-    Atom{T, T, T, T}(0, x.charge - y.charge, x.mass - y.mass, x.σ - y.σ, x.ϵ - y.ϵ, false)
-end
-
 function Base.:+(x::Atom{T, T, T, T}, y::NamedTuple{(:index, :charge, :mass, :σ, :ϵ, :solute),
                     Tuple{Int, C, M, S, E, Bool}}) where {T, C, M, S, E}
     Atom{T, T, T, T}(
@@ -52,8 +44,8 @@ end
 #TODO ADD DF TO THIS, HOW??
 function Base.:+(r::Base.RefValue{Any}, y::NamedTuple{(:atoms, :coords, :boundary,
                  :velocities, :atoms_data, :topology, :pairwise_inters, :specific_inter_lists,
-                 :general_inters, :constraints, :neighbor_finder, :loggers, :k, :force_units,
-                 :energy_units, :masses)})
+                 :general_inters, :constraints, :neighbor_finder, :loggers, :force_units,
+                 :energy_units, :k, :masses, :data)})
     x = r.x
     (
         atoms=Zygote.accum(x.atoms, y.atoms),
@@ -68,18 +60,27 @@ function Base.:+(r::Base.RefValue{Any}, y::NamedTuple{(:atoms, :coords, :boundar
         constraints=Zygote.accum(x.constraints, y.constraints),
         neighbor_finder=nothing,
         loggers=nothing,
-        k=Zygote.accum(x.k, y.k),
         force_units=nothing,
         energy_units=nothing,
+        k=Zygote.accum(x.k, y.k),
         masses=Zygote.accum(x.masses, y.masses),
+        data=nothing,
     )
 end
 
 function Base.:+(y::NamedTuple{(:atoms, :coords, :boundary,
                  :velocities, :atoms_data, :topology, :pairwise_inters, :specific_inter_lists,
-                 :general_inters, :constraints, :neighbor_finder, :loggers, :k, :force_units,
-                 :energy_units, :masses)}, r::Base.RefValue{Any})
+                 :general_inters, :constraints, :neighbor_finder, :loggers, :force_units,
+                 :energy_units, :k, :masses, :data)}, r::Base.RefValue{Any})
     return r + y
+end
+
+function Zygote.accum(x::NamedTuple{(:side_lengths,), Tuple{SVector{3, T}}}, y::SVector{3, T}) where T
+    CubicBoundary(x.side_lengths .+ y; check_positive=false)
+end
+
+function Zygote.accum(x::NamedTuple{(:side_lengths,), Tuple{SVector{2, T}}}, y::SVector{2, T}) where T
+    RectangularBoundary(x.side_lengths .+ y; check_positive=false)
 end
 
 function Zygote.accum(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{3, T, Vector{T}}}}, y::SVector{3, T}) where T
@@ -123,15 +124,12 @@ function Base.zero(::Type{Union{Nothing, SizedVector{D, T, Vector{T}}}}) where {
     zero(SizedVector{D, T, Vector{T}})
 end
 
-# Slower version than in Zygote but doesn't give wrong gradients on the GPU for repeated indices
-# Here we just move it to the CPU then move it back
-# See https://github.com/FluxML/Zygote.jl/pull/1131
-Zygote.∇getindex(x::CuArray, inds::Tuple{AbstractArray{<:Integer}}) = dy -> begin
-    inds1_cpu = Array(inds[1])
-    dx = zeros(eltype(dy), length(x))
-    dxv = view(dx, inds1_cpu)
-    dxv .= Zygote.accum.(dxv, Zygote._droplike(Array(dy), dxv))
-    return Zygote._project(x, CuArray(dx)), nothing
+# ChainRules._setindex_zero returns a union type with NoTangent via the default path
+# This causes a problem on the GPU
+function ChainRules.∇getindex(x::CuArray{<:StaticVector}, dy, inds...)
+    plain_inds = Base.to_indices(x, inds)
+    dx = ChainRules.∇getindex!(zero(x), dy, plain_inds...)
+    return ChainRules.ProjectTo(x)(dx)
 end
 
 # Modified version of ForwardDiff.ForwardDiffStaticArraysExt.dualize
