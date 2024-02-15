@@ -404,11 +404,6 @@ Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
 CUDA.Const(nl::NoNeighborList) = nl
 
-struct ExtraStorage{C,V}
-    ca_coord_storage::C
-    ca_vel_storage::V
-end
-
 
 """
     System(; <keyword arguments>)
@@ -476,7 +471,6 @@ mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF,
     force_units::F
     energy_units::E
     masses::M
-    hidden_storage::Union{ExtraStorage{C,V}, Nothing}
 end
 
 function System(;
@@ -536,7 +530,6 @@ function System(;
     end
 
     df = n_dof(D, length(atoms), boundary)
-    hidden_storage = nothing
     if length(constraint_algorithms) > 0
         if neighbor_finder == NoNeighborFinder()
             throw(ArgumentError("Constraints algorithms require neighbor lists."))
@@ -545,11 +538,6 @@ function System(;
             neighbor_finder = disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
             df -= n_dof_lost(D, ca.clusters)
         end
-
-        #Build global storage for positions & velocities to be shared by constraint algorithms
-        ca_coord_storage = similar(coords)
-        ca_vel_storage = similar(vels)
-        hidden_storage = ExtraStorage(ca_coord_storage, ca_vel_storage)
     end
 
 
@@ -580,7 +568,7 @@ function System(;
     return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF, L, K, F, E, M}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraint_algorithms,
-                    neighbor_finder, loggers, k_converted, df, force_units, energy_units, atom_masses, hidden_storage)
+                    neighbor_finder, loggers, k_converted, df, force_units, energy_units, atom_masses)
 end
 
 """
@@ -844,7 +832,6 @@ function ReplicaSystem(;
     GI = eltype(replica_general_inters)
 
     df = n_dof(D, length(atoms), boundary)
-    hidden_storage = nothing
     if length(constraint_algorithms) > 0
         if neighbor_finder == NoNeighborFinder()
             throw(ArgumentError("Constraints algorithms require neighbor lists."))
@@ -853,9 +840,6 @@ function ReplicaSystem(;
             neighbor_finder = disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
             df -= n_dof_lost(D, ca.clusters)
         end
-        ca_coord_storage = similar(coords)
-        ca_vel_storage = similar(vels)
-        hidden_storage = ExtraStorage(ca_coord_storage, ca_vel_storage)
     end
 
 
@@ -932,7 +916,7 @@ function ReplicaSystem(;
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], deepcopy(constraint_algorithms),
             deepcopy(neighbor_finder), replica_loggers[i],
-            k_converted, df, force_units, energy_units, atom_masses, deepcopy(hidden_storage)) for i in 1:n_replicas)
+            k_converted, df, force_units, energy_units, atom_masses) for i in 1:n_replicas)
 
 
     R = typeof(replicas)

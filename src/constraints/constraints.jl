@@ -175,29 +175,30 @@ function save_ca_positions!(sys::System, c)
     end
 end
 
-function apply_position_constraints!(sys::System; n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys::System, coord_storage;
+     n_threads::Integer=Threads.nthreads())
 
    for ca in sys.constraint_algorithms
-       position_constraints!(sys, ca, n_threads = n_threads)
+       position_constraints!(sys, ca, coord_storage, n_threads = n_threads)
    end
 
    return sys
 
 end
 
-function apply_position_constraints!(sys::System, apply_vel_correction::Val{true}, dt;
-     n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys::System, coord_storage,
+     vel_storage, dt; n_threads::Integer=Threads.nthreads())
 
      if length(sys.constraint_algorithms) > 0
-        sys.hidden_storage.ca_vel_storage .= -sys.coords ./ dt
+        vel_storage .= -sys.coords ./ dt
 
         for ca in sys.constraint_algorithms
-            position_constraints!(sys, ca, n_threads = n_threads)
+            position_constraints!(sys, ca, coord_storage, n_threads = n_threads)
         end
 
-        sys.hidden_storage.ca_vel_storage .+= sys.coords ./ dt
+        vel_storage .+= sys.coords ./ dt
 
-        sys.velocities .+= sys.hidden_storage.ca_vel_storage
+        sys.velocities .+= vel_storage
     end
 
    return sys

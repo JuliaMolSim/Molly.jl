@@ -31,23 +31,17 @@ function SHAKE_RATTLE(constraints::AbstractVector{<:Constraint}, n_atoms, dist_t
     return SHAKE_RATTLE{typeof(dist_tolerance), typeof(vel_tolerance)}(clusters, dist_tolerance, vel_tolerance)
 end
 
-function position_constraints!(sys::System, constraint_algo::SHAKE_RATTLE;
+function position_constraints!(sys::System, constraint_algo::SHAKE_RATTLE, coord_storage;
      n_threads::Integer=Threads.nthreads())
 
-    # Threads.@threads for group_id in 1:n_threads #& can only paralellize over independent clusters
-    #     for i in group_id:n_threads:length(sys.constraints)
-    #         SHAKE_update!(sys, constraint_algo, sys.constraints[i])
-    #     end
-    # end
-
-    SHAKE_updates!(sys, constraint_algo)
+    SHAKE_updates!(sys, constraint_algo, coord_storage)
 
     return sys
 end
 
 
 
-function SHAKE_updates!(sys, ca::SHAKE_RATTLE)
+function SHAKE_updates!(sys, ca::SHAKE_RATTLE, coord_storage)
     converged = false
 
     while !converged
@@ -60,7 +54,7 @@ function SHAKE_updates!(sys, ca::SHAKE_RATTLE)
                 s12 = vector(sys.coords[k2], sys.coords[k1], sys.boundary) #& extra allocation
 
                 # Distance vector between the atoms before unconstrained update (r)
-                r12 = vector(sys.hidden_storage.ca_coord_storage[k2], sys.hidden_storage.ca_coord_storage[k1], sys.boundary) #& extra allocation
+                r12 = vector(coord_storage[k2], coord_storage[k1], sys.boundary) #& extra allocation
 
                 if abs(norm(s12) - constraint.dist) > ca.dist_tolerance
                     m1_inv = 1/mass(sys.atoms[k1])
