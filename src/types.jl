@@ -940,7 +940,7 @@ function ReplicaSystem(;
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], deepcopy(constraint_algorithms), 
-            deepcopy(neighbor_finder), replica_loggers[i],
+            deepcopy(neighbor_finder), replica_loggers[i], deepcopy(df),
             force_units, energy_units, k_converted, atom_masses, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
 

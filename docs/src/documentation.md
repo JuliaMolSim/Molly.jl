@@ -1269,9 +1269,11 @@ SHAKE was originally derived for the Verlet integration scheme with RATTLE exten
 | VelocityVerlet             |   X   |    X   |
 | Langevin                   |   X   |        |
 | Langevin Splitting         |   -   |        |
+| Overdamped Langevin        |   -   |        |
 | NoseHoover                 |   -   |    -   |
 | MetropolisMonteCarlo       |       |        |
 | SteepestDescentMinimizer   |       |        |
+(X) = Supported, (-) = Not Implemented
 
 In Molly, the SHAKE constraints for diatomic molecules are solved analytically while all larger constraints are solved iterively. The velocity constraints imposed by RATTLE form a linear system of equations which could be solved exactly; however, this operation is expensive for clusters of more than 4 constraints. Therefore, RATTLE constraints can be solved by direct matrix inversion for small clusters (4 or fewer constraints) and iteratively otherwise (currently only solved iteratively). The number of constraints here does not refer to the total number of constraints in the system, rather the total number of constraints in an independent cluster/molecule. For example, a water molecule can be constrained by 2 distance constraints and 1 angle constraint which is only 3 constraints. However, a C-C backbone of an organic molecule like octane would need 7 constraints to maintain all of the C-C bond lengths. Constraining large clusters will result in a performance penalty.
 
