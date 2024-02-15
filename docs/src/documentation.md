@@ -21,7 +21,7 @@ n_atoms = 100
 atom_mass = 10.0u"g/mol"
 atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 ```
-See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) docs for more information on the unit annotations.
+See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) documentation for more information on the unit annotations.
 Molly re-exports Unitful.jl, [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) and [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) since they are often required to run simulations.
 You can use your own atom types in Molly, provided that the [`mass`](@ref) function is defined and any fields required by the interactions are present.
 Next, we'll need some starting coordinates and velocities.
@@ -78,6 +78,7 @@ simulator = VelocityVerlet(
 simulate!(sys, simulator, 1_000)
 ```
 `atoms`, `coords` and `boundary` are the minimum required properties to define a [`System`](@ref), though you would generally want to add interactions to a [`System`](@ref) to do something useful with it.
+The `data` keyword argument can give arbitrary data to the [`System`](@ref) that can be accessed with `sys.data`, for example metadata or properties to be used with a custom simulator.
 [`System`](@ref) implements the `AbstractSystem` [interface from AtomsBase.jl](https://juliamolsim.github.io/AtomsBase.jl/stable).
 Various functions can be used on a [`System`](@ref):
 ```julia
@@ -328,6 +329,25 @@ simulator = Langevin(
 
 simulate!(sys, simulator, 5_000)
 ```
+The OpenMM setup procedure is tested against OpenMM in terms of matching forces and energies.
+However it is not thoroughly tested with respect to ligands or special residues and requires that atom names exactly match residue templates.
+By default, terminal residues are renamed to match the appropriate templates.
+For example, the first (N-terminal) residue could be changed from "MET" to "NMET".
+This can be turned off by giving `rename_terminal_res=false` to [`System`](@ref) if the residue names in the input file are appropriate.
+Currently atom classes are not supported, only atom types.
+Residue patches, virtual sites, file includes and any force types other than `HarmonicBondForce`/`HarmonicAngleForce`/`PeriodicTorsionForce`/`NonbondedForce` are currently ignored.
+
+!!! tip "Obtaining compatible structure files"
+
+    Future work will increase the features and robustness when reading in structure files. In the mean time, the following tips may help you to read in a file correctly and without errors:
+
+    * Make sure there are no missing residues or heavy atoms. Tools such as [MODELLER](https://salilab.org/modeller) and [SCWRL4](http://dunbrack.fccc.edu/lab/scwrl) can fix these issues.
+    * Remove the hydrogen atoms and add them back [using OpenMM](http://docs.openmm.org/latest/userguide/application/03_model_building_editing.html#adding-hydrogens), which will ensure they have atom names compatible with the OpenMM force field files.
+    * Make sure that all residue names match the corresponding residue template name and that all atom names match the appropriate atom in the residue template.
+    * Non-standard residues also require `CONECT` records for Chemfiles to assign bonds correctly, see for example [a compatible alanine dipeptide file](https://github.com/noeblassel/SINEQSummerSchool2023/blob/main/notebooks/dipeptide_nowater.pdb).
+
+    Some PDB files that read in fine can be found [here](https://github.com/greener-group/GB99dms/tree/main/structures/training/conf_1).
+
 To run on the GPU, set `gpu=true`.
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
 The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
@@ -362,16 +382,9 @@ sys_res = add_position_restraints(
 )
 ```
 
-The OpenMM setup procedure is tested against OpenMM in terms of matching forces and energies.
-However it is not thoroughly tested with respect to ligands or special residues and requires that atom names exactly match residue templates.
-By default, terminal residues are renamed to match the appropriate templates.
-For example, the first (N-terminal) residue could be changed from "MET" to "NMET".
-This can be turned off by giving `rename_terminal_res=false` to [`System`](@ref) if the residue names in the input file are appropriate.
-Currently atom classes are not supported, only atom types.
-Residue patches, virtual sites, file includes and any force types other than `HarmonicBondForce`/`HarmonicAngleForce`/`PeriodicTorsionForce`/`NonbondedForce` are currently ignored.
-
 The Gromacs setup procedure should be considered experimental.
 Currently Ewald summation methods, constraint algorithms and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
+Stay tuned for developments in this area.
 
 ## Enhanced sampling
 
@@ -481,133 +494,6 @@ It should modify the coordinates as appropriate, accounting for any boundary con
 [`random_uniform_translation!`](@ref) and [`random_normal_translation!`](@ref) are provided as common trial move functions.
 [`MonteCarloLogger`](@ref) records various properties throughout the simulation.
 
-## Agent-based modelling
-
-Agent-based modelling (ABM) is conceptually similar to molecular dynamics.
-Julia has [Agents.jl](https://juliadynamics.github.io/Agents.jl/stable/) for ABM, but Molly can also be used to simulate arbitrary agent-based systems in continuous space.
-Here we simulate a toy [SIR model](https://en.wikipedia.org/wiki/Compartmental_models_in_epidemiology#The_SIR_model) for disease spread.
-This example shows how atom properties can be mutable, i.e. change during the simulation, and includes custom forces and loggers (see below for more info).
-```julia
-@enum Status susceptible infected recovered
-
-# Custom atom type
-mutable struct Person
-    i::Int
-    status::Status
-    mass::Float64
-    σ::Float64
-    ϵ::Float64
-end
-
-# Custom PairwiseInteraction
-struct SIRInteraction <: PairwiseInteraction
-    dist_infection::Float64
-    prob_infection::Float64
-    prob_recovery::Float64
-end
-
-# Custom force function
-function Molly.force(inter::SIRInteraction,
-                        vec_ij,
-                        coord_i,
-                        coord_j,
-                        atom_i,
-                        atom_j,
-                        boundary)
-    if (atom_i.status == infected && atom_j.status == susceptible) ||
-                (atom_i.status == susceptible && atom_j.status == infected)
-        # Infect close people randomly
-        r2 = sum(abs2, vec_ij)
-        if r2 < inter.dist_infection^2 && rand() < inter.prob_infection
-            atom_i.status = infected
-            atom_j.status = infected
-        end
-    end
-    # Workaround to obtain a self-interaction
-    if atom_i.i == (atom_j.i - 1)
-        # Recover randomly
-        if atom_i.status == infected && rand() < inter.prob_recovery
-            atom_i.status = recovered
-        end
-    end
-    return zero(coord_i)
-end
-
-# Custom logger
-function fracs_SIR(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
-    counts_sir = [
-        count(p -> p.status == susceptible, s.atoms),
-        count(p -> p.status == infected   , s.atoms),
-        count(p -> p.status == recovered  , s.atoms)
-    ]
-    return counts_sir ./ length(s)
-end
-
-SIRLogger(n_steps) = GeneralObservableLogger(fracs_SIR, Vector{Float64}, n_steps)
-
-temp = 1.0
-boundary = RectangularBoundary(10.0)
-n_steps = 1_000
-n_people = 500
-n_starting = 2
-atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
-coords = place_atoms(n_people, boundary; min_dist=0.1)
-velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
-
-lj = LennardJones(
-    cutoff=DistanceCutoff(1.6),
-    use_neighbors=true,
-    force_units=NoUnits,
-    energy_units=NoUnits,
-)
-sir = SIRInteraction(0.5, 0.06, 0.01)
-pairwise_inters = (LennardJones=lj, SIR=sir)
-neighbor_finder = DistanceNeighborFinder(
-    eligible=trues(n_people, n_people),
-    n_steps=10,
-    dist_cutoff=2.0,
-)
-simulator = VelocityVerlet(
-    dt=0.02,
-    coupling=AndersenThermostat(temp, 5.0),
-)
-
-sys = System(
-    atoms=atoms,
-    coords=coords,
-    boundary=boundary,
-    velocities=velocities,
-    pairwise_inters=pairwise_inters,
-    neighbor_finder=neighbor_finder,
-    loggers=(
-        coords=CoordinateLogger(Float64, 10; dims=2),
-        SIR=SIRLogger(10),
-    ),
-    force_units=NoUnits,
-    energy_units=NoUnits,
-)
-
-simulate!(sys, simulator, n_steps)
-
-visualize(sys.loggers.coords, boundary, "sim_agent.mp4"; markersize=0.1)
-```
-![Agent simulation](images/sim_agent.gif)
-
-We can use the logger to plot the fraction of people susceptible, infected and recovered over the course of the simulation:
-
-```julia
-using GLMakie
-
-f = Figure()
-ax = Axis(f[1, 1], xlabel="Snapshot", ylabel="Fraction")
-
-lines!([l[1] for l in values(sys.loggers.SIR)], label="Susceptible")
-lines!([l[2] for l in values(sys.loggers.SIR)], label="Infected")
-lines!([l[3] for l in values(sys.loggers.SIR)], label="Recovered")
-axislegend()
-```
-![Fraction SIR](images/fraction_sir.png)
-
 ## Units
 
 Molly is fairly opinionated about using [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) units as shown above: you don't have to use them, but it is better if you do.
@@ -648,7 +534,7 @@ The force on each particle in the system is derived from the potential correspon
 In Molly there are three types of interactions:
 - [`PairwiseInteraction`](@ref)s are present between all or most atom pairs, and account for example for non-bonded terms in molecular mechanics force fields.
 - [`SpecificInteraction`](@ref)s are present between specific atoms, and account for example for bonded terms in molecular mechanics force fields.
-- General interactions are a free-form interaction type that can access the whole system and outputs forces for all atoms. This is useful for neural network potentials, implicit solvent models and other cases that require maximum flexibility.
+- General interactions are a free-form interaction type that can access the whole system and outputs forces for all atoms. This is useful for neural network potentials, implicit solvent models and other cases that require maximum flexibility. General interactions should be compatible with the [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl) interface.
 
 The available pairwise interactions are:
 - [`LennardJones`](@ref)
@@ -715,6 +601,7 @@ end
 `vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
+One nice feature of Molly is that this function will work on both the CPU and the GPU.
 
 An optional final argument `special` is a `Bool` determining whether the atom pair interaction should be treated as special.
 This is specified during neighbor finder construction.
@@ -784,12 +671,17 @@ struct MyGeneralInter
     # Properties, e.g. a neural network model
 end
 ```
-Next, you need to define a method for the [`forces`](@ref) function (note this is different to the [`force`](@ref) function above).
+Next, you need to define a method for the `AtomsCalculators.forces` function (note this is different to the [`force`](@ref) function above).
 ```julia
-function Molly.forces(inter::MyGeneralInter,
-                        sys,
-                        neighbors=nothing;
-                        n_threads=Threads.nthreads())
+import AtomsCalculators
+
+function AtomsCalculators.forces(sys,
+                                 inter::MyGeneralInter;
+                                 neighbors=nothing,
+                                 n_threads=Threads.nthreads(),
+                                 kwargs...)
+    # kwargs... is required, neighbors and n_threads can be omitted if not used
+
     # Calculate the forces on all atoms using the interaction and the system
     # The output should have the same shape as the coordinates
     # For example, a neural network might do something like this
@@ -800,8 +692,8 @@ The neighbors calculated from the neighbor list are available in this function, 
 You could carry out your own neighbor finding in this function if required.
 Note that this function calculates forces not accelerations; if you have a neural network that calculates accelerations you should multiply these by `masses(sys)` to get the forces according to F=ma.
 
-A method for the [`potential_energy`](@ref) function that takes the same arguments and returns a single value can also be defined.
-A method for the [`virial`](@ref) function that takes the same arguments can also be defined, allowing virial and pressure calculation when using custom general interactions.
+A method for the `AtomsCalculators.potential_energy` function that takes the same arguments and returns a single value can also be defined.
+A method for the [`virial`](@ref) function can also be defined, allowing virial and pressure calculation when using custom general interactions.
 To use your custom interaction in a simulation, add it to the list of general interactions:
 ```julia
 general_inters = (MyGeneralInter(),)
@@ -949,6 +841,7 @@ The available simulators are:
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
 - [`LangevinSplitting`](@ref)
+- [`OverdampedLangevin`](@ref)
 - [`NoseHoover`](@ref)
 - [`TemperatureREMD`](@ref)
 - [`HamiltonianREMD`](@ref)
@@ -1231,8 +1124,9 @@ sys = System(
 
 We leave the loggers empty until we thermalize the system using Langevin dynamics.
 ```julia
+dt = 0.002u"ps"
 simulator = LangevinSplitting(
-    dt=0.002u"ps",
+    dt=dt,
     temperature=temp,
     friction=10.0u"g * mol^-1 * ps^-1",
     splitting="BAOAB",
@@ -1276,10 +1170,9 @@ show(sys.loggers)
 Note we also could have used the convenience function [`AutoCorrelationLogger`](@ref) to define our logger since the two observables we are correlating are the same.
 ```julia
 using GLMakie
-
 f = Figure()
 ax = Axis(f[1, 1], xlabel="Time / ps", ylabel="Correlation")
-lines!(0:999, values(sys.loggers.velocity_autocorrelation))
+lines!((1:1000) .* ustrip(dt), values(sys.loggers.velocity_autocorrelation))
 ```
 ![Velocity Autocorrelations](images/velocity_autocorrelations.png)\
 As expected, the velocities are highly correlated at small time offsets and the correlation decays rapidly.
@@ -1341,11 +1234,11 @@ Functions that may be useful for analysis include:
 - [`velocity_autocorr`](@ref)
 - [`rmsd`](@ref)
 - [`radius_gyration`](@ref)
+- [`hydrodynamic_radius`](@ref)
 - [`bond_angle`](@ref)
 - [`torsion_angle`](@ref)
 
 Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.
-
 ## Constraint Algorithms
 
 Molly implements [`SHAKE`](@ref) and its extension, [`RATTLE`](@ref), to perform constrained molecular dynamics. These methods are useful
