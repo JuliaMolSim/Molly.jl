@@ -578,7 +578,7 @@ function System(;
     end
 
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
-                specific_inter_lists, general_inters, boundary, constraints)
+                specific_inter_lists, general_inters, boundary)
 
 
     return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF, L, F, E, K, M, DA}(
@@ -940,8 +940,8 @@ function ReplicaSystem(;
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], deepcopy(constraint_algorithms), 
-            deepcopy(neighbor_finder), replica_loggers[i], k_converted,
-            force_units, energy_units, atom_masses, nothing) for i in 1:n_replicas)
+            deepcopy(neighbor_finder), replica_loggers[i],
+            force_units, energy_units, k_converted, atom_masses, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
 
     return ReplicaSystem{D, G, T, A, AD, EL, F, E, K, R, DA}(

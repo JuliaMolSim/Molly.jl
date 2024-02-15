@@ -1239,6 +1239,7 @@ Functions that may be useful for analysis include:
 - [`torsion_angle`](@ref)
 
 Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.
+
 ## Constraint Algorithms
 
 Molly implements [`SHAKE`](@ref) and its extension, [`RATTLE`](@ref), to perform constrained molecular dynamics. These methods are useful
