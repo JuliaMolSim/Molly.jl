@@ -1124,8 +1124,14 @@ function System(sys::AbstractSystem{D}, energy_units, force_units) where D
         atoms_data[i] = AtomData(element=String(atomic_symbol(atom)))
     end
 
-    coords = position(sys)
-    vels = velocity(sys)
+    # AtomsBase does not specify type for coordinates or velocities
+    # so it is best to use unified type. Thus conversion to SVector.
+    coords = map(position(sys)) do r
+        SVector(r...)
+    end
+    vels = map(velocity(sys)) do v
+        SVector(v...)
+    end
 
     mass_dim = dimension(atomic_mass(sys, 1))
     if mass_dim == u"𝐌" && dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
