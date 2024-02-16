@@ -131,7 +131,7 @@ end
 
 ##### High Level Constraint Functions ######
 function save_ca_positions!(sys::System, c)
-    if length(sys.constraint_algorithms) > 0
+    if length(sys.constraints) > 0
         sys.hidden_storage.ca_coord_storage .= c
     end
 end
@@ -139,7 +139,7 @@ end
 function apply_position_constraints!(sys::System, coord_storage;
      n_threads::Integer=Threads.nthreads())
 
-   for ca in sys.constraint_algorithms
+   for ca in sys.constraints
        position_constraints!(sys, ca, coord_storage, n_threads = n_threads)
    end
 
@@ -150,10 +150,10 @@ end
 function apply_position_constraints!(sys::System, coord_storage,
      vel_storage, dt; n_threads::Integer=Threads.nthreads())
 
-     if length(sys.constraint_algorithms) > 0
+     if length(sys.constraints) > 0
         vel_storage .= -sys.coords ./ dt
 
-        for ca in sys.constraint_algorithms
+        for ca in sys.constraints
             position_constraints!(sys, ca, coord_storage, n_threads = n_threads)
         end
 
@@ -168,7 +168,7 @@ end
 
 function apply_velocity_constraints!(sys::System; n_threads::Integer=Threads.nthreads())
     
-    for ca in sys.constraint_algorithms
+    for ca in sys.constraints
         velocity_constraints!(sys, ca, n_threads = n_threads)
     end
 

@@ -144,7 +144,7 @@ function simulate!(sys,
     
     for step_n in 1:n_steps
         
-        if length(sys.constraint_algorithms) > 0
+        if length(sys.constraints) > 0
             ca_coord_storage .= sys.coords
         end
 
@@ -217,7 +217,7 @@ function simulate!(sys,
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
 
-    using_constraints = (length(sys.constraint_algorithms) > 0)
+    using_constraints = (length(sys.constraints) > 0)
 
     ca_coord_storage = similar(sys.coords)
 
@@ -226,7 +226,7 @@ function simulate!(sys,
 
         sys.velocities += accels_t .* sim.dt
         
-        if length(sys.constraint_algorithms) > 0
+        if length(sys.constraints) > 0
             ca_coord_storage .= sys.coords
         end
 
@@ -292,7 +292,7 @@ function simulate!(sys,
 
         coords_copy = sys.coords
         
-        if length(sys.constraint_algorithms) > 0
+        if length(sys.constraints) > 0
             ca_coord_storage .= sys.coords
         end
 
@@ -381,7 +381,7 @@ function simulate!(sys,
 
         sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
 
-        if length(sys.constraint_algorithms) > 0
+        if length(sys.constraints) > 0
             ca_coord_storage .= sys.coords
         end
 

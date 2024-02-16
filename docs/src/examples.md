@@ -998,7 +998,7 @@ sys = System(
                 ),
             ),
         neighbor_finder = neighbor_finder,
-        constraint_algorithms = (ca,),
+        constraints = (ca,),
         energy_units = u"kcal * mol^-1",
         force_units = u"kcal * mol^-1 * Å^-1"
         )

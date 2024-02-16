@@ -447,8 +447,8 @@ interface described there.
 - `general_inters::GI=()`: the general interactions in the system,
     i.e. interactions involving all atoms such as implicit solvent. Each should
     implement the AtomsCalculators.jl interface. Typically a `Tuple`.
-- `constraint_algorithms::CA=()` : The constraint algorithm(s) used to apply
-    bond and angle constraints to the system.
+- `constraints::CA=()` : The constraint algorithm(s) used to apply
+    bond and angle constraints to the system. (e.g. SHAKE_RATTLE)
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `loggers::L=()`: the loggers that record properties of interest during a
@@ -472,7 +472,7 @@ mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF,
     pairwise_inters::PI
     specific_inter_lists::SI
     general_inters::GI
-    constraint_algorithms::CA
+    constraints::CA
     neighbor_finder::NF
     loggers::L
     df::Int
@@ -493,7 +493,7 @@ function System(;
                 pairwise_inters=(),
                 specific_inter_lists=(),
                 general_inters=(),
-                constraint_algorithms=(),
+                constraints=(),
                 neighbor_finder=NoNeighborFinder(),
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
@@ -511,7 +511,7 @@ function System(;
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
-    CA = typeof(constraint_algorithms)
+    CA = typeof(constraints)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
@@ -542,11 +542,11 @@ function System(;
     end
 
     df = n_dof(D, length(atoms), boundary)
-    if length(constraint_algorithms) > 0
+    if length(constraints) > 0
         if neighbor_finder == NoNeighborFinder()
             throw(ArgumentError("Constraints algorithms require neighbor lists."))
         end
-        for ca in constraint_algorithms
+        for ca in constraints
             neighbor_finder = disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
             df -= n_dof_lost(D, ca.clusters)
         end
@@ -583,7 +583,7 @@ function System(;
 
     return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF, L, F, E, K, M, DA}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
-                    specific_inter_lists, general_inters, constraint_algorithms,
+                    specific_inter_lists, general_inters, constraints,
                     neighbor_finder, loggers, df, force_units, energy_units, k_converted, atom_masses, data)
 end
 
@@ -604,7 +604,7 @@ function System(sys::System;
                 pairwise_inters=sys.pairwise_inters,
                 specific_inter_lists=sys.specific_inter_lists,
                 general_inters=sys.general_inters,
-                constraint_algorithms=sys.constraint_algorithms,
+                constraints=sys.constraints,
                 neighbor_finder=sys.neighbor_finder,
                 loggers=sys.loggers,
                 force_units=sys.force_units,
@@ -621,7 +621,7 @@ function System(sys::System;
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
-        constraint_algorithms=constraint_algorithms,
+        constraints=constraints,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=force_units,
@@ -649,7 +649,7 @@ function System(crystal::Crystal{D};
                 pairwise_inters=(),
                 specific_inter_lists=(),
                 general_inters=(),
-                constraint_algorithms=(),
+                constraints=(),
                 neighbor_finder=NoNeighborFinder(),
                 loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
@@ -686,7 +686,7 @@ function System(crystal::Crystal{D};
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
-        constraint_algorithms=constraint_algorithms,
+        constraints=constraints,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=force_units,
@@ -750,7 +750,7 @@ construction where `n` is the number of threads to be used per replica.
     value is passed to the argument `replica_general_inters`.
 - `replica_general_inters=[() for _ in 1:n_replicas]`: the general interactions for 
     each replica.
-- `constraint_algorithms::CA=()` : The constraint algorithm(s) used to apply
+- `constraints::CA=()` : The constraint algorithm(s) used to apply
     bond and angle constraints to the system. It is duplicated for each replica.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation. It is duplicated for each replica.
@@ -793,7 +793,7 @@ function ReplicaSystem(;
                         replica_specific_inter_lists=nothing,
                         general_inters=(),
                         replica_general_inters=nothing,
-                        constraint_algorithms=(),
+                        constraints=(),
                         neighbor_finder=NoNeighborFinder(),
                         replica_loggers=[() for _ in 1:n_replicas],
                         exchange_logger=nothing,
@@ -812,7 +812,7 @@ function ReplicaSystem(;
     C = typeof(replica_coords[1])
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
-    CA = typeof(constraint_algorithms)
+    CA = typeof(constraints)
 
 
     if isnothing(replica_velocities)
@@ -857,11 +857,11 @@ function ReplicaSystem(;
     GI = eltype(replica_general_inters)
 
     df = n_dof(D, length(atoms), boundary)
-    if length(constraint_algorithms) > 0
+    if length(constraints) > 0
         if neighbor_finder == NoNeighborFinder()
             throw(ArgumentError("Constraints algorithms require neighbor lists."))
         end
-        for ca in constraint_algorithms
+        for ca in constraints
             neighbor_finder = disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
             df -= n_dof_lost(D, ca.clusters)
         end
@@ -939,7 +939,7 @@ function ReplicaSystem(;
                             typeof(replica_loggers[i]), F, E, K, M, Nothing}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
-            replica_general_inters[i], deepcopy(constraint_algorithms), 
+            replica_general_inters[i], deepcopy(constraints), 
             deepcopy(neighbor_finder), replica_loggers[i], deepcopy(df),
             force_units, energy_units, k_converted, atom_masses, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
