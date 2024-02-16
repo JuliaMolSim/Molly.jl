@@ -47,34 +47,3 @@ function RATTLE_updates!(sys, ca::SHAKE_RATTLE)
 
 end
 
-
-"""
-RATTLE solution for a single distance constraint between atoms i and j,
-where atoms i and j do NOT participate in any other constraints.
-"""
-# function RATTLE_update!(sys, cluster::ConstraintCluster{1})
-
-#     constraint = cluster.constraints[1]
-
-#     # Index of atoms in bond k
-#     k1, k2 = constraint.atom_idxs
-
-#     # Inverse of masses of atoms in bond k
-#     inv_m1 = 1/mass(sys.atoms[k1])
-#     inv_m2 = 1/mass(sys.atoms[k2])
-
-#     # Distance vector between the atoms after SHAKE constraint
-#     r_k1k2 = vector(sys.coords[k2], sys.coords[k1], sys.boundary)
-
-#     # Difference between unconstrainted velocities
-#     v_k1k2 = sys.velocities[k2] .- sys.velocities[k1]
-
-#     # Re-arrange constraint equation to solve for Lagrange multiplier
-#     # Technically this has a factor of dt which cancels out in the velocity update
-#     λₖ = -dot(r_k1k2,v_k1k2)/(dot(r_k1k2,r_k1k2)*(inv_m1 + inv_m2))
-
-#     # Correct velocities
-#     sys.velocities[k1] -= (inv_m1 .* λₖ .* r_k1k2)
-#     sys.velocities[k2] += (inv_m2 .* λₖ .* r_k1k2)
-
-# end

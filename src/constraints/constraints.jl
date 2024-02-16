@@ -29,26 +29,6 @@ struct DistanceConstraint{D} <: Constraint
     dist::D
 end
 
-# """
-# Constraint between three atoms that maintains a common angle (e.g. a water molecule).
-# 180° angles are not supported as they cause issues with RATTLE/SHAKE 
-# # Arguments
-# - `atom_idxs::SVector{2,Int}` : The indices of atoms in the system participating in this constraint.
-#     The first atom in this list is assumed to be the central atom if the `central_atom_idx` keyword is not specified
-# - `angle::A` : Angle between the atoms.
-# - `central_atom_idx::Int` : The index if the atom that corresponds to the central atom of the constraint.
-# """
-# struct AngleConstraint{A,D} <: Constraint
-#     edge_atom_idxs::SVector{2,Int}
-#     central_atom_idx::Int
-#     angle::A
-#     dists::D
-# end
-
-# function AngleConstraint(atom_idxs, angle, dists, central_atom)
-#     return {typeof(angle), typeof(dists)}(atom_idxs, angle, dists, central_atom)
-# end
-
 
 """
 Atoms in a cluster do not participate in any other constraints outside of that cluster.
@@ -73,12 +53,6 @@ function ConstraintCluster(constraints)
         end
     end
 
-    #Not sure this is always true? not true for rings
-    # if length(unique(atom_ids)) < length(constraints)
-    #     throw(ArgumentError("System is overconstrained. There are more constraints than unique atoms\
-    #     in cluster with atoms: $(atom_ids)."))
-    # end
-
     return ConstraintCluster{length(constraints)}(constraints, length(unique(atom_ids)))
 
 end
@@ -86,19 +60,6 @@ end
 Base.length(cc::ConstraintCluster) = length(cc.constraints)
 
 
-# """
-# Loops through all of the constraints in the system and converts the 
-# angle constraints into 3 distance constraints.
-# """
-# function angle_to_dist_constraints!(sys)
-#     for (i, cosntraint) in enumerate(sys.constraints)
-#         if typeof(constraint) == AngleConstraint
-#             d1 = DistanceConstraint()
-#             d2 = DistanceConstraint()
-#             d3 = DistanceConstraint()
-#         end
-#     end
-# end
 
 ##### Constraint Setup ######
 
@@ -214,24 +175,6 @@ function apply_velocity_constraints!(sys::System; n_threads::Integer=Threads.nth
     return sys
 end
 
-# """
-# Verifies that the initial conditions of the system satisfy the constraints.
-# """
-# function check_initial_constraints(coords, clusters, init_tol)
-
-#     if init_tol !== nothing
-#         for cluster in clusters
-#             for constraint in cluster.constraints
-#                 r_actual = norm(coords[constraint.atom_idxs[1]] .- coords[constraint.atom_idxs[2]])
-#                 if !isapprox(r_actual, constraint.dist, atol = init_tol)
-#                     throw(ArgumentError("Constraint between atoms $(constraint.atom_idxs[1]) 
-#                         and $(constraint.atom_idxs[2]) is not satisfied by the initial conditions."))
-#                 end
-#             end
-#         end
-#     end
-
-# end
 
 function check_position_constraints(sys::System, ca::ConstraintAlgorithm)
 
@@ -300,18 +243,5 @@ end
 function n_dof(D::Int, N_atoms::Int, boundary)
     return D*N_atoms - (D - (num_infinte_boundary(boundary)))
 end
-# function n_dof(D::Int, N_atoms::Int, boundary, constraint_clusters)
-
-#     # Momentum only conserved in directions with PBC
-#     dof = 3*N_atoms
-
-#     #Assumes constraints are a non-linear chain
-#     for cluster in constraint_clusters
-#         dof -= length(cluster.constraints)
-#     end
-
-#     return dof - (D - (num_infinte_boundary(boundary)))
-
-# end
 
 
