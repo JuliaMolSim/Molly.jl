@@ -580,7 +580,7 @@ end
         sys.coords[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
     end
 
-    apply_position_constraints!(sys, sh, old_coords)
+    apply_position_constraints!(sys, old_coords)
 
     @test check_position_constraints(sys, ca) == true
 end
