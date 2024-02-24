@@ -1,7 +1,7 @@
 export SHAKE_RATTLE
 
 """
-SHAKE_RATTLE(coords, tolerance, init_posn_tol)
+SHAKE_RATTLE(constraints::AbstractVector{<:Constraint}, n_atoms, dist_tolerance, vel_tolerance)
 
 A constraint algorithm to set bonds distances in a simulation. Velocity constraints will be imposed
 for simulators that integrate velocities (e.g. [`VelocityVerlet`](@ref)).
@@ -17,18 +17,18 @@ system solved to satisfy the RATTLE algorithm.
 - vel_tolerance: Tolerance used to end iterative procedure when calculating velocity constraints.
     Should have same units as velocities*coords.
 """
-struct SHAKE_RATTLE{D, V, CC}
+struct SHAKE_RATTLE{CC, D, V} <: ConstraintAlgorithm
     clusters::AbstractVector{CC}
     dist_tolerance::D
     vel_tolerance::V
 end
 
-function SHAKE_RATTLE(constraints::AbstractVector{<:Constraint}, n_atoms, dist_tolerance, vel_tolerance)
+function SHAKE_RATTLE(constraints, n_atoms::Int, dist_tolerance, vel_tolerance)
 
     #If this becomes a memory issue n_atoms could probably be number of atoms constrained
     clusters = build_clusters(n_atoms, constraints)
 
-    return SHAKE_RATTLE{typeof(dist_tolerance), typeof(vel_tolerance)}(clusters, dist_tolerance, vel_tolerance)
+    return SHAKE_RATTLE{eltype(clusters), typeof(dist_tolerance), typeof(vel_tolerance)}(clusters, dist_tolerance, vel_tolerance)
 end
 
 function position_constraints!(sys::System, constraint_algo::SHAKE_RATTLE, coord_storage;
@@ -48,7 +48,7 @@ function SHAKE_updates!(sys, ca::SHAKE_RATTLE, coord_storage)
         for cluster in ca.clusters #& illegal to parallelize this
             for constraint in cluster.constraints
 
-                k1, k2 = constraint.atom_idxs
+                k1, k2 = constraint.i, constraint.j
         
                 # Distance vector after unconstrained update (s)
                 s12 = vector(sys.coords[k2], sys.coords[k1], sys.boundary) #& extra allocation
@@ -109,7 +109,7 @@ function RATTLE_updates!(sys, ca::SHAKE_RATTLE)
            for constraint in cluster.constraints
 
                # Index of atoms in bond k
-               k1, k2 = constraint.atom_idxs
+               k1, k2 = constraint.i, constraint.j
 
                # Inverse of masses of atoms in bond k
                inv_m1 = 1/mass(sys.atoms[k1])

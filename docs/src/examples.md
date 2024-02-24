@@ -982,7 +982,8 @@ ca = SHAKE_RATTLE(constraints, length(atoms), 1e-8u"Å", 1e-8u"Å^2/ps")
 
 boundary = CubicBoundary(200.0u"Å")
 
-neighbor_finder = DistanceNeighborFinder(eligible = trues(length(atoms),length(atoms)), dist_cutoff = 2.0*r_cut)
+neighbor_finder = DistanceNeighborFinder(eligible = trues(length(atoms),length(atoms)), dist_cutoff = 1.5*r_cut)
+disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
 
 sys = System(
         atoms = atoms,

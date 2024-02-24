@@ -478,7 +478,7 @@ end
         
         #Add bonded atoms
         bond_length = 0.74u"Å" #hydrogen bond length
-        constraints = [DistanceConstraint(SVector(j, j+1), bond_length) for j in range(1, n_atoms, step = 2)]
+        constraints = [DistanceConstraint(j, j+1, bond_length) for j in range(1, n_atoms, step = 2)]
         atoms = [Atom(index = j, mass = atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in range(1,n_atoms)]
         coords = [SVector(coords_matrix[j,1]u"Å",coords_matrix[j,2]u"Å",coords_matrix[j,3]u"Å") for j in range(1,n_atoms)]
         velocities = [1000*SVector(vel_matrix[j,:]u"Å/ps"...) for j in range(1,n_atoms)]
@@ -488,6 +488,7 @@ end
         boundary = CubicBoundary(200.0u"Å")
 
         neighbor_finder = DistanceNeighborFinder(eligible = trues(length(atoms),length(atoms)), dist_cutoff = 1.5*r_cut)
+        disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
 
         sys = System(
                 atoms = atoms,
@@ -526,68 +527,63 @@ end
 
 # end
 
-# @testset "SHAKE triatomic" begin
-#     n_atoms = 30
-#     atom_mass = 10.0u"g/mol"
-#     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-#     boundary = CubicBoundary(2.0u"nm")
+@testset "SHAKE triatomic" begin
+    n_atoms = 30
+    atom_mass = 10.0u"g/mol"
+    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+    boundary = CubicBoundary(2.0u"nm")
 
-#     coords = place_atoms(n_atoms ÷ 3, boundary, min_dist=0.3u"nm")
+    coords = place_atoms(n_atoms ÷ 3, boundary, min_dist=0.3u"nm")
 
-#     for i in 1:(n_atoms ÷ 3)
-#         push!(coords, coords[i] .+ [0.13, 0.0, 0.0]u"nm")
-#     end
+    for i in 1:(n_atoms ÷ 3)
+        push!(coords, coords[i] .+ [0.13, 0.0, 0.0]u"nm")
+    end
 
-#     for i in 1:(n_atoms ÷ 3)
-#         push!(coords, coords[i] .+ [0.26, 0.0, 0.0]u"nm")
-#     end
+    for i in 1:(n_atoms ÷ 3)
+        push!(coords, coords[i] .+ [0.26, 0.0, 0.0]u"nm")
+    end
 
-#     temp = 100.0u"K"
-#     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+    temp = 100.0u"K"
+    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
-#     eligible = trues(n_atoms, n_atoms)
-#     for i in 1:(n_atoms ÷ 3)
-#         eligible[i, i + (n_atoms ÷ 3)] = false
-#         eligible[i + (n_atoms ÷ 3), i] = false
-#         eligible[i + (n_atoms ÷ 3), i + 2 * (n_atoms ÷ 3)] = false
-#         eligible[i + 2 * (n_atoms ÷ 3), i + (n_atoms ÷ 3)] = false
-#     end
+    eligible = trues(n_atoms, n_atoms)
+    for i in 1:(n_atoms ÷ 3)
+        eligible[i, i + (n_atoms ÷ 3)] = false
+        eligible[i + (n_atoms ÷ 3), i] = false
+        eligible[i + (n_atoms ÷ 3), i + 2 * (n_atoms ÷ 3)] = false
+        eligible[i + 2 * (n_atoms ÷ 3), i + (n_atoms ÷ 3)] = false
+    end
 
-#     neighbor_finder = DistanceNeighborFinder(eligible=eligible, n_steps=10, dist_cutoff=1.5u"nm")
+    neighbor_finder = DistanceNeighborFinder(eligible=eligible, n_steps=10, dist_cutoff=1.5u"nm")
+    bond_length = 0.1u"nm"
 
-#     bond_lengths = [0.1u"nm" for i in 1:(2 * (n_atoms ÷ 3))]
-#     sh = SHAKE(
-#         bond_lengths,
-#         collect(1:(2 * (n_atoms ÷ 3))),
-#         collect(((n_atoms ÷ 3) + 1):n_atoms),
-#     )
-#     constraints = (sh,)
+    is = collect(1:(2 * (n_atoms ÷ 3)))
+    js = collect(((n_atoms ÷ 3) + 1):n_atoms)
+    constraints = [DistanceConstraint(is[idx], js[idx], bond_length) for idx in eachindex(is)]
 
-#     sys = System(
-#         atoms=atoms,
-#         coords=coords,
-#         boundary=boundary,
-#         velocities=velocities,
-#         pairwise_inters=(LennardJones(use_neighbors=true),),
-#         constraints=constraints,
-#         neighbor_finder=neighbor_finder,
-#         loggers=(coords=CoordinateLogger(10),),
-#     )
+    ca = SHAKE_RATTLE(constraints, n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps")
 
-#     for i in eachindex(sys.coords)
-#         sys.coords[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
-#     end
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        constraints=(ca,),
+        neighbor_finder=neighbor_finder,
+        loggers=(coords=CoordinateLogger(10),),
+    )
 
-#     old_coords = sys.coords
+    old_coords = deepcopy(sys.coords)
 
-#     @time apply_constraints!(sys, sh, old_coords, 0.002u"ps")
+    for i in eachindex(sys.coords)
+        sys.coords[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
+    end
 
-#     lengths = map(eachindex(sh.is)) do r
-#         return norm(vector(sys.coords[sh.is[r]], sys.coords[sh.js[r]], sys.boundary))
-#     end
+    apply_position_constraints!(sys, sh, old_coords)
 
-#     @test maximum(abs.(lengths .- 0.1u"nm")) < 1e-10u"nm"
-# end
+    @test check_position_constraints(sys, ca) == true
+end
 
 
 @testset "Langevin splitting" begin

@@ -1,7 +1,12 @@
 export
     DistanceConstraint,
     check_position_constraints,
-    check_velocity_constraints
+    check_velocity_constraints,
+    disable_intra_constraint_interactions!,
+    apply_position_constraints!,
+    apply_velocity_constraints!    
+
+abstract type ConstraintAlgorithm end;
 
 """
 Constraint between two atoms that maintains the distance between the two atoms.
@@ -30,17 +35,17 @@ struct ConstraintCluster{N,C}
     n_unique_atoms::Integer
 end
 
+
 function ConstraintCluster(constraints)
 
     #Count # of unique atoms in cluster
     atom_ids = []
     for constraint in constraints
-        for atom_idx in constraint.atom_idxs
-            push!(atom_ids, atom_idx)
-        end
+        push!(atom_ids, constraint.i)
+        push!(atom_ids, constraint.j)
     end
 
-    return ConstraintCluster{length(constraints)}(constraints, length(unique(atom_ids)))
+    return ConstraintCluster{length(constraints), eltype(constraints)}(constraints, length(unique(atom_ids)))
 
 end
 
@@ -60,8 +65,8 @@ function disable_intra_constraint_interactions!(neighbor_finder,
     # Loop through constraints and modify eligible matrix
     for cluster in constraint_clsuters
         for constraint in cluster.constraints
-            neighbor_finder.eligible[constraint.atom_idxs[1], constraint.atom_idxs[2]] = false
-            neighbor_finder.eligible[constraint.atom_idxs[2], constraint.atom_idxs[1]] = false
+            neighbor_finder.eligible[constraint.i, constraint.j] = false
+            neighbor_finder.eligible[constraint.j, constraint.i] = false
         end
     end
 
@@ -81,17 +86,17 @@ function build_clusters(n_atoms, constraints)
 
     # Store constraints as directed edges, direction is arbitrary but necessary
     for constraint in constraints
-        edge_added = add_edge!(constraint_graph, constraint.atom_idxs[1], constraint.atom_idxs[2])
+        edge_added = add_edge!(constraint_graph, constraint.i, constraint.j)
         if edge_added
-            idx_dist_pairs[constraint.atom_idxs[1],constraint.atom_idxs[2]] = constraint.dist
-            idx_dist_pairs[constraint.atom_idxs[2],constraint.atom_idxs[1]] = constraint.dist
+            idx_dist_pairs[constraint.i,constraint.j] = constraint.dist
+            idx_dist_pairs[constraint.j,constraint.i] = constraint.dist
         else
             @warn "Duplicated constraint in System. It will be ignored."
         end
     end
 
     # Get groups of constraints that are connected to eachother 
-    cc = connected_components(constraint_graph) #& this can return non-connected things sometimes??
+    cc = connected_components(constraint_graph)
     # Initialze empty vector of clusters
     clusters = Vector{ConstraintCluster}(undef, 0)
 
@@ -162,8 +167,7 @@ function check_position_constraints(sys::System, ca::ConstraintAlgorithm)
     max_err = typemin(float_type(sys))*unit(sys.coords[1][1])
     for cluster in ca.clusters
         for constraint in cluster.constraints
-            k1, k2 = constraint.atom_idxs
-            err = abs(norm(vector(sys.coords[k2], sys.coords[k1], sys.boundary)) - constraint.dist)
+            err = abs(norm(vector(sys.coords[constraint.j], sys.coords[constraint.i], sys.boundary)) - constraint.dist)
             if max_err < err
                 max_err = err
             end
@@ -178,8 +182,8 @@ function check_velocity_constraints(sys::System, ca::ConstraintAlgorithm)
     max_err = typemin(float_type(sys))*unit(sys.velocities[1][1])*unit(sys.coords[1][1])
     for cluster in ca.clusters
         for constraint in cluster.constraints
-            k1, k2 = constraint.atom_idxs
-            err = abs(dot(vector(sys.coords[k2], sys.coords[k1], sys.boundary), (sys.velocities[k2] .- sys.velocities[k1])))
+            err = abs(dot(vector(sys.coords[constraint.j], sys.coords[constraint.i], sys.boundary),
+                                (sys.velocities[constraint.j] .- sys.velocities[constraint.i])))
             if max_err < err
                 max_err = err
             end

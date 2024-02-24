@@ -543,11 +543,7 @@ function System(;
 
     df = n_dof(D, length(atoms), boundary)
     if length(constraints) > 0
-        if neighbor_finder == NoNeighborFinder()
-            throw(ArgumentError("Constraints algorithms require neighbor lists."))
-        end
         for ca in constraints
-            neighbor_finder = disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
             df -= n_dof_lost(D, ca.clusters)
         end
     end
