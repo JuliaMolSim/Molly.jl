@@ -41,10 +41,9 @@ function Base.:+(x::Atom{T, T, T, T}, y::NamedTuple{(:index, :charge, :mass, :σ
     )
 end
 
-#TODO ADD DF TO THIS, HOW??
 function Base.:+(r::Base.RefValue{Any}, y::NamedTuple{(:atoms, :coords, :boundary,
                  :velocities, :atoms_data, :topology, :pairwise_inters, :specific_inter_lists,
-                 :general_inters, :constraints, :neighbor_finder, :loggers, :force_units,
+                 :general_inters, :constraints, :neighbor_finder, :loggers, :df, :force_units,
                  :energy_units, :k, :masses, :data)})
     x = r.x
     (
@@ -60,6 +59,7 @@ function Base.:+(r::Base.RefValue{Any}, y::NamedTuple{(:atoms, :coords, :boundar
         constraints=Zygote.accum(x.constraints, y.constraints),
         neighbor_finder=nothing,
         loggers=nothing,
+        df=nothing,
         force_units=nothing,
         energy_units=nothing,
         k=Zygote.accum(x.k, y.k),
@@ -70,7 +70,7 @@ end
 
 function Base.:+(y::NamedTuple{(:atoms, :coords, :boundary,
                  :velocities, :atoms_data, :topology, :pairwise_inters, :specific_inter_lists,
-                 :general_inters, :constraints, :neighbor_finder, :loggers, :force_units,
+                 :general_inters, :constraints, :neighbor_finder, :loggers, :df, :force_units,
                  :energy_units, :k, :masses, :data)}, r::Base.RefValue{Any})
     return r + y
 end
