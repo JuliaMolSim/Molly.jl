@@ -144,7 +144,7 @@ function validate_coords(coords)
     end
 
     valid_length_dimensions = [u"𝐋", NoDims]
-    coord_dimension = dimension(eltype(coords[1]))
+    coord_dimension = (dimension ∘ eltype ∘ eltype)(coords)
 
     if coord_dimension ∉ valid_length_dimensions
         throw(ArgumentError("coordinate units have dimension $coord_dimension. Length units " *
@@ -164,7 +164,7 @@ function validate_velocities(velocities)
     end
 
     valid_velocity_dimensions = [u"𝐋 * 𝐓^-1", NoDims]
-    velocity_dimension = dimension(eltype(velocities[1]))
+    velocity_dimension = (dimension ∘ eltype ∘ eltype)(velocities)
 
     if velocity_dimension ∉ valid_velocity_dimensions
         throw(ArgumentError("velocity units have dimension $velocity_dimension. Velocity units " *
