@@ -4,28 +4,15 @@ export
     check_velocity_constraints
 
 """
-Supertype for all constraint algorithms.
-
-Should implement the following methods:
-position_constraints!(sys::System, constraint_algo::ConstraintAlgorithm, accels, dt; n_threads::Integer=Threads.nthreads())
-velocity_constraints!(sys::System, constraint_algo::ConstraintAlgorithm; n_threads::Integer=Threads.nthreads())
-"""
-abstract type ConstraintAlgorithm end
-
-
-"""
-Supertype for all types of constraint.
-"""
-abstract type Constraint end
-
-"""
 Constraint between two atoms that maintains the distance between the two atoms.
 # Arguments
-- `atom_idxs::SVector{Int}` : The indices of atoms in the system participating in this constraint
+- `i::Int`: Index of atom participating in this constraint
+- `j::Int`: Index of the other atom in this constraint
 - `dist::D` : Euclidean distance between the two atoms.
 """
-struct DistanceConstraint{D} <: Constraint
-    atom_idxs::SVector{2,<:Integer}
+struct DistanceConstraint{D}
+    i::Int
+    j::Int
     dist::D
 end
 
@@ -38,8 +25,8 @@ Note that an angle constraints will be implemented as 3 distance constraints. Th
 use special methods that improve computational performance. Any constraint not listed above
 will come at a performance penatly.
 """
-struct ConstraintCluster{N}
-    constraints::SVector{N,<:Constraint}
+struct ConstraintCluster{N,C}
+    constraints::SVector{N,C}
     n_unique_atoms::Integer
 end
 
@@ -117,7 +104,7 @@ function build_clusters(n_atoms, constraints)
                 neigh_idxs = neighbors(constraint_graph, ai)
                 for neigh_idx in neigh_idxs
                     push!(connected_constraints,
-                        DistanceConstraint(SVector(ai, neigh_idx), idx_dist_pairs[ai,neigh_idx]))
+                        DistanceConstraint(ai, neigh_idx, idx_dist_pairs[ai,neigh_idx]))
                 end
             end
             connected_constraints = convert(SVector{length(connected_constraints)}, connected_constraints)
@@ -130,12 +117,6 @@ end
 
 
 ##### High Level Constraint Functions ######
-function save_ca_positions!(sys::System, c)
-    if length(sys.constraints) > 0
-        sys.hidden_storage.ca_coord_storage .= c
-    end
-end
-
 function apply_position_constraints!(sys::System, coord_storage;
      n_threads::Integer=Threads.nthreads())
 
@@ -241,7 +222,7 @@ function n_dof_lost(D::Int, constraint_clusters)
 end
 
 function n_dof(D::Int, N_atoms::Int, boundary)
-    return D*N_atoms - (D - (num_infinte_boundary(boundary)))
+    return D*N_atoms - (D - (num_infinite_boundary(boundary)))
 end
 
 

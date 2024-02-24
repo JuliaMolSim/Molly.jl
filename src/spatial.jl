@@ -219,8 +219,8 @@ end
 
 has_infinite_boundary(b::Union{CubicBoundary, RectangularBoundary}) = any(isinf, b.side_lengths)
 has_infinite_boundary(b::TriclinicBoundary) = false
-num_infinte_boundary(b::Union{CubicBoundary, RectangularBoundary}) = sum(isinf.(b.side_lengths))
-num_infinte_boundary(b::TriclinicBoundary) = 0
+num_infinite_boundary(b::Union{CubicBoundary, RectangularBoundary}) = sum(isinf.(b.side_lengths))
+num_infinite_boundary(b::TriclinicBoundary) = 0
 
 """
     box_volume(boundary)

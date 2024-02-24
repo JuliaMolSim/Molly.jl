@@ -141,17 +141,19 @@ function simulate!(sys,
 
     ca_coord_storage = similar(sys.coords)
     ca_vel_storage = similar(sys.velocities)
+
+    using_constraints = (length(sys.constraints) > 0)
     
     for step_n in 1:n_steps
         
-        if length(sys.constraints) > 0
+        if using_constraints
             ca_coord_storage .= sys.coords
         end
 
         # Position Update
         sys.coords += sys.velocities .* sim.dt .+ ((accels_t .* sim.dt ^ 2) ./ 2)
 
-        sys = apply_position_constraints!(sys, ca_coord_storage, ca_vel_storage, sim.dt, n_threads=n_threads)
+        apply_position_constraints!(sys, ca_coord_storage, ca_vel_storage, sim.dt, n_threads=n_threads)
 
         #Enforce PBC
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
@@ -161,7 +163,7 @@ function simulate!(sys,
         
         sys.velocities += ((accels_t .+ accels_t_dt) .* sim.dt / 2)
 
-        sys = apply_velocity_constraints!(sys, n_threads=n_threads)
+        apply_velocity_constraints!(sys, n_threads=n_threads)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -226,13 +228,13 @@ function simulate!(sys,
 
         sys.velocities += accels_t .* sim.dt
         
-        if length(sys.constraints) > 0
+        if using_constraints
             ca_coord_storage .= sys.coords
         end
 
         sys.coords += sys.velocities .* sim.dt
 
-        sys = apply_position_constraints!(sys, ca_coord_storage, n_threads=n_threads)
+        apply_position_constraints!(sys, ca_coord_storage, n_threads=n_threads)
 
         if using_constraints
             sys.velocities .= (sys.coords .- ca_coord_storage)./sim.dt
@@ -285,6 +287,7 @@ function simulate!(sys,
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
     coords_last = sys.coords
 
+    using_constraints = (length(sys.constraints) > 0)
     ca_coord_storage = similar(sys.coords)
 
     for step_n in 1:n_steps
@@ -292,7 +295,7 @@ function simulate!(sys,
 
         coords_copy = sys.coords
         
-        if length(sys.constraints) > 0
+        if using_constraints
             ca_coord_storage .= sys.coords
         end
 
@@ -304,7 +307,7 @@ function simulate!(sys,
                           accels_t .* sim.dt ^ 2
         end
 
-        sys = apply_position_constraints!(sys, ca_coord_storage, n_threads=n_threads)
+        apply_position_constraints!(sys, ca_coord_storage, n_threads=n_threads)
         
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         # This is accurate to O(dt)
@@ -368,12 +371,13 @@ function simulate!(sys,
 
     ca_coord_storage = similar(sys.coords)
     ca_vel_storage = similar(sys.velocities)
+    using_constraints = (length(sys.constraints) > 0)
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)    
 
         sys.velocities += accels_t .* sim.dt
-        sys = apply_velocity_constraints!(sys, n_threads=n_threads)
+        apply_velocity_constraints!(sys, n_threads=n_threads)
 
         sys.coords += sys.velocities .* sim.dt / 2
 
@@ -381,13 +385,13 @@ function simulate!(sys,
 
         sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
 
-        if length(sys.constraints) > 0
+        if using_constraints
             ca_coord_storage .= sys.coords
         end
 
         sys.coords += sys.velocities .* sim.dt / 2
 
-        sys = apply_position_constraints!(sys, ca_coord_storage, ca_vel_storage, sim.dt, n_threads=n_threads)
+        apply_position_constraints!(sys, ca_coord_storage, ca_vel_storage, sim.dt, n_threads=n_threads)
 
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0

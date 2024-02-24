@@ -144,7 +144,6 @@ function validate_coords(coords)
     end
 
     valid_length_dimensions = [u"𝐋", NoDims]
-    println(eltype(coords[1]))
     coord_dimension = dimension(eltype(coords[1]))
 
     if coord_dimension ∉ valid_length_dimensions

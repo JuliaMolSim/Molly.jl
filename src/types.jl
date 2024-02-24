@@ -447,7 +447,7 @@ interface described there.
 - `general_inters::GI=()`: the general interactions in the system,
     i.e. interactions involving all atoms such as implicit solvent. Each should
     implement the AtomsCalculators.jl interface. Typically a `Tuple`.
-- `constraints::CA=()` : The constraint algorithm(s) used to apply
+- `constraints::CN=()` : The constraint algorithm(s) used to apply
     bond and angle constraints to the system. (e.g. SHAKE_RATTLE)
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
@@ -461,7 +461,7 @@ interface described there.
     modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `data::DA=nothing`: arbitrary data associated with the system.
 """
-mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF,
+mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
                       L, F, E, K, M, DA} <: AbstractSystem{D}
     atoms::A
     coords::C
@@ -472,7 +472,7 @@ mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF,
     pairwise_inters::PI
     specific_inter_lists::SI
     general_inters::GI
-    constraints::CA
+    constraints::CN
     neighbor_finder::NF
     loggers::L
     df::Int
@@ -511,7 +511,7 @@ function System(;
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
-    CA = typeof(constraints)
+    CN = typeof(constraints)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
@@ -581,7 +581,7 @@ function System(;
                 specific_inter_lists, general_inters, boundary)
 
 
-    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF, L, F, E, K, M, DA}(
+    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, DA}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints,
                     neighbor_finder, loggers, df, force_units, energy_units, k_converted, atom_masses, data)
@@ -750,7 +750,7 @@ construction where `n` is the number of threads to be used per replica.
     value is passed to the argument `replica_general_inters`.
 - `replica_general_inters=[() for _ in 1:n_replicas]`: the general interactions for 
     each replica.
-- `constraints::CA=()` : The constraint algorithm(s) used to apply
+- `constraints::CN=()` : The constraint algorithm(s) used to apply
     bond and angle constraints to the system. It is duplicated for each replica.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation. It is duplicated for each replica.
@@ -812,7 +812,7 @@ function ReplicaSystem(;
     C = typeof(replica_coords[1])
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
-    CA = typeof(constraints)
+    CN = typeof(constraints)
 
 
     if isnothing(replica_velocities)
@@ -935,7 +935,7 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CA, NF,
+    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
                             typeof(replica_loggers[i]), F, E, K, M, Nothing}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
