@@ -244,9 +244,10 @@ function ChainRulesCore.rrule(::typeof(forces_pair_spec), coords::AbstractArray{
         )[1]
         d_pairwise_inters_nonl = nothing_to_notangent(grads[4])
         d_pairwise_inters_nl   = nothing_to_notangent(grads[5])
+        d_boundary = grads[10]
         return NoTangent(), d_coords, d_atoms, d_pairwise_inters_nonl, d_pairwise_inters_nl,
                d_sils_1_atoms, d_sils_2_atoms, d_sils_3_atoms, d_sils_4_atoms,
-               NoTangent(), NoTangent(), NoTangent(), NoTangent()
+               d_boundary, NoTangent(), NoTangent(), NoTangent()
     end
 
     return Y, forces_pair_spec_pullback
@@ -294,9 +295,10 @@ function ChainRulesCore.rrule(::typeof(potential_energy_pair_spec), coords, atom
         )[1]
         d_pairwise_inters_nonl = nothing_to_notangent(grads[4])
         d_pairwise_inters_nl   = nothing_to_notangent(grads[5])
+        d_boundary = grads[10]
         return NoTangent(), d_coords, d_atoms, d_pairwise_inters_nonl, d_pairwise_inters_nl,
                d_sils_1_atoms, d_sils_2_atoms, d_sils_3_atoms, d_sils_4_atoms,
-               NoTangent(), NoTangent(), NoTangent(), NoTangent(), NoTangent()
+               d_boundary, NoTangent(), NoTangent(), NoTangent(), NoTangent()
     end
 
     return Y, potential_energy_pair_spec_pullback

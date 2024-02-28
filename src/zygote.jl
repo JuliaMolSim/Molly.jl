@@ -49,7 +49,7 @@ function Base.:+(r::Base.RefValue{Any}, y::NamedTuple{(:atoms, :coords, :boundar
     (
         atoms=Zygote.accum(x.atoms, y.atoms),
         coords=Zygote.accum(x.coords, y.coords),
-        boundary=nothing,
+        boundary=Zygote.accum(x.boundary, y.boundary),
         velocities=Zygote.accum(x.velocities, y.velocities),
         atoms_data=Zygote.accum(x.atoms_data, y.atoms_data),
         topology=nothing,
