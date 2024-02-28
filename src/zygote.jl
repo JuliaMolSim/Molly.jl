@@ -98,6 +98,17 @@ function Base.:+(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{2, T, Vector{
     RectangularBoundary(SVector{2, T}(x.side_lengths .+ y.side_lengths); check_positive=false)
 end
 
+function Base.:+(x::SVector{3, T}, y::CubicBoundary{T}) where T
+    CubicBoundary(x .+ y.side_lengths; check_positive=false)
+end
+
+function Base.:+(x::SVector{2, T}, y::RectangularBoundary{T}) where T
+    RectangularBoundary(x .+ y.side_lengths; check_positive=false)
+end
+
+Base.:+(x::CubicBoundary{T}, y::SVector{3, T}) where {T} = y + x
+Base.:+(x::RectangularBoundary{T}, y::SVector{2, T}) where {T} = y + x
+
 atom_or_empty(at::Atom, T) = at
 atom_or_empty(at::Nothing, T) = zero(Atom{T, T, T, T})
 

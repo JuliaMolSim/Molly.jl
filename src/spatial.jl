@@ -50,6 +50,14 @@ Base.getindex(b::CubicBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::CubicBoundary) = 1
 Base.lastindex(b::CubicBoundary) = 3
 
+function Base.zero(b::CubicBoundary{T}) where T
+    return CubicBoundary(zero(SVector{3, T}); check_positive=false)
+end
+
+function Base.:+(b1::CubicBoundary, b2::CubicBoundary)
+    return CubicBoundary(b1.side_lengths .+ b2.side_lengths; check_positive=false)
+end
+
 """
     RectangularBoundary(x, y)
     RectangularBoundary(x)
@@ -75,6 +83,14 @@ RectangularBoundary(x::Number; kwargs...) = RectangularBoundary(SVector{2}(x, x)
 Base.getindex(b::RectangularBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::RectangularBoundary) = 1
 Base.lastindex(b::RectangularBoundary) = 2
+
+function Base.zero(b::RectangularBoundary{T}) where T
+    return RectangularBoundary(zero(SVector{2, T}); check_positive=false)
+end
+
+function Base.:+(b1::RectangularBoundary, b2::RectangularBoundary)
+    return RectangularBoundary(b1.side_lengths .+ b2.side_lengths; check_positive=false)
+end
 
 """
     TriclinicBoundary(v1, v2, v3; approx_images=true)
