@@ -117,7 +117,7 @@ function build_clusters(n_atoms, constraints)
         end
     end
 
-    return clusters
+    return [clusters...]
 end
 
 

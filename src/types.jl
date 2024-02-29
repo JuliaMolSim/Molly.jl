@@ -747,7 +747,10 @@ construction where `n` is the number of threads to be used per replica.
 - `replica_general_inters=[() for _ in 1:n_replicas]`: the general interactions for 
     each replica.
 - `constraints::CN=()` : The constraint algorithm(s) used to apply
-    bond and angle constraints to the system. It is duplicated for each replica.
+    the same bond and angle constraints to all replicas. This is only used if
+    not value is passed to the argument `replica_constraints`.
+- `replica_constraints=()` : The constraint algorithm(s) used to apply
+    bond and angle constraints to each replica.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation. It is duplicated for each replica.
 - `replica_loggers=[() for _ in 1:n_replicas]`: the loggers for each replica 
@@ -790,6 +793,7 @@ function ReplicaSystem(;
                         general_inters=(),
                         replica_general_inters=nothing,
                         constraints=(),
+                        replica_constraints=nothing,
                         neighbor_finder=NoNeighborFinder(),
                         replica_loggers=[() for _ in 1:n_replicas],
                         exchange_logger=nothing,
@@ -808,7 +812,6 @@ function ReplicaSystem(;
     C = typeof(replica_coords[1])
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
-    CN = typeof(constraints)
 
 
     if isnothing(replica_velocities)
@@ -853,15 +856,17 @@ function ReplicaSystem(;
     GI = eltype(replica_general_inters)
 
     df = n_dof(D, length(atoms), boundary)
-    if length(constraints) > 0
-        if neighbor_finder == NoNeighborFinder()
-            throw(ArgumentError("Constraints algorithms require neighbor lists."))
-        end
-        for ca in constraints
-            neighbor_finder = disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
-            df -= n_dof_lost(D, ca.clusters)
-        end
+    if isnothing(replica_constraints)
+        df -= n_dof_lost(D, ca.clusters)
+        replica_constraints = [constraints for _ in 1:n_replicas]
+        replica_dfs = [df for _ in 1:n_replicas]
+    elseif length(replica_constraints) != n_replicas
+        throw(ArgumentError("number of constraints ($(length(replica_constraints)))"
+                            * "does not match number of replicas ($n_replicas)"))
+    else #if replicas passed & correct length
+        replica_dfs = [df - n_dof_lost(D, ca.clusters) for ca in replica_constraints]
     end
+    CN = eltype(replica_constraints)
 
 
     if isnothing(exchange_logger)
@@ -935,8 +940,8 @@ function ReplicaSystem(;
                             typeof(replica_loggers[i]), F, E, K, M, Nothing}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
-            replica_general_inters[i], deepcopy(constraints), 
-            deepcopy(neighbor_finder), replica_loggers[i], deepcopy(df),
+            replica_general_inters[i], replica_constraints[i], 
+            deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i],
             force_units, energy_units, k_converted, atom_masses, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
 
