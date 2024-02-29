@@ -857,14 +857,26 @@ function ReplicaSystem(;
 
     df = n_dof(D, length(atoms), boundary)
     if isnothing(replica_constraints)
-        df -= n_dof_lost(D, ca.clusters)
-        replica_constraints = [constraints for _ in 1:n_replicas]
-        replica_dfs = [df for _ in 1:n_replicas]
+        if length(constraints) > 0
+            for ca in constraints
+                df -= n_dof_lost(D, ca.clusters)
+            end
+            replica_constraints = [constraints for _ in 1:n_replicas]
+            replica_dfs = [df for _ in 1:n_replicas]
+        end
+
     elseif length(replica_constraints) != n_replicas
         throw(ArgumentError("number of constraints ($(length(replica_constraints)))"
                             * "does not match number of replicas ($n_replicas)"))
     else #if replicas passed & correct length
-        replica_dfs = [df - n_dof_lost(D, ca.clusters) for ca in replica_constraints]
+        replica_dfs = df.*ones(typeof(df), length(replica_constraints))
+        for (i,cosntraints) in enumerate(replica_constraints)
+            if length(constraints) > 0
+                for ca in cosntraints
+                    replica_dfs[i] -= n_dof_lost(D, ca.clusters)
+                end
+            end
+        end
     end
     CN = eltype(replica_constraints)
 
