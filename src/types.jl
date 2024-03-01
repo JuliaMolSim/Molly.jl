@@ -857,12 +857,15 @@ function ReplicaSystem(;
 
     df = n_dof(D, length(atoms), boundary)
     if isnothing(replica_constraints)
+        replica_dfs = [df for _ in 1:n_replicas]
+        
         if length(constraints) > 0
             for ca in constraints
                 df -= n_dof_lost(D, ca.clusters)
             end
             replica_constraints = [constraints for _ in 1:n_replicas]
-            replica_dfs = [df for _ in 1:n_replicas]
+        else
+            replica_constraints = [constraints for _ in 1:n_replicas]
         end
 
     elseif length(replica_constraints) != n_replicas
@@ -878,7 +881,6 @@ function ReplicaSystem(;
             end
         end
     end
-    CN = eltype(replica_constraints)
 
 
     if isnothing(exchange_logger)
@@ -948,7 +950,9 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+    println(length(replica_constraints))
+
+    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, typeof(replica_constraints[i]), NF,
                             typeof(replica_loggers[i]), F, E, K, M, Nothing}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
