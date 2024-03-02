@@ -60,7 +60,7 @@ Disables interactions between atoms in a constraint. This prevents forces
 from blowing up as atoms in a bond are typically very close to eachother.
 """
 function disable_intra_constraint_interactions!(neighbor_finder,
-     constraint_clsuters::AbstractVector{ConstraintCluster})
+     constraint_clsuters::AbstractVector{<:ConstraintCluster})
 
     # Loop through constraints and modify eligible matrix
     for cluster in constraint_clsuters

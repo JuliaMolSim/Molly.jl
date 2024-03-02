@@ -1269,7 +1269,7 @@ SHAKE was originally derived for the Verlet integration scheme with RATTLE exten
 | VelocityVerlet             |   X   |    X   |
 | Langevin                   |   X   |        |
 | Langevin Splitting         |   -   |        |
-| Overdamped Langevin        |   -   |        |
+| Overdamped Langevin        |   X   |        |
 | NoseHoover                 |   -   |    -   |
 | MetropolisMonteCarlo       |       |        |
 | SteepestDescentMinimizer   |       |        |
