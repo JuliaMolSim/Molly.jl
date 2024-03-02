@@ -141,10 +141,8 @@ function simulate!(sys,
 
     using_constraints = (length(sys.constraints) > 0)
 
-    if using_constraints
-        ca_coord_storage = similar(sys.coords)
-        ca_vel_storage = similar(sys.velocities)
-    end
+    ca_coord_storage = similar(sys.coords)
+    ca_vel_storage = similar(sys.velocities)
     
     for step_n in 1:n_steps
         
@@ -223,9 +221,7 @@ function simulate!(sys,
 
     using_constraints = (length(sys.constraints) > 0)
 
-    if using_constraints
-        ca_coord_storage = similar(sys.coords)
-    end
+    ca_coord_storage = similar(sys.coords)
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
@@ -293,9 +289,7 @@ function simulate!(sys,
 
     using_constraints = (length(sys.constraints) > 0)
 
-    if using_constraints
-        ca_coord_storage = similar(sys.coords)
-    end
+    ca_coord_storage = similar(sys.coords)
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
@@ -378,10 +372,9 @@ function simulate!(sys,
 
     using_constraints = (length(sys.constraints) > 0)
 
-    if using_constraints
-        ca_coord_storage = similar(sys.coords)
-        ca_vel_storage = similar(sys.velocities)
-    end
+    ca_coord_storage = similar(sys.coords)
+    ca_vel_storage = similar(sys.velocities)
+
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)    
@@ -584,9 +577,7 @@ function simulate!(sys,
 
     using_constraints = (length(sys.constraints) > 0)
 
-    if using_constraints
-        ca_coord_storage = similar(sys.coords)
-    end
+    ca_coord_storage = similar(sys.coords)
 
     for step_n in 1:n_steps
 
