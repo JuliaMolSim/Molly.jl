@@ -30,7 +30,7 @@ function SHAKE_RATTLE(constraints, n_atoms::Int, dist_tolerance, vel_tolerance)
     #If this becomes a memory issue n_atoms could probably be number of atoms constrained
     clusters = build_clusters(n_atoms, constraints)
 
-    return SHAKE_RATTLE{eltype(clusters), typeof(dist_tolerance), typeof(vel_tolerance)}(clusters, dist_tolerance, vel_tolerance)
+    return SHAKE_RATTLE{typeof(clusters), typeof(dist_tolerance), typeof(vel_tolerance)}(clusters, dist_tolerance, vel_tolerance)
 end
 
 function position_constraints!(sys::System, constraint_algo::SHAKE_RATTLE, coord_storage;
