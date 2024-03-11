@@ -16,12 +16,12 @@ ustrip_vec(x...) = ustrip.(x...)
 # Parses the length, mass, velocity, energy and force units and verifies they are
 #   correct and consistent with other parameters passed to the system.
 function check_units(atoms, coords, velocities, energy_units, force_units,
-                     p_inters, s_inters, g_inters, boundary, constraints)
+                     p_inters, s_inters, g_inters, boundary)
     masses = mass.(atoms)
     sys_units = check_system_units(masses, coords, velocities, energy_units, force_units)
 
     check_interaction_units(p_inters, s_inters, g_inters, sys_units)
-    check_other_units(atoms, boundary, constraints, sys_units)
+    check_other_units(atoms, boundary, sys_units)
 
     return sys_units
 end
@@ -82,7 +82,7 @@ function check_interaction_units(p_inters, s_inters, g_inters, sys_units::NamedT
 
 end
 
-function check_other_units(atoms_dev, boundary, constraints, sys_units::NamedTuple)
+function check_other_units(atoms_dev, boundary, sys_units::NamedTuple)
     atoms = Array(atoms_dev)
     box_units = unit(length_type(boundary))
 
@@ -106,6 +106,7 @@ function check_other_units(atoms_dev, boundary, constraints, sys_units::NamedTup
             throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but system energy unit was $(sys_units[:energy])"))
         end
     end
+
 end
 
 function validate_energy_units(energy_units)

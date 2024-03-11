@@ -460,67 +460,72 @@ end
     end
 end
 
-@testset "SHAKE bond constraints" begin
-    n_atoms = 100
-    atom_mass = 10.0u"g/mol"
-    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    boundary = CubicBoundary(2.0u"nm")
 
-    coords = place_atoms(n_atoms ÷ 2, boundary, min_dist=0.3u"nm")
+@testset "SHAKE/RATTLE Diatomic" begin
+    #Simulates hydrogen gas
+    r_cut = 8.5u"Å"
+    temp = 300.0u"K"
+    atom_mass = 1.00794u"g/mol"
 
-    for i in eachindex(coords)
-        push!(coords, coords[i] .+ [0.15, 0.0, 0.0]u"nm")
+    n_atoms = 400
+    hydrogen_data = readdlm(joinpath(data_dir, "initial_hydrogen_data.atom"), skipstart = 9)
+    coords_matrix = hydrogen_data[:,2:4]
+    vel_matrix = hydrogen_data[:,5:7]
+
+    for simulator in [VelocityVerlet(dt = 0.002u"ps"), Verlet(dt = 0.002u"ps"),
+        StormerVerlet(dt = 0.002u"ps"), Langevin(dt = 0.002u"ps", temperature = temp, friction=1.0u"ps^-1")]
+        #,NoseHoover(dt=2.0u"fs", temperature=temp)]
+        
+        #Add bonded atoms
+        bond_length = 0.74u"Å" #hydrogen bond length
+        constraints = [DistanceConstraint(j, j+1, bond_length) for j in range(1, n_atoms, step = 2)]
+        atoms = [Atom(index = j, mass = atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in range(1,n_atoms)]
+        coords = [SVector(coords_matrix[j,1]u"Å",coords_matrix[j,2]u"Å",coords_matrix[j,3]u"Å") for j in range(1,n_atoms)]
+        velocities = [1000*SVector(vel_matrix[j,:]u"Å/ps"...) for j in range(1,n_atoms)]
+        
+        ca = SHAKE_RATTLE(constraints, length(atoms), 1e-8u"Å",  1e-8u"Å^2/ps")
+
+        boundary = CubicBoundary(200.0u"Å")
+
+        neighbor_finder = DistanceNeighborFinder(eligible = trues(length(atoms),length(atoms)), dist_cutoff = 1.5*r_cut)
+        disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
+
+        sys = System(
+                atoms = atoms,
+                coords = coords,
+                boundary = boundary,
+                velocities=velocities,
+                pairwise_inters=(
+                    LennardJones(
+                        cutoff = ShiftedPotentialCutoff(r_cut),
+                        use_neighbors = true,
+                        energy_units = u"kcal * mol^-1",
+                        force_units = u"kcal * mol^-1 * Å^-1"
+                        ),
+                    ),
+                neighbor_finder = neighbor_finder,
+                constraints = (ca,),
+                energy_units = u"kcal * mol^-1",
+                force_units = u"kcal * mol^-1 * Å^-1"
+        )
+
+        simulate!(sys, simulator, 10_000, n_threads = 1)
+
+        @test (check_position_constraints(sys, ca) == true)
+
+        if typeof(simulator) ∈ [VelocityVerlet, NoseHoover]
+            @test (check_velocity_constraints(sys, ca) == true)
+        end
+
     end
 
-    temp = 100.0u"K"
-    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-
-    eligible = trues(n_atoms, n_atoms)
-    for i in 1:(n_atoms ÷ 2)
-        eligible[i, i + (n_atoms ÷ 2)] = false
-        eligible[i + (n_atoms ÷ 2), i] = false
-    end
-
-    neighbor_finder = DistanceNeighborFinder(eligible=eligible, n_steps=10, dist_cutoff=1.5u"nm")
-
-    bond_lengths = [0.1u"nm" for i in 1:(n_atoms ÷ 2)]
-    sh = SHAKE(bond_lengths, collect(1:(n_atoms ÷ 2)), collect((1 + (n_atoms ÷ 2)):n_atoms))
-    constraints = (sh,)
-
-    sys = System(
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
-        constraints=constraints,
-        neighbor_finder=neighbor_finder,
-        loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
-    )
-
-    for i in eachindex(sys.coords)
-        sys.coords[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"        
-    end
-
-    old_coords = sys.coords
-    apply_constraints!(sys, sh, old_coords, 0.002u"ps")
-
-    lengths = map(eachindex(sh.is)) do r
-        return norm(vector(sys.coords[sh.is[r]], sys.coords[sh.js[r]], sys.boundary))
-    end
-
-    @test maximum(abs.(lengths .- 0.1u"nm")) < 1e-10u"nm"
-
-    simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 1.0u"ps"))
-
-    @time simulate!(sys, simulator, 1_000)
-
-    lengths = map(eachindex(sh.is)) do r
-        return norm(vector(sys.coords[sh.is[r]], sys.coords[sh.js[r]], sys.boundary))
-    end
-
-    @test maximum(abs.(lengths .- 0.1u"nm")) < 1e-10u"nm"
 end
+
+
+# @testset "Bad SHAKE/RATTLE SetUps" begin
+    
+
+# end
 
 @testset "SHAKE triatomic" begin
     n_atoms = 30
@@ -550,14 +555,13 @@ end
     end
 
     neighbor_finder = DistanceNeighborFinder(eligible=eligible, n_steps=10, dist_cutoff=1.5u"nm")
+    bond_length = 0.1u"nm"
 
-    bond_lengths = [0.1u"nm" for i in 1:(2 * (n_atoms ÷ 3))]
-    sh = SHAKE(
-        bond_lengths,
-        collect(1:(2 * (n_atoms ÷ 3))),
-        collect(((n_atoms ÷ 3) + 1):n_atoms),
-    )
-    constraints = (sh,)
+    is = collect(1:(2 * (n_atoms ÷ 3)))
+    js = collect(((n_atoms ÷ 3) + 1):n_atoms)
+    constraints = [DistanceConstraint(is[idx], js[idx], bond_length) for idx in eachindex(is)]
+
+    ca = SHAKE_RATTLE(constraints, n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps")
 
     sys = System(
         atoms=atoms,
@@ -565,25 +569,25 @@ end
         boundary=boundary,
         velocities=velocities,
         pairwise_inters=(LennardJones(use_neighbors=true),),
-        constraints=constraints,
+        constraints=(ca,),
         neighbor_finder=neighbor_finder,
         loggers=(coords=CoordinateLogger(10),),
     )
 
+    old_coords = deepcopy(sys.coords)
+
     for i in eachindex(sys.coords)
         sys.coords[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
+        sys.velocities[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm/ps"
     end
 
-    old_coords = sys.coords
+    apply_position_constraints!(sys, old_coords)
+    apply_velocity_constraints!(sys)
 
-    @time apply_constraints!(sys, sh, old_coords, 0.002u"ps")
-
-    lengths = map(eachindex(sh.is)) do r
-        return norm(vector(sys.coords[sh.is[r]], sys.coords[sh.js[r]], sys.boundary))
-    end
-
-    @test maximum(abs.(lengths .- 0.1u"nm")) < 1e-10u"nm"
+    @test check_position_constraints(sys, ca) == true
+    @test check_velocity_constraints(sys, ca) == true
 end
+
 
 @testset "Langevin splitting" begin
     n_atoms = 400
