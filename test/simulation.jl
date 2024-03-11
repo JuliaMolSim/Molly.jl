@@ -578,11 +578,14 @@ end
 
     for i in eachindex(sys.coords)
         sys.coords[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
+        sys.velocities[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm/ps"
     end
 
     apply_position_constraints!(sys, old_coords)
+    apply_velocity_constraints!(sys)
 
     @test check_position_constraints(sys, ca) == true
+    @test check_velocity_constraints(sys, ca) == true
 end
 
 

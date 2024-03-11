@@ -1,4 +1,6 @@
-export SHAKE_RATTLE
+export SHAKE_RATTLE,
+    check_position_constraints,
+    check_velocity_constraints
 
 """
 SHAKE_RATTLE(constraints::AbstractVector{<:Constraint}, n_atoms, dist_tolerance, vel_tolerance)
@@ -17,8 +19,8 @@ system solved to satisfy the RATTLE algorithm.
 - vel_tolerance: Tolerance used to end iterative procedure when calculating velocity constraints.
     Should have same units as velocities*coords.
 """
-struct SHAKE_RATTLE{CC, D, V} <: ConstraintAlgorithm
-    clusters::AbstractVector{CC}
+struct SHAKE_RATTLE{CC, D, V}
+    clusters::CC
     dist_tolerance::D
     vel_tolerance::V
 end
@@ -55,6 +57,8 @@ function SHAKE_updates!(sys, ca::SHAKE_RATTLE, coord_storage)
 
                 # Distance vector between the atoms before unconstrained update (r)
                 r12 = vector(coord_storage[k2], coord_storage[k1], sys.boundary) #& extra allocation
+
+                println(ustrip(norm(s12) - constraint.dist))
 
                 if abs(norm(s12) - constraint.dist) > ca.dist_tolerance
                     m1_inv = 1/mass(sys.atoms[k1])
@@ -138,4 +142,47 @@ function RATTLE_updates!(sys, ca::SHAKE_RATTLE)
        converged = check_velocity_constraints(sys, ca)
    end
 
+end
+
+
+
+"""
+check_position_constraints(sys::System, ca::SHAKE_RATTLE)
+
+Checks if the position constraints are satisfied by current positions of `sys`.
+"""
+function check_position_constraints(sys::System, ca::SHAKE_RATTLE)
+
+    max_err = typemin(float_type(sys))*unit(sys.coords[1][1])
+    for cluster in ca.clusters
+        for constraint in cluster.constraints
+            err = abs(norm(vector(sys.coords[constraint.j], sys.coords[constraint.i], sys.boundary)) - constraint.dist)
+            if max_err < err
+                max_err = err
+            end
+        end
+    end
+
+    return (max_err < ca.dist_tolerance)
+end
+
+"""
+check_velocity_constraints(sys::System, ca::SHAKE_RATTLE)
+
+Checks if the velocity constraints are satisfied by current velocities of `sys`.
+"""
+function check_velocity_constraints(sys::System, ca::SHAKE_RATTLE)
+
+    max_err = typemin(float_type(sys))*unit(sys.velocities[1][1])*unit(sys.coords[1][1])
+    for cluster in ca.clusters
+        for constraint in cluster.constraints
+            err = abs(dot(vector(sys.coords[constraint.j], sys.coords[constraint.i], sys.boundary),
+                                (sys.velocities[constraint.j] .- sys.velocities[constraint.i])))
+            if max_err < err
+                max_err = err
+            end
+        end
+    end
+
+    return (max_err < ca.vel_tolerance)
 end
