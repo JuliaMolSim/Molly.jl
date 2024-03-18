@@ -148,7 +148,6 @@ end
         displacements(final_coords, boundary)
         distances(final_coords, boundary)
         rdf(final_coords, boundary)
-        @test unit(velocity_autocorr(s.loggers.vels)) == u"nm^2 * ps^-2"
         @test unit(first(values(s.loggers.potkin_correlation))) == NoUnits
         @test unit(first(values(s.loggers.velocity_autocorrelation; normalize=false))) == u"nm^2 * ps^-2"
 

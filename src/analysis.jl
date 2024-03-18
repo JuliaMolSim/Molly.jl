@@ -5,7 +5,6 @@ export
     displacements,
     distances,
     rdf,
-    velocity_autocorr,
     rmsd,
     radius_gyration,
     hydrodynamic_radius
@@ -104,20 +103,6 @@ function rdf(coords, boundary; npoints::Integer=200)
     bin_centers = collect(kd.x) .* dist_unit
     density_weighted = kd.density ./ normalizing_factor
     return bin_centers, density_weighted
-end
-
-"""
-    velocity_autocorr(vl, first_ind, last_ind)
-
-Calculate the autocorrelation function of velocity from the velocity logger.
-
-This characterizes the similarity between velocities observed at different
-time instances.
-"""
-function velocity_autocorr(vl::GeneralObservableLogger{T, typeof(velocities_wrapper)}, first_ind::Integer=1,
-                            last_ind::Integer=length(values(vl))) where T
-    n_atoms = length(first(values(vl)))
-    return dot(values(vl)[first_ind], values(vl)[last_ind]) / n_atoms
 end
 
 """

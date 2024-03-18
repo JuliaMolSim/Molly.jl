@@ -1269,7 +1269,6 @@ Functions that may be useful for analysis include:
 - [`rdf`](@ref)
 - [`distances`](@ref)
 - [`displacements`](@ref)
-- [`velocity_autocorr`](@ref)
 - [`rmsd`](@ref)
 - [`radius_gyration`](@ref)
 - [`hydrodynamic_radius`](@ref)
