@@ -740,7 +740,7 @@ AtomsCalculators.forces(ab_sys, calc)
 ```
 We can also convert the AtomsBase.jl system to a Molly [`System`](@ref):
 ```julia
-System(ab_sys, u"kJ", u"kJ/Å")
+System(ab_sys; force_units=u"kJ/Å", energy_units=u"kJ")
 ```
 ```
 System with 5 atoms, boundary CubicBoundary{Quantity{Float64, 𝐋, Unitful.FreeUnits{(Å,), 𝐋, nothing}}}(Quantity{Float64, 𝐋, Unitful.FreeUnits{(Å,), 𝐋, nothing}}[1.54732 Å, 1.4654985 Å, 1.792895 Å])

@@ -1095,14 +1095,17 @@ end
 Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io, s)
 
 """
-    System(abstract_system)
+    System(abstract_system; force_units=u"kJ * mol^-1 * nm^-1", energy_units=u"kJ * mol^-1")
 
 Convert an AtomsBase `AbstractSystem` to a Molly `System`.
 
+`force_units` and `energy_units` should be set as appropriate.
 To add properties not present in the AtomsBase interface (e.g. pair potentials) use the
 convenience constructor `System(sys::System)`.
 """
-function System(sys::AbstractSystem{D}, energy_units, force_units) where D
+function System(sys::AbstractSystem{D};
+                force_units=u"kJ * mol^-1 * nm^-1",
+                energy_units=u"kJ * mol^-1") where D
     # Convert BC to Molly types
     bb = bounding_box(sys)
     bcs = AtomsBase.boundary_conditions(sys)
@@ -1175,8 +1178,8 @@ function System(sys::AbstractSystem{D}, energy_units, force_units) where D
         boundary=molly_boundary,
         velocities=vels,
         atoms_data=atoms_data,
-        energy_units=energy_units,
         force_units=force_units,
+        energy_units=energy_units,
     )
 end
 
@@ -1251,7 +1254,8 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         n_threads::Integer=Threads.nthreads(),
         kwargs...,
     )
-    sys_nointers = System(abstract_sys, calc.energy_units, calc.force_units)
+    sys_nointers = System(abstract_sys; force_units=calc.force_units,
+                          energy_units=calc.energy_units)
     sys = System(
         sys_nointers;
         pairwise_inters=calc.pairwise_inters,
@@ -1271,7 +1275,8 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         n_threads::Integer=Threads.nthreads(),
         kwargs...,
     )
-    sys_nointers = System(abstract_sys, calc.energy_units, calc.force_units)
+    sys_nointers = System(abstract_sys; force_units=calc.force_units,
+                          energy_units=calc.energy_units)
     sys = System(
         sys_nointers;
         pairwise_inters=calc.pairwise_inters,

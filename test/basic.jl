@@ -487,7 +487,7 @@ end
                         [0.0    , 1.4654985, 0.0      ],
                         [0.0    , 0.0      , 1.7928950]]u"Å",
     )
-    molly_sys = System(ab_sys_2, u"kJ", u"kJ/Å")
+    molly_sys = System(ab_sys_2; energy_units=u"kJ", force_units=u"kJ/Å")
     test_approx_eq(ab_sys_2, molly_sys; common_only=true)
 end
 
