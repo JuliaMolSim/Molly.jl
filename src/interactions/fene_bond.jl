@@ -16,7 +16,7 @@ V_{\text{WCA}}(r) =
     \begin{cases}
       4\varepsilon \left[ \left( \frac{\sigma}{r} \right) ^{12} - \left( \frac{\sigma}{r} \right) ^6 \right] + \varepsilon & r < 2^{1/6}\sigma\\
       0 & r \geq 2^{1/6}\sigma\\
-    \end{cases}       
+    \end{cases}
 ```
 """
 struct FENEBond{K, D, E} <: SpecificInteraction

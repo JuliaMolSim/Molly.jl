@@ -66,6 +66,7 @@ function simulate!(sys,
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
+    using_constraints = length(sys.constraints) > 0
     E = potential_energy(sys, neighbors; n_threads=n_threads)
     println(sim.log_stream, "Step 0 - potential energy ",
             E, " - max force N/A - N/A")
@@ -77,6 +78,7 @@ function simulate!(sys,
 
         coords_copy = sys.coords
         sys.coords += hn * F ./ max_force
+        using_constraints && apply_position_constraints!(sys, coords_copy; n_threads=n_threads)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         neighbors_copy = neighbors
@@ -134,38 +136,29 @@ function simulate!(sys,
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
-
-    using_constraints = (length(sys.constraints) > 0)
-
+    using_constraints = length(sys.constraints) > 0
     if using_constraints
-        ca_coord_storage = similar(sys.coords)
-        ca_vel_storage = similar(sys.velocities)
+        cons_coord_storage = similar(sys.coords)
+        cons_vel_storage = similar(sys.velocities)
     end
-    
+
     for step_n in 1:n_steps
-        
         if using_constraints
-            ca_coord_storage .= sys.coords
+            cons_coord_storage .= sys.coords
         end
 
-        # Position Update
         sys.coords += sys.velocities .* sim.dt .+ ((accels_t .* sim.dt ^ 2) ./ 2)
-
-        using_constraints && apply_position_constraints!(sys, ca_coord_storage, ca_vel_storage, sim.dt, n_threads=n_threads)
-
-        #Enforce PBC
+        using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
+                                                         sim.dt; n_threads=n_threads)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
-        #Calculate new forces
         accels_t_dt = accelerations(sys, neighbors; n_threads=n_threads)
-        
-        sys.velocities += ((accels_t .+ accels_t_dt) .* sim.dt / 2)
 
-        using_constraints && apply_velocity_constraints!(sys, n_threads=n_threads)
+        sys.velocities += ((accels_t .+ accels_t_dt) .* sim.dt / 2)
+        using_constraints && apply_velocity_constraints!(sys; n_threads=n_threads)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -180,7 +173,6 @@ function simulate!(sys,
         else
             accels_t = accels_t_dt
         end
-
 
         run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
     end
@@ -220,28 +212,24 @@ function simulate!(sys,
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
-
-    using_constraints = (length(sys.constraints) > 0)
-
+    using_constraints = length(sys.constraints) > 0
     if using_constraints
-        ca_coord_storage = similar(sys.coords)
+        cons_coord_storage = similar(sys.coords)
     end
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
         sys.velocities += accels_t .* sim.dt
-        
+
         if using_constraints
-            ca_coord_storage .= sys.coords
+            cons_coord_storage .= sys.coords
         end
-
         sys.coords += sys.velocities .* sim.dt
-
-        using_constraints && apply_position_constraints!(sys, ca_coord_storage, n_threads=n_threads)
+        using_constraints && apply_position_constraints!(sys, cons_coord_storage; n_threads=n_threads)
 
         if using_constraints
-            sys.velocities .= (sys.coords .- ca_coord_storage)./sim.dt
+            sys.velocities .= (sys.coords .- cons_coord_storage) ./ sim.dt
         end
 
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
@@ -290,20 +278,17 @@ function simulate!(sys,
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
     coords_last = sys.coords
-
-    using_constraints = (length(sys.constraints) > 0)
-
+    using_constraints = length(sys.constraints) > 0
     if using_constraints
-        ca_coord_storage = similar(sys.coords)
+        cons_coord_storage = similar(sys.coords)
     end
 
     for step_n in 1:n_steps
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
         coords_copy = sys.coords
-        
         if using_constraints
-            ca_coord_storage .= sys.coords
+            cons_coord_storage .= sys.coords
         end
 
         if step_n == 1
@@ -314,8 +299,8 @@ function simulate!(sys,
                           accels_t .* sim.dt ^ 2
         end
 
-        using_constraints && apply_position_constraints!(sys, ca_coord_storage, n_threads=n_threads)
-        
+        using_constraints && apply_position_constraints!(sys, cons_coord_storage; n_threads=n_threads)
+
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
         # This is accurate to O(dt)
         sys.velocities = vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt
@@ -375,35 +360,31 @@ function simulate!(sys,
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
-
-    using_constraints = (length(sys.constraints) > 0)
-
+    using_constraints = length(sys.constraints) > 0
     if using_constraints
-        ca_coord_storage = similar(sys.coords)
-        ca_vel_storage = similar(sys.velocities)
+        cons_coord_storage = similar(sys.coords)
+        cons_vel_storage = similar(sys.velocities)
     end
 
     for step_n in 1:n_steps
-        accels_t = accelerations(sys, neighbors; n_threads=n_threads)    
+        accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
         sys.velocities += accels_t .* sim.dt
-        apply_velocity_constraints!(sys, n_threads=n_threads)
+        apply_velocity_constraints!(sys; n_threads=n_threads)
 
         if using_constraints
-            ca_coord_storage .= sys.coords
+            cons_coord_storage .= sys.coords
         end
-
         sys.coords += sys.velocities .* sim.dt / 2
 
         noise = random_velocities(sys, sim.temperature; rng=rng)
-
         sys.velocities = sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
 
         sys.coords += sys.velocities .* sim.dt / 2
 
-        using_constraints && apply_position_constraints!(sys, ca_coord_storage, ca_vel_storage, sim.dt, n_threads=n_threads)
-
+        using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt; n_threads=n_threads)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
@@ -432,6 +413,8 @@ correspond to the **BAOA** and **BAB** schemes respectively.
 For more information on the sampling properties of splitting schemes, see
 [Fass et al. 2018](https://doi.org/10.3390/e20050318).
 
+Not currently compatible with constraints, will print a warning and continue
+without applying constraints.
 Not currently compatible with automatic differentiation using Zygote.
 
 # Arguments
@@ -464,6 +447,10 @@ function simulate!(sys,
                     n_threads::Integer=Threads.nthreads(),
                     run_loggers=true,
                     rng=Random.GLOBAL_RNG)
+    if length(sys.constraints) > 0
+        @warn "LangevinSplitting is not currently compatible with constraints, " *
+              "constraints will be ignored"
+    end
     M_inv = inv.(masses(sys))
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
     σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
@@ -473,7 +460,6 @@ function simulate!(sys,
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
-
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
 
@@ -531,9 +517,7 @@ function O_step!(sys, α_eff, σ_eff, rng, temperature, neighbors)
 end
 
 function A_step!(sys, dt_eff, neighbors)
-
     sys.coords += sys.velocities * dt_eff
-
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     return sys
 end
@@ -542,7 +526,6 @@ function B_step!(sys, dt_eff, acceleration_vector, compute_forces::Bool,
                  n_threads::Integer, neighbors)
     if compute_forces
         acceleration_vector .= accelerations(sys, neighbors; n_threads=n_threads)
-
     end
     sys.velocities += dt_eff * acceleration_vector
     return sys
@@ -552,6 +535,9 @@ end
     OverdampedLangevin(; <keyword arguments>)
 
 Simulates the overdamped Langevin equation using the Euler-Maruyama method.
+
+Not currently compatible with constraints, will print a warning and continue
+without applying constraints.
 
 # Arguments
 - `dt::S`: the time step of the simulation.
@@ -577,20 +563,22 @@ function simulate!(sys,
                     n_threads::Integer=Threads.nthreads(),
                     run_loggers=true,
                     rng=Random.GLOBAL_RNG)
+    if length(sys.constraints) > 0
+        @warn "OverdampedLangevin is not currently compatible with constraints, " *
+              "constraints will be ignored"
+    end
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
 
     for step_n in 1:n_steps
-
         accels_t = accelerations(sys, neighbors; n_threads=n_threads)
 
         noise = random_velocities(sys, sim.temperature; rng=rng)
         sys.coords += (accels_t ./ sim.friction) .* sim.dt .+ sqrt((2 / sim.friction) * sim.dt) .* noise
-
-        
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
@@ -611,6 +599,9 @@ temperature of the system.
 
 See [Evans and Holian 1985](https://doi.org/10.1063/1.449071).
 The current implementation is limited to ergodic systems.
+
+Not currently compatible with constraints, will print a warning and continue
+without applying constraints.
 
 # Arguments
 - `dt::T`: the time step of the simulation.
@@ -634,24 +625,23 @@ end
 
 function simulate!(sys, sim::NoseHoover, n_steps::Integer;
                      n_threads::Integer=Threads.nthreads(), run_loggers=true)
+    if length(sys.constraints) > 0
+        @warn "NoseHoover is not currently compatible with constraints, " *
+              "constraints will be ignored"
+    end
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
-
     accels_t = accelerations(sys, neighbors; n_threads=n_threads)
     accels_t_dt = zero(accels_t)
-
     v_half = zero(sys.velocities)
     zeta = zero(inv(sim.dt))
 
     for step_n in 1:n_steps
-
         v_half = sys.velocities .+ (accels_t .- (sys.velocities .* zeta)) .* (sim.dt / 2)
 
         sys.coords += v_half .* sim.dt
-
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
         zeta_half = zeta + (sim.dt / (2 * (sim.damping^2))) * ((temperature(sys) / sim.temperature) - 1)
@@ -731,7 +721,7 @@ function TemperatureREMD(;
 
     simulators = Tuple(simulators[i] for i in 1:N)
     ST = typeof(simulators)
-    
+
     return TemperatureREMD{N, T, DT, TP, ST, ET}(dt, temperatures, simulators, exchange_time)
 end
 
@@ -832,7 +822,7 @@ function HamiltonianREMD(;
     if exchange_time <= dt
         throw(ArgumentError("exchange time ($exchange_time) must be greater than the time step ($dt)"))
     end
-    
+
     return HamiltonianREMD{N, T, DT, ST, ET}(dt, temperature, simulators, exchange_time)
 end
 
@@ -853,7 +843,7 @@ function simulate!(sys::ReplicaSystem,
             random_velocities!(sys.replicas[i], sim.temperature; rng=rng)
         end
     end
-    
+
     return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads, run_loggers=run_loggers)
 end
 

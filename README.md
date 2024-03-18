@@ -26,6 +26,7 @@ Implemented features include:
 - Replica exchange molecular dynamics.
 - Monte Carlo simulation.
 - Periodic, triclinic and infinite boundary conditions.
+- Constraints with SHAKE and RATTLE
 - Flexible loggers to track arbitrary properties throughout simulations.
 - Cutoff algorithms for non-bonded interactions.
 - Various neighbor list implementations to speed up the calculation of non-bonded forces, including the use of [CellListMap.jl](https://github.com/m3g/CellListMap.jl).
@@ -43,7 +44,7 @@ Implemented features include:
 Features not yet implemented include:
 - High GPU performance.
 - Ewald or particle mesh Ewald summation.
-- Constrained bonds and angles.
+- Full support for constrained bonds and angles.
 - Protein preparation - solvent box, add hydrogens etc.
 - Simulators such as metadynamics.
 - Quantum mechanical modelling.

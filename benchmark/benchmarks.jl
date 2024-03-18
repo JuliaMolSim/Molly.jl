@@ -101,7 +101,6 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
                       ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
     end
 
-
     sys = System(
         atoms=atoms,
         coords=coords,

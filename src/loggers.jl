@@ -46,7 +46,7 @@ end
 """
     GeneralObservableLogger(observable::Function, T, n_steps)
 
-A logger which holds a record of regularly sampled observations of a system. 
+A logger which holds a record of regularly sampled observations of a system.
 
 `observable` should return an object of type `T` and support the method
 `observable(s::System, neighbors; n_threads::Integer)::T`.
@@ -316,7 +316,7 @@ C(t)=\langle A_t\cdot B_0\rangle -\langle A \rangle\cdot \langle B\rangle
 These can be used to estimate statistical error, or to compute transport
 coefficients from Green-Kubo type formulas.
 *A* and *B* are observables, functions of the form
-`observable(sys::System, neighbors; n_threads::Integer)`.    
+`observable(sys::System, neighbors; n_threads::Integer)`.
 The return values of *A* and *B* can be of scalar or vector type (including
 `Vector{SVector{...}}`, like positions or velocities) and must implement `dot`.
 
@@ -343,7 +343,7 @@ mutable struct TimeCorrelationLogger{T_A, T_A2, T_B, T_B2, T_AB, TF_A, TF_B}
     n_correlation::Int
     history_A::CircularBuffer{T_A}
     history_B::CircularBuffer{T_B}
-    sum_offset_products::Vector{T_AB} 
+    sum_offset_products::Vector{T_AB}
     n_timesteps::Int
     sum_A::T_A
     sum_B::T_B
@@ -352,7 +352,7 @@ mutable struct TimeCorrelationLogger{T_A, T_A2, T_B, T_B2, T_AB, TF_A, TF_B}
 end
 
 function TimeCorrelationLogger(observableA::TF_A, observableB::TF_B,
-                                TA::DataType, TB::DataType, 
+                                TA::DataType, TB::DataType,
                                 observable_length::Integer,
                                 n_correlation::Integer) where {TF_A, TF_B}
     ini_sum_A = (observable_length > 1) ? zeros(TA, observable_length) : zero(TA)

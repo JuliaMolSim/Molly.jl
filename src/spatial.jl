@@ -110,6 +110,8 @@ height/width.
 Setting the keyword argument `approx_images` to `false` means the exact closest
 image is found, which is slower.
 
+Not currently able to simulate a cubic box, use [`CubicBoundary`](@ref) or small
+offsets instead.
 Not currently compatible with infinite boundaries.
 Not currently compatible with automatic differentiation using Zygote.
 """
@@ -131,7 +133,7 @@ ispositive(x) = x > zero(x)
 function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
     if !ispositive(bv[1][1]) || !iszero_value(bv[1][2]) || !iszero_value(bv[1][3])
         throw(ArgumentError("first basis vector must be along the x-axis (no y or z component) " *
-                            "and have a positive x component " * 
+                            "and have a positive x component " *
                             "when constructing a TriclinicBoundary, got $(bv[1])"))
     end
     if !ispositive(bv[2][2]) || !iszero_value(bv[2][3])
@@ -235,8 +237,8 @@ end
 
 has_infinite_boundary(b::Union{CubicBoundary, RectangularBoundary}) = any(isinf, b.side_lengths)
 has_infinite_boundary(b::TriclinicBoundary) = false
-num_infinite_boundary(b::Union{CubicBoundary, RectangularBoundary}) = sum(isinf.(b.side_lengths))
-num_infinite_boundary(b::TriclinicBoundary) = 0
+n_infinite_dims(b::Union{CubicBoundary, RectangularBoundary}) = sum(isinf, b.side_lengths)
+n_infinite_dims(b::TriclinicBoundary) = 0
 
 """
     box_volume(boundary)

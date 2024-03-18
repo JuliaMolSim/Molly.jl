@@ -460,74 +460,65 @@ end
     end
 end
 
-
-@testset "SHAKE/RATTLE Diatomic" begin
-    #Simulates hydrogen gas
+@testset "Constraints diatomic" begin
     r_cut = 8.5u"Å"
     temp = 300.0u"K"
     atom_mass = 1.00794u"g/mol"
-
     n_atoms = 400
-    hydrogen_data = readdlm(joinpath(data_dir, "initial_hydrogen_data.atom"), skipstart = 9)
-    coords_matrix = hydrogen_data[:,2:4]
-    vel_matrix = hydrogen_data[:,5:7]
+    hydrogen_data = readdlm(joinpath(data_dir, "initial_hydrogen_data.atom"); skipstart=9)
+    coords_matrix = hydrogen_data[:, 2:4]
+    vel_matrix = hydrogen_data[:, 5:7]
 
-    for simulator in [VelocityVerlet(dt = 0.002u"ps"), Verlet(dt = 0.002u"ps"),
-        StormerVerlet(dt = 0.002u"ps"), Langevin(dt = 0.002u"ps", temperature = temp, friction=1.0u"ps^-1")]
-        #,NoseHoover(dt=2.0u"fs", temperature=temp)]
-        
-        #Add bonded atoms
-        bond_length = 0.74u"Å" #hydrogen bond length
-        constraints = [DistanceConstraint(j, j+1, bond_length) for j in range(1, n_atoms, step = 2)]
-        atoms = [Atom(index = j, mass = atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in range(1,n_atoms)]
-        coords = [SVector(coords_matrix[j,1]u"Å",coords_matrix[j,2]u"Å",coords_matrix[j,3]u"Å") for j in range(1,n_atoms)]
-        velocities = [1000*SVector(vel_matrix[j,:]u"Å/ps"...) for j in range(1,n_atoms)]
-        
-        ca = SHAKE_RATTLE(constraints, length(atoms), 1e-8u"Å",  1e-8u"Å^2/ps")
+    simulators = (
+        VelocityVerlet(dt=0.002u"ps"),
+        Verlet(dt=0.002u"ps"),
+        StormerVerlet(dt=0.002u"ps"),
+        Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
+    )
 
-        boundary = CubicBoundary(200.0u"Å")
+    bond_length = 0.74u"Å"
+    constraints = [DistanceConstraint(j, j + 1, bond_length) for j in 1:2:n_atoms]
+    atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
+    cons = SHAKE_RATTLE(constraints, n_atoms, 1e-8u"Å", 1e-8u"Å^2 * ps^-1")
+    boundary = CubicBoundary(200.0u"Å")
+    lj = LennardJones(
+        cutoff=ShiftedPotentialCutoff(r_cut),
+        use_neighbors=true,
+        energy_units=u"kcal * mol^-1",
+        force_units=u"kcal * mol^-1 * Å^-1"
+    )
+    neighbor_finder = DistanceNeighborFinder(
+        eligible=trues(n_atoms, n_atoms),
+        dist_cutoff=1.5*r_cut,
+    )
+    disable_constrained_interactions!(neighbor_finder, cons.clusters)
 
-        neighbor_finder = DistanceNeighborFinder(eligible = trues(length(atoms),length(atoms)), dist_cutoff = 1.5*r_cut)
-        disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
+    for simulator in simulators
+        coords = [SVector(coords_matrix[j, 1]u"Å", coords_matrix[j, 2]u"Å", coords_matrix[j, 3]u"Å") for j in 1:n_atoms]
+        velocities = [1000 * SVector(vel_matrix[j, :]u"Å/ps"...) for j in 1:n_atoms]
 
         sys = System(
-                atoms = atoms,
-                coords = coords,
-                boundary = boundary,
-                velocities=velocities,
-                pairwise_inters=(
-                    LennardJones(
-                        cutoff = ShiftedPotentialCutoff(r_cut),
-                        use_neighbors = true,
-                        energy_units = u"kcal * mol^-1",
-                        force_units = u"kcal * mol^-1 * Å^-1"
-                        ),
-                    ),
-                neighbor_finder = neighbor_finder,
-                constraints = (ca,),
-                energy_units = u"kcal * mol^-1",
-                force_units = u"kcal * mol^-1 * Å^-1"
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            velocities=velocities,
+            pairwise_inters=(lj,),
+            neighbor_finder=neighbor_finder,
+            constraints=(cons,),
+            energy_units=u"kcal * mol^-1",
+            force_units=u"kcal * mol^-1 * Å^-1",
         )
 
-        simulate!(sys, simulator, 10_000, n_threads = 1)
+        simulate!(sys, simulator, 10_000)
 
-        @test (check_position_constraints(sys, ca) == true)
-
-        if typeof(simulator) ∈ [VelocityVerlet, NoseHoover]
-            @test (check_velocity_constraints(sys, ca) == true)
+        @test check_position_constraints(sys, cons)
+        if simulator isa VelocityVerlet
+            @test check_velocity_constraints(sys, cons)
         end
-
     end
-
 end
 
-
-# @testset "Bad SHAKE/RATTLE SetUps" begin
-    
-
-# end
-
-@testset "SHAKE triatomic" begin
+@testset "Constraints triatomic" begin
     n_atoms = 30
     atom_mass = 10.0u"g/mol"
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
@@ -560,8 +551,7 @@ end
     is = collect(1:(2 * (n_atoms ÷ 3)))
     js = collect(((n_atoms ÷ 3) + 1):n_atoms)
     constraints = [DistanceConstraint(is[idx], js[idx], bond_length) for idx in eachindex(is)]
-
-    ca = SHAKE_RATTLE(constraints, n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps")
+    cons = SHAKE_RATTLE(constraints, n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps")
 
     sys = System(
         atoms=atoms,
@@ -569,7 +559,7 @@ end
         boundary=boundary,
         velocities=velocities,
         pairwise_inters=(LennardJones(use_neighbors=true),),
-        constraints=(ca,),
+        constraints=(cons,),
         neighbor_finder=neighbor_finder,
         loggers=(coords=CoordinateLogger(10),),
     )
@@ -577,17 +567,16 @@ end
     old_coords = deepcopy(sys.coords)
 
     for i in eachindex(sys.coords)
-        sys.coords[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
+        sys.coords[i]     += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
         sys.velocities[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm/ps"
     end
 
     apply_position_constraints!(sys, old_coords)
     apply_velocity_constraints!(sys)
 
-    @test check_position_constraints(sys, ca) == true
-    @test check_velocity_constraints(sys, ca) == true
+    @test check_position_constraints(sys, cons)
+    @test check_velocity_constraints(sys, cons)
 end
-
 
 @testset "Langevin splitting" begin
     n_atoms = 400
@@ -810,7 +799,7 @@ end
         pairwise_inters=(Coulomb(), ),
         neighbor_finder=neighbor_finder,
         loggers=(
-            coords=CoordinateLogger(10), 
+            coords=CoordinateLogger(10),
             mcl=MonteCarloLogger(),
             avgpe=AverageObservableLogger(potential_energy, typeof(atoms[1].ϵ), 10),
         ),
@@ -1140,7 +1129,7 @@ end
 
     @time simulate!(sys, simulator, 25_000; run_loggers=false)
     @time simulate!(sys, simulator, 25_000)
- 
+
     @test length(values(sys.loggers.tot_eng)) == 251
     @test -1850u"kJ * mol^-1" < mean(values(sys.loggers.tot_eng)) < -1650u"kJ * mol^-1"
 

@@ -106,7 +106,6 @@ function check_other_units(atoms_dev, boundary, sys_units::NamedTuple)
             throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but system energy unit was $(sys_units[:energy])"))
         end
     end
-
 end
 
 function validate_energy_units(energy_units)
@@ -137,7 +136,7 @@ end
 function validate_coords(coords)
     coord_units = map(Array(coords)) do coord
         [unit(c) for c in coord]
-    end 
+    end
 
     if !allequal(coord_units) || !allequal(coord_units[1])
         throw(ArgumentError("coordinates have mixed units"))
@@ -157,7 +156,7 @@ end
 function validate_velocities(velocities)
     velocity_units = map(Array(velocities)) do vel
         [unit(v) for v in vel]
-    end 
+    end
 
     if !allequal(velocity_units) || !allequal(velocity_units[1])
         throw(ArgumentError("velocities have mixed units"))

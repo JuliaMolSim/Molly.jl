@@ -352,10 +352,10 @@ end
 
 @testset "Replica System" begin
     n_atoms = 100
-    boundary = CubicBoundary(2.0u"nm") 
+    boundary = CubicBoundary(2.0u"nm")
     temp = 298.0u"K"
     atom_mass = 10.0u"g/mol"
-    
+
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     replica_velocities = nothing
@@ -367,7 +367,7 @@ end
         eligible[i, i + (n_atoms ÷ 2)] = false
         eligible[i + (n_atoms ÷ 2), i] = false
     end
-    
+
     neighbor_finder = DistanceNeighborFinder(
         eligible=eligible,
         n_steps=10,
@@ -481,7 +481,7 @@ end
     ab_sys_1 = make_test_system().system
     # Update values to be something that works with Molly
     ab_sys_2 = AbstractSystem(
-        ab_sys_1; 
+        ab_sys_1;
         boundary_conditions = [Periodic(), Periodic(), Periodic()],
         bounding_box = [[1.54732, 0.0      , 0.0      ],
                         [0.0    , 1.4654985, 0.0      ],
@@ -493,7 +493,7 @@ end
 
 @testset "AtomsCalculators" begin
     ab_sys = AbstractSystem(
-        make_test_system().system; 
+        make_test_system().system;
         boundary_conditions = [Periodic(), Periodic(), Periodic()],
         bounding_box = [[1.54732, 0.0      , 0.0      ],
                         [0.0    , 1.4654985, 0.0      ],

@@ -447,8 +447,8 @@ interface described there.
 - `general_inters::GI=()`: the general interactions in the system,
     i.e. interactions involving all atoms such as implicit solvent. Each should
     implement the AtomsCalculators.jl interface. Typically a `Tuple`.
-- `constraints::CN=()` : The constraint algorithm(s) used to apply
-    bond and angle constraints to the system. (e.g. SHAKE_RATTLE)
+- `constraints::CN=()`: the constraints for bonds and angles in the system.
+    Typically a `Tuple`.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `loggers::L=()`: the loggers that record properties of interest during a
@@ -518,7 +518,6 @@ function System(;
     E = typeof(energy_units)
     DA = typeof(data)
 
-
     if isnothing(velocities)
         if force_units == NoUnits
             vels = zero(coords)
@@ -548,7 +547,6 @@ function System(;
         end
     end
 
-
     if isa(atoms, CuArray) && !isa(coords, CuArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
@@ -561,13 +559,15 @@ function System(;
     if isa(vels, CuArray) && !isa(atoms, CuArray)
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
+    if isa(atoms, CuArray) && length(constraints) > 0
+        @warn "Constraints are not currently compatible with simulation on the GPU"
+    end
 
     atom_masses = mass.(atoms)
     M = typeof(atom_masses)
 
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
-
 
     if !isbitstype(eltype(coords)) || !isbitstype(eltype(vels))
         @warn "eltype of coords or velocities is not isbits, it is recomended to use a vector of SVector's for performance"
@@ -576,11 +576,10 @@ function System(;
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
 
-
     return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, DA}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
-                    specific_inter_lists, general_inters, constraints,
-                    neighbor_finder, loggers, df, force_units, energy_units, k_converted, atom_masses, data)
+                    specific_inter_lists, general_inters, constraints, neighbor_finder, loggers,
+                    df, force_units, energy_units, k_converted, atom_masses, data)
 end
 
 """
@@ -702,8 +701,8 @@ Properties unused in the simulation or in analysis can be left with their defaul
 The minimal required arguments are `atoms`, `replica_coords`, `boundary` and `n_replicas`.
 `atoms` and the elements in `replica_coords` should have the same length, along with
 `atoms_data` and the elements in `replica_velocities` if these are provided.
-The number of elements in `replica_coords`, `replica_velocities`, `replica_loggers` and 
-the interaction arguments `replica_pairwise_inters`, `replica_specific_inter_lists`, 
+The number of elements in `replica_coords`, `replica_velocities`, `replica_loggers` and
+the interaction arguments `replica_pairwise_inters`, `replica_specific_inter_lists`,
 `replica_general_inters` and `replica_constraints` should be equal to `n_replicas`.
 This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
 interface described there.
@@ -726,34 +725,34 @@ construction where `n` is the number of threads to be used per replica.
 - `topology::TO=nothing`: topological information about the system such as which
     atoms are in the same molecule (to be used if the same for all replicas).
     This is only used if no value is passed to the argument `replica_topology`.
-- `replica_topology=[nothing for _ in 1:n_replicas]`: the topological information for 
+- `replica_topology=[nothing for _ in 1:n_replicas]`: the topological information for
     each replica.
-- `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e. interactions 
+- `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e. interactions
     between all or most atom pairs such as electrostatics (to be used if the same for all replicas).
-    Typically a `Tuple`. This is only used if no value is passed to the argument 
+    Typically a `Tuple`. This is only used if no value is passed to the argument
     `replica_pairwise_inters`.
-- `replica_pairwise_inters=[() for _ in 1:n_replicas]`: the pairwise interactions for 
+- `replica_pairwise_inters=[() for _ in 1:n_replicas]`: the pairwise interactions for
     each replica.
-- `specific_inter_lists::SI=()`: the specific interactions in the system, i.e. interactions 
-    between specific atoms such as bonds or angles (to be used if the same for all replicas). 
-    Typically a `Tuple`. This is only used if no value is passed to the argument 
+- `specific_inter_lists::SI=()`: the specific interactions in the system, i.e. interactions
+    between specific atoms such as bonds or angles (to be used if the same for all replicas).
+    Typically a `Tuple`. This is only used if no value is passed to the argument
     `replica_specific_inter_lists`.
-- `replica_specific_inter_lists=[() for _ in 1:n_replicas]`: the specific interactions in 
+- `replica_specific_inter_lists=[() for _ in 1:n_replicas]`: the specific interactions in
     each replica.
-- `general_inters::GI=()`: the general interactions in the system, i.e. interactions involving 
+- `general_inters::GI=()`: the general interactions in the system, i.e. interactions involving
     all atoms such as implicit solvent (to be used if the same for all replicas). Each should
     implement the AtomsCalculators.jl interface. Typically a `Tuple`. This is only used if no
     value is passed to the argument `replica_general_inters`.
-- `replica_general_inters=[() for _ in 1:n_replicas]`: the general interactions for 
+- `replica_general_inters=[() for _ in 1:n_replicas]`: the general interactions for
     each replica.
-- `constraints::CN=()` : The constraint algorithm(s) used to apply
-    the same bond and angle constraints to all replicas. This is only used if
-    not value is passed to the argument `replica_constraints`.
-- `replica_constraints=()` : The constraint algorithm(s) used to apply
-    bond and angle constraints to each replica.
+- `constraints::CN=()`: the constraints for bonds and angles in the system (to be used if the same
+    for all replicas). Typically a `Tuple`. This is only used if no value is passed to the
+    argument `replica_constraints`.
+- `replica_constraints=[() for _ in 1:n_replicas]`: the constraints for bonds and angles in each
+    replica.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation. It is duplicated for each replica.
-- `replica_loggers=[() for _ in 1:n_replicas]`: the loggers for each replica 
+- `replica_loggers=[() for _ in 1:n_replicas]`: the loggers for each replica
     that record properties of interest during a simulation.
 - `exchange_logger::EL=ReplicaExchangeLogger(n_replicas)`: the logger used to record
     the exchange of replicas.
@@ -813,7 +812,6 @@ function ReplicaSystem(;
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
 
-
     if isnothing(replica_velocities)
         if force_units == NoUnits
             replica_velocities = [zero(replica_coords[1]) for _ in 1:n_replicas]
@@ -857,31 +855,26 @@ function ReplicaSystem(;
 
     df = n_dof(D, length(atoms), boundary)
     if isnothing(replica_constraints)
-        replica_dfs = [df for _ in 1:n_replicas]
-        
         if length(constraints) > 0
             for ca in constraints
                 df -= n_dof_lost(D, ca.clusters)
             end
-            replica_constraints = [constraints for _ in 1:n_replicas]
-        else
-            replica_constraints = [constraints for _ in 1:n_replicas]
         end
-
+        replica_dfs = fill(df, n_replicas)
+        replica_constraints = [constraints for _ in 1:n_replicas]
     elseif length(replica_constraints) != n_replicas
         throw(ArgumentError("number of constraints ($(length(replica_constraints)))"
                             * "does not match number of replicas ($n_replicas)"))
-    else #if replicas passed & correct length
-        replica_dfs = df.*ones(typeof(df), length(replica_constraints))
-        for (i,cosntraints) in enumerate(replica_constraints)
-            if length(constraints) > 0
-                for ca in cosntraints
+    else
+        replica_dfs = fill(df, n_replicas)
+        for (i, rcs) in enumerate(replica_constraints)
+            if length(rcs) > 0
+                for ca in rcs
                     replica_dfs[i] -= n_dof_lost(D, ca.clusters)
                 end
             end
         end
     end
-
 
     if isnothing(exchange_logger)
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)
@@ -950,13 +943,11 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    println(length(replica_constraints))
-
-    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, typeof(replica_constraints[i]), NF,
-                            typeof(replica_loggers[i]), F, E, K, M, Nothing}(
+    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, typeof(replica_constraints[i]),
+                            NF, typeof(replica_loggers[i]), F, E, K, M, Nothing}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
-            replica_general_inters[i], replica_constraints[i], 
+            replica_general_inters[i], replica_constraints[i],
             deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i],
             force_units, energy_units, k_converted, atom_masses, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
@@ -1010,10 +1001,10 @@ AtomsBase.atomkeys(s::Union{System, ReplicaSystem}) = (:position, :velocity, :at
 AtomsBase.hasatomkey(s::Union{System, ReplicaSystem}, x::Symbol) = x in atomkeys(s)
 AtomsBase.keys(sys::Union{System, ReplicaSystem}) = fieldnames(typeof(sys))
 AtomsBase.haskey(sys::Union{System, ReplicaSystem}, x::Symbol) = hasfield(typeof(sys), x)
-Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) = 
+Base.getindex(sys::Union{System, ReplicaSystem}, x::Symbol) =
     hasfield(typeof(sys), x) ? getfield(sys, x) : KeyError("no field `$x`, allowed keys are $(keys(sys))")
 Base.pairs(sys::Union{System, ReplicaSystem}) = (k => sys[k] for k in keys(sys))
-Base.get(sys::Union{System, ReplicaSystem}, x::Symbol, default) = 
+Base.get(sys::Union{System, ReplicaSystem}, x::Symbol, default) =
     haskey(sys, x) ? getfield(sys, x) : default
 
 AtomsBase.position(s::System) = s.coords

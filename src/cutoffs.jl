@@ -125,8 +125,8 @@ function force_divr_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
 
     Va = potential(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params)
     dVa = -force_divr(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params) *
-          cutoff.dist_activation
-    
+            cutoff.dist_activation
+
     return -((6t^2 - 6t) * Va / (cutoff.dist_cutoff-cutoff.dist_activation) + (3t^2 - 4t + 1) * dVa)/r
 end
 
@@ -136,8 +136,8 @@ function potential_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
 
     Va = potential(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params)
     dVa = -force_divr(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params) *
-          cutoff.dist_activation
-    
+            cutoff.dist_activation
+
     return (2t^3 - 3t^2 + 1) * Va + (t^3 - 2t^2 + t) *
            (cutoff.dist_cutoff-cutoff.dist_activation) * dVa
 end

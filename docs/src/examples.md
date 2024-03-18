@@ -952,65 +952,65 @@ simulator = Langevin(
 simulate!(sys, simulator, 200_000)
 ```
 
-## Constrained Dynamics
+## Constrained dynamics
 
-Molly supports SHAKE and RATTLE constraint algorithms. The code below shows a simple example where molecules of hydrogen are randomly placed in a box and constrained.
-
+Molly supports the SHAKE and RATTLE constraint algorithms.
+The code below shows an example where molecules of hydrogen are randomly placed in a box and constrained during a simulation.
 ```julia
 using Molly
+using Test
 
 r_cut = 8.5u"Å"
 temp = 300.0u"K"
 atom_mass = 1.00794u"g/mol"
 
 n_atoms_half = 200
-atoms = [Atom(index = i, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for i in 1:n_atoms_half]
+atoms = [Atom(index=i, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for i in 1:n_atoms_half]
 max_coord = 200.0u"Å"
 coords = [max_coord .* rand(SVector{3}) for i in 1:n_atoms_half]
+boundary = CubicBoundary(200.0u"Å")
+lj = LennardJones(
+    cutoff=ShiftedPotentialCutoff(r_cut),
+    use_neighbors=true,
+    energy_units=u"kcal * mol^-1",
+    force_units=u"kcal * mol^-1 * Å^-1",
+)
 
-
-#Add bonded atoms
-bond_length = 0.74u"Å" #hydrogen bond length
-constraints = DistanceConstraint[]
-for j in range(1, n_atoms_half)
-    push!(atoms, Atom(index = j + n_atoms_half, mass = atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1"))
-    push!(coords, coords[j] .+ SVector(bond_length,0.0u"Å",0.0u"Å"))
-    push!(constraints, DistanceConstraint(SVector(j, j+n_atoms_half), bond_length))
+# Add bonded atoms
+bond_length = 0.74u"Å" # Hydrogen bond length
+constraints = []
+for j in 1:n_atoms_half
+    push!(atoms, Atom(index=(j + n_atoms_half), mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1"))
+    push!(coords, coords[j] .+ SVector(bond_length, 0.0u"Å", 0.0u"Å"))
+    push!(constraints, DistanceConstraint(j, j + n_atoms_half, bond_length))
 end
 
-ca = SHAKE_RATTLE(constraints, length(atoms), 1e-8u"Å", 1e-8u"Å^2/ps")
+shake = SHAKE_RATTLE([constraints...], length(atoms), 1e-8u"Å", 1e-8u"Å^2 * ps^-1")
 
-boundary = CubicBoundary(200.0u"Å")
-
-neighbor_finder = DistanceNeighborFinder(eligible = trues(length(atoms),length(atoms)), dist_cutoff = 1.5*r_cut)
-disable_intra_constraint_interactions!(neighbor_finder, ca.clusters)
+neighbor_finder = DistanceNeighborFinder(
+    eligible=trues(length(atoms), length(atoms)),
+    dist_cutoff=1.5*r_cut,
+)
+disable_constrained_interactions!(neighbor_finder, shake.clusters)
 
 sys = System(
-        atoms = atoms,
-        coords = coords,
-        boundary = boundary,
-        velocities = nothing,
-        pairwise_inters=(
-            LennardJones(
-                cutoff = ShiftedPotentialCutoff(r_cut),
-                use_neighbors = true,
-                energy_units = u"kcal * mol^-1",
-                force_units = u"kcal * mol^-1 * Å^-1"
-                ),
-            ),
-        neighbor_finder = neighbor_finder,
-        constraints = (ca,),
-        energy_units = u"kcal * mol^-1",
-        force_units = u"kcal * mol^-1 * Å^-1"
-        )
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    pairwise_inters=(lj,),
+    neighbor_finder=neighbor_finder,
+    constraints=(shake,),
+    energy_units=u"kcal * mol^-1",
+    force_units=u"kcal * mol^-1 * Å^-1",
+)
 
 random_velocities!(sys, temp)
 
-simulator = VelocityVerlet(dt = 0.001u"ps") #Will use SHAKE and RATTLE
+simulator = VelocityVerlet(dt=0.001u"ps")
 
 simulate!(sys, simulator, 10_000)
 
-# Can check constraint distance at end of simulation
-distances_converged = check_position_constraints(sys, ca)
-velocities_converged = check_velocity_constraints(sys, ca)
+# Check that the constraints are satisfied at the end of the simulation
+@test check_position_constraints(sys, shake)
+@test check_velocity_constraints(sys, shake)
 ```

@@ -55,7 +55,7 @@
             pairwise_inters=(LennardJones(),),
         )
         sim = SteepestDescentMinimizer(tol=1.0u"kJ * mol^-1 * nm^-1")
-    
+
         simulate!(sys, sim)
         dists = distances(sys.coords, sys.boundary)
         dists_flat = dists[triu(trues(3, 3), 1)]

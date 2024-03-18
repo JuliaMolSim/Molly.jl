@@ -236,7 +236,7 @@ end
 
     function test_energy_grad(gpu::Bool, parallel::Bool)
         sys_ref = create_sys(gpu)
-    
+
         function loss(params_dic)
             n_threads = parallel ? Threads.nthreads() : 1
             atoms, pairwise_inters, specific_inter_lists, general_inters = inject_gradients(
@@ -398,7 +398,7 @@ end
         "inter_PT_N/CT/C/N_k_6"    => -0.016736,
         "inter_PT_N/CT/C/N_k_7"    => -1.06692,
         "inter_PT_N/CT/C/N_k_8"    => 0.3138,
-        "inter_PT_N/CT/C/N_k_9"    => 0.238488,        
+        "inter_PT_N/CT/C/N_k_9"    => 0.238488,
     )
 
     platform_runs = [("CPU", [false, false])]

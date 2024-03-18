@@ -239,7 +239,7 @@ clm_box_arg(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 clm_box_arg(b::TriclinicBoundary) = hcat(b.basis_vectors...)
 
 # This function sets up the box structure for CellListMap. It uses the unit cell
-# if it is given, or guesses a box size from the number of particles, assuming 
+# if it is given, or guesses a box size from the number of particles, assuming
 # that the atomic density is similar to that of liquid water at ambient conditions.
 function CellListMapNeighborFinder(;
                                    eligible,
@@ -267,11 +267,11 @@ function CellListMapNeighborFinder(;
     else
         x = x0
     end
-    # Construct the cell list for the first time, to allocate 
+    # Construct the cell list for the first time, to allocate
     cl = CellList(x, box; parallel=true, nbatches=number_of_batches)
     return CellListMapNeighborFinder{3, T}(
         eligible, dist_cutoff, special, n_steps,
-        cl, CellListMap.AuxThreaded(cl), 
+        cl, CellListMap.AuxThreaded(cl),
         [NeighborList(0, [(Int32(0), Int32(0), false)]) for _ in 1:CellListMap.nbatches(cl)],
     )
 end

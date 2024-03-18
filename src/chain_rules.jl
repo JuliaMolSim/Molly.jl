@@ -1,6 +1,7 @@
 # Chain rules to allow differentiable simulations
 
 @non_differentiable CUDA.zeros(args...)
+@non_differentiable n_infinite_dims(args...)
 @non_differentiable random_velocities(args...)
 @non_differentiable random_velocities!(args...)
 @non_differentiable cuda_threads_blocks_pairwise(args...)

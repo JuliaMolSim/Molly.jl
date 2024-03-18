@@ -365,7 +365,7 @@ end
     else
         krf = (1 / (inter.dist_cutoff ^ 3)) * ((inter.solvent_dielectric - 1) /
               (2 * inter.solvent_dielectric + 1))
-        crf = (1 /  inter.dist_cutoff     ) * ((3 * inter.solvent_dielectric) / 
+        crf = (1 /  inter.dist_cutoff     ) * ((3 * inter.solvent_dielectric) /
               (2 * inter.solvent_dielectric + 1))
     end
 
