@@ -401,7 +401,7 @@ You could replace the simple network here with a much more complicated model and
 
 ## Biomolecular force fields
 
-Molly was used to train the [GB99dms force field](https://www.biorxiv.org/content/10.1101/2023.08.29.555352) for implicit solvent molecular dynamics of proteins.
+Molly was used to train the [GB99dms force field](https://doi.org/10.1039/D3SC05230C) for implicit solvent molecular dynamics of proteins.
 This involved doing differentiable simulations of one million steps with a loss function based on the residue-residue distance match to explicit solvent simulations.
 The [code is available](https://github.com/greener-group/GB99dms).
 
