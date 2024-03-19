@@ -1,5 +1,22 @@
 # Molly.jl release notes
 
+## v0.20.0 - Mar 2024
+
+### Breaking changes
+- `apply_constraints!` and `SHAKE` are removed as part of the changes to constraints.
+- The `System` constructor for AtomsBase.jl systems is changed to take `force_units` and `energy_units` as keyword arguments rather than positional arguments. The defaults are consistent with the rest of Molly.
+- `velocity_autocorr` is removed since `AutoCorrelationLogger` provides a more general version of this functionality.
+
+### New features
+- Support for constraints is improved and documented with `SHAKE_RATTLE` allowing the SHAKE and RATTLE algorithms to be applied as appropriate to most simulators. `DistanceConstraint`, `disable_constrained_interactions!`, `apply_position_constraints!`, `apply_velocity_constraints!`, `check_position_constraints` and `check_velocity_constraints` are all added. Constraints are not currently compatible with GPU simulation.
+- Gradients with respect to the boundary can now be calculated in some contexts.
+
+### Community
+- A logo is added to the project.
+
+### Bug fixes
+- A bug in `FENEBond` potential energy calculation is fixed.
+
 ## v0.19.0 - Feb 2024
 
 ### Breaking changes
