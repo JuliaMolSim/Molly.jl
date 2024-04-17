@@ -559,9 +559,6 @@ function System(;
     if isa(vels, CuArray) && !isa(atoms, CuArray)
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
-    if isa(atoms, CuArray) && length(constraints) > 0
-        @warn "Constraints are not currently compatible with simulation on the GPU"
-    end
 
     atom_masses = mass.(atoms)
     M = typeof(atom_masses)

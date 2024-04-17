@@ -37,33 +37,42 @@ function SHAKE_RATTLE(constraints, n_atoms::Integer, dist_tolerance, vel_toleran
             clusters, dist_tolerance, vel_tolerance)
 end
 
-function apply_position_constraints!(sys, ca::SHAKE_RATTLE, coord_storage;
-                                     n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys::System{D,false}, ca::SHAKE_RATTLE, coord_storage;
+                                     n_threads::Integer=Threads.nthreads()) where D
     # SHAKE updates
     converged = false
-
     while !converged
-        # syncing here is an incremental improvement for gpu and inc reg for cpu
-        for cluster in ca.clusters # Cannot parallelize this
-            if coord_storage isa CuArray
-                # @show "GPU VERSION of apply_position_constraints_kernel!"
-                # blocking=true saves a fair # of allocations, but not time
-                CUDA.@sync blocking = true @cuda apply_position_constraints_kernel!(sys.coords, sys.atoms, sys.boundary, cluster, coord_storage, ca.dist_tolerance)
-                #  @cuda apply_position_constraints_kernel!(sys.coords, sys.atoms, sys.boundary, cluster, coord_storage, ca.dist_tolerance)
-            else
-                # @show "CPU VERSION of apply_position_constraints_kernel!"
-                apply_position_constraints_kernel!(sys.coords, sys.atoms, sys.boundary, cluster, coord_storage, ca.dist_tolerance)
-
-            end
+        for cluster in ca.clusters
+            apply_position_constraints_kernel!(sys.coords, sys.atoms, sys.boundary, cluster, coord_storage, ca.dist_tolerance)
         end
+         converged = check_position_constraints(sys, ca)
+    end
+    return sys
+end
 
+function apply_position_constraints!(sys::System{D,true}, ca::SHAKE_RATTLE, coord_storage;
+                                     n_threads::Integer=Threads.nthreads()) where {D}
+    # SHAKE updates
+    converged = false
+    clusters = cu(ca.clusters)
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(ca.clusters))
+    while !converged
+        CUDA.@sync @cuda threads = n_threads_gpu blocks = n_blocks apply_position_constraints_gpu!(
+            sys.coords, sys.atoms, sys.boundary, clusters, coord_storage, ca.dist_tolerance)
         converged = check_position_constraints(sys, ca)
     end
     return sys
 end
 
+function apply_position_constraints_gpu!(coords, atoms, boundary, clusters, coord_storage, dist_tolerance)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    (i > length(clusters)) && return nothing
+    cluster = clusters[i]
+    apply_position_constraints_kernel!(coords, atoms, boundary, cluster, coord_storage, dist_tolerance)
+end
+
 function apply_position_constraints_kernel!(coords, atoms, boundary, cluster, coord_storage, dist_tolerance)
-    @inbounds for constraint in cluster.constraints
+    @inbounds for constraint in cluster.constraints # Cannot parallelize this
         k1, k2 = constraint.i, constraint.j
 
         # Vector between the atoms after unconstrained update (s)
@@ -105,11 +114,13 @@ function apply_velocity_constraints!(sys, ca::SHAKE_RATTLE; n_threads::Integer=T
     converged = false
 
     while !converged
-        for cluster in ca.clusters # Cannot parallelize this
-            if sys.coords isa CuArray
-                CUDA.@sync blocking = true @cuda apply_velocity_constraints_kernel!(sys.coords, sys.atoms, sys.velocities, sys.boundary, cluster, ca.vel_tolerance)
-                # @cuda apply_velocity_constraints_kernel!(sys.coords, sys.atoms, sys.velocities, sys.boundary, cluster, ca.vel_tolerance)
-            else
+        if is_on_gpu(sys)
+            clusters = cu(ca.clusters)
+            n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(ca.clusters))
+            CUDA.@sync @cuda threads = n_threads_gpu blocks = n_blocks apply_velocity_constraints_gpu!(
+                sys.coords, sys.atoms, sys.velocities, sys.boundary, clusters, ca.vel_tolerance)
+        else
+            for cluster in ca.clusters
                 apply_velocity_constraints_kernel!(sys.coords, sys.atoms, sys.velocities, sys.boundary, cluster, ca.vel_tolerance)
             end
         end
@@ -119,8 +130,15 @@ function apply_velocity_constraints!(sys, ca::SHAKE_RATTLE; n_threads::Integer=T
     return sys
 end
 
+function apply_velocity_constraints_gpu!(coords, atoms, velocities, boundary, clusters, vel_tolerance)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    (i > length(clusters)) && return nothing
+    cluster = clusters[i]
+    apply_velocity_constraints_kernel!(coords, atoms, velocities, boundary, cluster, vel_tolerance)
+end
+
 function apply_velocity_constraints_kernel!(coords, atoms, velocities, boundary, cluster, vel_tolerance)
-    @inbounds for constraint in cluster.constraints
+    @inbounds for constraint in cluster.constraints # Cannot parallelize this
         k1, k2 = constraint.i, constraint.j
 
         inv_m1 = inv(mass(atoms[k1]))
@@ -165,21 +183,25 @@ function check_position_constraints(sys::System{D,false}, ca::SHAKE_RATTLE) wher
     return max_err < ca.dist_tolerance
 end
 
-# GPU version of check_position_constraints
 function check_position_constraints(sys::System{D,true}, ca::SHAKE_RATTLE) where {D}
-    # println("GPU VERSION of check_position_constraints")
     max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.coords)))
     deltas = CUDA.fill(max_err, length(ca.clusters))
+    clusters = cu(ca.clusters)
 
-    CUDA.@sync blocking = true for (i, cluster) in enumerate(ca.clusters)
-        @cuda check_position_kernel(sys.coords, cluster, sys.boundary, deltas, i)
-    end
-    max_err = CUDA.maximum(deltas)
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(ca.clusters))
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=
+        n_blocks check_position_kernel!(sys.coords, clusters, sys.boundary, deltas)
+
+    max_err = maximum(deltas)
     return max_err < ca.dist_tolerance
 end
 
-function check_position_kernel(coords, cluster, boundary, deltas, i)
-    @inbounds for constraint in cluster.constraints
+function check_position_kernel!(coords, clusters, boundary, deltas)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    (i > length(clusters)) && return nothing
+    cluster = clusters[i]
+
+    for constraint in cluster.constraints
         dr = vector(coords[constraint.i], coords[constraint.j], boundary)
         err = abs(norm(dr) - constraint.dist)
 
@@ -208,20 +230,25 @@ function check_velocity_constraints(sys::System, ca::SHAKE_RATTLE)
     return max_err < ca.vel_tolerance
 end
 
-# GPU version of check_velocity_constraints
 function check_velocity_constraints(sys::System{D,true}, ca::SHAKE_RATTLE) where {D}
     max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
     deltas = CUDA.fill(max_err, length(ca.clusters))
+    clusters = cu(ca.clusters)
 
-    CUDA.@sync blocking = true for (i, cluster) in enumerate(ca.clusters)
-        @cuda check_velocity_kernel(sys.coords, sys.velocities, cluster, sys.boundary, deltas, i)
-    end
-    max_err = CUDA.maximum(deltas)
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(ca.clusters))
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks check_velocity_kernel!(
+        sys.coords, sys.velocities, clusters, sys.boundary, deltas)
+    
+    max_err = maximum(deltas)
     return max_err < ca.vel_tolerance
 end
 
-function check_velocity_kernel(coords, velocities, cluster, boundary, deltas, i)
-    @inbounds for constraint in cluster.constraints
+function check_velocity_kernel!(coords, velocities, clusters, boundary, deltas)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    (i > length(clusters)) && return nothing
+    cluster = clusters[i]
+
+    for constraint in cluster.constraints
         dr = vector(coords[constraint.i], coords[constraint.j], boundary)
         v_diff = velocities[constraint.j] .- velocities[constraint.i]
         err = abs(dot(dr, v_diff))

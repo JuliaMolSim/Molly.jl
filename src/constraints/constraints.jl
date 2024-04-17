@@ -46,7 +46,7 @@ Base.length(cc::ConstraintCluster) = length(cc.constraints)
 Disables neighbor list interactions between atoms in a constraint.
 """
 function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
-    for cluster in constraint_clusters
+    CUDA.@allowscalar for cluster in constraint_clusters
         for constraint in cluster.constraints
             neighbor_finder.eligible[constraint.i, constraint.j] = false
             neighbor_finder.eligible[constraint.j, constraint.i] = false
