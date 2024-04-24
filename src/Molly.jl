@@ -37,10 +37,6 @@ using Random
 using SparseArrays
 using Statistics
 
-if VERSION < v"1.8.0-DEV.1494"
-    allequal(itr) = isempty(itr) ? true : all(isequal(first(itr)), itr)
-end
-
 include("types.jl")
 include("units.jl")
 include("spatial.jl")
