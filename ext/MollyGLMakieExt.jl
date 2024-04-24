@@ -1,24 +1,30 @@
 # Visualize simulations
 # This file is only loaded when GLMakie is imported
 
-using .GLMakie
+module MollyGLMakieExt
 
-function visualize(coord_logger,
-                    boundary,
-                    out_filepath::AbstractString;
-                    connections=Tuple{Int, Int}[],
-                    connection_frames=[trues(length(connections)) for i in values(coord_logger)],
-                    trails::Integer=0,
-                    framerate::Integer=30,
-                    color=:purple,
-                    connection_color=:orange,
-                    markersize=0.05,
-                    linewidth=2.0,
-                    transparency=true,
-                    show_boundary::Bool=true,
-                    boundary_linewidth=2.0,
-                    boundary_color=:black,
-                    kwargs...)
+using Molly
+using GLMakie
+using Colors
+using Unitful
+using LinearAlgebra
+
+function Molly.visualize(coord_logger,
+                         boundary,
+                         out_filepath::AbstractString;
+                         connections=Tuple{Int, Int}[],
+                         connection_frames=[trues(length(connections)) for i in values(coord_logger)],
+                         trails::Integer=0,
+                         framerate::Integer=30,
+                         color=:purple,
+                         connection_color=:orange,
+                         markersize=0.05,
+                         linewidth=2.0,
+                         transparency=true,
+                         show_boundary::Bool=true,
+                         boundary_linewidth=2.0,
+                         boundary_color=:black,
+                         kwargs...)
     coords_start = first(values(coord_logger))
     dist_unit = unit(first(first(coords_start)))
     dims = n_dimensions(boundary)
@@ -44,7 +50,7 @@ function visualize(coord_logger,
     if show_boundary
         lines!(
             ax,
-            bounding_box_lines(boundary, dist_unit)...;
+            Molly.bounding_box_lines(boundary, dist_unit)...;
             color=boundary_color,
             linewidth=boundary_linewidth,
         )
@@ -74,10 +80,13 @@ function visualize(coord_logger,
         end
     end
     for (ci, cn) in enumerate(connection_nodes)
-        lines!(ax, cn;
-                color=isa(connection_color, AbstractArray) ? connection_color[ci] : connection_color,
-                linewidth=isa(linewidth, AbstractArray) ? linewidth[ci] : linewidth,
-                transparency=transparency)
+        lines!(
+            ax,
+            cn;
+            color=(isa(connection_color, AbstractArray) ? connection_color[ci] : connection_color),
+            linewidth=(isa(linewidth, AbstractArray) ? linewidth[ci] : linewidth),
+            transparency=transparency,
+        )
     end
 
     trail_positions = []
@@ -90,10 +99,10 @@ function visualize(coord_logger,
                     transparency=transparency, markerspace=:data, kwargs...)
     end
 
-    boundary_conv = ustrip.(dist_unit, cubic_bounding_box(boundary))
-    xlims!(ax, axis_limits(boundary_conv, coord_logger, 1))
-    ylims!(ax, axis_limits(boundary_conv, coord_logger, 2))
-    dims == 3 && zlims!(ax, axis_limits(boundary_conv, coord_logger, 3))
+    boundary_conv = ustrip.(dist_unit, Molly.cubic_bounding_box(boundary))
+    xlims!(ax, Molly.axis_limits(boundary_conv, coord_logger, 1))
+    ylims!(ax, Molly.axis_limits(boundary_conv, coord_logger, 2))
+    dims == 3 && zlims!(ax, Molly.axis_limits(boundary_conv, coord_logger, 3))
 
     GLMakie.record(fig, out_filepath, eachindex(values(coord_logger)); framerate=framerate) do frame_i
         coords = values(coord_logger)[frame_i]
@@ -112,8 +121,7 @@ function visualize(coord_logger,
                 end
             else
                 if dims == 3
-                    connection_nodes[ci][] = PointType.([0.0, 0.0], [0.0, 0.0],
-                                                        [0.0, 0.0])
+                    connection_nodes[ci][] = PointType.([0.0, 0.0], [0.0, 0.0], [0.0, 0.0])
                 elseif dims == 2
                     connection_nodes[ci][] = PointType.([0.0, 0.0], [0.0, 0.0])
                 end
@@ -125,4 +133,6 @@ function visualize(coord_logger,
             trail_position[] = PointType.(ustrip_vec.(values(coord_logger)[max(frame_i - trail_i, 1)]))
         end
     end
+end
+
 end

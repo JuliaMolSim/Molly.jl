@@ -143,6 +143,7 @@ Here we simulate a toy [SIR model](https://en.wikipedia.org/wiki/Compartmental_m
 This example shows how atom properties can be mutable, i.e. change during the simulation, and includes custom forces and loggers (see below for more info).
 ```julia
 using Molly
+using GLMakie
 
 @enum Status susceptible infected recovered
 
