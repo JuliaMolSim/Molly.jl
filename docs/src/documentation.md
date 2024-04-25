@@ -889,6 +889,7 @@ function Molly.simulate!(sys,
         remove_CM_motion!(sys)
 
         # Apply the loggers like this
+        # Computed quantities can also be given as keyword arguments to run_loggers!
         run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
 
         # Find new neighbors like this
@@ -1064,14 +1065,32 @@ Running loggers can be disabled entirely with `run_loggers=false`, which is the 
 Loggers are currently ignored for the purposes of taking gradients, so if a logger is used in the gradient calculation the gradients will appear to be nothing.
 
 Many times, a logger will just record an observation to an `Array` containing a record of past observations.
-For this purpose, you can use the [`GeneralObservableLogger`](@ref) without defining a custom logging function. Simply define your observation function as
+For this purpose, you can use the [`GeneralObservableLogger`](@ref) without defining a custom logging function.
+Define your observation function as
 ```julia
-function my_observable(sys::System, neighbors; n_threads::Integer)
+function my_observable(sys::System, neighbors; n_threads::Integer, kwargs...)
     # Probe the system for some desired property
     return observation
 end
 ```
-A logger which records this property every `n_steps` can be constructed through 
+Keyword arguments `current_forces` and `current_potential_energy` can also be used here to avoid recomputing values that are passed from the simulator:
+```julia
+function my_pe_observable(sys::System, neighbors; n_threads::Integer,
+                          current_potential_energy=nothing, kwargs...)
+    if isnothing(current_potential_energy)
+        # Compute potential energy
+        return potential_energy(sys, neighbors; n_threads=n_threads)
+    else
+        # Potential energy was passed from simulator, reuse
+        return current_potential_energy
+    end
+end
+```
+These keyword arguments are also available in [`log_property!`](@ref).
+Which values are passed depends on the simulator being used, for example [`SteepestDescentMinimizer`](@ref) passes `current_potential_energy` because it uses it for minimization.
+Note that loggers are called after [`apply_coupling!`](@ref), so the coordinates may have changed since the potential energy or forces were computed.
+
+A logger which records the property every `n_steps` can be constructed through 
 ```julia
 my_logger = GeneralObservableLogger(my_observable, T, n_steps)
 ```
