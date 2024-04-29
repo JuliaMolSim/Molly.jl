@@ -1,3 +1,5 @@
+# Energy conservation test
+
 using Molly
 using CUDA
 
