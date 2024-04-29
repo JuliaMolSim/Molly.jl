@@ -7,6 +7,7 @@ using Molly
 using GLMakie
 using Colors
 using Unitful
+
 using LinearAlgebra
 
 function Molly.visualize(coord_logger,
