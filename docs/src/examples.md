@@ -450,6 +450,96 @@ save("polymer_angle.png", f)
 
 There is [an example](https://acesuit.github.io/ACEpotentials.jl/dev/tutorials/molly) of using ACE potentials in Molly.
 
+## Python ASE calculator
+
+[`ASECalculator`](@ref) can be used along with [PythonCall.jl](https://github.com/JuliaPy/PythonCall.jl) to use a Python [ASE](https://wiki.fysik.dtu.dk/ase) calculator with Molly.
+Here we simulate a dipeptide molecule in a vacuum with [MACE-OFF23](https://github.com/ACEsuit/mace-off):
+```julia
+using Molly
+using PythonCall # Python packages ase and mace need to be installed beforehand
+using Downloads
+
+Downloads.download(
+    "https://raw.githubusercontent.com/noeblassel/SINEQSummerSchool2023/main/notebooks/dipeptide_nowater.pdb",
+    "dipeptide_nowater.pdb",
+)
+
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+ff = MolecularForceField(joinpath(data_dir, "force_fields", "ff99SBildn.xml"))
+sys = System("dipeptide_nowater.pdb", ff; rename_terminal_res=false)
+
+mc = pyimport("mace.calculators")
+ase_calc = mc.mace_off(model="medium", device="cuda")
+
+calc = ASECalculator(
+    ase_calc=ase_calc,
+    atoms=sys.atoms,
+    coords=sys.coords,
+    boundary=sys.boundary,
+    atoms_data=sys.atoms_data,
+)
+
+sys = System(
+    sys;
+    general_inters=(calc,),
+    loggers=(StructureWriter(20, "mace_dipeptide.pdb"),) # Every 10 fs
+)
+potential_energy(sys)
+
+minimizer = SteepestDescentMinimizer(log_stream=stdout)
+simulate!(sys, minimizer)
+
+temp = 298.0u"K"
+random_velocities!(sys, temp)
+simulator = Langevin(
+    dt=0.0005u"ps", # 0.5 fs
+    temperature=temp,
+    friction=1.0u"ps^-1",
+)
+
+simulate!(deepcopy(sys), simulator, 5; run_loggers=false)
+@time simulate!(sys, simulator, 2000)
+```
+
+Another example using [psi4](https://wiki.fysik.dtu.dk/ase/ase/calculators/psi4.html) to get the potential energy of a water molecule:
+```julia
+using Molly
+using PythonCall # Python packages ase and psi4 need to be installed beforehand
+
+build = pyimport("ase.build")
+psi4 = pyimport("ase.calculators.psi4")
+
+py_atoms = build.molecule("H2O")
+ase_calc = psi4.Psi4(
+    atoms=py_atoms,
+    method="b3lyp",
+    basis="6-311g_d_p_",
+)
+
+atoms = [Atom(mass=16.0u"u"), Atom(mass=1.0u"u"), Atom(mass=1.0u"u")]
+coords = SVector{3, Float64}.(eachrow(pyconvert(Matrix, py_atoms.get_positions()))) * u"Å"
+boundary = CubicBoundary(100.0u"Å")
+
+calc = ASECalculator(
+    ase_calc=ase_calc,
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    elements=["O", "H", "H"],
+)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    general_inters=(calc,),
+    energy_units=u"eV",
+    force_units=u"eV/Å",
+)
+
+potential_energy(sys) # -2080.2391023908813 eV
+```
+
 ## Density functional theory
 
 [DFTK.jl](https://github.com/JuliaMolSim/DFTK.jl) can be used to calculate forces using density functional theory (DFT), allowing the simulation of quantum systems in Molly.

@@ -562,6 +562,7 @@ The available general interactions are:
 - [`ImplicitSolventOBC`](@ref)
 - [`ImplicitSolventGBN2`](@ref)
 - [`MullerBrown`](@ref)
+- [`ASECalculator`](@ref)
 
 ### Pairwise interactions
 
