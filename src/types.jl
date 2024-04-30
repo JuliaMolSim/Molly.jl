@@ -1300,7 +1300,7 @@ end
 A Python [ASE](https://wiki.fysik.dtu.dk/ase) calculator.
 
 This calculator is only available when PythonCall is imported.
-It is the reponsibility of the user to have the required Python packages installed.
+It is the user's responsibility to have the required Python packages installed.
 This includes ASE and any packages providing the calculator.
 
 Contrary to the rest of Molly, unitless quantities are assumed to have ASE units:
