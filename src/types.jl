@@ -728,19 +728,19 @@ construction where `n` is the number of threads to be used per replica.
     This is only used if no value is passed to the argument `replica_topology`.
 - `replica_topology=[nothing for _ in 1:n_replicas]`: the topological information for
     each replica.
-- `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e. interactions
+- `pairwise_inters=()`: the pairwise interactions in the system, i.e. interactions
     between all or most atom pairs such as electrostatics (to be used if the same for all replicas).
     Typically a `Tuple`. This is only used if no value is passed to the argument
     `replica_pairwise_inters`.
 - `replica_pairwise_inters=[() for _ in 1:n_replicas]`: the pairwise interactions for
     each replica.
-- `specific_inter_lists::SI=()`: the specific interactions in the system, i.e. interactions
+- `specific_inter_lists=()`: the specific interactions in the system, i.e. interactions
     between specific atoms such as bonds or angles (to be used if the same for all replicas).
     Typically a `Tuple`. This is only used if no value is passed to the argument
     `replica_specific_inter_lists`.
 - `replica_specific_inter_lists=[() for _ in 1:n_replicas]`: the specific interactions in
     each replica.
-- `general_inters::GI=()`: the general interactions in the system, i.e. interactions involving
+- `general_inters=()`: the general interactions in the system, i.e. interactions involving
     all atoms such as implicit solvent (to be used if the same for all replicas). Each should
     implement the AtomsCalculators.jl interface. Typically a `Tuple`. This is only used if no
     value is passed to the argument `replica_general_inters`.
@@ -836,7 +836,6 @@ function ReplicaSystem(;
         throw(ArgumentError("number of pairwise interactions ($(length(replica_pairwise_inters)))"
                             * "does not match number of replicas ($n_replicas)"))
     end
-    PI = eltype(replica_pairwise_inters)
 
     if isnothing(replica_specific_inter_lists)
         replica_specific_inter_lists = [specific_inter_lists for _ in 1:n_replicas]
@@ -844,7 +843,6 @@ function ReplicaSystem(;
         throw(ArgumentError("number of specific interaction lists ($(length(replica_specific_inter_lists)))"
                             * "does not match number of replicas ($n_replicas)"))
     end
-    SI = eltype(replica_specific_inter_lists)
 
     if isnothing(replica_general_inters)
         replica_general_inters = [general_inters for _ in 1:n_replicas]
@@ -852,7 +850,6 @@ function ReplicaSystem(;
         throw(ArgumentError("number of general interactions ($(length(replica_general_inters)))"
                             * "does not match number of replicas ($n_replicas)"))
     end
-    GI = eltype(replica_general_inters)
 
     df = n_dof(D, length(atoms), boundary)
     if isnothing(replica_constraints)
@@ -944,8 +941,10 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, typeof(replica_constraints[i]),
-                            NF, typeof(replica_loggers[i]), F, E, K, M, Nothing}(
+    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, typeof(replica_pairwise_inters[i]),
+                        typeof(replica_specific_inter_lists[i]), typeof(replica_general_inters[i]),
+                        typeof(replica_constraints[i]), NF, typeof(replica_loggers[i]), F, E, K,
+                        M, Nothing}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i],
