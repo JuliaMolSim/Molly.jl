@@ -1,5 +1,24 @@
 # Molly.jl release notes
 
+## v0.21.0 - Apr 2024
+
+### Breaking changes
+- Observable functions for `GeneralObservableLogger` now need to accept arbitrary keyword arguments, for example by adding `kwargs...` to the function call. This allows the logging changes described below.
+
+### Non-breaking changes
+- Support for Julia versions before 1.9 is dropped. A package extension, rather than Requires.jl, is used to provide `visualize` when GLMakie.jl is imported.
+
+### New features
+- `ASECalculator` is added, allowing Python ASE calculators to be used in Molly. The code is in a package extension available when PythonCall.jl is imported. It is the user's responsibility to have the required Python packages installed. Examples of using MACE and psi4 are given.
+- `current_forces` and `current_potential_energy` can be used in logging functions to reuse properties calculated in the simulation step. They default to `nothing` when the properties are not available.
+- Interaction types are allowed to be different for each replica in a `ReplicaSystem`.
+
+### Performance improvements
+- `PotentialEnergyLogger`, `TotalEnergyLogger` and `ForceLogger` avoid recomputation when the relevant properties are calculated in the simulation step.
+
+### Bug fixes
+- `MollyCalculator` now works in two dimensions and for other floating point types.
+
 ## v0.20.0 - Mar 2024
 
 ### Breaking changes
