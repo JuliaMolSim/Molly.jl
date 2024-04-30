@@ -1219,8 +1219,9 @@ Not currently compatible with using atom properties such as `σ` and `ϵ`.
     be set to `NoUnits` if units are not being used.
 - `k::K=Unitful.k` or `Unitful.k * Unitful.Na`: the Boltzmann constant, which may be
     modified in some simulations. `k` is chosen based on the `energy_units` given.
+- `dims::Integer=3`: the number of dimensions in the system.
 """
-struct MollyCalculator{PI, SI, GI, NF, F, E, K}
+struct MollyCalculator{D, PI, SI, GI, NF, F, E, K}
     pairwise_inters::PI
     specific_inter_lists::SI
     general_inters::GI
@@ -1238,14 +1239,18 @@ function MollyCalculator(;
         force_units=u"kJ * mol^-1 * nm^-1",
         energy_units=u"kJ * mol^-1",
         k=default_k(energy_units),
+        dims::Integer=3,
     )
-    return MollyCalculator(pairwise_inters, specific_inter_lists, general_inters, neighbor_finder,
-                           force_units, energy_units, k)
+    return MollyCalculator{dims, typeof(pairwise_inters), typeof(specific_inter_lists),
+                           typeof(general_inters), typeof(neighbor_finder), typeof(force_units),
+                           typeof(energy_units), typeof(k)}(
+            pairwise_inters, specific_inter_lists, general_inters, neighbor_finder,
+            force_units, energy_units, k)
 end
 
-function AtomsCalculators.promote_force_type(::Any, calc::MollyCalculator)
+function AtomsCalculators.promote_force_type(::Any, calc::MollyCalculator{D}) where D
     T = typeof(ustrip(calc.k))
-    return typeof(ones(SVector{3, T}) * calc.force_units)
+    return typeof(ones(SVector{D, T}) * calc.force_units)
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.forces(
