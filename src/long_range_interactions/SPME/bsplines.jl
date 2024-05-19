@@ -41,14 +41,11 @@ function calc_C(β, V, ms, recip_lat)
 end
     
 
-function calc_BC(spme::SPME)
+function calc_BC!(BC::Array{T,3}, spme::SPME) where T
     V = vol(spme.sys)
     K1, K2, K3 = n_mesh(spme)
     recip_lat = reciprocal_lattice(spme) #SPME uses the 1 normalized version
     n = spline_order(spme)
-
-    BC = zeros(ComplexF64, K1, K2, K3)
-    hs = [0,0,0]
 
     #Gather h indices 
     h1s = collect(0:(K1-1))
@@ -77,7 +74,7 @@ function calc_BC(spme::SPME)
         end
     end
 
-    BC[1,1,1] = 0
+    BC[1,1,1] = T(0.0)
 
     return BC
 end
