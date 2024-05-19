@@ -1,0 +1,11 @@
+- dQdR calculation in charge interpolation never worked (GPU & CPU)
+- Parallelize charge interpolation on CPU
+- remove repeated allocations for things in force loop
+- figure out how to adapt run! function to Molly
+- add LongRangeInteraction type?, SPME is a pair interaction though
+- write kernel to calculate the scaled fractional coords for charge interpolation on GPU
+
+- put the reciprocal space code into a function
+    - bundle this into a package extension? would separate FFTW and potentially Adapt.jl
+
+- do particle-particle part with Molly existing infastructure
