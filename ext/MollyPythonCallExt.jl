@@ -14,7 +14,12 @@ using Unitful
 const ase = Ref{Py}()
 
 function __init__()
-    ase[] = pyimport("ase")
+    try
+        ase[] = pyimport("ase")
+    catch
+        @warn "MollyPythonCallExt is loaded but the ase Python package is not available, " *
+              "ASECalculator will not work"
+    end
 end
 
 inf_to_one(x) = isinf(x) ? one(x) : x
