@@ -330,7 +330,7 @@ end
 
 @testset "Analysis" begin
     pdb_path = joinpath(data_dir, "1ssu.pdb")
-    struc = read(pdb_path, BioStructures.PDB)
+    struc = read(pdb_path, BioStructures.PDBFormat)
     cm_1 = BioStructures.coordarray(struc[1], BioStructures.calphaselector)
     cm_2 = BioStructures.coordarray(struc[2], BioStructures.calphaselector)
     coords_1 = SVector{3, Float64}.(eachcol(cm_1)) / 10 * u"nm"

@@ -151,7 +151,7 @@ end
         @test unit(first(values(s.loggers.potkin_correlation))) == NoUnits
         @test unit(first(values(s.loggers.velocity_autocorrelation; normalize=false))) == u"nm^2 * ps^-2"
 
-        traj = read(temp_fp_pdb, BioStructures.PDB)
+        traj = read(temp_fp_pdb, BioStructures.PDBFormat)
         rm(temp_fp_pdb)
         @test BioStructures.countmodels(traj) == 201
         @test BioStructures.countatoms(first(traj)) == 100

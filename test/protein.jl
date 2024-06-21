@@ -33,7 +33,7 @@
     s.velocities = [random_velocity(mass(a), temp) .* 0.01 for a in s.atoms]
     @time simulate!(s, simulator, n_steps; n_threads=1)
 
-    traj = read(temp_fp_pdb, BioStructures.PDB)
+    traj = read(temp_fp_pdb, BioStructures.PDBFormat)
     rm(temp_fp_pdb)
     @test BioStructures.countmodels(traj) == 11
     @test BioStructures.countatoms(first(traj)) == 5191
