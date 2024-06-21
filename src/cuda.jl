@@ -72,7 +72,7 @@ function pairwise_force_kernel_nl!(forces, coords_var, atoms_var, boundary, inte
     return nothing
 end
 
-"""
+#=
 **The No-neighborlist pairwise force summation kernel**: This kernel calculates all the pairwise forces in the system of
 `n_atoms` atoms, this is done by dividing the complete matrix of `n_atoms`×`n_atoms` interactions into small tiles. Most
 of the tiles are of size `WARPSIZE`×`WARPSIZE`, but when `n_atoms` is not divisible by `WARPSIZE`, some tiles on the
@@ -111,7 +111,7 @@ That's why the calculations are done in the following order:
     g | 1 2 3 4 5 6
     h | 1 2 3 4 5 6
 ```
-"""
+=#
 function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, atoms_var, boundary, inters,
                                      ::Val{D}, ::Val{F}) where {T, D, F}
     coords = CUDA.Const(coords_var)

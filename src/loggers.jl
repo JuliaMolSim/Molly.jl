@@ -3,6 +3,7 @@
 export
     run_loggers!,
     GeneralObservableLogger,
+    values,
     log_property!,
     TemperatureLogger,
     CoordinateLogger,

@@ -15,14 +15,14 @@ struct DistanceConstraint{D}
     dist::D
 end
 
-"""
+#=
     ConstraintCluster(constraints)
 
 A group of constraints.
 
 Atoms in a cluster do not participate in any other constraints outside of that cluster.
 Larger clusters may incur a performance penalty.
-"""
+=#
 struct ConstraintCluster{N, C}
     constraints::SVector{N, C}
     n_unique_atoms::Int
@@ -137,7 +137,7 @@ function apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
     return sys
 end
 
-"""
+#=
     n_dof_lost(D::Integer, constraint_clusters)
 
 Calculate the number of degrees of freedom lost from the system due to the constraints.
@@ -154,7 +154,7 @@ When using constraint algorithms the vibrational degrees of freedom are removed 
 | Vibrational   |     0      |  D*N - (2D - 1) |    D*N - 2D         |
 | Total         |     D      |      D*N        |       D*N           |
 
-"""
+=#
 function n_dof_lost(D::Integer, constraint_clusters)
     # Bond constraints remove vibrational DoFs
     vibrational_dof_lost = 0

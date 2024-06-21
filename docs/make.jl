@@ -5,6 +5,7 @@ makedocs(
     sitename="Molly.jl",
     format=Documenter.HTML(
         prettyurls=(get(ENV, "CI", nothing) == "true"),
+        size_threshold_ignore=["api.md"],
     ),
     pages=[
         "Home"                      => "index.md",
@@ -16,7 +17,7 @@ makedocs(
         "Related software"          => "related.md",
         "Development"               => "development.md",
         "API"                       => "api.md",
-    ]
+    ],
 )
 
 deploydocs(
