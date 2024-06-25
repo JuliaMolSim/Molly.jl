@@ -145,8 +145,7 @@ end
 Base.:+(c1::T, ::T) where {T <: Union{NoCutoff, DistanceCutoff, ShiftedPotentialCutoff,
                                       ShiftedForceCutoff, CubicSplineCutoff}} = c1
 
-function force_divr_with_cutoff(inter, r2, params, cutoff::C, coord_i::SVector{D, T},
-                                force_units) where {C, D, T}
+function force_divr_with_cutoff(inter, r2, params, cutoff::C, force_units) where C
     if cutoff_points(C) == 0
         return force_divr(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
@@ -160,8 +159,7 @@ function force_divr_with_cutoff(inter, r2, params, cutoff::C, coord_i::SVector{D
     end
 end
 
-function potential_with_cutoff(inter, r2, params, cutoff::C, coord_i::SVector{D, T},
-                               energy_units) where {C, D, T}
+function potential_with_cutoff(inter, r2, params, cutoff::C, energy_units) where C
     if cutoff_points(C) == 0
         return potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1

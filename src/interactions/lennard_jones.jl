@@ -102,7 +102,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, inter.force_units)
     if special
         return f * dr * inter.weight_special
     else
@@ -269,7 +269,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ, inter.σ6_fac)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, inter.force_units)
     if special
         return f * dr * inter.weight_special
     else
