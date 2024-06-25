@@ -68,7 +68,7 @@ function force(inter::Mie{S, C, T},
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, inter.force_units)
     return f * dr
 end
 
