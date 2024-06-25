@@ -150,19 +150,13 @@ function force_divr_with_cutoff(inter, r2, params, cutoff::C, coord_i::SVector{D
     if cutoff_points(C) == 0
         return force_divr(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        if r2 > cutoff.sqdist_cutoff
-            return zero(inv(oneunit(T))) * force_units
-        else
-            return force_divr_cutoff(cutoff, r2, inter, params)
-        end
+        return force_divr_cutoff(cutoff, r2, inter, params) * (r2 <= cutoff.sqdist_cutoff)
     elseif cutoff_points(C) == 2
-        if r2 > cutoff.sqdist_cutoff
-            return zero(inv(oneunit(T))) * force_units
-        elseif r2 < cutoff.sqdist_activation
-            return force_divr(inter, r2, inv(r2), params)
-        else
-            return force_divr_cutoff(cutoff, r2, inter, params)
-        end
+        return ifelse(
+            r2 < cutoff.sqdist_activation,
+            force_divr(inter, r2, inv(r2), params),
+            force_divr_cutoff(cutoff, r2, inter, params) * (r2 <= cutoff.sqdist_cutoff),
+        )
     end
 end
 
@@ -171,18 +165,12 @@ function potential_with_cutoff(inter, r2, params, cutoff::C, coord_i::SVector{D,
     if cutoff_points(C) == 0
         return potential(inter, r2, inv(r2), params)
     elseif cutoff_points(C) == 1
-        if r2 > cutoff.sqdist_cutoff
-            return ustrip(zero(T)) * energy_units
-        else
-            return potential_cutoff(cutoff, r2, inter, params)
-        end
+        return potential_cutoff(cutoff, r2, inter, params) * (r2 <= cutoff.sqdist_cutoff)
     elseif cutoff_points(C) == 2
-        if r2 > cutoff.sqdist_cutoff
-            return ustrip(zero(T)) * energy_units
-        elseif r2 < cutoff.sqdist_activation
-            return potential(inter, r2, inv(r2), params)
-        else
-            return potential_cutoff(cutoff, r2, inter, params)
-        end
+        return ifelse(
+            r2 < cutoff.sqdist_activation,
+            potential(inter, r2, inv(r2), params),
+            potential_cutoff(cutoff, r2, inter, params) * (r2 <= cutoff.sqdist_cutoff),
+        )
     end
 end
