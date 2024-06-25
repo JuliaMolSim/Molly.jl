@@ -53,7 +53,7 @@ use_neighbors(inter::SoftSphere) = inter.use_neighbors
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, inter.force_units)
     return f * dr
 end
 
