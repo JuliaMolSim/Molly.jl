@@ -100,7 +100,7 @@ end
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)
 
-    return potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
+    return potential_with_cutoff(inter, r2, params, cutoff, inter.energy_units)
 end
 
 function potential(::Mie, r2, invr2, (m, n, σ_r, const_mn))
