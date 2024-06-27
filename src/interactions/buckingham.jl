@@ -98,7 +98,7 @@ end
     r2 = sum(abs2, dr)
     params = (Aij, Bij, Cij)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
+    pe = potential_with_cutoff(inter, r2, params, cutoff, inter.energy_units)
     if special
         return pe * inter.weight_special
     else

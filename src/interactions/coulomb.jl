@@ -99,7 +99,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     params = (coulomb_const, qi, qj)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
+    pe = potential_with_cutoff(inter, r2, params, cutoff, inter.energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -236,7 +236,7 @@ end
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
     params = (coulomb_const, qi, qj, σ, inter.σ6_fac)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
+    pe = potential_with_cutoff(inter, r2, params, cutoff, inter.energy_units)
     if special
         return pe * inter.weight_special
     else

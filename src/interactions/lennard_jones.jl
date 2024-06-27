@@ -140,7 +140,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
+    pe = potential_with_cutoff(inter, r2, params, cutoff, inter.energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -310,7 +310,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ, inter.σ6_fac)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
+    pe = potential_with_cutoff(inter, r2, params, cutoff, inter.energy_units)
     if special
         return pe * inter.weight_special
     else
