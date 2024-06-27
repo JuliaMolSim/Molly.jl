@@ -82,7 +82,7 @@ function potential_energy(inter::SoftSphere{S, C},
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    return potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
+    return potential_with_cutoff(inter, r2, params, cutoff, inter.energy_units)
 end
 
 function potential(::SoftSphere, r2, invr2, (σ2, ϵ))
