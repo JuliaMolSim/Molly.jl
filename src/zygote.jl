@@ -83,6 +83,14 @@ function Zygote.accum(x::NamedTuple{(:side_lengths,), Tuple{SVector{2, T}}}, y::
     RectangularBoundary(x.side_lengths .+ y; check_positive=false)
 end
 
+function Zygote.accum(x::NamedTuple{(:side_lengths,), Tuple{SVector{3, T}}}, y::SizedVector{3, T, Vector{T}}) where T
+    CubicBoundary(x.side_lengths .+ y; check_positive=false)
+end
+
+function Zygote.accum(x::NamedTuple{(:side_lengths,), Tuple{SVector{2, T}}}, y::SizedVector{2, T, Vector{T}}) where T
+    RectangularBoundary(x.side_lengths .+ y; check_positive=false)
+end
+
 function Zygote.accum(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{3, T, Vector{T}}}}, y::SVector{3, T}) where T
     CubicBoundary(SVector{3, T}(x.side_lengths .+ y); check_positive=false)
 end
@@ -96,6 +104,14 @@ function Base.:+(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{3, T, Vector{
 end
 
 function Base.:+(x::NamedTuple{(:side_lengths,), Tuple{SizedVector{2, T, Vector{T}}}}, y::RectangularBoundary{T}) where T
+    RectangularBoundary(SVector{2, T}(x.side_lengths .+ y.side_lengths); check_positive=false)
+end
+
+function Base.:+(x::CubicBoundary{T}, y::NamedTuple{(:side_lengths,), Tuple{SVector{3, T}}}) where T
+    CubicBoundary(SVector{3, T}(x.side_lengths .+ y.side_lengths); check_positive=false)
+end
+
+function Base.:+(x::RectangularBoundary{T}, y::NamedTuple{(:side_lengths,), Tuple{SVector{2, T}}}) where T
     RectangularBoundary(SVector{2, T}(x.side_lengths .+ y.side_lengths); check_positive=false)
 end
 
