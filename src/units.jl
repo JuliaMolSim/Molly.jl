@@ -213,19 +213,13 @@ end
 
 function check_energy_units(E, energy_units)
     if unit(E) != energy_units
-        error("system energy units are ", energy_units, " but encountered energy units ",
-              unit(E))
+        error("system energy units are ", energy_units, " but encountered energy units ", unit(E))
     end
 end
 
-function check_force_units(fdr::AbstractArray, sys_force_units)
-    return check_force_units(unit(first(fdr)), sys_force_units)
-end
-
-function check_force_units(force_units, sys_force_units)
-    if force_units != sys_force_units
-        error("system force units are ", sys_force_units, " but encountered force units ",
-              force_units)
+function check_force_units(F, force_units)
+    if unit(F) != force_units
+        error("system force units are ", force_units, " but encountered force units ", unit(F))
     end
 end
 
