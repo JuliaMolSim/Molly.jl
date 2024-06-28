@@ -25,10 +25,8 @@ function accelerations(sys, neighbors; n_threads::Integer=Threads.nthreads())
 end
 
 """
-    force(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
-          atom_i, atom_j, boundary)
-    force(inter::PairwiseInteraction, vec_ij, coord_i, coord_j,
-          atom_i, atom_j, boundary, special)
+    force(inter::PairwiseInteraction, vec_ij, atom_i, atom_j, force_units, special,
+          coord_i, coord_j, boundary, velocity_i, velocity_j, step_n)
     force(inter::SpecificInteraction, coord_i, coord_j,
           boundary)
     force(inter::SpecificInteraction, coord_i, coord_j,
@@ -42,17 +40,14 @@ For [`PairwiseInteraction`](@ref)s returns a single force vector and for
 [`SpecificInteraction`](@ref)s returns a type such as [`SpecificForce2Atoms`](@ref).
 Custom pairwise and specific interaction types should implement this function.
 """
-function force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
-    # Fallback for interactions where special interactions are not relevant
-    return force(inter, dr, coord_i, coord_j, atom_i, atom_j, boundary)
-end
+function force end
 
 # Allow GPU-specific force functions to be defined if required
-force_gpu(inter, dr, ci, cj, ai, aj, bnd, spec) = force(inter, dr, ci, cj, ai, aj, bnd, spec)
-force_gpu(inter, ci, bnd)             = force(inter, ci, bnd)
-force_gpu(inter, ci, cj, bnd)         = force(inter, ci, cj, bnd)
-force_gpu(inter, ci, cj, ck, bnd)     = force(inter, ci, cj, ck, bnd)
-force_gpu(inter, ci, cj, ck, cl, bnd) = force(inter, ci, cj, ck, cl, bnd)
+force_gpu(inter::PairwiseInteraction, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn) = force(inter, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn)
+force_gpu(inter::SpecificInteraction, ci, bnd)             = force(inter, ci, bnd)
+force_gpu(inter::SpecificInteraction, ci, cj, bnd)         = force(inter, ci, cj, bnd)
+force_gpu(inter::SpecificInteraction, ci, cj, ck, bnd)     = force(inter, ci, cj, ck, bnd)
+force_gpu(inter::SpecificInteraction, ci, cj, ck, cl, bnd) = force(inter, ci, cj, ck, cl, bnd)
 
 """
     SpecificForce1Atoms(f1)
@@ -138,7 +133,7 @@ function forces(sys::System{D, false}, neighbors;
     sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
     sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
 
-    fs = forces_pair_spec(sys.coords, sys.atoms, pairwise_inters_nonl, pairwise_inters_nl,
+    fs = forces_pair_spec(sys.coords, sys.velocities, sys.atoms, pairwise_inters_nonl, pairwise_inters_nl,
                           sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
                           sys.boundary, sys.force_units, neighbors, n_threads)
 
@@ -149,17 +144,17 @@ function forces(sys::System{D, false}, neighbors;
     return fs
 end
 
-function forces_pair_spec(coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
+function forces_pair_spec(coords, velocities, atoms, pairwise_inters_nonl, pairwise_inters_nl,
                           sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
                           boundary, force_units, neighbors, n_threads)
     fs = ustrip_vec.(zero(coords))
-    forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
+    forces_pair_spec!(fs, coords, velocities, atoms, pairwise_inters_nonl, pairwise_inters_nl,
                       sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, boundary,
                       force_units, neighbors, n_threads)
     return fs * force_units
 end
 
-function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_inters_nl,
+function forces_pair_spec!(fs, coords, velocities, atoms, pairwise_inters_nonl, pairwise_inters_nl,
                                      sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
                                      boundary, force_units, neighbors, n_threads)
     n_atoms = length(coords)
@@ -171,10 +166,11 @@ function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_int
                 for i in chunk_i:n_threads:n_atoms
                     for j in (i + 1):n_atoms
                         dr = vector(coords[i], coords[j], boundary)
-                        f = force(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
-                                  atoms[j], boundary)
+                        f = force(pairwise_inters_nonl[1], dr, atoms[i], atoms[j], force_units, false,
+                                  coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
                         for inter in pairwise_inters_nonl[2:end]
-                            f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
+                            f += force(inter, dr, atoms[i], atoms[j], force_units, false,
+                                       coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
                         end
                         check_force_units(f, force_units)
                         f_ustrip = ustrip.(f)
@@ -193,11 +189,11 @@ function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_int
                 for ni in chunk_i:n_threads:length(neighbors)
                     i, j, special = neighbors[ni]
                     dr = vector(coords[i], coords[j], boundary)
-                    f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
-                              atoms[j], boundary, special)
+                    f = force(pairwise_inters_nl[1], dr, atoms[i], atoms[j], force_units, special,
+                              coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
                     for inter in pairwise_inters_nl[2:end]
-                        f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary,
-                                   special)
+                        f += force(inter, dr, atoms[i], atoms[j], force_units, special,
+                                   coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
                     end
                     check_force_units(f, force_units)
                     f_ustrip = ustrip.(f)
@@ -213,10 +209,11 @@ function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_int
             for i in 1:n_atoms
                 for j in (i + 1):n_atoms
                     dr = vector(coords[i], coords[j], boundary)
-                    f = force(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
-                              atoms[j], boundary)
+                    f = force(pairwise_inters_nonl[1], dr, atoms[i], atoms[j], force_units, false,
+                              coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
                     for inter in pairwise_inters_nonl[2:end]
-                        f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
+                        f += force(inter, dr, atoms[i], atoms[j], force_units, false,
+                                   coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
                     end
                     check_force_units(f, force_units)
                     f_ustrip = ustrip.(f)
@@ -233,11 +230,11 @@ function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_int
             for ni in eachindex(neighbors)
                 i, j, special = neighbors[ni]
                 dr = vector(coords[i], coords[j], boundary)
-                f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
-                          atoms[j], boundary, special)
+                f = force(pairwise_inters_nl[1], dr, atoms[i], atoms[j], force_units, special,
+                          coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
                 for inter in pairwise_inters_nl[2:end]
-                    f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary,
-                               special)
+                    f += force(inter, dr, atoms[i], atoms[j], force_units, special,
+                               coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
                 end
                 check_force_units(f, force_units)
                 f_ustrip = ustrip.(f)
@@ -304,7 +301,7 @@ function forces(sys::System{D, true, T}, neighbors;
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
-        fs_mat += pairwise_force_gpu(sys.coords, sys.atoms, sys.boundary, pairwise_inters_nonl,
+        fs_mat += pairwise_force_gpu(sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters_nonl,
                                      nbs, sys.force_units, val_ft)
     end
 
@@ -315,7 +312,7 @@ function forces(sys::System{D, true, T}, neighbors;
         end
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]
-            fs_mat += pairwise_force_gpu(sys.coords, sys.atoms, sys.boundary, pairwise_inters_nl,
+            fs_mat += pairwise_force_gpu(sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters_nl,
                                          nbs, sys.force_units, val_ft)
         end
     end

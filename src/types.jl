@@ -1329,3 +1329,5 @@ struct ASECalculator{T}
     ase_atoms::T # T will be Py but that is not available here
     ase_calc::T
 end
+
+iszero_value(x) = iszero(x)
