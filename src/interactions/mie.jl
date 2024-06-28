@@ -1,7 +1,7 @@
 export Mie
 
 @doc raw"""
-    Mie(; m, n, cutoff, use_neighbors, lorentz_mixing, force_units, energy_units, skip_shortcut)
+    Mie(; m, n, cutoff, use_neighbors, lorentz_mixing, skip_shortcut)
 
 The Mie generalized interaction between two atoms.
 
@@ -15,14 +15,12 @@ where
 C = \frac{n}{n - m} \left( \frac{n}{m} \right) ^\frac{m}{n - m}
 ```
 """
-struct Mie{S, C, T, F, E} <: PairwiseInteraction
+struct Mie{S, C, T} <: PairwiseInteraction
     m::T
     n::T
     cutoff::C
     use_neighbors::Bool
     lorentz_mixing::Bool
-    force_units::F
-    energy_units::E
     mn_fac::T
 end
 
@@ -32,26 +30,23 @@ function Mie(;
                 cutoff=NoCutoff(),
                 use_neighbors=false,
                 lorentz_mixing=true,
-                force_units=u"kJ * mol^-1 * nm^-1",
-                energy_units=u"kJ * mol^-1",
                 skip_shortcut=false)
     m_p, n_p, mn_fac = promote(m, n, (n / (n - m)) * (n / m) ^ (m / (n - m)))
-    return Mie{skip_shortcut, typeof(cutoff), typeof(m_p), typeof(force_units), typeof(energy_units)}(
-        m_p, n_p, cutoff, use_neighbors, lorentz_mixing, force_units, energy_units, mn_fac)
+    return Mie{skip_shortcut, typeof(cutoff), typeof(m_p)}(
+        m_p, n_p, cutoff, use_neighbors, lorentz_mixing, mn_fac)
 end
 
 use_neighbors(inter::Mie) = inter.use_neighbors
 
 function force(inter::Mie{S, C, T},
-                                    dr,
-                                    coord_i,
-                                    coord_j,
-                                    atom_i,
-                                    atom_j,
-                                    boundary) where {S, C, T}
+               dr,
+               atom_i,
+               atom_j,
+               force_units,
+               args...) where {S, C, T}
     if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
               iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
-        return ustrip.(zero(coord_i)) * inter.force_units
+        return ustrip.(zero(coord_i)) * force_units
     end
 
     # Lorentz-Berthelot mixing rules use the arithmetic average for σ
@@ -68,7 +63,7 @@ function force(inter::Mie{S, C, T},
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, inter.force_units)
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
     return f * dr
 end
 
@@ -77,15 +72,14 @@ function force_divr(::Mie, r2, invr2, (m, n, σ_r, const_mn))
 end
 
 @inline function potential_energy(inter::Mie{S, C, T},
-                                            dr,
-                                            coord_i,
-                                            coord_j,
-                                            atom_i,
-                                            atom_j,
-                                            boundary) where {S, C, T}
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  energy_units,
+                                  args...) where {S, C, T}
     if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
               iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
-        return ustrip(zero(coord_i[1])) * inter.energy_units
+        return ustrip(zero(coord_i[1])) * energy_units
     end
 
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
@@ -100,7 +94,7 @@ end
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)
 
-    return potential_with_cutoff(inter, r2, params, cutoff, inter.energy_units)
+    return potential_with_cutoff(inter, r2, params, cutoff, energy_units)
 end
 
 function potential(::Mie, r2, invr2, (m, n, σ_r, const_mn))
