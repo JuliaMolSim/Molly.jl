@@ -28,11 +28,9 @@
     # Custom force function
     function Molly.force(inter::SIRInteraction,
                             vec_ij,
-                            coord_i,
-                            coord_j,
                             atom_i,
                             atom_j,
-                            boundary)
+                            args...)
         if (atom_i.status == infected && atom_j.status == susceptible) ||
                     (atom_i.status == susceptible && atom_j.status == infected)
             # Infect close people randomly
@@ -49,7 +47,7 @@
                 atom_i.status = recovered
             end
         end
-        return zero(coord_i)
+        return zero(vec_ij)
     end
 
     # Test log_property! definition rather than just using GeneralObservableLogger
@@ -74,12 +72,7 @@
     coords = place_atoms(n_people, boundary; min_dist=0.1)
     velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
 
-    lj = LennardJones(
-        cutoff=DistanceCutoff(1.6),
-        use_neighbors=true,
-        force_units=NoUnits,
-        energy_units=NoUnits,
-    )
+    lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
     sir = SIRInteraction(0.5, 0.06, 0.01)
     @test !use_neighbors(sir)
     pairwise_inters = (LennardJones=lj, SIR=sir)

@@ -42,11 +42,11 @@ function force(inter::Mie{S, C, T},
                dr,
                atom_i,
                atom_j,
-               force_units,
+               force_units=u"kJ * mol^-1 * nm^-1",
                args...) where {S, C, T}
     if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
               iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
-        return ustrip.(zero(coord_i)) * force_units
+        return ustrip.(zero(dr)) * force_units
     end
 
     # Lorentz-Berthelot mixing rules use the arithmetic average for σ
@@ -75,11 +75,11 @@ end
                                   dr,
                                   atom_i,
                                   atom_j,
-                                  energy_units,
+                                  energy_units=u"kJ * mol^-1",
                                   args...) where {S, C, T}
     if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
               iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
-        return ustrip(zero(coord_i[1])) * energy_units
+        return ustrip(zero(dr[1])) * energy_units
     end
 
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)

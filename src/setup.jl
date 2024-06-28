@@ -792,8 +792,6 @@ function System(coord_file::AbstractString,
         cutoff=DistanceCutoff(T(dist_cutoff)),
         use_neighbors=true,
         weight_special=force_field.weight_14_lj,
-        force_units=force_units,
-        energy_units=energy_units,
     )
     if isnothing(implicit_solvent)
         crf = CoulombReactionField(
@@ -802,8 +800,6 @@ function System(coord_file::AbstractString,
             use_neighbors=true,
             weight_special=force_field.weight_14_coulomb,
             coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
-            force_units=force_units,
-            energy_units=energy_units,
         )
     else
         crf = Coulomb(
@@ -811,8 +807,6 @@ function System(coord_file::AbstractString,
             use_neighbors=true,
             weight_special=force_field.weight_14_coulomb,
             coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
-            force_units=force_units,
-            energy_units=energy_units,
         )
     end
     pairwise_inters = (lj, crf)
@@ -954,8 +948,8 @@ function System(coord_file::AbstractString,
         general_inters=general_inters,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
-        force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
-        energy_units=units ? u"kJ * mol^-1" : NoUnits,
+        force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),
+        energy_units=(units ? u"kJ * mol^-1" : NoUnits),
         k=k,
         data=data,
     )
@@ -1214,8 +1208,6 @@ function System(T::Type,
         cutoff=DistanceCutoff(T(dist_cutoff)),
         use_neighbors=true,
         weight_special=T(0.5),
-        force_units=force_units,
-        energy_units=energy_units,
     )
     crf = CoulombReactionField(
         dist_cutoff=T(dist_cutoff),
@@ -1223,8 +1215,6 @@ function System(T::Type,
         use_neighbors=true,
         weight_special=T(0.5),
         coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
-        force_units=force_units,
-        energy_units=energy_units,
     )
 
     if isnothing(boundary)
@@ -1322,8 +1312,8 @@ function System(T::Type,
         specific_inter_lists=specific_inter_lists,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
-        force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
-        energy_units=units ? u"kJ * mol^-1" : NoUnits,
+        force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),
+        energy_units=(units ? u"kJ * mol^-1" : NoUnits),
         k=k,
         data=data,
     )

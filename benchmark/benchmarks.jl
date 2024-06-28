@@ -44,10 +44,10 @@ coords = [c1, c2]
 dr = vector(c1, c2, boundary)
 b1 = HarmonicBond(k=100_000.0u"kJ * mol^-1 * nm^-2", r0=0.6u"nm")
 
-SUITE["interactions"]["LennardJones force" ] = @benchmarkable force($(LennardJones()), $(dr), $(c1), $(c2), $(a1), $(a1), $(boundary))
-SUITE["interactions"]["LennardJones energy"] = @benchmarkable potential_energy($(LennardJones()), $(dr), $(c1), $(c2), $(a1), $(a1), $(boundary))
-SUITE["interactions"]["Coulomb force"      ] = @benchmarkable force($(Coulomb()), $(dr), $(c1), $(c2), $(a1), $(a1), $(boundary))
-SUITE["interactions"]["Coulomb energy"     ] = @benchmarkable potential_energy($(Coulomb()), $(dr), $(c1), $(c2), $(a1), $(a1), $(boundary))
+SUITE["interactions"]["LennardJones force" ] = @benchmarkable force($(LennardJones()), $(dr), $(a1), $(a1))
+SUITE["interactions"]["LennardJones energy"] = @benchmarkable potential_energy($(LennardJones()), $(dr), $(a1), $(a1))
+SUITE["interactions"]["Coulomb force"      ] = @benchmarkable force($(Coulomb()), $(dr), $(a1), $(a1))
+SUITE["interactions"]["Coulomb energy"     ] = @benchmarkable potential_energy($(Coulomb()), $(dr), $(a1), $(a1))
 SUITE["interactions"]["HarmonicBond force" ] = @benchmarkable force($(b1), $(c1), $(c2), $(boundary))
 SUITE["interactions"]["HarmonicBond energy"] = @benchmarkable potential_energy($(b1), $(c1), $(c2), $(boundary))
 

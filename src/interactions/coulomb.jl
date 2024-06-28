@@ -50,7 +50,7 @@ end
                        dr,
                        atom_i,
                        atom_j,
-                       force_units,
+                       force_units=u"kJ * mol^-1 * nm^-1",
                        special::Bool=false,
                        args...) where C
     r2 = sum(abs2, dr)
@@ -75,7 +75,7 @@ end
                                   dr,
                                   atom_i,
                                   atom_j,
-                                  energy_units,
+                                  energy_units=u"kJ * mol^-1",
                                   special::Bool=false,
                                   args...) where C
     r2 = sum(abs2, dr)
@@ -168,7 +168,7 @@ end
                        dr,
                        atom_i,
                        atom_j,
-                       force_units,
+                       force_units=u"kJ * mol^-1 * nm^-1",
                        special::Bool=false,
                        args...) where C
     r2 = sum(abs2, dr)
@@ -198,7 +198,7 @@ end
                                   dr,
                                   atom_i,
                                   atom_j,
-                                  energy_units,
+                                  energy_units=u"kJ * mol^-1",
                                   special::Bool=false,
                                   args...) where C
     r2 = sum(abs2, dr)
@@ -275,12 +275,12 @@ end
                        dr,
                        atom_i,
                        atom_j,
-                       force_units,
+                       force_units=u"kJ * mol^-1 * nm^-1",
                        special::Bool=false,
                        args...)
     r2 = sum(abs2, dr)
     if r2 > (inter.dist_cutoff ^ 2)
-        return ustrip.(zero(coord_i)) * force_units
+        return ustrip.(zero(dr)) * force_units
     end
 
     coulomb_const = inter.coulomb_const
@@ -308,12 +308,12 @@ end
                                   dr,
                                   atom_i,
                                   atom_j,
-                                  energy_units,
+                                  energy_units=u"kJ * mol^-1",
                                   special::Bool=false,
                                   args...)
     r2 = sum(abs2, dr)
     if r2 > (inter.dist_cutoff ^ 2)
-        return ustrip(zero(coord_i[1])) * energy_units
+        return ustrip(zero(dr[1])) * energy_units
     end
 
     coulomb_const = inter.coulomb_const

@@ -455,7 +455,7 @@ end
 
     # Mis-matched energy units in interaction and system
     coords = place_atoms(1, b_right; min_dist=0.01u"nm")
-    lj = LennardJones(energy_units="kcal/mol")
+    lj = LennardJones()
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,
                                       pairwise_inters=(lj,))
 
@@ -497,7 +497,7 @@ end
                         [0.0    , 1.4654985, 0.0      ],
                         [0.0    , 0.0      , 1.7928950]]u"Å",
     )
-    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", force_units=u"kJ/Å", energy_units=u"kJ")
+    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å")
     calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
 
     pe = AtomsCalculators.potential_energy(ab_sys, calc)

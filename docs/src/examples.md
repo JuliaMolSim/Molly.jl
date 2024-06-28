@@ -166,11 +166,9 @@ end
 # Custom force function
 function Molly.force(inter::SIRInteraction,
                         vec_ij,
-                        coord_i,
-                        coord_j,
                         atom_i,
                         atom_j,
-                        boundary)
+                        args...)
     if (atom_i.status == infected && atom_j.status == susceptible) ||
                 (atom_i.status == susceptible && atom_j.status == infected)
         # Infect close people randomly
@@ -187,7 +185,7 @@ function Molly.force(inter::SIRInteraction,
             atom_i.status = recovered
         end
     end
-    return zero(coord_i)
+    return zero(vec_ij)
 end
 
 # Custom logger
@@ -211,12 +209,7 @@ atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for
 coords = place_atoms(n_people, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
 
-lj = LennardJones(
-    cutoff=DistanceCutoff(1.6),
-    use_neighbors=true,
-    force_units=NoUnits,
-    energy_units=NoUnits,
-)
+lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
 sir = SIRInteraction(0.5, 0.06, 0.01)
 pairwise_inters = (LennardJones=lj, SIR=sir)
 neighbor_finder = DistanceNeighborFinder(
@@ -640,11 +633,9 @@ Molly.use_neighbors(::BondableInteraction) = true
 
 function Molly.force(inter::BondableInteraction,
                         dr,
-                        coord_i,
-                        coord_j,
                         atom_i,
                         atom_j,
-                        boundary)
+                        args...)
     # Break bonds randomly
     if atom_j.i in atom_i.partners && rand() < inter.prob_break
         delete!(atom_i.partners, atom_j.i)
@@ -662,7 +653,7 @@ function Molly.force(inter::BondableInteraction,
         fdr = -c * normalize(dr)
         return fdr
     else
-        return zero(coord_i)
+        return zero(dr)
     end
 end
 
@@ -687,12 +678,7 @@ atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = place_atoms(n_atoms, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
-    SoftSphere(
-        cutoff=DistanceCutoff(2.0),
-        use_neighbors=true,
-        force_units=NoUnits,
-        energy_units=NoUnits,
-    ),
+    SoftSphere(cutoff=DistanceCutoff(2.0), use_neighbors=true),
     BondableInteraction(0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(
@@ -751,7 +737,7 @@ using Molly
 using Zygote
 using GLMakie
 
-inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
+inter = LennardJones()
 boundary = CubicBoundary(5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
@@ -759,7 +745,7 @@ function force_direct(dist)
     c1 = SVector(1.0, 1.0, 1.0)
     c2 = SVector(dist + 1.0, 1.0, 1.0)
     vec = vector(c1, c2, boundary)
-    F = force(inter, vec, c1, c2, a1, a2, boundary)
+    F = force(inter, vec, a1, a2, NoUnits)
     return F[1]
 end
 
@@ -768,7 +754,7 @@ function force_grad(dist)
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
         vec = vector(c1, c2, boundary)
-        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
+        potential_energy(inter, vec, a1, a2, NoUnits)
     end
     return -grad[1]
 end
@@ -810,7 +796,7 @@ ab_sys = AtomsBase.AbstractSystem(
                     [0.0    , 0.0      , 1.7928950]]u"Å",
 )
 
-coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", force_units=u"kJ/Å", energy_units=u"kJ")
+coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å")
 calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
 
 AtomsCalculators.potential_energy(ab_sys, calc)
@@ -901,7 +887,7 @@ function energies(m, n)
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
         vec = vector(c1, c2, boundary)
-        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
+        potential_energy(inter, vec, a1, a2, NoUnits)
     end
 end
 
@@ -948,7 +934,7 @@ function energies(α, λ, p)
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
         vec = vector(c1, c2, boundary)
-        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
+        potential_energy(inter, vec, a1, a2, NoUnits)
     end
 end
 
@@ -1005,11 +991,7 @@ r_cut = 0.85u"nm"
 sys = System(
     fcc_crystal;
     velocities=velocities,
-    pairwise_inters=(LennardJones(
-        cutoff=ShiftedForceCutoff(r_cut),
-        energy_units=u"kJ * mol^-1",
-        force_units=u"kJ * mol^-1 * nm^-1",
-    ),),
+    pairwise_inters=(LennardJones(cutoff=ShiftedForceCutoff(r_cut)),),
     loggers=(
         kinetic_eng=KineticEnergyLogger(100),
         pot_eng=PotentialEnergyLogger(100),
@@ -1060,12 +1042,7 @@ atoms = [Atom(index=i, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1")
 max_coord = 200.0u"Å"
 coords = [max_coord .* rand(SVector{3}) for i in 1:n_atoms_half]
 boundary = CubicBoundary(200.0u"Å")
-lj = LennardJones(
-    cutoff=ShiftedPotentialCutoff(r_cut),
-    use_neighbors=true,
-    energy_units=u"kcal * mol^-1",
-    force_units=u"kcal * mol^-1 * Å^-1",
-)
+lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
 
 # Add bonded atoms
 bond_length = 0.74u"Å" # Hydrogen bond length

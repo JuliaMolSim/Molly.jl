@@ -43,12 +43,12 @@ use_neighbors(inter::Buckingham) = inter.use_neighbors
                        dr,
                        atom_i,
                        atom_j,
-                       force_units,
+                       force_units=u"kJ * mol^-1 * nm^-1",
                        special::Bool=false,
                        args...) where C
     if (iszero_value(atom_i.A) || iszero_value(atom_j.A)) &&
        (iszero_value(atom_i.C) || iszero_value(atom_j.C))
-        return ustrip.(zero(coord_i)) * force_units
+        return ustrip.(zero(dr)) * force_units
     end
 
     Aij = sqrt(atom_i.A * atom_j.A)
@@ -76,12 +76,12 @@ end
                                   dr,
                                   atom_i,
                                   atom_j,
-                                  energy_units,
+                                  energy_units=u"kJ * mol^-1",
                                   special::Bool=false,
                                   args...) where C
     if (iszero_value(atom_i.A) || iszero_value(atom_j.A)) &&
        (iszero_value(atom_i.C) || iszero_value(atom_j.C))
-        return ustrip(zero(coord_i[1])) * energy_units
+        return ustrip(zero(dr[1])) * energy_units
     end
 
     Aij = sqrt(atom_i.A * atom_j.A)

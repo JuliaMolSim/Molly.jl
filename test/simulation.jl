@@ -391,8 +391,7 @@ end
         coords=ustrip_vec.(coords),
         boundary=CubicBoundary(ustrip.(boundary)),
         velocities=ustrip_vec.(u"nm/ps",velocities),
-        pairwise_inters=(LennardJones(use_neighbors=true, force_units=NoUnits,
-                                      energy_units=NoUnits),),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -478,12 +477,7 @@ end
     atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
     cons = SHAKE_RATTLE(constraints, n_atoms, 1e-8u"Å", 1e-8u"Å^2 * ps^-1")
     boundary = CubicBoundary(200.0u"Å")
-    lj = LennardJones(
-        cutoff=ShiftedPotentialCutoff(r_cut),
-        use_neighbors=true,
-        energy_units=u"kcal * mol^-1",
-        force_units=u"kcal * mol^-1 * Å^-1"
-    )
+    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
     neighbor_finder = DistanceNeighborFinder(
         eligible=trues(n_atoms, n_atoms),
         dist_cutoff=1.5*r_cut,
@@ -1089,11 +1083,7 @@ end
     sys = System(
         fcc_crystal;
         velocities=velocities,
-        pairwise_inters=(LennardJones(
-            cutoff=ShiftedForceCutoff(r_cut),
-            energy_units=u"kJ * mol^-1",
-            force_units=u"kJ * mol^-1 * nm^-1",
-        ),),
+        pairwise_inters=(LennardJones(cutoff=ShiftedForceCutoff(r_cut)),),
         loggers=(tot_eng=TotalEnergyLogger(100),),
         energy_units=u"kJ * mol^-1",
         force_units=u"kJ * mol^-1 * nm^-1",
