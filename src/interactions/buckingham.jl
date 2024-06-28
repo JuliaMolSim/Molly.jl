@@ -1,7 +1,7 @@
 export Buckingham
 
 @doc raw"""
-    Buckingham(; cutoff, use_neighbors, weight_special, force_units, energy_units)
+    Buckingham(; cutoff, use_neighbors, weight_special)
 
 The Buckingham interaction between two atoms.
 
@@ -23,37 +23,32 @@ C_{ij} &= (C_{ii} C_{jj})^{1/2}
 ```
 so atoms that use this interaction should have fields `A`, `B` and `C` available.
 """
-struct Buckingham{C, W, F, E} <: PairwiseInteraction
+struct Buckingham{C, W} <: PairwiseInteraction
     cutoff::C
     use_neighbors::Bool
     weight_special::W
-    force_units::F
-    energy_units::E
 end
 
 function Buckingham(;
                     cutoff=NoCutoff(),
                     use_neighbors=false,
-                    weight_special=1,
-                    force_units=u"kJ * mol^-1 * nm^-1",
-                    energy_units=u"kJ * mol^-1")
-    return Buckingham{typeof(cutoff), typeof(weight_special), typeof(force_units), typeof(energy_units)}(
-        cutoff, use_neighbors, weight_special, force_units, energy_units)
+                    weight_special=1)
+    return Buckingham{typeof(cutoff), typeof(weight_special)}(
+        cutoff, use_neighbors, weight_special)
 end
 
 use_neighbors(inter::Buckingham) = inter.use_neighbors
 
 @inline function force(inter::Buckingham{C},
-                                    dr,
-                                    coord_i,
-                                    coord_j,
-                                    atom_i,
-                                    atom_j,
-                                    boundary,
-                                    special::Bool=false) where C
+                       dr,
+                       atom_i,
+                       atom_j,
+                       force_units,
+                       special::Bool=false,
+                       args...) where C
     if (iszero_value(atom_i.A) || iszero_value(atom_j.A)) &&
        (iszero_value(atom_i.C) || iszero_value(atom_j.C))
-        return ustrip.(zero(coord_i)) * inter.force_units
+        return ustrip.(zero(coord_i)) * force_units
     end
 
     Aij = sqrt(atom_i.A * atom_j.A)
@@ -64,7 +59,7 @@ use_neighbors(inter::Buckingham) = inter.use_neighbors
     r2 = sum(abs2, dr)
     params = (Aij, Bij, Cij)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, inter.force_units)
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
     if special
         return f * dr * inter.weight_special
     else
@@ -78,16 +73,15 @@ function force_divr(::Buckingham, r2, invr2, (A, B, C))
 end
 
 @inline function potential_energy(inter::Buckingham{C},
-                                            dr,
-                                            coord_i,
-                                            coord_j,
-                                            atom_i,
-                                            atom_j,
-                                            boundary,
-                                            special::Bool=false) where C
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  energy_units,
+                                  special::Bool=false,
+                                  args...) where C
     if (iszero_value(atom_i.A) || iszero_value(atom_j.A)) &&
        (iszero_value(atom_i.C) || iszero_value(atom_j.C))
-        return ustrip(zero(coord_i[1])) * inter.energy_units
+        return ustrip(zero(coord_i[1])) * energy_units
     end
 
     Aij = sqrt(atom_i.A * atom_j.A)
@@ -98,7 +92,7 @@ end
     r2 = sum(abs2, dr)
     params = (Aij, Bij, Cij)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, inter.energy_units)
+    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
     if special
         return pe * inter.weight_special
     else
