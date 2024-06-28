@@ -325,7 +325,7 @@ function forces(sys::System{D, true, T}, neighbors;
 
     for inter in values(sys.general_inters)
         fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, n_threads=n_threads)
-        check_force_units(unit(eltype(eltype(fs_gen))), sys.force_units)
+        check_force_units(zero(eltype(fs_gen)), sys.force_units)
         fs += ustrip_vec.(fs_gen)
     end
 
