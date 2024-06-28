@@ -8,9 +8,7 @@ import BioStructures # Imported to avoid clashing names
 using CUDA
 import Enzyme
 using FiniteDifferences
-using ForwardDiff
 import SimpleCrystals
-using Zygote
 
 using DelimitedFiles
 using LinearAlgebra

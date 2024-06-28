@@ -20,7 +20,6 @@ using Distributions
 using Enzyme
 using EzXML
 using FLoops
-using ForwardDiff
 using Graphs
 using KernelDensity
 using NearestNeighbors
@@ -30,7 +29,6 @@ using Unitful
 using UnitfulAtomic
 using UnitfulChainRules
 using UnsafeAtomicsLLVM
-using Zygote
 
 using LinearAlgebra
 using Random
@@ -68,8 +66,6 @@ include("neighbors.jl")
 include("loggers.jl")
 include("analysis.jl")
 include("setup.jl")
-include("chain_rules.jl")
-include("zygote.jl")
 include("gradients.jl")
 
 end
