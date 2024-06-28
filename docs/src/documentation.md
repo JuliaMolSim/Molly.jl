@@ -586,12 +586,17 @@ Next, you need to define a method for the [`force`](@ref) function acting betwee
 This has a set series of arguments:
 ```julia
 function Molly.force(inter::MyPairwiseInter,
-                        vec_ij,
-                        coord_i,
-                        coord_j,
-                        atom_i,
-                        atom_j,
-                        boundary)
+                     vec_ij,
+                     atom_i,
+                     atom_j,
+                     force_units,
+                     special,
+                     coord_i,
+                     coord_j,
+                     boundary,
+                     velocity_i,
+                     velocity_j,
+                     step_n)
     # Replace this with your force calculation
     # A positive force causes the atoms to move apart
     f = 0.0
@@ -601,12 +606,17 @@ function Molly.force(inter::MyPairwiseInter,
     return fdr
 end
 ```
+Most of the arguments will generally not be used but are passed to allow maximum flexibility.
+You can use `args...` to indicate unused further arguments, e.g. `Molly.force(inter::MyPairwiseInter, vec_ij, args...)`.
 `vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
+`force_units` can be useful for returning a zero force under certain conditions.
+`step_n` is the step number in the simulator, allowing time-dependent interactions.
+Beware that this step counter starts from 1 every time [`simulate!`](@ref) is called.
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
 One nice feature of Molly is that this function will work on both the CPU and the GPU.
 
-An optional final argument `special` is a `Bool` determining whether the atom pair interaction should be treated as special.
+The argument `special` is a `Bool` determining whether the atom pair interaction should be treated as special.
 This is specified during neighbor finder construction.
 When simulating molecules, for example, non-bonded interactions for atoms in a 1-4 bonding arrangement (i-x-x-j) are often weighted by a factor such as 0.5.
 For interactions where this is relevant, `special` can be used to apply this weighting in the interaction.
@@ -624,7 +634,28 @@ pairwise_inters = (MyPairwiseInter=MyPairwiseInter(),)
 For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{PairwiseInteraction}`.
 
 If you wish to calculate potential energies or log the energy throughout a simulation, you will need to define a method for the [`potential_energy`](@ref) function.
-This has the same arguments as [`force`](@ref) and should return a single value corresponding to the potential energy.
+This has the same arguments as [`force`](@ref), except the fifth argument is the energy units not the force units, and should return a single value corresponding to the potential energy:
+```julia
+function Molly.potential_energy(inter::MyPairwiseInter,
+                                vec_ij,
+                                atom_i,
+                                atom_j,
+                                energy_units,
+                                special,
+                                coord_i,
+                                coord_j,
+                                boundary,
+                                velocity_i,
+                                velocity_j,
+                                step_n)
+    # Example Lennard-Jones interaction
+    σ = (atom_i.σ + atom_j.σ) / 2
+    ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
+    r = norm(vec_ij)
+    E = 4ϵ * ((σ/r)^6 - (σ/r)^12)
+    return E
+end
+```
 
 ### Specific interactions
 
