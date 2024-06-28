@@ -66,8 +66,6 @@ neighbor_finder = DistanceNeighborFinder(
 lj = LennardJones(
     cutoff=DistanceCutoff(1.5),
     use_neighbors=true,
-    force_units=NoUnits,
-    energy_units=NoUnits,
 )
 pairwise_inters = (lj,)
 coords = place_atoms(n_atoms, boundary; min_dist=0.6)

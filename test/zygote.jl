@@ -1,5 +1,5 @@
 @testset "Gradients" begin
-    inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
+    inter = LennardJones()
     boundary = CubicBoundary(5.0)
     a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
@@ -7,7 +7,7 @@
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
         vec = vector(c1, c2, boundary)
-        F = force(inter, vec, c1, c2, a1, a2, boundary)
+        F = force(inter, vec, a1, a2, NoUnits)
         return F[1]
     end
 
@@ -16,7 +16,7 @@
             c1 = SVector(1.0, 1.0, 1.0)
             c2 = SVector(dist + 1.0, 1.0, 1.0)
             vec = vector(c1, c2, boundary)
-            potential_energy(inter, vec, c1, c2, a1, a2, boundary)
+            potential_energy(inter, vec, a1, a2, NoUnits)
         end
         return -grad[1]
     end
@@ -54,19 +54,12 @@ end
         coords_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in coords]
         velocities_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in velocities]
         nb_cutoff = f32 ? 1.2f0 : 1.2
-        lj = LennardJones(
-            cutoff=DistanceCutoff(nb_cutoff),
-            use_neighbors=true,
-            force_units=NoUnits,
-            energy_units=NoUnits,
-        )
+        lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
         crf = CoulombReactionField(
             dist_cutoff=nb_cutoff,
             solvent_dielectric=f32 ? Float32(Molly.crf_solvent_dielectric) : Molly.crf_solvent_dielectric,
             use_neighbors=true,
             coulomb_const=f32 ? Float32(ustrip(Molly.coulombconst)) : ustrip(Molly.coulombconst),
-            force_units=NoUnits,
-            energy_units=NoUnits,
         )
         pairwise_inters = pis ? (lj, crf) : ()
         bond_is = gpu ? CuArray(Int32.(collect(1:(n_atoms ÷ 2)))) : Int32.(collect(1:(n_atoms ÷ 2)))
