@@ -165,16 +165,14 @@ function inject_interaction_list(inter::InteractionList4Atoms, params_dic, gpu)
     InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, inters_grad, inter.types)
 end
 
-function inject_interaction(inter::LennardJones{S, C, W, WS, F, E}, params_dic) where {S, C, W, WS, F, E}
+function inject_interaction(inter::LennardJones{S, C, W, WS}, params_dic) where {S, C, W, WS}
     key_prefix = "inter_LJ_"
-    LennardJones{S, C, W, WS, F, E}(
+    LennardJones{S, C, W, WS}(
         inter.cutoff,
         inter.use_neighbors,
         inter.lorentz_mixing,
         dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
         dict_get(params_dic, key_prefix * "weight_solute_solvent", inter.weight_solute_solvent),
-        inter.force_units,
-        inter.energy_units,
     )
 end
 
@@ -185,8 +183,6 @@ function inject_interaction(inter::Coulomb, params_dic)
         inter.use_neighbors,
         dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
         dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-        inter.force_units,
-        inter.energy_units,
     )
 end
 
@@ -198,8 +194,6 @@ function inject_interaction(inter::CoulombReactionField, params_dic)
         inter.use_neighbors,
         dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
         dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
-        inter.force_units,
-        inter.energy_units,
     )
 end
 

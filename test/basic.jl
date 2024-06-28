@@ -453,12 +453,6 @@ end
     coords = place_atoms(1, b_right; min_dist=0.01u"nm")
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_wrong)
 
-    # Mis-matched energy units in interaction and system
-    coords = place_atoms(1, b_right; min_dist=0.01u"nm")
-    lj = LennardJones()
-    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,
-                                      pairwise_inters=(lj,))
-
     # Mixed units or other invalid units
     bad_velo = [random_velocity(1.0u"g/mol",10u"K",Unitful.k*Unitful.Na) .* 2u"g"]
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,

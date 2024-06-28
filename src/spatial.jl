@@ -714,14 +714,14 @@ end
 function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
                             pairwise_inters_nl) where {D, G, T}
     if G
-        coords, atoms = Array(sys.coords), Array(sys.atoms)
+        coords, velocities, atoms = Array(sys.coords), Array(sys.velocities), Array(sys.atoms)
         if isnothing(neighbors_dev)
             neighbors = neighbors_dev
         else
             neighbors = NeighborList(neighbors_dev.n, Array(neighbors_dev.list))
         end
     else
-        coords, atoms = sys.coords, sys.atoms
+        coords, velocities, atoms = sys.coords, sys.velocities, sys.atoms
         neighbors = neighbors_dev
     end
 
@@ -733,10 +733,11 @@ function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
         for i in 1:n_atoms
             for j in (i + 1):n_atoms
                 dr = vector(coords[i], coords[j], boundary)
-                f = force(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
-                          atoms[j], boundary)
+                f = force(pairwise_inters_nonl[1], dr, atoms[i], atoms[j], sys.force_units, false,
+                          coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
                 for inter in pairwise_inters_nonl[2:end]
-                    f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
+                    f += force(inter, dr, atoms[i], atoms[j], sys.force_units, false,
+                               coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
                 end
                 v += dot(f, dr)
             end
@@ -750,11 +751,11 @@ function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
         for ni in eachindex(neighbors)
             i, j, special = neighbors[ni]
             dr = vector(coords[i], coords[j], boundary)
-            f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
-                      atoms[j], boundary, special)
+            f = force(pairwise_inters_nl[1], dr, atoms[i], atoms[j], sys.force_units, special,
+                      coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
             for inter in pairwise_inters_nl[2:end]
-                f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary,
-                           special)
+                f += force(inter, dr, atoms[i], atoms[j], sys.force_units, special,
+                           coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
             end
             v += dot(f, dr)
         end

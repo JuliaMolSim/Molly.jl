@@ -26,7 +26,7 @@ function Coulomb(;
                     cutoff=NoCutoff(),
                     use_neighbors=false,
                     weight_special=1,
-                    coulomb_const=coulombconst,
+                    coulomb_const=coulombconst)
     return Coulomb{typeof(cutoff), typeof(weight_special), typeof(coulomb_const)}(
         cutoff, use_neighbors, weight_special, coulomb_const)
 end
