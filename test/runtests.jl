@@ -23,7 +23,7 @@ using Test
 
 # Allow testing of particular components
 const GROUP = get(ENV, "GROUP", "All")
-if GROUP in ("Protein", "Zygote", "NotZygote")
+if GROUP in ("Protein", "Gradients", "NotGradients")
     @warn "Only running $GROUP tests as GROUP is set to $GROUP"
 end
 
@@ -70,7 +70,7 @@ const temp_fp_viz = tempname(cleanup=true) * ".mp4"
 # Required for parallel gradient tests
 Enzyme.API.runtimeActivity!(true)
 
-if GROUP in ("All", "NotZygote")
+if GROUP in ("All", "NotGradients")
     # Some failures due to dependencies but there is an unbound args error
     Aqua.test_all(
         Molly;
@@ -86,10 +86,10 @@ if GROUP in ("All", "NotZygote")
     include("agent.jl")
 end
 
-if GROUP in ("All", "Protein", "NotZygote")
+if GROUP in ("All", "Protein", "NotGradients")
     include("protein.jl")
 end
 
-if GROUP in ("All", "Zygote")
-    include("zygote.jl")
+if GROUP in ("All", "Gradients")
+    include("gradients.jl")
 end
