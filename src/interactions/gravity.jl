@@ -20,12 +20,10 @@ Gravity(; G=Unitful.G, use_neighbors=false) = Gravity{typeof(G)}(G, use_neighbor
 use_neighbors(inter::Gravity) = inter.use_neighbors
 
 @inline function force(inter::Gravity,
-                                 dr,
-                                 coord_i,
-                                 coord_j,
-                                 atom_i,
-                                 atom_j,
-                                 boundary)
+                       dr,
+                       atom_i,
+                       atom_j,
+                       args...)
     r2 = sum(abs2, dr)
     params = (inter.G, mass(atom_i), mass(atom_j))
     f = force_divr(inter, r2, inv(r2), params)
@@ -37,12 +35,10 @@ function force_divr(::Gravity, r2, invr2, (G, mi, mj))
 end
 
 @inline function potential_energy(inter::Gravity,
-                                            dr,
-                                            coord_i,
-                                            coord_j,
-                                            atom_i,
-                                            atom_j,
-                                            boundary)
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  args...)
     r2 = sum(abs2, dr)
     params = (inter.G, mass(atom_i), mass(atom_j))
     potential(inter, r2, inv(r2), params)
