@@ -55,12 +55,15 @@ general interactions.
 
     potential_energy(inter::PairwiseInteraction, vec_ij, atom_i, atom_j, energy_units, special,
                      coord_i, coord_j, boundary, velocity_i, velocity_j, step_n)
-    potential_energy(inter::SpecificInteraction, coords_i, coords_j,
-                     boundary)
-    potential_energy(inter::SpecificInteraction, coords_i, coords_j,
-                     coords_k, boundary)
-    potential_energy(inter::SpecificInteraction, coords_i, coords_j,
-                     coords_k, coords_l, boundary)
+    potential_energy(inter::SpecificInteraction, coord_i, boundary, atom_i, energy_units,
+                     velocity_i, step_n)
+    potential_energy(inter::SpecificInteraction, coord_i, coord_j, boundary, atom_i, atom_j,
+                     energy_units, velocity_i, velocity_j, step_n)
+    potential_energy(inter::SpecificInteraction, coord_i, coord_j, coord_k, boundary, atom_i,
+                     atom_j, atom_k, energy_units, velocity_i, velocity_j, velocity_k, step_n)
+    potential_energy(inter::SpecificInteraction, coord_i, coord_j, coord_k, coord_l, boundary,
+                     atom_i, atom_j, atom_k, atom_l, energy_units, velocity_i, velocity_j,
+                     velocity_k, velocity_l, step_n)
 
 Calculate the potential energy due to a given interaction type.
 
@@ -250,7 +253,7 @@ function potential_energy(sys::System{D, true, T}, neighbors;
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
         pe_vec += pairwise_pe_gpu(sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters_nonl,
-                                  nbs, sys.energy_units, step_n, val_ft)
+                                  nbs, step_n, sys.energy_units, val_ft)
     end
 
     pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
@@ -261,13 +264,13 @@ function potential_energy(sys::System{D, true, T}, neighbors;
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]
             pe_vec += pairwise_pe_gpu(sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters_nl,
-                                      nbs, sys.energy_units, step_n, val_ft)
+                                      nbs, step_n, sys.energy_units, val_ft)
         end
     end
 
     for inter_list in values(sys.specific_inter_lists)
         pe_vec += specific_pe_gpu(inter_list, sys.coords, sys.velocities, sys.atoms, sys.boundary,
-                                  sys.energy_units, step_n, val_ft)
+                                  step_n, sys.energy_units, val_ft)
     end
 
     pe = Array(pe_vec)[1]
