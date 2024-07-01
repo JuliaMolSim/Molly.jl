@@ -72,10 +72,10 @@ end
 
 # Allow GPU-specific potential energy functions to be defined if required
 potential_energy_gpu(inter::PairwiseInteraction, dr, ai, aj, eu, sp, ci, cj, bnd, vi, vj, sn) = potential_energy(inter, dr, ai, aj, eu, sp, ci, cj, bnd, vi, vj, sn)
-potential_energy_gpu(inter::SpecificInteraction, ci, bnd)             = potential_energy(inter, ci, bnd)
-potential_energy_gpu(inter::SpecificInteraction, ci, cj, bnd)         = potential_energy(inter, ci, cj, bnd)
-potential_energy_gpu(inter::SpecificInteraction, ci, cj, ck, bnd)     = potential_energy(inter, ci, cj, ck, bnd)
-potential_energy_gpu(inter::SpecificInteraction, ci, cj, ck, cl, bnd) = potential_energy(inter, ci, cj, ck, cl, bnd)
+potential_energy_gpu(inter::SpecificInteraction, ci, bnd, ai, eu, vi, sn) = potential_energy(inter, ci, bnd, ai, eu, vi, sn)
+potential_energy_gpu(inter::SpecificInteraction, ci, cj, bnd, ai, aj, eu, vi, vj, sn) = potential_energy(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn)
+potential_energy_gpu(inter::SpecificInteraction, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn) = potential_energy(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn)
+potential_energy_gpu(inter::SpecificInteraction, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn) = potential_energy(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn)
 
 function potential_energy(sys::System{D, false}, neighbors;
                           n_threads::Integer=Threads.nthreads()) where D
@@ -112,6 +112,7 @@ end
 function potential_energy_pair_spec!(pe_vec, coords, velocities, atoms, pairwise_inters_nonl,
                         pairwise_inters_nl, sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
                         boundary, energy_units, neighbors, n_threads, ::Val{T}) where T
+    step_n = 0
     pe_sum = zero(T)
 
     @inbounds if n_threads > 1
@@ -124,10 +125,10 @@ function potential_energy_pair_spec!(pe_vec, coords, velocities, atoms, pairwise
                     for j in (i + 1):n_atoms
                         dr = vector(coords[i], coords[j], boundary)
                         pe = potential_energy(pairwise_inters_nonl[1], dr, atoms[i], atoms[j], energy_units, false,
-                                    coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
+                                    coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
                         for inter in pairwise_inters_nonl[2:end]
                             pe += potential_energy(inter, dr, atoms[i], atoms[j], energy_units, false,
-                                    coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
+                                    coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
                         end
                         check_energy_units(pe, energy_units)
                         pe_sum_chunks[chunk_i] += ustrip(pe)
@@ -145,10 +146,10 @@ function potential_energy_pair_spec!(pe_vec, coords, velocities, atoms, pairwise
                     i, j, special = neighbors[ni]
                     dr = vector(coords[i], coords[j], boundary)
                     pe = potential_energy(pairwise_inters_nl[1], dr, atoms[i], atoms[j], energy_units, special,
-                                    coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
+                                    coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
                     for inter in pairwise_inters_nl[2:end]
                         pe += potential_energy(inter, dr, atoms[i], atoms[j], energy_units, special,
-                                    coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
+                                    coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
                     end
                     check_energy_units(pe, energy_units)
                     pe_sum_chunks[chunk_i] += ustrip(pe)
@@ -164,10 +165,10 @@ function potential_energy_pair_spec!(pe_vec, coords, velocities, atoms, pairwise
                 for j in (i + 1):n_atoms
                     dr = vector(coords[i], coords[j], boundary)
                     pe = potential_energy(pairwise_inters_nonl[1], dr, atoms[i], atoms[j], energy_units, false,
-                                coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
+                                coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
                     for inter in pairwise_inters_nonl[2:end]
                         pe += potential_energy(inter, dr, atoms[i], atoms[j], energy_units, false,
-                                    coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
+                                    coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
                     end
                     check_energy_units(pe, energy_units)
                     pe_sum += ustrip(pe)
@@ -183,10 +184,10 @@ function potential_energy_pair_spec!(pe_vec, coords, velocities, atoms, pairwise
                 i, j, special = neighbors[ni]
                 dr = vector(coords[i], coords[j], boundary)
                 pe = potential_energy(pairwise_inters_nl[1], dr, atoms[i], atoms[j], energy_units, special,
-                                coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
+                                coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
                 for inter in pairwise_inters_nl[2:end]
                     pe += potential_energy(inter, dr, atoms[i], atoms[j], energy_units, special,
-                                coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
+                                coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
                 end
                 check_energy_units(pe, energy_units)
                 pe_sum += ustrip(pe)
@@ -196,7 +197,8 @@ function potential_energy_pair_spec!(pe_vec, coords, velocities, atoms, pairwise
 
     @inbounds for inter_list in sils_1_atoms
         for (i, inter) in zip(inter_list.is, inter_list.inters)
-            pe = potential_energy(inter, coords[i], boundary)
+            pe = potential_energy(inter, coords[i], boundary, atoms[i], energy_units,
+                                  velocities[i], step_n)
             check_energy_units(pe, energy_units)
             pe_sum += ustrip(pe)
         end
@@ -204,7 +206,8 @@ function potential_energy_pair_spec!(pe_vec, coords, velocities, atoms, pairwise
 
     @inbounds for inter_list in sils_2_atoms
         for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
-            pe = potential_energy(inter, coords[i], coords[j], boundary)
+            pe = potential_energy(inter, coords[i], coords[j], boundary, atoms[i], atoms[j],
+                                  energy_units, velocities[i], velocities[j], step_n)
             check_energy_units(pe, energy_units)
             pe_sum += ustrip(pe)
         end
@@ -212,7 +215,9 @@ function potential_energy_pair_spec!(pe_vec, coords, velocities, atoms, pairwise
 
     @inbounds for inter_list in sils_3_atoms
         for (i, j, k, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.inters)
-            pe = potential_energy(inter, coords[i], coords[j], coords[k], boundary)
+            pe = potential_energy(inter, coords[i], coords[j], coords[k], boundary, atoms[i],
+                                  atoms[j], atoms[k], energy_units, velocities[i], velocities[j],
+                                  velocities[k], step_n)
             check_energy_units(pe, energy_units)
             pe_sum += ustrip(pe)
         end
@@ -221,7 +226,10 @@ function potential_energy_pair_spec!(pe_vec, coords, velocities, atoms, pairwise
     @inbounds for inter_list in sils_4_atoms
         for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
                                        inter_list.inters)
-            pe = potential_energy(inter, coords[i], coords[j], coords[k], coords[l], boundary)
+            pe = potential_energy(inter, coords[i], coords[j], coords[k], coords[l], boundary,
+                                  atoms[i], atoms[j], atoms[k], atoms[l], energy_units,
+                                  velocities[i], velocities[j], velocities[k], velocities[l],
+                                  step_n)
             check_energy_units(pe, energy_units)
             pe_sum += ustrip(pe)
         end
@@ -233,6 +241,7 @@ end
 
 function potential_energy(sys::System{D, true, T}, neighbors;
                           n_threads::Integer=Threads.nthreads()) where {D, T}
+    step_n = 0
     n_atoms = length(sys)
     val_ft = Val(T)
     pe_vec = CUDA.zeros(T, 1)
@@ -241,7 +250,7 @@ function potential_energy(sys::System{D, true, T}, neighbors;
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(n_atoms)
         pe_vec += pairwise_pe_gpu(sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters_nonl,
-                                  nbs, sys.energy_units, val_ft)
+                                  nbs, sys.energy_units, step_n, val_ft)
     end
 
     pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
@@ -252,12 +261,13 @@ function potential_energy(sys::System{D, true, T}, neighbors;
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]
             pe_vec += pairwise_pe_gpu(sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters_nl,
-                                      nbs, sys.energy_units, val_ft)
+                                      nbs, sys.energy_units, step_n, val_ft)
         end
     end
 
     for inter_list in values(sys.specific_inter_lists)
-        pe_vec += specific_pe_gpu(inter_list, sys.coords, sys.boundary, sys.energy_units, val_ft)
+        pe_vec += specific_pe_gpu(inter_list, sys.coords, sys.velocities, sys.atoms, sys.boundary,
+                                  sys.energy_units, step_n, val_ft)
     end
 
     pe = Array(pe_vec)[1]
