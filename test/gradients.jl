@@ -59,7 +59,7 @@ end
             dist_cutoff=nb_cutoff,
             solvent_dielectric=f32 ? Float32(Molly.crf_solvent_dielectric) : Molly.crf_solvent_dielectric,
             use_neighbors=true,
-            coulomb_const=f32 ? Float32(ustrip(Molly.coulombconst)) : ustrip(Molly.coulombconst),
+            coulomb_const=f32 ? Float32(ustrip(Molly.coulomb_const)) : ustrip(Molly.coulomb_const),
         )
         pairwise_inters = pis ? (lj, crf) : ()
         bond_is = gpu ? CuArray(Int32.(collect(1:(n_atoms ÷ 2)))) : Int32.(collect(1:(n_atoms ÷ 2)))

@@ -399,16 +399,16 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     inds_j = hcat(1:n_atoms...)
     inds_i = permutedims(inds_j, (2, 1))
 
-    coulomb_const = units ? coulombconst : ustrip(coulombconst)
+    coulomb_const_units = units ? coulomb_const : ustrip(coulomb_const)
     if !iszero_value(solute_dielectric)
-        factor_solute = -T(coulomb_const) / T(solute_dielectric)
+        factor_solute = -T(coulomb_const_units) / T(solute_dielectric)
     else
-        factor_solute = zero(T(coulomb_const))
+        factor_solute = zero(T(coulomb_const_units))
     end
     if !iszero_value(solvent_dielectric)
-        factor_solvent = T(coulomb_const) / T(solvent_dielectric)
+        factor_solvent = T(coulomb_const_units) / T(solvent_dielectric)
     else
-        factor_solvent = zero(T(coulomb_const))
+        factor_solvent = zero(T(coulomb_const_units))
     end
 
     if isa(atoms, CuArray)
@@ -551,16 +551,16 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
         table_m0 = ustrip.(table_m0_units)
     end
 
-    coulomb_const = units ? coulombconst : ustrip(coulombconst)
+    coulomb_const_units = units ? coulomb_const : ustrip(coulomb_const)
     if !iszero_value(solute_dielectric)
-        factor_solute = -T(coulomb_const) / T(solute_dielectric)
+        factor_solute = -T(coulomb_const_units) / T(solute_dielectric)
     else
-        factor_solute = zero(T(coulomb_const))
+        factor_solute = zero(T(coulomb_const_units))
     end
     if !iszero_value(solvent_dielectric)
-        factor_solvent = T(coulomb_const) / T(solvent_dielectric)
+        factor_solvent = T(coulomb_const_units) / T(solvent_dielectric)
     else
-        factor_solvent = zero(T(coulomb_const))
+        factor_solvent = zero(T(coulomb_const_units))
     end
 
     if isa(atoms, CuArray)
