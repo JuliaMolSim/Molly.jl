@@ -669,7 +669,15 @@ Next, you need to define a method for the [`force`](@ref) function.
 The form of this will depend on whether the interaction involves 1, 2, 3 or 4 atoms.
 For example in the 2 atom case:
 ```julia
-function Molly.force(inter::MySpecificInter, coords_i, coords_j, boundary)
+function Molly.force(inter::MySpecificInter,
+                     coord_i,
+                     coord_j,
+                     boundary,
+                     atom_i,
+                     atom_j,
+                     force_units,
+                     velocity_i,
+                     velocity_j)
     dr = vector(coords_i, coords_j, boundary)
 
     # Replace this with your force calculation
@@ -680,7 +688,8 @@ function Molly.force(inter::MySpecificInter, coords_i, coords_j, boundary)
     return SpecificForce2Atoms(-fdr, fdr)
 end
 ```
-The 3 atom case would define `Molly.force(inter::MySpecificInter, coords_i, coords_j, coords_k, boundary)` and return `SpecificForce3Atoms(f1, f2, f3)`.
+Again, most of these arguments are rarely used and can be replaced with `args...`.
+The 3 atom case would define `Molly.force(inter::MySpecificInter, coord_i, coord_j, coord_k, boundary, atom_i, atom_j, atom_k, force_units, velocity_i, velocity_j, velocity_k)` and return `SpecificForce3Atoms(f1, f2, f3)`.
 To use your custom interaction, add it to the specific interaction lists along with the atom indices:
 ```julia
 specific_inter_lists = (
@@ -695,7 +704,23 @@ For 3 atom interactions use [`InteractionList3Atoms`](@ref) and pass 3 sets of i
 If using the GPU, the inner list of indices and interactions should be moved to the GPU with `CuArray`.
 The number in the interaction list and the return type from [`force`](@ref) must match, e.g. [`InteractionList3Atoms`](@ref) must always return [`SpecificForce3Atoms`](@ref) from the corresponding [`force`](@ref) function.
 If some atoms are required in the interaction for force calculation but have no force applied to them by the interaction, give a zero force vector for those atoms.
-Again a method for the [`potential_energy`](@ref) function with the same arguments can be defined.
+Again a method for [`potential_energy`](@ref) with the same arguments, except the seventh argument is the energy units not the force units, can be defined:
+```julia
+function Molly.potential_energy(inter::MySpecificInter,
+                                coord_i,
+                                coord_j,
+                                boundary,
+                                atom_i,
+                                atom_j,
+                                energy_units,
+                                velocity_i,
+                                velocity_j)
+    # Example harmonic bond interaction
+    dr = vector(coord_i, coord_j, boundary)
+    r = norm(dr)
+    return (inter.k / 2) * (r - inter.r0) ^ 2
+end
+```
 
 ### General interactions
 

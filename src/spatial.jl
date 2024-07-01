@@ -713,6 +713,7 @@ end
 
 function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
                             pairwise_inters_nl) where {D, G, T}
+    step_n = 0
     if G
         coords, velocities, atoms = Array(sys.coords), Array(sys.velocities), Array(sys.atoms)
         if isnothing(neighbors_dev)
@@ -734,10 +735,10 @@ function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
             for j in (i + 1):n_atoms
                 dr = vector(coords[i], coords[j], boundary)
                 f = force(pairwise_inters_nonl[1], dr, atoms[i], atoms[j], sys.force_units, false,
-                          coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
+                          coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
                 for inter in pairwise_inters_nonl[2:end]
                     f += force(inter, dr, atoms[i], atoms[j], sys.force_units, false,
-                               coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
+                               coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
                 end
                 v += dot(f, dr)
             end
@@ -752,10 +753,10 @@ function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
             i, j, special = neighbors[ni]
             dr = vector(coords[i], coords[j], boundary)
             f = force(pairwise_inters_nl[1], dr, atoms[i], atoms[j], sys.force_units, special,
-                      coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
+                      coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
             for inter in pairwise_inters_nl[2:end]
                 f += force(inter, dr, atoms[i], atoms[j], sys.force_units, special,
-                           coords[i], coords[j], boundary, velocities[i], velocities[j], 0)
+                           coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
             end
             v += dot(f, dr)
         end

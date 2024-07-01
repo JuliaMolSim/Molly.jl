@@ -28,7 +28,7 @@ end
 
 FENEBond(; k, r0, σ, ϵ) = FENEBond{typeof(k), typeof(r0), typeof(ϵ)}(k, r0, σ, ϵ)
 
-@inline function force(b::FENEBond, coord_i, coord_j, boundary)
+@inline function force(b::FENEBond, coord_i, coord_j, boundary, args...)
     ab = vector(coord_i, coord_j, boundary)
     r = norm(ab)
     r2 = r^2
@@ -47,7 +47,7 @@ FENEBond(; k, r0, σ, ϵ) = FENEBond{typeof(k), typeof(r0), typeof(ϵ)}(k, r0, �
     return SpecificForce2Atoms(-f, f)
 end
 
-@inline function potential_energy(b::FENEBond, coord_i, coord_j, boundary)
+@inline function potential_energy(b::FENEBond, coord_i, coord_j, boundary, args...)
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)
     r2 = r^2

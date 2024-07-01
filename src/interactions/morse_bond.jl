@@ -18,7 +18,7 @@ end
 
 MorseBond(; D, a, r0) = MorseBond{typeof(D), typeof(a), typeof(r0)}(D, a, r0)
 
-@inline function force(b::MorseBond, coord_i, coord_j, boundary)
+@inline function force(b::MorseBond, coord_i, coord_j, boundary, args...)
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)
     ralp = exp(-b.a * (r - b.r0))
@@ -27,7 +27,7 @@ MorseBond(; D, a, r0) = MorseBond{typeof(D), typeof(a), typeof(r0)}(D, a, r0)
     return SpecificForce2Atoms(f, -f)
 end
 
-@inline function potential_energy(b::MorseBond, coord_i, coord_j, boundary)
+@inline function potential_energy(b::MorseBond, coord_i, coord_j, boundary, args...)
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)
     ralp = exp(-b.a * (r - b.r0))
