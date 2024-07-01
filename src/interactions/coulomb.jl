@@ -20,13 +20,13 @@ struct Coulomb{C, W, T} <: PairwiseInteraction
     coulomb_const::T
 end
 
-const coulombconst = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
+const coulomb_const = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
 
 function Coulomb(;
                     cutoff=NoCutoff(),
                     use_neighbors=false,
                     weight_special=1,
-                    coulomb_const=coulombconst)
+                    coulomb_const=coulomb_const)
     return Coulomb{typeof(cutoff), typeof(weight_special), typeof(coulomb_const)}(
         cutoff, use_neighbors, weight_special, coulomb_const)
 end
@@ -55,9 +55,9 @@ end
                        args...) where C
     r2 = sum(abs2, dr)
     cutoff = inter.cutoff
-    coulomb_const = inter.coulomb_const
+    ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    params = (coulomb_const, qi, qj)
+    params = (ke, qi, qj)
 
     f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
     if special
@@ -67,8 +67,8 @@ end
     end
 end
 
-function force_divr(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
-    return (coulomb_const * qi * qj) / √(r2 ^ 3)
+function force_divr(::Coulomb, r2, invr2, (ke, qi, qj))
+    return (ke * qi * qj) / √(r2 ^ 3)
 end
 
 @inline function potential_energy(inter::Coulomb{C},
@@ -80,9 +80,9 @@ end
                                   args...) where C
     r2 = sum(abs2, dr)
     cutoff = inter.cutoff
-    coulomb_const = inter.coulomb_const
+    ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    params = (coulomb_const, qi, qj)
+    params = (ke, qi, qj)
 
     pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
     if special
@@ -92,8 +92,8 @@ end
     end
 end
 
-function potential(::Coulomb, r2, invr2, (coulomb_const, qi, qj))
-    return (coulomb_const * qi * qj) * √invr2
+function potential(::Coulomb, r2, invr2, (ke, qi, qj))
+    return (ke * qi * qj) * √invr2
 end
 
 @doc raw"""
@@ -127,7 +127,7 @@ function CoulombSoftCore(;
                     use_neighbors=false,
                     lorentz_mixing=true,
                     weight_special=1,
-                    coulomb_const=coulombconst)
+                    coulomb_const=coulomb_const)
     σ6_fac = α * λ^p
     return CoulombSoftCore{typeof(cutoff), typeof(α), typeof(λ), typeof(p), typeof(σ6_fac),
                            typeof(weight_special), typeof(coulomb_const)}(
@@ -173,10 +173,10 @@ end
                        args...) where C
     r2 = sum(abs2, dr)
     cutoff = inter.cutoff
-    coulomb_const = inter.coulomb_const
+    ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-    params = (coulomb_const, qi, qj, σ, inter.σ6_fac)
+    params = (ke, qi, qj, σ, inter.σ6_fac)
 
     f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
     if special
@@ -186,11 +186,11 @@ end
     end
 end
 
-function force_divr(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ6_fac))
+function force_divr(::CoulombSoftCore, r2, invr2, (ke, qi, qj, σ, σ6_fac))
     inv_rsc6 = inv(r2^3 + σ6_fac * σ^6)
     inv_rsc2 = cbrt(inv_rsc6)
     inv_rsc3 = sqrt(inv_rsc6)
-    ff = (coulomb_const * qi * qj) * inv_rsc2 * sqrt(r2)^5 * inv_rsc2 * inv_rsc3
+    ff = (ke * qi * qj) * inv_rsc2 * sqrt(r2)^5 * inv_rsc2 * inv_rsc3
     return ff * √invr2
 end
 
@@ -203,10 +203,10 @@ end
                                   args...) where C
     r2 = sum(abs2, dr)
     cutoff = inter.cutoff
-    coulomb_const = inter.coulomb_const
+    ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-    params = (coulomb_const, qi, qj, σ, inter.σ6_fac)
+    params = (ke, qi, qj, σ, inter.σ6_fac)
 
     pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
     if special
@@ -216,9 +216,9 @@ end
     end
 end
 
-function potential(::CoulombSoftCore, r2, invr2, (coulomb_const, qi, qj, σ, σ6_fac))
+function potential(::CoulombSoftCore, r2, invr2, (ke, qi, qj, σ, σ6_fac))
     inv_rsc6 = inv(r2^3 + σ6_fac * σ^6)
-    return (coulomb_const * qi * qj) * √cbrt(inv_rsc6)
+    return (ke * qi * qj) * √cbrt(inv_rsc6)
 end
 
 """
@@ -243,7 +243,7 @@ function CoulombReactionField(;
                     solvent_dielectric=crf_solvent_dielectric,
                     use_neighbors=false,
                     weight_special=1,
-                    coulomb_const=coulombconst)
+                    coulomb_const=coulomb_const)
     return CoulombReactionField{typeof(dist_cutoff), typeof(solvent_dielectric),
                                 typeof(weight_special), typeof(coulomb_const)}(
         dist_cutoff, solvent_dielectric, use_neighbors, weight_special, coulomb_const)
@@ -283,7 +283,7 @@ end
         return ustrip.(zero(dr)) * force_units
     end
 
-    coulomb_const = inter.coulomb_const
+    ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = √r2
     if special
@@ -295,7 +295,7 @@ end
               (2 * inter.solvent_dielectric + 1))
     end
 
-    f = (coulomb_const * qi * qj) * (inv(r) - 2 * krf * r2) * inv(r2)
+    f = (ke * qi * qj) * (inv(r) - 2 * krf * r2) * inv(r2)
 
     if special
         return f * dr * inter.weight_special
@@ -316,7 +316,7 @@ end
         return ustrip(zero(dr[1])) * energy_units
     end
 
-    coulomb_const = inter.coulomb_const
+    ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = √r2
     if special
@@ -330,7 +330,7 @@ end
               (2 * inter.solvent_dielectric + 1))
     end
 
-    pe = (coulomb_const * qi * qj) * (inv(r) + krf * r2 - crf)
+    pe = (ke * qi * qj) * (inv(r) + krf * r2 - crf)
 
     if special
         return pe * inter.weight_special

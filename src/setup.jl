@@ -799,14 +799,14 @@ function System(coord_file::AbstractString,
             solvent_dielectric=T(crf_solvent_dielectric),
             use_neighbors=true,
             weight_special=force_field.weight_14_coulomb,
-            coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
     else
         crf = Coulomb(
             cutoff=DistanceCutoff(T(dist_cutoff)),
             use_neighbors=true,
             weight_special=force_field.weight_14_coulomb,
-            coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
     end
     pairwise_inters = (lj, crf)
@@ -1214,7 +1214,7 @@ function System(T::Type,
         solvent_dielectric=T(crf_solvent_dielectric),
         use_neighbors=true,
         weight_special=T(0.5),
-        coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
+        coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
     )
 
     if isnothing(boundary)
