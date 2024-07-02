@@ -678,8 +678,8 @@ function remove_CM_motion!(sys)
 end
 
 @doc raw"""
-    virial(sys, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
-    virial(inter, sys, neighbors; n_threads=Threads.nthreads())
+    virial(sys, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
+    virial(inter, sys, neighbors; step_n=0, n_threads=Threads.nthreads())
 
 Calculate the virial of a system or the virial resulting from a general interaction.
 
@@ -699,21 +699,20 @@ function virial(sys; n_threads::Integer=Threads.nthreads())
     return virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function virial(sys, neighbors; n_threads::Integer=Threads.nthreads())
+function virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
-    v = virial(sys, neighbors, pairwise_inters_nonl, pairwise_inters_nl)
+    v = virial(sys, neighbors, step_n, pairwise_inters_nonl, pairwise_inters_nl)
 
     for inter in values(sys.general_inters)
-        v += virial(inter, sys, neighbors; n_threads=n_threads)
+        v += virial(inter, sys, neighbors; step_n=step_n, n_threads=n_threads)
     end
 
     return v
 end
 
-function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
+function virial(sys::System{D, G, T}, neighbors_dev, step_n, pairwise_inters_nonl,
                             pairwise_inters_nl) where {D, G, T}
-    step_n = 0
     if G
         coords, velocities, atoms = Array(sys.coords), Array(sys.velocities), Array(sys.atoms)
         if isnothing(neighbors_dev)
