@@ -175,7 +175,8 @@ function forces_nounits!(fs_nounits, sys::System{D, false}, neighbors, fs_chunks
     end
 
     for inter in values(sys.general_inters)
-        fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, n_threads=n_threads)
+        fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, step_n=step_n,
+                                         n_threads=n_threads)
         check_force_units(zero(eltype(fs_gen)), sys.force_units)
         fs_nounits .+= ustrip_vec.(fs_gen)
     end
@@ -380,7 +381,8 @@ function forces_nounits!(fs_nounits, sys::System{D, true, T}, neighbors,
     fs_nounits .= reinterpret(SVector{D, T}, vec(fs_mat))
 
     for inter in values(sys.general_inters)
-        fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, n_threads=n_threads)
+        fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, step_n=step_n,
+                                         n_threads=n_threads)
         check_force_units(zero(eltype(fs_gen)), sys.force_units)
         fs_nounits .+= ustrip_vec.(fs_gen)
     end

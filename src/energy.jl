@@ -104,7 +104,8 @@ function potential_energy(sys::System{D, false, T}, neighbors; step_n::Integer=0
     for inter in values(sys.general_inters)
         pe += uconvert(
             sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, n_threads=n_threads),
+            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors,
+                                              step_n=step_n, n_threads=n_threads),
         )
     end
 
@@ -281,7 +282,8 @@ function potential_energy(sys::System{D, true, T}, neighbors, step_n::Integer=0;
     for inter in values(sys.general_inters)
         pe += uconvert(
             sys.energy_units,
-            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors, n_threads=n_threads),
+            AtomsCalculators.potential_energy(sys, inter; neighbors=neighbors,
+                                              step_n=step_n, n_threads=n_threads),
         )
     end
 

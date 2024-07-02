@@ -737,9 +737,10 @@ import AtomsCalculators
 function AtomsCalculators.forces(sys,
                                  inter::MyGeneralInter;
                                  neighbors=nothing,
+                                 step_n=0,
                                  n_threads=Threads.nthreads(),
                                  kwargs...)
-    # kwargs... is required, neighbors and n_threads can be omitted if not used
+    # kwargs... is required, neighbors/step_n/n_threads can be omitted if not used
 
     # Calculate the forces on all atoms using the interaction and the system
     # The output should have the same shape as the coordinates
@@ -930,7 +931,7 @@ function Molly.simulate!(sys,
 
     for step_n in 1:n_steps
         # Calculate accelerations like this
-        accels_t = accelerations(sys, neighbors; n_threads=n_threads)
+        accels_t = accelerations(sys, neighbors, step_n; n_threads=n_threads)
 
         # Ensure coordinates stay within the simulation box like this
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
@@ -1126,7 +1127,7 @@ Many times, a logger will just record an observation to an `Array` containing a 
 For this purpose, you can use the [`GeneralObservableLogger`](@ref) without defining a custom logging function.
 Define your observation function as
 ```julia
-function my_observable(sys::System, neighbors; n_threads::Integer, kwargs...)
+function my_observable(sys::System, neighbors, step_n; n_threads::Integer, kwargs...)
     # Probe the system for some desired property
     return observation
 end
