@@ -113,7 +113,7 @@ function Base.show(io::IO, tl::GeneralObservableLogger{T, typeof(temperature_wra
             tl.n_steps, ", ", length(values(tl)), " temperatures recorded")
 end
 
-coordinates_wrapper(sys, args...; kwargs...) = sys.coords
+coordinates_wrapper(sys, args...; kwargs...) = copy(sys.coords)
 
 """
     CoordinateLogger(n_steps; dims=3)
@@ -137,7 +137,7 @@ function Base.show(io::IO, cl::GeneralObservableLogger{T, typeof(coordinates_wra
             length(values(cl)) > 0 ? length(first(values(cl))) : "?", " atoms")
 end
 
-velocities_wrapper(sys, args...; kwargs...) = sys.velocities
+velocities_wrapper(sys, args...; kwargs...) = copy(sys.velocities)
 
 """
     VelocityLogger(n_steps; dims=3)
@@ -229,7 +229,7 @@ function forces_wrapper(sys, neighbors, step_n::Integer; n_threads::Integer,
     if isnothing(current_forces)
         return forces(sys, neighbors, step_n; n_threads=n_threads)
     else
-        return current_forces
+        return copy(current_forces)
     end
 end
 
