@@ -1260,6 +1260,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         abstract_sys,
         calc::MollyCalculator;
         neighbors=nothing,
+        step_n::Integer=0,
         n_threads::Integer=Threads.nthreads(),
         kwargs...,
     )
@@ -1274,13 +1275,14 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         k=calc.k,
     )
     nbs = isnothing(neighbors) ? find_neighbors(sys) : neighbors
-    return forces(sys, nbs; n_threads=n_threads)
+    return forces(sys, nbs, step_n; n_threads=n_threads)
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         abstract_sys,
         calc::MollyCalculator;
         neighbors=nothing,
+        step_n::Integer=0,
         n_threads::Integer=Threads.nthreads(),
         kwargs...,
     )
@@ -1295,7 +1297,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         k=calc.k,
     )
     nbs = isnothing(neighbors) ? find_neighbors(sys) : neighbors
-    return potential_energy(sys, nbs; n_threads=n_threads)
+    return potential_energy(sys, nbs, step_n; n_threads=n_threads)
 end
 
 """
