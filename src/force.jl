@@ -11,7 +11,7 @@ export
     forces
 
 """
-    accelerations(system, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
+    accelerations(system, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
 
 Calculate the accelerations of all atoms in a system using the pairwise,
 specific and general interactions and Newton's second law of motion.
@@ -20,8 +20,8 @@ function accelerations(sys; n_threads::Integer=Threads.nthreads())
     return accelerations(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function accelerations(sys, neighbors; n_threads::Integer=Threads.nthreads())
-    return forces(sys, neighbors; n_threads=n_threads) ./ masses(sys)
+function accelerations(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+    return forces(sys, neighbors, step_n; n_threads=n_threads) ./ masses(sys)
 end
 
 """
@@ -368,7 +368,7 @@ function forces_nounits!(fs_nounits, sys::System{D, true, T}, neighbors,
         end
         if length(neighbors) > 0
             nbs = @view neighbors.list[1:neighbors.n]
-            pairwise_force_gpu!(fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters_nonl,
+            pairwise_force_gpu!(fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters_nl,
                                 nbs, step_n, sys.force_units, val_ft)
         end
     end

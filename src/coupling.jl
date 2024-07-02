@@ -196,7 +196,7 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
     recompute_forces = false
 
     for attempt_n in 1:barostat.n_iterations
-        E = potential_energy(sys, neighbors; n_threads=n_threads)
+        E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
         V = box_volume(sys.boundary)
         dV = barostat.volume_scale * (2 * rand(T) - 1)
         v_scale = (V + dV) / V
@@ -213,7 +213,7 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
             # This may not be valid for larger changes
             neighbors_trial = neighbors
         end
-        E_trial = potential_energy(sys, neighbors_trial; n_threads=n_threads)
+        E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
         dE = energy_remove_mol(E_trial - E)
         dW = dE + uconvert(unit(dE), barostat.pressure * dV) - n_molecules * kT * log(v_scale)
         if dW <= zero(dW) || rand(T) < exp(-dW / kT)
@@ -349,7 +349,7 @@ function apply_coupling!(sys::System{D, G, T},
         mask1[axis] = true
         mask2[axis] = false
 
-        E = potential_energy(sys, neighbors; n_threads=n_threads)
+        E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
         V = box_volume(sys.boundary)
         dV = barostat.volume_scale[axis] * (2 * rand(T) - 1)
         v_scale = (V + dV) / V
@@ -366,7 +366,7 @@ function apply_coupling!(sys::System{D, G, T},
             # This may not be valid for larger changes
             neighbors_trial = neighbors
         end
-        E_trial = potential_energy(sys, neighbors_trial; n_threads=n_threads)
+        E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
         dE = energy_remove_mol(E_trial - E)
         dW = dE + uconvert(unit(dE), barostat.pressure[axis] * dV) - n_molecules * kT * log(v_scale)
         if dW <= zero(dW) || rand(T) < exp(-dW / kT)
@@ -521,7 +521,7 @@ function apply_coupling!(sys::System{D, G, T},
             axis = 1
         end
 
-        E = potential_energy(sys, neighbors; n_threads=n_threads)
+        E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
         V = box_volume(sys.boundary)
         dV = barostat.volume_scale[axis] * (2 * rand(T) - 1)
         v_scale = (V + dV) / V
@@ -557,7 +557,7 @@ function apply_coupling!(sys::System{D, G, T},
             # This may not be valid for larger changes
             neighbors_trial = neighbors
         end
-        E_trial = potential_energy(sys, neighbors_trial; n_threads=n_threads)
+        E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
         dE = energy_remove_mol(E_trial - E)
         PdV = uconvert(unit(dE), barostat.pressure[axis] * dV)
         γdA = uconvert(unit(dE), barostat.tension * dA)
