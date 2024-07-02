@@ -613,6 +613,7 @@ Atom properties can be accessed, e.g. `atom_i.σ`.
 `force_units` can be useful for returning a zero force under certain conditions.
 `step_n` is the step number in the simulator, allowing time-dependent interactions.
 Beware that this step counter starts from 1 every time [`simulate!`](@ref) is called.
+It also doesn't work with [`simulate_remd!`](@ref).
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
 One nice feature of Molly is that this function will work on both the CPU and the GPU.
 
