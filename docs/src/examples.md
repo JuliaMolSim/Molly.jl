@@ -189,7 +189,7 @@ function Molly.force(inter::SIRInteraction,
 end
 
 # Custom logger
-function fracs_SIR(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+function fracs_SIR(s::System, args...;  kwargs...)
     counts_sir = [
         count(p -> p.status == susceptible, s.atoms),
         count(p -> p.status == infected   , s.atoms),
@@ -657,7 +657,7 @@ function Molly.force(inter::BondableInteraction,
     end
 end
 
-function bonds(sys::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+function bonds(sys::System, args...; kwargs...)
     bonds = BitVector()
     for i in 1:length(sys)
         for j in 1:(i - 1)

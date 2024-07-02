@@ -4,7 +4,7 @@
     temp = 298.0u"K"
     boundary = RectangularBoundary(2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
-    gen_temp_wrapper(s, neighbors; kwargs...) = temperature(s)
+    gen_temp_wrapper(s, args...; kwargs...) = temperature(s)
 
     s = System(
         atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
@@ -64,7 +64,7 @@ end
     TP = typeof(0.2u"kJ * mol^-1")
 
     V(sys, args...; kwargs...) = sys.velocities
-    pot_obs(sys, neighbors; kwargs...) = potential_energy(sys, neighbors)
+    pot_obs(sys, neighbors, step_n; kwargs...) = potential_energy(sys, neighbors, step_n)
     kin_obs(sys, args...; kwargs...) = kinetic_energy(sys)
 
     for n_threads in n_threads_list
@@ -851,7 +851,7 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
     n_log_steps = 500
 
-    box_size_wrapper(sys, neighbors; kwargs...) = sys.boundary.side_lengths[1]
+    box_size_wrapper(sys, args...; kwargs...) = sys.boundary.side_lengths[1]
     BoundaryLogger(n_steps) = GeneralObservableLogger(box_size_wrapper, typeof(1.0u"nm"), n_steps)
 
     sys = System(
@@ -941,7 +941,7 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
     n_log_steps = 500
 
-    box_volume_wrapper(sys, neighbors; kwargs...) = box_volume(sys.boundary)
+    box_volume_wrapper(sys, args...; kwargs...) = box_volume(sys.boundary)
     VolumeLogger(n_steps) = GeneralObservableLogger(box_volume_wrapper, typeof(1.0u"nm^3"), n_steps)
 
     baro_f(pressure) = MonteCarloAnisotropicBarostat(pressure, temp, boundary)
@@ -1013,7 +1013,7 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
     n_log_steps = 500
 
-    box_volume_wrapper(sys, neighbors; kwargs...) = box_volume(sys.boundary)
+    box_volume_wrapper(sys, args...; kwargs...) = box_volume(sys.boundary)
     VolumeLogger(n_steps) = GeneralObservableLogger(box_volume_wrapper, typeof(1.0u"nm^3"), n_steps)
 
     lang_f(barostat) = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
