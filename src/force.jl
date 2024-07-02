@@ -129,8 +129,8 @@ function forces(sys; n_threads::Integer=Threads.nthreads())
     return forces(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function forces(sys::System{D, false}, neighbors;
-                n_threads::Integer=Threads.nthreads()) where D
+function forces(sys::System{D, AT}, neighbors;
+                n_threads::Integer=Threads.nthreads()) where {D, AT}
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
@@ -295,11 +295,11 @@ function forces_pair_spec!(fs, coords, atoms, pairwise_inters_nonl, pairwise_int
     return nothing
 end
 
-function forces(sys::System{D, true, T}, neighbors;
-                n_threads::Integer=Threads.nthreads()) where {D, T}
+function forces(sys::System{D, AT, T}, neighbors;
+                n_threads::Integer=Threads.nthreads()) where {D, T, AT <: AbstractGPUArray}
     n_atoms = length(sys)
     val_ft = Val(T)
-    fs_mat = CUDA.zeros(T, D, n_atoms)
+    fs_mat = KernelAbstractions.zeros(get_backend(sys.coords), T, D, n_atoms)
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0

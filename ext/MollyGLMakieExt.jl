@@ -5,7 +5,6 @@ module MollyGLMakieExt
 
 using Molly
 using GLMakie
-using Colors
 using Unitful
 
 using LinearAlgebra
@@ -95,7 +94,7 @@ function Molly.visualize(coord_logger,
         push!(trail_positions, Observable(PointType.(ustrip_vec.(coords_start))))
         col = parse.(Colorant, color)
         alpha = 1 - (trail_i / (trails + 1))
-        alpha_col = RGBA.(red.(col), green.(col), blue.(col), alpha)
+        alpha_col = GLMakie.RGBAf.(red.(col), green.(col), blue.(col), alpha)
         scatter!(ax, trail_positions[end]; color=alpha_col,  markersize=markersize,
                     transparency=transparency, markerspace=:data, kwargs...)
     end

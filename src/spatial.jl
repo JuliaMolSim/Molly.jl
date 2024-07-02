@@ -585,7 +585,8 @@ function random_velocities(sys::System{3, true}, temp; rng=Random.GLOBAL_RNG)
     if isbits(rng)
         return random_velocity_3D.(masses(sys), temp, sys.k, rng)
     else
-        return CuArray(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
+        ArrayType = get_array_type(sys.coords)
+        return ArrayType(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
     end
 end
 
@@ -593,7 +594,8 @@ function random_velocities(sys::System{2, true}, temp; rng=Random.GLOBAL_RNG)
     if isbits(rng)
         return random_velocity_2D.(masses(sys), temp, sys.k, rng)
     else
-        return CuArray(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
+        ArrayType = get_array_type(sys.coords)
+        return ArrayType(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
     end
 end
 
@@ -707,9 +709,9 @@ function virial(sys, neighbors; n_threads::Integer=Threads.nthreads())
     return v
 end
 
-function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
-                            pairwise_inters_nl) where {D, G, T}
-    if G
+function virial(sys::System{D, AT, T}, neighbors_dev, pairwise_inters_nonl,
+                            pairwise_inters_nl) where {D, AT, T}
+    if AT <: AbstractGPUArray
         coords, atoms = Array(sys.coords), Array(sys.atoms)
         if isnothing(neighbors_dev)
             neighbors = neighbors_dev
@@ -760,7 +762,7 @@ function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
 end
 
 # Default for general interactions
-function virial(inter, sys::System{D, G, T}, neighbors=nothing; kwargs...) where {D, G, T}
+function virial(inter, sys::System{D, AT, T}, neighbors=nothing; kwargs...) where {D, AT, T}
     return zero(T) * sys.energy_units
 end
 
@@ -845,8 +847,9 @@ function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topolo
     end
 end
 
-function molecule_centers(coords::CuArray, boundary, topology)
-    return CuArray(molecule_centers(Array(coords), boundary, topology))
+function molecule_centers(coords::AbstractGPUArray, boundary, topology)
+    ArrayType = get_array_type(coords)
+    return ArrayType(molecule_centers(Array(coords), boundary, topology))
 end
 
 # Allows scaling multiple vectors at once by broadcasting this function
@@ -898,7 +901,8 @@ function scale_coords!(sys, scale_factor; ignore_molecules=false)
             coords_nounits[i] = wrap_coords(
                     coords_nounits[i] .+ shift_vecs[mi] .- center_shifts[mi], boundary_nounits)
         end
-        sys.coords = coords_nounits * coord_units
+        ArrayType = get_array_type(sys.coords)
+        sys.coords = ArrayType(coords_nounits * coord_units)
     end
     return sys
 end

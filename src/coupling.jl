@@ -57,9 +57,9 @@ struct AndersenThermostat{T, C}
     coupling_const::C
 end
 
-function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, sim,
+function apply_coupling!(sys::System{D, AT}, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
-                         n_threads::Integer=Threads.nthreads()) where D
+                         n_threads::Integer=Threads.nthreads()) where {D, AT}
     for i in eachindex(sys)
         if rand() < (sim.dt / thermostat.coupling_const)
             sys.velocities[i] = random_velocity(mass(sys.atoms[i]), thermostat.temperature, sys.k;
@@ -69,9 +69,9 @@ function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, 
     return false
 end
 
-function apply_coupling!(sys::System{D, true, T}, thermostat::AndersenThermostat, sim,
+function apply_coupling!(sys::System{D, AT, T}, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
-                         n_threads::Integer=Threads.nthreads()) where {D, T}
+                         n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
     atoms_to_bump = T.(rand(length(sys)) .< (sim.dt / thermostat.coupling_const))
     atoms_to_leave = one(T) .- atoms_to_bump
     atoms_to_bump_dev = move_array(atoms_to_bump, sys)

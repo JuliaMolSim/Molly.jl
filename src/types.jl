@@ -412,8 +412,6 @@ Base.firstindex(::NoNeighborList) = 1
 Base.lastindex(nl::NoNeighborList) = length(nl)
 Base.eachindex(nl::NoNeighborList) = Base.OneTo(length(nl))
 
-CUDA.Const(nl::NoNeighborList) = nl
-
 """
     System(; <keyword arguments>)
 
@@ -462,7 +460,7 @@ interface described there.
     modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `data::DA=nothing`: arbitrary data associated with the system.
 """
-mutable struct System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
                       L, F, E, K, M, DA} <: AbstractSystem{D}
     atoms::A
     coords::C
@@ -502,7 +500,7 @@ function System(;
                 k=default_k(energy_units),
                 data=nothing)
     D = n_dimensions(boundary)
-    G = isa(coords, CuArray)
+    AT = get_array_type(coords)
     T = float_type(boundary)
     A = typeof(atoms)
     C = typeof(coords)
@@ -548,19 +546,19 @@ function System(;
         end
     end
 
-    if isa(atoms, CuArray) && !isa(coords, CuArray)
+    if isa(atoms, AbstractGPUArray) && !isa(coords, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
-    if isa(coords, CuArray) && !isa(atoms, CuArray)
+    if isa(coords, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the coordinates are on the GPU but the atoms are not"))
     end
-    if isa(atoms, CuArray) && !isa(vels, CuArray)
+    if isa(atoms, AbstractGPUArray) && !isa(vels, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the velocities are not"))
     end
-    if isa(vels, CuArray) && !isa(atoms, CuArray)
+    if isa(vels, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
-    if isa(atoms, CuArray) && length(constraints) > 0
+    if isa(atoms, AbstractGPUArray) && length(constraints) > 0
         @warn "Constraints are not currently compatible with simulation on the GPU"
     end
 
@@ -577,7 +575,7 @@ function System(;
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
 
-    return System{D, G, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, DA}(
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, DA}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, neighbor_finder, loggers,
                     df, force_units, energy_units, k_converted, atom_masses, data)
@@ -765,7 +763,7 @@ construction where `n` is the number of threads to be used per replica.
     modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `data::DA=nothing`: arbitrary data associated with the replica system.
 """
-mutable struct ReplicaSystem{D, G, T, A, AD, EL, F, E, K, R, DA} <: AbstractSystem{D}
+mutable struct ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA} <: AbstractSystem{D}
     atoms::A
     n_replicas::Int
     atoms_data::AD
@@ -802,7 +800,7 @@ function ReplicaSystem(;
                         k=default_k(energy_units),
                         data=nothing)
     D = n_dimensions(boundary)
-    G = isa(replica_coords[1], CuArray)
+    AT = get_array_type(replica_coords[1])
     T = float_type(boundary)
     A = typeof(atoms)
     AD = typeof(atoms_data)
@@ -913,25 +911,25 @@ function ReplicaSystem(;
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
-    n_cuarray = sum(y -> isa(y, CuArray), replica_coords)
+    n_cuarray = sum(y -> isa(y, AbstractGPUArray), replica_coords)
     if !(n_cuarray == n_replicas || n_cuarray == 0)
         throw(ArgumentError("the coordinates for $n_cuarray out of $n_replicas replicas are on GPU"))
     end
-    if isa(atoms, CuArray) && n_cuarray != n_replicas
+    if isa(atoms, AbstractGPUArray) && n_cuarray != n_replicas
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
-    if n_cuarray == n_replicas && !isa(atoms, CuArray)
+    if n_cuarray == n_replicas && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the coordinates are on the GPU but the atoms are not"))
     end
 
-    n_cuarray = sum(y -> isa(y, CuArray), replica_velocities)
+    n_cuarray = sum(y -> isa(y, AbstractGPUArray), replica_velocities)
     if !(n_cuarray == n_replicas || n_cuarray == 0)
         throw(ArgumentError("the velocities for $n_cuarray out of $n_replicas replicas are on GPU"))
     end
-    if isa(atoms, CuArray) && n_cuarray != n_replicas
+    if isa(atoms, AbstractGPUArray) && n_cuarray != n_replicas
         throw(ArgumentError("the atoms are on the GPU but the velocities are not"))
     end
-    if n_cuarray == n_replicas && !isa(atoms, CuArray)
+    if n_cuarray == n_replicas && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
 
@@ -941,7 +939,7 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, G, T, A, C, B, V, AD, TO, typeof(replica_pairwise_inters[i]),
+    replicas = Tuple(System{D, AT, T, A, C, B, V, AD, TO, typeof(replica_pairwise_inters[i]),
                         typeof(replica_specific_inter_lists[i]), typeof(replica_general_inters[i]),
                         typeof(replica_constraints[i]), NF, typeof(replica_loggers[i]), F, E, K,
                         M, Nothing}(
@@ -952,7 +950,7 @@ function ReplicaSystem(;
             force_units, energy_units, k_converted, atom_masses, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
 
-    return ReplicaSystem{D, G, T, A, AD, EL, F, E, K, R, DA}(
+    return ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA}(
             atoms, n_replicas, atoms_data, exchange_logger, force_units,
             energy_units, k_converted, replicas, data)
 end
@@ -962,7 +960,7 @@ end
 
 Whether a [`System`](@ref) or [`ReplicaSystem`](@ref) is on the GPU.
 """
-is_on_gpu(::Union{System{D, G}, ReplicaSystem{D, G}}) where {D, G} = G
+is_on_gpu(::Union{System{D, AT}, ReplicaSystem{D, AT}}) where {D, AT} = AT <: AbstractGPUArray
 
 """
     float_type(sys)
@@ -970,7 +968,7 @@ is_on_gpu(::Union{System{D, G}, ReplicaSystem{D, G}}) where {D, G} = G
 
 The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses.
 """
-float_type(::Union{System{D, G, T}, ReplicaSystem{D, G, T}}) where {D, G, T} = T
+float_type(::Union{System{D, AT, T}, ReplicaSystem{D, AT, T}}) where {D, AT, T} = T
 
 """
     masses(sys)
@@ -989,8 +987,7 @@ charges(s::Union{System, ReplicaSystem}) = charge.(s.atoms)
 charge(s::Union{System, ReplicaSystem}, i::Integer) = charge(s.atoms[i])
 
 # Move an array to the GPU depending on whether the system is on the GPU
-move_array(arr, ::System{D, false}) where {D} = arr
-move_array(arr, ::System{D, true }) where {D} = CuArray(arr)
+move_array(arr, ::System{D, AT}) where {D, AT} = AT(arr)
 
 Base.getindex(s::Union{System, ReplicaSystem}, i::Integer) = AtomView(s, i)
 Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)

@@ -38,8 +38,10 @@ end
         return mean(sqrt.(minimum(disps_diag; dims=1)))
     end
 
-    function test_simulation_grad(gpu::Bool, parallel::Bool, forward::Bool, f32::Bool, pis::Bool,
-                                  sis::Bool, obc2::Bool, gbn2::Bool)
+    function test_simulation_grad(ArrayType::Type{AT}, parallel::Bool,
+                                  forward::Bool, f32::Bool, pis::Bool,
+                                  sis::Bool, obc2::Bool,
+                                  gbn2::Bool) where AT <: AbstractArray
         n_atoms = 50
         n_steps = 100
         atom_mass = f32 ? 10.0f0 : 10.0
@@ -69,15 +71,15 @@ end
             energy_units=NoUnits,
         )
         pairwise_inters = pis ? (lj, crf) : ()
-        bond_is = gpu ? CuArray(Int32.(collect(1:(n_atoms ÷ 2)))) : Int32.(collect(1:(n_atoms ÷ 2)))
-        bond_js = gpu ? CuArray(Int32.(collect((1 + n_atoms ÷ 2):n_atoms))) : Int32.(collect((1 + n_atoms ÷ 2):n_atoms))
+        bond_is = ArrayType(Int32.(collect(1:(n_atoms ÷ 2))))
+        bond_js = ArrayType(Int32.(collect((1 + n_atoms ÷ 2):n_atoms)))
         bond_dists = [norm(vector(Array(coords)[i], Array(coords)[i + n_atoms ÷ 2], boundary)) for i in 1:(n_atoms ÷ 2)]
         angles_inner = [HarmonicAngle(k=f32 ? 10.0f0 : 10.0, θ0=f32 ? 2.0f0 : 2.0) for i in 1:15]
         angles = InteractionList3Atoms(
-            gpu ? CuArray(Int32.(collect( 1:15))) : Int32.(collect( 1:15)),
-            gpu ? CuArray(Int32.(collect(16:30))) : Int32.(collect(16:30)),
-            gpu ? CuArray(Int32.(collect(31:45))) : Int32.(collect(31:45)),
-            gpu ? CuArray(angles_inner) : angles_inner,
+            ArrayType(Int32.(collect( 1:15))),
+            ArrayType(Int32.(collect(16:30))),
+            ArrayType(Int32.(collect(31:45))),
+            ArrayType(angles_inner),
         )
         torsions_inner = [PeriodicTorsion(
                 periodicities=[1, 2, 3],
@@ -86,16 +88,16 @@ end
                 n_terms=6,
             ) for i in 1:10]
         torsions = InteractionList4Atoms(
-            gpu ? CuArray(Int32.(collect( 1:10))) : Int32.(collect( 1:10)),
-            gpu ? CuArray(Int32.(collect(11:20))) : Int32.(collect(11:20)),
-            gpu ? CuArray(Int32.(collect(21:30))) : Int32.(collect(21:30)),
-            gpu ? CuArray(Int32.(collect(31:40))) : Int32.(collect(31:40)),
-            gpu ? CuArray(torsions_inner) : torsions_inner,
+            ArrayType(Int32.(collect( 1:10))),
+            ArrayType(Int32.(collect(11:20))),
+            ArrayType(Int32.(collect(21:30))),
+            ArrayType(Int32.(collect(31:40))),
+            ArrayType(torsions_inner),
         )
         atoms_setup = [Atom(charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.0f0 : 0.0) for i in 1:n_atoms]
         if obc2
             imp_obc2 = ImplicitSolventOBC(
-                gpu ? CuArray(atoms_setup) : atoms_setup,
+                ArrayType(atoms_setup),
                 [AtomData(element="O") for i in 1:n_atoms],
                 InteractionList2Atoms(bond_is, bond_js, nothing);
                 kappa=(f32 ? 0.7f0 : 0.7),
@@ -104,7 +106,7 @@ end
             general_inters = (imp_obc2,)
         elseif gbn2
             imp_gbn2 = ImplicitSolventGBN2(
-                gpu ? CuArray(atoms_setup) : atoms_setup,
+                ArrayType(atoms_setup),
                 [AtomData(element="O") for i in 1:n_atoms],
                 InteractionList2Atoms(bond_is, bond_js, nothing);
                 kappa=(f32 ? 0.7f0 : 0.7),
@@ -114,7 +116,7 @@ end
             general_inters = ()
         end
         neighbor_finder = DistanceNeighborFinder(
-            eligible=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+            eligible=ArrayType(trues(n_atoms, n_atoms)),
             n_steps=10,
             dist_cutoff=f32 ? 1.5f0 : 1.5,
         )
@@ -130,16 +132,16 @@ end
             bonds = InteractionList2Atoms(
                 bond_is,
                 bond_js,
-                gpu ? CuArray(bonds_inner) : bonds_inner,
+                ArrayType(bonds_inner),
             )
             cs = deepcopy(forward ? coords_dual : coords)
             vs = deepcopy(forward ? velocities_dual : velocities)
 
             sys = System(
-                atoms=gpu ? CuArray(atoms) : atoms,
-                coords=gpu ? CuArray(cs) : cs,
+                atoms=ArrayType(atoms),
+                coords=ArrayType(cs),
                 boundary=boundary,
-                velocities=gpu ? CuArray(vs) : vs,
+                velocities=ArrayType(vs),
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=sis ? (bonds, angles, torsions) : (),
                 general_inters=general_inters,
@@ -157,27 +159,27 @@ end
     end
 
     runs = [ #                gpu    par    fwd    f32    pis    sis    obc2   gbn2    tol_σ tol_r0
-        ("CPU"             , [false, false, false, false, true , true , false, false], 0.1 , 1.0 ),
-        ("CPU forward"     , [false, false, true , false, true , true , false, false], 0.02, 0.1 ),
-        ("CPU f32"         , [false, false, false, true , true , true , false, false], 0.2 , 10.0),
-        ("CPU nospecific"  , [false, false, false, false, true , false, false, false], 0.1 , 0.0 ),
-        ("CPU nopairwise"  , [false, false, false, false, false, true , false, false], 0.0 , 1.0 ),
-        ("CPU obc2"        , [false, false, false, false, true , true , true , false], 0.1 , 20.0),
-        ("CPU gbn2"        , [false, false, false, false, true , true , false, true ], 0.1 , 20.0),
-        ("CPU gbn2 forward", [false, false, true , false, true , true , false, true ], 0.05, 0.1 ),
+        ("CPU"             , [Array, false, false, false, true , true , false, false], 0.1 , 1.0 ),
+        ("CPU forward"     , [Array, false, true , false, true , true , false, false], 0.02, 0.1 ),
+        ("CPU f32"         , [Array, false, false, true , true , true , false, false], 0.2 , 10.0),
+        ("CPU nospecific"  , [Array, false, false, false, true , false, false, false], 0.1 , 0.0 ),
+        ("CPU nopairwise"  , [Array, false, false, false, false, true , false, false], 0.0 , 1.0 ),
+        ("CPU obc2"        , [Array, false, false, false, true , true , true , false], 0.1 , 20.0),
+        ("CPU gbn2"        , [Array, false, false, false, true , true , false, true ], 0.1 , 20.0),
+        ("CPU gbn2 forward", [Array, false, true , false, true , true , false, true ], 0.05, 0.1 ),
     ]
     if run_parallel_tests #                   gpu    par    fwd    f32    pis    sis    obc2   gbn2    tol_σ tol_r0
-        push!(runs, ("CPU parallel"        , [false, true , false, false, true , true , false, false], 0.1 , 1.0 ))
-        push!(runs, ("CPU parallel forward", [false, true , true , false, true , true , false, false], 0.01, 0.05))
-        push!(runs, ("CPU parallel f32"    , [false, true , false, true , true , true , false, false], 0.2 , 10.0))
+        push!(runs, ("CPU parallel"        , [Array, true , false, false, true , true , false, false], 0.1 , 1.0 ))
+        push!(runs, ("CPU parallel forward", [Array, true , true , false, true , true , false, false], 0.01, 0.05))
+        push!(runs, ("CPU parallel f32"    , [Array, true , false, true , true , true , false, false], 0.2 , 10.0))
     end
-    if run_gpu_tests #                        gpu    par    fwd    f32    pis    sis    obc2   gbn2    tol_σ tol_r0
-        push!(runs, ("GPU"                 , [true , false, false, false, true , true , false, false], 0.25, 20.0))
-        push!(runs, ("GPU f32"             , [true , false, false, true , true , true , false, false], 0.5 , 50.0))
-        push!(runs, ("GPU nospecific"      , [true , false, false, false, true , false, false, false], 0.25, 0.0 ))
-        push!(runs, ("GPU nopairwise"      , [true , false, false, false, false, true , false, false], 0.0 , 10.0))
-        push!(runs, ("GPU obc2"            , [true , false, false, false, true , true , true , false], 0.25, 20.0))
-        push!(runs, ("GPU gbn2"            , [true , false, false, false, true , true , false, true ], 0.25, 20.0))
+    if run_cuda_tests #                        gpu       par    fwd    f32    pis    sis    obc2   gbn2    tol_σ tol_r0
+        push!(runs, ("GPU"                 , [CuArray , false, false, false, true , true , false, false], 0.25, 20.0))
+        push!(runs, ("GPU f32"             , [CuArray , false, false, true , true , true , false, false], 0.5 , 50.0))
+        push!(runs, ("GPU nospecific"      , [CuArray , false, false, false, true , false, false, false], 0.25, 0.0 ))
+        push!(runs, ("GPU nopairwise"      , [CuArray , false, false, false, false, true , false, false], 0.0 , 10.0))
+        push!(runs, ("GPU obc2"            , [CuArray , false, false, false, true , true , true , false], 0.25, 20.0))
+        push!(runs, ("GPU gbn2"            , [CuArray , false, false, false, true , true , false, true ], 0.25, 20.0))
     end
 
     for (name, args, tol_σ, tol_r0) in runs
@@ -222,21 +224,22 @@ end
 end
 
 @testset "Differentiable protein" begin
-    function create_sys(gpu::Bool)
+    function create_sys(ArrayType::Type{AT}) where AT <: AbstractArray
         ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...; units=false)
         return System(
             joinpath(data_dir, "6mrr_nowater.pdb"),
             ff;
             units=false,
-            gpu=gpu,
+            ArrayType = ArrayType,
             implicit_solvent="gbn2",
             kappa=0.7,
         )
     end
 
-    function test_energy_grad(gpu::Bool, parallel::Bool)
-        sys_ref = create_sys(gpu)
-
+    function test_energy_grad(ArrayType::Type{AT},
+                              parallel::Bool) where AT <: AbstractArray
+        sys_ref = create_sys(ArrayType)
+    
         function loss(params_dic)
             n_threads = parallel ? Threads.nthreads() : 1
             atoms, pairwise_inters, specific_inter_lists, general_inters = inject_gradients(
@@ -262,8 +265,9 @@ end
 
     sum_abs(x) = sum(abs, x)
 
-    function test_force_grad(gpu::Bool, parallel::Bool)
-        sys_ref = create_sys(gpu)
+    function test_force_grad(ArrayType::Type{AT},
+                             parallel::Bool) where AT <: AbstractArray
+        sys_ref = create_sys(ArrayType)
 
         function loss(params_dic)
             n_threads = parallel ? Threads.nthreads() : 1
@@ -289,8 +293,9 @@ end
         return loss
     end
 
-    function test_sim_grad(gpu::Bool, parallel::Bool)
-        sys_ref = create_sys(gpu)
+    function test_sim_grad(ArrayType::Type{AT},
+                           parallel::Bool) where AT <: AbstractArray
+        sys_ref = create_sys(ArrayType)
 
         function loss(params_dic)
             n_threads = parallel ? Threads.nthreads() : 1
@@ -401,12 +406,12 @@ end
         "inter_PT_N/CT/C/N_k_9"    => 0.238488,
     )
 
-    platform_runs = [("CPU", [false, false])]
+    platform_runs = [("CPU", [Array, false])]
     if run_parallel_tests
-        push!(platform_runs, ("CPU parallel", [false, true]))
+        push!(platform_runs, ("CPU parallel", [Array, true]))
     end
-    if run_gpu_tests
-        push!(platform_runs, ("GPU", [true, false]))
+    if run_cuda_tests
+        push!(platform_runs, ("GPU", [CuArray, false]))
     end
     test_runs = [
         ("Energy", test_energy_grad, 1e-8),
@@ -426,7 +431,7 @@ end
     for (test_name, test_fn, test_tol) in test_runs
         for (platform, args) in platform_runs
             f = test_fn(args...)
-            grads_zygote = CUDA.allowscalar() do
+            grads_zygote = GPUArrays.allowscalar() do
                 gradient(f, params_dic)[1]
             end
             @test count(!iszero, values(grads_zygote)) == 67

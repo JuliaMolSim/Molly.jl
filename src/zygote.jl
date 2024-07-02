@@ -11,8 +11,8 @@ iszero_value(x) = iszero(x)
 Zygote.accum(x::AbstractArray{<:SizedVector}, ys::AbstractArray{<:SVector}...) = Zygote.accum.(convert(typeof(ys[1]), x), ys...)
 Zygote.accum(x::AbstractArray{<:SVector}, ys::AbstractArray{<:SizedVector}...) = Zygote.accum.(x, convert.(typeof(x), ys)...)
 
-Zygote.accum(x::Vector{<:SVector} , y::CuArray{<:SVector}) = Zygote.accum(CuArray(x), y)
-Zygote.accum(x::CuArray{<:SVector}, y::Vector{<:SVector} ) = Zygote.accum(x, CuArray(y))
+Zygote.accum(x::Vector{<:SVector} , y::AbstractGPUArray{<:SVector}) = Zygote.accum(get_array_type(y)(x), y)
+Zygote.accum(x::AbstractGPUArray{<:SVector}, y::Vector{<:SVector} ) = Zygote.accum(x, get_array_type(x)(y))
 
 Zygote.accum(x::SVector{D, T}, y::T) where {D, T} = x .+ y
 
@@ -24,9 +24,9 @@ Base.:+(x::SizedVector, y::Real) = x .+ y
 Base.:+(x::Real, y::Zygote.OneElement) = x .+ y
 Base.:+(x::Zygote.OneElement, y::Real) = x .+ y
 
-function Zygote.accum(x::CuArray{Atom{T, T, T, T}},
+function Zygote.accum(x::AbstractGPUArray{Atom{T, T, T, T}},
                       y::Vector{NamedTuple{(:index, :charge, :mass, :σ, :ϵ, :solute)}}) where T
-    CuArray(Zygote.accum(Array(x), y))
+    get_array_type(x)((Zygote.accum(Array(x), y)))
 end
 
 function Base.:+(x::Atom{T, T, T, T}, y::NamedTuple{(:index, :charge, :mass, :σ, :ϵ, :solute),
@@ -153,7 +153,7 @@ end
 
 # ChainRules._setindex_zero returns a union type with NoTangent via the default path
 # This causes a problem on the GPU
-function ChainRules.∇getindex(x::CuArray{<:StaticVector}, dy, inds...)
+function ChainRules.∇getindex(x::AbstractGPUArray{<:StaticVector}, dy, inds...) 
     plain_inds = Base.to_indices(x, inds)
     dx = ChainRules.∇getindex!(zero(x), dy, plain_inds...)
     return ChainRules.ProjectTo(x)(dx)
@@ -179,15 +179,16 @@ end
 sized_to_static(v::SizedVector{3, T, Vector{T}}) where {T} = SVector{3, T}(v[1], v[2], v[3])
 sized_to_static(v::SizedVector{2, T, Vector{T}}) where {T} = SVector{2, T}(v[1], v[2])
 
-function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg::CuArray) where {D, T}
-    CuArray(sized_to_static.(ȳ_in))
+function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}},
+                     arg::AbstractGPUArray) where {D, T}
+    get_array_type(arg)(sized_to_static.(ȳ_in))
 end
 
 function modify_grad(ȳ_in::AbstractArray{SizedVector{D, T, Vector{T}}}, arg) where {D, T}
     sized_to_static.(ȳ_in)
 end
 
-modify_grad(ȳ_in, arg::CuArray) = CuArray(ȳ_in)
+modify_grad(ȳ_in, arg::AbstractGPUArray) = get_Array_type(arg)(ȳ_in)
 modify_grad(ȳ_in, arg) = ȳ_in
 
 # Dualize a value with extra partials
@@ -720,5 +721,5 @@ for op in (:+, :-, :*, :/, :mass, :charge, :ustrip, :ustrip_vec, :wrap_coords,
             :get_bi, :get_bj, :get_fi, :get_fj, :gb_force_loop_1, :gb_force_loop_2, :gb_energy_loop)
     @eval Zygote.@adjoint Broadcast.broadcasted(::Broadcast.AbstractArrayStyle, f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
     # Avoid ambiguous dispatch
-    @eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
+    #@eval Zygote.@adjoint Broadcast.broadcasted(::CUDA.AbstractGPUArrayStyle  , f::typeof($op), args...) = Zygote.broadcast_forward(f, args...)
 end

@@ -70,8 +70,8 @@ function potential_energy(sys; n_threads::Integer=Threads.nthreads())
     return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function potential_energy(sys::System{D, false}, neighbors;
-                          n_threads::Integer=Threads.nthreads()) where D
+function potential_energy(sys::System{D, AT}, neighbors;
+                          n_threads::Integer=Threads.nthreads()) where {D, AT}
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
@@ -224,11 +224,11 @@ function potential_energy_pair_spec!(pe_vec, coords, atoms, pairwise_inters_nonl
     return nothing
 end
 
-function potential_energy(sys::System{D, true, T}, neighbors;
-                          n_threads::Integer=Threads.nthreads()) where {D, T}
+function potential_energy(sys::System{D, AT, T}, neighbors;
+                          n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
     n_atoms = length(sys)
     val_ft = Val(T)
-    pe_vec = CUDA.zeros(T, 1)
+    pe_vec = KernelAbstractions.zeros(get_backend(sys.coords), T, 1)
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
