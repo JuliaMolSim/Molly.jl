@@ -1,7 +1,6 @@
 # Chain rules to allow differentiable simulations
-
 @non_differentiable n_infinite_dims(args...)
-@non_differentiable zeros(args...)
+@non_differentiable KernelAbstractions.zeros(args...)
 @non_differentiable get_backend(args...)
 @non_differentiable get_array_type(args...)
 @non_differentiable random_velocities(args...)

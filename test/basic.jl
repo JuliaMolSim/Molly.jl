@@ -321,7 +321,7 @@ end
             )
             neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
             @test length(neighbors_gpu) == n_neighbors_ref
-            CUDA.allowscalar() do
+            GPUArrays.allowscalar() do
                 @test neighbors_gpu[10] isa Tuple{Int32, Int32, Bool}
             end
             @test identical_neighbors(neighbors_gpu, neighbors_ref)
@@ -339,7 +339,7 @@ end
             )
             neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
             @test length(neighbors_gpu) == n_neighbors_ref
-            AMDGPU.allowscalar() do
+            GPUArrays.allowscalar() do
                 @test neighbors_gpu[10] isa Tuple{Int32, Int32, Bool}
             end
             @test identical_neighbors(neighbors_gpu, neighbors_ref)

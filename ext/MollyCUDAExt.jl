@@ -3,10 +3,9 @@ module MollyCUDAExt
 using Molly
 using CUDA
 using ChainRulesCore
+using Atomix
 
-# CUDA specific calls for Molly
-@non_differentiable CUDA.zeros(args...)
-CUDA.Const(nl::NoNeighborList) = nl
+CUDA.Const(nl::Molly.NoNeighborList) = nl
 
 # CUDA.jl kernels
 const WARPSIZE = UInt32(32)
@@ -492,5 +491,10 @@ function specific_pe_4_atoms_kernel!(energy, coords_var, boundary, is_var, js_va
     end
     return nothing
 end
+
+# CUDA specific calls for Molly
+@non_differentiable CUDA.zeros(args...)
+@non_differentiable cuda_threads_blocks_pairwise(args...)
+@non_differentiable cuda_threads_blocks_specific(args...)
 
 end
