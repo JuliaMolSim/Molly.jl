@@ -73,7 +73,7 @@ function potential_energy(sys; n_threads::Integer=Threads.nthreads())
     return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function potential_energy(sys::System{D, false, T}, neighbors; step_n::Integer=0,
+function potential_energy(sys::System{D, false, T}, neighbors, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where {D, T}
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))

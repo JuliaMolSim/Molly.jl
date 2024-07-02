@@ -73,7 +73,7 @@ function simulate!(sys,
     hn = sim.step_size
 
     for step_n in 1:sim.max_steps
-        F = forces(sys, neighbors; n_threads=n_threads)
+        F = forces(sys, neighbors, step_n; n_threads=n_threads)
         max_force = maximum(norm.(F))
 
         coords_copy = sys.coords
@@ -84,7 +84,7 @@ function simulate!(sys,
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                     n_threads=n_threads)
-        E_trial = potential_energy(sys, neighbors; n_threads=n_threads)
+        E_trial = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
         if E_trial < E
             hn = 6 * hn / 5
             E = E_trial
@@ -158,7 +158,7 @@ function simulate!(sys,
                                                          sim.dt; n_threads=n_threads)
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
 
-        forces_t_dt = forces(sys, neighbors; n_threads=n_threads)
+        forces_t_dt = forces(sys, neighbors, step_n; n_threads=n_threads)
         accels_t_dt = forces_t_dt ./ masses(sys)
 
         sys.velocities += ((accels_t .+ accels_t_dt) .* sim.dt / 2)
@@ -173,7 +173,7 @@ function simulate!(sys,
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
         if recompute_forces
-            forces_t = forces(sys, neighbors; n_threads=n_threads)
+            forces_t = forces(sys, neighbors, step_n; n_threads=n_threads)
             accels_t = forces_t ./ masses(sys)
         else
             forces_t = forces_t_dt
@@ -225,7 +225,7 @@ function simulate!(sys,
     end
 
     for step_n in 1:n_steps
-        forces_t = forces(sys, neighbors; n_threads=n_threads)
+        forces_t = forces(sys, neighbors, step_n; n_threads=n_threads)
         accels_t = forces_t ./ masses(sys)
 
         sys.velocities += accels_t .* sim.dt
@@ -293,7 +293,7 @@ function simulate!(sys,
     end
 
     for step_n in 1:n_steps
-        forces_t = forces(sys, neighbors; n_threads=n_threads)
+        forces_t = forces(sys, neighbors, step_n; n_threads=n_threads)
         accels_t = forces_t ./ masses(sys)
 
         coords_copy = sys.coords
@@ -378,7 +378,7 @@ function simulate!(sys,
     end
 
     for step_n in 1:n_steps
-        forces_t = forces(sys, neighbors; n_threads=n_threads)
+        forces_t = forces(sys, neighbors, step_n; n_threads=n_threads)
         accels_t = forces_t ./ masses(sys)
 
         sys.velocities += accels_t .* sim.dt
@@ -507,7 +507,7 @@ function simulate!(sys,
 
     for step_n in 1:n_steps
         for (step!, args) in step_arg_pairs
-            step!(args..., neighbors)
+            step!(args..., neighbors, step_n)
         end
 
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
@@ -523,22 +523,22 @@ function simulate!(sys,
     return sys
 end
 
-function O_step!(sys, α_eff, σ_eff, rng, temperature, neighbors)
+function O_step!(sys, α_eff, σ_eff, rng, temperature, neighbors, step_n)
     noise = random_velocities(sys, temperature; rng=rng)
     sys.velocities = α_eff .* sys.velocities + σ_eff .* noise
     return sys
 end
 
-function A_step!(sys, dt_eff, neighbors)
+function A_step!(sys, dt_eff, neighbors, step_n)
     sys.coords += sys.velocities * dt_eff
     sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
     return sys
 end
 
 function B_step!(sys, dt_eff, acceleration_vector, compute_forces::Bool,
-                 n_threads::Integer, neighbors)
+                 n_threads::Integer, neighbors, step_n::Integer)
     if compute_forces
-        acceleration_vector .= accelerations(sys, neighbors; n_threads=n_threads)
+        acceleration_vector .= accelerations(sys, neighbors, step_n; n_threads=n_threads)
     end
     sys.velocities += dt_eff * acceleration_vector
     return sys
@@ -586,7 +586,7 @@ function simulate!(sys,
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
 
     for step_n in 1:n_steps
-        forces_t = forces(sys, neighbors; n_threads=n_threads)
+        forces_t = forces(sys, neighbors, step_n; n_threads=n_threads)
         accels_t = forces_t ./ masses(sys)
 
         noise = random_velocities(sys, sim.temperature; rng=rng)
@@ -666,7 +666,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
         T_half = uconvert(unit(sim.temperature), 2 * KE_half / (sys.df * sys.k))
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)
 
-        forces_t_dt = forces(sys, neighbors; n_threads=n_threads)
+        forces_t_dt = forces(sys, neighbors, step_n; n_threads=n_threads)
         accels_t_dt = forces_t_dt ./ masses(sys)
 
         sys.velocities = (v_half .+ accels_t_dt .* (sim.dt / 2)) ./
@@ -681,7 +681,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                     n_threads=n_threads)
         if recompute_forces
-            forces_t = forces(sys, neighbors; n_threads=n_threads)
+            forces_t = forces(sys, neighbors, step_n; n_threads=n_threads)
             accels_t = forces_t ./ masses(sys)
         else
             forces_t = forces_t_dt
@@ -906,6 +906,8 @@ end
                    n_threads=Threads.nthreads(), run_loggers=true)
 
 Run a REMD simulation on a [`ReplicaSystem`](@ref) using a REMD simulator.
+
+Not currently compatible with interactions that depend on step number.
 """
 function simulate_remd!(sys::ReplicaSystem,
                         remd_sim,
@@ -998,22 +1000,22 @@ function simulate!(sys::System{D, G, T},
                    run_loggers=true) where {D, G, T}
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E_old = potential_energy(sys, neighbors; n_threads=n_threads)
-    for i in 1:n_steps
+    for step_n in 1:n_steps
         coords_old = copy(sys.coords)
         sim.trial_moves(sys; sim.trial_args...) # Changes the coordinates of the system
         neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-        E_new = potential_energy(sys, neighbors; n_threads=n_threads)
+        E_new = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
 
         ΔE = E_new - E_old
         δ = ΔE / (sys.k * sim.temperature)
         if δ < 0 || (rand() < exp(-δ))
-            run_loggers!(sys, neighbors, i, run_loggers; n_threads=n_threads,
+            run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
                          current_potential_energy=E_new, success=true,
                          energy_rate=(E_new / (sys.k * sim.temperature)))
             E_old = E_new
         else
             sys.coords = coords_old
-            run_loggers!(sys, neighbors, i, run_loggers; n_threads=n_threads,
+            run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
                          current_potential_energy=E_old, success=false,
                          energy_rate=(E_old / (sys.k * sim.temperature)))
         end

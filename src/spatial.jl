@@ -679,7 +679,7 @@ end
 
 @doc raw"""
     virial(sys, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
-    virial(inter, sys, neighbors; step_n=0, n_threads=Threads.nthreads())
+    virial(inter, sys, neighbors, step_n; n_threads=Threads.nthreads())
 
 Calculate the virial of a system or the virial resulting from a general interaction.
 
@@ -705,7 +705,7 @@ function virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nt
     v = virial(sys, neighbors, step_n, pairwise_inters_nonl, pairwise_inters_nl)
 
     for inter in values(sys.general_inters)
-        v += virial(inter, sys, neighbors; step_n=step_n, n_threads=n_threads)
+        v += virial(inter, sys, neighbors, step_n; n_threads=n_threads)
     end
 
     return v
@@ -765,12 +765,12 @@ function virial(sys::System{D, G, T}, neighbors_dev, step_n, pairwise_inters_non
 end
 
 # Default for general interactions
-function virial(inter, sys::System{D, G, T}, neighbors=nothing; kwargs...) where {D, G, T}
+function virial(inter, sys::System{D, G, T}, args...; kwargs...) where {D, G, T}
     return zero(T) * sys.energy_units
 end
 
 @doc raw"""
-    pressure(sys, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
+    pressure(sys, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
 
 Calculate the pressure of a system.
 
@@ -793,13 +793,13 @@ function pressure(sys; n_threads::Integer=Threads.nthreads())
     return pressure(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function pressure(sys::AtomsBase.AbstractSystem{D}, neighbors;
+function pressure(sys::AtomsBase.AbstractSystem{D}, neighbors, step_n::Integer=0;
                   n_threads::Integer=Threads.nthreads()) where D
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
     NkT = energy_remove_mol(length(sys) * sys.k * temperature(sys))
-    vir = energy_remove_mol(virial(sys, neighbors; n_threads=n_threads))
+    vir = energy_remove_mol(virial(sys, neighbors, step_n; n_threads=n_threads))
     P = (NkT - (2 * vir) / D) / box_volume(sys.boundary)
     if sys.energy_units == NoUnits || D != 3
         # If implied energy units are (u * nm^2 * ps^-2) and everything is
