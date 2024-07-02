@@ -431,7 +431,7 @@ end
     for (test_name, test_fn, test_tol) in test_runs
         for (platform, args) in platform_runs
             f = test_fn(args...)
-            grads_zygote = CUDA.allowscalar() do
+            grads_zygote = GPUArrays.allowscalar() do
                 gradient(f, params_dic)[1]
             end
             @test count(!iszero, values(grads_zygote)) == 67
