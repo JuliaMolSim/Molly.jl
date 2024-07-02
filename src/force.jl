@@ -130,7 +130,7 @@ function init_forces_buffer(forces_nounits::CuArray{SVector{D, T}}, n_threads) w
 end
 
 """
-    forces(system, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
+    forces(system, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
 
 Calculate the forces on all atoms in a system using the pairwise, specific and
 general interactions.
@@ -148,7 +148,6 @@ end
 
 function forces_nounits!(fs_nounits, sys::System{D, false}, neighbors, fs_chunks=nothing,
                          step_n::Integer=0; n_threads::Integer=Threads.nthreads()) where D
-    n_atoms = length(sys)
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
@@ -158,20 +157,22 @@ function forces_nounits!(fs_nounits, sys::System{D, false}, neighbors, fs_chunks
 
     if length(sys.pairwise_inters) > 0
         if n_threads > 1
-            pairwise_forces_threads!(fs_nounits, fs_chunks, neighbors, sys.atoms, sys.coords,
-                                     sys.velocities, sys.boundary, sys.force_units, n_atoms,
+            pairwise_forces_threads!(fs_nounits, fs_chunks, sys.atoms, sys.coords, sys.velocities,
+                                     sys.boundary, neighbors, sys.force_units, length(sys),
                                      pairwise_inters_nonl, pairwise_inters_nl, n_threads, step_n)
         else
-            pairwise_forces!(fs_nounits, neighbors, sys.atoms, sys.coords, sys.velocities,
-                             sys.boundary, sys.force_units, n_atoms, pairwise_inters_nonl,
+            pairwise_forces!(fs_nounits, sys.atoms, sys.coords, sys.velocities, sys.boundary,
+                             neighbors, sys.force_units, length(sys), pairwise_inters_nonl,
                              pairwise_inters_nl, step_n)
         end
     else
         fill!(fs_nounits, zero(eltype(fs_nounits)))
     end
 
-    specific_forces!(fs_nounits, sys.atoms, sys.coords, sys.velocities, sys.boundary,
-                     sys.force_units, sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, step_n)
+    if length(sys.specific_inter_lists) > 0
+        specific_forces!(fs_nounits, sys.atoms, sys.coords, sys.velocities, sys.boundary,
+                         sys.force_units, sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, step_n)
+    end
 
     for inter in values(sys.general_inters)
         fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, n_threads=n_threads)
@@ -182,8 +183,8 @@ function forces_nounits!(fs_nounits, sys::System{D, false}, neighbors, fs_chunks
     return fs_nounits
 end
 
-function pairwise_forces!(fs_nounits, neighbors, atoms, coords, velocities, boundary, force_units, n_atoms,
-                          pairwise_inters_nonl, pairwise_inters_nl, step_n=0)
+function pairwise_forces!(fs_nounits, atoms, coords, velocities, boundary, neighbors, force_units,
+                          n_atoms, pairwise_inters_nonl, pairwise_inters_nl, step_n=0)
     fill!(fs_nounits, zero(eltype(fs_nounits)))
 
     @inbounds if length(pairwise_inters_nonl) > 0
@@ -227,9 +228,9 @@ function pairwise_forces!(fs_nounits, neighbors, atoms, coords, velocities, boun
     return fs_nounits
 end
 
-function pairwise_forces_threads!(fs_nounits, fs_chunks, neighbors, atoms, coords, velocities, boundary,
-                                  force_units, n_atoms, pairwise_inters_nonl, pairwise_inters_nl,
-                                  n_threads, step_n=0)
+function pairwise_forces_threads!(fs_nounits, fs_chunks, atoms, coords, velocities, boundary,
+                                  neighbors, force_units, n_atoms, pairwise_inters_nonl,
+                                  pairwise_inters_nl, n_threads, step_n=0)
     if isnothing(fs_chunks)
         throw(ArgumentError("fs_chunks is not set but n_threads is > 1"))
     end
@@ -351,6 +352,7 @@ function forces_nounits!(fs_nounits, sys::System{D, true, T}, neighbors,
                          n_threads::Integer=Threads.nthreads()) where {D, T}
     fill!(fs_mat, zero(T))
     val_ft = Val(T)
+
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(length(sys))
