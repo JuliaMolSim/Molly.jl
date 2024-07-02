@@ -2,6 +2,7 @@ module MollyCUDAExt
 
 using Molly
 using CUDA
+using ChainRulesCore
 
 # CUDA specific calls for Molly
 @non_differentiable CUDA.zeros(args...)
