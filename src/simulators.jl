@@ -413,7 +413,7 @@ function simulate!(sys,
         end
         sys.coords .+= sys.velocities .* sim.dt ./ 2
 
-        noise .= random_velocities(sys, sim.temperature; rng=rng)
+        random_velocities!(noise, sys, sim.temperature; rng=rng)
         sys.velocities .= sys.velocities .* sim.vel_scale .+ noise .* sim.noise_scale
 
         sys.coords .+= sys.velocities .* sim.dt ./ 2
@@ -497,7 +497,11 @@ function simulate!(sys,
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
-    accels_t = accelerations(sys, neighbors; n_threads=n_threads)
+    forces_nounits_t = ustrip_vec.(similar(sys.coords))
+    forces_t = forces_nounits_t .* sys.force_units
+    forces_buffer = init_forces_buffer(forces_nounits_t, n_threads)
+    accels_t = forces_t ./ masses(sys)
+    noise = similar(sys.velocities)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
 
@@ -524,9 +528,10 @@ function simulate!(sys,
         if op == 'A'
             return (A_step!, (sys, effective_dts[j]))
         elseif op == 'B'
-            return (B_step!, (sys, effective_dts[j], accels_t, force_computation_steps[j], n_threads))
+            return (B_step!, (sys, forces_nounits_t, forces_t, forces_buffer, accels_t,
+                              effective_dts[j], force_computation_steps[j], n_threads))
         elseif op == 'O'
-            return (O_step!, (sys, α_eff, σ_eff, rng, sim.temperature))
+            return (O_step!, (sys, noise, α_eff, σ_eff, rng, sim.temperature))
         end
     end
 
@@ -548,24 +553,27 @@ function simulate!(sys,
     return sys
 end
 
-function O_step!(sys, α_eff, σ_eff, rng, temperature, neighbors, step_n)
-    noise = random_velocities(sys, temperature; rng=rng)
-    sys.velocities .= α_eff .* sys.velocities .+ σ_eff .* noise
-    return sys
-end
-
 function A_step!(sys, dt_eff, neighbors, step_n)
     sys.coords .+= sys.velocities .* dt_eff
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     return sys
 end
 
-function B_step!(sys, dt_eff, acceleration_vector, compute_forces::Bool,
-                 n_threads::Integer, neighbors, step_n::Integer)
+function B_step!(sys, forces_nounits_t, forces_t, forces_buffer, accels_t, dt_eff,
+                 compute_forces::Bool, n_threads::Integer, neighbors, step_n::Integer)
     if compute_forces
-        acceleration_vector .= accelerations(sys, neighbors, step_n; n_threads=n_threads)
+        forces_nounits_t .= forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, step_n;
+                                            n_threads=n_threads)
+        forces_t .= forces_nounits_t .* sys.force_units
+        accels_t .= forces_t ./ masses(sys)
     end
-    sys.velocities .+= dt_eff .* acceleration_vector
+    sys.velocities .+= dt_eff .* accels_t
+    return sys
+end
+
+function O_step!(sys, noise, α_eff, σ_eff, rng, temperature, neighbors, step_n)
+    random_velocities!(noise, sys, temperature; rng=rng)
+    sys.velocities .= α_eff .* sys.velocities .+ σ_eff .* noise
     return sys
 end
 
@@ -621,7 +629,7 @@ function simulate!(sys,
         forces_t .= forces_nounits_t .* sys.force_units
         accels_t .= forces_t ./ masses(sys)
 
-        noise .= random_velocities(sys, sim.temperature; rng=rng)
+        random_velocities!(noise, sys, sim.temperature; rng=rng)
         sys.coords .+= (accels_t ./ sim.friction) .* sim.dt .+ sqrt((2 / sim.friction) * sim.dt) .* noise
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
 

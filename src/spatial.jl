@@ -603,13 +603,24 @@ end
 
 """
     random_velocities!(sys, temp)
+    random_velocities!(vels, sys, temp)
 
-Set the velocities of a [`System`](@ref) to random velocities generated from the
-Maxwell-Boltzmann distribution.
+Set the velocities of a [`System`](@ref), or a vector, to random velocities
+generated from the Maxwell-Boltzmann distribution.
 """
 function random_velocities!(sys, temp; rng=Random.GLOBAL_RNG)
-    sys.velocities = random_velocities(sys, temp; rng=rng)
+    sys.velocities .= random_velocities(sys, temp; rng=rng)
     return sys
+end
+
+function random_velocities!(vels, sys::AbstractSystem{3}, temp; rng=Random.GLOBAL_RNG)
+    vels .= random_velocity_3D.(masses(sys), temp, sys.k, rng)
+    return vels
+end
+
+function random_velocities!(vels, sys::AbstractSystem{2}, temp; rng=Random.GLOBAL_RNG)
+    vels .= random_velocity_2D.(masses(sys), temp, sys.k, rng)
+    return vels
 end
 
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
@@ -673,7 +684,7 @@ function remove_CM_motion!(sys)
     atom_masses = masses(sys)
     cm_momentum = sum_svec(Array(sys.velocities .* atom_masses))
     cm_velocity = cm_momentum / sum(Array(atom_masses))
-    sys.velocities = sys.velocities .- (cm_velocity,)
+    sys.velocities .= sys.velocities .- (cm_velocity,)
     return sys
 end
 
@@ -875,7 +886,7 @@ Not currently compatible with automatic differentiation using Zygote.
 function scale_coords!(sys, scale_factor; ignore_molecules=false)
     if ignore_molecules || isnothing(sys.topology)
         sys.boundary = scale_boundary(sys.boundary, scale_factor)
-        sys.coords = scale_vec.(sys.coords, Ref(scale_factor))
+        sys.coords .= scale_vec.(sys.coords, Ref(scale_factor))
     elseif sys.boundary isa TriclinicBoundary
         error("scaling coordinates by molecule is not compatible with a TriclinicBoundary")
     else
@@ -903,7 +914,7 @@ function scale_coords!(sys, scale_factor; ignore_molecules=false)
             coords_nounits[i] = wrap_coords(
                     coords_nounits[i] .+ shift_vecs[mi] .- center_shifts[mi], boundary_nounits)
         end
-        sys.coords = coords_nounits * coord_units
+        sys.coords .= move_array(coords_nounits .* coord_units, sys)
     end
     return sys
 end

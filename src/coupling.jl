@@ -77,7 +77,7 @@ function apply_coupling!(sys::System{D, true, T}, thermostat::AndersenThermostat
     atoms_to_bump_dev = move_array(atoms_to_bump, sys)
     atoms_to_leave_dev = move_array(atoms_to_leave, sys)
     vs = random_velocities(sys, thermostat.temperature)
-    sys.velocities = sys.velocities .* atoms_to_leave_dev .+ vs .* atoms_to_bump_dev
+    sys.velocities .= sys.velocities .* atoms_to_leave_dev .+ vs .* atoms_to_bump_dev
     return false
 end
 
@@ -101,7 +101,7 @@ end
 
 function apply_coupling!(sys, thermostat::RescaleThermostat, sim, neighbors=nothing,
                          step_n::Integer=0; n_threads::Integer=Threads.nthreads())
-    sys.velocities *= sqrt(thermostat.temperature / temperature(sys))
+    sys.velocities .*= sqrt(thermostat.temperature / temperature(sys))
     return false
 end
 
@@ -126,7 +126,7 @@ end
 function apply_coupling!(sys, thermostat::BerendsenThermostat, sim, neighbors=nothing,
                          step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temperature(sys)) - 1)
-    sys.velocities *= sqrt(λ2)
+    sys.velocities .*= sqrt(λ2)
     return false
 end
 
@@ -194,6 +194,7 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
     kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
+    old_coords = similar(sys.coords)
 
     for attempt_n in 1:barostat.n_iterations
         E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
@@ -201,7 +202,7 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
         dV = barostat.volume_scale * (2 * rand(T) - 1)
         v_scale = (V + dV) / V
         l_scale = (D == 2 ? sqrt(v_scale) : cbrt(v_scale))
-        old_coords = copy(sys.coords)
+        old_coords .= sys.coords
         old_boundary = sys.boundary
         scale_coords!(sys, l_scale)
 
@@ -220,7 +221,7 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
             recompute_forces = true
             barostat.n_accepted += 1
         else
-            sys.coords = old_coords
+            sys.coords .= old_coords
             sys.boundary = old_boundary
         end
         barostat.n_attempted += 1
@@ -337,6 +338,7 @@ function apply_coupling!(sys::System{D, G, T},
     kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
+    old_coords = similar(sys.coords)
 
     for attempt_n in 1:barostat.n_iterations
         axis = 0
@@ -354,7 +356,7 @@ function apply_coupling!(sys::System{D, G, T},
         dV = barostat.volume_scale[axis] * (2 * rand(T) - 1)
         v_scale = (V + dV) / V
         l_scale = SVector{D}(mask1 * v_scale + mask2)
-        old_coords = copy(sys.coords)
+        old_coords .= sys.coords
         old_boundary = sys.boundary
         scale_coords!(sys, l_scale)
 
@@ -373,7 +375,7 @@ function apply_coupling!(sys::System{D, G, T},
             recompute_forces = true
             barostat.n_accepted[axis] += 1
         else
-            sys.coords = old_coords
+            sys.coords .= old_coords
             sys.boundary = old_boundary
         end
         barostat.n_attempted[axis] += 1
@@ -510,6 +512,7 @@ function apply_coupling!(sys::System{D, G, T},
     kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
+    old_coords = similar(sys.coords)
 
     for attempt_n in 1:barostat.n_iterations
         axis = 0
@@ -545,7 +548,7 @@ function apply_coupling!(sys::System{D, G, T},
 
         dA = sys.boundary[1] * sys.boundary[2] * (l_scale[1] * l_scale[2] - one(T))
 
-        old_coords = copy(sys.coords)
+        old_coords .= sys.coords
         old_boundary = sys.boundary
         scale_coords!(sys, l_scale)
 
@@ -566,7 +569,7 @@ function apply_coupling!(sys::System{D, G, T},
             recompute_forces = true
             barostat.n_accepted[axis] += 1
         else
-            sys.coords = old_coords
+            sys.coords .= old_coords
             sys.boundary = old_boundary
         end
         barostat.n_attempted[axis] += 1
