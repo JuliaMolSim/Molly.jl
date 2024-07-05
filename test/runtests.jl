@@ -6,7 +6,7 @@ import AtomsCalculators
 using AtomsCalculators.AtomsCalculatorsTesting
 import BioStructures # Imported to avoid clashing names
 using CUDA
-import Enzyme
+using Enzyme
 using FiniteDifferences
 import SimpleCrystals
 
