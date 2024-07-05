@@ -11,14 +11,21 @@
         return F[1]
     end
 
+    function pe(dist)
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, a1, a2, NoUnits)
+    end
+
     function force_grad(dist)
-        grad = gradient(dist) do dist
-            c1 = SVector(1.0, 1.0, 1.0)
-            c2 = SVector(dist + 1.0, 1.0, 1.0)
-            vec = vector(c1, c2, boundary)
-            potential_energy(inter, vec, a1, a2, NoUnits)
-        end
-        return -grad[1]
+        grads = autodiff(
+            Reverse,
+            pe,
+            Active,
+            Active(dist),
+        )
+        return -grads[1][1]
     end
 
     dists = collect(0.2:0.01:1.2)
@@ -51,8 +58,6 @@ end
         )
         coords = place_atoms(n_atoms, boundary; min_dist=f32 ? 0.6f0 : 0.6, max_attempts=500)
         velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-        coords_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in coords]
-        velocities_dual = [ForwardDiff.Dual.(x, f32 ? 0.0f0 : 0.0) for x in velocities]
         nb_cutoff = f32 ? 1.2f0 : 1.2
         lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
         crf = CoulombReactionField(
@@ -125,8 +130,8 @@ end
                 bond_js,
                 gpu ? CuArray(bonds_inner) : bonds_inner,
             )
-            cs = deepcopy(forward ? coords_dual : coords)
-            vs = deepcopy(forward ? velocities_dual : velocities)
+            cs = deepcopy(coords)
+            vs = deepcopy(velocities)
 
             sys = System(
                 atoms=gpu ? CuArray(atoms) : atoms,
@@ -179,35 +184,28 @@ end
         r0 = f32 ? 1.0f0 : 1.0
         f = test_simulation_grad(args...)
         if forward
-            # Run once to setup
-            grad_zygote = (
-                gradient((σ, r0) -> Zygote.forwarddiff(σ  -> f(σ, r0), σ ), σ, r0)[1],
-                gradient((σ, r0) -> Zygote.forwarddiff(r0 -> f(σ, r0), r0), σ, r0)[2],
-            )
-            grad_zygote = (
-                gradient((σ, r0) -> Zygote.forwarddiff(σ  -> f(σ, r0), σ ), σ, r0)[1],
-                gradient((σ, r0) -> Zygote.forwarddiff(r0 -> f(σ, r0), r0), σ, r0)[2],
+            grad_enzyme = (
+                autodiff(Forward, f, Duplicated, Duplicated(σ, f32 ? 1.0f0 : 1.0), Const(r0))[2],
+                autodiff(Forward, f, Duplicated, Const(σ), Duplicated(r0, f32 ? 1.0f0 : 1.0))[2],
             )
         else
-            # Run once to setup
-            grad_zygote = gradient(f, σ, r0)
-            grad_zygote = gradient(f, σ, r0)
+            grad_enzyme = autodiff(Reverse, f, Active, Active(σ), Active(r0))[1]
         end
         grad_fd = (
             central_fdm(6, 1)(σ  -> ForwardDiff.value(f(σ, r0)), σ ),
             central_fdm(6, 1)(r0 -> ForwardDiff.value(f(σ, r0)), r0),
         )
-        for (prefix, gzy, gfd, tol) in zip(("σ", "r0"), grad_zygote, grad_fd, (tol_σ, tol_r0))
+        for (prefix, genz, gfd, tol) in zip(("σ", "r0"), grad_enzyme, grad_fd, (tol_σ, tol_r0))
             if abs(gfd) < 1e-13
-                @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy"
+                @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Enzyme $genz"
                 ztol = contains(name, "f32") ? 1e-8 : 1e-10
-                @test isnothing(gzy) || abs(gzy) < ztol
-            elseif isnothing(gzy)
-                @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy"
-                @test !isnothing(gzy)
+                @test isnothing(genz) || abs(genz) < ztol
+            elseif isnothing(genz)
+                @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Enzyme $genz"
+                @test !isnothing(genz)
             else
-                frac_diff = abs(gzy - gfd) / abs(gfd)
-                @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Zygote $gzy, fractional difference $frac_diff"
+                frac_diff = abs(genz - gfd) / abs(gfd)
+                @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Enzyme $genz, fractional difference $frac_diff"
                 @test frac_diff < tol
             end
         end
@@ -419,19 +417,18 @@ end
     for (test_name, test_fn, test_tol) in test_runs
         for (platform, args) in platform_runs
             f = test_fn(args...)
-            grads_zygote = CUDA.allowscalar() do
-                gradient(f, params_dic)[1]
-            end
-            @test count(!iszero, values(grads_zygote)) == 67
+            grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
+            autodiff(Reverse, f, Active, Duplicated(params_dic, grads_enzyme))
+            @test count(!iszero, values(grads_enzyme)) == 67
             for param in params_to_test
-                gzy = grads_zygote[param]
+                genz = grads_enzyme[param]
                 gfd = central_fdm(6, 1)(params_dic[param]) do val
                     dic = deepcopy(params_dic)
                     dic[param] = val
                     f(dic)
                 end
-                frac_diff = abs(gzy - gfd) / abs(gfd)
-                @info "$(rpad(test_name, 6)) - $(rpad(platform, 12)) - $(rpad(param, 21)) - FD $gfd, Zygote $gzy, fractional difference $frac_diff"
+                frac_diff = abs(genz - gfd) / abs(gfd)
+                @info "$(rpad(test_name, 6)) - $(rpad(platform, 12)) - $(rpad(param, 21)) - FD $gfd, Enzyme $genz, fractional difference $frac_diff"
                 @test frac_diff < test_tol
             end
         end
