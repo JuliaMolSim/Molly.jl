@@ -1,5 +1,13 @@
 # Molly.jl release notes
 
+## v0.21.1 - Jul 2024
+
+### Non-breaking changes
+- Compatibility bounds are updated for various packages.
+
+### Bug fixes
+- A bug in boundary gradient calculation is fixed.
+
 ## v0.21.0 - Apr 2024
 
 ### Breaking changes
