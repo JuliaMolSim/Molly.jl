@@ -1247,7 +1247,11 @@ function MollyCalculator(;
             force_units, energy_units, k)
 end
 
-function AtomsCalculators.promote_force_type(::Any, calc::MollyCalculator{D}) where D
+AtomsCalculators.energy_unit(calc::MollyCalculator) = calc.energy_units
+AtomsCalculators.length_unit(calc::MollyCalculator) = calc.energy_units / calc.force_units
+AtomsCalculators.force_unit(calc::MollyCalculator) = calc.force_units
+
+function AtomsCalculators.promote_force_type(::AbstractSystem{D}, calc::MollyCalculator{D}) where D
     T = typeof(ustrip(calc.k))
     return typeof(ones(SVector{D, T}) * calc.force_units)
 end
