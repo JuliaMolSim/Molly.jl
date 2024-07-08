@@ -17,7 +17,6 @@ using CUDA
 using DataStructures
 using Distances
 using Distributions
-using Enzyme
 using EzXML
 using FLoops
 using Graphs

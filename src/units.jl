@@ -187,12 +187,6 @@ function convert_k_units(T, k, energy_units)
     return k_converted
 end
 
-function check_energy_units(E, energy_units)
-    if unit(E) != energy_units
-        error("system energy units are ", energy_units, " but encountered energy units ", unit(E))
-    end
-end
-
 function check_force_units(F, force_units)
     if unit(F) != force_units
         error("system force units are ", force_units, " but encountered force units ", unit(F))
@@ -200,6 +194,12 @@ function check_force_units(F, force_units)
 end
 
 check_force_units(F::SVector, force_units) = @inbounds check_force_units(F[1], force_units)
+
+function check_energy_units(E, energy_units)
+    if unit(E) != energy_units
+        error("system energy units are ", energy_units, " but encountered energy units ", unit(E))
+    end
+end
 
 function energy_remove_mol(x)
     if dimension(x) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
