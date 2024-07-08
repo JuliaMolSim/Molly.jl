@@ -47,97 +47,94 @@ end
 
     function test_simulation_grad(gpu::Bool, parallel::Bool, forward::Bool, f32::Bool, pis::Bool,
                                   sis::Bool, obc2::Bool, gbn2::Bool)
+        T = f32 ? Float32 : Float64
+        AT = gpu ? CuArray : Array
         n_atoms = 50
         n_steps = 100
-        atom_mass = f32 ? 10.0f0 : 10.0
-        boundary = f32 ? CubicBoundary(3.0f0) : CubicBoundary(3.0)
-        temp = f32 ? 1.0f0 : 1.0
+        atom_mass = T(10.0)
+        boundary = CubicBoundary(T(3.0))
+        temp = T(1.0)
         simulator = VelocityVerlet(
-            dt=f32 ? 0.001f0 : 0.001,
+            dt=T(0.001),
             coupling=RescaleThermostat(temp),
         )
-        coords = place_atoms(n_atoms, boundary; min_dist=f32 ? 0.6f0 : 0.6, max_attempts=500)
+        coords = place_atoms(n_atoms, boundary; min_dist=T(0.6), max_attempts=500)
         velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-        nb_cutoff = f32 ? 1.2f0 : 1.2
+        nb_cutoff = T(1.2)
         lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
         crf = CoulombReactionField(
             dist_cutoff=nb_cutoff,
-            solvent_dielectric=f32 ? Float32(Molly.crf_solvent_dielectric) : Molly.crf_solvent_dielectric,
+            solvent_dielectric=T(Molly.crf_solvent_dielectric),
             use_neighbors=true,
-            coulomb_const=f32 ? Float32(ustrip(Molly.coulomb_const)) : ustrip(Molly.coulomb_const),
+            coulomb_const=T(ustrip(Molly.coulomb_const)),
         )
         pairwise_inters = pis ? (lj, crf) : ()
-        bond_is = gpu ? CuArray(Int32.(collect(1:(n_atoms ÷ 2)))) : Int32.(collect(1:(n_atoms ÷ 2)))
-        bond_js = gpu ? CuArray(Int32.(collect((1 + n_atoms ÷ 2):n_atoms))) : Int32.(collect((1 + n_atoms ÷ 2):n_atoms))
+        bond_is = AT(Int32.(collect(1:(n_atoms ÷ 2))))
+        bond_js = AT(Int32.(collect((1 + n_atoms ÷ 2):n_atoms)))
         bond_dists = [norm(vector(Array(coords)[i], Array(coords)[i + n_atoms ÷ 2], boundary)) for i in 1:(n_atoms ÷ 2)]
-        angles_inner = [HarmonicAngle(k=f32 ? 10.0f0 : 10.0, θ0=f32 ? 2.0f0 : 2.0) for i in 1:15]
+        angles_inner = [HarmonicAngle(k=T(10.0), θ0=T(2.0)) for i in 1:15]
         angles = InteractionList3Atoms(
-            gpu ? CuArray(Int32.(collect( 1:15))) : Int32.(collect( 1:15)),
-            gpu ? CuArray(Int32.(collect(16:30))) : Int32.(collect(16:30)),
-            gpu ? CuArray(Int32.(collect(31:45))) : Int32.(collect(31:45)),
-            gpu ? CuArray(angles_inner) : angles_inner,
+            AT(Int32.(collect( 1:15))),
+            AT(Int32.(collect(16:30))),
+            AT(Int32.(collect(31:45))),
+            AT(angles_inner),
         )
         torsions_inner = [PeriodicTorsion(
                 periodicities=[1, 2, 3],
-                phases=f32 ? [1.0f0, 0.0f0, -1.0f0] : [1.0, 0.0, -1.0],
-                ks=f32 ? [10.0f0, 5.0f0, 8.0f0] : [10.0, 5.0, 8.0],
+                phases=T[1.0, 0.0, -1.0],
+                ks=T[10.0, 5.0, 8.0],
                 n_terms=6,
             ) for i in 1:10]
         torsions = InteractionList4Atoms(
-            gpu ? CuArray(Int32.(collect( 1:10))) : Int32.(collect( 1:10)),
-            gpu ? CuArray(Int32.(collect(11:20))) : Int32.(collect(11:20)),
-            gpu ? CuArray(Int32.(collect(21:30))) : Int32.(collect(21:30)),
-            gpu ? CuArray(Int32.(collect(31:40))) : Int32.(collect(31:40)),
-            gpu ? CuArray(torsions_inner) : torsions_inner,
+            AT(Int32.(collect( 1:10))),
+            AT(Int32.(collect(11:20))),
+            AT(Int32.(collect(21:30))),
+            AT(Int32.(collect(31:40))),
+            AT(torsions_inner),
         )
-        atoms_setup = [Atom(charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.0f0 : 0.0) for i in 1:n_atoms]
+        atoms_setup = [Atom(charge=zero(T), σ=zero(T)) for i in 1:n_atoms]
         if obc2
             imp_obc2 = ImplicitSolventOBC(
-                gpu ? CuArray(atoms_setup) : atoms_setup,
+                AT(atoms_setup),
                 [AtomData(element="O") for i in 1:n_atoms],
                 InteractionList2Atoms(bond_is, bond_js, nothing);
-                kappa=(f32 ? 0.7f0 : 0.7),
+                kappa=T(0.7),
                 use_OBC2=true,
             )
             general_inters = (imp_obc2,)
         elseif gbn2
             imp_gbn2 = ImplicitSolventGBN2(
-                gpu ? CuArray(atoms_setup) : atoms_setup,
+                AT(atoms_setup),
                 [AtomData(element="O") for i in 1:n_atoms],
                 InteractionList2Atoms(bond_is, bond_js, nothing);
-                kappa=(f32 ? 0.7f0 : 0.7),
+                kappa=T(0.7),
             )
             general_inters = (imp_gbn2,)
         else
             general_inters = ()
         end
         neighbor_finder = DistanceNeighborFinder(
-            eligible=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+            eligible=AT(trues(n_atoms, n_atoms)),
             n_steps=10,
-            dist_cutoff=f32 ? 1.5f0 : 1.5,
+            dist_cutoff=T(1.5),
         )
 
         function loss(σ, r0)
-            if f32
-                atoms = [Atom(i, i % 2 == 0 ? -0.02f0 : 0.02f0, atom_mass, σ, 0.2f0, false) for i in 1:n_atoms]
-            else
-                atoms = [Atom(i, i % 2 == 0 ? -0.02 : 0.02, atom_mass, σ, 0.2, false) for i in 1:n_atoms]
-            end
-
-            bonds_inner = [HarmonicBond(f32 ? 100.0f0 : 100.0, bond_dists[i] * r0) for i in 1:(n_atoms ÷ 2)]
+            atoms = [Atom(i, i % 2 == 0 ? T(-0.02) : T(0.02), atom_mass, σ, T(0.2), false) for i in 1:n_atoms]
+            bonds_inner = [HarmonicBond(T(100.0), bond_dists[i] * r0) for i in 1:(n_atoms ÷ 2)]
             bonds = InteractionList2Atoms(
                 bond_is,
                 bond_js,
-                gpu ? CuArray(bonds_inner) : bonds_inner,
+                AT(bonds_inner),
             )
             cs = deepcopy(coords)
             vs = deepcopy(velocities)
 
             sys = System(
-                atoms=gpu ? CuArray(atoms) : atoms,
-                coords=gpu ? CuArray(cs) : cs,
+                atoms=AT(atoms),
+                coords=AT(cs),
                 boundary=boundary,
-                velocities=gpu ? CuArray(vs) : vs,
+                velocities=AT(vs),
                 pairwise_inters=pairwise_inters,
                 specific_inter_lists=sis ? (bonds, angles, torsions) : (),
                 general_inters=general_inters,
