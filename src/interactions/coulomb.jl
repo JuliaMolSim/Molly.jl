@@ -27,14 +27,13 @@ function Coulomb(;
                     use_neighbors=false,
                     weight_special=1,
                     coulomb_const=coulomb_const)
-    return Coulomb{typeof(cutoff), typeof(weight_special), typeof(coulomb_const)}(
-        cutoff, use_neighbors, weight_special, coulomb_const)
+    return Coulomb(cutoff, use_neighbors, weight_special, coulomb_const)
 end
 
 use_neighbors(inter::Coulomb) = inter.use_neighbors
 
 function Base.zero(coul::Coulomb{C, W, T}) where {C, W, T}
-    return Coulomb{C, W, T}(coul.cutoff, false, zero(W), zero(T))
+    return Coulomb(coul.cutoff, coul.use_neighbors, zero(W), zero(T))
 end
 
 function Base.:+(c1::Coulomb, c2::Coulomb)
@@ -51,7 +50,7 @@ end
                        atom_i,
                        atom_j,
                        force_units=u"kJ * mol^-1 * nm^-1",
-                       special::Bool=false,
+                       special=false,
                        args...) where C
     r2 = sum(abs2, dr)
     cutoff = inter.cutoff
@@ -76,7 +75,7 @@ end
                                   atom_i,
                                   atom_j,
                                   energy_units=u"kJ * mol^-1",
-                                  special::Bool=false,
+                                  special=false,
                                   args...) where C
     r2 = sum(abs2, dr)
     cutoff = inter.cutoff
@@ -97,7 +96,7 @@ function potential(::Coulomb, r2, invr2, (ke, qi, qj))
 end
 
 @doc raw"""
-    CoulombSoftCore(; cutoff, α, λ, p, use_neighbors, lorentz_mixing, weight_special, coulomb_const)
+    CoulombSoftCore(; cutoff, α, λ, p, use_neighbors, σ_mixing, weight_special, coulomb_const)
 
 The Coulomb electrostatic interaction between two atoms with a soft core.
 
@@ -107,16 +106,16 @@ V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha  \sigma_{ij}^6
 ```
 If ``\alpha`` or ``\lambda`` are zero this gives the standard [`Coulomb`](@ref) potential.
 """
-struct CoulombSoftCore{C, A, L, P, R, W, T} <: PairwiseInteraction
+struct CoulombSoftCore{C, A, L, P, W, T, R} <: PairwiseInteraction
     cutoff::C
     α::A
     λ::L
     p::P
-    σ6_fac::R
     use_neighbors::Bool
-    lorentz_mixing::Bool
+    σ_mixing::Function
     weight_special::W
     coulomb_const::T
+    σ6_fac::R
 end
 
 function CoulombSoftCore(;
@@ -125,28 +124,27 @@ function CoulombSoftCore(;
                     λ=0,
                     p=2,
                     use_neighbors=false,
-                    lorentz_mixing=true,
+                    σ_mixing=lorentz_σ_mixing,
                     weight_special=1,
                     coulomb_const=coulomb_const)
     σ6_fac = α * λ^p
-    return CoulombSoftCore{typeof(cutoff), typeof(α), typeof(λ), typeof(p), typeof(σ6_fac),
-                           typeof(weight_special), typeof(coulomb_const)}(
-        cutoff, α, λ, p, σ6_fac, use_neighbors, lorentz_mixing, weight_special, coulomb_const)
+    return CoulombSoftCore(cutoff, α, λ, p, use_neighbors, σ_mixing, weight_special,
+                           coulomb_const, σ6_fac)
 end
 
 use_neighbors(inter::CoulombSoftCore) = inter.use_neighbors
 
-function Base.zero(coul::CoulombSoftCore{C, A, L, P, R, W, T}) where {C, A, L, P, R, W, T}
-    return CoulombSoftCore{C, A, L, P, R, W, T}(
+function Base.zero(coul::CoulombSoftCore{C, A, L, P, W, T, R}) where {C, A, L, P, W, T, R}
+    return CoulombSoftCore(
         coul.cutoff,
         zero(A),
         zero(L),
         zero(P),
-        zero(R),
-        false,
-        false,
+        coul.use_neighbors,
+        coul.σ_mixing,
         zero(W),
         zero(T),
+        zero(R),
     )
 end
 
@@ -156,26 +154,26 @@ function Base.:+(c1::CoulombSoftCore, c2::CoulombSoftCore)
         c1.α + c2.α,
         c1.λ + c2.λ,
         c1.p + c2.p,
-        c1.σ6_fac + c2.σ6_fac,
         c1.use_neighbors,
-        c1.lorentz_mixing,
+        c1.σ_mixing,
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
+        c1.σ6_fac + c2.σ6_fac,
     )
 end
 
-@inline function force(inter::CoulombSoftCore{C},
+@inline function force(inter::CoulombSoftCore,
                        dr,
                        atom_i,
                        atom_j,
                        force_units=u"kJ * mol^-1 * nm^-1",
-                       special::Bool=false,
-                       args...) where C
+                       special=false,
+                       args...)
     r2 = sum(abs2, dr)
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
+    σ = inter.σ_mixing(atom_i, atom_j)
     params = (ke, qi, qj, σ, inter.σ6_fac)
 
     f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
@@ -194,18 +192,18 @@ function force_divr(::CoulombSoftCore, r2, invr2, (ke, qi, qj, σ, σ6_fac))
     return ff * √invr2
 end
 
-@inline function potential_energy(inter::CoulombSoftCore{C},
+@inline function potential_energy(inter::CoulombSoftCore,
                                   dr,
                                   atom_i,
                                   atom_j,
                                   energy_units=u"kJ * mol^-1",
-                                  special::Bool=false,
-                                  args...) where C
+                                  special=false,
+                                  args...)
     r2 = sum(abs2, dr)
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
+    σ = inter.σ_mixing(atom_i, atom_j)
     params = (ke, qi, qj, σ, inter.σ6_fac)
 
     pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
@@ -244,9 +242,8 @@ function CoulombReactionField(;
                     use_neighbors=false,
                     weight_special=1,
                     coulomb_const=coulomb_const)
-    return CoulombReactionField{typeof(dist_cutoff), typeof(solvent_dielectric),
-                                typeof(weight_special), typeof(coulomb_const)}(
-        dist_cutoff, solvent_dielectric, use_neighbors, weight_special, coulomb_const)
+    return CoulombReactionField(dist_cutoff, solvent_dielectric, use_neighbors,
+                                weight_special, coulomb_const)
 end
 
 use_neighbors(inter::CoulombReactionField) = inter.use_neighbors
@@ -255,7 +252,7 @@ function Base.zero(coul::CoulombReactionField{D, S, W, T}) where {D, S, W, T}
     return CoulombReactionField{D, S, W, T}(
         zero(D),
         zero(S),
-        false,
+        coul.use_neighbors,
         zero(W),
         zero(T),
     )
@@ -276,7 +273,7 @@ end
                        atom_i,
                        atom_j,
                        force_units=u"kJ * mol^-1 * nm^-1",
-                       special::Bool=false,
+                       special=false,
                        args...)
     r2 = sum(abs2, dr)
     if r2 > (inter.dist_cutoff ^ 2)
@@ -309,7 +306,7 @@ end
                                   atom_i,
                                   atom_j,
                                   energy_units=u"kJ * mol^-1",
-                                  special::Bool=false,
+                                  special=false,
                                   args...)
     r2 = sum(abs2, dr)
     if r2 > (inter.dist_cutoff ^ 2)
