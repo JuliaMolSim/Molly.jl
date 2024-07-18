@@ -1,7 +1,7 @@
 export SoftSphere
 
 @doc raw"""
-    SoftSphere(; cutoff, use_neighbors, lorentz_mixing, skip_shortcut)
+    SoftSphere(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing)
 
 The soft-sphere potential.
 
@@ -10,38 +10,44 @@ The potential energy is defined as
 V(r_{ij}) = 4\varepsilon_{ij} \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12}
 ```
 """
-struct SoftSphere{S, C} <: PairwiseInteraction
+struct SoftSphere{C} <: PairwiseInteraction
     cutoff::C
     use_neighbors::Bool
-    lorentz_mixing::Bool
+    shortcut::Function
+    σ_mixing::Function
+    ϵ_mixing::Function
 end
 
 function SoftSphere(;
                     cutoff=NoCutoff(),
                     use_neighbors=false,
-                    lorentz_mixing=true,
-                    skip_shortcut=false)
-    return SoftSphere{skip_shortcut, typeof(cutoff)}(
-        cutoff, use_neighbors, lorentz_mixing)
+                    shortcut=lj_zero_shortcut,
+                    σ_mixing=lorentz_σ_mixing,
+                    ϵ_mixing=geometric_ϵ_mixing)
+    return SoftSphere(cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing)
 end
 
 use_neighbors(inter::SoftSphere) = inter.use_neighbors
 
-@inline function force(inter::SoftSphere{S, C},
+function Base.zero(ss::SoftSphere)
+    return SoftSphere(ss.cutoff, ss.use_neighbors, ss.shortcut, ss.σ_mixing, ss.ϵ_mixing)
+end
+
+function Base.:+(s1::SoftSphere, ::SoftSphere)
+    return SoftSphere(s1.cutoff, s1.use_neighbors, s1.shortcut, s1.σ_mixing, s1.ϵ_mixing)
+end
+
+@inline function force(inter::SoftSphere,
                        dr,
                        atom_i,
                        atom_j,
                        force_units=u"kJ * mol^-1 * nm^-1",
-                       args...) where {S, C}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
-              iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
+                       args...)
+    if inter.shortcut(atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
     end
-
-    # Lorentz-Berthelot mixing rules use the arithmetic average for σ
-    # Otherwise use the geometric average
-    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-    ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
+    σ = inter.σ_mixing(atom_i, atom_j)
+    ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
     r2 = sum(abs2, dr)
@@ -57,19 +63,17 @@ function force_divr(::SoftSphere, r2, invr2, (σ2, ϵ))
     return (24ϵ * invr2) * 2 * six_term ^ 2
 end
 
-function potential_energy(inter::SoftSphere{S, C},
+function potential_energy(inter::SoftSphere,
                           dr,
                           atom_i,
                           atom_j,
                           energy_units=u"kJ * mol^-1",
-                          args...) where {S, C}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
-              iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
+                          args...)
+    if inter.shortcut(atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
     end
-
-    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-    ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
+    σ = inter.σ_mixing(atom_i, atom_j)
+    ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
     r2 = sum(abs2, dr)
