@@ -19,6 +19,12 @@ Gravity(; G=Unitful.G, use_neighbors=false) = Gravity{typeof(G)}(G, use_neighbor
 
 use_neighbors(inter::Gravity) = inter.use_neighbors
 
+function Base.zero(gr::Gravity{T}) where T
+    return Gravity(zero(T), gr.use_neighbors)
+end
+
+Base.:+(g1::Gravity, g2::Gravity) = Gravity(g1.G + g2.G, g1.use_neighbors)
+
 @inline function force(inter::Gravity,
                        dr,
                        atom_i,
