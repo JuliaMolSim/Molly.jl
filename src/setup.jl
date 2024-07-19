@@ -467,7 +467,7 @@ function System(coord_file::AbstractString,
     top = Chemfiles.Topology(frame)
     n_atoms = size(top)
 
-    atoms = Atom[]
+    atoms_abst = Atom[]
     atoms_data = AtomData[]
     bonds = InteractionList2Atoms(HarmonicBond)
     angles = InteractionList3Atoms(HarmonicAngle)
@@ -553,11 +553,10 @@ function System(coord_file::AbstractString,
         if ismissing(ch)
             error("atom of type ", at.type, " has not had charge set")
         end
-        solute = res_id_to_standard[res_id] || res_name in ("ACE", "NME")
         if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
             error("atom of type ", at.type, " has not had σ or ϵ set")
         end
-        push!(atoms, Atom(index=ai, charge=ch, mass=at.mass, σ=at.σ, ϵ=at.ϵ, solute=solute))
+        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=ch, σ=at.σ, ϵ=at.ϵ))
         push!(atoms_data, AtomData(atom_type=at_type, atom_name=atom_name, res_number=Chemfiles.id(res),
                                     res_name=Chemfiles.name(res), element=at.element))
         eligible[ai, ai] = false
@@ -886,7 +885,6 @@ function System(coord_file::AbstractString,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
-    atoms = [atoms...]
     if gpu || !use_cell_list
         neighbor_finder = DistanceNeighborFinder(
             eligible=(gpu ? CuArray(eligible) : eligible),
@@ -905,15 +903,18 @@ function System(coord_file::AbstractString,
         )
     end
     if gpu
-        atoms = CuArray(atoms)
-        coords = CuArray(coords)
+        atoms = CuArray([atoms_abst...])
+        coords_dev = CuArray(coords)
+    else
+        atoms = [atoms_abst...]
+        coords_dev = coords
     end
 
     if isnothing(velocities)
         if units
-            vels = zero(ustrip_vec.(coords))u"nm * ps^-1"
+            vels = zero(ustrip_vec.(coords_dev))u"nm * ps^-1"
         else
-            vels = zero(coords)
+            vels = zero(coords_dev)
         end
     else
         vels = velocities
@@ -938,7 +939,7 @@ function System(coord_file::AbstractString,
     k = units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k)
     return System(
         atoms=atoms,
-        coords=coords,
+        coords=coords_dev,
         boundary=boundary_used,
         velocities=vels,
         atoms_data=atoms_data,
@@ -976,7 +977,7 @@ function System(T::Type,
     atomnames = Dict{String, String}()
 
     name = "?"
-    atoms = Atom[]
+    atoms_abst = Atom[]
     atoms_data = AtomData[]
     bonds = InteractionList2Atoms(HarmonicBond)
     pairs = Tuple{Int, Int}[]
@@ -1039,11 +1040,19 @@ function System(T::Type,
             # Take the first version of each atom type only
             if !haskey(atomtypes, atomname)
                 if units
-                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4])u"g/mol",
-                            σ=parse(T, c[7])u"nm", ϵ=parse(T, c[8])u"kJ * mol^-1")
+                    atomtypes[atomname] = Atom(
+                        mass=parse(T, c[4])u"g/mol",
+                        charge=parse(T, c[5]),
+                        σ=parse(T, c[7])u"nm",
+                        ϵ=parse(T, c[8])u"kJ * mol^-1",
+                    )
                 else
-                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4]),
-                            σ=parse(T, c[7]), ϵ=parse(T, c[8]))
+                    atomtypes[atomname] = Atom(
+                        mass=parse(T, c[4]),
+                        charge=parse(T, c[5]),
+                        σ=parse(T, c[7]),
+                        ϵ=parse(T, c[8]),
+                    )
                 end
             end
         elseif current_field == "atoms"
@@ -1054,10 +1063,9 @@ function System(T::Type,
             else
                 atom_mass = parse(T, c[8])
             end
-            solute = c[4] in standard_res_names
-            atom_index = length(atoms) + 1
-            push!(atoms, Atom(index=atom_index, charge=ch, mass=atom_mass, σ=atomtypes[attype].σ,
-                                ϵ=atomtypes[attype].ϵ, solute=solute))
+            atom_index = length(atoms_abst) + 1
+            push!(atoms_abst, Atom(index=atom_index, mass=atom_mass, charge=ch, σ=atomtypes[attype].σ,
+                                ϵ=atomtypes[attype].ϵ))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=c[5], res_number=parse(Int, c[3]),
                                         res_name=c[4]))
         elseif current_field == "bonds"
@@ -1136,26 +1144,26 @@ function System(T::Type,
 
     # Read coordinate file and add solvent atoms
     lines = readlines(coord_file)
-    coords = SArray[]
+    coords_abst = SArray[]
     for (i, l) in enumerate(lines[3:end-1])
         coord = SVector(parse(T, l[21:28]), parse(T, l[29:36]), parse(T, l[37:44]))
         if units
-            push!(coords, (coord)u"nm")
+            push!(coords_abst, (coord)u"nm")
         else
-            push!(coords, coord)
+            push!(coords_abst, coord)
         end
 
         # Some atoms are not specified explicitly in the topology so are added here
-        if i > length(atoms)
+        if i > length(atoms_abst)
             atname = strip(l[11:15])
             attype = replace(atname, r"\d+" => "")
             temp_charge = atomtypes[attype].charge
             if attype == "CL" # Temp hack to fix charges
                 temp_charge = T(-1.0)
             end
-            atom_index = length(atoms) + 1
-            push!(atoms, Atom(index=atom_index, charge=temp_charge, mass=atomtypes[attype].mass,
-                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ, solute=false))
+            atom_index = length(atoms_abst) + 1
+            push!(atoms_abst, Atom(index=atom_index, mass=atomtypes[attype].mass, charge=temp_charge,
+                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=atname, res_number=parse(Int, l[1:5]),
                                         res_name=strip(l[6:10])))
 
@@ -1181,7 +1189,7 @@ function System(T::Type,
     end
 
     # Calculate matrix of pairs eligible for non-bonded interactions
-    n_atoms = length(coords)
+    n_atoms = length(coords_abst)
     eligible = trues(n_atoms, n_atoms)
     for i in 1:n_atoms
         eligible[i, i] = false
@@ -1224,7 +1232,7 @@ function System(T::Type,
     else
         boundary_used = boundary
     end
-    coords = [coords...]
+    coords = [coords_abst...]
     if center_coords
         coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
     end
@@ -1266,8 +1274,6 @@ function System(T::Type,
     end
     specific_inter_lists = tuple(specific_inter_array...)
 
-    atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ, solute=a.solute) for a in atoms]
-
     if gpu || !use_cell_list
         neighbor_finder = DistanceNeighborFinder(
             eligible=(gpu ? CuArray(eligible) : eligible),
@@ -1286,15 +1292,18 @@ function System(T::Type,
         )
     end
     if gpu
-        atoms = CuArray(atoms)
-        coords = CuArray(coords)
+        atoms = CuArray([atoms_abst...])
+        coords_dev = CuArray(coords)
+    else
+        atoms = [atoms_abst...]
+        coords_dev = coords
     end
 
     if isnothing(velocities)
         if units
-            vels = zero(ustrip_vec.(coords))u"nm * ps^-1"
+            vels = zero(ustrip_vec.(coords_dev))u"nm * ps^-1"
         else
-            vels = zero(coords)
+            vels = zero(coords_dev)
         end
     else
         vels = velocities
@@ -1303,7 +1312,7 @@ function System(T::Type,
     k = units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k)
     return System(
         atoms=atoms,
-        coords=coords,
+        coords=coords_dev,
         boundary=boundary_used,
         velocities=vels,
         atoms_data=atoms_data,
