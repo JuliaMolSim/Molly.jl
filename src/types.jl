@@ -9,8 +9,8 @@ export
     InteractionList3Atoms,
     InteractionList4Atoms,
     Atom,
-    charge,
     mass,
+    charge,
     AtomData,
     MolecularTopology,
     NeighborList,
@@ -219,43 +219,43 @@ The types used should be bits types if the GPU is going to be used.
 
 # Arguments
 - `index::Int`: the index of the atom in the system.
-- `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
+- `atom_type::T`: the type of the atom.
 - `mass::M=1.0u"g/mol"`: the mass of the atom.
+- `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
-- `solute::Bool=false`: whether the atom is part of the solute.
 """
-struct Atom{C, M, S, E}
+struct Atom{T, M, C, S, E}
     index::Int
-    charge::C
+    atom_type::T
     mass::M
+    charge::C
     σ::S
     ϵ::E
-    solute::Bool
 end
 
 function Atom(;
                 index=1,
-                charge=0.0,
+                atom_type=1,
                 mass=1.0u"g/mol",
+                charge=0.0,
                 σ=0.0u"nm",
-                ϵ=0.0u"kJ * mol^-1",
-                solute=false)
-    return Atom(index, charge, mass, σ, ϵ, solute)
+                ϵ=0.0u"kJ * mol^-1")
+    return Atom(index, atom_type, mass, charge, σ, ϵ)
 end
 
-function Base.zero(::Type{Atom{T, T, T, T}}) where T
-    z = zero(T)
-    return Atom(0, z, z, z, z, false)
+function Base.zero(::Atom{T, M, C, S, E}) where {T, M, C, S, E}
+    return Atom(0, zero(T), zero(M), zero(C), zero(S), zero(E))
 end
 
 function Base.:+(a1::Atom, a2::Atom)
-    return Atom(0, a1.charge + a2.charge, a1.mass + a2.mass, a1.σ + a2.σ, a1.ϵ + a2.ϵ, false)
+    return Atom(a1.index, a1.atom_type, a1.mass + a2.mass, a1.charge + a2.charge,
+                a1.σ + a2.σ, a1.ϵ + a2.ϵ)
 end
 
-function Base.:-(a1::Atom, a2::Atom)
-    return Atom(0, a1.charge - a2.charge, a1.mass - a2.mass, a1.σ - a2.σ, a1.ϵ - a2.ϵ, false)
+function Base.getindex(atom::Atom, x::Symbol)
+    return hasfield(Atom, x) ? getfield(atom, x) : KeyError("no field $x in Atom")
 end
 
 """
@@ -286,8 +286,8 @@ function Base.getindex(at::Atom, x::Symbol)
 end
 
 function Base.show(io::IO, a::Atom)
-    print(io, "Atom with index ", a.index, ", charge=", charge(a),
-            ", mass=", mass(a), ", σ=", a.σ, ", ϵ=", a.ϵ)
+    print(io, "Atom with index=", a.index, ", atom_type=", a.atom_type, ", mass=", mass(a),
+          ", charge=", charge(a), ", σ=", a.σ, ", ϵ=", a.ϵ)
 end
 
 """

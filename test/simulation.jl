@@ -7,7 +7,7 @@
     gen_temp_wrapper(s, args...; kwargs...) = temperature(s)
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
         boundary=boundary,
         pairwise_inters=(LennardJones(use_neighbors=true),),
@@ -69,7 +69,7 @@ end
 
     for n_threads in n_threads_list
         s = System(
-            atoms=[Atom(index=i, charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+            atoms=[Atom(index=i, mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
                    for i in 1:n_atoms],
             coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
             boundary=boundary,
@@ -166,7 +166,7 @@ end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         pairwise_inters=(LennardJones(use_neighbors=true),),
@@ -208,7 +208,7 @@ end
     ]
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         pairwise_inters=(LennardJones(use_neighbors=true),),
@@ -249,7 +249,7 @@ end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=BerendsenThermostat(temp, 1.0u"ps"))
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         velocities=[random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms],
@@ -309,7 +309,7 @@ end
         end
 
         s = System(
-            atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"g/mol", σ=0.2u"nm",
+            atoms=[Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             coords=place_atoms(n_atoms, boundary; min_dist=0.2u"nm"),
             boundary=boundary,
@@ -367,7 +367,7 @@ end
     V(sys::System, neighbors=nothing) = sys.velocities
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         velocities=velocities,
@@ -387,7 +387,7 @@ end
     vtype_nounits = eltype(ustrip_vec.(velocities))
 
     s_nounits = System(
-        atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
+        atoms=[Atom(mass=10.0, charge=0.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
         coords=ustrip_vec.(coords),
         boundary=CubicBoundary(ustrip.(boundary)),
         velocities=ustrip_vec.(u"nm/ps",velocities),
@@ -430,7 +430,7 @@ end
         n_steps = 2_000
         boundary = CubicBoundary(2.0u"nm")
         starting_coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-        atoms = [Atom(charge=0.0, mass=10.0u"g/mol", σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+        atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
         atoms_data = [AtomData(atom_type=(i <= n_atoms_res ? "A1" : "A2")) for i in 1:n_atoms]
         sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
 
@@ -577,7 +577,7 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
     s1 = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom( mass=10.0u"g/mol", charge=0.0,σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         velocities=velocities,
@@ -1101,8 +1101,9 @@ end
     updated_atoms = []
 
     for i in eachindex(sys)
-        push!(updated_atoms, Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
-                                  mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
+        push!(updated_atoms, Atom(index=sys.atoms[i].index, atom_type=sys.atoms[i].atom_type,
+                                  charge=sys.atoms[i].charge, mass=sys.atoms[i].mass,
+                                  σ=σ, ϵ=ϵ))
     end
 
     sys = System(sys; atoms=[updated_atoms...])
@@ -1178,12 +1179,12 @@ end
         if gpu
             coords = CuArray(deepcopy(f32 ? starting_coords_f32 : starting_coords))
             velocities = CuArray(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-            atoms = CuArray([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+            atoms = CuArray([Atom(mass=atom_mass, charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                                   ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
         else
             coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
             velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
-            atoms = [Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+            atoms = [Atom(mass=atom_mass, charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                             ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
         end
 

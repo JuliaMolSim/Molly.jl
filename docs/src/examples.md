@@ -1008,8 +1008,9 @@ These paramaters must be added to the [`System`](@ref) manually by making use of
 updated_atoms = []
 
 for i in eachindex(sys)
-    push!(updated_atoms, Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
-                              mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
+    push!(updated_atoms, Atom(index=sys.atoms[i].index, atom_type=sys.atoms[i].atom_type,
+                              mass=sys.atoms[i].mass, charge=sys.atoms[i].charge,
+                              σ=σ, ϵ=ϵ))
 end
 
 sys = System(sys; atoms=[updated_atoms...])

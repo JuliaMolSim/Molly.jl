@@ -120,7 +120,7 @@ end
         )
 
         function loss(σ, r0)
-            atoms = [Atom(i, i % 2 == 0 ? T(-0.02) : T(0.02), atom_mass, σ, T(0.2), false) for i in 1:n_atoms]
+            atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? T(-0.02) : T(0.02)), σ, T(0.2)) for i in 1:n_atoms]
             bonds_inner = [HarmonicBond(T(100.0), bond_dists[i] * r0) for i in 1:(n_atoms ÷ 2)]
             bonds = InteractionList2Atoms(
                 bond_is,
