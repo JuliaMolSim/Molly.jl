@@ -2,7 +2,7 @@
 *.jl.*.cov
 *.jl.mem
 docs/build
-/Manifest.toml
+*Manifest.toml
 benchmark/tune.json
 benchmark/results
 .vscode/settings.json
