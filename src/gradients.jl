@@ -26,7 +26,6 @@ function extract_parameters(sys, ff)
         if inter isa LennardJones
             key_prefix = "inter_LJ_"
             params_dic[key_prefix * "weight_14"] = inter.weight_special
-            params_dic[key_prefix * "weight_solute_solvent"] = inter.weight_solute_solvent
         elseif inter isa Coulomb
             key_prefix = "inter_CO_"
             params_dic[key_prefix * "weight_14"] = inter.weight_special
@@ -121,11 +120,11 @@ function inject_atom(at, at_data, params_dic)
     key_prefix = "atom_$(at_data.atom_type)_"
     Atom(
         at.index,
-        at.charge, # Residue-specific
+        at.atom_type,
         dict_get(params_dic, key_prefix * "mass"  , at.mass),
+        at.charge, # Residue-specific
         dict_get(params_dic, key_prefix * "σ"     , at.σ   ),
         dict_get(params_dic, key_prefix * "ϵ"     , at.ϵ   ),
-        at.solute,
     )
 end
 
@@ -165,14 +164,15 @@ function inject_interaction_list(inter::InteractionList4Atoms, params_dic, gpu)
     InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, inters_grad, inter.types)
 end
 
-function inject_interaction(inter::LennardJones{S, C, W, WS}, params_dic) where {S, C, W, WS}
+function inject_interaction(inter::LennardJones, params_dic)
     key_prefix = "inter_LJ_"
-    LennardJones{S, C, W, WS}(
+    LennardJones(
         inter.cutoff,
         inter.use_neighbors,
-        inter.lorentz_mixing,
+        inter.shortcut,
+        inter.σ_mixing,
+        inter.ϵ_mixing,
         dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
-        dict_get(params_dic, key_prefix * "weight_solute_solvent", inter.weight_solute_solvent),
     )
 end
 
