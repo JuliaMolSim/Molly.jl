@@ -3,6 +3,8 @@ export
     CoulombSoftCore,
     CoulombReactionField
 
+const coulomb_const = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
+
 @doc raw"""
     Coulomb(; cutoff, use_neighbors, weight_special, coulomb_const)
 
@@ -13,21 +15,11 @@ The potential energy is defined as
 V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}}
 ```
 """
-struct Coulomb{C, W, T} <: PairwiseInteraction
-    cutoff::C
-    use_neighbors::Bool
-    weight_special::W
-    coulomb_const::T
-end
-
-const coulomb_const = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
-
-function Coulomb(;
-                    cutoff=NoCutoff(),
-                    use_neighbors=false,
-                    weight_special=1,
-                    coulomb_const=coulomb_const)
-    return Coulomb(cutoff, use_neighbors, weight_special, coulomb_const)
+@kwdef struct Coulomb{C, W, T} <: PairwiseInteraction
+    cutoff::C = NoCutoff()
+    use_neighbors::Bool = false
+    weight_special::W = 1
+    coulomb_const::T = coulomb_const
 end
 
 use_neighbors(inter::Coulomb) = inter.use_neighbors
@@ -106,30 +98,16 @@ V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha  \sigma_{ij}^6
 ```
 If ``\alpha`` or ``\lambda`` are zero this gives the standard [`Coulomb`](@ref) potential.
 """
-struct CoulombSoftCore{C, A, L, P, W, T, R} <: PairwiseInteraction
-    cutoff::C
-    α::A
-    λ::L
-    p::P
-    use_neighbors::Bool
-    σ_mixing::Function
-    weight_special::W
-    coulomb_const::T
-    σ6_fac::R
-end
-
-function CoulombSoftCore(;
-                    cutoff=NoCutoff(),
-                    α=1,
-                    λ=0,
-                    p=2,
-                    use_neighbors=false,
-                    σ_mixing=lorentz_σ_mixing,
-                    weight_special=1,
-                    coulomb_const=coulomb_const)
-    σ6_fac = α * λ^p
-    return CoulombSoftCore(cutoff, α, λ, p, use_neighbors, σ_mixing, weight_special,
-                           coulomb_const, σ6_fac)
+@kwdef struct CoulombSoftCore{C, A, L, P, W, T, R} <: PairwiseInteraction
+    cutoff::C = NoCutoff()
+    α::A = 1
+    λ::L = 0
+    p::P = 2
+    use_neighbors::Bool = false
+    σ_mixing::Function = lorentz_σ_mixing
+    weight_special::W = 1
+    coulomb_const::T = coulomb_const
+    σ6_fac::R = α * λ^p
 end
 
 use_neighbors(inter::CoulombSoftCore) = inter.use_neighbors
@@ -219,6 +197,8 @@ function potential(::CoulombSoftCore, r2, invr2, (ke, qi, qj, σ, σ6_fac))
     return (ke * qi * qj) * √cbrt(inv_rsc6)
 end
 
+const crf_solvent_dielectric = 78.3
+
 """
     CoulombReactionField(; dist_cutoff, solvent_dielectric, use_neighbors, weight_special,
                             coulomb_const)
@@ -226,24 +206,12 @@ end
 The Coulomb electrostatic interaction modified using the reaction field approximation
 between two atoms.
 """
-struct CoulombReactionField{D, S, W, T} <: PairwiseInteraction
+@kwdef struct CoulombReactionField{D, S, W, T} <: PairwiseInteraction
     dist_cutoff::D
-    solvent_dielectric::S
-    use_neighbors::Bool
-    weight_special::W
-    coulomb_const::T
-end
-
-const crf_solvent_dielectric = 78.3
-
-function CoulombReactionField(;
-                    dist_cutoff,
-                    solvent_dielectric=crf_solvent_dielectric,
-                    use_neighbors=false,
-                    weight_special=1,
-                    coulomb_const=coulomb_const)
-    return CoulombReactionField(dist_cutoff, solvent_dielectric, use_neighbors,
-                                weight_special, coulomb_const)
+    solvent_dielectric::S = crf_solvent_dielectric
+    use_neighbors::Bool = false
+    weight_special::W = 1
+    coulomb_const::T = coulomb_const
 end
 
 use_neighbors(inter::CoulombReactionField) = inter.use_neighbors
