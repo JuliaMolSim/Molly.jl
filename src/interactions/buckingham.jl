@@ -45,26 +45,14 @@ C_{ij} &= (C_{ii} C_{jj})^{1/2}
 ```
 so atoms that use this interaction should have fields `A`, `B` and `C` available.
 """
-struct Buckingham{C, W} <: PairwiseInteraction
-    cutoff::C
-    use_neighbors::Bool
-    shortcut::Function
-    A_mixing::Function
-    B_mixing::Function
-    C_mixing::Function
-    weight_special::W
-end
-
-function Buckingham(;
-                    cutoff=NoCutoff(),
-                    use_neighbors=false,
-                    shortcut=buckingham_zero_shortcut,
-                    A_mixing=geometric_A_mixing,
-                    B_mixing=inverse_B_mixing,
-                    C_mixing=geometric_C_mixing,
-                    weight_special=1)
-    return Buckingham(cutoff, use_neighbors, shortcut, A_mixing, B_mixing,
-                      C_mixing, weight_special)
+@kwdef struct Buckingham{C, W} <: PairwiseInteraction
+    cutoff::C = NoCutoff()
+    use_neighbors::Bool = false
+    shortcut::Function = buckingham_zero_shortcut
+    A_mixing::Function = geometric_A_mixing
+    B_mixing::Function = inverse_B_mixing
+    C_mixing::Function = geometric_C_mixing
+    weight_special::W = 1
 end
 
 use_neighbors(inter::Buckingham) = inter.use_neighbors
