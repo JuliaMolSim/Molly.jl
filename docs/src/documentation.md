@@ -949,8 +949,8 @@ function Molly.simulate!(sys,
         remove_CM_motion!(sys)
 
         # Apply the loggers like this
-        # Computed quantities can also be given as keyword arguments to run_loggers!
-        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
+        # Computed quantities can also be given as keyword arguments to apply_loggers!
+        apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
 
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;

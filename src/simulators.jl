@@ -66,7 +66,7 @@ function simulate!(sys,
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E = potential_energy(sys, neighbors; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads, current_potential_energy=E)
+    apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads, current_potential_energy=E)
     using_constraints = length(sys.constraints) > 0
     println(sim.log_stream, "Step 0 - potential energy ", E, " - max force N/A - N/A")
     hn = sim.step_size
@@ -103,8 +103,8 @@ function simulate!(sys,
                     E_trial, " - max force ", max_force, " - rejected")
         end
 
-        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
-                     current_potential_energy=E)
+        apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
+                       current_potential_energy=E)
 
         if max_force < sim.tol
             break
@@ -148,7 +148,7 @@ function simulate!(sys,
     forces_t_dt = forces_nounits_t_dt .* sys.force_units
     forces_buffer = init_forces_buffer(forces_nounits_t_dt, n_threads)
     accels_t_dt = zero(accels_t)
-    run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
+    apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
     using_constraints = length(sys.constraints) > 0
     if using_constraints
         cons_coord_storage = similar(sys.coords)
@@ -191,8 +191,8 @@ function simulate!(sys,
             accels_t .= accels_t_dt
         end
 
-        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
-                     current_forces=forces_t)
+        apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
+                       current_forces=forces_t)
     end
     return sys
 end
@@ -229,7 +229,7 @@ function simulate!(sys,
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
+    apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
     forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer(forces_nounits_t, n_threads)
@@ -269,8 +269,8 @@ function simulate!(sys,
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
 
-        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
-                     current_forces=forces_t)
+        apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
+                       current_forces=forces_t)
     end
     return sys
 end
@@ -303,7 +303,7 @@ function simulate!(sys,
                     run_loggers=true)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
+    apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
     coords_last, coords_copy = similar(sys.coords), similar(sys.coords)
     forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
@@ -339,8 +339,8 @@ function simulate!(sys,
                                    n_threads=n_threads)
         coords_last .= coords_copy
 
-        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
-                     current_forces=forces_t)
+        apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
+                       current_forces=forces_t)
     end
     return sys
 end
@@ -387,7 +387,7 @@ function simulate!(sys,
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
+    apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
     forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer(forces_nounits_t, n_threads)
@@ -432,8 +432,8 @@ function simulate!(sys,
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
 
-        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
-                     current_forces=forces_t)
+        apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
+                       current_forces=forces_t)
     end
     return sys
 end
@@ -496,7 +496,7 @@ function simulate!(sys,
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
+    apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
     forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer(forces_nounits_t, n_threads)
@@ -548,7 +548,7 @@ function simulate!(sys,
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                    n_threads=n_threads)
 
-        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
+        apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
     end
     return sys
 end
@@ -616,7 +616,7 @@ function simulate!(sys,
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
+    apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
     forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer(forces_nounits_t, n_threads)
@@ -640,8 +640,8 @@ function simulate!(sys,
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                    n_threads=n_threads)
 
-        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
-                     current_forces=forces_t)
+        apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
+                       current_forces=forces_t)
     end
     return sys
 end
@@ -693,7 +693,7 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
     forces_t_dt = forces_nounits_t_dt .* sys.force_units
     forces_buffer = init_forces_buffer(forces_nounits_t_dt, n_threads)
     accels_t_dt = zero(accels_t)
-    run_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
+    apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
     v_half = zero(sys.velocities)
     zeta = zero(inv(sim.dt))
 
@@ -735,8 +735,8 @@ function simulate!(sys, sim::NoseHoover, n_steps::Integer;
             accels_t .= accels_t_dt
         end
 
-        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
-                     current_forces=forces_t)
+        apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
+                       current_forces=forces_t)
     end
     return sys
 end
@@ -1058,15 +1058,15 @@ function simulate!(sys::System{D, G, T},
         ΔE = E_new - E_old
         δ = ΔE / (sys.k * sim.temperature)
         if δ < 0 || (rand() < exp(-δ))
-            run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
-                         current_potential_energy=E_new, success=true,
-                         energy_rate=(E_new / (sys.k * sim.temperature)))
+            apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
+                           current_potential_energy=E_new, success=true,
+                           energy_rate=(E_new / (sys.k * sim.temperature)))
             E_old = E_new
         else
             sys.coords .= coords_old
-            run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
-                         current_potential_energy=E_old, success=false,
-                         energy_rate=(E_old / (sys.k * sim.temperature)))
+            apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
+                           current_potential_energy=E_old, success=false,
+                           energy_rate=(E_old / (sys.k * sim.temperature)))
         end
     end
 
