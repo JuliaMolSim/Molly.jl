@@ -10,21 +10,12 @@ The potential energy is defined as
 V(r_{ij}) = 4\varepsilon_{ij} \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12}
 ```
 """
-struct SoftSphere{C} <: PairwiseInteraction
-    cutoff::C
-    use_neighbors::Bool
-    shortcut::Function
-    σ_mixing::Function
-    ϵ_mixing::Function
-end
-
-function SoftSphere(;
-                    cutoff=NoCutoff(),
-                    use_neighbors=false,
-                    shortcut=lj_zero_shortcut,
-                    σ_mixing=lorentz_σ_mixing,
-                    ϵ_mixing=geometric_ϵ_mixing)
-    return SoftSphere(cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing)
+@kwdef struct SoftSphere{C} <: PairwiseInteraction
+    cutoff::C = NoCutoff()
+    use_neighbors::Bool = false
+    shortcut::Function = lj_zero_shortcut
+    σ_mixing::Function = lorentz_σ_mixing
+    ϵ_mixing::Function = geometric_ϵ_mixing
 end
 
 use_neighbors(inter::SoftSphere) = inter.use_neighbors
