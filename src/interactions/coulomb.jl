@@ -98,13 +98,13 @@ V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha  \sigma_{ij}^6
 ```
 If ``\alpha`` or ``\lambda`` are zero this gives the standard [`Coulomb`](@ref) potential.
 """
-@kwdef struct CoulombSoftCore{C, A, L, P, W, T, R} <: PairwiseInteraction
+@kwdef struct CoulombSoftCore{C, A, L, P, S, W, T, R} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 1
     λ::L = 0
     p::P = 2
     use_neighbors::Bool = false
-    σ_mixing::Function = lorentz_σ_mixing
+    σ_mixing::S = lorentz_σ_mixing
     weight_special::W = 1
     coulomb_const::T = coulomb_const
     σ6_fac::R = α * λ^p
@@ -112,7 +112,7 @@ end
 
 use_neighbors(inter::CoulombSoftCore) = inter.use_neighbors
 
-function Base.zero(coul::CoulombSoftCore{C, A, L, P, W, T, R}) where {C, A, L, P, W, T, R}
+function Base.zero(coul::CoulombSoftCore{C, A, L, P, S, W, T, R}) where {C, A, L, P, S, W, T, R}
     return CoulombSoftCore(
         coul.cutoff,
         zero(A),

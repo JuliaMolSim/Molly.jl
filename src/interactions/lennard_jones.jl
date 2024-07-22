@@ -38,18 +38,18 @@ and the force on each atom by
 \end{aligned}
 ```
 """
-@kwdef struct LennardJones{C, W} <: PairwiseInteraction
+@kwdef struct LennardJones{C, H, S, E, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
-    shortcut::Function = lj_zero_shortcut
-    σ_mixing::Function = lorentz_σ_mixing
-    ϵ_mixing::Function = geometric_ϵ_mixing
+    shortcut::H = lj_zero_shortcut
+    σ_mixing::S = lorentz_σ_mixing
+    ϵ_mixing::E = geometric_ϵ_mixing
     weight_special::W = 1
 end
 
 use_neighbors(inter::LennardJones) = inter.use_neighbors
 
-function Base.zero(lj::LennardJones{C, W}) where {C, W}
+function Base.zero(lj::LennardJones{C, H, S, E, W}) where {C, H, S, E, W}
     return LennardJones(
         lj.cutoff,
         lj.use_neighbors,
@@ -153,22 +153,22 @@ r_{ij}^{\text{sc}} = \left(r_{ij}^6 + \alpha \sigma_{ij}^6 \lambda^p \right)^{1/
 ```
 If ``\alpha`` or ``\lambda`` are zero this gives the standard [`LennardJones`](@ref) potential.
 """
-@kwdef struct LennardJonesSoftCore{C, A, L, P, W, R} <: PairwiseInteraction
+@kwdef struct LennardJonesSoftCore{C, A, L, P, H, S, E, W, R} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 1
     λ::L = 0
     p::P = 2
     use_neighbors::Bool = false
-    shortcut::Function = lj_zero_shortcut
-    σ_mixing::Function = lorentz_σ_mixing
-    ϵ_mixing::Function = geometric_ϵ_mixing
+    shortcut::H = lj_zero_shortcut
+    σ_mixing::S = lorentz_σ_mixing
+    ϵ_mixing::E = geometric_ϵ_mixing
     weight_special::W = 1
     σ6_fac::R = α * λ^p
 end
 
 use_neighbors(inter::LennardJonesSoftCore) = inter.use_neighbors
 
-function Base.zero(lj::LennardJonesSoftCore{C, A, L, P, W, R}) where {C, A, L, P, W, R}
+function Base.zero(lj::LennardJonesSoftCore{C, A, L, P, H, S, E, W, R}) where {C, A, L, P, H, S, E, W, R}
     return LennardJonesSoftCore(
         lj.cutoff,
         zero(A),

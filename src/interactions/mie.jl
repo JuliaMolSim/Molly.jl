@@ -15,14 +15,14 @@ where
 C = \frac{n}{n - m} \left( \frac{n}{m} \right) ^\frac{m}{n - m}
 ```
 """
-struct Mie{C, T} <: PairwiseInteraction
+struct Mie{T, C, H, S, E} <: PairwiseInteraction
     m::T
     n::T
     cutoff::C
     use_neighbors::Bool
-    shortcut::Function
-    σ_mixing::Function
-    ϵ_mixing::Function
+    shortcut::H
+    σ_mixing::S
+    ϵ_mixing::E
     mn_fac::T
 end
 
@@ -40,7 +40,7 @@ end
 
 use_neighbors(inter::Mie) = inter.use_neighbors
 
-function Base.zero(m::Mie{C, T}) where {C, T}
+function Base.zero(m::Mie{T}) where T
     return Mie(zero(T), zero(T), m.cutoff, m.use_neighbors, m.shortcut, m.σ_mixing,
                m.ϵ_mixing, zero(T))
 end
