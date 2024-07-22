@@ -1,7 +1,7 @@
 # Loggers to record properties throughout a simulation
 
 export
-    run_loggers!,
+    apply_loggers!,
     GeneralObservableLogger,
     values,
     log_property!,
@@ -22,8 +22,8 @@ export
     MonteCarloLogger
 
 """
-    run_loggers!(system, neighbors=nothing, step_n=0, run_loggers=true;
-                 n_threads=Threads.nthreads(), kwargs...)
+    apply_loggers!(system, neighbors=nothing, step_n=0, run_loggers=true;
+                   n_threads=Threads.nthreads(), kwargs...)
 
 Run the loggers associated with a system.
 
@@ -32,8 +32,8 @@ are not run before the first step.
 Additional keyword arguments can be passed to the loggers if required.
 Ignored for gradient calculation during automatic differentiation.
 """
-function run_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, run_loggers=true;
-                      n_threads::Integer=Threads.nthreads(), kwargs...)
+function apply_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, run_loggers=true;
+                        n_threads::Integer=Threads.nthreads(), kwargs...)
     if run_loggers == true || (run_loggers == :skipzero && step_n != 0)
         for logger in values(sys.loggers)
             log_property!(logger, sys, neighbors, step_n; n_threads=n_threads, kwargs...)
