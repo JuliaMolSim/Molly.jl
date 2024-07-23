@@ -11,7 +11,7 @@ The potential energy is defined as
 V(\phi) = \sum_{n=1}^N k_n (1 + \cos(n \phi - \phi_{s,n}))
 ```
 """
-struct PeriodicTorsion{N, T, E} <: SpecificInteraction
+struct PeriodicTorsion{N, T, E}
     periodicities::NTuple{N, Int}
     phases::NTuple{N, T}
     ks::NTuple{N, E}

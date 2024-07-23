@@ -156,8 +156,8 @@ mutable struct Person
     ϵ::Float64
 end
 
-# Custom PairwiseInteraction
-struct SIRInteraction <: PairwiseInteraction
+# Custom pairwise interaction
+struct SIRInteraction
     dist_infection::Float64
     prob_infection::Float64
     prob_recovery::Float64
@@ -605,7 +605,7 @@ values(sys.loggers.coords)[end]
 ## Making and breaking bonds
 
 There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation?
-In this case you can use a [`PairwiseInteraction`](@ref) to make, break and apply the bonds.
+In this case you can use a pairwise interaction to make, break and apply the bonds.
 The partners of the atom can be stored in the atom type.
 We make a logger to record when the bonds are present, allowing us to visualize them with the `connection_frames` keyword argument to [`visualize`](@ref) (this can take a while to plot).
 ```julia
@@ -621,7 +621,7 @@ struct BondableAtom
     partners::Set{Int}
 end
 
-struct BondableInteraction <: PairwiseInteraction
+struct BondableInteraction
     prob_formation::Float64
     prob_break::Float64
     dist_formation::Float64

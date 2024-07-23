@@ -19,7 +19,7 @@ V_{\text{WCA}}(r) =
     \end{cases}
 ```
 """
-struct FENEBond{K, D, E} <: SpecificInteraction
+struct FENEBond{K, D, E}
     k::K
     r0::D
     σ::D
