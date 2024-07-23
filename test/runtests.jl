@@ -33,8 +33,8 @@ end
 
 const run_visualize_tests = get(ENV, "VISTESTS", "1") != "0"
 if run_visualize_tests
-    using GLMakie
-elseif get(ENV, "VISTESTS", "1") == "0"
+    import GLMakie
+else
     @warn "The visualization tests will not be run as VISTESTS is set to 0"
 end
 
