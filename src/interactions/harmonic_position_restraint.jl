@@ -10,7 +10,7 @@ The potential energy is defined as
 V(\boldsymbol{x}) = \frac{1}{2} k |\boldsymbol{x} - \boldsymbol{x}_0|^2
 ```
 """
-struct HarmonicPositionRestraint{K, C} <: SpecificInteraction
+struct HarmonicPositionRestraint{K, C}
     k::K
     x0::C
 end

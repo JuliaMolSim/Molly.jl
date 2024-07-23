@@ -10,7 +10,7 @@ The potential energy is defined as
 V(r) = D(1 - e^{-a(r - r_0)})^2
 ```
 """
-struct MorseBond{T, A, R} <: SpecificInteraction
+struct MorseBond{T, A, R}
     D::T
     a::A
     r0::R

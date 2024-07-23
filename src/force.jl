@@ -25,32 +25,30 @@ function accelerations(sys, neighbors, step_n::Integer=0; n_threads::Integer=Thr
 end
 
 """
-    force(inter::PairwiseInteraction, vec_ij, atom_i, atom_j, force_units, special,
-          coord_i, coord_j, boundary, velocity_i, velocity_j, step_n)
-    force(inter::SpecificInteraction, coord_i, boundary, atom_i, force_units,
-          velocity_i, step_n)
-    force(inter::SpecificInteraction, coord_i, coord_j, boundary, atom_i, atom_j,
-          force_units, velocity_i, velocity_j, step_n)
-    force(inter::SpecificInteraction, coord_i, coord_j, coord_k, boundary, atom_i,
-          atom_j, atom_k, force_units, velocity_i, velocity_j, velocity_k, step_n)
-    force(inter::SpecificInteraction, coord_i, coord_j, coord_k, coord_l, boundary,
-          atom_i, atom_j, atom_k, atom_l, force_units, velocity_i, velocity_j,
-          velocity_k, velocity_l, step_n)
+    force(inter, vec_ij, atom_i, atom_j, force_units, special, coord_i, coord_j,
+          boundary, velocity_i, velocity_j, step_n)
+    force(inter, coord_i, boundary, atom_i, force_units, velocity_i, step_n)
+    force(inter, coord_i, coord_j, boundary, atom_i, atom_j, force_units, velocity_i,
+          velocity_j, step_n)
+    force(inter, coord_i, coord_j, coord_k, boundary, atom_i, atom_j, atom_k,
+          force_units, velocity_i, velocity_j, velocity_k, step_n)
+    force(inter, coord_i, coord_j, coord_k, coord_l, boundary, atom_i, atom_j, atom_k,
+          atom_l, force_units, velocity_i, velocity_j, velocity_k, velocity_l, step_n)
 
 Calculate the force between atoms due to a given interaction type.
 
-For [`PairwiseInteraction`](@ref)s returns a single force vector and for
-[`SpecificInteraction`](@ref)s returns a type such as [`SpecificForce2Atoms`](@ref).
+For pairwise interactions returns a single force vector and for specific interactions
+returns a type such as [`SpecificForce2Atoms`](@ref).
 Custom pairwise and specific interaction types should implement this function.
 """
 function force end
 
 # Allow GPU-specific force functions to be defined if required
-force_gpu(inter::PairwiseInteraction, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn) = force(inter, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn)
-force_gpu(inter::SpecificInteraction, ci, bnd, ai, fu, vi, sn) = force(inter, ci, bnd, ai, fu, vi, sn)
-force_gpu(inter::SpecificInteraction, ci, cj, bnd, ai, aj, fu, vi, vj, sn) = force(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn)
-force_gpu(inter::SpecificInteraction, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn) = force(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn)
-force_gpu(inter::SpecificInteraction, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn) = force(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn)
+force_gpu(inter, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn) = force(inter, dr, ai, aj, fu, sp, ci, cj, bnd, vi, vj, sn)
+force_gpu(inter, ci, bnd, ai, fu, vi, sn) = force(inter, ci, bnd, ai, fu, vi, sn)
+force_gpu(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn) = force(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn)
+force_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn) = force(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn)
+force_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn) = force(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn)
 
 """
     SpecificForce1Atoms(f1)

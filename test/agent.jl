@@ -10,8 +10,8 @@
         ϵ::Float64
     end
 
-    # Custom PairwiseInteraction
-    struct SIRInteraction <: PairwiseInteraction
+    # Custom pairwise interaction
+    struct SIRInteraction
         dist_infection::Float64
         prob_infection::Float64
         prob_recovery::Float64

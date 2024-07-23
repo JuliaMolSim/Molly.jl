@@ -15,7 +15,7 @@ The potential energy is defined as
 V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}}
 ```
 """
-@kwdef struct Coulomb{C, W, T} <: PairwiseInteraction
+@kwdef struct Coulomb{C, W, T}
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
     weight_special::W = 1
@@ -98,7 +98,7 @@ V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha  \sigma_{ij}^6
 ```
 If ``\alpha`` or ``\lambda`` are zero this gives the standard [`Coulomb`](@ref) potential.
 """
-@kwdef struct CoulombSoftCore{C, A, L, P, S, W, T, R} <: PairwiseInteraction
+@kwdef struct CoulombSoftCore{C, A, L, P, S, W, T, R}
     cutoff::C = NoCutoff()
     α::A = 1
     λ::L = 0
@@ -206,7 +206,7 @@ const crf_solvent_dielectric = 78.3
 The Coulomb electrostatic interaction modified using the reaction field approximation
 between two atoms.
 """
-@kwdef struct CoulombReactionField{D, S, W, T} <: PairwiseInteraction
+@kwdef struct CoulombReactionField{D, S, W, T}
     dist_cutoff::D
     solvent_dielectric::S = crf_solvent_dielectric
     use_neighbors::Bool = false

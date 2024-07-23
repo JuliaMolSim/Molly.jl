@@ -12,7 +12,7 @@ The potential energy is defined as
 V(\theta) = \frac{1}{2} k (\theta - \theta_0)^2
 ```
 """
-struct HarmonicAngle{K, D} <: SpecificInteraction
+struct HarmonicAngle{K, D}
     k::K
     θ0::D
 end

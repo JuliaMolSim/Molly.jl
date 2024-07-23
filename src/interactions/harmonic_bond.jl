@@ -10,7 +10,7 @@ The potential energy is defined as
 V(r) = \frac{1}{2} k (r - r_0)^2
 ```
 """
-struct HarmonicBond{K, D} <: SpecificInteraction
+struct HarmonicBond{K, D}
     k::K
     r0::D
 end

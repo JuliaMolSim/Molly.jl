@@ -534,8 +534,8 @@ The force on each particle in the system is derived from the potential correspon
 ```
 
 In Molly there are three types of interactions:
-- [`PairwiseInteraction`](@ref)s are present between all or most atom pairs, and account for example for non-bonded terms in molecular mechanics force fields.
-- [`SpecificInteraction`](@ref)s are present between specific atoms, and account for example for bonded terms in molecular mechanics force fields.
+- Pairwise interactions are present between all or most atom pairs, and account for example for non-bonded terms in molecular mechanics force fields.
+- Specific interactions are present between specific atoms, and account for example for bonded terms in molecular mechanics force fields.
 - General interactions are a free-form interaction type that can access the whole system and outputs forces for all atoms. This is useful for neural network potentials, implicit solvent models and other cases that require maximum flexibility. General interactions should be compatible with the [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl) interface.
 
 The available pairwise interactions are:
@@ -567,9 +567,9 @@ The available general interactions are:
 
 ### Pairwise interactions
 
-To define your own [`PairwiseInteraction`](@ref), first define the `struct`:
+To define your own pairwise interaction, first define the `struct`:
 ```julia
-struct MyPairwiseInter <: PairwiseInteraction
+struct MyPairwiseInter
     # Any properties, e.g. constants for the interaction or cutoff parameters
 end
 ```
@@ -632,7 +632,7 @@ Note that you can also use a named tuple instead of a tuple if you want to acces
 ```julia
 pairwise_inters = (MyPairwiseInter=MyPairwiseInter(),)
 ```
-For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{PairwiseInteraction}`.
+For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{Any}`.
 
 If you wish to calculate potential energies or log the energy throughout a simulation, you will need to define a method for the [`potential_energy`](@ref) function.
 This has the same arguments as [`force`](@ref), except the fifth argument is the energy units not the force units, and should return a single value corresponding to the potential energy:
@@ -660,9 +660,9 @@ end
 
 ### Specific interactions
 
-To define your own [`SpecificInteraction`](@ref), first define the `struct`:
+To define your own specific interaction, first define the `struct`:
 ```julia
-struct MySpecificInter <: SpecificInteraction
+struct MySpecificInter
     # Properties, e.g. a bond distance corresponding to the energy minimum
 end
 ```

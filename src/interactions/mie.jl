@@ -15,7 +15,7 @@ where
 C = \frac{n}{n - m} \left( \frac{n}{m} \right) ^\frac{m}{n - m}
 ```
 """
-struct Mie{T, C, H, S, E} <: PairwiseInteraction
+struct Mie{T, C, H, S, E}
     m::T
     n::T
     cutoff::C
