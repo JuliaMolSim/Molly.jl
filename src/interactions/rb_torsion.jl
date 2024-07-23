@@ -5,7 +5,7 @@ export RBTorsion
 
 A Ryckaert-Bellemans torsion angle between four atoms.
 """
-struct RBTorsion{T} <: SpecificInteraction
+struct RBTorsion{T}
     f1::T
     f2::T
     f3::T

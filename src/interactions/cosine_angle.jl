@@ -11,7 +11,7 @@ The potential energy is defined as
 V(\theta) = k(1 + \cos(\theta - \theta_0))
 ```
 """
-struct CosineAngle{K, D} <: SpecificInteraction
+struct CosineAngle{K, D}
     k::K
     θ0::D
 end
