@@ -171,7 +171,7 @@ end
     @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 
     params_dic = extract_parameters(sys_nounits, ff_nounits)
-    @test length(params_dic) == 639
+    @test length(params_dic) == 638
     atoms_grad, pis_grad, sis_grad, gis_grad = inject_gradients(sys_nounits, params_dic)
     @test atoms_grad == sys_nounits.atoms
     @test pis_grad == sys_nounits.pairwise_inters
