@@ -323,15 +323,20 @@ function bounding_box_lines(boundary::TriclinicBoundary, dist_unit)
 end
 
 """
-    random_coord(boundary)
+    random_coord(boundary; rng=Random.GLOBAL_RNG)
 
 Generate a random coordinate uniformly distributed within a bounding box.
 """
-random_coord(boundary::CubicBoundary      ) = rand(SVector{3, float_type(boundary)}) .* boundary
-random_coord(boundary::RectangularBoundary) = rand(SVector{2, float_type(boundary)}) .* boundary
+function random_coord(boundary::CubicBoundary; rng=Random.GLOBAL_RNG)
+    return rand(rng, SVector{3, float_type(boundary)}) .* boundary
+end
 
-function random_coord(boundary::TriclinicBoundary{T}) where T
-    return sum(rand(SVector{3, T}) .* boundary.basis_vectors)
+function random_coord(boundary::RectangularBoundary; rng=Random.GLOBAL_RNG)
+    return rand(rng, SVector{2, float_type(boundary)}) .* boundary
+end
+
+function random_coord(boundary::TriclinicBoundary{T}; rng=Random.GLOBAL_RNG) where T
+    return sum(rand(rng, SVector{3, T}) .* boundary.basis_vectors)
 end
 
 """
