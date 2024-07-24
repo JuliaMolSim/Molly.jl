@@ -54,6 +54,8 @@ const gpu_list = run_gpu_tests ? (false, true) : (false,)
 if run_gpu_tests
     device!(parse(Int, DEVICE))
     @info "The GPU tests will be run on device $DEVICE"
+elseif get(ENV, "GPUTESTS", "1") == "0"
+    @warn "The GPU tests will not be run as GPUTESTS is set to 0"
 else
     @warn "The GPU tests will not be run as a CUDA-enabled device is not available"
 end
@@ -65,7 +67,7 @@ const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 const temp_fp_pdb = tempname(cleanup=true) * ".pdb"
 const temp_fp_viz = tempname(cleanup=true) * ".mp4"
 
-# Required for parallel gradient tests
+# Required for gradient tests
 Enzyme.API.runtimeActivity!(true)
 
 if GROUP in ("All", "NotGradients")

@@ -35,20 +35,80 @@
 end
 
 @testset "Differentiable simulation" begin
-    abs2_vec(x) = abs2.(x)
-
-    # Function is strange in order to work with gradients on the GPU
-    function mean_min_separation(coords, boundary)
-        diffs = displacements(coords, boundary)
-        disps = Array(sum.(abs2_vec.(diffs)))
-        disps_diag = disps .+ Diagonal(100 * ones(typeof(boundary[1]), length(coords)))
-        return mean(sqrt.(minimum(disps_diag; dims=1)))
+    runs = [ #                gpu    par    fwd    f32    obc2   gbn2    tol_σ tol_r0
+        ("CPU"             , [false, false, false, false, false, false], 1e-4, 1e-4),
+        ("CPU forward"     , [false, false, true , false, false, false], 0.5 , 0.1 ),
+        ("CPU f32"         , [false, false, false, true , false, false], 0.01, 5e-4),
+        ("CPU obc2"        , [false, false, false, false, true , false], 1e-4, 1e-4),
+        ("CPU gbn2"        , [false, false, false, false, false, true ], 1e-4, 1e-4),
+        ("CPU gbn2 forward", [false, false, true , false, false, true ], 0.5 , 0.1 ),
+    ]
+    if run_parallel_tests #                   gpu    par    fwd    f32    obc2   gbn2    tol_σ tol_r0
+        push!(runs, ("CPU parallel"        , [false, true , false, false, false, false], 1e-4, 1e-4))
+        push!(runs, ("CPU parallel forward", [false, true , true , false, false, false], 0.5 , 0.1 ))
+        push!(runs, ("CPU parallel f32"    , [false, true , false, true , false, false], 0.01, 5e-4))
+    end
+    if run_gpu_tests #                        gpu    par    fwd    f32    obc2   gbn2    tol_σ tol_r0
+        push!(runs, ("GPU"                 , [true , false, false, false, false, false], 0.25, 20.0))
+        push!(runs, ("GPU forward"         , [true , false, true , false, false, false], 0.25, 20.0))
+        push!(runs, ("GPU f32"             , [true , false, false, true , false, false], 0.5 , 50.0))
+        push!(runs, ("GPU obc2"            , [true , false, false, false, true , false], 0.25, 20.0))
+        push!(runs, ("GPU gbn2"            , [true , false, false, false, false, true ], 0.25, 20.0))
     end
 
-    function test_simulation_grad(gpu::Bool, parallel::Bool, forward::Bool, f32::Bool, pis::Bool,
-                                  sis::Bool, obc2::Bool, gbn2::Bool)
+    function mean_min_separation(coords, boundary, ::Val{T}) where T
+        min_seps = T[]
+        for i in eachindex(coords)
+            min_sq_sep = T(100.0)
+            for j in eachindex(coords)
+                if i != j
+                    sq_dist = sum(abs2, vector(coords[i], coords[j], boundary))
+                    min_sq_sep = min(sq_dist, min_sq_sep)
+                end
+            end
+            push!(min_seps, sqrt(min_sq_sep))
+        end
+        return mean(min_seps)
+    end
+
+    function loss(σ, r0, coords, velocities, boundary, pairwise_inters, general_inters,
+                  neighbor_finder, simulator, n_steps, n_threads, n_atoms, atom_mass, bond_dists,
+                  bond_is, bond_js, angles, torsions, ::Val{T}, ::Val{AT}) where {T, AT}
+        atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? T(-0.02) : T(0.02)), σ, T(0.2)) for i in 1:n_atoms]
+        bonds_inner = HarmonicBond{T, T}[]
+        for i in 1:(n_atoms ÷ 2)
+            push!(bonds_inner, HarmonicBond(T(100.0), bond_dists[i] * r0))
+        end
+        bonds = InteractionList2Atoms(
+            bond_is,
+            bond_js,
+            AT(bonds_inner),
+        )
+
+        sys = System(
+            atoms=atoms,
+            coords=AT(coords),
+            boundary=boundary,
+            velocities=AT(velocities),
+            pairwise_inters=pairwise_inters,
+            specific_inter_lists=(bonds, angles, torsions),
+            general_inters=general_inters,
+            neighbor_finder=neighbor_finder,
+            force_units=NoUnits,
+            energy_units=NoUnits,
+        )
+
+        simulate!(sys, simulator, n_steps; n_threads=n_threads)
+
+        return mean_min_separation(sys.coords, boundary, Val(T))
+    end
+
+    for (name, args, tol_σ, tol_r0) in runs
+        gpu, parallel, forward, f32, obc2, gbn2 = args
         T = f32 ? Float32 : Float64
         AT = gpu ? CuArray : Array
+        σ  = T(0.4)
+        r0 = T(1.0)
         n_atoms = 50
         n_steps = 100
         atom_mass = T(10.0)
@@ -58,8 +118,9 @@ end
             dt=T(0.001),
             coupling=RescaleThermostat(temp),
         )
-        coords = place_atoms(n_atoms, boundary; min_dist=T(0.6), max_attempts=500)
-        velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+        rng = Xoshiro(1000) # Same system every time, not required but increases stability
+        coords = place_atoms(n_atoms, boundary; min_dist=T(0.6), max_attempts=500, rng=rng)
+        velocities = [random_velocity(atom_mass, temp; rng=rng) for i in 1:n_atoms]
         nb_cutoff = T(1.2)
         lj = LennardJones(cutoff=DistanceCutoff(nb_cutoff), use_neighbors=true)
         crf = CoulombReactionField(
@@ -68,10 +129,11 @@ end
             use_neighbors=true,
             coulomb_const=T(ustrip(Molly.coulomb_const)),
         )
-        pairwise_inters = pis ? (lj, crf) : ()
+        pairwise_inters = (lj, crf)
         bond_is = AT(Int32.(collect(1:(n_atoms ÷ 2))))
         bond_js = AT(Int32.(collect((1 + n_atoms ÷ 2):n_atoms)))
-        bond_dists = [norm(vector(Array(coords)[i], Array(coords)[i + n_atoms ÷ 2], boundary)) for i in 1:(n_atoms ÷ 2)]
+        bond_dists = [norm(vector(Array(coords)[i], Array(coords)[i + n_atoms ÷ 2], boundary))
+                      for i in 1:(n_atoms ÷ 2)]
         angles_inner = [HarmonicAngle(k=T(10.0), θ0=T(2.0)) for i in 1:15]
         angles = InteractionList3Atoms(
             AT(Int32.(collect( 1:15))),
@@ -118,79 +180,53 @@ end
             n_steps=10,
             dist_cutoff=T(1.5),
         )
+        n_threads = parallel ? Threads.nthreads() : 1
 
-        function loss(σ, r0)
-            atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? T(-0.02) : T(0.02)), σ, T(0.2)) for i in 1:n_atoms]
-            bonds_inner = [HarmonicBond(T(100.0), bond_dists[i] * r0) for i in 1:(n_atoms ÷ 2)]
-            bonds = InteractionList2Atoms(
-                bond_is,
-                bond_js,
-                AT(bonds_inner),
-            )
-            cs = deepcopy(coords)
-            vs = deepcopy(velocities)
-
-            sys = System(
-                atoms=AT(atoms),
-                coords=AT(cs),
-                boundary=boundary,
-                velocities=AT(vs),
-                pairwise_inters=pairwise_inters,
-                specific_inter_lists=sis ? (bonds, angles, torsions) : (),
-                general_inters=general_inters,
-                neighbor_finder=neighbor_finder,
-                force_units=NoUnits,
-                energy_units=NoUnits,
-            )
-
-            simulate!(sys, simulator, n_steps; n_threads=(parallel ? Threads.nthreads() : 1))
-
-            return mean_min_separation(sys.coords, boundary)
-        end
-
-        return loss
-    end
-
-    runs = [ #                gpu    par    fwd    f32    pis    sis    obc2   gbn2    tol_σ tol_r0
-        ("CPU"             , [false, false, false, false, true , true , false, false], 0.1 , 1.0 ),
-        ("CPU forward"     , [false, false, true , false, true , true , false, false], 0.02, 0.1 ),
-        ("CPU f32"         , [false, false, false, true , true , true , false, false], 0.2 , 10.0),
-        ("CPU nospecific"  , [false, false, false, false, true , false, false, false], 0.1 , 0.0 ),
-        ("CPU nopairwise"  , [false, false, false, false, false, true , false, false], 0.0 , 1.0 ),
-        ("CPU obc2"        , [false, false, false, false, true , true , true , false], 0.1 , 20.0),
-        ("CPU gbn2"        , [false, false, false, false, true , true , false, true ], 0.1 , 20.0),
-        ("CPU gbn2 forward", [false, false, true , false, true , true , false, true ], 0.05, 0.1 ),
-    ]
-    if run_parallel_tests #                   gpu    par    fwd    f32    pis    sis    obc2   gbn2    tol_σ tol_r0
-        push!(runs, ("CPU parallel"        , [false, true , false, false, true , true , false, false], 0.1 , 1.0 ))
-        push!(runs, ("CPU parallel forward", [false, true , true , false, true , true , false, false], 0.01, 0.05))
-        push!(runs, ("CPU parallel f32"    , [false, true , false, true , true , true , false, false], 0.2 , 10.0))
-    end
-    if run_gpu_tests #                        gpu    par    fwd    f32    pis    sis    obc2   gbn2    tol_σ tol_r0
-        push!(runs, ("GPU"                 , [true , false, false, false, true , true , false, false], 0.25, 20.0))
-        push!(runs, ("GPU f32"             , [true , false, false, true , true , true , false, false], 0.5 , 50.0))
-        push!(runs, ("GPU nospecific"      , [true , false, false, false, true , false, false, false], 0.25, 0.0 ))
-        push!(runs, ("GPU nopairwise"      , [true , false, false, false, false, true , false, false], 0.0 , 10.0))
-        push!(runs, ("GPU obc2"            , [true , false, false, false, true , true , true , false], 0.25, 20.0))
-        push!(runs, ("GPU gbn2"            , [true , false, false, false, true , true , false, true ], 0.25, 20.0))
-    end
-
-    for (name, args, tol_σ, tol_r0) in runs
-        forward, f32 = args[3], args[4]
-        σ  = f32 ? 0.4f0 : 0.4
-        r0 = f32 ? 1.0f0 : 1.0
-        f = test_simulation_grad(args...)
+        const_args = [
+            Const(boundary), Const(pairwise_inters),
+            Const(general_inters), Const(neighbor_finder), Const(simulator),
+            Const(n_steps), Const(n_threads), Const(n_atoms), Const(atom_mass),
+            Const(bond_dists), Const(bond_is), Const(bond_js), Const(angles),
+            Const(torsions), Const(Val(T)), Const(Val(AT)),
+        ]
         if forward
             grad_enzyme = (
-                autodiff(Forward, f, Duplicated, Duplicated(σ, f32 ? 1.0f0 : 1.0), Const(r0))[2],
-                autodiff(Forward, f, Duplicated, Const(σ), Duplicated(r0, f32 ? 1.0f0 : 1.0))[2],
+                autodiff(
+                    Forward, loss, Duplicated, Duplicated(σ, one(T)), Const(r0),
+                    Duplicated(copy(coords), zero(coords)),
+                    Duplicated(copy(velocities), zero(velocities)), const_args...,
+                )[2],
+                autodiff(
+                    Forward, loss, Duplicated, Const(σ), Duplicated(r0, one(T)),
+                    Duplicated(copy(coords), zero(coords)),
+                    Duplicated(copy(velocities), zero(velocities)), const_args...,
+                )[2],
             )
         else
-            grad_enzyme = autodiff(Reverse, f, Active, Active(σ), Active(r0))[1]
+            grad_enzyme = autodiff(
+                Reverse, loss, Active, Active(σ), Active(r0),
+                Duplicated(copy(coords), zero(coords)),
+                Duplicated(copy(velocities), zero(velocities)), const_args...,
+            )[1][1:2]
         end
+
         grad_fd = (
-            central_fdm(6, 1)(σ  -> ForwardDiff.value(f(σ, r0)), σ ),
-            central_fdm(6, 1)(r0 -> ForwardDiff.value(f(σ, r0)), r0),
+            central_fdm(6, 1)(
+                σ -> loss(
+                    σ, r0, copy(coords), copy(velocities), boundary, pairwise_inters, general_inters,
+                    neighbor_finder, simulator, n_steps, n_threads, n_atoms, atom_mass, bond_dists,
+                    bond_is, bond_js, angles, torsions, Val(T), Val(AT),
+                ),
+                σ,
+            ),
+            central_fdm(6, 1)(
+                r0 -> loss(
+                    σ, r0, copy(coords), copy(velocities), boundary, pairwise_inters, general_inters,
+                    neighbor_finder, simulator, n_steps, n_threads, n_atoms, atom_mass, bond_dists,
+                    bond_is, bond_js, angles, torsions, Val(T), Val(AT),
+                ),
+                r0,
+            ),
         )
         for (prefix, genz, gfd, tol) in zip(("σ", "r0"), grad_enzyme, grad_fd, (tol_σ, tol_r0))
             if abs(gfd) < 1e-13
