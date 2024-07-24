@@ -14,7 +14,7 @@ export
     add_position_restraints
 
 """
-    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100)
+    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100, rng=Random.GLOBAL_RNG)
 
 Generate random coordinates.
 
@@ -27,7 +27,8 @@ Can not be used if one or more dimensions has infinite boundaries.
 function place_atoms(n_atoms::Integer,
                      boundary;
                      min_dist=zero(length_type(boundary)),
-                     max_attempts::Integer=100)
+                     max_attempts::Integer=100,
+                     rng=Random.GLOBAL_RNG)
     if has_infinite_boundary(boundary)
         throw(ArgumentError("one or more dimension has infinite boundaries, boundary is $boundary"))
     end
@@ -41,7 +42,7 @@ function place_atoms(n_atoms::Integer,
     sizehint!(coords, n_atoms)
     failed_attempts = 0
     while length(coords) < n_atoms
-        new_coord = random_coord(boundary)
+        new_coord = random_coord(boundary; rng=rng)
         okay = true
         if min_dist > zero(min_dist)
             for coord in coords
@@ -64,7 +65,7 @@ end
 
 """
     place_diatomics(n_molecules, boundary, bond_length; min_dist=nothing,
-                    max_attempts=100, aligned=false)
+                    max_attempts=100, aligned=false, rng=Random.GLOBAL_RNG)
 
 Generate random diatomic molecule coordinates.
 
@@ -82,7 +83,8 @@ function place_diatomics(n_molecules::Integer,
                          bond_length;
                          min_dist=zero(length_type(boundary)),
                          max_attempts::Integer=100,
-                         aligned::Bool=false)
+                         aligned::Bool=false,
+                         rng=Random.GLOBAL_RNG)
     if has_infinite_boundary(boundary)
         throw(ArgumentError("one or more dimension has infinite boundaries, boundary is $boundary"))
     end
@@ -96,11 +98,11 @@ function place_diatomics(n_molecules::Integer,
     sizehint!(coords, 2 * n_molecules)
     failed_attempts = 0
     while length(coords) < (n_molecules * 2)
-        new_coord_a = random_coord(boundary)
+        new_coord_a = random_coord(boundary; rng=rng)
         if aligned
             shift = SVector{dims}([bond_length, [zero(bond_length) for d in 1:(dims - 1)]...])
         else
-            shift = bond_length * normalize(randn(SVector{dims, typeof(ustrip(bond_length))}))
+            shift = bond_length * normalize(randn(rng, SVector{dims, typeof(ustrip(bond_length))}))
         end
         new_coord_b = copy(new_coord_a) + shift
         okay = true
