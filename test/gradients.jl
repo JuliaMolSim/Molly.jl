@@ -35,25 +35,25 @@
 end
 
 @testset "Differentiable simulation" begin
-    runs = [ #                gpu    par    fwd    f32    obc2   gbn2    tol_σ tol_r0
-        ("CPU"             , [false, false, false, false, false, false], 1e-4, 1e-4),
-        ("CPU forward"     , [false, false, true , false, false, false], 0.5 , 0.1 ),
-        ("CPU f32"         , [false, false, false, true , false, false], 0.01, 5e-4),
-        ("CPU obc2"        , [false, false, false, false, true , false], 1e-4, 1e-4),
-        ("CPU gbn2"        , [false, false, false, false, false, true ], 1e-4, 1e-4),
-        ("CPU gbn2 forward", [false, false, true , false, false, true ], 0.5 , 0.1 ),
+    runs = [ #               gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+        ("CPU"             , false, false, false, false, false, false, 1e-4, 1e-4),
+        ("CPU forward"     , false, false, true , false, false, false, 0.5 , 0.1 ),
+        ("CPU f32"         , false, false, false, true , false, false, 0.01, 5e-4),
+        ("CPU obc2"        , false, false, false, false, true , false, 1e-4, 1e-4),
+        ("CPU gbn2"        , false, false, false, false, false, true , 1e-4, 1e-4),
+        ("CPU gbn2 forward", false, false, true , false, false, true , 0.5 , 0.1 ),
     ]
-    if run_parallel_tests #                   gpu    par    fwd    f32    obc2   gbn2    tol_σ tol_r0
-        push!(runs, ("CPU parallel"        , [false, true , false, false, false, false], 1e-4, 1e-4))
-        push!(runs, ("CPU parallel forward", [false, true , true , false, false, false], 0.5 , 0.1 ))
-        push!(runs, ("CPU parallel f32"    , [false, true , false, true , false, false], 0.01, 5e-4))
+    if run_parallel_tests #                  gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+        push!(runs, ("CPU parallel"        , false, true , false, false, false, false, 1e-4, 1e-4))
+        push!(runs, ("CPU parallel forward", false, true , true , false, false, false, 0.5 , 0.1 ))
+        push!(runs, ("CPU parallel f32"    , false, true , false, true , false, false, 0.01, 5e-4))
     end
-    if run_gpu_tests #                        gpu    par    fwd    f32    obc2   gbn2    tol_σ tol_r0
-        push!(runs, ("GPU"                 , [true , false, false, false, false, false], 0.25, 20.0))
-        push!(runs, ("GPU forward"         , [true , false, true , false, false, false], 0.25, 20.0))
-        push!(runs, ("GPU f32"             , [true , false, false, true , false, false], 0.5 , 50.0))
-        push!(runs, ("GPU obc2"            , [true , false, false, false, true , false], 0.25, 20.0))
-        push!(runs, ("GPU gbn2"            , [true , false, false, false, false, true ], 0.25, 20.0))
+    if run_gpu_tests #                       gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+        push!(runs, ("GPU"                 , true , false, false, false, false, false, 0.25, 20.0))
+        push!(runs, ("GPU forward"         , true , false, true , false, false, false, 0.25, 20.0))
+        push!(runs, ("GPU f32"             , true , false, false, true , false, false, 0.5 , 50.0))
+        push!(runs, ("GPU obc2"            , true , false, false, false, true , false, 0.25, 20.0))
+        push!(runs, ("GPU gbn2"            , true , false, false, false, false, true , 0.25, 20.0))
     end
 
     function mean_min_separation(coords, boundary, ::Val{T}) where T
@@ -103,8 +103,7 @@ end
         return mean_min_separation(sys.coords, boundary, Val(T))
     end
 
-    for (name, args, tol_σ, tol_r0) in runs
-        gpu, parallel, forward, f32, obc2, gbn2 = args
+    for (name, gpu, parallel, forward, f32, obc2, gbn2, tol_σ, tol_r0) in runs
         T = f32 ? Float32 : Float64
         AT = gpu ? CuArray : Array
         σ  = T(0.4)
