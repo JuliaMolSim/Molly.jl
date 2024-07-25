@@ -23,6 +23,14 @@ Base.zero(::HarmonicAngle{K, D}) where {K, D} = HarmonicAngle(k=zero(K), θ0=zer
 
 Base.:+(a1::HarmonicAngle, a2::HarmonicAngle) = HarmonicAngle(k=(a1.k + a2.k), θ0=(a1.θ0 + a2.θ0))
 
+function inject_interaction(inter::HarmonicAngle, inter_type, params_dic)
+    key_prefix = "inter_HA_$(inter_type)_"
+    return HarmonicAngle(
+        dict_get(params_dic, key_prefix * "k" , inter.k ),
+        dict_get(params_dic, key_prefix * "θ0", inter.θ0),
+    )
+end
+
 @inline function force(a::HarmonicAngle, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product
     ba = vector_pad3D(coords_j, coords_i, boundary)

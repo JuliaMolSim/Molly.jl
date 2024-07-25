@@ -51,6 +51,20 @@ function Base.:+(p1::PeriodicTorsion{N, T, E}, p2::PeriodicTorsion{N, T, E}) whe
     )
 end
 
+function inject_interaction(inter::PeriodicTorsion{N, T, E}, inter_type, params_dic) where {N, T, E}
+    if inter.proper
+        key_prefix = "inter_PT_$(inter_type)_"
+    else
+        key_prefix = "inter_IT_$(inter_type)_"
+    end
+    return PeriodicTorsion{N, T, E}(
+        inter.periodicities,
+        ntuple(i -> dict_get(params_dic, key_prefix * "phase_$i", inter.phases[i]), N),
+        ntuple(i -> dict_get(params_dic, key_prefix * "k_$i"    , inter.ks[i]    ), N),
+        inter.proper,
+    )
+end
+
 function periodic_torsion_vectors(coords_i, coords_j, coords_k, coords_l, boundary)
     ab = vector(coords_i, coords_j, boundary)
     bc = vector(coords_j, coords_k, boundary)
