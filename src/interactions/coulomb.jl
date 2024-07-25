@@ -47,6 +47,13 @@ function inject_interaction(inter::Coulomb, params_dic)
     )
 end
 
+function extract_parameters!(params_dic, inter::Coulomb, ff)
+    key_prefix = "inter_CO_"
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
+    return params_dic
+end
+
 @inline function force(inter::Coulomb{C},
                        dr,
                        atom_i,
@@ -255,6 +262,15 @@ function inject_interaction(inter::CoulombReactionField, params_dic)
         dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
         dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
     )
+end
+
+function extract_parameters!(params_dic, inter::CoulombReactionField, ff)
+    key_prefix = "inter_CRF_"
+    params_dic[key_prefix * "dist_cutoff"] = inter.dist_cutoff
+    params_dic[key_prefix * "solvent_dielectric"] = inter.solvent_dielectric
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
+    return params_dic
 end
 
 @inline function force(inter::CoulombReactionField,

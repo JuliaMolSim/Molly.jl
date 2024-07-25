@@ -778,57 +778,11 @@ function extract_parameters(sys, ff)
     end
 
     for inter in values(sys.pairwise_inters)
-        if inter isa LennardJones
-            key_prefix = "inter_LJ_"
-            params_dic[key_prefix * "weight_14"] = inter.weight_special
-        elseif inter isa Coulomb
-            key_prefix = "inter_CO_"
-            params_dic[key_prefix * "weight_14"] = inter.weight_special
-            params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
-        elseif inter isa CoulombReactionField
-            key_prefix = "inter_CRF_"
-            params_dic[key_prefix * "dist_cutoff"] = inter.dist_cutoff
-            params_dic[key_prefix * "solvent_dielectric"] = inter.solvent_dielectric
-            params_dic[key_prefix * "weight_14"] = inter.weight_special
-            params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
-        end
+        extract_parameters!(params_dic, inter, ff)
     end
 
     for inter in values(sys.specific_inter_lists)
-        if interaction_type(inter) <: HarmonicBond
-            for bond_type in inter.types
-                key_prefix = "inter_HB_$(bond_type)_"
-                if !haskey(params_dic, key_prefix * "k")
-                    bond = ff.bond_types[atom_types_to_tuple(bond_type)]
-                    params_dic[key_prefix * "k" ] = bond.k
-                    params_dic[key_prefix * "r0"] = bond.r0
-                end
-            end
-        elseif interaction_type(inter) <: HarmonicAngle
-            for angle_type in inter.types
-                key_prefix = "inter_HA_$(angle_type)_"
-                if !haskey(params_dic, key_prefix * "k")
-                    ang = ff.angle_types[atom_types_to_tuple(angle_type)]
-                    params_dic[key_prefix * "k" ] = ang.k
-                    params_dic[key_prefix * "θ0"] = ang.θ0
-                end
-            end
-        elseif interaction_type(inter) <: PeriodicTorsion
-            for (torsion_type, torsion_inter) in zip(inter.types, Array(inter.inters))
-                if torsion_inter.proper
-                    key_prefix = "inter_PT_$(torsion_type)_"
-                else
-                    key_prefix = "inter_IT_$(torsion_type)_"
-                end
-                if !haskey(params_dic, key_prefix * "phase_1")
-                    torsion = ff.torsion_types[atom_types_to_tuple(torsion_type)]
-                    for i in eachindex(torsion.phases)
-                        params_dic[key_prefix * "phase_$i"] = torsion.phases[i]
-                        params_dic[key_prefix * "k_$i"    ] = torsion.ks[i]
-                    end
-                end
-            end
-        end
+        extract_parameters!(params_dic, inter, ff)
     end
 
     return params_dic

@@ -31,6 +31,20 @@ function inject_interaction(inter::HarmonicAngle, inter_type, params_dic)
     )
 end
 
+function extract_parameters!(params_dic,
+                             inter::InteractionList3Atoms{<:Any, <:AbstractVector{<:HarmonicAngle}},
+                             ff)
+    for angle_type in inter.types
+        key_prefix = "inter_HA_$(angle_type)_"
+        if !haskey(params_dic, key_prefix * "k")
+            ang = ff.angle_types[atom_types_to_tuple(angle_type)]
+            params_dic[key_prefix * "k" ] = ang.k
+            params_dic[key_prefix * "θ0"] = ang.θ0
+        end
+    end
+    return params_dic
+end
+
 @inline function force(a::HarmonicAngle, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product
     ba = vector_pad3D(coords_j, coords_i, boundary)

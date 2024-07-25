@@ -83,6 +83,12 @@ function inject_interaction(inter::LennardJones, params_dic)
     )
 end
 
+function extract_parameters!(params_dic, inter::LennardJones, ff)
+    key_prefix = "inter_LJ_"
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    return params_dic
+end
+
 @inline function force(inter::LennardJones,
                        dr,
                        atom_i,
