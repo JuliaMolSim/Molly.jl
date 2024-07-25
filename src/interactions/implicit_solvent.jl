@@ -597,6 +597,44 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E}},
     end
 end
 
+function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
+    key_prefix = "inter_GB_"
+    bond_index = findfirst(sil -> eltype(sil.inters) <: HarmonicBond, sys.specific_inter_lists)
+
+    element_to_radius = Dict{String, DefaultFloat}() # Units here made the gradients vanish
+    for k in keys(mbondi2_element_to_radius)
+        element_to_radius[k] = dict_get(params_dic, key_prefix * "radius_" * k,
+                                        ustrip(mbondi2_element_to_radius[k]))
+    end
+    element_to_screen = empty(gbn2_element_to_screen)
+    for k in keys(gbn2_element_to_screen)
+        element_to_screen[k] = dict_get(params_dic, key_prefix * "screen_" * k, gbn2_element_to_screen[k])
+    end
+    atom_params = empty(gbn2_atom_params)
+    for k in keys(gbn2_atom_params)
+        atom_params[k] = dict_get(params_dic, key_prefix * "params_" * k, gbn2_atom_params[k])
+    end
+
+    ImplicitSolventGBN2(
+        sys.atoms,
+        sys.atoms_data,
+        sys.specific_inter_lists[bond_index];
+        solvent_dielectric=dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
+        solute_dielectric=dict_get(params_dic, key_prefix * "solute_dielectric", inter.solute_dielectric),
+        kappa=dict_get(params_dic, key_prefix * "kappa", ustrip(inter.kappa))u"nm^-1",
+        offset=dict_get(params_dic, key_prefix * "offset", ustrip(inter.offset))u"nm",
+        dist_cutoff=inter.dist_cutoff,
+        probe_radius=dict_get(params_dic, key_prefix * "probe_radius", ustrip(inter.probe_radius))u"nm",
+        sa_factor=dict_get(params_dic, key_prefix * "sa_factor", ustrip(inter.sa_factor))u"kJ * mol^-1 * nm^-2",
+        use_ACE=inter.use_ACE,
+        neck_scale=dict_get(params_dic, key_prefix * "neck_scale", inter.neck_scale),
+        neck_cut=dict_get(params_dic, key_prefix * "neck_cut", ustrip(inter.neck_cut))u"nm",
+        element_to_radius=element_to_radius,
+        element_to_screen=element_to_screen,
+        atom_params=atom_params,
+    )
+end
+
 function born_radii_loop_OBC(coord_i, coord_j, ori, srj, dist_cutoff, boundary)
     I = zero(coord_i[1] / unit(dist_cutoff)^2)
     r = norm(vector(coord_i, coord_j, boundary))

@@ -277,7 +277,7 @@ end
         return potential_energy(sys; n_threads=n_threads)
     end
     
-    function test_force_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
+    function test_forces_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
         atoms, pis, sis, gis = inject_gradients(sys_ref, params_dic)
 
         sys = System(
@@ -409,7 +409,7 @@ end
     end
     test_runs = [
         ("Energy", test_energy_grad, 1e-8),
-        ("Force" , test_force_grad , 1e-8),
+        ("Force" , test_forces_grad , 1e-8),
     ]
     if !running_CI
         #push!(test_runs, ("Sim", test_sim_grad, 0.015))

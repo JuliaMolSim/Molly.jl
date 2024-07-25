@@ -21,6 +21,14 @@ Base.zero(::HarmonicBond{K, D}) where {K, D} = HarmonicBond(k=zero(K), r0=zero(D
 
 Base.:+(b1::HarmonicBond, b2::HarmonicBond) = HarmonicBond(k=(b1.k + b2.k), r0=(b1.r0 + b2.r0))
 
+function inject_interaction(inter::HarmonicBond, inter_type, params_dic)
+    key_prefix = "inter_HB_$(inter_type)_"
+    return HarmonicBond(
+        dict_get(params_dic, key_prefix * "k" , inter.k ),
+        dict_get(params_dic, key_prefix * "r0", inter.r0),
+    )
+end
+
 @inline function force(b::HarmonicBond, coord_i, coord_j, boundary, args...)
     ab = vector(coord_i, coord_j, boundary)
     c = b.k * (norm(ab) - b.r0)
