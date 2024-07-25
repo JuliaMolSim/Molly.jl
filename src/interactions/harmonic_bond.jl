@@ -29,6 +29,20 @@ function inject_interaction(inter::HarmonicBond, inter_type, params_dic)
     )
 end
 
+function extract_parameters!(params_dic,
+                             inter::InteractionList2Atoms{<:Any, <:AbstractVector{<:HarmonicBond}},
+                             ff)
+    for bond_type in inter.types
+        key_prefix = "inter_HB_$(bond_type)_"
+        if !haskey(params_dic, key_prefix * "k")
+            bond = ff.bond_types[atom_types_to_tuple(bond_type)]
+            params_dic[key_prefix * "k" ] = bond.k
+            params_dic[key_prefix * "r0"] = bond.r0
+        end
+    end
+    return params_dic
+end
+
 @inline function force(b::HarmonicBond, coord_i, coord_j, boundary, args...)
     ab = vector(coord_i, coord_j, boundary)
     c = b.k * (norm(ab) - b.r0)
