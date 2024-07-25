@@ -37,6 +37,16 @@ function Base.:+(c1::Coulomb, c2::Coulomb)
     )
 end
 
+function inject_interaction(inter::Coulomb, params_dic)
+    key_prefix = "inter_CO_"
+    return Coulomb(
+        inter.cutoff,
+        inter.use_neighbors,
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
+    )
+end
+
 @inline function force(inter::Coulomb{C},
                        dr,
                        atom_i,
@@ -233,6 +243,17 @@ function Base.:+(c1::CoulombReactionField, c2::CoulombReactionField)
         c1.use_neighbors,
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
+    )
+end
+
+function inject_interaction(inter::CoulombReactionField, params_dic)
+    key_prefix = "inter_CRF_"
+    return CoulombReactionField(
+        dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
+        dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
+        inter.use_neighbors,
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
     )
 end
 
