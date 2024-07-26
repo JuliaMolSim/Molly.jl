@@ -676,7 +676,7 @@ with respect to atomic distance.
 Custom GBSA methods should implement this function.
 """
 function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, boundary) where T
-    Is = fill(zero(T) / unit(inter.dist_cutoff)^2, length(coords))
+    Is = fill(zero(T) / unit(inter.dist_cutoff), length(coords))
     @inbounds for i in eachindex(coords)
         I = zero(eltype(Is))
         for j in eachindex(coords)
@@ -868,13 +868,8 @@ end
 get_bi(r::ForceLoopResult1) = r.bi
 get_bj(r::ForceLoopResult1) = r.bj
 
-struct ForceLoopResult2{V}
-    fi::V
-    fj::V
-end
-
-get_fi(r::Union{ForceLoopResult1, ForceLoopResult2}) = r.fi
-get_fj(r::Union{ForceLoopResult1, ForceLoopResult2}) = r.fj
+get_fi(r::ForceLoopResult1) = r.fi
+get_fj(r::ForceLoopResult1) = r.fj
 
 function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, dist_cutoff,
                             factor_solute, factor_solvent, kappa, boundary)
@@ -920,8 +915,7 @@ function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, bounda
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)
     if iszero_value(r) || (!iszero_value(dist_cutoff) && r > dist_cutoff)
-        zero_force = zero(bi ./ coord_i .^ 2)
-        return ForceLoopResult2(zero_force, zero_force)
+        return zero(bi ./ coord_i .^ 2)
     end
     rsrj = r + srj
     if ori < rsrj
@@ -933,10 +927,9 @@ function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, bounda
         t3 = (1 + (srj^2)*r2inv)*(L^2 - U^2)/8 + log(U/L)*r2inv/4
         de = bi * (t3 - ig) * rinv
         fdr = dr * de
-        return ForceLoopResult2(-fdr, fdr)
+        return fdr
     else
-        zero_force = zero(bi ./ coord_i .^ 2)
-        return ForceLoopResult2(zero_force, zero_force)
+        return zero(bi ./ coord_i .^ 2)
     end
 end
 
@@ -958,12 +951,16 @@ function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges
 
     born_forces_2 = born_forces_1 .* (Bs .^ 2) .* B_grads
 
-    bis = @view born_forces_2[inter.is]
-    loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, I_grads, inter.oris, inter.srjs,
-                                  inter.dist_cutoff, (boundary,))
+    @inbounds for i in eachindex(sys)
+        for j in eachindex(sys)
+            f = gb_force_loop_2(coords[i], coords[j], born_forces_2[i], I_grads[i, j],
+                                inter.oris[i], inter.srjs[j], inter.dist_cutoff, boundary)
+            fs[i] = fs[i] .- f
+            fs[j] = fs[j] .+ f
+        end
+    end
 
-    return fs .+ dropdims(sum(get_fi.(loop_res_2); dims=2); dims=2) .+
-                 dropdims(sum(get_fj.(loop_res_2); dims=1); dims=1)
+    return fs
 end
 
 function forces_gbsa(sys::System{D, true, T}, inter, Bs, B_grads, I_grads, born_forces,
