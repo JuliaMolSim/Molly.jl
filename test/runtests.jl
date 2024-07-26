@@ -25,18 +25,15 @@ if GROUP in ("Protein", "Gradients", "NotGradients")
     @warn "Only running $GROUP tests as GROUP is set to $GROUP"
 end
 
-# Some CPU gradient tests give memory errors on CI
-const running_CI = haskey(ENV, "CI")
-if running_CI
-    @warn "The visualization tests and some CPU gradient tests will not be run as this is CI"
-end
-
 # GLMakie doesn't work on CI or when running tests remotely
+const running_CI = haskey(ENV, "CI")
 const run_visualize_tests = !running_CI && get(ENV, "VISTESTS", "1") != "0"
 if run_visualize_tests
     import GLMakie
     @info "The visualization tests will be run as this is not CI"
-elseif !running_CI && get(ENV, "VISTESTS", "1") == "0"
+elseif running_CI
+    @warn "The visualization tests will not be run as this is CI"
+else
     @warn "The visualization tests will not be run as VISTESTS is set to 0"
 end
 
