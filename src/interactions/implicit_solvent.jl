@@ -324,7 +324,7 @@ function lookup_table(full_table::AbstractArray{T}, radii) where T
     return table
 end
 
-function lookup_table(full_table::AbstractArray{T}, radii::AbstractArray{<:AbstractFloat}) where T
+function lookup_table(full_table::AbstractArray, radii::AbstractArray{<:AbstractFloat})
     return lookup_table(full_table, radii * u"nm")
 end
 
@@ -676,6 +676,25 @@ with respect to atomic distance.
 Custom GBSA methods should implement this function.
 """
 function born_radii_and_grad(inter::ImplicitSolventOBC, coords, boundary)
+    Is = fill(zero(eltype(eltype(coords))) / unit(inter.dist_cutoff)^2, length(coords))
+    @inbounds for i in eachindex(coords)
+        I = zero(eltype(Is))
+        for j in eachindex(coords)
+            I += born_radii_loop_OBC(coords[i], coords[j], inter.oris[i],
+                                     inter.srjs[j], inter.dist_cutoff, boundary)
+        end
+        Is[i] = I
+    end
+    I_grads = zeros(eltype(Is), length(Is), length(Is)) ./ unit(inter.dist_cutoff)
+
+    Bs_B_grads = born_radii_sum.(inter.offset_radii, inter.offset, Is,
+                                 inter.α, inter.β, inter.γ)
+    Bs      = get_i1.(Bs_B_grads)
+    B_grads = get_i2.(Bs_B_grads)
+    return Bs, B_grads, I_grads
+end
+
+function born_radii_and_grad(inter::ImplicitSolventOBC, coords::CuArray, boundary)
     coords_i = @view coords[inter.is]
     coords_j = @view coords[inter.js]
     loop_res = born_radii_loop_OBC.(coords_i, coords_j, inter.oris, inter.srjs,
