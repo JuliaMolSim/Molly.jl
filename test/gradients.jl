@@ -407,13 +407,11 @@ end
     if run_gpu_tests
         push!(platform_runs, ("GPU", true, false))
     end
-    test_runs = [
+    test_runs = (
         ("Energy", test_energy_grad, 1e-8),
-        ("Force" , test_forces_grad , 1e-8),
-    ]
-    if !running_CI
-        #push!(test_runs, ("Sim", test_sim_grad, 0.015))
-    end
+        ("Force" , test_forces_grad, 1e-8),
+        ("Sim"   , test_sim_grad   , 1e-2),
+    )
     params_to_test = (
         #"inter_LJ_weight_14",
         "atom_N_ϵ",
@@ -442,7 +440,8 @@ end
                     test_fn(dic, sys_ref, copy(sys_ref.coords), sys_ref.neighbor_finder, n_threads)
                 end
                 frac_diff = abs(genz - gfd) / abs(gfd)
-                @info "$(rpad(test_name, 6)) - $(rpad(platform, 12)) - $(rpad(param, 21)) - FD $gfd, Enzyme $genz, fractional difference $frac_diff"
+                @info "$(rpad(test_name, 6)) - $(rpad(platform, 12)) - $(rpad(param, 21)) - " *
+                      "FD $gfd, Enzyme $genz, fractional difference $frac_diff"
                 @test frac_diff < test_tol
             end
         end
