@@ -23,8 +23,6 @@ export
 
 Steepest descent energy minimization.
 
-Not currently compatible with automatic differentiation using Zygote.
-
 # Arguments
 - `step_size::D=0.01u"nm"`: the initial maximum displacement.
 - `max_steps::Int=1000`: the maximum number of steps.
@@ -454,7 +452,6 @@ For more information on the sampling properties of splitting schemes, see
 
 Not currently compatible with constraints, will print a warning and continue
 without applying constraints.
-Not currently compatible with automatic differentiation using Zygote.
 
 # Arguments
 - `dt::S`: the time step of the simulation.
@@ -754,8 +751,6 @@ the number of temperatures in the simulator.
 When calling [`simulate!`](@ref), the `assign_velocities` keyword argument determines
 whether to assign random velocities at the appropriate temperature for each replica.
 
-Not currently compatible with automatic differentiation using Zygote.
-
 # Arguments
 - `dt::DT`: the time step of the simulation.
 - `temperatures::TP`: the temperatures corresponding to the replicas.
@@ -861,8 +856,6 @@ A simulator for a parallel Hamiltonian replica exchange MD (H-REMD) simulation o
 The replicas are expected to have different Hamiltonians, i.e. different interactions.
 When calling [`simulate!`](@ref), the `assign_velocities` keyword argument determines
 whether to assign random velocities at the appropriate temperature for each replica.
-
-Not currently compatible with automatic differentiation using Zygote.
 
 # Arguments
 - `dt::DT`: the time step of the simulation.

@@ -162,8 +162,6 @@ It should be used alongside a temperature coupling method such as the [`Langevin
 simulator or [`AndersenThermostat`](@ref) coupling.
 The neighbor list is not updated when making trial moves or after accepted moves.
 Note that the barostat can change the bounding box of the system.
-
-Not currently compatible with automatic differentiation using Zygote.
 """
 mutable struct MonteCarloBarostat{T, P, K, V}
     pressure::P
@@ -280,8 +278,6 @@ It should be used alongside a temperature coupling method such as the [`Langevin
 simulator or [`AndersenThermostat`](@ref) coupling.
 The neighbor list is not updated when making trial moves or after accepted moves.
 Note that the barostat can change the bounding box of the system.
-
-Not currently compatible with automatic differentiation using Zygote.
 """
 mutable struct MonteCarloAnisotropicBarostat{D, T, P, K, V}
     pressure::SVector{D, P}
@@ -439,7 +435,6 @@ The neighbor list is not updated when making trial moves or after accepted moves
 Note that the barostat can change the bounding box of the system.
 
 This barostat is only available for 3D systems.
-Not currently compatible with automatic differentiation using Zygote.
 """
 mutable struct MonteCarloMembraneBarostat{T, P, K, V, S}
     pressure::SVector{3, P}
