@@ -429,7 +429,7 @@ end
             grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
             autodiff(
                 Reverse, test_fn, Active, Duplicated(params_dic, grads_enzyme),
-                Const(sys_ref), Duplicated(sys_ref.coords, zero(sys_ref.coords)),
+                Const(sys_ref), Duplicated(copy(sys_ref.coords), zero(sys_ref.coords)),
                 Duplicated(sys_ref.neighbor_finder, sys_ref.neighbor_finder),
                 Const(n_threads),
             )
@@ -439,7 +439,7 @@ end
                 gfd = central_fdm(6, 1)(params_dic[param]) do val
                     dic = copy(params_dic)
                     dic[param] = val
-                    test_fn(dic, sys_ref, sys_ref.coords, sys_ref.neighbor_finder, n_threads)
+                    test_fn(dic, sys_ref, copy(sys_ref.coords), sys_ref.neighbor_finder, n_threads)
                 end
                 frac_diff = abs(genz - gfd) / abs(gfd)
                 @info "$(rpad(test_name, 6)) - $(rpad(platform, 12)) - $(rpad(param, 21)) - FD $gfd, Enzyme $genz, fractional difference $frac_diff"

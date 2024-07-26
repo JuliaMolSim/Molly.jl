@@ -202,9 +202,9 @@ function loss(θ)
 
     sys = System(
         atoms=atoms,
-        coords=deepcopy(coords),
+        coords=copy(coords),
         boundary=boundary,
-        velocities=deepcopy(velocities),
+        velocities=copy(velocities),
         specific_inter_lists=specific_inter_lists,
         loggers=loggers,
         force_units=NoUnits,
@@ -332,9 +332,9 @@ function loss()
 
     sys = System(
         atoms=atoms,
-        coords=deepcopy(coords),
+        coords=copy(coords),
         boundary=boundary,
-        velocities=deepcopy(velocities),
+        velocities=copy(velocities),
         general_inters=general_inters,
         loggers=loggers,
         force_units=NoUnits,

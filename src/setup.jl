@@ -1390,9 +1390,9 @@ function add_position_restraints(sys,
     sis = (sys.specific_inter_lists..., restraints)
     return System(
         atoms=deepcopy(sys.atoms),
-        coords=deepcopy(sys.coords),
-        boundary=deepcopy(sys.boundary),
-        velocities=deepcopy(sys.velocities),
+        coords=copy(sys.coords),
+        boundary=copy(sys.boundary),
+        velocities=copy(sys.velocities),
         atoms_data=deepcopy(sys.atoms_data),
         topology=deepcopy(sys.topology),
         pairwise_inters=deepcopy(sys.pairwise_inters),
