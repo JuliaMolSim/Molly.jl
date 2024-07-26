@@ -436,7 +436,7 @@ end
 
         sys = System(
             atoms=(gpu ? CuArray(atoms) : atoms),
-            coords=(gpu ? CuArray(deepcopy(starting_coords)) : deepcopy(starting_coords)),
+            coords=(gpu ? CuArray(copy(starting_coords)) : copy(starting_coords)),
             boundary=boundary,
             atoms_data=atoms_data,
             pairwise_inters=(LennardJones(),),
@@ -555,7 +555,7 @@ end
         loggers=(coords=CoordinateLogger(10),),
     )
 
-    old_coords = deepcopy(sys.coords)
+    old_coords = copy(sys.coords)
 
     for i in eachindex(sys.coords)
         sys.coords[i]     += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
@@ -856,7 +856,7 @@ end
 
     sys = System(
         atoms=atoms,
-        coords=deepcopy(coords),
+        coords=copy(coords),
         boundary=boundary,
         pairwise_inters=(LennardJones(),),
         loggers=(
@@ -896,7 +896,7 @@ end
 
             sys = System(
                 atoms=AT(atoms),
-                coords=AT(deepcopy(coords)),
+                coords=AT(copy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -963,7 +963,7 @@ end
 
             sys = System(
                 atoms=AT(atoms),
-                coords=AT(deepcopy(coords)),
+                coords=AT(copy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1034,7 +1034,7 @@ end
 
             sys = System(
                 atoms=AT(atoms),
-                coords=AT(deepcopy(coords)),
+                coords=AT(copy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1177,13 +1177,13 @@ end
         show(devnull, neighbor_finder)
 
         if gpu
-            coords = CuArray(deepcopy(f32 ? starting_coords_f32 : starting_coords))
-            velocities = CuArray(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
+            coords = CuArray(copy(f32 ? starting_coords_f32 : starting_coords))
+            velocities = CuArray(copy(f32 ? starting_velocities_f32 : starting_velocities))
             atoms = CuArray([Atom(mass=atom_mass, charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                                   ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
         else
-            coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
-            velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
+            coords = copy(f32 ? starting_coords_f32 : starting_coords)
+            velocities = copy(f32 ? starting_velocities_f32 : starting_velocities)
             atoms = [Atom(mass=atom_mass, charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                             ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
         end

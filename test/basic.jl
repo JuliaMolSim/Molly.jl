@@ -188,7 +188,7 @@
             eligible=(gpu ? CuArray(no_nbs) : no_nbs),
             dist_cutoff=1.0u"nm",
         )
-        coords_start = deepcopy(sys.coords)
+        coords_start = copy(sys.coords)
         pe_start = potential_energy(sys, find_neighbors(sys))
         scale_factor = 1.02
         n_scales = 10

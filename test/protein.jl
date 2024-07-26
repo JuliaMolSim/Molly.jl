@@ -127,7 +127,7 @@ end
     n_steps = 100
     simulator = VelocityVerlet(dt=0.0005u"ps")
     velocities_start = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
-    sys.velocities = deepcopy(velocities_start)
+    sys.velocities = copy(velocities_start)
     @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
     @test temperature(sys) ≈ 329.3202932884933u"K"
 
@@ -150,7 +150,7 @@ end
     sys_nounits = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff_nounits;
-        velocities=deepcopy(ustrip_vec.(velocities_start)),
+        velocities=copy(ustrip_vec.(velocities_start)),
         units=false,
         center_coords=false,
     )
@@ -181,7 +181,7 @@ end
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
-            velocities=CuArray(deepcopy(velocities_start)),
+            velocities=CuArray(copy(velocities_start)),
             gpu=true,
             center_coords=false,
         )
@@ -209,7 +209,7 @@ end
         sys_nounits = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff_nounits;
-            velocities=CuArray(deepcopy(ustrip_vec.(velocities_start))),
+            velocities=CuArray(copy(ustrip_vec.(velocities_start))),
             units=false,
             gpu=true,
             center_coords=false,
@@ -278,7 +278,7 @@ end
 
             if solvent_model == "gbn2"
                 sim = SteepestDescentMinimizer(tol=400.0u"kJ * mol^-1 * nm^-1")
-                coords_start = deepcopy(sys.coords)
+                coords_start = copy(sys.coords)
                 simulate!(sys, sim)
                 @test potential_energy(sys) < E_molly
                 @test rmsd(coords_start, sys.coords) < 0.1u"nm"

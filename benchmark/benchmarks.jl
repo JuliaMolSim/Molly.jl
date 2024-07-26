@@ -90,13 +90,13 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
     end
 
     if gpu
-        coords = CuArray(deepcopy(f32 ? starting_coords_f32 : starting_coords))
-        velocities = CuArray(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
+        coords = CuArray(copy(f32 ? starting_coords_f32 : starting_coords))
+        velocities = CuArray(copy(f32 ? starting_velocities_f32 : starting_velocities))
         atoms = CuArray([Atom(mass=atom_mass, charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                               ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
     else
-        coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
-        velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
+        coords = copy(f32 ? starting_coords_f32 : starting_coords)
+        velocities = copy(f32 ? starting_velocities_f32 : starting_velocities)
         atoms = [Atom(mass=atom_mass, charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                       ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
     end
