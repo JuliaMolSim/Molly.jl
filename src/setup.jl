@@ -1391,7 +1391,7 @@ function add_position_restraints(sys,
     return System(
         atoms=deepcopy(sys.atoms),
         coords=copy(sys.coords),
-        boundary=copy(sys.boundary),
+        boundary=deepcopy(sys.boundary),
         velocities=copy(sys.velocities),
         atoms_data=deepcopy(sys.atoms_data),
         topology=deepcopy(sys.topology),
