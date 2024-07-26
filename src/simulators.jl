@@ -59,10 +59,11 @@ are not run before the first step.
 it is `false`.
 Custom simulators should implement this function.
 """
-function simulate!(sys,
-                    sim::SteepestDescentMinimizer;
-                    n_threads::Integer=Threads.nthreads(),
-                    run_loggers=false)
+@inline function simulate!(sys,
+                           sim::SteepestDescentMinimizer;
+                           n_threads::Integer=Threads.nthreads(),
+                           run_loggers=false)
+    # @inline needed to avoid Enzyme error
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E = potential_energy(sys, neighbors; n_threads=n_threads)
@@ -134,11 +135,11 @@ function VelocityVerlet(; dt, coupling=NoCoupling(), remove_CM_motion=1)
     return VelocityVerlet(dt, coupling, Int(remove_CM_motion))
 end
 
-function simulate!(sys,
-                    sim::VelocityVerlet,
-                    n_steps::Integer;
-                    n_threads::Integer=Threads.nthreads(),
-                    run_loggers=true)
+@inline function simulate!(sys,
+                           sim::VelocityVerlet,
+                           n_steps::Integer;
+                           n_threads::Integer=Threads.nthreads(),
+                           run_loggers=true)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -221,11 +222,11 @@ function Verlet(; dt, coupling=NoCoupling(), remove_CM_motion=1)
     return Verlet(dt, coupling, Int(remove_CM_motion))
 end
 
-function simulate!(sys,
-                    sim::Verlet,
-                    n_steps::Integer;
-                    n_threads::Integer=Threads.nthreads(),
-                    run_loggers=true)
+@inline function simulate!(sys,
+                           sim::Verlet,
+                           n_steps::Integer;
+                           n_threads::Integer=Threads.nthreads(),
+                           run_loggers=true)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -296,11 +297,11 @@ end
 
 StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
 
-function simulate!(sys,
-                    sim::StormerVerlet,
-                    n_steps::Integer;
-                    n_threads::Integer=Threads.nthreads(),
-                    run_loggers=true)
+@inline function simulate!(sys,
+                           sim::StormerVerlet,
+                           n_steps::Integer;
+                           n_threads::Integer=Threads.nthreads(),
+                           run_loggers=true)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
@@ -378,12 +379,12 @@ function Langevin(; dt, temperature, friction, coupling=NoCoupling(), remove_CM_
                     vel_scale, noise_scale)
 end
 
-function simulate!(sys,
-                    sim::Langevin,
-                    n_steps::Integer;
-                    n_threads::Integer=Threads.nthreads(),
-                    run_loggers=true,
-                    rng=Random.GLOBAL_RNG)
+@inline function simulate!(sys,
+                           sim::Langevin,
+                           n_steps::Integer;
+                           n_threads::Integer=Threads.nthreads(),
+                           run_loggers=true,
+                           rng=Random.GLOBAL_RNG)
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -479,12 +480,12 @@ function LangevinSplitting(; dt, temperature, friction, splitting, remove_CM_mot
         dt, temperature, friction, splitting, Int(remove_CM_motion))
 end
 
-function simulate!(sys,
-                    sim::LangevinSplitting,
-                    n_steps::Integer;
-                    n_threads::Integer=Threads.nthreads(),
-                    run_loggers=true,
-                    rng=Random.GLOBAL_RNG)
+@inline function simulate!(sys,
+                           sim::LangevinSplitting,
+                           n_steps::Integer;
+                           n_threads::Integer=Threads.nthreads(),
+                           run_loggers=true,
+                           rng=Random.GLOBAL_RNG)
     if length(sys.constraints) > 0
         @warn "LangevinSplitting is not currently compatible with constraints, " *
               "constraints will be ignored"
@@ -603,12 +604,12 @@ function OverdampedLangevin(; dt, temperature, friction, remove_CM_motion=1)
     return OverdampedLangevin(dt, temperature, friction, Int(remove_CM_motion))
 end
 
-function simulate!(sys,
-                    sim::OverdampedLangevin,
-                    n_steps::Integer;
-                    n_threads::Integer=Threads.nthreads(),
-                    run_loggers=true,
-                    rng=Random.GLOBAL_RNG)
+@inline function simulate!(sys,
+                           sim::OverdampedLangevin,
+                           n_steps::Integer;
+                           n_threads::Integer=Threads.nthreads(),
+                           run_loggers=true,
+                           rng=Random.GLOBAL_RNG)
     if length(sys.constraints) > 0
         @warn "OverdampedLangevin is not currently compatible with constraints, " *
               "constraints will be ignored"
@@ -678,8 +679,8 @@ function NoseHoover(; dt, temperature, damping=100*dt, coupling=NoCoupling(), re
     return NoseHoover(dt, temperature, damping, coupling, Int(remove_CM_motion))
 end
 
-function simulate!(sys, sim::NoseHoover, n_steps::Integer;
-                     n_threads::Integer=Threads.nthreads(), run_loggers=true)
+@inline function simulate!(sys, sim::NoseHoover, n_steps::Integer;
+                           n_threads::Integer=Threads.nthreads(), run_loggers=true)
     if length(sys.constraints) > 0
         @warn "NoseHoover is not currently compatible with constraints, " *
               "constraints will be ignored"
@@ -1040,11 +1041,11 @@ function MetropolisMonteCarlo(; temperature, trial_moves, trial_args=Dict())
     return MetropolisMonteCarlo(temperature, trial_moves, trial_args)
 end
 
-function simulate!(sys::System{D, G, T},
-                   sim::MetropolisMonteCarlo,
-                   n_steps::Integer;
-                   n_threads::Integer=Threads.nthreads(),
-                   run_loggers=true) where {D, G, T}
+@inline function simulate!(sys::System{D, G, T},
+                           sim::MetropolisMonteCarlo,
+                           n_steps::Integer;
+                           n_threads::Integer=Threads.nthreads(),
+                           run_loggers=true) where {D, G, T}
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E_old = potential_energy(sys, neighbors; n_threads=n_threads)
     coords_old = similar(sys.coords)
