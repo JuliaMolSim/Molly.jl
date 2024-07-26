@@ -675,8 +675,8 @@ with respect to atomic distance.
 
 Custom GBSA methods should implement this function.
 """
-function born_radii_and_grad(inter::ImplicitSolventOBC, coords, boundary)
-    Is = fill(zero(eltype(eltype(coords))) / unit(inter.dist_cutoff)^2, length(coords))
+function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, boundary) where T
+    Is = fill(zero(T) / unit(inter.dist_cutoff)^2, length(coords))
     @inbounds for i in eachindex(coords)
         I = zero(eltype(Is))
         for j in eachindex(coords)
@@ -1171,7 +1171,27 @@ function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
     end
 end
 
-function AtomsCalculators.potential_energy(sys, inter::AbstractGBSA; kwargs...)
+function AtomsCalculators.potential_energy(sys::System{<:Any, false, T}, inter::AbstractGBSA;
+                                           kwargs...) where T
+    coords, boundary = sys.coords, sys.boundary
+    Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, boundary)
+    atom_charges = charge.(sys.atoms)
+
+    E = zero(T) * sys.energy_units
+    @inbounds for i in eachindex(sys)
+        for j in eachindex(sys)
+            E += gb_energy_loop(
+                coords[i], coords[j], i, j, atom_charges[i], atom_charges[j], Bs[i], Bs[j],
+                inter.oris[i], inter.dist_cutoff, inter.factor_solute, inter.factor_solvent,
+                inter.kappa, inter.offset, inter.probe_radius, inter.sa_factor,
+                inter.use_ACE, boundary,
+            )
+        end
+    end
+    return E
+end
+
+function AtomsCalculators.potential_energy(sys::System{<:Any, true}, inter::AbstractGBSA; kwargs...)
     coords, atoms, boundary = sys.coords, sys.atoms, sys.boundary
     Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, boundary)
 
