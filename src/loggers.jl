@@ -38,8 +38,6 @@ function apply_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, run_l
         for logger in values(sys.loggers)
             log_property!(logger, sys, neighbors, step_n; n_threads=n_threads, kwargs...)
         end
-    elseif run_loggers != false && run_loggers != :skipzero
-        throw(ArgumentError("run_loggers must be true, false or :skipzero"))
     end
     return sys
 end
