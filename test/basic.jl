@@ -188,7 +188,7 @@
             eligible=(gpu ? CuArray(no_nbs) : no_nbs),
             dist_cutoff=1.0u"nm",
         )
-        coords_start = deepcopy(sys.coords)
+        coords_start = copy(sys.coords)
         pe_start = potential_energy(sys, find_neighbors(sys))
         scale_factor = 1.02
         n_scales = 10
@@ -453,12 +453,6 @@ end
     coords = place_atoms(1, b_right; min_dist=0.01u"nm")
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_wrong)
 
-    # Mis-matched energy units in interaction and system
-    coords = place_atoms(1, b_right; min_dist=0.01u"nm")
-    lj = LennardJones(energy_units="kcal/mol")
-    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,
-                                      pairwise_inters=(lj,))
-
     # Mixed units or other invalid units
     bad_velo = [random_velocity(1.0u"g/mol",10u"K",Unitful.k*Unitful.Na) .* 2u"g"]
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,
@@ -499,7 +493,7 @@ end
                         [0.0    , 1.4654985, 0.0      ],
                         [0.0    , 0.0      , 1.7928950]]u"Å",
     )
-    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", force_units=u"kJ/Å", energy_units=u"kJ")
+    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å")
     calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
 
     pe = AtomsCalculators.potential_energy(ab_sys, calc)
