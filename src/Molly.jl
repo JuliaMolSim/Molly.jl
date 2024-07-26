@@ -9,8 +9,6 @@ import AtomsBase
 import AtomsCalculators
 import BioStructures # Imported to avoid clashing names
 using CellListMap
-using ChainRules
-using ChainRulesCore
 import Chemfiles
 using Combinatorics
 using CUDA
@@ -26,7 +24,6 @@ using PeriodicTable
 using SimpleCrystals
 using Unitful
 using UnitfulAtomic
-using UnitfulChainRules
 using UnsafeAtomicsLLVM
 
 using LinearAlgebra

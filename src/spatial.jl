@@ -113,7 +113,6 @@ image is found, which is slower.
 Not currently able to simulate a cubic box, use [`CubicBoundary`](@ref) or small
 offsets instead.
 Not currently compatible with infinite boundaries.
-Not currently compatible with automatic differentiation using Zygote.
 """
 struct TriclinicBoundary{T, A, D, I}
     basis_vectors::SVector{3, SVector{3, D}}
@@ -677,7 +676,6 @@ function torsion_angle(vec_ij, vec_jk, vec_kl)
     return θ
 end
 
-# Used to write an rrule that can override the Zygote sum adjoint
 sum_svec(arr) = sum(arr)
 
 """
@@ -708,8 +706,6 @@ Custom general interaction types can implement this function.
 This should only be used on systems containing just pairwise interactions, or
 where the specific interactions, constraints and general interactions without
 [`virial`](@ref) defined do not contribute to the virial.
-Not currently compatible with automatic differentiation using Zygote when
-using pairwise interactions.
 """
 function virial(sys; n_threads::Integer=Threads.nthreads())
     return virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
@@ -802,8 +798,6 @@ This should only be used on systems containing just pairwise interactions, or
 where the specific interactions, constraints and general interactions without
 [`virial`](@ref) defined do not contribute to the virial.
 Not compatible with infinite boundaries.
-Not currently compatible with automatic differentiation using Zygote when
-using pairwise interactions.
 """
 function pressure(sys; n_threads::Integer=Threads.nthreads())
     return pressure(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
@@ -837,7 +831,6 @@ Accounts for periodic boundary conditions by using the circular mean.
 If `topology=nothing` then the coordinates are returned.
 
 Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
-Not currently compatible with automatic differentiation using Zygote.
 """
 function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topology) where {D, C}
     if isnothing(topology)
@@ -886,7 +879,6 @@ moved by the same amount according to the center of coordinates of the molecule.
 This can be disabled with `ignore_molecules=true`.
 
 Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
-Not currently compatible with automatic differentiation using Zygote.
 """
 function scale_coords!(sys, scale_factor; ignore_molecules=false)
     if ignore_molecules || isnothing(sys.topology)
