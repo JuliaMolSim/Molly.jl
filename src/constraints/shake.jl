@@ -37,54 +37,76 @@ function SHAKE_RATTLE(constraints, n_atoms::Integer, dist_tolerance, vel_toleran
             clusters, dist_tolerance, vel_tolerance)
 end
 
-function apply_position_constraints!(sys, ca::SHAKE_RATTLE, coord_storage;
-                                     n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys::System{D,false}, ca::SHAKE_RATTLE, coord_storage;
+                                     n_threads::Integer=Threads.nthreads()) where D
     # SHAKE updates
     converged = false
-
     while !converged
-        for cluster in ca.clusters # Cannot parallelize this
-            for constraint in cluster.constraints
-                k1, k2 = constraint.i, constraint.j
-
-                # Vector between the atoms after unconstrained update (s)
-                s12 = vector(sys.coords[k1], sys.coords[k2], sys.boundary)
-
-                # Vector between the atoms before unconstrained update (r)
-                r12 = vector(coord_storage[k1], coord_storage[k2], sys.boundary)
-
-                if abs(norm(s12) - constraint.dist) > ca.dist_tolerance
-                    m1_inv = inv(mass(sys.atoms[k1]))
-                    m2_inv = inv(mass(sys.atoms[k2]))
-                    a = (m1_inv + m2_inv)^2 * sum(abs2, r12)
-                    b = -2 * (m1_inv + m2_inv) * dot(r12, s12)
-                    c = sum(abs2, s12) - (constraint.dist)^2
-                    D = b^2 - 4*a*c
-
-                    if ustrip(D) < 0.0
-                        @warn "SHAKE determinant negative, setting to 0.0"
-                        D = zero(D)
-                    end
-
-                    # Quadratic solution for g
-                    α1 = (-b + sqrt(D)) / (2*a)
-                    α2 = (-b - sqrt(D)) / (2*a)
-
-                    g = abs(α1) <= abs(α2) ? α1 : α2
-
-                    # Update positions
-                    δri1 = r12 .* (g*m1_inv)
-                    δri2 = r12 .* (-g*m2_inv)
-
-                    sys.coords[k1] += δri1
-                    sys.coords[k2] += δri2
-                end
-            end
+        for cluster in ca.clusters
+            apply_position_constraints_kernel!(sys.coords, sys.atoms, sys.boundary, cluster, coord_storage, ca.dist_tolerance)
         end
+         converged = check_position_constraints(sys, ca)
+    end
+    return sys
+end
 
+function apply_position_constraints!(sys::System{D,true}, ca::SHAKE_RATTLE, coord_storage;
+                                     n_threads::Integer=Threads.nthreads()) where {D}
+    # SHAKE updates
+    converged = false
+    clusters = cu(ca.clusters)
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(ca.clusters))
+    while !converged
+        CUDA.@sync @cuda threads = n_threads_gpu blocks = n_blocks apply_position_constraints_gpu!(
+            sys.coords, sys.atoms, sys.boundary, clusters, coord_storage, ca.dist_tolerance)
         converged = check_position_constraints(sys, ca)
     end
     return sys
+end
+
+function apply_position_constraints_gpu!(coords, atoms, boundary, clusters, coord_storage, dist_tolerance)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    (i > length(clusters)) && return nothing
+    cluster = clusters[i]
+    apply_position_constraints_kernel!(coords, atoms, boundary, cluster, coord_storage, dist_tolerance)
+end
+
+function apply_position_constraints_kernel!(coords, atoms, boundary, cluster, coord_storage, dist_tolerance)
+    @inbounds for constraint in cluster.constraints # Cannot parallelize this
+        k1, k2 = constraint.i, constraint.j
+
+        # Vector between the atoms after unconstrained update (s)
+        s12 = vector(coords[k1], coords[k2], boundary)
+
+        # Vector between the atoms before unconstrained update (r)
+        r12 = vector(coord_storage[k1], coord_storage[k2], boundary)
+        if abs(norm(s12) - constraint.dist) > dist_tolerance
+            m1_inv = inv(mass(atoms[k1]))
+            m2_inv = inv(mass(atoms[k2]))
+            a = (m1_inv + m2_inv)^2 * sum(abs2, r12)
+            b = -2 * (m1_inv + m2_inv) * dot(r12, s12)
+            c = sum(abs2, s12) - (constraint.dist)^2
+            D = b^2 - 4 * a * c
+
+            if ustrip(D) < 0.0
+                # @warn "SHAKE determinant negative, setting to 0.0"
+                D = zero(D)
+            end
+
+            # Quadratic solution for g
+            α1 = (-b + sqrt(D)) / (2 * a)
+            α2 = (-b - sqrt(D)) / (2 * a)
+
+            g = abs(α1) <= abs(α2) ? α1 : α2
+
+            # Update positions
+            δri1 = r12 .* (g * m1_inv)
+            δri2 = r12 .* (-g * m2_inv)
+
+            coords[k1] += δri1
+            coords[k2] += δri2
+        end
+    end
 end
 
 function apply_velocity_constraints!(sys, ca::SHAKE_RATTLE; n_threads::Integer=Threads.nthreads())
@@ -92,29 +114,14 @@ function apply_velocity_constraints!(sys, ca::SHAKE_RATTLE; n_threads::Integer=T
     converged = false
 
     while !converged
-        for cluster in ca.clusters # Cannot parallelize this
-            for constraint in cluster.constraints
-                k1, k2 = constraint.i, constraint.j
-
-                inv_m1 = inv(mass(sys.atoms[k1]))
-                inv_m2 = inv(mass(sys.atoms[k2]))
-
-                # Vector between the atoms after SHAKE constraint
-                r_k1k2 = vector(sys.coords[k1], sys.coords[k2], sys.boundary)
-
-                # Difference between unconstrainted velocities
-                v_k1k2 = sys.velocities[k2] .- sys.velocities[k1]
-
-                err = abs(dot(r_k1k2, v_k1k2))
-                if err > ca.vel_tolerance
-                    # Re-arrange constraint equation to solve for Lagrange multiplier
-                    # This has a factor of dt which cancels out in the velocity update
-                    λₖ = -dot(r_k1k2, v_k1k2) / (dot(r_k1k2, r_k1k2) * (inv_m1 + inv_m2))
-
-                    # Correct velocities
-                    sys.velocities[k1] -= inv_m1 .* λₖ .* r_k1k2
-                    sys.velocities[k2] += inv_m2 .* λₖ .* r_k1k2
-                end
+        if is_on_gpu(sys)
+            clusters = cu(ca.clusters)
+            n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(ca.clusters))
+            CUDA.@sync @cuda threads = n_threads_gpu blocks = n_blocks apply_velocity_constraints_gpu!(
+                sys.coords, sys.atoms, sys.velocities, sys.boundary, clusters, ca.vel_tolerance)
+        else
+            for cluster in ca.clusters
+                apply_velocity_constraints_kernel!(sys.coords, sys.atoms, sys.velocities, sys.boundary, cluster, ca.vel_tolerance)
             end
         end
 
@@ -123,12 +130,46 @@ function apply_velocity_constraints!(sys, ca::SHAKE_RATTLE; n_threads::Integer=T
     return sys
 end
 
+function apply_velocity_constraints_gpu!(coords, atoms, velocities, boundary, clusters, vel_tolerance)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    (i > length(clusters)) && return nothing
+    cluster = clusters[i]
+    apply_velocity_constraints_kernel!(coords, atoms, velocities, boundary, cluster, vel_tolerance)
+end
+
+function apply_velocity_constraints_kernel!(coords, atoms, velocities, boundary, cluster, vel_tolerance)
+    @inbounds for constraint in cluster.constraints # Cannot parallelize this
+        k1, k2 = constraint.i, constraint.j
+
+        inv_m1 = inv(mass(atoms[k1]))
+        inv_m2 = inv(mass(atoms[k2]))
+
+        # Vector between the atoms after SHAKE constraint
+        r_k1k2 = vector(coords[k1], coords[k2], boundary)
+
+        # Difference between unconstrainted velocities
+        v_k1k2 = velocities[k2] .- velocities[k1]
+
+        err = abs(dot(r_k1k2, v_k1k2))
+        if err > vel_tolerance
+            # Re-arrange constraint equation to solve for Lagrange multiplier
+            # This has a factor of dt which cancels out in the velocity update
+            λₖ = -dot(r_k1k2, v_k1k2) / (dot(r_k1k2, r_k1k2) * (inv_m1 + inv_m2))
+
+            # Correct velocities
+            velocities[k1] -= inv_m1 .* λₖ .* r_k1k2
+            velocities[k2] += inv_m2 .* λₖ .* r_k1k2
+        end
+    end
+    
+end
+
 """
     check_position_constraints(sys, constraints)
 
 Checks if the position constraints are satisfied by the current coordinates of `sys`.
 """
-function check_position_constraints(sys, ca::SHAKE_RATTLE)
+function check_position_constraints(sys::System{D,false}, ca::SHAKE_RATTLE) where {D}
     max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.coords)))
     for cluster in ca.clusters
         for constraint in cluster.constraints
@@ -142,6 +183,33 @@ function check_position_constraints(sys, ca::SHAKE_RATTLE)
     return max_err < ca.dist_tolerance
 end
 
+function check_position_constraints(sys::System{D,true}, ca::SHAKE_RATTLE) where {D}
+    max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.coords)))
+    deltas = CUDA.fill(max_err, length(ca.clusters))
+    clusters = cu(ca.clusters)
+
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(ca.clusters))
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=
+        n_blocks check_position_kernel!(sys.coords, clusters, sys.boundary, deltas)
+
+    max_err = maximum(deltas)
+    return max_err < ca.dist_tolerance
+end
+
+function check_position_kernel!(coords, clusters, boundary, deltas)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    (i > length(clusters)) && return nothing
+    cluster = clusters[i]
+
+    for constraint in cluster.constraints
+        dr = vector(coords[constraint.i], coords[constraint.j], boundary)
+        err = abs(norm(dr) - constraint.dist)
+
+        if deltas[i] < err
+            deltas[i] = err
+        end
+    end
+end
 """
     check_velocity_constraints(sys, constraints)
 
@@ -161,3 +229,33 @@ function check_velocity_constraints(sys::System, ca::SHAKE_RATTLE)
     end
     return max_err < ca.vel_tolerance
 end
+
+function check_velocity_constraints(sys::System{D,true}, ca::SHAKE_RATTLE) where {D}
+    max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
+    deltas = CUDA.fill(max_err, length(ca.clusters))
+    clusters = cu(ca.clusters)
+
+    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(ca.clusters))
+    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks check_velocity_kernel!(
+        sys.coords, sys.velocities, clusters, sys.boundary, deltas)
+    
+    max_err = maximum(deltas)
+    return max_err < ca.vel_tolerance
+end
+
+function check_velocity_kernel!(coords, velocities, clusters, boundary, deltas)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    (i > length(clusters)) && return nothing
+    cluster = clusters[i]
+
+    for constraint in cluster.constraints
+        dr = vector(coords[constraint.i], coords[constraint.j], boundary)
+        v_diff = velocities[constraint.j] .- velocities[constraint.i]
+        err = abs(dot(dr, v_diff))
+        if deltas[i] < err
+            deltas[i] = err
+        end
+    end
+end
+
+
