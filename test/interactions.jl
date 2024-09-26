@@ -83,7 +83,7 @@
         B::TB
         C::TC
     end
-
+ 
     buck_c1 = SVector(10.0, 10.0, 10.0)u"Å"
     buck_c2 = SVector(13.0, 10.0, 10.0)u"Å"
     buck_c3 = SVector(14.0, 10.0, 10.0)u"Å"
@@ -385,5 +385,56 @@
         Molly.potential_muller_brown(inter, local_min_1),
         -108.166724117u"kJ * mol^-1";
         atol=1e-7u"kJ * mol^-1",
+    )
+    
+    AH_a1 = AshbaughHatchAtom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
+    inter = AshbaughHatch()
+
+    @test isapprox(
+        force(inter, dr12, c1, c2, AH_a1, AH_a1, boundary),
+        SVector(16.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        force(inter, dr13, c1, c3, AH_a1, AH_a1, boundary),
+        SVector(-1.375509739, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr12, c1, c2, AH_a1, AH_a1, boundary),
+        0.0u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr13, c1, c3, AH_a1, AH_a1, boundary),
+        -0.1170417309u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    AH_a1 = AshbaughHatchAtom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5)
+    @test isapprox(
+        potential_energy(inter, dr13, c1, c3, AH_a1, AH_a1, boundary),
+        -0.058520865u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    @test isapprox(
+        force(inter, dr13, c1, c3, AH_a1, AH_a1, boundary),
+        SVector(-0.68775486946, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+
+    c2 = SVector(1.28, 1.0, 1.0)u"nm"
+    dr12 = vector(c1, c2, boundary)
+    @test isapprox(
+        potential_energy(inter, dr12, c1, c2, AH_a1, AH_a1, boundary),
+        0.7205987916u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    @test isapprox(
+        force(inter, dr12, c1, c2, AH_a1, AH_a1, boundary),
+        SVector(52.5306754422, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 end

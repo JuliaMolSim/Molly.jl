@@ -1,7 +1,8 @@
 export
     LennardJones,
     LennardJonesSoftCore,
-    AshbaughHatch
+    AshbaughHatch,
+    AshbaughHatchAtom
 
 @doc raw"""
     LennardJones(; cutoff, use_neighbors, lorentz_mixing, weight_special, weight_solute_solvent,
@@ -340,7 +341,7 @@ V_{\text{LJ}}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}
 V_{\text{AH}}(r_{ij}) =
     \begin{cases}
       V_{\text{LJ}}(r_{ij}) -λ_{ij}V_{\text{LJ}}(r_{c})+\varepsilon_{ij}(1-λ_{ij}) &,  r_{ij}\leq  2^{1/6}σ  \\
-       λ_{ij}\left(V_{\text{LJ}}(r_{ij}) -V_{\text{LJ}}(r_{c} \right) &,  2^{1/6}σ \leq r_{ij}< r_{c}\\
+       λ_{ij}\left(V_{\text{LJ}}(r_{ij}) -V_{\text{LJ}}(r_{c}) \right) &,  2^{1/6}σ \leq r_{ij}< r_{c}\\
        0 &,   r_{ij}\gt r_{c}
     \end{cases}
 ```
@@ -349,8 +350,8 @@ and the force on each atom by
 ```math
 \vec{F}_{\text{AH}} =
     \begin{cases}
-      F_{\text{LJ}}(r_{ij})  &,  r_{ij}\leq  2^{1/6}σ  \\
-       λ_{ij}\left(F_{\text{LJ}}(r_{ij})  &,  2^{1/6}σ \leq r_{ij}< r_{c}\\
+      F_{\text{LJ}}(r_{ij})  &,  r_{ij} \leq  2^{1/6}σ  \\
+       λ_{ij}F_{\text{LJ}}(r_{ij})  &,  2^{1/6}σ \leq r_{ij}< r_{c}\\
        0 &,   r_{ij}\gt r_{c}
     \end{cases}
 ```
@@ -358,7 +359,7 @@ where
 ```math
 \begin{aligned}
 \vec{F}_{\text{LJ}}\
-&= \frac{24\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}^{6}}{r_{ij}^{6}}\right)^2 -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] 
+&= \frac{24\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}^{6}}{r_{ij}^{6}}\right)^2 -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]  \vec{r_{ij}}
 \end{aligned}
 ```
 
@@ -374,8 +375,30 @@ struct AshbaughHatch{S, C, W, WS, F, E} <: PairwiseInteraction
     energy_units::E
 end
 
+struct AshbaughHatchAtom{C, M, S, E, L}
+    index::Int
+    charge::C
+    mass::M
+    σ::S
+    ϵ::E
+    λ::L
+    solute::Bool
+end
+
+function AshbaughHatchAtom(;
+    index=1,
+    charge=0.0,
+    mass=1.0u"g/mol",
+    σ=0.0u"nm",
+    ϵ=0.0u"kJ * mol^-1",
+    λ=1.0,
+    solute=false)
+return AshbaughHatchAtom(index, charge, mass, σ, ϵ,λ, solute)
+end
+
+
 function AshbaughHatch(;
-                        cutoff=ShiftedPotentialCutoff(),
+                        cutoff=NoCutoff(),
                         use_neighbors=false,
                         lorentz_mixing=true,
                         weight_special=1,
@@ -390,9 +413,6 @@ function AshbaughHatch(;
 end
 
 use_neighbors(inter::AshbaughHatch) = inter.use_neighbors
-
-is_solute(at::Atom) = at.solute
-is_solute(at) = false
 
 function Base.zero(lj::AshbaughHatch{S, C, W, WS, F, E}) where {S, C, W, WS, F, E}
     return LennardJones{S, C, W, WS, F, E}(
@@ -457,12 +477,11 @@ end
     end
 end
 
-function force_divr(::AshbaughHatch, r2, invr2, (σ2, ϵ, λ))
-    #six_term = (σ2 * invr2) ^ 3
+@inline function force_divr(::AshbaughHatch, r2, invr2, (σ2, ϵ, λ))
     if r2 < 2^(1/3)*σ2
-        return  force_divr(::LennardJones, r2, invr2, (σ2, ϵ))# (24ϵ * invr2) * (2 * six_term ^ 2 - six_term)
+        return  force_divr(LennardJones(), r2, invr2, (σ2, ϵ))
     else
-        return λ*force_divr(::LennardJones, r2, invr2, (σ2, ϵ)) #*(24ϵ * invr2) * (2 * six_term ^ 2 - six_term)
+        return λ*force_divr(LennardJones(), r2, invr2, (σ2, ϵ)) 
     end
 end
 
@@ -503,11 +522,10 @@ end
     end
 end
 
-function potential(::AshbaughHatch, r2, invr2, (σ2, ϵ, λ))
-    #six_term = (σ2 * invr2) ^ 3
+@inline function potential(::AshbaughHatch, r2, invr2, (σ2, ϵ, λ))
     if r2 < 2^(1/3)*σ2
-        return   potential(::LennardJones, r2, invr2, (σ2, ϵ)) #4ϵ * (six_term ^ 2 - six_term) + ϵ*(1-λ)
+        return   potential(LennardJones(), r2, invr2, (σ2, ϵ)) + ϵ*(1-λ) 
     else
-        return λ* potential(::LennardJones, r2, invr2, (σ2, ϵ)) #4ϵ * (six_term ^ 2 - six_term)
+        return λ* potential(LennardJones(), r2, invr2, (σ2, ϵ))
     end
 end
