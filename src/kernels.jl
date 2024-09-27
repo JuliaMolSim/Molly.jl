@@ -17,8 +17,8 @@ end
 function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundary,
                             pairwise_inters, nbs, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    fs_mat = KernelAbstractions.zeros(backend, D, length(atoms))
-    n_threads_gpu, n_blocks = gpu_threads_blocks_pairwise(length(nbs))
+    fs_mat = KernelAbstractions.zeros(backend, T, D, length(atoms))
+    n_threads_gpu = gpu_threads_blocks_pairwise(length(nbs))
     kernel! = pairwise_force_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, coords, atoms, boundary, pairwise_inters, nbs,
             Val(D), Val(force_units), ndrange = length(nbs))
@@ -49,8 +49,8 @@ end
         end
         for dim in 1:D
             fval = ustrip(f[dim])
-            Atomix.@atomic :monotonic forces[dim, i] += -fval
-            Atomix.@atomic :monotonic forces[dim, j] +=  fval
+            Atomix.@atomic forces[dim, i] = forces[dim, i] - fval
+            Atomix.@atomic forces[dim, j] = forces[dim, j] + fval
         end
     end
 end
