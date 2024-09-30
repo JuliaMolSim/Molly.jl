@@ -353,7 +353,7 @@ function ChainRulesCore.rrule(::typeof(pairwise_force_gpu), coords::AbstractArra
 
     function pairwise_force_gpu_pullback(d_fs_mat)
         backend = get_backend(coords)
-        ArrayType = find_arrat_type(coords)
+        ArrayType = find_array_type(coords)
         n_atoms = length(atoms)
         z = zero(T)
         fs_mat = KernelAbstractions.zeros(backend, T, D, n_atoms)
