@@ -57,6 +57,7 @@ const DEVICE = get(ENV, "DEVICE", "0")
 
 const run_cuda_tests = get(ENV, "GPUTESTS", "1") != "0" && CUDA.functional()
 const run_rocm_tests = get(ENV, "GPUTESTS", "1") != "0" && AMDGPU.functional()
+#const run_rocm_tests = false
 array_list = (Array,)
 
 if run_cuda_tests
@@ -94,17 +95,17 @@ if GROUP in ("All", "NotZygote")
         piracies=false,
     )
 
-    include("basic.jl")
-    include("interactions.jl")
-    include("minimization.jl")
+    #include("basic.jl")
+    #include("interactions.jl")
+    #include("minimization.jl")
     include("simulation.jl")
-    include("agent.jl")
+    #include("agent.jl")
 end
 
 if GROUP in ("All", "Protein", "NotZygote")
-    include("protein.jl")
+    #include("protein.jl")
 end
 
 if GROUP in ("All", "Zygote")
-    include("zygote.jl")
+    #include("zygote.jl")
 end

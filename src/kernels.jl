@@ -69,7 +69,7 @@ end
 function specific_force_gpu(inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
                             boundary, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    fs_mat = KernelAbstractions.zeros(backend, typeof(coords), T, D, length(coords))
+    fs_mat = KernelAbstractions.zeros(backend, T, D, length(coords))
     n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
     kernel! = specific_force_2_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, coords, boundary, inter_list.is, inter_list.js,
