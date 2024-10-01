@@ -546,6 +546,7 @@ The available pairwise interactions are:
 - [`Coulomb`](@ref)
 - [`CoulombSoftCore`](@ref)
 - [`CoulombReactionField`](@ref)
+- [`Yukawa`](@ref)
 - [`Gravity`](@ref)
 
 The available specific interactions are:

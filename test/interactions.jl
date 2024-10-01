@@ -159,6 +159,29 @@
         atol=1e-5u"kJ * mol^-1",
     )
 
+
+    inter = Yukawa(; kappa=1.0u"nm^-1")
+    @test isapprox(
+        force(inter, dr12, c1, c2, a1, a1, boundary),
+        SVector(1486.7077156786308, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-5u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        force(inter, dr13, c1, c3, a1, a1, boundary),
+        SVector(814.8981977722481, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-5u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr12, c1, c2, a1, a1, boundary),
+        343.08639592583785u"kJ * mol^-1";
+        atol=1e-5u"kJ * mol^-1",
+    )
+    @test isapprox(
+        potential_energy(inter, dr13, c1, c3, a1, a1, boundary),
+        232.8280565063u"kJ * mol^-1";
+        atol=1e-5u"kJ * mol^-1",
+    )
+
     c1_grav = SVector(1.0, 1.0, 1.0)u"m"
     c2_grav = SVector(6.0, 1.0, 1.0)u"m"
     a1_grav, a2_grav = Atom(mass=1e6u"kg"), Atom(mass=1e5u"kg")
