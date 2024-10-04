@@ -4,7 +4,7 @@ export
     CubicBoundary,
     RectangularBoundary,
     TriclinicBoundary,
-    box_volume,
+    volume,
     box_center,
     scale_boundary,
     random_coord,
@@ -240,12 +240,12 @@ n_infinite_dims(b::Union{CubicBoundary, RectangularBoundary}) = sum(isinf, b.sid
 n_infinite_dims(b::TriclinicBoundary) = 0
 
 """
-    box_volume(boundary)
+    volume(boundary)
 
 Calculate the volume of a 3D bounding box or the area of a 2D bounding box.
 """
-box_volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
-box_volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
+volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
+volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
 
 """
     box_center(boundary)
@@ -806,7 +806,7 @@ function pressure(sys::AbstractSystem{D}, neighbors, step_n::Integer=0;
     end
     NkT = energy_remove_mol(length(sys) * sys.k * temperature(sys))
     vir = energy_remove_mol(virial(sys, neighbors, step_n; n_threads=n_threads))
-    P = (NkT - (2 * vir) / D) / box_volume(sys.boundary)
+    P = (NkT - (2 * vir) / D) / volume(sys.boundary)
     if sys.energy_units == NoUnits || D != 3
         # If implied energy units are (u * nm^2 * ps^-2) and everything is
         #   consistent then this has implied units of (u * nm^-1 * ps^-2)
