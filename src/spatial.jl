@@ -5,6 +5,7 @@ export
     RectangularBoundary,
     TriclinicBoundary,
     volume,
+    density,
     box_center,
     scale_boundary,
     random_coord,
@@ -247,9 +248,33 @@ n_infinite_dims(sys::System) = n_infinite_dims(sys.boundary)
     volume(boundary)
 
 Calculate the volume of a 3D bounding box or the area of a 2D bounding box.
+
+Returns infinite volume for infinite boundaries.
 """
 volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
 volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
+
+"""
+    density(sys)
+
+The density of a [`System`](@ref).
+
+Returns zero density for infinite boundaries.
+"""
+function density(sys)
+    m = sum(mass, sys.atoms)
+    if dimension(m) == u"𝐌 * 𝐍^-1"
+        m_no_mol = m / Unitful.Na
+    else
+        m_no_mol = m
+    end
+    d = m_no_mol / volume(sys)
+    if unit(d) == NoUnits
+        return d
+    else
+        return uconvert(u"kg * m^-3", d)
+    end
+end
 
 """
     box_center(boundary)
