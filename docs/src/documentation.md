@@ -90,6 +90,7 @@ forces(sys)
 accelerations(sys)
 
 masses(sys)
+density(sys) # 207.56738339673083 kg m^-3
 temperature(sys) # 96.76667184796673 K
 random_velocities(sys, 300.0u"K")
 
@@ -110,6 +111,7 @@ sys.loggers
 # For certain systems
 virial(sys)
 pressure(sys)
+dipole_moment(sys)
 
 # AtomsBase.jl interface
 import AtomsBase
@@ -1072,6 +1074,10 @@ The available loggers are:
 - [`KineticEnergyLogger`](@ref)
 - [`PotentialEnergyLogger`](@ref)
 - [`ForceLogger`](@ref)
+- [`VolumeLogger`](@ref)
+- [`DensityLogger`](@ref)
+- [`VirialLogger`](@ref)
+- [`PressureLogger`](@ref)
 - [`StructureWriter`](@ref)
 - [`TimeCorrelationLogger`](@ref)
 - [`AutoCorrelationLogger`](@ref)
