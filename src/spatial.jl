@@ -23,7 +23,8 @@ export
     virial,
     pressure,
     molecule_centers,
-    scale_coords!
+    scale_coords!,
+    dipole_moment
 
 """
     CubicBoundary(x, y, z)
@@ -938,3 +939,12 @@ function scale_coords!(sys, scale_factor; ignore_molecules=false)
     end
     return sys
 end
+
+"""
+    dipole_moment(sys)
+
+The dipole moment μ of a system.
+
+Requires the charges on the atoms to be set.
+"""
+dipole_moment(sys) = sum(sys.coords .* charges(sys))
