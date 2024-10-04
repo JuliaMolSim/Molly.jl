@@ -13,6 +13,7 @@ export
     PotentialEnergyLogger,
     ForceLogger,
     VirialLogger,
+    DensityLogger,
     PressureLogger,
     StructureWriter,
     TimeCorrelationLogger,
@@ -273,6 +274,24 @@ VirialLogger(n_steps::Integer) = VirialLogger(typeof(one(DefaultFloat)u"kJ * mol
 function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)}) where T
     print(io, "VirialLogger{", eltype(values(vl)), "} with n_steps ",
             vl.n_steps, ", ", length(values(vl)), " virials recorded")
+end
+
+density_wrapper(sys, args...; kwargs...) = density(sys)
+
+"""
+    DensityLogger(n_steps)
+    DensityLogger(T, n_steps)
+
+Log the [`density`](@ref) of a system throughout a simulation.
+
+Not compatible with infinite boundaries.
+"""
+DensityLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(density_wrapper, T, n_steps)
+DensityLogger(n_steps::Integer) = DensityLogger(typeof(one(DefaultFloat)u"kg * m^-3"), n_steps)
+
+function Base.show(io::IO, dl::GeneralObservableLogger{T, typeof(density_wrapper)}) where T
+    print(io, "DensityLogger{", eltype(values(dl)), "} with n_steps ",
+            dl.n_steps, ", ", length(values(dl)), " densities recorded")
 end
 
 function pressure_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
