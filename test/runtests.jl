@@ -6,6 +6,8 @@ import AtomsCalculators
 using AtomsCalculators.AtomsCalculatorsTesting
 import BioStructures # Imported to avoid clashing names
 using CUDA
+using AMDGPU
+using GPUArrays
 import Enzyme
 using FiniteDifferences
 using ForwardDiff
@@ -53,13 +55,25 @@ end
 # Allow CUDA device to be specified
 const DEVICE = get(ENV, "DEVICE", "0")
 
-const run_gpu_tests = get(ENV, "GPUTESTS", "1") != "0" && CUDA.functional()
-const gpu_list = run_gpu_tests ? (false, true) : (false,)
-if run_gpu_tests
+const run_cuda_tests = get(ENV, "GPUTESTS", "1") != "0" && CUDA.functional()
+const run_rocm_tests = get(ENV, "GPUTESTS", "1") != "0" && AMDGPU.functional()
+
+array_list = (Array,)
+
+if run_cuda_tests
+    array_list = (array_list..., CuArray)
     device!(parse(Int, DEVICE))
-    @info "The GPU tests will be run on device $DEVICE"
+    @info "The CUDA tests will be run on device $DEVICE"
 else
-    @warn "The GPU tests will not be run as a CUDA-enabled device is not available"
+    @warn "The CUDA tests will not be run as a CUDA-enabled device is not available"
+end
+
+if run_rocm_tests
+    array_list = (array_list..., ROCArray)
+    AMDGPU.device!(AMDGPU.devices()[parse(Int, DEVICE)+1])
+    @info "The ROCM tests will be run on device $DEVICE"
+else
+    @warn "The ROCM tests will not be run as a ROCM-enabled device is not available"
 end
 
 const data_dir = normpath(@__DIR__, "..", "data")

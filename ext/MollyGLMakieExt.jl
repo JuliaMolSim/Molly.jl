@@ -5,8 +5,8 @@ module MollyGLMakieExt
 
 using Molly
 using GLMakie
-using Colors
 using Unitful
+using Colors
 
 using LinearAlgebra
 
