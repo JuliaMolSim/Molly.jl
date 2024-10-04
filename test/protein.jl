@@ -9,6 +9,7 @@
             coords=CoordinateLogger(10),
             energy=TotalEnergyLogger(10),
             writer=StructureWriter(10, temp_fp_pdb),
+            density=DensityLogger(10),
         ),
         data="test_data_peptide",
     )
@@ -33,6 +34,7 @@
     s.velocities = [random_velocity(mass(a), temp) .* 0.01 for a in s.atoms]
     @time simulate!(s, simulator, n_steps; n_threads=1)
 
+    @test all(isapprox(1016.0870493u"kg * m^-3"), values(s.loggers.density))
     traj = read(temp_fp_pdb, BioStructures.PDBFormat)
     rm(temp_fp_pdb)
     @test BioStructures.countmodels(traj) == 11

@@ -12,9 +12,9 @@ export
     KineticEnergyLogger,
     PotentialEnergyLogger,
     ForceLogger,
-    VirialLogger,
     VolumeLogger,
     DensityLogger,
+    VirialLogger,
     PressureLogger,
     StructureWriter,
     TimeCorrelationLogger,
@@ -255,28 +255,6 @@ function Base.show(io::IO, fl::GeneralObservableLogger{T, typeof(forces_wrapper)
             length(values(fl)) > 0 ? length(first(values(fl))) : "?", " atoms")
 end
 
-function virial_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
-    return virial(sys, neighbors, step_n; n_threads=n_threads)
-end
-
-"""
-    VirialLogger(n_steps)
-    VirialLogger(T, n_steps)
-
-Log the [`virial`](@ref) of a system throughout a simulation.
-
-This should only be used on systems containing just pairwise interactions, or
-where the specific interactions, general interactions and constraints do not
-contribute to the virial.
-"""
-VirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(virial_wrapper, T, n_steps)
-VirialLogger(n_steps::Integer) = VirialLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
-
-function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)}) where T
-    print(io, "VirialLogger{", eltype(values(vl)), "} with n_steps ",
-            vl.n_steps, ", ", length(values(vl)), " virials recorded")
-end
-
 volume_wrapper(sys, args...; kwargs...) = volume(sys)
 
 """
@@ -311,6 +289,28 @@ DensityLogger(n_steps::Integer) = DensityLogger(typeof(one(DefaultFloat)u"kg * m
 function Base.show(io::IO, dl::GeneralObservableLogger{T, typeof(density_wrapper)}) where T
     print(io, "DensityLogger{", eltype(values(dl)), "} with n_steps ",
             dl.n_steps, ", ", length(values(dl)), " densities recorded")
+end
+
+function virial_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
+    return virial(sys, neighbors, step_n; n_threads=n_threads)
+end
+
+"""
+    VirialLogger(n_steps)
+    VirialLogger(T, n_steps)
+
+Log the [`virial`](@ref) of a system throughout a simulation.
+
+This should only be used on systems containing just pairwise interactions, or
+where the specific interactions, general interactions and constraints do not
+contribute to the virial.
+"""
+VirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(virial_wrapper, T, n_steps)
+VirialLogger(n_steps::Integer) = VirialLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+
+function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)}) where T
+    print(io, "VirialLogger{", eltype(values(vl)), "} with n_steps ",
+            vl.n_steps, ", ", length(values(vl)), " virials recorded")
 end
 
 function pressure_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
