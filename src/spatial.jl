@@ -245,12 +245,14 @@ n_infinite_dims(b::TriclinicBoundary) = 0
 n_infinite_dims(sys::System) = n_infinite_dims(sys.boundary)
 
 """
+    volume(sys)
     volume(boundary)
 
-Calculate the volume of a 3D bounding box or the area of a 2D bounding box.
+Calculate the volume (3D) or area (2D) of a [`System`](@ref) or bounding box.
 
 Returns infinite volume for infinite boundaries.
 """
+volume(sys) = volume(sys.boundary)
 volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
 volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
 

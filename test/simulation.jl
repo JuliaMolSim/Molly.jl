@@ -941,9 +941,6 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
     n_log_steps = 500
 
-    volume_wrapper(sys, args...; kwargs...) = volume(sys.boundary)
-    VolumeLogger(n_steps) = GeneralObservableLogger(volume_wrapper, typeof(1.0u"nm^3"), n_steps)
-
     baro_f(pressure) = MonteCarloAnisotropicBarostat(pressure, temp, boundary)
     lang_f(barostat) = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
 
@@ -1012,9 +1009,6 @@ end
     atoms = fill(Atom(mass=atom_mass, σ=0.3345u"nm", ϵ=1.0451u"kJ * mol^-1"), n_atoms)
     coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
     n_log_steps = 500
-
-    volume_wrapper(sys, args...; kwargs...) = volume(sys.boundary)
-    VolumeLogger(n_steps) = GeneralObservableLogger(volume_wrapper, typeof(1.0u"nm^3"), n_steps)
 
     lang_f(barostat) = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
 

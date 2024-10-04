@@ -13,6 +13,7 @@ export
     PotentialEnergyLogger,
     ForceLogger,
     VirialLogger,
+    VolumeLogger,
     DensityLogger,
     PressureLogger,
     StructureWriter,
@@ -274,6 +275,24 @@ VirialLogger(n_steps::Integer) = VirialLogger(typeof(one(DefaultFloat)u"kJ * mol
 function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)}) where T
     print(io, "VirialLogger{", eltype(values(vl)), "} with n_steps ",
             vl.n_steps, ", ", length(values(vl)), " virials recorded")
+end
+
+volume_wrapper(sys, args...; kwargs...) = volume(sys)
+
+"""
+    VolumeLogger(n_steps)
+    VolumeLogger(T, n_steps)
+
+Log the [`volume`](@ref) of a system throughout a simulation.
+
+Not compatible with infinite boundaries.
+"""
+VolumeLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(volume_wrapper, T, n_steps)
+VolumeLogger(n_steps::Integer) = VolumeLogger(typeof(one(DefaultFloat)u"nm^3"), n_steps)
+
+function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(volume_wrapper)}) where T
+    print(io, "VolumeLogger{", eltype(values(vl)), "} with n_steps ",
+            vl.n_steps, ", ", length(values(vl)), " volumes recorded")
 end
 
 density_wrapper(sys, args...; kwargs...) = density(sys)
