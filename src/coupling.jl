@@ -178,7 +178,7 @@ end
 
 function MonteCarloBarostat(P, T, boundary; n_steps=30, n_iterations=1, scale_factor=0.01,
                             scale_increment=1.1, max_volume_frac=0.3, trial_find_neighbors=false)
-    volume_scale = box_volume(boundary) * float_type(boundary)(scale_factor)
+    volume_scale = volume(boundary) * float_type(boundary)(scale_factor)
     return MonteCarloBarostat(P, T, n_steps, n_iterations, volume_scale, scale_increment,
                               max_volume_frac, trial_find_neighbors, 0, 0)
 end
@@ -196,7 +196,7 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
 
     for attempt_n in 1:barostat.n_iterations
         E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
-        V = box_volume(sys.boundary)
+        V = volume(sys.boundary)
         dV = barostat.volume_scale * (2 * rand(T) - 1)
         v_scale = (V + dV) / V
         l_scale = (D == 2 ? sqrt(v_scale) : cbrt(v_scale))
@@ -301,7 +301,7 @@ function MonteCarloAnisotropicBarostat(pressure::SVector{D},
                                        scale_increment=1.1,
                                        max_volume_frac=0.3,
                                        trial_find_neighbors=false) where D
-    volume_scale_factor = box_volume(boundary) * float_type(boundary)(scale_factor)
+    volume_scale_factor = volume(boundary) * float_type(boundary)(scale_factor)
     volume_scale = fill(volume_scale_factor, D)
     if AtomsBase.n_dimensions(boundary) != D
         throw(ArgumentError("pressure vector length ($(D)) must match boundary " *
@@ -348,7 +348,7 @@ function apply_coupling!(sys::System{D, G, T},
         mask2[axis] = false
 
         E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
-        V = box_volume(sys.boundary)
+        V = volume(sys.boundary)
         dV = barostat.volume_scale[axis] * (2 * rand(T) - 1)
         v_scale = (V + dV) / V
         l_scale = SVector{D}(mask1 * v_scale + mask2)
@@ -465,7 +465,7 @@ function MonteCarloMembraneBarostat(pressure,
                                     xy_isotropy=false,
                                     z_axis_fixed=false,
                                     constant_volume=false)
-    volume_scale_factor = box_volume(boundary) * float_type(boundary)(scale_factor)
+    volume_scale_factor = volume(boundary) * float_type(boundary)(scale_factor)
     volume_scale = fill(volume_scale_factor, 3)
 
     if AtomsBase.n_dimensions(boundary) != 3
@@ -520,7 +520,7 @@ function apply_coupling!(sys::System{D, G, T},
         end
 
         E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
-        V = box_volume(sys.boundary)
+        V = volume(sys.boundary)
         dV = barostat.volume_scale[axis] * (2 * rand(T) - 1)
         v_scale = (V + dV) / V
         l_scale = SVector{D, T}(one(T), one(T), one(T))

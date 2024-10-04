@@ -877,7 +877,7 @@ b = TriclinicBoundary(
 )
 
 # Volume of bounding box
-box_volume(b) # 3.8993746318188633 nm^3
+volume(b) # 3.8993746318188633 nm^3
 
 # Random coordinate uniformly distributed within boundary
 random_coord(b) # SVector(2.651062310435411, 2.1702306804433973, 0.9518105403051831)u"nm"

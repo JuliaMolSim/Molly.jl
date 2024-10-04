@@ -33,7 +33,7 @@ function place_atoms(n_atoms::Integer,
         throw(ArgumentError("one or more dimension has infinite boundaries, boundary is $boundary"))
     end
     dims = AtomsBase.n_dimensions(boundary)
-    max_atoms = box_volume(boundary) / (min_dist ^ dims)
+    max_atoms = volume(boundary) / (min_dist ^ dims)
     if n_atoms > max_atoms
         throw(ArgumentError("boundary $boundary too small for $n_atoms atoms with minimum distance $min_dist"))
     end
@@ -89,7 +89,7 @@ function place_diatomics(n_molecules::Integer,
         throw(ArgumentError("one or more dimension has infinite boundaries, boundary is $boundary"))
     end
     dims = AtomsBase.n_dimensions(boundary)
-    max_molecules = box_volume(boundary) / ((min_dist + bond_length) ^ dims)
+    max_molecules = volume(boundary) / ((min_dist + bond_length) ^ dims)
     if n_molecules > max_molecules
         throw(ArgumentError("boundary $boundary too small for $n_molecules diatomics with minimum distance $min_dist"))
     end

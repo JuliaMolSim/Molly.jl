@@ -832,7 +832,7 @@ end
         distance_sum += sqrt(min_dist2)
     end
     mean_distance = distance_sum / length(sys)
-    wigner_seitz_radius = cbrt(3 * box_volume(sys.boundary) / (4π * length(sys)))
+    wigner_seitz_radius = cbrt(3 * volume(sys.boundary) / (4π * length(sys)))
     @test wigner_seitz_radius < mean_distance < 2 * wigner_seitz_radius
 end
 
@@ -941,8 +941,8 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
     n_log_steps = 500
 
-    box_volume_wrapper(sys, args...; kwargs...) = box_volume(sys.boundary)
-    VolumeLogger(n_steps) = GeneralObservableLogger(box_volume_wrapper, typeof(1.0u"nm^3"), n_steps)
+    volume_wrapper(sys, args...; kwargs...) = volume(sys.boundary)
+    VolumeLogger(n_steps) = GeneralObservableLogger(volume_wrapper, typeof(1.0u"nm^3"), n_steps)
 
     baro_f(pressure) = MonteCarloAnisotropicBarostat(pressure, temp, boundary)
     lang_f(barostat) = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
@@ -973,7 +973,7 @@ end
                     potential_energy=PotentialEnergyLogger(n_log_steps),
                     virial=VirialLogger(n_log_steps),
                     pressure=PressureLogger(n_log_steps),
-                    box_volume=VolumeLogger(n_log_steps),
+                    volume=VolumeLogger(n_log_steps),
                 ),
             )
 
@@ -988,8 +988,8 @@ end
             @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
             all(!isnothing, press) && @test 0.6u"bar" < mean(values(sys.loggers.pressure)) < 1.3u"bar"
             any(!isnothing, press) && @test 0.1u"bar" < std(values(sys.loggers.pressure)) < 2.5u"bar"
-            any(!isnothing, press) && @test 800.0u"nm^3" < mean(values(sys.loggers.box_volume)) < 2000u"nm^3"
-            any(!isnothing, press) && @test 80.0u"nm^3" < std(values(sys.loggers.box_volume)) < 500.0u"nm^3"
+            any(!isnothing, press) && @test 800.0u"nm^3" < mean(values(sys.loggers.volume)) < 2000u"nm^3"
+            any(!isnothing, press) && @test 80.0u"nm^3" < std(values(sys.loggers.volume)) < 500.0u"nm^3"
             axis_is_uncoupled = isnothing.(press)
             axis_is_unchanged = sys.boundary .== 8.0u"nm"
             @test all(axis_is_uncoupled .== axis_is_unchanged)
@@ -1013,8 +1013,8 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
     n_log_steps = 500
 
-    box_volume_wrapper(sys, args...; kwargs...) = box_volume(sys.boundary)
-    VolumeLogger(n_steps) = GeneralObservableLogger(box_volume_wrapper, typeof(1.0u"nm^3"), n_steps)
+    volume_wrapper(sys, args...; kwargs...) = volume(sys.boundary)
+    VolumeLogger(n_steps) = GeneralObservableLogger(volume_wrapper, typeof(1.0u"nm^3"), n_steps)
 
     lang_f(barostat) = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
 
@@ -1044,7 +1044,7 @@ end
                     potential_energy=PotentialEnergyLogger(n_log_steps),
                     virial=VirialLogger(n_log_steps),
                     pressure=PressureLogger(n_log_steps),
-                    box_volume=VolumeLogger(n_log_steps),
+                    volume=VolumeLogger(n_log_steps),
                 ),
             )
 

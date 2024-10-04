@@ -56,8 +56,8 @@
     @test ustrip(b) == CubicBoundary(4.0, 5.0, 6.0)
     @test ustrip(u"Å", b) == CubicBoundary(40.0, 50.0, 60.0)
     @test !Molly.has_infinite_boundary(b)
-    @test box_volume(b) == 120.0u"nm^3"
-    @test box_volume(CubicBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^3"
+    @test volume(b) == 120.0u"nm^3"
+    @test volume(CubicBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^3"
     @test box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
     sb = scale_boundary(b, 1.1)
     @test sb.side_lengths ≈ SVector(4.4, 5.5, 6.6)u"nm"
@@ -72,8 +72,8 @@
     @test ustrip(b) == RectangularBoundary(4.0, 5.0)
     @test ustrip(u"km", b) == RectangularBoundary(4e-3, 5e-3)
     @test !Molly.has_infinite_boundary(b)
-    @test box_volume(b) == 20.0u"m^2"
-    @test box_volume(RectangularBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^2"
+    @test volume(b) == 20.0u"m^2"
+    @test volume(RectangularBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^2"
     @test box_center(b) == SVector(2.0, 2.5)u"m"
     sb = scale_boundary(b, 0.9)
     @test sb.side_lengths ≈ SVector(3.6, 4.5)u"m"
@@ -92,11 +92,11 @@
     @test TriclinicBoundary([b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3]]) == b
 
     @test AtomsBase.bounding_box(b) == (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
-    @test box_volume(b) ≈ 3.89937463181886u"nm^3"
+    @test volume(b) ≈ 3.89937463181886u"nm^3"
     @test isapprox(box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm"; atol=1e-6u"nm")
     sb = scale_boundary(b, 1.2)
     @test [sb.α, sb.β, sb.γ] ≈ [b.α, b.β, b.γ]
-    @test box_volume(sb) ≈ box_volume(b) * 1.2^3
+    @test volume(sb) ≈ volume(b) * 1.2^3
     @test isapprox(
         Molly.cubic_bounding_box(b),
         SVector(4.5788800, 2.2719630, 1.0233205)u"nm";
