@@ -191,20 +191,20 @@ end
         if forward
             grad_enzyme = (
                 autodiff(
-                    Forward, loss, Duplicated, Duplicated(σ, one(T)), Const(r0),
-                    Duplicated(copy(coords), zero(coords)),
+                    set_runtime_activity(Forward), loss, Duplicated,
+                    Duplicated(σ, one(T)), Const(r0), Duplicated(copy(coords), zero(coords)),
                     Duplicated(copy(velocities), zero(velocities)), const_args...,
-                )[2],
+                )[1],
                 autodiff(
-                    Forward, loss, Duplicated, Const(σ), Duplicated(r0, one(T)),
-                    Duplicated(copy(coords), zero(coords)),
+                    set_runtime_activity(Forward), loss, Duplicated,
+                    Const(σ), Duplicated(r0, one(T)), Duplicated(copy(coords), zero(coords)),
                     Duplicated(copy(velocities), zero(velocities)), const_args...,
-                )[2],
+                )[1],
             )
         else
             grad_enzyme = autodiff(
-                Reverse, loss, Active, Active(σ), Active(r0),
-                Duplicated(copy(coords), zero(coords)),
+                set_runtime_activity(Reverse), loss, Active,
+                Active(σ), Active(r0), Duplicated(copy(coords), zero(coords)),
                 Duplicated(copy(velocities), zero(velocities)), const_args...,
             )[1][1:2]
         end
@@ -426,8 +426,9 @@ end
             n_threads = parallel ? Threads.nthreads() : 1
             grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
             autodiff(
-                Reverse, test_fn, Active, Duplicated(params_dic, grads_enzyme),
-                Const(sys_ref), Duplicated(copy(sys_ref.coords), zero(sys_ref.coords)),
+                set_runtime_activity(Reverse), test_fn, Active,
+                Duplicated(params_dic, grads_enzyme), Const(sys_ref),
+                Duplicated(copy(sys_ref.coords), zero(sys_ref.coords)),
                 Duplicated(sys_ref.neighbor_finder, sys_ref.neighbor_finder),
                 Const(n_threads),
             )
