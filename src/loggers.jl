@@ -1,7 +1,7 @@
 # Loggers to record properties throughout a simulation
 
 export
-    run_loggers!,
+    apply_loggers!,
     GeneralObservableLogger,
     values,
     log_property!,
@@ -12,6 +12,8 @@ export
     KineticEnergyLogger,
     PotentialEnergyLogger,
     ForceLogger,
+    VolumeLogger,
+    DensityLogger,
     VirialLogger,
     PressureLogger,
     StructureWriter,
@@ -22,8 +24,8 @@ export
     MonteCarloLogger
 
 """
-    run_loggers!(system, neighbors=nothing, step_n=0, run_loggers=true;
-                 n_threads=Threads.nthreads(), kwargs...)
+    apply_loggers!(system, neighbors=nothing, step_n=0, run_loggers=true;
+                   n_threads=Threads.nthreads(), kwargs...)
 
 Run the loggers associated with a system.
 
@@ -32,14 +34,12 @@ are not run before the first step.
 Additional keyword arguments can be passed to the loggers if required.
 Ignored for gradient calculation during automatic differentiation.
 """
-function run_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, run_loggers=true;
-                      n_threads::Integer=Threads.nthreads(), kwargs...)
+function apply_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, run_loggers=true;
+                        n_threads::Integer=Threads.nthreads(), kwargs...)
     if run_loggers == true || (run_loggers == :skipzero && step_n != 0)
         for logger in values(sys.loggers)
             log_property!(logger, sys, neighbors, step_n; n_threads=n_threads, kwargs...)
         end
-    elseif run_loggers != false && run_loggers != :skipzero
-        throw(ArgumentError("run_loggers must be true, false or :skipzero"))
     end
     return sys
 end
@@ -72,7 +72,8 @@ Access the stored observations in a logger.
 Base.values(logger::GeneralObservableLogger) = logger.history
 
 """
-    log_property!(logger, system, neighbors=nothing, step_n=0; n_threads=Threads.nthreads(), kwargs...)
+    log_property!(logger, system, neighbors=nothing, step_n=0;
+                  n_threads=Threads.nthreads(), kwargs...)
 
 Log a property of a system throughout a simulation.
 
@@ -82,7 +83,7 @@ Additional keyword arguments can be passed to the logger if required.
 function log_property!(logger::GeneralObservableLogger, s::System, neighbors=nothing,
                         step_n::Integer=0; kwargs...)
     if (step_n % logger.n_steps) == 0
-        obs = logger.observable(s, neighbors; kwargs...)
+        obs = logger.observable(s, neighbors, step_n; kwargs...)
         push!(logger.history, obs)
     end
 end
@@ -93,7 +94,7 @@ function Base.show(io::IO, gol::GeneralObservableLogger)
             gol.observable)
 end
 
-temperature_wrapper(sys, neighbors; kwargs...) = temperature(sys)
+temperature_wrapper(sys, args...; kwargs...) = temperature(sys)
 
 """
     TemperatureLogger(n_steps)
@@ -112,7 +113,7 @@ function Base.show(io::IO, tl::GeneralObservableLogger{T, typeof(temperature_wra
             tl.n_steps, ", ", length(values(tl)), " temperatures recorded")
 end
 
-coordinates_wrapper(sys, neighbors; kwargs...) = sys.coords
+coordinates_wrapper(sys, args...; kwargs...) = copy(sys.coords)
 
 """
     CoordinateLogger(n_steps; dims=3)
@@ -136,7 +137,7 @@ function Base.show(io::IO, cl::GeneralObservableLogger{T, typeof(coordinates_wra
             length(values(cl)) > 0 ? length(first(values(cl))) : "?", " atoms")
 end
 
-velocities_wrapper(sys, neighbors; kwargs...) = sys.velocities
+velocities_wrapper(sys, args...; kwargs...) = copy(sys.velocities)
 
 """
     VelocityLogger(n_steps; dims=3)
@@ -160,7 +161,7 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(velocities_wrap
             length(values(vl)) > 0 ? length(first(values(vl))) : "?", " atoms")
 end
 
-kinetic_energy_wrapper(sys, neighbors; kwargs...) = kinetic_energy(sys)
+kinetic_energy_wrapper(sys, args...; kwargs...) = kinetic_energy(sys)
 
 """
     KineticEnergyLogger(n_steps)
@@ -179,10 +180,10 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(kinetic_energy_
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-function potential_energy_wrapper(sys, neighbors; n_threads::Integer,
+function potential_energy_wrapper(sys, neighbors, step_n::Integer; n_threads::Integer,
                                   current_potential_energy=nothing, kwargs...)
     if isnothing(current_potential_energy)
-        return potential_energy(sys, neighbors; n_threads=n_threads)
+        return potential_energy(sys, neighbors, step_n; n_threads=n_threads)
     else
         return current_potential_energy
     end
@@ -205,8 +206,8 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(potential_energ
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-function total_energy_wrapper(sys, neighbors; kwargs...)
-    return kinetic_energy(sys) + potential_energy_wrapper(sys, neighbors; kwargs...)
+function total_energy_wrapper(sys, args...; kwargs...)
+    return kinetic_energy(sys) + potential_energy_wrapper(sys, args...; kwargs...)
 end
 
 """
@@ -223,11 +224,12 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(total_energy_wr
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-function forces_wrapper(sys, neighbors; n_threads::Integer, current_forces=nothing, kwargs...)
+function forces_wrapper(sys, neighbors, step_n::Integer; n_threads::Integer,
+                        current_forces=nothing, kwargs...)
     if isnothing(current_forces)
-        return forces(sys, neighbors; n_threads=n_threads)
+        return forces(sys, neighbors, step_n; n_threads=n_threads)
     else
-        return current_forces
+        return copy(current_forces)
     end
 end
 
@@ -253,7 +255,45 @@ function Base.show(io::IO, fl::GeneralObservableLogger{T, typeof(forces_wrapper)
             length(values(fl)) > 0 ? length(first(values(fl))) : "?", " atoms")
 end
 
-virial_wrapper(sys, neighbors; n_threads, kwargs...) = virial(sys, neighbors; n_threads=n_threads)
+volume_wrapper(sys, args...; kwargs...) = volume(sys)
+
+"""
+    VolumeLogger(n_steps)
+    VolumeLogger(T, n_steps)
+
+Log the [`volume`](@ref) of a system throughout a simulation.
+
+Not compatible with infinite boundaries.
+"""
+VolumeLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(volume_wrapper, T, n_steps)
+VolumeLogger(n_steps::Integer) = VolumeLogger(typeof(one(DefaultFloat)u"nm^3"), n_steps)
+
+function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(volume_wrapper)}) where T
+    print(io, "VolumeLogger{", eltype(values(vl)), "} with n_steps ",
+            vl.n_steps, ", ", length(values(vl)), " volumes recorded")
+end
+
+density_wrapper(sys, args...; kwargs...) = density(sys)
+
+"""
+    DensityLogger(n_steps)
+    DensityLogger(T, n_steps)
+
+Log the [`density`](@ref) of a system throughout a simulation.
+
+Not compatible with infinite boundaries.
+"""
+DensityLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(density_wrapper, T, n_steps)
+DensityLogger(n_steps::Integer) = DensityLogger(typeof(one(DefaultFloat)u"kg * m^-3"), n_steps)
+
+function Base.show(io::IO, dl::GeneralObservableLogger{T, typeof(density_wrapper)}) where T
+    print(io, "DensityLogger{", eltype(values(dl)), "} with n_steps ",
+            dl.n_steps, ", ", length(values(dl)), " densities recorded")
+end
+
+function virial_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
+    return virial(sys, neighbors, step_n; n_threads=n_threads)
+end
 
 """
     VirialLogger(n_steps)
@@ -273,7 +313,9 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)
             vl.n_steps, ", ", length(values(vl)), " virials recorded")
 end
 
-pressure_wrapper(sys, neighbors; n_threads, kwargs...) = pressure(sys, neighbors; n_threads=n_threads)
+function pressure_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
+    return pressure(sys, neighbors, step_n; n_threads=n_threads)
+end
 
 """
     PressureLogger(n_steps)
@@ -460,9 +502,9 @@ end
 
 function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothing,
                         step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
-    A = logger.observableA(s, neighbors; n_threads=n_threads, kwargs...)
+    A = logger.observableA(s, neighbors, step_n; n_threads=n_threads, kwargs...)
     if logger.observableA != logger.observableB
-        B = logger.observableB(s, neighbors; n_threads=n_threads, kwargs...)
+        B = logger.observableB(s, neighbors, step_n; n_threads=n_threads, kwargs...)
     else
         B = A
     end
@@ -562,7 +604,7 @@ end
 function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=nothing,
                         step_n::Integer=0; kwargs...) where T
     if (step_n % aol.n_steps) == 0
-        obs = aol.observable(s, neighbors; kwargs...)
+        obs = aol.observable(s, neighbors, step_n; kwargs...)
         push!(aol.current_block, obs)
 
         if length(aol.current_block) == aol.current_block_size

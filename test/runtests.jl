@@ -6,11 +6,9 @@ import AtomsCalculators
 using AtomsCalculators.AtomsCalculatorsTesting
 import BioStructures # Imported to avoid clashing names
 using CUDA
-import Enzyme
+using Enzyme
 using FiniteDifferences
-using ForwardDiff
 import SimpleCrystals
-using Zygote
 
 using DelimitedFiles
 using LinearAlgebra
@@ -23,22 +21,19 @@ using Test
 
 # Allow testing of particular components
 const GROUP = get(ENV, "GROUP", "All")
-if GROUP in ("Protein", "Zygote", "NotZygote")
+if GROUP in ("Protein", "Gradients", "NotGradients")
     @warn "Only running $GROUP tests as GROUP is set to $GROUP"
 end
 
-# Some CPU gradient tests give memory errors on CI
-const running_CI = haskey(ENV, "CI")
-if running_CI
-    @warn "The visualization tests and some CPU gradient tests will not be run as this is CI"
-end
-
 # GLMakie doesn't work on CI or when running tests remotely
+const running_CI = haskey(ENV, "CI")
 const run_visualize_tests = !running_CI && get(ENV, "VISTESTS", "1") != "0"
 if run_visualize_tests
-    using GLMakie
+    import GLMakie
     @info "The visualization tests will be run as this is not CI"
-elseif !running_CI && get(ENV, "VISTESTS", "1") == "0"
+elseif running_CI
+    @warn "The visualization tests will not be run as this is CI"
+else
     @warn "The visualization tests will not be run as VISTESTS is set to 0"
 end
 
@@ -58,6 +53,8 @@ const gpu_list = run_gpu_tests ? (false, true) : (false,)
 if run_gpu_tests
     device!(parse(Int, DEVICE))
     @info "The GPU tests will be run on device $DEVICE"
+elseif get(ENV, "GPUTESTS", "1") == "0"
+    @warn "The GPU tests will not be run as GPUTESTS is set to 0"
 else
     @warn "The GPU tests will not be run as a CUDA-enabled device is not available"
 end
@@ -69,10 +66,7 @@ const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 const temp_fp_pdb = tempname(cleanup=true) * ".pdb"
 const temp_fp_viz = tempname(cleanup=true) * ".mp4"
 
-# Required for parallel gradient tests
-Enzyme.API.runtimeActivity!(true)
-
-if GROUP in ("All", "NotZygote")
+if GROUP in ("All", "NotGradients")
     # Some failures due to dependencies but there is an unbound args error
     Aqua.test_all(
         Molly;
@@ -88,10 +82,10 @@ if GROUP in ("All", "NotZygote")
     include("agent.jl")
 end
 
-if GROUP in ("All", "Protein", "NotZygote")
+if GROUP in ("All", "Protein", "NotGradients")
     include("protein.jl")
 end
 
-if GROUP in ("All", "Zygote")
-    include("zygote.jl")
+if GROUP in ("All", "Gradients")
+    include("gradients.jl")
 end

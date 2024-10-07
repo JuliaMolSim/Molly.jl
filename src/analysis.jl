@@ -62,7 +62,6 @@ for the periodic boundary conditions.
 function displacements(coords, boundary)
     n_atoms = length(coords)
     coords_rep = repeat(reshape(coords, n_atoms, 1), 1, n_atoms)
-    # Makes gradient work with Zygote broadcasting additions
     vec_2_arg(c1, c2) = vector(c1, c2, boundary)
     diffs = vec_2_arg.(coords_rep, permutedims(coords_rep, (2, 1)))
     return diffs
@@ -92,7 +91,7 @@ function rdf(coords, boundary; npoints::Integer=200)
     dists_vec = [dists[i, j] for i in 1:n_atoms, j in 1:n_atoms if j > i]
     dist_unit = unit(first(dists_vec))
     kd = kde(ustrip.(dists_vec); npoints=npoints)
-    ρ = n_atoms / box_volume(boundary)
+    ρ = n_atoms / volume(boundary)
     T = float_type(boundary)
     if dims == 3
         normalizing_factor = 4 .* T(π) .* ρ .* step(kd.x) .* kd.x .^ 2 .* dist_unit .^ 3
@@ -163,7 +162,6 @@ function hydrodynamic_radius(coords::AbstractArray{SVector{D, T}}, boundary) whe
     n_atoms = length(coords)
     diag_cpu = Diagonal(ones(T, n_atoms))
     diag = isa(coords, CuArray) ? CuArray(diag_cpu) : diag_cpu
-    # Other approaches to removing the diagonal Inf didn't work with Zygote
     dists = distances(coords, boundary) .+ diag
     sum_inv_dists = sum(inv.(dists)) - sum(inv(diag))
     inv_R_hyd = sum_inv_dists / (2 * n_atoms^2)
