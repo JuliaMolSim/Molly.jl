@@ -39,8 +39,9 @@ jobs:
       - uses: julia-actions/julia-runtest@v1
         env:
           GROUP: ${{ matrix.test }}
+          DISPLAY: ':0'
         with:
-          prefix: "DISPLAY=:0 xvfb-run -s '-screen 0 1024x768x24'"
+          prefix: "xvfb-run -s '-screen 0 1024x768x24'"
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v4
         with:
