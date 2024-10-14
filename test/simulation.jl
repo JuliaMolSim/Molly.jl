@@ -438,8 +438,8 @@ end
         sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
 
         sys = System(
-            atoms=gpu ? CuArray(atoms) : atoms,
-            coords=gpu ? CuArray(deepcopy(starting_coords)) : deepcopy(starting_coords),
+            atoms=(gpu ? CuArray(atoms) : atoms),
+            coords=(gpu ? CuArray(deepcopy(starting_coords)) : deepcopy(starting_coords)),
             boundary=boundary,
             atoms_data=atoms_data,
             pairwise_inters=(LennardJones(),),
