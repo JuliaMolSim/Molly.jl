@@ -19,9 +19,10 @@ jobs:
       matrix:
         version:
           - '1'
+          - 'lts'
+          - 'pre'
         os:
           - ubuntu-latest
-          - macOS-latest
         arch:
           - x64
         test:
