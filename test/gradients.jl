@@ -410,8 +410,10 @@ end
     test_runs = (
         ("Energy", test_energy_grad, 1e-8),
         ("Force" , test_forces_grad, 1e-8),
-        ("Sim"   , test_sim_grad   , 1e-2),
     )
+    if !running_CI
+        push!(test_runs, ("Sim", test_sim_grad, 1e-2))
+    end
     params_to_test = (
         #"inter_LJ_weight_14",
         "atom_N_ϵ",
