@@ -7,7 +7,7 @@ export
     log_property!,
     TemperatureLogger,
     CoordinateLogger,
-    VelocityLogger,
+    VelocitiesLogger,
     TotalEnergyLogger,
     KineticEnergyLogger,
     PotentialEnergyLogger,
@@ -140,12 +140,12 @@ end
 velocities_wrapper(sys, args...; kwargs...) = copy(sys.velocities)
 
 """
-    VelocityLogger(n_steps; dims=3)
-    VelocityLogger(T, n_steps; dims=3)
+    VelocitiesLogger(n_steps; dims=3)
+    VelocitiesLogger(T, n_steps; dims=3)
 
 Log the velocities throughout a simulation.
 """
-function VelocityLogger(T, n_steps::Integer; dims::Integer=3)
+function VelocitiesLogger(T, n_steps::Integer; dims::Integer=3)
     return GeneralObservableLogger(
         velocities_wrapper,
         Array{SArray{Tuple{dims}, T, 1, dims}, 1},
@@ -153,10 +153,10 @@ function VelocityLogger(T, n_steps::Integer; dims::Integer=3)
     )
 end
 
-VelocityLogger(n_steps::Integer; dims::Integer=3) = VelocityLogger(typeof(one(DefaultFloat)u"nm * ps^-1"), n_steps; dims=dims)
+VelocitiesLogger(n_steps::Integer; dims::Integer=3) = VelocitiesLogger(typeof(one(DefaultFloat)u"nm * ps^-1"), n_steps; dims=dims)
 
 function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(velocities_wrapper)}) where T
-    print(io, "VelocityLogger{", eltype(eltype(values(vl))), "} with n_steps ",
+    print(io, "VelocitiesLogger{", eltype(eltype(values(vl))), "} with n_steps ",
             vl.n_steps, ", ", length(values(vl)), " frames recorded for ",
             length(values(vl)) > 0 ? length(first(values(vl))) : "?", " atoms")
 end

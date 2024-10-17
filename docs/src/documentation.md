@@ -1069,7 +1069,7 @@ The available loggers are:
 - [`GeneralObservableLogger`](@ref)
 - [`TemperatureLogger`](@ref)
 - [`CoordinateLogger`](@ref)
-- [`VelocityLogger`](@ref)
+- [`VelocitiesLogger`](@ref)
 - [`TotalEnergyLogger`](@ref)
 - [`KineticEnergyLogger`](@ref)
 - [`PotentialEnergyLogger`](@ref)

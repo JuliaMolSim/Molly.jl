@@ -84,7 +84,7 @@ end
             loggers=(
                 temp=TemperatureLogger(100),
                 coords=CoordinateLogger(100),
-                vels=VelocityLogger(100),
+                vels=VelocitiesLogger(100),
                 energy=TotalEnergyLogger(100),
                 ke=KineticEnergyLogger(100),
                 pe=PotentialEnergyLogger(100),
