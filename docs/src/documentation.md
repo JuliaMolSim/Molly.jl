@@ -828,7 +828,7 @@ random_coord(b) # SVector(2.651062310435411, 2.1702306804433973, 0.9518105403051
 wrap_coords(SVector(1.0, 1.0, 1.0)u"nm", b) # SVector(3.2, 1.0, 1.0)u"nm"
 ```
 
-The [`box_center`](@ref), [`n_dimensions`](@ref), [`float_type`](@ref), [`place_atoms`](@ref) and [`place_diatomics`](@ref) functions are also available for boundaries.
+The [`box_center`](@ref), `AtomsBase.n_dimensions`, [`float_type`](@ref), [`place_atoms`](@ref) and [`place_diatomics`](@ref) functions are also available for boundaries.
 
 The appropriate boundary to use will depend on your simulation.
 For example, having different lengths in each dimension would usually only make sense in a situation where forces or restraints depended on the dimension.
