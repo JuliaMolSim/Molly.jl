@@ -1,9 +1,9 @@
 export ustrip_vec
 
 # Unit types to dispatch on
-@derived_dimension MolarMass Unitful.𝐌/Unitful.𝐍 true
-@derived_dimension BoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1 true
-@derived_dimension MolarBoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1*Unitful.𝐍^-1 true
+@derived_dimension MolarMass Unitful.𝐌/Unitful.𝐍
+@derived_dimension BoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1
+@derived_dimension MolarBoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1*Unitful.𝐍^-1
 
 """
     ustrip_vec(x)
