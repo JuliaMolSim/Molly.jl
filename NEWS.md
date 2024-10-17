@@ -1,5 +1,10 @@
 # Molly.jl release notes
 
+## v0.21.2 - Oct 2024
+
+### Non-breaking changes
+- Updates are made for AtomsBase.jl 0.4. AtomsBase is no longer re-exported.
+
 ## v0.21.1 - Jul 2024
 
 ### Non-breaking changes
