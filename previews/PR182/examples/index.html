@@ -91,7 +91,7 @@ sys = System(
     boundary=boundary,
     velocities=velocities,
     pairwise_inters=(inter,),
-    loggers=(coords=CoordinateLogger(typeof(1.0u&quot;km&quot;), 10),),
+    loggers=(coords=CoordinatesLogger(typeof(1.0u&quot;km&quot;), 10),),
     force_units=u&quot;kg * km * d^-2&quot;,
     energy_units=u&quot;kg * km^2 * d^-2&quot;,
 )
@@ -199,7 +199,7 @@ sys = System(
     pairwise_inters=pairwise_inters,
     neighbor_finder=neighbor_finder,
     loggers=(
-        coords=CoordinateLogger(Float64, 10; dims=2),
+        coords=CoordinatesLogger(Float64, 10; dims=2),
         SIR=SIRLogger(10),
     ),
     force_units=NoUnits,
@@ -314,7 +314,7 @@ sys = System(
     pairwise_inters=(lj,),
     specific_inter_lists=(bonds, angles),
     neighbor_finder=neighbor_finder,
-    loggers=(coords=CoordinateLogger(200),),
+    loggers=(coords=CoordinatesLogger(200),),
 )
 
 sim = Langevin(dt=0.002u&quot;ps&quot;, temperature=300.0u&quot;K&quot;, friction=1.0u&quot;ps^-1&quot;)
@@ -497,7 +497,7 @@ atoms = fill(Atom(mass=28.0), 2)
 coords = [SVector(1/8, 1/8, 1/8), SVector(-1/8, -1/8, -1/8)]
 velocities = [randn(SVector{3, Float64}) * 0.1 for _ in 1:2]
 boundary = CubicBoundary(Inf)
-loggers = (coords=CoordinateLogger(Float64, 1),)
+loggers = (coords=CoordinatesLogger(Float64, 1),)
 
 sys = System(
     atoms=atoms,
@@ -607,7 +607,7 @@ sys = System(
     pairwise_inters=pairwise_inters,
     neighbor_finder=neighbor_finder,
     loggers=(
-        coords=CoordinateLogger(Float64, 20; dims=2),
+        coords=CoordinatesLogger(Float64, 20; dims=2),
         bonds=BondLogger(20),
     ),
     force_units=NoUnits,
@@ -894,4 +894,4 @@ simulate!(sys, simulator, 10_000)
 
 # Check that the constraints are satisfied at the end of the simulation
 @test check_position_constraints(sys, shake)
-@test check_velocity_constraints(sys, shake)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../exercises/">Exercises »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.7.0 on <span class="colophon-date" title="Thursday 17 October 2024 13:47">Thursday 17 October 2024</span>. Using Julia version 1.11.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+@test check_velocity_constraints(sys, shake)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../exercises/">Exercises »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.7.0 on <span class="colophon-date" title="Thursday 17 October 2024 18:35">Thursday 17 October 2024</span>. Using Julia version 1.11.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
