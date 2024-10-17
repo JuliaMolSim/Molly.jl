@@ -8,6 +8,7 @@ import BioStructures # Imported to avoid clashing names
 using CUDA
 using Enzyme
 using FiniteDifferences
+using KernelDensity
 import SimpleCrystals
 
 using DelimitedFiles

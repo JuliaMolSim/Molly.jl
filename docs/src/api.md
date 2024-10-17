@@ -7,6 +7,7 @@ Molly re-exports [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.j
 Package extensions are used in order to reduce the number of dependencies:
 - To use [`visualize`](@ref), call `using GLMakie`.
 - To use [`ASECalculator`](@ref), call `using PythonCall`.
+- To use [`rdf`](@ref), call `using KernelDensity`.
 
 ## Exported names
 

@@ -1,57 +1,13 @@
 # Analysis tools
 
 export
-    visualize,
     displacements,
     distances,
-    rdf,
     rmsd,
     radius_gyration,
-    hydrodynamic_radius
-
-"""
-    visualize(coord_logger, boundary, out_filepath; <keyword arguments>)
-
-Visualize a simulation as an animation.
-
-This function is only available when GLMakie is imported.
-It can take a while to run, depending on the length of the simulation and the
-number of atoms.
-
-# Arguments
-- `connections=Tuple{Int, Int}[]`: pairs of atoms indices to link with bonds.
-- `connection_frames`: the frames in which bonds are shown. Should be a list of
-    the same length as the number of frames, where each item is a list of
-    `Bool`s of the same length as `connections`. Defaults to always `true`.
-- `trails::Integer=0`: the number of preceding frames to show as transparent
-    trails.
-- `framerate::Integer=30`: the frame rate of the animation.
-- `color=:purple`: the color of the atoms. Can be a single color or a list of
-    colors of the same length as the number of atoms.
-- `connection_color=:orange`: the color of the bonds. Can be a single color or a
-    list of colors of the same length as `connections`.
-- `markersize=0.05`: the size of the atom markers, in the units of the data.
-- `linewidth=2.0`: the width of the bond lines.
-- `transparency=true`: whether transparency is active on the plot.
-- `show_boundary::Bool=true`: whether to show the bounding box as lines.
-- `boundary_linewidth=2.0`: the width of the boundary lines.
-- `boundary_color=:black`: the color of the boundary lines.
-- `kwargs...`: other keyword arguments are passed to the point plotting
-    function.
-"""
-function visualize end
-
-function axis_limits(boundary_conv, coord_logger, dim)
-    lim = boundary_conv[dim]
-    if isinf(lim)
-        # Find coordinate limits in given dimension
-        low  = ustrip(minimum(cs -> minimum(c -> c[dim], cs), values(coord_logger)))
-        high = ustrip(maximum(cs -> maximum(c -> c[dim], cs), values(coord_logger)))
-        return low, high
-    else
-        return 0.0, lim
-    end
-end
+    hydrodynamic_radius,
+    visualize,
+    rdf
 
 """
     displacements(coords, boundary)
@@ -74,34 +30,6 @@ Calculate the pairwise distances of a set of coordinates, accounting for the
 periodic boundary conditions.
 """
 distances(coords, boundary) = norm.(displacements(coords, boundary))
-
-"""
-    rdf(coords, boundary; npoints=200)
-
-Calculate the radial distribution function of a set of coordinates.
-
-This describes how density varies as a function of distance from each atom.
-Returns a list of distance bin centers and a list of the corresponding
-densities.
-"""
-function rdf(coords, boundary; npoints::Integer=200)
-    n_atoms = length(coords)
-    dims = length(first(coords))
-    dists = distances(coords, boundary)
-    dists_vec = [dists[i, j] for i in 1:n_atoms, j in 1:n_atoms if j > i]
-    dist_unit = unit(first(dists_vec))
-    kd = kde(ustrip.(dists_vec); npoints=npoints)
-    ρ = n_atoms / volume(boundary)
-    T = float_type(boundary)
-    if dims == 3
-        normalizing_factor = 4 .* T(π) .* ρ .* step(kd.x) .* kd.x .^ 2 .* dist_unit .^ 3
-    elseif dims == 2
-        normalizing_factor = 2 .* T(π) .* ρ .* step(kd.x) .* kd.x .* dist_unit .^ 2
-    end
-    bin_centers = collect(kd.x) .* dist_unit
-    density_weighted = kd.density ./ normalizing_factor
-    return bin_centers, density_weighted
-end
 
 """
     rmsd(coords_1, coords_2)
@@ -167,3 +95,59 @@ function hydrodynamic_radius(coords::AbstractArray{SVector{D, T}}, boundary) whe
     inv_R_hyd = sum_inv_dists / (2 * n_atoms^2)
     return inv(inv_R_hyd)
 end
+
+function axis_limits(boundary_conv, coord_logger, dim)
+    lim = boundary_conv[dim]
+    if isinf(lim)
+        # Find coordinate limits in given dimension
+        low  = ustrip(minimum(cs -> minimum(c -> c[dim], cs), values(coord_logger)))
+        high = ustrip(maximum(cs -> maximum(c -> c[dim], cs), values(coord_logger)))
+        return low, high
+    else
+        return 0.0, lim
+    end
+end
+
+"""
+    visualize(coord_logger, boundary, out_filepath; <keyword arguments>)
+
+Visualize a simulation as an animation.
+
+This function is only available when GLMakie is imported.
+It can take a while to run, depending on the length of the simulation and the
+number of atoms.
+
+# Arguments
+- `connections=Tuple{Int, Int}[]`: pairs of atoms indices to link with bonds.
+- `connection_frames`: the frames in which bonds are shown. Should be a list of
+    the same length as the number of frames, where each item is a list of
+    `Bool`s of the same length as `connections`. Defaults to always `true`.
+- `trails::Integer=0`: the number of preceding frames to show as transparent
+    trails.
+- `framerate::Integer=30`: the frame rate of the animation.
+- `color=:purple`: the color of the atoms. Can be a single color or a list of
+    colors of the same length as the number of atoms.
+- `connection_color=:orange`: the color of the bonds. Can be a single color or a
+    list of colors of the same length as `connections`.
+- `markersize=0.05`: the size of the atom markers, in the units of the data.
+- `linewidth=2.0`: the width of the bond lines.
+- `transparency=true`: whether transparency is active on the plot.
+- `show_boundary::Bool=true`: whether to show the bounding box as lines.
+- `boundary_linewidth=2.0`: the width of the boundary lines.
+- `boundary_color=:black`: the color of the boundary lines.
+- `kwargs...`: other keyword arguments are passed to the point plotting
+    function.
+"""
+function visualize end
+
+"""
+    rdf(coords, boundary; npoints=200)
+
+Calculate the radial distribution function of a set of coordinates.
+
+This function is only available when KernelDensity is imported.
+This describes how density varies as a function of distance from each atom.
+Returns a list of distance bin centers and a list of the corresponding
+densities.
+"""
+function rdf end

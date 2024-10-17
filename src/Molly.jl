@@ -18,7 +18,6 @@ using Distributions
 using EzXML
 using FLoops
 using Graphs
-using KernelDensity
 using NearestNeighbors
 using PeriodicTable
 using SimpleCrystals
