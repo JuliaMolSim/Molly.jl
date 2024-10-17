@@ -11,7 +11,7 @@ export
     TotalEnergyLogger,
     KineticEnergyLogger,
     PotentialEnergyLogger,
-    ForceLogger,
+    ForcesLogger,
     VolumeLogger,
     DensityLogger,
     VirialLogger,
@@ -234,12 +234,12 @@ function forces_wrapper(sys, neighbors, step_n::Integer; n_threads::Integer,
 end
 
 """
-    ForceLogger(n_steps; dims=3)
-    ForceLogger(T, n_steps; dims=3)
+    ForcesLogger(n_steps; dims=3)
+    ForcesLogger(T, n_steps; dims=3)
 
 Log the [`forces`](@ref) throughout a simulation.
 """
-function ForceLogger(T, n_steps::Integer; dims::Integer=3)
+function ForcesLogger(T, n_steps::Integer; dims::Integer=3)
     return GeneralObservableLogger(
         forces_wrapper,
         Array{SArray{Tuple{dims}, T, 1, dims}, 1},
@@ -247,10 +247,10 @@ function ForceLogger(T, n_steps::Integer; dims::Integer=3)
     )
 end
 
-ForceLogger(n_steps::Integer; dims::Integer=3) = ForceLogger(typeof(one(DefaultFloat)u"kJ * mol^-1 * nm^-1"), n_steps; dims=dims)
+ForcesLogger(n_steps::Integer; dims::Integer=3) = ForcesLogger(typeof(one(DefaultFloat)u"kJ * mol^-1 * nm^-1"), n_steps; dims=dims)
 
 function Base.show(io::IO, fl::GeneralObservableLogger{T, typeof(forces_wrapper)}) where T
-    print(io, "ForceLogger{", eltype(eltype(values(fl))), "} with n_steps ",
+    print(io, "ForcesLogger{", eltype(eltype(values(fl))), "} with n_steps ",
             fl.n_steps, ", ", length(values(fl)), " frames recorded for ",
             length(values(fl)) > 0 ? length(first(values(fl))) : "?", " atoms")
 end

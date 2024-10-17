@@ -1073,7 +1073,7 @@ The available loggers are:
 - [`TotalEnergyLogger`](@ref)
 - [`KineticEnergyLogger`](@ref)
 - [`PotentialEnergyLogger`](@ref)
-- [`ForceLogger`](@ref)
+- [`ForcesLogger`](@ref)
 - [`VolumeLogger`](@ref)
 - [`DensityLogger`](@ref)
 - [`VirialLogger`](@ref)
