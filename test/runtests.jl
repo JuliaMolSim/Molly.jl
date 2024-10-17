@@ -23,6 +23,8 @@ using Test
 const GROUP = get(ENV, "GROUP", "All")
 if GROUP in ("Protein", "Gradients", "NotGradients")
     @warn "Only running $GROUP tests as GROUP is set to $GROUP"
+elseif GROUP != "All"
+    error("Unrecognised test group, GROUP=$GROUP")
 end
 
 # Some CPU gradient tests give memory errors on CI
@@ -47,12 +49,12 @@ else
 end
 
 # Allow CUDA device to be specified
-const DEVICE = get(ENV, "DEVICE", "0")
+const DEVICE = parse(Int, get(ENV, "DEVICE", "0"))
 
 const run_gpu_tests = get(ENV, "GPUTESTS", "1") != "0" && CUDA.functional()
-const gpu_list = run_gpu_tests ? (false, true) : (false,)
+const gpu_list = (run_gpu_tests ? (false, true) : (false,))
 if run_gpu_tests
-    device!(parse(Int, DEVICE))
+    device!(DEVICE)
     @info "The GPU tests will be run on device $DEVICE"
 elseif get(ENV, "GPUTESTS", "1") == "0"
     @warn "The GPU tests will not be run as GPUTESTS is set to 0"
