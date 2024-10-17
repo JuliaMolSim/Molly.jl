@@ -62,7 +62,7 @@
     sb = scale_boundary(b, 1.1)
     @test sb.side_lengths ≈ SVector(4.4, 5.5, 6.6)u"nm"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0, 6.0)u"nm"
-    @test Molly.axis_limits(CubicBoundary(4.0, 5.0, 6.0), CoordinateLogger(1), 2) == (0.0, 5.0)
+    @test Molly.axis_limits(CubicBoundary(4.0, 5.0, 6.0), CoordinatesLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError CubicBoundary(-4.0u"nm", 5.0u"nm", 6.0u"nm")
     @test_throws DomainError CubicBoundary( 4.0u"nm", 0.0u"nm", 6.0u"nm")
 
@@ -78,7 +78,7 @@
     sb = scale_boundary(b, 0.9)
     @test sb.side_lengths ≈ SVector(3.6, 4.5)u"m"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0)u"m"
-    @test Molly.axis_limits(RectangularBoundary(4.0, 5.0), CoordinateLogger(1), 2) == (0.0, 5.0)
+    @test Molly.axis_limits(RectangularBoundary(4.0, 5.0), CoordinatesLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError RectangularBoundary(-4.0u"nm", 5.0u"nm")
     @test_throws DomainError RectangularBoundary( 4.0u"nm", 0.0u"nm")
 
@@ -137,7 +137,7 @@
     end
 
     atoms = fill(Atom(mass=1.0u"g/mol"), n_atoms)
-    loggers = (coords=CoordinateLogger(10),)
+    loggers = (coords=CoordinatesLogger(10),)
     temp = 100.0u"K"
     dt = 0.002u"ps"
     sim = VelocityVerlet(dt=dt, remove_CM_motion=false)
@@ -405,7 +405,7 @@ end
         replica_velocities=replica_velocities,
         pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
-        replica_loggers=[(temp=TemperatureLogger(10), coords=CoordinateLogger(10))
+        replica_loggers=[(temp=TemperatureLogger(10), coords=CoordinatesLogger(10))
                          for i in 1:n_replicas],
         data="test_data_repsys",
     )
@@ -417,7 +417,7 @@ end
         velocities=nothing,
         pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
-        loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
+        loggers=(temp=TemperatureLogger(10), coords=CoordinatesLogger(10)),
         data="test_data_sys",
     )
 

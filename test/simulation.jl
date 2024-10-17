@@ -18,7 +18,7 @@
         ),
         loggers=(
             temp=TemperatureLogger(100),
-            coords=CoordinateLogger(100; dims=2),
+            coords=CoordinatesLogger(100; dims=2),
             gen_temp=GeneralObservableLogger(gen_temp_wrapper, typeof(temp), 10),
             avg_temp=AverageObservableLogger(Molly.temperature_wrapper,
                                                 typeof(temp), 1; n_blocks=200),
@@ -83,7 +83,7 @@ end
             ),
             loggers=(
                 temp=TemperatureLogger(100),
-                coords=CoordinateLogger(100),
+                coords=CoordinatesLogger(100),
                 vels=VelocitiesLogger(100),
                 energy=TotalEnergyLogger(100),
                 ke=KineticEnergyLogger(100),
@@ -175,7 +175,7 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=(coords=CoordinateLogger(100),),
+        loggers=(coords=CoordinatesLogger(100),),
     )
 
     @test Molly.has_infinite_boundary(boundary)
@@ -217,7 +217,7 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=(coords=CoordinateLogger(100),),
+        loggers=(coords=CoordinatesLogger(100),),
     )
     random_velocities!(s, temp)
 
@@ -262,7 +262,7 @@ end
         ),
         loggers=(
             temp=TemperatureLogger(10),
-            coords=CoordinateLogger(10),
+            coords=CoordinatesLogger(10),
         ),
     )
 
@@ -318,7 +318,7 @@ end
             neighbor_finder=neighbor_finder,
             loggers=(
                 temp=TemperatureLogger(100),
-                coords=CoordinateLogger(100),
+                coords=CoordinatesLogger(100),
                 energy=TotalEnergyLogger(100),
             ),
         )
@@ -341,7 +341,7 @@ end
         boundary=boundary,
         velocities=velocities,
         general_inters=(MullerBrown(),),
-        loggers=(coords=CoordinateLogger(100; dims=2),),
+        loggers=(coords=CoordinatesLogger(100; dims=2),),
     )
 
     simulator = VelocityVerlet(dt=0.002u"ps")
@@ -379,7 +379,7 @@ end
         ),
         loggers=(
             temp=TemperatureLogger(100),
-            coords=CoordinateLogger(100),
+            coords=CoordinatesLogger(100),
             energy=TotalEnergyLogger(100),
         ),
     )
@@ -399,7 +399,7 @@ end
         ),
         loggers=(
             temp=TemperatureLogger(Float64, 100),
-            coords=CoordinateLogger(Float64, 100),
+            coords=CoordinatesLogger(Float64, 100),
             energy=TotalEnergyLogger(Float64, 100),
         ),
         force_units=NoUnits,
@@ -440,7 +440,7 @@ end
             boundary=boundary,
             atoms_data=atoms_data,
             pairwise_inters=(LennardJones(),),
-            loggers=(coords=CoordinateLogger(100),),
+            loggers=(coords=CoordinatesLogger(100),),
         )
 
         atom_selector(at, at_data) = at_data.atom_type == "A1"
@@ -552,7 +552,7 @@ end
         pairwise_inters=(LennardJones(use_neighbors=true),),
         constraints=(cons,),
         neighbor_finder=neighbor_finder,
-        loggers=(coords=CoordinateLogger(10),),
+        loggers=(coords=CoordinatesLogger(10),),
     )
 
     old_coords = copy(sys.coords)
@@ -651,7 +651,7 @@ end
     )
 
     n_replicas = 4
-    replica_loggers = [(temp=TemperatureLogger(10), coords=CoordinateLogger(10)) for i in 1:n_replicas]
+    replica_loggers = [(temp=TemperatureLogger(10), coords=CoordinatesLogger(10)) for i in 1:n_replicas]
 
     repsys = ReplicaSystem(
         atoms=atoms,
@@ -789,7 +789,7 @@ end
         pairwise_inters=(Coulomb(), ),
         neighbor_finder=neighbor_finder,
         loggers=(
-            coords=CoordinateLogger(10),
+            coords=CoordinatesLogger(10),
             mcl=MonteCarloLogger(),
             avgpe=AverageObservableLogger(Molly.potential_energy_wrapper, typeof(atoms[1].ϵ), 10),
         ),

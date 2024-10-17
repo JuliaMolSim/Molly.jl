@@ -6,7 +6,7 @@
         joinpath(data_dir, "5XER", "gmx_top_ff.top");
         loggers=(
             temp=TemperatureLogger(10),
-            coords=CoordinateLogger(10),
+            coords=CoordinatesLogger(10),
             energy=TotalEnergyLogger(10),
             writer=StructureWriter(10, temp_fp_pdb),
             density=DensityLogger(10),
@@ -51,7 +51,7 @@ end
         joinpath(data_dir, "5XER", "gmx_top_ff.top");
         loggers=(
             temp=TemperatureLogger(Float32, 10),
-            coords=CoordinateLogger(Float32, 10),
+            coords=CoordinatesLogger(Float32, 10),
             energy=TotalEnergyLogger(Float32, 10),
         ),
         units=false,

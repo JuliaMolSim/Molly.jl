@@ -111,7 +111,7 @@ sys = System(
     boundary=boundary,
     velocities=velocities,
     pairwise_inters=(inter,),
-    loggers=(coords=CoordinateLogger(typeof(1.0u"km"), 10),),
+    loggers=(coords=CoordinatesLogger(typeof(1.0u"km"), 10),),
     force_units=u"kg * km * d^-2",
     energy_units=u"kg * km^2 * d^-2",
 )
@@ -230,7 +230,7 @@ sys = System(
     pairwise_inters=pairwise_inters,
     neighbor_finder=neighbor_finder,
     loggers=(
-        coords=CoordinateLogger(Float64, 10; dims=2),
+        coords=CoordinatesLogger(Float64, 10; dims=2),
         SIR=SIRLogger(10),
     ),
     force_units=NoUnits,
@@ -361,7 +361,7 @@ sys = System(
     pairwise_inters=(lj,),
     specific_inter_lists=(bonds, angles),
     neighbor_finder=neighbor_finder,
-    loggers=(coords=CoordinateLogger(200),),
+    loggers=(coords=CoordinatesLogger(200),),
 )
 
 sim = Langevin(dt=0.002u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
@@ -579,7 +579,7 @@ atoms = fill(Atom(mass=28.0), 2)
 coords = [SVector(1/8, 1/8, 1/8), SVector(-1/8, -1/8, -1/8)]
 velocities = [randn(SVector{3, Float64}) * 0.1 for _ in 1:2]
 boundary = CubicBoundary(Inf)
-loggers = (coords=CoordinateLogger(Float64, 1),)
+loggers = (coords=CoordinatesLogger(Float64, 1),)
 
 sys = System(
     atoms=atoms,
@@ -699,7 +699,7 @@ sys = System(
     pairwise_inters=pairwise_inters,
     neighbor_finder=neighbor_finder,
     loggers=(
-        coords=CoordinateLogger(Float64, 20; dims=2),
+        coords=CoordinatesLogger(Float64, 20; dims=2),
         bonds=BondLogger(20),
     ),
     force_units=NoUnits,

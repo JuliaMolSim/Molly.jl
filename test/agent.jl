@@ -93,7 +93,7 @@
         pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
         loggers=(
-            coords=CoordinateLogger(Float64, 10; dims=2),
+            coords=CoordinatesLogger(Float64, 10; dims=2),
             SIR=SIRLogger(10, []),
         ),
         force_units=NoUnits,

@@ -6,7 +6,7 @@ export
     values,
     log_property!,
     TemperatureLogger,
-    CoordinateLogger,
+    CoordinatesLogger,
     VelocitiesLogger,
     TotalEnergyLogger,
     KineticEnergyLogger,
@@ -116,12 +116,12 @@ end
 coordinates_wrapper(sys, args...; kwargs...) = copy(sys.coords)
 
 """
-    CoordinateLogger(n_steps; dims=3)
-    CoordinateLogger(T, n_steps; dims=3)
+    CoordinatesLogger(n_steps; dims=3)
+    CoordinatesLogger(T, n_steps; dims=3)
 
 Log the coordinates throughout a simulation.
 """
-function CoordinateLogger(T, n_steps::Integer; dims::Integer=3)
+function CoordinatesLogger(T, n_steps::Integer; dims::Integer=3)
     return GeneralObservableLogger(
         coordinates_wrapper,
         Array{SArray{Tuple{dims}, T, 1, dims}, 1},
@@ -129,10 +129,10 @@ function CoordinateLogger(T, n_steps::Integer; dims::Integer=3)
     )
 end
 
-CoordinateLogger(n_steps::Integer; dims::Integer=3) = CoordinateLogger(typeof(one(DefaultFloat)u"nm"), n_steps; dims=dims)
+CoordinatesLogger(n_steps::Integer; dims::Integer=3) = CoordinatesLogger(typeof(one(DefaultFloat)u"nm"), n_steps; dims=dims)
 
 function Base.show(io::IO, cl::GeneralObservableLogger{T, typeof(coordinates_wrapper)}) where T
-    print(io, "CoordinateLogger{", eltype(eltype(values(cl))), "} with n_steps ",
+    print(io, "CoordinatesLogger{", eltype(eltype(values(cl))), "} with n_steps ",
             cl.n_steps, ", ", length(values(cl)), " frames recorded for ",
             length(values(cl)) > 0 ? length(first(values(cl))) : "?", " atoms")
 end

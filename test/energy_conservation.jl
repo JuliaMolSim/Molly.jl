@@ -31,7 +31,7 @@ using Test
                 boundary=boundary,
                 pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=false),),
                 loggers=(
-                    coords=CoordinateLogger(100),
+                    coords=CoordinatesLogger(100),
                     energy=TotalEnergyLogger(100),
                 ),
             )
