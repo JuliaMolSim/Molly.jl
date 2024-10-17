@@ -1,6 +1,6 @@
 using Molly
 using Aqua
-import AtomsBase: Periodic, AbstractSystem
+import AtomsBase
 using AtomsBaseTesting
 import AtomsCalculators
 using AtomsCalculators.AtomsCalculatorsTesting

@@ -214,31 +214,35 @@ Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(u
 
 function AtomsBase.bounding_box(b::CubicBoundary)
     z = zero(b[1])
-    bb = SVector{3}([
+    bb = (
         SVector(b[1], z   , z   ),
         SVector(z   , b[2], z   ),
         SVector(z   , z   , b[3]),
-    ])
-    return unit(z) == NoUnits ? (bb)u"nm" : bb # Assume nm without other information
+    )
+    return unit(z) == NoUnits ? (bb .* u"nm") : bb # Assume nm without other information
 end
 
 function AtomsBase.bounding_box(b::RectangularBoundary)
     z = zero(b[1])
-    bb = SVector{2}([
+    bb = (
         SVector(b[1], z   ),
         SVector(z   , b[2]),
-    ])
-    return unit(z) == NoUnits ? (bb)u"nm" : bb
+    )
+    return unit(z) == NoUnits ? (bb .* u"nm") : bb
 end
 
 function AtomsBase.bounding_box(b::TriclinicBoundary)
-    return unit(b[1][1]) == NoUnits ? (b.basis_vectors)u"nm" : b.basis_vectors
+    bb = (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
+    return unit(b[1][1]) == NoUnits ? (bb .* u"nm") : bb
 end
 
 has_infinite_boundary(b::Union{CubicBoundary, RectangularBoundary}) = any(isinf, b.side_lengths)
 has_infinite_boundary(b::TriclinicBoundary) = false
+has_infinite_boundary(sys::System) = has_infinite_boundary(sys.boundary)
+
 n_infinite_dims(b::Union{CubicBoundary, RectangularBoundary}) = sum(isinf, b.side_lengths)
 n_infinite_dims(b::TriclinicBoundary) = 0
+n_infinite_dims(sys::System) = n_infinite_dims(sys.boundary)
 
 """
     box_volume(boundary)
@@ -573,11 +577,11 @@ end
 Generate random velocities from the Maxwell-Boltzmann distribution
 for a [`System`](@ref).
 """
-function random_velocities(sys::AbstractSystem{3}, temp; rng=Random.GLOBAL_RNG)
+function random_velocities(sys::AtomsBase.AbstractSystem{3}, temp; rng=Random.GLOBAL_RNG)
     return random_velocity_3D.(masses(sys), temp, sys.k, rng)
 end
 
-function random_velocities(sys::AbstractSystem{2}, temp; rng=Random.GLOBAL_RNG)
+function random_velocities(sys::AtomsBase.AbstractSystem{2}, temp; rng=Random.GLOBAL_RNG)
     return random_velocity_2D.(masses(sys), temp, sys.k, rng)
 end
 
@@ -788,7 +792,7 @@ function pressure(sys; n_threads::Integer=Threads.nthreads())
     return pressure(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function pressure(sys::AbstractSystem{D}, neighbors;
+function pressure(sys::AtomsBase.AbstractSystem{D}, neighbors;
                   n_threads::Integer=Threads.nthreads()) where D
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")

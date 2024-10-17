@@ -799,12 +799,12 @@ The [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl) pa
 Calculators can be used with a Molly [`System`](@ref) by giving them as `general_inters` during system setup. It is also possible to use a [`MollyCalculator`](@ref) to calculate properties on [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) systems:
 ```julia
 using Molly
+import AtomsBase
 using AtomsBaseTesting
 using AtomsCalculators
 
-ab_sys = AbstractSystem(
+ab_sys = AtomsBase.AbstractSystem(
     make_test_system().system; 
-    boundary_conditions = [Periodic(), Periodic(), Periodic()],
     bounding_box = [[1.54732, 0.0      , 0.0      ],
                     [0.0    , 1.4654985, 0.0      ],
                     [0.0    , 0.0      , 1.7928950]]u"Å",

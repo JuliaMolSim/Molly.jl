@@ -22,7 +22,7 @@ atom_mass = 10.0u"g/mol"
 atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
 ```
 See the [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) documentation for more information on the unit annotations.
-Molly re-exports Unitful.jl, [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) and [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) since they are often required to run simulations.
+Molly re-exports Unitful.jl and [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) since they are often required to run simulations.
 You can use your own atom types in Molly, provided that the [`mass`](@ref) function is defined and any fields required by the interactions are present.
 Next, we'll need some starting coordinates and velocities.
 ```julia
@@ -96,10 +96,6 @@ random_velocities(sys, 300.0u"K")
 float_type(sys) # Float64
 is_on_gpu(sys)  # false
 
-# AtomsBase.jl interface
-atomic_mass(sys, 5) # 10.0 u
-position(sys, 10)
-
 # Access properties
 sys.atoms
 sys.coords
@@ -114,6 +110,11 @@ sys.loggers
 # For certain systems
 virial(sys)
 pressure(sys)
+
+# AtomsBase.jl interface
+import AtomsBase
+AtomsBase.mass(sys, 5) # 10.0 u
+AtomsBase.position(sys, 10)
 
 # Define a new system with certain properties changed
 System(sys; coords=(sys.coords .* 0.5))
