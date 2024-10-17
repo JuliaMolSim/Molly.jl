@@ -14,7 +14,7 @@ export
     add_position_restraints
 
 """
-    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100)
+    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100, rng=Random.GLOBAL_RNG)
 
 Generate random coordinates.
 
@@ -27,12 +27,13 @@ Can not be used if one or more dimensions has infinite boundaries.
 function place_atoms(n_atoms::Integer,
                      boundary;
                      min_dist=zero(length_type(boundary)),
-                     max_attempts::Integer=100)
+                     max_attempts::Integer=100,
+                     rng=Random.GLOBAL_RNG)
     if has_infinite_boundary(boundary)
         throw(ArgumentError("one or more dimension has infinite boundaries, boundary is $boundary"))
     end
     dims = AtomsBase.n_dimensions(boundary)
-    max_atoms = box_volume(boundary) / (min_dist ^ dims)
+    max_atoms = volume(boundary) / (min_dist ^ dims)
     if n_atoms > max_atoms
         throw(ArgumentError("boundary $boundary too small for $n_atoms atoms with minimum distance $min_dist"))
     end
@@ -41,7 +42,7 @@ function place_atoms(n_atoms::Integer,
     sizehint!(coords, n_atoms)
     failed_attempts = 0
     while length(coords) < n_atoms
-        new_coord = random_coord(boundary)
+        new_coord = random_coord(boundary; rng=rng)
         okay = true
         if min_dist > zero(min_dist)
             for coord in coords
@@ -64,7 +65,7 @@ end
 
 """
     place_diatomics(n_molecules, boundary, bond_length; min_dist=nothing,
-                    max_attempts=100, aligned=false)
+                    max_attempts=100, aligned=false, rng=Random.GLOBAL_RNG)
 
 Generate random diatomic molecule coordinates.
 
@@ -82,12 +83,13 @@ function place_diatomics(n_molecules::Integer,
                          bond_length;
                          min_dist=zero(length_type(boundary)),
                          max_attempts::Integer=100,
-                         aligned::Bool=false)
+                         aligned::Bool=false,
+                         rng=Random.GLOBAL_RNG)
     if has_infinite_boundary(boundary)
         throw(ArgumentError("one or more dimension has infinite boundaries, boundary is $boundary"))
     end
     dims = AtomsBase.n_dimensions(boundary)
-    max_molecules = box_volume(boundary) / ((min_dist + bond_length) ^ dims)
+    max_molecules = volume(boundary) / ((min_dist + bond_length) ^ dims)
     if n_molecules > max_molecules
         throw(ArgumentError("boundary $boundary too small for $n_molecules diatomics with minimum distance $min_dist"))
     end
@@ -96,11 +98,11 @@ function place_diatomics(n_molecules::Integer,
     sizehint!(coords, 2 * n_molecules)
     failed_attempts = 0
     while length(coords) < (n_molecules * 2)
-        new_coord_a = random_coord(boundary)
+        new_coord_a = random_coord(boundary; rng=rng)
         if aligned
             shift = SVector{dims}([bond_length, [zero(bond_length) for d in 1:(dims - 1)]...])
         else
-            shift = bond_length * normalize(randn(SVector{dims, typeof(ustrip(bond_length))}))
+            shift = bond_length * normalize(randn(rng, SVector{dims, typeof(ustrip(bond_length))}))
         end
         new_coord_b = copy(new_coord_a) + shift
         okay = true
@@ -467,7 +469,7 @@ function System(coord_file::AbstractString,
     top = Chemfiles.Topology(frame)
     n_atoms = size(top)
 
-    atoms = Atom[]
+    atoms_abst = Atom[]
     atoms_data = AtomData[]
     bonds = InteractionList2Atoms(HarmonicBond)
     angles = InteractionList3Atoms(HarmonicAngle)
@@ -553,11 +555,10 @@ function System(coord_file::AbstractString,
         if ismissing(ch)
             error("atom of type ", at.type, " has not had charge set")
         end
-        solute = res_id_to_standard[res_id] || res_name in ("ACE", "NME")
         if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
             error("atom of type ", at.type, " has not had σ or ϵ set")
         end
-        push!(atoms, Atom(index=ai, charge=ch, mass=at.mass, σ=at.σ, ϵ=at.ϵ, solute=solute))
+        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=ch, σ=at.σ, ϵ=at.ϵ))
         push!(atoms_data, AtomData(atom_type=at_type, atom_name=atom_name, res_number=Chemfiles.id(res),
                                     res_name=Chemfiles.name(res), element=at.element))
         eligible[ai, ai] = false
@@ -792,8 +793,6 @@ function System(coord_file::AbstractString,
         cutoff=DistanceCutoff(T(dist_cutoff)),
         use_neighbors=true,
         weight_special=force_field.weight_14_lj,
-        force_units=force_units,
-        energy_units=energy_units,
     )
     if isnothing(implicit_solvent)
         crf = CoulombReactionField(
@@ -801,18 +800,14 @@ function System(coord_file::AbstractString,
             solvent_dielectric=T(crf_solvent_dielectric),
             use_neighbors=true,
             weight_special=force_field.weight_14_coulomb,
-            coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
-            force_units=force_units,
-            energy_units=energy_units,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
     else
         crf = Coulomb(
             cutoff=DistanceCutoff(T(dist_cutoff)),
             use_neighbors=true,
             weight_special=force_field.weight_14_coulomb,
-            coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
-            force_units=force_units,
-            energy_units=energy_units,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
     end
     pairwise_inters = (lj, crf)
@@ -892,7 +887,6 @@ function System(coord_file::AbstractString,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
-    atoms = [atoms...]
     if gpu || !use_cell_list
         neighbor_finder = DistanceNeighborFinder(
             eligible=(gpu ? CuArray(eligible) : eligible),
@@ -911,15 +905,18 @@ function System(coord_file::AbstractString,
         )
     end
     if gpu
-        atoms = CuArray(atoms)
-        coords = CuArray(coords)
+        atoms = CuArray([atoms_abst...])
+        coords_dev = CuArray(coords)
+    else
+        atoms = [atoms_abst...]
+        coords_dev = coords
     end
 
     if isnothing(velocities)
         if units
-            vels = zero(ustrip_vec.(coords))u"nm * ps^-1"
+            vels = zero(ustrip_vec.(coords_dev))u"nm * ps^-1"
         else
-            vels = zero(coords)
+            vels = zero(coords_dev)
         end
     else
         vels = velocities
@@ -944,7 +941,7 @@ function System(coord_file::AbstractString,
     k = units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k)
     return System(
         atoms=atoms,
-        coords=coords,
+        coords=coords_dev,
         boundary=boundary_used,
         velocities=vels,
         atoms_data=atoms_data,
@@ -954,8 +951,8 @@ function System(coord_file::AbstractString,
         general_inters=general_inters,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
-        force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
-        energy_units=units ? u"kJ * mol^-1" : NoUnits,
+        force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),
+        energy_units=(units ? u"kJ * mol^-1" : NoUnits),
         k=k,
         data=data,
     )
@@ -982,7 +979,7 @@ function System(T::Type,
     atomnames = Dict{String, String}()
 
     name = "?"
-    atoms = Atom[]
+    atoms_abst = Atom[]
     atoms_data = AtomData[]
     bonds = InteractionList2Atoms(HarmonicBond)
     pairs = Tuple{Int, Int}[]
@@ -1045,11 +1042,19 @@ function System(T::Type,
             # Take the first version of each atom type only
             if !haskey(atomtypes, atomname)
                 if units
-                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4])u"g/mol",
-                            σ=parse(T, c[7])u"nm", ϵ=parse(T, c[8])u"kJ * mol^-1")
+                    atomtypes[atomname] = Atom(
+                        mass=parse(T, c[4])u"g/mol",
+                        charge=parse(T, c[5]),
+                        σ=parse(T, c[7])u"nm",
+                        ϵ=parse(T, c[8])u"kJ * mol^-1",
+                    )
                 else
-                    atomtypes[atomname] = Atom(charge=parse(T, c[5]), mass=parse(T, c[4]),
-                            σ=parse(T, c[7]), ϵ=parse(T, c[8]))
+                    atomtypes[atomname] = Atom(
+                        mass=parse(T, c[4]),
+                        charge=parse(T, c[5]),
+                        σ=parse(T, c[7]),
+                        ϵ=parse(T, c[8]),
+                    )
                 end
             end
         elseif current_field == "atoms"
@@ -1060,10 +1065,9 @@ function System(T::Type,
             else
                 atom_mass = parse(T, c[8])
             end
-            solute = c[4] in standard_res_names
-            atom_index = length(atoms) + 1
-            push!(atoms, Atom(index=atom_index, charge=ch, mass=atom_mass, σ=atomtypes[attype].σ,
-                                ϵ=atomtypes[attype].ϵ, solute=solute))
+            atom_index = length(atoms_abst) + 1
+            push!(atoms_abst, Atom(index=atom_index, mass=atom_mass, charge=ch, σ=atomtypes[attype].σ,
+                                ϵ=atomtypes[attype].ϵ))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=c[5], res_number=parse(Int, c[3]),
                                         res_name=c[4]))
         elseif current_field == "bonds"
@@ -1142,26 +1146,26 @@ function System(T::Type,
 
     # Read coordinate file and add solvent atoms
     lines = readlines(coord_file)
-    coords = SArray[]
+    coords_abst = SArray[]
     for (i, l) in enumerate(lines[3:end-1])
         coord = SVector(parse(T, l[21:28]), parse(T, l[29:36]), parse(T, l[37:44]))
         if units
-            push!(coords, (coord)u"nm")
+            push!(coords_abst, (coord)u"nm")
         else
-            push!(coords, coord)
+            push!(coords_abst, coord)
         end
 
         # Some atoms are not specified explicitly in the topology so are added here
-        if i > length(atoms)
+        if i > length(atoms_abst)
             atname = strip(l[11:15])
             attype = replace(atname, r"\d+" => "")
             temp_charge = atomtypes[attype].charge
             if attype == "CL" # Temp hack to fix charges
                 temp_charge = T(-1.0)
             end
-            atom_index = length(atoms) + 1
-            push!(atoms, Atom(index=atom_index, charge=temp_charge, mass=atomtypes[attype].mass,
-                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ, solute=false))
+            atom_index = length(atoms_abst) + 1
+            push!(atoms_abst, Atom(index=atom_index, mass=atomtypes[attype].mass, charge=temp_charge,
+                                σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=atname, res_number=parse(Int, l[1:5]),
                                         res_name=strip(l[6:10])))
 
@@ -1187,7 +1191,7 @@ function System(T::Type,
     end
 
     # Calculate matrix of pairs eligible for non-bonded interactions
-    n_atoms = length(coords)
+    n_atoms = length(coords_abst)
     eligible = trues(n_atoms, n_atoms)
     for i in 1:n_atoms
         eligible[i, i] = false
@@ -1214,17 +1218,13 @@ function System(T::Type,
         cutoff=DistanceCutoff(T(dist_cutoff)),
         use_neighbors=true,
         weight_special=T(0.5),
-        force_units=force_units,
-        energy_units=energy_units,
     )
     crf = CoulombReactionField(
         dist_cutoff=T(dist_cutoff),
         solvent_dielectric=T(crf_solvent_dielectric),
         use_neighbors=true,
         weight_special=T(0.5),
-        coulomb_const=(units ? T(coulombconst) : T(ustrip(coulombconst))),
-        force_units=force_units,
-        energy_units=energy_units,
+        coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
     )
 
     if isnothing(boundary)
@@ -1234,7 +1234,7 @@ function System(T::Type,
     else
         boundary_used = boundary
     end
-    coords = [coords...]
+    coords = [coords_abst...]
     if center_coords
         coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
     end
@@ -1276,8 +1276,6 @@ function System(T::Type,
     end
     specific_inter_lists = tuple(specific_inter_array...)
 
-    atoms = [Atom(index=a.index, charge=a.charge, mass=a.mass, σ=a.σ, ϵ=a.ϵ, solute=a.solute) for a in atoms]
-
     if gpu || !use_cell_list
         neighbor_finder = DistanceNeighborFinder(
             eligible=(gpu ? CuArray(eligible) : eligible),
@@ -1296,15 +1294,18 @@ function System(T::Type,
         )
     end
     if gpu
-        atoms = CuArray(atoms)
-        coords = CuArray(coords)
+        atoms = CuArray([atoms_abst...])
+        coords_dev = CuArray(coords)
+    else
+        atoms = [atoms_abst...]
+        coords_dev = coords
     end
 
     if isnothing(velocities)
         if units
-            vels = zero(ustrip_vec.(coords))u"nm * ps^-1"
+            vels = zero(ustrip_vec.(coords_dev))u"nm * ps^-1"
         else
-            vels = zero(coords)
+            vels = zero(coords_dev)
         end
     else
         vels = velocities
@@ -1313,7 +1314,7 @@ function System(T::Type,
     k = units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k)
     return System(
         atoms=atoms,
-        coords=coords,
+        coords=coords_dev,
         boundary=boundary_used,
         velocities=vels,
         atoms_data=atoms_data,
@@ -1322,8 +1323,8 @@ function System(T::Type,
         specific_inter_lists=specific_inter_lists,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
-        force_units=units ? u"kJ * mol^-1 * nm^-1" : NoUnits,
-        energy_units=units ? u"kJ * mol^-1" : NoUnits,
+        force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),
+        energy_units=(units ? u"kJ * mol^-1" : NoUnits),
         k=k,
         data=data,
     )
@@ -1389,9 +1390,9 @@ function add_position_restraints(sys,
     sis = (sys.specific_inter_lists..., restraints)
     return System(
         atoms=deepcopy(sys.atoms),
-        coords=deepcopy(sys.coords),
+        coords=copy(sys.coords),
         boundary=deepcopy(sys.boundary),
-        velocities=deepcopy(sys.velocities),
+        velocities=copy(sys.velocities),
         atoms_data=deepcopy(sys.atoms_data),
         topology=deepcopy(sys.topology),
         pairwise_inters=deepcopy(sys.pairwise_inters),

@@ -324,7 +324,7 @@ function lookup_table(full_table::AbstractArray{T}, radii) where T
     return table
 end
 
-function lookup_table(full_table::AbstractArray{T}, radii::AbstractArray{<:AbstractFloat}) where T
+function lookup_table(full_table::AbstractArray, radii::AbstractArray{<:AbstractFloat})
     return lookup_table(full_table, radii * u"nm")
 end
 
@@ -360,7 +360,7 @@ struct ImplicitSolventOBC{T, D, V, K, S, F, I, DI} <: AbstractGBSA
     srjs::DI
 end
 
-function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
+function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E}},
                             atoms_data,
                             bonds;
                             solvent_dielectric=gb_solvent_dielectric,
@@ -373,7 +373,7 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
                             use_ACE=true,
                             use_OBC2=false,
                             element_to_radius=mbondi2_element_to_radius,
-                            element_to_screen=obc_element_to_screen) where {T, M, D, E}
+                            element_to_screen=obc_element_to_screen) where {TY, M, T, D, E}
     units = dimension(D) == u"𝐋"
     radii = mbondi2_radii(atoms_data, bonds; element_to_radius=element_to_radius)
 
@@ -399,16 +399,16 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{T, M, D, E}},
     inds_j = hcat(1:n_atoms...)
     inds_i = permutedims(inds_j, (2, 1))
 
-    coulomb_const = units ? coulombconst : ustrip(coulombconst)
+    coulomb_const_units = units ? coulomb_const : ustrip(coulomb_const)
     if !iszero_value(solute_dielectric)
-        factor_solute = -T(coulomb_const) / T(solute_dielectric)
+        factor_solute = -T(coulomb_const_units) / T(solute_dielectric)
     else
-        factor_solute = zero(T(coulomb_const))
+        factor_solute = zero(T(coulomb_const_units))
     end
     if !iszero_value(solvent_dielectric)
-        factor_solvent = T(coulomb_const) / T(solvent_dielectric)
+        factor_solvent = T(coulomb_const_units) / T(solvent_dielectric)
     else
-        factor_solvent = zero(T(coulomb_const))
+        factor_solvent = zero(T(coulomb_const_units))
     end
 
     if isa(atoms, CuArray)
@@ -474,7 +474,7 @@ struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, TD, TM, DI} <: AbstractGBSA
     srjs::DI
 end
 
-function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
+function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E}},
                                 atoms_data,
                                 bonds;
                                 solvent_dielectric=gb_solvent_dielectric,
@@ -493,7 +493,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
                                 atom_params=gbn2_atom_params,
                                 atom_params_nucleic=gbn2_atom_params_nucleic,
                                 data_d0=gbn2_data_d0,
-                                data_m0=gbn2_data_m0) where {T, M, D, E}
+                                data_m0=gbn2_data_m0) where {TY, M, T, D, E}
     units = dimension(D) == u"𝐋"
     radii = mbondi3_radii(atoms_data, bonds; element_to_radius=element_to_radius)
     nucleic_acid_residues = ("A", "C", "G", "U", "DA", "DC", "DG", "DT")
@@ -551,16 +551,16 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
         table_m0 = ustrip.(table_m0_units)
     end
 
-    coulomb_const = units ? coulombconst : ustrip(coulombconst)
+    coulomb_const_units = units ? coulomb_const : ustrip(coulomb_const)
     if !iszero_value(solute_dielectric)
-        factor_solute = -T(coulomb_const) / T(solute_dielectric)
+        factor_solute = -T(coulomb_const_units) / T(solute_dielectric)
     else
-        factor_solute = zero(T(coulomb_const))
+        factor_solute = zero(T(coulomb_const_units))
     end
     if !iszero_value(solvent_dielectric)
-        factor_solvent = T(coulomb_const) / T(solvent_dielectric)
+        factor_solvent = T(coulomb_const_units) / T(solvent_dielectric)
     else
-        factor_solvent = zero(T(coulomb_const))
+        factor_solvent = zero(T(coulomb_const_units))
     end
 
     if isa(atoms, CuArray)
@@ -595,6 +595,44 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{T, M, D, E}},
                     factor_solute, factor_solvent, is, js, d0s, m0s, neck_scale, ustrip(neck_cut),
                     oris, orjs, srjs)
     end
+end
+
+function inject_interaction(inter::ImplicitSolventGBN2, params_dic, sys)
+    key_prefix = "inter_GB_"
+    bond_index = findfirst(sil -> eltype(sil.inters) <: HarmonicBond, sys.specific_inter_lists)
+
+    element_to_radius = Dict{String, DefaultFloat}()
+    for k in keys(mbondi2_element_to_radius)
+        element_to_radius[k] = dict_get(params_dic, key_prefix * "radius_" * k,
+                                        ustrip(mbondi2_element_to_radius[k]))
+    end
+    element_to_screen = empty(gbn2_element_to_screen)
+    for k in keys(gbn2_element_to_screen)
+        element_to_screen[k] = dict_get(params_dic, key_prefix * "screen_" * k, gbn2_element_to_screen[k])
+    end
+    atom_params = empty(gbn2_atom_params)
+    for k in keys(gbn2_atom_params)
+        atom_params[k] = dict_get(params_dic, key_prefix * "params_" * k, gbn2_atom_params[k])
+    end
+
+    ImplicitSolventGBN2(
+        sys.atoms,
+        sys.atoms_data,
+        sys.specific_inter_lists[bond_index];
+        solvent_dielectric=dict_get(params_dic, key_prefix * "solvent_dielectric", inter.solvent_dielectric),
+        solute_dielectric=dict_get(params_dic, key_prefix * "solute_dielectric", inter.solute_dielectric),
+        kappa=dict_get(params_dic, key_prefix * "kappa", ustrip(inter.kappa))u"nm^-1",
+        offset=dict_get(params_dic, key_prefix * "offset", ustrip(inter.offset))u"nm",
+        dist_cutoff=inter.dist_cutoff,
+        probe_radius=dict_get(params_dic, key_prefix * "probe_radius", ustrip(inter.probe_radius))u"nm",
+        sa_factor=dict_get(params_dic, key_prefix * "sa_factor", ustrip(inter.sa_factor))u"kJ * mol^-1 * nm^-2",
+        use_ACE=inter.use_ACE,
+        neck_scale=dict_get(params_dic, key_prefix * "neck_scale", inter.neck_scale),
+        neck_cut=dict_get(params_dic, key_prefix * "neck_cut", ustrip(inter.neck_cut))u"nm",
+        element_to_radius=element_to_radius,
+        element_to_screen=element_to_screen,
+        atom_params=atom_params,
+    )
 end
 
 function born_radii_loop_OBC(coord_i, coord_j, ori, srj, dist_cutoff, boundary)
@@ -637,7 +675,26 @@ with respect to atomic distance.
 
 Custom GBSA methods should implement this function.
 """
-function born_radii_and_grad(inter::ImplicitSolventOBC, coords, boundary)
+function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, boundary) where T
+    Is = fill(zero(T) / unit(inter.dist_cutoff), length(coords))
+    @inbounds for i in eachindex(coords)
+        I = zero(eltype(Is))
+        for j in eachindex(coords)
+            I += born_radii_loop_OBC(coords[i], coords[j], inter.oris[i],
+                                     inter.srjs[j], inter.dist_cutoff, boundary)
+        end
+        Is[i] = I
+    end
+    I_grads = zeros(eltype(Is), length(Is), length(Is)) ./ unit(inter.dist_cutoff)
+
+    Bs_B_grads = born_radii_sum.(inter.offset_radii, inter.offset, Is,
+                                 inter.α, inter.β, inter.γ)
+    Bs      = get_i1.(Bs_B_grads)
+    B_grads = get_i2.(Bs_B_grads)
+    return Bs, B_grads, I_grads
+end
+
+function born_radii_and_grad(inter::ImplicitSolventOBC, coords::CuArray, boundary)
     coords_i = @view coords[inter.is]
     coords_j = @view coords[inter.js]
     loop_res = born_radii_loop_OBC.(coords_i, coords_j, inter.oris, inter.srjs,
@@ -800,36 +857,17 @@ function gbsa_born_kernel!(Is, I_grads, coords_var, offset_radii_var, scaled_off
     return nothing
 end
 
-# Store the results of the ij broadcasts during force calculation
-struct ForceLoopResult1{T, V}
-    bi::T
-    bj::T
-    fi::V
-    fj::V
-end
-
-get_bi(r::ForceLoopResult1) = r.bi
-get_bj(r::ForceLoopResult1) = r.bj
-
-struct ForceLoopResult2{V}
-    fi::V
-    fj::V
-end
-
-get_fi(r::Union{ForceLoopResult1, ForceLoopResult2}) = r.fi
-get_fj(r::Union{ForceLoopResult1, ForceLoopResult2}) = r.fj
-
 function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, dist_cutoff,
                             factor_solute, factor_solvent, kappa, boundary)
     if j < i
         zero_force = zero(factor_solute ./ coord_i .^ 2)
-        return ForceLoopResult1(zero_force[1], zero_force[1], zero_force, zero_force)
+        return zero_force[1], zero_force[1], zero_force, zero_force
     end
     dr = vector(coord_i, coord_j, boundary)
     r2 = sum(abs2, dr)
     if !iszero_value(dist_cutoff) && r2 > dist_cutoff^2
         zero_force = zero(factor_solute ./ coord_i .^ 2)
-        return ForceLoopResult1(zero_force[1], zero_force[1], zero_force, zero_force)
+        return zero_force[1], zero_force[1], zero_force, zero_force
     end
     alpha2_ij = Bi * Bj
     D = r2 / (4 * alpha2_ij)
@@ -851,11 +889,10 @@ function gb_force_loop_1(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, dis
         fdr = dr * dGpol_dr
         change_fs_i =  fdr
         change_fs_j = -fdr
-        return ForceLoopResult1(change_born_force_i, change_born_force_j,
-                                change_fs_i, change_fs_j)
+        return change_born_force_i, change_born_force_j, change_fs_i, change_fs_j
     else
         zero_force = zero(factor_solute ./ coord_i .^ 2)
-        return ForceLoopResult1(change_born_force_i, zero_force[1], zero_force, zero_force)
+        return change_born_force_i, zero_force[1], zero_force, zero_force
     end
 end
 
@@ -863,8 +900,7 @@ function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, bounda
     dr = vector(coord_i, coord_j, boundary)
     r = norm(dr)
     if iszero_value(r) || (!iszero_value(dist_cutoff) && r > dist_cutoff)
-        zero_force = zero(bi ./ coord_i .^ 2)
-        return ForceLoopResult2(zero_force, zero_force)
+        return zero(bi ./ coord_i .^ 2)
     end
     rsrj = r + srj
     if ori < rsrj
@@ -876,37 +912,40 @@ function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, bounda
         t3 = (1 + (srj^2)*r2inv)*(L^2 - U^2)/8 + log(U/L)*r2inv/4
         de = bi * (t3 - ig) * rinv
         fdr = dr * de
-        return ForceLoopResult2(-fdr, fdr)
+        return fdr
     else
-        zero_force = zero(bi ./ coord_i .^ 2)
-        return ForceLoopResult2(zero_force, zero_force)
+        return zero(bi ./ coord_i .^ 2)
     end
 end
 
 function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
     coords, boundary = sys.coords, sys.boundary
-    coords_i = @view coords[inter.is]
-    coords_j = @view coords[inter.js]
-    charges_i = @view atom_charges[inter.is]
-    charges_j = @view atom_charges[inter.js]
-    Bsi = @view Bs[inter.is]
-    Bsj = @view Bs[inter.js]
-    loop_res_1 = gb_force_loop_1.(coords_i, coords_j, inter.is, inter.js, charges_i,
-                                  charges_j, Bsi, Bsj, inter.dist_cutoff, inter.factor_solute,
-                                  inter.factor_solvent, inter.kappa, (boundary,))
-    born_forces_1 = born_forces .+ dropdims(sum(get_bi.(loop_res_1); dims=2); dims=2) .+
-                                   dropdims(sum(get_bj.(loop_res_1); dims=1); dims=1)
-    fs = dropdims(sum(get_fi.(loop_res_1); dims=2); dims=2) .+
-         dropdims(sum(get_fj.(loop_res_1); dims=1); dims=1)
+    born_forces_1 = copy(born_forces)
+    fs = ustrip_vec.(zero(coords)) * sys.force_units
+    @inbounds for i in eachindex(sys)
+        for j in eachindex(sys)
+            bi, bj, fi, fj = gb_force_loop_1(
+                coords[i], coords[j], i, j, atom_charges[i], atom_charges[j], Bs[i], Bs[j],
+                inter.dist_cutoff, inter.factor_solute, inter.factor_solvent, inter.kappa, boundary,
+            )
+            born_forces_1[i] += bi
+            born_forces_1[j] += bj
+            fs[i] = fs[i] .+ fi
+            fs[j] = fs[j] .+ fj
+        end
+    end
 
     born_forces_2 = born_forces_1 .* (Bs .^ 2) .* B_grads
+    @inbounds for i in eachindex(sys)
+        for j in eachindex(sys)
+            f = gb_force_loop_2(coords[i], coords[j], born_forces_2[i], I_grads[i, j],
+                                inter.oris[i], inter.srjs[j], inter.dist_cutoff, boundary)
+            fs[i] = fs[i] .- f
+            fs[j] = fs[j] .+ f
+        end
+    end
 
-    bis = @view born_forces_2[inter.is]
-    loop_res_2 = gb_force_loop_2.(coords_i, coords_j, bis, I_grads, inter.oris, inter.srjs,
-                                  inter.dist_cutoff, (boundary,))
-
-    return fs .+ dropdims(sum(get_fi.(loop_res_2); dims=2); dims=2) .+
-                 dropdims(sum(get_fj.(loop_res_2); dims=1); dims=1)
+    return fs
 end
 
 function forces_gbsa(sys::System{D, true, T}, inter, Bs, B_grads, I_grads, born_forces,
@@ -1114,7 +1153,27 @@ function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
     end
 end
 
-function AtomsCalculators.potential_energy(sys, inter::AbstractGBSA; kwargs...)
+function AtomsCalculators.potential_energy(sys::System{<:Any, false, T}, inter::AbstractGBSA;
+                                           kwargs...) where T
+    coords, boundary = sys.coords, sys.boundary
+    Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, boundary)
+    atom_charges = charge.(sys.atoms)
+
+    E = zero(T) * sys.energy_units
+    @inbounds for i in eachindex(sys)
+        for j in eachindex(sys)
+            E += gb_energy_loop(
+                coords[i], coords[j], i, j, atom_charges[i], atom_charges[j], Bs[i], Bs[j],
+                inter.oris[i], inter.dist_cutoff, inter.factor_solute, inter.factor_solvent,
+                inter.kappa, inter.offset, inter.probe_radius, inter.sa_factor,
+                inter.use_ACE, boundary,
+            )
+        end
+    end
+    return E
+end
+
+function AtomsCalculators.potential_energy(sys::System{<:Any, true}, inter::AbstractGBSA; kwargs...)
     coords, atoms, boundary = sys.coords, sys.atoms, sys.boundary
     Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, boundary)
 
@@ -1125,9 +1184,10 @@ function AtomsCalculators.potential_energy(sys, inter::AbstractGBSA; kwargs...)
     charges_j = @view atom_charges[inter.js]
     Bsi = @view Bs[inter.is]
     Bsj = @view Bs[inter.js]
-    return sum(gb_energy_loop.(coords_i, coords_j, inter.is, inter.js, charges_i,
-                                charges_j, Bsi, Bsj, inter.oris, inter.dist_cutoff,
-                                inter.factor_solute, inter.factor_solvent, inter.kappa,
-                                inter.offset, inter.probe_radius, inter.sa_factor, inter.use_ACE,
-                                (boundary,)))
+    return sum(gb_energy_loop.(
+        coords_i, coords_j, inter.is, inter.js, charges_i, charges_j, Bsi, Bsj,
+        inter.oris, inter.dist_cutoff, inter.factor_solute, inter.factor_solvent,
+        inter.kappa, inter.offset, inter.probe_radius, inter.sa_factor, inter.use_ACE,
+        (boundary,),
+    ))
 end

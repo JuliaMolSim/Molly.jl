@@ -7,8 +7,8 @@ In the last few years, the deep learning revolution has broadened to include the
 The concept of using automatic differentiation (AD) to obtain exact gradients through physical simulations has many interesting applications, including parameterising force fields and training neural networks to describe atomic potentials.
 
 There are some projects that explore differentiable molecular simulations - see [Related software](@ref).
-However Julia provides a strong suite of AD tools, with [Zygote.jl](https://github.com/FluxML/Zygote.jl) and [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) allowing source-to-source transformations for much of the language.
-With Molly you can use the power of Zygote and Enzyme to obtain gradients through molecular simulations, even in the presence of complex interactions such as implicit solvation and stochasticity such as Langevin dynamics or the Andersen thermostat.
+However Julia provides a strong suite of AD tools, with [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) allowing source-to-source transformations for much of the language.
+With Molly you can use the power of Enzyme to obtain gradients through molecular simulations, even in the presence of complex interactions such as implicit solvation and stochasticity such as Langevin dynamics or the Andersen thermostat.
 Reverse mode AD can be used on the CPU with multithreading and on the GPU; performance is typically within an order of magnitude of the primal run.
 Forward mode AD can also be used on the CPU.
 Pairwise, specific and general interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
@@ -44,7 +44,6 @@ end
 Now we can set up and run the simulation in a similar way to that described in the [Molly documentation](@ref).
 The difference is that we wrap the simulation in a `loss` function.
 This returns a single value that we want to obtain gradients with respect to, in this case the difference between the value of the above function at the end of the simulation and a target distance.
-The `Zygote.ignore()` block allows us to ignore code for the purposes of obtaining gradients; you could add the [`visualize`](@ref) function there for example.
 ```julia
 using Zygote
 using Format
@@ -66,8 +65,6 @@ neighbor_finder = DistanceNeighborFinder(
 lj = LennardJones(
     cutoff=DistanceCutoff(1.5),
     use_neighbors=true,
-    force_units=NoUnits,
-    energy_units=NoUnits,
 )
 pairwise_inters = (lj,)
 coords = place_atoms(n_atoms, boundary; min_dist=0.6)
@@ -78,8 +75,8 @@ simulator = VelocityVerlet(
 )
 
 function loss(σ, coords, velocities)
-    atoms = [Atom(0, 0.0, atom_mass, σ, 0.2, false) for i in 1:n_atoms]
-    loggers = (coords=CoordinateLogger(Float64, 10),)
+    atoms = [Atom(0, 0, atom_mass, 0.0, σ, 0.2) for i in 1:n_atoms]
+    loggers = (coords=CoordinatesLogger(Float64, 10),)
 
     sys = System(
         atoms=atoms,
@@ -98,10 +95,8 @@ function loss(σ, coords, velocities)
     mms_end = mean_min_separation(Array(sys.coords), boundary)
     loss_val = abs(mms_end - dist_true)
 
-    Zygote.ignore() do
-        printfmt("σ {:6.3f}  |  Mean min sep expected {:6.3f}  |  Mean min sep end {:6.3f}  |  Loss {:6.3f}  |  ",
-                  σ, σ * (2 ^ (1 / 6)), mms_end, loss_val)
-    end
+    printfmt("σ {:6.3f}  |  Mean min sep expected {:6.3f}  |  Mean min sep end {:6.3f}  |  Loss {:6.3f}  |  ",
+             σ, σ * (2 ^ (1 / 6)), mms_end, loss_val)
 
     return loss_val
 end
@@ -186,8 +181,8 @@ simulator = VelocityVerlet(
 )
 
 function loss(θ)
-    atoms = [Atom(0, 0.0, atom_mass, 0.0, 0.0, false) for i in 1:n_atoms]
-    loggers = (coords=CoordinateLogger(Float64, 2),)
+    atoms = [Atom(0, 0, atom_mass, 0.0, 0.0, 0.0) for i in 1:n_atoms]
+    loggers = (coords=CoordinatesLogger(Float64, 2),)
     specific_inter_lists = (
         InteractionList2Atoms(
             [1, 2, 4, 5],
@@ -204,9 +199,9 @@ function loss(θ)
 
     sys = System(
         atoms=atoms,
-        coords=deepcopy(coords),
+        coords=copy(coords),
         boundary=boundary,
-        velocities=deepcopy(velocities),
+        velocities=copy(velocities),
         specific_inter_lists=specific_inter_lists,
         loggers=loggers,
         force_units=NoUnits,
@@ -220,10 +215,8 @@ function loss(θ)
     dist_end = 0.5 * (d1 + d2)
     loss_val = abs(dist_end - dist_true)
 
-    Zygote.ignore() do
-        printfmt("θ {:5.1f}°  |  Final dist {:4.2f}  |  Loss {:5.3f}  |  ",
-                 rad2deg(θ), dist_end, loss_val)
-    end
+    printfmt("θ {:5.1f}°  |  Final dist {:4.2f}  |  Loss {:5.3f}  |  ",
+             rad2deg(θ), dist_end, loss_val)
 
     return loss_val
 end
@@ -278,7 +271,7 @@ The plot of these shows that the gradient has the expected sign either side of t
 
 ## Neural network potentials
 
-Since gradients can be computed with Zygote, [Flux](https://fluxml.ai) models can also be incorporated into simulations.
+[Flux](https://fluxml.ai) models can also be incorporated into simulations.
 Here we show a neural network in the force function, though they can also be used in other parts of the simulation.
 This example also shows how gradients for multiple parameters can be obtained, in this case the parameters of the neural network.
 The jump from single to multiple parameters is important because single parameters can be optimised using finite differencing, whereas differentiable simulation is well-placed to optimise many parameters simultaneously.
@@ -328,15 +321,15 @@ simulator = VelocityVerlet(
 )
 
 function loss()
-    atoms = [Atom(0, 0.0f0, mass, 0.0f0, 0.0f0, false) for i in 1:n_atoms]
-    loggers = (coords=CoordinateLogger(Float32, 10),)
+    atoms = [Atom(0, 0, mass, 0.0f0, 0.0f0, 0.0f0) for i in 1:n_atoms]
+    loggers = (coords=CoordinatesLogger(Float32, 10),)
     general_inters = (NNBonds(),)
 
     sys = System(
         atoms=atoms,
-        coords=deepcopy(coords),
+        coords=copy(coords),
         boundary=boundary,
-        velocities=deepcopy(velocities),
+        velocities=copy(velocities),
         general_inters=general_inters,
         loggers=loggers,
         force_units=NoUnits,
@@ -350,10 +343,8 @@ function loss()
                 norm(vector(sys.coords[3], sys.coords[1], boundary))) / 3
     loss_val = abs(dist_end - dist_true)
 
-    Zygote.ignore() do
-        printfmt("Dist end {:6.3f}  |  Loss {:6.3f}\n", dist_end, loss_val)
-        visualize(sys.loggers.coords, boundary, "sim.mp4"; show_boundary=false)
-    end
+    printfmt("Dist end {:6.3f}  |  Loss {:6.3f}\n", dist_end, loss_val)
+    visualize(sys.loggers.coords, boundary, "sim.mp4"; show_boundary=false)
 
     return loss_val
 end

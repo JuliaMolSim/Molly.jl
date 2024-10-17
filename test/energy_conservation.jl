@@ -13,7 +13,7 @@ using Test
         boundary = CubicBoundary(50.0u"nm")
         simulator = VelocityVerlet(dt=0.001u"ps", remove_CM_motion=false)
 
-        atoms = [Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+        atoms = [Atom(mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
         dist_cutoff = 3.0u"nm"
         cutoffs = (
             DistanceCutoff(dist_cutoff),
@@ -31,7 +31,7 @@ using Test
                 boundary=boundary,
                 pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=false),),
                 loggers=(
-                    coords=CoordinateLogger(100),
+                    coords=CoordinatesLogger(100),
                     energy=TotalEnergyLogger(100),
                 ),
             )

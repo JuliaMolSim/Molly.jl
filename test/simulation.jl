@@ -4,10 +4,10 @@
     temp = 298.0u"K"
     boundary = RectangularBoundary(2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
-    gen_temp_wrapper(s, neighbors; kwargs...) = temperature(s)
+    gen_temp_wrapper(s, args...; kwargs...) = temperature(s)
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
         boundary=boundary,
         pairwise_inters=(LennardJones(use_neighbors=true),),
@@ -18,7 +18,7 @@
         ),
         loggers=(
             temp=TemperatureLogger(100),
-            coords=CoordinateLogger(100; dims=2),
+            coords=CoordinatesLogger(100; dims=2),
             gen_temp=GeneralObservableLogger(gen_temp_wrapper, typeof(temp), 10),
             avg_temp=AverageObservableLogger(Molly.temperature_wrapper,
                                                 typeof(temp), 1; n_blocks=200),
@@ -64,12 +64,12 @@ end
     TP = typeof(0.2u"kJ * mol^-1")
 
     V(sys, args...; kwargs...) = sys.velocities
-    pot_obs(sys, neighbors; kwargs...) = potential_energy(sys, neighbors)
+    pot_obs(sys, neighbors, step_n; kwargs...) = potential_energy(sys, neighbors, step_n)
     kin_obs(sys, args...; kwargs...) = kinetic_energy(sys)
 
     for n_threads in n_threads_list
         s = System(
-            atoms=[Atom(index=i, charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+            atoms=[Atom(index=i, mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
                    for i in 1:n_atoms],
             coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
             boundary=boundary,
@@ -83,12 +83,12 @@ end
             ),
             loggers=(
                 temp=TemperatureLogger(100),
-                coords=CoordinateLogger(100),
-                vels=VelocityLogger(100),
+                coords=CoordinatesLogger(100),
+                vels=VelocitiesLogger(100),
                 energy=TotalEnergyLogger(100),
                 ke=KineticEnergyLogger(100),
                 pe=PotentialEnergyLogger(100),
-                force=ForceLogger(100),
+                force=ForcesLogger(100),
                 writer=StructureWriter(100, temp_fp_pdb),
                 potkin_correlation=TimeCorrelationLogger(pot_obs, kin_obs, TP, TP, 1, 100),
                 velocity_autocorrelation=AutoCorrelationLogger(V, TV, n_atoms, 100),
@@ -166,7 +166,7 @@ end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         pairwise_inters=(LennardJones(use_neighbors=true),),
@@ -175,7 +175,7 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=(coords=CoordinateLogger(100),),
+        loggers=(coords=CoordinatesLogger(100),),
     )
 
     @test Molly.has_infinite_boundary(boundary)
@@ -208,7 +208,7 @@ end
     ]
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         pairwise_inters=(LennardJones(use_neighbors=true),),
@@ -217,7 +217,7 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=(coords=CoordinateLogger(100),),
+        loggers=(coords=CoordinatesLogger(100),),
     )
     random_velocities!(s, temp)
 
@@ -249,7 +249,7 @@ end
     simulator = VelocityVerlet(dt=0.002u"ps", coupling=BerendsenThermostat(temp, 1.0u"ps"))
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         velocities=[random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms],
@@ -262,7 +262,7 @@ end
         ),
         loggers=(
             temp=TemperatureLogger(10),
-            coords=CoordinateLogger(10),
+            coords=CoordinatesLogger(10),
         ),
     )
 
@@ -309,7 +309,7 @@ end
         end
 
         s = System(
-            atoms=[Atom(charge=i % 2 == 0 ? -1.0 : 1.0, mass=10.0u"g/mol", σ=0.2u"nm",
+            atoms=[Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm",
                         ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
             coords=place_atoms(n_atoms, boundary; min_dist=0.2u"nm"),
             boundary=boundary,
@@ -318,7 +318,7 @@ end
             neighbor_finder=neighbor_finder,
             loggers=(
                 temp=TemperatureLogger(100),
-                coords=CoordinateLogger(100),
+                coords=CoordinatesLogger(100),
                 energy=TotalEnergyLogger(100),
             ),
         )
@@ -341,7 +341,7 @@ end
         boundary=boundary,
         velocities=velocities,
         general_inters=(MullerBrown(),),
-        loggers=(coords=CoordinateLogger(100; dims=2),),
+        loggers=(coords=CoordinatesLogger(100; dims=2),),
     )
 
     simulator = VelocityVerlet(dt=0.002u"ps")
@@ -367,7 +367,7 @@ end
     V(sys::System, neighbors=nothing) = sys.velocities
 
     s = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         velocities=velocities,
@@ -379,7 +379,7 @@ end
         ),
         loggers=(
             temp=TemperatureLogger(100),
-            coords=CoordinateLogger(100),
+            coords=CoordinatesLogger(100),
             energy=TotalEnergyLogger(100),
         ),
     )
@@ -387,12 +387,11 @@ end
     vtype_nounits = eltype(ustrip_vec.(velocities))
 
     s_nounits = System(
-        atoms=[Atom(charge=0.0, mass=10.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
+        atoms=[Atom(mass=10.0, charge=0.0, σ=0.3, ϵ=0.2) for i in 1:n_atoms],
         coords=ustrip_vec.(coords),
         boundary=CubicBoundary(ustrip.(boundary)),
         velocities=ustrip_vec.(u"nm/ps",velocities),
-        pairwise_inters=(LennardJones(use_neighbors=true, force_units=NoUnits,
-                                      energy_units=NoUnits),),
+        pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=DistanceNeighborFinder(
             eligible=trues(n_atoms, n_atoms),
             n_steps=10,
@@ -400,7 +399,7 @@ end
         ),
         loggers=(
             temp=TemperatureLogger(Float64, 100),
-            coords=CoordinateLogger(Float64, 100),
+            coords=CoordinatesLogger(Float64, 100),
             energy=TotalEnergyLogger(Float64, 100),
         ),
         force_units=NoUnits,
@@ -431,17 +430,17 @@ end
         n_steps = 2_000
         boundary = CubicBoundary(2.0u"nm")
         starting_coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
-        atoms = [Atom(charge=0.0, mass=10.0u"g/mol", σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+        atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
         atoms_data = [AtomData(atom_type=(i <= n_atoms_res ? "A1" : "A2")) for i in 1:n_atoms]
         sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
 
         sys = System(
             atoms=(gpu ? CuArray(atoms) : atoms),
-            coords=(gpu ? CuArray(deepcopy(starting_coords)) : deepcopy(starting_coords)),
+            coords=(gpu ? CuArray(copy(starting_coords)) : copy(starting_coords)),
             boundary=boundary,
             atoms_data=atoms_data,
             pairwise_inters=(LennardJones(),),
-            loggers=(coords=CoordinateLogger(100),),
+            loggers=(coords=CoordinatesLogger(100),),
         )
 
         atom_selector(at, at_data) = at_data.atom_type == "A1"
@@ -478,12 +477,7 @@ end
     atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
     cons = SHAKE_RATTLE(constraints, n_atoms, 1e-8u"Å", 1e-8u"Å^2 * ps^-1")
     boundary = CubicBoundary(200.0u"Å")
-    lj = LennardJones(
-        cutoff=ShiftedPotentialCutoff(r_cut),
-        use_neighbors=true,
-        energy_units=u"kcal * mol^-1",
-        force_units=u"kcal * mol^-1 * Å^-1"
-    )
+    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
     neighbor_finder = DistanceNeighborFinder(
         eligible=trues(n_atoms, n_atoms),
         dist_cutoff=1.5*r_cut,
@@ -558,10 +552,10 @@ end
         pairwise_inters=(LennardJones(use_neighbors=true),),
         constraints=(cons,),
         neighbor_finder=neighbor_finder,
-        loggers=(coords=CoordinateLogger(10),),
+        loggers=(coords=CoordinatesLogger(10),),
     )
 
-    old_coords = deepcopy(sys.coords)
+    old_coords = copy(sys.coords)
 
     for i in eachindex(sys.coords)
         sys.coords[i]     += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
@@ -583,7 +577,7 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
     s1 = System(
-        atoms=[Atom(charge=0.0, mass=10.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        atoms=[Atom( mass=10.0u"g/mol", charge=0.0,σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
         coords=coords,
         boundary=boundary,
         velocities=velocities,
@@ -657,7 +651,7 @@ end
     )
 
     n_replicas = 4
-    replica_loggers = [(temp=TemperatureLogger(10), coords=CoordinateLogger(10)) for i in 1:n_replicas]
+    replica_loggers = [(temp=TemperatureLogger(10), coords=CoordinatesLogger(10)) for i in 1:n_replicas]
 
     repsys = ReplicaSystem(
         atoms=atoms,
@@ -795,7 +789,7 @@ end
         pairwise_inters=(Coulomb(), ),
         neighbor_finder=neighbor_finder,
         loggers=(
-            coords=CoordinateLogger(10),
+            coords=CoordinatesLogger(10),
             mcl=MonteCarloLogger(),
             avgpe=AverageObservableLogger(Molly.potential_energy_wrapper, typeof(atoms[1].ϵ), 10),
         ),
@@ -838,7 +832,7 @@ end
         distance_sum += sqrt(min_dist2)
     end
     mean_distance = distance_sum / length(sys)
-    wigner_seitz_radius = cbrt(3 * box_volume(sys.boundary) / (4π * length(sys)))
+    wigner_seitz_radius = cbrt(3 * volume(sys.boundary) / (4π * length(sys)))
     @test wigner_seitz_radius < mean_distance < 2 * wigner_seitz_radius
 end
 
@@ -857,12 +851,12 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
     n_log_steps = 500
 
-    box_size_wrapper(sys, neighbors; kwargs...) = sys.boundary.side_lengths[1]
+    box_size_wrapper(sys, args...; kwargs...) = sys.boundary.side_lengths[1]
     BoundaryLogger(n_steps) = GeneralObservableLogger(box_size_wrapper, typeof(1.0u"nm"), n_steps)
 
     sys = System(
         atoms=atoms,
-        coords=deepcopy(coords),
+        coords=copy(coords),
         boundary=boundary,
         pairwise_inters=(LennardJones(),),
         loggers=(
@@ -902,7 +896,7 @@ end
 
             sys = System(
                 atoms=AT(atoms),
-                coords=AT(deepcopy(coords)),
+                coords=AT(copy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -947,9 +941,6 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
     n_log_steps = 500
 
-    box_volume_wrapper(sys, neighbors; kwargs...) = box_volume(sys.boundary)
-    VolumeLogger(n_steps) = GeneralObservableLogger(box_volume_wrapper, typeof(1.0u"nm^3"), n_steps)
-
     baro_f(pressure) = MonteCarloAnisotropicBarostat(pressure, temp, boundary)
     lang_f(barostat) = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
 
@@ -969,7 +960,7 @@ end
 
             sys = System(
                 atoms=AT(atoms),
-                coords=AT(deepcopy(coords)),
+                coords=AT(copy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -979,7 +970,7 @@ end
                     potential_energy=PotentialEnergyLogger(n_log_steps),
                     virial=VirialLogger(n_log_steps),
                     pressure=PressureLogger(n_log_steps),
-                    box_volume=VolumeLogger(n_log_steps),
+                    volume=VolumeLogger(n_log_steps),
                 ),
             )
 
@@ -994,8 +985,8 @@ end
             @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
             all(!isnothing, press) && @test 0.6u"bar" < mean(values(sys.loggers.pressure)) < 1.3u"bar"
             any(!isnothing, press) && @test 0.1u"bar" < std(values(sys.loggers.pressure)) < 2.5u"bar"
-            any(!isnothing, press) && @test 800.0u"nm^3" < mean(values(sys.loggers.box_volume)) < 2000u"nm^3"
-            any(!isnothing, press) && @test 80.0u"nm^3" < std(values(sys.loggers.box_volume)) < 500.0u"nm^3"
+            any(!isnothing, press) && @test 800.0u"nm^3" < mean(values(sys.loggers.volume)) < 2000u"nm^3"
+            any(!isnothing, press) && @test 80.0u"nm^3" < std(values(sys.loggers.volume)) < 500.0u"nm^3"
             axis_is_uncoupled = isnothing.(press)
             axis_is_unchanged = sys.boundary .== 8.0u"nm"
             @test all(axis_is_uncoupled .== axis_is_unchanged)
@@ -1019,9 +1010,6 @@ end
     coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
     n_log_steps = 500
 
-    box_volume_wrapper(sys, neighbors; kwargs...) = box_volume(sys.boundary)
-    VolumeLogger(n_steps) = GeneralObservableLogger(box_volume_wrapper, typeof(1.0u"nm^3"), n_steps)
-
     lang_f(barostat) = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
 
     barostat_test_set = (
@@ -1040,7 +1028,7 @@ end
 
             sys = System(
                 atoms=AT(atoms),
-                coords=AT(deepcopy(coords)),
+                coords=AT(copy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1050,7 +1038,7 @@ end
                     potential_energy=PotentialEnergyLogger(n_log_steps),
                     virial=VirialLogger(n_log_steps),
                     pressure=PressureLogger(n_log_steps),
-                    box_volume=VolumeLogger(n_log_steps),
+                    volume=VolumeLogger(n_log_steps),
                 ),
             )
 
@@ -1089,11 +1077,7 @@ end
     sys = System(
         fcc_crystal;
         velocities=velocities,
-        pairwise_inters=(LennardJones(
-            cutoff=ShiftedForceCutoff(r_cut),
-            energy_units=u"kJ * mol^-1",
-            force_units=u"kJ * mol^-1 * nm^-1",
-        ),),
+        pairwise_inters=(LennardJones(cutoff=ShiftedForceCutoff(r_cut)),),
         loggers=(tot_eng=TotalEnergyLogger(100),),
         energy_units=u"kJ * mol^-1",
         force_units=u"kJ * mol^-1 * nm^-1",
@@ -1111,8 +1095,9 @@ end
     updated_atoms = []
 
     for i in eachindex(sys)
-        push!(updated_atoms, Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
-                                  mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
+        push!(updated_atoms, Atom(index=sys.atoms[i].index, atom_type=sys.atoms[i].atom_type,
+                                  charge=sys.atoms[i].charge, mass=sys.atoms[i].mass,
+                                  σ=σ, ϵ=ϵ))
     end
 
     sys = System(sys; atoms=[updated_atoms...])
@@ -1186,14 +1171,14 @@ end
         show(devnull, neighbor_finder)
 
         if gpu
-            coords = CuArray(deepcopy(f32 ? starting_coords_f32 : starting_coords))
-            velocities = CuArray(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-            atoms = CuArray([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+            coords = CuArray(copy(f32 ? starting_coords_f32 : starting_coords))
+            velocities = CuArray(copy(f32 ? starting_velocities_f32 : starting_velocities))
+            atoms = CuArray([Atom(mass=atom_mass, charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                                   ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
         else
-            coords = deepcopy(f32 ? starting_coords_f32 : starting_coords)
-            velocities = deepcopy(f32 ? starting_velocities_f32 : starting_velocities)
-            atoms = [Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+            coords = copy(f32 ? starting_coords_f32 : starting_coords)
+            velocities = copy(f32 ? starting_velocities_f32 : starting_velocities)
+            atoms = [Atom(mass=atom_mass, charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                             ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
         end
 

@@ -26,8 +26,8 @@ jobs:
         arch:
           - x64
         test:
-          - NotZygote
-          - Zygote
+          - NotGradients
+          - Gradients
     steps:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2

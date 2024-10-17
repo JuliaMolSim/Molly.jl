@@ -6,9 +6,10 @@
         joinpath(data_dir, "5XER", "gmx_top_ff.top");
         loggers=(
             temp=TemperatureLogger(10),
-            coords=CoordinateLogger(10),
+            coords=CoordinatesLogger(10),
             energy=TotalEnergyLogger(10),
             writer=StructureWriter(10, temp_fp_pdb),
+            density=DensityLogger(10),
         ),
         data="test_data_peptide",
     )
@@ -33,6 +34,7 @@
     s.velocities = [random_velocity(mass(a), temp) .* 0.01 for a in s.atoms]
     @time simulate!(s, simulator, n_steps; n_threads=1)
 
+    @test all(isapprox(1016.0870493u"kg * m^-3"), values(s.loggers.density))
     traj = read(temp_fp_pdb, BioStructures.PDBFormat)
     rm(temp_fp_pdb)
     @test BioStructures.countmodels(traj) == 11
@@ -49,7 +51,7 @@ end
         joinpath(data_dir, "5XER", "gmx_top_ff.top");
         loggers=(
             temp=TemperatureLogger(Float32, 10),
-            coords=CoordinateLogger(Float32, 10),
+            coords=CoordinatesLogger(Float32, 10),
             energy=TotalEnergyLogger(Float32, 10),
         ),
         units=false,
@@ -127,7 +129,7 @@ end
     n_steps = 100
     simulator = VelocityVerlet(dt=0.0005u"ps")
     velocities_start = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
-    sys.velocities = deepcopy(velocities_start)
+    sys.velocities = copy(velocities_start)
     @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
     @test temperature(sys) ≈ 329.3202932884933u"K"
 
@@ -150,7 +152,7 @@ end
     sys_nounits = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff_nounits;
-        velocities=deepcopy(ustrip_vec.(velocities_start)),
+        velocities=copy(ustrip_vec.(velocities_start)),
         units=false,
         center_coords=false,
     )
@@ -171,7 +173,7 @@ end
     @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 
     params_dic = extract_parameters(sys_nounits, ff_nounits)
-    @test length(params_dic) == 639
+    @test length(params_dic) == 638
     atoms_grad, pis_grad, sis_grad, gis_grad = inject_gradients(sys_nounits, params_dic)
     @test atoms_grad == sys_nounits.atoms
     @test pis_grad == sys_nounits.pairwise_inters
@@ -181,7 +183,7 @@ end
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
-            velocities=CuArray(deepcopy(velocities_start)),
+            velocities=CuArray(copy(velocities_start)),
             gpu=true,
             center_coords=false,
         )
@@ -209,7 +211,7 @@ end
         sys_nounits = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff_nounits;
-            velocities=CuArray(deepcopy(ustrip_vec.(velocities_start))),
+            velocities=CuArray(copy(ustrip_vec.(velocities_start))),
             units=false,
             gpu=true,
             center_coords=false,
@@ -278,7 +280,7 @@ end
 
             if solvent_model == "gbn2"
                 sim = SteepestDescentMinimizer(tol=400.0u"kJ * mol^-1 * nm^-1")
-                coords_start = deepcopy(sys.coords)
+                coords_start = copy(sys.coords)
                 simulate!(sys, sim)
                 @test potential_energy(sys) < E_molly
                 @test rmsd(coords_start, sys.coords) < 0.1u"nm"

@@ -7,6 +7,7 @@ makedocs(
         prettyurls=(get(ENV, "CI", nothing) == "true"),
         size_threshold_ignore=["api.md"],
     ),
+    modules=[Molly],
     pages=[
         "Home"                      => "index.md",
         "Documentation"             => "documentation.md",
