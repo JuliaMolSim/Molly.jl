@@ -264,10 +264,6 @@ function Base.:+(a1::Atom, a2::Atom)
                 a1.σ + a2.σ, a1.ϵ + a2.ϵ)
 end
 
-function Base.getindex(atom::Atom, x::Symbol)
-    return hasfield(Atom, x) ? getfield(atom, x) : KeyError("no field $x in Atom")
-end
-
 # get function errors with AD
 dict_get(dic, key, default) = haskey(dic, key) ? dic[key] : default
 
