@@ -191,11 +191,6 @@ Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
 Base.firstindex(b::TriclinicBoundary) = 1
 Base.lastindex(b::TriclinicBoundary) = 3
 
-"""
-    n_dimensions(boundary)
-
-Number of dimensions of a bounding box.
-"""
 AtomsBase.n_dimensions(::CubicBoundary) = 3
 AtomsBase.n_dimensions(::RectangularBoundary) = 2
 AtomsBase.n_dimensions(::TriclinicBoundary) = 3

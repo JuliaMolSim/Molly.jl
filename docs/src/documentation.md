@@ -470,7 +470,7 @@ sys = System(
     boundary=boundary,
     pairwise_inters=pairwise_inters,
     loggers=(
-        coords=CoordinateLogger(n_atoms, dims=n_dimensions(boundary)),
+        coords=CoordinateLogger(n_atoms, dims=2),
         montecarlo=MonteCarloLogger(),
     ),
 )
