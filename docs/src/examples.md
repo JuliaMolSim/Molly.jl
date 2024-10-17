@@ -931,7 +931,7 @@ save("mie.png", f)
 
 ## Variations of the soft-core LJ potential
 
-The soft-core Lennard-Jones potential is parameterised by three parameters ``\alpha``, ``\lambda`` and ``p``.
+The soft-core Lennard-Jones potential is parameterised by ``\alpha``, ``\lambda`` and ``p`` in addition to the standard Lennard-Jones parameters.
 These parameters shift the value of ``r_{ij}`` to ``\left(r_{ij}^6 + \sigma_{ij} \alpha \lambda^{p} \right)^{\frac{1}{6}}``.
 This gives a soft core, i.e. the potential does not diverge for ``r_{ij} \rightarrow 0``.
 ```julia
