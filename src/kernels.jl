@@ -4,6 +4,22 @@ function get_array_type(a::AT) where AT <: AbstractArray
     return AT.name.wrapper
 end
 
+@inline function sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j,
+                                    boundary, special, ::Val{F}) where F
+    dr = vector(coord_i, coord_j, boundary)
+    f_tuple = ntuple(length(inters)) do inter_type_i
+        force_gpu(inters[inter_type_i], dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
+    end
+    f = sum(f_tuple)
+    if unit(f[1]) != F
+        # This triggers an error but it isn't printed
+        # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
+        #   for how to throw a more meaningful error
+        error("wrong force unit returned, was expecting $F but got $(unit(f[1]))")
+    end
+    return f
+end
+
 function gpu_threads_blocks_pairwise(n_neighbors)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512"))
     return n_threads_gpu
@@ -34,19 +50,7 @@ end
 
     @inbounds if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
-        coord_i, coord_j = coords[i], coords[j]
-        atom_i, atom_j = atoms[i], atoms[j]
-        dr = vector(coord_i, coord_j, boundary)
-        f_tuple = ntuple(length(inters)) do inter_type_i
-            force_gpu(inters[inter_type_i], dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
-        end
-        f = sum(f_tuple)
-        if unit(f[1]) != F
-            # This triggers an error but it isn't printed
-            # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
-            #   for how to throw a more meaningful error
-            error("wrong force unit returned, was expecting $F but got $(unit(f[1]))")
-        end
+        f = sum_pairwise_forces(inters, coords[i], coords[j], atoms[i], atoms[j], boundary, special, Val(F))
         for dim in 1:D
             fval = ustrip(f[dim])
             Atomix.@atomic forces[dim, i] = forces[dim, i] - fval
