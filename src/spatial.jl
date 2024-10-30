@@ -699,17 +699,21 @@ function torsion_angle(vec_ij, vec_jk, vec_kl)
     return θ
 end
 
-sum_svec(arr) = sum(arr)
-
 """
     remove_CM_motion!(system)
 
 Remove the center of mass motion from a [`System`](@ref).
 """
 function remove_CM_motion!(sys)
-    atom_masses = masses(sys)
-    cm_momentum = sum_svec(Array(sys.velocities .* atom_masses))
-    cm_velocity = cm_momentum / sum(Array(atom_masses))
+    masses_cpu = Array(masses(sys))
+    velocities_cpu = Array(sys.velocities)
+    cm_momentum = zero(eltype(velocities_cpu)) .* zero(eltype(masses_cpu))
+    total_mass = zero(eltype(masses_cpu))
+    for i in eachindex(sys)
+        cm_momentum += velocities_cpu[i] * masses_cpu[i]
+        total_mass += masses_cpu[i]
+    end
+    cm_velocity = cm_momentum / total_mass
     sys.velocities .= sys.velocities .- (cm_velocity,)
     return sys
 end
