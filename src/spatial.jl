@@ -633,13 +633,8 @@ function random_velocities!(sys, temp; rng=Random.default_rng())
     return sys
 end
 
-function random_velocities!(vels, sys::AbstractSystem{3}, temp; rng=Random.default_rng())
-    vels .= random_velocity_3D.(masses(sys), temp, sys.k, rng)
-    return vels
-end
-
-function random_velocities!(vels, sys::AbstractSystem{2}, temp; rng=Random.default_rng())
-    vels .= random_velocity_2D.(masses(sys), temp, sys.k, rng)
+function random_velocities!(vels, sys::AbstractSystem, temp; rng=Random.default_rng())
+    vels .= random_velocities(sys, temp; rng=rng)
     return vels
 end
 
