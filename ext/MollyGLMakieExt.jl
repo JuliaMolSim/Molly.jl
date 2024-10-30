@@ -4,6 +4,7 @@
 module MollyGLMakieExt
 
 using Molly
+import AtomsBase
 using GLMakie
 using Colors
 using Unitful
@@ -28,7 +29,7 @@ function Molly.visualize(coord_logger,
                          kwargs...)
     coords_start = first(values(coord_logger))
     dist_unit = unit(first(first(coords_start)))
-    dims = n_dimensions(boundary)
+    dims = AtomsBase.n_dimensions(boundary)
     fig = Figure()
 
     if dims == 3

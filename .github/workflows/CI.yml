@@ -19,9 +19,10 @@ jobs:
       matrix:
         version:
           - '1'
+          - 'lts'
+          - 'pre'
         os:
           - ubuntu-latest
-          - macOS-latest
         arch:
           - x64
         test:
@@ -34,10 +35,14 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
+      - run: sudo apt-get update && sudo apt-get install -y xorg-dev mesa-utils xvfb libgl1 freeglut3-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libxext-dev xsettingsd x11-xserver-utils
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
         env:
           GROUP: ${{ matrix.test }}
+          DISPLAY: ':0'
+        with:
+          prefix: "xvfb-run -s '-screen 0 1024x768x24'"
       - uses: julia-actions/julia-processcoverage@v1
       - uses: codecov/codecov-action@v4
         with:
