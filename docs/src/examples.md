@@ -799,12 +799,12 @@ The [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl) pa
 Calculators can be used with a Molly [`System`](@ref) by giving them as `general_inters` during system setup. It is also possible to use a [`MollyCalculator`](@ref) to calculate properties on [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) systems:
 ```julia
 using Molly
+import AtomsBase
 using AtomsBaseTesting
 using AtomsCalculators
 
-ab_sys = AbstractSystem(
+ab_sys = AtomsBase.AbstractSystem(
     make_test_system().system; 
-    boundary_conditions = [Periodic(), Periodic(), Periodic()],
     bounding_box = [[1.54732, 0.0      , 0.0      ],
                     [0.0    , 1.4654985, 0.0      ],
                     [0.0    , 0.0      , 1.7928950]]u"Å",
@@ -931,7 +931,7 @@ save("mie.png", f)
 
 ## Variations of the soft-core LJ potential
 
-The soft-core Lennard-Jones potential is parameterised by three parameters ``\alpha``, ``\lambda`` and ``p``.
+The soft-core Lennard-Jones potential is parameterised by ``\alpha``, ``\lambda`` and ``p`` in addition to the standard Lennard-Jones parameters.
 These parameters shift the value of ``r_{ij}`` to ``\left(r_{ij}^6 + \sigma_{ij} \alpha \lambda^{p} \right)^{\frac{1}{6}}``.
 This gives a soft core, i.e. the potential does not diverge for ``r_{ij} \rightarrow 0``.
 ```julia

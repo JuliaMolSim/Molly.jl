@@ -63,7 +63,7 @@ function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, 
     for i in eachindex(sys)
         if rand() < (sim.dt / thermostat.coupling_const)
             sys.velocities[i] = random_velocity(mass(sys.atoms[i]), thermostat.temperature, sys.k;
-                                                dims=n_dimensions(sys))
+                                                dims=AtomsBase.n_dimensions(sys))
         end
     end
     return false
@@ -306,9 +306,9 @@ function MonteCarloAnisotropicBarostat(pressure::SVector{D},
                                        trial_find_neighbors=false) where D
     volume_scale_factor = box_volume(boundary) * float_type(boundary)(scale_factor)
     volume_scale = fill(volume_scale_factor, D)
-    if n_dimensions(boundary) != D
+    if AtomsBase.n_dimensions(boundary) != D
         throw(ArgumentError("pressure vector length ($(D)) must match boundary " *
-                            "dimensionality ($(n_dimensions(boundary)))"))
+                            "dimensionality ($(AtomsBase.n_dimensions(boundary)))"))
     end
 
     return MonteCarloAnisotropicBarostat(
@@ -471,8 +471,8 @@ function MonteCarloMembraneBarostat(pressure,
     volume_scale_factor = box_volume(boundary) * float_type(boundary)(scale_factor)
     volume_scale = fill(volume_scale_factor, 3)
 
-    if n_dimensions(boundary) != 3
-        throw(ArgumentError("boundary dimensionality ($(n_dimensions(boundary))) must be 3"))
+    if AtomsBase.n_dimensions(boundary) != 3
+        throw(ArgumentError("boundary dimensionality ($(AtomsBase.n_dimensions(boundary))) must be 3"))
     end
     if z_axis_fixed && constant_volume
         throw(ArgumentError("cannot keep z-axis fixed whilst keeping the volume constant"))

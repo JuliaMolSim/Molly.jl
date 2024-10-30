@@ -1,11 +1,11 @@
 module Molly
 
 using Reexport
-@reexport using AtomsBase
 @reexport using StaticArrays
 @reexport using Unitful
 
 using Atomix
+import AtomsBase
 import AtomsCalculators
 import BioStructures # Imported to avoid clashing names
 using CellListMap

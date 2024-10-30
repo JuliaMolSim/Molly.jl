@@ -27,8 +27,7 @@
     random_velocities!(s, temp)
 
     @test masses(s) == fill(10.0u"g/mol", n_atoms)
-    @test typeof(boundary_conditions(s)) <: SVector
-    @test bounding_box(s) == SVector(
+    @test AtomsBase.bounding_box(s) == (
         SVector(2.0, 0.0)u"nm",
         SVector(0.0, 2.0)u"nm",
     )
@@ -70,7 +69,8 @@ end
 
     for n_threads in n_threads_list
         s = System(
-            atoms=[Atom(charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+            atoms=[Atom(index=i, charge=0.0, mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+                   for i in 1:n_atoms],
             coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
             boundary=boundary,
             velocities=[random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
@@ -98,21 +98,18 @@ end
         # Test AtomsBase.jl interface
         @test length(s) == n_atoms
         @test eachindex(s) == Base.OneTo(n_atoms)
-        @test species_type(s) <: AtomView
-        @test typeof(s[5]) <: AtomView
         @test length(s[2:4]) == 3
         @test length(s[[2, 4]]) == 2
         @test broadcast(a -> a.index, s) == collect(1:n_atoms)
-        @test position(s) == s.coords
-        @test position(s, 5) == s.coords[5]
-        @test velocity(s) == s.velocities
-        @test velocity(s, 5) == s.velocities[5]
-        @test atomic_mass(s) == fill(atom_mass, n_atoms)
-        @test atomic_mass(s, 5) == atom_mass
-        @test atomic_symbol(s) == fill(:Ar, n_atoms)
-        @test atomic_symbol(s, 5) == :Ar
-        @test typeof(boundary_conditions(s)) <: SVector
-        @test bounding_box(s) == SVector(
+        @test AtomsBase.position(s, :) == s.coords
+        @test AtomsBase.position(s, 5) == s.coords[5]
+        @test AtomsBase.velocity(s, :) == s.velocities
+        @test AtomsBase.velocity(s, 5) == s.velocities[5]
+        @test AtomsBase.mass(s, :) == fill(atom_mass, n_atoms)
+        @test AtomsBase.mass(s, 5) == atom_mass
+        @test AtomsBase.atomic_symbol(s) == fill(:Ar, n_atoms)
+        @test AtomsBase.atomic_symbol(s, 5) == :Ar
+        @test AtomsBase.bounding_box(s) == (
             SVector(2.0, 0.0, 0.0)u"nm",
             SVector(0.0, 2.0, 0.0)u"nm",
             SVector(0.0, 0.0, 2.0)u"nm",
@@ -182,8 +179,9 @@ end
     )
 
     @test Molly.has_infinite_boundary(boundary)
-    @test atomic_symbol(s) == fill(:unknown, n_atoms)
-    @test atomic_symbol(s, 5) == :unknown
+    @test Molly.has_infinite_boundary(s)
+    @test AtomsBase.atomic_symbol(s) == fill(:unknown, n_atoms)
+    @test AtomsBase.atomic_symbol(s, 5) == :unknown
 
     random_velocities!(s, temp)
 
@@ -438,8 +436,8 @@ end
         sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
 
         sys = System(
-            atoms=gpu ? CuArray(atoms) : atoms,
-            coords=gpu ? CuArray(deepcopy(starting_coords)) : deepcopy(starting_coords),
+            atoms=(gpu ? CuArray(atoms) : atoms),
+            coords=(gpu ? CuArray(deepcopy(starting_coords)) : deepcopy(starting_coords)),
             boundary=boundary,
             atoms_data=atoms_data,
             pairwise_inters=(LennardJones(),),
@@ -677,10 +675,9 @@ end
     @test masses(repsys) == fill(atom_mass, n_atoms)
     @test length(repsys) == n_atoms
     @test eachindex(repsys) == Base.OneTo(n_atoms)
-    @test species_type(repsys) <: AtomView
-    @test atomic_mass(repsys) == fill(atom_mass, n_atoms)
-    @test atomic_mass(repsys, 5) == atom_mass
-    @test bounding_box(repsys) == SVector(
+    @test AtomsBase.mass(repsys, :) == fill(atom_mass, n_atoms)
+    @test AtomsBase.mass(repsys, 5) == atom_mass
+    @test AtomsBase.bounding_box(repsys) == (
         SVector(2.0, 0.0, 0.0)u"nm",
         SVector(0.0, 2.0, 0.0)u"nm",
         SVector(0.0, 0.0, 2.0)u"nm",
