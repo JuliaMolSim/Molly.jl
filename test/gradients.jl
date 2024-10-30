@@ -407,10 +407,10 @@ end
     if run_gpu_tests
         push!(platform_runs, ("GPU", true, false))
     end
-    test_runs = (
+    test_runs = [
         ("Energy", test_energy_grad, 1e-8),
         ("Force" , test_forces_grad, 1e-8),
-    )
+    ]
     if !running_CI
         push!(test_runs, ("Sim", test_sim_grad, 1e-2))
     end
