@@ -382,7 +382,7 @@ end
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
-                           rng=Random.GLOBAL_RNG)
+                           rng=Random.default_rng())
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -482,7 +482,7 @@ end
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
-                           rng=Random.GLOBAL_RNG)
+                           rng=Random.default_rng())
     if length(sys.constraints) > 0
         @warn "LangevinSplitting is not currently compatible with constraints, " *
               "constraints will be ignored"
@@ -606,7 +606,7 @@ end
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
-                           rng=Random.GLOBAL_RNG)
+                           rng=Random.default_rng())
     if length(sys.constraints) > 0
         @warn "OverdampedLangevin is not currently compatible with constraints, " *
               "constraints will be ignored"
@@ -793,7 +793,7 @@ function simulate!(sys::ReplicaSystem,
                     sim::TemperatureREMD,
                     n_steps::Integer;
                     assign_velocities::Bool=false,
-                    rng=Random.GLOBAL_RNG,
+                    rng=Random.default_rng(),
                     n_threads::Integer=Threads.nthreads(),
                     run_loggers=true)
     if sys.n_replicas != length(sim.simulators)
@@ -811,7 +811,7 @@ function simulate!(sys::ReplicaSystem,
 end
 
 """
-    remd_exchange!(sys, sim, n, m; rng=Random.GLOBAL_RNG, n_threads=Threads.nthreads())
+    remd_exchange!(sys, sim, n, m; rng=Random.default_rng(), n_threads=Threads.nthreads())
 
 Attempt an exchange of replicas `n` and `m` in a [`ReplicaSystem`](@ref) during a REMD simulation.
 
@@ -823,7 +823,7 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
                         n::Integer,
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
-                        rng=Random.GLOBAL_RNG) where {D, G, T}
+                        rng=Random.default_rng()) where {D, G, T}
     T_n, T_m = sim.temperatures[n], sim.temperatures[m]
     β_n, β_m = inv(sys.k * T_n), inv(sys.k * T_m)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
@@ -892,7 +892,7 @@ function simulate!(sys::ReplicaSystem,
                     sim::HamiltonianREMD,
                     n_steps::Integer;
                     assign_velocities::Bool=false,
-                    rng=Random.GLOBAL_RNG,
+                    rng=Random.default_rng(),
                     n_threads::Integer=Threads.nthreads(),
                     run_loggers=true)
     if sys.n_replicas != length(sim.simulators)
@@ -914,7 +914,7 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
                         n::Integer,
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
-                        rng=Random.GLOBAL_RNG) where {D, G, T}
+                        rng=Random.default_rng()) where {D, G, T}
     T_sim = sim.temperature
     β_sim = inv(sys.k * T_sim)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
@@ -943,7 +943,7 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
 end
 
 """
-    simulate_remd!(sys, remd_sim, n_steps; rng=Random.GLOBAL_RNG,
+    simulate_remd!(sys, remd_sim, n_steps; rng=Random.default_rng(),
                    n_threads=Threads.nthreads(), run_loggers=true)
 
 Run a REMD simulation on a [`ReplicaSystem`](@ref) using a REMD simulator.
@@ -953,7 +953,7 @@ Not currently compatible with interactions that depend on step number.
 function simulate_remd!(sys::ReplicaSystem,
                         remd_sim,
                         n_steps::Integer;
-                        rng=Random.GLOBAL_RNG,
+                        rng=Random.default_rng(),
                         n_threads::Integer=Threads.nthreads(),
                         run_loggers=true)
     if sys.n_replicas != length(remd_sim.simulators)

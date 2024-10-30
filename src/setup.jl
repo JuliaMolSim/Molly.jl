@@ -14,7 +14,7 @@ export
     add_position_restraints
 
 """
-    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100, rng=Random.GLOBAL_RNG)
+    place_atoms(n_atoms, boundary; min_dist=nothing, max_attempts=100, rng=Random.default_rng())
 
 Generate random coordinates.
 
@@ -28,7 +28,7 @@ function place_atoms(n_atoms::Integer,
                      boundary;
                      min_dist=zero(length_type(boundary)),
                      max_attempts::Integer=100,
-                     rng=Random.GLOBAL_RNG)
+                     rng=Random.default_rng())
     if has_infinite_boundary(boundary)
         throw(ArgumentError("one or more dimension has infinite boundaries, boundary is $boundary"))
     end
@@ -65,7 +65,7 @@ end
 
 """
     place_diatomics(n_molecules, boundary, bond_length; min_dist=nothing,
-                    max_attempts=100, aligned=false, rng=Random.GLOBAL_RNG)
+                    max_attempts=100, aligned=false, rng=Random.default_rng())
 
 Generate random diatomic molecule coordinates.
 
@@ -84,7 +84,7 @@ function place_diatomics(n_molecules::Integer,
                          min_dist=zero(length_type(boundary)),
                          max_attempts::Integer=100,
                          aligned::Bool=false,
-                         rng=Random.GLOBAL_RNG)
+                         rng=Random.default_rng())
     if has_infinite_boundary(boundary)
         throw(ArgumentError("one or more dimension has infinite boundaries, boundary is $boundary"))
     end

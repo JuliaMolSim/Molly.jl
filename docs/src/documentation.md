@@ -981,7 +981,7 @@ function Molly.remd_exchange!(sys::ReplicaSystem,
                               n::Integer,
                               m::Integer;
                               n_threads::Integer=Threads.nthreads(),
-                              rng=Random.GLOBAL_RNG)
+                              rng=Random.default_rng())
     # Attempt to exchange the replicas with index n and m
     # First define Δ for the REMD scheme
     make_exchange = Δ <= 0 || rand(rng) < exp(-Δ) # Example of Metropolis acceptance rate
@@ -1001,7 +1001,7 @@ This does any initial setup such as assigning velocities then uses [`simulate_re
 function Molly.simulate!(sys::ReplicaSystem,
                          sim::MyREMDSimulator,
                          n_steps::Integer;
-                         rng=Random.GLOBAL_RNG,
+                         rng=Random.default_rng(),
                          n_threads::Integer=Threads.nthreads())
     # Do any initial setup if necessary
     simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
