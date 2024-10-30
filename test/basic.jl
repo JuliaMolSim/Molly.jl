@@ -56,13 +56,13 @@
     @test ustrip(b) == CubicBoundary(4.0, 5.0, 6.0)
     @test ustrip(u"Å", b) == CubicBoundary(40.0, 50.0, 60.0)
     @test !Molly.has_infinite_boundary(b)
-    @test box_volume(b) == 120.0u"nm^3"
-    @test box_volume(CubicBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^3"
+    @test volume(b) == 120.0u"nm^3"
+    @test volume(CubicBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^3"
     @test box_center(b) == SVector(2.0, 2.5, 3.0)u"nm"
     sb = scale_boundary(b, 1.1)
     @test sb.side_lengths ≈ SVector(4.4, 5.5, 6.6)u"nm"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0, 6.0)u"nm"
-    @test Molly.axis_limits(CubicBoundary(4.0, 5.0, 6.0), CoordinateLogger(1), 2) == (0.0, 5.0)
+    @test Molly.axis_limits(CubicBoundary(4.0, 5.0, 6.0), CoordinatesLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError CubicBoundary(-4.0u"nm", 5.0u"nm", 6.0u"nm")
     @test_throws DomainError CubicBoundary( 4.0u"nm", 0.0u"nm", 6.0u"nm")
 
@@ -72,13 +72,13 @@
     @test ustrip(b) == RectangularBoundary(4.0, 5.0)
     @test ustrip(u"km", b) == RectangularBoundary(4e-3, 5e-3)
     @test !Molly.has_infinite_boundary(b)
-    @test box_volume(b) == 20.0u"m^2"
-    @test box_volume(RectangularBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^2"
+    @test volume(b) == 20.0u"m^2"
+    @test volume(RectangularBoundary(0.0u"m"; check_positive=false)) == 0.0u"m^2"
     @test box_center(b) == SVector(2.0, 2.5)u"m"
     sb = scale_boundary(b, 0.9)
     @test sb.side_lengths ≈ SVector(3.6, 4.5)u"m"
     @test Molly.cubic_bounding_box(b) == SVector(4.0, 5.0)u"m"
-    @test Molly.axis_limits(RectangularBoundary(4.0, 5.0), CoordinateLogger(1), 2) == (0.0, 5.0)
+    @test Molly.axis_limits(RectangularBoundary(4.0, 5.0), CoordinatesLogger(1), 2) == (0.0, 5.0)
     @test_throws DomainError RectangularBoundary(-4.0u"nm", 5.0u"nm")
     @test_throws DomainError RectangularBoundary( 4.0u"nm", 0.0u"nm")
 
@@ -92,11 +92,11 @@
     @test TriclinicBoundary([b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3]]) == b
 
     @test AtomsBase.bounding_box(b) == (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
-    @test box_volume(b) ≈ 3.89937463181886u"nm^3"
+    @test volume(b) ≈ 3.89937463181886u"nm^3"
     @test isapprox(box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm"; atol=1e-6u"nm")
     sb = scale_boundary(b, 1.2)
     @test [sb.α, sb.β, sb.γ] ≈ [b.α, b.β, b.γ]
-    @test box_volume(sb) ≈ box_volume(b) * 1.2^3
+    @test volume(sb) ≈ volume(b) * 1.2^3
     @test isapprox(
         Molly.cubic_bounding_box(b),
         SVector(4.5788800, 2.2719630, 1.0233205)u"nm";
@@ -137,7 +137,7 @@
     end
 
     atoms = fill(Atom(mass=1.0u"g/mol"), n_atoms)
-    loggers = (coords=CoordinateLogger(10),)
+    loggers = (coords=CoordinatesLogger(10),)
     temp = 100.0u"K"
     dt = 0.002u"ps"
     sim = VelocityVerlet(dt=dt, remove_CM_motion=false)
@@ -188,7 +188,7 @@
             eligible=(gpu ? CuArray(no_nbs) : no_nbs),
             dist_cutoff=1.0u"nm",
         )
-        coords_start = deepcopy(sys.coords)
+        coords_start = copy(sys.coords)
         pe_start = potential_energy(sys, find_neighbors(sys))
         scale_factor = 1.02
         n_scales = 10
@@ -405,7 +405,7 @@ end
         replica_velocities=replica_velocities,
         pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
-        replica_loggers=[(temp=TemperatureLogger(10), coords=CoordinateLogger(10))
+        replica_loggers=[(temp=TemperatureLogger(10), coords=CoordinatesLogger(10))
                          for i in 1:n_replicas],
         data="test_data_repsys",
     )
@@ -417,7 +417,7 @@ end
         velocities=nothing,
         pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
-        loggers=(temp=TemperatureLogger(10), coords=CoordinateLogger(10)),
+        loggers=(temp=TemperatureLogger(10), coords=CoordinatesLogger(10)),
         data="test_data_sys",
     )
 
@@ -452,12 +452,6 @@ end
     atoms = [Atom(mass=1.0u"g/mol", σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")]
     coords = place_atoms(1, b_right; min_dist=0.01u"nm")
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_wrong)
-
-    # Mis-matched energy units in interaction and system
-    coords = place_atoms(1, b_right; min_dist=0.01u"nm")
-    lj = LennardJones(energy_units="kcal/mol")
-    @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,
-                                      pairwise_inters=(lj,))
 
     # Mixed units or other invalid units
     bad_velo = [random_velocity(1.0u"g/mol",10u"K",Unitful.k*Unitful.Na) .* 2u"g"]
@@ -497,7 +491,7 @@ end
                         [0.0    , 1.4654985, 0.0      ],
                         [0.0    , 0.0      , 1.7928950]]u"Å",
     )
-    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å", force_units=u"kJ/Å", energy_units=u"kJ")
+    coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å")
     calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
 
     pe = AtomsCalculators.potential_energy(ab_sys, calc)

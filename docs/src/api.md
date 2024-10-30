@@ -2,17 +2,23 @@
 
 The API reference can be found here.
 
-Molly also re-exports [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) and [Unitful.jl](https://github.com/PainterQubits/Unitful.jl), making the likes of `SVector` and `1.0u"nm"` available when you call `using Molly`.
+Molly re-exports [StaticArrays.jl](https://github.com/JuliaArrays/StaticArrays.jl) and [Unitful.jl](https://github.com/PainterQubits/Unitful.jl), making the likes of `SVector` and `1.0u"nm"` available when you call `using Molly`.
 
-The [`visualize`](@ref) function is in a package extension and is only available once you have called `using GLMakie`.
-The [`ASECalculator`](@ref) code is in a package extension and is only available once you have called `using PythonCall`.
+Package extensions are used in order to reduce the number of dependencies:
+- To use [`visualize`](@ref), call `using GLMakie`.
+- To use [`ASECalculator`](@ref), call `using PythonCall`.
+- To use [`rdf`](@ref), call `using KernelDensity`.
+
+## Exported names
 
 ```@index
-Order   = [:module, :type, :constant, :function, :macro]
+Order = [:module, :type, :constant, :function, :macro]
 ```
+
+## Docstrings
 
 ```@autodocs
 Modules = [Molly]
 Private = false
-Order   = [:module, :type, :constant, :function, :macro]
+Order = [:module, :type, :constant, :function, :macro]
 ```

@@ -1,9 +1,9 @@
 export ustrip_vec
 
 # Unit types to dispatch on
-@derived_dimension MolarMass Unitful.𝐌/Unitful.𝐍 true
-@derived_dimension BoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1 true
-@derived_dimension MolarBoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1*Unitful.𝐍^-1 true
+@derived_dimension MolarMass Unitful.𝐌/Unitful.𝐍
+@derived_dimension BoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1
+@derived_dimension MolarBoltzmannConstUnits Unitful.𝐌*Unitful.𝐋^2*Unitful.𝐓^-2*Unitful.𝚯^-1*Unitful.𝐍^-1
 
 """
     ustrip_vec(x)
@@ -19,10 +19,7 @@ function check_units(atoms, coords, velocities, energy_units, force_units,
                      p_inters, s_inters, g_inters, boundary)
     masses = mass.(atoms)
     sys_units = check_system_units(masses, coords, velocities, energy_units, force_units)
-
-    check_interaction_units(p_inters, s_inters, g_inters, sys_units)
     check_other_units(atoms, boundary, sys_units)
-
     return sys_units
 end
 
@@ -61,25 +58,6 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
 
     return NamedTuple{(:length, :velocity, :mass, :energy, :force)}((length_units,
         vel_units, mass_units, energy_units, force_units))
-end
-
-function check_interaction_units(p_inters, s_inters, g_inters, sys_units::NamedTuple)
-    for inter_tuple in [p_inters, s_inters, g_inters]
-        for inter in inter_tuple
-            if hasproperty(inter, :energy_units)
-                if inter.energy_units != sys_units[:energy]
-                    throw(ArgumentError("energy units passed to system do not match those passed in an interaction"))
-                end
-            end
-
-            if hasproperty(inter, :force_units)
-                if inter.force_units != sys_units[:force]
-                    throw(ArgumentError("force units passed to system do not match those passed in an interaction"))
-                end
-            end
-        end
-    end
-
 end
 
 function check_other_units(atoms_dev, boundary, sys_units::NamedTuple)
@@ -195,9 +173,7 @@ function convert_k_units(T, k, energy_units)
             # Use user-supplied unitless Boltzmann constant
             k_converted = T(k)
         else
-            Zygote.ignore() do
-                @warn "Units will be stripped from Boltzmann constant: energy_units was passed as NoUnits and units were provided on k: $(unit(k))"
-            end
+            @warn "Units will be stripped from Boltzmann constant: energy_units was passed as NoUnits and units were provided on k: $(unit(k))"
             k_converted = T(ustrip(k))
         end
     elseif dimension(energy_units) in (u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2", u"𝐋^2 * 𝐌 * 𝐓^-2")
@@ -211,21 +187,17 @@ function convert_k_units(T, k, energy_units)
     return k_converted
 end
 
-function check_energy_units(E, energy_units)
-    if unit(E) != energy_units
-        error("system energy units are ", energy_units, " but encountered energy units ",
-              unit(E))
+function check_force_units(F, force_units)
+    if unit(F) != force_units
+        error("system force units are ", force_units, " but encountered force units ", unit(F))
     end
 end
 
-function check_force_units(fdr::AbstractArray, sys_force_units)
-    return check_force_units(unit(first(fdr)), sys_force_units)
-end
+check_force_units(F::SVector, force_units) = @inbounds check_force_units(F[1], force_units)
 
-function check_force_units(force_units, sys_force_units)
-    if force_units != sys_force_units
-        error("system force units are ", sys_force_units, " but encountered force units ",
-              force_units)
+function check_energy_units(E, energy_units)
+    if unit(E) != energy_units
+        error("system energy units are ", energy_units, " but encountered energy units ", unit(E))
     end
 end
 

@@ -2,9 +2,27 @@ export
     LennardJones,
     LennardJonesSoftCore
 
+function lj_zero_shortcut(atom_i, atom_j)
+    return iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
+           iszero_value(atom_i.σ) || iszero_value(atom_j.σ)
+end
+
+no_shortcut(atom_i, atom_j) = false
+
+function lorentz_σ_mixing(atom_i, atom_j)
+    return (atom_i.σ + atom_j.σ) / 2
+end
+
+function geometric_σ_mixing(atom_i, atom_j)
+    return sqrt(atom_i.σ * atom_j.σ)
+end
+
+function geometric_ϵ_mixing(atom_i, atom_j)
+    return sqrt(atom_i.ϵ * atom_j.ϵ)
+end
+
 @doc raw"""
-    LennardJones(; cutoff, use_neighbors, lorentz_mixing, weight_special, weight_solute_solvent,
-                 force_units, energy_units, skip_shortcut)
+    LennardJones(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)
 
 The Lennard-Jones 6-12 interaction between two atoms.
 
@@ -20,89 +38,76 @@ and the force on each atom by
 \end{aligned}
 ```
 """
-struct LennardJones{S, C, W, WS, F, E} <: PairwiseInteraction
-    cutoff::C
-    use_neighbors::Bool
-    lorentz_mixing::Bool
-    weight_special::W
-    weight_solute_solvent::WS
-    force_units::F
-    energy_units::E
-end
-
-function LennardJones(;
-                        cutoff=NoCutoff(),
-                        use_neighbors=false,
-                        lorentz_mixing=true,
-                        weight_special=1,
-                        weight_solute_solvent=1,
-                        force_units=u"kJ * mol^-1 * nm^-1",
-                        energy_units=u"kJ * mol^-1",
-                        skip_shortcut=false)
-    return LennardJones{skip_shortcut, typeof(cutoff), typeof(weight_special),
-                        typeof(weight_solute_solvent), typeof(force_units), typeof(energy_units)}(
-        cutoff, use_neighbors, lorentz_mixing, weight_special, weight_solute_solvent,
-        force_units, energy_units)
+@kwdef struct LennardJones{C, H, S, E, W}
+    cutoff::C = NoCutoff()
+    use_neighbors::Bool = false
+    shortcut::H = lj_zero_shortcut
+    σ_mixing::S = lorentz_σ_mixing
+    ϵ_mixing::E = geometric_ϵ_mixing
+    weight_special::W = 1
 end
 
 use_neighbors(inter::LennardJones) = inter.use_neighbors
 
-is_solute(at::Atom) = at.solute
-is_solute(at) = false
-
-function Base.zero(lj::LennardJones{S, C, W, WS, F, E}) where {S, C, W, WS, F, E}
-    return LennardJones{S, C, W, WS, F, E}(
+function Base.zero(lj::LennardJones{C, H, S, E, W}) where {C, H, S, E, W}
+    return LennardJones(
         lj.cutoff,
-        false,
-        false,
+        lj.use_neighbors,
+        lj.shortcut,
+        lj.σ_mixing,
+        lj.ϵ_mixing,
         zero(W),
-        zero(WS),
-        lj.force_units,
-        lj.energy_units,
     )
 end
 
-function Base.:+(l1::LennardJones{S, C, W, WS, F, E},
-                 l2::LennardJones{S, C, W, WS, F, E}) where {S, C, W, WS, F, E}
-    return LennardJones{S, C, W, WS, F, E}(
+function Base.:+(l1::LennardJones, l2::LennardJones)
+    return LennardJones(
         l1.cutoff,
         l1.use_neighbors,
-        l1.lorentz_mixing,
+        l1.shortcut,
+        l1.σ_mixing,
+        l1.ϵ_mixing,
         l1.weight_special + l2.weight_special,
-        l1.weight_solute_solvent + l2.weight_solute_solvent,
-        l1.force_units,
-        l1.energy_units,
     )
 end
 
-@inline function force(inter::LennardJones{S, C},
-                                    dr,
-                                    coord_i,
-                                    coord_j,
-                                    atom_i,
-                                    atom_j,
-                                    boundary,
-                                    special::Bool=false) where {S, C}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
-              iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
-        return ustrip.(zero(coord_i)) * inter.force_units
-    end
+function inject_interaction(inter::LennardJones, params_dic)
+    key_prefix = "inter_LJ_"
+    return LennardJones(
+        inter.cutoff,
+        inter.use_neighbors,
+        inter.shortcut,
+        inter.σ_mixing,
+        inter.ϵ_mixing,
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+    )
+end
 
-    # Lorentz-Berthelot mixing rules use the arithmetic average for σ
-    # Otherwise use the geometric average
-    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-    if (is_solute(atom_i) && !is_solute(atom_j)) || (is_solute(atom_j) && !is_solute(atom_i))
-        ϵ = inter.weight_solute_solvent * sqrt(atom_i.ϵ * atom_j.ϵ)
-    else
-        ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
+function extract_parameters!(params_dic, inter::LennardJones, ff)
+    key_prefix = "inter_LJ_"
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    return params_dic
+end
+
+@inline function force(inter::LennardJones,
+                       dr,
+                       atom_i,
+                       atom_j,
+                       force_units=u"kJ * mol^-1 * nm^-1",
+                       special=false,
+                       args...)
+    if inter.shortcut(atom_i, atom_j)
+        return ustrip.(zero(dr)) * force_units
     end
+    σ = inter.σ_mixing(atom_i, atom_j)
+    ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
     r2 = sum(abs2, dr)
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
     if special
         return f * dr * inter.weight_special
     else
@@ -115,32 +120,25 @@ function force_divr(::LennardJones, r2, invr2, (σ2, ϵ))
     return (24ϵ * invr2) * (2 * six_term ^ 2 - six_term)
 end
 
-@inline function potential_energy(inter::LennardJones{S, C},
-                                            dr,
-                                            coord_i,
-                                            coord_j,
-                                            atom_i,
-                                            atom_j,
-                                            boundary,
-                                            special::Bool=false) where {S, C}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
-              iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
-        return ustrip(zero(coord_i[1])) * inter.energy_units
+@inline function potential_energy(inter::LennardJones,
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  energy_units=u"kJ * mol^-1",
+                                  special=false,
+                                  args...)
+    if inter.shortcut(atom_i, atom_j)
+        return ustrip(zero(dr[1])) * energy_units
     end
-
-    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-    if (is_solute(atom_i) && !is_solute(atom_j)) || (is_solute(atom_j) && !is_solute(atom_i))
-        ϵ = inter.weight_solute_solvent * sqrt(atom_i.ϵ * atom_j.ϵ)
-    else
-        ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
-    end
+    σ = inter.σ_mixing(atom_i, atom_j)
+    ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
     r2 = sum(abs2, dr)
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
+    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -154,8 +152,8 @@ function potential(::LennardJones, r2, invr2, (σ2, ϵ))
 end
 
 @doc raw"""
-    LennardJonesSoftCore(; cutoff, α, λ, p, use_neighbors, lorentz_mixing, weight_special,
-                         weight_solute_solvent, force_units, energy_units, skip_shortcut)
+    LennardJonesSoftCore(; cutoff, α, λ, p, use_neighbors, shortcut, σ_mixing, ϵ_mixing,
+                         weight_special)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core.
 
@@ -173,103 +171,70 @@ r_{ij}^{\text{sc}} = \left(r_{ij}^6 + \alpha \sigma_{ij}^6 \lambda^p \right)^{1/
 ```
 If ``\alpha`` or ``\lambda`` are zero this gives the standard [`LennardJones`](@ref) potential.
 """
-struct LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E} <: PairwiseInteraction
-    cutoff::C
-    α::A
-    λ::L
-    p::P
-    σ6_fac::R
-    use_neighbors::Bool
-    lorentz_mixing::Bool
-    weight_special::W
-    weight_solute_solvent::WS
-    force_units::F
-    energy_units::E
-end
-
-function LennardJonesSoftCore(;
-                        cutoff=NoCutoff(),
-                        α=1,
-                        λ=0,
-                        p=2,
-                        use_neighbors=false,
-                        lorentz_mixing=true,
-                        weight_special=1,
-                        weight_solute_solvent=1,
-                        force_units=u"kJ * mol^-1 * nm^-1",
-                        energy_units=u"kJ * mol^-1",
-                        skip_shortcut=false)
-    σ6_fac = α * λ^p
-    return LennardJonesSoftCore{skip_shortcut, typeof(cutoff), typeof(α), typeof(λ), typeof(p),
-                                typeof(σ6_fac), typeof(weight_special), typeof(weight_solute_solvent),
-                                typeof(force_units), typeof(energy_units)}(
-        cutoff, α, λ, p, σ6_fac, use_neighbors, lorentz_mixing, weight_special,
-        weight_solute_solvent, force_units, energy_units)
+@kwdef struct LennardJonesSoftCore{C, A, L, P, H, S, E, W, R}
+    cutoff::C = NoCutoff()
+    α::A = 1
+    λ::L = 0
+    p::P = 2
+    use_neighbors::Bool = false
+    shortcut::H = lj_zero_shortcut
+    σ_mixing::S = lorentz_σ_mixing
+    ϵ_mixing::E = geometric_ϵ_mixing
+    weight_special::W = 1
+    σ6_fac::R = α * λ^p
 end
 
 use_neighbors(inter::LennardJonesSoftCore) = inter.use_neighbors
 
-function Base.zero(lj::LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E}) where {S, C, A, L, P, R, W, WS, F, E}
-    return LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E}(
+function Base.zero(lj::LennardJonesSoftCore{C, A, L, P, H, S, E, W, R}) where {C, A, L, P, H, S, E, W, R}
+    return LennardJonesSoftCore(
         lj.cutoff,
         zero(A),
         zero(L),
         zero(P),
-        zero(R),
-        false,
-        false,
+        lj.use_neighbors,
+        lj.shortcut,
+        lj.σ_mixing,
+        lj.ϵ_mixing,
         zero(W),
-        zero(WS),
-        lj.force_units,
-        lj.energy_units,
+        zero(R),
     )
 end
 
-function Base.:+(l1::LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E},
-                 l2::LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E}) where {S, C, A, L, P, R, W, WS, F, E}
-    return LennardJonesSoftCore{S, C, A, L, P, R, W, WS, F, E}(
+function Base.:+(l1::LennardJonesSoftCore, l2::LennardJonesSoftCore)
+    return LennardJonesSoftCore(
         l1.cutoff,
         l1.α + l2.α,
         l1.λ + l2.λ,
         l1.p + l2.p,
-        l1.σ6_fac + l2.σ6_fac,
         l1.use_neighbors,
-        l1.lorentz_mixing,
+        l1.shortcut,
+        l1.σ_mixing,
+        l1.ϵ_mixing,
         l1.weight_special + l2.weight_special,
-        l1.weight_solute_solvent + l2.weight_solute_solvent,
-        l1.force_units,
-        l1.energy_units,
+        l1.σ6_fac + l2.σ6_fac,
     )
 end
 
-@inline function force(inter::LennardJonesSoftCore{S, C},
-                                    dr,
-                                    coord_i,
-                                    coord_j,
-                                    atom_i,
-                                    atom_j,
-                                    boundary,
-                                    special::Bool=false) where {S, C}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
-              iszero_value(atom_i.σ) || iszero_value(atom_j.σ))
-        return ustrip.(zero(coord_i)) * inter.force_units
+@inline function force(inter::LennardJonesSoftCore,
+                       dr,
+                       atom_i,
+                       atom_j,
+                       force_units=u"kJ * mol^-1 * nm^-1",
+                       special=false,
+                       args...)
+    if inter.shortcut(atom_i, atom_j)
+        return ustrip.(zero(dr)) * force_units
     end
-
-    # Lorentz-Berthelot mixing rules use the arithmetic average for σ
-    # Otherwise use the geometric average
-    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-    if (is_solute(atom_i) && !is_solute(atom_j)) || (is_solute(atom_j) && !is_solute(atom_i))
-        ϵ = inter.weight_solute_solvent * sqrt(atom_i.ϵ * atom_j.ϵ)
-    else
-        ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
-    end
+    σ = inter.σ_mixing(atom_i, atom_j)
+    ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
     r2 = sum(abs2, dr)
     σ2 = σ^2
     params = (σ2, ϵ, inter.σ6_fac)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
     if special
         return f * dr * inter.weight_special
     else
@@ -285,32 +250,25 @@ function force_divr(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
     return ff * √invr2
 end
 
-@inline function potential_energy(inter::LennardJonesSoftCore{S, C},
-                                            dr,
-                                            coord_i,
-                                            coord_j,
-                                            atom_i,
-                                            atom_j,
-                                            boundary,
-                                            special::Bool=false) where {S, C}
-    if !S && (iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
-              iszero_value(atom_i.σ) ||iszero_value(atom_j.σ))
-        return ustrip(zero(coord_i[1])) * inter.energy_units
+@inline function potential_energy(inter::LennardJonesSoftCore,
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  energy_units=u"kJ * mol^-1",
+                                  special=false,
+                                  args...)
+    if inter.shortcut(atom_i, atom_j)
+        return ustrip(zero(dr[1])) * energy_units
     end
-
-    σ = inter.lorentz_mixing ? (atom_i.σ + atom_j.σ) / 2 : sqrt(atom_i.σ * atom_j.σ)
-    if (is_solute(atom_i) && !is_solute(atom_j)) || (is_solute(atom_j) && !is_solute(atom_i))
-        ϵ = inter.weight_solute_solvent * sqrt(atom_i.ϵ * atom_j.ϵ)
-    else
-        ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
-    end
+    σ = inter.σ_mixing(atom_i, atom_j)
+    ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
     r2 = sum(abs2, dr)
     σ2 = σ^2
     params = (σ2, ϵ, inter.σ6_fac)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
+    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
     if special
         return pe * inter.weight_special
     else

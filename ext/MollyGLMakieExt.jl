@@ -35,12 +35,12 @@ function Molly.visualize(coord_logger,
     if dims == 3
         PointType = Point3f
         ax = Axis3(fig[1, 1], aspect=:data)
-        max_connection_dist = cbrt(box_volume(boundary)) / 2
+        max_connection_dist = cbrt(Molly.volume(boundary)) / 2
     elseif dims == 2
         PointType = Point2f
         ax = Axis(fig[1, 1])
         ax.aspect = DataAspect()
-        max_connection_dist = sqrt(box_volume(boundary)) / 2
+        max_connection_dist = sqrt(Molly.volume(boundary)) / 2
     else
         throw(ArgumentError("found $dims dimensions but can only visualize 2 or 3 dimensions"))
     end

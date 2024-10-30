@@ -11,14 +11,14 @@ The potential energy is defined as
 V(\theta) = k(1 + \cos(\theta - \theta_0))
 ```
 """
-struct CosineAngle{K, D} <: SpecificInteraction
+struct CosineAngle{K, D}
     k::K
     θ0::D
 end
 
 CosineAngle(; k, θ0) = CosineAngle{typeof(k), typeof(θ0)}(k, θ0)
 
-@inline function force(a::CosineAngle, coords_i, coords_j, coords_k, boundary)
+@inline function force(a::CosineAngle, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product
     ba = vector_pad3D(coords_j, coords_i, boundary)
     bc = vector_pad3D(coords_j, coords_k, boundary)
@@ -38,7 +38,7 @@ CosineAngle(; k, θ0) = CosineAngle{typeof(k), typeof(θ0)}(k, θ0)
 end
 
 @inline function potential_energy(a::CosineAngle, coords_i, coords_j,
-                                            coords_k, boundary)
+                                  coords_k, boundary, args...)
     θ = bond_angle(coords_i, coords_j, coords_k, boundary)
     return a.k * (1 + cos(θ - a.θ0))
 end
