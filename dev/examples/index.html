@@ -91,7 +91,7 @@ sys = System(
     boundary=boundary,
     velocities=velocities,
     pairwise_inters=(inter,),
-    loggers=(coords=CoordinateLogger(typeof(1.0u&quot;km&quot;), 10),),
+    loggers=(coords=CoordinatesLogger(typeof(1.0u&quot;km&quot;), 10),),
     force_units=u&quot;kg * km * d^-2&quot;,
     energy_units=u&quot;kg * km^2 * d^-2&quot;,
 )
@@ -125,8 +125,8 @@ mutable struct Person
     ϵ::Float64
 end
 
-# Custom PairwiseInteraction
-struct SIRInteraction &lt;: PairwiseInteraction
+# Custom pairwise interaction
+struct SIRInteraction
     dist_infection::Float64
     prob_infection::Float64
     prob_recovery::Float64
@@ -135,11 +135,9 @@ end
 # Custom force function
 function Molly.force(inter::SIRInteraction,
                         vec_ij,
-                        coord_i,
-                        coord_j,
                         atom_i,
                         atom_j,
-                        boundary)
+                        args...)
     if (atom_i.status == infected &amp;&amp; atom_j.status == susceptible) ||
                 (atom_i.status == susceptible &amp;&amp; atom_j.status == infected)
         # Infect close people randomly
@@ -156,11 +154,11 @@ function Molly.force(inter::SIRInteraction,
             atom_i.status = recovered
         end
     end
-    return zero(coord_i)
+    return zero(vec_ij)
 end
 
 # Custom logger
-function fracs_SIR(s::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+function fracs_SIR(s::System, args...;  kwargs...)
     counts_sir = [
         count(p -&gt; p.status == susceptible, s.atoms),
         count(p -&gt; p.status == infected   , s.atoms),
@@ -180,12 +178,7 @@ atoms = [Person(i, i &lt;= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) 
 coords = place_atoms(n_people, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
 
-lj = LennardJones(
-    cutoff=DistanceCutoff(1.6),
-    use_neighbors=true,
-    force_units=NoUnits,
-    energy_units=NoUnits,
-)
+lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
 sir = SIRInteraction(0.5, 0.06, 0.01)
 pairwise_inters = (LennardJones=lj, SIR=sir)
 neighbor_finder = DistanceNeighborFinder(
@@ -206,7 +199,7 @@ sys = System(
     pairwise_inters=pairwise_inters,
     neighbor_finder=neighbor_finder,
     loggers=(
-        coords=CoordinateLogger(Float64, 10; dims=2),
+        coords=CoordinatesLogger(Float64, 10; dims=2),
         SIR=SIRLogger(10),
     ),
     force_units=NoUnits,
@@ -321,7 +314,7 @@ sys = System(
     pairwise_inters=(lj,),
     specific_inter_lists=(bonds, angles),
     neighbor_finder=neighbor_finder,
-    loggers=(coords=CoordinateLogger(200),),
+    loggers=(coords=CoordinatesLogger(200),),
 )
 
 sim = Langevin(dt=0.002u&quot;ps&quot;, temperature=300.0u&quot;K&quot;, friction=1.0u&quot;ps^-1&quot;)
@@ -504,7 +497,7 @@ atoms = fill(Atom(mass=28.0), 2)
 coords = [SVector(1/8, 1/8, 1/8), SVector(-1/8, -1/8, -1/8)]
 velocities = [randn(SVector{3, Float64}) * 0.1 for _ in 1:2]
 boundary = CubicBoundary(Inf)
-loggers = (coords=CoordinateLogger(Float64, 1),)
+loggers = (coords=CoordinatesLogger(Float64, 1),)
 
 sys = System(
     atoms=atoms,
@@ -524,7 +517,7 @@ simulate!(sys, simulator, 100)
 values(sys.loggers.coords)[end]
 # 2-element Vector{SVector{3, Float64}}:
 #  [0.12060853912863925, 0.12292128337998731, 0.13100409788691614]
-#  [-0.13352575661477334, -0.11473039463130282, -0.13189544838731393]</code></pre><h2 id="Making-and-breaking-bonds"><a class="docs-heading-anchor" href="#Making-and-breaking-bonds">Making and breaking bonds</a><a id="Making-and-breaking-bonds-1"></a><a class="docs-heading-anchor-permalink" href="#Making-and-breaking-bonds" title="Permalink"></a></h2><p>There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation? In this case you can use a <a href="../api/#Molly.PairwiseInteraction"><code>PairwiseInteraction</code></a> to make, break and apply the bonds. The partners of the atom can be stored in the atom type. We make a logger to record when the bonds are present, allowing us to visualize them with the <code>connection_frames</code> keyword argument to <a href="../api/#Molly.visualize"><code>visualize</code></a> (this can take a while to plot).</p><pre><code class="language-julia hljs">using Molly
+#  [-0.13352575661477334, -0.11473039463130282, -0.13189544838731393]</code></pre><h2 id="Making-and-breaking-bonds"><a class="docs-heading-anchor" href="#Making-and-breaking-bonds">Making and breaking bonds</a><a id="Making-and-breaking-bonds-1"></a><a class="docs-heading-anchor-permalink" href="#Making-and-breaking-bonds" title="Permalink"></a></h2><p>There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation? In this case you can use a pairwise interaction to make, break and apply the bonds. The partners of the atom can be stored in the atom type. We make a logger to record when the bonds are present, allowing us to visualize them with the <code>connection_frames</code> keyword argument to <a href="../api/#Molly.visualize"><code>visualize</code></a> (this can take a while to plot).</p><pre><code class="language-julia hljs">using Molly
 using GLMakie
 using LinearAlgebra
 
@@ -536,7 +529,7 @@ struct BondableAtom
     partners::Set{Int}
 end
 
-struct BondableInteraction &lt;: PairwiseInteraction
+struct BondableInteraction
     prob_formation::Float64
     prob_break::Float64
     dist_formation::Float64
@@ -548,11 +541,9 @@ Molly.use_neighbors(::BondableInteraction) = true
 
 function Molly.force(inter::BondableInteraction,
                         dr,
-                        coord_i,
-                        coord_j,
                         atom_i,
                         atom_j,
-                        boundary)
+                        args...)
     # Break bonds randomly
     if atom_j.i in atom_i.partners &amp;&amp; rand() &lt; inter.prob_break
         delete!(atom_i.partners, atom_j.i)
@@ -570,11 +561,11 @@ function Molly.force(inter::BondableInteraction,
         fdr = -c * normalize(dr)
         return fdr
     else
-        return zero(coord_i)
+        return zero(dr)
     end
 end
 
-function bonds(sys::System, neighbors=nothing; n_threads::Integer=Threads.nthreads())
+function bonds(sys::System, args...; kwargs...)
     bonds = BitVector()
     for i in 1:length(sys)
         for j in 1:(i - 1)
@@ -595,12 +586,7 @@ atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
 coords = place_atoms(n_atoms, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_atoms]
 pairwise_inters = (
-    SoftSphere(
-        cutoff=DistanceCutoff(2.0),
-        use_neighbors=true,
-        force_units=NoUnits,
-        energy_units=NoUnits,
-    ),
+    SoftSphere(cutoff=DistanceCutoff(2.0), use_neighbors=true),
     BondableInteraction(0.1, 0.1, 1.1, 2.0, 0.1),
 )
 neighbor_finder = DistanceNeighborFinder(
@@ -621,7 +607,7 @@ sys = System(
     pairwise_inters=pairwise_inters,
     neighbor_finder=neighbor_finder,
     loggers=(
-        coords=CoordinateLogger(Float64, 20; dims=2),
+        coords=CoordinatesLogger(Float64, 20; dims=2),
         bonds=BondLogger(20),
     ),
     force_units=NoUnits,
@@ -648,7 +634,7 @@ visualize(
 using Zygote
 using GLMakie
 
-inter = LennardJones(force_units=NoUnits, energy_units=NoUnits)
+inter = LennardJones()
 boundary = CubicBoundary(5.0)
 a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
 
@@ -656,7 +642,7 @@ function force_direct(dist)
     c1 = SVector(1.0, 1.0, 1.0)
     c2 = SVector(dist + 1.0, 1.0, 1.0)
     vec = vector(c1, c2, boundary)
-    F = force(inter, vec, c1, c2, a1, a2, boundary)
+    F = force(inter, vec, a1, a2, NoUnits)
     return F[1]
 end
 
@@ -665,7 +651,7 @@ function force_grad(dist)
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
         vec = vector(c1, c2, boundary)
-        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
+        potential_energy(inter, vec, a1, a2, NoUnits)
     end
     return -grad[1]
 end
@@ -698,7 +684,7 @@ ab_sys = AtomsBase.AbstractSystem(
                     [0.0    , 0.0      , 1.7928950]]u&quot;Å&quot;,
 )
 
-coul = Coulomb(coulomb_const=2.307e-21u&quot;kJ*Å&quot;, force_units=u&quot;kJ/Å&quot;, energy_units=u&quot;kJ&quot;)
+coul = Coulomb(coulomb_const=2.307e-21u&quot;kJ*Å&quot;)
 calc = MollyCalculator(pairwise_inters=(coul,), force_units=u&quot;kJ/Å&quot;, energy_units=u&quot;kJ&quot;)
 
 AtomsCalculators.potential_energy(ab_sys, calc)</code></pre><pre><code class="nohighlight hljs">9.112207692184968e-21 kJ</code></pre><pre><code class="language-julia hljs">AtomsCalculators.forces(ab_sys, calc)</code></pre><pre><code class="nohighlight hljs">5-element Vector{SVector{3, Quantity{Float64, 𝐋 𝐌 𝐓^-2, Unitful.FreeUnits{(Å^-1, kJ), 𝐋 𝐌 𝐓^-2, nothing}}}}:
@@ -756,7 +742,7 @@ function energies(m, n)
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
         vec = vector(c1, c2, boundary)
-        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
+        potential_energy(inter, vec, a1, a2, NoUnits)
     end
 end
 
@@ -793,7 +779,7 @@ function energies(α, λ, p)
         c1 = SVector(1.0, 1.0, 1.0)
         c2 = SVector(dist + 1.0, 1.0, 1.0)
         vec = vector(c1, c2, boundary)
-        potential_energy(inter, vec, c1, c2, a1, a2, boundary)
+        potential_energy(inter, vec, a1, a2, NoUnits)
     end
 end
 
@@ -836,11 +822,7 @@ r_cut = 0.85u&quot;nm&quot;
 sys = System(
     fcc_crystal;
     velocities=velocities,
-    pairwise_inters=(LennardJones(
-        cutoff=ShiftedForceCutoff(r_cut),
-        energy_units=u&quot;kJ * mol^-1&quot;,
-        force_units=u&quot;kJ * mol^-1 * nm^-1&quot;,
-    ),),
+    pairwise_inters=(LennardJones(cutoff=ShiftedForceCutoff(r_cut)),),
     loggers=(
         kinetic_eng=KineticEnergyLogger(100),
         pot_eng=PotentialEnergyLogger(100),
@@ -852,8 +834,9 @@ sys = System(
 updated_atoms = []
 
 for i in eachindex(sys)
-    push!(updated_atoms, Atom(index=sys.atoms[i].index, charge=sys.atoms[i].charge,
-                              mass=sys.atoms[i].mass, σ=σ, ϵ=ϵ, solute=sys.atoms[i].solute))
+    push!(updated_atoms, Atom(index=sys.atoms[i].index, atom_type=sys.atoms[i].atom_type,
+                              mass=sys.atoms[i].mass, charge=sys.atoms[i].charge,
+                              σ=σ, ϵ=ϵ))
 end
 
 sys = System(sys; atoms=[updated_atoms...])</code></pre><p>Now the system can be simulated using any of the available simulators:</p><pre><code class="language-julia hljs">simulator = Langevin(
@@ -873,12 +856,7 @@ atoms = [Atom(index=i, mass=atom_mass, σ=2.8279u&quot;Å&quot;, ϵ=0.074u&quot
 max_coord = 200.0u&quot;Å&quot;
 coords = [max_coord .* rand(SVector{3}) for i in 1:n_atoms_half]
 boundary = CubicBoundary(200.0u&quot;Å&quot;)
-lj = LennardJones(
-    cutoff=ShiftedPotentialCutoff(r_cut),
-    use_neighbors=true,
-    energy_units=u&quot;kcal * mol^-1&quot;,
-    force_units=u&quot;kcal * mol^-1 * Å^-1&quot;,
-)
+lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
 
 # Add bonded atoms
 bond_length = 0.74u&quot;Å&quot; # Hydrogen bond length
@@ -916,4 +894,4 @@ simulate!(sys, simulator, 10_000)
 
 # Check that the constraints are satisfied at the end of the simulation
 @test check_position_constraints(sys, shake)
-@test check_velocity_constraints(sys, shake)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../exercises/">Exercises »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.7.0 on <span class="colophon-date" title="Wednesday 30 October 2024 11:27">Wednesday 30 October 2024</span>. Using Julia version 1.11.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+@test check_velocity_constraints(sys, shake)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../exercises/">Exercises »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.7.0 on <span class="colophon-date" title="Wednesday 30 October 2024 14:53">Wednesday 30 October 2024</span>. Using Julia version 1.11.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
