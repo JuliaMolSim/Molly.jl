@@ -614,19 +614,11 @@ function random_velocities(sys::AtomsBase.AbstractSystem{2}, temp; rng=Random.de
 end
 
 function random_velocities(sys::System{3, true}, temp; rng=Random.default_rng())
-    if isbits(rng)
-        return random_velocity_3D.(masses(sys), temp, sys.k, rng)
-    else
-        return CuArray(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
-    end
+    return CuArray(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
 end
 
 function random_velocities(sys::System{2, true}, temp; rng=Random.default_rng())
-    if isbits(rng)
-        return random_velocity_2D.(masses(sys), temp, sys.k, rng)
-    else
-        return CuArray(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
-    end
+    return CuArray(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
 end
 
 """
