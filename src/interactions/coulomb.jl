@@ -362,40 +362,22 @@ and the force on each atom by
 F(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}^2} \exp(-\kappa r_{ij})\left(\kappa r_{ij} + 1\right) \vec{r}_{ij}
 ```
 """
-struct Yukawa{C, W, T, F, E, D} <: PairwiseInteraction
-    cutoff::C
-    use_neighbors::Bool
-    weight_special::W
-    coulomb_const::T
-    force_units::F
-    energy_units::E
-    kappa::D
-end
-
-#const coulombconst = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
-
-function Yukawa(;
-                    cutoff=NoCutoff(),
-                    use_neighbors=false,
-                    weight_special=1,
-                    coulomb_const=coulombconst,
-                    force_units=u"kJ * mol^-1 * nm^-1",
-                    energy_units=u"kJ * mol^-1",
-                    kappa=1.0*u"nm^-1")
-    return Yukawa{typeof(cutoff), typeof(weight_special), typeof(coulomb_const), typeof(force_units), typeof(energy_units),typeof(kappa)}(
-        cutoff, use_neighbors, weight_special, coulomb_const, force_units, energy_units, kappa)
+@kwdef struct Yukawa{C, W, T, D} 
+    cutoff::C= NoCutoff()
+    use_neighbors::Bool= false
+    weight_special::W =1
+    coulomb_const::T = coulomb_const
+    kappa::D = kappa=1.0*u"nm^-1"
 end
 
 use_neighbors(inter::Yukawa) = inter.use_neighbors
 
-function Base.zero(yukawa::Yukawa{C, W, T, F, E,D}) where {C, W, T, F, E,D}
-    return Yukawa{C, W, T, F, E,D}(
+function Base.zero(yukawa::Yukawa{C, W, T ,D}) where {C, W, T, D}
+    return Yukawa{C, W, T, D}(
         yukawa.cutoff,
-        false,
-        zero(W),
-        zero(T),
-        yukawa.force_units,
-        yukawa.energy_units,
+        yukawa.use_neighbors,
+        yukawa.weight_special,
+        yukawa.coulomb_const,
         yukawa.kappa
     )
 end
@@ -405,21 +387,18 @@ function Base.:+(c1::Yukawa, c2::Yukawa)
         c1.cutoff,
         c1.use_neighbors,
         c1.weight_special + c2.weight_special,
-        c1.coulomb_const + c2.coulomb_const,
-        c1.force_units,
-        c1.energy_units,
+        c1.coulomb_const,
         c1.kappa
     )
 end
 
 @inline function force(inter::Yukawa{C},
                                     dr,
-                                    coord_i,
-                                    coord_j,
                                     atom_i,
                                     atom_j,
-                                    boundary,
-                                    special::Bool=false) where C
+                                    force_units=u"kJ * mol^-1 * nm^-1",
+                                    special=false,
+                                    args...) where C
     r2 = sum(abs2, dr)
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
@@ -427,7 +406,7 @@ end
     kappa = inter.kappa
     params = (coulomb_const, qi, qj, kappa)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, coord_i, inter.force_units)
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
     if special
         return f * dr * inter.weight_special
     else
@@ -442,19 +421,17 @@ end
 
 @inline function potential_energy(inter::Yukawa{C},
                                             dr,
-                                            coord_i,
-                                            coord_j,
                                             atom_i,
                                             atom_j,
-                                            boundary,
-                                            special::Bool=false) where C
+                                            energy_units=u"kJ * mol^-1",
+                                            special::Bool=false, args...) where C
     r2 = sum(abs2, dr)
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     params = (coulomb_const, qi, qj, inter.kappa)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, coord_i, inter.energy_units)
+    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
     if special
         return pe * inter.weight_special
     else
