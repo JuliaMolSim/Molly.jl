@@ -4,7 +4,8 @@ export
     CubicBoundary,
     RectangularBoundary,
     TriclinicBoundary,
-    box_volume,
+    volume,
+    density,
     box_center,
     scale_boundary,
     random_coord,
@@ -22,7 +23,8 @@ export
     virial,
     pressure,
     molecule_centers,
-    scale_coords!
+    scale_coords!,
+    dipole_moment
 
 """
     CubicBoundary(x, y, z)
@@ -113,7 +115,6 @@ image is found, which is slower.
 Not currently able to simulate a cubic box, use [`CubicBoundary`](@ref) or small
 offsets instead.
 Not currently compatible with infinite boundaries.
-Not currently compatible with automatic differentiation using Zygote.
 """
 struct TriclinicBoundary{T, A, D, I}
     basis_vectors::SVector{3, SVector{3, D}}
@@ -190,11 +191,6 @@ Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
 Base.firstindex(b::TriclinicBoundary) = 1
 Base.lastindex(b::TriclinicBoundary) = 3
 
-"""
-    n_dimensions(boundary)
-
-Number of dimensions of a bounding box.
-"""
 AtomsBase.n_dimensions(::CubicBoundary) = 3
 AtomsBase.n_dimensions(::RectangularBoundary) = 2
 AtomsBase.n_dimensions(::TriclinicBoundary) = 3
@@ -245,12 +241,38 @@ n_infinite_dims(b::TriclinicBoundary) = 0
 n_infinite_dims(sys::System) = n_infinite_dims(sys.boundary)
 
 """
-    box_volume(boundary)
+    volume(sys)
+    volume(boundary)
 
-Calculate the volume of a 3D bounding box or the area of a 2D bounding box.
+Calculate the volume (3D) or area (2D) of a [`System`](@ref) or bounding box.
+
+Returns infinite volume for infinite boundaries.
 """
-box_volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
-box_volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
+volume(sys) = volume(sys.boundary)
+volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
+volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
+
+"""
+    density(sys)
+
+The density of a [`System`](@ref).
+
+Returns zero density for infinite boundaries.
+"""
+function density(sys)
+    m = sum(mass, sys.atoms)
+    if dimension(m) == u"𝐌 * 𝐍^-1"
+        m_no_mol = m / Unitful.Na
+    else
+        m_no_mol = m
+    end
+    d = m_no_mol / volume(sys)
+    if unit(d) == NoUnits
+        return d
+    else
+        return uconvert(u"kg * m^-3", d)
+    end
+end
 
 """
     box_center(boundary)
@@ -323,15 +345,20 @@ function bounding_box_lines(boundary::TriclinicBoundary, dist_unit)
 end
 
 """
-    random_coord(boundary)
+    random_coord(boundary; rng=Random.default_rng())
 
 Generate a random coordinate uniformly distributed within a bounding box.
 """
-random_coord(boundary::CubicBoundary      ) = rand(SVector{3, float_type(boundary)}) .* boundary
-random_coord(boundary::RectangularBoundary) = rand(SVector{2, float_type(boundary)}) .* boundary
+function random_coord(boundary::CubicBoundary; rng=Random.default_rng())
+    return rand(rng, SVector{3, float_type(boundary)}) .* boundary
+end
 
-function random_coord(boundary::TriclinicBoundary{T}) where T
-    return sum(rand(SVector{3, T}) .* boundary.basis_vectors)
+function random_coord(boundary::RectangularBoundary; rng=Random.default_rng())
+    return rand(rng, SVector{2, float_type(boundary)}) .* boundary
+end
+
+function random_coord(boundary::TriclinicBoundary{T}; rng=Random.default_rng()) where T
+    return sum(rand(rng, SVector{3, T}) .* boundary.basis_vectors)
 end
 
 """
@@ -457,35 +484,35 @@ end
 
 """
     random_velocity(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature;
-                    dims=3, rng=Random.GLOBAL_RNG)
+                    dims=3, rng=Random.default_rng())
     random_velocity(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
                     k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits};
-                    dims=3, rng=Random.GLOBAL_RNG)
+                    dims=3, rng=Random.default_rng())
     random_velocity(atom_mass::Real, temp::Real, k::Real=ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k);
-                    dims=3, rng=Random.GLOBAL_RNG)
+                    dims=3, rng=Random.default_rng())
 
 Generate a random velocity from the Maxwell-Boltzmann distribution, with
 optional custom Boltzmann constant.
 """
 function random_velocity(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature;
-                         dims::Integer=3, rng=Random.GLOBAL_RNG)
+                         dims::Integer=3, rng=Random.default_rng())
     return SVector([maxwell_boltzmann(atom_mass, temp; rng=rng) for i in 1:dims]...)
 end
 
 function random_velocity(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
                          k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits};
-                         dims::Integer=3, rng=Random.GLOBAL_RNG)
+                         dims::Integer=3, rng=Random.default_rng())
     return SVector([maxwell_boltzmann(atom_mass, temp, k; rng=rng) for i in 1:dims]...)
 end
 
 function random_velocity(atom_mass::Real, temp::Real,
                          k::Real=ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k);
-                         dims::Integer=3, rng=Random.GLOBAL_RNG)
+                         dims::Integer=3, rng=Random.default_rng())
     return SVector([maxwell_boltzmann(atom_mass, temp, k; rng=rng) for i in 1:dims]...)
 end
 
 function random_velocity_3D(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
-                            rng=Random.GLOBAL_RNG)
+                            rng=Random.default_rng())
     return SVector(
         maxwell_boltzmann(atom_mass, temp; rng=rng),
         maxwell_boltzmann(atom_mass, temp; rng=rng),
@@ -495,7 +522,7 @@ end
 
 function random_velocity_3D(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
                             k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits},
-                            rng=Random.GLOBAL_RNG)
+                            rng=Random.default_rng())
     return SVector(
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
@@ -503,7 +530,7 @@ function random_velocity_3D(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Uni
     )
 end
 
-function random_velocity_3D(atom_mass::Real, temp::Real, k::Real, rng=Random.GLOBAL_RNG)
+function random_velocity_3D(atom_mass::Real, temp::Real, k::Real, rng=Random.default_rng())
     return SVector(
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
@@ -512,7 +539,7 @@ function random_velocity_3D(atom_mass::Real, temp::Real, k::Real, rng=Random.GLO
 end
 
 function random_velocity_2D(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
-                            rng=Random.GLOBAL_RNG)
+                            rng=Random.default_rng())
     return SVector(
         maxwell_boltzmann(atom_mass, temp; rng=rng),
         maxwell_boltzmann(atom_mass, temp; rng=rng),
@@ -521,14 +548,14 @@ end
 
 function random_velocity_2D(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature,
                             k::Union{BoltzmannConstUnits, MolarBoltzmannConstUnits},
-                            rng=Random.GLOBAL_RNG)
+                            rng=Random.default_rng())
     return SVector(
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
     )
 end
 
-function random_velocity_2D(atom_mass::Real, temp::Real, k::Real, rng=Random.GLOBAL_RNG)
+function random_velocity_2D(atom_mass::Real, temp::Real, k::Real, rng=Random.default_rng())
     return SVector(
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
         maxwell_boltzmann(atom_mass, temp, k; rng=rng),
@@ -537,19 +564,20 @@ end
 
 """
     maxwell_boltzmann(atom_mass::Unitful.Mass, temp::Unitful.Temperature,
-                      k::BoltzmannConstUnits=Unitful.k; rng=Random.GLOBAL_RNG)
+                      k::BoltzmannConstUnits=Unitful.k; rng=Random.default_rng())
     maxwell_boltzmann(atom_mass::MolarMass, temp::Unitful.Temperature,
                       k_molar::MolarBoltzmannConstUnits=(Unitful.k * Unitful.Na);
-                      rng=Random.GLOBAL_RNG)
+                      rng=Random.default_rng())
     maxwell_boltzmann(atom_mass::Real, temperature::Real,
-                      k::Real=ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k); rng=Random.GLOBAL_RNG)
+                      k::Real=ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k);
+                      rng=Random.default_rng())
 
 Generate a random velocity along one dimension from the Maxwell-Boltzmann
 distribution, with optional custom Boltzmann constant.
 """
 function maxwell_boltzmann(atom_mass::Unitful.Mass, temp::Unitful.Temperature,
                            k::BoltzmannConstUnits=uconvert(u"g * nm^2 * ps^-2 * K^-1", Unitful.k);
-                           rng=Random.GLOBAL_RNG)
+                           rng=Random.default_rng())
     T = typeof(convert(AbstractFloat, ustrip(temp)))
     σ = sqrt(T(k) * temp / atom_mass)
     return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
@@ -557,7 +585,7 @@ end
 
 function maxwell_boltzmann(atom_mass::MolarMass, temp::Unitful.Temperature,
                            k_molar::MolarBoltzmannConstUnits=uconvert(u"g * mol^-1 * nm^2 * ps^-2 * K^-1", Unitful.k * Unitful.Na);
-                           rng=Random.GLOBAL_RNG)
+                           rng=Random.default_rng())
     T = typeof(convert(AbstractFloat, ustrip(temp)))
     σ = sqrt(T(k_molar) * temp / atom_mass)
     return rand(rng, Normal(zero(T), T(ustrip(σ)))) * unit(σ)
@@ -565,7 +593,7 @@ end
 
 function maxwell_boltzmann(atom_mass::Real, temp::Real,
                            k::Real=ustrip(u"u * nm^2 * ps^-2 * K^-1", Unitful.k);
-                           rng=Random.GLOBAL_RNG)
+                           rng=Random.default_rng())
     T = typeof(convert(AbstractFloat, temp))
     σ = sqrt(T(k) * temp / atom_mass)
     return rand(rng, Normal(zero(T), T(σ)))
@@ -577,39 +605,37 @@ end
 Generate random velocities from the Maxwell-Boltzmann distribution
 for a [`System`](@ref).
 """
-function random_velocities(sys::AtomsBase.AbstractSystem{3}, temp; rng=Random.GLOBAL_RNG)
+function random_velocities(sys::AtomsBase.AbstractSystem{3}, temp; rng=Random.default_rng())
     return random_velocity_3D.(masses(sys), temp, sys.k, rng)
 end
 
-function random_velocities(sys::AtomsBase.AbstractSystem{2}, temp; rng=Random.GLOBAL_RNG)
+function random_velocities(sys::AtomsBase.AbstractSystem{2}, temp; rng=Random.default_rng())
     return random_velocity_2D.(masses(sys), temp, sys.k, rng)
 end
 
-function random_velocities(sys::System{3, true}, temp; rng=Random.GLOBAL_RNG)
-    if isbits(rng)
-        return random_velocity_3D.(masses(sys), temp, sys.k, rng)
-    else
-        return CuArray(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
-    end
+function random_velocities(sys::System{3, true}, temp; rng=Random.default_rng())
+    return CuArray(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
 end
 
-function random_velocities(sys::System{2, true}, temp; rng=Random.GLOBAL_RNG)
-    if isbits(rng)
-        return random_velocity_2D.(masses(sys), temp, sys.k, rng)
-    else
-        return CuArray(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
-    end
+function random_velocities(sys::System{2, true}, temp; rng=Random.default_rng())
+    return CuArray(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
 end
 
 """
     random_velocities!(sys, temp)
+    random_velocities!(vels, sys, temp)
 
-Set the velocities of a [`System`](@ref) to random velocities generated from the
-Maxwell-Boltzmann distribution.
+Set the velocities of a [`System`](@ref), or a vector, to random velocities
+generated from the Maxwell-Boltzmann distribution.
 """
-function random_velocities!(sys, temp; rng=Random.GLOBAL_RNG)
-    sys.velocities = random_velocities(sys, temp; rng=rng)
+function random_velocities!(sys, temp; rng=Random.default_rng())
+    sys.velocities .= random_velocities(sys, temp; rng=rng)
     return sys
+end
+
+function random_velocities!(vels, sys::AbstractSystem, temp; rng=Random.default_rng())
+    vels .= random_velocities(sys, temp; rng=rng)
+    return vels
 end
 
 # Sometimes domain error occurs for acos if the value is > 1.0 or < -1.0
@@ -661,25 +687,28 @@ function torsion_angle(vec_ij, vec_jk, vec_kl)
     return θ
 end
 
-# Used to write an rrule that can override the Zygote sum adjoint
-sum_svec(arr) = sum(arr)
-
 """
     remove_CM_motion!(system)
 
 Remove the center of mass motion from a [`System`](@ref).
 """
 function remove_CM_motion!(sys)
-    atom_masses = masses(sys)
-    cm_momentum = sum_svec(Array(sys.velocities .* atom_masses))
-    cm_velocity = cm_momentum / sum(Array(atom_masses))
-    sys.velocities = sys.velocities .- (cm_velocity,)
+    masses_cpu = Array(masses(sys))
+    velocities_cpu = Array(sys.velocities)
+    cm_momentum = zero(eltype(velocities_cpu)) .* zero(eltype(masses_cpu))
+    total_mass = zero(eltype(masses_cpu))
+    for i in eachindex(sys)
+        cm_momentum += velocities_cpu[i] * masses_cpu[i]
+        total_mass += masses_cpu[i]
+    end
+    cm_velocity = cm_momentum / total_mass
+    sys.velocities .= sys.velocities .- (cm_velocity,)
     return sys
 end
 
 @doc raw"""
-    virial(sys, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
-    virial(inter, sys, neighbors; n_threads=Threads.nthreads())
+    virial(sys, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
+    virial(inter, sys, neighbors, step_n; n_threads=Threads.nthreads())
 
 Calculate the virial of a system or the virial resulting from a general interaction.
 
@@ -692,36 +721,34 @@ Custom general interaction types can implement this function.
 This should only be used on systems containing just pairwise interactions, or
 where the specific interactions, constraints and general interactions without
 [`virial`](@ref) defined do not contribute to the virial.
-Not currently compatible with automatic differentiation using Zygote when
-using pairwise interactions.
 """
 function virial(sys; n_threads::Integer=Threads.nthreads())
     return virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function virial(sys, neighbors; n_threads::Integer=Threads.nthreads())
+function virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
-    v = virial(sys, neighbors, pairwise_inters_nonl, pairwise_inters_nl)
+    v = virial(sys, neighbors, step_n, pairwise_inters_nonl, pairwise_inters_nl)
 
     for inter in values(sys.general_inters)
-        v += virial(inter, sys, neighbors; n_threads=n_threads)
+        v += virial(inter, sys, neighbors, step_n; n_threads=n_threads)
     end
 
     return v
 end
 
-function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
+function virial(sys::System{D, G, T}, neighbors_dev, step_n, pairwise_inters_nonl,
                             pairwise_inters_nl) where {D, G, T}
     if G
-        coords, atoms = Array(sys.coords), Array(sys.atoms)
+        coords, velocities, atoms = Array(sys.coords), Array(sys.velocities), Array(sys.atoms)
         if isnothing(neighbors_dev)
             neighbors = neighbors_dev
         else
             neighbors = NeighborList(neighbors_dev.n, Array(neighbors_dev.list))
         end
     else
-        coords, atoms = sys.coords, sys.atoms
+        coords, velocities, atoms = sys.coords, sys.velocities, sys.atoms
         neighbors = neighbors_dev
     end
 
@@ -733,10 +760,11 @@ function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
         for i in 1:n_atoms
             for j in (i + 1):n_atoms
                 dr = vector(coords[i], coords[j], boundary)
-                f = force(pairwise_inters_nonl[1], dr, coords[i], coords[j], atoms[i],
-                          atoms[j], boundary)
+                f = force(pairwise_inters_nonl[1], dr, atoms[i], atoms[j], sys.force_units, false,
+                          coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
                 for inter in pairwise_inters_nonl[2:end]
-                    f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary)
+                    f += force(inter, dr, atoms[i], atoms[j], sys.force_units, false,
+                               coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
                 end
                 v += dot(f, dr)
             end
@@ -750,11 +778,11 @@ function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
         for ni in eachindex(neighbors)
             i, j, special = neighbors[ni]
             dr = vector(coords[i], coords[j], boundary)
-            f = force(pairwise_inters_nl[1], dr, coords[i], coords[j], atoms[i],
-                      atoms[j], boundary, special)
+            f = force(pairwise_inters_nl[1], dr, atoms[i], atoms[j], sys.force_units, special,
+                      coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
             for inter in pairwise_inters_nl[2:end]
-                f += force(inter, dr, coords[i], coords[j], atoms[i], atoms[j], boundary,
-                           special)
+                f += force(inter, dr, atoms[i], atoms[j], sys.force_units, special,
+                           coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
             end
             v += dot(f, dr)
         end
@@ -764,12 +792,12 @@ function virial(sys::System{D, G, T}, neighbors_dev, pairwise_inters_nonl,
 end
 
 # Default for general interactions
-function virial(inter, sys::System{D, G, T}, neighbors=nothing; kwargs...) where {D, G, T}
+function virial(inter, sys::System{D, G, T}, args...; kwargs...) where {D, G, T}
     return zero(T) * sys.energy_units
 end
 
 @doc raw"""
-    pressure(sys, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
+    pressure(sys, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
 
 Calculate the pressure of a system.
 
@@ -785,21 +813,19 @@ This should only be used on systems containing just pairwise interactions, or
 where the specific interactions, constraints and general interactions without
 [`virial`](@ref) defined do not contribute to the virial.
 Not compatible with infinite boundaries.
-Not currently compatible with automatic differentiation using Zygote when
-using pairwise interactions.
 """
 function pressure(sys; n_threads::Integer=Threads.nthreads())
     return pressure(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function pressure(sys::AtomsBase.AbstractSystem{D}, neighbors;
+function pressure(sys::AtomsBase.AbstractSystem{D}, neighbors, step_n::Integer=0;
                   n_threads::Integer=Threads.nthreads()) where D
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
     NkT = energy_remove_mol(length(sys) * sys.k * temperature(sys))
-    vir = energy_remove_mol(virial(sys, neighbors; n_threads=n_threads))
-    P = (NkT - (2 * vir) / D) / box_volume(sys.boundary)
+    vir = energy_remove_mol(virial(sys, neighbors, step_n; n_threads=n_threads))
+    P = (NkT - (2 * vir) / D) / volume(sys.boundary)
     if sys.energy_units == NoUnits || D != 3
         # If implied energy units are (u * nm^2 * ps^-2) and everything is
         #   consistent then this has implied units of (u * nm^-1 * ps^-2)
@@ -820,7 +846,6 @@ Accounts for periodic boundary conditions by using the circular mean.
 If `topology=nothing` then the coordinates are returned.
 
 Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
-Not currently compatible with automatic differentiation using Zygote.
 """
 function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topology) where {D, C}
     if isnothing(topology)
@@ -869,12 +894,11 @@ moved by the same amount according to the center of coordinates of the molecule.
 This can be disabled with `ignore_molecules=true`.
 
 Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
-Not currently compatible with automatic differentiation using Zygote.
 """
 function scale_coords!(sys, scale_factor; ignore_molecules=false)
     if ignore_molecules || isnothing(sys.topology)
         sys.boundary = scale_boundary(sys.boundary, scale_factor)
-        sys.coords = scale_vec.(sys.coords, Ref(scale_factor))
+        sys.coords .= scale_vec.(sys.coords, Ref(scale_factor))
     elseif sys.boundary isa TriclinicBoundary
         error("scaling coordinates by molecule is not compatible with a TriclinicBoundary")
     else
@@ -902,7 +926,16 @@ function scale_coords!(sys, scale_factor; ignore_molecules=false)
             coords_nounits[i] = wrap_coords(
                     coords_nounits[i] .+ shift_vecs[mi] .- center_shifts[mi], boundary_nounits)
         end
-        sys.coords = coords_nounits * coord_units
+        sys.coords .= move_array(coords_nounits .* coord_units, sys)
     end
     return sys
 end
+
+"""
+    dipole_moment(sys)
+
+The dipole moment μ of a system.
+
+Requires the charges on the atoms to be set.
+"""
+dipole_moment(sys) = sum(sys.coords .* charges(sys))

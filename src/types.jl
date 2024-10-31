@@ -1,20 +1,19 @@
 # Types
 
 export
-    PairwiseInteraction,
-    use_neighbors,
-    SpecificInteraction,
     InteractionList1Atoms,
     InteractionList2Atoms,
     InteractionList3Atoms,
     InteractionList4Atoms,
     Atom,
-    charge,
     mass,
+    charge,
     AtomData,
     MolecularTopology,
     NeighborList,
     System,
+    inject_gradients,
+    extract_parameters,
     ReplicaSystem,
     is_on_gpu,
     float_type,
@@ -24,31 +23,6 @@ export
     ASECalculator
 
 const DefaultFloat = Float64
-
-"""
-A pairwise interaction that will apply to all or most atom pairs.
-
-Custom pairwise interactions should sub-type this abstract type.
-"""
-abstract type PairwiseInteraction end
-
-"""
-    use_neighbors(inter)
-
-Whether a pairwise interaction uses the neighbor list, default `false`.
-
-Custom pairwise interactions can define a method for this function.
-For built-in interactions such as [`LennardJones`](@ref) this function accesses
-the `use_neighbors` field of the struct.
-"""
-use_neighbors(::PairwiseInteraction) = false
-
-"""
-A specific interaction between sets of specific atoms, e.g. a bond angle.
-
-Custom specific interactions should sub-type this abstract type.
-"""
-abstract type SpecificInteraction end
 
 """
     InteractionList1Atoms(is, inters)
@@ -208,6 +182,42 @@ function Base.:+(il1::InteractionList4Atoms{I, T}, il2::InteractionList4Atoms{I,
     )
 end
 
+function inject_interaction_list(inter::InteractionList1Atoms, params_dic, gpu)
+    if gpu
+        inters_grad = CuArray(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+    else
+        inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
+    end
+    InteractionList1Atoms(inter.is, inters_grad, inter.types)
+end
+
+function inject_interaction_list(inter::InteractionList2Atoms, params_dic, gpu)
+    if gpu
+        inters_grad = CuArray(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+    else
+        inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
+    end
+    InteractionList2Atoms(inter.is, inter.js, inters_grad, inter.types)
+end
+
+function inject_interaction_list(inter::InteractionList3Atoms, params_dic, gpu)
+    if gpu
+        inters_grad = CuArray(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+    else
+        inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
+    end
+    InteractionList3Atoms(inter.is, inter.js, inter.ks, inters_grad, inter.types)
+end
+
+function inject_interaction_list(inter::InteractionList4Atoms, params_dic, gpu)
+    if gpu
+        inters_grad = CuArray(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+    else
+        inters_grad = inject_interaction.(inter.inters, inter.types, (params_dic,))
+    end
+    InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, inters_grad, inter.types)
+end
+
 """
     Atom(; <keyword arguments>)
 
@@ -219,43 +229,54 @@ The types used should be bits types if the GPU is going to be used.
 
 # Arguments
 - `index::Int`: the index of the atom in the system.
-- `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
+- `atom_type::T`: the type of the atom.
 - `mass::M=1.0u"g/mol"`: the mass of the atom.
+- `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
-- `solute::Bool=false`: whether the atom is part of the solute.
 """
-struct Atom{C, M, S, E}
+struct Atom{T, M, C, S, E}
     index::Int
-    charge::C
+    atom_type::T
     mass::M
+    charge::C
     σ::S
     ϵ::E
-    solute::Bool
 end
 
 function Atom(;
                 index=1,
-                charge=0.0,
+                atom_type=1,
                 mass=1.0u"g/mol",
+                charge=0.0,
                 σ=0.0u"nm",
-                ϵ=0.0u"kJ * mol^-1",
-                solute=false)
-    return Atom(index, charge, mass, σ, ϵ, solute)
+                ϵ=0.0u"kJ * mol^-1")
+    return Atom(index, atom_type, mass, charge, σ, ϵ)
 end
 
-function Base.zero(::Type{Atom{T, T, T, T}}) where T
-    z = zero(T)
-    return Atom(0, z, z, z, z, false)
+function Base.zero(::Atom{T, M, C, S, E}) where {T, M, C, S, E}
+    return Atom(0, zero(T), zero(M), zero(C), zero(S), zero(E))
 end
 
 function Base.:+(a1::Atom, a2::Atom)
-    return Atom(0, a1.charge + a2.charge, a1.mass + a2.mass, a1.σ + a2.σ, a1.ϵ + a2.ϵ, false)
+    return Atom(a1.index, a1.atom_type, a1.mass + a2.mass, a1.charge + a2.charge,
+                a1.σ + a2.σ, a1.ϵ + a2.ϵ)
 end
 
-function Base.:-(a1::Atom, a2::Atom)
-    return Atom(0, a1.charge - a2.charge, a1.mass - a2.mass, a1.σ - a2.σ, a1.ϵ - a2.ϵ, false)
+# get function errors with AD
+dict_get(dic, key, default) = haskey(dic, key) ? dic[key] : default
+
+function inject_atom(at, at_data, params_dic)
+    key_prefix = "atom_$(at_data.atom_type)_"
+    Atom(
+        at.index,
+        at.atom_type,
+        dict_get(params_dic, key_prefix * "mass"  , at.mass),
+        at.charge, # Residue-specific
+        dict_get(params_dic, key_prefix * "σ"     , at.σ   ),
+        dict_get(params_dic, key_prefix * "ϵ"     , at.ϵ   ),
+    )
 end
 
 """
@@ -286,8 +307,8 @@ function Base.getindex(at::Atom, x::Symbol)
 end
 
 function Base.show(io::IO, a::Atom)
-    print(io, "Atom with index ", a.index, ", charge=", charge(a),
-            ", mass=", mass(a), ", σ=", a.σ, ", ϵ=", a.ϵ)
+    print(io, "Atom with index=", a.index, ", atom_type=", a.atom_type, ", mass=", mass(a),
+          ", charge=", charge(a), ", σ=", a.σ, ", ϵ=", a.ϵ)
 end
 
 """
@@ -699,6 +720,68 @@ function System(crystal::Crystal{D};
         k=k,
         data=data,
     )
+end
+
+"""
+    inject_gradients(sys, params_dic)
+
+Add parameters from a dictionary to a [`System`](@ref).
+
+Allows gradients for individual parameters to be tracked.
+Returns atoms, pairwise interactions, specific interaction lists and general
+interactions.
+"""
+function inject_gradients(sys::System{D, G}, params_dic) where {D, G}
+    if G
+        atoms_grad = CuArray(inject_atom.(Array(sys.atoms), sys.atoms_data, (params_dic,)))
+    else
+        atoms_grad = inject_atom.(sys.atoms, sys.atoms_data, (params_dic,))
+    end
+    if length(sys.pairwise_inters) > 0
+        pis_grad = inject_interaction.(sys.pairwise_inters, (params_dic,))
+    else
+        pis_grad = sys.pairwise_inters
+    end
+    if length(sys.specific_inter_lists) > 0
+        sis_grad = inject_interaction_list.(sys.specific_inter_lists, (params_dic,), G)
+    else
+        sis_grad = sys.specific_inter_lists
+    end
+    if length(sys.general_inters) > 0
+        gis_grad = inject_interaction.(sys.general_inters, (params_dic,), (sys,))
+    else
+        gis_grad = sys.general_inters
+    end
+    return atoms_grad, pis_grad, sis_grad, gis_grad
+end
+
+"""
+    extract_parameters(system, force_field)
+
+Form a `Dict` of all parameters in a [`System`](@ref), allowing gradients to be tracked.
+"""
+function extract_parameters(sys, ff)
+    params_dic = Dict()
+
+    for at_data in sys.atoms_data
+        key_prefix = "atom_$(at_data.atom_type)_"
+        if !haskey(params_dic, key_prefix * "mass")
+            at = ff.atom_types[at_data.atom_type]
+            params_dic[key_prefix * "mass"] = at.mass
+            params_dic[key_prefix * "σ"   ] = at.σ
+            params_dic[key_prefix * "ϵ"   ] = at.ϵ
+        end
+    end
+
+    for inter in values(sys.pairwise_inters)
+        extract_parameters!(params_dic, inter, ff)
+    end
+
+    for inter in values(sys.specific_inter_lists)
+        extract_parameters!(params_dic, inter, ff)
+    end
+
+    return params_dic
 end
 
 """
@@ -1273,6 +1356,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         abstract_sys,
         calc::MollyCalculator;
         neighbors=nothing,
+        step_n::Integer=0,
         n_threads::Integer=Threads.nthreads(),
         kwargs...,
     )
@@ -1287,13 +1371,14 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         k=calc.k,
     )
     nbs = isnothing(neighbors) ? find_neighbors(sys) : neighbors
-    return forces(sys, nbs; n_threads=n_threads)
+    return forces(sys, nbs, step_n; n_threads=n_threads)
 end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         abstract_sys,
         calc::MollyCalculator;
         neighbors=nothing,
+        step_n::Integer=0,
         n_threads::Integer=Threads.nthreads(),
         kwargs...,
     )
@@ -1308,7 +1393,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         k=calc.k,
     )
     nbs = isnothing(neighbors) ? find_neighbors(sys) : neighbors
-    return potential_energy(sys, nbs; n_threads=n_threads)
+    return potential_energy(sys, nbs, step_n; n_threads=n_threads)
 end
 
 """
@@ -1342,3 +1427,5 @@ struct ASECalculator{T}
     ase_atoms::T # T will be Py but that is not available here
     ase_calc::T
 end
+
+iszero_value(x) = iszero(x)

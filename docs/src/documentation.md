@@ -66,7 +66,7 @@ sys = System(
     pairwise_inters=pairwise_inters,
     loggers=(
         temp=TemperatureLogger(10),
-        coords=CoordinateLogger(10),
+        coords=CoordinatesLogger(10),
     ),
 )
 
@@ -90,6 +90,7 @@ forces(sys)
 accelerations(sys)
 
 masses(sys)
+density(sys) # 207.56738339673083 kg m^-3
 temperature(sys) # 96.76667184796673 K
 random_velocities(sys, 300.0u"K")
 
@@ -110,6 +111,7 @@ sys.loggers
 # For certain systems
 virial(sys)
 pressure(sys)
+dipole_moment(sys)
 
 # AtomsBase.jl interface
 import AtomsBase
@@ -159,7 +161,7 @@ sys = System(
     pairwise_inters=(LennardJones(),),
     loggers=(
         temp=TemperatureLogger(typeof(1.0f0u"K"), 10),
-        coords=CoordinateLogger(typeof(1.0f0u"nm"), 10),
+        coords=CoordinatesLogger(typeof(1.0f0u"nm"), 10),
     ),
 )
 
@@ -231,7 +233,7 @@ sys = System(
     neighbor_finder=neighbor_finder,
     loggers=(
         temp=TemperatureLogger(10),
-        coords=CoordinateLogger(10),
+        coords=CoordinatesLogger(10),
     ),
 )
 
@@ -273,7 +275,7 @@ sys = System(
     boundary=boundary,
     velocities=velocities,
     pairwise_inters=pairwise_inters,
-    loggers=(coords=CoordinateLogger(Float32, 10; dims=2),),
+    loggers=(coords=CoordinatesLogger(Float32, 10; dims=2),),
     force_units=NoUnits,
     energy_units=NoUnits,
 )
@@ -468,7 +470,7 @@ sys = System(
     boundary=boundary,
     pairwise_inters=pairwise_inters,
     loggers=(
-        coords=CoordinateLogger(n_atoms, dims=n_dimensions(boundary)),
+        coords=CoordinatesLogger(n_atoms, dims=2),
         montecarlo=MonteCarloLogger(),
     ),
 )
@@ -534,8 +536,8 @@ The force on each particle in the system is derived from the potential correspon
 ```
 
 In Molly there are three types of interactions:
-- [`PairwiseInteraction`](@ref)s are present between all or most atom pairs, and account for example for non-bonded terms in molecular mechanics force fields.
-- [`SpecificInteraction`](@ref)s are present between specific atoms, and account for example for bonded terms in molecular mechanics force fields.
+- Pairwise interactions are present between all or most atom pairs, and account for example for non-bonded terms in molecular mechanics force fields.
+- Specific interactions are present between specific atoms, and account for example for bonded terms in molecular mechanics force fields.
 - General interactions are a free-form interaction type that can access the whole system and outputs forces for all atoms. This is useful for neural network potentials, implicit solvent models and other cases that require maximum flexibility. General interactions should be compatible with the [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl) interface.
 
 The available pairwise interactions are:
@@ -569,9 +571,9 @@ The available general interactions are:
 
 ### Pairwise interactions
 
-To define your own [`PairwiseInteraction`](@ref), first define the `struct`:
+To define your own pairwise interaction, first define the `struct`:
 ```julia
-struct MyPairwiseInter <: PairwiseInteraction
+struct MyPairwiseInter
     # Any properties, e.g. constants for the interaction or cutoff parameters
 end
 ```
@@ -588,12 +590,17 @@ Next, you need to define a method for the [`force`](@ref) function acting betwee
 This has a set series of arguments:
 ```julia
 function Molly.force(inter::MyPairwiseInter,
-                        vec_ij,
-                        coord_i,
-                        coord_j,
-                        atom_i,
-                        atom_j,
-                        boundary)
+                     vec_ij,
+                     atom_i,
+                     atom_j,
+                     force_units,
+                     special,
+                     coord_i,
+                     coord_j,
+                     boundary,
+                     velocity_i,
+                     velocity_j,
+                     step_n)
     # Replace this with your force calculation
     # A positive force causes the atoms to move apart
     f = 0.0
@@ -603,12 +610,18 @@ function Molly.force(inter::MyPairwiseInter,
     return fdr
 end
 ```
+Most of the arguments will generally not be used but are passed to allow maximum flexibility.
+You can use `args...` to indicate unused further arguments, e.g. `Molly.force(inter::MyPairwiseInter, vec_ij, args...)`.
 `vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
+`force_units` can be useful for returning a zero force under certain conditions.
+`step_n` is the step number in the simulator, allowing time-dependent interactions.
+Beware that this step counter starts from 1 every time [`simulate!`](@ref) is called.
+It also doesn't work with [`simulate_remd!`](@ref).
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
 One nice feature of Molly is that this function will work on both the CPU and the GPU.
 
-An optional final argument `special` is a `Bool` determining whether the atom pair interaction should be treated as special.
+The argument `special` is a `Bool` determining whether the atom pair interaction should be treated as special.
 This is specified during neighbor finder construction.
 When simulating molecules, for example, non-bonded interactions for atoms in a 1-4 bonding arrangement (i-x-x-j) are often weighted by a factor such as 0.5.
 For interactions where this is relevant, `special` can be used to apply this weighting in the interaction.
@@ -623,16 +636,37 @@ Note that you can also use a named tuple instead of a tuple if you want to acces
 ```julia
 pairwise_inters = (MyPairwiseInter=MyPairwiseInter(),)
 ```
-For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{PairwiseInteraction}`.
+For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{Any}`.
 
 If you wish to calculate potential energies or log the energy throughout a simulation, you will need to define a method for the [`potential_energy`](@ref) function.
-This has the same arguments as [`force`](@ref) and should return a single value corresponding to the potential energy.
+This has the same arguments as [`force`](@ref), except the fifth argument is the energy units not the force units, and should return a single value corresponding to the potential energy:
+```julia
+function Molly.potential_energy(inter::MyPairwiseInter,
+                                vec_ij,
+                                atom_i,
+                                atom_j,
+                                energy_units,
+                                special,
+                                coord_i,
+                                coord_j,
+                                boundary,
+                                velocity_i,
+                                velocity_j,
+                                step_n)
+    # Example Lennard-Jones interaction
+    σ = (atom_i.σ + atom_j.σ) / 2
+    ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
+    r = norm(vec_ij)
+    E = 4ϵ * ((σ/r)^6 - (σ/r)^12)
+    return E
+end
+```
 
 ### Specific interactions
 
-To define your own [`SpecificInteraction`](@ref), first define the `struct`:
+To define your own specific interaction, first define the `struct`:
 ```julia
-struct MySpecificInter <: SpecificInteraction
+struct MySpecificInter
     # Properties, e.g. a bond distance corresponding to the energy minimum
 end
 ```
@@ -640,7 +674,15 @@ Next, you need to define a method for the [`force`](@ref) function.
 The form of this will depend on whether the interaction involves 1, 2, 3 or 4 atoms.
 For example in the 2 atom case:
 ```julia
-function Molly.force(inter::MySpecificInter, coords_i, coords_j, boundary)
+function Molly.force(inter::MySpecificInter,
+                     coord_i,
+                     coord_j,
+                     boundary,
+                     atom_i,
+                     atom_j,
+                     force_units,
+                     velocity_i,
+                     velocity_j)
     dr = vector(coords_i, coords_j, boundary)
 
     # Replace this with your force calculation
@@ -651,7 +693,8 @@ function Molly.force(inter::MySpecificInter, coords_i, coords_j, boundary)
     return SpecificForce2Atoms(-fdr, fdr)
 end
 ```
-The 3 atom case would define `Molly.force(inter::MySpecificInter, coords_i, coords_j, coords_k, boundary)` and return `SpecificForce3Atoms(f1, f2, f3)`.
+Again, most of these arguments are rarely used and can be replaced with `args...`.
+The 3 atom case would define `Molly.force(inter::MySpecificInter, coord_i, coord_j, coord_k, boundary, atom_i, atom_j, atom_k, force_units, velocity_i, velocity_j, velocity_k)` and return `SpecificForce3Atoms(f1, f2, f3)`.
 To use your custom interaction, add it to the specific interaction lists along with the atom indices:
 ```julia
 specific_inter_lists = (
@@ -666,7 +709,23 @@ For 3 atom interactions use [`InteractionList3Atoms`](@ref) and pass 3 sets of i
 If using the GPU, the inner list of indices and interactions should be moved to the GPU with `CuArray`.
 The number in the interaction list and the return type from [`force`](@ref) must match, e.g. [`InteractionList3Atoms`](@ref) must always return [`SpecificForce3Atoms`](@ref) from the corresponding [`force`](@ref) function.
 If some atoms are required in the interaction for force calculation but have no force applied to them by the interaction, give a zero force vector for those atoms.
-Again a method for the [`potential_energy`](@ref) function with the same arguments can be defined.
+Again a method for [`potential_energy`](@ref) with the same arguments, except the seventh argument is the energy units not the force units, can be defined:
+```julia
+function Molly.potential_energy(inter::MySpecificInter,
+                                coord_i,
+                                coord_j,
+                                boundary,
+                                atom_i,
+                                atom_j,
+                                energy_units,
+                                velocity_i,
+                                velocity_j)
+    # Example harmonic bond interaction
+    dr = vector(coord_i, coord_j, boundary)
+    r = norm(dr)
+    return (inter.k / 2) * (r - inter.r0) ^ 2
+end
+```
 
 ### General interactions
 
@@ -683,9 +742,10 @@ import AtomsCalculators
 function AtomsCalculators.forces(sys,
                                  inter::MyGeneralInter;
                                  neighbors=nothing,
+                                 step_n=0,
                                  n_threads=Threads.nthreads(),
                                  kwargs...)
-    # kwargs... is required, neighbors and n_threads can be omitted if not used
+    # kwargs... is required, neighbors/step_n/n_threads can be omitted if not used
 
     # Calculate the forces on all atoms using the interaction and the system
     # The output should have the same shape as the coordinates
@@ -821,7 +881,7 @@ b = TriclinicBoundary(
 )
 
 # Volume of bounding box
-box_volume(b) # 3.8993746318188633 nm^3
+volume(b) # 3.8993746318188633 nm^3
 
 # Random coordinate uniformly distributed within boundary
 random_coord(b) # SVector(2.651062310435411, 2.1702306804433973, 0.9518105403051831)u"nm"
@@ -876,7 +936,7 @@ function Molly.simulate!(sys,
 
     for step_n in 1:n_steps
         # Calculate accelerations like this
-        accels_t = accelerations(sys, neighbors; n_threads=n_threads)
+        accels_t = accelerations(sys, neighbors, step_n; n_threads=n_threads)
 
         # Ensure coordinates stay within the simulation box like this
         sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
@@ -893,8 +953,8 @@ function Molly.simulate!(sys,
         remove_CM_motion!(sys)
 
         # Apply the loggers like this
-        # Computed quantities can also be given as keyword arguments to run_loggers!
-        run_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
+        # Computed quantities can also be given as keyword arguments to apply_loggers!
+        apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
 
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
@@ -923,7 +983,7 @@ function Molly.remd_exchange!(sys::ReplicaSystem,
                               n::Integer,
                               m::Integer;
                               n_threads::Integer=Threads.nthreads(),
-                              rng=Random.GLOBAL_RNG)
+                              rng=Random.default_rng())
     # Attempt to exchange the replicas with index n and m
     # First define Δ for the REMD scheme
     make_exchange = Δ <= 0 || rand(rng) < exp(-Δ) # Example of Metropolis acceptance rate
@@ -943,7 +1003,7 @@ This does any initial setup such as assigning velocities then uses [`simulate_re
 function Molly.simulate!(sys::ReplicaSystem,
                          sim::MyREMDSimulator,
                          n_steps::Integer;
-                         rng=Random.GLOBAL_RNG,
+                         rng=Random.default_rng(),
                          n_threads::Integer=Threads.nthreads())
     # Do any initial setup if necessary
     simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads)
@@ -1010,12 +1070,16 @@ Loggers record properties of the simulation to allow monitoring and analysis.
 The available loggers are:
 - [`GeneralObservableLogger`](@ref)
 - [`TemperatureLogger`](@ref)
-- [`CoordinateLogger`](@ref)
-- [`VelocityLogger`](@ref)
+- [`CoordinatesLogger`](@ref)
+- [`VelocitiesLogger`](@ref)
 - [`TotalEnergyLogger`](@ref)
 - [`KineticEnergyLogger`](@ref)
 - [`PotentialEnergyLogger`](@ref)
-- [`ForceLogger`](@ref)
+- [`ForcesLogger`](@ref)
+- [`VolumeLogger`](@ref)
+- [`DensityLogger`](@ref)
+- [`VirialLogger`](@ref)
+- [`PressureLogger`](@ref)
 - [`StructureWriter`](@ref)
 - [`TimeCorrelationLogger`](@ref)
 - [`AutoCorrelationLogger`](@ref)
@@ -1023,8 +1087,8 @@ The available loggers are:
 - [`ReplicaExchangeLogger`](@ref)
 - [`MonteCarloLogger`](@ref)
 
-Many of the loggers can be initialised with just the number of steps between recorded values, e.g. `CoordinateLogger(10)`.
-An optional first argument is the type of the recorded value; the above is equivalent to `CoordinateLogger(typeof(1.0u"nm"), 10)` but if the simulation did not use units then `CoordinateLogger(Float64, 10)` would be required.
+Many of the loggers can be initialised with just the number of steps between recorded values, e.g. `CoordinatesLogger(10)`.
+An optional first argument is the type of the recorded value; the above is equivalent to `CoordinatesLogger(typeof(1.0u"nm"), 10)` but if the simulation did not use units then `CoordinatesLogger(Float64, 10)` would be required.
 If the simulation is in 2D, giving `dims=2` as a keyword argument is required for some loggers.
 A logger's history can be accessed with `values(my_logger)`.
 
@@ -1072,7 +1136,7 @@ Many times, a logger will just record an observation to an `Array` containing a 
 For this purpose, you can use the [`GeneralObservableLogger`](@ref) without defining a custom logging function.
 Define your observation function as
 ```julia
-function my_observable(sys::System, neighbors; n_threads::Integer, kwargs...)
+function my_observable(sys::System, neighbors, step_n; n_threads::Integer, kwargs...)
     # Probe the system for some desired property
     return observation
 end

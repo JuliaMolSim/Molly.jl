@@ -10,8 +10,8 @@
         ϵ::Float64
     end
 
-    # Custom PairwiseInteraction
-    struct SIRInteraction <: PairwiseInteraction
+    # Custom pairwise interaction
+    struct SIRInteraction
         dist_infection::Float64
         prob_infection::Float64
         prob_recovery::Float64
@@ -28,11 +28,9 @@
     # Custom force function
     function Molly.force(inter::SIRInteraction,
                             vec_ij,
-                            coord_i,
-                            coord_j,
                             atom_i,
                             atom_j,
-                            boundary)
+                            args...)
         if (atom_i.status == infected && atom_j.status == susceptible) ||
                     (atom_i.status == susceptible && atom_j.status == infected)
             # Infect close people randomly
@@ -49,12 +47,11 @@
                 atom_i.status = recovered
             end
         end
-        return zero(coord_i)
+        return zero(vec_ij)
     end
 
     # Test log_property! definition rather than just using GeneralObservableLogger
-    function Molly.log_property!(logger::SIRLogger, sys, neighbors, step_n;
-                                 n_threads=Threads.nthreads(), kwargs...)
+    function Molly.log_property!(logger::SIRLogger, sys, neighbors, step_n; kwargs...)
         if step_n % logger.n_steps == 0
             counts_sir = [
                 count(p -> p.status == susceptible, sys.atoms),
@@ -74,12 +71,7 @@
     coords = place_atoms(n_people, boundary; min_dist=0.1)
     velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
 
-    lj = LennardJones(
-        cutoff=DistanceCutoff(1.6),
-        use_neighbors=true,
-        force_units=NoUnits,
-        energy_units=NoUnits,
-    )
+    lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
     sir = SIRInteraction(0.5, 0.06, 0.01)
     @test !use_neighbors(sir)
     pairwise_inters = (LennardJones=lj, SIR=sir)
@@ -101,7 +93,7 @@
         pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
         loggers=(
-            coords=CoordinateLogger(Float64, 10; dims=2),
+            coords=CoordinatesLogger(Float64, 10; dims=2),
             SIR=SIRLogger(10, []),
         ),
         force_units=NoUnits,

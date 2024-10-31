@@ -10,14 +10,14 @@ The potential energy is defined as
 V(\boldsymbol{x}) = \frac{1}{2} k |\boldsymbol{x} - \boldsymbol{x}_0|^2
 ```
 """
-struct HarmonicPositionRestraint{K, C} <: SpecificInteraction
+struct HarmonicPositionRestraint{K, C}
     k::K
     x0::C
 end
 
 HarmonicPositionRestraint(; k, x0) = HarmonicPositionRestraint{typeof(k), typeof(x0)}(k, x0)
 
-@inline function force(pr::HarmonicPositionRestraint, coord_i, boundary)
+@inline function force(pr::HarmonicPositionRestraint, coord_i, boundary, args...)
     ab = vector(coord_i, pr.x0, boundary)
     c = pr.k * norm(ab)
     if iszero_value(c)
@@ -28,7 +28,7 @@ HarmonicPositionRestraint(; k, x0) = HarmonicPositionRestraint{typeof(k), typeof
     return SpecificForce1Atoms(f)
 end
 
-@inline function potential_energy(pr::HarmonicPositionRestraint, coord_i, boundary)
+@inline function potential_energy(pr::HarmonicPositionRestraint, coord_i, boundary, args...)
     dr = vector(coord_i, pr.x0, boundary)
     return (pr.k / 2) * dot(dr, dr)
 end
