@@ -6,6 +6,7 @@ export
     AndersenThermostat,
     RescaleThermostat,
     BerendsenThermostat,
+    BerendsenBarostat,
     MonteCarloBarostat,
     MonteCarloAnisotropicBarostat,
     MonteCarloMembraneBarostat
@@ -128,6 +129,51 @@ function apply_coupling!(sys, thermostat::BerendsenThermostat, sim, neighbors=no
     λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temperature(sys)) - 1)
     sys.velocities .*= sqrt(λ2)
     return false
+end
+
+@doc raw"""
+    BerendsenBarostat(pressure, coupling_const; compressibility=4.6e-5u"bar^-1",
+                      max_scale_frac=0.1, n_steps=1)
+
+The Berendsen barostat for controlling pressure.
+
+The scaling factor for the box every `n_steps` steps is
+```math
+\mu = 1 - \frac{\kappa_T \delta t}{3 \tau} ( P_0 - P )
+```
+with the fractional change limited to `max_scale_frac`.
+
+This barostat should be used with caution as it can lead to simulation
+artifacts.
+"""
+struct BerendsenBarostat{P, C, IC, T}
+    pressure::P
+    coupling_const::C
+    compressibility::IC
+    max_scale_frac::T
+    n_steps::Int
+end
+
+function BerendsenBarostat(pressure, coupling_const; compressibility=4.6e-5u"bar^-1",
+                           max_scale_frac=0.1, n_steps=1)
+    return BerendsenBarostat(pressure, coupling_const, compressibility,
+                             max_scale_frac, n_steps)
+end
+
+function apply_coupling!(sys, barostat::BerendsenBarostat, sim, neighbors=nothing,
+                         step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+    if !iszero(step_n % barostat.n_steps)
+        return false
+    end
+    P = pressure(sys, neighbors, step_n; n_threads=n_threads)
+    μ = 1 - ((barostat.compressibility * sim.dt) / (3 * barostat.coupling_const)) *
+                (barostat.pressure - P)
+    μ_clamp = clamp(μ, 1 - barostat.max_scale_frac, 1 + barostat.max_scale_frac)
+    if isone(μ_clamp)
+        return false
+    end
+    scale_coords!(sys, μ_clamp)    
+    return true
 end
 
 @doc raw"""

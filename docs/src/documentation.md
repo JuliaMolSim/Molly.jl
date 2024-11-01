@@ -1020,6 +1020,7 @@ The available couplers are:
 - [`AndersenThermostat`](@ref)
 - [`RescaleThermostat`](@ref)
 - [`BerendsenThermostat`](@ref)
+- [`BerendsenBarostat`](@ref)
 - [`MonteCarloBarostat`](@ref)
 - [`MonteCarloAnisotropicBarostat`](@ref)
 - [`MonteCarloMembraneBarostat`](@ref)
