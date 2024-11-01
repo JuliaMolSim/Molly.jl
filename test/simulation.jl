@@ -836,6 +836,43 @@ end
     @test wigner_seitz_radius < mean_distance < 2 * wigner_seitz_radius
 end
 
+@testset "Berendsen barostat" begin
+    n_atoms = 100
+    n_steps = 40_000
+    temp = 10.0u"K"
+    boundary = CubicBoundary(4.0u"nm")
+
+    box_size_wrapper(sys, args...; kwargs...) = sys.boundary.side_lengths[1]
+    BoxSizeLogger(n_steps) = GeneralObservableLogger(box_size_wrapper, typeof(1.0u"nm"), n_steps)
+
+    sys = System(
+        coords=place_atoms(n_atoms, boundary),
+        atoms=[Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms],
+        boundary=boundary,
+        pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+        loggers=(
+            pressure=PressureLogger(10),
+            box_size=BoxSizeLogger(10),
+        ),
+    )
+
+    coupling = BerendsenBarostat(1.0u"bar", 0.1u"fs"; max_scale_frac=0.01)
+    simulator = Langevin(
+        dt=0.001u"ps",
+        temperature=temp,
+        friction=1.0u"ps^-1",
+        coupling=coupling,
+    )
+
+    random_velocities!(sys, temp)
+    simulate!(sys, simulator, n_steps)
+
+    @test 0.9u"bar" < mean(values(sys.loggers.pressure)[2001:end]) < 1.1u"bar"
+    @test std(values(sys.loggers.pressure)[2001:end]) < 0.2u"bar"
+    @test 5.0u"nm" < mean(values(sys.loggers.box_size)[2001:end]) < 5.4u"nm"
+    @test std(values(sys.loggers.box_size)[2001:end]) < 0.1u"nm"
+end
+
 @testset "Monte Carlo barostat" begin
     # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
     n_atoms = 25
@@ -852,7 +889,7 @@ end
     n_log_steps = 500
 
     box_size_wrapper(sys, args...; kwargs...) = sys.boundary.side_lengths[1]
-    BoundaryLogger(n_steps) = GeneralObservableLogger(box_size_wrapper, typeof(1.0u"nm"), n_steps)
+    BoxSizeLogger(n_steps) = GeneralObservableLogger(box_size_wrapper, typeof(1.0u"nm"), n_steps)
 
     sys = System(
         atoms=atoms,
@@ -866,7 +903,7 @@ end
             potential_energy=PotentialEnergyLogger(n_log_steps),
             virial=VirialLogger(n_log_steps),
             pressure=PressureLogger(n_log_steps),
-            box_size=BoundaryLogger(n_log_steps),
+            box_size=BoxSizeLogger(n_log_steps),
         ),
     )
 
@@ -906,7 +943,7 @@ end
                     potential_energy=PotentialEnergyLogger(n_log_steps),
                     virial=VirialLogger(n_log_steps),
                     pressure=PressureLogger(n_log_steps),
-                    box_size=BoundaryLogger(n_log_steps),
+                    box_size=BoxSizeLogger(n_log_steps),
                 ),
             )
 
