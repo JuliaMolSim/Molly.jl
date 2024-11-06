@@ -76,7 +76,6 @@
         0.0253410816u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
-       
 
     struct BuckinghamAtom{M, TA, TB, TC}
         mass::M
@@ -448,16 +447,16 @@
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 
-    c2 = SVector(1.28, 1.0, 1.0)u"nm"
-    dr12 = vector(c1, c2, boundary)
+    c4 = SVector(1.28, 1.0, 1.0)u"nm"
+    dr14 = vector(c1, c2, boundary)
     @test isapprox(
-        potential_energy(inter, dr12,  AH_a1, AH_a1),
+        potential_energy(inter, dr14,  AH_a1, AH_a1),
         0.7205987916u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
 
     @test isapprox(
-        force(inter, dr12,  AH_a1, AH_a1),
+        force(inter, dr14,  AH_a1, AH_a1),
         SVector(52.5306754422, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )

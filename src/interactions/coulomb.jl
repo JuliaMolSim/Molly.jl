@@ -347,7 +347,7 @@ end
 
 
 @doc raw"""
-    Yukawa(; cutoff, use_neighbors, weight_special, coulomb_const, force_units, energy_units)
+    Yukawa(; cutoff, use_neighbors, weight_special, coulomb_const, kappa)
 
 The Yukawa electrostatic interaction between two atoms.
 
@@ -367,7 +367,7 @@ F(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}^2} \exp(-\kappa r_{ij})\le
     use_neighbors::Bool= false
     weight_special::W =1
     coulomb_const::T = coulomb_const
-    kappa::D = kappa=1.0*u"nm^-1"
+    kappa::D = 1.0*u"nm^-1"
 end
 
 use_neighbors(inter::Yukawa) = inter.use_neighbors
@@ -416,7 +416,7 @@ end
 
 function force_divr(::Yukawa, r2, invr2, (coulomb_const, qi, qj, kappa))
     r = sqrt(r2)
-    return (coulomb_const * qi * qj) / r^3 *exp(-kappa*r) * (kappa*r+1.0)
+    return (coulomb_const * qi * qj) / r^3 *exp(-kappa*r) * (kappa*r+1)
 end
 
 @inline function potential_energy(inter::Yukawa{C},

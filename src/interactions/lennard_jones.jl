@@ -293,8 +293,7 @@ end
 
 
 @doc raw"""
-    AshbaughHatch(; cutoff, α, λ, p, use_neighbors, lorentz_mixing, weight_special,
-                         weight_solute_solvent, force_units, energy_units, skip_shortcut)
+    AshbaughHatch(; cutoff,use_neighbors,shortcut, ϵ_mixing,σ_mixing, λ_mixing,weight_special)
 
 The AshbaughHatch ($V_{\text{AH}}$) is a modified Lennard-Jones ($V_{\text{LJ}}$) 6-12 interaction between two atoms.
 
@@ -306,9 +305,8 @@ V_{\text{LJ}}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}
 ```math
 V_{\text{AH}}(r_{ij}) =
     \begin{cases}
-      V_{\text{LJ}}(r_{ij}) -λ_{ij}V_{\text{LJ}}(r_{c})+\varepsilon_{ij}(1-λ_{ij}) &,  r_{ij}\leq  2^{1/6}σ  \\
-       λ_{ij}\left(V_{\text{LJ}}(r_{ij}) -V_{\text{LJ}}(r_{c}) \right) &,  2^{1/6}σ \leq r_{ij}< r_{c}\\
-       0 &,   r_{ij}\gt r_{c}
+      V_{\text{LJ}}(r_{ij}) +\varepsilon_{ij}(1-λ_{ij}) &,  r_{ij}\leq  2^{1/6}σ  \\
+       λ_{ij}V_{\text{LJ}}(r_{ij})  &,  2^{1/6}σ \leq r_{ij}
     \end{cases}
 ```
 
@@ -317,8 +315,7 @@ and the force on each atom by
 \vec{F}_{\text{AH}} =
     \begin{cases}
       F_{\text{LJ}}(r_{ij})  &,  r_{ij} \leq  2^{1/6}σ  \\
-       λ_{ij}F_{\text{LJ}}(r_{ij})  &,  2^{1/6}σ \leq r_{ij}< r_{c}\\
-       0 &,   r_{ij}\gt r_{c}
+       λ_{ij}F_{\text{LJ}}(r_{ij})  &,  2^{1/6}σ \leq r_{ij}
     \end{cases}
 ```
 where
@@ -349,7 +346,6 @@ end
     σ::S =0.0u"nm"
     ϵ::E =0.0u"kJ * mol^-1"
     λ::L=1.0
-    solute::Bool = false
 end
 
 use_neighbors(inter::AshbaughHatch) = inter.use_neighbors
