@@ -33,6 +33,29 @@
         )
     end
 
+    function do_shortcut(atom_i, atom_j) return true end
+
+    for inter in (LennardJones(;shortcut=do_shortcut),
+            Mie(m=6, n=12;shortcut=do_shortcut),
+            LennardJonesSoftCore(α=1, λ=0, p=2;shortcut=do_shortcut), 
+            SoftSphere(;shortcut=do_shortcut), 
+            Buckingham(;shortcut=do_shortcut), 
+            AshbaughHatch(;shortcut=do_shortcut),
+            )
+
+        @test isapprox(
+            force(inter, dr12, a1, a1),
+            SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+            atol=1e-9u"kJ * mol^-1 * nm^-1",
+        )
+
+        @test isapprox(
+            potential_energy(inter, dr12, a1, a1),
+            0.0u"kJ * mol^-1";
+            atol=1e-9u"kJ * mol^-1",
+        )
+    end
+    
     inter = LennardJonesSoftCore(α=1, λ=0.5, p=2)
     @test isapprox(
         force(inter, dr12, a1, a1),
@@ -159,8 +182,7 @@
         atol=1e-5u"kJ * mol^-1",
     )
 
-
-    inter = Yukawa()
+    inter = Yukawa(; weight_special=0.5)
     @test isapprox(
         force(inter, dr12, a1, a1),
         SVector(1486.7077156786308, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
@@ -169,6 +191,11 @@
     @test isapprox(
         force(inter, dr13, a1, a1),
         SVector(814.8981977722481, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-5u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        force(inter, dr13, a1, a1,u"kJ * mol^-1 * nm^-1",true),
+        SVector(0.5*814.8981977722481, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-5u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
@@ -181,7 +208,11 @@
         232.8280565063u"kJ * mol^-1";
         atol=1e-5u"kJ * mol^-1",
     )
-
+    @test isapprox(
+        potential_energy(inter, dr13, a1, a1,u"kJ * mol^-1 * nm^-1",true),
+        0.5*232.8280565063u"kJ * mol^-1";
+        atol=1e-5u"kJ * mol^-1",
+    )
     c1_grav = SVector(1.0, 1.0, 1.0)u"m"
     c2_grav = SVector(6.0, 1.0, 1.0)u"m"
     a1_grav, a2_grav = Atom(mass=1e6u"kg"), Atom(mass=1e5u"kg")
@@ -408,9 +439,8 @@
         -108.166724117u"kJ * mol^-1";
         atol=1e-7u"kJ * mol^-1",
     )
-    
     AH_a1 = AshbaughHatchAtom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=1.0)
-    inter = AshbaughHatch()
+    inter = AshbaughHatch(weight_special=0.5)
 
     @test isapprox(
         force(inter, dr12, AH_a1, AH_a1, boundary),
@@ -432,7 +462,7 @@
         -0.1170417309u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
-   
+
 
     AH_a1 = AshbaughHatchAtom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1", λ=0.5)
     @test isapprox(
@@ -448,7 +478,7 @@
     )
 
     c4 = SVector(1.28, 1.0, 1.0)u"nm"
-    dr14 = vector(c1, c2, boundary)
+    dr14 = vector(c1, c4, boundary)
     @test isapprox(
         potential_energy(inter, dr14,  AH_a1, AH_a1),
         0.7205987916u"kJ * mol^-1";
@@ -458,6 +488,18 @@
     @test isapprox(
         force(inter, dr14,  AH_a1, AH_a1),
         SVector(52.5306754422, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+
+    @test isapprox(
+        potential_energy(inter, dr14,  AH_a1, AH_a1,u"kJ * mol^-1 * nm^-1", true),
+        0.5*0.7205987916u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    @test isapprox(
+        force(inter, dr14,  AH_a1, AH_a1,u"kJ * mol^-1 * nm^-1",true),
+        SVector(0.5*52.5306754422, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 end
