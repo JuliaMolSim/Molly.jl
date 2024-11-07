@@ -236,23 +236,13 @@ The types used should be bits types if the GPU is going to be used.
     potential is zero.
 - `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
 """
-struct Atom{T, M, C, S, E}
-    index::Int
-    atom_type::T
-    mass::M
-    charge::C
-    σ::S
-    ϵ::E
-end
-
-function Atom(;
-                index=1,
-                atom_type=1,
-                mass=1.0u"g/mol",
-                charge=0.0,
-                σ=0.0u"nm",
-                ϵ=0.0u"kJ * mol^-1")
-    return Atom(index, atom_type, mass, charge, σ, ϵ)
+@kwdef struct Atom{T, M, C, S, E}
+    index::Int = 1
+    atom_type::T = 1
+    mass::M = 1.0u"g/mol"
+    charge::C = 0.0
+    σ::S = 0.0u"nm"
+    ϵ::E = 0.0u"kJ * mol^-1"
 end
 
 function Base.zero(::Atom{T, M, C, S, E}) where {T, M, C, S, E}
