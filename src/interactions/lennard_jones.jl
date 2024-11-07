@@ -10,25 +10,13 @@ end
 
 no_shortcut(atom_i, atom_j) = false
 
-function lorentz_σ_mixing(atom_i, atom_j)
-    return (atom_i.σ + atom_j.σ) / 2
-end
+lorentz_σ_mixing(atom_i, atom_j) = (atom_i.σ + atom_j.σ) / 2
+lorentz_ϵ_mixing(atom_i, atom_j) = (atom_i.ϵ + atom_j.ϵ) / 2
+lorentz_λ_mixing(atom_i, atom_j) = (atom_i.λ + atom_j.λ) / 2
 
-function lorentz_ϵ_mixing(atom_i, atom_j)
-    return (atom_i.ϵ + atom_j.ϵ) / 2
-end
-
-function lorentz_λ_mixing(atom_i, atom_j)
-    return (atom_i.λ + atom_j.λ) / 2
-end
-
-function geometric_σ_mixing(atom_i, atom_j)
-    return sqrt(atom_i.σ * atom_j.σ)
-end
-
-function geometric_ϵ_mixing(atom_i, atom_j)
-    return sqrt(atom_i.ϵ * atom_j.ϵ)
-end
+geometric_σ_mixing(atom_i, atom_j) = sqrt(atom_i.σ * atom_j.σ)
+geometric_ϵ_mixing(atom_i, atom_j) = sqrt(atom_i.ϵ * atom_j.ϵ)
+geometric_λ_mixing(atom_i, atom_j) = sqrt(atom_i.λ * atom_j.λ)
 
 @doc raw"""
     LennardJones(; cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)
