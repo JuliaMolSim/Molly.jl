@@ -543,12 +543,14 @@ In Molly there are three types of interactions:
 The available pairwise interactions are:
 - [`LennardJones`](@ref)
 - [`LennardJonesSoftCore`](@ref)
+- [`AshbaughHatch`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
 - [`Buckingham`](@ref)
 - [`Coulomb`](@ref)
 - [`CoulombSoftCore`](@ref)
 - [`CoulombReactionField`](@ref)
+- [`Yukawa`](@ref)
 - [`Gravity`](@ref)
 
 The available specific interactions are:

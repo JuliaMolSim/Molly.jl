@@ -1,7 +1,8 @@
 export
     Coulomb,
     CoulombSoftCore,
-    CoulombReactionField
+    CoulombReactionField,
+    Yukawa
 
 const coulomb_const = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0
 
@@ -339,4 +340,105 @@ end
     else
         return pe
     end
+end
+
+
+
+
+
+@doc raw"""
+    Yukawa(; cutoff, use_neighbors, weight_special, coulomb_const, kappa)
+
+The Yukawa electrostatic interaction between two atoms.
+
+The potential energy is defined as
+```math
+V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}} \exp(-\kappa r_{ij})
+```
+
+and the force on each atom by 
+
+```math
+F(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}^2} \exp(-\kappa r_{ij})\left(\kappa r_{ij} + 1\right) \vec{r}_{ij}
+```
+"""
+@kwdef struct Yukawa{C, W, T, D} 
+    cutoff::C= NoCutoff()
+    use_neighbors::Bool= false
+    weight_special::W =1
+    coulomb_const::T = coulomb_const
+    kappa::D = 1.0*u"nm^-1"
+end
+
+use_neighbors(inter::Yukawa) = inter.use_neighbors
+
+function Base.zero(yukawa::Yukawa{C, W, T ,D}) where {C, W, T, D}
+    return Yukawa{C, W, T, D}(
+        yukawa.cutoff,
+        yukawa.use_neighbors,
+        yukawa.weight_special,
+        yukawa.coulomb_const,
+        yukawa.kappa
+    )
+end
+
+function Base.:+(c1::Yukawa, c2::Yukawa)
+    return Yukawa(
+        c1.cutoff,
+        c1.use_neighbors,
+        c1.weight_special + c2.weight_special,
+        c1.coulomb_const,
+        c1.kappa
+    )
+end
+
+@inline function force(inter::Yukawa{C},
+                                    dr,
+                                    atom_i,
+                                    atom_j,
+                                    force_units=u"kJ * mol^-1 * nm^-1",
+                                    special=false,
+                                    args...) where C
+    r2 = sum(abs2, dr)
+    cutoff = inter.cutoff
+    coulomb_const = inter.coulomb_const
+    qi, qj = atom_i.charge, atom_j.charge
+    kappa = inter.kappa
+    params = (coulomb_const, qi, qj, kappa)
+
+    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
+    if special
+        return f * dr * inter.weight_special
+    else
+        return f * dr
+    end
+end
+
+function force_divr(::Yukawa, r2, invr2, (coulomb_const, qi, qj, kappa))
+    r = sqrt(r2)
+    return (coulomb_const * qi * qj) / r^3 *exp(-kappa*r) * (kappa*r+1)
+end
+
+@inline function potential_energy(inter::Yukawa{C},
+                                            dr,
+                                            atom_i,
+                                            atom_j,
+                                            energy_units=u"kJ * mol^-1",
+                                            special::Bool=false, args...) where C
+    r2 = sum(abs2, dr)
+    cutoff = inter.cutoff
+    coulomb_const = inter.coulomb_const
+    qi, qj = atom_i.charge, atom_j.charge
+    params = (coulomb_const, qi, qj, inter.kappa)
+
+    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
+    if special
+        return pe * inter.weight_special
+    else
+        return pe
+    end
+end
+
+function potential(::Yukawa, r2, invr2, (coulomb_const, qi, qj, kappa))
+    return (coulomb_const * qi * qj) * √invr2 * exp(-kappa*sqrt(r2))
 end

@@ -1,6 +1,8 @@
 export
     LennardJones,
-    LennardJonesSoftCore
+    LennardJonesSoftCore,
+    AshbaughHatch,
+    AshbaughHatchAtom
 
 function lj_zero_shortcut(atom_i, atom_j)
     return iszero_value(atom_i.ϵ) || iszero_value(atom_j.ϵ) ||
@@ -11,6 +13,14 @@ no_shortcut(atom_i, atom_j) = false
 
 function lorentz_σ_mixing(atom_i, atom_j)
     return (atom_i.σ + atom_j.σ) / 2
+end
+
+function lorentz_ϵ_mixing(atom_i, atom_j)
+    return (atom_i.ϵ + atom_j.ϵ) / 2
+end
+
+function lorentz_λ_mixing(atom_i, atom_j)
+    return (atom_i.λ + atom_j.λ) / 2
 end
 
 function geometric_σ_mixing(atom_i, atom_j)
@@ -279,4 +289,160 @@ end
 function potential(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
     six_term = σ2^3 * inv(r2^3 + σ2^3 * σ6_fac)
     return 4ϵ * (six_term ^ 2 - six_term)
+end
+
+
+@doc raw"""
+    AshbaughHatch(; cutoff,use_neighbors,shortcut, ϵ_mixing,σ_mixing, λ_mixing,weight_special)
+
+The AshbaughHatch ($V_{\text{AH}}$) is a modified Lennard-Jones ($V_{\text{LJ}}$) 6-12 interaction between two atoms.
+
+The potential energy is defined by
+```math
+V_{\text{LJ}}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \\ 
+```
+
+```math
+V_{\text{AH}}(r_{ij}) =
+    \begin{cases}
+      V_{\text{LJ}}(r_{ij}) +\varepsilon_{ij}(1-λ_{ij}) &,  r_{ij}\leq  2^{1/6}σ  \\
+       λ_{ij}V_{\text{LJ}}(r_{ij})  &,  2^{1/6}σ \leq r_{ij}
+    \end{cases}
+```
+
+and the force on each atom by
+```math
+\vec{F}_{\text{AH}} =
+    \begin{cases}
+      F_{\text{LJ}}(r_{ij})  &,  r_{ij} \leq  2^{1/6}σ  \\
+       λ_{ij}F_{\text{LJ}}(r_{ij})  &,  2^{1/6}σ \leq r_{ij}
+    \end{cases}
+```
+where
+```math
+\begin{aligned}
+\vec{F}_{\text{LJ}}\
+&= \frac{24\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}^{6}}{r_{ij}^{6}}\right)^2 -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]  \vec{r_{ij}}
+\end{aligned}
+```
+
+If ``\lambda`` is one this gives the standard [`LennardJones`](@ref) potential.
+"""
+@kwdef struct AshbaughHatch{C, H, E, F,L,W} 
+    cutoff::C = NoCutoff()
+    use_neighbors::Bool = false
+    shortcut::H = lj_zero_shortcut
+    ϵ_mixing::E = lorentz_ϵ_mixing
+    σ_mixing::F = lorentz_σ_mixing
+    λ_mixing::L = lorentz_λ_mixing
+    weight_special::W = 1
+end
+
+
+@kwdef struct AshbaughHatchAtom{C, M, S, E, L}
+    index::Int = 1
+    charge::C = 0.0
+    mass::M =1.0u"g/mol"
+    σ::S =0.0u"nm"
+    ϵ::E =0.0u"kJ * mol^-1"
+    λ::L=1.0
+end
+
+use_neighbors(inter::AshbaughHatch) = inter.use_neighbors
+
+function Base.zero(lj::AshbaughHatch{C, H, E, F,L,W}) where {C, H, E, F,L,W}
+    return AshbaughHatch{C, H, E, F,L,W}(
+        lj.cutoff,
+        lj,use_neighbors,
+        lj.shortcut,
+        lj.σ_mixing,
+        lj.ϵ_mixing,
+        lj.λ_mixing,
+        zero(W),
+    )
+end
+
+function Base.:+(l1::AshbaughHatch{C, H, E, F,L,W},
+                 l2::AshbaughHatch{C, H, E, F,L,W}) where {C, H, E, F,L,W}
+    return AshbaughHatch{C, H, E, F,L,W}(
+        l1.cutoff,
+        l1.use_neighbors,
+        l1.shortcut,
+        l1.σ_mixing,
+        l1.ϵ_mixing,
+        l1.λ_mixing,
+        l1.weight_special + l2.weight_special,
+    )
+end
+
+@inline function force(inter::AshbaughHatch{S, C},
+                                    dr,
+                                    atom_i,
+                                    atom_j,
+                                    force_units=u"kJ * mol^-1 * nm^-1",
+                                    special::Bool=false, args...) where {S, C}
+    if inter.shortcut(atom_i, atom_j)
+        return ustrip.(zero(dr)) * force_units
+    end
+
+    # Lorentz-Berthelot mixing rules use the arithmetic average for σ
+    # Otherwise use the geometric average
+    ϵ = inter.ϵ_mixing(atom_i, atom_j)
+    σ = inter.σ_mixing(atom_i, atom_j)
+    λ = inter.λ_mixing(atom_i, atom_j)
+
+    cutoff = inter.cutoff
+    r2 = sum(abs2, dr)
+    σ2 = σ^2
+    params = (σ2, ϵ, λ)
+
+    f = force_divr_with_cutoff(inter, r2, params, cutoff,force_units)
+    if special
+        return f * dr * inter.weight_special
+    else
+        return f * dr
+    end
+end
+
+@inline function force_divr(::AshbaughHatch, r2, invr2, (σ2, ϵ, λ))
+    if r2 < 2^(1/3)*σ2
+        return  force_divr(LennardJones(), r2, invr2, (σ2, ϵ))
+    else
+        return λ*force_divr(LennardJones(), r2, invr2, (σ2, ϵ)) 
+    end
+end
+
+@inline function potential_energy(inter::AshbaughHatch{S, C},
+                                            dr,
+                                            atom_i,
+                                            atom_j,
+                                            energy_units=u"kJ * mol^-1",
+                                            special::Bool=false,
+                                            args...) where {S, C}
+    if inter.shortcut(atom_i, atom_j)
+        return ustrip(zero(dr[1])) * energy_units
+    end
+    ϵ = inter.ϵ_mixing(atom_i, atom_j)     ### probably not needed for Calvados2 use case
+    σ = inter.σ_mixing(atom_i, atom_j)
+    λ = inter.λ_mixing(atom_i, atom_j)
+
+    cutoff = inter.cutoff
+    r2 = sum(abs2, dr)
+    σ2 = σ^2
+    params = (σ2, ϵ, λ)
+
+    pe = potential_with_cutoff(inter, r2, params, cutoff,energy_units)
+    if special
+        return pe * inter.weight_special
+    else
+        return pe
+    end
+end
+
+@inline function potential(::AshbaughHatch, r2, invr2, (σ2, ϵ, λ))
+    if r2 < 2^(1/3)*σ2
+        return   potential(LennardJones(), r2, invr2, (σ2, ϵ)) + ϵ*(1-λ) 
+    else
+        return λ* potential(LennardJones(), r2, invr2, (σ2, ϵ))
+    end
 end
