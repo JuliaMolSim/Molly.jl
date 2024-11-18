@@ -265,9 +265,9 @@ function CellListMapNeighborFinder(;
     if isnothing(unit_cell)
         twice_cutoff = nextfloat(2 * dist_cutoff)
         if unit(dist_cutoff) == NoUnits
-            side = max(twice_cutoff, (np * 0.01) ^ (1 / 3))
+            side = max(twice_cutoff, T((np * 0.01) ^ (1 / 3)))
         else
-            side = max(twice_cutoff, uconvert(unit(dist_cutoff), (np * 0.01u"nm^3") ^ (1 / 3)))
+            side = max(twice_cutoff, uconvert(unit(dist_cutoff), T((np * 0.01u"nm^3") ^ (1 / 3))))
         end
         sides = SVector(side, side, side)
         box = CellListMap.Box(sides, dist_cutoff)
