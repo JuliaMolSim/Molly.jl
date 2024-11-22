@@ -46,7 +46,7 @@ MollyPythonCallExt = "PythonCall"
 
 [compat]
 Atomix = "0.1"
-AtomsBase = "0.4"
+AtomsBase = "0.4, 0.5"
 AtomsCalculators = "0.2"
 BioStructures = "4"
 CUDA = "4.2, 5"
