@@ -208,7 +208,7 @@ Unitful.ustrip(u::Unitful.Units, b::CubicBoundary) = CubicBoundary(ustrip.(u, b.
 Unitful.ustrip(b::RectangularBoundary) = RectangularBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(ustrip.(u, b.side_lengths))
 
-function AtomsBase.bounding_box(b::CubicBoundary)
+function AtomsBase.cell_vectors(b::CubicBoundary)
     z = zero(b[1])
     bb = (
         SVector(b[1], z   , z   ),
@@ -218,7 +218,7 @@ function AtomsBase.bounding_box(b::CubicBoundary)
     return unit(z) == NoUnits ? (bb .* u"nm") : bb # Assume nm without other information
 end
 
-function AtomsBase.bounding_box(b::RectangularBoundary)
+function AtomsBase.cell_vectors(b::RectangularBoundary)
     z = zero(b[1])
     bb = (
         SVector(b[1], z   ),
@@ -227,7 +227,7 @@ function AtomsBase.bounding_box(b::RectangularBoundary)
     return unit(z) == NoUnits ? (bb .* u"nm") : bb
 end
 
-function AtomsBase.bounding_box(b::TriclinicBoundary)
+function AtomsBase.cell_vectors(b::TriclinicBoundary)
     bb = (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
     return unit(b[1][1]) == NoUnits ? (bb .* u"nm") : bb
 end

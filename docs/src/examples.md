@@ -791,7 +791,7 @@ using AtomsCalculators
 
 ab_sys = AtomsBase.AbstractSystem(
     make_test_system().system; 
-    bounding_box = [[1.54732, 0.0      , 0.0      ],
+    cell_vectors = [[1.54732, 0.0      , 0.0      ],
                     [0.0    , 1.4654985, 0.0      ],
                     [0.0    , 0.0      , 1.7928950]]u"Å",
 )

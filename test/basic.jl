@@ -91,7 +91,7 @@
     @test TriclinicBoundary(b.basis_vectors) == b
     @test TriclinicBoundary([b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3]]) == b
 
-    @test AtomsBase.bounding_box(b) == (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
+    @test AtomsBase.cell_vectors(b) == (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
     @test volume(b) ≈ 3.89937463181886u"nm^3"
     @test isapprox(box_center(b), SVector(2.28944, 1.1359815, 0.5116602)u"nm"; atol=1e-6u"nm")
     sb = scale_boundary(b, 1.2)
@@ -476,7 +476,7 @@ end
     # Update values to be something that works with Molly
     ab_sys_2 = AtomsBase.AbstractSystem(
         ab_sys_1;
-        bounding_box = [[1.54732, 0.0      , 0.0],
+        cell_vectors = [[1.54732, 0.0      , 0.0],
                         [0.0    , 1.4654985, 0.0],
                         [0.0    , 0.0      , Inf]]u"Å",
     )
@@ -487,7 +487,7 @@ end
 @testset "AtomsCalculators" begin
     ab_sys = AtomsBase.AbstractSystem(
         make_test_system().system;
-        bounding_box = [[1.54732, 0.0      , 0.0      ],
+        cell_vectors = [[1.54732, 0.0      , 0.0      ],
                         [0.0    , 1.4654985, 0.0      ],
                         [0.0    , 0.0      , 1.7928950]]u"Å",
     )

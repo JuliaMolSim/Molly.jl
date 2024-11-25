@@ -27,7 +27,7 @@
     random_velocities!(s, temp)
 
     @test masses(s) == fill(10.0u"g/mol", n_atoms)
-    @test AtomsBase.bounding_box(s) == (
+    @test AtomsBase.cell_vectors(s) == (
         SVector(2.0, 0.0)u"nm",
         SVector(0.0, 2.0)u"nm",
     )
@@ -109,7 +109,7 @@ end
         @test AtomsBase.mass(s, 5) == atom_mass
         @test AtomsBase.atomic_symbol(s) == fill(:Ar, n_atoms)
         @test AtomsBase.atomic_symbol(s, 5) == :Ar
-        @test AtomsBase.bounding_box(s) == (
+        @test AtomsBase.cell_vectors(s) == (
             SVector(2.0, 0.0, 0.0)u"nm",
             SVector(0.0, 2.0, 0.0)u"nm",
             SVector(0.0, 0.0, 2.0)u"nm",
@@ -671,7 +671,7 @@ end
     @test eachindex(repsys) == Base.OneTo(n_atoms)
     @test AtomsBase.mass(repsys, :) == fill(atom_mass, n_atoms)
     @test AtomsBase.mass(repsys, 5) == atom_mass
-    @test AtomsBase.bounding_box(repsys) == (
+    @test AtomsBase.cell_vectors(repsys) == (
         SVector(2.0, 0.0, 0.0)u"nm",
         SVector(0.0, 2.0, 0.0)u"nm",
         SVector(0.0, 0.0, 2.0)u"nm",

@@ -677,7 +677,7 @@ function System(crystal::Crystal{D};
     coords = [SVector{D}(AtomsBase.position(crystal, i)) for i in 1:length(crystal)]
 
     # Build bounding box
-    side_lengths = norm.(AtomsBase.bounding_box(crystal))
+    side_lengths = norm.(AtomsBase.cell_vectors(crystal))
     if any(typeof(crystal.lattice.crystal_family) .<: [CubicLattice, OrthorhombicLattice, TetragonalLattice])
         boundary = CubicBoundary(side_lengths...)
     elseif any(typeof(crystal.lattice.crystal_family) .<: [SquareLattice, RectangularLattice])
@@ -1162,12 +1162,12 @@ function AtomsBase.atomic_number(s::Union{System, ReplicaSystem}, i::Integer)
     end
 end
 
-AtomsBase.bounding_box(s::System) = AtomsBase.bounding_box(s.boundary)
-AtomsBase.bounding_box(s::ReplicaSystem) = AtomsBase.bounding_box(s.replicas[1])
+AtomsBase.cell_vectors(s::System) = AtomsBase.cell_vectors(s.boundary)
+AtomsBase.cell_vectors(s::ReplicaSystem) = AtomsBase.cell_vectors(s.replicas[1])
 
 function AtomsBase.cell(sys::System{D}) where D
     return AtomsBase.PeriodicCell(
-        AtomsBase.bounding_box(sys),
+        AtomsBase.cell_vectors(sys),
         has_infinite_boundary(sys) ? ntuple(i -> !isinf(sys.boundary.side_lengths[i]), D) :
                                      ntuple(i -> true, D),
     )
@@ -1199,7 +1199,7 @@ convenience constructor `System(sys::System)`.
 function System(sys::AtomsBase.AbstractSystem{D};
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1") where D
-    bb = AtomsBase.bounding_box(sys)
+    bb = AtomsBase.cell_vectors(sys)
     is_cubic = true
     for (i, bv) in enumerate(bb)
         for j in 1:(i - 1)
