@@ -45,7 +45,7 @@ MollyKernelDensityExt = "KernelDensity"
 MollyPythonCallExt = "PythonCall"
 
 [compat]
-Atomix = "0.1"
+Atomix = "0.1, 1"
 AtomsBase = "0.5"
 AtomsCalculators = "0.2"
 BioStructures = "4"
