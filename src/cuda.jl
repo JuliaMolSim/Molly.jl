@@ -43,7 +43,7 @@ function pairwise_force_gpu!(fs_mat, coords::AbstractArray{SVector{D, C}}, veloc
         n_blocks_j = cld(length(atoms), nthreads)
         kernel(fs_mat, coords, velocities, atoms, boundary, pairwise_inters, step_n, Val(D),
                Val(force_units); threads=nthreads, blocks=(n_blocks_i, n_blocks_j))
-    else
+	else    
         n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel_nl!(
                 fs_mat, coords, velocities, atoms, boundary, pairwise_inters, nbs, step_n,
@@ -52,8 +52,56 @@ function pairwise_force_gpu!(fs_mat, coords::AbstractArray{SVector{D, C}}, veloc
     return fs_mat
 end
 
+function pairwise_force_gpu_nl!(fs_mat, coords::AbstractArray{SVector{D, C}}, velocities, atoms,
+                    boundary, pairwise_inters, DistanceNeighborFinder_Object, step_n, force_units, ::Val{T}) where {D, C, T}
+	Morton_bits = 4
+	w = DistanceNeighborFinder_Object.dist_cutoff - 0.1f0u"nm"
+	sorted_sequence = CuArray(sorted_Morton_seq(Array(coords), w, Morton_bits))
+	N = length(coords)
+	n_blocks = cld(N, WARPSIZE)
+	mins = CUDA.zeros(T, n_blocks, 3)u"nm"
+	maxs = CUDA.zeros(T, n_blocks, 3)u"nm"
+	CUDA.@sync @cuda blocks=(n_blocks,) threads=(WARPSIZE,) kernel_min_max!(sorted_sequence, 
+	mins, maxs, coords, Val(N), boundary)
+	CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) force_kernel!(sorted_sequence, 
+			fs_mat, mins, maxs, coords, atoms, Val(N), DistanceNeighborFinder_Object.dist_cutoff, Val(force_units), pairwise_inters, 
+			boundary, step_n, DistanceNeighborFinder_Object.special, DistanceNeighborFinder_Object.eligible, Val(T))
+    return fs_mat
+end
+
+
+function pairwise_pe_gpu!(pe_vec_nounits, coords::AbstractArray{SVector{D, C}}, velocities, atoms,
+                          boundary, pairwise_inters, nbs, step_n, energy_units,
+                          ::Val{T}) where {D, C, T}
+
+	n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
+	CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
+				pe_vec_nounits, coords, velocities, atoms, boundary, pairwise_inters, nbs,
+				step_n, Val(energy_units))
+	return pe_vec_nounits
+end
+
+function pairwise_pe_gpu_nl!(pe_vec_nounits, coords::AbstractArray{SVector{D, C}}, velocities, atoms,
+                          boundary, pairwise_inters, DistanceNeighborFinder_Object, step_n, energy_units,
+                          ::Val{T}) where {D, C, T}
+	Morton_bits = 4
+	w = DistanceNeighborFinder_Object.dist_cutoff - 0.1f0u"nm"
+	sorted_sequence = CuArray(sorted_Morton_seq(Array(coords), w, Morton_bits))
+	N = length(coords)
+	n_blocks = cld(N, WARPSIZE)
+	mins = CUDA.zeros(T, n_blocks, 3)u"nm"
+	maxs = CUDA.zeros(T, n_blocks, 3)u"nm"
+	CUDA.@sync @cuda blocks=(n_blocks,) threads=(32,) kernel_min_max!(sorted_sequence, 
+	mins, maxs, coords, Val(N), boundary)
+	CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) energy_kernel!(sorted_sequence, 
+	pe_vec_nounits, mins, maxs, coords, atoms, Val(N), DistanceNeighborFinder_Object.dist_cutoff, Val(energy_units), pairwise_inters, boundary, step_n, DistanceNeighborFinder_Object.special, DistanceNeighborFinder_Object.eligible, Val(T))
+
+    return pe_vec_nounits
+end
+
+
 function pairwise_force_kernel_nl!(forces, coords_var, velocities_var, atoms_var, boundary, inters,
-                                neighbors_var, step_n, ::Val{D}, ::Val{F}) where {D, F}
+    neighbors_var, step_n, ::Val{D}, ::Val{F}) where {D, F}
     coords = CUDA.Const(coords_var)
     velocities = CUDA.Const(velocities_var)
     atoms = CUDA.Const(atoms_var)
@@ -73,6 +121,675 @@ function pairwise_force_kernel_nl!(forces, coords_var, velocities_var, atoms_var
     end
     return nothing
 end
+
+function pairwise_pe_kernel!(energy, coords_var, velocities_var, atoms_var, boundary, inters,
+                             neighbors_var, step_n, ::Val{E}) where E
+    coords = CUDA.Const(coords_var)
+    velocities = CUDA.Const(velocities_var)
+    atoms = CUDA.Const(atoms_var)
+    neighbors = CUDA.Const(neighbors_var)
+
+    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+
+    @inbounds if inter_i <= length(neighbors)
+        i, j, special = neighbors[inter_i]
+        coord_i, coord_j, vel_i, vel_j = coords[i], coords[j], velocities[i], velocities[j]
+        dr = vector(coord_i, coord_j, boundary)
+        pe = potential_energy_gpu(inters[1], dr, atoms[i], atoms[j], E, special, coord_i, coord_j,
+                                  boundary, vel_i, vel_j, step_n)
+        for inter in inters[2:end]
+            pe += potential_energy_gpu(inter, dr, atoms[i], atoms[j], E, special, coord_i, coord_j,
+                                       boundary, vel_i, vel_j, step_n)
+        end
+		
+        if unit(pe) != E
+            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
+        end
+        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
+    end
+    return nothing
+end
+
+# ********************************************* TO BE TESTED ************************************************************
+function sorted_Morton_seq(positions, w, bits::Int)
+	N = length(positions)
+	Morton_sequence = Vector{Int32}(undef, N)
+    for i in 1:N
+		x, y, z = positions[i][1], positions[i][2], positions[i][3]
+        Morton_sequence[i] = Morton_code(floor(Int32, x/w), floor(Int32, y/w), floor(Int32, z/w), bits)
+    end
+	sort = Int32.(sortperm(Morton_sequence))
+    return sort
+end
+
+
+# Function to compute Morton code (Z-order) from voxel indices (i, j, k)
+function Morton_code(i::Int32, j::Int32, k::Int32, bits::Int)
+    code = 0
+    for bit in 0:(bits-1)
+        code |= ((i >> bit) & 1) << (3 * bit)
+        code |= ((j >> bit) & 1) << (3 * bit + 1)
+        code |= ((k >> bit) & 1) << (3 * bit + 2)
+    end
+    return Int32(code)
+end
+
+
+function kernel_min_max!(
+	sorted_seq,
+	mins::AbstractArray{D}, 
+	maxs::AbstractArray{D}, 
+	coords, 
+	::Val{n}, 
+	boundary) where {n, D}
+
+	D32 = Int32(32)
+	a = Int32(1)
+	b = Int32(3)
+	r = Int32(n % D32)
+    i = threadIdx().x + (blockIdx().x - a) * blockDim().x
+    local_i = threadIdx().x
+	mins_smem = CuStaticSharedArray(D, (D32, b))
+	maxs_smem = CuStaticSharedArray(D, (D32, b))
+	r_smem = CuStaticSharedArray(D, (r, b))
+ 
+	if i <= n - r && local_i <= D32
+		for xyz in a:b
+			mins_smem[local_i, xyz] = coords[sorted_seq[i]][xyz]
+			maxs_smem[local_i, xyz] = coords[sorted_seq[i]][xyz]
+		end
+	end
+	if i > n - r && i <= n && local_i <= r
+		for xyz in a:b
+			r_smem[local_i, xyz] = coords[sorted_seq[i]][xyz]
+		end
+	end
+	
+    sync_threads() 
+
+	# Same condition as before
+	if i <= n - r && local_i <= D32
+		for k in a:Int32(log2(D32))
+			for xyz in a:b
+				@inbounds begin
+					if local_i % Int32(2^k) == Int32(0)
+						if mins_smem[local_i, xyz] > mins_smem[local_i - Int32(2^(k - 1)), xyz] 
+							mins_smem[local_i, xyz] = mins_smem[local_i - Int32(2^(k - 1)), xyz]
+						end
+						if maxs_smem[local_i, xyz] < maxs_smem[local_i - Int32(2^(k - 1)), xyz] 
+							maxs_smem[local_i, xyz] = maxs_smem[local_i - Int32(2^(k - 1)), xyz]
+						end
+					end
+				end
+			end
+		end
+		
+		# Select the last thread (in which the minimum is stored) and fill the vectors of minima and maxima 
+		if local_i == D32 
+			for k in a:b
+				mins[blockIdx().x, k] = mins_smem[local_i, k]
+				maxs[blockIdx().x, k] = maxs_smem[local_i, k]
+			end
+		end
+
+	end 
+
+	# Since the remainder array is low-dimensional, we can do the scan
+	xyz_min = CuStaticSharedArray(D, b)
+	xyz_max = CuStaticSharedArray(D, b)
+	for k in a:b
+		xyz_min[k] = 10 * boundary.side_lengths[k] # We use a very large (arbitrary) value
+		xyz_max[k] = -10 * boundary.side_lengths[k]
+	end
+
+	# Turn off all the threads except one
+	if local_i == a
+		for j in a:r
+			@inbounds begin
+				for k in a:b
+					if r_smem[j, k] < xyz_min[k] 
+						xyz_min[k] = r_smem[j, k]
+					end
+					if r_smem[j, k] > xyz_max[k] 
+						xyz_max[k] = r_smem[j, k]
+					end
+				end
+			end
+		end
+	
+		# Select the last block and complete the minima and maxima vectors 
+		if blockIdx().x == Int32(ceil(n/D32)) && r != Int32(0)
+			for k in 1:3
+				mins[blockIdx().x, k] = xyz_min[k] 
+				maxs[blockIdx().x, k] = xyz_max[k]
+			end
+		end
+	end
+
+	return nothing
+end
+
+
+function boxes_dist(x1_min::D, x1_max::D, x2_min::D, x2_max::D, Lx::D) where D
+
+	a = abs(Molly.vector_1D(x2_max, x1_min, Lx))
+	b = abs(Molly.vector_1D(x1_max, x2_min, Lx))
+
+	return ifelse(
+		x1_min - x2_max <= zero(D) && x2_min - x1_max <= zero(D),
+		zero(D),
+		ifelse(a < b, a, b)
+	)	
+end
+
+
+function force_kernel!( 
+	sorted_seq,
+	forces_nounits, 
+	mins::AbstractArray{D}, 
+	maxs::AbstractArray{D}, 
+	coords, 
+	atoms,
+	::Val{N}, 
+	r_cut, 
+	::Val{force_units},
+	inters_tuple,
+	boundary,
+	step_n,
+	special_matrix,
+	eligible_matrix,
+	::Val{T}) where {N, D, force_units, T}
+
+	# Converted factors
+	a = Int32(1)
+	b = Int32(3)
+	n_blocks = Int32(ceil(N / 32))
+
+    # Get the indices that run on the blocks and threads
+    i = blockIdx().x
+    j = blockIdx().y
+	i_0_tile = (i - 1) * warpsize()
+	j_0_tile = (j - 1) * warpsize()
+	index_i = i_0_tile + laneid()
+	index_j = j_0_tile + laneid()
+	
+	# Keep track of the interactions between particles in r-block and the others in 32-blocks
+	force_smem = CuStaticSharedArray(T, (32, 3))
+	opposites_sum = CuStaticSharedArray(T, (32, 3))
+	r = Int32((N - 1) % 32 + 1)
+	r32_interactions = CuStaticSharedArray(T, (r, 3))
+	for k in a:b
+		force_smem[laneid(), k] = zero(T)
+		opposites_sum[laneid(), k] = zero(T)
+		if laneid() <= r
+			r32_interactions[laneid(), k] = zero(T)
+		end
+	end
+
+    # The code is organised in 4 mutually excluding parts (this is the first (1) one)
+	if j < n_blocks && i < j
+		d_block = zero(D)
+		dist_block = zero(T)u"nm^2"
+		@inbounds for k in a:b	
+			d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+			dist_block += d_block * d_block	
+		end
+		
+		# Check on block-block distance
+		if dist_block < r_cut * r_cut
+
+			s_idx_i = sorted_seq[index_i]
+			coords_i = coords[s_idx_i] 
+			atoms_i = atoms[s_idx_i]
+			d_pb = zero(D)
+			dist_pb = zero(T)u"nm^2"
+			@inbounds for k in a:b	
+				d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+				dist_pb += d_pb * d_pb
+			end
+
+			Bool_excl = dist_pb < r_cut * r_cut
+			coords_j = coords[sorted_seq[index_j]]
+
+			# Shuffle
+			@inbounds for m in a:warpsize()
+				sync_warp()
+				m2 = Int32((m + laneid() - 1) % 32 + 1)
+				s_idx_j = sorted_seq[j_0_tile + m2]
+				atoms_j = atoms[s_idx_j]
+				coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, laneid() + a, warpsize())
+				dr = vector(coords_j, coords_i, boundary)
+				r2 = dr[1]^2 + dr[2]^2 + dr[3]^2
+ 				
+				f = ifelse(
+					eligible_matrix[s_idx_i, s_idx_j] == true && Bool_excl == true && r2 <= r_cut * r_cut, 
+					sum_pairwise_forces(
+						inters_tuple,
+						atoms_i, atoms_j,
+						Val(force_units),
+						special_matrix[s_idx_i, s_idx_j],
+						coords_i, coords_j,
+						boundary,
+						zero(coords_i) * u"ps^-1", 
+						zero(coords_j) * u"ps^-1",
+						step_n 
+					), 
+					zero(T)
+				)
+				for k in a:b
+					force_smem[laneid(), k] += ustrip(f[k])
+					opposites_sum[m2, k] -= ustrip(f[k])
+				end
+			end
+			sync_threads()
+			for k in a:b
+				CUDA.atomic_add!(
+					pointer(forces_nounits, sorted_seq[index_i] * b - (b - k)), 
+					-force_smem[laneid(), k]
+				) 
+				CUDA.atomic_add!(
+					pointer(forces_nounits, sorted_seq[index_j] * b - (b - k)), 
+					-opposites_sum[laneid(), k]
+				) 
+			end
+		end
+	end
+
+
+	# part (2)
+	if j == n_blocks && i < n_blocks
+
+		d_block = zero(D)
+		dist_block = zero(T)u"nm^2"
+		@inbounds for k in a:b
+			d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+			dist_block += d_block * d_block	
+		end
+
+		if dist_block < r_cut * r_cut 
+
+			s_idx_i = sorted_seq[index_i]
+			coords_i = coords[s_idx_i]
+			atoms_i = atoms[s_idx_i]
+			d_pb = zero(D)
+			dist_pb = zero(T)u"nm^2"			
+			@inbounds for k in a:b	
+				d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+				dist_pb += d_pb * d_pb
+			end
+			Bool_excl = dist_pb < r_cut * r_cut
+			
+			# Compute the 32 * r distances
+			@inbounds for m in a:r
+				s_idx_j = sorted_seq[j_0_tile + m]
+				coords_j = coords[s_idx_j]
+				atoms_j = atoms[s_idx_j]
+				dr = vector(coords_j, coords_i, boundary)
+				r2 = dr[1]^2 + dr[2]^2 + dr[3]^2
+				f = ifelse(
+					eligible_matrix[s_idx_i, s_idx_j] == true && Bool_excl == true && r2 <= r_cut * r_cut, 
+					sum_pairwise_forces(
+						inters_tuple,
+						atoms_i, atoms_j,
+						Val(force_units),
+						special_matrix[s_idx_i, s_idx_j],
+						coords_i, coords_j,
+						boundary,
+						zero(coords_i) * u"ps^-1", 
+						zero(coords_j) * u"ps^-1",
+						step_n 
+					), 
+					zero(T)
+				)
+				for k in a:b
+					force_smem[laneid(), k] += ustrip(f[k])
+				end
+				val_x = -ustrip(f[1])
+				val_y = -ustrip(f[2])
+				val_z = -ustrip(f[3])
+				for offset in (Int32(16), Int32(8), Int32(4), Int32(2), a)
+					val_x += CUDA.shfl_down_sync(0xFFFFFFFF, val_x, offset, warpsize())
+					val_y += CUDA.shfl_down_sync(0xFFFFFFFF, val_y, offset, warpsize())
+					val_z += CUDA.shfl_down_sync(0xFFFFFFFF, val_z, offset, warpsize())
+				end
+				r32_interactions[m, 1] = val_x
+				r32_interactions[m, 2] = val_y
+				r32_interactions[m, 3] = val_z
+				
+			end
+
+			# Sum contributions of the r-block to the other standard blocks
+			for k in a:b
+				CUDA.atomic_add!(
+					pointer(forces_nounits, sorted_seq[index_i] * b - (b - k)), 
+					-force_smem[laneid(), k]
+				) 
+				if laneid() <= r
+
+					# Note the index j: we want to update the forces applied to the particles in the last block
+					CUDA.atomic_add!(
+						pointer(forces_nounits, sorted_seq[index_j] * b - (b - k)), 
+						-r32_interactions[laneid(), k]
+					)
+				end	
+			end
+		end
+	end
+
+
+	# part (3)
+	if i == j && i < n_blocks
+
+		s_idx_i = sorted_seq[index_i]
+		coords_i = coords[s_idx_i]
+		atoms_i = atoms[s_idx_i]
+		@inbounds for m in laneid() + a : warpsize()
+			s_idx_j = sorted_seq[j_0_tile + m]
+			coords_j = coords[s_idx_j]
+			atoms_j = atoms[s_idx_j]
+			dr = vector(coords_j, coords_i, boundary)
+			r2 = dr[1]^2 + dr[2]^2 + dr[3]^2
+			f = ifelse(
+				eligible_matrix[s_idx_i, s_idx_j] == true && r2 <= r_cut * r_cut, 
+				sum_pairwise_forces(
+					inters_tuple,
+					atoms_i, atoms_j,
+					Val(force_units),
+					special_matrix[s_idx_i, s_idx_j],
+					coords_i, coords_j,
+					boundary,
+					zero(coords_i) * u"ps^-1", 
+					zero(coords_j) * u"ps^-1",
+					step_n 
+				), 
+				zero(T)
+			)
+			
+			for k in a:b
+				force_smem[laneid(), k] += ustrip(f[k])
+				opposites_sum[m, k] -= ustrip(f[k])
+			end
+		end	
+
+		for k in a:b
+
+			# In this case i == j, so we can call atomic_add! only once
+			CUDA.atomic_add!(
+				pointer(forces_nounits, sorted_seq[index_i] * b - (b - k)), 
+				-force_smem[laneid(), k] - opposites_sum[laneid(), k]
+			) 
+		end
+	end
+
+
+	# part (4)
+	if i == n_blocks && j == n_blocks
+
+		if laneid() <= r
+			
+			s_idx_i = sorted_seq[index_i]
+			coords_i = coords[s_idx_i]
+			atoms_i = atoms[s_idx_i]
+			@inbounds for m in laneid() + a : r
+				s_idx_j = sorted_seq[j_0_tile + m]
+				coords_j = coords[s_idx_j]
+				atoms_j = atoms[s_idx_j]
+				dr = vector(coords_j, coords_i, boundary)
+				r2 = dr[1]^2 + dr[2]^2 + dr[3]^2
+				f = ifelse(
+					eligible_matrix[s_idx_i, s_idx_j] == true && r2 <= r_cut * r_cut, 
+					sum_pairwise_forces(
+						inters_tuple,
+						atoms_i, atoms_j,
+						Val(force_units),
+						special_matrix[s_idx_i, s_idx_j],
+						coords_i, coords_j,
+						boundary,
+						zero(coords_i) * u"ps^-1", 
+						zero(coords_j) * u"ps^-1",
+						step_n 
+					), 
+					zero(T)
+				)
+				for k in a:b
+					force_smem[laneid(), k] += ustrip(f[k])
+					opposites_sum[m, k] -= ustrip(f[k])
+				end
+			end
+			for k in a:b
+
+				# Sum the contributions from the r-block and the 32-blocks separately
+				CUDA.atomic_add!(
+					pointer(forces_nounits, sorted_seq[index_i] * b - (b - k)), 
+					-force_smem[laneid(), k] - opposites_sum[laneid(), k]
+				) 
+			end
+		end
+	end
+
+    return nothing
+end
+
+
+
+function energy_kernel!( 
+	sorted_seq,
+	energy_nounits, 
+	mins::AbstractArray{D}, 
+	maxs::AbstractArray{D}, 
+	coords, 
+	atoms,
+	::Val{N}, 
+	r_cut, 
+	::Val{energy_units},
+	inters_tuple,
+	boundary,
+	step_n, 
+	special_matrix,
+	eligible_matrix,
+	::Val{T}) where {N, D, energy_units, T}
+
+	# Converted factors
+	a = Int32(1)
+	b = Int32(3)
+	n_blocks = Int32(ceil(N / 32))
+	r = Int32((N - 1) % 32 + 1)
+
+    # Indices and shared memory
+    i = blockIdx().x
+    j = blockIdx().y
+	i_0_tile = (i - 1) * warpsize()
+	j_0_tile = (j - 1) * warpsize()
+	index_i = i_0_tile + laneid()
+	index_j = j_0_tile + laneid()
+	E_smem = CuStaticSharedArray(T, 32)
+	E_smem[laneid()] = zero(T)
+
+    # The code is organised in 4 mutually excluding parts (this is the first (1) one)
+	if j < n_blocks && i < j
+		d_block = zero(D)
+		dist_block = zero(T)u"nm^2"
+		@inbounds for k in a:b	
+			d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+			dist_block += d_block * d_block	
+		end
+		
+		# Check on block-block distance
+		if dist_block < r_cut * r_cut
+
+			s_idx_i = sorted_seq[index_i]
+			coords_i = coords[s_idx_i] 
+			atoms_i = atoms[s_idx_i]
+			d_pb = zero(D)
+			dist_pb = zero(T)u"nm^2"
+			@inbounds for k in a:b	
+				d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+				dist_pb += d_pb * d_pb
+			end
+
+			Bool_excl = dist_pb < r_cut * r_cut
+			coords_j = coords[sorted_seq[index_j]]
+
+			# Shuffle
+			@inbounds for m in a:warpsize()
+				sync_warp()
+				m2 = Int32((m + laneid() - 1) % 32 + 1)
+				s_idx_j = sorted_seq[j_0_tile + m2]
+				atoms_j = atoms[s_idx_j]
+				coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, laneid() + a, warpsize())
+				dr = vector(coords_j, coords_i, boundary)
+				r2 = dr[1]^2 + dr[2]^2 + dr[3]^2
+				pe = ifelse(
+					eligible_matrix[s_idx_i, s_idx_j] == true && Bool_excl == true && r2 <= r_cut * r_cut, 
+					sum_pairwise_potentials(
+						inters_tuple,
+						atoms_i, atoms_j,
+						Val(energy_units),
+						special_matrix[s_idx_i, s_idx_j],
+						coords_i, coords_j,
+						boundary,
+						zero(coords_i) * u"ps^-1", 
+						zero(coords_j) * u"ps^-1",
+						step_n 
+					), 
+					zero(T)
+				)
+				E_smem[laneid()] += ustrip(pe[1])
+			end
+		end
+	end
+
+	# part (2)
+	if j == n_blocks && i < n_blocks
+
+		d_block = zero(D)
+		dist_block = zero(T)u"nm^2"
+		@inbounds for k in a:b
+			d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+			dist_block += d_block * d_block	
+		end
+
+		if dist_block < r_cut * r_cut 
+
+			s_idx_i = sorted_seq[index_i]
+			coords_i = coords[s_idx_i]
+			atoms_i = atoms[s_idx_i]
+			d_pb = zero(D)
+			dist_pb = zero(T)u"nm^2"			
+			@inbounds for k in a:b	
+				d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+				dist_pb += d_pb * d_pb
+			end
+			Bool_excl = dist_pb < r_cut * r_cut
+			
+			# Compute the 32 * r distances
+			@inbounds for m in a:r
+				s_idx_j = sorted_seq[j_0_tile + m]
+				coords_j = coords[s_idx_j]
+				atoms_j = atoms[s_idx_j]
+				dr = vector(coords_j, coords_i, boundary)
+				r2 = dr[1]^2 + dr[2]^2 + dr[3]^2
+				pe = ifelse(
+					eligible_matrix[s_idx_i, s_idx_j] == true && Bool_excl == true && r2 <= r_cut * r_cut, 
+					sum_pairwise_potentials(
+						inters_tuple,
+						atoms_i,
+						atoms_j,
+						Val(energy_units),
+						special_matrix[s_idx_i, s_idx_j],
+						coords_i,
+						coords_j,
+						boundary,
+						zero(coords_i) * u"ps^-1", 
+						zero(coords_j) * u"ps^-1",
+						step_n 
+					), 
+					zero(T)
+				)
+				E_smem[laneid()] += ustrip(pe[1])
+			end
+		end
+	end
+
+
+	# part (3)
+	if i == j && i < n_blocks
+
+		s_idx_i = sorted_seq[index_i]
+		coords_i = coords[s_idx_i]
+		atoms_i = atoms[s_idx_i]
+		@inbounds for m in laneid() + a : warpsize()
+			s_idx_j = sorted_seq[j_0_tile + m]
+			coords_j = coords[s_idx_j]
+			atoms_j = atoms[s_idx_j]
+			dr = vector(coords_j, coords_i, boundary)
+			r2 = dr[1]^2 + dr[2]^2 + dr[3]^2
+			pe = ifelse(
+				eligible_matrix[s_idx_i, s_idx_j] == true && r2 <= r_cut * r_cut, 
+				sum_pairwise_potentials(
+					inters_tuple,
+					atoms_i, atoms_j,
+					Val(energy_units),
+					special_matrix[s_idx_i, s_idx_j],
+					coords_i, coords_j,
+					boundary,
+					zero(coords_i) * u"ps^-1", 
+					zero(coords_j) * u"ps^-1",
+					step_n 
+				), 
+				zero(T)
+			)
+			E_smem[laneid()] += ustrip(pe[1])
+		end	
+	end
+
+
+	# part (4)
+	if i == n_blocks && j == n_blocks
+
+		if laneid() <= r
+			
+			s_idx_i = sorted_seq[index_i]
+			coords_i = coords[s_idx_i]
+			atoms_i = atoms[s_idx_i]
+			@inbounds for m in laneid() + a : r
+				s_idx_j = sorted_seq[j_0_tile + m]
+				coords_j = coords[s_idx_j]
+				atoms_j = atoms[s_idx_j]
+				dr = vector(coords_j, coords_i, boundary)
+				r2 = dr[1]^2 + dr[2]^2 + dr[3]^2
+				
+				pe = ifelse(
+					eligible_matrix[s_idx_i, s_idx_j] == true && r2 <= r_cut * r_cut, 
+					sum_pairwise_potentials(
+						inters_tuple,
+						atoms_i, atoms_j,
+						Val(energy_units),
+						special_matrix[s_idx_i, s_idx_j],
+						coords_i, coords_j,
+						boundary,
+						zero(coords_i) * u"ps^-1", 
+						zero(coords_j) * u"ps^-1",
+						step_n 
+					), 
+					zero(T)
+				)
+				E_smem[laneid()] += ustrip(pe[1])
+			end
+		end
+	end
+
+	if threadIdx().x == 1
+		sum = T(0.0)
+		for k in 1:32
+			sum += E_smem[k]
+		end
+		CUDA.atomic_add!(pointer(energy_nounits), sum)
+	end
+    return nothing
+end
+# ********************************************* TO BE TESTED (SEE CODE ABOVE) ************************************************************
+
 
 #=
 **The No-neighborlist pairwise force summation kernel**: This kernel calculates all the pairwise forces in the system of
@@ -197,6 +914,25 @@ end
         error("wrong force unit returned, was expecting $F but got $(unit(f[1]))")
     end
     return f
+end
+
+@inline function sum_pairwise_potentials(inters, atom_i, atom_j, ::Val{E}, special, coord_i, coord_j,
+                                     boundary, vel_i, vel_j, step_n) where E
+    dr = vector(coord_i, coord_j, boundary)
+
+    pe_tuple = ntuple(length(inters)) do inter_type_i
+        SVector(potential_energy_gpu(inters[inter_type_i], dr, atom_i, atom_j, E, special, coord_i, coord_j, boundary,
+                  vel_i, vel_j, step_n))
+				  # why? 
+    end
+    pe = sum(pe_tuple)
+    if unit(pe[1]) != E
+        # This triggers an error but it isn't printed
+        # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
+        #   for how to throw a more meaningful error
+        error("wrong force unit returned, was expecting $E but got $(unit(pe[1]))")
+    end
+    return pe
 end
 
 function specific_force_gpu!(fs_mat, inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
@@ -344,42 +1080,6 @@ function specific_force_4_atoms_kernel!(forces, coords_var, velocities_var, atom
     return nothing
 end
 
-function pairwise_pe_gpu!(pe_vec_nounits, coords::AbstractArray{SVector{D, C}}, velocities, atoms,
-                          boundary, pairwise_inters, nbs, step_n, energy_units,
-                          ::Val{T}) where {D, C, T}
-    n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
-                pe_vec_nounits, coords, velocities, atoms, boundary, pairwise_inters, nbs,
-                step_n, Val(energy_units))
-    return pe_vec_nounits
-end
-
-function pairwise_pe_kernel!(energy, coords_var, velocities_var, atoms_var, boundary, inters,
-                             neighbors_var, step_n, ::Val{E}) where E
-    coords = CUDA.Const(coords_var)
-    velocities = CUDA.Const(velocities_var)
-    atoms = CUDA.Const(atoms_var)
-    neighbors = CUDA.Const(neighbors_var)
-
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-
-    @inbounds if inter_i <= length(neighbors)
-        i, j, special = neighbors[inter_i]
-        coord_i, coord_j, vel_i, vel_j = coords[i], coords[j], velocities[i], velocities[j]
-        dr = vector(coord_i, coord_j, boundary)
-        pe = potential_energy_gpu(inters[1], dr, atoms[i], atoms[j], E, special, coord_i, coord_j,
-                                  boundary, vel_i, vel_j, step_n)
-        for inter in inters[2:end]
-            pe += potential_energy_gpu(inter, dr, atoms[i], atoms[j], E, special, coord_i, coord_j,
-                                       boundary, vel_i, vel_j, step_n)
-        end
-        if unit(pe) != E
-            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
-        end
-        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
-    end
-    return nothing
-end
 
 function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
                           velocities, atoms, boundary, step_n, energy_units, ::Val{T}) where {D, C, T}
