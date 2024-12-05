@@ -30,7 +30,7 @@ function cuda_threads_blocks_specific(n_inters)
 end
 
 function pairwise_force_gpu!(fs_mat, coords::AbstractArray{SVector{D, C}}, velocities, atoms,
-                    boundary, pairwise_inters, nbs, step_n, force_units, ::Val{T}) where {D, C, T}
+                    boundary, pairwise_inters, nbs, step_n, special, eligible, r_cut, force_units, ::Val{T}) where {D, C, T}
     if typeof(nbs) == NoNeighborList
         kernel = @cuda launch=false pairwise_force_kernel_nonl!(
                 fs_mat, coords, velocities, atoms, boundary, pairwise_inters, step_n,
@@ -44,59 +44,45 @@ function pairwise_force_gpu!(fs_mat, coords::AbstractArray{SVector{D, C}}, veloc
         kernel(fs_mat, coords, velocities, atoms, boundary, pairwise_inters, step_n, Val(D),
                Val(force_units); threads=nthreads, blocks=(n_blocks_i, n_blocks_j))
 	else    
-        n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_force_kernel_nl!(
-                fs_mat, coords, velocities, atoms, boundary, pairwise_inters, nbs, step_n,
-                Val(D), Val(force_units))
-    end
-    return fs_mat
-end
-
-function pairwise_force_gpu_nl!(fs_mat, coords::AbstractArray{SVector{D, C}}, velocities, atoms,
-                    boundary, pairwise_inters, DistanceNeighborFinder_Object, step_n, force_units, ::Val{T}) where {D, C, T}
-	Morton_bits = 4
-	w = DistanceNeighborFinder_Object.dist_cutoff - 0.1f0u"nm"
-	sorted_sequence = CuArray(sorted_Morton_seq(Array(coords), w, Morton_bits))
-	N = length(coords)
-	n_blocks = cld(N, WARPSIZE)
-	mins = CUDA.zeros(T, n_blocks, 3)u"nm"
-	maxs = CUDA.zeros(T, n_blocks, 3)u"nm"
-	CUDA.@sync @cuda blocks=(n_blocks,) threads=(WARPSIZE,) kernel_min_max!(sorted_sequence, 
-	mins, maxs, coords, Val(N), boundary)
-	CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) force_kernel!(sorted_sequence, 
-			fs_mat, mins, maxs, coords, atoms, Val(N), DistanceNeighborFinder_Object.dist_cutoff, Val(force_units), pairwise_inters, 
-			boundary, step_n, DistanceNeighborFinder_Object.special, DistanceNeighborFinder_Object.eligible, Val(T))
+        Morton_bits = 4
+		w = r_cut - 0.1f0u"nm"
+		sorted_sequence = CuArray(sorted_Morton_seq(Array(coords), w, Morton_bits))
+		N = length(coords)
+		n_blocks = cld(N, WARPSIZE)
+		mins = CUDA.zeros(T, n_blocks, 3)u"nm"
+		maxs = CUDA.zeros(T, n_blocks, 3)u"nm"
+		CUDA.@sync @cuda blocks=(n_blocks,) threads=(WARPSIZE,) kernel_min_max!(sorted_sequence, 
+		mins, maxs, coords, Val(N), boundary)
+		CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) force_kernel!(sorted_sequence, 
+				fs_mat, mins, maxs, coords, atoms, Val(N), r_cut, Val(force_units), pairwise_inters, 
+				boundary, step_n, special, eligible, Val(T))
+	end
     return fs_mat
 end
 
 
 function pairwise_pe_gpu!(pe_vec_nounits, coords::AbstractArray{SVector{D, C}}, velocities, atoms,
-                          boundary, pairwise_inters, nbs, step_n, energy_units,
+                          boundary, pairwise_inters, nbs, step_n, special, eligible, r_cut, energy_units,
                           ::Val{T}) where {D, C, T}
-
-	n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
-	CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
-				pe_vec_nounits, coords, velocities, atoms, boundary, pairwise_inters, nbs,
-				step_n, Val(energy_units))
+	if typeof(nbs) == NoNeighborList
+		n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
+    	CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
+                pe_vec_nounits, coords, velocities, atoms, boundary, pairwise_inters, nbs,
+                step_n, Val(energy_units))
+	else
+		Morton_bits = 4
+		w = r_cut - 0.1f0u"nm"
+		sorted_sequence = CuArray(sorted_Morton_seq(Array(coords), w, Morton_bits))
+		N = length(coords)
+		n_blocks = cld(N, WARPSIZE)
+		mins = CUDA.zeros(T, n_blocks, 3)u"nm"
+		maxs = CUDA.zeros(T, n_blocks, 3)u"nm"
+		CUDA.@sync @cuda blocks=(n_blocks,) threads=(WARPSIZE,) kernel_min_max!(sorted_sequence, 
+		mins, maxs, coords, Val(N), boundary)
+		CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) energy_kernel!(sorted_sequence, 
+		pe_vec_nounits, mins, maxs, coords, atoms, Val(N), r_cut, Val(energy_units), pairwise_inters, boundary, step_n, special, eligible, Val(T))
+	end
 	return pe_vec_nounits
-end
-
-function pairwise_pe_gpu_nl!(pe_vec_nounits, coords::AbstractArray{SVector{D, C}}, velocities, atoms,
-                          boundary, pairwise_inters, DistanceNeighborFinder_Object, step_n, energy_units,
-                          ::Val{T}) where {D, C, T}
-	Morton_bits = 4
-	w = DistanceNeighborFinder_Object.dist_cutoff - 0.1f0u"nm"
-	sorted_sequence = CuArray(sorted_Morton_seq(Array(coords), w, Morton_bits))
-	N = length(coords)
-	n_blocks = cld(N, WARPSIZE)
-	mins = CUDA.zeros(T, n_blocks, 3)u"nm"
-	maxs = CUDA.zeros(T, n_blocks, 3)u"nm"
-	CUDA.@sync @cuda blocks=(n_blocks,) threads=(32,) kernel_min_max!(sorted_sequence, 
-	mins, maxs, coords, Val(N), boundary)
-	CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) energy_kernel!(sorted_sequence, 
-	pe_vec_nounits, mins, maxs, coords, atoms, Val(N), DistanceNeighborFinder_Object.dist_cutoff, Val(energy_units), pairwise_inters, boundary, step_n, DistanceNeighborFinder_Object.special, DistanceNeighborFinder_Object.eligible, Val(T))
-
-    return pe_vec_nounits
 end
 
 
