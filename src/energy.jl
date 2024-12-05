@@ -262,19 +262,14 @@ function potential_energy(sys::System{D, true, T}, neighbors, step_n::Integer=0;
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(length(sys))
         pairwise_pe_gpu!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary,
-                         pairwise_inters_nonl, nbs, step_n, sys.energy_units, val_ft)
+                             pairwise_inters_nonl, nbs, step_n, CuArray{Bool}(ones(Bool, length(sys), length(sys))), CuArray{Bool}(ones(Bool, length(sys), length(sys))), 1, sys.energy_units, val_ft)
     end
 
     pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nl) > 0
-        if isnothing(neighbors)
-            error("an interaction uses the neighbor list but neighbors is nothing")
-        end
-        if length(neighbors) > 0
-            nbs = @view neighbors.list[1:neighbors.n]
-            pairwise_pe_gpu!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary,
-                             pairwise_inters_nl, nbs, step_n, sys.energy_units, val_ft)
-        end
+        pairwise_pe_gpu!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary,
+                            pairwise_inters_nl, nothing, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible, sys.neighbor_finder.dist_cutoff, sys.energy_units, val_ft)
+        
     end
 
     for inter_list in values(sys.specific_inter_lists)

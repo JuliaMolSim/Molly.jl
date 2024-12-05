@@ -354,9 +354,10 @@ function forces_nounits!(fs_nounits, sys::System{D, true, T}, neighbors,
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
-        nbs = NoNeighborList(length(sys))
+        n = length(sys)
+        nbs = NoNeighborList(n)
         pairwise_force_gpu!(fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters_nonl,
-                            nbs, step_n, sys.force_units, val_ft)
+                            nbs, step_n, CuArray{Bool}(ones(Bool, n, n)), CuArray{Bool}(ones(Bool, n, n)), 1, sys.force_units, val_ft)
     end
 
     pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
@@ -365,9 +366,8 @@ function forces_nounits!(fs_nounits, sys::System{D, true, T}, neighbors,
             error("an interaction uses the neighbor list but neighbors is nothing")
         end
         if length(neighbors) > 0
-            nbs = @view neighbors.list[1:neighbors.n]
             pairwise_force_gpu!(fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters_nl,
-                                nbs, step_n, sys.force_units, val_ft)
+                                nothing, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible, sys.neighbor_finder.dist_cutoff, sys.force_units, val_ft)
         end
     end
 
@@ -387,3 +387,5 @@ function forces_nounits!(fs_nounits, sys::System{D, true, T}, neighbors,
 
     return fs_nounits
 end
+
+
