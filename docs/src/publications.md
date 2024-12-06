@@ -12,3 +12,4 @@ Other papers that use, contribute to or are compatible with Molly are listed bel
 - Blassel N and Stoltz G. Fixing the flux: A dual approach to computing transport coefficients, [arXiv](https://arxiv.org/abs/2305.08224) (2023)
 - Witt WC et al. ACEpotentials.jl: A Julia implementation of the atomic cluster expansion, [J Chem Phys](https://doi.org/10.1063/5.0158783) 159, 164101 (2023)
 - Monmarché P, Spacek R and Stoltz G. Transient subtraction: A control variate method for computing transport coefficients, [arXiv](https://arxiv.org/abs/2410.00212) (2024)
+- Greener JG. Reversible molecular simulation for training classical and machine learning force field, [arXiv](https://arxiv.org/abs/2412.04374) (2024)
