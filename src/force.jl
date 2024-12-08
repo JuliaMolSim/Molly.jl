@@ -123,8 +123,9 @@ function init_forces_buffer(forces_nounits, n_threads)
     end
 end
 
-function init_forces_buffer(forces_nounits::CuArray{SVector{D, T}}, n_threads) where {D, T}
-    return CUDA.zeros(T, D, length(forces_nounits))
+function init_forces_buffer(forces_nounits::AbstractGPUArray{SVector{D, T}}, n_threads) where {D, T}
+    return KernelAbstractions.zeros(get_backend(forces_nounits),
+                                    T, D, length(forces_nounits))
 end
 
 """
@@ -346,9 +347,9 @@ function specific_forces!(fs_nounits, atoms, coords, velocities, boundary, force
     return fs_nounits
 end
 
-function forces_nounits!(fs_nounits, sys::System{D, true, T}, neighbors,
+function forces_nounits!(fs_nounits, sys::System{D, AT, T}, neighbors,
                          fs_mat=CUDA.zeros(T, D, length(sys)), step_n::Integer=0;
-                         n_threads::Integer=Threads.nthreads()) where {D, T}
+                         n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
     fill!(fs_mat, zero(T))
     val_ft = Val(T)
 
