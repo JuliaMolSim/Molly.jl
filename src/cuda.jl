@@ -53,7 +53,7 @@ function pairwise_force_gpu!(fs_mat, coords::AbstractArray{SVector{D, C}}, veloc
 		maxs = CUDA.zeros(T, n_blocks, 3)u"nm"
 		CUDA.@sync @cuda blocks=(n_blocks,) threads=(WARPSIZE,) kernel_min_max!(sorted_sequence, 
 		mins, maxs, coords, Val(N), boundary)
-		CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) force_kernel!(sorted_sequence, 
+		CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(sorted_sequence, 
 				fs_mat, mins, maxs, coords, atoms, Val(N), r_cut, Val(force_units), pairwise_inters, 
 				boundary, step_n, special, eligible, Val(T))
 	end
@@ -258,8 +258,8 @@ end
 
 function boxes_dist(x1_min::D, x1_max::D, x2_min::D, x2_max::D, Lx::D) where D
 
-	a = abs(Molly.vector_1D(x2_max, x1_min, Lx))
-	b = abs(Molly.vector_1D(x1_max, x2_min, Lx))
+	a = abs(vector_1D(x2_max, x1_min, Lx))
+	b = abs(vector_1D(x1_max, x2_min, Lx))
 
 	return ifelse(
 		x1_min - x2_max <= zero(D) && x2_min - x1_max <= zero(D),
@@ -302,69 +302,85 @@ function force_kernel!(
 	# Keep track of the interactions between particles in r-block and the others in 32-blocks
 	force_smem = CuStaticSharedArray(T, (32, 3))
 	opposites_sum = CuStaticSharedArray(T, (32, 3))
+	eligible = CuStaticSharedArray(Bool, (32, 32))
+	special = CuStaticSharedArray(Bool, (32, 32))
 	r = Int32((N - 1) % 32 + 1)
-	r32_interactions = CuStaticSharedArray(T, (r, 3))
-	for k in a:b
+	@inbounds for k in a:b
 		force_smem[laneid(), k] = zero(T)
 		opposites_sum[laneid(), k] = zero(T)
-		if laneid() <= r
-			r32_interactions[laneid(), k] = zero(T)
-		end
 	end
 
     # The code is organised in 4 mutually excluding parts (this is the first (1) one)
 	if j < n_blocks && i < j
 		d_block = zero(D)
 		dist_block = zero(T)u"nm^2"
-		@inbounds for k in a:b	
+		for k in a:b	
 			d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
 			dist_block += d_block * d_block	
 		end
 		
 		# Check on block-block distance
-		if dist_block < r_cut * r_cut
+		if dist_block <= r_cut * r_cut
 
 			s_idx_i = sorted_seq[index_i]
 			coords_i = coords[s_idx_i] 
 			atoms_i = atoms[s_idx_i]
 			d_pb = zero(D)
 			dist_pb = zero(T)u"nm^2"
-			@inbounds for k in a:b	
+			for k in a:b	
 				d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
 				dist_pb += d_pb * d_pb
 			end
 
-			Bool_excl = dist_pb < r_cut * r_cut
-			coords_j = coords[sorted_seq[index_j]]
+			Bool_excl = dist_pb <= r_cut * r_cut
+			s_idx_j = sorted_seq[index_j]
+			coords_j = coords[s_idx_j]
+			shuffle_idx = laneid()
+			atoms_j = atoms[s_idx_j]
+			atype_j = atoms_j.atom_type
+			aindex_j = atoms_j.index
+			amass_j = atoms_j.mass
+			acharge_j = atoms_j.charge
+			aσ_j = atoms_j.σ
+			aϵ_j = atoms_j.ϵ
+
+			for m in a:warpsize()
+				eligible[laneid(), m] = eligible_matrix[s_idx_i, sorted_seq[j_0_tile + m]]
+				special[laneid(), m] = special_matrix[s_idx_i, sorted_seq[j_0_tile + m]]
+			end
 
 			# Shuffle
-			@inbounds for m in a:warpsize()
+			for m in a:warpsize()
 				sync_warp()
-				m2 = Int32((m + laneid() - 1) % 32 + 1)
-				s_idx_j = sorted_seq[j_0_tile + m2]
-				atoms_j = atoms[s_idx_j]
 				coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, laneid() + a, warpsize())
+				s_idx_j = CUDA.shfl_sync(0xFFFFFFFF, s_idx_j, laneid() + a, warpsize())
+				shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, laneid() + a, warpsize())
+				atype_j = CUDA.shfl_sync(0xFFFFFFFF, atype_j, laneid() + a, warpsize())
+				aindex_j = CUDA.shfl_sync(0xFFFFFFFF, aindex_j, laneid() + a, warpsize())
+				amass_j = CUDA.shfl_sync(0xFFFFFFFF, amass_j, laneid() + a, warpsize())
+				acharge_j = CUDA.shfl_sync(0xFFFFFFFF, acharge_j, laneid() + a, warpsize())
+				aσ_j = CUDA.shfl_sync(0xFFFFFFFF, aσ_j, laneid() + a, warpsize())
+				aϵ_j = CUDA.shfl_sync(0xFFFFFFFF, aϵ_j, laneid() + a, warpsize())
+				
+				atoms_j_shuffle = Atom(atype_j, aindex_j, amass_j, acharge_j, aσ_j, aϵ_j)
 				dr = vector(coords_j, coords_i, boundary)
 				r2 = dr[1]^2 + dr[2]^2 + dr[3]^2
+				condition = eligible[laneid(), shuffle_idx] == true && Bool_excl == true && r2 <= r_cut * r_cut
  				
-				f = ifelse(
-					eligible_matrix[s_idx_i, s_idx_j] == true && Bool_excl == true && r2 <= r_cut * r_cut, 
-					sum_pairwise_forces(
-						inters_tuple,
-						atoms_i, atoms_j,
-						Val(force_units),
-						special_matrix[s_idx_i, s_idx_j],
-						coords_i, coords_j,
-						boundary,
-						zero(coords_i) * u"ps^-1", 
-						zero(coords_j) * u"ps^-1",
-						step_n 
-					), 
-					zero(T)
-				)
+				f = condition ? sum_pairwise_forces(
+					inters_tuple,
+					atoms_i, atoms_j_shuffle,
+					Val(force_units),
+					special[laneid(), shuffle_idx],
+					coords_i, coords_j,
+					boundary,
+					zero(coords_i) * u"ps^-1", 
+					zero(coords_j) * u"ps^-1",
+					step_n) : SVector{3, T}(zero(T), zero(T), zero(T))
+
 				for k in a:b
 					force_smem[laneid(), k] += ustrip(f[k])
-					opposites_sum[m2, k] -= ustrip(f[k])
+					opposites_sum[shuffle_idx, k] -= ustrip(f[k])
 				end
 			end
 			sync_threads()
@@ -387,61 +403,51 @@ function force_kernel!(
 
 		d_block = zero(D)
 		dist_block = zero(T)u"nm^2"
-		@inbounds for k in a:b
+		for k in a:b
 			d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
 			dist_block += d_block * d_block	
 		end
 
-		if dist_block < r_cut * r_cut 
+		if dist_block <= r_cut * r_cut 
 
 			s_idx_i = sorted_seq[index_i]
 			coords_i = coords[s_idx_i]
 			atoms_i = atoms[s_idx_i]
 			d_pb = zero(D)
 			dist_pb = zero(T)u"nm^2"			
-			@inbounds for k in a:b	
+			for k in a:b	
 				d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
 				dist_pb += d_pb * d_pb
 			end
-			Bool_excl = dist_pb < r_cut * r_cut
+			Bool_excl = dist_pb <= r_cut * r_cut
 			
 			# Compute the 32 * r distances
-			@inbounds for m in a:r
+			for m in a:r
 				s_idx_j = sorted_seq[j_0_tile + m]
 				coords_j = coords[s_idx_j]
 				atoms_j = atoms[s_idx_j]
 				dr = vector(coords_j, coords_i, boundary)
 				r2 = dr[1]^2 + dr[2]^2 + dr[3]^2
-				f = ifelse(
-					eligible_matrix[s_idx_i, s_idx_j] == true && Bool_excl == true && r2 <= r_cut * r_cut, 
-					sum_pairwise_forces(
-						inters_tuple,
-						atoms_i, atoms_j,
-						Val(force_units),
-						special_matrix[s_idx_i, s_idx_j],
-						coords_i, coords_j,
-						boundary,
-						zero(coords_i) * u"ps^-1", 
-						zero(coords_j) * u"ps^-1",
-						step_n 
-					), 
-					zero(T)
-				)
+				condition = eligible_matrix[s_idx_i, s_idx_j] == true && Bool_excl == true && r2 <= r_cut * r_cut
+
+				f = condition ? sum_pairwise_forces(
+					inters_tuple,
+					atoms_i, atoms_j,
+					Val(force_units),
+					special_matrix[s_idx_i, s_idx_j],
+					coords_i, coords_j,
+					boundary,
+					zero(coords_i) * u"ps^-1", 
+					zero(coords_j) * u"ps^-1",
+					step_n) : SVector{3, T}(zero(T), zero(T), zero(T))
+
 				for k in a:b
 					force_smem[laneid(), k] += ustrip(f[k])
+					CUDA.atomic_add!(
+						pointer(forces_nounits, sorted_seq[j_0_tile + m] * b - (b - k)), 
+						ustrip(f[k])
+					)
 				end
-				val_x = -ustrip(f[1])
-				val_y = -ustrip(f[2])
-				val_z = -ustrip(f[3])
-				for offset in (Int32(16), Int32(8), Int32(4), Int32(2), a)
-					val_x += CUDA.shfl_down_sync(0xFFFFFFFF, val_x, offset, warpsize())
-					val_y += CUDA.shfl_down_sync(0xFFFFFFFF, val_y, offset, warpsize())
-					val_z += CUDA.shfl_down_sync(0xFFFFFFFF, val_z, offset, warpsize())
-				end
-				r32_interactions[m, 1] = val_x
-				r32_interactions[m, 2] = val_y
-				r32_interactions[m, 3] = val_z
-				
 			end
 
 			# Sum contributions of the r-block to the other standard blocks
@@ -450,14 +456,6 @@ function force_kernel!(
 					pointer(forces_nounits, sorted_seq[index_i] * b - (b - k)), 
 					-force_smem[laneid(), k]
 				) 
-				if laneid() <= r
-
-					# Note the index j: we want to update the forces applied to the particles in the last block
-					CUDA.atomic_add!(
-						pointer(forces_nounits, sorted_seq[index_j] * b - (b - k)), 
-						-r32_interactions[laneid(), k]
-					)
-				end	
 			end
 		end
 	end
@@ -469,27 +467,24 @@ function force_kernel!(
 		s_idx_i = sorted_seq[index_i]
 		coords_i = coords[s_idx_i]
 		atoms_i = atoms[s_idx_i]
-		@inbounds for m in laneid() + a : warpsize()
+		for m in laneid() + a : warpsize()
 			s_idx_j = sorted_seq[j_0_tile + m]
 			coords_j = coords[s_idx_j]
 			atoms_j = atoms[s_idx_j]
 			dr = vector(coords_j, coords_i, boundary)
 			r2 = dr[1]^2 + dr[2]^2 + dr[3]^2
-			f = ifelse(
-				eligible_matrix[s_idx_i, s_idx_j] == true && r2 <= r_cut * r_cut, 
-				sum_pairwise_forces(
-					inters_tuple,
-					atoms_i, atoms_j,
-					Val(force_units),
-					special_matrix[s_idx_i, s_idx_j],
-					coords_i, coords_j,
-					boundary,
-					zero(coords_i) * u"ps^-1", 
-					zero(coords_j) * u"ps^-1",
-					step_n 
-				), 
-				zero(T)
-			)
+			condition = eligible_matrix[s_idx_i, s_idx_j] == true && r2 <= r_cut * r_cut
+
+			f = condition ? sum_pairwise_forces(
+				inters_tuple,
+				atoms_i, atoms_j,
+				Val(force_units),
+				special_matrix[s_idx_i, s_idx_j],
+				coords_i, coords_j,
+				boundary,
+				zero(coords_i) * u"ps^-1", 
+				zero(coords_j) * u"ps^-1",
+				step_n) : SVector{3, T}(zero(T), zero(T), zero(T))
 			
 			for k in a:b
 				force_smem[laneid(), k] += ustrip(f[k])
@@ -516,27 +511,25 @@ function force_kernel!(
 			s_idx_i = sorted_seq[index_i]
 			coords_i = coords[s_idx_i]
 			atoms_i = atoms[s_idx_i]
-			@inbounds for m in laneid() + a : r
+			for m in laneid() + a : r
 				s_idx_j = sorted_seq[j_0_tile + m]
 				coords_j = coords[s_idx_j]
 				atoms_j = atoms[s_idx_j]
 				dr = vector(coords_j, coords_i, boundary)
 				r2 = dr[1]^2 + dr[2]^2 + dr[3]^2
-				f = ifelse(
-					eligible_matrix[s_idx_i, s_idx_j] == true && r2 <= r_cut * r_cut, 
-					sum_pairwise_forces(
-						inters_tuple,
-						atoms_i, atoms_j,
-						Val(force_units),
-						special_matrix[s_idx_i, s_idx_j],
-						coords_i, coords_j,
-						boundary,
-						zero(coords_i) * u"ps^-1", 
-						zero(coords_j) * u"ps^-1",
-						step_n 
-					), 
-					zero(T)
-				)
+				condition = eligible_matrix[s_idx_i, s_idx_j] == true && r2 <= r_cut * r_cut
+				
+				f = condition ? sum_pairwise_forces(
+					inters_tuple,
+					atoms_i, atoms_j,
+					Val(force_units),
+					special_matrix[s_idx_i, s_idx_j],
+					coords_i, coords_j,
+					boundary,
+					zero(coords_i) * u"ps^-1", 
+					zero(coords_j) * u"ps^-1",
+					step_n) : SVector{3, T}(zero(T), zero(T), zero(T))
+
 				for k in a:b
 					force_smem[laneid(), k] += ustrip(f[k])
 					opposites_sum[m, k] -= ustrip(f[k])
@@ -555,6 +548,7 @@ function force_kernel!(
 
     return nothing
 end
+
 
 
 
