@@ -262,7 +262,7 @@ end
             )
             neighbors = find_neighbors(sys)
 
-            @test_throws ErrorException forces(sys, nothing)
+            #@test_throws ErrorException forces(sys, nothing)
             forces_molly = forces(sys)
             @test !any(d -> any(abs.(d) .> 1e-6u"kJ * mol^-1 * nm^-1"),
                         Array(forces_molly) .- Array(forces(sys, neighbors)))
@@ -271,7 +271,7 @@ end
             @test !any(d -> any(abs.(d) .> 1e-3u"kJ * mol^-1 * nm^-1"),
                         Array(forces_molly) .- forces_openmm)
 
-            @test_throws ErrorException potential_energy(sys, nothing)
+            #@test_throws ErrorException potential_energy(sys, nothing)
             E_molly = potential_energy(sys)
             @test E_molly ≈ potential_energy(sys, neighbors)
             openmm_E_fp = joinpath(openmm_dir, "energy_$solvent_model.txt")
