@@ -888,11 +888,12 @@ function System(coord_file::AbstractString,
     coords = wrap_coords.(coords, (boundary_used,))
 
     if gpu || !use_cell_list
-        neighbor_finder = DistanceNeighborFinder(
+        neighbor_finder = GPUNeighborFinder(
             eligible=(gpu ? CuArray(eligible) : eligible),
-            special=(gpu ? CuArray(special) : special),
-            n_steps=10,
             dist_cutoff=T(dist_neighbors),
+            special=(gpu ? CuArray(special) : special),
+            n_steps_reorder=10,
+            initialized=false,
         )
     else
         neighbor_finder = CellListMapNeighborFinder(
@@ -1277,11 +1278,12 @@ function System(T::Type,
     specific_inter_lists = tuple(specific_inter_array...)
 
     if gpu || !use_cell_list
-        neighbor_finder = DistanceNeighborFinder(
+        neighbor_finder = GPUNeighborFinder(
             eligible=(gpu ? CuArray(eligible) : eligible),
             special=(gpu ? CuArray(special) : special),
-            n_steps=10,
+            n_steps_reorder=10,
             dist_cutoff=T(dist_neighbors),
+            initialized=false,
         )
     else
         neighbor_finder = CellListMapNeighborFinder(

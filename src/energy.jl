@@ -75,7 +75,8 @@ Calculate the potential energy due to a given interaction type.
 Custom interaction types should implement this function.
 """
 function potential_energy(sys; n_threads::Integer=Threads.nthreads())
-    return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+    buffers = init_forces_buffer(ustrip_vec.(zero(sys.coords)), sys.coords, n_threads)
+    return potential_energy(sys, find_neighbors(sys; n_threads=n_threads), buffers; n_threads=n_threads)
 end
 
 function potential_energy(sys::System{D, false, T}, neighbors, step_n::Integer=0;
@@ -253,7 +254,7 @@ function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_a
     return pe
 end
 
-function potential_energy(sys::System{D, true, T}, neighbors, step_n::Integer=0;
+function potential_energy(sys::System{D, true, T}, neighbors, buffers, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where {D, T}
     pe_vec_nounits = CUDA.zeros(T, 1)
     val_ft = Val(T)
@@ -261,15 +262,12 @@ function potential_energy(sys::System{D, true, T}, neighbors, step_n::Integer=0;
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(length(sys))
-        pairwise_pe_gpu!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary,
-                             pairwise_inters_nonl, nbs, step_n, CuArray{Bool}(ones(Bool, length(sys), length(sys))), CuArray{Bool}(ones(Bool, length(sys), length(sys))), 1, sys.energy_units, val_ft)
+        pairwise_pe_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters_nonl, nbs, step_n)
     end
 
     pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nl) > 0
-        pairwise_pe_gpu!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary,
-                            pairwise_inters_nl, nothing, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible, sys.neighbor_finder.dist_cutoff, sys.energy_units, val_ft)
-        
+        pairwise_pe_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters_nl, nothing, step_n)   
     end
 
     for inter_list in values(sys.specific_inter_lists)
