@@ -115,7 +115,7 @@ Base.:+(x::SpecificForce2Atoms, y::SpecificForce2Atoms) = SpecificForce2Atoms(x.
 Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3)
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 
-function init_forces_buffer(forces_nounits, n_threads)
+function init_forces_buffer(forces_nounits, ::AbstractArray{SVector{D, C}}, n_threads) where {D, C}
     if n_threads == 1
         return nothing
     else
@@ -123,8 +123,21 @@ function init_forces_buffer(forces_nounits, n_threads)
     end
 end
 
-function init_forces_buffer(forces_nounits::CuArray{SVector{D, T}}, n_threads) where {D, T}
-    return CUDA.zeros(T, D, length(forces_nounits))
+struct ForcesBuffer{F, C}
+    fs_mat::F
+    box_mins::C
+    box_maxs::C
+    Morton_seq::CuArray{Int32}
+end
+
+function init_forces_buffer(forces_nounits::CuArray{SVector{D, T}}, ::AbstractArray{SVector{D, C}}, n_threads) where {D, T, C}
+    N = length(forces_nounits)
+    n_blocks = cld(N, 32)
+    fs_mat = CUDA.zeros(T, D, N)
+    box_mins = CUDA.zeros(C, n_blocks, D) 
+    box_maxs = CUDA.zeros(C, n_blocks, D) 
+    Morton_seq = CUDA.zeros(Int32, N)
+    return ForcesBuffer(fs_mat, box_mins, box_maxs, Morton_seq)
 end
 
 """
@@ -139,7 +152,7 @@ end
 
 function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     forces_nounits = ustrip_vec.(zero(sys.coords))
-    forces_buffer = init_forces_buffer(forces_nounits, n_threads)
+    forces_buffer = init_forces_buffer(forces_nounits, sys.coords, n_threads)
     forces_nounits!(forces_nounits, sys, neighbors, forces_buffer, step_n; n_threads=n_threads)
     return forces_nounits .* sys.force_units
 end
@@ -347,31 +360,29 @@ function specific_forces!(fs_nounits, atoms, coords, velocities, boundary, force
 end
 
 function forces_nounits!(fs_nounits, sys::System{D, true, T}, neighbors,
-                         fs_mat=CUDA.zeros(T, D, length(sys)), step_n::Integer=0;
+                         buffers, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads()) where {D, T}
-    fill!(fs_mat, zero(T))
+    fill!(buffers.fs_mat, zero(T))
     val_ft = Val(T)
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         n = length(sys)
         nbs = NoNeighborList(n)
-        pairwise_force_gpu!(fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters_nonl,
-                            nbs, step_n, CuArray{Bool}(ones(Bool, n, n)), CuArray{Bool}(ones(Bool, n, n)), 1, sys.force_units, val_ft)
+        pairwise_force_gpu!(buffers, sys, pairwise_inters_nonl, nbs, step_n)
     end
 
     pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nl) > 0
-        pairwise_force_gpu!(fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters_nl,
-                            nothing, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible, sys.neighbor_finder.dist_cutoff, sys.force_units, val_ft)
+        pairwise_force_gpu!(buffers, sys, pairwise_inters_nl, nothing, step_n)
     end
 
     for inter_list in values(sys.specific_inter_lists)
-        specific_force_gpu!(fs_mat, inter_list, sys.coords, sys.velocities, sys.atoms,
+        specific_force_gpu!(buffers.fs_mat, inter_list, sys.coords, sys.velocities, sys.atoms,
                             sys.boundary, step_n, sys.force_units, val_ft)
     end
 
-    fs_nounits .= reinterpret(SVector{D, T}, vec(fs_mat))
+    fs_nounits .= reinterpret(SVector{D, T}, vec(buffers.fs_mat))
 
     for inter in values(sys.general_inters)
         fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, step_n=step_n,
