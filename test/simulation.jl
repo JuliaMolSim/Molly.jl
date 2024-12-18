@@ -221,8 +221,75 @@ end
     )
     random_velocities!(s, temp)
 
+    s_gpu = System(
+        atoms=CuArray([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
+        coords=CuArray(coords),
+        boundary=boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        neighbor_finder=GPUNeighborFinder(
+            eligible=CuArray(trues(n_atoms, n_atoms)),
+            n_steps_reorder=10,
+            dist_cutoff=2.0u"nm",
+        ),
+        loggers=(coords=CoordinatesLogger(100),),
+    )
+
     for simulator in simulators
         @time simulate!(s, simulator, n_steps; n_threads=1)
+        @time simulate!(s_gpu, simulator, n_steps; n_threads=1)
+    end
+end
+
+@testset "Verlet integrators on CPU and GPU" begin
+    n_atoms = 100
+    n_steps = 1000
+    temp = 298.0u"K"
+    boundary = CubicBoundary(4.0u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
+    velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
+    simulators = [
+        VelocityVerlet(dt=0.002u"ps"),
+        Verlet(dt=0.002u"ps"),
+        StormerVerlet(dt=0.002u"ps"),
+    ]
+
+    s = System(
+        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.1u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+        coords=coords,
+        velocities=velocities,
+        boundary=boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        neighbor_finder=DistanceNeighborFinder(
+            eligible=trues(n_atoms, n_atoms),
+            n_steps=10,
+            dist_cutoff=2.0u"nm",
+        ),
+        loggers=(coords=CoordinatesLogger(100),),
+    )
+
+
+    s_gpu = System(
+        atoms=CuArray([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.1u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
+        coords=CuArray(coords),
+        velocities=CuArray(velocities),
+        boundary=boundary,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        neighbor_finder=GPUNeighborFinder(
+            eligible=CuArray(trues(n_atoms, n_atoms)),
+            n_steps_reorder=10,
+            dist_cutoff=2.0u"nm",
+        ),
+        loggers=(coords=CoordinatesLogger(100),),
+    )
+
+    for simulator in simulators
+        @time simulate!(s, simulator, n_steps; n_threads=1)
+        @time simulate!(s_gpu, simulator, n_steps; n_threads=1)
+        coord_diff = sum(sum(map(x -> abs.(x), s.coords .- Array(s_gpu.coords)))) / (3 * n_atoms)
+        E_diff = abs(potential_energy(s) - potential_energy(s_gpu))
+        @info "$(rpad(name, 19)) - difference per coordinate $coord_diff - potential energy difference $E_diff"
+        @test coord_diff < 1e-4u"nm"
+        @test E_diff < 5e-4u"kJ * mol^-1"
     end
 end
 
@@ -324,6 +391,67 @@ end
         )
 
         @time simulate!(s, simulator, n_steps)
+    end
+end
+
+@testset "LJ on CPU and GPU" begin
+    n_atoms = 100
+    n_steps = 100
+    temp = 298.0u"K"
+    boundary = CubicBoundary(2.0u"nm")
+    G = 10.0u"kJ * mol * nm * g^-2"
+    simulator = VelocityVerlet(dt=0.002u"ps")
+    pairwise_inter_types = (
+        LennardJones(use_neighbors=true), 
+        LennardJones(use_neighbors=false),
+        LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),
+        LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), use_neighbors=true),
+        LennardJones(cutoff=ShiftedForceCutoff(1.0u"nm"), use_neighbors=true),
+        LennardJones(cutoff=CubicSplineCutoff(0.6u"nm", 1.0u"nm"), use_neighbors=true),
+    )
+
+    for inter in pairwise_inter_types
+        if use_neighbors(inter)
+            neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms), n_steps=10,
+                                                        dist_cutoff=1.2u"nm")
+        else
+            neighbor_finder = NoNeighborFinder()
+        end
+
+        neighbor_finder_gpu = GPUNeighborFinder(eligible=CuArray(trues(n_atoms, n_atoms)), n_steps_reorder=10,
+                                                        dist_cutoff=1.2u"nm")
+
+        atoms = [Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]  
+        coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")                                             
+        velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
+
+        s = System(
+            atoms=atoms,
+            coords=coords,
+            boundary=boundary,
+            velocities=velocities,
+            pairwise_inters=(inter,),
+            neighbor_finder=neighbor_finder,
+        )
+
+        s_gpu = System(
+            atoms=CuArray(atoms),
+            coords=CuArray(coords),
+            boundary=boundary,
+            velocities=CuArray(velocities),
+            pairwise_inters=(inter,),
+            neighbor_finder=neighbor_finder_gpu,
+        )
+
+        E_diff_start = abs(potential_energy(s) - potential_energy(s_gpu))
+        @test E_diff_start < 5e-4u"kJ * mol^-1"
+        @time simulate!(s, simulator, n_steps)
+        @time simulate!(s_gpu, simulator, n_steps)
+        coord_diff = sum(sum(map(x -> abs.(x), s.coords .- Array(s_gpu.coords)))) / (3 * n_atoms)
+        E_diff = abs(potential_energy(s) - potential_energy(s_gpu))
+        @info "$(rpad(inter, 19)) - difference per coordinate $coord_diff - potential energy difference $E_diff_start (start) and $E_diff" 
+        @test coord_diff < 5e-4u"nm"
+        @test E_diff < 5e-3u"kJ * mol^-1"
     end
 end
 
@@ -1200,7 +1328,15 @@ end
         neighbor_finder = NoNeighborFinder()
         cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
         pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
-        if nl
+        if nl && gpu
+            neighbor_finder = GPUNeighborFinder(
+                eligible=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+                n_steps_reorder=10,
+                dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+            )
+            pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
+        end
+        if nl && !gpu
             neighbor_finder = DistanceNeighborFinder(
                 eligible=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
                 n_steps=10,

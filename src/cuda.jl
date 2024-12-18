@@ -33,13 +33,13 @@ function pairwise_force_gpu!(buffers, sys::System{D, true, T}, pairwise_inters, 
     if typeof(nbs) == NoNeighborList
         kernel = @cuda launch=false pairwise_force_kernel_nonl!(
 			    buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, step_n,
-                Val(D), Val(force_units))
+                Val(D), Val(sys.force_units))
         conf = launch_configuration(kernel.fun)
         threads_basic = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512"))
-        nthreads = min(length(atoms), threads_basic, conf.threads)
+        nthreads = min(length(sys.atoms), threads_basic, conf.threads)
         nthreads = cld(nthreads, WARPSIZE) * WARPSIZE
-        n_blocks_i = cld(length(atoms), WARPSIZE)
-        n_blocks_j = cld(length(atoms), nthreads)
+        n_blocks_i = cld(length(sys.atoms), WARPSIZE)
+        n_blocks_j = cld(length(sys.atoms), nthreads)
         kernel(buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, step_n, Val(D),
                Val(sys.force_units); threads=nthreads, blocks=(n_blocks_i, n_blocks_j))
 	else    
@@ -68,22 +68,20 @@ function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, true, T}, pair
 		n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
     	CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
                 pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, nbs,
-                step_n, Val(energy_units))
+                step_n, Val(sys.energy_units))
 	else
 		N = length(sys.coords)
 		n_blocks = cld(N, WARPSIZE)
 		r_cut = sys.neighbor_finder.dist_cutoff
-		if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
-            Morton_bits = 4
-            w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
-            Morton_seq_cpu = sorted_Morton_seq(Array(sys.coords), w, Morton_bits)
-			copyto!(buffers.Morton_seq, Morton_seq_cpu)
-            fill!(buffers.box_mins, zero(eltype(buffers.box_mins)))
-            fill!(buffers.box_maxs, zero(eltype(buffers.box_maxs)))
-            CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N), sys.boundary)
-            buffers = ForcesBuffer(buffers.fs_mat, buffers.box_mins, buffers.box_maxs, buffers.Morton_seq)
-			sys.neighbor_finder.initialized = true
-        end
+		Morton_bits = 4
+		w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
+		Morton_seq_cpu = sorted_Morton_seq(Array(sys.coords), w, Morton_bits)
+		copyto!(buffers.Morton_seq, Morton_seq_cpu)
+		fill!(buffers.box_mins, zero(eltype(buffers.box_mins)))
+		fill!(buffers.box_maxs, zero(eltype(buffers.box_maxs)))
+		CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N), sys.boundary)
+		buffers = ForcesBuffer(buffers.fs_mat, buffers.box_mins, buffers.box_maxs, buffers.Morton_seq)
+		sys.neighbor_finder.initialized = true
 		CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(buffers.Morton_seq, 
 		pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords, sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), pairwise_inters, sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible, Val(T))
 	end
@@ -315,9 +313,6 @@ function force_kernel!(
 		opposites_sum[laneid(), k] = zero(T)
 	end
 
-	if index_i == 1 && index_j == 43
-		@cuprintln(ustrip(maxs[2, 1]))
-	end
 
     # The code is organised in 4 mutually excluding parts (this is the first (1) one)
 	if j < n_blocks && i < j

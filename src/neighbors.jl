@@ -78,12 +78,15 @@ function GPUNeighborFinder(;
                             dist_cutoff,
                             special=zero(eligible),
                             n_steps_reorder=10,
-                            initialized)
+                            initialized=false)
     return GPUNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
-                eligible, dist_cutoff, special, n_steps_reorder, false)
+                eligible, dist_cutoff, special, n_steps_reorder, initialized)
 end
 
 find_neighbors(sys::System{D, true}, nf::GPUNeighborFinder, current_neighbors=nothing, step_n::Integer=0, initialized::Bool=false; kwargs...) where D = nothing
+
+find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
+
 
 function find_neighbors(sys::System{D, false},
                         nf::DistanceNeighborFinder,

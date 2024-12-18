@@ -75,8 +75,7 @@ Calculate the potential energy due to a given interaction type.
 Custom interaction types should implement this function.
 """
 function potential_energy(sys; n_threads::Integer=Threads.nthreads())
-    buffers = init_forces_buffer(ustrip_vec.(zero(sys.coords)), sys.coords, n_threads)
-    return potential_energy(sys, find_neighbors(sys; n_threads=n_threads), buffers; n_threads=n_threads)
+    return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
 function potential_energy(sys::System{D, false, T}, neighbors, step_n::Integer=0;
@@ -254,7 +253,8 @@ function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_a
     return pe
 end
 
-function potential_energy(sys::System{D, true, T}, neighbors, buffers, step_n::Integer=0;
+function potential_energy(sys::System{D, true, T}, neighbors, step_n::Integer=0,
+                          buffers=init_forces_buffer(ustrip_vec.(zero(sys.coords)), sys.coords, 1);
                           n_threads::Integer=Threads.nthreads()) where {D, T}
     pe_vec_nounits = CUDA.zeros(T, 1)
     val_ft = Val(T)

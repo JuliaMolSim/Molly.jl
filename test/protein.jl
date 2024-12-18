@@ -67,6 +67,34 @@ end
     @test 3.6f0 < s.boundary.side_lengths[1] < 3.8f0
 end
 
+@testset "Peptide Float32 no units on GPU" begin
+    n_steps = 1_000
+    temp = 298.0f0
+    press = Float32(ustrip(u"u * nm^-1 * ps^-2", 1.0f0u"bar"))
+    s = System(
+        Float32,
+        joinpath(data_dir, "5XER", "gmx_coords.gro"),
+        joinpath(data_dir, "5XER", "gmx_top_ff.top");
+        loggers=(
+            temp=TemperatureLogger(Float32, 10),
+            coords=CoordinatesLogger(Float32, 10),
+            energy=TotalEnergyLogger(Float32, 10),
+        ),
+        gpu=true,
+        units=false,
+    )
+    thermostat = AndersenThermostat(temp, 10.0f0)
+    barostat = MonteCarloBarostat(press, temp, s.boundary; n_steps=20)
+    simulator = VelocityVerlet(dt=0.0002f0, coupling=(thermostat, barostat))
+
+    atoms = Array(s.atoms)
+    s.velocities = CuArray([random_velocity(mass(a), temp) .* 0.01f0 for a in atoms])
+    simulate!(deepcopy(s), simulator, 100; n_threads=1)
+    @time simulate!(s, simulator, n_steps; n_threads=1)
+    @test typeof(s.neighbor_finder).name.wrapper == GPUNeighborFinder
+    @test 3.6f0 < Array(s.boundary.side_lengths)[1] < 3.8f0
+end
+
 @testset "OpenMM protein comparison" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     show(devnull, ff)
