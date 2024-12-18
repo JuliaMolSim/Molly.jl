@@ -4,11 +4,12 @@ function get_array_type(a::AT) where AT <: AbstractArray
     return AT.name.wrapper
 end
 
-@inline function sum_pairwise_forces(inters, coord_i, coord_j, atom_i, atom_j,
-                                    boundary, special, ::Val{F}) where F
+@inline function sum_pairwise_forces(inters, atom_i, atom_j, ::Val{F}, special, coord_i, coord_j,
+                                     boundary, vel_i, vel_j, step_n) where F
     dr = vector(coord_i, coord_j, boundary)
     f_tuple = ntuple(length(inters)) do inter_type_i
-        force_gpu(inters[inter_type_i], dr, coord_i, coord_j, atom_i, atom_j, boundary, special)
+        force_gpu(inters[inter_type_i], dr, atom_i, atom_j, F, special, coord_i, coord_j, boundary,
+                  vel_i, vel_j, step_n)
     end
     f = sum(f_tuple)
     if unit(f[1]) != F
@@ -20,37 +21,44 @@ end
     return f
 end
 
-function gpu_threads_blocks_pairwise(n_neighbors)
+function gpu_threads_pairwise(n_neighbors)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512"))
     return n_threads_gpu
 end
 
-function gpu_threads_blocks_specific(n_inters)
+function gpu_threads_specific(n_inters)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_SPECIFIC", "128"))
     return n_threads_gpu
 end
 
-function pairwise_force_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundary,
-                            pairwise_inters, nbs, force_units, ::Val{T}) where {D, C, T}
+function pairwise_force_gpu!(fs_mat, coords::AbstractArray{SVector{D, C}}, velocities, atoms,
+                    boundary, pairwise_inters, nbs, step_n, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    fs_mat = KernelAbstractions.zeros(backend, T, D, length(atoms))
-    n_threads_gpu = gpu_threads_blocks_pairwise(length(nbs))
-    kernel! = pairwise_force_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, coords, atoms, boundary, pairwise_inters, nbs,
-            Val(D), Val(force_units), ndrange = length(nbs))
+    if typeof(nbs) == NoNeighborList
+        n_threads_gpu = gpu_threads_pairwise(length(atoms))
+        kernel! = pairwise_force_kernel_nonl!(backend, n_threads_gpu)
+        kernel!(fs_mat, coords, velocities, atoms, boundary, pairwise_inters, step_n, Val(D), Val(force_units); ndrange = length(atoms))
+    else
+        n_threads_gpu = gpu_threads_pairwise(length(nbs))
+        kernel! = pairwise_force_kernel_nl!(backend, n_threads_gpu)
+        kernel!(fs_mat, coords, velocities, atoms, boundary, pairwise_inters,
+                nbs, step_n, Val(D), Val(force_units); ndrange = length(nbs))
+
+    end
     return fs_mat
 end
 
-@kernel function pairwise_force_kernel!(forces, @Const(coords),
-                                        @Const(atoms), boundary, inters,
-                                        @Const(neighbors), ::Val{D},
-                                        ::Val{F}) where {D, F}
+@kernel function pairwise_force_kernel_nl!(forces, @Const(coords),
+                                           @Const(velocities), @Const(atoms),
+                                           boundary, inters,
+                                           @Const(neighbors), step_n, ::Val{D},
+                                           ::Val{F}) where {D, F}
 
     inter_i = @index(Global, Linear)
 
     @inbounds if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
-        f = sum_pairwise_forces(inters, coords[i], coords[j], atoms[i], atoms[j], boundary, special, Val(F))
+        f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), special, coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
         for dim in 1:D
             fval = ustrip(f[dim])
             Atomix.@atomic forces[dim, i] = forces[dim, i] - fval
@@ -59,55 +67,74 @@ end
     end
 end
 
-function specific_force_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
-                            boundary, force_units, ::Val{T}) where {D, C, T}
+@kernel function pairwise_force_kernel_nonl!(forces, @Const(coords),
+                                             @Const(velocities), @Const(atoms),
+                                             boundary, inters,
+                                             step_n, ::Val{D},
+                                             ::Val{F}) where {D, F}
+
+    i = @index(Global, Linear)
+
+    @inbounds for j = 1:length(atoms)
+        if i != j
+            f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), false, coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
+            for dim in 1:D
+                fval = ustrip(f[dim])
+                Atomix.@atomic forces[dim, i] = forces[dim, i] - fval
+                Atomix.@atomic forces[dim, j] = forces[dim, j] + fval
+            end
+        end
+    end
+end
+
+function specific_force_gpu!(fs_mat, inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
+                            velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    fs_mat = KernelAbstractions.zeros(backend, T, D, length(coords))
-    n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
+    n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_1_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, coords, boundary, inter_list.is, inter_list.inters,
-            Val(D), Val(force_units), ndrange = length(inter_list))
+    kernel!(fs_mat, coords, velocities, atoms, boundary, step_n, inter_list.is,
+            inter_list.inters, Val(D), Val(force_units);
+            ndrange = length(inter_list))
     return fs_mat
 end
 
-function specific_force_gpu(inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
-                            boundary, force_units, ::Val{T}) where {D, C, T}
+function specific_force_gpu!(fs_mat, inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
+                            velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    fs_mat = KernelAbstractions.zeros(backend, T, D, length(coords))
-    n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
+    n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_2_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, coords, boundary, inter_list.is, inter_list.js,
-            inter_list.inters, Val(D), Val(force_units),
+    kernel!(fs_mat, coords, velocities, atoms, boundary, step_n, inter_list.is,
+            inter_list.js, inter_list.inters, Val(D), Val(force_units);
             ndrange = length(inter_list))
     return fs_mat
 end
 
-function specific_force_gpu(inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
-                            boundary, force_units, ::Val{T}) where {D, C, T}
+function specific_force_gpu!(fs_mat, inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
+                            velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    fs_mat = KernelAbstractions.zeros(backend, T, D, length(coords))
-    n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
+    n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_3_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, coords, boundary, inter_list.is, inter_list.js,
-            inter_list.ks, inter_list.inters, Val(D), Val(force_units),
-            ndrange = length(inter_list))
+    kernel!(fs_mat, coords, velocities, atoms, boundary, step_n, inter_list.is,
+            inter_list.js, inter_list.ks, inter_list.inters, Val(D),
+            Val(force_units); ndrange = length(inter_list))
     return fs_mat
 end
 
-function specific_force_gpu(inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
-                            boundary, force_units, ::Val{T}) where {D, C, T}
+function specific_force_gpu!(fs_mat, inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
+                            velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    fs_mat = KernelAbstractions.zeros(backend, T, D, length(coords))
-    n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
+    n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_4_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(fs_mat, coords, boundary, inter_list.is, inter_list.js,
-            inter_list.ks, inter_list.ls, inter_list.inters, Val(D),
-            Val(force_units), ndrange = length(inter_list))
+    kernel!(fs_mat, coords, velocities, atoms, boundary, step_n, inter_list.is,
+            inter_list.js, inter_list.ks, inter_list.ls, inter_list.inters,
+            Val(D), Val(force_units); ndrange = length(inter_list))
     return fs_mat
 end
 
 @kernel function specific_force_1_atoms_kernel!(forces, @Const(coords),
-                                                boundary, @Const(is),
+                                                @Const(velocities),
+                                                @Const(atoms), boundary,
+                                                step_n, @Const(is),
                                                 @Const(inters), ::Val{D},
                                                 ::Val{F}) where {D, F}
 
@@ -115,19 +142,20 @@ end
 
     @inbounds if inter_i <= length(is)
         i = is[inter_i]
-        fs = force_gpu(inters[inter_i], coords[i], boundary)
+        fs = force_gpu(inters[inter_i], coords[i], boundary, atoms[i], F, velocities[i], step_n)
         if unit(fs.f1[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
         for dim in 1:D
-            Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
+            Atomix.@atomic forces[dim, i] += ustrip(fs.f1[dim])
         end
     end
 end
 
 @kernel function specific_force_2_atoms_kernel!(forces, @Const(coords),
-                                                boundary, @Const(is),
-                                                @Const(js),
+                                                @Const(velocities),
+                                                @Const(atoms), boundary,
+                                                step_n, @Const(is), @Const(js),
                                                 @Const(inters), ::Val{D},
                                                 ::Val{F}) where {D, F}
 
@@ -135,19 +163,22 @@ end
 
     @inbounds if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
-        fs = force_gpu(inters[inter_i], coords[i], coords[j], boundary)
+        fs = force_gpu(inters[inter_i], coords[i], coords[j], boundary, atoms[i], atoms[j], F,
+                       velocities[i], velocities[j], step_n)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
         for dim in 1:D
-            Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
-            Atomix.@atomic :monotonic forces[dim, j] += ustrip(fs.f2[dim])
+            Atomix.@atomic forces[dim, i] += ustrip(fs.f1[dim])
+            Atomix.@atomic forces[dim, j] += ustrip(fs.f2[dim])
         end
     end
 end
 
 @kernel function specific_force_3_atoms_kernel!(forces, @Const(coords),
-                                                boundary, @Const(is),
+                                                @Const(velocities),
+                                                @Const(atoms), boundary,
+                                                step_n, @Const(is),
                                                 @Const(js), @Const(ks),
                                                 @Const(inters), ::Val{D},
                                                 ::Val{F}) where {D, F}
@@ -156,20 +187,23 @@ end
 
     @inbounds if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
-        fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary)
+        fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary, atoms[i],
+                       atoms[j], atoms[k], F, velocities[i], velocities[j], velocities[k], step_n)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
         for dim in 1:D
-            Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
-            Atomix.@atomic :monotonic forces[dim, j] += ustrip(fs.f2[dim])
-            Atomix.@atomic :monotonic forces[dim, k] += ustrip(fs.f3[dim])
+            Atomix.@atomic forces[dim, i] += ustrip(fs.f1[dim])
+            Atomix.@atomic forces[dim, j] += ustrip(fs.f2[dim])
+            Atomix.@atomic forces[dim, k] += ustrip(fs.f3[dim])
         end
     end
 end
 
 @kernel function specific_force_4_atoms_kernel!(forces, @Const(coords),
-                                                boundary, @Const(is),
+                                                @Const(velocities),
+                                                @Const(atoms), boundary,
+                                                step_n, @Const(is),
                                                 @Const(js), @Const(ks),
                                                 @Const(ls),
                                                 @Const(inters), ::Val{D},
@@ -179,167 +213,160 @@ end
 
     @inbounds if inter_i <= length(is)
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
-        fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary)
+        fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary,
+                       atoms[i], atoms[j], atoms[k], atoms[l], F, velocities[i], velocities[j],
+                       velocities[k], velocities[l], step_n)
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
         for dim in 1:D
-            Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
-            Atomix.@atomic :monotonic forces[dim, j] += ustrip(fs.f2[dim])
-            Atomix.@atomic :monotonic forces[dim, k] += ustrip(fs.f3[dim])
-            Atomix.@atomic :monotonic forces[dim, l] += ustrip(fs.f4[dim])
+            Atomix.@atomic forces[dim, i] += ustrip(fs.f1[dim])
+            Atomix.@atomic forces[dim, j] += ustrip(fs.f2[dim])
+            Atomix.@atomic forces[dim, k] += ustrip(fs.f3[dim])
+            Atomix.@atomic forces[dim, l] += ustrip(fs.f4[dim])
         end
     end
 end
 
-function pairwise_pe_gpu(coords::AbstractArray{SVector{D, C}}, atoms, boundary,
-                         pairwise_inters, nbs, energy_units, ::Val{T}) where {D, C, T}
+function pairwise_pe_gpu!(pe_vec_nounits, coords::AbstractArray{SVector{D, C}}, velocities, atoms, boundary,
+                         pairwise_inters, nbs, step_n, energy_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    pe_vec = KernelAbstractions.zeros(backend, T, 1)
-    n_threads_gpu = gpu_threads_blocks_pairwise(length(nbs))
+    n_threads_gpu = gpu_threads_pairwise(length(nbs))
     kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)
-    kernel!(pe_vec, coords, atoms, boundary, pairwise_inters, nbs,
-            Val(energy_units), ndrange = length(nbs))
-    return pe_vec
+    kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, pairwise_inters, nbs, step_n, Val(energy_units); ndrange = length(nbs))
+    return pe_vec_nounits
 end
 
-@kernel function pairwise_pe_kernel!(energy, @Const(coords),
+@kernel function pairwise_pe_kernel!(energy, @Const(coords), @Const(velocities),
                                      @Const(atoms), boundary, inters,
-                                     @Const(neighbors), ::Val{E}) where E
+                                     @Const(neighbors), step_n, ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
 
     @inbounds if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
-        coord_i, coord_j = coords[i], coords[j]
+        coord_i, coord_j, vel_i, vel_j = coords[i], coords[j], velocities[i], velocities[j]
         dr = vector(coord_i, coord_j, boundary)
-        pe = potential_energy_gpu(inters[1], dr, coord_i, coord_j, atoms[i], atoms[j],
-                                  boundary, special)
+        pe = potential_energy_gpu(inters[1], dr, atoms[i], atoms[j], E, special, coord_i, coord_j,
+                                  boundary, vel_i, vel_j, step_n)
         for inter in inters[2:end]
-            pe += potential_energy_gpu(inter, dr, coord_i, coord_j, atoms[i], atoms[j],
-                                       boundary, special)
+            pe += potential_energy_gpu(inter, dr, atoms[i], atoms[j], E, special, coord_i, coord_j,
+                                       boundary, vel_i, vel_j, step_n)
         end
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[1] += ustrip(pe)
     end
 end
 
-function specific_pe_gpu(inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
-                         boundary, energy_units, ::Val{T}) where {D, C, T}
+function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
+                          velocities, atoms, boundary, step_n, energy_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    pe_vec = KernelAbstractions.zeros(backend, T, 1)
-    n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
+    n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_pe_1_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(pe_vec, coords, boundary, inter_list.is, inter_list.inters,
-            Val(energy_units), ndrange = length(inter_list))
-    return pe_vec
+    kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
+            inter_list.inters, Val(energy_units); ndrange = length(inter_list))
+    return pe_vec_nounits
 end
 
-function specific_pe_gpu(inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
-                         boundary, energy_units, ::Val{T}) where {D, C, T}
+function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
+                          velocities, atoms, boundary, step_n, energy_units, ::Val{T}) where {D, C, T}
+
     backend = get_backend(coords)
-    pe_vec = KernelAbstractions.zeros(backend, T, 1)
-    n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
+    n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_pe_2_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(pe_vec, coords, boundary, inter_list.is, inter_list.js,
-            inter_list.inters, Val(energy_units), ndrange = length(inter_list))
-    return pe_vec
+    kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
+            inter_list.js, inter_list.inters, Val(energy_units); ndrange = length(inter_list))
+    return pe_vec_nounits
 end
 
-function specific_pe_gpu(inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
-                         boundary, energy_units, ::Val{T}) where {D, C, T}
+function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
+                          velocities, atoms, boundary, step_n, energy_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    pe_vec = KernelAbstractions.zeros(backend, T, 1)
-    n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
+    n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_pe_3_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(pe_vec, coords, boundary, inter_list.is, inter_list.js,
-            inter_list.ks, inter_list.inters, Val(energy_units),
+    kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
+            inter_list.js, inter_list.ks, inter_list.inters, Val(energy_units);
             ndrange = length(inter_list))
-    return pe_vec
+    return pe_vec_nounits
 end
 
-function specific_pe_gpu(inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
-                         boundary, energy_units, ::Val{T}) where {D, C, T}
+function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
+                          velocities, atoms, boundary, step_n, energy_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
-    pe_vec = KernelAbstractions.zeros(backend, T, 1)
-    n_threads_gpu = gpu_threads_blocks_specific(length(inter_list))
+    n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_pe_4_atoms_kernel!(backend, n_threads_gpu)
-    kernel!(pe_vec, coords, boundary, inter_list.is, inter_list.js,
-            inter_list.ks, inter_list.ls, inter_list.inters,
-            Val(energy_units), ndrange = length(inter_list))
-    return pe_vec
+    kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
+            inter_list.js, inter_list.ks, inter_list.ls, inter_list.inters, Val(energy_units);
+            ndrange = length(inter_list))
+    return pe_vec_nounits
 end
 
-@kernel function specific_pe_1_atoms_kernel!(energy, @Const(coords),
-                                             boundary, @Const(is),
-                                             @Const(inters),
-                                             ::Val{E}) where E
+@kernel function specific_pe_1_atoms_kernel!(energy, @Const(coords), @Const(velocities), @Const(atoms), boundary,
+                    step_n, @Const(is), @Const(inters), ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
 
     @inbounds if inter_i <= length(is)
         i = is[inter_i]
-        pe = potential_energy_gpu(inters[inter_i], coords[i], boundary)
+        pe = potential_energy_gpu(inters[inter_i], coords[i], boundary, atoms[i], E,
+                                  velocities[i], step_n)
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[1] += ustrip(pe)
     end
 end
 
-@kernel function specific_pe_2_atoms_kernel!(energy, @Const(coords),
-                                             boundary, @Const(is),
-                                             @Const(js),
-                                             @Const(inters),
-                                             ::Val{E}) where E
+@kernel function specific_pe_2_atoms_kernel!(energy, @Const(coords), @Const(velocities), @Const(atoms), boundary,
+                    step_n, @Const(is), @Const(js), @Const(inters), ::Val{E}) where E
+
 
     inter_i = @index(Global, Linear)
 
     @inbounds if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
-        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], boundary)
+        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], boundary, atoms[i],
+                                  atoms[j], E, velocities[i], velocities[j], step_n)
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[1] += ustrip(pe)
     end
 end
 
-@kernel function specific_pe_3_atoms_kernel!(energy, @Const(coords),
-                                             boundary, @Const(is),
-                                             @Const(js), @Const(ks),
-                                             @Const(inters),
-                                             ::Val{E}) where E
+@kernel function specific_pe_3_atoms_kernel!(energy, @Const(coords), @Const(velocities), @Const(atoms), boundary,
+                    step_n, @Const(is), @Const(js), @Const(ks), @Const(inters), ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
 
     @inbounds if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
-        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary)
+        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary,
+                                  atoms[i], atoms[j], atoms[k], E, velocities[i], velocities[j],
+                                  velocities[k], step_n)
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[1] += ustrip(pe)
     end
 end
 
-@kernel function specific_pe_4_atoms_kernel!(energy, @Const(coords),
-                                             boundary, @Const(is),
-                                             @Const(js), @Const(ks),
-                                             @Const(ls),
-                                             @Const(inters),
-                                             ::Val{E}) where E
+@kernel function specific_pe_4_atoms_kernel!(energy, @Const(coords), @Const(velocities), @Const(atoms), boundary,
+                    step_n, @Const(is), @Const(js), @Const(ks), @Const(ls), @Const(inters), ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
 
     @inbounds if inter_i <= length(is)
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
-        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary)
+        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l],
+                                  boundary, atoms[i], atoms[j], atoms[k], atoms[l], E,
+                                  velocities[i], velocities[j], velocities[k], velocities[l],
+                                  step_n)
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end
-        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
+        Atomix.@atomic energy[1] += ustrip(pe)
     end
 end

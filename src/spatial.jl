@@ -613,11 +613,11 @@ function random_velocities(sys::AtomsBase.AbstractSystem{2}, temp; rng=Random.de
     return random_velocity_2D.(masses(sys), temp, sys.k, rng)
 end
 
-function random_velocities(sys::System{3, true}, temp; rng=Random.default_rng())
+function random_velocities(sys::System{3, AT}, temp; rng=Random.default_rng()) where AT <: AbstractGPUArray
     return AT(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
 end
 
-function random_velocities(sys::System{2, true}, temp; rng=Random.default_rng())
+function random_velocities(sys::System{2, AT}, temp; rng=Random.default_rng()) where AT <: AbstractGPUArray
     return AT(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
 end
 
@@ -634,6 +634,7 @@ function random_velocities!(sys, temp; rng=Random.default_rng())
 end
 
 function random_velocities!(vels, sys::AbstractSystem, temp; rng=Random.default_rng())
+    vs = random_velocities(sys, temp; rng=rng)
     vels .= random_velocities(sys, temp; rng=rng)
     return vels
 end
