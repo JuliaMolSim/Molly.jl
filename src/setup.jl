@@ -887,21 +887,28 @@ function System(coord_file::AbstractString,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
-    if gpu || !use_cell_list
+    if gpu
         neighbor_finder = GPUNeighborFinder(
-            eligible=(gpu ? CuArray(eligible) : eligible),
+            eligible=CuArray(eligible),
             dist_cutoff=T(dist_neighbors),
-            special=(gpu ? CuArray(special) : special),
+            special=CuArray(special),
             n_steps_reorder=10,
             initialized=false,
         )
-    else
+    elseif use_cell_list
         neighbor_finder = CellListMapNeighborFinder(
             eligible=eligible,
             special=special,
             n_steps=10,
             x0=coords,
             unit_cell=boundary_used,
+            dist_cutoff=T(dist_neighbors),
+        )
+    else
+        neighbor_finder = DistanceNeighborFinder(
+            eligible=eligible,
+            special=special,
+            n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
     end
@@ -1277,21 +1284,28 @@ function System(T::Type,
     end
     specific_inter_lists = tuple(specific_inter_array...)
 
-    if gpu || !use_cell_list
+    if gpu
         neighbor_finder = GPUNeighborFinder(
-            eligible=(gpu ? CuArray(eligible) : eligible),
-            special=(gpu ? CuArray(special) : special),
-            n_steps_reorder=10,
+            eligible=CuArray(eligible),
             dist_cutoff=T(dist_neighbors),
+            special=CuArray(special),
+            n_steps_reorder=10,
             initialized=false,
         )
-    else
+    elseif use_cell_list
         neighbor_finder = CellListMapNeighborFinder(
             eligible=eligible,
             special=special,
             n_steps=10,
             x0=coords,
             unit_cell=boundary_used,
+            dist_cutoff=T(dist_neighbors),
+        )
+    else
+        neighbor_finder = DistanceNeighborFinder(
+            eligible=eligible,
+            special=special,
+            n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
     end
