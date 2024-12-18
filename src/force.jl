@@ -145,8 +145,8 @@ function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nt
     return forces_nounits .* sys.force_units
 end
 
-function forces_nounits!(fs_nounits, sys::System{D, false}, neighbors, fs_chunks=nothing,
-                         step_n::Integer=0; n_threads::Integer=Threads.nthreads()) where D
+function forces_nounits!(fs_nounits, sys::System{D, AT}, neighbors, fs_chunks=nothing,
+                         step_n::Integer=0; n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractArray}
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))

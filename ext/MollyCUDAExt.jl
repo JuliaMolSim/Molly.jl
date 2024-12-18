@@ -2,7 +2,6 @@ module MollyCUDAExt
 
 using Molly
 using CUDA
-using ChainRulesCore
 using Atomix
 
 CUDA.Const(nl::Molly.NoNeighborList) = nl
