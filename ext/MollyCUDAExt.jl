@@ -1,3 +1,11 @@
+module MollyCUDAExt
+
+using Molly
+using CUDA
+using Atomix
+
+CUDA.Const(nl::Molly.NoNeighborList) = nl
+
 # CUDA.jl kernels
 const WARPSIZE = UInt32(32)
 
@@ -513,3 +521,5 @@ function specific_pe_4_atoms_kernel!(energy, coords_var, velocities_var, atoms_v
     end
     return nothing
 end
+
+end # module
