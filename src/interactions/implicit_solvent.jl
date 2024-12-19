@@ -565,7 +565,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E}},
     end
 
     if isa(atoms, AbstractGPUArray)
-        ArrayType = fine_array_type(atoms)
+        ArrayType = get_array_type(atoms)
         or = ArrayType(offset_radii)
         sor = ArrayType(scaled_offset_radii)
         is, js = ArrayType(inds_i), ArrayType(inds_j)
@@ -948,8 +948,8 @@ function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges
     return fs
 end
 
-function forces_gbsa(sys::System{D, true, T}, inter, Bs, B_grads, I_grads, born_forces,
-                     atom_charges) where {D, T}
+function forces_gbsa(sys::System{D, AT, T}, inter, Bs, B_grads, I_grads, born_forces,
+                     atom_charges) where {D, AT <: AbstractGPUArray, T}
     fs_mat_1, born_forces_mod_ustrip = gbsa_force_1_gpu(sys.coords, sys.boundary, inter.dist_cutoff,
                         inter.factor_solute, inter.factor_solvent, inter.kappa, Bs, atom_charges,
                         sys.force_units)
@@ -1149,8 +1149,8 @@ function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
     end
 end
 
-function AtomsCalculators.potential_energy(sys::System{<:Any, false, T}, inter::AbstractGBSA;
-                                           kwargs...) where T
+function AtomsCalculators.potential_energy(sys::System{<:Any, AT, T}, inter::AbstractGBSA;
+                                           kwargs...) where {AT, T}
     coords, boundary = sys.coords, sys.boundary
     Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, boundary)
     atom_charges = charge.(sys.atoms)
@@ -1169,7 +1169,7 @@ function AtomsCalculators.potential_energy(sys::System{<:Any, false, T}, inter::
     return E
 end
 
-function AtomsCalculators.potential_energy(sys::System{<:Any, true}, inter::AbstractGBSA; kwargs...)
+function AtomsCalculators.potential_energy(sys::System{<:Any, AT}, inter::AbstractGBSA; kwargs...) where AT <: AbstractGPUArray
     coords, atoms, boundary = sys.coords, sys.atoms, sys.boundary
     Bs, B_grads, I_grads = born_radii_and_grad(inter, coords, boundary)
 
