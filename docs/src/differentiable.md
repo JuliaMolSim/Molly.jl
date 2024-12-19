@@ -3,19 +3,21 @@
 !!! note
     There are still many rough edges when taking gradients through simulations. Please open an issue if you run into an error and remember the golden rule of AD: check your gradients against finite differencing if you want to make sure they are correct.
 
+!!! note
+    There are currently issues with running differentiable simulations on the GPU. Hopefully these will be resolved soon.
+
 In the last few years, the deep learning revolution has broadened to include the paradigm of [differentiable programming](https://en.wikipedia.org/wiki/Differentiable_programming).
 The concept of using automatic differentiation (AD) to obtain exact gradients through physical simulations has many interesting applications, including parameterising force fields and training neural networks to describe atomic potentials.
 
 There are some projects that explore differentiable molecular simulations - see [Related software](@ref).
 However Julia provides a strong suite of AD tools, with [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) allowing source-to-source transformations for much of the language.
 With Molly you can use the power of Enzyme to obtain gradients through molecular simulations, even in the presence of complex interactions such as implicit solvation and stochasticity such as Langevin dynamics or the Andersen thermostat.
-Reverse mode AD can be used on the CPU with multithreading and on the GPU; performance is typically within an order of magnitude of the primal run.
-Forward mode AD can also be used on the CPU.
+Reverse and forward mode AD can be used on the CPU with multithreading and on the GPU; performance is typically within an order of magnitude of the primal run.
 Pairwise, specific and general interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
 
 Differentiable simulation does not currently work with units and some components of the package.
 This is mentioned in the relevant docstrings.
-It is memory intensive on the GPU so using gradient checkpointing will likely be required for larger simulations.
+It is memory intensive on the GPU so using gradient checkpointing, e.g. with [Checkpointing.jl](https://github.com/Argonne-National-Laboratory/Checkpointing.jl), will likely be required for larger simulations.
 
 ## Pairwise interactions
 
@@ -162,7 +164,6 @@ It is common to require a loss function formed from values throughout a simulati
 In this case it is recommended to split up the simulation into a set of short simulations in the loss function, each starting from the previous final coordinates and velocities.
 This runs an identical simulation but makes the intermediate coordinates and velocities available for use in calculating the final loss.
 For example, the RMSD could be calculated from the coordinates every 100 steps and added to a variable that is then divided by the number of chunks to get a loss value corresponding to the mean RMSD over the simulation.
-Loggers are ignored for gradient calculation and should not be used in the loss function.
 
 ## Specific interactions
 
@@ -425,6 +426,11 @@ Molly was used to train the [GB99dms force field](https://doi.org/10.1039/D3SC05
 This involved doing differentiable simulations of one million steps with a loss function based on the residue-residue distance match to explicit solvent simulations.
 The [code is available](https://github.com/greener-group/GB99dms).
 
+## Reversible simulation
+
+Molly.jl was also used to code [reversible simulation](https://arxiv.org/abs/2412.04374), an extension of differentiable simulation with RAD where the gradients are calculated explicitly.
+This means the memory cost is constant in step number.
+
 ## Molecular loss functions
 
 Ultimately, you need some objective function in order to calculate the gradient for each parameter.
@@ -448,5 +454,4 @@ Some of these are currently not possible in Molly as the loggers are ignored for
 
 - The magnitude of gradients may be less important than the sign. Consider sampling gradients across different sources of stochasticity, such as starting velocities and conformations.
 - Exploding gradients prove a problem when using the velocity Verlet integrator in the NVE ensemble. This is why the velocity rescaling and Berendsen thermostats were used in the above examples. Langevin dynamics also seems to work. It is likely that the development of suitable simulation strategies and thermostats will be necessary to unlock the potential of differentiable simulation.
-- Do you *really* need a neural network to describe your potential? Think about learning a smaller number of physically-meaningful parameters before you put in a large neural network and expect it to learn. Whilst it is true that neural networks are universal function approximators, it does not follow that you will be able to train one by differentiating through  a long simulation. A 1,000-step simulation with a 10-layer network at each step is analogous to training a 10,000 layer network (with shared weights).
 - Forward mode AD holds much promise for differentiable simulation, provided that the number of parameters is small, because the memory requirement is constant in the number of simulation steps. However, if the code runs slower than non-differentiable alternatives then the best approach is likely to use finite differencing with the simulation as a black box. Adjoint sensitivity is another approach to getting gradients which is not yet available in Molly.jl.
