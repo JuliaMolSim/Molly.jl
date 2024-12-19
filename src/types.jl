@@ -20,7 +20,8 @@ export
     masses,
     charges,
     MollyCalculator,
-    ASECalculator
+    ASECalculator,
+    NoNeighborList
 
 const DefaultFloat = Float64
 

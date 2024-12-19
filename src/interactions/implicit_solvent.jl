@@ -850,7 +850,7 @@ end
                     numer = 2 * r_d0_strip + 9 * r_d0_strip^5 / 5
                     I_grad -= 10 * neck_scale * m0 * numer / (denom^2 * unit(dist_cutoff))
                 end
-                Atomix.@atomic :monotonic Is[i] += ustrip(unit(dist_cutoff)^-1, I)
+                Atomix.@atomic Is[i] += ustrip(unit(dist_cutoff)^-1, I)
                 I_grads[i, j] += ustrip(unit(dist_cutoff)^-2, I_grad)
             end
         end
@@ -1036,18 +1036,18 @@ end
             dGpol_dalpha2_ij = -Gpol * exp_term * (1 + D_term) / (2 * denominator2)
 
             change_born_force_i = dGpol_dalpha2_ij * Bj
-            Atomix.@atomic :monotonic born_forces_mod_ustrip[i] += ustrip(change_born_force_i)
+            Atomix.@atomic born_forces_mod_ustrip[i] += ustrip(change_born_force_i)
             if i != j
                 change_born_force_j = dGpol_dalpha2_ij * Bi
-                Atomix.@atomic :monotonic born_forces_mod_ustrip[j] += ustrip(change_born_force_j)
+                Atomix.@atomic born_forces_mod_ustrip[j] += ustrip(change_born_force_j)
                 fdr = dr * dGpol_dr
                 if unit(fdr[1]) != F
                     error("wrong force unit returned, was expecting $F but got $(unit(fdr[1]))")
                 end
                 for dim in 1:D
                     fval = ustrip(fdr[dim])
-                    Atomix.@atomic :monotonic forces[dim, i] +=  fval
-                    Atomix.@atomic :monotonic forces[dim, j] += -fval
+                    Atomix.@atomic forces[dim, i] +=  fval
+                    Atomix.@atomic forces[dim, j] += -fval
                 end
             end
         end
@@ -1088,8 +1088,8 @@ end
                     end
                     for dim in 1:D
                         fval = ustrip(fdr[dim])
-                        Atomix.@atomic :monotonic forces[dim, i] +=  fval
-                        Atomix.@atomic :monotonic forces[dim, j] += -fval
+                        Atomix.@atomic forces[dim, i] +=  fval
+                        Atomix.@atomic forces[dim, j] += -fval
                     end
                 end
             end
