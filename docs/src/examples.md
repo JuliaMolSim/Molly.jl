@@ -42,7 +42,7 @@ for temp in temps
     simulate!(sys, simulator, 5_000; run_loggers=:skipzero)
 end
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel="Step",
@@ -395,7 +395,7 @@ for traj_coords in logged_coords[(n_frames ÷ 2):end]
     end
 end
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel="End-to-end distance / nm",
@@ -425,7 +425,7 @@ for traj_coords in logged_coords[(n_frames ÷ 2):end]
     end
 end
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel="Angle with adjacent monomers / degrees",
@@ -763,7 +763,7 @@ dists = collect(0.2:0.01:1.2)
 forces_direct = force_direct.(dists)
 forces_grad = force_grad.(dists)
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel="Distance / nm",
@@ -842,7 +842,7 @@ function energies(inter)
     end
 end
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel="Distance / nm",
@@ -891,7 +891,7 @@ function energies(m, n)
     end
 end
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel="Distance / nm",
@@ -938,7 +938,7 @@ function energies(α, λ, p)
     end
 end
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel="Distance / nm",
