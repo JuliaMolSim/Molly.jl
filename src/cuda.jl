@@ -57,7 +57,7 @@ function pairwise_force_gpu!(buffers, sys::System{D, true, T}, pairwise_inters, 
             buffers = ForcesBuffer(buffers.fs_mat, buffers.box_mins, buffers.box_maxs, buffers.Morton_seq)
 			sys.neighbor_finder.initialized = true
         end
-		CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(buffers.Morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords, sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters, sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible, Val(T))
+		CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) force_kernel!(buffers.Morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords, sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters, sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible, Val(T))
 	end
     return buffers
 end
@@ -82,7 +82,7 @@ function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, true, T}, pair
 		CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N), sys.boundary)
 		buffers = ForcesBuffer(buffers.fs_mat, buffers.box_mins, buffers.box_maxs, buffers.Morton_seq)
 		sys.neighbor_finder.initialized = true
-		CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(buffers.Morton_seq, 
+		CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) energy_kernel!(buffers.Morton_seq, 
 		pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords, sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), pairwise_inters, sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible, Val(T))
 	end
 	return pe_vec_nounits
