@@ -135,11 +135,21 @@ visualize(sys.loggers.coords, boundary, "sim_lj.mp4")
 
 ## GPU acceleration
 
-To run simulations on the GPU you will need to have a CUDA-compatible device.
-[CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) is used to run on the device.
+To run simulations on the GPU you will need to have a GPU available and then load the appropriate package:
+
+| Hardware Available | Necessary Package | Array Type |
+| ------------------ | ----------------- | ---------- |
+| Parallel CPU       | none              | Array      |
+| NVIDIA GPU         | CUDA              | CuArray    |
+| AMD GPU            | AMDGPU            | ROCArray   |
+| Intel GPU          | oneAPI            | oneArray   |
+| Apple Silicon      | Metal             | MtlArray   |
+
+As an important note, Metal / Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` (for example) where necessary.
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
 This example also shows setting up a simulation to run with `Float32`, which gives better performance on GPUs.
 Of course, you will need to determine whether this level of numerical accuracy is appropriate in your case.
+Here is an example script for an NVIDIA GPU using CUDA:
 ```julia
 using Molly
 using CUDA
@@ -168,6 +178,7 @@ sys = System(
 simulate!(deepcopy(sys), simulator, 20) # Compile function
 simulate!(sys, simulator, 1_000)
 ```
+To use another GPU package, just swap out `CUDA` for your desired package and `CuArray` for your desired array type.
 The device to run on can be changed with `device!`, e.g. `device!(1)`.
 The GPU code path is currently designed to be compatible with differentiable simulation and runs slower than related software, but this is an active area of development.
 Nonetheless, GPU performance is significantly better than CPU performance and is good enough for many applications.
