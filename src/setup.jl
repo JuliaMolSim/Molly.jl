@@ -1290,8 +1290,8 @@ function System(T::Type,
         )
     end
 
-    atoms = ArrayType(atoms)
-    coords = ArrayType(coords)
+    atoms = ArrayType([atoms_abst...])
+    coords_dev = ArrayType(coords)
 
     if isnothing(velocities)
         if units

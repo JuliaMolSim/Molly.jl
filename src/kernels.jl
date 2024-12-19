@@ -75,7 +75,7 @@ end
 
     i = @index(Global, Linear)
 
-    @inbounds for j = 1:length(atoms)
+    @inbounds for j = 1:i
         if i != j
             f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), false, coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
             for dim in 1:D
