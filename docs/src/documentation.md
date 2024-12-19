@@ -571,6 +571,11 @@ The available general interactions are:
 
 ### Pairwise interactions
 
+Some pairwise interactions define mixing functions which determine how the parameters from each atom are combined.
+For example, the default `σ_mixing` for [`LennardJones`](@ref) is `Molly.lorentz_σ_mixing`, which is defined as `(atom_i.σ + atom_j.σ) / 2`.
+Custom mixing functions can be given instead.
+The `atom_type` field of the atoms is available, allowing features like changing the weight of solute-solvent interactions.
+
 To define your own pairwise interaction, first define the `struct`:
 ```julia
 struct MyPairwiseInter
@@ -620,6 +625,7 @@ Beware that this step counter starts from 1 every time [`simulate!`](@ref) is ca
 It also doesn't work with [`simulate_remd!`](@ref).
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
 One nice feature of Molly is that this function will work on both the CPU and the GPU.
+If you need a different version of the function on GPU, you can define `Molly.force_gpu` (and `Molly.potential_energy_gpu`).
 
 The argument `special` is a `Bool` determining whether the atom pair interaction should be treated as special.
 This is specified during neighbor finder construction.
@@ -936,14 +942,15 @@ function Molly.simulate!(sys,
 
     for step_n in 1:n_steps
         # Calculate accelerations like this
+        # See src/simulators.jl for more efficient code that reuses memory
         accels_t = accelerations(sys, neighbors, step_n; n_threads=n_threads)
 
         # Ensure coordinates stay within the simulation box like this
-        sys.coords = wrap_coords.(sys.coords, (sys.boundary,))
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
 
         # Example velocity update
         # Includes appropriate unit conversion for when the force units are per mol
-        sys.velocities += (accels_t .+ accels_t_dt) .* sim.dt / 2
+        sys.velocities .+= (accels_t .+ accels_t_dt) .* sim.dt / 2
 
         # Apply coupling like this
         recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
