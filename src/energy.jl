@@ -22,10 +22,16 @@ end
 
 kinetic_energy_noconvert(sys) = sum(masses(sys) .* sum.(abs2, sys.velocities)) / 2
 
-"""
+@doc raw"""
     kinetic_energy(system)
 
 Calculate the kinetic energy of a system.
+
+The kinetic energy is defined as
+```math
+E_k = \frac{1}{2} \sum_{i} m_i v_i^2
+```
+where ``m_i`` is the mass and ``v_i`` is the velocity of atom ``i``.
 """
 function kinetic_energy(sys::System{D, G, T}) where {D, G, T}
     ke = kinetic_energy_noconvert(sys)
