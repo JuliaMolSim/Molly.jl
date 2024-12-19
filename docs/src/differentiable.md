@@ -24,30 +24,27 @@ In this type of simulation each atom has a σ value that determines how close it
 We are going to find the σ value that results in a desired distance of each atom to its closest neighbor.
 First we need a function to obtain the mean distance of each atom to its closest neighbor:
 ```julia
-using Molly
+using Molly, Statistics
 
-function mean_min_separation(final_coords, boundary)
-    n_atoms = length(final_coords)
-    sum_dists = 0.0
-    for i in 1:n_atoms
-        min_dist = 100.0
-        for j in 1:n_atoms
-            i == j && continue
-            dist = sqrt(sum(abs2, vector(final_coords[i], final_coords[j], boundary)))
-            min_dist = min(dist, min_dist)
+function mean_min_separation(coords, boundary)
+    min_seps = Float64[]
+    for i in eachindex(coords)
+        min_sq_sep = 100.0
+        for j in eachindex(coords)
+            if i != j
+                sq_dist = sum(abs2, vector(coords[i], coords[j], boundary))
+                min_sq_sep = min(sq_dist, min_sq_sep)
+            end
         end
-        sum_dists += min_dist
+        push!(min_seps, sqrt(min_sq_sep))
     end
-    return sum_dists / n_atoms
+    return mean(min_seps)
 end
 ```
 Now we can set up and run the simulation in a similar way to that described in the [Molly documentation](@ref).
 The difference is that we wrap the simulation in a `loss` function.
 This returns a single value that we want to obtain gradients with respect to, in this case the difference between the value of the above function at the end of the simulation and a target distance.
 ```julia
-using Zygote
-using Format
-
 dist_true = 0.5
 scale_σ_to_dist = 2 ^ (1 / 6)
 σtrue = dist_true / scale_σ_to_dist
@@ -57,26 +54,23 @@ n_steps = 500
 atom_mass = 10.0
 boundary = CubicBoundary(3.0)
 temp = 1.0
+simulator = VelocityVerlet(
+    dt=0.02,
+    coupling=RescaleThermostat(temp),
+)
+coords = place_atoms(n_atoms, boundary; min_dist=0.6)
+velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+lj = LennardJones(cutoff=DistanceCutoff(1.5), use_neighbors=true)
+pairwise_inters = (lj,)
 neighbor_finder = DistanceNeighborFinder(
     eligible=trues(n_atoms, n_atoms),
     n_steps=10,
     dist_cutoff=1.8,
 )
-lj = LennardJones(
-    cutoff=DistanceCutoff(1.5),
-    use_neighbors=true,
-)
-pairwise_inters = (lj,)
-coords = place_atoms(n_atoms, boundary; min_dist=0.6)
-velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-simulator = VelocityVerlet(
-    dt=0.02,
-    coupling=RescaleThermostat(temp),
-)
 
-function loss(σ, coords, velocities)
-    atoms = [Atom(0, 0, atom_mass, 0.0, σ, 0.2) for i in 1:n_atoms]
-    loggers = (coords=CoordinatesLogger(Float64, 10),)
+function loss(σ, coords, velocities, boundary, pairwise_inters,
+              neighbor_finder, simulator, n_steps, n_atoms, atom_mass, dist_true)
+    atoms = [Atom(i, 1, atom_mass, 0.0, σ, 0.2) for i in 1:n_atoms]
 
     sys = System(
         atoms=atoms,
@@ -85,25 +79,38 @@ function loss(σ, coords, velocities)
         velocities=velocities,
         pairwise_inters=pairwise_inters,
         neighbor_finder=neighbor_finder,
-        loggers=loggers,
         force_units=NoUnits,
         energy_units=NoUnits,
     )
 
-    mms_start = mean_min_separation(Array(sys.coords), boundary)
     simulate!(sys, simulator, n_steps)
-    mms_end = mean_min_separation(Array(sys.coords), boundary)
+    mms_end = mean_min_separation(sys.coords, boundary)
     loss_val = abs(mms_end - dist_true)
 
-    printfmt("σ {:6.3f}  |  Mean min sep expected {:6.3f}  |  Mean min sep end {:6.3f}  |  Loss {:6.3f}  |  ",
-             σ, σ * (2 ^ (1 / 6)), mms_end, loss_val)
+    print(
+        "σ ", round(σ; digits=3), "  |  Mean min sep expected ", round(σ * (2 ^ (1 / 6)); digits=3),
+        "  |  Mean min sep end ", round(mms_end; digits=3), "  |  Loss ", round(loss_val; digits=3),
+        "  |  ",
+    )
 
     return loss_val
 end
 ```
-We can obtain the gradient of `loss` with respect to the atom property `σ`.
+We can obtain the gradient of `loss` with respect to the atom property `σ` using Enzyme.
 ```julia
-grad = gradient(loss, σtrue, coords, velocities)[1]
+using Enzyme
+
+const_args = [
+    Const(boundary), Const(pairwise_inters), Const(neighbor_finder),
+    Const(simulator), Const(n_steps), Const(n_atoms),
+    Const(atom_mass), Const(dist_true),
+]
+
+grad_enzyme = autodiff(
+    set_runtime_activity(Reverse), loss, Active, Active(σtrue),
+    Duplicated(coords, zero(coords)), Duplicated(velocities, zero(velocities)),
+    const_args...,
+)[1][1]
 ```
 This gradient can be used in a training loop to optimise `σ`, starting from an arbitrary value.
 ```julia
@@ -112,11 +119,15 @@ function train()
     n_epochs = 15
 
     for epoch_n in 1:n_epochs
-        printfmt("Epoch {:>2}  |  ", epoch_n)
+        print("Epoch ", epoch_n, "  |  ")
         coords = place_atoms(n_atoms, boundary; min_dist=0.6)
         velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-        grad = gradient(loss, σlearn, coords, velocities)[1]
-        printfmt("Grad {:6.3f}\n", grad)
+        grad = autodiff(
+            set_runtime_activity(Reverse), loss, Active, Active(σlearn),
+            Duplicated(coords, zero(coords)), Duplicated(velocities, zero(velocities)),
+            const_args...,
+        )[1][1]
+        println("Grad ", round(grad; digits=3))
         σlearn -= grad * 1e-2
     end
 end
@@ -124,23 +135,23 @@ end
 train()
 ```
 ```
-Epoch  1  |  σ  0.535  |  Mean min sep expected  0.600  |  Mean min sep end  0.587  |  Loss  0.087  |  Grad  0.793
-Epoch  2  |  σ  0.527  |  Mean min sep expected  0.591  |  Mean min sep end  0.581  |  Loss  0.081  |  Grad  1.202
-Epoch  3  |  σ  0.515  |  Mean min sep expected  0.578  |  Mean min sep end  0.568  |  Loss  0.068  |  Grad  1.558
-Epoch  4  |  σ  0.499  |  Mean min sep expected  0.560  |  Mean min sep end  0.551  |  Loss  0.051  |  Grad  0.766
-Epoch  5  |  σ  0.491  |  Mean min sep expected  0.552  |  Mean min sep end  0.543  |  Loss  0.043  |  Grad  1.068
-Epoch  6  |  σ  0.481  |  Mean min sep expected  0.540  |  Mean min sep end  0.531  |  Loss  0.031  |  Grad  0.757
-Epoch  7  |  σ  0.473  |  Mean min sep expected  0.531  |  Mean min sep end  0.526  |  Loss  0.026  |  Grad  0.781
-Epoch  8  |  σ  0.465  |  Mean min sep expected  0.522  |  Mean min sep end  0.518  |  Loss  0.018  |  Grad  1.549
-Epoch  9  |  σ  0.450  |  Mean min sep expected  0.505  |  Mean min sep end  0.504  |  Loss  0.004  |  Grad  0.030
-Epoch 10  |  σ  0.450  |  Mean min sep expected  0.505  |  Mean min sep end  0.504  |  Loss  0.004  |  Grad  0.066
-Epoch 11  |  σ  0.449  |  Mean min sep expected  0.504  |  Mean min sep end  0.503  |  Loss  0.003  |  Grad  0.313
-Epoch 12  |  σ  0.446  |  Mean min sep expected  0.500  |  Mean min sep end  0.501  |  Loss  0.001  |  Grad  0.636
-Epoch 13  |  σ  0.439  |  Mean min sep expected  0.493  |  Mean min sep end  0.497  |  Loss  0.003  |  Grad -0.181
-Epoch 14  |  σ  0.441  |  Mean min sep expected  0.495  |  Mean min sep end  0.498  |  Loss  0.002  |  Grad -0.758
-Epoch 15  |  σ  0.449  |  Mean min sep expected  0.504  |  Mean min sep end  0.503  |  Loss  0.003  |  Grad  0.281
+Epoch 1  |  σ 0.535  |  Mean min sep expected 0.6  |  Mean min sep end 0.59  |  Loss 0.09  |  Grad 1.495
+Epoch 2  |  σ 0.52  |  Mean min sep expected 0.583  |  Mean min sep end 0.577  |  Loss 0.077  |  Grad 0.721
+Epoch 3  |  σ 0.512  |  Mean min sep expected 0.575  |  Mean min sep end 0.562  |  Loss 0.062  |  Grad 1.066
+Epoch 4  |  σ 0.502  |  Mean min sep expected 0.563  |  Mean min sep end 0.553  |  Loss 0.053  |  Grad 0.435
+Epoch 5  |  σ 0.497  |  Mean min sep expected 0.558  |  Mean min sep end 0.552  |  Loss 0.052  |  Grad 0.398
+Epoch 6  |  σ 0.493  |  Mean min sep expected 0.554  |  Mean min sep end 0.551  |  Loss 0.051  |  Grad 0.318
+Epoch 7  |  σ 0.49  |  Mean min sep expected 0.55  |  Mean min sep end 0.536  |  Loss 0.036  |  Grad 1.291
+Epoch 8  |  σ 0.477  |  Mean min sep expected 0.536  |  Mean min sep end 0.533  |  Loss 0.033  |  Grad 0.257
+Epoch 9  |  σ 0.475  |  Mean min sep expected 0.533  |  Mean min sep end 0.53  |  Loss 0.03  |  Grad 0.539
+Epoch 10  |  σ 0.469  |  Mean min sep expected 0.527  |  Mean min sep end 0.535  |  Loss 0.035  |  Grad 1.253
+Epoch 11  |  σ 0.457  |  Mean min sep expected 0.513  |  Mean min sep end 0.504  |  Loss 0.004  |  Grad 1.453
+Epoch 12  |  σ 0.442  |  Mean min sep expected 0.496  |  Mean min sep end 0.491  |  Loss 0.009  |  Grad -1.07
+Epoch 13  |  σ 0.453  |  Mean min sep expected 0.508  |  Mean min sep end 0.504  |  Loss 0.004  |  Grad 1.599
+Epoch 14  |  σ 0.437  |  Mean min sep expected 0.49  |  Mean min sep end 0.494  |  Loss 0.006  |  Grad -0.181
+Epoch 15  |  σ 0.439  |  Mean min sep expected 0.493  |  Mean min sep end 0.49  |  Loss 0.01  |  Grad -1.355
 ```
-The final value we get is 0.449, close to the theoretical value of 0.445 if all atoms have a neighbor at the minimum pairwise energy distance.
+The final value we get is 0.439, close to the theoretical value of 0.445 if all atoms have a neighbor at the minimum pairwise energy distance.
 The RDF looks as follows, with the purple line corresponding to the desired distance to the closest neighbor.
 ![LJ RDF](images/rdf_lj.png)
 
@@ -158,13 +169,9 @@ Loggers are ignored for gradient calculation and should not be used in the loss 
 Next we look at obtaining gradients through simulations with specific interactions, e.g. bonds or angles between specified atoms.
 We will simulate two triatomic molecules and search for a minimum energy bond angle that gives a desired distance between the atoms at the end of the simulation.
 ```julia
-using Molly
-using Zygote
-using Format
-using LinearAlgebra
+using Molly, Enzyme, LinearAlgebra
 
 dist_true = 1.0
-
 n_steps = 150
 atom_mass = 10.0
 boundary = CubicBoundary(3.0)
@@ -175,35 +182,32 @@ coords = [
 ]
 n_atoms = length(coords)
 velocities = zero(coords)
+atoms = [Atom(i, 1, atom_mass, 0.0, 0.0, 0.0) for i in 1:n_atoms]
 simulator = VelocityVerlet(
     dt=0.05,
     coupling=BerendsenThermostat(temp, 0.5),
 )
+bonds = InteractionList2Atoms(
+    [1, 2, 4, 5],
+    [2, 3, 5, 6],
+    [HarmonicBond(100.0, 0.7) for _ in 1:4],
+)
 
-function loss(θ)
-    atoms = [Atom(0, 0, atom_mass, 0.0, 0.0, 0.0) for i in 1:n_atoms]
-    loggers = (coords=CoordinatesLogger(Float64, 2),)
-    specific_inter_lists = (
-        InteractionList2Atoms(
-            [1, 2, 4, 5],
-            [2, 3, 5, 6],
-            [HarmonicBond(100.0, 0.7) for _ in 1:4],
-        ),
-        InteractionList3Atoms(
-            [1, 4],
-            [2, 5],
-            [3, 6],
-            [HarmonicAngle(10.0, θ), HarmonicAngle(10.0, θ)],
-        ),
+function loss(θ, coords, velocities, atoms, bonds, boundary, simulator, n_steps,
+              n_atoms, atom_mass, dist_true)
+    angles = InteractionList3Atoms(
+        [1, 4],
+        [2, 5],
+        [3, 6],
+        [HarmonicAngle(10.0, θ), HarmonicAngle(10.0, θ)],
     )
 
     sys = System(
         atoms=atoms,
-        coords=copy(coords),
+        coords=coords,
         boundary=boundary,
-        velocities=copy(velocities),
-        specific_inter_lists=specific_inter_lists,
-        loggers=loggers,
+        velocities=velocities,
+        specific_inter_lists=(bonds, angles),
         force_units=NoUnits,
         energy_units=NoUnits,
     )
@@ -215,20 +219,31 @@ function loss(θ)
     dist_end = 0.5 * (d1 + d2)
     loss_val = abs(dist_end - dist_true)
 
-    printfmt("θ {:5.1f}°  |  Final dist {:4.2f}  |  Loss {:5.3f}  |  ",
-             rad2deg(θ), dist_end, loss_val)
+    print(
+        "θ ", round(rad2deg(θ); digits=1), "°  |  Final dist ", round(dist_end; digits=2),
+        "  |  Loss ", round(loss_val; digits=3), "  |  ",
+    )
 
     return loss_val
 end
+
+const_args = [
+    Const(atoms), Const(bonds), Const(boundary), Const(simulator),
+    Const(n_steps), Const(n_atoms), Const(atom_mass), Const(dist_true),
+]
 
 function train()
     θlearn = deg2rad(110.0)
     n_epochs = 20
 
     for epoch_n in 1:n_epochs
-        printfmt("Epoch {:>2}  |  ", epoch_n)
-        grad = gradient(loss, θlearn)[1]
-        printfmt("Grad {:6.3f}\n", round(grad; digits=2))
+        print("Epoch ", epoch_n, "  |  ")
+        grad = autodiff(
+            set_runtime_activity(Reverse), loss, Active, Active(θlearn),
+            Duplicated(copy(coords), zero(coords)), Duplicated(copy(velocities), zero(velocities)),
+            const_args...,
+        )[1][1]
+        println("Grad ", round(grad; digits=2))
         θlearn -= grad * 0.1
     end
 end
@@ -236,26 +251,26 @@ end
 train()
 ```
 ```
-Epoch  1  |  θ 110.0°  |  Final dist 1.16  |  Loss 0.155  |  Grad  0.410
-Epoch  2  |  θ 107.7°  |  Final dist 1.14  |  Loss 0.138  |  Grad  0.430
-Epoch  3  |  θ 105.2°  |  Final dist 1.12  |  Loss 0.119  |  Grad  0.450
-Epoch  4  |  θ 102.6°  |  Final dist 1.10  |  Loss 0.099  |  Grad  0.470
-Epoch  5  |  θ 100.0°  |  Final dist 1.08  |  Loss 0.077  |  Grad  0.490
-Epoch  6  |  θ  97.2°  |  Final dist 1.05  |  Loss 0.049  |  Grad  0.710
-Epoch  7  |  θ  93.1°  |  Final dist 1.01  |  Loss 0.012  |  Grad  0.520
-Epoch  8  |  θ  90.1°  |  Final dist 0.98  |  Loss 0.015  |  Grad -0.540
-Epoch  9  |  θ  93.2°  |  Final dist 1.01  |  Loss 0.013  |  Grad  0.520
-Epoch 10  |  θ  90.2°  |  Final dist 0.99  |  Loss 0.015  |  Grad -0.540
-Epoch 11  |  θ  93.3°  |  Final dist 1.01  |  Loss 0.014  |  Grad  0.520
-Epoch 12  |  θ  90.3°  |  Final dist 0.99  |  Loss 0.014  |  Grad -0.540
-Epoch 13  |  θ  93.4°  |  Final dist 1.01  |  Loss 0.015  |  Grad  0.520
-Epoch 14  |  θ  90.4°  |  Final dist 0.99  |  Loss 0.013  |  Grad -0.540
-Epoch 15  |  θ  93.5°  |  Final dist 1.02  |  Loss 0.016  |  Grad  0.520
-Epoch 16  |  θ  90.5°  |  Final dist 0.99  |  Loss 0.012  |  Grad -0.540
-Epoch 17  |  θ  93.6°  |  Final dist 1.02  |  Loss 0.016  |  Grad  0.520
-Epoch 18  |  θ  90.6°  |  Final dist 0.99  |  Loss 0.011  |  Grad -0.530
-Epoch 19  |  θ  93.7°  |  Final dist 1.02  |  Loss 0.017  |  Grad  0.520
-Epoch 20  |  θ  90.7°  |  Final dist 0.99  |  Loss 0.010  |  Grad -0.530
+Epoch 1  |  θ 110.0°  |  Final dist 1.16  |  Loss 0.155  |  Grad 0.41
+Epoch 2  |  θ 107.7°  |  Final dist 1.14  |  Loss 0.138  |  Grad 0.43
+Epoch 3  |  θ 105.2°  |  Final dist 1.12  |  Loss 0.119  |  Grad 0.45
+Epoch 4  |  θ 102.6°  |  Final dist 1.1  |  Loss 0.099  |  Grad 0.47
+Epoch 5  |  θ 100.0°  |  Final dist 1.08  |  Loss 0.077  |  Grad 0.49
+Epoch 6  |  θ 97.2°  |  Final dist 1.05  |  Loss 0.049  |  Grad 0.71
+Epoch 7  |  θ 93.1°  |  Final dist 1.01  |  Loss 0.012  |  Grad 0.52
+Epoch 8  |  θ 90.1°  |  Final dist 0.98  |  Loss 0.015  |  Grad -0.54
+Epoch 9  |  θ 93.2°  |  Final dist 1.01  |  Loss 0.013  |  Grad 0.52
+Epoch 10  |  θ 90.2°  |  Final dist 0.99  |  Loss 0.015  |  Grad -0.54
+Epoch 11  |  θ 93.3°  |  Final dist 1.01  |  Loss 0.014  |  Grad 0.52
+Epoch 12  |  θ 90.3°  |  Final dist 0.99  |  Loss 0.014  |  Grad -0.54
+Epoch 13  |  θ 93.4°  |  Final dist 1.01  |  Loss 0.015  |  Grad 0.52
+Epoch 14  |  θ 90.4°  |  Final dist 0.99  |  Loss 0.013  |  Grad -0.54
+Epoch 15  |  θ 93.5°  |  Final dist 1.02  |  Loss 0.016  |  Grad 0.52
+Epoch 16  |  θ 90.5°  |  Final dist 0.99  |  Loss 0.012  |  Grad -0.54
+Epoch 17  |  θ 93.6°  |  Final dist 1.02  |  Loss 0.016  |  Grad 0.52
+Epoch 18  |  θ 90.6°  |  Final dist 0.99  |  Loss 0.011  |  Grad -0.53
+Epoch 19  |  θ 93.7°  |  Final dist 1.02  |  Loss 0.017  |  Grad 0.52
+Epoch 20  |  θ 90.7°  |  Final dist 0.99  |  Loss 0.01  |  Grad -0.53
 ```
 The final value we get is 90.7°, close to the theoretical value of 91.2° which can be calculated with trigonometry.
 The final simulation looks like this:
@@ -264,7 +279,11 @@ In the presence of other forces this value would not be so trivially obtainable.
 We can record the gradients for different values of `θ`:
 ```julia
 θs = collect(0:3:180)[2:end]
-grads = [gradient(loss, deg2rad(θ))[1] for θ in θs]
+grads = [autodiff(
+            set_runtime_activity(Reverse), loss, Active, Active(deg2rad(θ)),
+            Duplicated(copy(coords), zero(coords)), Duplicated(copy(velocities), zero(velocities)),
+            const_args...,
+        )[1][1] for θ in θs]
 ```
 The plot of these shows that the gradient has the expected sign either side of the correct value:
 ![Angle gradient](images/grad_angle.png)
@@ -279,33 +298,31 @@ The jump from single to multiple parameters is important because single paramete
 We set up three pseudo-atoms and train a network to imitate the Julia logo by moving the bottom two atoms:
 ```julia
 using Molly
-using GLMakie
-using Zygote
+using Enzyme
 using Flux
 import AtomsCalculators
-using Format
+import GLMakie
 using LinearAlgebra
-
-dist_true = 1.0f0
 
 model = Chain(
     Dense(1, 5, relu),
     Dense(5, 1, tanh),
 )
-ps = Flux.params(model)
 
-struct NNBonds end
+struct NNBonds{T}
+    model::T
+end
 
 function AtomsCalculators.forces(sys, inter::NNBonds; kwargs...)
     vec_ij = vector(sys.coords[1], sys.coords[3], sys.boundary)
     dist = norm(vec_ij)
-    f = model([dist])[1] * normalize(vec_ij)
+    f = inter.model([dist])[1] * normalize(vec_ij)
     fs = [f, zero(f), -f]
     return fs
 end
 
+dist_true = 1.0f0
 n_steps = 400
-mass = 10.0f0
 boundary = CubicBoundary(5.0f0)
 temp = 0.01f0
 coords = [
@@ -315,21 +332,21 @@ coords = [
 ]
 n_atoms = length(coords)
 velocities = zero(coords)
+atoms = [Atom(i, 1, 10.0f0, 0.0f0, 0.0f0, 0.0f0) for i in 1:n_atoms]
 simulator = VelocityVerlet(
     dt=0.02f0,
     coupling=BerendsenThermostat(temp, 0.5f0),
 )
 
-function loss()
-    atoms = [Atom(0, 0, mass, 0.0f0, 0.0f0, 0.0f0) for i in 1:n_atoms]
+function loss(model, coords, velocities, atoms, boundary, simulator, n_steps, dist_true)
     loggers = (coords=CoordinatesLogger(Float32, 10),)
-    general_inters = (NNBonds(),)
+    general_inters = (NNBonds(model),)
 
     sys = System(
         atoms=atoms,
-        coords=copy(coords),
+        coords=coords,
         boundary=boundary,
-        velocities=copy(velocities),
+        velocities=velocities,
         general_inters=general_inters,
         loggers=loggers,
         force_units=NoUnits,
@@ -343,7 +360,7 @@ function loss()
                 norm(vector(sys.coords[3], sys.coords[1], boundary))) / 3
     loss_val = abs(dist_end - dist_true)
 
-    printfmt("Dist end {:6.3f}  |  Loss {:6.3f}\n", dist_end, loss_val)
+    println("Dist end ", round(dist_end; digits=3), "  |  Loss ", round(loss_val; digits=3))
     visualize(sys.loggers.coords, boundary, "sim.mp4"; show_boundary=false)
 
     return loss_val
@@ -353,38 +370,50 @@ Before training the result looks like this:
 ![Logo before](images/logo_before.gif)
 ```julia
 function train()
+    model = Chain(
+        Dense(1, 5, relu),
+        Dense(5, 1, tanh),
+    )
+    opt = Optimisers.setup(ADAM(0.02, (0.9, 0.999)), model)
     n_epochs = 20
-    opt = ADAM(0.02, (0.9, 0.999))
 
     for epoch_n in 1:n_epochs
-        printfmt("Epoch {:>2}  |  ", epoch_n)
-        Flux.train!(loss, ps, ((),), opt)
+        print("Epoch ", epoch_n, "  |  ")
+        d_model = Flux.fmap(model) do x
+            x isa Array ? zero(x) : x
+        end
+        autodiff(
+            set_runtime_activity(Reverse), loss, Active, Duplicated(model, d_model),
+            Duplicated(copy(coords), zero(coords)), Duplicated(copy(velocities), zero(velocities)),
+            Const(atoms), Const(boundary), Const(simulator), Const(n_steps), Const(dist_true),
+        )
+        opt, model = Optimisers.update!(opt, model, d_model)
     end
 end
 
 train()
 ```
 ```
-Epoch  1  |  Dist end  0.757  |  Loss  0.243
-Epoch  2  |  Dist end  0.773  |  Loss  0.227
-Epoch  3  |  Dist end  0.794  |  Loss  0.206
-Epoch  4  |  Dist end  0.817  |  Loss  0.183
-Epoch  5  |  Dist end  0.843  |  Loss  0.157
-Epoch  6  |  Dist end  0.870  |  Loss  0.130
-Epoch  7  |  Dist end  0.898  |  Loss  0.102
-Epoch  8  |  Dist end  0.927  |  Loss  0.073
-Epoch  9  |  Dist end  0.957  |  Loss  0.043
-Epoch 10  |  Dist end  0.988  |  Loss  0.012
-Epoch 11  |  Dist end  1.018  |  Loss  0.018
-Epoch 12  |  Dist end  1.038  |  Loss  0.038
-Epoch 13  |  Dist end  1.050  |  Loss  0.050
-Epoch 14  |  Dist end  1.055  |  Loss  0.055
-Epoch 15  |  Dist end  1.054  |  Loss  0.054
-Epoch 16  |  Dist end  1.049  |  Loss  0.049
-Epoch 17  |  Dist end  1.041  |  Loss  0.041
-Epoch 18  |  Dist end  1.030  |  Loss  0.030
-Epoch 19  |  Dist end  1.017  |  Loss  0.017
-Epoch 20  |  Dist end  1.003  |  Loss  0.003
+Epoch 1  |  Dist end 0.821  |  Loss 0.179
+Epoch 2  |  Dist end 0.859  |  Loss 0.141
+Epoch 3  |  Dist end 0.902  |  Loss 0.098
+Epoch 4  |  Dist end 0.948  |  Loss 0.052
+Epoch 5  |  Dist end 0.996  |  Loss 0.004
+Epoch 6  |  Dist end 1.044  |  Loss 0.044
+Epoch 7  |  Dist end 1.069  |  Loss 0.069
+Epoch 8  |  Dist end 1.08  |  Loss 0.08
+Epoch 9  |  Dist end 1.081  |  Loss 0.081
+Epoch 10  |  Dist end 1.073  |  Loss 0.073
+Epoch 11  |  Dist end 1.06  |  Loss 0.06
+Epoch 12  |  Dist end 1.042  |  Loss 0.042
+Epoch 13  |  Dist end 1.019  |  Loss 0.019
+Epoch 14  |  Dist end 0.994  |  Loss 0.006
+Epoch 15  |  Dist end 0.978  |  Loss 0.022
+Epoch 16  |  Dist end 0.97  |  Loss 0.03
+Epoch 17  |  Dist end 0.968  |  Loss 0.032
+Epoch 18  |  Dist end 0.973  |  Loss 0.027
+Epoch 19  |  Dist end 0.982  |  Loss 0.018
+Epoch 20  |  Dist end 0.995  |  Loss 0.005
 ```
 After training it looks much better:
 ![Logo after](images/logo_after.gif)
