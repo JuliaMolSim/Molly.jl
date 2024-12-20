@@ -73,7 +73,7 @@ end
 
     function loss(σ, r0, coords, velocities, boundary, pairwise_inters, general_inters,
                   neighbor_finder, simulator, n_steps, n_threads, n_atoms, atom_mass, bond_dists,
-                  bond_is, bond_js, angles, torsions, ::Val{T}, ::Val{AT}) where {T, AT}
+                  bond_is, bond_js, angles, torsions, rng, ::Val{T}, ::Val{AT}) where {T, AT}
         atoms = [Atom(i, 1, atom_mass, (i % 2 == 0 ? T(-0.02) : T(0.02)), σ, T(0.2)) for i in 1:n_atoms]
         bonds_inner = HarmonicBond{T, T}[]
         for i in 1:(n_atoms ÷ 2)
@@ -98,7 +98,7 @@ end
             energy_units=NoUnits,
         )
 
-        simulate!(sys, simulator, n_steps; n_threads=n_threads)
+        simulate!(sys, simulator, n_steps; n_threads=n_threads, rng=rng)
 
         return mean_min_separation(sys.coords, boundary, Val(T))
     end
@@ -186,7 +186,7 @@ end
             Const(general_inters), Const(neighbor_finder), Const(simulator),
             Const(n_steps), Const(n_threads), Const(n_atoms), Const(atom_mass),
             Const(bond_dists), Const(bond_is), Const(bond_js), Const(angles),
-            Const(torsions), Const(Val(T)), Const(Val(AT)),
+            Const(torsions), Const(rng), Const(Val(T)), Const(Val(AT)),
         ]
         if forward
             grad_enzyme = (
@@ -214,7 +214,7 @@ end
                 σ -> loss(
                     σ, r0, copy(coords), copy(velocities), boundary, pairwise_inters, general_inters,
                     neighbor_finder, simulator, n_steps, n_threads, n_atoms, atom_mass, bond_dists,
-                    bond_is, bond_js, angles, torsions, Val(T), Val(AT),
+                    bond_is, bond_js, angles, torsions, rng, Val(T), Val(AT),
                 ),
                 σ,
             ),
@@ -222,7 +222,7 @@ end
                 r0 -> loss(
                     σ, r0, copy(coords), copy(velocities), boundary, pairwise_inters, general_inters,
                     neighbor_finder, simulator, n_steps, n_threads, n_atoms, atom_mass, bond_dists,
-                    bond_is, bond_js, angles, torsions, Val(T), Val(AT),
+                    bond_is, bond_js, angles, torsions, rng, Val(T), Val(AT),
                 ),
                 r0,
             ),
