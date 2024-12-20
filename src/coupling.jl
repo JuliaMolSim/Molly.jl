@@ -12,8 +12,8 @@ export
     MonteCarloMembraneBarostat
 
 """
-    apply_coupling!(system, coupling, simulator, neighbors=nothing,
-                    step_n=0; n_threads=Threads.nthreads())
+    apply_coupling!(system, coupling, simulator, neighbors=nothing, step_n=0;
+                    n_threads=Threads.nthreads(), rng=Random.default_rng())
 
 Apply a coupler to modify a simulation.
 
@@ -60,11 +60,12 @@ end
 
 function apply_coupling!(sys::System{D, false}, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
-                         n_threads::Integer=Threads.nthreads()) where D
+                         n_threads::Integer=Threads.nthreads(),
+                         rng=Random.default_rng()) where D
     for i in eachindex(sys)
-        if rand() < (sim.dt / thermostat.coupling_const)
+        if rand(rng) < (sim.dt / thermostat.coupling_const)
             sys.velocities[i] = random_velocity(mass(sys.atoms[i]), thermostat.temperature, sys.k;
-                                                dims=AtomsBase.n_dimensions(sys))
+                                                dims=AtomsBase.n_dimensions(sys), rng=rng)
         end
     end
     return false
@@ -72,12 +73,13 @@ end
 
 function apply_coupling!(sys::System{D, true, T}, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
-                         n_threads::Integer=Threads.nthreads()) where {D, T}
-    atoms_to_bump = T.(rand(length(sys)) .< (sim.dt / thermostat.coupling_const))
+                         n_threads::Integer=Threads.nthreads(),
+                         rng=Random.default_rng()) where {D, T}
+    atoms_to_bump = T.(rand(rng, length(sys)) .< (sim.dt / thermostat.coupling_const))
     atoms_to_leave = one(T) .- atoms_to_bump
     atoms_to_bump_dev = move_array(atoms_to_bump, sys)
     atoms_to_leave_dev = move_array(atoms_to_leave, sys)
-    vs = random_velocities(sys, thermostat.temperature)
+    vs = random_velocities(sys, thermostat.temperature; rng=rng)
     sys.velocities .= sys.velocities .* atoms_to_leave_dev .+ vs .* atoms_to_bump_dev
     return false
 end
@@ -101,7 +103,7 @@ struct RescaleThermostat{T}
 end
 
 function apply_coupling!(sys, thermostat::RescaleThermostat, sim, neighbors=nothing,
-                         step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+                         step_n::Integer=0; kwargs...)
     sys.velocities .*= sqrt(thermostat.temperature / temperature(sys))
     return false
 end
@@ -125,7 +127,7 @@ struct BerendsenThermostat{T, C}
 end
 
 function apply_coupling!(sys, thermostat::BerendsenThermostat, sim, neighbors=nothing,
-                         step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+                         step_n::Integer=0; kwargs...)
     λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temperature(sys)) - 1)
     sys.velocities .*= sqrt(λ2)
     return false
@@ -161,7 +163,7 @@ function BerendsenBarostat(pressure, coupling_const; compressibility=4.6e-5u"bar
 end
 
 function apply_coupling!(sys, barostat::BerendsenBarostat, sim, neighbors=nothing,
-                         step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+                         step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
     if !iszero(step_n % barostat.n_steps)
         return false
     end
@@ -230,7 +232,8 @@ function MonteCarloBarostat(P, T, boundary; n_steps=30, n_iterations=1, scale_fa
 end
 
 function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim, neighbors=nothing,
-                         step_n::Integer=0; n_threads::Integer=Threads.nthreads()) where {D, G, T}
+                         step_n::Integer=0; n_threads::Integer=Threads.nthreads(),
+                         rng=Random.default_rng()) where {D, G, T}
     if !iszero(step_n % barostat.n_steps)
         return false
     end
@@ -243,7 +246,7 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
     for attempt_n in 1:barostat.n_iterations
         E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
         V = volume(sys.boundary)
-        dV = barostat.volume_scale * (2 * rand(T) - 1)
+        dV = barostat.volume_scale * (2 * rand(rng, T) - 1)
         v_scale = (V + dV) / V
         l_scale = (D == 2 ? sqrt(v_scale) : cbrt(v_scale))
         old_coords .= sys.coords
@@ -261,7 +264,7 @@ function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim
         E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
         dE = energy_remove_mol(E_trial - E)
         dW = dE + uconvert(unit(dE), barostat.pressure * dV) - n_molecules * kT * log(v_scale)
-        if dW <= zero(dW) || rand(T) < exp(-dW / kT)
+        if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
             recompute_forces = true
             barostat.n_accepted += 1
         else
@@ -373,7 +376,8 @@ function apply_coupling!(sys::System{D, G, T},
                          sim,
                          neighbors=nothing,
                          step_n::Integer=0;
-                         n_threads::Integer=Threads.nthreads()) where {D, G, T}
+                         n_threads::Integer=Threads.nthreads(),
+                         rng=Random.default_rng()) where {D, G, T}
     !iszero(step_n % barostat.n_steps) && return false
     all(isnothing, barostat.pressure) && return false
 
@@ -385,7 +389,7 @@ function apply_coupling!(sys::System{D, G, T},
     for attempt_n in 1:barostat.n_iterations
         axis = 0
         while true
-            axis = rand(1:D)
+            axis = rand(rng, 1:D)
             !isnothing(barostat.pressure[axis]) && break
         end
         mask1 = falses(D)
@@ -395,7 +399,7 @@ function apply_coupling!(sys::System{D, G, T},
 
         E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
         V = volume(sys.boundary)
-        dV = barostat.volume_scale[axis] * (2 * rand(T) - 1)
+        dV = barostat.volume_scale[axis] * (2 * rand(rng, T) - 1)
         v_scale = (V + dV) / V
         l_scale = SVector{D}(mask1 * v_scale + mask2)
         old_coords .= sys.coords
@@ -413,7 +417,7 @@ function apply_coupling!(sys::System{D, G, T},
         E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
         dE = energy_remove_mol(E_trial - E)
         dW = dE + uconvert(unit(dE), barostat.pressure[axis] * dV) - n_molecules * kT * log(v_scale)
-        if dW <= zero(dW) || rand(T) < exp(-dW / kT)
+        if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
             recompute_forces = true
             barostat.n_accepted[axis] += 1
         else
@@ -547,7 +551,8 @@ function apply_coupling!(sys::System{D, G, T},
                          sim,
                          neighbors=nothing,
                          step_n::Integer=0;
-                         n_threads::Integer=Threads.nthreads()) where {D, G, T}
+                         n_threads::Integer=Threads.nthreads(),
+                         rng=Random.default_rng()) where {D, G, T}
     !iszero(step_n % barostat.n_steps) && return false
 
     kT = energy_remove_mol(sys.k * barostat.temperature)
@@ -558,7 +563,7 @@ function apply_coupling!(sys::System{D, G, T},
     for attempt_n in 1:barostat.n_iterations
         axis = 0
         while true
-            axis = rand(1:D)
+            axis = rand(rng, 1:D)
             !isnothing(barostat.pressure[axis]) && break
         end
         if barostat.xy_isotropy && axis == 2
@@ -567,7 +572,7 @@ function apply_coupling!(sys::System{D, G, T},
 
         E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
         V = volume(sys.boundary)
-        dV = barostat.volume_scale[axis] * (2 * rand(T) - 1)
+        dV = barostat.volume_scale[axis] * (2 * rand(rng, T) - 1)
         v_scale = (V + dV) / V
         l_scale = SVector{D, T}(one(T), one(T), one(T))
         if (axis == 1 || axis == 2) && barostat.xy_isotropy
@@ -606,7 +611,7 @@ function apply_coupling!(sys::System{D, G, T},
         PdV = uconvert(unit(dE), barostat.pressure[axis] * dV)
         γdA = uconvert(unit(dE), barostat.tension * dA)
         dW = dE + PdV - γdA - n_molecules * kT * log(v_scale)
-        if dW <= zero(dW) || rand(T) < exp(-dW / kT)
+        if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
             recompute_forces = true
             barostat.n_accepted[axis] += 1
         else

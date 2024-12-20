@@ -600,7 +600,7 @@ function maxwell_boltzmann(atom_mass::Real, temp::Real,
 end
 
 """
-    random_velocities(sys, temp)
+    random_velocities(sys, temp; rng=Random.default_rng())
 
 Generate random velocities from the Maxwell-Boltzmann distribution
 for a [`System`](@ref).
@@ -622,8 +622,8 @@ function random_velocities(sys::System{2, true}, temp; rng=Random.default_rng())
 end
 
 """
-    random_velocities!(sys, temp)
-    random_velocities!(vels, sys, temp)
+    random_velocities!(sys, temp; rng=Random.default_rng())
+    random_velocities!(vels, sys, temp; rng=Random.default_rng())
 
 Set the velocities of a [`System`](@ref), or a vector, to random velocities
 generated from the Maxwell-Boltzmann distribution.

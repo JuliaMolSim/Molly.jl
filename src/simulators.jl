@@ -137,7 +137,8 @@ end
                            sim::VelocityVerlet,
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
-                           run_loggers=true)
+                           run_loggers=true,
+                           rng=Random.default_rng())
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -176,7 +177,7 @@ end
             remove_CM_motion!(sys)
         end
         recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
-                                           n_threads=n_threads)
+                                           n_threads=n_threads, rng=rng)
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
@@ -224,7 +225,8 @@ end
                            sim::Verlet,
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
-                           run_loggers=true)
+                           run_loggers=true,
+                           rng=Random.default_rng())
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -263,7 +265,7 @@ end
             remove_CM_motion!(sys)
         end
         recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
-                                           n_threads=n_threads)
+                                           n_threads=n_threads, rng=rng)
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
@@ -299,7 +301,8 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
                            sim::StormerVerlet,
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
-                           run_loggers=true)
+                           run_loggers=true,
+                           rng=Random.default_rng())
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
@@ -332,7 +335,7 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
         sys.velocities .= vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt
 
         recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
-                                           n_threads=n_threads)
+                                           n_threads=n_threads, rng=rng)
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
@@ -427,7 +430,7 @@ end
         end
 
         recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
-                                           n_threads=n_threads)
+                                           n_threads=n_threads, rng=rng)
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                    n_threads=n_threads)
@@ -677,8 +680,11 @@ function NoseHoover(; dt, temperature, damping=100*dt, coupling=NoCoupling(), re
     return NoseHoover(dt, temperature, damping, coupling, Int(remove_CM_motion))
 end
 
-@inline function simulate!(sys, sim::NoseHoover, n_steps::Integer;
-                           n_threads::Integer=Threads.nthreads(), run_loggers=true)
+@inline function simulate!(sys,
+                           sim::NoseHoover, n_steps::Integer;
+                           n_threads::Integer=Threads.nthreads(),
+                           run_loggers=true,
+                           rng=Random.default_rng())
     if length(sys.constraints) > 0
         @warn "NoseHoover is not currently compatible with constraints, " *
               "constraints will be ignored"
@@ -720,7 +726,7 @@ end
             remove_CM_motion!(sys)
         end
         recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
-                                           n_threads=n_threads)
+                                           n_threads=n_threads, rng=rng)
 
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
                                     n_threads=n_threads)
@@ -794,9 +800,9 @@ function simulate!(sys::ReplicaSystem,
                     sim::TemperatureREMD,
                     n_steps::Integer;
                     assign_velocities::Bool=false,
-                    rng=Random.default_rng(),
                     n_threads::Integer=Threads.nthreads(),
-                    run_loggers=true)
+                    run_loggers=true,
+                    rng=Random.default_rng())
     if sys.n_replicas != length(sim.simulators)
         throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
                 "and simulators in TemperatureREMD ($(length(sim.simulators))) do not match"))
@@ -808,11 +814,11 @@ function simulate!(sys::ReplicaSystem,
         end
     end
 
-    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads, run_loggers=run_loggers)
+    return simulate_remd!(sys, sim, n_steps; n_threads=n_threads, run_loggers=run_loggers, rng=rng)
 end
 
 """
-    remd_exchange!(sys, sim, n, m; rng=Random.default_rng(), n_threads=Threads.nthreads())
+    remd_exchange!(sys, sim, n, m; n_threads=Threads.nthreads(), rng=Random.default_rng())
 
 Attempt an exchange of replicas `n` and `m` in a [`ReplicaSystem`](@ref) during a REMD simulation.
 
@@ -893,9 +899,9 @@ function simulate!(sys::ReplicaSystem,
                     sim::HamiltonianREMD,
                     n_steps::Integer;
                     assign_velocities::Bool=false,
-                    rng=Random.default_rng(),
                     n_threads::Integer=Threads.nthreads(),
-                    run_loggers=true)
+                    run_loggers=true,
+                    rng=Random.default_rng())
     if sys.n_replicas != length(sim.simulators)
         throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
                 "and simulators in HamiltonianREMD ($(length(sim.simulators))) do not match"))
@@ -907,7 +913,7 @@ function simulate!(sys::ReplicaSystem,
         end
     end
 
-    return simulate_remd!(sys, sim, n_steps; rng=rng, n_threads=n_threads, run_loggers=run_loggers)
+    return simulate_remd!(sys, sim, n_steps; n_threads=n_threads, run_loggers=run_loggers, rng=rng)
 end
 
 function remd_exchange!(sys::ReplicaSystem{D, G, T},
@@ -944,8 +950,8 @@ function remd_exchange!(sys::ReplicaSystem{D, G, T},
 end
 
 """
-    simulate_remd!(sys, remd_sim, n_steps; rng=Random.default_rng(),
-                   n_threads=Threads.nthreads(), run_loggers=true)
+    simulate_remd!(sys, remd_sim, n_steps; n_threads=Threads.nthreads(),
+                   run_loggers=true, rng=Random.default_rng())
 
 Run a REMD simulation on a [`ReplicaSystem`](@ref) using a REMD simulator.
 
@@ -954,9 +960,9 @@ Not currently compatible with interactions that depend on step number.
 function simulate_remd!(sys::ReplicaSystem,
                         remd_sim,
                         n_steps::Integer;
-                        rng=Random.default_rng(),
                         n_threads::Integer=Threads.nthreads(),
-                        run_loggers=true)
+                        run_loggers=true,
+                        rng=Random.default_rng())
     if sys.n_replicas != length(remd_sim.simulators)
         throw(ArgumentError("number of replicas in ReplicaSystem ($(length(sys.n_replicas))) " *
             "and simulators in the REMD simulator ($(length(remd_sim.simulators))) do not match"))
@@ -977,7 +983,7 @@ function simulate_remd!(sys::ReplicaSystem,
     for cycle in 1:n_cycles
         @sync for idx in eachindex(remd_sim.simulators)
             Threads.@spawn simulate!(sys.replicas[idx], remd_sim.simulators[idx], cycle_length;
-                                     n_threads=thread_div[idx], run_loggers=run_loggers)
+                                     n_threads=thread_div[idx], run_loggers=run_loggers, rng=rng)
         end
 
         # Alternate checking even pairs 2-3/4-5/6-7/... and odd pairs 1-2/3-4/5-6/...
@@ -985,7 +991,7 @@ function simulate_remd!(sys::ReplicaSystem,
         for n in (1 + cycle_parity):2:(sys.n_replicas - 1)
             n_attempts += 1
             m = n + 1
-            Δ, exchanged = remd_exchange!(sys, remd_sim, n, m; rng=rng, n_threads=n_threads)
+            Δ, exchanged = remd_exchange!(sys, remd_sim, n, m; n_threads=n_threads, rng=rng)
             if run_loggers != false && exchanged && !isnothing(sys.exchange_logger)
                 log_property!(sys.exchange_logger, sys, nothing, cycle * cycle_length;
                                     indices=(n, m), delta=Δ, n_threads=n_threads)
@@ -996,7 +1002,7 @@ function simulate_remd!(sys::ReplicaSystem,
     if remaining_steps > 0
         @sync for idx in eachindex(remd_sim.simulators)
             Threads.@spawn simulate!(sys.replicas[idx], remd_sim.simulators[idx], remaining_steps;
-                                     n_threads=thread_div[idx], run_loggers=run_loggers)
+                                     n_threads=thread_div[idx], run_loggers=run_loggers, rng=rng)
         end
     end
 
@@ -1039,7 +1045,8 @@ end
                            sim::MetropolisMonteCarlo,
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
-                           run_loggers=true) where {D, G, T}
+                           run_loggers=true,
+                           rng=Random.default_rng()) where {D, G, T}
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E_old = potential_energy(sys, neighbors; n_threads=n_threads)
     coords_old = similar(sys.coords)
@@ -1052,7 +1059,7 @@ end
 
         ΔE = E_new - E_old
         δ = ΔE / (sys.k * sim.temperature)
-        if δ < 0 || (rand() < exp(-δ))
+        if δ < 0 || (rand(rng) < exp(-δ))
             apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads,
                            current_potential_energy=E_new, success=true,
                            energy_rate=(E_new / (sys.k * sim.temperature)))
@@ -1069,7 +1076,8 @@ end
 end
 
 """
-    random_uniform_translation!(sys::System; shift_size=oneunit(eltype(eltype(sys.coords))))
+    random_uniform_translation!(sys::System; shift_size=oneunit(eltype(eltype(sys.coords))),
+                                rng=Random.default_rng())
 
 Performs a random translation of the coordinates of a randomly selected atom in a [`System`](@ref).
 
@@ -1077,16 +1085,18 @@ The translation is generated using a uniformly selected direction and uniformly 
 in range [0, 1) scaled by `shift_size` which should have appropriate length units.
 """
 function random_uniform_translation!(sys::System{D, G, T};
-                                     shift_size=oneunit(eltype(eltype(sys.coords)))) where {D, G, T}
-    rand_idx = rand(eachindex(sys))
-    direction = random_unit_vector(T, D)
-    magnitude = rand(T) * shift_size
+                                     shift_size=oneunit(eltype(eltype(sys.coords))),
+                                     rng=Random.default_rng()) where {D, G, T}
+    rand_idx = rand(rng, eachindex(sys))
+    direction = random_unit_vector(T, D, rng)
+    magnitude = rand(rng, T) * shift_size
     sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)
     return sys
 end
 
 """
-    random_normal_translation!(sys::System; shift_size=oneunit(eltype(eltype(sys.coords))))
+    random_normal_translation!(sys::System; shift_size=oneunit(eltype(eltype(sys.coords))),
+                               rng=Random.default_rng())
 
 Performs a random translation of the coordinates of a randomly selected atom in a [`System`](@ref).
 
@@ -1095,15 +1105,16 @@ the standard normal distribution i.e. with mean 0 and standard deviation 1, scal
 which should have appropriate length units.
 """
 function random_normal_translation!(sys::System{D, G, T};
-                                    shift_size=oneunit(eltype(eltype(sys.coords)))) where {D, G, T}
-    rand_idx = rand(eachindex(sys))
-    direction = random_unit_vector(T, D)
-    magnitude = randn(T) * shift_size
+                                    shift_size=oneunit(eltype(eltype(sys.coords))),
+                                    rng=Random.default_rng()) where {D, G, T}
+    rand_idx = rand(rng, eachindex(sys))
+    direction = random_unit_vector(T, D, rng)
+    magnitude = randn(rng, T) * shift_size
     sys.coords[rand_idx] = wrap_coords(sys.coords[rand_idx] .+ (magnitude * direction), sys.boundary)
     return sys
 end
 
-function random_unit_vector(float_type, dims)
-    vec = randn(float_type, dims)
+function random_unit_vector(float_type, dims, rng=Random.default_rng())
+    vec = randn(rng, float_type, dims)
     return vec / norm(vec)
 end
