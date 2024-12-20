@@ -43,7 +43,6 @@ function pairwise_force_gpu!(fs_mat, coords::AbstractArray{SVector{D, C}}, veloc
         kernel! = pairwise_force_kernel_nl!(backend, n_threads_gpu)
         kernel!(fs_mat, coords, velocities, atoms, boundary, pairwise_inters,
                 nbs, step_n, Val(D), Val(force_units); ndrange = length(nbs))
-
     end
     return fs_mat
 end
