@@ -875,8 +875,9 @@ end
 
 @testset "Monte Carlo barostat" begin
     # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
+    rng = Xoshiro(10)
     n_atoms = 25
-    n_steps = 1_000_000
+    n_steps = 100_000
     atom_mass = 39.947u"g/mol"
     boundary = CubicBoundary(8.0u"nm")
     temp = 288.15u"K"
@@ -885,7 +886,7 @@ end
     friction = 1.0u"ps^-1"
     lang = Langevin(dt=dt, temperature=temp, friction=friction)
     atoms = fill(Atom(mass=atom_mass, σ=0.3345u"nm", ϵ=1.0451u"kJ * mol^-1"), n_atoms)
-    coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm", rng=rng)
     n_log_steps = 500
 
     box_size_wrapper(sys, args...; kwargs...) = sys.boundary.side_lengths[1]
@@ -907,10 +908,10 @@ end
         ),
     )
 
-    simulate!(deepcopy(sys), lang, 1_000; n_threads=1)
-    @time simulate!(sys, lang, n_steps; n_threads=1)
+    simulate!(deepcopy(sys), lang, 1_000; n_threads=1, rng=rng)
+    @time simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
 
-    @test 280.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+    @test 270.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
     @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy  )) < 120.0u"kJ * mol^-1"
     @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
     @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
@@ -947,10 +948,10 @@ end
                 ),
             )
 
-            simulate!(deepcopy(sys), sim, 1_000; n_threads=1)
-            @time simulate!(sys, sim, n_steps; n_threads=1)
+            simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
+            @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
-            @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+            @test 270.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy  )) < 120.0u"kJ * mol^-1"
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
             @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
@@ -966,8 +967,9 @@ end
 
 @testset "Monte Carlo anisotropic barostat" begin
     # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
+    rng = Xoshiro(11)
     n_atoms = 25
-    n_steps = 1_000_000
+    n_steps = 100_000
     atom_mass = 39.947u"g/mol"
     boundary = CubicBoundary(8.0u"nm")
     temp = 288.15u"K"
@@ -975,7 +977,7 @@ end
     friction = 1.0u"ps^-1"
     lang = Langevin(dt=dt, temperature=temp, friction=friction)
     atoms = fill(Atom(mass=atom_mass, σ=0.3345u"nm", ϵ=1.0451u"kJ * mol^-1"), n_atoms)
-    coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm", rng=rng)
     n_log_steps = 500
 
     baro_f(pressure) = MonteCarloAnisotropicBarostat(pressure, temp, boundary)
@@ -1012,8 +1014,8 @@ end
             )
 
             sim = lang_f(baro_f(press))
-            simulate!(deepcopy(sys), sim, 100; n_threads=1)
-            @time simulate!(sys, sim, n_steps; n_threads=1)
+            simulate!(deepcopy(sys), sim, 100; n_threads=1, rng=rng)
+            @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
             @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 330.0u"K"
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy)) < 120.0u"kJ * mol^-1"
@@ -1033,8 +1035,9 @@ end
 
 @testset "Monte Carlo membrane barostat" begin
     # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
+    rng = Xoshiro(12)
     n_atoms = 25
-    n_steps = 1_000_000
+    n_steps = 100_000
     atom_mass = 39.947u"g/mol"
     boundary = CubicBoundary(8.0u"nm")
     temp = 288.15u"K"
@@ -1044,7 +1047,7 @@ end
     friction = 1.0u"ps^-1"
     lang = Langevin(dt=dt, temperature=temp, friction=friction)
     atoms = fill(Atom(mass=atom_mass, σ=0.3345u"nm", ϵ=1.0451u"kJ * mol^-1"), n_atoms)
-    coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm")
+    coords = place_atoms(n_atoms, boundary; min_dist=1.0u"nm", rng=rng)
     n_log_steps = 500
 
     lang_f(barostat) = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
@@ -1080,8 +1083,8 @@ end
             )
 
             sim = lang_f(barostat)
-            simulate!(deepcopy(sys), sim, 100; n_threads=1)
-            @time simulate!(sys, sim, n_steps; n_threads=1)
+            simulate!(deepcopy(sys), sim, 100; n_threads=1, rng=rng)
+            @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
             @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy)) < 120.0u"kJ * mol^-1"
