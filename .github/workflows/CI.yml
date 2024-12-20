@@ -29,6 +29,7 @@ jobs:
           - NotGradients
           - Gradients
     steps:
+      - run: export UCX_ERROR_SIGNALS="SIGILL,SIGBUS,SIGFPE"
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
         with:
