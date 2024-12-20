@@ -1371,3 +1371,32 @@ Functions that may be useful for analysis include:
 - [`torsion_angle`](@ref)
 
 Julia is a language well-suited to implementing all kinds of analysis for molecular simulations.
+
+## Randomness
+
+Many functions can take in a random number generator to allow reproducible randomness.
+For example:
+```julia-repl
+julia> using Molly, Random
+
+julia> random_velocity(10.0u"g/mol", 300.0u"K")
+3-element SVector{3, Quantity{Float64, 𝐋 𝐓^-1, Unitful.FreeUnits{(nm, ps^-1), 𝐋 𝐓^-1, nothing}}} with indices SOneTo(3):
+    0.5749142510427172 nm ps^-1
+   -0.5373536210638031 nm ps^-1
+ -0.044898786241729376 nm ps^-1
+
+julia> random_velocity(10.0u"g/mol", 300.0u"K"; rng=Xoshiro(10))
+3-element SVector{3, Quantity{Float64, 𝐋 𝐓^-1, Unitful.FreeUnits{(nm, ps^-1), 𝐋 𝐓^-1, nothing}}} with indices SOneTo(3):
+    0.1703351361585439 nm ps^-1
+ -0.027009534351612234 nm ps^-1
+   0.23543457751795477 nm ps^-1
+
+julia> random_velocity(10.0u"g/mol", 300.0u"K"; rng=Xoshiro(10))
+3-element SVector{3, Quantity{Float64, 𝐋 𝐓^-1, Unitful.FreeUnits{(nm, ps^-1), 𝐋 𝐓^-1, nothing}}} with indices SOneTo(3):
+    0.1703351361585439 nm ps^-1
+ -0.027009534351612234 nm ps^-1
+   0.23543457751795477 nm ps^-1
+
+```
+This may not apply across Julia versions, though you can use [StableRNGs.jl](https://github.com/JuliaRandom/StableRNGs.jl).
+It also does not apply across different backends such as CPU and GPU.
