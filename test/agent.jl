@@ -62,14 +62,15 @@
         end
     end
 
+    rng = Xoshiro(15)
     temp = 1.0
     boundary = RectangularBoundary(10.0)
     n_steps = 1_000
     n_people = 500
     n_starting = 2
     atoms = [Person(i, i <= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
-    coords = place_atoms(n_people, boundary; min_dist=0.1)
-    velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
+    coords = place_atoms(n_people, boundary; min_dist=0.1, rng=rng)
+    velocities = [random_velocity(1.0, temp; dims=2, rng=rng) for i in 1:n_people]
 
     lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
     sir = SIRInteraction(0.5, 0.06, 0.01)
@@ -100,7 +101,7 @@
         energy_units=NoUnits,
     )
 
-    @time simulate!(sys, simulator, n_steps; n_threads=1)
+    @time simulate!(sys, simulator, n_steps; n_threads=1, rng=rng)
 
     s, i, r = values(sys.loggers.SIR)[end]
     @test s < 0.9
