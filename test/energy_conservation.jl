@@ -6,7 +6,7 @@ using CUDA
 using Test
 
 @testset "Lennard-Jones energy conservation" begin
-    function test_energy_conservation(gpu::Bool, n_threads::Integer, n_steps::Integer)
+    function test_energy_conservation(nl::Bool, gpu::Bool, n_threads::Integer, n_steps::Integer)
         n_atoms = 2_000
         atom_mass = 40.0u"g/mol"
         temp = 1.0u"K"
@@ -24,14 +24,15 @@ using Test
     
         for cutoff in cutoffs
             coords = place_atoms(n_atoms, boundary; min_dist=0.1u"nm")
-    
-            if gpu
+            neighbor_finder = NoNeighborFinder()
+            if nl && gpu
                 neighbor_finder=GPUNeighborFinder(
                     eligible=CuArray(trues(n_atoms, n_atoms)),
                     n_steps_reorder=10,
                     dist_cutoff=dist_cutoff,
                 )
-            else
+            end
+            if nl && !gpu
                 neighbor_finder=DistanceNeighborFinder(
                     eligible=trues(n_atoms, n_atoms),
                     n_steps=10,
@@ -71,12 +72,15 @@ using Test
         end
     end
 
-    test_energy_conservation(false, 1, 10_000)
+    test_energy_conservation(true, false, 1, 10_000)
+    test_energy_conservation(false, false, 1, 10_000)
     if Threads.nthreads() > 1
-        test_energy_conservation(false, Threads.nthreads(), 50_000)
+        test_energy_conservation(true, false, Threads.nthreads(), 50_000)
+        test_energy_conservation(false, false, Threads.nthreads(), 50_000)
     end
     if CUDA.functional()
-        test_energy_conservation(true, 1, 100_000)
+        test_energy_conservation(true, true, 1, 100_000)
+        test_energy_conservation(false, true, 1, 100_000)
     end
 end
 

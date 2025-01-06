@@ -136,7 +136,7 @@ function VelocityVerlet(; dt, coupling=NoCoupling(), remove_CM_motion=1)
     return VelocityVerlet(dt, coupling, Int(remove_CM_motion))
 end
 
-@inline function simulate!(sys,
+@inline function simulate(sys,
                            sim::VelocityVerlet,
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
