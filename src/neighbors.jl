@@ -44,27 +44,10 @@ find_neighbors(sys::System; kwargs...) = find_neighbors(sys, sys.neighbor_finder
 find_neighbors(sys::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
 
 """
-    DistanceNeighborFinder(; eligible, dist_cutoff, special, n_steps)
+    GPUNeighborFinder(; eligible, dist_cutoff, special, n_steps_reorder, initialized)
 
-Find close atoms by distance.
+Returns nothing as neighbor list since the Eastman's algorithm for GPU computation of nonbonded forces does not require previous knowledge of a neighbor list. 
 """
-struct DistanceNeighborFinder{B, D}
-    eligible::B
-    dist_cutoff::D
-    special::B
-    n_steps::Int
-    neighbors::B # Used internally during neighbor calculation on the GPU
-end
-
-function DistanceNeighborFinder(;
-                                eligible,
-                                dist_cutoff,
-                                special=zero(eligible),
-                                n_steps=10)
-    return DistanceNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
-                eligible, dist_cutoff, special, n_steps, zero(eligible))
-end
-
 mutable struct GPUNeighborFinder{B, D}
     eligible::B
     dist_cutoff::D
@@ -87,6 +70,27 @@ find_neighbors(sys::System{D, true}, nf::GPUNeighborFinder, current_neighbors=no
 
 find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
 
+"""
+    DistanceNeighborFinder(; eligible, dist_cutoff, special, n_steps)
+
+Find close atoms by distance.
+"""
+struct DistanceNeighborFinder{B, D}
+    eligible::B
+    dist_cutoff::D
+    special::B
+    n_steps::Int
+    neighbors::B # Used internally during neighbor calculation on the GPU
+end
+
+function DistanceNeighborFinder(;
+                                eligible,
+                                dist_cutoff,
+                                special=zero(eligible),
+                                n_steps=10)
+    return DistanceNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
+                eligible, dist_cutoff, special, n_steps, zero(eligible))
+end
 
 function find_neighbors(sys::System{D, false},
                         nf::DistanceNeighborFinder,

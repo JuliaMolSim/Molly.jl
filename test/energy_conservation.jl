@@ -44,7 +44,7 @@ using Test
                 atoms=(gpu ? CuArray(atoms) : atoms),
                 coords=(gpu ? CuArray(coords) : coords),
                 boundary=boundary,
-                pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=true),),
+                pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=ifelse(nl, true, false)),),
                 neighbor_finder=neighbor_finder,
                 loggers=(
                     coords=CoordinatesLogger(100),

@@ -123,11 +123,11 @@ function init_forces_buffer(forces_nounits, ::AbstractArray{SVector{D, C}}, n_th
     end
 end
 
-struct ForcesBuffer{F, C}
+struct ForcesBuffer{F, C, M}
     fs_mat::F
     box_mins::C
     box_maxs::C
-    Morton_seq::CuArray{Int32}
+    Morton_seq::M
 end
 
 function init_forces_buffer(forces_nounits::CuArray{SVector{D, T}}, ::AbstractArray{SVector{D, C}}, n_threads) where {D, T, C}

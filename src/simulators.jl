@@ -73,9 +73,6 @@ Custom simulators should implement this function.
     F_nounits = ustrip_vec.(similar(sys.coords))
     F = F_nounits .* sys.force_units
     forces_buffer = init_forces_buffer(F_nounits, sys.coords, n_threads)
-    F_nounits = forces_nounits!(F_nounits, sys, neighbors, forces_buffer, 0;
-                                            n_threads=n_threads)
-    
 
     for step_n in 1:sim.max_steps
         F_nounits .= forces_nounits!(F_nounits, sys, neighbors, forces_buffer, step_n;
@@ -136,7 +133,7 @@ function VelocityVerlet(; dt, coupling=NoCoupling(), remove_CM_motion=1)
     return VelocityVerlet(dt, coupling, Int(remove_CM_motion))
 end
 
-@inline function simulate(sys,
+@inline function simulate!(sys,
                            sim::VelocityVerlet,
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
@@ -239,8 +236,6 @@ end
     forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer(forces_nounits_t, sys.coords, n_threads)
-    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
-                                            n_threads=n_threads)
     accels_t = forces_t ./ masses(sys)
     using_constraints = length(sys.constraints) > 0
     if using_constraints
@@ -317,8 +312,6 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
     forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer(forces_nounits_t, sys.coords, n_threads)
-    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
-                                            n_threads=n_threads)
     accels_t = forces_t ./ masses(sys)
     using_constraints = length(sys.constraints) > 0
 
@@ -403,8 +396,6 @@ end
     forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer(forces_nounits_t, sys.coords, n_threads)
-    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
-                                            n_threads=n_threads)
     accels_t = forces_t ./ masses(sys)
     noise = similar(sys.velocities)
     using_constraints = length(sys.constraints) > 0
@@ -513,8 +504,6 @@ end
     forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer(forces_nounits_t, sys.coords, n_threads)
-    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
-                                            n_threads=n_threads)
     accels_t = forces_t ./ masses(sys)
     noise = similar(sys.velocities)
 
@@ -635,8 +624,6 @@ end
     forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer(forces_nounits_t, sys.coords, n_threads)
-    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
-                                            n_threads=n_threads)
     accels_t = forces_t ./ masses(sys)
     noise = similar(sys.velocities)
 
