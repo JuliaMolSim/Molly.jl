@@ -123,11 +123,13 @@ function init_forces_buffer(forces_nounits, ::AbstractArray{SVector{D, C}}, n_th
     end
 end
 
-struct ForcesBuffer{F, C, M}
+struct ForcesBuffer{F, C, M, R}
     fs_mat::F
     box_mins::C
     box_maxs::C
     Morton_seq::M
+    compressed_eligible::R
+    compressed_special::R
 end
 
 function init_forces_buffer(forces_nounits::CuArray{SVector{D, T}}, ::AbstractArray{SVector{D, C}}, n_threads) where {D, T, C}
@@ -137,7 +139,9 @@ function init_forces_buffer(forces_nounits::CuArray{SVector{D, T}}, ::AbstractAr
     box_mins = CUDA.zeros(C, n_blocks, D) 
     box_maxs = CUDA.zeros(C, n_blocks, D) 
     Morton_seq = CUDA.zeros(Int32, N)
-    return ForcesBuffer(fs_mat, box_mins, box_maxs, Morton_seq)
+    compressed_eligible = CUDA.zeros(UInt32, 32, n_blocks, n_blocks)
+    compressed_special = CUDA.zeros(UInt32, 32, n_blocks, n_blocks)
+    return ForcesBuffer(fs_mat, box_mins, box_maxs, Morton_seq, compressed_eligible, compressed_special)
 end
 
 """

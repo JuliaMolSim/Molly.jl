@@ -7,13 +7,14 @@
     gen_temp_wrapper(s, args...; kwargs...) = temperature(s)
 
     s = System(
-        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
+        atoms=CuArray([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
+        coords=CuArray(place_atoms(n_atoms, boundary; min_dist=0.3u"nm")),
+        velocities=CuArray([random_velocity(10.0u"g/mol", temp) for i in 1:n_atoms]),
         boundary=boundary,
         pairwise_inters=(LennardJones(use_neighbors=true),),
-        neighbor_finder=DistanceNeighborFinder(
-            eligible=trues(n_atoms, n_atoms),
-            n_steps=10,
+        neighbor_finder=GPUNeighborFinder(
+            eligible=eligible=CuArray(trues(n_atoms, n_atoms)),
+            n_steps_reorder=10,
             dist_cutoff=2.0u"nm",
         ),
         loggers=(
@@ -24,7 +25,6 @@
                                                 typeof(temp), 1; n_blocks=200),
         ),
     )
-    random_velocities!(s, temp)
 
     @test masses(s) == fill(10.0u"g/mol", n_atoms)
     @test AtomsBase.cell_vectors(s) == (
