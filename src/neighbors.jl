@@ -394,7 +394,7 @@ function Base.show(io::IO, neighbor_finder::Union{DistanceNeighborFinder,
     print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end
 
-function Base.show(io::IO, neighbor_finder::Union{GPUNeighborFinder})
+function Base.show(io::IO, neighbor_finder::GPUNeighborFinder)
     println(io, typeof(neighbor_finder))
     println(io, "  Size of eligible matrix = " , size(neighbor_finder.eligible))
     println(io, "  n_steps_reorder = " , neighbor_finder.n_steps_reorder)
