@@ -30,7 +30,7 @@ for temp in temps
     simulate!(sys, simulator, 5_000; run_loggers=:skipzero)
 end
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel=&quot;Step&quot;,
@@ -344,7 +344,7 @@ for traj_coords in logged_coords[(n_frames ÷ 2):end]
     end
 end
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel=&quot;End-to-end distance / nm&quot;,
@@ -370,7 +370,7 @@ for traj_coords in logged_coords[(n_frames ÷ 2):end]
     end
 end
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel=&quot;Angle with adjacent monomers / degrees&quot;,
@@ -660,7 +660,7 @@ dists = collect(0.2:0.01:1.2)
 forces_direct = force_direct.(dists)
 forces_grad = force_grad.(dists)
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel=&quot;Distance / nm&quot;,
@@ -706,7 +706,7 @@ function energies(inter)
     end
 end
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel=&quot;Distance / nm&quot;,
@@ -746,7 +746,7 @@ function energies(m, n)
     end
 end
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel=&quot;Distance / nm&quot;,
@@ -783,7 +783,7 @@ function energies(α, λ, p)
     end
 end
 
-f = Figure(resolution=(600, 400))
+f = Figure(size=(600, 400))
 ax = Axis(
     f[1, 1],
     xlabel=&quot;Distance / nm&quot;,
@@ -894,4 +894,4 @@ simulate!(sys, simulator, 10_000)
 
 # Check that the constraints are satisfied at the end of the simulation
 @test check_position_constraints(sys, shake)
-@test check_velocity_constraints(sys, shake)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../exercises/">Exercises »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.8.0 on <span class="colophon-date" title="Thursday 19 December 2024 19:49">Thursday 19 December 2024</span>. Using Julia version 1.11.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+@test check_velocity_constraints(sys, shake)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../exercises/">Exercises »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.8.0 on <span class="colophon-date" title="Monday 13 January 2025 14:06">Monday 13 January 2025</span>. Using Julia version 1.11.2.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
