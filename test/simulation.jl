@@ -9,7 +9,6 @@
     s = System(
         atoms=CuArray([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
         coords=CuArray(place_atoms(n_atoms, boundary; min_dist=0.3u"nm")),
-        velocities=CuArray([random_velocity(10.0u"g/mol", temp) for i in 1:n_atoms]),
         boundary=boundary,
         pairwise_inters=(LennardJones(use_neighbors=true),),
         neighbor_finder=GPUNeighborFinder(
@@ -26,7 +25,9 @@
         ),
     )
 
-    @test masses(s) == fill(10.0u"g/mol", n_atoms)
+    random_velocities!(s, temp)
+
+    @test masses(s) == CuArray(fill(10.0u"g/mol", n_atoms))
     @test AtomsBase.cell_vectors(s) == (
         SVector(2.0, 0.0)u"nm",
         SVector(0.0, 2.0)u"nm",

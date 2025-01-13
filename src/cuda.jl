@@ -46,7 +46,7 @@ function pairwise_force_gpu!(buffers, sys::System{D, true, T}, pairwise_inters, 
 		N = length(sys.coords)
 		n_blocks = cld(N, WARPSIZE)
 		r_cut = sys.neighbor_finder.dist_cutoff
-		if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
+		if step_n % sys.neighbor_finder.n_steps_reorder == 0 || step_n == 1 || !sys.neighbor_finder.initialized
 			Morton_bits = 4
 			w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
 			Morton_seq_cpu = sorted_Morton_seq(Array(sys.coords), w, Morton_bits)
@@ -74,7 +74,7 @@ function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, true, T}, pair
 		w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
 		Morton_seq_cpu = sorted_Morton_seq(Array(sys.coords), w, Morton_bits)
 		copyto!(buffers.Morton_seq, Morton_seq_cpu)
-		CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N), sys.boundary)
+		CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N), sys.boundary, Val(D))
 		sys.neighbor_finder.initialized = true
 		CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(buffers.Morton_seq, 
 			pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords, sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), 
@@ -208,6 +208,7 @@ function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
 
 	a = Int32(1)
 	n_blocks = Int32(ceil(N / 32))
+	r = Int32((N - 1) % 32 + 1)
 	i = blockIdx().x
 	j = blockIdx().y
 	i_0_tile = (i - a) * warpsize()
@@ -215,7 +216,7 @@ function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
 	index_i = i_0_tile + laneid()
 	index_j = j_0_tile + laneid()
 
-	if j < n_blocks && i < j 
+	if j < n_blocks && i <= j 
 		s_idx_i = sorted_seq[index_i]
 		eligible_bitmask = UInt32(0)
 		special_bitmask = UInt32(0)
@@ -224,6 +225,36 @@ function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
 			eligible_bitmask = (eligible_bitmask << 1) | UInt32(eligible_matrix[s_idx_i, s_idx_j])
 			special_bitmask = (special_bitmask << 1) | UInt32(special_matrix[s_idx_i, s_idx_j])
 		end
+		compressed_eligible[laneid(), i, j] = eligible_bitmask
+		compressed_special[laneid(), i, j] = special_bitmask
+	end
+
+	if j == n_blocks && i < j
+		s_idx_i = sorted_seq[index_i]
+		eligible_bitmask = UInt32(0)
+		special_bitmask = UInt32(0)
+		for m in a:r
+			s_idx_j = sorted_seq[j_0_tile + m]
+			eligible_bitmask = (eligible_bitmask << 1) | UInt32(eligible_matrix[s_idx_i, s_idx_j])
+			special_bitmask = (special_bitmask << 1) | UInt32(special_matrix[s_idx_i, s_idx_j])
+		end
+		eligible_bitmask = (eligible_bitmask >> r) | (eligible_bitmask << (warpsize() - r))
+		special_bitmask = (special_bitmask >> r) | (special_bitmask << (warpsize() - r))
+		compressed_eligible[laneid(), i, j] = eligible_bitmask
+		compressed_special[laneid(), i, j] = special_bitmask
+	end
+
+	if j == n_blocks && i == j && laneid() <= r
+		s_idx_i = sorted_seq[index_i]
+		eligible_bitmask = UInt32(0)
+		special_bitmask = UInt32(0)
+		for m in a:r
+			s_idx_j = sorted_seq[j_0_tile + m]
+			eligible_bitmask = (eligible_bitmask << 1) | UInt32(eligible_matrix[s_idx_i, s_idx_j])
+			special_bitmask = (special_bitmask << 1) | UInt32(special_matrix[s_idx_i, s_idx_j])
+		end
+		eligible_bitmask = (eligible_bitmask >> r) | (eligible_bitmask << (warpsize() - r))
+		special_bitmask = (special_bitmask >> r) | (special_bitmask << (warpsize() - r))
 		compressed_eligible[laneid(), i, j] = eligible_bitmask
 		compressed_special[laneid(), i, j] = special_bitmask
 	end
@@ -302,8 +333,6 @@ function force_kernel!(
 	# Keep track of the interactions between particles in r-block and the others in 32-blocks
 	force_smem = CuStaticSharedArray(T, (32, 3))
 	opposites_sum = CuStaticSharedArray(T, (32, 3))
-	eligible = CuStaticSharedArray(Bool, (32, 32))
-	special = CuStaticSharedArray(Bool, (32, 32))
 	r = Int32((N - 1) % 32 + 1)
 	@inbounds for k in a:b
 		force_smem[laneid(), k] = zero(T)
@@ -344,18 +373,10 @@ function force_kernel!(
 			acharge_j = atoms_j.charge
 			aσ_j = atoms_j.σ
 			aϵ_j = atoms_j.ϵ
-
 			eligible_bitmask = UInt32(0)
 			special_bitmask = UInt32(0)
 			eligible_bitmask = eligible_compressed[laneid(), i, j]
 			special_bitmask = special_compressed[laneid(), i, j]
-			#eligible_bitmask = UInt32(0xffffffff)
-			#special_bitmask = UInt32(0xffffffff)
-			#=@inbounds for m in a:warpsize()
-				s_idx_j_m = sorted_seq[j_0_tile + m]
-				eligible_bitmask = (eligible_bitmask << 1) | UInt32(eligible_matrix[s_idx_i, s_idx_j_m])
-				special_bitmask = (special_bitmask << 1) | UInt32(special_matrix[s_idx_i, s_idx_j_m])
-			end=#
 
 			# Shuffle
 			for m in a:warpsize()
@@ -428,12 +449,10 @@ function force_kernel!(
 				dist_pb += d_pb * d_pb
 			end
 			Bool_excl = dist_pb <= r_cut * r_cut
-
-			@inbounds for m in a:r
-				s_idx_j = sorted_seq[j_0_tile + m]
-				eligible[laneid(), m] = eligible_matrix[s_idx_i, s_idx_j]
-				special[laneid(), m] = special_matrix[s_idx_i, s_idx_j]
-			end
+			eligible_bitmask = UInt32(0)
+			special_bitmask = UInt32(0)
+			eligible_bitmask = eligible_compressed[laneid(), i, j]
+			special_bitmask = special_compressed[laneid(), i, j]
 			
 			# Compute the 32 * r distances
 			for m in a:r
@@ -443,13 +462,15 @@ function force_kernel!(
 				atoms_j = atoms[s_idx_j]
 				dr = vector(coords_j, coords_i, boundary)
 				r2 = sum(abs2, dr)
-				condition = eligible[laneid(), m] && Bool_excl && r2 <= r_cut * r_cut
+				excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
+				spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
+				condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
 				f = condition ? sum_pairwise_forces(
 					inters_tuple,
 					atoms_i, atoms_j,
 					Val(force_units),
-					special[laneid(), m],
+					(spec & 0x1) == true,
 					coords_i, coords_j,
 					boundary,
 					vel_i, vel_j,
@@ -481,12 +502,10 @@ function force_kernel!(
 		coords_i = coords[s_idx_i]
 		vel_i = velocities[s_idx_i]
 		atoms_i = atoms[s_idx_i]
-
-		@inbounds for m in a:warpsize()
-			s_idx_j = sorted_seq[j_0_tile + m]
-			eligible[laneid(), m] = eligible_matrix[s_idx_i, s_idx_j]
-			special[laneid(), m] = special_matrix[s_idx_i, s_idx_j]
-		end
+		eligible_bitmask = UInt32(0)
+		special_bitmask = UInt32(0)
+		eligible_bitmask = eligible_compressed[laneid(), i, j]
+		special_bitmask = special_compressed[laneid(), i, j]
 
 		for m in (laneid() + a) : warpsize()
 			s_idx_j = sorted_seq[j_0_tile + m]
@@ -495,13 +514,15 @@ function force_kernel!(
 			atoms_j = atoms[s_idx_j]
 			dr = vector(coords_j, coords_i, boundary)
 			r2 = sum(abs2, dr)
-			condition = eligible[laneid(), m] && r2 <= r_cut * r_cut
+			excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
+			spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
+			condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
 			f = condition ? sum_pairwise_forces(
 				inters_tuple,
 				atoms_i, atoms_j,
 				Val(force_units),
-				special[laneid(), m],
+				(spec & 0x1) == true,
 				coords_i, coords_j,
 				boundary,
 				vel_i, vel_j,
@@ -514,7 +535,6 @@ function force_kernel!(
 		end	
 
 		@inbounds for k in a:b
-
 			# In this case i == j, so we can call atomic_add! only once
 			CUDA.atomic_add!(
 				pointer(forces_nounits, s_idx_i * b - (b - k)), 
@@ -531,12 +551,10 @@ function force_kernel!(
 			coords_i = coords[s_idx_i]
 			vel_i = velocities[s_idx_i]
 			atoms_i = atoms[s_idx_i]
-
-			@inbounds for m in a:r
-				s_idx_j = sorted_seq[j_0_tile + m]
-				eligible[laneid(), m] = eligible_matrix[s_idx_i, s_idx_j]
-				special[laneid(), m] = special_matrix[s_idx_i, s_idx_j]
-			end
+			eligible_bitmask = UInt32(0)
+			special_bitmask = UInt32(0)
+			eligible_bitmask = eligible_compressed[laneid(), i, j]
+			special_bitmask = special_compressed[laneid(), i, j]
 
 			for m in (laneid() + a) : r
 				s_idx_j = sorted_seq[j_0_tile + m]
@@ -545,13 +563,15 @@ function force_kernel!(
 				atoms_j = atoms[s_idx_j]
 				dr = vector(coords_j, coords_i, boundary)
 				r2 = sum(abs2, dr)
-				condition = eligible[laneid(), m] && r2 <= r_cut * r_cut
+				excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
+				spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
+				condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 				
 				f = condition ? sum_pairwise_forces(
 					inters_tuple,
 					atoms_i, atoms_j,
 					Val(force_units),
-					special[laneid(), m],
+					(spec & 0x1) == true,
 					coords_i, coords_j,
 					boundary,
 					vel_i, vel_j,
