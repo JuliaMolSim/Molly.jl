@@ -56,7 +56,7 @@ function pairwise_force_gpu!(buffers, sys::System{D, true, T}, pairwise_inters, 
 			CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(buffers.Morton_seq, 
 			sys.neighbor_finder.eligible, sys.neighbor_finder.special, buffers.compressed_eligible, buffers.compressed_special, Val(N))
 		end
-		CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(buffers.Morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords, sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters, sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible, buffers.compressed_special, buffers.compressed_eligible, Val(T), Val(D))
+		CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(buffers.Morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords, sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters, sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible, Val(T), Val(D))
 	end
 	return buffers
 end
@@ -312,14 +312,11 @@ function force_kernel!(
 	inters_tuple,
 	boundary,
 	step_n,
-	special_matrix,
-	eligible_matrix,
 	special_compressed,
 	eligible_compressed,
 	::Val{T},
 	::Val{D}) where {N, C, force_units, T, D}
 
-	# Get the indices that run on the blocks and threads
 	a = Int32(1)
 	b = Int32(D)
 	n_blocks = Int32(ceil(N / 32))
@@ -329,8 +326,6 @@ function force_kernel!(
 	j_0_tile = (j - a) * warpsize()
 	index_i = i_0_tile + laneid()
 	index_j = j_0_tile + laneid()
-	
-	# Keep track of the interactions between particles in r-block and the others in 32-blocks
 	force_smem = CuStaticSharedArray(T, (32, 3))
 	opposites_sum = CuStaticSharedArray(T, (32, 3))
 	r = Int32((N - 1) % 32 + 1)
@@ -339,7 +334,7 @@ function force_kernel!(
 		opposites_sum[laneid(), k] = zero(T)
 	end
 
-	# The code is organised in 4 mutually excluding parts (this is the first (1) one)
+	# The code is organised in 4 mutually excluding parts
 	if j < n_blocks && i < j
 		d_block = zero(C)
 		dist_block = zero(C) * zero(C)
@@ -347,8 +342,6 @@ function force_kernel!(
 			d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
 			dist_block += d_block * d_block	
 		end
-		
-		# Check on block-block distance
 		if dist_block <= r_cut * r_cut
 			s_idx_i = sorted_seq[index_i]
 			coords_i = coords[s_idx_i] 
@@ -427,8 +420,6 @@ function force_kernel!(
 		end
 	end
 
-
-	# part (2)
 	if j == n_blocks && i < n_blocks
 		d_block = zero(C)
 		dist_block = zero(C) * zero(C)
@@ -454,7 +445,6 @@ function force_kernel!(
 			eligible_bitmask = eligible_compressed[laneid(), i, j]
 			special_bitmask = special_compressed[laneid(), i, j]
 			
-			# Compute the 32 * r distances
 			for m in a:r
 				s_idx_j = sorted_seq[j_0_tile + m]
 				coords_j = coords[s_idx_j]
@@ -495,8 +485,6 @@ function force_kernel!(
 		end
 	end
 
-
-	# part (3)
 	if i == j && i < n_blocks
 		s_idx_i = sorted_seq[index_i]
 		coords_i = coords[s_idx_i]
@@ -543,8 +531,6 @@ function force_kernel!(
 		end
 	end
 
-
-	# part (4)
 	if i == n_blocks && j == n_blocks
 		if laneid() <= r
 			s_idx_i = sorted_seq[index_i]
@@ -614,13 +600,10 @@ function energy_kernel!(
 	::Val{T},
 	::Val{D}) where {N, C, energy_units, T, D}
 
-	# Converted factors
 	a = Int32(1)
 	b = Int32(D)
 	n_blocks = Int32(ceil(N / 32))
 	r = Int32((N - 1) % 32 + 1)
-
-	# Indices and shared memory
 	i = blockIdx().x
 	j = blockIdx().y
 	i_0_tile = (i - 1) * warpsize()
@@ -632,7 +615,7 @@ function energy_kernel!(
 	eligible = CuStaticSharedArray(Bool, (32, 32))
 	special = CuStaticSharedArray(Bool, (32, 32))
 
-	# The code is organised in 4 mutually excluding parts (this is the first (1) one)
+	# The code is organised in 4 mutually excluding parts
 	if j < n_blocks && i < j
 		d_block = zero(C)
 		dist_block = zero(C) * zero(C)
@@ -640,10 +623,7 @@ function energy_kernel!(
 			d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
 			dist_block += d_block * d_block	
 		end
-		
-		# Check on block-block distance
 		if dist_block <= r_cut * r_cut
-
 			s_idx_i = sorted_seq[index_i]
 			coords_i = coords[s_idx_i] 
 			vel_i = velocities[s_idx_i]
@@ -654,7 +634,6 @@ function energy_kernel!(
 				d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
 				dist_pb += d_pb * d_pb
 			end
-
 			Bool_excl = dist_pb <= r_cut * r_cut
 			s_idx_j = sorted_seq[index_j]
 			coords_j = coords[s_idx_j]
@@ -667,7 +646,6 @@ function energy_kernel!(
 			acharge_j = atoms_j.charge
 			aσ_j = atoms_j.σ
 			aϵ_j = atoms_j.ϵ
-
 			@inbounds for m in a:warpsize()
 				eligible[laneid(), m] = eligible_matrix[s_idx_i, sorted_seq[j_0_tile + m]]
 				special[laneid(), m] = special_matrix[s_idx_i, sorted_seq[j_0_tile + m]]
@@ -707,18 +685,14 @@ function energy_kernel!(
 		end
 	end
 
-	# part (2)
 	if j == n_blocks && i < n_blocks
-
 		d_block = zero(C)
 		dist_block = zero(C) * zero(C)
 		@inbounds for k in a:b
 			d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
 			dist_block += d_block * d_block	
 		end
-
 		if dist_block <= r_cut * r_cut 
-
 			s_idx_i = sorted_seq[index_i]
 			coords_i = coords[s_idx_i]
 			vel_i = velocities[s_idx_i]
@@ -730,14 +704,12 @@ function energy_kernel!(
 				dist_pb += d_pb * d_pb
 			end
 			Bool_excl = dist_pb <= r_cut * r_cut
-
 			@inbounds for m in a:r
 				s_idx_j = sorted_seq[j_0_tile + m]
 				eligible[laneid(), m] = eligible_matrix[s_idx_i, s_idx_j]
 				special[laneid(), m] = special_matrix[s_idx_i, s_idx_j]
 			end
 			
-			# Compute the 32 * r distances
 			for m in a:r
 				s_idx_j = sorted_seq[j_0_tile + m]
 				coords_j = coords[s_idx_j]
@@ -762,21 +734,16 @@ function energy_kernel!(
 		end
 	end
 
-
-	# part (3)
 	if i == j && i < n_blocks
-
 		s_idx_i = sorted_seq[index_i]
 		coords_i = coords[s_idx_i]
 		vel_i = velocities[s_idx_i]
 		atoms_i = atoms[s_idx_i]
-
 		@inbounds for m in a:warpsize()
 			s_idx_j = sorted_seq[j_0_tile + m]
 			eligible[laneid(), m] = eligible_matrix[s_idx_i, s_idx_j]
 			special[laneid(), m] = special_matrix[s_idx_i, s_idx_j]
 		end
-
 		@inbounds for m in (laneid() + a) : warpsize()
 			s_idx_j = sorted_seq[j_0_tile + m]
 			coords_j = coords[s_idx_j]
@@ -800,17 +767,12 @@ function energy_kernel!(
 		end	
 	end
 
-
-	# part (4)
 	if i == n_blocks && j == n_blocks
-
 		if laneid() <= r
-			
 			s_idx_i = sorted_seq[index_i]
 			coords_i = coords[s_idx_i]
 			vel_i = velocities[s_idx_i]
 			atoms_i = atoms[s_idx_i]
-
 			@inbounds for m in a:r
 				s_idx_j = sorted_seq[j_0_tile + m]
 				eligible[laneid(), m] = eligible_matrix[s_idx_i, s_idx_j]
