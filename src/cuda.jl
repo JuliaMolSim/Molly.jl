@@ -46,7 +46,7 @@ function pairwise_force_gpu!(buffers, sys::System{D, true, T}, pairwise_inters, 
         N = length(sys.coords)
         n_blocks = cld(N, WARPSIZE)
         r_cut = sys.neighbor_finder.dist_cutoff
-        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || step_n == 1 || !sys.neighbor_finder.initialized
+        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
             Morton_bits = 4
             w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
             Morton_seq_cpu = sorted_Morton_seq(Array(sys.coords), w, Morton_bits)

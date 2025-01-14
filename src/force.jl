@@ -115,7 +115,7 @@ Base.:+(x::SpecificForce2Atoms, y::SpecificForce2Atoms) = SpecificForce2Atoms(x.
 Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3)
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 
-function init_forces_buffer(forces_nounits, ::AbstractArray{SVector{D, C}}, n_threads) where {D, C}
+function init_forces_buffer!(sys, forces_nounits, n_threads)
     if n_threads == 1
         return nothing
     else
@@ -132,8 +132,9 @@ struct ForcesBuffer{F, C, M, R}
     compressed_special::R
 end
 
-function init_forces_buffer(forces_nounits::CuArray{SVector{D, T}}, ::AbstractArray{SVector{D, C}}, n_threads) where {D, T, C}
+function init_forces_buffer!(sys, forces_nounits::CuArray{SVector{D, T}}, n_threads) where {D, T}
     N = length(forces_nounits)
+    C = eltype(eltype(sys.coords))
     n_blocks = cld(N, 32)
     fs_mat = CUDA.zeros(T, D, N)
     box_mins = CUDA.zeros(C, n_blocks, D) 
@@ -141,6 +142,9 @@ function init_forces_buffer(forces_nounits::CuArray{SVector{D, T}}, ::AbstractAr
     Morton_seq = CUDA.zeros(Int32, N)
     compressed_eligible = CUDA.zeros(UInt32, 32, n_blocks, n_blocks)
     compressed_special = CUDA.zeros(UInt32, 32, n_blocks, n_blocks)
+    if sys.neighbor_finder isa GPUNeighborFinder
+        sys.neighbor_finder.initialized = false
+    end
     return ForcesBuffer(fs_mat, box_mins, box_maxs, Morton_seq, compressed_eligible, compressed_special)
 end
 
@@ -156,7 +160,7 @@ end
 
 function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     forces_nounits = ustrip_vec.(zero(sys.coords))
-    forces_buffer = init_forces_buffer(forces_nounits, sys.coords, n_threads)
+    forces_buffer = init_forces_buffer!(sys, forces_nounits, n_threads)
     forces_nounits!(forces_nounits, sys, neighbors, forces_buffer, step_n; n_threads=n_threads)
     return forces_nounits .* sys.force_units
 end
