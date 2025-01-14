@@ -253,11 +253,11 @@ function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_a
     return pe
 end
 
-function potential_energy(sys::System{D, true, T}, neighbors, step_n::Integer=0,
-                          buffers=init_forces_buffer(ustrip_vec.(zero(sys.coords)), sys.coords, 1);
+function potential_energy(sys::System{D, true, T}, neighbors, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where {D, T}
     pe_vec_nounits = CUDA.zeros(T, 1)
     val_ft = Val(T)
+    buffers = init_forces_buffer!(sys, ustrip_vec.(zero(sys.coords)), 1)
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0

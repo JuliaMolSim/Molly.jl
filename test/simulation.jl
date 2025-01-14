@@ -409,7 +409,6 @@ end
     n_steps = 100
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
-    G = 10.0u"kJ * mol * nm * g^-2"
     simulator = VelocityVerlet(dt=0.002u"ps")
     pairwise_inter_types = (
         LennardJones(use_neighbors=true), 
@@ -438,10 +437,10 @@ end
         velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
 
         s = System(
-            atoms=atoms,
-            coords=coords,
-            boundary=boundary,
-            velocities=velocities,
+            atoms=deepcopy(atoms),
+            coords=deepcopy(coords),
+            boundary=deepcopy(boundary),
+            velocities=deepcopy(velocities),
             pairwise_inters=(inter,),
             neighbor_finder=neighbor_finder,
         )
