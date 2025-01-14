@@ -257,24 +257,17 @@ function potential_energy(sys::System{D, true, T}, neighbors, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where {D, T}
     pe_vec_nounits = CUDA.zeros(T, 1)
     val_ft = Val(T)
+    buffers = init_forces_buffer!(sys, ustrip_vec.(zero(sys.coords)), 1)
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(length(sys))
-        pairwise_pe_gpu!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary,
-                         pairwise_inters_nonl, nbs, step_n, sys.energy_units, val_ft)
+        pairwise_pe_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters_nonl, nbs, step_n)
     end
 
     pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nl) > 0
-        if isnothing(neighbors)
-            error("an interaction uses the neighbor list but neighbors is nothing")
-        end
-        if length(neighbors) > 0
-            nbs = @view neighbors.list[1:neighbors.n]
-            pairwise_pe_gpu!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary,
-                             pairwise_inters_nl, nbs, step_n, sys.energy_units, val_ft)
-        end
+        pairwise_pe_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters_nl, nothing, step_n)   
     end
 
     for inter_list in values(sys.specific_inter_lists)

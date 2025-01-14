@@ -6,7 +6,8 @@ export
     find_neighbors,
     DistanceNeighborFinder,
     TreeNeighborFinder,
-    CellListMapNeighborFinder
+    CellListMapNeighborFinder,
+    GPUNeighborFinder
 
 """
     use_neighbors(inter)
@@ -41,6 +42,33 @@ Custom neighbor finders should implement this function.
 find_neighbors(sys::System; kwargs...) = find_neighbors(sys, sys.neighbor_finder; kwargs...)
 
 find_neighbors(sys::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
+
+"""
+    GPUNeighborFinder(; eligible, dist_cutoff, special, n_steps_reorder, initialized)
+
+Returns nothing as neighbor list since the Eastman's algorithm for GPU computation of nonbonded forces does not require previous knowledge of a neighbor list. 
+"""
+mutable struct GPUNeighborFinder{B, D}
+    eligible::B
+    dist_cutoff::D
+    special::B
+    n_steps_reorder::Int
+    initialized::Bool
+end
+
+function GPUNeighborFinder(;
+                            eligible,
+                            dist_cutoff,
+                            special=zero(eligible),
+                            n_steps_reorder=10,
+                            initialized=false)
+    return GPUNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
+                eligible, dist_cutoff, special, n_steps_reorder, initialized)
+end
+
+find_neighbors(sys::System{D, true}, nf::GPUNeighborFinder, current_neighbors=nothing, step_n::Integer=0, initialized::Bool=false; kwargs...) where D = nothing
+
+find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
 
 """
     DistanceNeighborFinder(; eligible, dist_cutoff, special, n_steps)
@@ -363,5 +391,12 @@ function Base.show(io::IO, neighbor_finder::Union{DistanceNeighborFinder,
     println(io, typeof(neighbor_finder))
     println(io, "  Size of eligible matrix = " , size(neighbor_finder.eligible))
     println(io, "  n_steps = " , neighbor_finder.n_steps)
+    print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
+end
+
+function Base.show(io::IO, neighbor_finder::GPUNeighborFinder)
+    println(io, typeof(neighbor_finder))
+    println(io, "  Size of eligible matrix = " , size(neighbor_finder.eligible))
+    println(io, "  n_steps_reorder = " , neighbor_finder.n_steps_reorder)
     print(  io, "  dist_cutoff = ", neighbor_finder.dist_cutoff)
 end

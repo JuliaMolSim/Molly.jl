@@ -184,10 +184,17 @@
         # Mark all pairs as ineligible for pairwise interactions and check that the
         #   potential energy from the specific interactions does not change on scaling
         no_nbs = falses(length(sys), length(sys))
-        sys.neighbor_finder = DistanceNeighborFinder(
-            eligible=(gpu ? CuArray(no_nbs) : no_nbs),
-            dist_cutoff=1.0u"nm",
-        )
+        if gpu
+            sys.neighbor_finder = GPUNeighborFinder(
+                eligible=(gpu ? CuArray(no_nbs) : no_nbs),
+                dist_cutoff=1.0u"nm",
+            )
+        else 
+            sys.neighbor_finder = DistanceNeighborFinder(
+                eligible=(gpu ? CuArray(no_nbs) : no_nbs),
+                dist_cutoff=1.0u"nm",
+            )
+        end
         coords_start = copy(sys.coords)
         pe_start = potential_energy(sys, find_neighbors(sys))
         scale_factor = 1.02
