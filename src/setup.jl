@@ -888,7 +888,7 @@ function System(coord_file::AbstractString,
     coords = wrap_coords.(coords, (boundary_used,))
 
     if (array_type <: AbstractGPUArray)
-        neighbor_finder = DistanceNeighborFinder(
+        neighbor_finder = GPUNeighborFinder(
             eligible=array_type(eligible),
             dist_cutoff=T(dist_neighbors),
             special=array_type(special),
@@ -1281,7 +1281,7 @@ function System(T::Type,
     specific_inter_lists = tuple(specific_inter_array...)
 
     if array_type <: AbstractGPUArray
-        neighbor_finder = DistanceNeighborFinder(
+        neighbor_finder = GPUNeighborFinder(
             eligible=array_type(eligible),
             dist_cutoff=T(dist_neighbors),
             special=array_type(special),

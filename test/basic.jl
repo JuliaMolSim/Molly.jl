@@ -191,7 +191,7 @@
             )
         else 
             sys.neighbor_finder = DistanceNeighborFinder(
-                eligible=array_type(no_nbs),
+                eligible=(array_type <: AbstractGPUArray ? array_type(no_nbs) : no_nbs),
                 dist_cutoff=1.0u"nm",
             )
         end

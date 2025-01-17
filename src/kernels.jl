@@ -227,12 +227,12 @@ end
     end
 end
 
-function pairwise_pe_gpu!(pe_vec_nounits, coords::AbstractArray{SVector{D, C}}, velocities, atoms, boundary,
-                         pairwise_inters, nbs, step_n, energy_units, ::Val{T}) where {D, C, T}
-    backend = get_backend(coords)
+function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T},
+                         pairwise_inters, nbs, step_n) where {D, AT <: AbstractGPUArray, T}
+    backend = get_backend(sys.coords)
     n_threads_gpu = gpu_threads_pairwise(length(nbs))
     kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)
-    kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, pairwise_inters, nbs, step_n, Val(energy_units); ndrange = length(nbs))
+    kernel!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, nbs, step_n, Val(energy_units); ndrange = length(nbs))
     return pe_vec_nounits
 end
 

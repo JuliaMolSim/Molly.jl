@@ -1233,3 +1233,4 @@ function specific_pe_4_atoms_kernel!(energy, coords_var, velocities_var, atoms_v
     end
     return nothing
 end
+end
