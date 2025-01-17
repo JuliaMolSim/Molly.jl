@@ -327,7 +327,7 @@ sys = System(
         energy=TotalEnergyLogger(10),
         writer=StructureWriter(10, "traj_6mrr_1ps.pdb", ["HOH"]),
     ),
-    gpu=false,
+    array_type=Array,
 )
 
 minimizer = SteepestDescentMinimizer()
@@ -363,7 +363,7 @@ Residue patches, virtual sites, file includes and any force types other than `Ha
 
     Some PDB files that read in fine can be found [here](https://github.com/greener-group/GB99dms/tree/main/structures/training/conf_1).
 
-To run on the GPU, set `gpu=true`.
+To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the array type for your GPU backend (for example, `CuArray` for NVIDIA or `ROCArray` for AMD).
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
 The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
 Other options include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_neighbors`).
