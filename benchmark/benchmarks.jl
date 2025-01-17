@@ -62,7 +62,8 @@ const starting_velocities = [random_velocity(atom_mass, 1.0u"K") for i in 1:n_at
 const starting_coords_f32 = [Float32.(c) for c in starting_coords]
 const starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
+function test_sim(nl::Bool, parallel::Bool, f32::Bool,
+                  array_type::Type{AT}) where AT <: AbstractArray
     n_atoms = 400
     n_steps = 200
     atom_mass = f32 ? 10.0f0u"g/mol" : 10.0u"g/mol"
@@ -72,9 +73,9 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
     r0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
     bonds = [HarmonicBond(k=k, r0=r0) for i in 1:(n_atoms ÷ 2)]
     specific_inter_lists = (InteractionList2Atoms(
-        gpu ? CuArray(Int32.(collect(1:2:n_atoms))) : Int32.(collect(1:2:n_atoms)),
-        gpu ? CuArray(Int32.(collect(2:2:n_atoms))) : Int32.(collect(2:2:n_atoms)),
-        gpu ? CuArray(bonds) : bonds,
+        array_type(Int32.(collect(1:2:n_atoms))),
+        array_type(Int32.(collect(2:2:n_atoms))),
+        array_type(bonds),
     ),)
 
     neighbor_finder = NoNeighborFinder()
@@ -82,24 +83,17 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
     pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
     if nl
         neighbor_finder = DistanceNeighborFinder(
-            eligible=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
+            eligible=array_type(trues(n_atoms, n_atoms)),
             n_steps=10,
             dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
         )
         pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
     end
 
-    if gpu
-        coords = CuArray(copy(f32 ? starting_coords_f32 : starting_coords))
-        velocities = CuArray(copy(f32 ? starting_velocities_f32 : starting_velocities))
-        atoms = CuArray([Atom(mass=atom_mass, charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                              ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
-    else
-        coords = copy(f32 ? starting_coords_f32 : starting_coords)
-        velocities = copy(f32 ? starting_velocities_f32 : starting_velocities)
-        atoms = [Atom(mass=atom_mass, charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                      ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    end
+    coords = array_type(deepcopy(f32 ? starting_coords_f32 : starting_coords))
+    velocities = array_type(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
+    atoms = array_type([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+                            ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
 
     sys = System(
         atoms=atoms,
@@ -117,22 +111,22 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
 end
 
 runs = [
-    ("CPU"       , [false, false, false, false]),
-    ("CPU f32"   , [false, false, true , false]),
-    ("CPU NL"    , [true , false, false, false]),
-    ("CPU f32 NL", [true , false, true , false]),
+    ("CPU"       , [false, false, false, Array]),
+    ("CPU f32"   , [false, false, true , Array]),
+    ("CPU NL"    , [true , false, false, Array]),
+    ("CPU f32 NL", [true , false, true , Array]),
 ]
 if run_parallel_tests
-    push!(runs, ("CPU parallel"       , [false, true , false, false]))
-    push!(runs, ("CPU parallel f32"   , [false, true , true , false]))
-    push!(runs, ("CPU parallel NL"    , [true , true , false, false]))
-    push!(runs, ("CPU parallel f32 NL", [true , true , true , false]))
+    push!(runs, ("CPU parallel"       , [false, true , false, Array]))
+    push!(runs, ("CPU parallel f32"   , [false, true , true , Array]))
+    push!(runs, ("CPU parallel NL"    , [true , true , false, Array]))
+    push!(runs, ("CPU parallel f32 NL", [true , true , true , Array]))
 end
-if run_gpu_tests
-    push!(runs, ("GPU"       , [false, false, false, true]))
-    push!(runs, ("GPU f32"   , [false, false, true , true]))
-    push!(runs, ("GPU NL"    , [true , false, false, true]))
-    push!(runs, ("GPU f32 NL", [true , false, true , true]))
+if run_cuda_tests
+    push!(runs, ("GPU"       , [false, false, false, CuArray]))
+    push!(runs, ("GPU f32"   , [false, false, true , CuArray]))
+    push!(runs, ("GPU NL"    , [true , false, false, CuArray]))
+    push!(runs, ("GPU f32 NL", [true , false, true , CuArray]))
 end
 
 for (name, args) in runs
