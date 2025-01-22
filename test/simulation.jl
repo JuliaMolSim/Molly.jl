@@ -1,22 +1,33 @@
 @testset "Lennard-Jones 2D" begin
-    if run_gpu_tests
+    for gpu in gpu_list
+        AT = gpu ? CuArray : Array
         n_atoms = 10
         n_steps = 20_000
-        temp = 298.0u"K"
+        temp = 100.0u"K"
         boundary = RectangularBoundary(2.0u"nm")
-        simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
+        simulator = VelocityVerlet(dt=0.001u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
         gen_temp_wrapper(s, args...; kwargs...) = temperature(s)
 
-        s = System(
-            atoms=CuArray([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
-            coords=CuArray(place_atoms(n_atoms, boundary; min_dist=0.3u"nm")),
-            boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
-            neighbor_finder=GPUNeighborFinder(
-                eligible=eligible=CuArray(trues(n_atoms, n_atoms)),
+        if gpu
+            neighbor_finder = GPUNeighborFinder(
+                eligible=eligible=AT(trues(n_atoms, n_atoms)),
                 n_steps_reorder=10,
                 dist_cutoff=2.0u"nm",
-            ),
+            )
+        else
+            neighbor_finder = DistanceNeighborFinder(
+                eligible=trues(n_atoms, n_atoms),
+                n_steps=10,
+                dist_cutoff=2.0u"nm",
+            )
+        end
+
+        s = System(
+            atoms=AT([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
+            coords=AT(place_atoms(n_atoms, boundary; min_dist=0.3u"nm")),
+            boundary=boundary,
+            pairwise_inters=(LennardJones(use_neighbors=true),),
+            neighbor_finder=neighbor_finder,
             loggers=(
                 temp=TemperatureLogger(100),
                 coords=CoordinatesLogger(100; dims=2),
@@ -28,7 +39,7 @@
 
         random_velocities!(s, temp)
 
-        @test masses(s) == CuArray(fill(10.0u"g/mol", n_atoms))
+        @test masses(s) == AT(fill(10.0u"g/mol", n_atoms))
         @test AtomsBase.cell_vectors(s) == (
             SVector(2.0, 0.0)u"nm",
             SVector(0.0, 2.0)u"nm",
@@ -437,10 +448,10 @@ end
         velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
 
         s = System(
-            atoms=deepcopy(atoms),
-            coords=deepcopy(coords),
-            boundary=deepcopy(boundary),
-            velocities=deepcopy(velocities),
+            atoms=copy(atoms),
+            coords=copy(coords),
+            boundary=boundary,
+            velocities=copy(velocities),
             pairwise_inters=(inter,),
             neighbor_finder=neighbor_finder,
         )
