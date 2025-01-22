@@ -4,10 +4,10 @@ export
     use_neighbors,
     NoNeighborFinder,
     find_neighbors,
+    GPUNeighborFinder,
     DistanceNeighborFinder,
     TreeNeighborFinder,
-    CellListMapNeighborFinder,
-    GPUNeighborFinder
+    CellListMapNeighborFinder
 
 """
     use_neighbors(inter)
@@ -46,7 +46,10 @@ find_neighbors(sys::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
 """
     GPUNeighborFinder(; eligible, dist_cutoff, special, n_steps_reorder, initialized)
 
-Returns nothing as neighbor list since the Eastman's algorithm for GPU computation of nonbonded forces does not require previous knowledge of a neighbor list. 
+Use the non-bonded forces/potential energy algorithm from
+[Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413) to avoid calculating a neighbor list.
+
+This is the recommended neighbor finder on GPU.
 """
 mutable struct GPUNeighborFinder{B, D}
     eligible::B
@@ -65,8 +68,6 @@ function GPUNeighborFinder(;
     return GPUNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
                 eligible, dist_cutoff, special, n_steps_reorder, initialized)
 end
-
-find_neighbors(sys::System{D, true}, nf::GPUNeighborFinder, current_neighbors=nothing, step_n::Integer=0, initialized::Bool=false; kwargs...) where D = nothing
 
 find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
 
@@ -234,6 +235,7 @@ end
 
 Find close atoms by distance using a cell list algorithm from CellListMap.jl.
 
+This is the recommended neighbor finder on CPU.
 `x0` and `unit_cell` are optional initial coordinates and system unit cell that improve the
 first approximation of the cell list structure.
 Can not be used if one or more dimensions has infinite boundaries.

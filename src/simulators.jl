@@ -144,7 +144,8 @@ end
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_nounits_t = ustrip_vec.(zero(sys.coords))
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
-    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0; n_threads=n_threads)
+    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
+                                       n_threads=n_threads)
     forces_t = forces_nounits_t .* sys.force_units
     accels_t = forces_t ./ masses(sys)
     forces_nounits_t_dt = ustrip_vec.(similar(sys.coords))
@@ -696,7 +697,8 @@ end
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_nounits_t = ustrip_vec.(zero(sys.coords))
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
-    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0; n_threads=n_threads)
+    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
+                                       n_threads=n_threads)
     forces_t = forces_nounits_t .* sys.force_units
     accels_t = forces_t ./ masses(sys)
     forces_nounits_t_dt = ustrip_vec.(similar(sys.coords))
