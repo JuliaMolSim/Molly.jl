@@ -6,7 +6,8 @@ using CUDA
 using Test
 
 @testset "Lennard-Jones energy conservation" begin
-    function test_energy_conservation(nl::Bool, array_type::AbstractArray, n_threads::Integer, n_steps::Integer)
+    function test_energy_conservation(nl::Bool, ::Type{AT}, n_threads::Integer,
+                                      n_steps::Integer) where AT
         n_atoms = 2_000
         atom_mass = 40.0u"g/mol"
         temp = 1.0u"K"
@@ -41,8 +42,8 @@ using Test
             end
     
             sys = System(
-                atoms=(array_type(atoms) : atoms),
-                coords=(array_type(coords) : coords),
+                atoms=AT(atoms),
+                coords=AT(coords),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=ifelse(nl, true, false)),),
                 neighbor_finder=neighbor_finder,
@@ -78,9 +79,9 @@ using Test
         test_energy_conservation(true, Array, Threads.nthreads(), 50_000)
         test_energy_conservation(false, Array, Threads.nthreads(), 50_000)
     end
-    for array_type in array_list[2:end]
-        test_energy_conservation(true, array_type, 1, 100_000)
-        test_energy_conservation(false, array_type, 1, 100_000)
+    for AT in array_list[2:end]
+        test_energy_conservation(true, AT, 1, 100_000)
+        test_energy_conservation(false, AT, 1, 100_000)
     end
 end
 

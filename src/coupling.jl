@@ -58,10 +58,10 @@ struct AndersenThermostat{T, C}
     coupling_const::C
 end
 
-function apply_coupling!(sys::System{D}, thermostat::AndersenThermostat, sim,
+function apply_coupling!(sys::System, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where D
+                         rng=Random.default_rng())
     for i in eachindex(sys)
         if rand(rng) < (sim.dt / thermostat.coupling_const)
             sys.velocities[i] = random_velocity(mass(sys.atoms[i]), thermostat.temperature, sys.k;
@@ -77,8 +77,8 @@ function apply_coupling!(sys::System{D, AT, T}, thermostat::AndersenThermostat, 
                          rng=Random.default_rng()) where {D, AT <: AbstractGPUArray, T}
     atoms_to_bump = T.(rand(rng, length(sys)) .< (sim.dt / thermostat.coupling_const))
     atoms_to_leave = one(T) .- atoms_to_bump
-    atoms_to_bump_dev = move_array(atoms_to_bump, sys)
-    atoms_to_leave_dev = move_array(atoms_to_leave, sys)
+    atoms_to_bump_dev = AT(atoms_to_bump)
+    atoms_to_leave_dev = AT(atoms_to_leave)
     vs = random_velocities(sys, thermostat.temperature; rng=rng)
     sys.velocities .= sys.velocities .* atoms_to_leave_dev .+ vs .* atoms_to_bump_dev
     return false
@@ -231,9 +231,9 @@ function MonteCarloBarostat(P, T, boundary; n_steps=30, n_iterations=1, scale_fa
                               max_volume_frac, trial_find_neighbors, 0, 0)
 end
 
-function apply_coupling!(sys::System{D, G, T}, barostat::MonteCarloBarostat, sim, neighbors=nothing,
+function apply_coupling!(sys::System{D, AT, T}, barostat::MonteCarloBarostat, sim, neighbors=nothing,
                          step_n::Integer=0; n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {D, G, T}
+                         rng=Random.default_rng()) where {D, AT, T}
     if !iszero(step_n % barostat.n_steps)
         return false
     end
@@ -371,13 +371,13 @@ function MonteCarloAnisotropicBarostat(pressure::SVector{D},
     )
 end
 
-function apply_coupling!(sys::System{D, G, T},
+function apply_coupling!(sys::System{D, AT, T},
                          barostat::MonteCarloAnisotropicBarostat{D},
                          sim,
                          neighbors=nothing,
                          step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {D, G, T}
+                         rng=Random.default_rng()) where {D, AT, T}
     !iszero(step_n % barostat.n_steps) && return false
     all(isnothing, barostat.pressure) && return false
 
@@ -546,13 +546,13 @@ function MonteCarloMembraneBarostat(pressure,
     )
 end
 
-function apply_coupling!(sys::System{D, G, T},
+function apply_coupling!(sys::System{D, AT, T},
                          barostat::MonteCarloMembraneBarostat,
                          sim,
                          neighbors=nothing,
                          step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {D, G, T}
+                         rng=Random.default_rng()) where {D, AT, T}
     !iszero(step_n % barostat.n_steps) && return false
 
     kT = energy_remove_mol(sys.k * barostat.temperature)

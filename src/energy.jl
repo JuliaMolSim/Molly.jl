@@ -33,7 +33,7 @@ E_k = \frac{1}{2} \sum_{i} m_i v_i^2
 ```
 where ``m_i`` is the mass and ``v_i`` is the velocity of atom ``i``.
 """
-function kinetic_energy(sys::System{D, G, T}) where {D, G, T}
+function kinetic_energy(sys::System)
     ke = kinetic_energy_noconvert(sys)
     return uconvert(sys.energy_units, ke)
 end
@@ -255,7 +255,6 @@ end
 
 function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
-    n_atoms = length(sys)
     val_ft = Val(T)
     pe_vec_nounits = KernelAbstractions.zeros(get_backend(sys.coords), T, 1)
     buffers = init_forces_buffer!(sys, ustrip_vec.(zero(sys.coords)), 1)

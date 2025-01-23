@@ -37,7 +37,7 @@ function cuda_threads_blocks_specific(n_inters)
     return n_threads_gpu, n_blocks
 end
 
-function pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters, nbs::NoNeighborList,
+function pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters, nbs::Molly.NoNeighborList,
                              step_n) where {D, AT <: CuArray, T}
     kernel = @cuda launch=false pairwise_force_kernel_nonl!(
             buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, step_n,
@@ -81,7 +81,7 @@ function pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters, nb
 end
 
 function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, pairwise_inters,
-                          nbs::NoNeighborList, step_n) where {D, AT <: CuArray, T}
+                          nbs::Molly.NoNeighborList, step_n) where {D, AT <: CuArray, T}
     n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
     CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
         pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters,

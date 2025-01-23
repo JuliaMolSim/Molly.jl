@@ -93,12 +93,12 @@ function DistanceNeighborFinder(;
                 eligible, dist_cutoff, special, n_steps, zero(eligible))
 end
 
-function find_neighbors(sys::System{D, AT},
+function find_neighbors(sys::System,
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
-                        n_threads::Integer=Threads.nthreads()) where {D, AT}
+                        n_threads::Integer=Threads.nthreads())
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
@@ -130,7 +130,6 @@ end
                                                   @Const(coords),
                                                   @Const(eligible),
                                                   boundary, sq_dist_neighbors)
-
     n_atoms = length(coords)
     n_inters = n_atoms_to_n_pairs(n_atoms)
     inter_i = @index(Global, Linear)
@@ -166,7 +165,7 @@ function find_neighbors(sys::System{D, AT},
     backend = get_backend(sys.coords)
     kernel! = distance_neighbor_finder_kernel!(backend, n_threads_gpu)
     kernel!(nf.neighbors, sys.coords, nf.eligible, sys.boundary,
-            nf.dist_cutoff^2, ndrange = n_inters)
+            nf.dist_cutoff^2, ndrange=n_inters)
 
     pairs = findall(nf.neighbors)
     nbsi, nbsj = getindex.(pairs, 1), getindex.(pairs, 2)
@@ -198,12 +197,12 @@ function TreeNeighborFinder(;
     return TreeNeighborFinder{typeof(dist_cutoff)}(eligible, dist_cutoff, special, n_steps)
 end
 
-function find_neighbors(sys::System,
+function find_neighbors(sys::System{<:Any, AT},
                         nf::TreeNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
-                        n_threads::Integer=Threads.nthreads())
+                        n_threads::Integer=Threads.nthreads()) where AT
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
@@ -226,7 +225,7 @@ function find_neighbors(sys::System,
         end
     end
 
-    return NeighborList(length(neighbors_list), move_array(neighbors_list, sys))
+    return NeighborList(length(neighbors_list), AT(neighbors_list))
 end
 
 """

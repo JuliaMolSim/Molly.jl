@@ -251,13 +251,13 @@ end
 end
 
 @testset "Differentiable protein" begin
-    function create_sys(array_type)
+    function create_sys(AT)
         ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...; units=false)
         return System(
             joinpath(data_dir, "6mrr_nowater.pdb"),
             ff;
             units=false,
-            array_type=array_type,
+            array_type=AT,
             implicit_solvent="gbn2",
             kappa=0.7,
         )

@@ -634,7 +634,6 @@ function random_velocities!(sys, temp; rng=Random.default_rng())
 end
 
 function random_velocities!(vels, sys::AbstractSystem, temp; rng=Random.default_rng())
-    vs = random_velocities(sys, temp; rng=rng)
     vels .= random_velocities(sys, temp; rng=rng)
     return vels
 end
@@ -876,8 +875,8 @@ function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topolo
 end
 
 function molecule_centers(coords::AbstractGPUArray, boundary, topology)
-    array_type = get_array_type(coords)
-    return array_type(molecule_centers(Array(coords), boundary, topology))
+    AT = get_array_type(coords)
+    return AT(molecule_centers(Array(coords), boundary, topology))
 end
 
 # Allows scaling multiple vectors at once by broadcasting this function
@@ -897,7 +896,7 @@ This can be disabled with `ignore_molecules=true`.
 
 Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
 """
-function scale_coords!(sys, scale_factor; ignore_molecules=false)
+function scale_coords!(sys::System{<:Any, AT}, scale_factor; ignore_molecules=false) where AT
     if ignore_molecules || isnothing(sys.topology)
         sys.boundary = scale_boundary(sys.boundary, scale_factor)
         sys.coords .= scale_vec.(sys.coords, Ref(scale_factor))
@@ -928,7 +927,7 @@ function scale_coords!(sys, scale_factor; ignore_molecules=false)
             coords_nounits[i] = wrap_coords(
                     coords_nounits[i] .+ shift_vecs[mi] .- center_shifts[mi], boundary_nounits)
         end
-        sys.coords .= move_array(coords_nounits .* coord_units, sys)
+        sys.coords .= AT(coords_nounits .* coord_units)
     end
     return sys
 end

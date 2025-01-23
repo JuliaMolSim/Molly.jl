@@ -6,8 +6,8 @@ module MollyGLMakieExt
 using Molly
 import AtomsBase
 using GLMakie
-using Unitful
 using Colors
+using Unitful
 
 using LinearAlgebra
 

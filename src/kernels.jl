@@ -1,9 +1,5 @@
 # KernelAbstractions.jl kernels
 
-function get_array_type(a::AT) where AT <: AbstractArray
-    return AT.name.wrapper
-end
-
 @inline function sum_pairwise_forces(inters, atom_i, atom_j, ::Val{F}, special, coord_i, coord_j,
                                      boundary, vel_i, vel_j, step_n) where F
     dr = vector(coord_i, coord_j, boundary)
@@ -13,9 +9,6 @@ end
     end
     f = sum(f_tuple)
     if unit(f[1]) != F
-        # This triggers an error but it isn't printed
-        # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
-        #   for how to throw a more meaningful error
         error("wrong force unit returned, was expecting $F but got $(unit(f[1]))")
     end
     return f
@@ -37,7 +30,8 @@ function pairwise_force_gpu!(buffers, sys::System{D, AT, T},
     if typeof(neighbors) == NoNeighborList
         n_threads_gpu = gpu_threads_pairwise(length(atoms))
         kernel! = pairwise_force_kernel_nonl!(backend, n_threads_gpu)
-        kernel!(buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, step_n, Val(D), Val(force_units); ndrange = length(atoms))
+        kernel!(buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary,
+                pairwise_inters, step_n, Val(D), Val(force_units); ndrange = length(atoms))
     elseif length(neighbors) > 0
         nbs = @view neighbors.list[1:neighbors.n]
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
@@ -58,7 +52,8 @@ end
 
     @inbounds if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
-        f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), special, coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
+        f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), special, coords[i], coords[j],
+                                boundary, velocities[i], velocities[j], step_n)
         for dim in 1:D
             fval = ustrip(f[dim])
             Atomix.@atomic forces[dim, i] = forces[dim, i] - fval
@@ -77,7 +72,8 @@ end
 
     @inbounds for j = 1:i
         if i != j
-            f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), false, coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
+            f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), false, coords[i], coords[j],
+                                    boundary, velocities[i], velocities[j], step_n)
             for dim in 1:D
                 fval = ustrip(f[dim])
                 Atomix.@atomic forces[dim, i] = forces[dim, i] - fval
@@ -307,8 +303,8 @@ function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList4Atoms, coo
     return pe_vec_nounits
 end
 
-@kernel function specific_pe_1_atoms_kernel!(energy, @Const(coords), @Const(velocities), @Const(atoms), boundary,
-                    step_n, @Const(is), @Const(inters), ::Val{E}) where E
+@kernel function specific_pe_1_atoms_kernel!(energy, @Const(coords), @Const(velocities),
+                    @Const(atoms), boundary, step_n, @Const(is), @Const(inters), ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
 
@@ -323,8 +319,9 @@ end
     end
 end
 
-@kernel function specific_pe_2_atoms_kernel!(energy, @Const(coords), @Const(velocities), @Const(atoms), boundary,
-                    step_n, @Const(is), @Const(js), @Const(inters), ::Val{E}) where E
+@kernel function specific_pe_2_atoms_kernel!(energy, @Const(coords), @Const(velocities),
+                    @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(inters),
+                    ::Val{E}) where E
 
 
     inter_i = @index(Global, Linear)
@@ -340,8 +337,9 @@ end
     end
 end
 
-@kernel function specific_pe_3_atoms_kernel!(energy, @Const(coords), @Const(velocities), @Const(atoms), boundary,
-                    step_n, @Const(is), @Const(js), @Const(ks), @Const(inters), ::Val{E}) where E
+@kernel function specific_pe_3_atoms_kernel!(energy, @Const(coords), @Const(velocities),
+                    @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(ks),
+                    @Const(inters), ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
 
@@ -357,8 +355,9 @@ end
     end
 end
 
-@kernel function specific_pe_4_atoms_kernel!(energy, @Const(coords), @Const(velocities), @Const(atoms), boundary,
-                    step_n, @Const(is), @Const(js), @Const(ks), @Const(ls), @Const(inters), ::Val{E}) where E
+@kernel function specific_pe_4_atoms_kernel!(energy, @Const(coords), @Const(velocities),
+                    @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(ks),
+                    @Const(ls), @Const(inters), ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
 

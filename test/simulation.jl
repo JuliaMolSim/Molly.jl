@@ -574,7 +574,7 @@ end
 end
 
 @testset "Position restraints" begin
-    for array_type in array_list
+    for AT in array_list
         n_atoms = 10
         n_atoms_res = n_atoms ÷ 2
         n_steps = 2_000
@@ -585,8 +585,8 @@ end
         sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
 
         sys = System(
-            atoms=array_type(atoms),
-            coords=array_type(deepcopy(starting_coords)),
+            atoms=AT(atoms),
+            coords=AT(copy(starting_coords)),
             boundary=boundary,
             atoms_data=atoms_data,
             pairwise_inters=(LennardJones(),),
@@ -1077,14 +1077,14 @@ end
     vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
 
     for sim in (lang_baro, vvand_baro)
-        for array_type in array_list
-            if array_type <: AbstractGPUArray && sim == vvand_baro
+        for AT in array_list
+            if AT <: AbstractGPUArray && sim == vvand_baro
                 continue
             end
 
             sys = System(
-                atoms=array_type(atoms),
-                coords=array_type(deepcopy(coords)),
+                atoms=AT(atoms),
+                coords=AT(copy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1140,15 +1140,15 @@ end
         SVector(nothing  , nothing  , nothing  ), # Uncoupled
     )
 
-    for array_type in array_list
+    for AT in array_list
         for (press_i, press) in enumerate(pressure_test_set)
-            if array_type <: AbstractGPUArray && press_i != 2
+            if AT <: AbstractGPUArray && press_i != 2
                 continue
             end
 
             sys = System(
-                atoms=array_type(atoms),
-                coords=array_type(deepcopy(coords)),
+                atoms=AT(atoms),
+                coords=AT(copy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1208,15 +1208,15 @@ end
         MonteCarloMembraneBarostat(press, tens, temp, boundary; z_axis_fixed=true),
     )
 
-    for array_type in array_list
+    for AT in array_list
         for (barostat_i, barostat) in enumerate(barostat_test_set)
-            if array_type <: AbstractGPUArray && barostat_i != 2
+            if AT <: AbstractGPUArray && barostat_i != 2
                 continue
             end
 
             sys = System(
-                atoms=array_type(atoms),
-                coords=array_type(deepcopy(coords)),
+                atoms=AT(atoms),
+                coords=AT(copy(coords)),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1330,8 +1330,7 @@ end
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-    function test_sim(nl::Bool, parallel::Bool, f32::Bool,
-                      array_type::Type{AT}) where AT <: AbstractArray
+    function test_sim(nl::Bool, parallel::Bool, f32::Bool, ::Type{AT}) where AT
         n_atoms = 400
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"g/mol" : 10.0u"g/mol"
@@ -1341,9 +1340,9 @@ end
         r0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
         bonds = [HarmonicBond(k=k, r0=r0) for i in 1:(n_atoms ÷ 2)]
         specific_inter_lists = (InteractionList2Atoms(
-            array_type(Int32.(collect(1:2:n_atoms))),
-            array_type(Int32.(collect(2:2:n_atoms))),
-            array_type(bonds),
+            AT(Int32.(collect(1:2:n_atoms))),
+            AT(Int32.(collect(2:2:n_atoms))),
+            AT(bonds),
         ),)
 
         neighbor_finder = NoNeighborFinder()
@@ -1359,7 +1358,7 @@ end
         end
         if nl && !gpu
             neighbor_finder = DistanceNeighborFinder(
-                eligible=array_type(trues(n_atoms, n_atoms)),
+                eligible=AT(trues(n_atoms, n_atoms)),
                 n_steps=10,
                 dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
             )
@@ -1367,9 +1366,9 @@ end
         end
         show(devnull, neighbor_finder)
 
-        coords = array_type(deepcopy(f32 ? starting_coords_f32 : starting_coords))
-        velocities = array_type(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-        atoms = array_type([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+        coords = AT(copy(f32 ? starting_coords_f32 : starting_coords))
+        velocities = AT(copy(f32 ? starting_velocities_f32 : starting_velocities))
+        atoms = AT([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
                                 ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
 
         s = System(
@@ -1382,7 +1381,7 @@ end
             neighbor_finder=neighbor_finder,
         )
 
-        @test is_on_gpu(s) == (array_type <: AbstractGPUArray)
+        @test is_on_gpu(s) == (AT <: AbstractGPUArray)
         @test float_type(s) == (f32 ? Float32 : Float64)
 
         n_threads = parallel ? Threads.nthreads() : 1

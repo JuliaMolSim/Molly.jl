@@ -428,8 +428,8 @@ are not available when reading Gromacs files.
 - `loggers=()`: the loggers that record properties of interest during a
     simulation.
 - `units::Bool=true`: whether to use Unitful quantities.
-- `array_type::AbstractArray = Array`: The array_type desired for the simulation
-   (for GPU support, use CuArray or ROCArray)
+- `array_type=Array`: the array type for the simulation, for example
+    use `CuArray` or `ROCArray` for GPU support.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
 - `dist_neighbors=1.2u"nm"`: cutoff distance for the neighbor list, should be
     greater than `dist_cutoff`.
@@ -452,7 +452,7 @@ function System(coord_file::AbstractString,
                 velocities=nothing,
                 loggers=(),
                 units::Bool=true,
-                array_type::Type{AT} where AT <: AbstractArray = Array,
+                ::Type{AT}=Array,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
@@ -460,7 +460,7 @@ function System(coord_file::AbstractString,
                 data=nothing,
                 implicit_solvent=nothing,
                 kappa=0.0u"nm^-1",
-                rename_terminal_res::Bool=true)
+                rename_terminal_res::Bool=true) where AT <: AbstractArray
     T = typeof(force_field.weight_14_coulomb)
 
     # Chemfiles uses zero-based indexing, be careful
@@ -824,9 +824,9 @@ function System(coord_file::AbstractString,
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            array_type(bonds.is),
-            array_type(bonds.js),
-            array_type([bonds.inters...]),
+            AT(bonds.is),
+            AT(bonds.js),
+            AT([bonds.inters...]),
             bonds.types,
         ))
         topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
@@ -835,30 +835,30 @@ function System(coord_file::AbstractString,
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
-            array_type(angles.is),
-            array_type(angles.js),
-            array_type(angles.ks),
-            array_type([angles.inters...]),
+            AT(angles.is),
+            AT(angles.js),
+            AT(angles.ks),
+            AT([angles.inters...]),
             angles.types,
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            array_type(torsions.is),
-            array_type(torsions.js),
-            array_type(torsions.ks),
-            array_type(torsions.ls),
-            array_type(torsion_inters_pad),
+            AT(torsions.is),
+            AT(torsions.js),
+            AT(torsions.ks),
+            AT(torsions.ls),
+            AT(torsion_inters_pad),
             torsions.types,
         ))
     end
     if length(impropers.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            array_type(impropers.is),
-            array_type(impropers.js),
-            array_type(impropers.ks),
-            array_type(impropers.ls),
-            array_type(improper_inters_pad),
+            AT(impropers.is),
+            AT(impropers.js),
+            AT(impropers.ks),
+            AT(impropers.ls),
+            AT(improper_inters_pad),
             impropers.types,
         ))
     end
@@ -887,11 +887,11 @@ function System(coord_file::AbstractString,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
-    if (array_type <: AbstractGPUArray)
+    if AT <: AbstractGPUArray
         neighbor_finder = GPUNeighborFinder(
-            eligible=array_type(eligible),
+            eligible=AT(eligible),
             dist_cutoff=T(dist_neighbors),
-            special=array_type(special),
+            special=AT(special),
             n_steps_reorder=10,
             initialized=false,
         )
@@ -913,8 +913,8 @@ function System(coord_file::AbstractString,
         )
     end
 
-    atoms = array_type([atoms_abst...])
-    coords_dev = array_type(coords)
+    atoms = AT([atoms_abst...])
+    coords_dev = AT(coords)
 
     if isnothing(velocities)
         if units
@@ -969,12 +969,12 @@ function System(T::Type,
                 velocities=nothing,
                 loggers=(),
                 units::Bool=true,
-                array_type::Type{AT} where AT <: AbstractArray = Array,
+                ::Type{AT}=Array,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
                 use_cell_list::Bool=true,
-                data=nothing)
+                data=nothing) where AT <: AbstractArray
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
     bondtypes = Dict{String, HarmonicBond}()
@@ -1250,9 +1250,9 @@ function System(T::Type,
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            array_type(bonds.is),
-            array_type(bonds.js),
-            array_type([bonds.inters...]),
+            AT(bonds.is),
+            AT(bonds.js),
+            AT([bonds.inters...]),
             bonds.types,
         ))
         topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
@@ -1261,30 +1261,30 @@ function System(T::Type,
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
-            array_type(angles.is),
-            array_type(angles.js),
-            array_type(angles.ks),
-            array_type([angles.inters...]),
+            AT(angles.is),
+            AT(angles.js),
+            AT(angles.ks),
+            AT([angles.inters...]),
             angles.types,
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            array_type(torsions.is),
-            array_type(torsions.js),
-            array_type(torsions.ks),
-            array_type(torsions.ls),
-            array_type([torsions.inters...]),
+            AT(torsions.is),
+            AT(torsions.js),
+            AT(torsions.ks),
+            AT(torsions.ls),
+            AT([torsions.inters...]),
             torsions.types,
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
 
-    if array_type <: AbstractGPUArray
+    if AT <: AbstractGPUArray
         neighbor_finder = GPUNeighborFinder(
-            eligible=array_type(eligible),
+            eligible=AT(eligible),
             dist_cutoff=T(dist_neighbors),
-            special=array_type(special),
+            special=AT(special),
             n_steps_reorder=10,
             initialized=false,
         )
@@ -1306,8 +1306,8 @@ function System(T::Type,
         )
     end
 
-    atoms = array_type([atoms_abst...])
-    coords_dev = array_type(coords)
+    atoms = AT([atoms_abst...])
+    coords_dev = AT(coords)
 
     if isnothing(velocities)
         if units
@@ -1374,10 +1374,10 @@ The `atom_selector` function takes in each atom and atom data and determines whe
 that atom.
 For example, [`is_heavy_atom`](@ref) means non-hydrogen atoms are restrained.
 """
-function add_position_restraints(sys,
+function add_position_restraints(sys::System{<:Any, AT},
                                  k;
                                  atom_selector::Function=is_any_atom,
-                                 restrain_coords=sys.coords)
+                                 restrain_coords=sys.coords) where AT
     k_array = isa(k, AbstractArray) ? k : fill(k, length(sys))
     if length(k_array) != length(sys)
         throw(ArgumentError("the system has $(length(sys)) atoms but there are $(length(k_array)) k values"))
@@ -1394,7 +1394,7 @@ function add_position_restraints(sys,
             push!(inters, HarmonicPositionRestraint(k_res, x0))
         end
     end
-    restraints = InteractionList1Atoms(move_array(is, sys), move_array([inters...], sys), types)
+    restraints = InteractionList1Atoms(AT(is), AT([inters...]), types)
     sis = (sys.specific_inter_lists..., restraints)
     return System(
         atoms=deepcopy(sys.atoms),

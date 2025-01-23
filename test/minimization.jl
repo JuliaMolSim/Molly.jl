@@ -42,14 +42,14 @@
     @test isapprox(potential_energy(sys; n_threads=1) * u"kJ * mol^-1", -3.0u"kJ * mol^-1";
                     atol=1e-4u"kJ * mol^-1")
 
-    for array_type in array_list[2:end]
-        coords = array_type([
+    for AT in array_list[2:end]
+        coords = AT([
             SVector(1.0, 1.0, 1.0)u"nm",
             SVector(1.6, 1.0, 1.0)u"nm",
             SVector(1.4, 1.6, 1.0)u"nm",
         ])
         sys = System(
-            atoms=array_type([Atom(σ=(0.4 / (2 ^ (1 / 6)))u"nm", ϵ=1.0u"kJ * mol^-1") for i in 1:3]),
+            atoms=AT([Atom(σ=(0.4 / (2 ^ (1 / 6)))u"nm", ϵ=1.0u"kJ * mol^-1") for i in 1:3]),
             coords=coords,
             boundary=CubicBoundary(5.0u"nm"),
             pairwise_inters=(LennardJones(),),

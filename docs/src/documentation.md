@@ -139,13 +139,13 @@ To run simulations on the GPU you will need to have a GPU available and then loa
 
 | Hardware Available | Necessary Package | Array Type |
 | ------------------ | ----------------- | ---------- |
-| Parallel CPU       | none              | Array      |
-| NVIDIA GPU         | CUDA              | CuArray    |
-| AMD GPU            | AMDGPU            | ROCArray   |
-| Intel GPU          | oneAPI            | oneArray   |
-| Apple Silicon      | Metal             | MtlArray   |
+| Parallel CPU       | none              | `Array`    |
+| NVIDIA GPU         | CUDA              | `CuArray`  |
+| AMD GPU            | AMDGPU            | `ROCArray` |
+| Intel GPU          | oneAPI            | `oneArray` |
+| Apple Silicon      | Metal             | `MtlArray` |
 
-As an important note, Metal / Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` (for example) where necessary.
+As an important note, Metal/Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` (for example) where necessary.
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
 This example also shows setting up a simulation to run with `Float32`, which gives much better performance on GPUs.
 Of course, you will need to determine whether this level of numerical accuracy is appropriate in your case.
@@ -363,7 +363,7 @@ Residue patches, virtual sites, file includes and any force types other than `Ha
 
     Some PDB files that read in fine can be found [here](https://github.com/greener-group/GB99dms/tree/main/structures/training/conf_1).
 
-To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the array type for your GPU backend (for example, `CuArray` for NVIDIA or `ROCArray` for AMD).
+To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the array type for your GPU backend (for example `CuArray` for NVIDIA or `ROCArray` for AMD).
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
 The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
 Other options include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_neighbors`).
@@ -1028,10 +1028,10 @@ function Molly.simulate!(sys::ReplicaSystem,
 end
 ```
 
-Under the hood there are two implementations for the [`forces`](@ref) function, used by [`accelerations`](@ref), and for [`potential_energy`](@ref): a version geared towards CPUs and parallelism, and a version geared towards GPUs.
-You can define different versions of a simulator for CPU and GPU systems by dispatching on `System{D, false}` or `System{D, true}` respectively.
+Under the hood there are multiple implementations for the [`forces`](@ref) function, used by [`accelerations`](@ref), and for [`potential_energy`](@ref): a version geared towards CPUs and parallelism, a CUDA version, and a version for other GPU backends.
+You can define different versions of a simulator for CPU, CUDA and generic GPU systems by dispatching on `System{D, Array}` or `System{D, CuArray}` and `System{D, AT} where AT <: AbstractGPUArray` respectively.
 This also applies to coupling methods, neighbor finders and analysis functions.
-You do not have to define two versions though: you may only intend to use the simulator one way, or one version may be performant in all cases.
+You do not have to define different versions though: you may only intend to use the simulator one way, or one version may be performant in all cases.
 
 ## Coupling
 

@@ -20,8 +20,8 @@ end
 # Allow CUDA device to be specified
 const DEVICE = get(ENV, "DEVICE", "0")
 
-const run_gpu_tests = CUDA.functional()
-if run_gpu_tests
+const run_cuda_tests = CUDA.functional()
+if run_cuda_tests
     device!(parse(Int, DEVICE))
     @info "The GPU benchmarks will be run on device $DEVICE"
 else
@@ -62,8 +62,7 @@ const starting_velocities = [random_velocity(atom_mass, 1.0u"K") for i in 1:n_at
 const starting_coords_f32 = [Float32.(c) for c in starting_coords]
 const starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-function test_sim(nl::Bool, parallel::Bool, f32::Bool,
-                  array_type::Type{AT}) where AT <: AbstractArray
+function test_sim(nl::Bool, parallel::Bool, f32::Bool, ::Type{AT}) where AT
     n_atoms = 400
     n_steps = 200
     atom_mass = f32 ? 10.0f0u"g/mol" : 10.0u"g/mol"
@@ -73,9 +72,9 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool,
     r0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
     bonds = [HarmonicBond(k=k, r0=r0) for i in 1:(n_atoms ÷ 2)]
     specific_inter_lists = (InteractionList2Atoms(
-        array_type(Int32.(collect(1:2:n_atoms))),
-        array_type(Int32.(collect(2:2:n_atoms))),
-        array_type(bonds),
+        AT(Int32.(collect(1:2:n_atoms))),
+        AT(Int32.(collect(2:2:n_atoms))),
+        AT(bonds),
     ),)
 
     neighbor_finder = NoNeighborFinder()
@@ -83,17 +82,17 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool,
     pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
     if nl
         neighbor_finder = DistanceNeighborFinder(
-            eligible=array_type(trues(n_atoms, n_atoms)),
+            eligible=AT(trues(n_atoms, n_atoms)),
             n_steps=10,
             dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
         )
         pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
     end
 
-    coords = array_type(deepcopy(f32 ? starting_coords_f32 : starting_coords))
-    velocities = array_type(deepcopy(f32 ? starting_velocities_f32 : starting_velocities))
-    atoms = array_type([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                            ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
+    coords = AT(copy(f32 ? starting_coords_f32 : starting_coords))
+    velocities = AT(copy(f32 ? starting_velocities_f32 : starting_velocities))
+    atoms = AT([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+                     ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
 
     sys = System(
         atoms=atoms,

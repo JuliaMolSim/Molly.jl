@@ -831,12 +831,12 @@ Attempt an exchange of replicas `n` and `m` in a [`ReplicaSystem`](@ref) during 
 Successful exchanges should exchange coordinates and velocities as appropriate.
 Returns acceptance quantity `Δ` and a `Bool` indicating whether the exchange was successful.
 """
-function remd_exchange!(sys::ReplicaSystem{D, AT, T},
+function remd_exchange!(sys::ReplicaSystem,
                         sim::TemperatureREMD,
                         n::Integer,
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
-                        rng=Random.default_rng()) where {D, AT, T}
+                        rng=Random.default_rng())
     T_n, T_m = sim.temperatures[n], sim.temperatures[m]
     β_n, β_m = inv(sys.k * T_n), inv(sys.k * T_m)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
@@ -922,12 +922,12 @@ function simulate!(sys::ReplicaSystem,
     return simulate_remd!(sys, sim, n_steps; n_threads=n_threads, run_loggers=run_loggers, rng=rng)
 end
 
-function remd_exchange!(sys::ReplicaSystem{D, AT, T},
+function remd_exchange!(sys::ReplicaSystem,
                         sim::HamiltonianREMD,
                         n::Integer,
                         m::Integer;
                         n_threads::Integer=Threads.nthreads(),
-                        rng=Random.default_rng()) where {D, AT, T}
+                        rng=Random.default_rng())
     T_sim = sim.temperature
     β_sim = inv(sys.k * T_sim)
     neighbors_n = find_neighbors(sys.replicas[n], sys.replicas[n].neighbor_finder;
@@ -1047,12 +1047,12 @@ function MetropolisMonteCarlo(; temperature, trial_moves, trial_args=Dict())
     return MetropolisMonteCarlo(temperature, trial_moves, trial_args)
 end
 
-@inline function simulate!(sys::System{D, AT, T},
+@inline function simulate!(sys::System,
                            sim::MetropolisMonteCarlo,
                            n_steps::Integer;
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
-                           rng=Random.default_rng()) where {D, AT, T}
+                           rng=Random.default_rng())
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E_old = potential_energy(sys, neighbors; n_threads=n_threads)
     coords_old = similar(sys.coords)

@@ -20,8 +20,7 @@ export
     masses,
     charges,
     MollyCalculator,
-    ASECalculator,
-    NoNeighborList
+    ASECalculator
 
 const DefaultFloat = Float64
 
@@ -183,23 +182,23 @@ function Base.:+(il1::InteractionList4Atoms{I, T}, il2::InteractionList4Atoms{I,
     )
 end
 
-function inject_interaction_list(inter::InteractionList1Atoms, params_dic, array_type)
-    inters_grad = array_type(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+function inject_interaction_list(inter::InteractionList1Atoms, params_dic, AT)
+    inters_grad = AT(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
     InteractionList1Atoms(inter.is, inters_grad, inter.types)
 end
 
-function inject_interaction_list(inter::InteractionList2Atoms, params_dic, array_type)
-    inters_grad = array_type(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+function inject_interaction_list(inter::InteractionList2Atoms, params_dic, AT)
+    inters_grad = AT(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
     InteractionList2Atoms(inter.is, inter.js, inters_grad, inter.types)
 end
 
-function inject_interaction_list(inter::InteractionList3Atoms, params_dic, array_type)
-    inters_grad = array_type(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+function inject_interaction_list(inter::InteractionList3Atoms, params_dic, AT)
+    inters_grad = AT(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
     InteractionList3Atoms(inter.is, inter.js, inter.ks, inters_grad, inter.types)
 end
 
-function inject_interaction_list(inter::InteractionList4Atoms, params_dic, array_type)
-    inters_grad = array_type(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+function inject_interaction_list(inter::InteractionList4Atoms, params_dic, AT)
+    inters_grad = AT(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
     InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, inters_grad, inter.types)
 end
 
@@ -465,7 +464,7 @@ interface described there.
 - `data::DA=nothing`: arbitrary data associated with the system.
 """
 mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
-                      L, F, E, K, M, DA} <: AbstractSystem{D}
+                      L, F, E, K, M, DA} <: AtomsBase.AbstractSystem{D}
     atoms::A
     coords::C
     boundary::B
@@ -826,7 +825,7 @@ construction where `n` is the number of threads to be used per replica.
     modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `data::DA=nothing`: arbitrary data associated with the replica system.
 """
-mutable struct ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA} <: AbstractSystem{D}
+mutable struct ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA} <: AtomsBase.AbstractSystem{D}
     atoms::A
     n_replicas::Int
     atoms_data::AD
@@ -863,7 +862,6 @@ function ReplicaSystem(;
                         k=default_k(energy_units),
                         data=nothing)
     D = AtomsBase.n_dimensions(boundary)
-    D = n_dimensions(boundary)
     AT = get_array_type(replica_coords[1])
     T = float_type(boundary)
     A = typeof(atoms)
@@ -1019,6 +1017,13 @@ function ReplicaSystem(;
             energy_units, k_converted, replicas, data)
 end
 
+# Rename, export, docstring
+function get_array_type(::AT) where AT
+    return AT.name.wrapper
+end
+
+get_array_type(::Union{System{D, AT}, ReplicaSystem{D, AT}}) where {D, AT} = AT
+
 """
     is_on_gpu(sys)
 
@@ -1049,9 +1054,6 @@ The partial charges of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref
 """
 charges(s::Union{System, ReplicaSystem}) = charge.(s.atoms)
 charge(s::Union{System, ReplicaSystem}, i::Integer) = charge(s.atoms[i])
-
-# Move an array to the GPU depending on whether the system is on the GPU
-move_array(arr, ::System{D, AT}) where {D, AT} = AT(arr)
 
 Base.getindex(s::Union{System, ReplicaSystem}, i::Union{Integer, AbstractVector}) = s.atoms[i]
 Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)

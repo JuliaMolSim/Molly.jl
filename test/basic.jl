@@ -176,22 +176,22 @@
     @test mcs == [SVector(0.05, 0.0), SVector(1.0, 1.0)]
 
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
-    for array_type in array_list
-        sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; array_type=array_type, use_cell_list=false)
+    for AT in array_list
+        sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; array_type=AT, use_cell_list=false)
         mcs = molecule_centers(sys.coords, sys.boundary, sys.topology)
         @test isapprox(Array(mcs)[1], mean(sys.coords[1:1170]); atol=0.08u"nm")
 
         # Mark all pairs as ineligible for pairwise interactions and check that the
         #   potential energy from the specific interactions does not change on scaling
         no_nbs = falses(length(sys), length(sys))
-        if array_type <: AbstractGPUArray
+        if AT <: AbstractGPUArray
             sys.neighbor_finder = GPUNeighborFinder(
-                eligible=array_type(no_nbs),
+                eligible=AT(no_nbs),
                 dist_cutoff=1.0u"nm",
             )
         else 
             sys.neighbor_finder = DistanceNeighborFinder(
-                eligible=(array_type <: AbstractGPUArray ? array_type(no_nbs) : no_nbs),
+                eligible=AT(no_nbs),
                 dist_cutoff=1.0u"nm",
             )
         end

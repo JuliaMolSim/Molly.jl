@@ -11,14 +11,14 @@ import BioStructures # Imported to avoid clashing names
 using CellListMap
 import Chemfiles
 using Combinatorics
-using KernelAbstractions
-using GPUArrays
 using DataStructures
 using Distances
 using Distributions
 using EzXML
 using FLoops
+using GPUArrays
 using Graphs
+using KernelAbstractions
 using NearestNeighbors
 using PeriodicTable
 using SimpleCrystals
