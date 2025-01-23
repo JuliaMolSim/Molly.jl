@@ -32,13 +32,14 @@ function gpu_threads_specific(n_inters)
 end
 
 function pairwise_force_gpu!(buffers, sys::System{D, AT, T}, 
-                    pairwise_inters, nbs, step_n) where {D, AT <: AbstractGPUArray, T}
+                    pairwise_inters, neighbors, step_n) where {D, AT <: AbstractGPUArray, T}
     backend = get_backend(coords)
-    if typeof(nbs) == NoNeighborList
+    if typeof(neighbors) == NoNeighborList
         n_threads_gpu = gpu_threads_pairwise(length(atoms))
         kernel! = pairwise_force_kernel_nonl!(backend, n_threads_gpu)
         kernel!(buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, step_n, Val(D), Val(force_units); ndrange = length(atoms))
-    else
+    elseif length(neighbors) > 0
+        nbs = @view neighbors.list[1:neighbors.n]
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_force_kernel_nl!(backend, n_threads_gpu)
         kernel!(buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters,
@@ -228,11 +229,15 @@ end
 end
 
 function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T},
-                         pairwise_inters, nbs, step_n) where {D, AT <: AbstractGPUArray, T}
-    backend = get_backend(sys.coords)
-    n_threads_gpu = gpu_threads_pairwise(length(nbs))
-    kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)
-    kernel!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, nbs, step_n, Val(energy_units); ndrange = length(nbs))
+                         pairwise_inters, neighbors, step_n) where {D, AT <: AbstractGPUArray, T}
+    if length(neighbors) > 0
+        backend = get_backend(sys.coords)
+        nbs = @view neighbors.list[1:neighbors.n]
+        n_threads_gpu = gpu_threads_pairwise(length(nbs))
+        kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)
+        kernel!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary,
+                pairwise_inters, nbs, step_n, Val(energy_units); ndrange=length(nbs))
+    end
     return pe_vec_nounits
 end
 

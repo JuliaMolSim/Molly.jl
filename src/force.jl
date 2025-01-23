@@ -383,7 +383,7 @@ function forces_nounits!(fs_nounits, sys::System{D, AT, T}, neighbors,
 
     pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nl) > 0
-        pairwise_force_gpu!(buffers, sys, pairwise_inters_nl, nothing, step_n)
+        pairwise_force_gpu!(buffers, sys, pairwise_inters_nl, neighbors, step_n)
     end
 
     for inter_list in values(sys.specific_inter_lists)
