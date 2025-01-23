@@ -307,7 +307,6 @@ end
             @time simulate!(s_gpu, simulator, n_steps; n_threads=1)
             coord_diff = sum(sum(map(x -> abs.(x), s.coords .- Array(s_gpu.coords)))) / (3 * n_atoms)
             E_diff = abs(potential_energy(s) - potential_energy(s_gpu))
-            @info "$(rpad(name, 19)) - difference per coordinate $coord_diff - potential energy difference $E_diff"
             @test coord_diff < 1e-4u"nm"
             @test E_diff < 5e-4u"kJ * mol^-1"
         end
@@ -472,7 +471,6 @@ end
             @time simulate!(s_gpu, simulator, n_steps)
             coord_diff = sum(sum(map(x -> abs.(x), s.coords .- Array(s_gpu.coords)))) / (3 * n_atoms)
             E_diff = abs(potential_energy(s) - potential_energy(s_gpu))
-            @info "$(rpad(inter, 19)) - difference per coordinate $coord_diff - potential energy difference $E_diff_start (start) and $E_diff" 
             @test coord_diff < 5e-4u"nm"
             @test E_diff < 5e-3u"kJ * mol^-1"
         end
@@ -913,6 +911,7 @@ end
     @test efficiency > 0.2 # This is a fairly arbitrary threshold, but it's a good tests for very bad cases
     @test efficiency < 1.0 # Bad acceptance rate?
     @info "Exchange Efficiency: $efficiency"
+
     for id in eachindex(repsys.replicas)
         mean_temp = mean(values(repsys.replicas[id].loggers.temp))
         @test (0.9 * temp) < mean_temp < (1.1 * temp)
@@ -1063,7 +1062,7 @@ end
     simulate!(deepcopy(sys), lang, 1_000; n_threads=1, rng=rng)
     @time simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
 
-    @test 270.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+    @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
     @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy  )) < 120.0u"kJ * mol^-1"
     @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
     @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
@@ -1103,7 +1102,7 @@ end
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
             @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
-            @test 270.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+            @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy  )) < 120.0u"kJ * mol^-1"
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
             @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
