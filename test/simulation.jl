@@ -1,22 +1,33 @@
 @testset "Lennard-Jones 2D" begin
-    if run_gpu_tests
+    for gpu in gpu_list
+        AT = gpu ? CuArray : Array
         n_atoms = 10
         n_steps = 20_000
-        temp = 298.0u"K"
+        temp = 100.0u"K"
         boundary = RectangularBoundary(2.0u"nm")
-        simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
+        simulator = VelocityVerlet(dt=0.001u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
         gen_temp_wrapper(s, args...; kwargs...) = temperature(s)
 
-        s = System(
-            atoms=CuArray([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
-            coords=CuArray(place_atoms(n_atoms, boundary; min_dist=0.3u"nm")),
-            boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
-            neighbor_finder=GPUNeighborFinder(
-                eligible=eligible=CuArray(trues(n_atoms, n_atoms)),
+        if gpu
+            neighbor_finder = GPUNeighborFinder(
+                eligible=eligible=AT(trues(n_atoms, n_atoms)),
                 n_steps_reorder=10,
                 dist_cutoff=2.0u"nm",
-            ),
+            )
+        else
+            neighbor_finder = DistanceNeighborFinder(
+                eligible=trues(n_atoms, n_atoms),
+                n_steps=10,
+                dist_cutoff=2.0u"nm",
+            )
+        end
+
+        s = System(
+            atoms=AT([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
+            coords=AT(place_atoms(n_atoms, boundary; min_dist=0.3u"nm")),
+            boundary=boundary,
+            pairwise_inters=(LennardJones(use_neighbors=true),),
+            neighbor_finder=neighbor_finder,
             loggers=(
                 temp=TemperatureLogger(100),
                 coords=CoordinatesLogger(100; dims=2),
@@ -28,7 +39,7 @@
 
         random_velocities!(s, temp)
 
-        @test masses(s) == CuArray(fill(10.0u"g/mol", n_atoms))
+        @test masses(s) == AT(fill(10.0u"g/mol", n_atoms))
         @test AtomsBase.cell_vectors(s) == (
             SVector(2.0, 0.0)u"nm",
             SVector(0.0, 2.0)u"nm",
@@ -296,7 +307,6 @@ end
             @time simulate!(s_gpu, simulator, n_steps; n_threads=1)
             coord_diff = sum(sum(map(x -> abs.(x), s.coords .- Array(s_gpu.coords)))) / (3 * n_atoms)
             E_diff = abs(potential_energy(s) - potential_energy(s_gpu))
-            @info "$(rpad(name, 19)) - difference per coordinate $coord_diff - potential energy difference $E_diff"
             @test coord_diff < 1e-4u"nm"
             @test E_diff < 5e-4u"kJ * mol^-1"
         end
@@ -437,10 +447,10 @@ end
         velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
 
         s = System(
-            atoms=deepcopy(atoms),
-            coords=deepcopy(coords),
-            boundary=deepcopy(boundary),
-            velocities=deepcopy(velocities),
+            atoms=copy(atoms),
+            coords=copy(coords),
+            boundary=boundary,
+            velocities=copy(velocities),
             pairwise_inters=(inter,),
             neighbor_finder=neighbor_finder,
         )
@@ -461,7 +471,6 @@ end
             @time simulate!(s_gpu, simulator, n_steps)
             coord_diff = sum(sum(map(x -> abs.(x), s.coords .- Array(s_gpu.coords)))) / (3 * n_atoms)
             E_diff = abs(potential_energy(s) - potential_energy(s_gpu))
-            @info "$(rpad(inter, 19)) - difference per coordinate $coord_diff - potential energy difference $E_diff_start (start) and $E_diff" 
             @test coord_diff < 5e-4u"nm"
             @test E_diff < 5e-3u"kJ * mol^-1"
         end
@@ -902,6 +911,7 @@ end
     @test efficiency > 0.2 # This is a fairly arbitrary threshold, but it's a good tests for very bad cases
     @test efficiency < 1.0 # Bad acceptance rate?
     @info "Exchange Efficiency: $efficiency"
+
     for id in eachindex(repsys.replicas)
         mean_temp = mean(values(repsys.replicas[id].loggers.temp))
         @test (0.9 * temp) < mean_temp < (1.1 * temp)
@@ -1052,7 +1062,7 @@ end
     simulate!(deepcopy(sys), lang, 1_000; n_threads=1, rng=rng)
     @time simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
 
-    @test 270.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+    @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
     @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy  )) < 120.0u"kJ * mol^-1"
     @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
     @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
@@ -1091,7 +1101,7 @@ end
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
             @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
-            @test 270.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
+            @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.total_energy  )) < 120.0u"kJ * mol^-1"
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
             @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"

@@ -147,7 +147,7 @@ To run simulations on the GPU you will need to have a GPU available and then loa
 
 As an important note, Metal / Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` (for example) where necessary.
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
-This example also shows setting up a simulation to run with `Float32`, which gives better performance on GPUs.
+This example also shows setting up a simulation to run with `Float32`, which gives much better performance on GPUs.
 Of course, you will need to determine whether this level of numerical accuracy is appropriate in your case.
 Here is an example script for an NVIDIA GPU using CUDA:
 ```julia
@@ -398,7 +398,7 @@ sys_res = add_position_restraints(
 ```
 
 The Gromacs setup procedure should be considered experimental.
-Currently Ewald summation methods, constraint algorithms and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
+Currently Ewald summation methods, full support for constraint algorithms and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
 Stay tuned for developments in this area.
 
 ## Enhanced sampling
@@ -1325,12 +1325,17 @@ Constraining large clusters will result in a performance penalty.
 ## Neighbor finders
 
 Neighbor finders find close atoms periodically throughout the simulation, saving on computation time by allowing the force calculation between distant atoms to be omitted.
-When using a neighbor finder you should in general also use a cutoff (see [Cutoffs](@ref)) with a cutoff distance less than the neighbor finder distance.
 The available neighbor finders are:
 - [`NoNeighborFinder`](@ref)
 - [`CellListMapNeighborFinder`](@ref)
-- [`TreeNeighborFinder`](@ref)
+- [`GPUNeighborFinder`](@ref)
 - [`DistanceNeighborFinder`](@ref)
+- [`TreeNeighborFinder`](@ref)
+
+The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU and [`GPUNeighborFinder`](@ref) on GPU.
+When using a neighbor finder you should in general also use an interaction cutoff (see [Cutoffs](@ref)) with a cutoff distance less than the neighbor finder distance.
+The difference between the two should be larger than an atom can move in the time of the `n_steps` defined by the neighbor finder.
+The exception is [`GPUNeighborFinder`](@ref), which uses the algorithm from [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413) to avoid calculating a neighbor list and should have `dist_cutoff` set to the interaction cutoff distance.
 
 To define your own neighbor finder, first define the `struct`:
 ```julia

@@ -40,8 +40,9 @@ function pairwise_force_gpu!(buffers, sys::System{D, true, T}, pairwise_inters, 
         nthreads = cld(nthreads, WARPSIZE) * WARPSIZE
         n_blocks_i = cld(length(sys.atoms), WARPSIZE)
         n_blocks_j = cld(length(sys.atoms), nthreads)
-        kernel(buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, step_n, Val(D),
-               Val(sys.force_units); threads=nthreads, blocks=(n_blocks_i, n_blocks_j))
+        kernel(buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters,
+               step_n, Val(D), Val(sys.force_units); threads=nthreads,
+               blocks=(n_blocks_i, n_blocks_j))
     else    
         N = length(sys.coords)
         n_blocks = cld(N, WARPSIZE)
@@ -51,12 +52,19 @@ function pairwise_force_gpu!(buffers, sys::System{D, true, T}, pairwise_inters, 
             w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
             Morton_seq_cpu = sorted_Morton_seq(Array(sys.coords), w, Morton_bits)
             copyto!(buffers.Morton_seq, Morton_seq_cpu)
-            CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N), sys.boundary, Val(D))
+            CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
+                    buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
+                    sys.boundary, Val(D))
             sys.neighbor_finder.initialized = true
-            CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(buffers.Morton_seq, 
-            sys.neighbor_finder.eligible, sys.neighbor_finder.special, buffers.compressed_eligible, buffers.compressed_special, Val(N))
+            CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
+                    buffers.Morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
+                    buffers.compressed_eligible, buffers.compressed_special, Val(N))
         end
-        CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(buffers.Morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords, sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters, sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible, Val(T), Val(D))
+        CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(
+                buffers.Morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords,
+                sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters,
+                sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
+                Val(T), Val(D))
     end
     return buffers
 end
@@ -67,6 +75,9 @@ function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, true, T}, pair
         CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
             pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, nbs, step_n, Val(sys.energy_units))
     else
+        # The ordering is always recomputed for potential energy
+        # Different buffers are used to the forces case, so sys.neighbor_finder.initialized
+        #   is not updated
         N = length(sys.coords)
         n_blocks = cld(N, WARPSIZE)
         r_cut = sys.neighbor_finder.dist_cutoff
@@ -74,11 +85,14 @@ function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, true, T}, pair
         w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
         Morton_seq_cpu = sorted_Morton_seq(Array(sys.coords), w, Morton_bits)
         copyto!(buffers.Morton_seq, Morton_seq_cpu)
-        CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N), sys.boundary, Val(D))
-        sys.neighbor_finder.initialized = true
-        CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(buffers.Morton_seq, 
-            pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords, sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), 
-            pairwise_inters, sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible, Val(T), Val(D))
+        CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
+                buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
+                Val(N), sys.boundary, Val(D))
+        CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
+                buffers.Morton_seq, pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords,
+                sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
+                sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible,
+                Val(T), Val(D))
     end
     return pe_vec_nounits
 end
@@ -204,7 +218,8 @@ function kernel_min_max!(
     return nothing
 end
 
-function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix, compressed_eligible, compressed_special, ::Val{N}) where N
+function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
+                                    compressed_eligible, compressed_special, ::Val{N}) where N
 
     a = Int32(1)
     n_blocks = Int32(ceil(N / 32))
