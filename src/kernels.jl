@@ -230,10 +230,42 @@ end
 function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T},
                          pairwise_inters, nbs, step_n) where {D, AT <: AbstractGPUArray, T}
     backend = get_backend(sys.coords)
-    n_threads_gpu = gpu_threads_pairwise(length(nbs))
-    kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)
-    kernel!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, nbs, step_n, Val(energy_units); ndrange = length(nbs))
+    if typeof(nbs) == Nothing
+        n_threads_gpu = gpu_threads_pairwise(length(sys.coords))
+        kernel! = pairwise_pe_kernel_nonl!(backend, n_threads_gpu)
+        kernel!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, step_n, Val(energy_units); ndrange = length(sys.coords))
+    else
+        n_threads_gpu = gpu_threads_pairwise(length(nbs))
+        kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)
+        kernel!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, nbs, step_n, Val(energy_units); ndrange = length(nbs))
+    end
     return pe_vec_nounits
+
+end
+
+@kernel function pairwise_pe_kernel_nonl!(energy, @Const(coords),
+                                          @Const(velocities),
+                                          @Const(atoms), boundary, inters,
+                                          step_n,
+                                          ::Val{E}) where E
+
+    i = @index(Global, Linear)
+
+    for j = i+1:length(coords)
+        special = false
+        coord_i, coord_j, vel_i, vel_j = coords[i], coords[j], velocities[i], velocities[j]
+        dr = vector(coord_i, coord_j, boundary)
+        pe = potential_energy_gpu(inters[1], dr, atoms[i], atoms[j], E, special, coord_i, coord_j,
+                                  boundary, vel_i, vel_j, step_n)
+        for inter in inters[2:end]
+            pe += potential_energy_gpu(inter, dr, atoms[i], atoms[j], E, special, coord_i, coord_j,
+                                       boundary, vel_i, vel_j, step_n)
+        end
+        if unit(pe) != E
+            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
+        end
+        Atomix.@atomic energy[1] += ustrip(pe)
+    end
 end
 
 @kernel function pairwise_pe_kernel!(energy, @Const(coords), @Const(velocities),
