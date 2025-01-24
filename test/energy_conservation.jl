@@ -1,6 +1,8 @@
 # Energy conservation test
 
 using Molly
+using AbstractGPUArray
+using AMDGPU
 using CUDA
 
 using Test
@@ -25,20 +27,22 @@ using Test
     
         for cutoff in cutoffs
             coords = place_atoms(n_atoms, boundary; min_dist=0.1u"nm")
-            neighbor_finder = NoNeighborFinder()
-            if nl && gpu
-                neighbor_finder=GPUNeighborFinder(
-                    eligible=CuArray(trues(n_atoms, n_atoms)),
-                    n_steps_reorder=10,
-                    dist_cutoff=dist_cutoff,
-                )
-            end
-            if nl && !gpu
-                neighbor_finder=DistanceNeighborFinder(
-                    eligible=trues(n_atoms, n_atoms),
-                    n_steps=10,
-                    dist_cutoff=dist_cutoff,
-                )
+            if nl
+                if AT <: CuArray
+                    neighbor_finder=GPUNeighborFinder(
+                        eligible=AT(trues(n_atoms, n_atoms)),
+                        n_steps_reorder=10,
+                        dist_cutoff=dist_cutoff,
+                    )
+                else
+                    neighbor_finder=DistanceNeighborFinder(
+                        eligible=trues(n_atoms, n_atoms),
+                        n_steps=10,
+                        dist_cutoff=dist_cutoff,
+                    )
+                end
+            else
+                neighbor_finder = NoNeighborFinder()
             end
     
             sys = System(
@@ -62,7 +66,7 @@ using Test
             @test isapprox(Es[1], E0; atol=1e-7u"kJ * mol^-1")
     
             max_ΔE = maximum(abs.(Es .- E0))
-            platform_str = gpu ? "GPU" : "CPU $n_threads thread(s)"
+            platform_str = (AT <: AbstractGPUArray ? "$AT" : "CPU $n_threads thread(s)")
             cutoff_str = Base.typename(typeof(cutoff)).wrapper
             @info "$platform_str - $cutoff_str - max energy difference $max_ΔE"
             @test max_ΔE < 5e-4u"kJ * mol^-1"
@@ -73,16 +77,18 @@ using Test
         end
     end
 
-    test_energy_conservation(true, Array, 1, 10_000)
+    test_energy_conservation(true , Array, 1, 10_000)
     test_energy_conservation(false, Array, 1, 10_000)
     if Threads.nthreads() > 1
-        test_energy_conservation(true, Array, Threads.nthreads(), 50_000)
+        test_energy_conservation(true , Array, Threads.nthreads(), 50_000)
         test_energy_conservation(false, Array, Threads.nthreads(), 50_000)
     end
-    for AT in array_list[2:end]
-        test_energy_conservation(true, AT, 1, 100_000)
-        test_energy_conservation(false, AT, 1, 100_000)
+    if CUDA.functional()
+        test_energy_conservation(true , CuArray, 1, 100_000)
+        test_energy_conservation(false, CuArray, 1, 100_000)
+    end
+    if AMDGPU.functional()
+        test_energy_conservation(true , ROCArray, 1, 100_000)
+        test_energy_conservation(false, ROCArray, 1, 100_000)
     end
 end
-
-

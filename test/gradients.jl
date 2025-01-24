@@ -43,19 +43,19 @@ end
         ("CPU gbn2"        , Array, false, false, false, false, true , 1e-4, 1e-4),
         ("CPU gbn2 forward", Array, false, true , false, false, true , 0.5 , 0.1 ),
     ]
-    if run_parallel_tests #                  gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
-        push!(runs, ("CPU parallel"        , Array, true , false, false, false, false, 1e-4, 1e-4))
-        push!(runs, ("CPU parallel forward", Array, true , true , false, false, false, 0.5 , 0.1 ))
-        push!(runs, ("CPU parallel f32"    , Array, true , false, true , false, false, 0.01, 5e-4))
+    if run_parallel_tests #                  gpu      par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+        push!(runs, ("CPU parallel"        , Array  , true , false, false, false, false, 1e-4, 1e-4))
+        push!(runs, ("CPU parallel forward", Array  , true , true , false, false, false, 0.5 , 0.1 ))
+        push!(runs, ("CPU parallel f32"    , Array  , true , false, true , false, false, 0.01, 5e-4))
     end
-    if run_cuda_tests #                       gpu     par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+    if run_cuda_tests #                      gpu      par    fwd    f32    obc2   gbn2   tol_σ tol_r0
         push!(runs, ("CUDA"                , CuArray, false, false, false, false, false, 0.25, 20.0))
         push!(runs, ("CUDA forward"        , CuArray, false, true , false, false, false, 0.25, 20.0))
         push!(runs, ("CUDA f32"            , CuArray, false, false, true , false, false, 0.5 , 50.0))
         push!(runs, ("CUDA obc2"           , CuArray, false, false, false, true , false, 0.25, 20.0))
         push!(runs, ("CUDA gbn2"           , CuArray, false, false, false, false, true , 0.25, 20.0))
     end
-    if run_rocm_tests #                       gpu      par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+    if run_rocm_tests #                      gpu       par    fwd    f32    obc2   gbn2   tol_σ tol_r0
         push!(runs, ("ROCM"                , ROCArray, false, false, false, false, false, 0.25, 20.0))
         push!(runs, ("ROCM forward"        , ROCArray, false, true , false, false, false, 0.25, 20.0))
         push!(runs, ("ROCM f32"            , ROCArray, false, false, true , false, false, 0.5 , 50.0))

@@ -49,7 +49,7 @@ find_neighbors(sys::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
 Use the non-bonded forces/potential energy algorithm from
 [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413) to avoid calculating a neighbor list.
 
-This is the recommended neighbor finder on GPU.
+This is the recommended neighbor finder on NVIDIA GPUs.
 """
 mutable struct GPUNeighborFinder{B, D}
     eligible::B
@@ -75,6 +75,8 @@ find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
     DistanceNeighborFinder(; eligible, dist_cutoff, special, n_steps)
 
 Find close atoms by distance.
+
+This is the recommended neighbor finder on non-NVIDIA GPUs.
 """
 struct DistanceNeighborFinder{B, D}
     eligible::B

@@ -26,20 +26,23 @@ end
 
 function pairwise_force_gpu!(buffers, sys::System{D, AT, T}, 
                     pairwise_inters, neighbors, step_n) where {D, AT <: AbstractGPUArray, T}
-    backend = get_backend(coords)
+    if isnothing(neighbors)
+        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
+              "should use DistanceNeighborFinder instead")
+    end
     if typeof(neighbors) == NoNeighborList
-        n_threads_gpu = gpu_threads_pairwise(length(atoms))
-        kernel! = pairwise_force_kernel_nonl!(backend, n_threads_gpu)
-        kernel!(buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary,
-                pairwise_inters, step_n, Val(D), Val(force_units); ndrange = length(atoms))
-    elseif length(neighbors) > 0
+        nbs = neighbors
+    else
         nbs = @view neighbors.list[1:neighbors.n]
+    end
+    if length(neighbors) > 0
+        backend = get_backend(coords)
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_force_kernel_nl!(backend, n_threads_gpu)
         kernel!(buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters,
-                nbs, step_n, Val(D), Val(force_units); ndrange = length(nbs))
+                nbs, step_n, Val(D), Val(force_units); ndrange=length(nbs))
     end
-    return fs_mat
+    return buffers
 end
 
 @kernel function pairwise_force_kernel_nl!(forces, @Const(coords),
@@ -58,27 +61,6 @@ end
             fval = ustrip(f[dim])
             Atomix.@atomic forces[dim, i] = forces[dim, i] - fval
             Atomix.@atomic forces[dim, j] = forces[dim, j] + fval
-        end
-    end
-end
-
-@kernel function pairwise_force_kernel_nonl!(forces, @Const(coords),
-                                             @Const(velocities), @Const(atoms),
-                                             boundary, inters,
-                                             step_n, ::Val{D},
-                                             ::Val{F}) where {D, F}
-
-    i = @index(Global, Linear)
-
-    @inbounds for j = 1:i
-        if i != j
-            f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), false, coords[i], coords[j],
-                                    boundary, velocities[i], velocities[j], step_n)
-            for dim in 1:D
-                fval = ustrip(f[dim])
-                Atomix.@atomic forces[dim, i] = forces[dim, i] - fval
-                Atomix.@atomic forces[dim, j] = forces[dim, j] + fval
-            end
         end
     end
 end
@@ -224,11 +206,19 @@ end
     end
 end
 
-function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T},
-                         pairwise_inters, neighbors, step_n) where {D, AT <: AbstractGPUArray, T}
+function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT},
+                         pairwise_inters, neighbors, step_n) where {D, AT <: AbstractGPUArray}
+    if isnothing(neighbors)
+        error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
+            "should use DistanceNeighborFinder instead")
+    end
+    if typeof(neighbors) == NoNeighborList
+        nbs = neighbors
+    else
+        nbs = @view neighbors.list[1:neighbors.n]
+    end
     if length(neighbors) > 0
         backend = get_backend(sys.coords)
-        nbs = @view neighbors.list[1:neighbors.n]
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_pe_kernel!(backend, n_threads_gpu)
         kernel!(pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary,

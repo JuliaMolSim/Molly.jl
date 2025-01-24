@@ -59,8 +59,6 @@
         simulate!(sys, sim)
         dists = Array(distances(sys.coords, sys.boundary))
         dists_flat = dists[triu(trues(3, 3), 1)]
-
-        # GPU tolerances are more lenient (possibly for f32 shenanigans)
         @test all(x -> isapprox(x, 0.4u"nm"; atol=1e-2u"nm"), dists_flat)
         @test isapprox(potential_energy(sys), -3.0u"kJ * mol^-1";
                         atol=1e-2u"kJ * mol^-1")

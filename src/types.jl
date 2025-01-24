@@ -15,6 +15,7 @@ export
     inject_gradients,
     extract_parameters,
     ReplicaSystem,
+    array_type,
     is_on_gpu,
     float_type,
     masses,
@@ -503,7 +504,7 @@ function System(;
                 k=default_k(energy_units),
                 data=nothing)
     D = AtomsBase.n_dimensions(boundary)
-    AT = get_array_type(coords)
+    AT = array_type(coords)
     T = float_type(boundary)
     A = typeof(atoms)
     C = typeof(coords)
@@ -635,7 +636,7 @@ Construct a `System` from a SimpleCrystals.jl `Crystal` struct.
 
 Properties unused in the simulation or in analysis can be left with their
 default values.
-`atoms`, `atoms_data`, `coords` and `boundary` are automatically calcualted from
+`atoms`, `atoms_data`, `coords` and `boundary` are automatically calculated from
 the `Crystal` struct.
 Extra atom paramaters like `σ` have to be added manually after construction using
 the convenience constructor `System(sys; <keyword arguments>)`.
@@ -862,7 +863,7 @@ function ReplicaSystem(;
                         k=default_k(energy_units),
                         data=nothing)
     D = AtomsBase.n_dimensions(boundary)
-    AT = get_array_type(replica_coords[1])
+    AT = array_type(replica_coords[1])
     T = float_type(boundary)
     A = typeof(atoms)
     AD = typeof(atoms_data)
@@ -973,25 +974,25 @@ function ReplicaSystem(;
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
-    n_cuarray = sum(y -> isa(y, AbstractGPUArray), replica_coords)
-    if !(n_cuarray == n_replicas || n_cuarray == 0)
-        throw(ArgumentError("the coordinates for $n_cuarray out of $n_replicas replicas are on GPU"))
+    n_gpu_array = sum(y -> isa(y, AbstractGPUArray), replica_coords)
+    if !(n_gpu_array == n_replicas || n_gpu_array == 0)
+        throw(ArgumentError("the coordinates for $n_gpu_array out of $n_replicas replicas are on GPU"))
     end
-    if isa(atoms, AbstractGPUArray) && n_cuarray != n_replicas
+    if isa(atoms, AbstractGPUArray) && n_gpu_array != n_replicas
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
-    if n_cuarray == n_replicas && !isa(atoms, AbstractGPUArray)
+    if n_gpu_array == n_replicas && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the coordinates are on the GPU but the atoms are not"))
     end
 
-    n_cuarray = sum(y -> isa(y, AbstractGPUArray), replica_velocities)
-    if !(n_cuarray == n_replicas || n_cuarray == 0)
-        throw(ArgumentError("the velocities for $n_cuarray out of $n_replicas replicas are on GPU"))
+    n_gpu_array = sum(y -> isa(y, AbstractGPUArray), replica_velocities)
+    if !(n_gpu_array == n_replicas || n_gpu_array == 0)
+        throw(ArgumentError("the velocities for $n_gpu_array out of $n_replicas replicas are on GPU"))
     end
-    if isa(atoms, AbstractGPUArray) && n_cuarray != n_replicas
+    if isa(atoms, AbstractGPUArray) && n_gpu_array != n_replicas
         throw(ArgumentError("the atoms are on the GPU but the velocities are not"))
     end
-    if n_cuarray == n_replicas && !isa(atoms, AbstractGPUArray)
+    if n_gpu_array == n_replicas && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
 
@@ -1017,12 +1018,15 @@ function ReplicaSystem(;
             energy_units, k_converted, replicas, data)
 end
 
-# Rename, export, docstring
-function get_array_type(::AT) where AT
-    return AT.name.wrapper
-end
+"""
+    array_type(sys)
+    array_type(arr)
 
-get_array_type(::Union{System{D, AT}, ReplicaSystem{D, AT}}) where {D, AT} = AT
+The array type of a [`System`](@ref), [`ReplicaSystem`](@ref) or array, for example
+`Array` for systems on CPU or `CuArray` for systems on a NVIDIA GPU.
+"""
+array_type(::AT) where AT = AT.name.wrapper
+array_type(::Union{System{D, AT}, ReplicaSystem{D, AT}}) where {D, AT} = AT
 
 """
     is_on_gpu(sys)

@@ -1,4 +1,5 @@
 using Molly
+using AMDGPU
 using Aqua
 import AtomsBase
 using AtomsBaseTesting
@@ -7,9 +8,8 @@ using AtomsCalculators.AtomsCalculatorsTesting
 import BioStructures # Imported to avoid clashing names
 using CUDA
 using Enzyme
-using AMDGPU
-using GPUArrays
 using FiniteDifferences
+using GPUArrays
 using KernelDensity
 import SimpleCrystals
 
@@ -36,7 +36,7 @@ if running_CI
     @warn "Some CPU gradient tests will not be run as this is CI"
 end
 
-const run_visualize_tests = false#get(ENV, "VISTESTS", "1") != "0"
+const run_visualize_tests = get(ENV, "VISTESTS", "1") != "0"
 if run_visualize_tests
     import GLMakie
 else
@@ -52,7 +52,7 @@ else
 end
 
 # Allow CUDA device to be specified
-const DEVICE = 2#parse(Int, get(ENV, "DEVICE", "0"))
+const DEVICE = parse(Int, get(ENV, "DEVICE", "0"))
 
 const run_cuda_tests = get(ENV, "GPUTESTS", "1") != "0" && CUDA.functional()
 const run_rocm_tests = get(ENV, "GPUTESTS", "1") != "0" && AMDGPU.functional()

@@ -412,7 +412,7 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E}},
     end
 
     if isa(atoms, AbstractGPUArray)
-        AT = get_array_type(atoms)
+        AT = array_type(atoms)
         or = AT(offset_radii)
         sor = AT(scaled_offset_radii)
         is, js = AT(inds_i), AT(inds_j)
@@ -565,7 +565,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E}},
     end
 
     if isa(atoms, AbstractGPUArray)
-        AT = get_array_type(atoms)
+        AT = array_type(atoms)
         or = AT(offset_radii)
         sor = AT(scaled_offset_radii)
         is, js = AT(inds_i), AT(inds_j)

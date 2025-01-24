@@ -88,7 +88,7 @@ Calculate the hydrodynamic radius of a set of coordinates.
 """
 function hydrodynamic_radius(coords::AbstractArray{SVector{D, T}}, boundary) where {D, T}
     n_atoms = length(coords)
-    diag  = get_array_type(coords)(Diagonal(ones(T, n_atoms)))
+    diag  = array_type(coords)(Diagonal(ones(T, n_atoms)))
     dists = distances(coords, boundary) .+ diag
     sum_inv_dists = sum(inv.(dists)) - sum(inv(diag))
     inv_R_hyd = sum_inv_dists / (2 * n_atoms^2)

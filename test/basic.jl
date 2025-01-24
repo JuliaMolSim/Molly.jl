@@ -191,7 +191,7 @@
             )
         else 
             sys.neighbor_finder = DistanceNeighborFinder(
-                eligible=AT(no_nbs),
+                eligible=no_nbs,
                 dist_cutoff=1.0u"nm",
             )
         end
@@ -317,27 +317,8 @@ end
         end
     end
 
-    if run_cuda_tests
-        sys_gpu = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
-                         array_type=CuArray)
-        for neighbor_finder in (DistanceNeighborFinder,)
-            nf_gpu = neighbor_finder(
-                eligible=sys_gpu.neighbor_finder.eligible,
-                special=sys_gpu.neighbor_finder.special,
-                dist_cutoff=dist_cutoff,
-            )
-            neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
-            @test length(neighbors_gpu) == n_neighbors_ref
-            GPUArrays.allowscalar() do
-                @test neighbors_gpu[10] isa Tuple{Int32, Int32, Bool}
-            end
-            @test identical_neighbors(neighbors_gpu, neighbors_ref)
-        end
-    end
-
-    if run_rocm_tests
-        sys_gpu = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
-                         array_type=ROCArray)
+    for AT in array_list[2:end]
+        sys_gpu = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; array_type=AT)
         for neighbor_finder in (DistanceNeighborFinder,)
             nf_gpu = neighbor_finder(
                 eligible=sys_gpu.neighbor_finder.eligible,
@@ -366,8 +347,7 @@ end
         @test rmsd(CuArray(coords_1), CuArray(coords_2)) ≈ 2.54859467758795u"Å"
     end
     if run_rocm_tests
-        @test rmsd(ROCArray(coords_1),
-                   ROCArray(coords_2)) ≈ 2.54859467758795u"Å"
+        @test rmsd(ROCArray(coords_1), ROCArray(coords_2)) ≈ 2.54859467758795u"Å"
     end
 
     bb_atoms = BioStructures.collectatoms(struc[1], BioStructures.backboneselector)

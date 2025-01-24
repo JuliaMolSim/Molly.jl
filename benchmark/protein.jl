@@ -29,7 +29,7 @@ function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
         ff;
         velocities=AT(velocities),
         units=units,
-        gpu=gpu,
+        array_type=AT,
         dist_cutoff=(units ? dist_cutoff * u"nm" : dist_cutoff),
         dist_neighbors=(units ? dist_neighbors * u"nm" : dist_neighbors),
     )
@@ -53,9 +53,9 @@ runs = [
     ("GPU f32 nounits"                   , CuArray, false, true , false),
 ]
 
-for (run_name, gpu, parallel, f32, units) in runs
+for (run_name, AT, parallel, f32, units) in runs
     n_threads_used = parallel ? n_threads : 1
-    sys, sim = setup_system(gpu, f32, units)
+    sys, sim = setup_system(AT, f32, units)
     simulate!(deepcopy(sys), sim, 20; n_threads=n_threads_used)
     println(run_name)
     @time simulate!(sys, sim, n_steps; n_threads=n_threads_used)

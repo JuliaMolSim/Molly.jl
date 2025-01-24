@@ -875,7 +875,7 @@ function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topolo
 end
 
 function molecule_centers(coords::AbstractGPUArray, boundary, topology)
-    AT = get_array_type(coords)
+    AT = array_type(coords)
     return AT(molecule_centers(Array(coords), boundary, topology))
 end
 
