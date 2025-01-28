@@ -1341,7 +1341,7 @@ end
         if nl
             if AT <: CuArray
                 neighbor_finder = GPUNeighborFinder(
-                    eligible=AT(trues(n_atoms, n_atoms),
+                    eligible=AT(trues(n_atoms, n_atoms)),
                     n_steps_reorder=10,
                     dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
                 )

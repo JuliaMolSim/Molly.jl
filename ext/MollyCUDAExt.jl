@@ -411,7 +411,7 @@ function force_kernel!(
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
                  
-                f = condition ? sum_pairwise_forces(
+                f = condition ? Molly.sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j_shuffle,
                     Val(force_units),
@@ -476,7 +476,7 @@ function force_kernel!(
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
-                f = condition ? sum_pairwise_forces(
+                f = condition ? Molly.sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(force_units),
@@ -526,7 +526,7 @@ function force_kernel!(
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
             condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
-            f = condition ? sum_pairwise_forces(
+            f = condition ? Molly.sum_pairwise_forces(
                 inters_tuple,
                 atoms_i, atoms_j,
                 Val(force_units),
@@ -573,7 +573,7 @@ function force_kernel!(
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
                 
-                f = condition ? sum_pairwise_forces(
+                f = condition ? Molly.sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(force_units),
@@ -859,8 +859,8 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
                 j = j_0_tile + del_j
                 if i != j
                     atom_j, coord_j, vel_j = atoms[j], coords[j], velocities[j]
-                    f = sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
-                                            boundary, vel_i, vel_j, step_n)
+                    f = Molly.sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i,
+                                                  coord_j, boundary, vel_i, vel_j, step_n)
                     for dim in 1:D
                         forces_shmem[dim, tidx] += -ustrip(f[dim])
                     end
@@ -884,7 +884,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
         @inbounds for _ in 1:tilesteps
             sync_warp()
             atom_j = atoms[j]
-            f = sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
+            f = Molly.sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
                                     boundary, vel_i, vel_j, step_n)
             for dim in 1:D
                 forces_shmem[dim, tidx] += -ustrip(f[dim])
@@ -905,9 +905,9 @@ end
     dr = vector(coord_i, coord_j, boundary)
 
     pe_tuple = ntuple(length(inters)) do inter_type_i
-        SVector(potential_energy_gpu(inters[inter_type_i], dr, atom_i, atom_j, E, special, coord_i, coord_j, boundary,
-                  vel_i, vel_j, step_n))
-                  # SVector was required to avoid a GPU error occurring with scalars (like the quantity returned by potential_energy_gpu) 
+        # SVector was required to avoid a GPU error occurring with scalars
+        SVector(Molly.potential_energy_gpu(inters[inter_type_i], dr, atom_i, atom_j, E, special,
+                            coord_i, coord_j, boundary, vel_i, vel_j, step_n))
     end
     pe = sum(pe_tuple)
     if unit(pe[1]) != E
