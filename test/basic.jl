@@ -191,7 +191,7 @@
             )
         else
             sys.neighbor_finder = DistanceNeighborFinder(
-                eligible=(AT <: Array ? no_nbs : AT(no_nbs)),
+                eligible=AT(no_nbs),
                 dist_cutoff=1.0u"nm",
             )
         end
