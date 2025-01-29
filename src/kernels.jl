@@ -36,7 +36,7 @@ function pairwise_force_gpu!(buffers, sys::System{D, AT, T},
         nbs = @view neighbors.list[1:neighbors.n]
     end
     if length(neighbors) > 0
-        backend = get_backend(coords)
+        backend = get_backend(sys.coords)
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_force_kernel_nl!(backend, n_threads_gpu)
         kernel!(buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters,

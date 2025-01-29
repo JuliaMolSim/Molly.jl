@@ -184,14 +184,14 @@
         # Mark all pairs as ineligible for pairwise interactions and check that the
         #   potential energy from the specific interactions does not change on scaling
         no_nbs = falses(length(sys), length(sys))
-        if AT <: AbstractGPUArray
+        if AT <: CuArray
             sys.neighbor_finder = GPUNeighborFinder(
                 eligible=AT(no_nbs),
                 dist_cutoff=1.0u"nm",
             )
-        else 
+        else
             sys.neighbor_finder = DistanceNeighborFinder(
-                eligible=no_nbs,
+                eligible=(AT <: Array ? no_nbs : AT(no_nbs)),
                 dist_cutoff=1.0u"nm",
             )
         end

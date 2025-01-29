@@ -887,15 +887,14 @@ function System(coord_file::AbstractString,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
-    if AT <: AbstractGPUArray
+    if Symbol(AT) == :CuArray
         neighbor_finder = GPUNeighborFinder(
             eligible=AT(eligible),
             dist_cutoff=T(dist_neighbors),
             special=AT(special),
             n_steps_reorder=10,
-            initialized=false,
         )
-    elseif use_cell_list
+    elseif use_cell_list && !(AT <: AbstractGPUArray)
         neighbor_finder = CellListMapNeighborFinder(
             eligible=eligible,
             special=special,
@@ -906,8 +905,8 @@ function System(coord_file::AbstractString,
         )
     else
         neighbor_finder = DistanceNeighborFinder(
-            eligible=eligible,
-            special=special,
+            eligible=AT(eligible),
+            special=AT(special),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
@@ -1280,15 +1279,14 @@ function System(T::Type,
     end
     specific_inter_lists = tuple(specific_inter_array...)
 
-    if AT <: AbstractGPUArray
+    if Symbol(AT) == :CuArray
         neighbor_finder = GPUNeighborFinder(
             eligible=AT(eligible),
             dist_cutoff=T(dist_neighbors),
             special=AT(special),
             n_steps_reorder=10,
-            initialized=false,
         )
-    elseif use_cell_list
+    elseif use_cell_list && !(AT <: AbstractGPUArray)
         neighbor_finder = CellListMapNeighborFinder(
             eligible=eligible,
             special=special,
@@ -1299,8 +1297,8 @@ function System(T::Type,
         )
     else
         neighbor_finder = DistanceNeighborFinder(
-            eligible=eligible,
-            special=special,
+            eligible=AT(eligible),
+            special=AT(special),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
