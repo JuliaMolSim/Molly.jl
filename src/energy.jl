@@ -257,7 +257,7 @@ function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
     val_ft = Val(T)
     pe_vec_nounits = KernelAbstractions.zeros(get_backend(sys.coords), T, 1)
-    buffers = init_forces_buffer!(sys, ustrip_vec.(zero(sys.coords)), 1)
+    buffers = init_forces_buffer!(sys, ustrip_vec.(zero(sys.coords)), 1, true)
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0

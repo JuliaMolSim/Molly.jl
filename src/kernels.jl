@@ -210,7 +210,7 @@ function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT},
                          pairwise_inters, neighbors, step_n) where {D, AT <: AbstractGPUArray}
     if isnothing(neighbors)
         error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
-            "should use DistanceNeighborFinder instead")
+              "should use DistanceNeighborFinder instead")
     end
     if typeof(neighbors) == NoNeighborList
         nbs = neighbors
