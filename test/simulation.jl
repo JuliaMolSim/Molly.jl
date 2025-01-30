@@ -1402,6 +1402,10 @@ end
         push!(runs, ("$AT NL"    , [true , false, false, AT]))
         push!(runs, ("$AT f32 NL", [true , false, true , AT]))
     end
+    if run_metal_tests
+        push!(runs, ("$AT f32"   , [false, false, true , AT]))
+        push!(runs, ("$AT f32 NL", [true , false, true , AT]))
+    end
 
     final_coords_ref, E_start_ref = test_sim(runs[1][2]...)
     # Check all simulations give the same result to within some error

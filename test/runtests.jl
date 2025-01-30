@@ -89,7 +89,6 @@ else
 end
 
 if run_metal_tests
-    array_list = (array_list..., MtlArray)
     @info "The Metal tests will be run"
 else
     @warn "The Metal tests will not be run as a Metal-enabled device is not available"
