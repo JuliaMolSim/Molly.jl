@@ -43,6 +43,9 @@ find_neighbors(sys::System; kwargs...) = find_neighbors(sys, sys.neighbor_finder
 
 find_neighbors(sys::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
 
+# Indicates whether an array type is compatible with GPUNeighborFinder
+uses_gpu_neighbor_finder(AT) = false
+
 """
     GPUNeighborFinder(; eligible, dist_cutoff, special, n_steps_reorder, initialized)
 

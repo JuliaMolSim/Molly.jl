@@ -7,6 +7,8 @@ using KernelAbstractions
 
 const WARPSIZE = UInt32(32)
 
+Molly.uses_gpu_neighbor_finder(::Type{AT}) where {AT <: CuArray} = true
+
 CUDA.Const(nl::Molly.NoNeighborList) = nl
 
 macro shfl_multiple_sync(mask, target, width, vars...)

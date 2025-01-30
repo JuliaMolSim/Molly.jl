@@ -887,7 +887,7 @@ function System(coord_file::AbstractString,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
-    if Symbol(AT) == :CuArray
+    if uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
             eligible=AT(eligible),
             dist_cutoff=T(dist_neighbors),
@@ -1279,7 +1279,7 @@ function System(T::Type,
     end
     specific_inter_lists = tuple(specific_inter_array...)
 
-    if Symbol(AT) == :CuArray
+    if uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
             eligible=AT(eligible),
             dist_cutoff=T(dist_neighbors),
