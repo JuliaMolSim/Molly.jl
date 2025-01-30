@@ -34,7 +34,7 @@ Implemented features include:
 - [Unitful.jl](https://github.com/PainterQubits/Unitful.jl) compatibility so numbers have physical meaning.
 - Set up crystal systems using [SimpleCrystals.jl](https://github.com/ejmeitz/SimpleCrystals.jl).
 - Automatic multithreading.
-- GPU acceleration on CUDA-enabled devices.
+- GPU acceleration on all backends supported by [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl), with better performance on CUDA-enabled devices.
 - Run with Float64, Float32 or other float types.
 - Some analysis functions, e.g. RDF.
 - Visualise simulations as animations with [Makie.jl](https://makie.juliaplots.org/stable).
