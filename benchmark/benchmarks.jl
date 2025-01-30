@@ -17,15 +17,15 @@ else
     @warn "The parallel benchmarks will not be run as Julia is running on 1 thread"
 end
 
-# Allow CUDA device to be specified
-const DEVICE = get(ENV, "DEVICE", "0")
+# Allow GPU device to be specified
+const DEVICE = parse(Int, get(ENV, "DEVICE", "0"))
 
 const run_cuda_tests = CUDA.functional()
 if run_cuda_tests
-    device!(parse(Int, DEVICE))
-    @info "The GPU benchmarks will be run on device $DEVICE"
+    device!(DEVICE)
+    @info "The CUDA benchmarks will be run on device $DEVICE"
 else
-    @warn "The GPU benchmarks will not be run as a CUDA-enabled device is not available"
+    @warn "The CUDA benchmarks will not be run as a CUDA-enabled device is not available"
 end
 
 const SUITE = BenchmarkGroup(

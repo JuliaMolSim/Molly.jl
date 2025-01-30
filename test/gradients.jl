@@ -44,23 +44,16 @@ end
         ("CPU gbn2 forward", Array, false, true , false, false, true , 0.5 , 0.1 ),
     ]
     if run_parallel_tests #                  gpu      par    fwd    f32    obc2   gbn2   tol_σ tol_r0
-        push!(runs, ("CPU parallel"        , Array  , true , false, false, false, false, 1e-4, 1e-4))
-        push!(runs, ("CPU parallel forward", Array  , true , true , false, false, false, 0.5 , 0.1 ))
-        push!(runs, ("CPU parallel f32"    , Array  , true , false, true , false, false, 0.01, 5e-4))
+        push!(runs, ("CPU parallel"        , Array, true , false, false, false, false, 1e-4, 1e-4))
+        push!(runs, ("CPU parallel forward", Array, true , true , false, false, false, 0.5 , 0.1 ))
+        push!(runs, ("CPU parallel f32"    , Array, true , false, true , false, false, 0.01, 5e-4))
     end
-    if run_cuda_tests #                      gpu      par    fwd    f32    obc2   gbn2   tol_σ tol_r0
-        push!(runs, ("CUDA"                , CuArray, false, false, false, false, false, 0.25, 20.0))
-        push!(runs, ("CUDA forward"        , CuArray, false, true , false, false, false, 0.25, 20.0))
-        push!(runs, ("CUDA f32"            , CuArray, false, false, true , false, false, 0.5 , 50.0))
-        push!(runs, ("CUDA obc2"           , CuArray, false, false, false, true , false, 0.25, 20.0))
-        push!(runs, ("CUDA gbn2"           , CuArray, false, false, false, false, true , 0.25, 20.0))
-    end
-    if run_rocm_tests #                      gpu       par    fwd    f32    obc2   gbn2   tol_σ tol_r0
-        push!(runs, ("ROCM"                , ROCArray, false, false, false, false, false, 0.25, 20.0))
-        push!(runs, ("ROCM forward"        , ROCArray, false, true , false, false, false, 0.25, 20.0))
-        push!(runs, ("ROCM f32"            , ROCArray, false, false, true , false, false, 0.5 , 50.0))
-        push!(runs, ("ROCM obc2"           , ROCArray, false, false, false, true , false, 0.25, 20.0))
-        push!(runs, ("ROCM gbn2"           , ROCArray, false, false, false, false, true , 0.25, 20.0))
+    for AT in array_list[2:end] #            gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+        push!(runs, ("$AT"                 , AT   , false, false, false, false, false, 0.25, 20.0))
+        push!(runs, ("$AT forward"         , AT   , false, true , false, false, false, 0.25, 20.0))
+        push!(runs, ("$AT f32"             , AT   , false, false, true , false, false, 0.5 , 50.0))
+        push!(runs, ("$AT obc2"            , AT   , false, false, false, true , false, 0.25, 20.0))
+        push!(runs, ("$AT gbn2"            , AT   , false, false, false, false, true , 0.25, 20.0))
     end
 
     function mean_min_separation(coords, boundary, ::Val{T}) where T
@@ -410,11 +403,8 @@ end
     if run_parallel_tests
         push!(platform_runs, ("CPU parallel", Array, true))
     end
-    if run_cuda_tests
-        push!(platform_runs, ("CUDA", CuArray, false))
-    end
-    if run_rocm_tests
-        push!(platform_runs, ("ROCM", ROCArray, false))
+    for AT in array_list[2:end]
+        push!(platform_runs, ("$AT", AT, false))
     end
     test_runs = [
         ("Energy", test_energy_grad, 1e-8),

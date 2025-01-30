@@ -1396,17 +1396,11 @@ end
         push!(runs, ("CPU parallel NL"    , [true , true , false, Array]))
         push!(runs, ("CPU parallel f32 NL", [true , true , true , Array]))
     end
-    if run_cuda_tests
-        push!(runs, ("GPU"       , [false, false, false, CuArray]))
-        push!(runs, ("GPU f32"   , [false, false, true , CuArray]))
-        push!(runs, ("GPU NL"    , [true , false, false, CuArray]))
-        push!(runs, ("GPU f32 NL", [true , false, true , CuArray]))
-    end
-    if run_rocm_tests
-        push!(runs, ("GPU"       , [false, false, false, ROCArray]))
-        push!(runs, ("GPU f32"   , [false, false, true , ROCArray]))
-        push!(runs, ("GPU NL"    , [true , false, false, ROCArray]))
-        push!(runs, ("GPU f32 NL", [true , false, true , ROCArray]))
+    for AT in array_list[2:end]
+        push!(runs, ("$AT"       , [false, false, false, AT]))
+        push!(runs, ("$AT f32"   , [false, false, true , AT]))
+        push!(runs, ("$AT NL"    , [true , false, false, AT]))
+        push!(runs, ("$AT f32 NL", [true , false, true , AT]))
     end
 
     final_coords_ref, E_start_ref = test_sim(runs[1][2]...)
