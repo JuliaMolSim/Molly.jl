@@ -399,10 +399,8 @@ n_atoms_to_n_pairs(n_atoms::Integer) = (n_atoms * (n_atoms - 1)) ÷ 2
 Base.length(nl::NoNeighborList) = n_atoms_to_n_pairs(nl.n_atoms)
 
 function pair_index(n_atoms::Integer, ind::Integer)
-    T = Float32 # Float32 for compatibility with Metal devices
     kz = ind - 1
-    sq = sqrt(T(-8 * kz + 4 * n_atoms * (n_atoms - 1) - 7))
-    iz = n_atoms - 2 - unsafe_trunc(Int, sq * T(0.5) - T(0.5))
+    iz = n_atoms - 2 - Int(floor(sqrt(-8 * kz + 4 * n_atoms * (n_atoms - 1) - 7) / 2 - 0.5))
     jz = kz + iz + 1 - (n_atoms * (n_atoms - 1)) ÷ 2 + ((n_atoms - iz) * ((n_atoms - iz) - 1)) ÷ 2
     i = iz + 1
     j = jz + 1
