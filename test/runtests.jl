@@ -74,7 +74,7 @@ end
 
 if run_rocm_tests
     array_list = (array_list..., ROCArray)
-    AMDGPU.device!(AMDGPU.device(DEVICE))
+    AMDGPU.device!(AMDGPU.device(DEVICE+1))
     @info "The AMDGPU tests will be run on device $DEVICE"
 else
     @warn "The AMDGPU tests will not be run as a AMDGPU-enabled device is not available"
