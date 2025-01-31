@@ -36,7 +36,7 @@ using Test
                     )
                 else
                     neighbor_finder=DistanceNeighborFinder(
-                        eligible=trues(n_atoms, n_atoms),
+                        eligible=AT(trues(n_atoms, n_atoms)),
                         n_steps=10,
                         dist_cutoff=dist_cutoff,
                     )
