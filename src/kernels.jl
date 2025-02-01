@@ -45,7 +45,7 @@ function pairwise_force_gpu!(buffers, sys::System{D, AT, T},
     return buffers
 end
 
-@kernel function pairwise_force_kernel_nl!(forces, @Const(coords),
+@kernel inbounds=true function pairwise_force_kernel_nl!(forces, @Const(coords),
                                            @Const(velocities), @Const(atoms),
                                            boundary, inters,
                                            @Const(neighbors), step_n, ::Val{D},
@@ -53,7 +53,7 @@ end
 
     inter_i = @index(Global, Linear)
 
-    @inbounds if inter_i <= length(neighbors)
+    if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
         f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), special, coords[i], coords[j],
                                 boundary, velocities[i], velocities[j], step_n)
@@ -109,7 +109,7 @@ function specific_force_gpu!(fs_mat, inter_list::InteractionList4Atoms, coords::
     return fs_mat
 end
 
-@kernel function specific_force_1_atoms_kernel!(forces, @Const(coords),
+@kernel inbounds=true function specific_force_1_atoms_kernel!(forces, @Const(coords),
                                                 @Const(velocities),
                                                 @Const(atoms), boundary,
                                                 step_n, @Const(is),
@@ -118,7 +118,7 @@ end
 
     inter_i = @index(Global, Linear)
 
-    @inbounds if inter_i <= length(is)
+    if inter_i <= length(is)
         i = is[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], boundary, atoms[i], F, velocities[i], step_n)
         if unit(fs.f1[1]) != F
@@ -130,7 +130,7 @@ end
     end
 end
 
-@kernel function specific_force_2_atoms_kernel!(forces, @Const(coords),
+@kernel inbounds=true function specific_force_2_atoms_kernel!(forces, @Const(coords),
                                                 @Const(velocities),
                                                 @Const(atoms), boundary,
                                                 step_n, @Const(is), @Const(js),
@@ -139,7 +139,7 @@ end
 
     inter_i = @index(Global, Linear)
 
-    @inbounds if inter_i <= length(is)
+    if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], boundary, atoms[i], atoms[j], F,
                        velocities[i], velocities[j], step_n)
@@ -153,7 +153,7 @@ end
     end
 end
 
-@kernel function specific_force_3_atoms_kernel!(forces, @Const(coords),
+@kernel inbounds=true function specific_force_3_atoms_kernel!(forces, @Const(coords),
                                                 @Const(velocities),
                                                 @Const(atoms), boundary,
                                                 step_n, @Const(is),
@@ -163,7 +163,7 @@ end
 
     inter_i = @index(Global, Linear)
 
-    @inbounds if inter_i <= length(is)
+    if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary, atoms[i],
                        atoms[j], atoms[k], F, velocities[i], velocities[j], velocities[k], step_n)
@@ -178,7 +178,7 @@ end
     end
 end
 
-@kernel function specific_force_4_atoms_kernel!(forces, @Const(coords),
+@kernel inbounds=true function specific_force_4_atoms_kernel!(forces, @Const(coords),
                                                 @Const(velocities),
                                                 @Const(atoms), boundary,
                                                 step_n, @Const(is),
@@ -189,7 +189,7 @@ end
 
     inter_i = @index(Global, Linear)
 
-    @inbounds if inter_i <= length(is)
+    if inter_i <= length(is)
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
         fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary,
                        atoms[i], atoms[j], atoms[k], atoms[l], F, velocities[i], velocities[j],
@@ -227,13 +227,13 @@ function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT},
     return pe_vec_nounits
 end
 
-@kernel function pairwise_pe_kernel!(energy, @Const(coords), @Const(velocities),
+@kernel inbounds=true function pairwise_pe_kernel!(energy, @Const(coords), @Const(velocities),
                                      @Const(atoms), boundary, inters,
                                      @Const(neighbors), step_n, ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
 
-    @inbounds if inter_i <= length(neighbors)
+    if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
         coord_i, coord_j, vel_i, vel_j = coords[i], coords[j], velocities[i], velocities[j]
         dr = vector(coord_i, coord_j, boundary)
@@ -293,12 +293,12 @@ function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList4Atoms, coo
     return pe_vec_nounits
 end
 
-@kernel function specific_pe_1_atoms_kernel!(energy, @Const(coords), @Const(velocities),
+@kernel inbounds=true function specific_pe_1_atoms_kernel!(energy, @Const(coords), @Const(velocities),
                     @Const(atoms), boundary, step_n, @Const(is), @Const(inters), ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
 
-    @inbounds if inter_i <= length(is)
+    if inter_i <= length(is)
         i = is[inter_i]
         pe = potential_energy_gpu(inters[inter_i], coords[i], boundary, atoms[i], E,
                                   velocities[i], step_n)
@@ -309,14 +309,14 @@ end
     end
 end
 
-@kernel function specific_pe_2_atoms_kernel!(energy, @Const(coords), @Const(velocities),
+@kernel inbounds=true function specific_pe_2_atoms_kernel!(energy, @Const(coords), @Const(velocities),
                     @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(inters),
                     ::Val{E}) where E
 
 
     inter_i = @index(Global, Linear)
 
-    @inbounds if inter_i <= length(is)
+    if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
         pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], boundary, atoms[i],
                                   atoms[j], E, velocities[i], velocities[j], step_n)
@@ -327,13 +327,13 @@ end
     end
 end
 
-@kernel function specific_pe_3_atoms_kernel!(energy, @Const(coords), @Const(velocities),
+@kernel inbounds=true function specific_pe_3_atoms_kernel!(energy, @Const(coords), @Const(velocities),
                     @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(ks),
                     @Const(inters), ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
 
-    @inbounds if inter_i <= length(is)
+    if inter_i <= length(is)
         i, j, k = is[inter_i], js[inter_i], ks[inter_i]
         pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary,
                                   atoms[i], atoms[j], atoms[k], E, velocities[i], velocities[j],
@@ -345,13 +345,13 @@ end
     end
 end
 
-@kernel function specific_pe_4_atoms_kernel!(energy, @Const(coords), @Const(velocities),
+@kernel inbounds=true function specific_pe_4_atoms_kernel!(energy, @Const(coords), @Const(velocities),
                     @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(ks),
                     @Const(ls), @Const(inters), ::Val{E}) where E
 
     inter_i = @index(Global, Linear)
 
-    @inbounds if inter_i <= length(is)
+    if inter_i <= length(is)
         i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
         pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l],
                                   boundary, atoms[i], atoms[j], atoms[k], atoms[l], E,
