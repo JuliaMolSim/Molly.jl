@@ -22,7 +22,7 @@ function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
     velocities_nounits = SVector{3, T}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))
     velocities = units ? velocities_nounits * u"nm * ps^-1" : velocities_nounits
     dist_cutoff = T(1.0)
-    dist_neighbors = T(1.2)
+    dist_neighbors = (Molly.uses_gpu_neighbor_finder(AT) ? dist_cutoff : T(1.2))
 
     sys = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
@@ -48,9 +48,9 @@ runs = [
     ("CPU $n_threads threads"            , Array  , true , false, true ),
     ("CPU $n_threads threads f32"        , Array  , true , true , true ),
     ("CPU $n_threads threads f32 nounits", Array  , true , true , false),
-    ("GPU"                               , CuArray, false, false, true ),
-    ("GPU f32"                           , CuArray, false, true , true ),
-    ("GPU f32 nounits"                   , CuArray, false, true , false),
+    ("CUDA"                              , CuArray, false, false, true ),
+    ("CUDA f32"                          , CuArray, false, true , true ),
+    ("CUDA f32 nounits"                  , CuArray, false, true , false),
 ]
 
 for (run_name, AT, parallel, f32, units) in runs

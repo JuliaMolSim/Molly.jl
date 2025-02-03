@@ -77,16 +77,25 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, ::Type{AT}) where AT
         AT(bonds),
     ),)
 
-    neighbor_finder = NoNeighborFinder()
     cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
-    pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
     if nl
-        neighbor_finder = DistanceNeighborFinder(
-            eligible=AT(trues(n_atoms, n_atoms)),
-            n_steps=10,
-            dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
-        )
+        if Molly.uses_gpu_neighbor_finder(AT)
+            neighbor_finder = GPUNeighborFinder(
+                eligible=AT(trues(n_atoms, n_atoms)),
+                n_steps_reorder=10,
+                dist_cutoff=cutoff.dist_cutoff,
+            )
+        else
+            neighbor_finder = DistanceNeighborFinder(
+                eligible=AT(trues(n_atoms, n_atoms)),
+                n_steps=10,
+                dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+            )
+        end
         pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
+    else
+        neighbor_finder = NoNeighborFinder()
+        pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
     end
 
     coords = AT(copy(f32 ? starting_coords_f32 : starting_coords))
@@ -122,10 +131,10 @@ if run_parallel_tests
     push!(runs, ("CPU parallel f32 NL", [true , true , true , Array]))
 end
 if run_cuda_tests
-    push!(runs, ("GPU"       , [false, false, false, CuArray]))
-    push!(runs, ("GPU f32"   , [false, false, true , CuArray]))
-    push!(runs, ("GPU NL"    , [true , false, false, CuArray]))
-    push!(runs, ("GPU f32 NL", [true , false, true , CuArray]))
+    push!(runs, ("CUDA"       , [false, false, false, CuArray]))
+    push!(runs, ("CUDA f32"   , [false, false, true , CuArray]))
+    push!(runs, ("CUDA NL"    , [true , false, false, CuArray]))
+    push!(runs, ("CUDA f32 NL", [true , false, true , CuArray]))
 end
 
 for (name, args) in runs
