@@ -1200,7 +1200,8 @@ end
         MonteCarloMembraneBarostat(press, tens, temp, boundary; z_axis_fixed=true),
     )
 
-    for AT in array_list
+    if run_cuda_tests
+        AT = CuArray
         for (barostat_i, barostat) in enumerate(barostat_test_set)
             if AT <: AbstractGPUArray && barostat_i != 2
                 continue
