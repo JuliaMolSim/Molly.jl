@@ -11,13 +11,14 @@ import BioStructures # Imported to avoid clashing names
 using CellListMap
 import Chemfiles
 using Combinatorics
-using CUDA
 using DataStructures
 using Distances
 using Distributions
 using EzXML
 using FLoops
+using GPUArrays
 using Graphs
+using KernelAbstractions
 using NearestNeighbors
 using PeriodicTable
 using SimpleCrystals
@@ -34,7 +35,7 @@ include("types.jl")
 include("units.jl")
 include("spatial.jl")
 include("cutoffs.jl")
-include("cuda.jl")
+include("kernels.jl")
 include("force.jl")
 include("interactions/lennard_jones.jl")
 include("interactions/soft_sphere.jl")

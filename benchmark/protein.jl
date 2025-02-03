@@ -11,7 +11,7 @@ const data_dir = normpath(dirname(pathof(Molly)), "..", "data")
 const ff_dir = joinpath(data_dir, "force_fields")
 const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
-function setup_system(gpu::Bool, f32::Bool, units::Bool)
+function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
     T = f32 ? Float32 : Float64
     ff = MolecularForceField(
         T,
@@ -27,9 +27,9 @@ function setup_system(gpu::Bool, f32::Bool, units::Bool)
     sys = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
         ff;
-        velocities=gpu ? CuArray(velocities) : velocities,
+        velocities=AT(velocities),
         units=units,
-        gpu=gpu,
+        array_type=AT,
         dist_cutoff=(units ? dist_cutoff * u"nm" : dist_cutoff),
         dist_neighbors=(units ? dist_neighbors * u"nm" : dist_neighbors),
     )
@@ -41,21 +41,21 @@ function setup_system(gpu::Bool, f32::Bool, units::Bool)
 end
 
 runs = [
-    # run_name                             gpu    parr   f32    units
-    ("CPU 1 thread"                      , false, false, false, true ),
-    ("CPU 1 thread f32"                  , false, false, true , true ),
-    ("CPU 1 thread f32 nounits"          , false, false, true , false),
-    ("CPU $n_threads threads"            , false, true , false, true ),
-    ("CPU $n_threads threads f32"        , false, true , true , true ),
-    ("CPU $n_threads threads f32 nounits", false, true , true , false),
-    ("GPU"                               , true , false, false, true ),
-    ("GPU f32"                           , true , false, true , true ),
-    ("GPU f32 nounits"                   , true , false, true , false),
+    # run_name                             gpu      parr   f32    units
+    ("CPU 1 thread"                      , Array  , false, false, true ),
+    ("CPU 1 thread f32"                  , Array  , false, true , true ),
+    ("CPU 1 thread f32 nounits"          , Array  , false, true , false),
+    ("CPU $n_threads threads"            , Array  , true , false, true ),
+    ("CPU $n_threads threads f32"        , Array  , true , true , true ),
+    ("CPU $n_threads threads f32 nounits", Array  , true , true , false),
+    ("GPU"                               , CuArray, false, false, true ),
+    ("GPU f32"                           , CuArray, false, true , true ),
+    ("GPU f32 nounits"                   , CuArray, false, true , false),
 ]
 
-for (run_name, gpu, parallel, f32, units) in runs
+for (run_name, AT, parallel, f32, units) in runs
     n_threads_used = parallel ? n_threads : 1
-    sys, sim = setup_system(gpu, f32, units)
+    sys, sim = setup_system(AT, f32, units)
     simulate!(deepcopy(sys), sim, 20; n_threads=n_threads_used)
     println(run_name)
     @time simulate!(sys, sim, n_steps; n_threads=n_threads_used)

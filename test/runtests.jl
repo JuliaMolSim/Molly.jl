@@ -1,4 +1,5 @@
 using Molly
+using AMDGPU
 using Aqua
 import AtomsBase
 using AtomsBaseTesting
@@ -8,7 +9,10 @@ import BioStructures # Imported to avoid clashing names
 using CUDA
 using Enzyme
 using FiniteDifferences
+using GPUArrays
 using KernelDensity
+using Metal
+using oneAPI
 import SimpleCrystals
 
 using DelimitedFiles
@@ -49,18 +53,45 @@ else
     @warn "The parallel tests will not be run as Julia is running on 1 thread"
 end
 
-# Allow CUDA device to be specified
+const run_gpu_tests = get(ENV, "GPUTESTS", "1") != "0"
+# Allow GPU device to be specified
 const DEVICE = parse(Int, get(ENV, "DEVICE", "0"))
 
-const run_gpu_tests = get(ENV, "GPUTESTS", "1") != "0" && CUDA.functional()
-const gpu_list = (run_gpu_tests ? (false, true) : (false,))
-if run_gpu_tests
-    device!(DEVICE)
-    @info "The GPU tests will be run on device $DEVICE"
-elseif get(ENV, "GPUTESTS", "1") == "0"
-    @warn "The GPU tests will not be run as GPUTESTS is set to 0"
+const run_cuda_tests   = run_gpu_tests && CUDA.functional()
+const run_rocm_tests   = run_gpu_tests && AMDGPU.functional()
+const run_oneapi_tests = run_gpu_tests && oneAPI.functional()
+const run_metal_tests  = run_gpu_tests && Metal.functional()
+
+array_list = (Array,)
+
+if run_cuda_tests
+    array_list = (array_list..., CuArray)
+    CUDA.device!(DEVICE)
+    @info "The CUDA tests will be run on device $DEVICE"
 else
-    @warn "The GPU tests will not be run as a CUDA-enabled device is not available"
+    @warn "The CUDA tests will not be run as a CUDA-enabled device is not available"
+end
+
+if run_rocm_tests
+    array_list = (array_list..., ROCArray)
+    AMDGPU.device!(AMDGPU.device(DEVICE+1))
+    @info "The AMDGPU tests will be run on device $DEVICE"
+else
+    @warn "The AMDGPU tests will not be run as a AMDGPU-enabled device is not available"
+end
+
+if run_oneapi_tests
+    array_list = (array_list..., oneArray)
+    oneAPI.device!(DEVICE)
+    @info "The oneAPI tests will be run on device $DEVICE"
+else
+    @warn "The oneAPI tests will not be run as a oneAPI-enabled device is not available"
+end
+
+if run_metal_tests
+    @info "The Metal tests will be run"
+else
+    @warn "The Metal tests will not be run as a Metal-enabled device is not available"
 end
 
 const data_dir = normpath(@__DIR__, "..", "data")

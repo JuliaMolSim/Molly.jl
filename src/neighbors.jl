@@ -43,13 +43,16 @@ find_neighbors(sys::System; kwargs...) = find_neighbors(sys, sys.neighbor_finder
 
 find_neighbors(sys::System, nf::NoNeighborFinder, args...; kwargs...) = nothing
 
+# Indicates whether an array type is compatible with GPUNeighborFinder
+uses_gpu_neighbor_finder(AT) = false
+
 """
     GPUNeighborFinder(; eligible, dist_cutoff, special, n_steps_reorder, initialized)
 
 Use the non-bonded forces/potential energy algorithm from
 [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413) to avoid calculating a neighbor list.
 
-This is the recommended neighbor finder on GPU.
+This is the recommended neighbor finder on NVIDIA GPUs.
 """
 mutable struct GPUNeighborFinder{B, D}
     eligible::B
@@ -75,6 +78,8 @@ find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
     DistanceNeighborFinder(; eligible, dist_cutoff, special, n_steps)
 
 Find close atoms by distance.
+
+This is the recommended neighbor finder on non-NVIDIA GPUs.
 """
 struct DistanceNeighborFinder{B, D}
     eligible::B
@@ -93,12 +98,12 @@ function DistanceNeighborFinder(;
                 eligible, dist_cutoff, special, n_steps, zero(eligible))
 end
 
-function find_neighbors(sys::System{D, false},
+function find_neighbors(sys::System,
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
-                        n_threads::Integer=Threads.nthreads()) where D
+                        n_threads::Integer=Threads.nthreads())
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
@@ -121,20 +126,18 @@ function find_neighbors(sys::System{D, false},
     return NeighborList(length(neighbors_list), neighbors_list)
 end
 
-function cuda_threads_blocks_dnf(n_inters)
+function gpu_threads_blocks_dnf(n_inters)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_DISTANCENF", "512"))
-    n_blocks = cld(n_inters, n_threads_gpu)
-    return n_threads_gpu, n_blocks
+    return n_threads_gpu
 end
 
-function distance_neighbor_finder_kernel!(neighbors, coords_var, eligible_var,
-                                          boundary, sq_dist_neighbors)
-    coords    = CUDA.Const(coords_var)
-    eligible = CUDA.Const(eligible_var)
-
+@kernel function distance_neighbor_finder_kernel!(neighbors,
+                                                  @Const(coords),
+                                                  @Const(eligible),
+                                                  boundary, sq_dist_neighbors)
     n_atoms = length(coords)
     n_inters = n_atoms_to_n_pairs(n_atoms)
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    inter_i = @index(Global, Linear)
 
     @inbounds if inter_i <= n_inters
         i, j = pair_index(n_atoms, inter_i)
@@ -146,28 +149,28 @@ function distance_neighbor_finder_kernel!(neighbors, coords_var, eligible_var,
             end
         end
     end
-    return nothing
 end
 
 lists_to_tuple_list(i, j, w) = (Int32(i), Int32(j), w)
 
-function find_neighbors(sys::System{D, true},
+function find_neighbors(sys::System{D, AT},
                         nf::DistanceNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
-                        kwargs...) where D
+                        kwargs...) where {D, AT <: AbstractGPUArray}
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
 
     nf.neighbors .= false
     n_inters = n_atoms_to_n_pairs(length(sys))
-    n_threads_gpu, n_blocks = cuda_threads_blocks_dnf(n_inters)
+    n_threads_gpu = gpu_threads_blocks_dnf(n_inters)
 
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks distance_neighbor_finder_kernel!(
-        nf.neighbors, sys.coords, nf.eligible, sys.boundary, nf.dist_cutoff^2,
-    )
+    backend = get_backend(sys.coords)
+    kernel! = distance_neighbor_finder_kernel!(backend, n_threads_gpu)
+    kernel!(nf.neighbors, sys.coords, nf.eligible, sys.boundary,
+            nf.dist_cutoff^2, ndrange=n_inters)
 
     pairs = findall(nf.neighbors)
     nbsi, nbsj = getindex.(pairs, 1), getindex.(pairs, 2)
@@ -199,12 +202,12 @@ function TreeNeighborFinder(;
     return TreeNeighborFinder{typeof(dist_cutoff)}(eligible, dist_cutoff, special, n_steps)
 end
 
-function find_neighbors(sys::System,
+function find_neighbors(sys::System{<:Any, AT},
                         nf::TreeNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
-                        n_threads::Integer=Threads.nthreads())
+                        n_threads::Integer=Threads.nthreads()) where AT
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
@@ -227,7 +230,7 @@ function find_neighbors(sys::System,
         end
     end
 
-    return NeighborList(length(neighbors_list), move_array(neighbors_list, sys))
+    return NeighborList(length(neighbors_list), AT(neighbors_list))
 end
 
 """
@@ -337,19 +340,19 @@ function reduce_pairs(neighbors::NeighborList, neighbors_threaded::Vector{Neighb
     return neighbors
 end
 
-function find_neighbors(sys::System{D, G},
+function find_neighbors(sys::System{D, AT},
                         nf::CellListMapNeighborFinder,
                         current_neighbors=nothing,
                         step_n::Integer=0,
                         force_recompute::Bool=false;
-                        n_threads::Integer=Threads.nthreads()) where {D, G}
+                        n_threads::Integer=Threads.nthreads()) where {D, AT}
     if !force_recompute && !iszero(step_n % nf.n_steps)
         return current_neighbors
     end
 
     if isnothing(current_neighbors)
         neighbors = NeighborList()
-    elseif G
+    elseif AT <: AbstractGPUArray
         neighbors = NeighborList(current_neighbors.n, Array(current_neighbors.list))
     else
         neighbors = current_neighbors
@@ -381,8 +384,8 @@ function find_neighbors(sys::System{D, G},
     )
 
     nf.cl = cl
-    if G
-        return NeighborList(neighbors.n, CuArray(neighbors.list))
+    if AT <: AbstractGPUArray
+        return NeighborList(neighbors.n, AT(neighbors.list))
     else
         return neighbors
     end

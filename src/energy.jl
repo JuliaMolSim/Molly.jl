@@ -33,7 +33,7 @@ E_k = \frac{1}{2} \sum_{i} m_i v_i^2
 ```
 where ``m_i`` is the mass and ``v_i`` is the velocity of atom ``i``.
 """
-function kinetic_energy(sys::System{D, G, T}) where {D, G, T}
+function kinetic_energy(sys::System)
     ke = kinetic_energy_noconvert(sys)
     return uconvert(sys.energy_units, ke)
 end
@@ -78,8 +78,8 @@ function potential_energy(sys; n_threads::Integer=Threads.nthreads())
     return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function potential_energy(sys::System{D, false, T}, neighbors, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads()) where {D, T}
+function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
+                          n_threads::Integer=Threads.nthreads()) where {D, AT, T}
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
@@ -253,11 +253,11 @@ function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_a
     return pe
 end
 
-function potential_energy(sys::System{D, true, T}, neighbors, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads()) where {D, T}
-    pe_vec_nounits = CUDA.zeros(T, 1)
+function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
+                          n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
     val_ft = Val(T)
-    buffers = init_forces_buffer!(sys, ustrip_vec.(zero(sys.coords)), 1)
+    pe_vec_nounits = KernelAbstractions.zeros(get_backend(sys.coords), T, 1)
+    buffers = init_forces_buffer!(sys, ustrip_vec.(zero(sys.coords)), 1, true)
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
@@ -267,7 +267,7 @@ function potential_energy(sys::System{D, true, T}, neighbors, step_n::Integer=0;
 
     pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nl) > 0
-        pairwise_pe_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters_nl, nothing, step_n)   
+        pairwise_pe_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters_nl, neighbors, step_n)   
     end
 
     for inter_list in values(sys.specific_inter_lists)

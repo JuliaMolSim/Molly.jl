@@ -428,8 +428,8 @@ are not available when reading Gromacs files.
 - `loggers=()`: the loggers that record properties of interest during a
     simulation.
 - `units::Bool=true`: whether to use Unitful quantities.
-- `gpu::Bool=false`: whether to move the relevant parts of the system onto
-    the GPU.
+- `array_type=Array`: the array type for the simulation, for example
+    use `CuArray` or `ROCArray` for GPU support.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
 - `dist_neighbors=1.2u"nm"`: cutoff distance for the neighbor list, should be
     greater than `dist_cutoff`.
@@ -452,7 +452,7 @@ function System(coord_file::AbstractString,
                 velocities=nothing,
                 loggers=(),
                 units::Bool=true,
-                gpu::Bool=false,
+                array_type::Type{AT}=Array,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
@@ -460,7 +460,7 @@ function System(coord_file::AbstractString,
                 data=nothing,
                 implicit_solvent=nothing,
                 kappa=0.0u"nm^-1",
-                rename_terminal_res::Bool=true)
+                rename_terminal_res::Bool=true) where AT <: AbstractArray
     T = typeof(force_field.weight_14_coulomb)
 
     # Chemfiles uses zero-based indexing, be careful
@@ -824,9 +824,9 @@ function System(coord_file::AbstractString,
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            gpu ? CuArray(bonds.is) : bonds.is,
-            gpu ? CuArray(bonds.js) : bonds.js,
-            gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
+            AT(bonds.is),
+            AT(bonds.js),
+            AT([bonds.inters...]),
             bonds.types,
         ))
         topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
@@ -835,30 +835,30 @@ function System(coord_file::AbstractString,
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
-            gpu ? CuArray(angles.is) : angles.is,
-            gpu ? CuArray(angles.js) : angles.js,
-            gpu ? CuArray(angles.ks) : angles.ks,
-            gpu ? CuArray([angles.inters...]) : [angles.inters...],
+            AT(angles.is),
+            AT(angles.js),
+            AT(angles.ks),
+            AT([angles.inters...]),
             angles.types,
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            gpu ? CuArray(torsions.is) : torsions.is,
-            gpu ? CuArray(torsions.js) : torsions.js,
-            gpu ? CuArray(torsions.ks) : torsions.ks,
-            gpu ? CuArray(torsions.ls) : torsions.ls,
-            gpu ? CuArray(torsion_inters_pad) : torsion_inters_pad,
+            AT(torsions.is),
+            AT(torsions.js),
+            AT(torsions.ks),
+            AT(torsions.ls),
+            AT(torsion_inters_pad),
             torsions.types,
         ))
     end
     if length(impropers.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            gpu ? CuArray(impropers.is) : impropers.is,
-            gpu ? CuArray(impropers.js) : impropers.js,
-            gpu ? CuArray(impropers.ks) : impropers.ks,
-            gpu ? CuArray(impropers.ls) : impropers.ls,
-            gpu ? CuArray(improper_inters_pad) : improper_inters_pad,
+            AT(impropers.is),
+            AT(impropers.js),
+            AT(impropers.ks),
+            AT(impropers.ls),
+            AT(improper_inters_pad),
             impropers.types,
         ))
     end
@@ -887,15 +887,14 @@ function System(coord_file::AbstractString,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
-    if gpu
+    if uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
-            eligible=CuArray(eligible),
+            eligible=AT(eligible),
             dist_cutoff=T(dist_neighbors),
-            special=CuArray(special),
+            special=AT(special),
             n_steps_reorder=10,
-            initialized=false,
         )
-    elseif use_cell_list
+    elseif use_cell_list && !(AT <: AbstractGPUArray)
         neighbor_finder = CellListMapNeighborFinder(
             eligible=eligible,
             special=special,
@@ -906,19 +905,15 @@ function System(coord_file::AbstractString,
         )
     else
         neighbor_finder = DistanceNeighborFinder(
-            eligible=eligible,
-            special=special,
+            eligible=AT(eligible),
+            special=AT(special),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
     end
-    if gpu
-        atoms = CuArray([atoms_abst...])
-        coords_dev = CuArray(coords)
-    else
-        atoms = [atoms_abst...]
-        coords_dev = coords
-    end
+
+    atoms = AT([atoms_abst...])
+    coords_dev = AT(coords)
 
     if isnothing(velocities)
         if units
@@ -973,12 +968,12 @@ function System(T::Type,
                 velocities=nothing,
                 loggers=(),
                 units::Bool=true,
-                gpu::Bool=false,
+                array_type::Type{AT}=Array,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
                 use_cell_list::Bool=true,
-                data=nothing)
+                data=nothing) where AT <: AbstractArray
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
     bondtypes = Dict{String, HarmonicBond}()
@@ -1254,9 +1249,9 @@ function System(T::Type,
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            gpu ? CuArray(bonds.is) : bonds.is,
-            gpu ? CuArray(bonds.js) : bonds.js,
-            gpu ? CuArray([bonds.inters...]) : [bonds.inters...],
+            AT(bonds.is),
+            AT(bonds.js),
+            AT([bonds.inters...]),
             bonds.types,
         ))
         topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
@@ -1265,34 +1260,33 @@ function System(T::Type,
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
-            gpu ? CuArray(angles.is) : angles.is,
-            gpu ? CuArray(angles.js) : angles.js,
-            gpu ? CuArray(angles.ks) : angles.ks,
-            gpu ? CuArray([angles.inters...]) : [angles.inters...],
+            AT(angles.is),
+            AT(angles.js),
+            AT(angles.ks),
+            AT([angles.inters...]),
             angles.types,
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            gpu ? CuArray(torsions.is) : torsions.is,
-            gpu ? CuArray(torsions.js) : torsions.js,
-            gpu ? CuArray(torsions.ks) : torsions.ks,
-            gpu ? CuArray(torsions.ls) : torsions.ls,
-            gpu ? CuArray([torsions.inters...]) : [torsions.inters...],
+            AT(torsions.is),
+            AT(torsions.js),
+            AT(torsions.ks),
+            AT(torsions.ls),
+            AT([torsions.inters...]),
             torsions.types,
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
 
-    if gpu
+    if uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
-            eligible=CuArray(eligible),
+            eligible=AT(eligible),
             dist_cutoff=T(dist_neighbors),
-            special=CuArray(special),
+            special=AT(special),
             n_steps_reorder=10,
-            initialized=false,
         )
-    elseif use_cell_list
+    elseif use_cell_list && !(AT <: AbstractGPUArray)
         neighbor_finder = CellListMapNeighborFinder(
             eligible=eligible,
             special=special,
@@ -1303,19 +1297,15 @@ function System(T::Type,
         )
     else
         neighbor_finder = DistanceNeighborFinder(
-            eligible=eligible,
-            special=special,
+            eligible=AT(eligible),
+            special=AT(special),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
     end
-    if gpu
-        atoms = CuArray([atoms_abst...])
-        coords_dev = CuArray(coords)
-    else
-        atoms = [atoms_abst...]
-        coords_dev = coords
-    end
+
+    atoms = AT([atoms_abst...])
+    coords_dev = AT(coords)
 
     if isnothing(velocities)
         if units
@@ -1382,10 +1372,10 @@ The `atom_selector` function takes in each atom and atom data and determines whe
 that atom.
 For example, [`is_heavy_atom`](@ref) means non-hydrogen atoms are restrained.
 """
-function add_position_restraints(sys,
+function add_position_restraints(sys::System{<:Any, AT},
                                  k;
                                  atom_selector::Function=is_any_atom,
-                                 restrain_coords=sys.coords)
+                                 restrain_coords=sys.coords) where AT
     k_array = isa(k, AbstractArray) ? k : fill(k, length(sys))
     if length(k_array) != length(sys)
         throw(ArgumentError("the system has $(length(sys)) atoms but there are $(length(k_array)) k values"))
@@ -1402,7 +1392,7 @@ function add_position_restraints(sys,
             push!(inters, HarmonicPositionRestraint(k_res, x0))
         end
     end
-    restraints = InteractionList1Atoms(move_array(is, sys), move_array([inters...], sys), types)
+    restraints = InteractionList1Atoms(AT(is), AT([inters...]), types)
     sis = (sys.specific_inter_lists..., restraints)
     return System(
         atoms=deepcopy(sys.atoms),

@@ -1,5 +1,15 @@
-# CUDA.jl kernels
+module MollyCUDAExt
+
+using Molly
+using CUDA
+using Atomix
+using KernelAbstractions
+
 const WARPSIZE = UInt32(32)
+
+Molly.uses_gpu_neighbor_finder(::Type{AT}) where {AT <: CuArray} = true
+
+CUDA.Const(nl::Molly.NoNeighborList) = nl
 
 macro shfl_multiple_sync(mask, target, width, vars...)
     all_lines = map(vars) do v
@@ -29,71 +39,69 @@ function cuda_threads_blocks_specific(n_inters)
     return n_threads_gpu, n_blocks
 end
 
-function pairwise_force_gpu!(buffers, sys::System{D, true, T}, pairwise_inters, nbs, step_n) where {D, T}
-    if typeof(nbs) == NoNeighborList
-        kernel = @cuda launch=false pairwise_force_kernel_nonl!(
-                buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, step_n,
-                Val(D), Val(sys.force_units))
-        conf = launch_configuration(kernel.fun)
-        threads_basic = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512"))
-        nthreads = min(length(sys.atoms), threads_basic, conf.threads)
-        nthreads = cld(nthreads, WARPSIZE) * WARPSIZE
-        n_blocks_i = cld(length(sys.atoms), WARPSIZE)
-        n_blocks_j = cld(length(sys.atoms), nthreads)
-        kernel(buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters,
-               step_n, Val(D), Val(sys.force_units); threads=nthreads,
-               blocks=(n_blocks_i, n_blocks_j))
-    else    
-        N = length(sys.coords)
-        n_blocks = cld(N, WARPSIZE)
-        r_cut = sys.neighbor_finder.dist_cutoff
-        if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
-            Morton_bits = 4
-            w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
-            Morton_seq_cpu = sorted_Morton_seq(Array(sys.coords), w, Morton_bits)
-            copyto!(buffers.Morton_seq, Morton_seq_cpu)
-            CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
-                    buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
-                    sys.boundary, Val(D))
-            sys.neighbor_finder.initialized = true
-            CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
-                    buffers.Morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
-                    buffers.compressed_eligible, buffers.compressed_special, Val(N))
-        end
-        CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(
-                buffers.Morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords,
-                sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters,
-                sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
-                Val(T), Val(D))
-    end
+function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters,
+                                   nbs::Molly.NoNeighborList, step_n) where {D, AT <: CuArray, T}
+    kernel = @cuda launch=false pairwise_force_kernel_nonl!(
+            buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, step_n,
+            Val(D), Val(sys.force_units))
+    conf = launch_configuration(kernel.fun)
+    threads_basic = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512"))
+    nthreads = min(length(sys.atoms), threads_basic, conf.threads)
+    nthreads = cld(nthreads, WARPSIZE) * WARPSIZE
+    n_blocks_i = cld(length(sys.atoms), WARPSIZE)
+    n_blocks_j = cld(length(sys.atoms), nthreads)
+    kernel(buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters,
+            step_n, Val(D), Val(sys.force_units); threads=nthreads,
+            blocks=(n_blocks_i, n_blocks_j))
     return buffers
 end
 
-function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, true, T}, pairwise_inters, nbs, step_n) where {D, T}
-    if typeof(nbs) == NoNeighborList
-        n_threads_gpu, n_blocks = cuda_threads_blocks_pairwise(length(nbs))
-        CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks pairwise_pe_kernel!(
-            pe_vec_nounits, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, nbs, step_n, Val(sys.energy_units))
-    else
-        # The ordering is always recomputed for potential energy
-        # Different buffers are used to the forces case, so sys.neighbor_finder.initialized
-        #   is not updated
-        N = length(sys.coords)
-        n_blocks = cld(N, WARPSIZE)
-        r_cut = sys.neighbor_finder.dist_cutoff
+function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters, nbs::Nothing,
+                                   step_n) where {D, AT <: CuArray, T}
+    N = length(sys.coords)
+    n_blocks = cld(N, WARPSIZE)
+    r_cut = sys.neighbor_finder.dist_cutoff
+    if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
         Morton_bits = 4
         w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
         Morton_seq_cpu = sorted_Morton_seq(Array(sys.coords), w, Morton_bits)
         copyto!(buffers.Morton_seq, Morton_seq_cpu)
         CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
-                buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
-                Val(N), sys.boundary, Val(D))
-        CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
-                buffers.Morton_seq, pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords,
-                sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
-                sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible,
-                Val(T), Val(D))
+                buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
+                sys.boundary, Val(D))
+        sys.neighbor_finder.initialized = true
+        CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
+                buffers.Morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
+                buffers.compressed_eligible, buffers.compressed_special, Val(N))
     end
+    CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(
+            buffers.Morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords,
+            sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters,
+            sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
+            Val(T), Val(D))
+    return buffers
+end
+
+function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, pairwise_inters,
+                                nbs::Nothing, step_n) where {D, AT <: CuArray, T}
+    # The ordering is always recomputed for potential energy
+    # Different buffers are used to the forces case, so sys.neighbor_finder.initialized
+    #   is not updated
+    N = length(sys.coords)
+    n_blocks = cld(N, WARPSIZE)
+    r_cut = sys.neighbor_finder.dist_cutoff
+    Morton_bits = 4
+    w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
+    Morton_seq_cpu = sorted_Morton_seq(Array(sys.coords), w, Morton_bits)
+    copyto!(buffers.Morton_seq, Morton_seq_cpu)
+    CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
+            buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
+            Val(N), sys.boundary, Val(D))
+    CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
+            buffers.Morton_seq, pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords,
+            sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
+            sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible,
+            Val(T), Val(D))
     return pe_vec_nounits
 end
 
@@ -276,7 +284,6 @@ function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
     return nothing
 end
 
-
 #=
 **The No-neighborlist pairwise force summation kernel (algorithm by Eastman, see https://onlinelibrary.wiley.com/doi/full/10.1002/jcc.21413)**: 
 1. Case j < n_blocks && i < j, i.e., `WARPSIZE`×`WARPSIZE` tiles: For such tiles each row is assiged to a different thread in a warp which calculates the
@@ -406,7 +413,7 @@ function force_kernel!(
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
                  
-                f = condition ? sum_pairwise_forces(
+                f = condition ? Molly.sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j_shuffle,
                     Val(force_units),
@@ -471,7 +478,7 @@ function force_kernel!(
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
-                f = condition ? sum_pairwise_forces(
+                f = condition ? Molly.sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(force_units),
@@ -521,7 +528,7 @@ function force_kernel!(
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
             condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
-            f = condition ? sum_pairwise_forces(
+            f = condition ? Molly.sum_pairwise_forces(
                 inters_tuple,
                 atoms_i, atoms_j,
                 Val(force_units),
@@ -568,7 +575,7 @@ function force_kernel!(
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
                 
-                f = condition ? sum_pairwise_forces(
+                f = condition ? Molly.sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(force_units),
@@ -594,7 +601,6 @@ function force_kernel!(
 
     return nothing
 end
-
 
 function energy_kernel!( 
     sorted_seq,
@@ -828,8 +834,6 @@ function energy_kernel!(
     return nothing
 end
 
-
-
 function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, velocities_var,
                         atoms_var, boundary, inters, step_n, ::Val{D}, ::Val{F}) where {T, D, F}
     coords = CUDA.Const(coords_var)
@@ -857,8 +861,8 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
                 j = j_0_tile + del_j
                 if i != j
                     atom_j, coord_j, vel_j = atoms[j], coords[j], velocities[j]
-                    f = sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
-                                            boundary, vel_i, vel_j, step_n)
+                    f = Molly.sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i,
+                                                  coord_j, boundary, vel_i, vel_j, step_n)
                     for dim in 1:D
                         forces_shmem[dim, tidx] += -ustrip(f[dim])
                     end
@@ -882,7 +886,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
         @inbounds for _ in 1:tilesteps
             sync_warp()
             atom_j = atoms[j]
-            f = sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
+            f = Molly.sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
                                     boundary, vel_i, vel_j, step_n)
             for dim in 1:D
                 forces_shmem[dim, tidx] += -ustrip(f[dim])
@@ -898,58 +902,14 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
     return nothing
 end
 
-function pairwise_pe_kernel!(energy, coords_var, velocities_var, atoms_var, boundary, inters,
-                             neighbors_var, step_n, ::Val{E}) where E
-    coords = CUDA.Const(coords_var)
-    velocities = CUDA.Const(velocities_var)
-    atoms = CUDA.Const(atoms_var)
-    neighbors = CUDA.Const(neighbors_var)
-
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-
-    @inbounds if inter_i <= length(neighbors)
-        i, j, special = neighbors[inter_i]
-        coord_i, coord_j, vel_i, vel_j = coords[i], coords[j], velocities[i], velocities[j]
-        dr = vector(coord_i, coord_j, boundary)
-        pe = potential_energy_gpu(inters[1], dr, atoms[i], atoms[j], E, special, coord_i, coord_j,
-                                  boundary, vel_i, vel_j, step_n)
-        for inter in inters[2:end]
-            pe += potential_energy_gpu(inter, dr, atoms[i], atoms[j], E, special, coord_i, coord_j,
-                                       boundary, vel_i, vel_j, step_n)
-        end
-        if unit(pe) != E
-            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
-        end
-        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
-    end
-    return nothing
-end
-
-@inline function sum_pairwise_forces(inters, atom_i, atom_j, ::Val{F}, special, coord_i, coord_j,
-                                     boundary, vel_i, vel_j, step_n) where F
-    dr = vector(coord_i, coord_j, boundary)
-    f_tuple = ntuple(length(inters)) do inter_type_i
-        force_gpu(inters[inter_type_i], dr, atom_i, atom_j, F, special, coord_i, coord_j, boundary,
-                  vel_i, vel_j, step_n)
-    end
-    f = sum(f_tuple)
-    if unit(f[1]) != F
-        # This triggers an error but it isn't printed
-        # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
-        #   for how to throw a more meaningful error
-        error("wrong force unit returned, was expecting $F but got $(unit(f[1]))")
-    end
-    return f
-end
-
 @inline function sum_pairwise_potentials(inters, atom_i, atom_j, ::Val{E}, special, coord_i, coord_j,
                                      boundary, vel_i, vel_j, step_n) where E
     dr = vector(coord_i, coord_j, boundary)
 
     pe_tuple = ntuple(length(inters)) do inter_type_i
-        SVector(potential_energy_gpu(inters[inter_type_i], dr, atom_i, atom_j, E, special, coord_i, coord_j, boundary,
-                  vel_i, vel_j, step_n))
-                  # SVector was required to avoid a GPU error occurring with scalars (like the quantity returned by potential_energy_gpu) 
+        # SVector was required to avoid a GPU error occurring with scalars
+        SVector(Molly.potential_energy_gpu(inters[inter_type_i], dr, atom_i, atom_j, E, special,
+                            coord_i, coord_j, boundary, vel_i, vel_j, step_n))
     end
     pe = sum(pe_tuple)
     if unit(pe[1]) != E
@@ -961,281 +921,4 @@ end
     return pe
 end
 
-function specific_force_gpu!(fs_mat, inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
-                            velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_1_atoms_kernel!(fs_mat,
-            coords, velocities, atoms, boundary, step_n, inter_list.is, inter_list.inters,
-            Val(D), Val(force_units))
-    return fs_mat
-end
-
-function specific_force_gpu!(fs_mat, inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
-                            velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_2_atoms_kernel!(fs_mat,
-            coords, velocities, atoms, boundary, step_n, inter_list.is, inter_list.js,
-            inter_list.inters, Val(D), Val(force_units))
-    return fs_mat
-end
-
-function specific_force_gpu!(fs_mat, inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
-                            velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_3_atoms_kernel!(fs_mat,
-            coords, velocities, atoms, boundary, step_n, inter_list.is, inter_list.js,
-            inter_list.ks, inter_list.inters, Val(D), Val(force_units))
-    return fs_mat
-end
-
-function specific_force_gpu!(fs_mat, inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
-                            velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_force_4_atoms_kernel!(fs_mat,
-            coords, velocities, atoms, boundary, step_n, inter_list.is, inter_list.js,
-            inter_list.ks, inter_list.ls, inter_list.inters, Val(D), Val(force_units))
-    return fs_mat
-end
-
-function specific_force_1_atoms_kernel!(forces, coords_var, velocities_var, atoms_var, boundary,
-                        step_n, is_var, inters_var, ::Val{D}, ::Val{F}) where {D, F}
-    coords = CUDA.Const(coords_var)
-    velocities = CUDA.Const(velocities_var)
-    atoms = CUDA.Const(atoms_var)
-    is = CUDA.Const(is_var)
-    inters = CUDA.Const(inters_var)
-
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-
-    @inbounds if inter_i <= length(is)
-        i = is[inter_i]
-        fs = force_gpu(inters[inter_i], coords[i], boundary, atoms[i], F, velocities[i], step_n)
-        if unit(fs.f1[1]) != F
-            error("wrong force unit returned, was expecting $F")
-        end
-        for dim in 1:D
-            Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
-        end
-    end
-    return nothing
-end
-
-function specific_force_2_atoms_kernel!(forces, coords_var, velocities_var, atoms_var, boundary,
-                        step_n, is_var, js_var, inters_var, ::Val{D}, ::Val{F}) where {D, F}
-    coords = CUDA.Const(coords_var)
-    velocities = CUDA.Const(velocities_var)
-    atoms = CUDA.Const(atoms_var)
-    is = CUDA.Const(is_var)
-    js = CUDA.Const(js_var)
-    inters = CUDA.Const(inters_var)
-
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-
-    @inbounds if inter_i <= length(is)
-        i, j = is[inter_i], js[inter_i]
-        fs = force_gpu(inters[inter_i], coords[i], coords[j], boundary, atoms[i], atoms[j], F,
-                       velocities[i], velocities[j], step_n)
-        if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
-            error("wrong force unit returned, was expecting $F")
-        end
-        for dim in 1:D
-            Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
-            Atomix.@atomic :monotonic forces[dim, j] += ustrip(fs.f2[dim])
-        end
-    end
-    return nothing
-end
-
-function specific_force_3_atoms_kernel!(forces, coords_var, velocities_var, atoms_var, boundary,
-                        step_n, is_var, js_var, ks_var, inters_var, ::Val{D}, ::Val{F}) where {D, F}
-    coords = CUDA.Const(coords_var)
-    velocities = CUDA.Const(velocities_var)
-    atoms = CUDA.Const(atoms_var)
-    is = CUDA.Const(is_var)
-    js = CUDA.Const(js_var)
-    ks = CUDA.Const(ks_var)
-    inters = CUDA.Const(inters_var)
-
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-
-    @inbounds if inter_i <= length(is)
-        i, j, k = is[inter_i], js[inter_i], ks[inter_i]
-        fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary, atoms[i],
-                       atoms[j], atoms[k], F, velocities[i], velocities[j], velocities[k], step_n)
-        if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
-            error("wrong force unit returned, was expecting $F")
-        end
-        for dim in 1:D
-            Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
-            Atomix.@atomic :monotonic forces[dim, j] += ustrip(fs.f2[dim])
-            Atomix.@atomic :monotonic forces[dim, k] += ustrip(fs.f3[dim])
-        end
-    end
-    return nothing
-end
-
-function specific_force_4_atoms_kernel!(forces, coords_var, velocities_var, atoms_var, boundary,
-                        step_n, is_var, js_var, ks_var, ls_var, inters_var,
-                        ::Val{D}, ::Val{F}) where {D, F}
-    coords = CUDA.Const(coords_var)
-    velocities = CUDA.Const(velocities_var)
-    atoms = CUDA.Const(atoms_var)
-    is = CUDA.Const(is_var)
-    js = CUDA.Const(js_var)
-    ks = CUDA.Const(ks_var)
-    ls = CUDA.Const(ls_var)
-    inters = CUDA.Const(inters_var)
-
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-
-    @inbounds if inter_i <= length(is)
-        i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
-        fs = force_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l], boundary,
-                       atoms[i], atoms[j], atoms[k], atoms[l], F, velocities[i], velocities[j],
-                       velocities[k], velocities[l], step_n)
-        if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
-            error("wrong force unit returned, was expecting $F")
-        end
-        for dim in 1:D
-            Atomix.@atomic :monotonic forces[dim, i] += ustrip(fs.f1[dim])
-            Atomix.@atomic :monotonic forces[dim, j] += ustrip(fs.f2[dim])
-            Atomix.@atomic :monotonic forces[dim, k] += ustrip(fs.f3[dim])
-            Atomix.@atomic :monotonic forces[dim, l] += ustrip(fs.f4[dim])
-        end
-    end
-    return nothing
-end
-
-
-function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
-                          velocities, atoms, boundary, step_n, energy_units, ::Val{T}) where {D, C, T}
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_pe_1_atoms_kernel!(
-            pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.inters, Val(energy_units))
-    return pe_vec_nounits
-end
-
-function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
-                          velocities, atoms, boundary, step_n, energy_units, ::Val{T}) where {D, C, T}
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_pe_2_atoms_kernel!(
-            pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.js, inter_list.inters, Val(energy_units))
-    return pe_vec_nounits
-end
-
-function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
-                          velocities, atoms, boundary, step_n, energy_units, ::Val{T}) where {D, C, T}
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_pe_3_atoms_kernel!(
-            pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.js, inter_list.ks, inter_list.inters, Val(energy_units))
-    return pe_vec_nounits
-end
-
-function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
-                          velocities, atoms, boundary, step_n, energy_units, ::Val{T}) where {D, C, T}
-    n_threads_gpu, n_blocks = cuda_threads_blocks_specific(length(inter_list))
-    CUDA.@sync @cuda threads=n_threads_gpu blocks=n_blocks specific_pe_4_atoms_kernel!(
-            pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.js, inter_list.ks, inter_list.ls, inter_list.inters, Val(energy_units))
-    return pe_vec_nounits
-end
-
-function specific_pe_1_atoms_kernel!(energy, coords_var, velocities_var, atoms_var, boundary,
-                    step_n, is_var, inters_var, ::Val{E}) where E
-    coords = CUDA.Const(coords_var)
-    velocities = CUDA.Const(velocities_var)
-    atoms = CUDA.Const(atoms_var)
-    is = CUDA.Const(is_var)
-    inters = CUDA.Const(inters_var)
-
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-
-    @inbounds if inter_i <= length(is)
-        i = is[inter_i]
-        pe = potential_energy_gpu(inters[inter_i], coords[i], boundary, atoms[i], E,
-                                  velocities[i], step_n)
-        if unit(pe) != E
-            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
-        end
-        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
-    end
-    return nothing
-end
-
-function specific_pe_2_atoms_kernel!(energy, coords_var, velocities_var, atoms_var, boundary,
-                    step_n, is_var, js_var, inters_var, ::Val{E}) where E
-    coords = CUDA.Const(coords_var)
-    velocities = CUDA.Const(velocities_var)
-    atoms = CUDA.Const(atoms_var)
-    is = CUDA.Const(is_var)
-    js = CUDA.Const(js_var)
-    inters = CUDA.Const(inters_var)
-
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-
-    @inbounds if inter_i <= length(is)
-        i, j = is[inter_i], js[inter_i]
-        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], boundary, atoms[i],
-                                  atoms[j], E, velocities[i], velocities[j], step_n)
-        if unit(pe) != E
-            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
-        end
-        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
-    end
-    return nothing
-end
-
-function specific_pe_3_atoms_kernel!(energy, coords_var, velocities_var, atoms_var, boundary,
-                    step_n, is_var, js_var, ks_var, inters_var, ::Val{E}) where E
-    coords = CUDA.Const(coords_var)
-    velocities = CUDA.Const(velocities_var)
-    atoms = CUDA.Const(atoms_var)
-    is = CUDA.Const(is_var)
-    js = CUDA.Const(js_var)
-    ks = CUDA.Const(ks_var)
-    inters = CUDA.Const(inters_var)
-
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-
-    @inbounds if inter_i <= length(is)
-        i, j, k = is[inter_i], js[inter_i], ks[inter_i]
-        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], boundary,
-                                  atoms[i], atoms[j], atoms[k], E, velocities[i], velocities[j],
-                                  velocities[k], step_n)
-        if unit(pe) != E
-            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
-        end
-        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
-    end
-    return nothing
-end
-
-function specific_pe_4_atoms_kernel!(energy, coords_var, velocities_var, atoms_var, boundary,
-                    step_n, is_var, js_var, ks_var, ls_var, inters_var, ::Val{E}) where E
-    coords = CUDA.Const(coords_var)
-    velocities = CUDA.Const(velocities_var)
-    atoms = CUDA.Const(atoms_var)
-    is = CUDA.Const(is_var)
-    js = CUDA.Const(js_var)
-    ks = CUDA.Const(ks_var)
-    ls = CUDA.Const(ls_var)
-    inters = CUDA.Const(inters_var)
-
-    inter_i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-
-    @inbounds if inter_i <= length(is)
-        i, j, k, l = is[inter_i], js[inter_i], ks[inter_i], ls[inter_i]
-        pe = potential_energy_gpu(inters[inter_i], coords[i], coords[j], coords[k], coords[l],
-                                  boundary, atoms[i], atoms[j], atoms[k], atoms[l], E,
-                                  velocities[i], velocities[j], velocities[k], velocities[l],
-                                  step_n)
-        if unit(pe) != E
-            error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
-        end
-        Atomix.@atomic :monotonic energy[1] += ustrip(pe)
-    end
-    return nothing
 end

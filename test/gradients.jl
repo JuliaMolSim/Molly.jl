@@ -36,24 +36,24 @@ end
 
 @testset "Differentiable simulation" begin
     runs = [ #               gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
-        ("CPU"             , false, false, false, false, false, false, 1e-4, 1e-4),
-        ("CPU forward"     , false, false, true , false, false, false, 0.5 , 0.1 ),
-        ("CPU f32"         , false, false, false, true , false, false, 0.01, 5e-4),
-        ("CPU obc2"        , false, false, false, false, true , false, 1e-4, 1e-4),
-        ("CPU gbn2"        , false, false, false, false, false, true , 1e-4, 1e-4),
-        ("CPU gbn2 forward", false, false, true , false, false, true , 0.5 , 0.1 ),
+        ("CPU"             , Array, false, false, false, false, false, 1e-4, 1e-4),
+        ("CPU forward"     , Array, false, true , false, false, false, 0.5 , 0.1 ),
+        ("CPU f32"         , Array, false, false, true , false, false, 0.01, 5e-4),
+        ("CPU obc2"        , Array, false, false, false, true , false, 1e-4, 1e-4),
+        ("CPU gbn2"        , Array, false, false, false, false, true , 1e-4, 1e-4),
+        ("CPU gbn2 forward", Array, false, true , false, false, true , 0.5 , 0.1 ),
     ]
-    if run_parallel_tests #                  gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
-        push!(runs, ("CPU parallel"        , false, true , false, false, false, false, 1e-4, 1e-4))
-        push!(runs, ("CPU parallel forward", false, true , true , false, false, false, 0.5 , 0.1 ))
-        push!(runs, ("CPU parallel f32"    , false, true , false, true , false, false, 0.01, 5e-4))
+    if run_parallel_tests #                  gpu      par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+        push!(runs, ("CPU parallel"        , Array, true , false, false, false, false, 1e-4, 1e-4))
+        push!(runs, ("CPU parallel forward", Array, true , true , false, false, false, 0.5 , 0.1 ))
+        push!(runs, ("CPU parallel f32"    , Array, true , false, true , false, false, 0.01, 5e-4))
     end
-    if run_gpu_tests #                       gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
-        push!(runs, ("GPU"                 , true , false, false, false, false, false, 0.25, 20.0))
-        push!(runs, ("GPU forward"         , true , false, true , false, false, false, 0.25, 20.0))
-        push!(runs, ("GPU f32"             , true , false, false, true , false, false, 0.5 , 50.0))
-        push!(runs, ("GPU obc2"            , true , false, false, false, true , false, 0.25, 20.0))
-        push!(runs, ("GPU gbn2"            , true , false, false, false, false, true , 0.25, 20.0))
+    for AT in array_list[2:end] #            gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+        push!(runs, ("$AT"                 , AT   , false, false, false, false, false, 0.25, 20.0))
+        push!(runs, ("$AT forward"         , AT   , false, true , false, false, false, 0.25, 20.0))
+        push!(runs, ("$AT f32"             , AT   , false, false, true , false, false, 0.5 , 50.0))
+        push!(runs, ("$AT obc2"            , AT   , false, false, false, true , false, 0.25, 20.0))
+        push!(runs, ("$AT gbn2"            , AT   , false, false, false, false, true , 0.25, 20.0))
     end
 
     function mean_min_separation(coords, boundary, ::Val{T}) where T
@@ -103,9 +103,8 @@ end
         return mean_min_separation(sys.coords, boundary, Val(T))
     end
 
-    for (name, gpu, parallel, forward, f32, obc2, gbn2, tol_σ, tol_r0) in runs
+    for (name, AT, parallel, forward, f32, obc2, gbn2, tol_σ, tol_r0) in runs
         T = f32 ? Float32 : Float64
-        AT = gpu ? CuArray : Array
         σ  = T(0.4)
         r0 = T(1.0)
         n_atoms = 50
@@ -245,13 +244,13 @@ end
 end
 
 @testset "Differentiable protein" begin
-    function create_sys(gpu::Bool)
+    function create_sys(AT)
         ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...; units=false)
         return System(
             joinpath(data_dir, "6mrr_nowater.pdb"),
             ff;
             units=false,
-            gpu=gpu,
+            array_type=AT,
             implicit_solvent="gbn2",
             kappa=0.7,
         )
@@ -402,10 +401,10 @@ end
 
     platform_runs = [("CPU", false, false)]
     if run_parallel_tests
-        push!(platform_runs, ("CPU parallel", false, true))
+        push!(platform_runs, ("CPU parallel", Array, true))
     end
-    if run_gpu_tests
-        push!(platform_runs, ("GPU", true, false))
+    for AT in array_list[2:end]
+        push!(platform_runs, ("$AT", AT, false))
     end
     test_runs = [
         ("Energy", test_energy_grad, 1e-8),
@@ -423,8 +422,8 @@ end
     )
 
     for (test_name, test_fn, test_tol) in test_runs
-        for (platform, gpu, parallel) in platform_runs
-            sys_ref = create_sys(gpu)
+        for (platform, AT, parallel) in platform_runs
+            sys_ref = create_sys(AT)
             n_threads = parallel ? Threads.nthreads() : 1
             grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
             autodiff(

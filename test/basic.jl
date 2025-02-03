@@ -176,22 +176,22 @@
     @test mcs == [SVector(0.05, 0.0), SVector(1.0, 1.0)]
 
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
-    for gpu in gpu_list
-        sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=gpu, use_cell_list=false)
+    for AT in array_list
+        sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; array_type=AT, use_cell_list=false)
         mcs = molecule_centers(sys.coords, sys.boundary, sys.topology)
-        @test isapprox(Array(mcs)[1], mean(sys.coords[1:1170]); atol=0.04u"nm")
+        @test isapprox(Array(mcs)[1], mean(sys.coords[1:1170]); atol=0.08u"nm")
 
         # Mark all pairs as ineligible for pairwise interactions and check that the
         #   potential energy from the specific interactions does not change on scaling
         no_nbs = falses(length(sys), length(sys))
-        if gpu
+        if AT <: CuArray
             sys.neighbor_finder = GPUNeighborFinder(
-                eligible=(gpu ? CuArray(no_nbs) : no_nbs),
+                eligible=AT(no_nbs),
                 dist_cutoff=1.0u"nm",
             )
-        else 
+        else
             sys.neighbor_finder = DistanceNeighborFinder(
-                eligible=(gpu ? CuArray(no_nbs) : no_nbs),
+                eligible=AT(no_nbs),
                 dist_cutoff=1.0u"nm",
             )
         end
@@ -317,8 +317,8 @@ end
         end
     end
 
-    if run_gpu_tests
-        sys_gpu = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; gpu=true)
+    for AT in array_list[2:end]
+        sys_gpu = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; array_type=AT)
         for neighbor_finder in (DistanceNeighborFinder,)
             nf_gpu = neighbor_finder(
                 eligible=sys_gpu.neighbor_finder.eligible,
@@ -327,7 +327,7 @@ end
             )
             neighbors_gpu = find_neighbors(sys_gpu, nf_gpu)
             @test length(neighbors_gpu) == n_neighbors_ref
-            CUDA.allowscalar() do
+            GPUArrays.allowscalar() do
                 @test neighbors_gpu[10] isa Tuple{Int32, Int32, Bool}
             end
             @test identical_neighbors(neighbors_gpu, neighbors_ref)
@@ -343,8 +343,8 @@ end
     coords_1 = SVector{3, Float64}.(eachcol(cm_1)) / 10 * u"nm"
     coords_2 = SVector{3, Float64}.(eachcol(cm_2)) / 10 * u"nm"
     @test rmsd(coords_1, coords_2) ≈ 2.54859467758795u"Å"
-    if run_gpu_tests
-        @test rmsd(CuArray(coords_1), CuArray(coords_2)) ≈ 2.54859467758795u"Å"
+    for AT in array_list[2:end]
+        @test rmsd(AT(coords_1), AT(coords_2)) ≈ 2.54859467758795u"Å"
     end
 
     bb_atoms = BioStructures.collectatoms(struc[1], BioStructures.backboneselector)

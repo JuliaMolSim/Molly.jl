@@ -135,11 +135,21 @@ visualize(sys.loggers.coords, boundary, "sim_lj.mp4")
 
 ## GPU acceleration
 
-To run simulations on the GPU you will need to have a CUDA-compatible device.
-[CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) is used to run on the device.
+To run simulations on the GPU you will need to have a GPU available and then load the appropriate package:
+
+| Hardware Available | Necessary Package | Array Type |
+| ------------------ | ----------------- | ---------- |
+| Parallel CPU       | none              | `Array`    |
+| NVIDIA GPU         | CUDA              | `CuArray`  |
+| AMD GPU            | AMDGPU            | `ROCArray` |
+| Intel GPU          | oneAPI            | `oneArray` |
+| Apple Silicon      | Metal             | `MtlArray` |
+
+As an important note, Metal/Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` (for example) where necessary.
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
 This example also shows setting up a simulation to run with `Float32`, which gives much better performance on GPUs.
 Of course, you will need to determine whether this level of numerical accuracy is appropriate in your case.
+Here is an example script for an NVIDIA GPU using CUDA:
 ```julia
 using Molly
 using CUDA
@@ -168,6 +178,7 @@ sys = System(
 simulate!(deepcopy(sys), simulator, 20) # Compile function
 simulate!(sys, simulator, 1_000)
 ```
+To use another GPU package, just swap out `CUDA` for your desired package and `CuArray` for your desired array type.
 The device to run on can be changed with `device!`, e.g. `device!(1)`.
 The GPU code path is currently designed to be compatible with differentiable simulation and runs slower than related software, but this is an active area of development.
 Nonetheless, GPU performance is significantly better than CPU performance and is good enough for many applications.
@@ -316,7 +327,7 @@ sys = System(
         energy=TotalEnergyLogger(10),
         writer=StructureWriter(10, "traj_6mrr_1ps.pdb", ["HOH"]),
     ),
-    gpu=false,
+    array_type=Array,
 )
 
 minimizer = SteepestDescentMinimizer()
@@ -352,7 +363,7 @@ Residue patches, virtual sites, file includes and any force types other than `Ha
 
     Some PDB files that read in fine can be found [here](https://github.com/greener-group/GB99dms/tree/main/structures/training/conf_1).
 
-To run on the GPU, set `gpu=true`.
+To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the array type for your GPU backend (for example `CuArray` for NVIDIA or `ROCArray` for AMD).
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
 The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
 Other options include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_neighbors`).
@@ -1017,10 +1028,10 @@ function Molly.simulate!(sys::ReplicaSystem,
 end
 ```
 
-Under the hood there are two implementations for the [`forces`](@ref) function, used by [`accelerations`](@ref), and for [`potential_energy`](@ref): a version geared towards CPUs and parallelism, and a version geared towards GPUs.
-You can define different versions of a simulator for CPU and GPU systems by dispatching on `System{D, false}` or `System{D, true}` respectively.
+Under the hood there are multiple implementations for the [`forces`](@ref) function, used by [`accelerations`](@ref), and for [`potential_energy`](@ref): a version geared towards CPUs and parallelism, a CUDA version, and a version for other GPU backends.
+You can define different versions of a simulator for CPU, CUDA and generic GPU systems by dispatching on `System{D, Array}` or `System{D, CuArray}` and `System{D, AT} where AT <: AbstractGPUArray` respectively.
 This also applies to coupling methods, neighbor finders and analysis functions.
-You do not have to define two versions though: you may only intend to use the simulator one way, or one version may be performant in all cases.
+You do not have to define different versions though: you may only intend to use the simulator one way, or one version may be performant in all cases.
 
 ## Coupling
 
@@ -1321,7 +1332,7 @@ The available neighbor finders are:
 - [`DistanceNeighborFinder`](@ref)
 - [`TreeNeighborFinder`](@ref)
 
-The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU and [`GPUNeighborFinder`](@ref) on GPU.
+The recommended neighbor finder is [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref) on NVIDIA GPUs and [`DistanceNeighborFinder`](@ref) on other GPUs.
 When using a neighbor finder you should in general also use an interaction cutoff (see [Cutoffs](@ref)) with a cutoff distance less than the neighbor finder distance.
 The difference between the two should be larger than an atom can move in the time of the `n_steps` defined by the neighbor finder.
 The exception is [`GPUNeighborFinder`](@ref), which uses the algorithm from [Eastman and Pande 2010](https://doi.org/10.1002/jcc.21413) to avoid calculating a neighbor list and should have `dist_cutoff` set to the interaction cutoff distance.

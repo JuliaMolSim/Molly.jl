@@ -1,6 +1,5 @@
 @testset "Lennard-Jones 2D" begin
-    for gpu in gpu_list
-        AT = gpu ? CuArray : Array
+    for AT in array_list
         n_atoms = 10
         n_steps = 20_000
         temp = 100.0u"K"
@@ -8,7 +7,7 @@
         simulator = VelocityVerlet(dt=0.001u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
         gen_temp_wrapper(s, args...; kwargs...) = temperature(s)
 
-        if gpu
+        if AT <: CuArray
             neighbor_finder = GPUNeighborFinder(
                 eligible=eligible=AT(trues(n_atoms, n_atoms)),
                 n_steps_reorder=10,
@@ -16,7 +15,7 @@
             )
         else
             neighbor_finder = DistanceNeighborFinder(
-                eligible=trues(n_atoms, n_atoms),
+                eligible=AT(trues(n_atoms, n_atoms)),
                 n_steps=10,
                 dist_cutoff=2.0u"nm",
             )
@@ -221,39 +220,32 @@ end
         OverdampedLangevin(dt=0.002u"ps", temperature=temp, friction=10.0u"ps^-1"),
     ]
 
-    s = System(
-        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
-        coords=coords,
-        boundary=boundary,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
-        neighbor_finder=DistanceNeighborFinder(
-            eligible=trues(n_atoms, n_atoms),
-            n_steps=10,
-            dist_cutoff=2.0u"nm",
-        ),
-        loggers=(coords=CoordinatesLogger(100),),
-    )
-    random_velocities!(s, temp)
-
-    if run_gpu_tests
-        s_gpu = System(
-            atoms=CuArray([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
-            coords=CuArray(coords),
-            boundary=boundary,
-            pairwise_inters=(LennardJones(use_neighbors=true),),
-            neighbor_finder=GPUNeighborFinder(
-                eligible=CuArray(trues(n_atoms, n_atoms)),
+    for AT in array_list
+        if AT <: CuArray
+            neighbor_finder = GPUNeighborFinder(
+                eligible=AT(trues(n_atoms, n_atoms)),
                 n_steps_reorder=10,
                 dist_cutoff=2.0u"nm",
-            ),
+            )
+        else
+            neighbor_finder = DistanceNeighborFinder(
+                eligible=AT(trues(n_atoms, n_atoms)),
+                n_steps=10,
+                dist_cutoff=2.0u"nm",
+            )
+        end
+        s = System(
+            atoms=AT([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+                      for i in 1:n_atoms]),
+            coords=AT(coords),
+            boundary=boundary,
+            pairwise_inters=(LennardJones(use_neighbors=true),),
+            neighbor_finder=neighbor_finder,
             loggers=(coords=CoordinatesLogger(100),),
         )
-    end
-
-    for simulator in simulators
-        @time simulate!(s, simulator, n_steps; n_threads=1)
-        if run_gpu_tests
-            @time simulate!(s_gpu, simulator, n_steps; n_threads=1)
+        random_velocities!(s, temp)
+        for simulator in simulators
+            @time simulate!(s, simulator, n_steps; n_threads=1)
         end
     end
 end
@@ -285,7 +277,7 @@ end
         loggers=(coords=CoordinatesLogger(100),),
     )
 
-    if run_gpu_tests
+    if run_cuda_tests
         s_gpu = System(
             atoms=CuArray([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.1u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
             coords=CuArray(coords),
@@ -303,7 +295,7 @@ end
 
     for simulator in simulators
         @time simulate!(s, simulator, n_steps; n_threads=1)
-        if run_gpu_tests
+        if run_cuda_tests
             @time simulate!(s_gpu, simulator, n_steps; n_threads=1)
             coord_diff = sum(sum(map(x -> abs.(x), s.coords .- Array(s_gpu.coords)))) / (3 * n_atoms)
             E_diff = abs(potential_energy(s) - potential_energy(s_gpu))
@@ -437,7 +429,7 @@ end
             neighbor_finder = NoNeighborFinder()
         end
 
-        if run_gpu_tests
+        if run_cuda_tests
             neighbor_finder_gpu = GPUNeighborFinder(eligible=CuArray(trues(n_atoms, n_atoms)), n_steps_reorder=10,
                                                         dist_cutoff=1.2u"nm")
         end
@@ -457,7 +449,7 @@ end
         E0 = potential_energy(s)
         @time simulate!(s, simulator, n_steps)
 
-        if run_gpu_tests
+        if run_cuda_tests
             s_gpu = System(
                 atoms=CuArray(atoms),
                 coords=CuArray(coords),
@@ -574,7 +566,7 @@ end
 end
 
 @testset "Position restraints" begin
-    for gpu in gpu_list
+    for AT in array_list
         n_atoms = 10
         n_atoms_res = n_atoms ÷ 2
         n_steps = 2_000
@@ -585,8 +577,8 @@ end
         sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
 
         sys = System(
-            atoms=(gpu ? CuArray(atoms) : atoms),
-            coords=(gpu ? CuArray(copy(starting_coords)) : copy(starting_coords)),
+            atoms=AT(atoms),
+            coords=AT(copy(starting_coords)),
             boundary=boundary,
             atoms_data=atoms_data,
             pairwise_inters=(LennardJones(),),
@@ -1077,11 +1069,10 @@ end
     vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
 
     for sim in (lang_baro, vvand_baro)
-        for gpu in gpu_list
-            if gpu && sim == vvand_baro
+        for AT in array_list
+            if AT <: AbstractGPUArray && sim == vvand_baro
                 continue
             end
-            AT = gpu ? CuArray : Array
 
             sys = System(
                 atoms=AT(atoms),
@@ -1141,10 +1132,9 @@ end
         SVector(nothing  , nothing  , nothing  ), # Uncoupled
     )
 
-    for gpu in gpu_list
-        AT = gpu ? CuArray : Array
+    for AT in array_list
         for (press_i, press) in enumerate(pressure_test_set)
-            if gpu && press_i != 2
+            if AT <: AbstractGPUArray && press_i != 2
                 continue
             end
 
@@ -1210,10 +1200,10 @@ end
         MonteCarloMembraneBarostat(press, tens, temp, boundary; z_axis_fixed=true),
     )
 
-    for gpu in gpu_list
-        AT = gpu ? CuArray : Array
+    if run_cuda_tests
+        AT = CuArray
         for (barostat_i, barostat) in enumerate(barostat_test_set)
-            if gpu && barostat_i != 2
+            if AT <: AbstractGPUArray && barostat_i != 2
                 continue
             end
 
@@ -1333,7 +1323,7 @@ end
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-    function test_sim(nl::Bool, parallel::Bool, f32::Bool, gpu::Bool)
+    function test_sim(nl::Bool, parallel::Bool, f32::Bool, ::Type{AT}) where AT
         n_atoms = 400
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"g/mol" : 10.0u"g/mol"
@@ -1343,43 +1333,37 @@ end
         r0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
         bonds = [HarmonicBond(k=k, r0=r0) for i in 1:(n_atoms ÷ 2)]
         specific_inter_lists = (InteractionList2Atoms(
-            gpu ? CuArray(Int32.(collect(1:2:n_atoms))) : Int32.(collect(1:2:n_atoms)),
-            gpu ? CuArray(Int32.(collect(2:2:n_atoms))) : Int32.(collect(2:2:n_atoms)),
-            gpu ? CuArray(bonds) : bonds,
+            AT(Int32.(collect(1:2:n_atoms))),
+            AT(Int32.(collect(2:2:n_atoms))),
+            AT(bonds),
         ),)
-
-        neighbor_finder = NoNeighborFinder()
         cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
-        pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
-        if nl && gpu
-            neighbor_finder = GPUNeighborFinder(
-                eligible=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
-                n_steps_reorder=10,
-                dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
-            )
+
+        if nl
+            if AT <: CuArray
+                neighbor_finder = GPUNeighborFinder(
+                    eligible=AT(trues(n_atoms, n_atoms)),
+                    n_steps_reorder=10,
+                    dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+                )
+            else
+                neighbor_finder = DistanceNeighborFinder(
+                    eligible=AT(trues(n_atoms, n_atoms)),
+                    n_steps=10,
+                    dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+                )
+            end
             pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
-        end
-        if nl && !gpu
-            neighbor_finder = DistanceNeighborFinder(
-                eligible=gpu ? CuArray(trues(n_atoms, n_atoms)) : trues(n_atoms, n_atoms),
-                n_steps=10,
-                dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
-            )
-            pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
+        else
+            neighbor_finder = NoNeighborFinder()
+            pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
         end
         show(devnull, neighbor_finder)
 
-        if gpu
-            coords = CuArray(copy(f32 ? starting_coords_f32 : starting_coords))
-            velocities = CuArray(copy(f32 ? starting_velocities_f32 : starting_velocities))
-            atoms = CuArray([Atom(mass=atom_mass, charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                                  ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
-        else
-            coords = copy(f32 ? starting_coords_f32 : starting_coords)
-            velocities = copy(f32 ? starting_velocities_f32 : starting_velocities)
-            atoms = [Atom(mass=atom_mass, charge=f32 ? 0.0f0 : 0.0, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                            ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms]
-        end
+        coords = AT(copy(f32 ? starting_coords_f32 : starting_coords))
+        velocities = AT(copy(f32 ? starting_velocities_f32 : starting_velocities))
+        atoms = AT([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
+                                ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
 
         s = System(
             atoms=atoms,
@@ -1391,7 +1375,7 @@ end
             neighbor_finder=neighbor_finder,
         )
 
-        @test is_on_gpu(s) == gpu
+        @test is_on_gpu(s) == (AT <: AbstractGPUArray)
         @test float_type(s) == (f32 ? Float32 : Float64)
 
         n_threads = parallel ? Threads.nthreads() : 1
@@ -1402,22 +1386,26 @@ end
     end
 
     runs = [
-        ("CPU"       , [false, false, false, false]),
-        ("CPU f32"   , [false, false, true , false]),
-        ("CPU NL"    , [true , false, false, false]),
-        ("CPU f32 NL", [true , false, true , false]),
+        ("CPU"       , [false, false, false, Array]),
+        ("CPU f32"   , [false, false, true , Array]),
+        ("CPU NL"    , [true , false, false, Array]),
+        ("CPU f32 NL", [true , false, true , Array]),
     ]
     if run_parallel_tests
-        push!(runs, ("CPU parallel"       , [false, true , false, false]))
-        push!(runs, ("CPU parallel f32"   , [false, true , true , false]))
-        push!(runs, ("CPU parallel NL"    , [true , true , false, false]))
-        push!(runs, ("CPU parallel f32 NL", [true , true , true , false]))
+        push!(runs, ("CPU parallel"       , [false, true , false, Array]))
+        push!(runs, ("CPU parallel f32"   , [false, true , true , Array]))
+        push!(runs, ("CPU parallel NL"    , [true , true , false, Array]))
+        push!(runs, ("CPU parallel f32 NL", [true , true , true , Array]))
     end
-    if run_gpu_tests
-        push!(runs, ("GPU"       , [false, false, false, true]))
-        push!(runs, ("GPU f32"   , [false, false, true , true]))
-        push!(runs, ("GPU NL"    , [true , false, false, true]))
-        push!(runs, ("GPU f32 NL", [true , false, true , true]))
+    for AT in array_list[2:end]
+        push!(runs, ("$AT"       , [false, false, false, AT]))
+        push!(runs, ("$AT f32"   , [false, false, true , AT]))
+        push!(runs, ("$AT NL"    , [true , false, false, AT]))
+        push!(runs, ("$AT f32 NL", [true , false, true , AT]))
+    end
+    if run_metal_tests
+        push!(runs, ("$AT f32"   , [false, false, true , AT]))
+        push!(runs, ("$AT f32 NL", [true , false, true , AT]))
     end
 
     final_coords_ref, E_start_ref = test_sim(runs[1][2]...)
