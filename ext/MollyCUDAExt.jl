@@ -1,3 +1,6 @@
+# CUDA kernels that use warp-level features
+# This file is only loaded when CUDA is imported
+
 module MollyCUDAExt
 
 using Molly
