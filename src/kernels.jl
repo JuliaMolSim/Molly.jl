@@ -59,8 +59,8 @@ end
                                 boundary, velocities[i], velocities[j], step_n)
         for dim in 1:D
             fval = ustrip(f[dim])
-            Atomix.@atomic forces[dim, i] = forces[dim, i] - fval
-            Atomix.@atomic forces[dim, j] = forces[dim, j] + fval
+            Atomix.@atomic forces[dim, i] += -fval
+            Atomix.@atomic forces[dim, j] +=  fval
         end
     end
 end
