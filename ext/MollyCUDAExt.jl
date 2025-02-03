@@ -62,20 +62,20 @@ function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inte
     n_blocks = cld(N, WARPSIZE)
     r_cut = sys.neighbor_finder.dist_cutoff
     if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
-        Morton_bits = 4
+        morton_bits = 4
         w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
-        Morton_seq_cpu = sorted_Morton_seq(Array(sys.coords), w, Morton_bits)
-        copyto!(buffers.Morton_seq, Morton_seq_cpu)
+        morton_seq_cpu = sorted_morton_seq(Array(sys.coords), w, morton_bits)
+        copyto!(buffers.morton_seq, morton_seq_cpu)
         CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
-                buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
+                buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
                 sys.boundary, Val(D))
         sys.neighbor_finder.initialized = true
         CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
-                buffers.Morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
+                buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     end
     CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(
-            buffers.Morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords,
+            buffers.morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords,
             sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
             Val(T), Val(D))
@@ -90,34 +90,34 @@ function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, 
     N = length(sys.coords)
     n_blocks = cld(N, WARPSIZE)
     r_cut = sys.neighbor_finder.dist_cutoff
-    Morton_bits = 4
+    morton_bits = 4
     w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
-    Morton_seq_cpu = sorted_Morton_seq(Array(sys.coords), w, Morton_bits)
-    copyto!(buffers.Morton_seq, Morton_seq_cpu)
+    morton_seq_cpu = sorted_morton_seq(Array(sys.coords), w, morton_bits)
+    copyto!(buffers.morton_seq, morton_seq_cpu)
     CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
-            buffers.Morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
+            buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
             Val(N), sys.boundary, Val(D))
     CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
-            buffers.Morton_seq, pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords,
+            buffers.morton_seq, pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords,
             sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
             sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible,
             Val(T), Val(D))
     return pe_vec_nounits
 end
 
-function sorted_Morton_seq(positions, w, bits::Int)
+function sorted_morton_seq(positions, w, bits::Int)
     N = length(positions)
     D = length(positions[1])
-    Morton_sequence = Vector{Int32}(undef, N)
+    morton_sequence = Vector{Int32}(undef, N)
     for i in 1:N
         scaled_coords = floor.(Int32, positions[i] ./ w)
-        Morton_sequence[i] = generalized_Morton_code(scaled_coords, bits, D)
+        morton_sequence[i] = generalized_morton_code(scaled_coords, bits, D)
     end
-    sort = Int32.(sortperm(Morton_sequence))
+    sort = Int32.(sortperm(morton_sequence))
     return sort
 end
 
-function generalized_Morton_code(indices, bits::Int, D::Int)
+function generalized_morton_code(indices, bits::Int, D::Int)
     code = 0
     for bit in 0:(bits-1)
         for d in 1:D

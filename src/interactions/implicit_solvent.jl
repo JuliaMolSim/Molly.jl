@@ -811,7 +811,6 @@ end
                                    dist_cutoff, offset, neck_scale, neck_cut,
                                    @Const(d0s), @Const(m0s), boundary,
                                    ::Val{C}) where C
-
     n_atoms = length(coords)
     n_inters = n_atoms ^ 2
     inter_i = @index(Global, Linear)
@@ -1002,7 +1001,6 @@ end
                                       factor_solute, factor_solvent, kappa,
                                       @Const(Bs), @Const(atom_charges),
                                       ::Val{D}, ::Val{F}) where {D, F}
-
     n_atoms = length(coords)
     n_inters_not_self = n_atoms_to_n_pairs(n_atoms)
     n_inters = n_inters_not_self + n_atoms
@@ -1059,7 +1057,6 @@ end
                                       @Const(sor), @Const(Bs),
                                       @Const(B_grads), @Const(I_grads),
                                       ::Val{D}, ::Val{F}) where {D, F}
-
     n_atoms = length(coords)
     n_inters = n_atoms ^ 2
     inter_i = @index(Global, Linear)
