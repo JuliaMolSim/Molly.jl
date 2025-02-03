@@ -399,7 +399,7 @@ end
         "inter_PT_N/CT/C/N_k_9"    => 0.238488,
     )
 
-    platform_runs = [("CPU", false, false)]
+    platform_runs = [("CPU", Array, false)]
     if run_parallel_tests
         push!(platform_runs, ("CPU parallel", Array, true))
     end

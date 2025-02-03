@@ -7,7 +7,7 @@
         simulator = VelocityVerlet(dt=0.001u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
         gen_temp_wrapper(s, args...; kwargs...) = temperature(s)
 
-        if AT <: CuArray
+        if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
                 eligible=eligible=AT(trues(n_atoms, n_atoms)),
                 n_steps_reorder=10,
@@ -221,7 +221,7 @@ end
     ]
 
     for AT in array_list
-        if AT <: CuArray
+        if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
                 eligible=AT(trues(n_atoms, n_atoms)),
                 n_steps_reorder=10,
@@ -1340,7 +1340,7 @@ end
         cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
 
         if nl
-            if AT <: CuArray
+            if Molly.uses_gpu_neighbor_finder(AT)
                 neighbor_finder = GPUNeighborFinder(
                     eligible=AT(trues(n_atoms, n_atoms)),
                     n_steps_reorder=10,
@@ -1404,6 +1404,7 @@ end
         push!(runs, ("$AT f32 NL", [true , false, true , AT]))
     end
     if run_metal_tests
+        AT = MtlArray
         push!(runs, ("$AT f32"   , [false, false, true , AT]))
         push!(runs, ("$AT f32 NL", [true , false, true , AT]))
     end

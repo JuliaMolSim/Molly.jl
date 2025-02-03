@@ -1,9 +1,9 @@
 # Energy conservation test
 
 using Molly
-using AbstractGPUArray
 using AMDGPU
 using CUDA
+using GPUArrays
 
 using Test
 
@@ -15,7 +15,7 @@ using Test
         temp = 1.0u"K"
         boundary = CubicBoundary(5.0u"nm")
         simulator = VelocityVerlet(dt=0.001u"ps", remove_CM_motion=false)
-    
+
         atoms = [Atom(mass=atom_mass, charge=0.0, σ=0.05u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
         dist_cutoff = 3.0u"nm"
         cutoffs = (
@@ -24,11 +24,11 @@ using Test
             ShiftedForceCutoff(dist_cutoff),
             CubicSplineCutoff(dist_cutoff, dist_cutoff + 0.5u"nm"),
         )
-    
+
         for cutoff in cutoffs
             coords = place_atoms(n_atoms, boundary; min_dist=0.1u"nm")
             if nl
-                if AT <: CuArray
+                if Molly.uses_gpu_neighbor_finder(AT)
                     neighbor_finder=GPUNeighborFinder(
                         eligible=AT(trues(n_atoms, n_atoms)),
                         n_steps_reorder=10,
@@ -44,7 +44,7 @@ using Test
             else
                 neighbor_finder = NoNeighborFinder()
             end
-    
+
             sys = System(
                 atoms=AT(atoms),
                 coords=AT(coords),
@@ -57,20 +57,20 @@ using Test
                 ),
             )
             random_velocities!(sys, temp)
-    
+
             E0 = total_energy(sys; n_threads=n_threads)
             simulate!(deepcopy(sys), simulator, 20; n_threads=n_threads)
             @time simulate!(sys, simulator, n_steps; n_threads=n_threads)
-    
+
             Es = values(sys.loggers.energy)
             @test isapprox(Es[1], E0; atol=1e-7u"kJ * mol^-1")
-    
+
             max_ΔE = maximum(abs.(Es .- E0))
             platform_str = (AT <: AbstractGPUArray ? "$AT" : "CPU $n_threads thread(s)")
             cutoff_str = Base.typename(typeof(cutoff)).wrapper
             @info "$platform_str - $cutoff_str - max energy difference $max_ΔE"
             @test max_ΔE < 5e-4u"kJ * mol^-1"
-    
+
             final_coords = last(values(sys.loggers.coords))
             @test all(all(c .> 0.0u"nm") for c in final_coords)
             @test all(all(c .< boundary) for c in final_coords)
