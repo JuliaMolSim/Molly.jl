@@ -58,12 +58,12 @@ function Base.:+(m1::Mie, m2::Mie)
     )
 end
 
-function force(inter::Mie,
-               dr,
-               atom_i,
-               atom_j,
-               force_units=u"kJ * mol^-1 * nm^-1",
-               args...)
+@inline function force(inter::Mie,
+                       dr,
+                       atom_i,
+                       atom_j,
+                       force_units=u"kJ * mol^-1 * nm^-1",
+                       args...)
     if inter.shortcut(atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
     end

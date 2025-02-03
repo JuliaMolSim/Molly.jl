@@ -54,12 +54,12 @@ function force_divr(::SoftSphere, r2, invr2, (σ2, ϵ))
     return (24ϵ * invr2) * 2 * six_term ^ 2
 end
 
-function potential_energy(inter::SoftSphere,
-                          dr,
-                          atom_i,
-                          atom_j,
-                          energy_units=u"kJ * mol^-1",
-                          args...)
+@inline function potential_energy(inter::SoftSphere,
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  energy_units=u"kJ * mol^-1",
+                                  args...)
     if inter.shortcut(atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
     end
