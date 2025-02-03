@@ -401,6 +401,25 @@ atom_types_to_tuple(atom_types) = tuple(map(at -> at == "-" ? "" : at, split(ato
 
 const standard_res_names = [keys(BioStructures.threeletter_to_aa)..., "HID", "HIE", "HIP"]
 
+# Versions of Chemfiles functions that don't make a copy
+function chemfiles_residue(top, ai)
+    ptr_raw = Chemfiles.lib.chfl_residue_from_topology(Chemfiles.__ptr(top), UInt64(ai))
+    ptr = Chemfiles.@__check_ptr(ptr_raw)
+    return Chemfiles.Residue(Chemfiles.CxxPointer(ptr, is_const=true))
+end
+
+function chemfiles_residue_for_atom(top, ai)
+    ptr = Chemfiles.lib.chfl_residue_for_atom(Chemfiles.__ptr(top), UInt64(ai))
+    return Chemfiles.Residue(Chemfiles.CxxPointer(ptr, is_const=true))
+end
+
+function chemfiles_name(top, ai)
+    ptr_raw = Chemfiles.lib.chfl_atom_from_topology(Chemfiles.__ptr(top), UInt64(ai))
+    ptr = Chemfiles.@__check_ptr(ptr_raw)
+    at = Chemfiles.Atom(Chemfiles.CxxPointer(ptr, is_const=false))
+    return Chemfiles.name(at)
+end
+
 """
     System(coordinate_file, force_field; <keyword arguments>)
 
@@ -486,7 +505,7 @@ function System(coord_file::AbstractString,
 
     res_id_to_standard = Dict{Tuple{Int, String}, Bool}()
     for ri in 1:Chemfiles.count_residues(top)
-        res = Chemfiles.Residue(top, ri - 1)
+        res = chemfiles_residue(top, ri - 1)
         res_id = get_res_id(res)
         res_name = Chemfiles.name(res)
         standard_res = res_name in standard_res_names
@@ -496,7 +515,7 @@ function System(coord_file::AbstractString,
             # Add missing N-terminal amide bonds, angles and torsions
             # See https://github.com/chemfiles/chemfiles/issues/429
             atom_inds_zero = Int.(Chemfiles.atoms(res))
-            atom_names = Chemfiles.name.(Chemfiles.Atom.((top,), atom_inds_zero))
+            atom_names = chemfiles_name.((top,), atom_inds_zero)
             nterm_atom_names = ("N", "H1", "H2", "H3", "CA", "CB", "HA", "HA2", "HA3", "C")
             ai_N, ai_H1, ai_H2, ai_H3, ai_CA, ai_CB, ai_HA, ai_HA2, ai_HA3, ai_C = [findfirst(isequal(an), atom_names) for an in nterm_atom_names]
             if !isnothing(ai_H1)
@@ -531,7 +550,7 @@ function System(coord_file::AbstractString,
         elseif res_name == "HOH"
             # Add missing water bonds and angles
             atom_inds_zero = Int.(Chemfiles.atoms(res))
-            atom_names = Chemfiles.name.(Chemfiles.Atom.((top,), atom_inds_zero))
+            atom_names = chemfiles_name.((top,), atom_inds_zero)
             ai_O, ai_H1, ai_H2 = [findfirst(isequal(an), atom_names) for an in ("O", "H1", "H2")]
             push!(top_bonds, [atom_inds_zero[ai_O], atom_inds_zero[ai_H1]])
             push!(top_bonds, [atom_inds_zero[ai_O], atom_inds_zero[ai_H2]])
@@ -541,8 +560,8 @@ function System(coord_file::AbstractString,
 
     use_charge_from_residue = "charge" in force_field.attributes_from_residue
     for ai in 1:n_atoms
-        atom_name = Chemfiles.name(Chemfiles.Atom(top, ai - 1))
-        res = Chemfiles.residue_for_atom(top, ai - 1)
+        atom_name = chemfiles_name(top, ai - 1)
+        res = chemfiles_residue_for_atom(top, ai - 1)
         res_id = get_res_id(res)
         res_name = residue_name(res, res_id_to_standard, rename_terminal_res)
         at_type = force_field.residue_types[res_name].types[atom_name]
@@ -565,10 +584,10 @@ function System(coord_file::AbstractString,
     end
 
     for (a1z, a2z) in top_bonds
-        atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
-        atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
-        res_name_1 = residue_name(Chemfiles.residue_for_atom(top, a1z), res_id_to_standard, rename_terminal_res)
-        res_name_2 = residue_name(Chemfiles.residue_for_atom(top, a2z), res_id_to_standard, rename_terminal_res)
+        atom_name_1 = chemfiles_name(top, a1z)
+        atom_name_2 = chemfiles_name(top, a2z)
+        res_name_1 = residue_name(chemfiles_residue_for_atom(top, a1z), res_id_to_standard, rename_terminal_res)
+        res_name_2 = residue_name(chemfiles_residue_for_atom(top, a2z), res_id_to_standard, rename_terminal_res)
         atom_type_1 = force_field.residue_types[res_name_1].types[atom_name_1]
         atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
         push!(bonds.is, a1z + 1)
@@ -586,12 +605,12 @@ function System(coord_file::AbstractString,
     end
 
     for (a1z, a2z, a3z) in top_angles
-        atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
-        atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
-        atom_name_3 = Chemfiles.name(Chemfiles.Atom(top, a3z))
-        res_name_1 = residue_name(Chemfiles.residue_for_atom(top, a1z), res_id_to_standard, rename_terminal_res)
-        res_name_2 = residue_name(Chemfiles.residue_for_atom(top, a2z), res_id_to_standard, rename_terminal_res)
-        res_name_3 = residue_name(Chemfiles.residue_for_atom(top, a3z), res_id_to_standard, rename_terminal_res)
+        atom_name_1 = chemfiles_name(top, a1z)
+        atom_name_2 = chemfiles_name(top, a2z)
+        atom_name_3 = chemfiles_name(top, a3z)
+        res_name_1 = residue_name(chemfiles_residue_for_atom(top, a1z), res_id_to_standard, rename_terminal_res)
+        res_name_2 = residue_name(chemfiles_residue_for_atom(top, a2z), res_id_to_standard, rename_terminal_res)
+        res_name_3 = residue_name(chemfiles_residue_for_atom(top, a3z), res_id_to_standard, rename_terminal_res)
         atom_type_1 = force_field.residue_types[res_name_1].types[atom_name_1]
         atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
         atom_type_3 = force_field.residue_types[res_name_3].types[atom_name_3]
@@ -611,14 +630,14 @@ function System(coord_file::AbstractString,
     end
 
     for (a1z, a2z, a3z, a4z) in top_torsions
-        atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
-        atom_name_2 = Chemfiles.name(Chemfiles.Atom(top, a2z))
-        atom_name_3 = Chemfiles.name(Chemfiles.Atom(top, a3z))
-        atom_name_4 = Chemfiles.name(Chemfiles.Atom(top, a4z))
-        res_name_1 = residue_name(Chemfiles.residue_for_atom(top, a1z), res_id_to_standard, rename_terminal_res)
-        res_name_2 = residue_name(Chemfiles.residue_for_atom(top, a2z), res_id_to_standard, rename_terminal_res)
-        res_name_3 = residue_name(Chemfiles.residue_for_atom(top, a3z), res_id_to_standard, rename_terminal_res)
-        res_name_4 = residue_name(Chemfiles.residue_for_atom(top, a4z), res_id_to_standard, rename_terminal_res)
+        atom_name_1 = chemfiles_name(top, a1z)
+        atom_name_2 = chemfiles_name(top, a2z)
+        atom_name_3 = chemfiles_name(top, a3z)
+        atom_name_4 = chemfiles_name(top, a4z)
+        res_name_1 = residue_name(chemfiles_residue_for_atom(top, a1z), res_id_to_standard, rename_terminal_res)
+        res_name_2 = residue_name(chemfiles_residue_for_atom(top, a2z), res_id_to_standard, rename_terminal_res)
+        res_name_3 = residue_name(chemfiles_residue_for_atom(top, a3z), res_id_to_standard, rename_terminal_res)
+        res_name_4 = residue_name(chemfiles_residue_for_atom(top, a4z), res_id_to_standard, rename_terminal_res)
         atom_type_1 = force_field.residue_types[res_name_1].types[atom_name_1]
         atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
         atom_type_3 = force_field.residue_types[res_name_3].types[atom_name_3]
@@ -678,8 +697,8 @@ function System(coord_file::AbstractString,
     # Note the order here - Chemfiles puts the central atom second
     for (a2z, a1z, a3z, a4z) in top_impropers
         inds_no1 = (a2z, a3z, a4z)
-        atom_names = [Chemfiles.name(Chemfiles.Atom(top, a)) for a in inds_no1]
-        res_names = [residue_name(Chemfiles.residue_for_atom(top, a), res_id_to_standard, rename_terminal_res) for a in inds_no1]
+        atom_names = [chemfiles_name(top, a) for a in inds_no1]
+        res_names = [residue_name(chemfiles_residue_for_atom(top, a), res_id_to_standard, rename_terminal_res) for a in inds_no1]
         atom_types = [force_field.residue_types[res_names[i]].types[atom_names[i]] for i in 1:3]
         # Amber sorts atoms alphabetically with hydrogen last
         if force_field.torsion_order == "amber"
@@ -688,11 +707,11 @@ function System(coord_file::AbstractString,
             order = [1, 2, 3]
         end
         a2z, a3z, a4z = [inds_no1[i] for i in order]
-        atom_name_1 = Chemfiles.name(Chemfiles.Atom(top, a1z))
+        atom_name_1 = chemfiles_name(top, a1z)
         atom_name_2 = atom_names[order[1]]
         atom_name_3 = atom_names[order[2]]
         atom_name_4 = atom_names[order[3]]
-        res_name_1 = residue_name(Chemfiles.residue_for_atom(top, a1z), res_id_to_standard, rename_terminal_res)
+        res_name_1 = residue_name(chemfiles_residue_for_atom(top, a1z), res_id_to_standard, rename_terminal_res)
         res_name_2 = res_names[order[1]]
         res_name_3 = res_names[order[2]]
         res_name_4 = res_names[order[3]]
@@ -731,9 +750,9 @@ function System(coord_file::AbstractString,
             a1, a2, a3, a4 = a1z + 1, a2z + 1, a3z + 1, a4z + 1
             # Follow Amber assignment rules from OpenMM
             if force_field.torsion_order == "amber"
-                r2 = Chemfiles.id(Chemfiles.residue_for_atom(top, a2z))
-                r3 = Chemfiles.id(Chemfiles.residue_for_atom(top, a3z))
-                r4 = Chemfiles.id(Chemfiles.residue_for_atom(top, a4z))
+                r2 = Chemfiles.id(chemfiles_residue_for_atom(top, a2z))
+                r3 = Chemfiles.id(chemfiles_residue_for_atom(top, a3z))
+                r4 = Chemfiles.id(chemfiles_residue_for_atom(top, a4z))
                 ta2 = force_field.residue_types[res_name_2].indices[atom_name_2]
                 ta3 = force_field.residue_types[res_name_3].indices[atom_name_3]
                 ta4 = force_field.residue_types[res_name_4].indices[atom_name_4]
