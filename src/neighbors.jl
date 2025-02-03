@@ -109,18 +109,25 @@ function find_neighbors(sys::System,
     end
 
     sqdist_cutoff = nf.dist_cutoff ^ 2
+    nl_threads = [Tuple{Int32, Int32, Bool}[] for i in 1:n_threads]
 
-    @floop ThreadedEx(basesize = length(sys) ÷ n_threads) for i in eachindex(sys)
-        ci = sys.coords[i]
-        nbi = @view nf.eligible[:, i]
-        speci = @view nf.special[:, i]
-        for j in 1:(i - 1)
-            r2 = sum(abs2, vector(ci, sys.coords[j], sys.boundary))
-            if r2 <= sqdist_cutoff && nbi[j]
-                nn = (Int32(j), Int32(i), speci[j])
-                @reduce(neighbors_list = append!(Tuple{Int32, Int32, Bool}[], (nn,)))
+    Threads.@threads for chunk_i in 1:n_threads
+        for i in chunk_i:n_threads:length(sys)
+            ci = sys.coords[i]
+            nbi = @view nf.eligible[:, i]
+            speci = @view nf.special[:, i]
+            for j in 1:(i - 1)
+                r2 = sum(abs2, vector(ci, sys.coords[j], sys.boundary))
+                if r2 <= sqdist_cutoff && nbi[j]
+                    push!(nl_threads[chunk_i], (Int32(i), Int32(j), speci[j]))
+                end
             end
         end
+    end
+
+    neighbors_list = Tuple{Int32, Int32, Bool}[]
+    for nl in nl_threads
+        append!(neighbors_list, nl)
     end
 
     return NeighborList(length(neighbors_list), neighbors_list)
@@ -216,18 +223,25 @@ function find_neighbors(sys::System{<:Any, AT},
     bv = ustrip.(dist_unit, sys.boundary)
     btree = BallTree(ustrip_vec.(sys.coords), PeriodicEuclidean(bv))
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
+    nl_threads = [Tuple{Int32, Int32, Bool}[] for i in 1:n_threads]
 
-    @floop ThreadedEx(basesize = length(sys) ÷ n_threads) for i in eachindex(sys)
-        ci = ustrip.(sys.coords[i])
-        nbi = @view nf.eligible[:, i]
-        speci = @view nf.special[:, i]
-        idxs = inrange(btree, ci, dist_cutoff, true)
-        for j in idxs
-            if nbi[j] && i > j
-                nn = (Int32(j), Int32(i), speci[j])
-                @reduce(neighbors_list = append!(Tuple{Int32, Int32, Bool}[], (nn,)))
+    Threads.@threads for chunk_i in 1:n_threads
+        for i in chunk_i:n_threads:length(sys)
+            ci = ustrip.(sys.coords[i])
+            nbi = @view nf.eligible[:, i]
+            speci = @view nf.special[:, i]
+            idxs = inrange(btree, ci, dist_cutoff, true)
+            for j in idxs
+                if nbi[j] && i > j
+                    push!(nl_threads[chunk_i], (Int32(i), Int32(j), speci[j]))
+                end
             end
         end
+    end
+
+    neighbors_list = Tuple{Int32, Int32, Bool}[]
+    for nl in nl_threads
+        append!(neighbors_list, nl)
     end
 
     return NeighborList(length(neighbors_list), AT(neighbors_list))
