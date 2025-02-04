@@ -450,8 +450,9 @@ are not available when reading Gromacs files.
 - `array_type=Array`: the array type for the simulation, for example
     use `CuArray` or `ROCArray` for GPU support.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
-- `dist_neighbors=1.2u"nm"`: cutoff distance for the neighbor list, should be
-    greater than `dist_cutoff`.
+- `dist_neighbors=1.2u"nm"`: cutoff distance for the neighbor list, should not
+    be less than `dist_cutoff`. Not relevant if [`GPUNeighborFinder`](@ref) is
+    used since the neighbors are calculated each step.
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
@@ -474,14 +475,18 @@ function System(coord_file::AbstractString,
                 loggers=(),
                 units::Bool=true,
                 array_type::Type{AT}=Array,
-                dist_cutoff=units ? 1.0u"nm" : 1.0,
-                dist_neighbors=units ? 1.2u"nm" : 1.2,
+                dist_cutoff=(units ? 1.0u"nm" : 1.0),
+                dist_neighbors=(units ? 1.2u"nm" : 1.2),
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing,
                 implicit_solvent=nothing,
                 kappa=0.0u"nm^-1",
                 rename_terminal_res::Bool=true) where AT <: AbstractArray
+    if dist_neighbors < dist_cutoff
+        throw(ArgumentError("dist_neighbors ($dist_neighbors) should not be less than " *
+                            "dist_cutoff ($dist_cutoff)"))
+    end
     T = typeof(force_field.weight_14_coulomb)
 
     # Chemfiles uses zero-based indexing, be careful
@@ -914,7 +919,7 @@ function System(coord_file::AbstractString,
     elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
             eligible=AT(eligible),
-            dist_cutoff=T(dist_neighbors),
+            dist_cutoff=T(dist_cutoff), # Neighbors are computed each step so no buffer is needed
             special=AT(special),
             n_steps_reorder=10,
         )
@@ -966,7 +971,7 @@ function System(coord_file::AbstractString,
         elseif implicit_solvent == "gbn2"
             general_inters = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
         else
-            error("unknown implicit solvent model: \"$implicit_solvent\"")
+            throw(ArgumentError("unknown implicit solvent model: \"$implicit_solvent\""))
         end
     else
         general_inters = ()
@@ -1000,11 +1005,16 @@ function System(T::Type,
                 loggers=(),
                 units::Bool=true,
                 array_type::Type{AT}=Array,
-                dist_cutoff=units ? 1.0u"nm" : 1.0,
-                dist_neighbors=units ? 1.2u"nm" : 1.2,
+                dist_cutoff=(units ? 1.0u"nm" : 1.0),
+                dist_neighbors=(units ? 1.2u"nm" : 1.2),
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing) where AT <: AbstractArray
+    if dist_neighbors < dist_cutoff
+        throw(ArgumentError("dist_neighbors ($dist_neighbors) should not be less than " *
+                            "dist_cutoff ($dist_cutoff)"))
+    end
+
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
     bondtypes = Dict{String, HarmonicBond}()
@@ -1316,7 +1326,7 @@ function System(T::Type,
     elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
             eligible=AT(eligible),
-            dist_cutoff=T(dist_neighbors),
+            dist_cutoff=T(dist_cutoff), # Neighbors are computed each step so no buffer is needed
             special=AT(special),
             n_steps_reorder=10,
         )
