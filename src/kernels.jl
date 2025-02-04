@@ -1,4 +1,4 @@
-# KernelAbstractions.jl kernels
+# KernelAbstractions.jl kernels, CUDA kernels are in extension
 
 @inline function sum_pairwise_forces(inters, atom_i, atom_j, ::Val{F}, special, coord_i, coord_j,
                                      boundary, vel_i, vel_j, step_n) where F

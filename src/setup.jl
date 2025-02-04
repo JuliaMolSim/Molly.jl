@@ -454,8 +454,10 @@ are not available when reading Gromacs files.
     greater than `dist_cutoff`.
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
-- `use_cell_list::Bool=true`: whether to use [`CellListMapNeighborFinder`](@ref)
-    on CPU. If `false`, [`DistanceNeighborFinder`](@ref) is used.
+- `neighbor_finder_type`: which neighbor finder to use, default is
+    [`CellListMapNeighborFinder`](@ref) on CPU, [`GPUNeighborFinder`](@ref)
+    on CUDA compatible GPUs and [`DistanceNeighborFinder`](@ref) on non-CUDA
+    compatible GPUs.
 - `data=nothing`: arbitrary data associated with the system.
 - `implicit_solvent=nothing`: specify a string to add an implicit solvent
     model, options are "obc1", "obc2" and "gbn2".
@@ -475,7 +477,7 @@ function System(coord_file::AbstractString,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
-                use_cell_list::Bool=true,
+                neighbor_finder_type=nothing,
                 data=nothing,
                 implicit_solvent=nothing,
                 kappa=0.0u"nm^-1",
@@ -808,23 +810,24 @@ function System(coord_file::AbstractString,
         energy_units = NoUnits
     end
 
+    using_neighbors = neighbor_finder_type != NoNeighborFinder
     lj = LennardJones(
         cutoff=DistanceCutoff(T(dist_cutoff)),
-        use_neighbors=true,
+        use_neighbors=using_neighbors,
         weight_special=force_field.weight_14_lj,
     )
     if isnothing(implicit_solvent)
         crf = CoulombReactionField(
             dist_cutoff=T(dist_cutoff),
             solvent_dielectric=T(crf_solvent_dielectric),
-            use_neighbors=true,
+            use_neighbors=using_neighbors,
             weight_special=force_field.weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
     else
         crf = Coulomb(
             cutoff=DistanceCutoff(T(dist_cutoff)),
-            use_neighbors=true,
+            use_neighbors=using_neighbors,
             weight_special=force_field.weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
@@ -906,14 +909,23 @@ function System(coord_file::AbstractString,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
-    if uses_gpu_neighbor_finder(AT)
+    if neighbor_finder_type == NoNeighborFinder
+        neighbor_finder = NoNeighborFinder()
+    elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
             eligible=AT(eligible),
             dist_cutoff=T(dist_neighbors),
             special=AT(special),
             n_steps_reorder=10,
         )
-    elseif use_cell_list && !(AT <: AbstractGPUArray)
+    elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) && AT <: AbstractGPUArray
+        neighbor_finder = DistanceNeighborFinder(
+            eligible=AT(eligible),
+            special=AT(special),
+            n_steps=10,
+            dist_cutoff=T(dist_neighbors),
+        )
+    elseif neighbor_finder_type in (nothing, CellListMapNeighborFinder) && !(AT <: AbstractGPUArray)
         neighbor_finder = CellListMapNeighborFinder(
             eligible=eligible,
             special=special,
@@ -923,7 +935,7 @@ function System(coord_file::AbstractString,
             dist_cutoff=T(dist_neighbors),
         )
     else
-        neighbor_finder = DistanceNeighborFinder(
+        neighbor_finder = neighbor_finder_type(
             eligible=AT(eligible),
             special=AT(special),
             n_steps=10,
@@ -991,7 +1003,7 @@ function System(T::Type,
                 dist_cutoff=units ? 1.0u"nm" : 1.0,
                 dist_neighbors=units ? 1.2u"nm" : 1.2,
                 center_coords::Bool=true,
-                use_cell_list::Bool=true,
+                neighbor_finder_type=nothing,
                 data=nothing) where AT <: AbstractArray
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()
@@ -1236,15 +1248,16 @@ function System(T::Type,
         special[j, i] = true
     end
 
+    using_neighbors = neighbor_finder_type != NoNeighborFinder
     lj = LennardJones(
         cutoff=DistanceCutoff(T(dist_cutoff)),
-        use_neighbors=true,
+        use_neighbors=using_neighbors,
         weight_special=T(0.5),
     )
     crf = CoulombReactionField(
         dist_cutoff=T(dist_cutoff),
         solvent_dielectric=T(crf_solvent_dielectric),
-        use_neighbors=true,
+        use_neighbors=using_neighbors,
         weight_special=T(0.5),
         coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
     )
@@ -1298,14 +1311,23 @@ function System(T::Type,
     end
     specific_inter_lists = tuple(specific_inter_array...)
 
-    if uses_gpu_neighbor_finder(AT)
+    if neighbor_finder_type == NoNeighborFinder
+        neighbor_finder = NoNeighborFinder()
+    elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
             eligible=AT(eligible),
             dist_cutoff=T(dist_neighbors),
             special=AT(special),
             n_steps_reorder=10,
         )
-    elseif use_cell_list && !(AT <: AbstractGPUArray)
+    elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) && AT <: AbstractGPUArray
+        neighbor_finder = DistanceNeighborFinder(
+            eligible=AT(eligible),
+            special=AT(special),
+            n_steps=10,
+            dist_cutoff=T(dist_neighbors),
+        )
+    elseif neighbor_finder_type in (nothing, CellListMapNeighborFinder) && !(AT <: AbstractGPUArray)
         neighbor_finder = CellListMapNeighborFinder(
             eligible=eligible,
             special=special,
@@ -1315,7 +1337,7 @@ function System(T::Type,
             dist_cutoff=T(dist_neighbors),
         )
     else
-        neighbor_finder = DistanceNeighborFinder(
+        neighbor_finder = neighbor_finder_type(
             eligible=AT(eligible),
             special=AT(special),
             n_steps=10,

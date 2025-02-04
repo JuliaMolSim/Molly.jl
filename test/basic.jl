@@ -177,7 +177,9 @@
 
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     for AT in array_list
-        sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; array_type=AT, use_cell_list=false)
+        sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; array_type=AT,
+                     neighbor_finder_type=(Molly.uses_gpu_neighbor_finder(AT) ? GPUNeighborFinder :
+                                                DistanceNeighborFinder))
         mcs = molecule_centers(sys.coords, sys.boundary, sys.topology)
         @test isapprox(Array(mcs)[1], mean(sys.coords[1:1170]); atol=0.08u"nm")
 
