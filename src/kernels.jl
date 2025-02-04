@@ -9,9 +9,27 @@
     end
     f = sum(f_tuple)
     if unit(f[1]) != F
+        # This triggers an error but it isn't printed
+        # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
+        #   for how to throw a more meaningful error
         error("wrong force unit returned, was expecting $F but got $(unit(f[1]))")
     end
     return f
+end
+
+@inline function sum_pairwise_potentials(inters, atom_i, atom_j, ::Val{E}, special, coord_i, coord_j,
+                                         boundary, vel_i, vel_j, step_n) where E
+    dr = vector(coord_i, coord_j, boundary)
+    pe_tuple = ntuple(length(inters)) do inter_type_i
+        # SVector was required to avoid a GPU error occurring with scalars
+        SVector(potential_energy_gpu(inters[inter_type_i], dr, atom_i, atom_j, E, special,
+                            coord_i, coord_j, boundary, vel_i, vel_j, step_n))
+    end
+    pe = sum(pe_tuple)
+    if unit(pe[1]) != E
+        error("wrong force unit returned, was expecting $E but got $(unit(pe[1]))")
+    end
+    return pe
 end
 
 function gpu_threads_pairwise(n_neighbors)
@@ -235,14 +253,8 @@ end
 
     if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
-        coord_i, coord_j, vel_i, vel_j = coords[i], coords[j], velocities[i], velocities[j]
-        dr = vector(coord_i, coord_j, boundary)
-        pe = potential_energy_gpu(inters[1], dr, atoms[i], atoms[j], E, special, coord_i, coord_j,
-                                  boundary, vel_i, vel_j, step_n)
-        for inter in inters[2:end]
-            pe += potential_energy_gpu(inter, dr, atoms[i], atoms[j], E, special, coord_i, coord_j,
-                                       boundary, vel_i, vel_j, step_n)
-        end
+        pe = sum_pairwise_potentials(inters, atoms[i], atoms[j], Val(E), special, coords[i],
+                                     coords[j], boundary, velocities[i], velocities[j], step_n)[1]
         if unit(pe) != E
             error("wrong energy unit returned, was expecting $E but got $(unit(pe))")
         end

@@ -415,7 +415,7 @@ function force_kernel!(
                 excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-                 
+
                 f = condition ? Molly.sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j_shuffle,
@@ -694,7 +694,7 @@ function energy_kernel!(
                 r2 = sum(abs2, dr)
                 condition = eligible[laneid(), shuffle_idx] && Bool_excl && r2 <= r_cut * r_cut
 
-                pe = condition ? sum_pairwise_potentials(
+                pe = condition ? Molly.sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j_shuffle,
                     Val(energy_units),
@@ -743,7 +743,7 @@ function energy_kernel!(
                 r2 = sum(abs2, dr)
                 condition = eligible[laneid(), m] && Bool_excl && r2 <= r_cut * r_cut
 
-                pe = condition ? sum_pairwise_potentials(
+                pe = condition ? Molly.sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(energy_units),
@@ -777,7 +777,7 @@ function energy_kernel!(
             r2 = sum(abs2, dr)
             condition = eligible[laneid(), m] && r2 <= r_cut * r_cut
 
-            pe = condition ? sum_pairwise_potentials(
+            pe = condition ? Molly.sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(energy_units),
@@ -812,7 +812,7 @@ function energy_kernel!(
                 r2 = sum(abs2, dr)
                 condition = eligible[laneid(), m] && r2 <= r_cut * r_cut
                 
-                pe = condition ? sum_pairwise_potentials(
+                pe = condition ? Molly.sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(energy_units),
@@ -903,25 +903,6 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
     end
 
     return nothing
-end
-
-@inline function sum_pairwise_potentials(inters, atom_i, atom_j, ::Val{E}, special, coord_i, coord_j,
-                                     boundary, vel_i, vel_j, step_n) where E
-    dr = vector(coord_i, coord_j, boundary)
-
-    pe_tuple = ntuple(length(inters)) do inter_type_i
-        # SVector was required to avoid a GPU error occurring with scalars
-        SVector(Molly.potential_energy_gpu(inters[inter_type_i], dr, atom_i, atom_j, E, special,
-                            coord_i, coord_j, boundary, vel_i, vel_j, step_n))
-    end
-    pe = sum(pe_tuple)
-    if unit(pe[1]) != E
-        # This triggers an error but it isn't printed
-        # See https://discourse.julialang.org/t/error-handling-in-cuda-kernels/79692
-        #   for how to throw a more meaningful error
-        error("wrong force unit returned, was expecting $E but got $(unit(pe[1]))")
-    end
-    return pe
 end
 
 end
