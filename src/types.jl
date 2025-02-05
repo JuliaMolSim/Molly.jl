@@ -590,7 +590,8 @@ end
 
 Convenience constructor for changing properties in a `System`.
 
-A copy of the `System` is returned with the provided keyword arguments modified.
+The `System` is returned with the provided keyword arguments modified.
+Give `deepcopy(sys)` as the argument to make a new copy of the system.
 """
 function System(sys::System;
                 atoms=sys.atoms,

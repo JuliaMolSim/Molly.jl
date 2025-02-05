@@ -706,7 +706,7 @@ sys = System(
     energy_units=NoUnits,
 )
 
-simulate!(sys, simulator, n_steps)
+simulate!(sys, simulator, n_steps; n_threads=1) # One thread to ensure thread safety
 
 connections = Tuple{Int, Int}[]
 for i in 1:length(sys)

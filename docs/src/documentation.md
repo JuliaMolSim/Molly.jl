@@ -137,7 +137,7 @@ visualize(sys.loggers.coords, boundary, "sim_lj.mp4")
 
 To run simulations on the GPU you will need to have a GPU available and then load the appropriate package:
 
-| Hardware Available | Necessary Package | Array Type |
+| Hardware available | Necessary package | Array type |
 | ------------------ | ----------------- | ---------- |
 | Parallel CPU       | none              | `Array`    |
 | NVIDIA GPU         | CUDA              | `CuArray`  |
@@ -145,7 +145,9 @@ To run simulations on the GPU you will need to have a GPU available and then loa
 | Intel GPU          | oneAPI            | `oneArray` |
 | Apple Silicon      | Metal             | `MtlArray` |
 
-As an important note, Metal/Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` (for example) where necessary.
+Metal/Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` in this case.
+Non-CUDA backends are less well-tested with Molly than CUDA.
+
 Simulation setup is similar to above, but with the coordinates, velocities and atoms moved to the GPU.
 This example also shows setting up a simulation to run with `Float32`, which gives much better performance on GPUs.
 Of course, you will need to determine whether this level of numerical accuracy is appropriate in your case.

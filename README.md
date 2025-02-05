@@ -40,6 +40,7 @@ Implemented features include:
 - Visualise simulations as animations with [Makie.jl](https://makie.juliaplots.org/stable).
 - Compatibility with [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl) and [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl).
 - Interface to use Python [ASE](https://wiki.fysik.dtu.dk/ase) calculators.
+- Control of random numbers during simulation, allowing reproducible stochastic simulations.
 - Differentiable molecular simulation. This is a unique feature of the package and the focus of its current development.
 
 Features not yet implemented include:

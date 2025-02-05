@@ -4,7 +4,7 @@
     There are still many rough edges when taking gradients through simulations. Please open an issue if you run into an error and remember the golden rule of AD: check your gradients against finite differencing if you want to make sure they are correct.
 
 !!! note
-    There are currently issues with running differentiable simulations on the GPU. Hopefully these will be resolved soon.
+    There are currently issues with running differentiable simulations on the GPU and on the CPU in certain cases. Hopefully these will be resolved soon.
 
 In the last few years, the deep learning revolution has broadened to include the paradigm of [differentiable programming](https://en.wikipedia.org/wiki/Differentiable_programming).
 The concept of using automatic differentiation (AD) to obtain exact gradients through physical simulations has many interesting applications, including parameterising force fields and training neural networks to describe atomic potentials.

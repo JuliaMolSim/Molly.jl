@@ -72,6 +72,7 @@ function GPUNeighborFinder(;
                 eligible, dist_cutoff, special, n_steps_reorder, initialized)
 end
 
+# The neighbors are calculated within the forces/potential energy kernels
 find_neighbors(sys::System, nf::GPUNeighborFinder, args...; kwargs...) = nothing
 
 """
@@ -337,7 +338,7 @@ end
 
 # Add a pair to the pair list
 # If the buffer size is large enough update the element, otherwise push a new element
-#   to `neighbor.list`.
+#   to `neighbor.list`
 function push_pair!(neighbors::NeighborList, i::Integer, j::Integer, eligible, special)
     if eligible[i, j]
         push!(neighbors, (Int32(i), Int32(j), special[i, j]))

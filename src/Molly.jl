@@ -7,7 +7,7 @@ using Reexport
 using Atomix
 import AtomsBase
 import AtomsCalculators
-import BioStructures # Imported to avoid clashing names
+import BioStructures
 using CellListMap
 import Chemfiles
 using Combinatorics
