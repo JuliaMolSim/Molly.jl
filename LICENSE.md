@@ -1,6 +1,6 @@
 The Molly.jl package is licensed under the MIT "Expat" License:
 
-> Copyright (c) 2018-2024: Joe Greener and other contributors
+> Copyright (c) 2018-2025: Joe Greener and other contributors
 > (https://github.com/JuliaMolSim/Molly.jl/graphs/contributors).
 >
 > Permission is hereby granted, free of charge, to any person obtaining a copy
