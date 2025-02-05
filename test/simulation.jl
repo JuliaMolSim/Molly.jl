@@ -1323,7 +1323,7 @@ end
     starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-    function test_sim(nl::Bool, parallel::Bool, f32::Bool, ::Type{AT}) where AT
+    function test_sim(nft, parallel::Bool, f32::Bool, ::Type{AT}) where AT
         n_atoms = 400
         n_steps = 200
         atom_mass = f32 ? 10.0f0u"g/mol" : 10.0u"g/mol"
@@ -1339,25 +1339,22 @@ end
         ),)
         cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
 
-        if nl
-            if Molly.uses_gpu_neighbor_finder(AT)
-                neighbor_finder = GPUNeighborFinder(
-                    eligible=AT(trues(n_atoms, n_atoms)),
-                    n_steps_reorder=10,
-                    dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
-                )
-            else
-                neighbor_finder = DistanceNeighborFinder(
-                    eligible=AT(trues(n_atoms, n_atoms)),
-                    n_steps=10,
-                    dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
-                )
-            end
-            pairwise_inters = (LennardJones(use_neighbors=true, cutoff=cutoff),)
+        if nft == GPUNeighborFinder
+            neighbor_finder = GPUNeighborFinder(
+                eligible=AT(trues(n_atoms, n_atoms)),
+                n_steps_reorder=10,
+                dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+            )
+        elseif nft == DistanceNeighborFinder
+            neighbor_finder = DistanceNeighborFinder(
+                eligible=AT(trues(n_atoms, n_atoms)),
+                n_steps=10,
+                dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+            )
         else
             neighbor_finder = NoNeighborFinder()
-            pairwise_inters = (LennardJones(use_neighbors=false, cutoff=cutoff),)
         end
+        pairwise_inters = (LennardJones(use_neighbors=(nft != NoNeighborFinder), cutoff=cutoff),)
         show(devnull, neighbor_finder)
 
         coords = AT(copy(f32 ? starting_coords_f32 : starting_coords))
@@ -1386,27 +1383,32 @@ end
     end
 
     runs = [
-        ("CPU"       , [false, false, false, Array]),
-        ("CPU f32"   , [false, false, true , Array]),
-        ("CPU NL"    , [true , false, false, Array]),
-        ("CPU f32 NL", [true , false, true , Array]),
+        ("CPU"       , [NoNeighborFinder      , false, false, Array]),
+        ("CPU f32"   , [NoNeighborFinder      , false, true , Array]),
+        ("CPU NL"    , [DistanceNeighborFinder, false, false, Array]),
+        ("CPU f32 NL", [DistanceNeighborFinder, false, true , Array]),
     ]
     if run_parallel_tests
-        push!(runs, ("CPU parallel"       , [false, true , false, Array]))
-        push!(runs, ("CPU parallel f32"   , [false, true , true , Array]))
-        push!(runs, ("CPU parallel NL"    , [true , true , false, Array]))
-        push!(runs, ("CPU parallel f32 NL", [true , true , true , Array]))
+        push!(runs, ("CPU parallel"       , [NoNeighborFinder      , true , false, Array]))
+        push!(runs, ("CPU parallel f32"   , [NoNeighborFinder      , true , true , Array]))
+        push!(runs, ("CPU parallel NL"    , [DistanceNeighborFinder, true , false, Array]))
+        push!(runs, ("CPU parallel f32 NL", [DistanceNeighborFinder, true , true , Array]))
     end
     for AT in array_list[2:end]
-        push!(runs, ("$AT"       , [false, false, false, AT]))
-        push!(runs, ("$AT f32"   , [false, false, true , AT]))
-        push!(runs, ("$AT NL"    , [true , false, false, AT]))
-        push!(runs, ("$AT f32 NL", [true , false, true , AT]))
+        push!(runs, ("$AT"       , [NoNeighborFinder      , false, false, AT]))
+        push!(runs, ("$AT f32"   , [NoNeighborFinder      , false, true , AT]))
+        push!(runs, ("$AT NL"    , [DistanceNeighborFinder, false, false, AT]))
+        push!(runs, ("$AT f32 NL", [DistanceNeighborFinder, false, true , AT]))
+    end
+    if run_cuda_tests
+        AT = CuArray
+        push!(runs, ("$AT GPU NL"    , [GPUNeighborFinder, false, false, AT]))
+        push!(runs, ("$AT f32 GPU NL", [GPUNeighborFinder, false, true , AT]))
     end
     if run_metal_tests
         AT = MtlArray
-        push!(runs, ("$AT f32"   , [false, false, true , AT]))
-        push!(runs, ("$AT f32 NL", [true , false, true , AT]))
+        push!(runs, ("$AT f32"   , [NoNeighborFinder      , false, true , AT]))
+        push!(runs, ("$AT f32 NL", [DistanceNeighborFinder, false, true , AT]))
     end
 
     final_coords_ref, E_start_ref = test_sim(runs[1][2]...)
