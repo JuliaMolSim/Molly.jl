@@ -86,7 +86,7 @@ end
         )
 
         sys = System(
-            atoms=atoms,
+            atoms=(AT == Array ? atoms : AT(atoms)),
             coords=AT(coords),
             boundary=boundary,
             velocities=AT(velocities),

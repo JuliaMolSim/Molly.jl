@@ -15,7 +15,7 @@ struct HarmonicBond{K, D}
     r0::D
 end
 
-HarmonicBond(; k, r0) = HarmonicBond{typeof(k), typeof(r0)}(k, r0)
+HarmonicBond(; k, r0) = HarmonicBond(k, r0)
 
 Base.zero(::HarmonicBond{K, D}) where {K, D} = HarmonicBond(k=zero(K), r0=zero(D))
 

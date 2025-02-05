@@ -278,7 +278,6 @@ function potential(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
     return 4ϵ * (six_term ^ 2 - six_term)
 end
 
-
 @doc raw"""
     AshbaughHatch(; cutoff, use_neighbors, shortcut, ϵ_mixing, σ_mixing,
                   λ_mixing, weight_special)

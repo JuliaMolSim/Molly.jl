@@ -17,7 +17,7 @@ struct HarmonicAngle{K, D}
     θ0::D
 end
 
-HarmonicAngle(; k, θ0) = HarmonicAngle{typeof(k), typeof(θ0)}(k, θ0)
+HarmonicAngle(; k, θ0) = HarmonicAngle(k, θ0)
 
 Base.zero(::HarmonicAngle{K, D}) where {K, D} = HarmonicAngle(k=zero(K), θ0=zero(D))
 

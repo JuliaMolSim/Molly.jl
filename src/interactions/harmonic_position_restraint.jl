@@ -15,7 +15,7 @@ struct HarmonicPositionRestraint{K, C}
     x0::C
 end
 
-HarmonicPositionRestraint(; k, x0) = HarmonicPositionRestraint{typeof(k), typeof(x0)}(k, x0)
+HarmonicPositionRestraint(; k, x0) = HarmonicPositionRestraint(k, x0)
 
 @inline function force(pr::HarmonicPositionRestraint, coord_i, boundary, args...)
     ab = vector(coord_i, pr.x0, boundary)

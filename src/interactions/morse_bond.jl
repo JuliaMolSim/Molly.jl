@@ -16,7 +16,7 @@ struct MorseBond{T, A, R}
     r0::R
 end
 
-MorseBond(; D, a, r0) = MorseBond{typeof(D), typeof(a), typeof(r0)}(D, a, r0)
+MorseBond(; D, a, r0) = MorseBond(D, a, r0)
 
 @inline function force(b::MorseBond, coord_i, coord_j, boundary, args...)
     dr = vector(coord_i, coord_j, boundary)

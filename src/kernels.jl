@@ -68,7 +68,6 @@ end
                                            boundary, inters,
                                            @Const(neighbors), step_n, ::Val{D},
                                            ::Val{F}) where {D, F}
-
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(neighbors)
@@ -133,7 +132,6 @@ end
                                                 step_n, @Const(is),
                                                 @Const(inters), ::Val{D},
                                                 ::Val{F}) where {D, F}
-
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
@@ -154,7 +152,6 @@ end
                                                 step_n, @Const(is), @Const(js),
                                                 @Const(inters), ::Val{D},
                                                 ::Val{F}) where {D, F}
-
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
@@ -178,7 +175,6 @@ end
                                                 @Const(js), @Const(ks),
                                                 @Const(inters), ::Val{D},
                                                 ::Val{F}) where {D, F}
-
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
@@ -204,7 +200,6 @@ end
                                                 @Const(ls),
                                                 @Const(inters), ::Val{D},
                                                 ::Val{F}) where {D, F}
-
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
@@ -248,7 +243,6 @@ end
 @kernel inbounds=true function pairwise_pe_kernel!(energy, @Const(coords), @Const(velocities),
                                      @Const(atoms), boundary, inters,
                                      @Const(neighbors), step_n, ::Val{E}) where E
-
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(neighbors)
@@ -274,7 +268,6 @@ end
 
 function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
                           velocities, atoms, boundary, step_n, energy_units, ::Val{T}) where {D, C, T}
-
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_pe_2_atoms_kernel!(backend, n_threads_gpu)
@@ -307,7 +300,6 @@ end
 
 @kernel inbounds=true function specific_pe_1_atoms_kernel!(energy, @Const(coords), @Const(velocities),
                     @Const(atoms), boundary, step_n, @Const(is), @Const(inters), ::Val{E}) where E
-
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
@@ -324,8 +316,6 @@ end
 @kernel inbounds=true function specific_pe_2_atoms_kernel!(energy, @Const(coords), @Const(velocities),
                     @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(inters),
                     ::Val{E}) where E
-
-
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
@@ -342,7 +332,6 @@ end
 @kernel inbounds=true function specific_pe_3_atoms_kernel!(energy, @Const(coords), @Const(velocities),
                     @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(ks),
                     @Const(inters), ::Val{E}) where E
-
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
@@ -360,7 +349,6 @@ end
 @kernel inbounds=true function specific_pe_4_atoms_kernel!(energy, @Const(coords), @Const(velocities),
                     @Const(atoms), boundary, step_n, @Const(is), @Const(js), @Const(ks),
                     @Const(ls), @Const(inters), ::Val{E}) where E
-
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)

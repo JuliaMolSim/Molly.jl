@@ -8,6 +8,7 @@ using Enzyme
 
 EnzymeRules.inactive(::typeof(Molly.check_units), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.n_infinite_dims), args...) = nothing
+EnzymeRules.inactive(::typeof(random_coord), args...) = nothing
 EnzymeRules.inactive(::typeof(random_velocity), args...) = nothing
 EnzymeRules.inactive(::typeof(random_velocities), args...) = nothing
 EnzymeRules.inactive(::typeof(random_velocities!), args...) = nothing

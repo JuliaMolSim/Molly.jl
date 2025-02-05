@@ -16,7 +16,7 @@ struct CosineAngle{K, D}
     θ0::D
 end
 
-CosineAngle(; k, θ0) = CosineAngle{typeof(k), typeof(θ0)}(k, θ0)
+CosineAngle(; k, θ0) = CosineAngle(k, θ0)
 
 @inline function force(a::CosineAngle, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product

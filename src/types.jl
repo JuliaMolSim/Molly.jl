@@ -240,7 +240,7 @@ function Base.:+(a1::Atom, a2::Atom)
 end
 
 # get function errors with AD
-dict_get(dic, key, default) = haskey(dic, key) ? dic[key] : default
+dict_get(dic, key, default) = (haskey(dic, key) ? dic[key] : default)
 
 function inject_atom(at, at_data, params_dic)
     key_prefix = "atom_$(at_data.atom_type)_"
@@ -1031,10 +1031,11 @@ array_type(::Union{System{D, AT}, ReplicaSystem{D, AT}}) where {D, AT} = AT
 
 """
     is_on_gpu(sys)
+    is_on_gpu(arr)
 
-Whether a [`System`](@ref) or [`ReplicaSystem`](@ref) is on the GPU.
+Whether a [`System`](@ref), [`ReplicaSystem`](@ref) or array type is on the GPU.
 """
-is_on_gpu(::Union{System{D, AT}, ReplicaSystem{D, AT}}) where {D, AT} = AT <: AbstractGPUArray
+is_on_gpu(::Union{System{D, AT}, ReplicaSystem{D, AT}, AT}) where {D, AT} = AT <: AbstractGPUArray
 
 """
     float_type(sys)
@@ -1346,7 +1347,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces(
         neighbor_finder=calc.neighbor_finder,
         k=calc.k,
     )
-    nbs = isnothing(neighbors) ? find_neighbors(sys) : neighbors
+    nbs = (isnothing(neighbors) ? find_neighbors(sys) : neighbors)
     return forces(sys, nbs, step_n; n_threads=n_threads)
 end
 
@@ -1368,7 +1369,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         neighbor_finder=calc.neighbor_finder,
         k=calc.k,
     )
-    nbs = isnothing(neighbors) ? find_neighbors(sys) : neighbors
+    nbs = (isnothing(neighbors) ? find_neighbors(sys) : neighbors)
     return potential_energy(sys, nbs, step_n; n_threads=n_threads)
 end
 

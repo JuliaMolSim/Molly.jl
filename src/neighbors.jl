@@ -207,7 +207,7 @@ function TreeNeighborFinder(;
                             dist_cutoff,
                             special=zero(eligible),
                             n_steps=10)
-    return TreeNeighborFinder{typeof(dist_cutoff)}(eligible, dist_cutoff, special, n_steps)
+    return TreeNeighborFinder(eligible, dist_cutoff, special, n_steps)
 end
 
 function find_neighbors(sys::System{<:Any, AT},
