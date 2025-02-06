@@ -69,14 +69,14 @@ function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inte
         w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
         morton_seq_cpu = sorted_morton_seq(Array(sys.coords), w, morton_bits)
         copyto!(buffers.morton_seq, morton_seq_cpu)
-        CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
-                buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
-                sys.boundary, Val(D))
         sys.neighbor_finder.initialized = true
         CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     end
+    CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
+                buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
+                sys.boundary, Val(D))
     CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(
             buffers.morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords,
             sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters,
