@@ -1343,7 +1343,7 @@ end
             neighbor_finder = GPUNeighborFinder(
                 eligible=AT(trues(n_atoms, n_atoms)),
                 n_steps_reorder=10,
-                dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+                dist_cutoff=f32 ? 1.0f0u"nm" : 1.0u"nm",
             )
         elseif nft == DistanceNeighborFinder
             neighbor_finder = DistanceNeighborFinder(
