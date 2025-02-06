@@ -1,5 +1,47 @@
 # Molly.jl release notes
 
+## v0.22.0 - Feb 2025
+
+The package is rewritten to use Enzyme.jl rather than Zygote.jl for differentiable simulations. This allows mutating code to be used, leading to better performance on CPU and GPU. In addition, faster CUDA kernels are added and support for other GPU backends is added via KernelAbstractions.jl.
+
+### Breaking changes
+- `CoordinateLogger`, `VelocityLogger` and `ForceLogger` are renamed to `CoordinatesLogger`, `VelocitiesLogger` and `ForcesLogger` respectively for consistency.
+- During system setup the `gpu` keyword argument is replaced by `array_type`, with `CuArray` giving the same behaviour as before. Use of other array types such as `ROCArray` is supported. The `use_cell_list` keyword argument is replaced with `neighbor_finder_type`, with the default depending on the backend.
+- The second type parameter to `System` is changed from a `Bool` indicating whether the system is on the GPU to the array type of the system.
+- Giving the `force_units` and `energy_units` is no longer required when constructing pairwise interactions such as `LennardJones`. In addition, mixing functions and shortcut functions can now be given to determine how to combine atomic parameters and when to skip the interaction respectively.
+- The arguments to `force` and `potential_energy` for pairwise and specific interactions are changed to allow more flexible interaction definitions, depending for example on the velocities or step number.
+- Differentiable simulations are no longer compatible with Zygote.jl, but can now be carried out using Enzyme.jl. This is faster and more memory-efficient.
+- The `solute` field to `Atom` is removed and the `atom_type` field is added. `weight_solute_solvent` is no longer an option for `LennardJones`, though similar functionality is available with `atom_type` and mixing functions.
+- `box_volume` is renamed to `volume`.
+- `run_loggers!` is renamed to `apply_loggers!` to avoid confusion with the `run_loggers` function argument.
+- The abstract types `PairwiseInteraction` and `SpecificInteraction` are removed. Custom interactions no longer need to sub-type anything.
+- Extensions are added for code requiring Enzyme.jl, CUDA.jl and KernelDensity.jl, so relevant imports are now required before using those features.
+
+### Non-breaking changes
+- Support for Julia versions before 1.10 is dropped.
+
+### New features
+- Backends supported by KernelAbstractions.jl can be used to run simulations by using the appropriate array type or the `array_type` keyword argument during system setup.
+- The Berendsen pressure coupling method is added as `BerendsenBarostat`.
+- The `density` and `dipole_moment` functions are added.
+- The `AshbaughHatch` and `Yukawa` potentials are added.
+- `VolumeLogger` and `DensityLogger` are added.
+- The `rng` keyword argument is added to `place_atoms`, `place_diatomics` and `random_coord`, allowing reproducible coordinate generation.
+- The `array_type` function is added, giving the array type of a system or array.
+- The step number can be given as a third argument with a default of `0` to `forces`, `potential_energy` and `virial` acting on a system. This allows time-dependent forces, with the caveat that the step number resets to 1 every time `simulate!` is called and can also be 0 to calculate forces before the first step.
+- A method is added to `random_velocities!` which takes in and modifies the velocities as the first argument.
+
+### Performance improvements
+- Better CUDA force and potential energy kernels significantly improve performance on CUDA compatible devices. The `GPUNeighborFinder` is added for this path but does not calculate neighbors, which are calculated each step in the kernels.
+- Simulations are faster on both CPU and GPU due to mutating code leading to fewer memory allocations.
+- System setup from a file is made much faster.
+- The package is faster to load as a number of dependencies have been removed.
+- The performance of implicit solvent on CPU is improved.
+
+### Bug fixes
+- A bug when using more than two interactions on the GPU is fixed.
+- A type conversion bug in `CellListMapNeighborFinder` construction is fixed.
+
 ## v0.21.2 - Oct 2024
 
 ### Non-breaking changes
