@@ -1,7 +1,7 @@
 export Mie
 
 @doc raw"""
-    Mie(; m, n, cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing)
+    Mie(; m, n, cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, weight_special)
 
 The Mie generalized interaction between two atoms.
 
@@ -15,7 +15,7 @@ where
 C = \frac{n}{n - m} \left( \frac{n}{m} \right) ^\frac{m}{n - m}
 ```
 """
-struct Mie{T, C, H, S, E}
+struct Mie{T, W, C, H, S, E}
     m::T
     n::T
     cutoff::C
@@ -23,6 +23,7 @@ struct Mie{T, C, H, S, E}
     shortcut::H
     σ_mixing::S
     ϵ_mixing::E
+    weight_special::W
     mn_fac::T
 end
 
@@ -33,16 +34,18 @@ function Mie(;
                 use_neighbors=false,
                 shortcut=lj_zero_shortcut,
                 σ_mixing=lorentz_σ_mixing,
-                ϵ_mixing=geometric_ϵ_mixing)
+                ϵ_mixing=geometric_ϵ_mixing,
+                weight_special=1)
     m_p, n_p, mn_fac = promote(m, n, (n / (n - m)) * (n / m) ^ (m / (n - m)))
-    return Mie(m_p, n_p, cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing, mn_fac)
+    return Mie(m_p, n_p, cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing,
+               weight_special, mn_fac)
 end
 
 use_neighbors(inter::Mie) = inter.use_neighbors
 
-function Base.zero(m::Mie{T}) where T
+function Base.zero(m::Mie{T, W}) where {T, W}
     return Mie(zero(T), zero(T), m.cutoff, m.use_neighbors, m.shortcut, m.σ_mixing,
-               m.ϵ_mixing, zero(T))
+               m.ϵ_mixing, zero(W), zero(T))
 end
 
 function Base.:+(m1::Mie, m2::Mie)
@@ -54,6 +57,7 @@ function Base.:+(m1::Mie, m2::Mie)
         m1.shortcut,
         m1.σ_mixing,
         m1.ϵ_mixing,
+        m1.weight_special + m2.weight_special,
         m1.mn_fac + m2.mn_fac,
     )
 end
@@ -63,6 +67,7 @@ end
                        atom_i,
                        atom_j,
                        force_units=u"kJ * mol^-1 * nm^-1",
+                       special=false,
                        args...)
     if inter.shortcut(atom_i, atom_j)
         return ustrip.(zero(dr)) * force_units
@@ -80,7 +85,11 @@ end
     params = (m, n, σ_r, const_mn)
 
     f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
-    return f * dr
+    if special
+        return f * dr * inter.weight_special
+    else
+        return f * dr
+    end
 end
 
 function force_divr(::Mie, r2, invr2, (m, n, σ_r, const_mn))
@@ -92,6 +101,7 @@ end
                                   atom_i,
                                   atom_j,
                                   energy_units=u"kJ * mol^-1",
+                                  special=false,
                                   args...)
     if inter.shortcut(atom_i, atom_j)
         return ustrip(zero(dr[1])) * energy_units
@@ -108,7 +118,12 @@ end
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)
 
-    return potential_with_cutoff(inter, r2, params, cutoff, energy_units)
+    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
+    if special
+        return pe * inter.weight_special
+    else
+        return pe
+    end
 end
 
 function potential(::Mie, r2, invr2, (m, n, σ_r, const_mn))
