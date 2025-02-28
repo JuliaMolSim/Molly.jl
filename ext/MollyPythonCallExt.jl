@@ -72,17 +72,20 @@ function Molly.ASECalculator(;
     return ASECalculator(ase_atoms, ase_calc)
 end
 
-function Molly.update_ase_calc!(ase_calc, sys)
+function Molly.update_ase_calc!(ase_calc, sys::System{<:Any, <:Any, T}) where T
     if unit(sys.boundary.side_lengths[1]) == NoUnits
         # Assume units are ASE units
-        coords_current = pylist(Array(sys.coords))
-        velocities_current = pylist(Array(sys.velocities))
+        coords_nounits, velocities_nounits = sys.coords, sys.velocities
         box = sys.boundary.side_lengths
     else
-        coords_current = pylist(ustrip_vec.(u"Å", Array(sys.coords)))
-        velocities_current = pylist(ustrip_vec.(u"u^(-1/2) * eV^(1/2)", Array(sys.velocities)))
+        coords_nounits = ustrip_vec.(u"Å", Array(sys.coords))
+        velocities_nounits = ustrip_vec.(u"u^(-1/2) * eV^(1/2)", Array(sys.velocities))
         box = ustrip.(u"Å", sys.boundary.side_lengths)
     end
+    coords_current = Py(Array(transpose(reshape(
+                            reinterpret(T, coords_nounits), 3, length(sys))))).to_numpy()
+    velocities_current = Py(Array(transpose(reshape(
+                            reinterpret(T, velocities_nounits), 3, length(sys))))).to_numpy()
     ase_calc.ase_atoms.set_positions(coords_current)
     ase_calc.ase_atoms.set_velocities(velocities_current)
     ase_calc.ase_atoms.set_cell(pylist(inf_to_one.(box)))
