@@ -313,7 +313,7 @@ visualize(
 The recommended way to run a macromolecular simulation is to read in a force field in [OpenMM XML format](http://docs.openmm.org/latest/userguide/application/05_creating_ffs.html) to a [`MolecularForceField`](@ref) and then read in a coordinate file in a format [supported by Chemfiles.jl](https://chemfiles.org/chemfiles/latest/formats.html).
 Files for common force fields can be found at [OpenMM](https://github.com/openmm/openmm) and [OpenMM force fields](https://github.com/openmm/openmmforcefields).
 This sets up a system in the same data structures as above and that is simulated in the same way.
-Here we carry out an energy minimization, simulate with a Langevin integrator in the NPT ensemble and use a [`StructureWriter`](@ref) to write the trajectory as a PDB file.
+Here we carry out an energy minimization, simulate with a Langevin integrator in the NPT ensemble and use a [`TrajectoryWriter`](@ref) to write the trajectory as a DCD file.
 ```julia
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff = MolecularForceField(
@@ -327,7 +327,7 @@ sys = System(
     ff;
     loggers=(
         energy=TotalEnergyLogger(10),
-        writer=StructureWriter(10, "traj_6mrr_1ps.pdb", ["HOH"]),
+        writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
     ),
     array_type=Array,
 )
@@ -377,7 +377,7 @@ sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
     loggers=(
         temp=TemperatureLogger(10),
-        writer=StructureWriter(10, "traj_5XER_1ps.pdb"),
+        writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
     ),
 )
 
@@ -1101,6 +1101,7 @@ The available loggers are:
 - [`DensityLogger`](@ref)
 - [`VirialLogger`](@ref)
 - [`PressureLogger`](@ref)
+- [`TrajectoryWriter`](@ref)
 - [`StructureWriter`](@ref)
 - [`TimeCorrelationLogger`](@ref)
 - [`AutoCorrelationLogger`](@ref)
