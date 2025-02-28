@@ -60,6 +60,14 @@ function Base.:+(b1::CubicBoundary, b2::CubicBoundary)
     return CubicBoundary(b1.side_lengths .+ b2.side_lengths; check_positive=false)
 end
 
+function Chemfiles.UnitCell(b::CubicBoundary)
+    if unit(eltype(b.side_lengths)) == NoUnits
+        Chemfiles.UnitCell(Array(b.side_lengths) .* 10) # Assume nm
+    else
+        Chemfiles.UnitCell(Array(ustrip.(u"Å", b.side_lengths)))
+    end
+end
+
 """
     RectangularBoundary(x, y)
     RectangularBoundary(x)
@@ -190,6 +198,14 @@ TriclinicBoundary(arr; kwargs...) = TriclinicBoundary(SVector{3}(arr); kwargs...
 Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
 Base.firstindex(b::TriclinicBoundary) = 1
 Base.lastindex(b::TriclinicBoundary) = 3
+
+function Chemfiles.UnitCell(b::TriclinicBoundary)
+    if unit(eltype(eltype(b.basis_vectors))) == NoUnits
+        Chemfiles.UnitCell(Array(hcat(b.basis_vectors...)) .* 10) # Assume nm
+    else
+        Chemfiles.UnitCell(Array(ustrip.(u"Å", hcat(b.basis_vectors...))))
+    end
+end
 
 AtomsBase.n_dimensions(::CubicBoundary) = 3
 AtomsBase.n_dimensions(::RectangularBoundary) = 2
