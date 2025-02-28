@@ -313,16 +313,17 @@ end
 
 """
     MolecularTopology(bond_is, bond_js, n_atoms)
-    MolecularTopology(atom_molecule_inds, molecule_atom_counts)
+    MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms)
 
 Topology information for a system.
 
-Stores the index of the molecule each atom belongs to and the number of
-atoms in each molecule.
+Stores the index of the molecule each atom belongs to, the number of
+atoms in each molecule and the list of bonded atom pairs.
 """
 struct MolecularTopology
     atom_molecule_inds::Vector{Int32}
     molecule_atom_counts::Vector{Int32}
+    bonded_atoms::Vector{Tuple{Int32, Int32}}
 end
 
 function bond_graph(bond_is, bond_js, n_atoms)
@@ -333,7 +334,7 @@ function bond_graph(bond_is, bond_js, n_atoms)
     return g
 end
 
-function MolecularTopology(bond_is, bond_js, n_atoms)
+function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
     g = bond_graph(bond_is, bond_js, n_atoms)
     cc = connected_components(g)
     atom_molecule_inds = zeros(Int32, n_atoms)
@@ -343,7 +344,8 @@ function MolecularTopology(bond_is, bond_js, n_atoms)
         end
     end
     molecule_atom_counts = length.(cc)
-    return MolecularTopology(atom_molecule_inds, molecule_atom_counts)
+    bonded_atoms = collect(zip(bond_is, bond_js))
+    return MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms)
 end
 
 """

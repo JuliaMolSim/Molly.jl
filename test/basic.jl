@@ -165,7 +165,7 @@
     coords = [SVector(1.95, 0.0, 0.0), SVector(0.05, 0.0, 0.0), SVector(0.15, 0.0, 0.0),
               SVector(1.0 , 1.0, 1.0)]
     boundary = CubicBoundary(2.0)
-    topology = MolecularTopology([1, 1, 1, 2], [3, 1])
+    topology = MolecularTopology([1, 1, 1, 2], [3, 1], [(1, 2), (2, 3)])
     mcs = molecule_centers(coords, boundary, topology)
     @test mcs == [SVector(0.05, 0.0, 0.0), SVector(1.0, 1.0, 1.0)]
 
