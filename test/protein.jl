@@ -8,7 +8,8 @@
             temp=TemperatureLogger(10),
             coords=CoordinatesLogger(10),
             energy=TotalEnergyLogger(10),
-            writer=StructureWriter(10, temp_fp_pdb),
+            dcd_writer=TrajectoryWriter(10, temp_fp_dcd),
+            pdb_writer=StructureWriter(10, temp_fp_pdb),
             density=DensityLogger(10),
         ),
         data="test_data_peptide",
@@ -35,6 +36,10 @@
     @time simulate!(s, simulator, n_steps; n_threads=1)
 
     @test all(isapprox(1016.0870493u"kg * m^-3"), values(s.loggers.density))
+    traj = Chemfiles.Trajectory(temp_fp_dcd)
+    rm(temp_fp_dcd)
+    @test Int(length(traj)) == 11
+    @test length(read(traj)) == 5191
     traj = read(temp_fp_pdb, BioStructures.PDBFormat)
     rm(temp_fp_pdb)
     @test BioStructures.countmodels(traj) == 11

@@ -5,7 +5,8 @@ import AtomsBase
 using AtomsBaseTesting
 import AtomsCalculators
 using AtomsCalculators.AtomsCalculatorsTesting
-import BioStructures # Imported to avoid clashing names
+import BioStructures
+import Chemfiles
 using CUDA
 using Enzyme
 using FiniteDifferences
@@ -99,6 +100,7 @@ const data_dir = normpath(@__DIR__, "..", "data")
 const ff_dir     = joinpath(data_dir, "force_fields")
 const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
+const temp_fp_dcd = tempname(cleanup=true) * ".dcd"
 const temp_fp_pdb = tempname(cleanup=true) * ".pdb"
 const temp_fp_viz = tempname(cleanup=true) * ".mp4"
 

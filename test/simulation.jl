@@ -102,7 +102,8 @@ end
                 ke=KineticEnergyLogger(100),
                 pe=PotentialEnergyLogger(100),
                 force=ForcesLogger(100),
-                writer=StructureWriter(100, temp_fp_pdb),
+                dcd_writer=TrajectoryWriter(100, temp_fp_dcd),
+                pdb_writer=StructureWriter(100, temp_fp_pdb),
                 potkin_correlation=TimeCorrelationLogger(pot_obs, kin_obs, TP, TP, 1, 100),
                 velocity_autocorrelation=AutoCorrelationLogger(V, TV, n_atoms, 100),
             ),
@@ -148,7 +149,8 @@ end
         show(devnull, s.loggers.ke)
         show(devnull, s.loggers.pe)
         show(devnull, s.loggers.force)
-        show(devnull, s.loggers.writer)
+        show(devnull, s.loggers.dcd_writer)
+        show(devnull, s.loggers.pdb_writer)
         show(devnull, s.loggers.potkin_correlation)
         show(devnull, s.loggers.velocity_autocorrelation)
 
@@ -161,6 +163,10 @@ end
         @test unit(first(values(s.loggers.potkin_correlation))) == NoUnits
         @test unit(first(values(s.loggers.velocity_autocorrelation; normalize=false))) == u"nm^2 * ps^-2"
 
+        traj = Chemfiles.Trajectory(temp_fp_dcd)
+        rm(temp_fp_dcd)
+        @test Int(length(traj)) == 201
+        @test length(read(traj)) == 100
         traj = read(temp_fp_pdb, BioStructures.PDBFormat)
         rm(temp_fp_pdb)
         @test BioStructures.countmodels(traj) == 201

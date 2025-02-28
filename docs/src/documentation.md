@@ -313,7 +313,7 @@ visualize(
 The recommended way to run a macromolecular simulation is to read in a force field in [OpenMM XML format](http://docs.openmm.org/latest/userguide/application/05_creating_ffs.html) to a [`MolecularForceField`](@ref) and then read in a coordinate file in a format [supported by Chemfiles.jl](https://chemfiles.org/chemfiles/latest/formats.html).
 Files for common force fields can be found at [OpenMM](https://github.com/openmm/openmm) and [OpenMM force fields](https://github.com/openmm/openmmforcefields).
 This sets up a system in the same data structures as above and that is simulated in the same way.
-Here we carry out an energy minimization, simulate with a Langevin integrator in the NPT ensemble and use a [`TrajectoryWriter`](@ref) to write the trajectory as a DCD file.
+Here we carry out an energy minimization, simulate with a Langevin integrator in the NPT ensemble and use a [`TrajectoryWriter`](@ref) to write the trajectory as a DCD file (or another file format, by changing the file extension).
 ```julia
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
 ff = MolecularForceField(
