@@ -1405,4 +1405,6 @@ struct ASECalculator{T}
     ase_calc::T
 end
 
+function update_ase_calc! end
+
 iszero_value(x) = iszero(x)
