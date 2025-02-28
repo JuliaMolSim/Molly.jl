@@ -62,9 +62,9 @@ end
 
 function Chemfiles.UnitCell(b::CubicBoundary)
     if unit(eltype(b.side_lengths)) == NoUnits
-        Chemfiles.UnitCell(Array(b.side_lengths) .* 10) # Assume nm
+        Chemfiles.UnitCell(Float64.(Array(b.side_lengths)) .* 10) # Assume nm
     else
-        Chemfiles.UnitCell(Array(ustrip.(u"Å", b.side_lengths)))
+        Chemfiles.UnitCell(Float64.(Array(ustrip.(u"Å", b.side_lengths))))
     end
 end
 
@@ -201,9 +201,9 @@ Base.lastindex(b::TriclinicBoundary) = 3
 
 function Chemfiles.UnitCell(b::TriclinicBoundary)
     if unit(eltype(eltype(b.basis_vectors))) == NoUnits
-        Chemfiles.UnitCell(Array(hcat(b.basis_vectors...)) .* 10) # Assume nm
+        Chemfiles.UnitCell(Float64.(Array(hcat(b.basis_vectors...))) .* 10) # Assume nm
     else
-        Chemfiles.UnitCell(Array(ustrip.(u"Å", hcat(b.basis_vectors...))))
+        Chemfiles.UnitCell(Float64.(Array(ustrip.(u"Å", hcat(b.basis_vectors...)))))
     end
 end
 
