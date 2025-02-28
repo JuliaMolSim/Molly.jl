@@ -313,7 +313,7 @@ end
 
 """
     MolecularTopology(bond_is, bond_js, n_atoms)
-    MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms)
+    MolecularTopology(atom_molecule_inds, molecule_atom_counts, bonded_atoms=[])
 
 Topology information for a system.
 
@@ -333,6 +333,8 @@ function bond_graph(bond_is, bond_js, n_atoms)
     end
     return g
 end
+
+MolecularTopology(amis, macs) = MolecularTopology(amis, macs, [])
 
 function MolecularTopology(bond_is, bond_js, n_atoms::Integer)
     g = bond_graph(bond_is, bond_js, n_atoms)
