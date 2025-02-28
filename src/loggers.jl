@@ -16,6 +16,7 @@ export
     DensityLogger,
     VirialLogger,
     PressureLogger,
+    TrajectoryWriter,
     StructureWriter,
     TimeCorrelationLogger,
     AutoCorrelationLogger,
@@ -336,11 +337,89 @@ function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(pressure_wrappe
 end
 
 """
+    TrajectoryWriter(n_steps, filepath)
+    TrajectoryWriter(n_steps, filepath, format)
+
+Write 3D structures to a file throughout a simulation.
+
+Uses Chemfiles.jl to write to one of a variety of formats including DCD, XTC,
+CIF, MOL2, SDF, TRR and XYZ.
+The full list of formats can be found in the
+[Chemfiles docs](https://chemfiles.org/chemfiles/latest/formats.html#list-of-supported-formats).
+By default the format is guessed from the file extension.
+
+The [`System`](@ref) should have `atoms_data` defined, and `topology` if bonding
+information is required.
+The file will be appended to, so should be deleted before simulation if it
+already exists.
+"""
+mutable struct TrajectoryWriter{T}
+    n_steps::Int
+    filepath::String
+    format::String
+    topology::T
+    topology_written::Bool
+    structure_n::Int
+end
+
+function TrajectoryWriter(n_steps::Integer, filepath::AbstractString, format="")
+    topology = Chemfiles.Topology() # Added to later when sys is available
+    return TrajectoryWriter(n_steps, filepath, uppercase(format), topology, false, 0)
+end
+
+function Base.show(io::IO, tw::TrajectoryWriter)
+    print(io, "TrajectoryWriter with n_steps ", tw.n_steps, ", filepath \"",
+            tw.filepath, "\", ", tw.structure_n, " frames written")
+end
+
+function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
+                       step_n::Integer=0; kwargs...)
+    if step_n % logger.n_steps == 0
+        if !logger.topology_written
+            if isnothing(sys.atoms_data) || length(sys) != length(sys.atoms_data)
+                throw(ArgumentError("atoms_data must be set to use TrajectoryWriter"))
+            end
+            for atom_data in sys.atoms_data
+                Chemfiles.add_atom!(logger.topology, Chemfiles.Atom(atom_data.element))
+            end
+            if !isnothing(sys.topology)
+                for (i, j) in sys.topology.bonded_atoms
+                    Chemfiles.add_bond!(logger.topology, i - 1, j - 1) # Zero-based indexing
+                end
+            end
+            logger.topology_written = true
+        end
+
+        logger.structure_n += 1
+        frame = Chemfiles.Frame()
+        resize!(frame, length(sys))
+        Chemfiles.set_topology!(frame, logger.topology)
+        pos = Chemfiles.positions(frame)
+
+        for (i, c) in enumerate(Array(sys.coords))
+            if unit(eltype(c)) == NoUnits
+                c_nounits = c .* 10 # Assume nm
+            else
+                c_nounits = ustrip.(u"Å", c)
+            end
+            pos[:, i] = c_nounits
+        end
+        
+        Chemfiles.set_cell!(frame, Chemfiles.UnitCell(sys.boundary))
+        Chemfiles.Trajectory(logger.filepath, 'a', logger.format) do trajectory
+            write(trajectory, frame)
+        end        
+    end
+end
+
+"""
     StructureWriter(n_steps, filepath, excluded_res=String[])
 
-Write 3D output structures to a file in the PDB format throughout a simulation.
+Write 3D structures to a file in the PDB format throughout a simulation.
 
 The [`System`](@ref) should have `atoms_data` defined.
+The file will be appended to, so should be deleted before simulation if it
+already exists.
 """
 mutable struct StructureWriter
     n_steps::Int
