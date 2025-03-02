@@ -337,8 +337,7 @@ function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(pressure_wrappe
 end
 
 """
-    TrajectoryWriter(n_steps, filepath)
-    TrajectoryWriter(n_steps, filepath, format)
+    TrajectoryWriter(n_steps, filepath; format="", write_velocities=false)
 
 Write 3D structures to a file throughout a simulation.
 
@@ -346,7 +345,8 @@ Uses Chemfiles.jl to write to one of a variety of formats including DCD, XTC,
 CIF, MOL2, SDF, TRR and XYZ.
 The full list of formats can be found in the
 [Chemfiles docs](https://chemfiles.org/chemfiles/latest/formats.html#list-of-supported-formats).
-By default the format is guessed from the file extension.
+By default the format is guessed from the file extension but it can also
+be given as a string, e.g. "DCD".
 
 The [`System`](@ref) should have `atoms_data` defined, and `topology` if bonding
 information is required.
@@ -357,14 +357,17 @@ mutable struct TrajectoryWriter{T}
     n_steps::Int
     filepath::String
     format::String
+    write_velocities::Bool
     topology::T
     topology_written::Bool
     structure_n::Int
 end
 
-function TrajectoryWriter(n_steps::Integer, filepath::AbstractString, format="")
+function TrajectoryWriter(n_steps::Integer, filepath::AbstractString; format="",
+                          write_velocities=false)
     topology = Chemfiles.Topology() # Added to later when sys is available
-    return TrajectoryWriter(n_steps, filepath, uppercase(format), topology, false, 0)
+    return TrajectoryWriter(n_steps, filepath, uppercase(format), write_velocities,
+                            topology, false, 0)
 end
 
 function Base.show(io::IO, tw::TrajectoryWriter)
@@ -394,8 +397,9 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
         frame = Chemfiles.Frame()
         resize!(frame, length(sys))
         Chemfiles.set_topology!(frame, logger.topology)
-        pos = Chemfiles.positions(frame)
+        Chemfiles.set_cell!(frame, Chemfiles.UnitCell(sys.boundary))
 
+        pos = Chemfiles.positions(frame)
         for (i, c) in enumerate(Array(sys.coords))
             if unit(eltype(c)) == NoUnits
                 c_nounits = c .* 10 # Assume nm
@@ -404,8 +408,20 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
             end
             pos[:, i] = c_nounits
         end
-        
-        Chemfiles.set_cell!(frame, Chemfiles.UnitCell(sys.boundary))
+
+        if logger.write_velocities
+            Chemfiles.add_velocities!(frame)
+            vels = Chemfiles.velocities(frame)
+            for (i, v) in enumerate(Array(sys.velocities))
+                if unit(eltype(v)) == NoUnits
+                    v_nounits = v .* 10 # Assume nm / ps
+                else
+                    v_nounits = ustrip.(u"Å * ps^-1", v)
+                end
+                vels[:, i] = v_nounits
+            end
+        end
+
         Chemfiles.Trajectory(logger.filepath, 'a', logger.format) do trajectory
             write(trajectory, frame)
         end        
