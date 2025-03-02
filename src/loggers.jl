@@ -337,37 +337,46 @@ function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(pressure_wrappe
 end
 
 """
-    TrajectoryWriter(n_steps, filepath; format="", write_velocities=false)
+    TrajectoryWriter(n_steps, filepath; format="", atom_inds=[],
+                     write_velocities=false)
 
 Write 3D structures to a file throughout a simulation.
 
 Uses Chemfiles.jl to write to one of a variety of formats including DCD, XTC,
 CIF, MOL2, SDF, TRR and XYZ.
-The full list of formats can be found in the
+The full list of file formats can be found in the
 [Chemfiles docs](https://chemfiles.org/chemfiles/latest/formats.html#list-of-supported-formats).
 By default the format is guessed from the file extension but it can also
-be given as a string, e.g. "DCD".
+be given as a string, e.g. `format="DCD"`.
+
+The atom indices to be written can be given as a list or range to `atom_inds`,
+with all atoms being written by default.
+Velocities can be written in addition to coordinates by setting
+`write_velocities=true`.
+Chemfiles does not support writing velocities to all file formats.
 
 The [`System`](@ref) should have `atoms_data` defined, and `topology` if bonding
 information is required.
 The file will be appended to, so should be deleted before simulation if it
 already exists.
 """
-mutable struct TrajectoryWriter{T}
+mutable struct TrajectoryWriter{I, T}
     n_steps::Int
     filepath::String
     format::String
+    atom_inds::I # Int[] or range
     write_velocities::Bool
     topology::T
     topology_written::Bool
     structure_n::Int
 end
 
-function TrajectoryWriter(n_steps::Integer, filepath::AbstractString; format="",
-                          write_velocities=false)
+function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
+                          format::AbstractString="", atom_inds=Int[],
+                          write_velocities::Bool=false)
     topology = Chemfiles.Topology() # Added to later when sys is available
-    return TrajectoryWriter(n_steps, filepath, uppercase(format), write_velocities,
-                            topology, false, 0)
+    return TrajectoryWriter(n_steps, filepath, uppercase(format), atom_inds,
+                            write_velocities, topology, false, 0)
 end
 
 function Base.show(io::IO, tw::TrajectoryWriter)
@@ -378,16 +387,29 @@ end
 function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
+        writing_all_atoms = iszero(length(logger.atom_inds))
+        atom_inds = (writing_all_atoms ? eachindex(sys) : logger.atom_inds)
         if !logger.topology_written
             if isnothing(sys.atoms_data) || length(sys) != length(sys.atoms_data)
-                throw(ArgumentError("atoms_data must be set to use TrajectoryWriter"))
+                throw(ArgumentError("TrajectoryWriter requires atoms_data to be set"))
             end
-            for atom_data in sys.atoms_data
-                Chemfiles.add_atom!(logger.topology, Chemfiles.Atom(atom_data.element))
+            if !all(in(eachindex(sys)), atom_inds)
+                throw(ArgumentError("TrajectoryWriter requires all atom_inds values to be " *
+                                    "valid indices in the system"))
+            end
+            for si in atom_inds
+                el = sys.atoms_data[si].element
+                Chemfiles.add_atom!(logger.topology, Chemfiles.Atom(el))
             end
             if !isnothing(sys.topology)
-                for (i, j) in sys.topology.bonded_atoms
-                    Chemfiles.add_bond!(logger.topology, i - 1, j - 1) # Zero-based indexing
+                for (si, sj) in sys.topology.bonded_atoms
+                    # Only write bonds where both atoms are present
+                    if si in atom_inds && sj in atom_inds
+                        ci = findfirst(isequal(si), atom_inds)
+                        cj = findfirst(isequal(sj), atom_inds)
+                        # Zero-based indexing
+                        Chemfiles.add_bond!(logger.topology, ci - 1, cj - 1)
+                    end
                 end
             end
             logger.topology_written = true
@@ -395,30 +417,34 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
 
         logger.structure_n += 1
         frame = Chemfiles.Frame()
-        resize!(frame, length(sys))
+        resize!(frame, length(atom_inds))
         Chemfiles.set_topology!(frame, logger.topology)
         Chemfiles.set_cell!(frame, Chemfiles.UnitCell(sys.boundary))
 
-        pos = Chemfiles.positions(frame)
-        for (i, c) in enumerate(Array(sys.coords))
+        coords_cf = Chemfiles.positions(frame)
+        coords = Array(sys.coords)
+        for (ci, si) in enumerate(atom_inds)
+            c = coords[si]
             if unit(eltype(c)) == NoUnits
                 c_nounits = c .* 10 # Assume nm
             else
                 c_nounits = ustrip.(u"Å", c)
             end
-            pos[:, i] = c_nounits
+            coords_cf[:, ci] = c_nounits
         end
 
         if logger.write_velocities
             Chemfiles.add_velocities!(frame)
-            vels = Chemfiles.velocities(frame)
-            for (i, v) in enumerate(Array(sys.velocities))
+            velocities_cf = Chemfiles.velocities(frame)
+            velocities = Array(sys.velocities)
+            for (ci, si) in enumerate(atom_inds)
+                v = velocities[si]
                 if unit(eltype(v)) == NoUnits
                     v_nounits = v .* 10 # Assume nm / ps
                 else
                     v_nounits = ustrip.(u"Å * ps^-1", v)
                 end
-                vels[:, i] = v_nounits
+                velocities_cf[:, ci] = v_nounits
             end
         end
 

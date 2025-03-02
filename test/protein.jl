@@ -8,7 +8,7 @@
             temp=TemperatureLogger(10),
             coords=CoordinatesLogger(10),
             energy=TotalEnergyLogger(10),
-            dcd_writer=TrajectoryWriter(10, temp_fp_dcd),
+            dcd_writer=TrajectoryWriter(10, temp_fp_dcd; atom_inds=1001:2000),
             pdb_writer=StructureWriter(10, temp_fp_pdb),
             density=DensityLogger(10),
         ),
@@ -39,7 +39,9 @@
     traj = Chemfiles.Trajectory(temp_fp_dcd)
     rm(temp_fp_dcd)
     @test Int(length(traj)) == 11
-    @test length(read(traj)) == 5191
+    frame = read(traj)
+    @test length(frame) == 1000
+    @test size(Chemfiles.positions(frame)) == (3, 1000)
     traj = read(temp_fp_pdb, BioStructures.PDBFormat)
     rm(temp_fp_pdb)
     @test BioStructures.countmodels(traj) == 11
