@@ -397,9 +397,14 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
                 throw(ArgumentError("TrajectoryWriter requires all atom_inds values to be " *
                                     "valid indices in the system"))
             end
+            atoms_cpu = Array(sys.atoms)
             for si in atom_inds
-                el = sys.atoms_data[si].element
-                Chemfiles.add_atom!(logger.topology, Chemfiles.Atom(el))
+                atom, atom_data = atoms_cpu[si], sys.atoms_data[si]
+                at = Chemfiles.Atom(atom_data.atom_name)
+                Chemfiles.set_type!(at, atom_data.atom_type)
+                Chemfiles.set_mass!(at, Float64(ustrip(mass(atom))))
+                Chemfiles.set_charge!(at, Float64(charge(atom)))
+                Chemfiles.add_atom!(logger.topology, at)
             end
             if !isnothing(sys.topology)
                 for (si, sj) in sys.topology.bonded_atoms

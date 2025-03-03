@@ -62,6 +62,7 @@ end
 
 function Chemfiles.UnitCell(b::CubicBoundary)
     if unit(eltype(b.side_lengths)) == NoUnits
+        # Float64 required for Chemfiles
         Chemfiles.UnitCell(Float64.(Array(b.side_lengths)) .* 10) # Assume nm
     else
         Chemfiles.UnitCell(Float64.(Array(ustrip.(u"Å", b.side_lengths))))
