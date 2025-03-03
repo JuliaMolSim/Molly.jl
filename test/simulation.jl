@@ -102,7 +102,8 @@ end
                 ke=KineticEnergyLogger(100),
                 pe=PotentialEnergyLogger(100),
                 force=ForcesLogger(100),
-                dcd_writer=TrajectoryWriter(100, temp_fp_dcd; write_velocities=true),
+                dcd_writer=TrajectoryWriter(100, temp_fp_dcd),
+                trr_writer=TrajectoryWriter(100, temp_fp_trr; write_velocities=true),
                 pdb_writer=StructureWriter(100, temp_fp_pdb),
                 potkin_correlation=TimeCorrelationLogger(pot_obs, kin_obs, TP, TP, 1, 100),
                 velocity_autocorrelation=AutoCorrelationLogger(V, TV, n_atoms, 100),
@@ -168,8 +169,20 @@ end
         @test Int(length(traj)) == 201
         frame = read(traj)
         @test length(frame) == 100
-        # Note that Chemfiles does not write velocities to the DCD format
+        # Chemfiles does not write velocities to DCD files
         @test size(Chemfiles.positions(frame)) == (3, 100)
+        @test !iszero(sum(Array(Chemfiles.positions(frame))))
+
+        traj = Chemfiles.Trajectory(temp_fp_trr)
+        rm(temp_fp_trr)
+        @test Int(length(traj)) == 201
+        frame = read(traj)
+        @test length(frame) == 100
+        @test size(Chemfiles.positions(frame)) == (3, 100)
+        @test !iszero(sum(Array(Chemfiles.positions(frame))))
+        @test size(Chemfiles.velocities(frame)) == (3, 100)
+        @test !iszero(sum(Chemfiles.velocities(frame)[1, 1]))
+
         traj = read(temp_fp_pdb, BioStructures.PDBFormat)
         rm(temp_fp_pdb)
         @test BioStructures.countmodels(traj) == 201

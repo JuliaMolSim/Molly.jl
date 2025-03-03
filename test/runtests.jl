@@ -101,6 +101,7 @@ const ff_dir     = joinpath(data_dir, "force_fields")
 const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
 const temp_fp_dcd = tempname(cleanup=true) * ".dcd"
+const temp_fp_trr = tempname(cleanup=true) * ".trr"
 const temp_fp_pdb = tempname(cleanup=true) * ".pdb"
 const temp_fp_viz = tempname(cleanup=true) * ".mp4"
 
