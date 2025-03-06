@@ -42,6 +42,7 @@
     frame = read(traj)
     @test length(frame) == 1000
     @test size(Chemfiles.positions(frame)) == (3, 1000)
+    @test Chemfiles.lengths(Chemfiles.UnitCell(frame)) == [37.146, 37.146, 37.146]
     traj = read(temp_fp_pdb, BioStructures.PDBFormat)
     rm(temp_fp_pdb)
     @test BioStructures.countmodels(traj) == 11

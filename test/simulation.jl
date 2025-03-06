@@ -172,6 +172,7 @@ end
         # Chemfiles does not write velocities to DCD files
         @test size(Chemfiles.positions(frame)) == (3, 100)
         @test !iszero(sum(Array(Chemfiles.positions(frame))))
+        @test Chemfiles.lengths(Chemfiles.UnitCell(frame)) == [20.0, 20.0, 20.0]
 
         traj = Chemfiles.Trajectory(temp_fp_trr)
         rm(temp_fp_trr)
@@ -182,6 +183,7 @@ end
         @test !iszero(sum(Array(Chemfiles.positions(frame))))
         @test size(Chemfiles.velocities(frame)) == (3, 100)
         @test !iszero(sum(Chemfiles.velocities(frame)[1, 1]))
+        @test Chemfiles.lengths(Chemfiles.UnitCell(frame)) == [20.0, 20.0, 20.0]
 
         traj = read(temp_fp_pdb, BioStructures.PDBFormat)
         rm(temp_fp_pdb)
