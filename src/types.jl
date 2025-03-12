@@ -1412,3 +1412,14 @@ end
 function update_ase_calc! end
 
 iszero_value(x) = iszero(x)
+
+# Only use threading if a condition is true
+macro maybe_threads(flag, expr)
+    quote
+        if $(flag)
+            Threads.@threads $expr
+        else
+            $expr
+        end
+    end |> esc
+end

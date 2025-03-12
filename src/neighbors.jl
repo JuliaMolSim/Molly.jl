@@ -112,7 +112,7 @@ function find_neighbors(sys::System,
     sqdist_cutoff = nf.dist_cutoff ^ 2
     nl_threads = [Tuple{Int32, Int32, Bool}[] for i in 1:n_threads]
 
-    Threads.@threads for chunk_i in 1:n_threads
+    @maybe_threads (n_threads > 1) for chunk_i in 1:n_threads
         for i in chunk_i:n_threads:length(sys)
             ci = sys.coords[i]
             nbi = @view nf.eligible[:, i]
@@ -226,7 +226,7 @@ function find_neighbors(sys::System{<:Any, AT},
     dist_cutoff = ustrip(dist_unit, nf.dist_cutoff)
     nl_threads = [Tuple{Int32, Int32, Bool}[] for i in 1:n_threads]
 
-    Threads.@threads for chunk_i in 1:n_threads
+    @maybe_threads (n_threads > 1) for chunk_i in 1:n_threads
         for i in chunk_i:n_threads:length(sys)
             ci = ustrip.(sys.coords[i])
             nbi = @view nf.eligible[:, i]
