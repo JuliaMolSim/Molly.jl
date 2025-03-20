@@ -1,5 +1,20 @@
 # Molly.jl release notes
 
+## v0.22.1 - Mar 2025
+
+### New features
+- Writing out trajectory files in formats supported by Chemfiles.jl, including DCD and XTC, is added via the `TrajectoryWriter` logger.
+- `MolecularTopology` can now optionally contain a list of indices of bonded atom pairs.
+- The `weight_special` option is added to `Mie`.
+- Functions required to calculate gradients for `MorseBond` are added.
+
+### Performance improvements
+- Simulation with `ASECalculator` is made faster.
+
+### Bug fixes
+- A memory issue when simulating with `ASECalculator` is fixed.
+- A bug in nested multithreading for `DistanceNeighborFinder` and `TreeNeighborFinder` is fixed.
+
 ## v0.22.0 - Feb 2025
 
 The package is rewritten to use Enzyme.jl rather than Zygote.jl for differentiable simulations. This allows mutating code to be used, leading to better performance on CPU and GPU. In addition, faster CUDA kernels are added and support for other GPU backends is added via KernelAbstractions.jl.
