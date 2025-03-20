@@ -359,6 +359,8 @@ The [`System`](@ref) should have `atoms_data` defined, and `topology` if bonding
 information is required.
 The file will be appended to, so should be deleted before simulation if it
 already exists.
+
+Not compatible with 2D systems.
 """
 mutable struct TrajectoryWriter{I, T}
     n_steps::Int
@@ -467,6 +469,8 @@ Write 3D structures to a file in the PDB format throughout a simulation.
 The [`System`](@ref) should have `atoms_data` defined.
 The file will be appended to, so should be deleted before simulation if it
 already exists.
+
+Not compatible with 2D systems.
 """
 mutable struct StructureWriter
     n_steps::Int
