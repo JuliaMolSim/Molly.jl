@@ -1314,6 +1314,7 @@ Currently, constraints are supported by the following simulators:
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
 
+See [this example](@ref "Constrained dynamics") for how to apply constraints to a system.
 Simulators incompatible with constraints will print a warning and continue when used with systems containing constraints.
 Constraints are not currently compatible with GPU simulation.
 
