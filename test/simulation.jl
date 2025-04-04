@@ -87,7 +87,8 @@ end
             coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
             boundary=boundary,
             velocities=[random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
-            atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR", element="Ar") for i in 1:n_atoms],
+            atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR", element="Ar")
+                        for i in 1:n_atoms],
             pairwise_inters=(LennardJones(use_neighbors=true),),
             neighbor_finder=DistanceNeighborFinder(
                 eligible=trues(n_atoms, n_atoms),
@@ -185,6 +186,7 @@ end
         @test !iszero(sum(Chemfiles.velocities(frame)[1, 1]))
         @test Chemfiles.lengths(Chemfiles.UnitCell(frame)) == [20.0, 20.0, 20.0]
 
+        @test readlines(temp_fp_pdb)[1] == "CRYST1     20.0     20.0     20.0  90.00  90.00  90.00 P 1           1"
         traj = read(temp_fp_pdb, BioStructures.PDBFormat)
         rm(temp_fp_pdb)
         @test BioStructures.countmodels(traj) == 201

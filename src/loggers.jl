@@ -471,6 +471,9 @@ The file will be appended to, so should be deleted before simulation if it
 already exists.
 
 Not compatible with 2D systems.
+The box size for the CRYST1 record is taken from the first snapshot;
+different box sizes at later snapshots will not be recorded.
+The CRYST1 record is not written for infinite boundaries.
 """
 mutable struct StructureWriter
     n_steps::Int
@@ -499,9 +502,39 @@ function log_property!(logger::StructureWriter, sys::System, neighbors=nothing,
     end
 end
 
+pdb_cryst1_length(l_Å) = lpad(round(l_Å; digits=3), 9)
+pdb_cryst1_angle(θ_rad) = lpad(round(rad2deg(θ_rad); digits=2), 7)
+
+# Non-infinite boundaries only
+function pdb_cryst1_line(b::CubicBoundary)
+    if unit(eltype(b.side_lengths)) == NoUnits
+        sl_Å = b.side_lengths .* 10 # Assume nm
+    else
+        sl_Å = ustrip.(u"Å", b.side_lengths)
+    end
+    return "CRYST1$(pdb_cryst1_length(sl_Å[1]))$(pdb_cryst1_length(sl_Å[2]))" *
+           "$(pdb_cryst1_length(sl_Å[3]))  90.00  90.00  90.00 P 1           1"
+end
+
+function pdb_cryst1_line(b::TriclinicBoundary)
+    side_lengths = norm.(b.basis_vectors)
+    if unit(eltype(side_lengths)) == NoUnits
+        sl_Å = side_lengths .* 10 # Assume nm
+    else
+        sl_Å = ustrip.(u"Å", side_lengths)
+    end
+    return "CRYST1$(pdb_cryst1_length(sl_Å[1]))$(pdb_cryst1_length(sl_Å[2]))" *
+           "$(pdb_cryst1_length(sl_Å[3]))$(pdb_cryst1_angle(b.α))" *
+           "$(pdb_cryst1_angle(b.β))$(pdb_cryst1_angle(b.γ)) P 1           1"
+end
+
 function append_model!(logger::StructureWriter, sys)
     logger.structure_n += 1
     open(logger.filepath, "a") do output
+        if logger.structure_n == 1 && !has_infinite_boundary(sys.boundary)
+            println(output, pdb_cryst1_line(sys.boundary))
+        end
+
         println(output, "MODEL     ", lpad(logger.structure_n, 4))
         for (i, coord) in enumerate(Array(sys.coords))
             atom_data = sys.atoms_data[i]

@@ -43,6 +43,8 @@
     @test length(frame) == 1000
     @test size(Chemfiles.positions(frame)) == (3, 1000)
     @test Chemfiles.lengths(Chemfiles.UnitCell(frame)) == [37.146, 37.146, 37.146]
+
+    @test readlines(temp_fp_pdb)[1] == "CRYST1   37.146   37.146   37.146  90.00  90.00  90.00 P 1           1"
     traj = read(temp_fp_pdb, BioStructures.PDBFormat)
     rm(temp_fp_pdb)
     @test BioStructures.countmodels(traj) == 11
