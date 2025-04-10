@@ -586,7 +586,8 @@ The available general interactions are:
 
 Some pairwise interactions define mixing functions which determine how the parameters from each atom are combined.
 For example, the default `σ_mixing` for [`LennardJones`](@ref) is `Molly.lorentz_σ_mixing`, which is defined as `(atom_i.σ + atom_j.σ) / 2`.
-Custom mixing functions can be given instead.
+Other mixing functions are available, such as `Molly.waldman_hagler_σ_mixing` and `Molly.fender_halsey_ϵ_mixing`.
+Custom mixing functions can be given instead and should take in the two atoms as arguments.
 The `atom_type` field of the atoms is available, allowing features like changing the weight of solute-solvent interactions.
 
 To define your own pairwise interaction, first define the `struct`:
