@@ -3,9 +3,18 @@
     c2 = SVector(1.3, 1.0, 1.0)u"nm"
     c3 = SVector(1.4, 1.0, 1.0)u"nm"
     a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    a2 = Atom(charge=1.0, σ=0.2u"nm", ϵ=0.1u"kJ * mol^-1")
     boundary = CubicBoundary(2.0u"nm")
     dr12 = vector(c1, c2, boundary)
     dr13 = vector(c1, c3, boundary)
+
+    @test Molly.lorentz_σ_mixing(a1, a2)        ≈ 0.25u"nm"
+    @test Molly.lorentz_ϵ_mixing(a1, a2)        ≈ 0.15u"kJ * mol^-1"
+    @test Molly.geometric_σ_mixing(a1, a2)      ≈ 0.2449489742783178u"nm"
+    @test Molly.geometric_ϵ_mixing(a1, a2)      ≈ 0.14142135623730953u"kJ * mol^-1"
+    @test Molly.waldman_hagler_σ_mixing(a1, a2) ≈ 0.271044458112581u"nm"
+    @test Molly.waldman_hagler_ϵ_mixing(a1, a2) ≈ 0.07704164677744986u"kJ * mol^-1"
+    @test Molly.fender_halsey_ϵ_mixing(a1, a2)  ≈ 0.13333333333333333u"kJ * mol^-1"
 
     @test !use_neighbors(LennardJones())
     @test  use_neighbors(LennardJones(use_neighbors=true))
@@ -403,9 +412,9 @@
     c2_cosine = SVector(2.0, 0.0, 0.0)u"nm"
     c3_cosine = SVector(3.0, 0.0, 0.0)u"nm"
     c4_cosine = SVector(2.0, 1.0, 0.0)u"nm"
-    a1 = CosineAngle(k=10.0 * kbT, θ0=0.0)
-    a2 = CosineAngle(k=10.0 * kbT, θ0=π/2)
-    fs = force(a1, c1_cosine, c2_cosine, c3_cosine, boundary_cosine)
+    ca1 = CosineAngle(k=10.0 * kbT, θ0=0.0)
+    ca2 = CosineAngle(k=10.0 * kbT, θ0=π/2)
+    fs = force(ca1, c1_cosine, c2_cosine, c3_cosine, boundary_cosine)
     @test isapprox(
         fs.f1,
         SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
@@ -421,7 +430,7 @@
         SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
-    fs = force(a2, c1_cosine, c2_cosine, c4_cosine, boundary_cosine)
+    fs = force(ca2, c1_cosine, c2_cosine, c4_cosine, boundary_cosine)
     @test isapprox(
         fs.f1,
         SVector(0.0, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
@@ -438,17 +447,17 @@
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
-        potential_energy(a1, c1_cosine, c2_cosine, c3_cosine, boundary_cosine),
+        potential_energy(ca1, c1_cosine, c2_cosine, c3_cosine, boundary_cosine),
         0.0u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
     @test isapprox(
-        potential_energy(a2, c1_cosine, c2_cosine, c3_cosine, boundary_cosine),
+        potential_energy(ca2, c1_cosine, c2_cosine, c3_cosine, boundary_cosine),
         24.79u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
     @test isapprox(
-        potential_energy(a2, c1_cosine, c2_cosine, c4_cosine, boundary_cosine),
+        potential_energy(ca2, c1_cosine, c2_cosine, c4_cosine, boundary_cosine),
         49.58u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
