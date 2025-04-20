@@ -336,6 +336,69 @@ function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(pressure_wrappe
             pl.n_steps, ", ", length(values(pl)), " pressures recorded")
 end
 
+pdb_cryst1_length(l_Å) = lpad(round(l_Å; digits=3), 9)
+pdb_cryst1_angle(θ_rad) = lpad(round(rad2deg(θ_rad); digits=2), 7)
+
+# Non-infinite boundaries only
+function pdb_cryst1_line(b::CubicBoundary)
+    if unit(eltype(b.side_lengths)) == NoUnits
+        sl_Å = b.side_lengths .* 10 # Assume nm
+    else
+        sl_Å = ustrip.(u"Å", b.side_lengths)
+    end
+    return "CRYST1$(pdb_cryst1_length(sl_Å[1]))$(pdb_cryst1_length(sl_Å[2]))" *
+           "$(pdb_cryst1_length(sl_Å[3]))  90.00  90.00  90.00 P 1           1"
+end
+
+function pdb_cryst1_line(b::TriclinicBoundary)
+    side_lengths = norm.(b.basis_vectors)
+    if unit(eltype(side_lengths)) == NoUnits
+        sl_Å = side_lengths .* 10 # Assume nm
+    else
+        sl_Å = ustrip.(u"Å", side_lengths)
+    end
+    return "CRYST1$(pdb_cryst1_length(sl_Å[1]))$(pdb_cryst1_length(sl_Å[2]))" *
+           "$(pdb_cryst1_length(sl_Å[3]))$(pdb_cryst1_angle(b.α))" *
+           "$(pdb_cryst1_angle(b.β))$(pdb_cryst1_angle(b.γ)) P 1           1"
+end
+
+function BioStructures.AtomRecord(at_data::AtomData, i, coord)
+    return BioStructures.AtomRecord(
+        false, i, at_data.atom_name, ' ', at_data.res_name, "A",
+        at_data.res_number, ' ', coord, 1.0, 0.0,
+        at_data.element == "?" ? "  " : at_data.element, "  "
+    )
+end
+
+function write_pdb_coords(output, sys, atom_inds_arg=Int[], excluded_res=())
+    atom_inds = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
+    coords_cpu = Array(sys.coords)
+    for i in atom_inds
+        coord, atom_data = coords_cpu[i], sys.atoms_data[i]
+        if unit(first(coord)) == NoUnits
+            # If not told, assume coordinates are in nm and convert to Å
+            coord_convert = 10 .* coord
+        else
+            coord_convert = ustrip.(u"Å", coord)
+        end
+        if !(atom_data.res_name in excluded_res)
+            at_rec = BioStructures.AtomRecord(atom_data, i, coord_convert)
+            println(output, BioStructures.pdbline(at_rec))
+        end
+    end
+end
+
+function write_pdb_file(filepath, sys; atom_inds=Int[], excluded_res=(),
+                        write_cell=true)
+    open(filepath, "w") do output
+        if write_cell && !has_infinite_boundary(sys.boundary)
+            println(output, pdb_cryst1_line(sys.boundary))
+        end
+        write_pdb_coords(output, sys, atom_inds, excluded_res)
+        println(output, "END")
+    end
+end
+
 """
     TrajectoryWriter(n_steps, filepath; format="", atom_inds=[],
                      excluded_res=String[], write_velocities=false,
@@ -343,12 +406,13 @@ end
 
 Write 3D structures to a file throughout a simulation.
 
-Uses Chemfiles.jl to write to one of a variety of formats including DCD, XTC,
+Uses Chemfiles.jl to write to one of a variety of formats including DCD, XTC, PDB,
 CIF, MOL2, SDF, TRR and XYZ.
 The full list of file formats can be found in the
 [Chemfiles docs](https://chemfiles.org/chemfiles/latest/formats.html#list-of-supported-formats).
 By default the format is guessed from the file extension but it can also
 be given as a string, e.g. `format="DCD"`.
+BioStructures.jl is used to write to the PDB format.
 
 The atom indices to be written can be given as a list or range to `atom_inds`,
 with all atoms being written by default.
@@ -363,6 +427,9 @@ The file will be appended to, so should be deleted before simulation if it
 already exists.
 
 Not compatible with 2D systems.
+For the PDB format, the box size for the CRYST1 record is taken from the first
+snapshot; different box sizes at later snapshots will not be recorded.
+The CRYST1 record is not written for infinite boundaries.
 """
 mutable struct TrajectoryWriter{I, T}
     n_steps::Int
@@ -382,7 +449,13 @@ function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                           excluded_res=String[], write_velocities::Bool=false,
                           write_cell::Bool=true)
     topology = Chemfiles.Topology() # Added to later when sys is available
-    return TrajectoryWriter(n_steps, filepath, uppercase(format), atom_inds,
+    if uppercase(splitext(filepath)[2]) == ".PDB"
+        format_used = "PDB"
+    else
+        # Chemfiles can deal with "" format
+        format_used = uppercase(format)
+    end
+    return TrajectoryWriter(n_steps, filepath, format_used, atom_inds,
                     Set(excluded_res), write_velocities, write_cell, topology,
                     false, 0)
 end
@@ -507,108 +580,12 @@ The box size for the CRYST1 record is taken from the first snapshot;
 different box sizes at later snapshots will not be recorded.
 The CRYST1 record is not written for infinite boundaries.
 """
-mutable struct StructureWriter{I}
-    n_steps::Int
-    filepath::String
-    atom_inds::I # Int[] or range
-    excluded_res::Set{String}
-    structure_n::Int
-end
-
 function StructureWriter(n_steps::Integer, filepath::AbstractString,
                          excluded_res=String[]; atom_inds=Int[])
-    return StructureWriter(n_steps, filepath, atom_inds, Set(excluded_res), 0)
-end
-
-function Base.show(io::IO, sw::StructureWriter)
-    print(io, "StructureWriter with n_steps ", sw.n_steps, ", filepath \"",
-            sw.filepath, "\", ", sw.structure_n, " frames written")
-end
-
-function log_property!(logger::StructureWriter, sys::System, neighbors=nothing,
-                        step_n::Integer=0; kwargs...)
-    if step_n % logger.n_steps == 0
-        if length(sys) != length(sys.atoms_data)
-            error("number of atoms is ", length(sys), " but number of atom data entries is ",
-                  length(sys.atoms_data), ", StructureWriter requires them to be the same")
-        end
-        append_model!(logger, sys)
-    end
-end
-
-pdb_cryst1_length(l_Å) = lpad(round(l_Å; digits=3), 9)
-pdb_cryst1_angle(θ_rad) = lpad(round(rad2deg(θ_rad); digits=2), 7)
-
-# Non-infinite boundaries only
-function pdb_cryst1_line(b::CubicBoundary)
-    if unit(eltype(b.side_lengths)) == NoUnits
-        sl_Å = b.side_lengths .* 10 # Assume nm
-    else
-        sl_Å = ustrip.(u"Å", b.side_lengths)
-    end
-    return "CRYST1$(pdb_cryst1_length(sl_Å[1]))$(pdb_cryst1_length(sl_Å[2]))" *
-           "$(pdb_cryst1_length(sl_Å[3]))  90.00  90.00  90.00 P 1           1"
-end
-
-function pdb_cryst1_line(b::TriclinicBoundary)
-    side_lengths = norm.(b.basis_vectors)
-    if unit(eltype(side_lengths)) == NoUnits
-        sl_Å = side_lengths .* 10 # Assume nm
-    else
-        sl_Å = ustrip.(u"Å", side_lengths)
-    end
-    return "CRYST1$(pdb_cryst1_length(sl_Å[1]))$(pdb_cryst1_length(sl_Å[2]))" *
-           "$(pdb_cryst1_length(sl_Å[3]))$(pdb_cryst1_angle(b.α))" *
-           "$(pdb_cryst1_angle(b.β))$(pdb_cryst1_angle(b.γ)) P 1           1"
-end
-
-function BioStructures.AtomRecord(at_data::AtomData, i, coord)
-    return BioStructures.AtomRecord(
-        false, i, at_data.atom_name, ' ', at_data.res_name, "A",
-        at_data.res_number, ' ', coord, 1.0, 0.0,
-        at_data.element == "?" ? "  " : at_data.element, "  "
-    )
-end
-
-function write_pdb_coords(output, sys, atom_inds_arg=Int[], excluded_res=())
-    atom_inds = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
-    coords_cpu = Array(sys.coords)
-    for i in atom_inds
-        coord, atom_data = coords_cpu[i], sys.atoms_data[i]
-        if unit(first(coord)) == NoUnits
-            # If not told, assume coordinates are in nm and convert to Å
-            coord_convert = 10 .* coord
-        else
-            coord_convert = ustrip.(u"Å", coord)
-        end
-        if !(atom_data.res_name in excluded_res)
-            at_rec = BioStructures.AtomRecord(atom_data, i, coord_convert)
-            println(output, BioStructures.pdbline(at_rec))
-        end
-    end
-end
-
-function write_pdb_file(filepath, sys; atom_inds=Int[], excluded_res=(),
-                        write_cell=true)
-    open(filepath, "w") do output
-        if write_cell && !has_infinite_boundary(sys.boundary)
-            println(output, pdb_cryst1_line(sys.boundary))
-        end
-        write_pdb_coords(output, sys, atom_inds, excluded_res)
-        println(output, "END")
-    end
-end
-
-function append_model!(logger::StructureWriter, sys)
-    logger.structure_n += 1
-    open(logger.filepath, "a") do output
-        if logger.structure_n == 1 && !has_infinite_boundary(sys.boundary)
-            println(output, pdb_cryst1_line(sys.boundary))
-        end
-        println(output, "MODEL     ", lpad(logger.structure_n, 4))
-        write_pdb_coords(output, sys, logger.atom_inds, logger.excluded_res)
-        println(output, "ENDMDL")
-    end
+    # This aliasing function will be removed in the next breaking release
+    return TrajectoryWriter(n_steps, filepath, "PDB", atom_inds,
+                    Set(excluded_res), false, true, Chemfiles.Topology(),
+                    false, 0)
 end
 
 @doc raw"""
