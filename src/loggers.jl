@@ -16,6 +16,7 @@ export
     DensityLogger,
     VirialLogger,
     PressureLogger,
+    write_structure,
     TrajectoryWriter,
     StructureWriter,
     TimeCorrelationLogger,
@@ -388,14 +389,133 @@ function write_pdb_coords(output, sys, atom_inds_arg=Int[], excluded_res=())
     end
 end
 
-function write_pdb_file(filepath, sys; atom_inds=Int[], excluded_res=(),
-                        write_cell=true)
-    open(filepath, "w") do output
-        if write_cell && !has_infinite_boundary(sys.boundary)
-            println(output, pdb_cryst1_line(sys.boundary))
+function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, excluded_res,
+                          write_velocities, write_cell, calc_topology, append)
+    atom_inds_all_res = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
+    if iszero(length(excluded_res))
+        atom_inds = atom_inds_all_res
+    else
+        atom_inds = filter(
+            si -> !(sys.atoms_data[si].res_name in excluded_res),
+            atom_inds_all_res,
+        )
+    end
+
+    if calc_topology
+        if isnothing(sys.atoms_data) || length(sys) != length(sys.atoms_data)
+            throw(ArgumentError("structure writing requires atoms_data to be set"))
         end
-        write_pdb_coords(output, sys, atom_inds, excluded_res)
-        println(output, "END")
+        if !all(in(eachindex(sys)), atom_inds)
+            throw(ArgumentError("structure writing requires all atom_inds values to " *
+                                "be valid indices in the system"))
+        end
+        atoms_cpu = Array(sys.atoms)
+        for si in atom_inds
+            atom, atom_data = atoms_cpu[si], sys.atoms_data[si]
+            at = Chemfiles.Atom(atom_data.atom_name)
+            Chemfiles.set_type!(at, atom_data.atom_type)
+            Chemfiles.set_mass!(at, Float64(ustrip(mass(atom))))
+            Chemfiles.set_charge!(at, Float64(charge(atom)))
+            Chemfiles.add_atom!(topology, at)
+        end
+        if !isnothing(sys.topology)
+            for (si, sj) in sys.topology.bonded_atoms
+                # Only write bonds where both atoms are present
+                if si in atom_inds && sj in atom_inds
+                    ci = findfirst(isequal(si), atom_inds)
+                    cj = findfirst(isequal(sj), atom_inds)
+                    # Zero-based indexing
+                    Chemfiles.add_bond!(topology, ci - 1, cj - 1)
+                end
+            end
+        end
+    end
+
+    frame = Chemfiles.Frame()
+    resize!(frame, length(atom_inds))
+    Chemfiles.set_topology!(frame, topology)
+    if write_cell
+        Chemfiles.set_cell!(frame, Chemfiles.UnitCell(sys.boundary))
+    end
+
+    coords_cf = Chemfiles.positions(frame)
+    coords = Array(sys.coords)
+    for (ci, si) in enumerate(atom_inds)
+        c = coords[si]
+        if unit(eltype(c)) == NoUnits
+            c_nounits = c .* 10 # Assume nm
+        else
+            c_nounits = ustrip.(u"Å", c)
+        end
+        coords_cf[:, ci] = c_nounits
+    end
+
+    if write_velocities
+        Chemfiles.add_velocities!(frame)
+        velocities_cf = Chemfiles.velocities(frame)
+        velocities = Array(sys.velocities)
+        for (ci, si) in enumerate(atom_inds)
+            v = velocities[si]
+            if unit(eltype(v)) == NoUnits
+                v_nounits = v .* 10 # Assume nm / ps
+            else
+                v_nounits = ustrip.(u"Å * ps^-1", v)
+            end
+            velocities_cf[:, ci] = v_nounits
+        end
+    end
+
+    writing_mode = (append ? 'a' : 'w')
+    Chemfiles.Trajectory(filepath, writing_mode, format) do trajectory
+        write(trajectory, frame)
+    end
+    return topology
+end
+
+"""
+    write_structure(filepath, sys; format="", atom_inds=[],
+                    excluded_res=String[], write_velocities=false,
+                    write_cell=true)
+
+Write the 3D structure of a system to a file.
+
+Uses Chemfiles.jl to write to one of a variety of formats including DCD, XTC, PDB,
+CIF, MOL2, SDF, TRR and XYZ.
+The full list of file formats can be found in the
+[Chemfiles docs](https://chemfiles.org/chemfiles/latest/formats.html#list-of-supported-formats).
+By default the format is guessed from the file extension but it can also
+be given as a string, e.g. `format="DCD"`.
+BioStructures.jl is used to write to the PDB format.
+
+The atom indices to be written can be given as a list or range to `atom_inds`,
+with all atoms being written by default.
+Residue names to be excluded can be given as `excluded_res`.
+Velocities can be written in addition to coordinates by setting
+`write_velocities=true`.
+Chemfiles does not support writing velocities to all file formats.
+
+The [`System`](@ref) should have `atoms_data` defined, and `topology` if bonding
+information is required.
+The file will be overwritten if it already exists.
+
+Not compatible with 2D systems.
+"""
+function write_structure(filepath, sys; format::AbstractString="", atom_inds=Int[],
+                         excluded_res=(), write_velocities::Bool=false,
+                         write_cell=true)
+    if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
+        # Special case PDB so more residue information can be written
+        open(filepath, "w") do output
+            if write_cell && !has_infinite_boundary(sys.boundary)
+                println(output, pdb_cryst1_line(sys.boundary))
+            end
+            write_pdb_coords(output, sys, atom_inds, excluded_res)
+            println(output, "END")
+        end
+    else
+        topology = Chemfiles.Topology()
+        write_chemfiles!(topology, filepath, sys, uppercase(format), atom_inds,
+                         excluded_res, write_velocities, write_cell, true, false)
     end
 end
 
@@ -449,7 +569,7 @@ function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                           excluded_res=String[], write_velocities::Bool=false,
                           write_cell::Bool=true)
     topology = Chemfiles.Topology() # Added to later when sys is available
-    if uppercase(splitext(filepath)[2]) == ".PDB"
+    if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
         format_used = "PDB"
     else
         # Chemfiles can deal with "" format
@@ -481,84 +601,11 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
                 println(output, "ENDMDL")
             end
         else
-            writing_all_atoms = iszero(length(logger.atom_inds))
-            atom_inds_all_res = (writing_all_atoms ? eachindex(sys) : logger.atom_inds)
-            if iszero(length(logger.excluded_res))
-                atom_inds = atom_inds_all_res
-            else
-                atom_inds = filter(
-                    si -> !(sys.atoms_data[si].res_name in logger.excluded_res),
-                    atom_inds_all_res,
-                )
-            end
-            if !logger.topology_written
-                if isnothing(sys.atoms_data) || length(sys) != length(sys.atoms_data)
-                    throw(ArgumentError("TrajectoryWriter requires atoms_data to be set"))
-                end
-                if !all(in(eachindex(sys)), atom_inds)
-                    throw(ArgumentError("TrajectoryWriter requires all atom_inds values to " *
-                                        "be valid indices in the system"))
-                end
-                atoms_cpu = Array(sys.atoms)
-                for si in atom_inds
-                    atom, atom_data = atoms_cpu[si], sys.atoms_data[si]
-                    at = Chemfiles.Atom(atom_data.atom_name)
-                    Chemfiles.set_type!(at, atom_data.atom_type)
-                    Chemfiles.set_mass!(at, Float64(ustrip(mass(atom))))
-                    Chemfiles.set_charge!(at, Float64(charge(atom)))
-                    Chemfiles.add_atom!(logger.topology, at)
-                end
-                if !isnothing(sys.topology)
-                    for (si, sj) in sys.topology.bonded_atoms
-                        # Only write bonds where both atoms are present
-                        if si in atom_inds && sj in atom_inds
-                            ci = findfirst(isequal(si), atom_inds)
-                            cj = findfirst(isequal(sj), atom_inds)
-                            # Zero-based indexing
-                            Chemfiles.add_bond!(logger.topology, ci - 1, cj - 1)
-                        end
-                    end
-                end
-                logger.topology_written = true
-            end
-
-            frame = Chemfiles.Frame()
-            resize!(frame, length(atom_inds))
-            Chemfiles.set_topology!(frame, logger.topology)
-            if logger.write_cell
-                Chemfiles.set_cell!(frame, Chemfiles.UnitCell(sys.boundary))
-            end
-
-            coords_cf = Chemfiles.positions(frame)
-            coords = Array(sys.coords)
-            for (ci, si) in enumerate(atom_inds)
-                c = coords[si]
-                if unit(eltype(c)) == NoUnits
-                    c_nounits = c .* 10 # Assume nm
-                else
-                    c_nounits = ustrip.(u"Å", c)
-                end
-                coords_cf[:, ci] = c_nounits
-            end
-
-            if logger.write_velocities
-                Chemfiles.add_velocities!(frame)
-                velocities_cf = Chemfiles.velocities(frame)
-                velocities = Array(sys.velocities)
-                for (ci, si) in enumerate(atom_inds)
-                    v = velocities[si]
-                    if unit(eltype(v)) == NoUnits
-                        v_nounits = v .* 10 # Assume nm / ps
-                    else
-                        v_nounits = ustrip.(u"Å * ps^-1", v)
-                    end
-                    velocities_cf[:, ci] = v_nounits
-                end
-            end
-
-            Chemfiles.Trajectory(logger.filepath, 'a', logger.format) do trajectory
-                write(trajectory, frame)
-            end        
+            write_chemfiles!(logger.topology, logger.filepath, sys, logger.format,
+                             logger.atom_inds, logger.excluded_res,
+                             logger.write_velocities, logger.write_cell,
+                             !logger.topology_written, true)
+            logger.topology_written = true
         end
     end
 end

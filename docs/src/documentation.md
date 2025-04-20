@@ -108,6 +108,9 @@ sys.constraints
 sys.neighbor_finder
 sys.loggers
 
+# Write out the system to a file
+write_structure("file.pdb", sys)
+
 # For certain systems
 virial(sys)
 pressure(sys)
