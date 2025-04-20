@@ -338,7 +338,7 @@ end
 
 """
     TrajectoryWriter(n_steps, filepath; format="", atom_inds=[],
-                     write_velocities=false)
+                     excluded_res=String[], write_velocities=false)
 
 Write 3D structures to a file throughout a simulation.
 
@@ -351,6 +351,7 @@ be given as a string, e.g. `format="DCD"`.
 
 The atom indices to be written can be given as a list or range to `atom_inds`,
 with all atoms being written by default.
+Residue names to be excluded can be given as `excluded_res`.
 Velocities can be written in addition to coordinates by setting
 `write_velocities=true`.
 Chemfiles does not support writing velocities to all file formats.
@@ -367,6 +368,7 @@ mutable struct TrajectoryWriter{I, T}
     filepath::String
     format::String
     atom_inds::I # Int[] or range
+    excluded_res::Set{String}
     write_velocities::Bool
     topology::T
     topology_written::Bool
@@ -375,10 +377,10 @@ end
 
 function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                           format::AbstractString="", atom_inds=Int[],
-                          write_velocities::Bool=false)
+                          excluded_res=String[], write_velocities::Bool=false)
     topology = Chemfiles.Topology() # Added to later when sys is available
     return TrajectoryWriter(n_steps, filepath, uppercase(format), atom_inds,
-                            write_velocities, topology, false, 0)
+                    Set(excluded_res), write_velocities, topology, false, 0)
 end
 
 function Base.show(io::IO, tw::TrajectoryWriter)
@@ -390,7 +392,15 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         writing_all_atoms = iszero(length(logger.atom_inds))
-        atom_inds = (writing_all_atoms ? eachindex(sys) : logger.atom_inds)
+        atom_inds_all_res = (writing_all_atoms ? eachindex(sys) : logger.atom_inds)
+        if iszero(length(logger.excluded_res))
+            atom_inds = atom_inds_all_res
+        else
+            atom_inds = filter(
+                si -> !(sys.atoms_data[si].res_name in logger.excluded_res),
+                atom_inds_all_res,
+            )
+        end
         if !logger.topology_written
             if isnothing(sys.atoms_data) || length(sys) != length(sys.atoms_data)
                 throw(ArgumentError("TrajectoryWriter requires atoms_data to be set"))
@@ -468,6 +478,7 @@ Write 3D structures to a file in the PDB format throughout a simulation.
 
 The atom indices to be written can be given as a list or range to `atom_inds`,
 with all atoms being written by default.
+Residue names to be excluded can be given as `excluded_res`.
 The [`System`](@ref) should have `atoms_data` defined.
 The file will be appended to, so should be deleted before simulation if it
 already exists.
