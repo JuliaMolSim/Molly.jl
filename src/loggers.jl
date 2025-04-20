@@ -462,10 +462,12 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
 end
 
 """
-    StructureWriter(n_steps, filepath, excluded_res=String[])
+    StructureWriter(n_steps, filepath, excluded_res=String[]; atom_inds=[])
 
 Write 3D structures to a file in the PDB format throughout a simulation.
 
+The atom indices to be written can be given as a list or range to `atom_inds`,
+with all atoms being written by default.
 The [`System`](@ref) should have `atoms_data` defined.
 The file will be appended to, so should be deleted before simulation if it
 already exists.
@@ -475,15 +477,17 @@ The box size for the CRYST1 record is taken from the first snapshot;
 different box sizes at later snapshots will not be recorded.
 The CRYST1 record is not written for infinite boundaries.
 """
-mutable struct StructureWriter
+mutable struct StructureWriter{I}
     n_steps::Int
     filepath::String
+    atom_inds::I # Int[] or range
     excluded_res::Set{String}
     structure_n::Int
 end
 
-function StructureWriter(n_steps::Integer, filepath::AbstractString, excluded_res=String[])
-    return StructureWriter(n_steps, filepath, Set(excluded_res), 0)
+function StructureWriter(n_steps::Integer, filepath::AbstractString,
+                         excluded_res=String[]; atom_inds=Int[])
+    return StructureWriter(n_steps, filepath, atom_inds, Set(excluded_res), 0)
 end
 
 function Base.show(io::IO, sw::StructureWriter)
@@ -528,36 +532,54 @@ function pdb_cryst1_line(b::TriclinicBoundary)
            "$(pdb_cryst1_angle(b.β))$(pdb_cryst1_angle(b.γ)) P 1           1"
 end
 
+function BioStructures.AtomRecord(at_data::AtomData, i, coord)
+    return BioStructures.AtomRecord(
+        false, i, at_data.atom_name, ' ', at_data.res_name, "A",
+        at_data.res_number, ' ', coord, 1.0, 0.0,
+        at_data.element == "?" ? "  " : at_data.element, "  "
+    )
+end
+
+function write_pdb_coords(output, sys, atom_inds_arg=Int[], excluded_res=())
+    atom_inds = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
+    coords_cpu = Array(sys.coords)
+    for i in atom_inds
+        coord, atom_data = coords_cpu[i], sys.atoms_data[i]
+        if unit(first(coord)) == NoUnits
+            # If not told, assume coordinates are in nm and convert to Å
+            coord_convert = 10 .* coord
+        else
+            coord_convert = ustrip.(u"Å", coord)
+        end
+        if !(atom_data.res_name in excluded_res)
+            at_rec = BioStructures.AtomRecord(atom_data, i, coord_convert)
+            println(output, BioStructures.pdbline(at_rec))
+        end
+    end
+end
+
+function write_pdb_file(filepath, sys; atom_inds=Int[], excluded_res=(),
+                        write_cell=true)
+    open(filepath, "w") do output
+        if write_cell && !has_infinite_boundary(sys.boundary)
+            println(output, pdb_cryst1_line(sys.boundary))
+        end
+        write_pdb_coords(output, sys, atom_inds, excluded_res)
+        println(output, "END")
+    end
+end
+
 function append_model!(logger::StructureWriter, sys)
     logger.structure_n += 1
     open(logger.filepath, "a") do output
         if logger.structure_n == 1 && !has_infinite_boundary(sys.boundary)
             println(output, pdb_cryst1_line(sys.boundary))
         end
-
         println(output, "MODEL     ", lpad(logger.structure_n, 4))
-        for (i, coord) in enumerate(Array(sys.coords))
-            atom_data = sys.atoms_data[i]
-            if unit(first(coord)) == NoUnits
-                # If not told, assume coordinates are in nm and convert to Å
-                coord_convert = 10 .* coord
-            else
-                coord_convert = ustrip.(u"Å", coord)
-            end
-            if !(atom_data.res_name in logger.excluded_res)
-                at_rec = atom_record(atom_data, i, coord_convert)
-                println(output, BioStructures.pdbline(at_rec))
-            end
-        end
+        write_pdb_coords(output, sys, logger.atom_inds, logger.excluded_res)
         println(output, "ENDMDL")
     end
 end
-
-atom_record(at_data, i, coord) = BioStructures.AtomRecord(
-    false, i, at_data.atom_name, ' ', at_data.res_name, "A",
-    at_data.res_number, ' ', coord, 1.0, 0.0,
-    at_data.element == "?" ? "  " : at_data.element, "  "
-)
 
 @doc raw"""
     TimeCorrelationLogger(observableA::Function, observableB::Function,
