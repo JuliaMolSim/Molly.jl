@@ -572,6 +572,16 @@ function System(coord_file::AbstractString,
         res_id = get_res_id(res)
         res_name = residue_name(res, res_id_to_standard, rename_terminal_res)
         at_type = force_field.residue_types[res_name].types[atom_name]
+        if "chainname" in Chemfiles.list_properties(res)
+            chain_id = Chemfiles.property(res, "chainname")
+        else
+            chain_id = "A"
+        end
+        if "is_standard_pdb" in Chemfiles.list_properties(res)
+            hetero_atom = !Chemfiles.property(res, "is_standard_pdb")
+        else
+            hetero_atom = false
+        end
         at = force_field.atom_types[at_type]
         if use_charge_from_residue
             ch = force_field.residue_types[res_name].charges[atom_name]
@@ -586,7 +596,8 @@ function System(coord_file::AbstractString,
         end
         push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=ch, σ=at.σ, ϵ=at.ϵ))
         push!(atoms_data, AtomData(atom_type=at_type, atom_name=atom_name, res_number=Chemfiles.id(res),
-                                    res_name=Chemfiles.name(res), element=at.element))
+                                    res_name=Chemfiles.name(res), chain_id=chain_id, element=at.element,
+                                    hetero_atom=hetero_atom))
         eligible[ai, ai] = false
     end
 

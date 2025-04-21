@@ -365,8 +365,8 @@ end
 
 function BioStructures.AtomRecord(at_data::AtomData, i, coord)
     return BioStructures.AtomRecord(
-        false, i, at_data.atom_name, ' ', at_data.res_name, "A",
-        at_data.res_number, ' ', coord, 1.0, 0.0,
+        at_data.hetero_atom, i, at_data.atom_name, ' ', at_data.res_name,
+        at_data.chain_id, at_data.res_number, ' ', coord, 1.0, 0.0,
         at_data.element == "?" ? "  " : at_data.element, "  "
     )
 end
@@ -383,6 +383,10 @@ function write_pdb_coords(output, sys, atom_inds_arg=Int[], excluded_res=())
             coord_convert = ustrip.(u"Å", coord)
         end
         if !(atom_data.res_name in excluded_res)
+            if length(atom_data.chain_id) > 1
+                throw(ArgumentError("chain ID is $(atom_data.chain_id) but can " *
+                                    "only be one character to write to a PDB file"))
+            end
             at_rec = BioStructures.AtomRecord(atom_data, i, coord_convert)
             println(output, BioStructures.pdbline(at_rec))
         end

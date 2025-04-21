@@ -87,7 +87,8 @@ end
             coords=place_atoms(n_atoms, boundary; min_dist=0.3u"nm"),
             boundary=boundary,
             velocities=[random_velocity(atom_mass, temp) .* 0.01 for i in 1:n_atoms],
-            atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR", element="Ar")
+            atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR",
+                                 chain_id="B", element="Ar")
                         for i in 1:n_atoms],
             pairwise_inters=(LennardJones(use_neighbors=true),),
             neighbor_finder=DistanceNeighborFinder(
@@ -118,7 +119,10 @@ end
             rm(temp_fp_pdb)
             @test BioStructures.countmodels(traj) == 1
             @test BioStructures.countatoms(first(traj)) == 4
-            @test BioStructures.serial(BioStructures.collectatoms(traj)[2]) == 12
+            traj_atoms = BioStructures.collectatoms(traj)
+            @test all(iszero, BioStructures.ishetero.(traj_atoms))
+            @test BioStructures.serial.(traj_atoms) == [10, 12, 14, 16]
+            @test BioStructures.chainids(traj) == ["B"]
 
             for write_boundary in (true, false)
                 # Suppress sybyl type warning

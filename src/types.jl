@@ -313,28 +313,22 @@ end
 fender_halsey_ϵ_mixing(atom_i, atom_j) = (2 * atom_i.ϵ * atom_j.ϵ) / (atom_i.ϵ + atom_j.ϵ)
 
 """
-    AtomData(atom_type, atom_name, res_number, res_name)
+    AtomData(; atom_type="?", atom_name="?", res_number=1, res_name="???",
+             chain_id="A", element="?", hetero_atom=false)
 
 Data associated with an atom.
 
 Storing this separately allows the [`Atom`](@ref) types to be bits types and hence
 work on the GPU.
 """
-struct AtomData
-    atom_type::String
-    atom_name::String
-    res_number::Int
-    res_name::String
-    element::String
-end
-
-function AtomData(;
-                    atom_type="?",
-                    atom_name="?",
-                    res_number=1,
-                    res_name="???",
-                    element="?")
-    return AtomData(atom_type, atom_name, res_number, res_name, element)
+@kwdef struct AtomData
+    atom_type::String = "?"
+    atom_name::String = "?"
+    res_number::Int = 1
+    res_name::String = "???"
+    chain_id::String = "A"
+    element::String = "?"
+    hetero_atom::Bool = false
 end
 
 """
