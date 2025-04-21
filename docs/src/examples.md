@@ -475,7 +475,7 @@ calc = ASECalculator(
 sys = System(
     sys;
     general_inters=(calc,),
-    loggers=(StructureWriter(20, "mace_dipeptide.pdb"),) # Every 10 fs
+    loggers=(TrajectoryWriter(20, "mace_dipeptide.pdb"),) # Every 10 fs
 )
 potential_energy(sys)
 

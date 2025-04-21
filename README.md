@@ -106,7 +106,7 @@ sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
     loggers=(
         temp=TemperatureLogger(10),
-        writer=StructureWriter(10, "traj_5XER_1ps.pdb"),
+        writer=TrajectoryWriter(10, "traj_5XER_1ps.pdb"),
     ),
 )
 

@@ -110,6 +110,7 @@ sys.loggers
 
 # Write out the system to a file
 write_structure("file.pdb", sys)
+write_structure("file.mol2", sys)
 
 # For certain systems
 virial(sys)

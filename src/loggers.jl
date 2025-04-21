@@ -390,7 +390,7 @@ function write_pdb_coords(output, sys, atom_inds_arg=Int[], excluded_res=())
 end
 
 function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, excluded_res,
-                          write_velocities, write_cell, calc_topology, append)
+                          write_velocities, write_boundary, calc_topology, append)
     atom_inds_all_res = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
     if iszero(length(excluded_res))
         atom_inds = atom_inds_all_res
@@ -434,7 +434,7 @@ function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, exclud
     frame = Chemfiles.Frame()
     resize!(frame, length(atom_inds))
     Chemfiles.set_topology!(frame, topology)
-    if write_cell
+    if write_boundary
         Chemfiles.set_cell!(frame, Chemfiles.UnitCell(sys.boundary))
     end
 
@@ -475,7 +475,7 @@ end
 """
     write_structure(filepath, sys; format="", atom_inds=[],
                     excluded_res=String[], write_velocities=false,
-                    write_cell=true)
+                    write_boundary=true)
 
 Write the 3D structure of a system to a file.
 
@@ -502,11 +502,11 @@ Not compatible with 2D systems.
 """
 function write_structure(filepath, sys; format::AbstractString="", atom_inds=Int[],
                          excluded_res=(), write_velocities::Bool=false,
-                         write_cell=true)
+                         write_boundary=true)
     if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
         # Special case PDB so more residue information can be written
         open(filepath, "w") do output
-            if write_cell && !has_infinite_boundary(sys.boundary)
+            if write_boundary && !has_infinite_boundary(sys.boundary)
                 println(output, pdb_cryst1_line(sys.boundary))
             end
             write_pdb_coords(output, sys, atom_inds, excluded_res)
@@ -515,14 +515,14 @@ function write_structure(filepath, sys; format::AbstractString="", atom_inds=Int
     else
         topology = Chemfiles.Topology()
         write_chemfiles!(topology, filepath, sys, uppercase(format), atom_inds,
-                         excluded_res, write_velocities, write_cell, true, false)
+                         excluded_res, write_velocities, write_boundary, true, false)
     end
 end
 
 """
     TrajectoryWriter(n_steps, filepath; format="", atom_inds=[],
                      excluded_res=String[], write_velocities=false,
-                     write_cell=true)
+                     write_boundary=true)
 
 Write 3D structures to a file throughout a simulation.
 
@@ -558,7 +558,7 @@ mutable struct TrajectoryWriter{I, T}
     atom_inds::I # Int[] or range
     excluded_res::Set{String}
     write_velocities::Bool
-    write_cell::Bool
+    write_boundary::Bool
     topology::T
     topology_written::Bool
     structure_n::Int
@@ -567,7 +567,7 @@ end
 function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                           format::AbstractString="", atom_inds=Int[],
                           excluded_res=String[], write_velocities::Bool=false,
-                          write_cell::Bool=true)
+                          write_boundary::Bool=true)
     topology = Chemfiles.Topology() # Added to later when sys is available
     if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
         format_used = "PDB"
@@ -576,7 +576,7 @@ function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
         format_used = uppercase(format)
     end
     return TrajectoryWriter(n_steps, filepath, format_used, atom_inds,
-                    Set(excluded_res), write_velocities, write_cell, topology,
+                    Set(excluded_res), write_velocities, write_boundary, topology,
                     false, 0)
 end
 
@@ -592,7 +592,7 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
         if logger.format == "PDB"
             # Special case PDB so more residue information can be written
             open(logger.filepath, "a") do output
-                if logger.write_cell && logger.structure_n == 1 &&
+                if logger.write_boundary && logger.structure_n == 1 &&
                             !has_infinite_boundary(sys.boundary)
                     println(output, pdb_cryst1_line(sys.boundary))
                 end
@@ -603,9 +603,11 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
         else
             write_chemfiles!(logger.topology, logger.filepath, sys, logger.format,
                              logger.atom_inds, logger.excluded_res,
-                             logger.write_velocities, logger.write_cell,
+                             logger.write_velocities, logger.write_boundary,
                              !logger.topology_written, true)
-            logger.topology_written = true
+            if !logger.topology_written
+                logger.topology_written = true
+            end
         end
     end
 end
