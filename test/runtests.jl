@@ -101,10 +101,12 @@ const data_dir = normpath(@__DIR__, "..", "data")
 const ff_dir     = joinpath(data_dir, "force_fields")
 const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
-const temp_fp_dcd = tempname(cleanup=true) * ".dcd"
-const temp_fp_trr = tempname(cleanup=true) * ".trr"
-const temp_fp_pdb = tempname(cleanup=true) * ".pdb"
-const temp_fp_viz = tempname(cleanup=true) * ".mp4"
+const temp_fp_dcd  = tempname(cleanup=true) * ".dcd"
+const temp_fp_trr  = tempname(cleanup=true) * ".trr"
+const temp_fp_pdb  = tempname(cleanup=true) * ".pdb"
+const temp_fp_xyz  = tempname(cleanup=true) * ".xyz"
+const temp_fp_mol2 = tempname(cleanup=true) * ".mol2"
+const temp_fp_mp4  = tempname(cleanup=true) * ".mp4"
 
 Enzyme.Compiler.VERBOSE_ERRORS[] = true
 

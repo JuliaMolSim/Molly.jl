@@ -61,7 +61,7 @@
         t, σ = values(s.loggers.avg_temp)
         @test values(s.loggers.avg_temp; std=false) == t
         @test isapprox(t, mean(values(s.loggers.temp)); atol=3σ)
-        run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_viz)
+        run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_mp4)
     end
 end
 
@@ -105,11 +105,50 @@ end
                 force=ForcesLogger(100),
                 dcd_writer=TrajectoryWriter(100, temp_fp_dcd),
                 trr_writer=TrajectoryWriter(100, temp_fp_trr; write_velocities=true),
-                pdb_writer=StructureWriter(100, temp_fp_pdb),
+                pdb_writer=TrajectoryWriter(100, temp_fp_pdb),
                 potkin_correlation=TimeCorrelationLogger(pot_obs, kin_obs, TP, TP, 1, 100),
                 velocity_autocorrelation=AutoCorrelationLogger(V, TV, n_atoms, 100),
             ),
         )
+
+        if n_threads == 1
+            write_structure(temp_fp_pdb, s; atom_inds=[10, 12, 14, 16])
+            @test readlines(temp_fp_pdb)[1] == "CRYST1     20.0     20.0     20.0  90.00  90.00  90.00 P 1           1"
+            traj = read(temp_fp_pdb, BioStructures.PDBFormat)
+            rm(temp_fp_pdb)
+            @test BioStructures.countmodels(traj) == 1
+            @test BioStructures.countatoms(first(traj)) == 4
+            @test BioStructures.serial(BioStructures.collectatoms(traj)[2]) == 12
+
+            for write_boundary in (true, false)
+                # Suppress sybyl type warning
+                @suppress_err begin
+                    write_structure(temp_fp_mol2, s; format="MOL2",
+                                    write_boundary=write_boundary)
+                    traj = Chemfiles.Trajectory(temp_fp_mol2)
+                    rm(temp_fp_mol2)
+                    @test Int(length(traj)) == 1
+                    frame = read(traj)
+                    @test length(frame) == 100
+                    @test size(Chemfiles.positions(frame)) == (3, 100)
+                    @test !iszero(sum(Array(Chemfiles.positions(frame))))
+                    if write_boundary
+                        @test Chemfiles.lengths(Chemfiles.UnitCell(frame)) == [20.0, 20.0, 20.0]
+                    end
+                end
+            end
+
+            write_structure(temp_fp_xyz, s)
+            @test countlines(temp_fp_xyz) == 102
+            traj = Chemfiles.Trajectory(temp_fp_xyz)
+            rm(temp_fp_xyz)
+            @test Int(length(traj)) == 1
+            frame = read(traj)
+            @test length(frame) == 100
+            @test size(Chemfiles.positions(frame)) == (3, 100)
+            @test !iszero(sum(Array(Chemfiles.positions(frame))))
+            @test Chemfiles.lengths(Chemfiles.UnitCell(frame)) == [20.0, 20.0, 20.0]
+        end
 
         # Test AtomsBase.jl interface
         @test length(s) == n_atoms
@@ -192,7 +231,7 @@ end
         @test BioStructures.countmodels(traj) == 201
         @test BioStructures.countatoms(first(traj)) == 100
 
-        run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_viz)
+        run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_mp4)
     end
 end
 
@@ -230,7 +269,7 @@ end
     @test length(values(s.loggers.coords)) == 21
     @test maximum(distances(s.coords, boundary)) > 5.0u"nm"
 
-    run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_viz)
+    run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_mp4)
 end
 
 @testset "Lennard-Jones simulators" begin
@@ -377,7 +416,7 @@ end
         visualize(
             s.loggers.coords,
             boundary,
-            temp_fp_viz;
+            temp_fp_mp4;
             connections=[(i, i + (n_atoms ÷ 2)) for i in 1:(n_atoms ÷ 2)],
             trails=2,
         )
