@@ -15,6 +15,7 @@ using KernelDensity
 using Metal
 using oneAPI
 import SimpleCrystals
+using Suppressor
 
 using DelimitedFiles
 using LinearAlgebra

@@ -489,8 +489,11 @@ end
                         [0.0    , 1.4654985, 0.0],
                         [0.0    , 0.0      , Inf]]u"Å",
     )
-    molly_sys = System(ab_sys_2; energy_units=u"kJ", force_units=u"kJ/Å")
-    test_approx_eq(ab_sys_2, molly_sys; common_only=true)
+    # Suppress origin warning
+    @suppress_err begin
+        molly_sys = System(ab_sys_2; energy_units=u"kJ", force_units=u"kJ/Å")
+        test_approx_eq(ab_sys_2, molly_sys; common_only=true)
+    end
 end
 
 @testset "AtomsCalculators" begin
@@ -503,15 +506,18 @@ end
     coul = Coulomb(coulomb_const=2.307e-21u"kJ*Å")
     calc = MollyCalculator(pairwise_inters=(coul,), force_units=u"kJ/Å", energy_units=u"kJ")
 
-    pe = AtomsCalculators.potential_energy(ab_sys, calc)
-    @test unit(pe) == u"kJ"
-    fs = AtomsCalculators.forces(ab_sys, calc)
-    @test length(fs) == length(ab_sys)
-    @test unit(fs[1][1]) == u"kJ/Å"
-    zfs = AtomsCalculators.zero_forces(ab_sys, calc)
-    @test zfs == fill(SVector(0.0, 0.0, 0.0)u"kJ/Å", length(ab_sys))
+    # Suppress origin warning
+    @suppress_err begin
+        pe = AtomsCalculators.potential_energy(ab_sys, calc)
+        @test unit(pe) == u"kJ"
+        fs = AtomsCalculators.forces(ab_sys, calc)
+        @test length(fs) == length(ab_sys)
+        @test unit(fs[1][1]) == u"kJ/Å"
+        zfs = AtomsCalculators.zero_forces(ab_sys, calc)
+        @test zfs == fill(SVector(0.0, 0.0, 0.0)u"kJ/Å", length(ab_sys))
 
-    # AtomsCalculators.AtomsCalculatorsTesting functions
-    test_potential_energy(ab_sys, calc)
-    test_forces(ab_sys, calc)
+        # AtomsCalculators.AtomsCalculatorsTesting functions
+        test_potential_energy(ab_sys, calc)
+        test_forces(ab_sys, calc)
+    end
 end
