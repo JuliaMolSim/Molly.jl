@@ -9,9 +9,9 @@ export
 
 Constraint between two atoms that maintains a fixed distance between the two atoms.
 """
-struct DistanceConstraint{D}
-    i::Int
-    j::Int
+struct DistanceConstraint{D, I}
+    i::I
+    j::I
     dist::D
 end
 
