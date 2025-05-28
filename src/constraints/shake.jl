@@ -29,12 +29,14 @@ struct SHAKE_RATTLE{C, D, V}
     clusters::C
     dist_tolerance::D
     vel_tolerance::V
+    n_constrainted_atoms::Int
 end
 
 function SHAKE_RATTLE(constraints, n_atoms::Integer, dist_tolerance, vel_tolerance)
     clusters = build_clusters(n_atoms, constraints)
+    n_constrainted_atoms = sum(num_unique.(clusters))
     return SHAKE_RATTLE{typeof(clusters), typeof(dist_tolerance), typeof(vel_tolerance)}(
-            clusters, dist_tolerance, vel_tolerance)
+            clusters, dist_tolerance, vel_tolerance, n_constrainted_atoms)
 end
 
 function apply_position_constraints!(sys, ca::SHAKE_RATTLE, coord_storage;
@@ -43,7 +45,7 @@ function apply_position_constraints!(sys, ca::SHAKE_RATTLE, coord_storage;
     converged = false
 
     while !converged
-        for cluster in ca.clusters # Cannot parallelize this
+        Threads.@threads for cluster in ca.clusters
             for constraint in cluster.constraints
                 k1, k2 = constraint.i, constraint.j
 
@@ -92,7 +94,7 @@ function apply_velocity_constraints!(sys, ca::SHAKE_RATTLE; n_threads::Integer=T
     converged = false
 
     while !converged
-        for cluster in ca.clusters # Cannot parallelize this
+        Threads.@threads for cluster in ca.clusters
             for constraint in cluster.constraints
                 k1, k2 = constraint.i, constraint.j
 

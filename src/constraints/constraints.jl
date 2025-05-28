@@ -39,6 +39,8 @@ function ConstraintCluster(constraints)
 end
 
 Base.length(cc::ConstraintCluster) = length(cc.constraints)
+num_unique(cc::ConstraintCluster) = cc.n_unique_atoms
+    
 
 """
     disable_constrained_interactions!(neighbor_finder, constraint_clusters)
