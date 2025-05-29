@@ -15,32 +15,15 @@ struct DistanceConstraint{D}
     dist::D
 end
 
-#=
-    ConstraintCluster(constraints)
 
-A group of constraints.
-
-Atoms in a cluster do not participate in any other constraints outside of that cluster.
-Larger clusters may incur a performance penalty.
-=#
-struct ConstraintCluster{N, C}
-    constraints::SVector{N, C}
-    n_unique_atoms::Int
-end
-
-function ConstraintCluster(constraints)
-    atom_ids = typeof(constraints[1].i)[]
-    for constraint in constraints
-        push!(atom_ids, constraint.i)
-        push!(atom_ids, constraint.j)
+function δ(x::T, y::T)
+    if x == y
+        return one(T)
+    else
+        return zero(T)
     end
-    return ConstraintCluster{length(constraints), eltype(constraints)}(
-                constraints, length(unique(atom_ids)))
 end
-
-Base.length(cc::ConstraintCluster) = length(cc.constraints)
-num_unique(cc::ConstraintCluster) = cc.n_unique_atoms
-    
+  
 
 """
     disable_constrained_interactions!(neighbor_finder, constraint_clusters)
@@ -49,7 +32,7 @@ Disables neighbor list interactions between atoms in a constraint.
 """
 function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
     for cluster in constraint_clusters
-        for constraint in cluster.constraints
+        for constraint in cluster
             neighbor_finder.eligible[constraint.i, constraint.j] = false
             neighbor_finder.eligible[constraint.j, constraint.i] = false
         end
@@ -76,24 +59,41 @@ function build_clusters(n_atoms, constraints)
     cc = connected_components(constraint_graph)
 
     # Loop through connected regions and convert to clusters
-    clusters = []
-    for (cluster_idx, atom_idxs) in enumerate(cc)
+    clusters1 = []; clusters2 = []; clusters3 = []
+    for (_, atom_idxs) in enumerate(cc)
         # Loop over atoms in connected region to build cluster
         if length(atom_idxs) > 1 # connected_components gives unconnected vertices as well
-            connected_constraints = []
+            # connected_constraints = []
+            is = []; js = []; dists = []
             for ai in atom_idxs
                 neigh_idxs = neighbors(constraint_graph, ai)
                 for neigh_idx in neigh_idxs
-                    constraint = DistanceConstraint(ai, neigh_idx, idx_dist_pairs[ai, neigh_idx])
-                    push!(connected_constraints, constraint)
+                    push!(is, ai)
+                    push!(js, neigh_idx)
+                    push!(dists, idx_dist_pairs[ai, neigh_idx])
+                    # constraint = DistanceConstraint(ai, neigh_idx, idx_dist_pairs[ai, neigh_idx])
+                    # push!(connected_constraints, constraint)
                 end
             end
-            push!(clusters, ConstraintCluster(SVector(connected_constraints...)))
+
+            cluster = StructArray{DistanceConstraint}((MVector(is...), MVector(js...), MVector(dists...)))
+            N = length(clsuter)
+            # cluster = SVector(connected_constraints...)
+            if N == 1
+                push!(clusters1, cluster)
+            elseif N == 2
+                push!(clusters2, cluster)
+            elseif N == 3
+                push!(clusters3, cluster)
+            else
+                @warn "Constraint clusters with more than 3 constraints are unsupported, skipping."
+            end
         end
     end
 
-    return [clusters...]
+    return [clusters1...], [clusters2...], [clusters3...]
 end
+
 
 """
     apply_position_constraints!(sys, coord_storage; n_threads::Integer=Threads.nthreads())

@@ -1064,10 +1064,12 @@ is_on_gpu(::Union{System{D, AT}, ReplicaSystem{D, AT}, AT}) where {D, AT} = AT <
 """
     float_type(sys)
     float_type(boundary)
+    float_type(unitful_quantity)
 
-The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses.
+The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box or unitful uses.
 """
 float_type(::Union{System{D, AT, T}, ReplicaSystem{D, AT, T}}) where {D, AT, T} = T
+float_type(::Unitful.AbstractQuantity{T}) where T = T
 
 """
     masses(sys)

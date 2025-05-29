@@ -14,30 +14,103 @@ See [Ryckaert et al. 1977](https://doi.org/10.1016/0021-9991(77)90098-5) for SHA
 [Andersen 1983](https://doi.org/10.1016/0021-9991(83)90014-1) for RATTLE and
 [Elber et al. 2011](https://doi.org/10.1140%2Fepjst%2Fe2011-01525-9) for a derivation
 of the linear system solved to satisfy the RATTLE algorithm.
+[Krautler et al. 2000](https://onlinelibrary.wiley.com/doi/10.1002/1096-987X(20010415)22:5%3C501::AID-JCC1021%3E3.0.CO;2-V) for the M-SHAKE algorithm
 
-Not currently compatible with GPU simulation.
 
 # Arguments
-- `constraints`: a vector of constraints to be imposed on the system.
-- `n_atoms::Integer`: the number of atoms in the system.
+- `constraints`: A vector of constraints to be imposed on the system.
+- `n_atoms`: Total number of atoms in the system.
 - `dist_tolerance`: the tolerance used to end the iterative procedure when calculating
     position constraints, should have the same units as the coordinates.
 - `vel_tolerance`: the tolerance used to end the iterative procedure when calculating
     velocity constraints, should have the same units as the velocities * the coordinates.
 """
-struct SHAKE_RATTLE{C, D, V}
-    clusters::C
+struct SHAKE_RATTLE{A, B, C, D, V}
+    clusters1::A
+    clusters2::B
+    clusters3::C
     dist_tolerance::D
     vel_tolerance::V
-    n_constrainted_atoms::Int
+    coord_ordering::Vector{Int}
 end
 
-function SHAKE_RATTLE(constraints, n_atoms::Integer, dist_tolerance, vel_tolerance)
-    clusters = build_clusters(n_atoms, constraints)
-    n_constrainted_atoms = sum(num_unique.(clusters))
+function SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance)
+
+    clusters1, clusters2, clusters3 = build_clusters(n_atoms, constraints)
+
+    # Generate coordinate ordering. This places single constraints first
+    # and in the order matching the `clusters1` list (i.e. first two atoms 
+    # correspond to the first constraint). Then the 3-constraint and 4-constraint
+    # clusters and finally all the other unconstrained atoms. This ordering is 
+    # is a one-time cost to improve GPU-performance.
+
+    coord_ordering = []
+    for cluster in clusters1
+        push!(coord_ordering, cluster[1].i, cluster[1].j)
+    end
+    for cluster in clusters2
+        atoms_in_cluster = unique(reduce(vcat, [[c.i, c.j] for c in cluster]))
+        push!(coord_ordering, atoms_in_cluster)
+    end
+    for cluster in clusters3
+        atoms_in_cluster = unique(reduce(vcat, [[c.i, c.j] for c in cluster]))
+        push!(coord_ordering, atoms_in_cluster)
+    end
+    
+
+    # Add indices of atoms which do not participate in constraints
+    unconstrained_coords = setdiff(1:n_atoms, coord_ordering)
+    push!(coord_ordering, unconstrained_coords)
+
+    # Update (i,j) indices of each constraint
+    index_map = Dict(orig => new for (new, orig) in enumerate(coord_ordering))
+
+    for cluster_array in (clusters1, clusters2, clusters3)
+        for cluster in cluster_array
+            for constraint in cluster
+                constraint.i = index_map[constraint.i]
+                constraint.j = index_map[constraint.j]
+            end
+        end
+    end
+    
     return SHAKE_RATTLE{typeof(clusters), typeof(dist_tolerance), typeof(vel_tolerance)}(
-            clusters, dist_tolerance, vel_tolerance, n_constrainted_atoms)
+            clusters1, clusters2, clusters3, dist_tolerance, vel_tolerance, coord_ordering)
 end
+
+function A_component_helper!(A, clusters, masses)
+    M = length(clusters[1])
+    for cluster in clusters
+        for a in 1:M
+            m1 = masses[cluster[a].i]
+            m2 = masses[cluster[a].j]
+            for b in 1:M 
+                δa1b1 = δ(cluster[a].i, cluster[b].i)
+                δa1b2 = δ(cluster[a].i, cluster[b].j)
+                δa2b2 = δ(cluster[a].j, cluster[b].j)
+                δa2b1 = δ(cluster[a].j, cluster[b].i)
+                A[a, b] = ((δa1b1 + δa1b2)/m1) + ((δa2b2 + δa2b1)/m2)
+            end
+        end
+    end
+    return A
+end
+
+function precompute_A_components(sr::SHAKE_RATTLE, masses)
+
+    Aₘ₂ = KernelAbstractions.zeros(backend, T, length(sr.clusters2), 2, 2) 
+    Aₘ₃ = KernelAbstractions.zeros(backend, T, length(sr.clusters3), 3, 3) 
+
+    # Construct mass component of the A matrix to avoid
+    # to avoid if-else inside the GPU kernel.
+    # Eqn 15 in J. Comp. Chem., Vol. 22, No. 5, 501–508
+    A_component_helper!(Aₘ₂, sr.clusters2, masses)
+    A_component_helper!(Aₘ₃, sr.clusters3, masses)
+
+    return Aₘ₂, Aₘ₃
+end
+
+
 
 function apply_position_constraints!(sys, ca::SHAKE_RATTLE, coord_storage;
                                      n_threads::Integer=Threads.nthreads())
