@@ -51,6 +51,8 @@ function SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance)
 
     #* DOUBLE CHECK THAT ORDER IS CONSISTENT WITH IMPLEMENTATION
     #* CENTER IS ASSUMED TO BE FIRST OFTEN.
+
+    #* ENFORCE NO BACKBONES ARE CONSTRAINED?
     coord_ordering = []
     for cluster in clusters1
         push!(coord_ordering, cluster[1].i, cluster[1].j)
