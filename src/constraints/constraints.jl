@@ -4,6 +4,9 @@ export
     apply_position_constraints!,
     apply_velocity_constraints!
 
+
+struct NoConstraints end
+
 """
     DistanceConstraint(i, j, dist)
 
@@ -15,15 +18,6 @@ struct DistanceConstraint{D}
     dist::D
 end
 
-
-function δ(x::T, y::T)
-    if x == y
-        return one(T)
-    else
-        return zero(T)
-    end
-end
-  
 
 """
     disable_constrained_interactions!(neighbor_finder, constraint_clusters)
@@ -96,28 +90,28 @@ end
 
 
 """
-    apply_position_constraints!(sys, coord_storage; n_threads::Integer=Threads.nthreads())
-    apply_position_constraints!(sys, coord_storage, vel_storage, dt;
-                                n_threads::Integer=Threads.nthreads())
+    apply_position_constraints!(sys, coord_storage)
+    apply_position_constraints!(sys, coord_storage, vel_storage, dt)
 
 Applies the system constraints to the coordinates.
 
 If `vel_storage` and `dt` are provided then velocity corrections are applied as well.
 """
-function apply_position_constraints!(sys, coord_storage; n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys, coord_storage)
     for ca in sys.constraints
-        apply_position_constraints!(sys, ca, coord_storage; n_threads=n_threads)
+        apply_position_constraints!(sys, ca, coord_storage)
     end
     return sys
 end
 
-function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
-                                     n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys, coord_storage, vel_storage, dt)
+
     if length(sys.constraints) > 0
+
         vel_storage .= -sys.coords ./ dt
 
         for ca in sys.constraints
-            apply_position_constraints!(sys, ca, coord_storage; n_threads=n_threads)
+            apply_position_constraints!(sys, ca, coord_storage)
         end
 
         vel_storage .+= sys.coords ./ dt
@@ -128,13 +122,13 @@ function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
 end
 
 """
-    apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
+    apply_velocity_constraints!(sys)
 
 Applies the system constraints to the velocities.
 """
-function apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
+function apply_velocity_constraints!(sys)
     for ca in sys.constraints
-        apply_velocity_constraints!(sys, ca; n_threads=n_threads)
+        apply_velocity_constraints!(sys, ca)
     end
     return sys
 end
@@ -160,7 +154,7 @@ When using constraint algorithms the vibrational degrees of freedom are removed 
 function n_dof_lost(D::Integer, constraint_clusters)
     # Bond constraints remove vibrational DoFs
     vibrational_dof_lost = 0
-    # Assumes constraints are a non-linear chain
+    # Assumes constraints are a non-linear chain (e.g., breaks for angle constraints)
     for cluster in constraint_clusters
         N = cluster.n_unique_atoms
         # If N > 2 assume non-linear (e.g. breaks for CO2)

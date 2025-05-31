@@ -574,6 +574,8 @@ function System(;
         end
     end
 
+    setup_constraints!(neighbor_finder, constraints)
+
     if isa(atoms, AbstractGPUArray) && !isa(coords, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
