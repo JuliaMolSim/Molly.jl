@@ -1199,17 +1199,25 @@ end
 Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io, s)
 
 """
-    System(abstract_system; force_units=u"kJ * mol^-1 * nm^-1", energy_units=u"kJ * mol^-1")
+    System(abstract_system; <keyword arguments>)
 
 Convert an AtomsBase `AbstractSystem` to a Molly `System`.
 
-`force_units` and `energy_units` should be set as appropriate.
-To add properties not present in the AtomsBase interface (e.g. pair potentials) use the
-convenience constructor `System(sys::System)`.
+The keyword arguments `force_units` and `energy_units` should be set as appropriate.
+Other keyword arguments are the same as for the main `System` constructor.
 """
 function System(sys::AtomsBase.AbstractSystem{D};
+                topology=nothing,
+                pairwise_inters=(),
+                specific_inter_lists=(),
+                general_inters=(),
+                constraints=(),
+                neighbor_finder=NoNeighborFinder(),
+                loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
-                energy_units=u"kJ * mol^-1") where D
+                energy_units=u"kJ * mol^-1",
+                k=default_k(energy_units),
+                data=nothing) where D
     bb = AtomsBase.cell_vectors(sys)
     is_cubic = true
     for (i, bv) in enumerate(bb)
@@ -1274,8 +1282,17 @@ function System(sys::AtomsBase.AbstractSystem{D};
         boundary=molly_boundary,
         velocities=vels,
         atoms_data=atoms_data,
+        topology=topology,
+        pairwise_inters=pairwise_inters,
+        specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
+        constraints=constraints,
+        neighbor_finder=neighbor_finder,
+        loggers=loggers,
         force_units=force_units,
         energy_units=energy_units,
+        k=k,
+        data=data,
     )
 end
 

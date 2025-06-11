@@ -137,6 +137,11 @@ visualize(sys.loggers.coords, boundary, "sim_lj.mp4")
 ```
 ![LJ simulation](images/sim_lj.gif)
 
+A Molly [`System`](@ref) can also be constructed from an AtomsBase.jl system. For example:
+```julia
+System(ab_sys; force_units=u"kJ/Å", energy_units=u"kJ")
+```
+
 ## GPU acceleration
 
 To run simulations on the GPU you will need to have a GPU available and then load the appropriate package:
