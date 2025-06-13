@@ -18,6 +18,10 @@ struct DistanceConstraint{D}
     dist::D
 end
 
+struct ConstraintCluster
+    clusters::StructArray{DistanceConstraint}
+    unique_atoms::Vector{Int}
+end
 
 """
     disable_constrained_interactions!(neighbor_finder, constraint_clusters)
@@ -32,6 +36,34 @@ function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
         end
     end
     return neighbor_finder
+end
+
+# This finds the unique atom indicies given a list
+# the lists of atoms that participate in a constraint clusters.
+# The first atom in the result is the atom at the center of the cluster
+function order_atoms(is, js)
+
+    counts = Dict{Int,Int}()
+    for atom in is
+        counts[atom] = get(counts, atom, 0) + 1
+    end
+
+    for atom in js
+        counts[atom] = get(counts, atom, 0) + 1
+    end
+
+    central_atoms = [atom for (atom, cnt) in counts if cnt > 1]
+    unique_atoms = collect(keys(counts))
+
+    if length(central_atoms) == 1
+        central = central_atoms[1]
+        unique_atoms = [central; filter(x -> x != central, unique_atoms)]
+        return unique_atoms
+    elseif length(central_atoms) == 0 # Will trigger if just 1 bond in constraint (e.g. C-C)
+        return unique_atoms
+    else
+        @error "Cannot find central atom. You are not permitted to constraint chains of 4 atoms (e.g., C-C-C-C)"
+    end
 end
 
 function build_clusters(n_atoms, constraints)
@@ -51,13 +83,13 @@ function build_clusters(n_atoms, constraints)
 
     # Get groups of constraints that are connected to eachother
     cc = connected_components(constraint_graph)
-
+    
+    clusters12 = ConstraintCluster[]; clusters23 = ConstraintCluster[]
+    clusters34 = ConstraintCluster[]; clusters_angle = ConstraintCluster[]
     # Loop through connected regions and convert to clusters
-    clusters1 = []; clusters2 = []; clusters3 = []
     for (_, atom_idxs) in enumerate(cc)
         # Loop over atoms in connected region to build cluster
         if length(atom_idxs) > 1 # connected_components gives unconnected vertices as well
-            # connected_constraints = []
             is = []; js = []; dists = []
             for ai in atom_idxs
                 neigh_idxs = neighbors(constraint_graph, ai)
@@ -65,27 +97,31 @@ function build_clusters(n_atoms, constraints)
                     push!(is, ai)
                     push!(js, neigh_idx)
                     push!(dists, idx_dist_pairs[ai, neigh_idx])
-                    # constraint = DistanceConstraint(ai, neigh_idx, idx_dist_pairs[ai, neigh_idx])
-                    # push!(connected_constraints, constraint)
                 end
             end
 
             cluster = StructArray{DistanceConstraint}((MVector(is...), MVector(js...), MVector(dists...)))
-            N = length(clsuter)
-            # cluster = SVector(connected_constraints...)
-            if N == 1
-                push!(clusters1, cluster)
-            elseif N == 2
-                push!(clusters2, cluster)
-            elseif N == 3
-                push!(clusters3, cluster)
+            N_constraint = length(cluster)
+            #* WILL NEED TO UPDATE THIS FOR ANGLE CONSTRAINTS!
+            #* ALL ATOMS WILL TRIGGER AS "CENTRAL" ATOMS 
+            unique_idxs = order_atoms(is, js) # this also puts the central atom as first index, IMPORTANT!
+            N_unique = length(unique_idxs)
+            constraint_cluster = ConstraintCluster(cluster, unique_idxs) 
+            if N_constraint == 1 && N_unique == 2 # Single bond constraint between two atoms
+                push!(clusters12, constraint_cluster)
+            elseif N_constraint == 2 && N_unique == 3 # Central atom with 2 bonds constrained
+                push!(clusters23, constraint_cluster)
+            elseif N_constraint == 3 && N_unique == 4 # Central atom 3 bonds constrained
+                push!(clusters34, constraint_cluster)
+            elseif N_constraint == 3 && N_unique == 3 # 3 atoms, with 2 bonds + 1 angle constraint
+                push!(clusters_angle, constraint_cluster)
             else
-                @warn "Constraint clusters with more than 3 constraints are unsupported, skipping."
+                @error "Constraint clusters with more than 3 constraints or too few unique atoms are not unsupported. Got $(N_constraint) constraints and $(N_unique) unique atoms."
             end
         end
     end
 
-    return [clusters1...], [clusters2...], [clusters3...]
+    return [clusters12...], [clusters23...], [clusters34...], [clusters_angle...]
 end
 
 

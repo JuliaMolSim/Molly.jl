@@ -57,84 +57,42 @@ end
 end
 
 # 2 atoms, 1 constraint
-@kernel inbounds=true function rattle2_kernel!(r, v, m, D, N_constraints)
+@kernel inbounds=true function rattle2_kernel!(r, v, m, clusters, N_constraints)
 
     idx = @index(Global, Linear) # Global Constraint Idx
-    tidx = @index(Local, Linear)
-    @uniform CONSTRAINTS_PER_BLOCK = @groupsize()[1]
-    @uniform ATOMS_PER_CLUSTER = 0x2 
-
-    r_shared = @localmem eltype(r) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
-    v_shared = @localmem eltype(v) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
-
-    # Step 1: Move velocities to shared memory to avoid uncoalesced access
-    # Positions are pre-sorted such that atoms in 1-constraint clusters are
-    # at the start. Furthermore, the atoms are sorted within that sector
-    # such that the 2 atoms in constraint 1 are the first two elements and so on
-
-    for i in 1:ATOMS_PER_CLUSTER
-        global_atom_idx = idx + ((i - 0x1) * CONSTRAINTS_PER_BLOCK)
-        shared_idx = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + i 
-        r_shared[shared_idx] .= r[global_atom_idx]  #* does this work with .= syntax?
-        v_shared[shared_idx] .= v[global_atom_idx]
-    end
-
-     # Ensure all data is loaded into shared memory
-     @synchronize()
 
     if idx <= N_constraints
 
         # Step 2 : Perform RATTLE, for a 2 atom cluster we
         # just re-arrange λ = A / c, since they are all scalars.
 
-        k1 = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + 0x1
-        k2 = k1 + 0x1
-     
-        m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]
-        r_k1k2  = vector(r_shared[k1], r_shared[k2], boundary)
-        v_k1k2 = v_shared[k2] .- v_shared[k1]
+        k1 = clusters[idx].unique_atoms[1]
+        k2 = clusters[idx].unique_atoms[2]
+
+        v_k1 = v[k1] # uncoalesced read
+        v_k2 = v[k2] # uncoalesced read
+    
+        m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]  # uncoalesced read
+        r_k1k2  = vector(r[k1], r[k2], boundary) # uncoalesced read
+        v_k1k2 = v_k2 .- v_k1
 
         λₖ = -dot(r_k1k2, v_k1k2) / (dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv))
-        v_shared[k1] -= m1_inv .* λₖ .* r_k1k2
-        v_shared[k2] += m2_inv .* λₖ .* r_k1k2
+        v_k1 -= m1_inv .* λₖ .* r_k1k2
+        v_k2 += m2_inv .* λₖ .* r_k1k2
 
         # Step 3: Write positions back to global memory
-        for i in 1:ATOMS_PER_CLUSTER
-            global_atom_idx = idx + ((i - 0x1) * CONSTRAINTS_PER_BLOCK)
-            shared_idx = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + i 
-            v[global_atom_idx] .= v_shared[shared_idx]
-        end
-
+        v[k1] .= v_k1 # uncoalesced write
+        v[k2] .= v_k2 # uncoalesced write
     end
-
 end
 
 # 3 atoms 2 constraints
 # Assumes first atom is central atom
-@kernel inbounds=true function rattle3_kernel!(r, v, m, D, N_constraints)
+@kernel inbounds=true function rattle3_kernel!(r, v, m, clusters, N_constraints)
+
     idx = @index(Global, Linear) # Global Constraint Idx
-    tidx = @index(Local, Linear)
-    @uniform CONSTRAINTS_PER_BLOCK = @groupsize()[1]
     @uniform NUM_CONSTRAINTS = 0x2
-    @uniform ATOMS_PER_CLUSTER = 0x3
 
-    r_shared = @localmem eltype(r) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
-    v_shared = @localmem eltype(v) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
-
-    # Step 1: Move velocities to shared memory to avoid uncoalesced access
-    # Positions are pre-sorted such that atoms in 1-constraint clusters are
-    # at the start. Furthermore, the atoms are sorted within that sector
-    # such that the 2 atoms in constraint 1 are the first two elements and so on
-
-    for i in 1:ATOMS_PER_CLUSTER
-        global_atom_idx = idx + ((i - 0x1) * CONSTRAINTS_PER_BLOCK)
-        shared_idx = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + i 
-        r_shared[shared_idx] .= r[global_atom_idx]  #* does this work with .= syntax?
-        v_shared[shared_idx] .= v[global_atom_idx]
-    end
-
-     # Ensure all data is loaded into shared memory
-     @synchronize()
 
     if idx <= N_constraints
 
@@ -143,16 +101,20 @@ end
         C = zeros(eltype(r), NUM_CONSTRAINTS)
         λ = zeros(eltype(r), NUM_CONSTRAINTS)
 
-        k1 = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + 0x1
-        k2 = k1 + 0x1
-        k3 = k1 + 0x2
+        k1 = clusters[idx].unique_atoms[1] # this is assumed to be the central atom
+        k2 = clusters[idx].unique_atoms[2]
+        k3 = clusters[idx].unique_atoms[3]
      
-        m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3]
-        r_k1k2  = vector(r_shared[k1], r_shared[k2], boundary)
-        r_k1k3  = vector(r_shared[k1], r_shared[k3], boundary)
+        m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3] # uncoalesced read
+        r_k1k2  = vector(r[k1], r[k2], boundary)
+        r_k1k3  = vector(r[k1], r[k3], boundary)
 
-        v_k1k2 = v_shared[k2] .- v_shared[k1]
-        v_k1k3 = v_shared[k3] .- v_shared[k1]
+        v_k1 = v[k1] # uncoalesced read
+        v_k2 = v[k2] # uncoalesced read
+        v_k3 = v[k3] # uncoalesced read
+
+        v_k1k2 = v_k2 .- v_k1
+        v_k1k3 = v_k3 .- v_k1
 
         A[1, 1] = dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv)
         A[1, 2] = dot(r_k1k2, r_k1k3) * (m1_inv)
@@ -164,46 +126,23 @@ end
 
         solve_2x2exactly!(λ, A[tid], C)
 
-        v_shared[k1] -= m1_inv * ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
-        v_shared[k2] -= m2_inv .* (-λ[1] .* r_k1k2)
-        v_shared[k3] -= m3_inv .* (-λ[2] .* r_k1k3)
+        v_k1 -= m1_inv * ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
+        v_k2 -= m2_inv .* (-λ[1] .* r_k1k2)
+        v_k3 -= m3_inv .* (-λ[2] .* r_k1k3)
 
-        # Step 3: Write positions back to global memory
-        for i in 1:ATOMS_PER_CLUSTER
-            global_atom_idx = idx + ((i - 0x1) * CONSTRAINTS_PER_BLOCK)
-            shared_idx = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + i 
-            v[global_atom_idx] .= v_shared[shared_idx]
-        end
+        # Write positions back to global memory
+        v[k1] = v_k1 # uncoalesced write
+        v[k2] = v_k2 # uncoalesced write
+        v[k3] = v_k3 # uncoalesced write
 
     end
 end
 
 # 4 atoms 3 cosntraints
 # Assumes first atom is central atom
-@kernel inbounds=true function rattle4_kernel!(r, v, m, D, N_constraints)
+@kernel inbounds=true function rattle4_kernel!(r, v, m, clusters, N_constraints)
     idx = @index(Global, Linear) # Global Constraint Idx
-    tidx = @index(Local, Linear)
-    @uniform CONSTRAINTS_PER_BLOCK = @groupsize()[1]
     @uniform NUM_CONSTRAINTS = 0x3
-    @uniform ATOMS_PER_CLUSTER = 0x4
-
-    r_shared = @localmem eltype(r) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
-    v_shared = @localmem eltype(v) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
-
-    # Step 1: Move velocities to shared memory to avoid uncoalesced access
-    # Positions are pre-sorted such that atoms in 1-constraint clusters are
-    # at the start. Furthermore, the atoms are sorted within that sector
-    # such that the 2 atoms in constraint 1 are the first two elements and so on
-
-    for i in 1:ATOMS_PER_CLUSTER
-        global_atom_idx = idx + ((i - 0x1) * CONSTRAINTS_PER_BLOCK)
-        shared_idx = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + i 
-        r_shared[shared_idx] .= r[global_atom_idx]  #* does this work with .= syntax?
-        v_shared[shared_idx] .= v[global_atom_idx]
-    end
-
-     # Ensure all data is loaded into shared memory
-     @synchronize()
 
     if idx <= N_constraints
 
@@ -213,17 +152,24 @@ end
         C = zeros(eltype(r), NUM_CONSTRAINTS)
         λ = zeros(eltype(r), NUM_CONSTRAINTS)
 
-        k1 = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + 0x1
-        k2 = k1 + 0x1; k3 = k1 + 0x2; k4 = k1 + 0x3
+        k1 = clusters[idx].unique_atoms[1] # this is assumed to be the central atom
+        k2 = clusters[idx].unique_atoms[2]
+        k3 = clusters[idx].unique_atoms[3]
+        k4 = clusters[idx].unique_atoms[4]
      
-        m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3]; m4_inv = 1 / m[k4]
-        r_k1k2  = vector(r_shared[k1], r_shared[k2], boundary)
-        r_k1k3  = vector(r_shared[k1], r_shared[k3], boundary)
-        r_k1k4  = vector(r_shared[k1], r_shared[k4], boundary)
+        m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3]; m4_inv = 1 / m[k4] # uncoalesced read
+        r_k1k2  = vector(r_shared[k1], r_shared[k2], boundary) # uncoalesced read
+        r_k1k3  = vector(r_shared[k1], r_shared[k3], boundary) # uncoalesced read
+        r_k1k4  = vector(r_shared[k1], r_shared[k4], boundary) # uncoalesced read
 
-        v_k1k2 = v_shared[k2] .- v_shared[k1]
-        v_k1k3 = v_shared[k3] .- v_shared[k1]
-        v_k1k4 = v_shared[k4] .- v_shared[k1]
+        vk1 = v[k1] # uncoalesced read
+        vk2 = v[k2] # uncoalesced read
+        vk3 = v[k3] # uncoalesced read
+        vk4 = v[k4] # uncoalesced read
+
+        v_k1k2 = vk2 .- vk1
+        v_k1k3 = vk3 .- vk1
+        v_k1k4 = vk4 .- vk1
 
         A[1, 1] = dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv)
         A[1, 2] = dot(r_k1k2, r_k1k3) * (m1_inv)
@@ -241,46 +187,24 @@ end
 
         solve3x3exactly!(λ, A, A_tmp, C)
 
-        v_shared[k1] -= m1_inv * ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3) .+ λ[3] .* r_k1k4)
-        v_shared[k2] -= m2_inv .* (-λ[1] .* r_k1k2)
-        v_shared[k3] -= m3_inv .* (-λ[2] .* r_k1k3)
-        v_shared[k4] -= m4_inv .* (-λ[3] .* r_k1k4)
+        vk1 -= m1_inv * ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3) .+ λ[3] .* r_k1k4)
+        vk2 -= m2_inv .* (-λ[1] .* r_k1k2)
+        vk3 -= m3_inv .* (-λ[2] .* r_k1k3)
+        vk4 -= m4_inv .* (-λ[3] .* r_k1k4)
 
-        # Step 3: Write positions back to global memory
-        for i in 1:ATOMS_PER_CLUSTER
-            global_atom_idx = idx + ((i - 0x1) * CONSTRAINTS_PER_BLOCK)
-            shared_idx = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + i 
-            v[global_atom_idx] .= v_shared[shared_idx]
-        end
+        v[k1] = vk1 # uncoalesced write
+        v[k2] = vk2 # uncoalesced write
+        v[k3] = vk3 # uncoalesced write
+        v[k4] = vk4 # uncoalesced write
 
     end
 end
 
 # 3 atoms 3 constraints
-@kernel inbounds=true function rattle3_angle_kernel!(r, v, m, D, N_constraints)
+@kernel inbounds=true function rattle3_angle_kernel!(r, v, m, clusters, N_constraints)
+
     idx = @index(Global, Linear) # Global Constraint Idx
-    tidx = @index(Local, Linear)
-    @uniform CONSTRAINTS_PER_BLOCK = @groupsize()[1]
     @uniform NUM_CONSTRAINTS = 0x3
-    @uniform ATOMS_PER_CLUSTER = 0x3
-
-    r_shared = @localmem eltype(r) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
-    v_shared = @localmem eltype(v) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
-
-    # Step 1: Move velocities to shared memory to avoid uncoalesced access
-    # Positions are pre-sorted such that atoms in 1-constraint clusters are
-    # at the start. Furthermore, the atoms are sorted within that sector
-    # such that the 2 atoms in constraint 1 are the first two elements and so on
-
-    for i in 1:ATOMS_PER_CLUSTER
-        global_atom_idx = idx + ((i - 0x1) * CONSTRAINTS_PER_BLOCK)
-        shared_idx = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + i 
-        r_shared[shared_idx] .= r[global_atom_idx]  #* does this work with .= syntax?
-        v_shared[shared_idx] .= v[global_atom_idx]
-    end
-
-     # Ensure all data is loaded into shared memory
-     @synchronize()
 
     if idx <= N_constraints
 
@@ -290,17 +214,18 @@ end
         C = zeros(eltype(r), NUM_CONSTRAINTS)
         λ = zeros(eltype(r), NUM_CONSTRAINTS)
 
-        k1 = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + 0x1
-        k2 = k1 + 0x1; k3 = k1 + 0x2
+        k1 = clusters[idx].unique_atoms[1] # this is assumed to be the central atom
+        k2 = clusters[idx].unique_atoms[2]
+        k3 = clusters[idx].unique_atoms[3]
      
-        m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3]
-        r_k1k2  = vector(r_shared[k1], r_shared[k2], boundary)
-        r_k1k3  = vector(r_shared[k1], r_shared[k3], boundary)
-        r_k2k3  = vector(r_shared[k2], r_shared[k3], boundary)
+        m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3] #uncoalesced read
+        r_k1k2  = vector(r_shared[k1], r_shared[k2], boundary) # uncoalesced read
+        r_k1k3  = vector(r_shared[k1], r_shared[k3], boundary) # uncoalesced read
+        r_k2k3  = vector(r_shared[k2], r_shared[k3], boundary) # uncoalesced read
 
-        v_k1k2 = v_shared[k2] .- v_shared[k1]
-        v_k1k3 = v_shared[k3] .- v_shared[k1]
-        v_k2k3 = v_shared[k3] .- v_shared[k2]
+        v_k1k2 = v_k2 .- v_k1
+        v_k1k3 = v_k3 .- v_k1
+        v_k2k3 = v_k3 .- v_k2
 
         A[1, 1] = dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv)
         A[1, 2] = dot(r_k1k2, r_k1k3) * (m1_inv)
@@ -318,16 +243,14 @@ end
 
         solve_2x2exactly!(λ, A, A_tmp, C)
 
-        v_shared[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
-        v_shared[k2] -= m2_inv .* ((-λ[1] .* r_k1k2) .+ (λ[3] .* r_k2k3))
-        v_shared[k3] -= m3_inv .* ((-λ[2] .* r_k1k3) .- (λ[3] .* r_k2k3))
+        v_k1 -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
+        v_k2 -= m2_inv .* ((-λ[1] .* r_k1k2) .+ (λ[3] .* r_k2k3))
+        v_k3 -= m3_inv .* ((-λ[2] .* r_k1k3) .- (λ[3] .* r_k2k3))
 
-        # Step 3: Write positions back to global memory
-        for i in 1:ATOMS_PER_CLUSTER
-            global_atom_idx = idx + ((i - 0x1) * CONSTRAINTS_PER_BLOCK)
-            shared_idx = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + i 
-            v[global_atom_idx] .= v_shared[shared_idx]
-        end
+        # Write positions back to global memory
+        v[k1] = k1
+        v[k2] = k3
+        v[k3] = k3
 
     end
 end
@@ -341,7 +264,7 @@ end
     @uniform ATOMS_PER_CLUSTER = 0x2
      
     r_t1_shared = @localmem eltype(r_t1) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
-    r_t2_shared = @localmem eltype(r_t1) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
+    r_t2_shared = @localmem eltype(r_t2) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
 
     if idx <= length(distances)
 
@@ -429,14 +352,6 @@ end
 function apply_position_cosntraints!(sys, ca::SHAKE_RATTLE, r_pre_unconstrained_update)
 
 
-    # Organize coordinates according to constraints
-    # this enables coalesced memory access on GPU.
-    # Sorting is about 3x faster than doing data[ordering]
-    # This faster on CPU for systems with fewer than ~200,000 atoms...
-    # but its slow to move things to GPU.
-    #* MAKE SURE I DO NOT MODIFY ca.coord_ordering!!!
-    AK.merge_sort_by_key!(ca.coord_ordering, sys.coords, ca.buffers.keys, ca.buffers.coords)
-    AK.merge_sort_by_key!(ca.coord_ordering, r_pre_unconstrained_update, ca.buffers.keys, ca.buffers.coords)
 
     shake2_kernel!(ca.clusters1.dist, r_pre_unconstrained_update, sys.coords, sys.masses, sys.boundary)
 
@@ -444,11 +359,11 @@ function apply_position_cosntraints!(sys, ca::SHAKE_RATTLE, r_pre_unconstrained_
     # shake3_kernel!()
     # shake4_kernel!()
 
-    # Re-vert coordinate ordering
-    AK.merge_sort_by_key!(ca.inv_ordering, sys.coords, ca.buffers.keys, ca.buffers.coords)
-
 end
 
-function apply_velocity_constraints!(sys, ca::SHAKE_RATTLE)
-
+function apply_velocity_constraints!(sys::System{D}, ca::SHAKE_RATTLE) where D
+    rattle2_kernel!(sys.coords, sys.velocities, sys.masses, D, ca.clusters1, length(ca.clusters1))
+    rattle3_kernel!(sys.coords, sys.velocities, sys.masses, D, ca.clusters2, length(ca.clusters2))
+    rattle4_kernel!(sys.coords, sys.velocities, sys.masses, D, ca.clusters3, length(ca.clusters3))
+    rattle3_angle_kernel!(sys.coords, sys.velocities, sys.masses, D, ca.angle_clusters, length(ca.angle_clusters))
 end
