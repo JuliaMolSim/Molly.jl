@@ -240,6 +240,9 @@ end
     ForcesLogger(T, n_steps; dims=3)
 
 Log the [`forces`](@ref) throughout a simulation.
+
+The forces are those from the interactions and do not include forces applied by
+stochastic simulators such as [`Langevin`](@ref).
 """
 function ForcesLogger(T, n_steps::Integer; dims::Integer=3)
     return GeneralObservableLogger(
