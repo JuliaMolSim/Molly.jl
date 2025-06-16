@@ -4,6 +4,9 @@ export
     apply_position_constraints!,
     apply_velocity_constraints!
 
+
+struct NoConstraints end
+
 """
     DistanceConstraint(i, j, dist)
 
@@ -15,30 +18,10 @@ struct DistanceConstraint{D, I}
     dist::D
 end
 
-#=
-    ConstraintCluster(constraints)
-
-A group of constraints.
-
-Atoms in a cluster do not participate in any other constraints outside of that cluster.
-Larger clusters may incur a performance penalty.
-=#
-struct ConstraintCluster{N, C}
-    constraints::SVector{N, C}
-    n_unique_atoms::Int
+struct ConstraintCluster
+    clusters::StructArray{DistanceConstraint}
+    unique_atoms::Vector{Int}
 end
-
-function ConstraintCluster(constraints)
-    atom_ids = typeof(constraints[1].i)[]
-    for constraint in constraints
-        push!(atom_ids, constraint.i)
-        push!(atom_ids, constraint.j)
-    end
-    return ConstraintCluster{length(constraints), eltype(constraints)}(
-                constraints, length(unique(atom_ids)))
-end
-
-Base.length(cc::ConstraintCluster) = length(cc.constraints)
 
 """
     disable_constrained_interactions!(neighbor_finder, constraint_clusters)
@@ -47,12 +30,40 @@ Disables neighbor list interactions between atoms in a constraint.
 """
 function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
     for cluster in constraint_clusters
-        for constraint in cluster.constraints
+        for constraint in cluster
             neighbor_finder.eligible[constraint.i, constraint.j] = false
             neighbor_finder.eligible[constraint.j, constraint.i] = false
         end
     end
     return neighbor_finder
+end
+
+# This finds the unique atom indicies given a list
+# the lists of atoms that participate in a constraint clusters.
+# The first atom in the result is the atom at the center of the cluster
+function order_atoms(is, js)
+
+    counts = Dict{Int,Int}()
+    for atom in is
+        counts[atom] = get(counts, atom, 0) + 1
+    end
+
+    for atom in js
+        counts[atom] = get(counts, atom, 0) + 1
+    end
+
+    central_atoms = [atom for (atom, cnt) in counts if cnt > 1]
+    unique_atoms = collect(keys(counts))
+
+    if length(central_atoms) == 1
+        central = central_atoms[1]
+        unique_atoms = [central; filter(x -> x != central, unique_atoms)]
+        return unique_atoms
+    elseif length(central_atoms) == 0 # Will trigger if just 1 bond in constraint (e.g. C-C)
+        return unique_atoms
+    else
+        @error "Cannot find central atom. You are not permitted to constraint chains of 4 atoms (e.g., C-C-C-C)"
+    end
 end
 
 function build_clusters(n_atoms, constraints)
@@ -72,50 +83,71 @@ function build_clusters(n_atoms, constraints)
 
     # Get groups of constraints that are connected to eachother
     cc = connected_components(constraint_graph)
-
+    
+    clusters12 = ConstraintCluster[]; clusters23 = ConstraintCluster[]
+    clusters34 = ConstraintCluster[]; clusters_angle = ConstraintCluster[]
     # Loop through connected regions and convert to clusters
-    clusters = []
-    for (cluster_idx, atom_idxs) in enumerate(cc)
+    for (_, atom_idxs) in enumerate(cc)
         # Loop over atoms in connected region to build cluster
         if length(atom_idxs) > 1 # connected_components gives unconnected vertices as well
-            connected_constraints = []
+            is = []; js = []; dists = []
             for ai in atom_idxs
                 neigh_idxs = neighbors(constraint_graph, ai)
                 for neigh_idx in neigh_idxs
-                    constraint = DistanceConstraint(ai, neigh_idx, idx_dist_pairs[ai, neigh_idx])
-                    push!(connected_constraints, constraint)
+                    push!(is, ai)
+                    push!(js, neigh_idx)
+                    push!(dists, idx_dist_pairs[ai, neigh_idx])
                 end
             end
-            push!(clusters, ConstraintCluster(SVector(connected_constraints...)))
+
+            cluster = StructArray{DistanceConstraint}((MVector(is...), MVector(js...), MVector(dists...)))
+            N_constraint = length(cluster)
+            #* WILL NEED TO UPDATE THIS FOR ANGLE CONSTRAINTS!
+            #* ALL ATOMS WILL TRIGGER AS "CENTRAL" ATOMS 
+            unique_idxs = order_atoms(is, js) # this also puts the central atom as first index, IMPORTANT!
+            N_unique = length(unique_idxs)
+            constraint_cluster = ConstraintCluster(cluster, unique_idxs) 
+            if N_constraint == 1 && N_unique == 2 # Single bond constraint between two atoms
+                push!(clusters12, constraint_cluster)
+            elseif N_constraint == 2 && N_unique == 3 # Central atom with 2 bonds constrained
+                push!(clusters23, constraint_cluster)
+            elseif N_constraint == 3 && N_unique == 4 # Central atom 3 bonds constrained
+                push!(clusters34, constraint_cluster)
+            elseif N_constraint == 3 && N_unique == 3 # 3 atoms, with 2 bonds + 1 angle constraint
+                push!(clusters_angle, constraint_cluster)
+            else
+                @error "Constraint clusters with more than 3 constraints or too few unique atoms are not unsupported. Got $(N_constraint) constraints and $(N_unique) unique atoms."
+            end
         end
     end
 
-    return [clusters...]
+    return [clusters12...], [clusters23...], [clusters34...], [clusters_angle...]
 end
 
+
 """
-    apply_position_constraints!(sys, coord_storage; n_threads::Integer=Threads.nthreads())
-    apply_position_constraints!(sys, coord_storage, vel_storage, dt;
-                                n_threads::Integer=Threads.nthreads())
+    apply_position_constraints!(sys, coord_storage)
+    apply_position_constraints!(sys, coord_storage, vel_storage, dt)
 
 Applies the system constraints to the coordinates.
 
 If `vel_storage` and `dt` are provided then velocity corrections are applied as well.
 """
-function apply_position_constraints!(sys, coord_storage; n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys, coord_storage)
     for ca in sys.constraints
-        apply_position_constraints!(sys, ca, coord_storage; n_threads=n_threads)
+        apply_position_constraints!(sys, ca, coord_storage)
     end
     return sys
 end
 
-function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
-                                     n_threads::Integer=Threads.nthreads())
+function apply_position_constraints!(sys, coord_storage, vel_storage, dt)
+
     if length(sys.constraints) > 0
+
         vel_storage .= -sys.coords ./ dt
 
         for ca in sys.constraints
-            apply_position_constraints!(sys, ca, coord_storage; n_threads=n_threads)
+            apply_position_constraints!(sys, ca, coord_storage)
         end
 
         vel_storage .+= sys.coords ./ dt
@@ -126,13 +158,13 @@ function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
 end
 
 """
-    apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
+    apply_velocity_constraints!(sys)
 
 Applies the system constraints to the velocities.
 """
-function apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
+function apply_velocity_constraints!(sys)
     for ca in sys.constraints
-        apply_velocity_constraints!(sys, ca; n_threads=n_threads)
+        apply_velocity_constraints!(sys, ca)
     end
     return sys
 end
@@ -158,7 +190,7 @@ When using constraint algorithms the vibrational degrees of freedom are removed 
 function n_dof_lost(D::Integer, constraint_clusters)
     # Bond constraints remove vibrational DoFs
     vibrational_dof_lost = 0
-    # Assumes constraints are a non-linear chain
+    # Assumes constraints are a non-linear chain (e.g., breaks for angle constraints)
     for cluster in constraint_clusters
         N = cluster.n_unique_atoms
         # If N > 2 assume non-linear (e.g. breaks for CO2)

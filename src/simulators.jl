@@ -170,8 +170,8 @@ end
         end
 
         sys.coords .+= sys.velocities .* sim.dt .+ ((accels_t .* sim.dt .^ 2) ./ 2)
-        using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
-                                                         sim.dt; n_threads=n_threads)
+
+        using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage, sim.dt)
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
 
         forces_nounits_t_dt .= forces_nounits!(forces_nounits_t_dt, sys, neighbors, forces_buffer,
@@ -180,7 +180,7 @@ end
         accels_t_dt .= forces_t_dt ./ masses(sys)
 
         sys.velocities .+= ((accels_t .+ accels_t_dt) .* sim.dt ./ 2)
-        using_constraints && apply_velocity_constraints!(sys; n_threads=n_threads)
+        using_constraints && apply_velocity_constraints!(sys)
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
