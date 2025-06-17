@@ -10,13 +10,11 @@ The potential energy is defined as
 V(r) = D(1 - e^{-a(r - r_0)})^2
 ```
 """
-struct MorseBond{T, A, R}
+@kwdef struct MorseBond{T, A, R}
     D::T
     a::A
     r0::R
 end
-
-MorseBond(; D, a, r0) = MorseBond(D, a, r0)
 
 Base.zero(::MorseBond{T, A, R}) where {T, A, R} = MorseBond(D=zero(T), a=zero(A), r0=zero(R))
 
