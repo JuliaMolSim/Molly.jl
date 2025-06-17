@@ -582,6 +582,7 @@ The available specific interactions are:
 - [`FENEBond`](@ref) - 2 atoms
 - [`HarmonicAngle`](@ref) - 3 atoms
 - [`CosineAngle`](@ref) - 3 atoms
+- [`UreyBradley`](@ref) - 3 atoms
 - [`PeriodicTorsion`](@ref) - 4 atoms
 - [`RBTorsion`](@ref) - 4 atoms
 

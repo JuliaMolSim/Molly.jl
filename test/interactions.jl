@@ -486,6 +486,30 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
+    a1 = UreyBradley(kangle=300.0u"kJ * mol^-1", θ0=0.8,
+                     kbond=10_000.0u"kJ * mol^-1 * nm^-2", r0=0.3u"nm")
+    fs = force(a1, c1, c2, c3a, boundary)
+    @test isapprox(
+        fs.f1,
+        SVector(0.0, -152.4546720285, -152.4546720285)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f2,
+        SVector(-21.9771730369, 14.6514486912, 14.6514486912)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f3,
+        SVector(21.9771730369, 137.8032233372, 137.8032233372)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(a1, c1, c2, c3a, boundary),
+        1.7626664989u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
     inter = MullerBrown()
     local_min_1 = SVector(  0.6234994049304005, 0.028037758528718367)u"nm"
     local_min_2 = SVector(-0.05001082299878202,  0.46669410487256247)u"nm"
