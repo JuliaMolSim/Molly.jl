@@ -24,6 +24,7 @@ using SimpleCrystals
 using Unitful
 using UnitfulAtomic
 using UnsafeAtomicsLLVM
+using StructArrays
 
 using LinearAlgebra
 using Random
@@ -53,8 +54,9 @@ include("interactions/rb_torsion.jl")
 include("interactions/implicit_solvent.jl")
 include("interactions/muller_brown.jl")
 include("energy.jl")
-include("constraints/constraints.jl")
 include("constraints/shake.jl")
+include("constraints/constraints_helper.jl")
+include("constraints/constraints.jl")
 include("simulators.jl")
 include("coupling.jl")
 include("neighbors.jl")

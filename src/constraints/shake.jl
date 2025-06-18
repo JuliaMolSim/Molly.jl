@@ -42,7 +42,7 @@ function SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance)
         clusters12, clusters23, clusters34, angle_clusters, dist_tolerance, vel_tolerance)
 end
 
-function kronickerδ(x::T, y::T)
+function kronickerδ(x::T, y::T) where T
     if x == y
         return one(T)
     else
@@ -140,21 +140,3 @@ function check_velocity_constraints(sys::System, ca::SHAKE_RATTLE)
     end
     return max_err < ca.vel_tolerance
 end
-
-
-
-# # Add indices of atoms which do not participate in constraints
-# unconstrained_coords = setdiff(1:n_atoms, coord_ordering)
-# push!(coord_ordering, unconstrained_coords)
-
-# # Update (i,j) indices of each constraint
-# index_map = Dict(orig => new for (new, orig) in enumerate(coord_ordering))
-
-# for cluster_array in (clusters1, clusters2, clusters3)
-#     for cluster in cluster_array
-#         for constraint in cluster
-#             constraint.i = index_map[constraint.i]
-#             constraint.j = index_map[constraint.j]
-#         end
-#     end
-# end
