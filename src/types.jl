@@ -1260,11 +1260,19 @@ function System(sys::AtomsBase.AbstractSystem{D};
     end
 
     # AtomsBase does not specify a type for coordinates or velocities so we convert to SVector
+    if !(:position in AtomsBase.atomkeys(sys))
+        throw(ArgumentError("Failed to construct Molly System form AbstractSystem. Missing position key."))
+    end
+    
     coords = map(AtomsBase.position(sys, :)) do r
         SVector(r...)
     end
-    vels = map(AtomsBase.velocity(sys, :)) do v
-        SVector(v...)
+
+    vels = nothing
+    if :velocity in AtomsBase.atomkeys(sys)
+        vels = map(AtomsBase.velocity(sys, :)) do v
+            SVector(v...)
+        end
     end
 
     mass_dim = dimension(AtomsBase.mass(sys, 1))
