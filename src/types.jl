@@ -570,11 +570,18 @@ function System(;
     df = n_dof(D, length(atoms), boundary)
     if length(constraints) > 0
         for ca in constraints
-            df -= n_dof_lost(D, ca.clusters)
+            
+            # Automatically disbales interactions between constrained atoms
+            # and whatever else is implemented for the constraint type.
+            setup_constraints!(neighbor_finder, ca)
+
+            for cluster_type in cluster_keys(ca)
+                clusters = getproperty(ca, cluster_type)
+                df -= n_dof_lost(D, clusters)
+            end
         end
     end
 
-    setup_constraints!(neighbor_finder, constraints)
 
     if isa(atoms, AbstractGPUArray) && !isa(coords, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))

@@ -58,11 +58,11 @@ end
 end
 
 # 2 atoms, 1 constraint
-@kernel inbounds=true function rattle2_kernel!(r, v, m, clusters, N_constraints)
+@kernel inbounds=true function rattle2_kernel!(r, v, m, clusters, boundary)
 
     idx = @index(Global, Linear) # Global Constraint Idx
 
-    if idx <= N_constraints
+    if idx <= length(clusters)
 
         # Step 2 : Perform RATTLE, for a 2 atom cluster we
         # just re-arrange λ = A / c, since they are all scalars.
@@ -81,7 +81,7 @@ end
         v_k1 -= m1_inv .* λₖ .* r_k1k2
         v_k2 += m2_inv .* λₖ .* r_k1k2
 
-        # Step 3: Write positions back to global memory
+        # Step 3: Write velocities back to global memory
         v[k1] .= v_k1 # uncoalesced write
         v[k2] .= v_k2 # uncoalesced write
     end
@@ -89,13 +89,13 @@ end
 
 # 3 atoms 2 constraints
 # Assumes first atom is central atom
-@kernel inbounds=true function rattle3_kernel!(r, v, m, clusters, N_constraints)
+@kernel inbounds=true function rattle3_kernel!(r, v, m, clusters, boundary)
 
     idx = @index(Global, Linear) # Global Constraint Idx
     @uniform NUM_CONSTRAINTS = 0x2
 
 
-    if idx <= N_constraints
+    if idx <= length(clusters)
 
         # Allocate thread-local memory
         A = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
@@ -141,11 +141,11 @@ end
 
 # 4 atoms 3 cosntraints
 # Assumes first atom is central atom
-@kernel inbounds=true function rattle4_kernel!(r, v, m, clusters, N_constraints)
+@kernel inbounds=true function rattle4_kernel!(r, v, m, clusters, boundary)
     idx = @index(Global, Linear) # Global Constraint Idx
     @uniform NUM_CONSTRAINTS = 0x3
 
-    if idx <= N_constraints
+    if idx <= length(clusters)
 
         # Allocate thread-local memory
         A = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
@@ -202,12 +202,12 @@ end
 end
 
 # 3 atoms 3 constraints
-@kernel inbounds=true function rattle3_angle_kernel!(r, v, m, clusters, N_constraints)
+@kernel inbounds=true function rattle3_angle_kernel!(r, v, m, clusters, boundary)
 
     idx = @index(Global, Linear) # Global Constraint Idx
     @uniform NUM_CONSTRAINTS = 0x3
 
-    if idx <= N_constraints
+    if idx <= length(clusters)
 
         # Allocate thread-local memory
         A = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
@@ -257,70 +257,48 @@ end
 end
 
 # 2 atoms, 1 constraint
-@kernel inbounds=true function shake2_kernel!(distances, r_t1::T, r_t2::T, m, D) where T
+@kernel inbounds=true function shake2_kernel!(clusters12, r_t1::T, r_t2::T, m, boundary) where T
 
     idx = @index(Global, Linear) # Global Constraint Idx
-    tidx = @index(Local, Linear)
-    @uniform CONSTRAINTS_PER_BLOCK = @groupsize()[1]
-    @uniform ATOMS_PER_CLUSTER = 0x2
-     
-    r_t1_shared = @localmem eltype(r_t1) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
-    r_t2_shared = @localmem eltype(r_t2) (ATOMS_PER_CLUSTER * CONSTRAINTS_PER_BLOCK, D)
+    
+    if idx <= length(clusters12)
 
-    if idx <= length(distances)
+        k1 = clusters12[idx].unique_atoms[1]
+        k2 = clusters12[idx].unique_atoms[2]
+        distance = clusters12[idx].constraints[1].dist # Only 1 cluster
 
-        # Step 1: Move positions to shared memory to avoid uncoalesced access
-        # Positions are pre-sorted such that atoms in 1-constraint clusters are
-        # at the start. Furthermore, the atoms are sorted within that sector
-        # such that the 2 atoms in constraint 1 are the first two elements and so on
-
-        for i in 1:ATOMS_PER_CLUSTER
-            global_atom_idx = idx + ((i - 0x1) * CONSTRAINTS_PER_BLOCK)
-            shared_idx = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + i 
-            r_t1_shared[shared_idx] .= r_t1[global_atom_idx]  #* does this work with .= syntax?
-            r_t2_shared[shared_idx] .= r_t2[global_atom_idx]
-        end
-
-        # Ensure all data is loaded into shared memory
-        @synchronize()
-
-        # Step 2 : Perform SHAKE, for a 2 atom cluster we can use 
-        # the quadratic formula to get an analytical solution
-
-        k1 = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + 0x1
-        k2 = k1 + 0x1
+        r_t2_k1 = r_t2[k1] # uncoalesced read
+        r_t2_k2 = r_t2[k2] # uncoalesced read
+        r_t1_k1 = r_t1[k1] # uncoalesced read
+        r_t1_k2 = r_t1[k2] # uncoalesced read
         
+        #* WILL JULIA GPU UNDERSTAND TO ALLOCATE VECTORS LIKE THIS??
         # Vector between the atoms after unconstrained update (s)
-        s12 = vector(r_t2_shared[k1], r_t2_shared[k2], boundary) #* WILL JULIA UNDERSTAND TO ALLOCATE VECTORS LIKE THIS??
+        s12 = vector(r_t2_k1, r_t2_k2, boundary) 
 
         # Vector between the atoms before unconstrained update (r)
-        r12 = vector(r_t1_shared[k1], r_t1_shared[k2], boundary)
+        r12 = vector(r_t1_k1, r_t1_k2, boundary)
 
         m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]
         a = (m1_inv + m2_inv)^2 * sum(abs2, r12)
-        b = -2 * (m1_inv + m2_inv) * dot3(r12, s12)
-        c = sum(abs2, s12) - (distances[idx])^2
+        b = -2 * (m1_inv + m2_inv) * dot(r12, s12)
+        c = sum(abs2, s12) - (distance)^2
         D = b^2 - 4*a*c
 
         # Just let the system blow up?? 
         # This usually happens when timestep too larger or over constrained
-        if D < 0.0
-            @error "SHAKE determinant negative"
+        if ustrip(D) < 0.0
+            error("SHAKE determinant negative")
         end
 
         α1 = (-b + sqrt(D))
         α2 = (-b - sqrt(D))
         g = branchless_min(α1, α2) / (2*a)
 
-        r_t2_shared[k1] += r12 .* (-g*m1_inv)
-        r_t2_shared[k2] += r12 .* (g*m2_inv)
+        # Step 3: Update global memory
+        r_t2[k1] .+= r12 .* (-g*m1_inv)
+        r_t2[k2] .+= r12 .* (g*m2_inv)
 
-        # Step 3: Write positions back to global memory
-        for i in 1:ATOMS_PER_CLUSTER
-            global_atom_idx = idx + ((i - 0x1) * CONSTRAINTS_PER_BLOCK)
-            shared_idx = (ATOMS_PER_CLUSTER * (tidx - 0x1)) + i 
-            r_t2[global_atom_idx] .= r_t2_shared[shared_idx]
-        end
     end
 
 end
@@ -349,12 +327,20 @@ end
 @kernel inbounds=true function shake3_angle_kernel!()
 
 end
+ 
+function apply_position_constraints!(
+        sys::System,
+        ca::SHAKE_RATTLE, 
+        r_pre_unconstrained_update
+    )
 
-function apply_position_constraints!(sys::System, ca::SHAKE_RATTLE, r_pre_unconstrained_update)
 
+    backend = get_backend(r_pre_unconstrained_update)
+    N_clusters = length(ca.clusters12)
+    N_blocks = cld(N_clusters, ca.gpu_block_size)
+    s2_kernel = shake2_kernel!(backend, N_blocks, N_clusters)
+    s2_kernel(ca.clusters12, r_pre_unconstrained_update, sys.coords, sys.masses, sys.boundary, ndrange = N_clusters)
 
-
-    shake2_kernel!(ca.clusters1.dist, r_pre_unconstrained_update, sys.coords, sys.masses, sys.boundary)
 
     #* TODO LAUNCH ON SEPARATE STREAMS/TASKS
     # shake3_kernel!()
@@ -408,9 +394,29 @@ function apply_velocity_constraints!(sys)
 end
 
 function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE)
+
+    backend = get_backend(sys.velocities)
+
+    N12_clusters = length(ca.clusters12)
+    N12_blocks = cld(N12_clusters, ca.gpu_block_size)
+    r2_kernel = rattle2_kernel!(backend, N12_blocks, N12_clusters)
+
+    N23_clusters = length(ca.clusters23)
+    N23_blocks = cld(N23_clusters, ca.gpu_block_size)
+    r3_kernel = rattle3_kernel!(backend, N23_blocks, N23_clusters)
+
+    N34_clusters = length(ca.clusters34)
+    N34_blocks = cld(N34_clusters, ca.gpu_block_size)
+    r4_kernel = rattle4_kernel!(backend, N34_blocks, N34_clusters)
+
+    N_angle_clusters = length(ca.angle_clusters)
+    N_angle_blocks = cld(N_angle_clusters, ca.gpu_block_size)
+    r3_angle_kernel = rattle3_angle_kernel!(backend, N_angle_blocks, N_angle_clusters)
+
+
     #* TODO LAUNCH ON SEPARATE STREAMS/TASKS
-    rattle2_kernel!(sys.coords, sys.velocities, sys.masses, ca.clusters1, length(ca.clusters1))
-    rattle3_kernel!(sys.coords, sys.velocities, sys.masses, ca.clusters2, length(ca.clusters2))
-    rattle4_kernel!(sys.coords, sys.velocities, sys.masses, ca.clusters3, length(ca.clusters3))
-    rattle3_angle_kernel!(sys.coords, sys.velocities, sys.masses, ca.angle_clusters, length(ca.angle_clusters))
+    r2_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters12, sys.boundary, ndrange = N12_clusters)
+    r3_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters23, sys.boundary, ndrange = N23_clusters)
+    r4_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters34, sys.boundary, ndrange = N34_clusters)
+    r3_angle_kernel(sys.coords, sys.velocities, sys.masses, ca.angle_clusters, sys.boundary, ndrange = N_angle_clusters)
 end

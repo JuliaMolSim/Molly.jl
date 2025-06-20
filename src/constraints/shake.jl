@@ -1,7 +1,8 @@
 export
     SHAKE_RATTLE,
     check_position_constraints,
-    check_velocity_constraints
+    check_velocity_constraints,
+    setup_constraints!
 
 """
     SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance)
@@ -25,22 +26,27 @@ of the linear system solved to satisfy the RATTLE algorithm.
 - `vel_tolerance`: the tolerance used to end the iterative procedure when calculating
     velocity constraints, should have the same units as the velocities * the coordinates.
 """
-struct SHAKE_RATTLE{A, B, C, D, E, F}
-    clusters12::A
-    clusters23::B
-    clusters34::C
-    angle_clusters::D
-    dist_tolerance::E
-    vel_tolerance::F
+struct SHAKE_RATTLE{CC, D, V}
+    clusters12::AbstractVector{CC} # CC will be ConstraintCluster 
+    clusters23::AbstractVector{CC}
+    clusters34::AbstractVector{CC}
+    angle_clusters::AbstractVector{CC}
+    dist_tolerance::D
+    vel_tolerance::V
+    gpu_block_size::Integer
 end
 
-function SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance)
+
+function SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance; gpu_block_size = 64)
 
     clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, constraints)
 
-    return SHAKE_RATTLE{typeof(clusters), typeof(dist_tolerance), typeof(vel_tolerance)}(
-        clusters12, clusters23, clusters34, angle_clusters, dist_tolerance, vel_tolerance)
+    return SHAKE_RATTLE{eltype(clusters12), typeof(dist_tolerance), typeof(vel_tolerance)}(
+        clusters12, clusters23, clusters34, angle_clusters, dist_tolerance, vel_tolerance, gpu_block_size)
 end
+
+cluster_keys(::SHAKE_RATTLE) = [:clusters12, :clusters23, :clusters34, :angle_clusters]
+
 
 function kronickerδ(x::T, y::T) where T
     if x == y
@@ -86,14 +92,14 @@ end
 function setup_constraints!(neighbor_finder, sr::SHAKE_RATTLE)
 
     # Compute and Move A matricies to Backend
-    Aₘ₂, Aₘ₃ = precompute_A_components(sr, masses(sys))
+    # Aₘ₂, Aₘ₃ = precompute_A_components(sr, masses(sys))
     #*TODO MOVE TO BACKEND
 
     # Disable Neighbor interactions that are constrained
     if typeof(neighbor_finder) != NoNeighborFinder
-        disable_constrained_interactions!(neighbor_finder, sr.clusters1)
-        disable_constrained_interactions!(neighbor_finder, sr.clusters2)
-        disable_constrained_interactions!(neighbor_finder, sr.clusters3)
+        disable_constrained_interactions!(neighbor_finder, sr.clusters12)
+        disable_constrained_interactions!(neighbor_finder, sr.clusters23)
+        disable_constrained_interactions!(neighbor_finder, sr.clusters34)
         disable_constrained_interactions!(neighbor_finder, sr.angle_clusters)
     end
 

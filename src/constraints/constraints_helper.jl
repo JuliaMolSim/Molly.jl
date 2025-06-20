@@ -19,18 +19,24 @@ struct DistanceConstraint{D}
 end
 
 struct ConstraintCluster
-    clusters::StructArray{DistanceConstraint}
+    constraints::StructArray{DistanceConstraint}
     unique_atoms::Vector{Int}
 end
+
+n_unique(cc::ConstraintCluster) = length(cc.unique_atoms)
 
 """
     disable_constrained_interactions!(neighbor_finder, constraint_clusters)
 
 Disables neighbor list interactions between atoms in a constraint.
 """
-function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
+function disable_constrained_interactions!(
+        neighbor_finder,
+        constraint_clusters::AbstractVector{ConstraintCluster}
+    )
+
     for cluster in constraint_clusters
-        for constraint in cluster
+        for constraint in cluster.constraints
             neighbor_finder.eligible[constraint.i, constraint.j] = false
             neighbor_finder.eligible[constraint.j, constraint.i] = false
         end
@@ -143,12 +149,12 @@ When using constraint algorithms the vibrational degrees of freedom are removed 
 | Total         |     D      |      D*N        |       D*N           |
 
 =#
-function n_dof_lost(D::Integer, constraint_clusters)
+function n_dof_lost(D::Integer, constraint_clusters::AbstractVector{ConstraintCluster})
     # Bond constraints remove vibrational DoFs
     vibrational_dof_lost = 0
     # Assumes constraints are a non-linear chain (e.g., breaks for angle constraints)
     for cluster in constraint_clusters
-        N = cluster.n_unique_atoms
+        N = n_unique(cluster)
         # If N > 2 assume non-linear (e.g. breaks for CO2)
         vibrational_dof_lost += ((N == 2) ? D*N - (2*D - 1) : D*(N - 2))
     end
