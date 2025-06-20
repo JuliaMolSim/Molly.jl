@@ -78,12 +78,10 @@ end
         v_k1k2 = v_k2 .- v_k1
 
         λₖ = -dot(r_k1k2, v_k1k2) / (dot(r_k1k2, r_k1k2) * (m1_inv + m2_inv))
-        v_k1 -= m1_inv .* λₖ .* r_k1k2
-        v_k2 += m2_inv .* λₖ .* r_k1k2
 
-        # Step 3: Write velocities back to global memory
-        v[k1] .= v_k1 # uncoalesced write
-        v[k2] .= v_k2 # uncoalesced write
+        # Step 3: Update velocities in global memory
+        v[k1] -= m1_inv .* λₖ .* r_k1k2
+        v[k2] += m2_inv .* λₖ .* r_k1k2
     end
 end
 
@@ -127,14 +125,10 @@ end
 
         solve_2x2exactly!(λ, A[tid], C)
 
-        v_k1 -= m1_inv * ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
-        v_k2 -= m2_inv .* (-λ[1] .* r_k1k2)
-        v_k3 -= m3_inv .* (-λ[2] .* r_k1k3)
-
-        # Write positions back to global memory
-        v[k1] = v_k1 # uncoalesced write
-        v[k2] = v_k2 # uncoalesced write
-        v[k3] = v_k3 # uncoalesced write
+        # Update global memory
+        v[k1] -= m1_inv * ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
+        v[k2] -= m2_inv .* (-λ[1] .* r_k1k2)
+        v[k3] -= m3_inv .* (-λ[2] .* r_k1k3)
 
     end
 end
@@ -188,15 +182,11 @@ end
 
         solve3x3exactly!(λ, A, A_tmp, C)
 
-        vk1 -= m1_inv * ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3) .+ λ[3] .* r_k1k4)
-        vk2 -= m2_inv .* (-λ[1] .* r_k1k2)
-        vk3 -= m3_inv .* (-λ[2] .* r_k1k3)
-        vk4 -= m4_inv .* (-λ[3] .* r_k1k4)
-
-        v[k1] = vk1 # uncoalesced write
-        v[k2] = vk2 # uncoalesced write
-        v[k3] = vk3 # uncoalesced write
-        v[k4] = vk4 # uncoalesced write
+        # Update global memory
+        v[k1] -= m1_inv * ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3) .+ λ[3] .* r_k1k4)
+        v[k2] -= m2_inv .* (-λ[1] .* r_k1k2)
+        v[k3] -= m3_inv .* (-λ[2] .* r_k1k3)
+        v[k4] -= m4_inv .* (-λ[3] .* r_k1k4)
 
     end
 end
@@ -244,14 +234,10 @@ end
 
         solve_2x2exactly!(λ, A, A_tmp, C)
 
-        v_k1 -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
-        v_k2 -= m2_inv .* ((-λ[1] .* r_k1k2) .+ (λ[3] .* r_k2k3))
-        v_k3 -= m3_inv .* ((-λ[2] .* r_k1k3) .- (λ[3] .* r_k2k3))
-
-        # Write positions back to global memory
-        v[k1] = k1
-        v[k2] = k3
-        v[k3] = k3
+        # Update global memory
+        v[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
+        v[k2] -= m2_inv .* ((-λ[1] .* r_k1k2) .+ (λ[3] .* r_k2k3))
+        v[k3] -= m3_inv .* ((-λ[2] .* r_k1k3) .- (λ[3] .* r_k2k3))
 
     end
 end
@@ -296,8 +282,8 @@ end
         g = branchless_min(α1, α2) / (2*a)
 
         # Step 3: Update global memory
-        r_t2[k1] .+= r12 .* (-g*m1_inv)
-        r_t2[k2] .+= r12 .* (g*m2_inv)
+        r_t2[k1] += r12 .* (-g*m1_inv)
+        r_t2[k2] += r12 .* (g*m2_inv)
 
     end
 
@@ -339,7 +325,7 @@ function apply_position_constraints!(
     N_clusters = length(ca.clusters12)
     N_blocks = cld(N_clusters, ca.gpu_block_size)
     s2_kernel = shake2_kernel!(backend, N_blocks, N_clusters)
-    s2_kernel(ca.clusters12, r_pre_unconstrained_update, sys.coords, sys.masses, sys.boundary, ndrange = N_clusters)
+    N_clusters > 0 && s2_kernel(ca.clusters12, r_pre_unconstrained_update, sys.coords, sys.masses, sys.boundary, ndrange = N_clusters)
 
 
     #* TODO LAUNCH ON SEPARATE STREAMS/TASKS
@@ -415,8 +401,8 @@ function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE)
 
 
     #* TODO LAUNCH ON SEPARATE STREAMS/TASKS
-    r2_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters12, sys.boundary, ndrange = N12_clusters)
-    r3_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters23, sys.boundary, ndrange = N23_clusters)
-    r4_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters34, sys.boundary, ndrange = N34_clusters)
-    r3_angle_kernel(sys.coords, sys.velocities, sys.masses, ca.angle_clusters, sys.boundary, ndrange = N_angle_clusters)
+    N12_clusters > 0 &&r2_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters12, sys.boundary, ndrange = N12_clusters)
+    N23_clusters > 0 && r3_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters23, sys.boundary, ndrange = N23_clusters)
+    N34_clusters > 0 && r4_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters34, sys.boundary, ndrange = N34_clusters)
+    N_angle_clusters > 0 && r3_angle_kernel(sys.coords, sys.velocities, sys.masses, ca.angle_clusters, sys.boundary, ndrange = N_angle_clusters)
 end
