@@ -115,12 +115,15 @@ Checks if the position constraints are satisfied by the current coordinates of `
 """
 function check_position_constraints(sys, ca::SHAKE_RATTLE)
     max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.coords)))
-    for cluster in ca.clusters
-        for constraint in cluster.constraints
-            dr = vector(sys.coords[constraint.i], sys.coords[constraint.j], sys.boundary)
-            err = abs(norm(dr) - constraint.dist)
-            if max_err < err
-                max_err = err
+    for cluster_type in cluster_keys(ca)
+        clusters = getproperty(ca, cluster_type)
+        for cluster in clusters
+            for constraint in cluster.constraints
+                dr = vector(sys.coords[constraint.i], sys.coords[constraint.j], sys.boundary)
+                err = abs(norm(dr) - constraint.dist)
+                if max_err < err
+                    max_err = err
+                end
             end
         end
     end
@@ -134,13 +137,16 @@ Checks if the velocity constraints are satisfied by the current velocities of `s
 """
 function check_velocity_constraints(sys::System, ca::SHAKE_RATTLE)
     max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
-    for cluster in ca.clusters
-        for constraint in cluster.constraints
-            dr = vector(sys.coords[constraint.i], sys.coords[constraint.j], sys.boundary)
-            v_diff = sys.velocities[constraint.j] .- sys.velocities[constraint.i]
-            err = abs(dot(dr, v_diff))
-            if max_err < err
-                max_err = err
+    for cluster_type in cluster_keys(ca)
+        clusters = getproperty(ca, cluster_type)
+        for cluster in clusters
+            for constraint in cluster.constraints
+                dr = vector(sys.coords[constraint.i], sys.coords[constraint.j], sys.boundary)
+                v_diff = sys.velocities[constraint.j] .- sys.velocities[constraint.i]
+                err = abs(dot(dr, v_diff))
+                if max_err < err
+                    max_err = err
+                end
             end
         end
     end

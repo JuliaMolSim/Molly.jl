@@ -251,14 +251,13 @@ end
 
         k1 = clusters12[idx].unique_atoms[1]
         k2 = clusters12[idx].unique_atoms[2]
-        distance = clusters12[idx].constraints[1].dist # Only 1 cluster
+        distance = first(clusters12[idx].constraints.dist) # Only 1 cluster
 
         r_t2_k1 = r_t2[k1] # uncoalesced read
         r_t2_k2 = r_t2[k2] # uncoalesced read
         r_t1_k1 = r_t1[k1] # uncoalesced read
         r_t1_k2 = r_t1[k2] # uncoalesced read
         
-        #* WILL JULIA GPU UNDERSTAND TO ALLOCATE VECTORS LIKE THIS??
         # Vector between the atoms after unconstrained update (s)
         s12 = vector(r_t2_k1, r_t2_k2, boundary) 
 
@@ -270,20 +269,20 @@ end
         b = -2 * (m1_inv + m2_inv) * dot(r12, s12)
         c = sum(abs2, s12) - (distance)^2
         D = b^2 - 4*a*c
-
+        
         # Just let the system blow up?? 
         # This usually happens when timestep too larger or over constrained
         if ustrip(D) < 0.0
-            error("SHAKE determinant negative")
+            error("SHAKE determinant negative: $(D)")
         end
 
-        α1 = (-b + sqrt(D))
-        α2 = (-b - sqrt(D))
-        g = branchless_min(α1, α2) / (2*a)
+        α1 = (-b + sqrt(D)) / (2*a)
+        α2 = (-b - sqrt(D)) / (2*a)
+        g = branchless_min(α1, α2)
 
         # Step 3: Update global memory
-        r_t2[k1] += r12 .* (-g*m1_inv)
-        r_t2[k2] += r12 .* (g*m2_inv)
+        r_t2[k1] += r12 .* (g*m1_inv)
+        r_t2[k2] += r12 .* (-g*m2_inv)
 
     end
 
@@ -319,7 +318,6 @@ function apply_position_constraints!(
         ca::SHAKE_RATTLE, 
         r_pre_unconstrained_update
     )
-
 
     backend = get_backend(r_pre_unconstrained_update)
     N_clusters = length(ca.clusters12)
@@ -401,7 +399,7 @@ function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE)
 
 
     #* TODO LAUNCH ON SEPARATE STREAMS/TASKS
-    N12_clusters > 0 &&r2_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters12, sys.boundary, ndrange = N12_clusters)
+    N12_clusters > 0 && r2_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters12, sys.boundary, ndrange = N12_clusters)
     N23_clusters > 0 && r3_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters23, sys.boundary, ndrange = N23_clusters)
     N34_clusters > 0 && r4_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters34, sys.boundary, ndrange = N34_clusters)
     N_angle_clusters > 0 && r3_angle_kernel(sys.coords, sys.velocities, sys.masses, ca.angle_clusters, sys.boundary, ndrange = N_angle_clusters)
