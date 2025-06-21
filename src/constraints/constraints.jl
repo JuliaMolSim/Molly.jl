@@ -11,6 +11,7 @@ end
     return branchless_select(a <= b, a, b)
 end
 
+
 @inline function solve2x2exactly(λ, A, C)
 
     determinant = A[1, 1] * A[2, 2] - A[1, 2] * A[2, 1]
@@ -123,7 +124,7 @@ end
         C[1] = -dot(r_k1k2, v_k1k2)
         C[2] = -dot(r_k1k3, v_k1k3)
 
-        solve_2x2exactly!(λ, A[tid], C)
+        solve_2x2exactly!(λ, A, C)
 
         # Update global memory
         v[k1] -= m1_inv * ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
@@ -288,13 +289,110 @@ end
 
 end
 
+@inline function A_matrix_branchless!(
+    A::AbstractMatrix{T},
+    cc::ConstraintCluster,
+    masses::AbstractVector{T},
+    r::AbstractVector{SVector{3,T}},      # positions at time t
+    r_uc::AbstractVector{SVector{3,T}},   # unconstrained pos at t+Δt
+    boundary                              
+  ) where T
+
+  cons = cc.constraints
+  M    = length(cons)
+
+  is = cons.i
+  js = cons.j
+
+  @inbounds for a in 1:M
+      ia = is[a]
+      ja = js[a]
+
+      inv_ia = one(T) / masses[ia]
+      inv_ja = one(T) / masses[ja]
+
+      # unconstrained bond‐vector r_uc[a] → SVector{3}
+      uc_vec = vector(r_uc[ia], r_uc[ja], boundary)
+      ux0, ux1, ux2 = uc_vec[1], uc_vec[2], uc_vec[3]
+
+      @inbounds for b in 1:M
+          ib = is[b]
+          jb = js[b]
+
+          # branchless Kronecker terms
+          bracket = ((ia==ib) - (ia==jb)) * inv_ia +
+                    ((ja==jb) - (ja==ib)) * inv_ja
+
+          # real bond‐vector at t
+          rt_vec = vector(r[ib], r[jb], boundary)
+          rtb0, rtb1, rtb2 = rt_vec[1], rt_vec[2], rt_vec[3]
+
+          # dot & write
+          A[a,b] = bracket * (rtb0*ux0 + rtb1*ux1 + rtb2*ux2)
+      end
+  end
+
+  return A
+end
+
 # 3 atoms, 2 constraints
-@kernel inbounds=true function shake3_kernel!(clusters)
+# Constraints between 1-2 and 1-3
+@kernel inbounds=true function shake3_kernel!(clusters, r_t1::T, r_t2::T, m, boundary, dt) where T
 
-    tid = @index(Global) # constraint index
+    idx = @index(Global, Linear) # Global Constraint Idx
+    @uniform NUM_CONSTRAINTS = 0x2
 
+    if idx <= length(clusters)
 
-    #* Iterate inside kernel?
+        cluster = clusters[idx] # Type is StructArray{DistanceConstraint}
+
+        # Allocate thread-local memory
+        A = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
+        C = zeros(eltype(r), NUM_CONSTRAINTS)
+        λ = zeros(eltype(r), NUM_CONSTRAINTS)
+
+        k1 = c.unique_atoms[1] # central atom
+        k2 = c.unique_atoms[2]
+        k3 = c.unique_atoms[3]
+
+        # distances are ordered in cluster creation
+        dist12, dist13 = c.constraints.dist
+
+        r_t2_k1 = r_t2[k1] # uncoalesced read
+        r_t2_k2 = r_t2[k2] # uncoalesced read
+        r_t2_k3 = r_t2[k3] # uncoalesced read
+
+        r_t1_k1 = r_t1[k1] # uncoalesced read
+        r_t1_k2 = r_t1[k2] # uncoalesced read
+        r_t1_k3 = r_t1[k3] # uncoalesced read
+
+        m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3] # uncoalesced read
+
+        r_k1k2  = vector(r_t1_k1, r_t1_k2, boundary)
+        r_k1k3  = vector(r_t1_k1, r_t1_k3, boundary)
+
+        s_k1k2 = vector(r_t2_k1, r_t2_k2, boundary)
+        s_k1k3 = vector(r_t2_k1, r_t2_k3, boundary)
+
+        # A matrix element (i,j) represents interaction of constraint i with constraint j.
+        A[1,1] = dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # this sets constraint 1 as between k1-k2
+        A[2,2] = dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # this sets constraint 1 as between k1-k3
+        A[1,2] = dot(r_k1k3, s_k1k2) * m1_inv
+        A[2,1] = dot(r_k1k2, s_k1k3) * m1_inv
+
+        A = A_matrix_branchless!(A, cluster, m, r_t1, r_t2, boundary)
+
+        denom = 4*dt*dt
+        C[1] = dot(s_k1k2, s_k1k2) - (dist12*dist12) / denom
+        C[2] = dot(s_k1k3, s_k1k3) - (dist13*dist13) / denom
+
+        solve_2x2exactly!(λ, A, C)
+
+        # Step 3: Update global memory
+        r_t2[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
+        r_t2[k2] -= m2_inv .* (-λ[1] .* r_k1k2)
+        r_t2[k3] -= m3_inv .* (-λ[2] .* r_k1k3)
+    end
     
 
 end

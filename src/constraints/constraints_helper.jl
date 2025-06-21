@@ -44,8 +44,8 @@ function disable_constrained_interactions!(
     return neighbor_finder
 end
 
-# This finds the unique atom indicies given a list
-# the lists of atoms that participate in a constraint clusters.
+# This finds the unique atom indicies given a the lists (is and js)
+# of atoms that participate in a constraint clusters.
 # The first atom in the result is the atom at the center of the cluster
 function order_atoms(is, js)
 
@@ -70,6 +70,47 @@ function order_atoms(is, js)
     else
         @error "Cannot find central atom. You are not permitted to constraint chains of 4 atoms (e.g., C-C-C-C)"
     end
+end
+
+# This makes sure the first atom in each distance constraint
+# is the central atom of the cluster. It also calls `order_atoms`
+# which ensures that the first atom in the cluster is the central atom
+function make_cluster(raw_is, raw_js, raw_ds)
+
+    # For bond constraints none of this matters
+    if length(raw_is) == 2
+        cluster = StructArray{DistanceConstraint}((
+                        MVector(raw_is...),
+                        MVector(raw_js...),
+                        MVector(raw_ds...)
+                        ))
+        return ConstraintCluster(cluster, unique([raw_is; raw_js]))
+    end
+
+    # find unique & central
+    unique_idxs = order_atoms(raw_is, raw_js)
+    central = unique_idxs[1]
+    others  = unique_idxs[2:end]
+    M       = length(others)
+
+    # build sorted  DistanceConstraints
+    is = fill(central, M) # ALL first atoms are the central atom
+    js = others
+    dists = Vector{eltype(raw_ds)}(undef, M)
+
+    # Figure out which distance goes with new pairings
+    for (a, o) in enumerate(others)
+        for (idx, (i0, j0)) in enumerate(zip(raw_is, raw_js))
+            if (i0 == central && j0 == o) || (j0 == central && i0 == o)
+                dists[a] = raw_ds[idx]
+                break
+            end
+        end
+    end
+
+    #* NEEds to be MVector??? dont remember why I did that
+    cluster = StructArray{DistanceConstraint}((MVector(is...), MVector(js...), MVector(dists...)))
+    return ConstraintCluster(cluster, unique_idxs)
 end
 
 function build_clusters(n_atoms, constraints)
@@ -106,13 +147,12 @@ function build_clusters(n_atoms, constraints)
                 end
             end
 
-            cluster = StructArray{DistanceConstraint}((MVector(is...), MVector(js...), MVector(dists...)))
-            N_constraint = length(cluster)
             #* WILL NEED TO UPDATE THIS FOR ANGLE CONSTRAINTS!
             #* ALL ATOMS WILL TRIGGER AS "CENTRAL" ATOMS 
-            unique_idxs = order_atoms(is, js) # this also puts the central atom as first index, IMPORTANT!
-            N_unique = length(unique_idxs)
-            constraint_cluster = ConstraintCluster(cluster, unique_idxs) 
+            constraint_cluster = make_cluster(is, js, dists)
+            N_constraint = length(is)
+            N_unique = n_unique(constraint_cluster)
+
             if N_constraint == 1 && N_unique == 2 # Single bond constraint between two atoms
                 push!(clusters12, constraint_cluster)
             elseif N_constraint == 2 && N_unique == 3 # Central atom with 2 bonds constrained
@@ -120,6 +160,7 @@ function build_clusters(n_atoms, constraints)
             elseif N_constraint == 3 && N_unique == 4 # Central atom 3 bonds constrained
                 push!(clusters34, constraint_cluster)
             elseif N_constraint == 3 && N_unique == 3 # 3 atoms, with 2 bonds + 1 angle constraint
+                error("Angle constraints not supported yet")
                 push!(clusters_angle, constraint_cluster)
             else
                 @error "Constraint clusters with more than 3 constraints or too few unique atoms are not unsupported. Got $(N_constraint) constraints and $(N_unique) unique atoms."
