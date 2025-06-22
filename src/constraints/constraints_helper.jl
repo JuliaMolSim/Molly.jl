@@ -1,11 +1,9 @@
 export
     DistanceConstraint,
+    AngleConstraint,
     disable_constrained_interactions!,
     apply_position_constraints!,
     apply_velocity_constraints!
-
-
-struct NoConstraints end
 
 """
     DistanceConstraint(i, j, dist)
@@ -16,6 +14,52 @@ struct DistanceConstraint{D}
     i::Int
     j::Int
     dist::D
+end
+
+"""
+    AngleConstraint(i, j, k, angle_jk, dist_ij, dist_ik)
+
+Constraint between three atoms that maintains a fixed angle, angle_jk, and two bond lengths. 
+Atoms j and k must be connected to a shared central atom with fixed bond distances given by
+dist_ij and dist_ik. Internally, an `AngleConstraint` is converted to 3 distance constraints. None
+of the atoms in this constraint are allowed to be constrained with another atom not
+included in this constraint. Angle can be passed as Unitful deg/rad, or as a plain
+number in radians. You cannot constrain linear molecules like CO2.
+
+# Arguments
+- `i`, `j`, `k`: The indices of the atoms in the constraint.
+- `angle_jk`: The angle between atoms j and k in radians if not Unitful.
+- `dist_ij`: The distance between atoms i and j.
+- `dist_ik`: The distance between atoms i and k.
+
+For example, a water molecule can be defined as:
+```julia
+ac = AngleConstraint(1, 2, 3, 104.5u"°", 0.9572u"Å", 0.9572u"Å")
+ac = AngleConstraint(1, 2, 3, 104.5 * π / 180, 0.9572u"Å", 0.9572u"Å")
+```
+where atom 1 is oxygen and atoms 2/3 are hydrogen.
+"""
+struct AngleConstraint{D}
+    i::Int
+    j::Int
+    k::Int
+    dist_ij::D
+    dist_ik::D
+    dist_jk::D
+end
+
+function AngleConstraint(i, j, k, angle_jk, dist_ij, dist_ik)
+
+    cosθ = cos(angle_jk)
+
+    if cosθ == -1.0
+        error(ArgumentError("Cannot constrain linear molecules."))
+    end
+
+    dist_jk = sqrt((dist_ij*dist_ij) + (dist_ik*dist_ik) -
+                    (2 * dist_ij * dist_ik * cosθ))
+
+    return AngleConstraint{typeof(dist_ij)}(i, j, k, dist_ij, dist_ik, dist_jk)
 end
 
 struct ConstraintCluster
@@ -119,6 +163,11 @@ function build_clusters(n_atoms, constraints)
 
     # Store constraints as directed edges, direction is arbitrary but necessary
     for constraint in constraints
+        #TODO - Add support for angle constraints
+        if constraint isa AngleConstraint
+            error(ArgumentError("Cannot constrain linear molecules."))
+        end
+
         edge_added = add_edge!(constraint_graph, constraint.i, constraint.j)
         if edge_added
             idx_dist_pairs[constraint.i, constraint.j] = constraint.dist
