@@ -294,7 +294,8 @@ end
     active_idxs,    
     still_active,
     kernel_fn,
-    other_kernel_args,
+    other_kernel_args...;
+    kernel_kwargs...
   )
     tid = @index(Global, Linear)
 
@@ -305,7 +306,8 @@ end
         kernel_fn(
             clusters[cluster_idx],
             still_active,
-            other_kernel_args...
+            other_kernel_args...;
+            kernel_kwargs...
         )
     end
 end
@@ -571,15 +573,85 @@ function apply_position_constraints!(
     )
 
     backend = get_backend(r_pre_unconstrained_update)
-    N_clusters = length(ca.clusters12)
-    N_blocks = cld(N_clusters, ca.gpu_block_size)
-    s2_kernel = shake2_kernel!(backend, N_blocks, N_clusters)
-    N_clusters > 0 && s2_kernel(ca.clusters12, r_pre_unconstrained_update, sys.coords, sys.masses, sys.boundary, ndrange = N_clusters)
 
+    N12_clusters = length(ca.clusters12)
+    N23_clusters = length(ca.clusters23)
+    N34_clusters = length(ca.clusters34)
+    N_angle_clusters = length(ca.angle_clusters)
+
+    if N12_clusters > 0
+        N12_blocks = cld(N12_clusters, ca.gpu_block_size)
+        s2_kernel = shake2_kernel!(backend, N12_blocks, N12_clusters)
+        # 2 atom constraints are solved analytically, no need to iterate
+        s2_kernel(ca.clusters12, r_pre_unconstrained_update, sys.coords, sys.masses, sys.boundary, ndrange = N12_clusters)
+    end
 
     #* TODO LAUNCH ON SEPARATE STREAMS/TASKS
-    # shake3_kernel!()
-    # shake4_kernel!()
+
+    if N23_clusters > 0 
+        N23_blocks = cld(N23_clusters, ca.gpu_block_size)
+        s3_kernel = shake3_kernel!(backend, N23_blocks, N23_clusters)
+        #* is this the right way to allocate in KA????
+        active_idxs = allocate(backend, Int32, N23_clusters)
+        active_idxs .= 1:N23_clusters
+        still_active = allocate(backend, Bool, N23_clusters)
+        still_active .= true
+        shake_iterative!(
+            ca.clusters23, 
+            active_idxs,    
+            still_active,
+            s3_kernel,
+            r_pre_unconstrained_update,
+            sys.coords,
+            sys.masses,
+            sys.boundary;
+            ndrange = N23_clusters
+        )
+    end
+
+    if N34_clusters > 0 
+        N34_blocks = cld(N34_clusters, ca.gpu_block_size)
+        s3_kernel = shake4_kernel!(backend, N34_blocks, N34_clusters)
+        #* is this the right way to allocate in KA????
+        active_idxs = allocate(backend, Int32, N34_clusters)
+        active_idxs .= 1:N34_clusters
+        still_active = allocate(backend, Bool, N34_clusters)
+        still_active .= true
+        shake_iterative!(
+            ca.clusters23, 
+            active_idxs,    
+            still_active,
+            s3_kernel,
+            r_pre_unconstrained_update,
+            sys.coords,
+            sys.masses,
+            sys.boundary;
+            ndrange = N34_clusters
+        )
+    end
+
+    if N_angle_clusters > 0 
+        N_angle_blocks = cld(N_angle_clusters, ca.gpu_block_size)
+        s_angle_kernel = shake3_angle_kernel!(backend, N_angle_blocks, N_angle_clusters)
+        #* is this the right way to allocate in KA????
+        active_idxs = allocate(backend, Int32, N_angle_clusters)
+        active_idxs .= 1:N_angle_clusters
+        still_active = allocate(backend, Bool, N_angle_clusters)
+        still_active .= true
+        shake_iterative!(
+            ca.clusters23, 
+            active_idxs,    
+            still_active,
+            s_angle_kernel,
+            r_pre_unconstrained_update,
+            sys.coords,
+            sys.masses,
+            sys.boundary;
+            ndrange = N_angle_clusters
+        )
+    end
+
+    KernelAbstractions.synchronize(backend)
 
 end
 
@@ -654,4 +726,7 @@ function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE)
     N23_clusters > 0 && r3_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters23, sys.boundary, ndrange = N23_clusters)
     N34_clusters > 0 && r4_kernel(sys.coords, sys.velocities, sys.masses, ca.clusters34, sys.boundary, ndrange = N34_clusters)
     N_angle_clusters > 0 && r3_angle_kernel(sys.coords, sys.velocities, sys.masses, ca.angle_clusters, sys.boundary, ndrange = N_angle_clusters)
+
+    KernelAbstractions.synchronize(backend)
+
 end

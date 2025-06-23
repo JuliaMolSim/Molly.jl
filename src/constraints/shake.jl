@@ -47,53 +47,8 @@ end
 
 cluster_keys(::SHAKE_RATTLE) = [:clusters12, :clusters23, :clusters34, :angle_clusters]
 
-
-function kronickerδ(x::T, y::T) where T
-    if x == y
-        return one(T)
-    else
-        return zero(T)
-    end
-end
   
-function A_matrix_helper!(A, clusters, masses)
-    M = length(clusters[1])
-    for cluster in clusters
-        for a in 1:M
-            m1 = masses[cluster[a].i]
-            m2 = masses[cluster[a].j]
-            for b in 1:M 
-                δa1b1 = kronickerδ(cluster[a].i, cluster[b].i)
-                δa1b2 = kronickerδ(cluster[a].i, cluster[b].j)
-                δa2b2 = kronickerδ(cluster[a].j, cluster[b].j)
-                δa2b1 = kronickerδ(cluster[a].j, cluster[b].i)
-                A[a, b] = ((δa1b1 + δa1b2)/m1) + ((δa2b2 + δa2b1)/m2)
-            end
-        end
-    end
-    return A
-end
-
-function precompute_A_components(sr::SHAKE_RATTLE, masses)
-
-    # Construct on CPU we can move to GPU after
-    Aₘ₂ = KernelAbstractions.zeros(CPU(), T, length(sr.clusters2), 2, 2) 
-    Aₘ₃ = KernelAbstractions.zeros(CPU(), T, length(sr.clusters3), 3, 3) 
-
-    # Construct mass component of the A matrix to avoid
-    # to avoid if-else inside the GPU kernel.
-    # Eqn 15 in J. Comp. Chem., Vol. 22, No. 5, 501–508
-    A_matrix_helper!(Aₘ₂, sr.clusters2, masses)
-    A_matrix_helper!(Aₘ₃, sr.clusters3, masses)
-
-    return Aₘ₂, Aₘ₃
-end
-
 function setup_constraints!(neighbor_finder, sr::SHAKE_RATTLE)
-
-    # Compute and Move A matricies to Backend
-    # Aₘ₂, Aₘ₃ = precompute_A_components(sr, masses(sys))
-    #*TODO MOVE TO BACKEND
 
     # Disable Neighbor interactions that are constrained
     if typeof(neighbor_finder) != NoNeighborFinder
