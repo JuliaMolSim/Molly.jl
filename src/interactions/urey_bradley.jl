@@ -10,7 +10,7 @@ and a harmonic bond between the outer atoms.
 The second atom is the middle atom.
 The potential energy is defined as
 ```math
-V(\theta, r) = \frac{1}{2} kangle (\theta - \theta_0)^2 + \frac{1}{2} kbond (r - r_0)^2
+V(\theta, r) = \frac{1}{2} k_a (\theta - \theta_0)^2 + \frac{1}{2} k_b (r - r_0)^2
 ```
 """
 @kwdef struct UreyBradley{KA, A, KB, D}

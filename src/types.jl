@@ -1261,26 +1261,27 @@ function System(sys::AtomsBase.AbstractSystem{D};
 
     # AtomsBase does not specify a type for coordinates or velocities so we convert to SVector
     if !(:position in AtomsBase.atomkeys(sys))
-        throw(ArgumentError("Failed to construct Molly System form AbstractSystem. Missing position key."))
+        throw(ArgumentError("failed to construct Molly System from AbstractSystem, " *
+                            "missing position key"))
     end
-    
     coords = map(AtomsBase.position(sys, :)) do r
         SVector(r...)
     end
 
-    vels = nothing
     if :velocity in AtomsBase.atomkeys(sys)
         vels = map(AtomsBase.velocity(sys, :)) do v
             SVector(v...)
         end
+    else
+        vels = nothing
     end
 
     mass_dim = dimension(AtomsBase.mass(sys, 1))
     if mass_dim == u"𝐌" && dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        throw(ArgumentError("When constructing System from AbstractSystem, energy units " *
+        throw(ArgumentError("when constructing System from AbstractSystem, energy units " *
                             "are molar but mass units are not"))
     elseif mass_dim == u"𝐌 * 𝐍^-1" && dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐓^-2"
-        throw(ArgumentError("When constructing System from AbstractSystem, mass units " *
+        throw(ArgumentError("when constructing System from AbstractSystem, mass units " *
                             "are molar but energy units are not"))
     end
 
