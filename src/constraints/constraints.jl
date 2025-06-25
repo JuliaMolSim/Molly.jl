@@ -289,34 +289,81 @@ end
 
 end
 
-@kernel function shake_iterative!(
-    clusters::AbstractVector{ConstraintCluster}, 
-    active_idxs,    
-    still_active,
-    kernel_fn,
-    other_kernel_args...;
-    kernel_kwargs...
-  )
-    tid = @index(Global, Linear)
+@kernel inbounds=true function shake_step!(
+        clusters::AbstractVector{ConstraintCluster}, 
+        active_idxs,    
+        still_active::AbstractVector{Bool},
+        N_active,
+        shake_fn,
+        other_kernel_args...;
+    )
 
-    if tid <= length(active_idxs)
+    tid = @index(Global, Linear)
+        
+    if tid <= N_active
         # Get cluster-idx this thread will work on
         cluster_idx = active_idxs[tid]
         # Do one M-SHAKE iteration and check if it is converged or not
-        kernel_fn(
+        is_active = shake_fn(
             clusters[cluster_idx],
-            still_active,
             other_kernel_args...;
-            kernel_kwargs...
         )
+        still_active[cluster_idx] = is_active
+    end
+    
+end
+
+function shake_gpu!(
+        clusters::Vector{ConstraintCluster},
+        shake_kernel,
+        max_iters, 
+        other_kernel_args...,
+    )
+    N_active_clusters = length(clusters)
+
+    kern = shake_step!(backend, ca.gpu_block_size)
+
+    active_idxs = allocate(backend, Int32, N_active_clusters)
+    active_idxs .= 1:N_active_clusters
+    # Doesnt need to be initialized, kernel will do that
+    still_active = allocate(backend, Bool, N_active_clusters)
+
+    iter = 1
+    while iter <= max_iters 
+
+        kern(
+            clusters, 
+            active_idxs,    
+            still_active,
+            N_active_clusters,
+            shake_kernel,
+            other_kernel_args...;
+            ndrange = N_active_clusters
+        )
+
+        #* This compaction can be done ON GPU with 
+        #* the scan imeplmented in AcceleratedKernels.jl + a scatter operation
+        #* for now this is easier and (probably) faster for smaller systems
+        still_active_host = Array(still_active) #! MOVING FROM DEVICE TO HOST
+        active_idxs_host  = findall(still_active_host) 
+
+        isempty(active_idxs_host) && break
+
+        N_active_clusters = length(active_idxs_host)
+        # Move active indices to the start. Anything at the end
+        # is ignored by kernel as only N_active_clusters 
+        # threads are launched.
+        active_idxs[1:N_active_clusters] .= active_idxs_host #! MOVING FROM HOST TO DEVICE
+
+        iter += 1
+
     end
 end
 
 # 3 atoms, 2 constraints
 # Constraints between 1-2 and 1-3
-@kernel inbounds=true function shake3_kernel!(
+function shake3_kernel!(
         cluster::StructArray{DistanceConstraint}, 
-        still_active_flags,
         r_t1::T, r_t2::T,
         m, 
         boundary,
@@ -385,15 +432,14 @@ end
     tol13 = abs(norm(s_k1k3) - dist13)
 
     # Constraint still active if either above tolerance
-    still_active_flags[idx] = (tol12 > ca.dist_tolerance) || (tol13 > ca.dist_tolerance)
+    return (tol12 > ca.dist_tolerance) || (tol13 > ca.dist_tolerance)
 
 end
 
 # 4 atoms, 3 constraints
 # Constraints between 1-2, 1-3 and 1-4
-@kernel inbounds=true function shake4_kernel!(
-        clusters, 
-        still_active_flags,
+function shake4_kernel!(
+        cluster, 
         r_t1::T, r_t2::T,
         m, 
         boundary,
@@ -476,14 +522,14 @@ end
 
     # Constraint still active if either above tolerance
     still_active = (tol12 > ca.dist_tolerance) || (tol13 > ca.dist_tolerance) || (tol14 > ca.dist_tolerance)
-    still_active_flags[idx] = still_active
+    return  still_active
 
 end
 
 # 3 atoms, 3 constraints
 # Constraints between 1-2, 1-3 and 2-3
-@kernel inbounds=true function shake3_angle_kernel!(
-        clusters, 
+function shake3_angle_kernel!(
+        cluster, 
         still_active_flags,
         r_t1::T, r_t2::T,
         m, 
@@ -562,7 +608,7 @@ end
 
     # Constraint still active if either above tolerance
     still_active = (tol12 > ca.dist_tolerance) || (tol13 > ca.dist_tolerance) || (tol23 > ca.dist_tolerance)
-    still_active_flags[idx] = still_active
+    return still_active
 
 end
  
@@ -580,74 +626,46 @@ function apply_position_constraints!(
     N_angle_clusters = length(ca.angle_clusters)
 
     if N12_clusters > 0
-        N12_blocks = cld(N12_clusters, ca.gpu_block_size)
-        s2_kernel = shake2_kernel!(backend, N12_blocks, N12_clusters)
         # 2 atom constraints are solved analytically, no need to iterate
+        s2_kernel = shake2_kernel!(backend, ca.gpu_block_size)
         s2_kernel(ca.clusters12, r_pre_unconstrained_update, sys.coords, sys.masses, sys.boundary, ndrange = N12_clusters)
     end
 
     #* TODO LAUNCH ON SEPARATE STREAMS/TASKS
 
     if N23_clusters > 0 
-        N23_blocks = cld(N23_clusters, ca.gpu_block_size)
-        s3_kernel = shake3_kernel!(backend, N23_blocks, N23_clusters)
-        #* is this the right way to allocate in KA????
-        active_idxs = allocate(backend, Int32, N23_clusters)
-        active_idxs .= 1:N23_clusters
-        still_active = allocate(backend, Bool, N23_clusters)
-        still_active .= true
-        shake_iterative!(
-            ca.clusters23, 
-            active_idxs,    
-            still_active,
-            s3_kernel,
+        shake_gpu!(
+            ca.clusters23,
+            shake3_kernel!,
+            ca.max_iters, 
             r_pre_unconstrained_update,
             sys.coords,
             sys.masses,
-            sys.boundary;
-            ndrange = N23_clusters
+            sys.boundary
         )
     end
 
     if N34_clusters > 0 
-        N34_blocks = cld(N34_clusters, ca.gpu_block_size)
-        s3_kernel = shake4_kernel!(backend, N34_blocks, N34_clusters)
-        #* is this the right way to allocate in KA????
-        active_idxs = allocate(backend, Int32, N34_clusters)
-        active_idxs .= 1:N34_clusters
-        still_active = allocate(backend, Bool, N34_clusters)
-        still_active .= true
-        shake_iterative!(
-            ca.clusters23, 
-            active_idxs,    
-            still_active,
-            s3_kernel,
+        shake_gpu!(
+            ca.clusters34,
+            shake4_kernel!,
+            ca.max_iters, 
             r_pre_unconstrained_update,
             sys.coords,
             sys.masses,
-            sys.boundary;
-            ndrange = N34_clusters
+            sys.boundary
         )
     end
 
     if N_angle_clusters > 0 
-        N_angle_blocks = cld(N_angle_clusters, ca.gpu_block_size)
-        s_angle_kernel = shake3_angle_kernel!(backend, N_angle_blocks, N_angle_clusters)
-        #* is this the right way to allocate in KA????
-        active_idxs = allocate(backend, Int32, N_angle_clusters)
-        active_idxs .= 1:N_angle_clusters
-        still_active = allocate(backend, Bool, N_angle_clusters)
-        still_active .= true
-        shake_iterative!(
-            ca.clusters23, 
-            active_idxs,    
-            still_active,
-            s_angle_kernel,
+        shake_gpu!(
+            ca.angle_clusters,
+            shake3_angle_kernel!,
+            ca.max_iters, 
             r_pre_unconstrained_update,
             sys.coords,
             sys.masses,
-            sys.boundary;
-            ndrange = N_angle_clusters
+            sys.boundary
         )
     end
 
