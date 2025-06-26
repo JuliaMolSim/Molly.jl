@@ -693,7 +693,6 @@ end
         eligible=trues(n_atoms, n_atoms),
         dist_cutoff=1.5*r_cut,
     )
-    disable_constrained_interactions!(neighbor_finder, cons.clusters)
 
     for simulator in simulators
         coords = [SVector(coords_matrix[j, 1]u"Å", coords_matrix[j, 2]u"Å", coords_matrix[j, 3]u"Å") for j in 1:n_atoms]

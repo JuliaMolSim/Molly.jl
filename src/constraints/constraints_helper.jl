@@ -62,8 +62,8 @@ function AngleConstraint(i, j, k, angle_jk, dist_ij, dist_ik)
     return AngleConstraint{typeof(dist_ij)}(i, j, k, dist_ij, dist_ik, dist_jk)
 end
 
-struct ConstraintCluster
-    constraints::StructArray{DistanceConstraint}
+struct ConstraintCluster{D <: DistanceConstraint}
+    constraints::StructArray{D}
     unique_atoms::Vector{Int}
 end
 
@@ -186,7 +186,7 @@ function build_clusters(n_atoms, constraints)
     for (_, atom_idxs) in enumerate(cc)
         # Loop over atoms in connected region to build cluster
         if length(atom_idxs) > 1 # connected_components gives unconnected vertices as well
-            is = []; js = []; dists = []
+            is = Int[]; js = Int[]; dists = []
             for ai in atom_idxs
                 neigh_idxs = neighbors(constraint_graph, ai)
                 for neigh_idx in neigh_idxs
@@ -198,7 +198,7 @@ function build_clusters(n_atoms, constraints)
 
             #* WILL NEED TO UPDATE THIS FOR ANGLE CONSTRAINTS!
             #* ALL ATOMS WILL TRIGGER AS "CENTRAL" ATOMS 
-            constraint_cluster = make_cluster(is, js, dists)
+            constraint_cluster = make_cluster(is, js, [dists...])
             N_constraint = length(is)
             N_unique = n_unique(constraint_cluster)
 
@@ -216,8 +216,8 @@ function build_clusters(n_atoms, constraints)
             end
         end
     end
-
-    return [clusters12...], [clusters23...], [clusters34...], [clusters_angle...]
+    return clusters12, clusters23, clusters34, clusters_angle
+    # return [clusters12...], [clusters23...], [clusters34...], [clusters_angle...]
 end
 
 
@@ -253,4 +253,50 @@ end
 
 function n_dof(D::Integer, n_atoms::Integer, boundary)
     return D * n_atoms - (D - n_infinite_dims(boundary))
+end
+
+
+"""
+    apply_position_constraints!(sys, coord_storage)
+    apply_position_constraints!(sys, coord_storage, vel_storage, dt)
+
+Applies the system constraints to the coordinates.
+
+If `vel_storage` and `dt` are provided then velocity corrections are applied as well.
+"""
+function apply_position_constraints!(sys, coord_storage; n_threads::Integer=Threads.nthreads())
+    for ca in sys.constraints
+        apply_position_constraints!(sys, ca, coord_storage; n_threads = n_threads)
+    end
+    return sys
+end
+
+function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
+                                        n_threads::Integer=Threads.nthreads())
+
+    if length(sys.constraints) > 0
+
+        vel_storage .= -sys.coords ./ dt
+
+        for ca in sys.constraints
+            apply_position_constraints!(sys, ca, coord_storage; n_threads = n_threads)
+        end
+
+        vel_storage .+= sys.coords ./ dt
+        sys.velocities .+= vel_storage
+    end
+
+    return sys
+end
+
+"""
+    apply_velocity_constraints!(sys)
+
+Applies the system constraints to the velocities.
+"""
+function apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
+    for ca in sys.constraints
+        apply_velocity_constraints!(sys, ca)
+    end
+    return sys
 end

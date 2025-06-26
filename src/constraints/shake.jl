@@ -4,6 +4,9 @@ export
     check_velocity_constraints,
     setup_constraints!
 
+const CC = ConstraintCluster #alias so next line is shorter
+
+
 """
     SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance)
 
@@ -26,13 +29,13 @@ of the linear system solved to satisfy the RATTLE algorithm.
 - `vel_tolerance`: the tolerance used to end the iterative procedure when calculating
     velocity constraints, should have the same units as the velocities * the coordinates.
 """
-struct SHAKE_RATTLE{CC, D, V}
-    clusters12::AbstractVector{CC} # CC will be ConstraintCluster 
-    clusters23::AbstractVector{CC}
-    clusters34::AbstractVector{CC}
-    angle_clusters::AbstractVector{CC}
-    dist_tolerance::D
-    vel_tolerance::V
+struct SHAKE_RATTLE{A <: CC, B <: CC, C <: CC, D <: CC, E, F}
+    clusters12::AbstractVector{A}
+    clusters23::AbstractVector{B}
+    clusters34::AbstractVector{C}
+    angle_clusters::AbstractVector{D}
+    dist_tolerance::E
+    vel_tolerance::F
     gpu_block_size::Integer
 end
 
@@ -41,7 +44,12 @@ function SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance; gpu_b
 
     clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, constraints)
 
-    return SHAKE_RATTLE{eltype(clusters12), typeof(dist_tolerance), typeof(vel_tolerance)}(
+    A = eltype(clusters12)
+    B = eltype(clusters23)
+    C = eltype(clusters34)
+    D = eltype(angle_clusters)
+
+    return SHAKE_RATTLE{A, B, C, D, typeof(dist_tolerance), typeof(vel_tolerance)}(
         clusters12, clusters23, clusters34, angle_clusters, dist_tolerance, vel_tolerance, gpu_block_size)
 end
 

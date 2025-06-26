@@ -88,26 +88,35 @@ end
 
 # 3 atoms 2 constraints
 # Assumes first atom is central atom
-@kernel inbounds=true function rattle3_kernel!(r, v, m, clusters, boundary)
+@kernel inbounds=true function rattle3_kernel!(
+    r::AbstractVector{<:AbstractVector{L}},
+    v::AbstractVector{<:AbstractVector{V}},
+    m::AbstractVector{M},
+    clusters,
+    boundary) where {L, V, M}
 
     idx = @index(Global, Linear) # Global Constraint Idx
     @uniform NUM_CONSTRAINTS = 0x2
-
+    @uniform A_type = typeof(zero(L)*zero(L) / zero(M))
+    @uniform C_type = typeof(zero(V)*zero(L))
+    @uniform L_type = typeof(zero(C_type) / zero(A_type))
 
     if idx <= length(clusters)
-
+        
         # Allocate thread-local memory
-        A = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
-        C = zeros(eltype(r), NUM_CONSTRAINTS)
-        λ = zeros(eltype(r), NUM_CONSTRAINTS)
+        A = zeros(A_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS) # Units are L^2 / M
+        C = zeros(C_type, NUM_CONSTRAINTS) # Units are L^2 / T
+        λ = zeros(L_type, NUM_CONSTRAINTS) # Units are M / T
 
         k1 = clusters[idx].unique_atoms[1] # this is assumed to be the central atom
         k2 = clusters[idx].unique_atoms[2]
         k3 = clusters[idx].unique_atoms[3]
+
+        r_k1 = r[k1]
      
         m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3] # uncoalesced read
-        r_k1k2  = vector(r[k1], r[k2], boundary)
-        r_k1k3  = vector(r[k1], r[k3], boundary)
+        r_k1k2  = vector(r_k1, r[k2], boundary)
+        r_k1k3  = vector(r_k1, r[k3], boundary)
 
         v_k1 = v[k1] # uncoalesced read
         v_k2 = v[k2] # uncoalesced read
@@ -124,10 +133,10 @@ end
         C[1] = -dot(r_k1k2, v_k1k2)
         C[2] = -dot(r_k1k3, v_k1k3)
 
-        solve_2x2exactly!(λ, A, C)
+        solve2x2exactly(λ, A, C)
 
         # Update global memory
-        v[k1] -= m1_inv * ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
+        v[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
         v[k2] -= m2_inv .* (-λ[1] .* r_k1k2)
         v[k3] -= m3_inv .* (-λ[2] .* r_k1k3)
 
@@ -136,27 +145,38 @@ end
 
 # 4 atoms 3 cosntraints
 # Assumes first atom is central atom
-@kernel inbounds=true function rattle4_kernel!(r, v, m, clusters, boundary)
+@kernel inbounds=true function rattle4_kernel!(
+    r::AbstractVector{<:AbstractVector{L}},
+    v::AbstractVector{<:AbstractVector{V}},
+    m::AbstractVector{M},
+    clusters,
+    boundary) where {L,V,M}
+
     idx = @index(Global, Linear) # Global Constraint Idx
     @uniform NUM_CONSTRAINTS = 0x3
+    @uniform A_type = typeof(zero(L)*zero(L) / zero(M))
+    @uniform C_type = typeof(zero(V)*zero(L))
+    @uniform L_type = typeof(zero(C_type) / zero(A_type))
 
     if idx <= length(clusters)
 
         # Allocate thread-local memory
-        A = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
-        A_tmp = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
-        C = zeros(eltype(r), NUM_CONSTRAINTS)
-        λ = zeros(eltype(r), NUM_CONSTRAINTS)
+        A = zeros(A_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
+        A_tmp = zeros(A_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
+        C = zeros(C_type, NUM_CONSTRAINTS)
+        λ = zeros(L_type, NUM_CONSTRAINTS)
 
         k1 = clusters[idx].unique_atoms[1] # this is assumed to be the central atom
         k2 = clusters[idx].unique_atoms[2]
         k3 = clusters[idx].unique_atoms[3]
         k4 = clusters[idx].unique_atoms[4]
+
+        r_k1 = r[k1] # uncoalesced read
      
         m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3]; m4_inv = 1 / m[k4] # uncoalesced read
-        r_k1k2  = vector(r_shared[k1], r_shared[k2], boundary) # uncoalesced read
-        r_k1k3  = vector(r_shared[k1], r_shared[k3], boundary) # uncoalesced read
-        r_k1k4  = vector(r_shared[k1], r_shared[k4], boundary) # uncoalesced read
+        r_k1k2  = vector(r_k1, r[k2], boundary) # uncoalesced read
+        r_k1k3  = vector(r_k1, r[k3], boundary) # uncoalesced read
+        r_k1k4  = vector(r_k1, r[k4], boundary) # uncoalesced read
 
         vk1 = v[k1] # uncoalesced read
         vk2 = v[k2] # uncoalesced read
@@ -184,7 +204,7 @@ end
         solve3x3exactly!(λ, A, A_tmp, C)
 
         # Update global memory
-        v[k1] -= m1_inv * ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3) .+ λ[3] .* r_k1k4)
+        v[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3) .+ λ[3] .* r_k1k4)
         v[k2] -= m2_inv .* (-λ[1] .* r_k1k2)
         v[k3] -= m3_inv .* (-λ[2] .* r_k1k3)
         v[k4] -= m4_inv .* (-λ[3] .* r_k1k4)
@@ -193,27 +213,39 @@ end
 end
 
 # 3 atoms 3 constraints
-@kernel inbounds=true function rattle3_angle_kernel!(r, v, m, clusters, boundary)
+@kernel inbounds=true function rattle3_angle_kernel!(
+    r::AbstractVector{<:AbstractVector{L}},
+    v::AbstractVector{<:AbstractVector{V}},
+    m::AbstractVector{M},
+    clusters,
+    boundary) where {L, V, M}
 
     idx = @index(Global, Linear) # Global Constraint Idx
     @uniform NUM_CONSTRAINTS = 0x3
+    @uniform A_type = typeof(zero(L)*zero(L) / zero(M))
+    @uniform C_type = typeof(zero(V)*zero(L))
+    @uniform L_type = typeof(zero(C_type) / zero(A_type))
 
     if idx <= length(clusters)
 
         # Allocate thread-local memory
-        A = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
-        A_tmp = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
-        C = zeros(eltype(r), NUM_CONSTRAINTS)
-        λ = zeros(eltype(r), NUM_CONSTRAINTS)
+        A = zeros(A_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
+        A_tmp = zeros(A_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
+        C = zeros(C_type, NUM_CONSTRAINTS)
+        λ = zeros(L_type, NUM_CONSTRAINTS)
 
         k1 = clusters[idx].unique_atoms[1] # this is assumed to be the central atom
         k2 = clusters[idx].unique_atoms[2]
         k3 = clusters[idx].unique_atoms[3]
+
+        r_k1 = r[k1]; v_k1 = v[k1]
+        r_k2 = r[k2]; v_k2 = v[k2]
+        r_k3 = r[k3]; v_k3 = v[k3]
      
         m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3] #uncoalesced read
-        r_k1k2  = vector(r_shared[k1], r_shared[k2], boundary) # uncoalesced read
-        r_k1k3  = vector(r_shared[k1], r_shared[k3], boundary) # uncoalesced read
-        r_k2k3  = vector(r_shared[k2], r_shared[k3], boundary) # uncoalesced read
+        r_k1k2  = vector(r_k1, r_k2, boundary) # uncoalesced read
+        r_k1k3  = vector(r_k1, r_k3, boundary) # uncoalesced read
+        r_k2k3  = vector(r_k2, r_k3, boundary) # uncoalesced read
 
         v_k1k2 = v_k2 .- v_k1
         v_k1k3 = v_k3 .- v_k1
@@ -233,7 +265,7 @@ end
         C[2] = -dot(r_k1k3, v_k1k3)
         C[3] = -dot(r_k2k3, v_k2k3)
 
-        solve_2x2exactly!(λ, A, A_tmp, C)
+        solve2x2exactly!(λ, A, A_tmp, C)
 
         # Update global memory
         v[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
@@ -413,7 +445,7 @@ function shake3_kernel!(
     C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12)) / denom
     C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13)) / denom
 
-    solve_2x2exactly!(λ, A, C)
+    solve2x2exactly(λ, A, C)
 
     # Step 3: Update global memory
     r_t2[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
@@ -615,7 +647,8 @@ end
 function apply_position_constraints!(
         sys::System,
         ca::SHAKE_RATTLE, 
-        r_pre_unconstrained_update
+        r_pre_unconstrained_update;
+        kwargs...
     )
 
     backend = get_backend(r_pre_unconstrained_update)
@@ -625,13 +658,14 @@ function apply_position_constraints!(
     N34_clusters = length(ca.clusters34)
     N_angle_clusters = length(ca.angle_clusters)
 
+    #* TODO LAUNCH ON SEPARATE STREAMS/TASKS
+    #* DOCS ON THSI ARE BLANK IN KA.jl
+
     if N12_clusters > 0
         # 2 atom constraints are solved analytically, no need to iterate
         s2_kernel = shake2_kernel!(backend, ca.gpu_block_size)
         s2_kernel(ca.clusters12, r_pre_unconstrained_update, sys.coords, sys.masses, sys.boundary, ndrange = N12_clusters)
     end
-
-    #* TODO LAUNCH ON SEPARATE STREAMS/TASKS
 
     if N23_clusters > 0 
         shake_gpu!(
@@ -673,52 +707,7 @@ function apply_position_constraints!(
 
 end
 
-
-"""
-    apply_position_constraints!(sys, coord_storage)
-    apply_position_constraints!(sys, coord_storage, vel_storage, dt)
-
-Applies the system constraints to the coordinates.
-
-If `vel_storage` and `dt` are provided then velocity corrections are applied as well.
-"""
-function apply_position_constraints!(sys, coord_storage)
-    for ca in sys.constraints
-        apply_position_constraints!(sys, ca, coord_storage)
-    end
-    return sys
-end
-
-function apply_position_constraints!(sys, coord_storage, vel_storage, dt)
-
-    if length(sys.constraints) > 0
-
-        vel_storage .= -sys.coords ./ dt
-
-        for ca in sys.constraints
-            apply_position_constraints!(sys, ca, coord_storage)
-        end
-
-        vel_storage .+= sys.coords ./ dt
-        sys.velocities .+= vel_storage
-    end
-
-    return sys
-end
-
-"""
-    apply_velocity_constraints!(sys)
-
-Applies the system constraints to the velocities.
-"""
-function apply_velocity_constraints!(sys)
-    for ca in sys.constraints
-        apply_velocity_constraints!(sys, ca)
-    end
-    return sys
-end
-
-function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE)
+function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; kwargs...)
 
     backend = get_backend(sys.velocities)
 
