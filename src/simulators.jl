@@ -509,9 +509,14 @@ end
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
     forces_nounits_t = ustrip_vec.(similar(sys.coords))
-    forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
+    
+    # Compute forces once for initialization
+    forces_nounits_t .= forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
+                                            n_threads=n_threads)
+    forces_t = forces_nounits_t .* sys.force_units
     accels_t = forces_t ./ masses(sys)
+    
     noise = similar(sys.velocities)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
@@ -547,12 +552,7 @@ end
         end
     end
     
-    # Compute forces once for initialization
-    forces_nounits_t .= forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
-                                            n_threads=n_threads)
-    forces_t .= forces_nounits_t .* sys.force_units
-    accels_t .= forces_t ./ masses(sys)
-    
+
     for step_n in 1:n_steps
         for (step!, args) in step_arg_pairs
             step!(args..., neighbors, step_n)
