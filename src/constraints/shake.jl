@@ -28,6 +28,8 @@ of the linear system solved to satisfy the RATTLE algorithm.
     position constraints, should have the same units as the coordinates.
 - `vel_tolerance`: the tolerance used to end the iterative procedure when calculating
     velocity constraints, should have the same units as the velocities * the coordinates.
+- `gpu_block_size`: The number of threads per block to use for GPU calculations.
+- `max_iters`: The maximum number of iterations to perform when doing SHAKE. Defaults to 25.
 """
 struct SHAKE_RATTLE{A <: CC, B <: CC, C <: CC, D <: CC, E, F}
     clusters12::AbstractVector{A}
@@ -37,10 +39,12 @@ struct SHAKE_RATTLE{A <: CC, B <: CC, C <: CC, D <: CC, E, F}
     dist_tolerance::E
     vel_tolerance::F
     gpu_block_size::Integer
+    max_iters::Integer
 end
 
 
-function SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance; gpu_block_size = 64)
+function SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance;
+                         gpu_block_size = 64, max_iters = 25)
 
     clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, constraints)
 
@@ -50,7 +54,7 @@ function SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance; gpu_b
     D = eltype(angle_clusters)
 
     return SHAKE_RATTLE{A, B, C, D, typeof(dist_tolerance), typeof(vel_tolerance)}(
-        clusters12, clusters23, clusters34, angle_clusters, dist_tolerance, vel_tolerance, gpu_block_size)
+        clusters12, clusters23, clusters34, angle_clusters, dist_tolerance, vel_tolerance, gpu_block_size, max_iters)
 end
 
 cluster_keys(::SHAKE_RATTLE) = [:clusters12, :clusters23, :clusters34, :angle_clusters]

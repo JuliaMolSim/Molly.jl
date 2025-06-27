@@ -338,7 +338,7 @@ end
         # Do one M-SHAKE iteration and check if it is converged or not
         is_active = shake_fn(
             clusters[cluster_idx],
-            other_kernel_args...;
+            other_kernel_args...
         )
         still_active[cluster_idx] = is_active
     end
@@ -347,8 +347,9 @@ end
 
 function shake_gpu!(
         clusters::Vector{ConstraintCluster},
+        ca::SHAKE_RATTLE,
+        backend,
         shake_kernel,
-        max_iters, 
         other_kernel_args...,
     )
     N_active_clusters = length(clusters)
@@ -361,7 +362,7 @@ function shake_gpu!(
     still_active = allocate(backend, Bool, N_active_clusters)
 
     iter = 1
-    while iter <= max_iters 
+    while iter <= ca.max_iters 
 
         kern(
             clusters, 
@@ -390,21 +391,33 @@ function shake_gpu!(
         iter += 1
 
     end
+
+    if iter == ca.max_iters + 1
+        @warn "SHAKE did not converge after $(ca.max_iters) iterations. Some constraints may not be satisfied."
+    end
+
 end
 
 # 3 atoms, 2 constraints
 # Constraints between 1-2 and 1-3
-function shake3_kernel!(
-        cluster::StructArray{DistanceConstraint}, 
-        r_t1::T, r_t2::T,
-        m, 
+@inline function shake3_kernel!(
+        cluster::ConstraintCluster, 
+        r_t1::AbstractVector{<:AbstractVector{L}}, 
+        r_t2::AbstractVector{<:AbstractVector{L}},
+        m::AbstractVector{M}, 
         boundary,
-        dt, 
-    ) where T
+        dist_tol::L
+    ) where {L,M}
 
-    idx = @index(Global, Linear) # Global Constraint Idx
-    @uniform NUM_CONSTRAINTS = 0x2
+    @uniform A_type = typeof(zero(L)*zero(L) / zero(M))
+    @uniform C_type = typeof(zero(L)*zero(L))
+    @uniform L_type = typeof(zero(M))
+    @uniform FT = float_type(boundary)
 
+    # Allocate thread-local memory
+    A = zeros(A_type, 0x2, 0x2) # Units are L^2 / M
+    C = zeros(C_type, 0x2) # Units are L^2
+    λ = zeros(L_type, 0x2) # Units are M
 
     k1 = cluster.unique_atoms[1] # central atom
     k2 = cluster.unique_atoms[2]
@@ -416,34 +429,25 @@ function shake3_kernel!(
     m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3] # uncoalesced read
 
     r_t2_k1 = r_t2[k1] # uncoalesced read
+    r_t1_k1 = r_t1[k1] # uncoalesced read
     r_t2_k2 = r_t2[k2] # uncoalesced read
     r_t2_k3 = r_t2[k3] # uncoalesced read
 
-    r_t1_k1 = r_t1[k1] # uncoalesced read
-    r_t1_k2 = r_t1[k2] # uncoalesced read
-    r_t1_k3 = r_t1[k3] # uncoalesced read
-
-    r_k1k2  = vector(r_t1_k1, r_t1_k2, boundary)
-    r_k1k3  = vector(r_t1_k1, r_t1_k3, boundary)
+    r_k1k2  = vector(r_t1_k1, r_t1[k2], boundary)
+    r_k1k3  = vector(r_t1_k1, r_t1[k3], boundary)
 
     # Distance vectors after unconstrainted update
     s_k1k2 = vector(r_t2_k1, r_t2_k2, boundary)
     s_k1k3 = vector(r_t2_k1, r_t2_k3, boundary)
 
-    # Allocate thread-local memory
-    A = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
-    C = zeros(eltype(r), NUM_CONSTRAINTS)
-    λ = zeros(eltype(r), NUM_CONSTRAINTS)
-
     # A matrix element (i,j) represents interaction of constraint i with constraint j.
-    A[1,1] = dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # this sets constraint 1 as between k1-k2
-    A[2,2] = dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # this sets constraint 1 as between k1-k3
-    A[1,2] = dot(r_k1k3, s_k1k2) * m1_inv
-    A[2,1] = dot(r_k1k2, s_k1k3) * m1_inv
+    A[1,1] = -FT(2.0) * dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # this sets constraint 1 as between k1-k2
+    A[2,2] = -FT(2.0) * dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # this sets constraint 1 as between k1-k3
+    A[1,2] = -FT(2.0) * dot(r_k1k3, s_k1k2) * m1_inv
+    A[2,1] = -FT(2.0) * dot(r_k1k2, s_k1k3) * m1_inv
 
-    denom = 4*dt*dt
-    C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12)) / denom
-    C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13)) / denom
+    C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12))
+    C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13))
 
     solve2x2exactly(λ, A, C)
 
@@ -464,22 +468,31 @@ function shake3_kernel!(
     tol13 = abs(norm(s_k1k3) - dist13)
 
     # Constraint still active if either above tolerance
-    return (tol12 > ca.dist_tolerance) || (tol13 > ca.dist_tolerance)
+    return (tol12 > dist_tol) || (tol13 > dist_tol)
 
 end
 
 # 4 atoms, 3 constraints
 # Constraints between 1-2, 1-3 and 1-4
-function shake4_kernel!(
-        cluster, 
-        r_t1::T, r_t2::T,
-        m, 
+@inline function shake4_kernel!(
+        cluster::ConstraintCluster, 
+        r_t1::AbstractVector{<:AbstractVector{L}},
+        r_t2::AbstractVector{<:AbstractVector{L}},
+        m::AbstractVector{M}, 
         boundary,
-        dt, 
-    ) where T
+        dist_tol::L
+    ) where {L,M}
 
-    idx = @index(Global, Linear) # Global Constraint Idx
-    @uniform NUM_CONSTRAINTS = 0x3
+    @uniform A_type = typeof(zero(L)*zero(L) / zero(M))
+    @uniform C_type = typeof(zero(L)*zero(L))
+    @uniform L_type = typeof(zero(M))
+    @uniform FT = float_type(boundary)
+
+    # Allocate thread-local memory
+    A = zeros(A_type, 0x3, 0x3)
+    A_tmp = zeros(A_type, 0x3, 0x3)
+    C = zeros(C_type, 0x3)
+    λ = zeros(L_type, 0x3)
 
     k1, k2, k3, k4 = cluster.unique_atoms
 
@@ -489,46 +502,36 @@ function shake4_kernel!(
     m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2];# uncoalesced read
     m3_inv = 1 / m[k3]; m4_inv = 1 / m[k4] # uncoalesced read
 
+    r_t1_k1 = r_t1[k1] # uncoalesced read
     r_t2_k1 = r_t2[k1] # uncoalesced read
     r_t2_k2 = r_t2[k2] # uncoalesced read
     r_t2_k3 = r_t2[k3] # uncoalesced read
     r_t2_k4 = r_t2[k4] # uncoalesced read
 
-    r_t1_k1 = r_t1[k1] # uncoalesced read
-    r_t1_k2 = r_t1[k2] # uncoalesced read
-    r_t1_k3 = r_t1[k3] # uncoalesced read
-    r_t1_k4 = r_t1[k4] # uncoalesced read
-
-    r_k1k2  = vector(r_t1_k1, r_t1_k2, boundary)
-    r_k1k3  = vector(r_t1_k1, r_t1_k3, boundary)
-    r_k1k4  = vector(r_t1_k1, r_t1_k4, boundary)
+    r_k1k2  = vector(r_t1_k1, r_t1[k2], boundary)
+    r_k1k3  = vector(r_t1_k1, r_t1[k3], boundary)
+    r_k1k4  = vector(r_t1_k1, r_t1[k4], boundary)
 
     # Distance vectors after unconstrainted update
     s_k1k2 = vector(r_t2_k1, r_t2_k2, boundary)
     s_k1k3 = vector(r_t2_k1, r_t2_k3, boundary)
     s_k1k4 = vector(r_t2_k1, r_t2_k4, boundary)
 
-    # Allocate thread-local memory
-    A = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
-    A_tmp = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
-    C = zeros(eltype(r), NUM_CONSTRAINTS)
-    λ = zeros(eltype(r), NUM_CONSTRAINTS)
-
     # A matrix element (i,j) represents interaction of constraint i with constraint j.
-    A[1,1] = dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # this sets constraint 1 as between k1-k2
-    A[2,2] = dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # this sets constraint 2 as between k1-k3
-    A[3,3] = dot(r_k1k4, s_k1k4) * (m1_inv + m4_inv) # this sets constraint 3 as between k1-k4
-    A[1,2] = dot(r_k1k3, s_k1k2) * m1_inv
-    A[2,1] = dot(r_k1k2, s_k1k3) * m1_inv
-    A[1,3] = dot(r_k1k4, s_k1k2) * m1_inv
-    A[3,1] = dot(r_k1k2, s_k1k4) * m1_inv
-    A[2,3] = dot(r_k1k4, s_k1k3) * m1_inv
-    A[3,2] = dot(r_k1k3, s_k1k4) * m1_inv
+    A[1,1] = -FT(2.0) * dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # this sets constraint 1 as between k1-k2
+    A[2,2] = -FT(2.0) * dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # this sets constraint 2 as between k1-k3
+    A[3,3] = -FT(2.0) * dot(r_k1k4, s_k1k4) * (m1_inv + m4_inv) # this sets constraint 3 as between k1-k4
+    A[1,2] = -FT(2.0) * dot(r_k1k3, s_k1k2) * m1_inv
+    A[2,1] = -FT(2.0) * dot(r_k1k2, s_k1k3) * m1_inv
+    A[1,3] = -FT(2.0) * dot(r_k1k4, s_k1k2) * m1_inv
+    A[3,1] = -FT(2.0) * dot(r_k1k2, s_k1k4) * m1_inv
+    A[2,3] = -FT(2.0) * dot(r_k1k4, s_k1k3) * m1_inv
+    A[3,2] = -FT(2.0) * dot(r_k1k3, s_k1k4) * m1_inv
 
-    denom = 4*dt*dt
-    C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12)) / denom
-    C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13)) / denom
-    C[3] = (dot(s_k1k4, s_k1k4) - (dist14*dist14)) / denom
+    #denom = 4*dt*dt
+    C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12)) #/ denom
+    C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13)) #/ denom
+    C[3] = (dot(s_k1k4, s_k1k4) - (dist14*dist14)) #/ denom
 
     solve3x3exactly!(λ, A, A_tmp, C)
 
@@ -553,24 +556,32 @@ function shake4_kernel!(
     tol14 = abs(norm(s_k1k4) - dist14)
 
     # Constraint still active if either above tolerance
-    still_active = (tol12 > ca.dist_tolerance) || (tol13 > ca.dist_tolerance) || (tol14 > ca.dist_tolerance)
+    still_active = (tol12 > dist_tol) || (tol13 > dist_tol) || (tol14 > dist_tol)
     return  still_active
 
 end
 
 # 3 atoms, 3 constraints
 # Constraints between 1-2, 1-3 and 2-3
-function shake3_angle_kernel!(
-        cluster, 
-        still_active_flags,
-        r_t1::T, r_t2::T,
-        m, 
+@inline function shake3_angle_kernel!(
+        cluster::ConstraintCluster, 
+        r_t1::AbstractVector{<:AbstractVector{L}},
+        r_t2::AbstractVector{<:AbstractVector{L}},
+        m::AbstractVector{M}, 
         boundary,
-        dt, 
-    ) where T
+        dist_tol::L
+    ) where {L,M}
 
-    idx = @index(Global, Linear) # Global Constraint Idx
-    @uniform NUM_CONSTRAINTS = 0x3
+    @uniform A_type = typeof(zero(L)*zero(L) / zero(M))
+    @uniform C_type = typeof(zero(L)*zero(L))
+    @uniform L_type = typeof(zero(M))
+    @uniform FT = float_type(boundary)
+
+    # Allocate thread-local memory
+    A = zeros(A_type, 0x3, 0x3)
+    A_tmp = zeros(A_type, 0x3, 0x3)
+    C = zeros(C_type, 0x3)
+    λ = zeros(L_type, 0x3)
 
     k1, k2, k3 = cluster.unique_atoms
 
@@ -596,27 +607,21 @@ function shake3_angle_kernel!(
     s_k1k3 = vector(r_t2_k1, r_t2_k3, boundary)
     s_k2k3 = vector(r_t2_k2, r_t2_k3, boundary)
 
-    # Allocate thread-local memory
-    A = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
-    A_tmp = zeros(eltype(r), NUM_CONSTRAINTS, NUM_CONSTRAINTS)
-    C = zeros(eltype(r), NUM_CONSTRAINTS)
-    λ = zeros(eltype(r), NUM_CONSTRAINTS)
-
     # A matrix element (i,j) represents interaction of constraint i with constraint j.
-    A[1,1] = dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # this sets constraint 1 as between k1-k2
-    A[2,2] = dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # this sets constraint 2 as between k1-k3
-    A[3,3] = dot(r_k1k3, s_k1k3) * (m2_inv + m3_inv) # this sets constraint 3 as between k2-k3
-    A[1,2] = dot(r_k1k3, s_k1k2) * m1_inv
-    A[2,1] = dot(r_k1k2, s_k1k3) * m1_inv
-    A[1,3] = dot(r_k2k3, s_k1k2) * (-m2_inv)
-    A[3,1] = dot(r_k1k2, s_k1k3) * (-m2_inv)
-    A[2,3] = dot(r_k2k3, s_k1k3) * m3_inv
-    A[3,2] = dot(r_k1k3, s_k2k3) * m3_inv
+    A[1,1] = -FT(2.0) * dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # this sets constraint 1 as between k1-k2
+    A[2,2] = -FT(2.0) * dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # this sets constraint 2 as between k1-k3
+    A[3,3] = -FT(2.0) * dot(r_k1k3, s_k1k3) * (m2_inv + m3_inv) # this sets constraint 3 as between k2-k3
+    A[1,2] = -FT(2.0) * dot(r_k1k3, s_k1k2) * m1_inv
+    A[2,1] = -FT(2.0) * dot(r_k1k2, s_k1k3) * m1_inv
+    A[1,3] = -FT(2.0) * dot(r_k2k3, s_k1k2) * (-m2_inv)
+    A[3,1] = -FT(2.0) * dot(r_k1k2, s_k1k3) * (-m2_inv)
+    A[2,3] = -FT(2.0) * dot(r_k2k3, s_k1k3) * m3_inv
+    A[3,2] = -FT(2.0) * dot(r_k1k3, s_k2k3) * m3_inv
 
-    denom = 4*dt*dt
-    C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12)) / denom
-    C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13)) / denom
-    C[3] = (dot(s_k2k3, s_k2k3) - (dist23*dist23)) / denom
+    #denom = 4*dt*dt
+    C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12)) #/ denom
+    C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13)) #/ denom
+    C[3] = (dot(s_k2k3, s_k2k3) - (dist23*dist23)) #/ denom
 
     solve3x3exactly!(λ, A, A_tmp, C)
 
@@ -639,7 +644,7 @@ function shake3_angle_kernel!(
     tol23 = abs(norm(s_k2k3) - dist23)
 
     # Constraint still active if either above tolerance
-    still_active = (tol12 > ca.dist_tolerance) || (tol13 > ca.dist_tolerance) || (tol23 > ca.dist_tolerance)
+    still_active = (tol12 > dist_tol) || (tol13 > dist_tol) || (tol23 > dist_tol)
     return still_active
 
 end
@@ -670,36 +675,42 @@ function apply_position_constraints!(
     if N23_clusters > 0 
         shake_gpu!(
             ca.clusters23,
+            ca,
+            backend,
             shake3_kernel!,
-            ca.max_iters, 
             r_pre_unconstrained_update,
             sys.coords,
             sys.masses,
-            sys.boundary
+            sys.boundary,
+            ca.dist_tolerance
         )
     end
 
     if N34_clusters > 0 
         shake_gpu!(
             ca.clusters34,
+            ca,
+            backend,
             shake4_kernel!,
-            ca.max_iters, 
             r_pre_unconstrained_update,
             sys.coords,
             sys.masses,
-            sys.boundary
+            sys.boundary,
+            ca.dist_tolerance
         )
     end
 
     if N_angle_clusters > 0 
         shake_gpu!(
             ca.angle_clusters,
+            ca,
+            backend,
             shake3_angle_kernel!,
-            ca.max_iters, 
             r_pre_unconstrained_update,
             sys.coords,
             sys.masses,
-            sys.boundary
+            sys.boundary,
+            ca.dist_tolerance
         )
     end
 

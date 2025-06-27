@@ -76,7 +76,7 @@ Disables neighbor list interactions between atoms in a constraint.
 """
 function disable_constrained_interactions!(
         neighbor_finder,
-        constraint_clusters::AbstractVector{ConstraintCluster}
+        constraint_clusters::AbstractVector{<:ConstraintCluster}
     )
 
     for cluster in constraint_clusters
