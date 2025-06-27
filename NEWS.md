@@ -1,5 +1,21 @@
 # Molly.jl release notes
 
+## v0.22.2 - Jun 2025
+
+### New features
+- `write_structure` is added to allow a system to be written to a file.
+- `TrajectoryWriter` now writes out better PDB files. `StructureWriter` is now an alias for `TrajectoryWriter` with the PDB format and will be removed in a future breaking release. It is recommended to replace instances of `StructureWriter` with `TrajectoryWriter`.
+- The `excluded_res` and `write_boundary` keyword arguments can now be given to `TrajectoryWriter`. The `atom_inds` keyword argument can now be given to `StructureWriter`.
+- `AtomData`can now store `chain_id` and `hetero_atom`, allowing better file writing.
+- The Urey-Bradley potential is added as `UreyBradley`.
+- The mixing functions `waldman_hagler_σ_mixing`, `waldman_hagler_ϵ_mixing` and `fender_halsey_ϵ_mixing` are added.
+- Additional keyword arguments can now be provided to the `System` constructor taking in an AtomsBase system.
+
+### Bug fixes
+- A bug when initialising forces in `LangevinSplitting` is fixed.
+- A bug when converting from an AtomsBase system without velocities is fixed.
+- A bug when setting up a system with infinite boundaries from a file is fixed.
+
 ## v0.22.1 - Mar 2025
 
 ### New features
