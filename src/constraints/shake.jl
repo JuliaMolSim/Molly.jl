@@ -48,6 +48,9 @@ function SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance;
 
     clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, constraints)
 
+    @assert ustrip(dist_tolerance) > 0.0 "dist_tolerance must be greater than zero"
+    @assert ustrip(vel_tolerance) > 0.0 "vel_tolerance must be greater than zero"
+
     A = eltype(clusters12)
     B = eltype(clusters23)
     C = eltype(clusters34)

@@ -738,16 +738,8 @@ end
     temp = 100.0u"K"
     velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
 
-    eligible = trues(n_atoms, n_atoms)
-    for i in 1:(n_atoms ÷ 3)
-        eligible[i, i + (n_atoms ÷ 3)] = false
-        eligible[i + (n_atoms ÷ 3), i] = false
-        eligible[i + (n_atoms ÷ 3), i + 2 * (n_atoms ÷ 3)] = false
-        eligible[i + 2 * (n_atoms ÷ 3), i + (n_atoms ÷ 3)] = false
-    end
-
-    neighbor_finder = DistanceNeighborFinder(eligible=eligible, n_steps=10, dist_cutoff=1.5u"nm")
-    bond_length = 0.1u"nm"
+    neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms),n_steps=10, dist_cutoff=1.5u"nm")
+    bond_length = 0.13u"nm"
 
     is = collect(1:(2 * (n_atoms ÷ 3)))
     js = collect(((n_atoms ÷ 3) + 1):n_atoms)
@@ -761,8 +753,7 @@ end
         velocities=velocities,
         pairwise_inters=(LennardJones(use_neighbors=true),),
         constraints=(cons,),
-        neighbor_finder=neighbor_finder,
-        loggers=(coords=CoordinatesLogger(10),),
+        neighbor_finder=neighbor_finder
     )
 
     old_coords = copy(sys.coords)

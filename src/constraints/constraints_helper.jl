@@ -122,7 +122,7 @@ end
 function make_cluster(raw_is, raw_js, raw_ds)
 
     # For bond constraints none of this matters
-    if length(raw_is) == 2
+    if length(raw_is) == 1
         cluster = StructArray{DistanceConstraint}((
                         MVector(raw_is...),
                         MVector(raw_js...),
