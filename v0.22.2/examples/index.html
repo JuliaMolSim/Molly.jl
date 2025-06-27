@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Examples · Molly.jl</title><meta name="title" content="Examples · Molly.jl"/><meta property="og:title" content="Examples · Molly.jl"/><meta property="twitter:title" content="Examples · Molly.jl"/><meta name="description" content="Documentation for Molly.jl."/><meta property="og:description" content="Documentation for Molly.jl."/><meta property="twitter:description" content="Documentation for Molly.jl."/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.svg" alt="Molly.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">Molly.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../documentation/">Documentation</a></li><li><a class="tocitem" href="../differentiable/">Differentiable simulation</a></li><li class="is-active"><a class="tocitem" href>Examples</a><ul class="internal"><li><a class="tocitem" href="#Simulated-annealing"><span>Simulated annealing</span></a></li><li><a class="tocitem" href="#Solar-system"><span>Solar system</span></a></li><li><a class="tocitem" href="#Agent-based-modelling"><span>Agent-based modelling</span></a></li><li><a class="tocitem" href="#Polymer-melt"><span>Polymer melt</span></a></li><li><a class="tocitem" href="#Machine-learning-potentials"><span>Machine learning potentials</span></a></li><li><a class="tocitem" href="#Python-ASE-calculator"><span>Python ASE calculator</span></a></li><li><a class="tocitem" href="#Density-functional-theory"><span>Density functional theory</span></a></li><li><a class="tocitem" href="#Making-and-breaking-bonds"><span>Making and breaking bonds</span></a></li><li><a class="tocitem" href="#Comparing-forces-to-AD"><span>Comparing forces to AD</span></a></li><li><a class="tocitem" href="#AtomsCalculators.jl-compatibility"><span>AtomsCalculators.jl compatibility</span></a></li><li><a class="tocitem" href="#Variations-of-the-Morse-potential"><span>Variations of the Morse potential</span></a></li><li><a class="tocitem" href="#Variations-of-the-Mie-potential"><span>Variations of the Mie potential</span></a></li><li><a class="tocitem" href="#Variations-of-the-soft-core-LJ-potential"><span>Variations of the soft-core LJ potential</span></a></li><li><a class="tocitem" href="#Crystal-structures"><span>Crystal structures</span></a></li><li><a class="tocitem" href="#Constrained-dynamics"><span>Constrained dynamics</span></a></li></ul></li><li><a class="tocitem" href="../exercises/">Exercises</a></li><li><a class="tocitem" href="../publications/">Publications</a></li><li><a class="tocitem" href="../related/">Related software</a></li><li><a class="tocitem" href="../development/">Development</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Examples</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Examples</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/JuliaMolSim/Molly.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/examples.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Molly-examples"><a class="docs-heading-anchor" href="#Molly-examples">Molly examples</a><a id="Molly-examples-1"></a><a class="docs-heading-anchor-permalink" href="#Molly-examples" title="Permalink"></a></h1><p>The best examples for learning how the package works are in the <a href="../documentation/#Molly-documentation">Molly documentation</a> section. Here we give further examples showing what you can do with the package. Each is a self-contained block of code. Made something cool yourself? Make a PR to add it to this page.</p><h2 id="Simulated-annealing"><a class="docs-heading-anchor" href="#Simulated-annealing">Simulated annealing</a><a id="Simulated-annealing-1"></a><a class="docs-heading-anchor-permalink" href="#Simulated-annealing" title="Permalink"></a></h2><p>You can change the thermostat temperature of a simulation by changing the simulator. Here we reduce the temperature of a simulation in stages from 300 K to 0 K.</p><pre><code class="language-julia hljs">using Molly
+using GLMakie
+
+data_dir = joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;)
+ff = MolecularForceField(
+    joinpath(data_dir, &quot;force_fields&quot;, &quot;ff99SBildn.xml&quot;),
+    joinpath(data_dir, &quot;force_fields&quot;, &quot;tip3p_standard.xml&quot;),
+    joinpath(data_dir, &quot;force_fields&quot;, &quot;his.xml&quot;),
+)
+
+sys = System(
+    joinpath(data_dir, &quot;6mrr_equil.pdb&quot;),
+    ff;
+    loggers=(temp=TemperatureLogger(100),),
+)
+
+minimizer = SteepestDescentMinimizer()
+simulate!(sys, minimizer)
+
+temps = [300.0, 200.0, 100.0, 0.0]u&quot;K&quot;
+random_velocities!(sys, temps[1])
+
+for temp in temps
+    simulator = Langevin(
+        dt=0.001u&quot;ps&quot;,
+        temperature=temp,
+        friction=1.0u&quot;ps^-1&quot;,
+    )
+    simulate!(sys, simulator, 5_000; run_loggers=:skipzero)
+end
+
+f = Figure(size=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Step&quot;,
+    ylabel=&quot;Temperature&quot;,
+    title=&quot;Temperature change during simulated annealing&quot;,
+)
+for (i, temp) in enumerate(temps)
+    lines!(
+        ax,
+        [5000 * i - 5000, 5000 * i],
+        [ustrip(temp), ustrip(temp)],
+        linestyle=&quot;--&quot;,
+        color=:orange,
+    )
+end
+scatter!(
+    ax,
+    100 .* (1:length(values(sys.loggers.temp))),
+    ustrip.(values(sys.loggers.temp)),
+    markersize=5,
+)
+save(&quot;annealing.png&quot;, f)</code></pre><p><img src="../images/annealing.png" alt="Annealing"/></p><h2 id="Solar-system"><a class="docs-heading-anchor" href="#Solar-system">Solar system</a><a id="Solar-system-1"></a><a class="docs-heading-anchor-permalink" href="#Solar-system" title="Permalink"></a></h2><p>Orbits of the four closest planets to the sun can be simulated.</p><pre><code class="language-julia hljs">using Molly
+using GLMakie
+
+# Using get_body_barycentric_posvel from Astropy
+coords = [
+    SVector(-1336052.8665050615,  294465.0896030796 ,  158690.88781384667)u&quot;km&quot;,
+    SVector(-58249418.70233503 , -26940630.286818042, -8491250.752464907 )u&quot;km&quot;,
+    SVector( 58624128.321813114, -81162437.2641475  , -40287143.05760552 )u&quot;km&quot;,
+    SVector(-99397467.7302648  , -105119583.06486066, -45537506.29775053 )u&quot;km&quot;,
+    SVector( 131714235.34070954, -144249196.60814604, -69730238.5084304  )u&quot;km&quot;,
+]
+
+velocities = [
+    SVector(-303.86327859262457, -1229.6540090943934, -513.791218405548  )u&quot;km * d^-1&quot;,
+    SVector( 1012486.9596885007, -3134222.279236384 , -1779128.5093088674)u&quot;km * d^-1&quot;,
+    SVector( 2504563.6403826815,  1567163.5923297722,  546718.234192132  )u&quot;km * d^-1&quot;,
+    SVector( 1915792.9709661514, -1542400.0057833872, -668579.962254351  )u&quot;km * d^-1&quot;,
+    SVector( 1690083.43357355  ,  1393597.7855017239,  593655.0037930267 )u&quot;km * d^-1&quot;,
+]
+
+body_masses = [
+    1.989e30u&quot;kg&quot;,
+    0.330e24u&quot;kg&quot;,
+    4.87e24u&quot;kg&quot; ,
+    5.97e24u&quot;kg&quot; ,
+    0.642e24u&quot;kg&quot;,
+]
+
+boundary = CubicBoundary(1e9u&quot;km&quot;)
+
+# Convert the gravitational constant to the appropriate units
+inter = Gravity(G=convert(typeof(1.0u&quot;km^3 * kg^-1 * d^-2&quot;), Unitful.G))
+
+sys = System(
+    atoms=[Atom(mass=m) for m in body_masses],
+    coords=coords .+ (SVector(5e8, 5e8, 5e8)u&quot;km&quot;,),
+    boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=(inter,),
+    loggers=(coords=CoordinatesLogger(typeof(1.0u&quot;km&quot;), 10),),
+    force_units=u&quot;kg * km * d^-2&quot;,
+    energy_units=u&quot;kg * km^2 * d^-2&quot;,
+)
+
+simulator = Verlet(
+    dt=0.1u&quot;d&quot;,
+    remove_CM_motion=false,
+)
+
+simulate!(sys, simulator, 3650) # 1 year
+
+visualize(
+    sys.loggers.coords,
+    boundary,
+    &quot;sim_planets.mp4&quot;;
+    trails=5,
+    color=[:yellow, :grey, :orange, :blue, :red],
+    markersize=[0.25, 0.08, 0.08, 0.08, 0.08],
+    transparency=false,
+)</code></pre><p><img src="../images/sim_planets.gif" alt="Planet simulation"/></p><h2 id="Agent-based-modelling"><a class="docs-heading-anchor" href="#Agent-based-modelling">Agent-based modelling</a><a id="Agent-based-modelling-1"></a><a class="docs-heading-anchor-permalink" href="#Agent-based-modelling" title="Permalink"></a></h2><p>Agent-based modelling (ABM) is conceptually similar to molecular dynamics. Julia has <a href="https://juliadynamics.github.io/Agents.jl/stable/">Agents.jl</a> for ABM, but Molly can also be used to simulate arbitrary agent-based systems in continuous space. Here we simulate a toy <a href="https://en.wikipedia.org/wiki/Compartmental_models_in_epidemiology#The_SIR_model">SIR model</a> for disease spread. This example shows how atom properties can be mutable, i.e. change during the simulation, and includes custom forces and loggers (see below for more info).</p><pre><code class="language-julia hljs">using Molly
+using GLMakie
+
+@enum Status susceptible infected recovered
+
+# Custom atom type
+mutable struct Person
+    i::Int
+    status::Status
+    mass::Float64
+    σ::Float64
+    ϵ::Float64
+end
+
+# Custom pairwise interaction
+struct SIRInteraction
+    dist_infection::Float64
+    prob_infection::Float64
+    prob_recovery::Float64
+end
+
+# Custom force function
+function Molly.force(inter::SIRInteraction,
+                        vec_ij,
+                        atom_i,
+                        atom_j,
+                        args...)
+    if (atom_i.status == infected &amp;&amp; atom_j.status == susceptible) ||
+                (atom_i.status == susceptible &amp;&amp; atom_j.status == infected)
+        # Infect close people randomly
+        r2 = sum(abs2, vec_ij)
+        if r2 &lt; inter.dist_infection^2 &amp;&amp; rand() &lt; inter.prob_infection
+            atom_i.status = infected
+            atom_j.status = infected
+        end
+    end
+    # Workaround to obtain a self-interaction
+    if atom_i.i == (atom_j.i - 1)
+        # Recover randomly
+        if atom_i.status == infected &amp;&amp; rand() &lt; inter.prob_recovery
+            atom_i.status = recovered
+        end
+    end
+    return zero(vec_ij)
+end
+
+# Custom logger
+function fracs_SIR(s::System, args...;  kwargs...)
+    counts_sir = [
+        count(p -&gt; p.status == susceptible, s.atoms),
+        count(p -&gt; p.status == infected   , s.atoms),
+        count(p -&gt; p.status == recovered  , s.atoms)
+    ]
+    return counts_sir ./ length(s)
+end
+
+SIRLogger(n_steps) = GeneralObservableLogger(fracs_SIR, Vector{Float64}, n_steps)
+
+temp = 1.0
+boundary = RectangularBoundary(10.0)
+n_steps = 1_000
+n_people = 500
+n_starting = 2
+atoms = [Person(i, i &lt;= n_starting ? infected : susceptible, 1.0, 0.1, 0.02) for i in 1:n_people]
+coords = place_atoms(n_people, boundary; min_dist=0.1)
+velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
+
+lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
+sir = SIRInteraction(0.5, 0.06, 0.01)
+pairwise_inters = (LennardJones=lj, SIR=sir)
+neighbor_finder = DistanceNeighborFinder(
+    eligible=trues(n_people, n_people),
+    n_steps=10,
+    dist_cutoff=2.0,
+)
+simulator = VelocityVerlet(
+    dt=0.02,
+    coupling=AndersenThermostat(temp, 5.0),
+)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
+    neighbor_finder=neighbor_finder,
+    loggers=(
+        coords=CoordinatesLogger(Float64, 10; dims=2),
+        SIR=SIRLogger(10),
+    ),
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+
+simulate!(sys, simulator, n_steps)
+
+visualize(sys.loggers.coords, boundary, &quot;sim_agent.mp4&quot;; markersize=0.1)</code></pre><p><img src="../images/sim_agent.gif" alt="Agent simulation"/></p><p>We can use the logger to plot the fraction of people susceptible, infected and recovered over the course of the simulation:</p><pre><code class="language-julia hljs">using GLMakie
+
+f = Figure()
+ax = Axis(f[1, 1], xlabel=&quot;Snapshot&quot;, ylabel=&quot;Fraction&quot;)
+
+lines!([l[1] for l in values(sys.loggers.SIR)], label=&quot;Susceptible&quot;)
+lines!([l[2] for l in values(sys.loggers.SIR)], label=&quot;Infected&quot;)
+lines!([l[3] for l in values(sys.loggers.SIR)], label=&quot;Recovered&quot;)
+axislegend()</code></pre><p><img src="../images/fraction_sir.png" alt="Fraction SIR"/></p><h2 id="Polymer-melt"><a class="docs-heading-anchor" href="#Polymer-melt">Polymer melt</a><a id="Polymer-melt-1"></a><a class="docs-heading-anchor-permalink" href="#Polymer-melt" title="Permalink"></a></h2><p>Here we use <a href="../api/#Molly.FENEBond"><code>FENEBond</code></a>, <a href="../api/#Molly.CosineAngle"><code>CosineAngle</code></a> and <a href="../api/#Molly.LennardJones"><code>LennardJones</code></a> to simulate interacting polymers. We also analyse the end-to-end polymer distances and chain angles across the trajectory.</p><pre><code class="language-julia hljs">using Molly
+using GLMakie
+using Colors
+using LinearAlgebra
+
+# Simulate 10 polymers each consisting of 6 monomers
+n_polymers = 10
+n_monomers = 6
+n_atoms = n_monomers * n_polymers
+n_bonds_mon = n_monomers - 1
+n_bonds_tot = n_bonds_mon * n_polymers
+n_angles_mon = n_monomers - 2
+n_angles_tot = n_angles_mon * n_polymers
+
+starting_length = 1.1u&quot;nm&quot;
+boundary = CubicBoundary(20.0u&quot;nm&quot;)
+
+# Random placement of polymer centers at the start
+start_coords = place_atoms(n_polymers, boundary; min_dist=6.0u&quot;nm&quot;)
+
+# Polymers start almost completely extended
+coords = []
+for pol_i in 1:n_polymers
+    for mon_i in 1:n_monomers
+        push!(coords, start_coords[pol_i] .+ SVector(
+            starting_length * (mon_i - 1 - n_monomers / 2),
+            rand() * 0.1u&quot;nm&quot;,
+            rand() * 0.1u&quot;nm&quot;,
+        ))
+    end
+end
+coords = [coords...] # Ensure the array is concretely typed
+
+# Create FENEBonds between adjacent monomers
+bond_is, bond_js = Int[], Int[]
+for pol_i in 1:n_polymers
+    for bi in 1:n_bonds_mon
+        push!(bond_is, (pol_i - 1) * n_monomers + bi    )
+        push!(bond_js, (pol_i - 1) * n_monomers + bi + 1)
+    end
+end
+
+fene_k = 250.0u&quot;kJ * mol^-1 * nm^-2&quot;
+fene_r0 = 1.6u&quot;nm&quot;
+bonds = InteractionList2Atoms(
+    bond_is,
+    bond_js,
+    [FENEBond(k=fene_k, r0=fene_r0, σ=1.0u&quot;nm&quot;, ϵ=2.5u&quot;kJ * mol^-1&quot;) for _ in 1:n_bonds_tot],
+)
+
+# Create CosineAngles between adjacent monomers
+angle_is, angle_js, angle_ks = Int[], Int[], Int[]
+for pol_i in 1:n_polymers
+    for bi in 1:n_angles_mon
+        push!(angle_is, (pol_i - 1) * n_monomers + bi    )
+        push!(angle_js, (pol_i - 1) * n_monomers + bi + 1)
+        push!(angle_ks, (pol_i - 1) * n_monomers + bi + 2)
+    end
+end
+
+angles = InteractionList3Atoms(
+    angle_is,
+    angle_js,
+    angle_ks,
+    [CosineAngle(k=2.0u&quot;kJ * mol^-1&quot;, θ0=0.0) for _ in 1:n_angles_tot],
+)
+
+atoms = [Atom(mass=10.0u&quot;g/mol&quot;, σ=1.0u&quot;nm&quot;, ϵ=0.5u&quot;kJ * mol^-1&quot;) for _ in 1:n_atoms]
+
+# Since we are using a generic pairwise Lennard-Jones potential too we need to
+#   exclude adjacent monomers from the neighbor list
+eligible = trues(n_atoms, n_atoms)
+for pol_i in 1:n_polymers
+    for mon_i in 1:n_bonds_mon
+        i = (pol_i - 1) * n_monomers + mon_i
+        j = (pol_i - 1) * n_monomers + mon_i + 1
+        eligible[i, j] = false
+        eligible[j, i] = false
+    end
+end
+
+lj = LennardJones(
+    cutoff=DistanceCutoff(5.0u&quot;nm&quot;),
+    use_neighbors=true,
+)
+neighbor_finder = DistanceNeighborFinder(
+    eligible=eligible,
+    n_steps=10,
+    dist_cutoff=5.5u&quot;nm&quot;,
+)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    pairwise_inters=(lj,),
+    specific_inter_lists=(bonds, angles),
+    neighbor_finder=neighbor_finder,
+    loggers=(coords=CoordinatesLogger(200),),
+)
+
+sim = Langevin(dt=0.002u&quot;ps&quot;, temperature=300.0u&quot;K&quot;, friction=1.0u&quot;ps^-1&quot;)
+
+simulate!(sys, sim, 100_000)
+
+colors = distinguishable_colors(n_polymers, [RGB(1, 1, 1), RGB(0, 0, 0)]; dropseed=true)
+
+visualize(
+    sys.loggers.coords,
+    boundary,
+    &quot;sim_polymer.gif&quot;;
+    connections=zip(bond_is, bond_js),
+    color=repeat(colors; inner=n_monomers),
+    connection_color=repeat(colors; inner=n_bonds_mon),
+)</code></pre><p><img src="../images/sim_polymer.gif" alt="Polymer simulation"/></p><pre><code class="language-julia hljs">logged_coords = values(sys.loggers.coords)
+n_frames = length(logged_coords)
+
+# Calculate end-to-end polymer distances for second half of trajectory
+end_to_end_dists = Float64[]
+for traj_coords in logged_coords[(n_frames ÷ 2):end]
+    for pol_i in 1:n_polymers
+        start_i = (pol_i - 1) * n_monomers + 1
+        end_i = pol_i * n_monomers
+        dist = norm(vector(traj_coords[start_i], traj_coords[end_i], boundary))
+        push!(end_to_end_dists, ustrip(dist))
+    end
+end
+
+f = Figure(size=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;End-to-end distance / nm&quot;,
+    ylabel=&quot;Density&quot;,
+    title=&quot;End-to-end polymer distance over the trajectory&quot;,
+)
+hist!(ax, end_to_end_dists, normalization=:pdf)
+xlims!(ax, low=0)
+ylims!(ax, low=0)
+save(&quot;polymer_dist.png&quot;, f)</code></pre><p><img src="../images/polymer_dist.png" alt="Polymer distances"/></p><pre><code class="language-julia hljs"># Calculate angles to adjacent monomers for second half of trajectory
+chain_angles = Float64[]
+for traj_coords in logged_coords[(n_frames ÷ 2):end]
+    for pol_i in 1:n_polymers
+        for mon_i in 2:(n_monomers - 1)
+            ang = bond_angle(
+                traj_coords[(pol_i - 1) * n_monomers + mon_i - 1],
+                traj_coords[(pol_i - 1) * n_monomers + mon_i    ],
+                traj_coords[(pol_i - 1) * n_monomers + mon_i + 1],
+                boundary,
+            )
+            push!(chain_angles, rad2deg(ang))
+        end
+    end
+end
+
+f = Figure(size=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Angle with adjacent monomers / degrees&quot;,
+    ylabel=&quot;Density&quot;,
+    title=&quot;Chain angles over the trajectory&quot;,
+)
+hist!(ax, chain_angles, normalization=:pdf)
+xlims!(ax, 0, 180)
+ylims!(ax, low=0)
+save(&quot;polymer_angle.png&quot;, f)</code></pre><p><img src="../images/polymer_angle.png" alt="Polymer angles"/></p><h2 id="Machine-learning-potentials"><a class="docs-heading-anchor" href="#Machine-learning-potentials">Machine learning potentials</a><a id="Machine-learning-potentials-1"></a><a class="docs-heading-anchor-permalink" href="#Machine-learning-potentials" title="Permalink"></a></h2><p>There is <a href="https://acesuit.github.io/ACEpotentials.jl/dev/tutorials/molly">an example</a> of using ACE potentials in Molly.</p><h2 id="Python-ASE-calculator"><a class="docs-heading-anchor" href="#Python-ASE-calculator">Python ASE calculator</a><a id="Python-ASE-calculator-1"></a><a class="docs-heading-anchor-permalink" href="#Python-ASE-calculator" title="Permalink"></a></h2><p><a href="../api/#Molly.ASECalculator"><code>ASECalculator</code></a> can be used along with <a href="https://github.com/JuliaPy/PythonCall.jl">PythonCall.jl</a> to use a Python <a href="https://wiki.fysik.dtu.dk/ase">ASE</a> calculator with Molly. Here we simulate a dipeptide molecule in a vacuum with <a href="https://github.com/ACEsuit/mace-off">MACE-OFF23</a>:</p><pre><code class="language-julia hljs">using Molly
+using PythonCall # Python packages ase and mace need to be installed beforehand
+using Downloads
+
+Downloads.download(
+    &quot;https://raw.githubusercontent.com/noeblassel/SINEQSummerSchool2023/main/notebooks/dipeptide_nowater.pdb&quot;,
+    &quot;dipeptide_nowater.pdb&quot;,
+)
+
+data_dir = joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;)
+ff = MolecularForceField(joinpath(data_dir, &quot;force_fields&quot;, &quot;ff99SBildn.xml&quot;))
+sys = System(&quot;dipeptide_nowater.pdb&quot;, ff; rename_terminal_res=false)
+
+mc = pyimport(&quot;mace.calculators&quot;)
+ase_calc = mc.mace_off(model=&quot;medium&quot;, device=&quot;cuda&quot;)
+
+calc = ASECalculator(
+    ase_calc=ase_calc,
+    atoms=sys.atoms,
+    coords=sys.coords,
+    boundary=sys.boundary,
+    atoms_data=sys.atoms_data,
+)
+
+sys = System(
+    sys;
+    general_inters=(calc,),
+    loggers=(TrajectoryWriter(20, &quot;mace_dipeptide.pdb&quot;),) # Every 10 fs
+)
+potential_energy(sys)
+
+minimizer = SteepestDescentMinimizer(log_stream=stdout)
+simulate!(sys, minimizer)
+
+temp = 298.0u&quot;K&quot;
+random_velocities!(sys, temp)
+simulator = Langevin(
+    dt=0.0005u&quot;ps&quot;, # 0.5 fs
+    temperature=temp,
+    friction=1.0u&quot;ps^-1&quot;,
+)
+
+simulate!(deepcopy(sys), simulator, 5; run_loggers=false)
+@time simulate!(sys, simulator, 2000)</code></pre><p>Another example using <a href="https://wiki.fysik.dtu.dk/ase/ase/calculators/psi4.html">psi4</a> to get the potential energy of a water molecule:</p><pre><code class="language-julia hljs">using Molly
+using PythonCall # Python packages ase and psi4 need to be installed beforehand
+
+build = pyimport(&quot;ase.build&quot;)
+psi4 = pyimport(&quot;ase.calculators.psi4&quot;)
+
+py_atoms = build.molecule(&quot;H2O&quot;)
+ase_calc = psi4.Psi4(
+    atoms=py_atoms,
+    method=&quot;b3lyp&quot;,
+    basis=&quot;6-311g_d_p_&quot;,
+)
+
+atoms = [Atom(mass=16.0u&quot;u&quot;), Atom(mass=1.0u&quot;u&quot;), Atom(mass=1.0u&quot;u&quot;)]
+coords = SVector{3, Float64}.(eachrow(pyconvert(Matrix, py_atoms.get_positions()))) * u&quot;Å&quot;
+boundary = CubicBoundary(100.0u&quot;Å&quot;)
+
+calc = ASECalculator(
+    ase_calc=ase_calc,
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    elements=[&quot;O&quot;, &quot;H&quot;, &quot;H&quot;],
+)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    general_inters=(calc,),
+    energy_units=u&quot;eV&quot;,
+    force_units=u&quot;eV/Å&quot;,
+)
+
+potential_energy(sys) # -2080.2391023908813 eV</code></pre><h2 id="Density-functional-theory"><a class="docs-heading-anchor" href="#Density-functional-theory">Density functional theory</a><a id="Density-functional-theory-1"></a><a class="docs-heading-anchor-permalink" href="#Density-functional-theory" title="Permalink"></a></h2><p><a href="https://github.com/JuliaMolSim/DFTK.jl">DFTK.jl</a> can be used to calculate forces using density functional theory (DFT), allowing the simulation of quantum systems in Molly. This example uses the <a href="https://docs.dftk.org/stable/guide/tutorial">DFTK.jl tutorial</a> to simulate two silicon atoms with atomic units. A general interaction is used since the whole force calculation is offloaded to DFTK.jl.</p><pre><code class="language-julia hljs">using Molly
+using DFTK
+import AtomsCalculators
+
+struct DFTKInteraction{L, A}
+    lattice::L
+    atoms::A
+end
+
+# Define lattice and atomic positions
+a = 5.431u&quot;Å&quot;                 # Silicon lattice constant
+lattice = a / 2 * [[0 1 1.];  # Silicon lattice vectors
+                   [1 0 1.];  # specified column by column
+                   [1 1 0.]];
+
+# Load HGH pseudopotential for Silicon
+Si = ElementPsp(:Si, psp=load_psp(&quot;hgh/lda/Si-q4&quot;))
+
+# Specify type of atoms
+atoms_dftk = [Si, Si]
+
+dftk_interaction = DFTKInteraction(lattice, atoms_dftk)
+
+function AtomsCalculators.forces(sys, inter::DFTKInteraction; kwargs...)
+    # Select model and basis
+    model = model_LDA(inter.lattice, inter.atoms, sys.coords)
+    kgrid = [4, 4, 4]     # k-point grid (Regular Monkhorst-Pack grid)
+    Ecut = 7              # kinetic energy cutoff
+    basis = PlaneWaveBasis(model; Ecut=Ecut, kgrid=kgrid)
+
+    # Run the SCF procedure to obtain the ground state
+    scfres = self_consistent_field(basis; tol=1e-5)
+
+    return compute_forces_cart(scfres)
+end
+
+atoms = fill(Atom(mass=28.0), 2)
+coords = [SVector(1/8, 1/8, 1/8), SVector(-1/8, -1/8, -1/8)]
+velocities = [randn(SVector{3, Float64}) * 0.1 for _ in 1:2]
+boundary = CubicBoundary(Inf)
+loggers = (coords=CoordinatesLogger(Float64, 1),)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    general_inters=(dftk_interaction,),
+    loggers=loggers,
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+
+simulator = Verlet(dt=0.0005, remove_CM_motion=false)
+
+simulate!(sys, simulator, 100)
+
+values(sys.loggers.coords)[end]
+# 2-element Vector{SVector{3, Float64}}:
+#  [0.12060853912863925, 0.12292128337998731, 0.13100409788691614]
+#  [-0.13352575661477334, -0.11473039463130282, -0.13189544838731393]</code></pre><h2 id="Making-and-breaking-bonds"><a class="docs-heading-anchor" href="#Making-and-breaking-bonds">Making and breaking bonds</a><a id="Making-and-breaking-bonds-1"></a><a class="docs-heading-anchor-permalink" href="#Making-and-breaking-bonds" title="Permalink"></a></h2><p>There is an example of mutable atom properties in the main documentation, but what if you want to make and break bonds during the simulation? In this case you can use a pairwise interaction to make, break and apply the bonds. The partners of the atom can be stored in the atom type. We make a logger to record when the bonds are present, allowing us to visualize them with the <code>connection_frames</code> keyword argument to <a href="../api/#Molly.visualize"><code>visualize</code></a> (this can take a while to plot).</p><pre><code class="language-julia hljs">using Molly
+using GLMakie
+using LinearAlgebra
+
+struct BondableAtom
+    i::Int
+    mass::Float64
+    σ::Float64
+    ϵ::Float64
+    partners::Set{Int}
+end
+
+struct BondableInteraction
+    prob_formation::Float64
+    prob_break::Float64
+    dist_formation::Float64
+    k::Float64
+    r0::Float64
+end
+
+Molly.use_neighbors(::BondableInteraction) = true
+
+function Molly.force(inter::BondableInteraction,
+                        dr,
+                        atom_i,
+                        atom_j,
+                        args...)
+    # Break bonds randomly
+    if atom_j.i in atom_i.partners &amp;&amp; rand() &lt; inter.prob_break
+        delete!(atom_i.partners, atom_j.i)
+        delete!(atom_j.partners, atom_i.i)
+    end
+    # Make bonds between close atoms randomly
+    r2 = sum(abs2, dr)
+    if r2 &lt; inter.r0 * inter.dist_formation &amp;&amp; rand() &lt; inter.prob_formation
+        push!(atom_i.partners, atom_j.i)
+        push!(atom_j.partners, atom_i.i)
+    end
+    # Apply the force of a harmonic bond
+    if atom_j.i in atom_i.partners
+        c = inter.k * (norm(dr) - inter.r0)
+        fdr = -c * normalize(dr)
+        return fdr
+    else
+        return zero(dr)
+    end
+end
+
+function bonds(sys::System, args...; kwargs...)
+    bonds = BitVector()
+    for i in 1:length(sys)
+        for j in 1:(i - 1)
+            push!(bonds, j in sys.atoms[i].partners)
+        end
+    end
+    return bonds
+end
+
+BondLogger(n_steps) = GeneralObservableLogger(bonds, BitVector, n_steps)
+
+n_atoms = 200
+boundary = RectangularBoundary(10.0)
+n_steps = 2_000
+temp = 1.0
+
+atoms = [BondableAtom(i, 1.0, 0.1, 0.02, Set([])) for i in 1:n_atoms]
+coords = place_atoms(n_atoms, boundary; min_dist=0.1)
+velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_atoms]
+pairwise_inters = (
+    SoftSphere(cutoff=DistanceCutoff(2.0), use_neighbors=true),
+    BondableInteraction(0.1, 0.1, 1.1, 2.0, 0.1),
+)
+neighbor_finder = DistanceNeighborFinder(
+    eligible=trues(n_atoms, n_atoms),
+    n_steps=10,
+    dist_cutoff=2.2,
+)
+simulator = VelocityVerlet(
+    dt=0.02,
+    coupling=AndersenThermostat(temp, 5.0),
+)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    pairwise_inters=pairwise_inters,
+    neighbor_finder=neighbor_finder,
+    loggers=(
+        coords=CoordinatesLogger(Float64, 20; dims=2),
+        bonds=BondLogger(20),
+    ),
+    force_units=NoUnits,
+    energy_units=NoUnits,
+)
+
+simulate!(sys, simulator, n_steps; n_threads=1) # One thread to ensure thread safety
+
+connections = Tuple{Int, Int}[]
+for i in 1:length(sys)
+    for j in 1:(i - 1)
+        push!(connections, (i, j))
+    end
+end
+
+visualize(
+    sys.loggers.coords,
+    boundary,
+    &quot;sim_mutbond.mp4&quot;;
+    connections=connections,
+    connection_frames=values(sys.loggers.bonds),
+    markersize=0.1,
+)</code></pre><p><img src="../images/sim_mutbond.gif" alt="Mutable bond simulation"/></p><h2 id="Comparing-forces-to-AD"><a class="docs-heading-anchor" href="#Comparing-forces-to-AD">Comparing forces to AD</a><a id="Comparing-forces-to-AD-1"></a><a class="docs-heading-anchor-permalink" href="#Comparing-forces-to-AD" title="Permalink"></a></h2><p>The force is the negative derivative of the potential energy with respect to position. MD packages, including Molly, implement the force functions directly for performance. However it is also possible to compute the forces using AD. Here we compare the two approaches for the Lennard-Jones potential and see that they give the same result.</p><pre><code class="language-julia hljs">using Molly
+using Zygote
+using GLMakie
+
+inter = LennardJones()
+boundary = CubicBoundary(5.0)
+a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
+
+function force_direct(dist)
+    c1 = SVector(1.0, 1.0, 1.0)
+    c2 = SVector(dist + 1.0, 1.0, 1.0)
+    vec = vector(c1, c2, boundary)
+    F = force(inter, vec, a1, a2, NoUnits)
+    return F[1]
+end
+
+function force_grad(dist)
+    grad = gradient(dist) do dist
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, a1, a2, NoUnits)
+    end
+    return -grad[1]
+end
+
+dists = collect(0.2:0.01:1.2)
+forces_direct = force_direct.(dists)
+forces_grad = force_grad.(dists)
+
+f = Figure(size=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Distance / nm&quot;,
+    ylabel=&quot;Force / kJ * mol^-1 * nm^-1&quot;,
+    title=&quot;Comparing gradients from direct calculation and AD&quot;,
+)
+scatter!(ax, dists, forces_direct, label=&quot;Direct&quot;, markersize=8)
+scatter!(ax, dists, forces_grad  , label=&quot;AD&quot;    , markersize=8, marker=&#39;x&#39;)
+xlims!(ax, low=0)
+ylims!(ax, -6.0, 10.0)
+axislegend()
+save(&quot;force_comparison.png&quot;, f)</code></pre><p><img src="../images/force_comparison.png" alt="Force comparison"/></p><h2 id="AtomsCalculators.jl-compatibility"><a class="docs-heading-anchor" href="#AtomsCalculators.jl-compatibility">AtomsCalculators.jl compatibility</a><a id="AtomsCalculators.jl-compatibility-1"></a><a class="docs-heading-anchor-permalink" href="#AtomsCalculators.jl-compatibility" title="Permalink"></a></h2><p>The <a href="https://github.com/JuliaMolSim/AtomsCalculators.jl">AtomsCalculators.jl</a> package provides a consistent interface that allows forces, energies etc. to be calculated with different packages. Calculators can be used with a Molly <a href="../api/#Molly.System"><code>System</code></a> by giving them as <code>general_inters</code> during system setup. It is also possible to use a <a href="../api/#Molly.MollyCalculator"><code>MollyCalculator</code></a> to calculate properties on <a href="https://github.com/JuliaMolSim/AtomsBase.jl">AtomsBase.jl</a> systems:</p><pre><code class="language-julia hljs">using Molly
+import AtomsBase
+using AtomsBaseTesting
+using AtomsCalculators
+
+ab_sys = AtomsBase.AbstractSystem(
+    make_test_system().system; 
+    cell_vectors = [[1.54732, 0.0      , 0.0      ],
+                    [0.0    , 1.4654985, 0.0      ],
+                    [0.0    , 0.0      , 1.7928950]]u&quot;Å&quot;,
+)
+
+coul = Coulomb(coulomb_const=2.307e-21u&quot;kJ*Å&quot;)
+calc = MollyCalculator(pairwise_inters=(coul,), force_units=u&quot;kJ/Å&quot;, energy_units=u&quot;kJ&quot;)
+
+AtomsCalculators.potential_energy(ab_sys, calc)</code></pre><pre><code class="nohighlight hljs">9.112207692184968e-21 kJ</code></pre><pre><code class="language-julia hljs">AtomsCalculators.forces(ab_sys, calc)</code></pre><pre><code class="nohighlight hljs">5-element Vector{SVector{3, Quantity{Float64, 𝐋 𝐌 𝐓^-2, Unitful.FreeUnits{(Å^-1, kJ), 𝐋 𝐌 𝐓^-2, nothing}}}}:
+ [5.052086904272771e-21 kJ Å^-1, 1.0837307191961731e-20 kJ Å^-1, -5.366866699852613e-21 kJ Å^-1]
+ [5.252901001053284e-22 kJ Å^-1, -2.3267009382813732e-21 kJ Å^-1, 9.276115314848821e-21 kJ Å^-1]
+ [-8.613462805775053e-21 kJ Å^-1, 5.726650141840073e-21 kJ Å^-1, -2.072868074170469e-20 kJ Å^-1]
+ [3.0360858013969523e-21 kJ Å^-1, -1.423725639552043e-20 kJ Å^-1, 1.681943212670848e-20 kJ Å^-1]
+ [0.0 kJ Å^-1, 0.0 kJ Å^-1, 0.0 kJ Å^-1]</code></pre><p>We can also convert the AtomsBase.jl system to a Molly <a href="../api/#Molly.System"><code>System</code></a>:</p><pre><code class="language-julia hljs">System(ab_sys; force_units=u&quot;kJ/Å&quot;, energy_units=u&quot;kJ&quot;)</code></pre><pre><code class="nohighlight hljs">System with 5 atoms, boundary CubicBoundary{Quantity{Float64, 𝐋, Unitful.FreeUnits{(Å,), 𝐋, nothing}}}(Quantity{Float64, 𝐋, Unitful.FreeUnits{(Å,), 𝐋, nothing}}[1.54732 Å, 1.4654985 Å, 1.792895 Å])</code></pre><h2 id="Variations-of-the-Morse-potential"><a class="docs-heading-anchor" href="#Variations-of-the-Morse-potential">Variations of the Morse potential</a><a id="Variations-of-the-Morse-potential-1"></a><a class="docs-heading-anchor-permalink" href="#Variations-of-the-Morse-potential" title="Permalink"></a></h2><p>The Morse potential for bonds has a parameter <em>a</em> that determines the width of the potential. It can also be compared to the harmonic bond potential.</p><pre><code class="language-julia hljs">using Molly
+using GLMakie
+
+boundary = CubicBoundary(5.0)
+dists = collect(0.12:0.005:2.0)
+
+function energies(inter)
+    return map(dists) do dist
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        potential_energy(inter, c1, c2, boundary)
+    end
+end
+
+f = Figure(size=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Distance / nm&quot;,
+    ylabel=&quot;Potential energy / kJ * mol^-1&quot;,
+    title=&quot;Variations of the Morse potential&quot;,
+)
+lines!(
+    ax,
+    dists,
+    energies(HarmonicBond(k=20_000.0, r0=0.2)),
+    label=&quot;Harmonic&quot;,
+)
+for a in [2.5, 5.0, 10.0]
+    lines!(
+        ax,
+        dists,
+        energies(MorseBond(D=100.0, a=a, r0=0.2)),
+        label=&quot;Morse a=$a nm^-1&quot;,
+    )
+end
+ylims!(ax, 0.0, 120.0)
+axislegend(position=:rb)
+save(&quot;morse.png&quot;, f)</code></pre><p><img src="../images/morse.png" alt="Morse"/></p><h2 id="Variations-of-the-Mie-potential"><a class="docs-heading-anchor" href="#Variations-of-the-Mie-potential">Variations of the Mie potential</a><a id="Variations-of-the-Mie-potential-1"></a><a class="docs-heading-anchor-permalink" href="#Variations-of-the-Mie-potential" title="Permalink"></a></h2><p>The Mie potential is parameterised by <em>m</em> describing the attraction and <em>n</em> describing the repulsion. When <em>m</em>=6 and <em>n</em>=12 this is equivalent to the Lennard-Jones potential.</p><pre><code class="language-julia hljs">using Molly
+using GLMakie
+
+boundary = CubicBoundary(5.0)
+a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
+dists = collect(0.2:0.005:0.8)
+
+function energies(m, n)
+    inter = Mie(m=m, n=n)
+    return map(dists) do dist
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, a1, a2, NoUnits)
+    end
+end
+
+f = Figure(size=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Distance / nm&quot;,
+    ylabel=&quot;Potential energy / kJ * mol^-1&quot;,
+    title=&quot;Variations of the Mie potential&quot;,
+)
+for m in [4, 6]
+    for n in [10, 12]
+        lines!(
+            ax,
+            dists,
+            energies(Float64(m), Float64(n)),
+            label=&quot;m=$m, n=$n&quot;,
+        )
+    end
+end
+xlims!(ax, low=0.2)
+ylims!(ax, -0.6, 0.3)
+axislegend(position=:rb)
+save(&quot;mie.png&quot;, f)</code></pre><p><img src="../images/mie.png" alt="Mie"/></p><h2 id="Variations-of-the-soft-core-LJ-potential"><a class="docs-heading-anchor" href="#Variations-of-the-soft-core-LJ-potential">Variations of the soft-core LJ potential</a><a id="Variations-of-the-soft-core-LJ-potential-1"></a><a class="docs-heading-anchor-permalink" href="#Variations-of-the-soft-core-LJ-potential" title="Permalink"></a></h2><p>The soft-core Lennard-Jones potential is parameterised by <span>$\alpha$</span>, <span>$\lambda$</span> and <span>$p$</span> in addition to the standard Lennard-Jones parameters. These parameters shift the value of <span>$r_{ij}$</span> to <span>$\left(r_{ij}^6 + \sigma_{ij} \alpha \lambda^{p} \right)^{\frac{1}{6}}$</span>. This gives a soft core, i.e. the potential does not diverge for <span>$r_{ij} \rightarrow 0$</span>.</p><pre><code class="language-julia hljs">using Molly
+using GLMakie
+
+boundary = CubicBoundary(5.0)
+a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
+dists = collect(0.05:0.005:0.8)
+
+function energies(α, λ, p)
+    inter = LennardJonesSoftCore(α=α, λ=λ, p=p)
+    return map(dists) do dist
+        c1 = SVector(1.0, 1.0, 1.0)
+        c2 = SVector(dist + 1.0, 1.0, 1.0)
+        vec = vector(c1, c2, boundary)
+        potential_energy(inter, vec, a1, a2, NoUnits)
+    end
+end
+
+f = Figure(size=(600, 400))
+ax = Axis(
+    f[1, 1],
+    xlabel=&quot;Distance / nm&quot;,
+    ylabel=&quot;Potential energy / kJ * mol^-1&quot;,
+    title=&quot;Variations of the soft-core Lennard-Jones potential&quot;,
+)
+for λ in [0.8, 0.9]
+    for α in [0.2, 0.4]
+        for p in [2]
+            lines!(
+                ax,
+                dists,
+                energies(α, λ, p),
+                label=&quot;α=$α, λ=$λ, p=$p&quot;,
+            )
+        end
+    end
+end
+
+lines!(ax, dists, energies(0, 1, 2), label=&quot;standard LJ potential&quot;)
+
+ylims!(-5, 25)
+axislegend(position=:rt)
+save(&quot;lennard_jones_sc.png&quot;, f)</code></pre><p><img src="../images/lennard_jones_sc.png" alt="Lennard-Jones Softcore"/></p><p>The form of the potential is approximately the same as standard Lennard-Jones for <span>$r_{ij} &gt; \sigma_{ij}$</span> if some fractional values are used for <span>$\lambda$</span> and <span>$\alpha$</span>.</p><h2 id="Crystal-structures"><a class="docs-heading-anchor" href="#Crystal-structures">Crystal structures</a><a id="Crystal-structures-1"></a><a class="docs-heading-anchor-permalink" href="#Crystal-structures" title="Permalink"></a></h2><p>Molly can make use of <a href="https://github.com/ejmeitz/SimpleCrystals.jl">SimpleCrystals.jl</a> to generate crystal structures for simulation. All 3D Bravais lattices and most 2D Bravais lattices are supported as well as user-defined crystals through the SimpleCrystals API. The only unsupported crystal types are those with a triclinic 2D simulation domain or crystals with lattice angles larger than 90°.</p><p>Molly provides a constructor for <a href="../api/#Molly.System"><code>System</code></a> that takes in a <code>Crystal</code> struct:</p><pre><code class="language-julia hljs">using Molly
+import SimpleCrystals
+
+a = 0.52468u&quot;nm&quot; # Lattice parameter for FCC Argon at 10 K
+atom_mass = 39.948u&quot;g/mol&quot;
+temp = 10.0u&quot;K&quot;
+fcc_crystal = SimpleCrystals.FCC(a, atom_mass, SVector(4, 4, 4))
+
+n_atoms = length(fcc_crystal)
+velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+
+r_cut = 0.85u&quot;nm&quot;
+sys = System(
+    fcc_crystal;
+    velocities=velocities,
+    pairwise_inters=(LennardJones(cutoff=ShiftedForceCutoff(r_cut)),),
+    loggers=(
+        kinetic_eng=KineticEnergyLogger(100),
+        pot_eng=PotentialEnergyLogger(100),
+    ),
+    energy_units=u&quot;kJ * mol^-1&quot;,
+    force_units=u&quot;kJ * mol^-1 * nm^-1&quot;,
+)</code></pre><p>Certain potentials such as <a href="../api/#Molly.LennardJones"><code>LennardJones</code></a> and <a href="../api/#Molly.Buckingham"><code>Buckingham</code></a> require extra atomic paramaters (e.g. <code>σ</code>) that are not implemented by the SimpleCrystals API. These paramaters must be added to the <a href="../api/#Molly.System"><code>System</code></a> manually by making use of the copy constructor:</p><pre><code class="language-julia hljs">σ = 0.34u&quot;nm&quot;
+ϵ = (4.184 * 0.24037)u&quot;kJ * mol^-1&quot;
+updated_atoms = []
+
+for i in eachindex(sys)
+    push!(updated_atoms, Atom(index=sys.atoms[i].index, atom_type=sys.atoms[i].atom_type,
+                              mass=sys.atoms[i].mass, charge=sys.atoms[i].charge,
+                              σ=σ, ϵ=ϵ))
+end
+
+sys = System(sys; atoms=[updated_atoms...])</code></pre><p>Now the system can be simulated using any of the available simulators:</p><pre><code class="language-julia hljs">simulator = Langevin(
+    dt=2.0u&quot;fs&quot;,
+    temperature=temp,
+    friction=1.0u&quot;ps^-1&quot;,
+)
+simulate!(sys, simulator, 200_000)</code></pre><h2 id="Constrained-dynamics"><a class="docs-heading-anchor" href="#Constrained-dynamics">Constrained dynamics</a><a id="Constrained-dynamics-1"></a><a class="docs-heading-anchor-permalink" href="#Constrained-dynamics" title="Permalink"></a></h2><p>Molly supports the SHAKE and RATTLE constraint algorithms. The code below shows an example where molecules of hydrogen are randomly placed in a box and constrained during a simulation.</p><pre><code class="language-julia hljs">using Molly
+using Test
+
+r_cut = 8.5u&quot;Å&quot;
+temp = 300.0u&quot;K&quot;
+atom_mass = 1.00794u&quot;g/mol&quot;
+
+n_atoms_half = 200
+atoms = [Atom(index=i, mass=atom_mass, σ=2.8279u&quot;Å&quot;, ϵ=0.074u&quot;kcal* mol^-1&quot;) for i in 1:n_atoms_half]
+max_coord = 200.0u&quot;Å&quot;
+coords = [max_coord .* rand(SVector{3}) for i in 1:n_atoms_half]
+boundary = CubicBoundary(200.0u&quot;Å&quot;)
+lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
+
+# Add bonded atoms
+bond_length = 0.74u&quot;Å&quot; # Hydrogen bond length
+constraints = []
+for j in 1:n_atoms_half
+    push!(atoms, Atom(index=(j + n_atoms_half), mass=atom_mass, σ=2.8279u&quot;Å&quot;, ϵ=0.074u&quot;kcal* mol^-1&quot;))
+    push!(coords, coords[j] .+ SVector(bond_length, 0.0u&quot;Å&quot;, 0.0u&quot;Å&quot;))
+    push!(constraints, DistanceConstraint(j, j + n_atoms_half, bond_length))
+end
+
+shake = SHAKE_RATTLE([constraints...], length(atoms), 1e-8u&quot;Å&quot;, 1e-8u&quot;Å^2 * ps^-1&quot;)
+
+neighbor_finder = DistanceNeighborFinder(
+    eligible=trues(length(atoms), length(atoms)),
+    dist_cutoff=1.5*r_cut,
+)
+disable_constrained_interactions!(neighbor_finder, shake.clusters)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    pairwise_inters=(lj,),
+    neighbor_finder=neighbor_finder,
+    constraints=(shake,),
+    energy_units=u&quot;kcal * mol^-1&quot;,
+    force_units=u&quot;kcal * mol^-1 * Å^-1&quot;,
+)
+
+random_velocities!(sys, temp)
+
+simulator = VelocityVerlet(dt=0.001u&quot;ps&quot;)
+
+simulate!(sys, simulator, 10_000)
+
+# Check that the constraints are satisfied at the end of the simulation
+@test check_position_constraints(sys, shake)
+@test check_velocity_constraints(sys, shake)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../exercises/">Exercises »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.13.0 on <span class="colophon-date" title="Friday 27 June 2025 15:03">Friday 27 June 2025</span>. Using Julia version 1.11.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
