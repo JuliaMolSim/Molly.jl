@@ -939,7 +939,8 @@ function System(coord_file::AbstractString,
             special=AT(special),
             n_steps_reorder=10,
         )
-    elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) && AT <: AbstractGPUArray
+    elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
+                (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))
         neighbor_finder = DistanceNeighborFinder(
             eligible=AT(eligible),
             special=AT(special),
@@ -1346,7 +1347,8 @@ function System(T::Type,
             special=AT(special),
             n_steps_reorder=10,
         )
-    elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) && AT <: AbstractGPUArray
+    elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
+                (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))
         neighbor_finder = DistanceNeighborFinder(
             eligible=AT(eligible),
             special=AT(special),
