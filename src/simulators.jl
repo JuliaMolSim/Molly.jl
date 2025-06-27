@@ -150,8 +150,8 @@ end
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_nounits_t = ustrip_vec.(zero(sys.coords))
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
-    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
-                                       n_threads=n_threads)
+    forces_nounits_t .= forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
+                                        n_threads=n_threads)
     forces_t = forces_nounits_t .* sys.force_units
     accels_t = forces_t ./ masses(sys)
     forces_nounits_t_dt = ustrip_vec.(similar(sys.coords))
@@ -510,13 +510,10 @@ end
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
     forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
-    
-    # Compute forces once for initialization
     forces_nounits_t .= forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
-                                            n_threads=n_threads)
+                                        n_threads=n_threads)
     forces_t = forces_nounits_t .* sys.force_units
     accels_t = forces_t ./ masses(sys)
-    
     noise = similar(sys.velocities)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
@@ -524,7 +521,6 @@ end
     # Determine the need to recompute accelerations before B steps
     forces_known = !occursin(r"^.*B[^B]*A[^B]*$", sim.splitting)
 
-    
     force_computation_steps = map(collect(sim.splitting)) do op
         if op == 'O'
             return false
@@ -546,12 +542,11 @@ end
             return (A_step!, (sys, effective_dts[j]))
         elseif op == 'B'
             return (B_step!, (sys, forces_nounits_t, forces_t, forces_buffer, accels_t,
-            effective_dts[j], force_computation_steps[j], n_threads))
+                              effective_dts[j], force_computation_steps[j], n_threads))
         elseif op == 'O'
             return (O_step!, (sys, noise, α_eff, σ_eff, rng, sim.temperature))
         end
     end
-    
 
     for step_n in 1:n_steps
         for (step!, args) in step_arg_pairs
@@ -711,8 +706,8 @@ end
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_nounits_t = ustrip_vec.(zero(sys.coords))
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
-    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
-                                       n_threads=n_threads)
+    forces_nounits_t .= forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
+                                        n_threads=n_threads)
     forces_t = forces_nounits_t .* sys.force_units
     accels_t = forces_t ./ masses(sys)
     forces_nounits_t_dt = ustrip_vec.(similar(sys.coords))
