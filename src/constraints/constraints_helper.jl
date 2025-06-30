@@ -5,12 +5,18 @@ export
     apply_position_constraints!,
     apply_velocity_constraints!
 
+
+abstract type Constraint{D} end
+
 """
+    DistanceConstraint(i, j, dist)
+
+
     DistanceConstraint(i, j, dist)
 
 Constraint between two atoms that maintains a fixed distance between the two atoms.
 """
-struct DistanceConstraint{D}
+struct DistanceConstraint{D} <: Constraint{D}
     i::Int
     j::Int
     dist::D
@@ -39,7 +45,7 @@ ac = AngleConstraint(1, 2, 3, 104.5 * π / 180, 0.9572u"Å", 0.9572u"Å")
 ```
 where atom 1 is oxygen and atoms 2/3 are hydrogen.
 """
-struct AngleConstraint{D}
+struct AngleConstraint{D} <: Constraint{D}
     i::Int
     j::Int
     k::Int
@@ -61,6 +67,16 @@ function AngleConstraint(i, j, k, angle_jk, dist_ij, dist_ik)
 
     return AngleConstraint{typeof(dist_ij)}(i, j, k, dist_ij, dist_ik, dist_jk)
 end
+
+to_distance_constraints(ac::AngleConstraint) = (
+    DistanceConstraint(ac.i, ac.j, ac.dist_ij),
+    DistanceConstraint(ac.i, ac.k, ac.dist_ik),
+    DistanceConstraint(ac.j, ac.k, ac.dist_jk)
+)
+
+"""
+    ConstraintCluster{D}(constraints, unique_atoms)
+"""
 
 struct ConstraintCluster{D <: DistanceConstraint}
     constraints::StructArray{D}
@@ -121,53 +137,64 @@ end
 # which ensures that the first atom in the cluster is the central atom
 function make_cluster(raw_is, raw_js, raw_ds)
 
-    # For bond constraints none of this matters
-    if length(raw_is) == 1
+    raw_unique_idxs = unique([raw_is; raw_js])
+    N_unique_atoms = length(raw_unique_idxs)
+    N_constraints = length(raw_is)
+
+    is_single_bond = (N_constraints == 1)
+    is_angle_cluster = (N_constraints == 3 && N_unique_atoms == 3)
+
+    if is_single_bond || is_angle_cluster # no central atom, order agnostic
         cluster = StructArray{DistanceConstraint}((
-                        MVector(raw_is...),
-                        MVector(raw_js...),
-                        MVector(raw_ds...)
+                        SVector(raw_is...),
+                        SVector(raw_js...),
+                        SVector(raw_ds...)
                         ))
-        return ConstraintCluster(cluster, unique([raw_is; raw_js]))
-    end
+        return ConstraintCluster(cluster, raw_unique_idxs)
+    else # order matters, need to place central atom first
+        unique_idxs = order_atoms(raw_is, raw_js)
+        central = unique_idxs[1]
+        others  = unique_idxs[2:end]
+        M       = length(others)
 
-    # find unique & central
-    unique_idxs = order_atoms(raw_is, raw_js)
-    central = unique_idxs[1]
-    others  = unique_idxs[2:end]
-    M       = length(others)
+        # build sorted  DistanceConstraints
+        is = fill(central, M) # ALL first atoms are the central atom
+        js = others
+        dists = Vector{eltype(raw_ds)}(undef, M)
 
-    # build sorted  DistanceConstraints
-    is = fill(central, M) # ALL first atoms are the central atom
-    js = others
-    dists = Vector{eltype(raw_ds)}(undef, M)
-
-    # Figure out which distance goes with new pairings
-    for (a, o) in enumerate(others)
-        for (idx, (i0, j0)) in enumerate(zip(raw_is, raw_js))
-            if (i0 == central && j0 == o) || (j0 == central && i0 == o)
-                dists[a] = raw_ds[idx]
-                break
+        # Figure out which distance goes with new pairings
+        for (a, o) in enumerate(others)
+            for (idx, (i0, j0)) in enumerate(zip(raw_is, raw_js))
+                if (i0 == central && j0 == o) || (j0 == central && i0 == o)
+                    dists[a] = raw_ds[idx]
+                    break
+                end
             end
         end
-    end
 
-    #* NEEds to be MVector??? dont remember why I did that
-    cluster = StructArray{DistanceConstraint}((MVector(is...), MVector(js...), MVector(dists...)))
-    return ConstraintCluster(cluster, unique_idxs)
+        cluster = StructArray{DistanceConstraint}((SVector(is...), SVector(js...), SVector(dists...)))
+        return ConstraintCluster(cluster, unique_idxs)
+    end
 end
 
-function build_clusters(n_atoms, constraints)
+function build_clusters(n_atoms, all_constraints::AbstractVector{<:Constraint{D}}) where D
     constraint_graph = SimpleDiGraph(n_atoms)
-    idx_dist_pairs = spzeros(n_atoms, n_atoms) * unit(constraints[1].dist)
+    idx_dist_pairs = spzeros(n_atoms, n_atoms) * unit(all_constraints[1].dist)
+
+    # Replace all angle constraints with distance constraints
+    constraints = Vector{DistanceConstraint{D}}(undef, 0)
+    for constraint in all_constraints
+        if constraint isa DistanceConstraint
+            push!(constraints, constraint)
+        elseif constraint isa AngleConstraint 
+            push!(constraints, to_distance_constraints(constraint)...)
+        else
+            error("Unknown constraint type: $(typeof(constraint))")
+        end
+    end
 
     # Store constraints as directed edges, direction is arbitrary but necessary
     for constraint in constraints
-        #TODO - Add support for angle constraints
-        if constraint isa AngleConstraint
-            error(ArgumentError("Cannot constrain linear molecules."))
-        end
-
         edge_added = add_edge!(constraint_graph, constraint.i, constraint.j)
         if edge_added
             idx_dist_pairs[constraint.i, constraint.j] = constraint.dist

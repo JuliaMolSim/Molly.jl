@@ -51,7 +51,7 @@ end
 
     # Assumes lambda is set to zeros initially
     for i in 1:3
-        λ[i] += A′[i,1] * C[1] + A′[i,2] * C[2] + A′[i,3] * C[3]
+        λ[i] += (A′[i,1] * C[1]) + (A′[i,2] * C[2]) + (A′[i,3] * C[3])
     end
 
     return λ
@@ -155,6 +155,7 @@ end
     idx = @index(Global, Linear) # Global Constraint Idx
     @uniform NUM_CONSTRAINTS = 0x3
     @uniform A_type = typeof(zero(L)*zero(L) / zero(M))
+    @uniform A_tmp_type = typeof(zero(M) / (zero(L)*zero(L)))
     @uniform C_type = typeof(zero(V)*zero(L))
     @uniform L_type = typeof(zero(C_type) / zero(A_type))
 
@@ -162,7 +163,7 @@ end
 
         # Allocate thread-local memory
         A = zeros(A_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
-        A_tmp = zeros(A_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
+        A_tmp = zeros(A_tmp_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
         C = zeros(C_type, NUM_CONSTRAINTS)
         λ = zeros(L_type, NUM_CONSTRAINTS)
 
@@ -223,6 +224,7 @@ end
     idx = @index(Global, Linear) # Global Constraint Idx
     @uniform NUM_CONSTRAINTS = 0x3
     @uniform A_type = typeof(zero(L)*zero(L) / zero(M))
+    @uniform A_tmp_type = typeof(zero(M) / (zero(L)*zero(L)))
     @uniform C_type = typeof(zero(V)*zero(L))
     @uniform L_type = typeof(zero(C_type) / zero(A_type))
 
@@ -230,7 +232,7 @@ end
 
         # Allocate thread-local memory
         A = zeros(A_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
-        A_tmp = zeros(A_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
+        A_tmp = zeros(A_tmp_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
         C = zeros(C_type, NUM_CONSTRAINTS)
         λ = zeros(L_type, NUM_CONSTRAINTS)
 
@@ -392,6 +394,9 @@ function shake_gpu!(
 
     end
 
+    # Keep track statistics on # of iterations
+    fit!(ca.stats, iter)
+
     if iter == ca.max_iters + 1
         @warn "SHAKE did not converge after $(ca.max_iters) iterations. Some constraints may not be satisfied."
     end
@@ -481,16 +486,17 @@ end
         m::AbstractVector{M}, 
         boundary,
         dist_tol::L
-    ) where {L,M}
+    ) where {L,M}   
 
+    @uniform FT = float_type(boundary)
     @uniform A_type = typeof(zero(L)*zero(L) / zero(M))
+    @uniform A_tmp_type = typeof(zero(M) / (zero(L)*zero(L)))
     @uniform C_type = typeof(zero(L)*zero(L))
     @uniform L_type = typeof(zero(M))
-    @uniform FT = float_type(boundary)
 
     # Allocate thread-local memory
     A = zeros(A_type, 0x3, 0x3)
-    A_tmp = zeros(A_type, 0x3, 0x3)
+    A_tmp = zeros(A_tmp_type, 0x3, 0x3)
     C = zeros(C_type, 0x3)
     λ = zeros(L_type, 0x3)
 
@@ -528,10 +534,9 @@ end
     A[2,3] = -FT(2.0) * dot(r_k1k4, s_k1k3) * m1_inv
     A[3,2] = -FT(2.0) * dot(r_k1k3, s_k1k4) * m1_inv
 
-    #denom = 4*dt*dt
-    C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12)) #/ denom
-    C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13)) #/ denom
-    C[3] = (dot(s_k1k4, s_k1k4) - (dist14*dist14)) #/ denom
+    C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12))
+    C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13))
+    C[3] = (dot(s_k1k4, s_k1k4) - (dist14*dist14))
 
     solve3x3exactly!(λ, A, A_tmp, C)
 
@@ -572,14 +577,15 @@ end
         dist_tol::L
     ) where {L,M}
 
+    @uniform FT = float_type(boundary)
     @uniform A_type = typeof(zero(L)*zero(L) / zero(M))
+    @uniform A_tmp_type = typeof(zero(M) / (zero(L)*zero(L)))
     @uniform C_type = typeof(zero(L)*zero(L))
     @uniform L_type = typeof(zero(M))
-    @uniform FT = float_type(boundary)
 
     # Allocate thread-local memory
     A = zeros(A_type, 0x3, 0x3)
-    A_tmp = zeros(A_type, 0x3, 0x3)
+    A_tmp = zeros(A_tmp_type, 0x3, 0x3)
     C = zeros(C_type, 0x3)
     λ = zeros(L_type, 0x3)
 
@@ -618,10 +624,9 @@ end
     A[2,3] = -FT(2.0) * dot(r_k2k3, s_k1k3) * m3_inv
     A[3,2] = -FT(2.0) * dot(r_k1k3, s_k2k3) * m3_inv
 
-    #denom = 4*dt*dt
-    C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12)) #/ denom
-    C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13)) #/ denom
-    C[3] = (dot(s_k2k3, s_k2k3) - (dist23*dist23)) #/ denom
+    C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12))
+    C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13))
+    C[3] = (dot(s_k2k3, s_k2k3) - (dist23*dist23))
 
     solve3x3exactly!(λ, A, A_tmp, C)
 
