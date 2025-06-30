@@ -249,6 +249,9 @@ function build_clusters(
         angle_constraints::AbstractVector{AngleConstraint{D}}
     ) where D
 
+    #! avoid mutating input, dont love this...
+    dist_constraints = copy(dist_constraints)
+
     # Convert angle constraints to distance constraints.
     # This is purely to check if they are connected to other
     # clusters in the DAG
