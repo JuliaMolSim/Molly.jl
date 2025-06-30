@@ -267,7 +267,7 @@ end
         C[2] = -dot(r_k1k3, v_k1k3)
         C[3] = -dot(r_k2k3, v_k2k3)
 
-        solve2x2exactly!(λ, A, A_tmp, C)
+        solve3x3exactly!(λ, A, A_tmp, C)
 
         # Update global memory
         v[k1] -= m1_inv .* ((λ[1] .* r_k1k2) .+ (λ[2] .* r_k1k3))
@@ -324,7 +324,7 @@ end
 end
 
 @kernel inbounds=true function shake_step!(
-        clusters::AbstractVector{ConstraintCluster}, 
+        clusters::AbstractVector{<:ConstraintCluster}, 
         active_idxs,    
         still_active::AbstractVector{Bool},
         N_active,
@@ -348,7 +348,7 @@ end
 end
 
 function shake_gpu!(
-        clusters::Vector{ConstraintCluster},
+        clusters::AbstractVector{<:ConstraintCluster},
         ca::SHAKE_RATTLE,
         backend,
         shake_kernel,
@@ -592,6 +592,7 @@ end
     k1, k2, k3 = cluster.unique_atoms
 
     # distances are ordered in cluster creation
+    #* DONT THINK THIS IS DONE FOR ANGLE CLUSTERS
     dist12, dist13, dist23 = cluster.constraints.dist
 
     m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3] # uncoalesced read
@@ -616,7 +617,7 @@ end
     # A matrix element (i,j) represents interaction of constraint i with constraint j.
     A[1,1] = -FT(2.0) * dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # this sets constraint 1 as between k1-k2
     A[2,2] = -FT(2.0) * dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # this sets constraint 2 as between k1-k3
-    A[3,3] = -FT(2.0) * dot(r_k1k3, s_k1k3) * (m2_inv + m3_inv) # this sets constraint 3 as between k2-k3
+    A[3,3] = -FT(2.0) * dot(r_k2k3, s_k2k3) * (m2_inv + m3_inv) # this sets constraint 3 as between k2-k3
     A[1,2] = -FT(2.0) * dot(r_k1k3, s_k1k2) * m1_inv
     A[2,1] = -FT(2.0) * dot(r_k1k2, s_k1k3) * m1_inv
     A[1,3] = -FT(2.0) * dot(r_k2k3, s_k1k2) * (-m2_inv)

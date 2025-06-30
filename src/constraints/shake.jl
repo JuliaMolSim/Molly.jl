@@ -8,9 +8,16 @@ const CC = ConstraintCluster #alias so next line is shorter
 
 
 """
-    SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance)
+    SHAKE_RATTLE(n_atoms,
+                dist_tolerance,
+                vel_tolerance;
+                dist_constraints = nothing,
+                angle_constraints = nothing,
+                gpu_block_size = 64,
+                max_iters = 25)
 
-Constrain distances during a simulation using the SHAKE and RATTLE algorithms.
+Constrain distances during a simulation using the SHAKE and RATTLE algorithms. 
+Either or both of `dist_constraints` and `angle_constraitns` must be passed.
 
 Velocity constraints will be imposed for simulators that integrate velocities such as
 [`VelocityVerlet`](@ref).
@@ -22,12 +29,15 @@ of the linear system solved to satisfy the RATTLE algorithm.
 
 
 # Arguments
-- `constraints`: A vector of constraints to be imposed on the system.
 - `n_atoms`: Total number of atoms in the system.
 - `dist_tolerance`: the tolerance used to end the iterative procedure when calculating
     position constraints, should have the same units as the coordinates.
 - `vel_tolerance`: the tolerance used to end the iterative procedure when calculating
     velocity constraints, should have the same units as the velocities * the coordinates.
+- `dist_constraints`: A vector of [`DistanceConstraint`](@ref) objects that define the
+    distance constraints to be applied. If `nothing`, no distance constraints are applied.
+- `angle_constraints`: A vector of [`AngleConstraint`](@ref) objects that define the
+    angle constraints to be applied. If `nothing`, no angle constraints are applied.
 - `gpu_block_size`: The number of threads per block to use for GPU calculations.
 - `max_iters`: The maximum number of iterations to perform when doing SHAKE. Defaults to 25.
 """
@@ -43,13 +53,18 @@ struct SHAKE_RATTLE{A <: CC, B <: CC, C <: CC, D <: CC, E, F, S}
     stats::S # keeps track of iters, average, variance, and max/min
 end
 
-function SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance;
-                         gpu_block_size = 64, max_iters = 25)
-
-    clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, constraints)
+function SHAKE_RATTLE(n_atoms,
+                     dist_tolerance,
+                     vel_tolerance;
+                     dist_constraints = nothing,
+                     angle_constraints = nothing,
+                     gpu_block_size = 64, max_iters = 25)
 
     @assert ustrip(dist_tolerance) > 0.0 "dist_tolerance must be greater than zero"
     @assert ustrip(vel_tolerance) > 0.0 "vel_tolerance must be greater than zero"
+    @assert !(isnothing(dist_constraints) && isnothing(angle_constraints)) "At least one of dist_constraints or angle_constraints must be provided"
+
+    clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, dist_constraints, angle_constraints)
 
     A = eltype(clusters12)
     B = eltype(clusters23)

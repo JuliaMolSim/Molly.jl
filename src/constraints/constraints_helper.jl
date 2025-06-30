@@ -46,7 +46,7 @@ ac = AngleConstraint(1, 2, 3, 104.5 * π / 180, 0.9572u"Å", 0.9572u"Å")
 where atom 1 is oxygen and atoms 2/3 are hydrogen.
 """
 struct AngleConstraint{D} <: Constraint{D}
-    i::Int
+    i::Int # Central atom
     j::Int
     k::Int
     dist_ij::D
@@ -69,14 +69,20 @@ function AngleConstraint(i, j, k, angle_jk, dist_ij, dist_ik)
 end
 
 to_distance_constraints(ac::AngleConstraint) = (
-    DistanceConstraint(ac.i, ac.j, ac.dist_ij),
-    DistanceConstraint(ac.i, ac.k, ac.dist_ik),
-    DistanceConstraint(ac.j, ac.k, ac.dist_jk)
+    DistanceConstraint(ac.i, ac.j, ac.dist_ij), # arm 1
+    DistanceConstraint(ac.i, ac.k, ac.dist_ik), # arm 2
+    DistanceConstraint(ac.j, ac.k, ac.dist_jk) # angle
 )
 
-"""
-    ConstraintCluster{D}(constraints, unique_atoms)
-"""
+function to_cluster(ac::AngleConstraint)
+    cluster = StructArray{DistanceConstraint}((
+                        SVector(ac.i, ac.i, ac.j),
+                        SVector(ac.j, ac.k, ac.k),
+                        SVector(ac.dist_ij, ac.dist_ik, ac.dist_jk)
+                        ))
+    return ConstraintCluster(cluster, [ac.i, ac.j, ac.k])
+end
+
 
 struct ConstraintCluster{D <: DistanceConstraint}
     constraints::StructArray{D}
@@ -177,24 +183,17 @@ function make_cluster(raw_is, raw_js, raw_ds)
     end
 end
 
-function build_clusters(n_atoms, all_constraints::AbstractVector{<:Constraint{D}}) where D
-    constraint_graph = SimpleDiGraph(n_atoms)
-    idx_dist_pairs = spzeros(n_atoms, n_atoms) * unit(all_constraints[1].dist)
-
-    # Replace all angle constraints with distance constraints
-    constraints = Vector{DistanceConstraint{D}}(undef, 0)
-    for constraint in all_constraints
-        if constraint isa DistanceConstraint
-            push!(constraints, constraint)
-        elseif constraint isa AngleConstraint 
-            push!(constraints, to_distance_constraints(constraint)...)
-        else
-            error("Unknown constraint type: $(typeof(constraint))")
-        end
-    end
+# Check for interactions between clusters and build non-angle clusters
+function build_central_atom_clusters(
+        n_atoms::Integer,
+        dist_constraints::AbstractVector{DistanceConstraint{D}}
+    ) where D
 
     # Store constraints as directed edges, direction is arbitrary but necessary
-    for constraint in constraints
+    constraint_graph = SimpleDiGraph(n_atoms)
+    idx_dist_pairs = spzeros(n_atoms, n_atoms) * unit(D)
+    
+    for constraint in dist_constraints
         edge_added = add_edge!(constraint_graph, constraint.i, constraint.j)
         if edge_added
             idx_dist_pairs[constraint.i, constraint.j] = constraint.dist
@@ -208,7 +207,7 @@ function build_clusters(n_atoms, all_constraints::AbstractVector{<:Constraint{D}
     cc = connected_components(constraint_graph)
     
     clusters12 = ConstraintCluster[]; clusters23 = ConstraintCluster[]
-    clusters34 = ConstraintCluster[]; clusters_angle = ConstraintCluster[]
+    clusters34 = ConstraintCluster[]
     # Loop through connected regions and convert to clusters
     for (_, atom_idxs) in enumerate(cc)
         # Loop over atoms in connected region to build cluster
@@ -223,10 +222,8 @@ function build_clusters(n_atoms, all_constraints::AbstractVector{<:Constraint{D}
                 end
             end
 
-            #* WILL NEED TO UPDATE THIS FOR ANGLE CONSTRAINTS!
-            #* ALL ATOMS WILL TRIGGER AS "CENTRAL" ATOMS 
-            constraint_cluster = make_cluster(is, js, [dists...])
             N_constraint = length(is)
+            constraint_cluster = make_cluster(is, js, [dists...])
             N_unique = n_unique(constraint_cluster)
 
             if N_constraint == 1 && N_unique == 2 # Single bond constraint between two atoms
@@ -235,16 +232,64 @@ function build_clusters(n_atoms, all_constraints::AbstractVector{<:Constraint{D}
                 push!(clusters23, constraint_cluster)
             elseif N_constraint == 3 && N_unique == 4 # Central atom 3 bonds constrained
                 push!(clusters34, constraint_cluster)
-            elseif N_constraint == 3 && N_unique == 3 # 3 atoms, with 2 bonds + 1 angle constraint
-                error("Angle constraints not supported yet")
-                push!(clusters_angle, constraint_cluster)
+            elseif N_constraint == 3 && N_unique == 3 # angle constraint
+                # Skip angle constraints, we will build them later if needed
+                continue
             else
                 @error "Constraint clusters with more than 3 constraints or too few unique atoms are not unsupported. Got $(N_constraint) constraints and $(N_unique) unique atoms."
             end
         end
     end
+    return clusters12, clusters23, clusters34
+end
+
+function build_clusters(
+        n_atoms::Integer,
+        dist_constraints::AbstractVector{DistanceConstraint{D}},
+        angle_constraints::AbstractVector{AngleConstraint{D}}
+    ) where D
+
+    # Convert angle constraints to distance constraints.
+    # This is purely to check if they are connected to other
+    # clusters in the DAG
+    for ac in angle_constraints
+        push!(dist_constraints, to_distance_constraints(ac)...)
+    end
+
+    # Check for interactions between clusters and build non-angle clusters
+    clusters12, clusters23, clusters34 = 
+        build_central_atom_clusters(n_atoms, dist_constraints)
+
+    # Now that we know angle_constraints do not interact with
+    # any of the distance constraints we can build their clusters
+    clusters_angle = ConstraintCluster[]
+    for ac in angle_constraints
+        push!(clusters_angle, to_cluster(ac))
+    end
+
     return clusters12, clusters23, clusters34, clusters_angle
-    # return [clusters12...], [clusters23...], [clusters34...], [clusters_angle...]
+end
+
+function build_clusters(
+        n_atoms::Integer,
+        dist_constraints::Nothing,
+        angle_constraints::AbstractVector{AngleConstraint{D}}
+    ) where D
+    acc = [to_cluster(ac) for ac in angle_constraints]
+    return ConstraintCluster[], ConstraintCluster[], ConstraintCluster[], acc
+end 
+
+function build_clusters(
+        n_atoms::Integer,
+        dist_constraints::AbstractVector{DistanceConstraint{D}}, 
+        angle_constraints::Nothing
+    ) where D
+
+    clusters12, clusters23, clusters34 = 
+        build_central_atom_clusters(n_atoms, dist_constraints)
+
+    return clusters12, clusters23, clusters34, ConstraintCluster[]
+
 end
 
 
@@ -266,10 +311,10 @@ When using constraint algorithms the vibrational degrees of freedom are removed 
 | Total         |     D      |      D*N        |       D*N           |
 
 =#
-function n_dof_lost(D::Integer, constraint_clusters::AbstractVector{ConstraintCluster})
+function n_dof_lost(D::Integer, constraint_clusters::AbstractVector{<:ConstraintCluster})
     # Bond constraints remove vibrational DoFs
     vibrational_dof_lost = 0
-    # Assumes constraints are a non-linear chain (e.g., breaks for angle constraints)
+    # Assumes constraints are a non-linear chain
     for cluster in constraint_clusters
         N = n_unique(cluster)
         # If N > 2 assume non-linear (e.g. breaks for CO2)

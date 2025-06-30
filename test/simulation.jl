@@ -686,7 +686,10 @@ end
     bond_length = 0.74u"Å"
     constraints = [DistanceConstraint(j, j + 1, bond_length) for j in 1:2:n_atoms]
     atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
-    cons = SHAKE_RATTLE(constraints, n_atoms, 1e-8u"Å", 1e-8u"Å^2 * ps^-1")
+    cons = SHAKE_RATTLE(n_atoms, 1e-8u"Å", 1e-8u"Å^2 * ps^-1"; dist_constraints = constraints)
+
+    @test length(cons.clusters12) == length(constraints)
+
     boundary = CubicBoundary(200.0u"Å")
     lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
     neighbor_finder = DistanceNeighborFinder(
@@ -744,7 +747,9 @@ end
     is = collect(1:(2 * (n_atoms ÷ 3)))
     js = collect(((n_atoms ÷ 3) + 1):n_atoms)
     constraints = [DistanceConstraint(is[idx], js[idx], bond_length) for idx in eachindex(is)]
-    cons = SHAKE_RATTLE(constraints, n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps")
+    cons = SHAKE_RATTLE(n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps"; dist_constraints = constraints)
+
+    @test length(cons.clusters23) == length(constraints)
 
     sys = System(
         atoms=atoms,
@@ -805,7 +810,9 @@ end
     is = repeat(1:(n_atoms ÷ 4), 3) # central atom in every cluster
     js = collect(((n_atoms ÷ 4) + 1):n_atoms)
     constraints = [DistanceConstraint(is[idx], js[idx], bond_length) for idx in eachindex(is)]
-    cons = SHAKE_RATTLE(constraints, n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps")
+    cons = SHAKE_RATTLE(n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps"; dist_constraints = constraints)
+
+    @test length(cons.clusters34) == length(constraints)
 
     sys = System(
         atoms=atoms,
@@ -829,6 +836,72 @@ end
 
     @test check_position_constraints(sys, cons)
     @test check_velocity_constraints(sys, cons)
+end
+
+
+@testset "Constraints Angle" begin
+    n_atoms = 30
+    atom_mass = 10.0u"g/mol"
+    #central atom
+    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
+    boundary = CubicBoundary(3.0u"nm")
+
+    coords = place_atoms(n_atoms ÷ 3, boundary, min_dist=0.3u"nm")
+
+    for i in 1:(n_atoms ÷ 3)
+        push!(coords, coords[i] .- [0.13, 0.0, 0.0]u"nm")
+    end
+
+    θ = (2 * pi) / 3 
+    for i in 1:(n_atoms ÷ 3)
+        push!(coords, coords[i] .+ [0.13*cos(π - θ), 0.13*sin(π - θ), 0.0]u"nm")
+    end
+
+    temp = 100.0u"K"
+    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
+
+    neighbor_finder = DistanceNeighborFinder(
+        eligible=trues(n_atoms, n_atoms),
+        n_steps=10,
+        dist_cutoff=1.5u"nm"
+    )
+    bond_length = 0.13u"nm"
+
+    is = collect(1:(n_atoms ÷ 3))
+    js = collect( ((n_atoms ÷ 3) + 1) : 2*(n_atoms ÷ 3) + 1)
+    ks = collect( (2*(n_atoms ÷ 3) + 1) : n_atoms)
+    angle_constraints = [AngleConstraint(is[idx], js[idx], ks[idx], θ, bond_length, bond_length) for idx in eachindex(is)]
+    cons = SHAKE_RATTLE(n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps"; angle_constraints = angle_constraints)
+
+    @test length(cons.angle_constraints) == n_atoms ÷ 3
+
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=(LennardJones(use_neighbors=true),),
+        constraints=(cons,),
+        neighbor_finder=neighbor_finder
+    )
+
+    old_coords = copy(sys.coords)
+
+    for i in eachindex(sys.coords)
+        sys.coords[i]     += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
+        sys.velocities[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm/ps"
+    end
+
+    apply_position_constraints!(sys, old_coords)
+    apply_velocity_constraints!(sys)
+
+    @test check_position_constraints(sys, cons)
+    @test check_velocity_constraints(sys, cons)
+end
+
+@testset "Angle + Dist Constraints" begin
+    
+
 end
 
 @testset "Langevin splitting" begin
