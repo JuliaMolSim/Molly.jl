@@ -236,6 +236,23 @@ end
         @test BioStructures.countatoms(first(traj)) == 100
 
         run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_mp4)
+
+        coords_unc = [c .± (abs(randn()) / 100)u"nm"         for c in s.coords    ]
+        vels_unc   = [v .± (abs(randn()) / 100)u"nm * ps^-1" for v in s.velocities]
+        @suppress_err begin
+            sys_unc = System(s; coords=coords_unc, velocities=vels_unc)
+            for n_threads in n_threads_list
+                @test typeof(potential_energy(sys_unc; n_threads=n_threads)) ==
+                                    typeof((1.0 ± 0.1)u"kJ * mol^-1")
+                @test abs(potential_energy(sys_unc; n_threads=n_threads) -
+                                    potential_energy(s; n_threads=n_threads)) < 0.1u"kJ * mol^-1"
+                @test typeof(kinetic_energy(sys_unc)) == typeof((1.0 ± 0.1)u"kJ * mol^-1")
+                @test typeof(temperature(sys_unc)) == typeof((1.0 ± 0.1)u"K")
+                @test abs(temperature(sys_unc) - temperature(s)) < 0.1u"K"
+                @test eltype(eltype(forces(sys_unc; n_threads=n_threads))) ==
+                                    typeof((1.0 ± 0.1)u"kJ * mol^-1 * nm^-1")
+            end
+        end
     end
 end
 
