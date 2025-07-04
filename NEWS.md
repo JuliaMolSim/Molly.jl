@@ -1,5 +1,10 @@
 # Molly.jl release notes
 
+## v0.22.3 - Jul 2025
+
+### Bug fixes
+- A bug when calculating the potential energy of a system using Measurements.jl is fixed.
+
 ## v0.22.2 - Jun 2025
 
 ### New features
