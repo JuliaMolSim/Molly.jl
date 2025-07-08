@@ -72,42 +72,23 @@ to_distance_constraints(ac::AngleConstraint) = (
     DistanceConstraint(ac.i, ac.j, ac.dist_ij), # arm 1
     DistanceConstraint(ac.i, ac.k, ac.dist_ik), # arm 2
     DistanceConstraint(ac.j, ac.k, ac.dist_jk) # angle
-)
+) 
 
 function to_cluster(ac::AngleConstraint)
-    cluster = StructArray{DistanceConstraint}((
-                        SVector(ac.i, ac.i, ac.j),
-                        SVector(ac.j, ac.k, ac.k),
-                        SVector(ac.dist_ij, ac.dist_ik, ac.dist_jk)
-                        ))
-    return ConstraintCluster(cluster, [ac.i, ac.j, ac.k])
+
+    cluster = @SVector [
+        DistanceConstraint(ac.i, ac.j, ac.dist_ij),
+        DistanceConstraint(ac.i, ac.k, ac.dist_ik),
+        DistanceConstraint(ac.j, ac.k, ac.dist_jk)
+    ]
+
+    return ConstraintCluster(cluster, SVector(ac.i, ac.j, ac.k))
 end
 
 
-struct ConstraintCluster{D <: DistanceConstraint}
-    constraints::StructArray{D}
-    unique_atoms::Vector{Int}
-end
-
-n_unique(cc::ConstraintCluster) = length(cc.unique_atoms)
-
-"""
-    disable_constrained_interactions!(neighbor_finder, constraint_clusters)
-
-Disables neighbor list interactions between atoms in a constraint.
-"""
-function disable_constrained_interactions!(
-        neighbor_finder,
-        constraint_clusters::AbstractVector{<:ConstraintCluster}
-    )
-
-    for cluster in constraint_clusters
-        for constraint in cluster.constraints
-            neighbor_finder.eligible[constraint.i, constraint.j] = false
-            neighbor_finder.eligible[constraint.j, constraint.i] = false
-        end
-    end
-    return neighbor_finder
+struct ConstraintCluster{N, M, D <: DistanceConstraint, I <: Integer}
+    constraints::SVector{N,D}
+    unique_atoms::SVector{M,I}
 end
 
 # This finds the unique atom indicies given a the lists (is and js)
@@ -141,7 +122,7 @@ end
 # This makes sure the first atom in each distance constraint
 # is the central atom of the cluster. It also calls `order_atoms`
 # which ensures that the first atom in the cluster is the central atom
-function make_cluster(raw_is, raw_js, raw_ds)
+function ConstraintCluster(raw_is, raw_js, raw_ds)
 
     raw_unique_idxs = unique([raw_is; raw_js])
     N_unique_atoms = length(raw_unique_idxs)
@@ -151,12 +132,13 @@ function make_cluster(raw_is, raw_js, raw_ds)
     is_angle_cluster = (N_constraints == 3 && N_unique_atoms == 3)
 
     if is_single_bond || is_angle_cluster # no central atom, order agnostic
-        cluster = StructArray{DistanceConstraint}((
-                        SVector(raw_is...),
-                        SVector(raw_js...),
-                        SVector(raw_ds...)
-                        ))
-        return ConstraintCluster(cluster, raw_unique_idxs)
+        #* WHY DOES @SVECTOR NOT WORK???
+        dcs = DistanceConstraint.(raw_is, raw_js, raw_ds)
+        dcs = SVector{N_constraints, DistanceConstraint{eltype(raw_ds)}}(dcs...)
+        return ConstraintCluster(
+            dcs,
+            SVector(raw_unique_idxs...)
+        )
     else # order matters, need to place central atom first
         unique_idxs = order_atoms(raw_is, raw_js)
         central = unique_idxs[1]
@@ -178,11 +160,38 @@ function make_cluster(raw_is, raw_js, raw_ds)
             end
         end
 
-        cluster = StructArray{DistanceConstraint}((SVector(is...), SVector(js...), SVector(dists...)))
-        return ConstraintCluster(cluster, unique_idxs)
+        #* WHY DOES @SVECTOR NOT WORK??
+        dcs = DistanceConstraint.(is, js, dists)
+        dcs = SVector{N_constraints, DistanceConstraint{eltype(dists)}}(dcs...)
+
+        return ConstraintCluster(
+            dcs,
+            SVector(unique_idxs...)
+        )
     end
 end
 
+n_unique(::ConstraintCluster{N,M}) where {N,M} = M
+n_constraints(::ConstraintCluster{N}) where {N} = N
+
+"""
+    disable_constrained_interactions!(neighbor_finder, constraint_clusters)
+
+Disables neighbor list interactions between atoms in a constraint.
+"""
+function disable_constrained_interactions!(
+        neighbor_finder,
+        constraint_clusters::AbstractVector
+    )
+
+    for cluster in constraint_clusters
+        for constraint in cluster.constraints
+            neighbor_finder.eligible[constraint.i, constraint.j] = false
+            neighbor_finder.eligible[constraint.j, constraint.i] = false
+        end
+    end
+    return neighbor_finder
+end
 # Check for interactions between clusters and build non-angle clusters
 function build_central_atom_clusters(
         n_atoms::Integer,
@@ -206,8 +215,9 @@ function build_central_atom_clusters(
     # Get groups of constraints that are connected to eachother
     cc = connected_components(constraint_graph)
     
-    clusters12 = ConstraintCluster[]; clusters23 = ConstraintCluster[]
-    clusters34 = ConstraintCluster[]
+    clusters12 = ConstraintCluster{1,2}[]
+    clusters23 = ConstraintCluster{2,3}[]
+    clusters34 = ConstraintCluster{3,4}[]
     # Loop through connected regions and convert to clusters
     for (_, atom_idxs) in enumerate(cc)
         # Loop over atoms in connected region to build cluster
@@ -222,8 +232,8 @@ function build_central_atom_clusters(
                 end
             end
 
-            N_constraint = length(is)
-            constraint_cluster = make_cluster(is, js, [dists...])
+            constraint_cluster = ConstraintCluster(is, js, [dists...])
+            N_constraint = n_constraints(constraint_cluster) # same as length(is)
             N_unique = n_unique(constraint_cluster)
 
             if N_constraint == 1 && N_unique == 2 # Single bond constraint between two atoms
@@ -240,7 +250,9 @@ function build_central_atom_clusters(
             end
         end
     end
-    return clusters12, clusters23, clusters34
+
+    #* These become Any[] if they are empty, is that ok??
+    return [clusters12...], [clusters23...], [clusters34...]
 end
 
 function build_clusters(
@@ -265,12 +277,12 @@ function build_clusters(
 
     # Now that we know angle_constraints do not interact with
     # any of the distance constraints we can build their clusters
-    clusters_angle = ConstraintCluster[]
+    clusters_angle = ConstraintCluster{3,3}[]
     for ac in angle_constraints
         push!(clusters_angle, to_cluster(ac))
     end
 
-    return clusters12, clusters23, clusters34, clusters_angle
+    return clusters12, clusters23, clusters34, [clusters_angle...]
 end
 
 function build_clusters(
@@ -279,6 +291,7 @@ function build_clusters(
         angle_constraints::AbstractVector{AngleConstraint{D}}
     ) where D
     acc = [to_cluster(ac) for ac in angle_constraints]
+    #* These are non-concrete...what should I do insteaD??
     return ConstraintCluster[], ConstraintCluster[], ConstraintCluster[], acc
 end 
 
@@ -314,7 +327,7 @@ When using constraint algorithms the vibrational degrees of freedom are removed 
 | Total         |     D      |      D*N        |       D*N           |
 
 =#
-function n_dof_lost(D::Integer, constraint_clusters::AbstractVector{<:ConstraintCluster})
+function n_dof_lost(D::Integer, constraint_clusters::AbstractVector)
     # Bond constraints remove vibrational DoFs
     vibrational_dof_lost = 0
     # Assumes constraints are a non-linear chain

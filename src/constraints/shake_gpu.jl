@@ -65,11 +65,14 @@ end
 
     if idx <= length(clusters)
 
+        #* THIS NEEDLESSLY LOADS THE DIST CONSTRAINTS
+        #* RATTLE JUST NEEDS THE ATOM IDXS
+        cluster = clusters[idx]
+
         # Step 2 : Perform RATTLE, for a 2 atom cluster we
         # just re-arrange λ = A / c, since they are all scalars.
 
-        k1 = clusters[idx].unique_atoms[1]
-        k2 = clusters[idx].unique_atoms[2]
+        k1, k2 = cluster.unique_atoms
 
         v_k1 = v[k1] # uncoalesced read
         v_k2 = v[k2] # uncoalesced read
@@ -102,15 +105,16 @@ end
     @uniform L_type = typeof(zero(C_type) / zero(A_type))
 
     if idx <= length(clusters)
+
+        cluster = clusters[idx]
         
         # Allocate thread-local memory
         A = zeros(A_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS) # Units are L^2 / M
         C = zeros(C_type, NUM_CONSTRAINTS) # Units are L^2 / T
         λ = zeros(L_type, NUM_CONSTRAINTS) # Units are M / T
 
-        k1 = clusters[idx].unique_atoms[1] # this is assumed to be the central atom
-        k2 = clusters[idx].unique_atoms[2]
-        k3 = clusters[idx].unique_atoms[3]
+        # k1 is central atom
+        k1, k2, k3 = cluster.unique_atoms
 
         r_k1 = r[k1]
      
@@ -161,16 +165,16 @@ end
 
     if idx <= length(clusters)
 
+        cluster = clusters[idx]
+
         # Allocate thread-local memory
         A = zeros(A_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
         A_tmp = zeros(A_tmp_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
         C = zeros(C_type, NUM_CONSTRAINTS)
         λ = zeros(L_type, NUM_CONSTRAINTS)
 
-        k1 = clusters[idx].unique_atoms[1] # this is assumed to be the central atom
-        k2 = clusters[idx].unique_atoms[2]
-        k3 = clusters[idx].unique_atoms[3]
-        k4 = clusters[idx].unique_atoms[4]
+        # k1 is central atom
+        k1, k2, k3, k4 = cluster.unique_atoms
 
         r_k1 = r[k1] # uncoalesced read
      
@@ -230,15 +234,16 @@ end
 
     if idx <= length(clusters)
 
+        cluster = clusters[idx]
+
         # Allocate thread-local memory
         A = zeros(A_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
         A_tmp = zeros(A_tmp_type, NUM_CONSTRAINTS, NUM_CONSTRAINTS)
         C = zeros(C_type, NUM_CONSTRAINTS)
         λ = zeros(L_type, NUM_CONSTRAINTS)
 
-        k1 = clusters[idx].unique_atoms[1] # this is assumed to be the central atom
-        k2 = clusters[idx].unique_atoms[2]
-        k3 = clusters[idx].unique_atoms[3]
+        # k1 is central atom
+        k1, k2, k3 = cluster.unique_atoms
 
         r_k1 = r[k1]; v_k1 = v[k1]
         r_k2 = r[k2]; v_k2 = v[k2]
@@ -284,9 +289,11 @@ end
     
     if idx <= length(clusters12)
 
-        k1 = clusters12[idx].unique_atoms[1]
-        k2 = clusters12[idx].unique_atoms[2]
-        distance = first(clusters12[idx].constraints.dist) # Only 1 cluster
+        cluster = clusters12[idx]
+
+        k1, k2 = cluster.unique_atoms
+
+        distance = first(cluster.constraints.dist) # Only 1 cluster
 
         r_t2_k1 = r_t2[k1] # uncoalesced read
         r_t2_k2 = r_t2[k2] # uncoalesced read
@@ -348,12 +355,12 @@ end
 end
 
 function shake_gpu!(
-        clusters::AbstractVector{<:ConstraintCluster},
+        clusters::C,
         ca::SHAKE_RATTLE,
         backend,
         shake_kernel,
         other_kernel_args...,
-    )
+    ) where {C <: AbstractVector{<:ConstraintCluster}}
     N_active_clusters = length(clusters)
 
     kern = shake_step!(backend, ca.gpu_block_size)
@@ -406,7 +413,7 @@ end
 # 3 atoms, 2 constraints
 # Constraints between 1-2 and 1-3
 @inline function shake3_kernel!(
-        cluster::ConstraintCluster, 
+        cluster::ConstraintCluster{2,3}, 
         r_t1::AbstractVector{<:AbstractVector{L}}, 
         r_t2::AbstractVector{<:AbstractVector{L}},
         m::AbstractVector{M}, 
@@ -424,12 +431,11 @@ end
     C = zeros(C_type, 0x2) # Units are L^2
     λ = zeros(L_type, 0x2) # Units are M
 
-    k1 = cluster.unique_atoms[1] # central atom
-    k2 = cluster.unique_atoms[2]
-    k3 = cluster.unique_atoms[3]
+    # central atom is k1
+    k1, k2, k3 = cluster.unique_atoms
 
     # distances are ordered in cluster creation
-    dist12, dist13 = cluster.constraints.dist
+    dist12, dist13 = getproperty.(cluster.constraints, :dist)
 
     m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3] # uncoalesced read
 
@@ -500,10 +506,11 @@ end
     C = zeros(C_type, 0x3)
     λ = zeros(L_type, 0x3)
 
+    # central atom is k1
     k1, k2, k3, k4 = cluster.unique_atoms
 
     # distances are ordered in cluster creation
-    dist12, dist13, dist14 = cluster.constraints.dist
+    dist12, dist13, dist14 = getproperty.(cluster.constraints, :dist)
 
     m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2];# uncoalesced read
     m3_inv = 1 / m[k3]; m4_inv = 1 / m[k4] # uncoalesced read
@@ -589,11 +596,11 @@ end
     C = zeros(C_type, 0x3)
     λ = zeros(L_type, 0x3)
 
+    # central atom is k1
     k1, k2, k3 = cluster.unique_atoms
 
     # distances are ordered in cluster creation
-    #* DONT THINK THIS IS DONE FOR ANGLE CLUSTERS
-    dist12, dist13, dist23 = cluster.constraints.dist
+    dist12, dist13, dist23 = getproperty.(cluster.constraints, :dist)
 
     m1_inv = 1 / m[k1]; m2_inv = 1 / m[k2]; m3_inv = 1 / m[k3] # uncoalesced read
 

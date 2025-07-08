@@ -41,11 +41,11 @@ of the linear system solved to satisfy the RATTLE algorithm.
 - `gpu_block_size`: The number of threads per block to use for GPU calculations.
 - `max_iters`: The maximum number of iterations to perform when doing SHAKE. Defaults to 25.
 """
-struct SHAKE_RATTLE{A <: CC, B <: CC, C <: CC, D <: CC, E, F, S}
-    clusters12::AbstractVector{A}
-    clusters23::AbstractVector{B}
-    clusters34::AbstractVector{C}
-    angle_clusters::AbstractVector{D}
+struct SHAKE_RATTLE{A, B, C, D, E, F, S}
+    clusters12::A
+    clusters23::B
+    clusters34::C
+    angle_clusters::D
     dist_tolerance::E
     vel_tolerance::F
     gpu_block_size::Integer
@@ -66,10 +66,10 @@ function SHAKE_RATTLE(n_atoms,
 
     clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, dist_constraints, angle_constraints)
 
-    A = eltype(clusters12)
-    B = eltype(clusters23)
-    C = eltype(clusters34)
-    D = eltype(angle_clusters)
+    A = typeof(clusters12)
+    B = typeof(clusters23)
+    C = typeof(clusters34)
+    D = typeof(angle_clusters)
 
     stats = Series(Mean(), Variance(), Extrema())
 
