@@ -252,6 +252,11 @@ end
                 @test eltype(eltype(forces(sys_unc; n_threads=n_threads))) ==
                                     typeof((1.0 ± 0.1)u"kJ * mol^-1 * nm^-1")
             end
+            simulator_unc = VelocityVerlet(dt=0.002u"ps")
+            for n_threads in n_threads_list
+                simulate!(sys_unc, simulator_unc, 1; n_threads=n_threads,
+                          run_loggers=false)
+            end
         end
     end
 end
