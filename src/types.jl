@@ -538,7 +538,6 @@ function System(;
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
-    CN = typeof(constraints)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
@@ -567,22 +566,6 @@ function System(;
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
-    df = n_dof(D, length(atoms), boundary)
-    if length(constraints) > 0
-        for ca in constraints
-            
-            # Automatically disbales interactions between constrained atoms
-            # and whatever else is implemented for the constraint type.
-            setup_constraints!(neighbor_finder, ca)
-
-            for cluster_type in cluster_keys(ca)
-                clusters = getproperty(ca, cluster_type)
-                df -= n_dof_lost(D, clusters)
-            end
-        end
-    end
-
-
     if isa(atoms, AbstractGPUArray) && !isa(coords, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
@@ -595,9 +578,6 @@ function System(;
     if isa(vels, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
-    if isa(atoms, AbstractGPUArray) && length(constraints) > 0
-        @warn "Constraints are not currently compatible with simulation on the GPU"
-    end
 
     atom_masses = mass.(atoms)
     M = typeof(atom_masses)
@@ -608,6 +588,23 @@ function System(;
     if !isbitstype(eltype(coords)) || !isbitstype(eltype(vels))
         @warn "eltype of coords or velocities is not isbits, it is recomended to use a vector of SVector's for performance"
     end
+
+    df = n_dof(D, length(atoms), boundary)
+    if length(constraints) > 0
+        for ca in constraints
+            for cluster_type in cluster_keys(ca)
+                clusters = getproperty(ca, cluster_type)
+                df -= n_dof_lost(D, clusters)
+            end
+        end
+    end
+    # Automatically disbales interactions between constrained atoms
+    # and whatever else is implemented for the constraint type.
+    # Constraints moved to GPU here if necessary.
+    coord_backend = get_backend(coords)
+    constraints = Tuple(setup_constraints!(ca, neighbor_finder, coord_backend)[1] for ca in constraints)
+    CN = typeof(constraints)
+
 
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
@@ -1079,6 +1076,7 @@ The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box or un
 """
 float_type(::Union{System{D, AT, T}, ReplicaSystem{D, AT, T}}) where {D, AT, T} = T
 float_type(::Unitful.AbstractQuantity{T}) where T = T
+float_type(::Type{<:Unitful.AbstractQuantity{T}}) where T = T
 
 """
     masses(sys)

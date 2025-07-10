@@ -18,6 +18,7 @@ using EzXML
 using GPUArrays
 using Graphs
 using KernelAbstractions
+import KernelAbstractions as KA
 using NearestNeighbors
 using PeriodicTable
 using SimpleCrystals

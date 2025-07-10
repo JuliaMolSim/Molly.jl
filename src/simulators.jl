@@ -166,7 +166,7 @@ end
 
     for step_n in 1:n_steps
         if using_constraints
-            cons_coord_storage .= sys.coords
+            copy!(cons_coord_storage, sys.coords)
         end
 
         sys.coords .+= sys.velocities .* sim.dt .+ ((accels_t .* sim.dt .^ 2) ./ 2)
@@ -247,7 +247,7 @@ end
     accels_t = forces_t ./ masses(sys)
     using_constraints = length(sys.constraints) > 0
     if using_constraints
-        cons_coord_storage = similar(sys.coords)
+        copy!(cons_coord_storage, sys.coords)
     end
 
     for step_n in 1:n_steps
@@ -407,9 +407,10 @@ end
     accels_t = forces_t ./ masses(sys)
     noise = similar(sys.velocities)
     using_constraints = length(sys.constraints) > 0
+
     if using_constraints
-        cons_coord_storage = similar(sys.coords)
-        cons_vel_storage = similar(sys.velocities)
+        copy!(cons_coord_storage, sys.coords)
+        copy!(cons_vel_storage, sys.velocities)
     end
 
     for step_n in 1:n_steps
@@ -422,7 +423,7 @@ end
         apply_velocity_constraints!(sys; n_threads=n_threads)
 
         if using_constraints
-            cons_coord_storage .= sys.coords
+            copy!(cons_coord_storage, sys.coords)
         end
         sys.coords .+= sys.velocities .* sim.dt ./ 2
 

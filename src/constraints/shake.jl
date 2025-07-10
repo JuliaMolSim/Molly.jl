@@ -63,6 +63,29 @@ function SHAKE_RATTLE(n_atoms,
     @assert ustrip(dist_tolerance) > 0.0 "dist_tolerance must be greater than zero"
     @assert ustrip(vel_tolerance) > 0.0 "vel_tolerance must be greater than zero"
     @assert !(isnothing(dist_constraints) && isnothing(angle_constraints)) "At least one of dist_constraints or angle_constraints must be provided"
+    @assert length(dist_constraints) > 0 || length(angle_constraints) > 0 "At least one of dist_constraints or angle_constraints must be non-empty"
+
+    if !isnothing(dist_constraints) && length(dist_constraints) == 0
+        @warn "You passed an empty vector for `dist_constraints`, no distance constraints will be applied."
+        dist_constraints = nothing
+    end
+
+    if !isnothing(angle_constraints) && length(angle_constraints) == 0
+        @warn "You passed an empty vector for `angle_constraints`, no angle constraints will be applied."
+        angle_constraints = nothing
+    end
+
+    if float_type(dist_tolerance) isa Float32 
+        if ustrip(dist_tolerance) <= Float32(1e-6) 
+            @warn "Using Float32 with a SHAKE dist_tolerance less than 1e-6. Might have convergence issues."
+        end
+    end
+
+    if float_type(vel_tolerance) isa Float32 
+        if ustrip(vel_tolerance) <= Float32(1e-6) 
+            @warn "Using Float32 with a RATTLE vel_tolerance less than 1e-6. Might have convergence issues."
+        end
+    end
 
     clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, dist_constraints, angle_constraints)
 
@@ -77,6 +100,17 @@ function SHAKE_RATTLE(n_atoms,
         clusters12, clusters23, clusters34, angle_clusters, dist_tolerance, vel_tolerance, gpu_block_size, max_iters, stats)
 end
 
+function SHAKE_RATTLE(sr::SHAKE_RATTLE, clusters12, clusters23, clusters34, angle_clusters)
+    A = typeof(clusters12)
+    B = typeof(clusters23)
+    C = typeof(clusters34)
+    D = typeof(angle_clusters)
+
+    return SHAKE_RATTLE{A, B, C, D, typeof(sr.dist_tolerance), typeof(sr.vel_tolerance), typeof(sr.stats)}(
+        clusters12, clusters23, clusters34, angle_clusters,
+        sr.dist_tolerance, sr.vel_tolerance, sr.gpu_block_size, sr.max_iters, sr.stats)
+end
+
 cluster_keys(::SHAKE_RATTLE) = [:clusters12, :clusters23, :clusters34, :angle_clusters]
 iters_avg(sr::SHAKE_RATTLE) = value(sr.stats[1])
 iters_var(sr::SHAKE_RATTLE) = value(sr.stats[2])
@@ -85,7 +119,7 @@ iters_max(sr::SHAKE_RATTLE) = value(sr.stats[3].max)
 iters_nmin(sr::SHAKE_RATTLE) = value(sr.stats[3].nmin)
 iters_nmax(sr::SHAKE_RATTLE) = value(sr.stats[3].nmax)
   
-function setup_constraints!(neighbor_finder, sr::SHAKE_RATTLE)
+function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, backend)
 
     # Disable Neighbor interactions that are constrained
     if typeof(neighbor_finder) != NoNeighborFinder
@@ -95,7 +129,36 @@ function setup_constraints!(neighbor_finder, sr::SHAKE_RATTLE)
         disable_constrained_interactions!(neighbor_finder, sr.angle_clusters)
     end
 
-    return neighbor_finder
+    # Move to proper backend
+    # Assume only other backend is CPU, in which case we do nothing.
+    if typeof(backend) <: KernelAbstractions.GPU
+        println("HERE")
+
+        clusters12_gpu = []; clusters23_gpu = []
+        clusters34_gpu = []; angle_clusters_gpu = []
+
+        if length(sr.clusters12) > 0
+            println("HERE2")
+            clusters12_gpu = allocate(backend, eltype(sr.clusters12), length(sr.clusters12))
+            copy!(clusters12_gpu, sr.clusters12)
+        end
+        if length(sr.clusters23) > 0
+            clusters23_gpu = allocate(backend, eltype(sr.clusters23), length(sr.clusters23))
+            copy!(clusters23_gpu, sr.clusters23)
+        end
+        if length(sr.clusters34) > 0
+            clusters34_gpu = allocate(backend, eltype(sr.clusters34), length(sr.clusters34))
+            copy!(clusters34_gpu, sr.clusters34)
+        end
+        if length(sr.angle_clusters) > 0
+            angle_clusters_gpu = allocate(backend, eltype(sr.angle_clusters), length(sr.angle_clusters))
+            copy!(angle_clusters_gpu, sr.angle_clusters)
+        end
+
+        sr = SHAKE_RATTLE(sr, clusters12_gpu, clusters23_gpu, clusters34_gpu, angle_clusters_gpu)
+    end
+
+    return sr, neighbor_finder
 
 end
 

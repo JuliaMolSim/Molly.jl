@@ -82,14 +82,20 @@ function to_cluster(ac::AngleConstraint)
         DistanceConstraint(ac.j, ac.k, ac.dist_jk)
     ]
 
-    return ConstraintCluster(cluster, SVector(ac.i, ac.j, ac.k))
+    return ConstraintCluster(cluster, SVector{3, Int32}(ac.i, ac.j, ac.k))
 end
 
 
 struct ConstraintCluster{N, M, D <: DistanceConstraint, I <: Integer}
     constraints::SVector{N,D}
-    unique_atoms::SVector{M,I}
+    unique_atoms::SVector{M, I}
 end
+
+#* WE ONLY USE THE DISTANCES AFTER EVERYTHING IS SORTED
+# struct KernelConstraintCluster{N, M, D, I <: Integer}
+#     distances::SVector{N, D}
+#     unique_atoms::SVector{M, I}
+# end
 
 # This finds the unique atom indicies given a the lists (is and js)
 # of atoms that participate in a constraint clusters.
@@ -174,6 +180,27 @@ end
 n_unique(::ConstraintCluster{N,M}) where {N,M} = M
 n_constraints(::ConstraintCluster{N}) where {N} = N
 
+# No-op when backends are same
+to_backend(arr, old::T, new::T) where {T <: KA.Backend} = arr
+
+# Allocates and copies when backends are different
+function to_backend(arr, old::A, new::B) where {A <: KA.Backend, B <: KA.Backend}
+    out = allocate(new, eltype(arr), size(arr))
+    copy!(out, arr)
+    return out
+end
+
+# Kernel to support when neighbor finder is on GPU
+@kernel function disable_pairs!(eligible, idx_i, idx_j)
+    tid = @index(Global, Linear)
+    if tid <= length(idx_i)
+        i = idx_i[tid]
+        j = idx_j[tid]
+        @inbounds eligible[i, j] = false
+        @inbounds eligible[j, i] = false
+    end
+end
+
 """
     disable_constrained_interactions!(neighbor_finder, constraint_clusters)
 
@@ -184,14 +211,41 @@ function disable_constrained_interactions!(
         constraint_clusters::AbstractVector
     )
 
-    for cluster in constraint_clusters
-        for constraint in cluster.constraints
-            neighbor_finder.eligible[constraint.i, constraint.j] = false
-            neighbor_finder.eligible[constraint.j, constraint.i] = false
+    if isa(neighbor_finder.eligible, AbstractGPUArray)
+
+        # Collect pairs first
+        i_idx = Int[]
+        j_idx = Int[]
+        for cl in constraint_clusters
+            append!(i_idx, getproperty.(cl.constraints, :i))
+            append!(j_idx, getproperty.(cl.constraints, :j))
         end
+
+        nf_backend = get_backend(neighbor_finder.eligible)
+        is_backend = get_backend(i_idx)
+
+        i_idx = to_backend(i_idx, is_backend, nf_backend)
+        j_idx = to_backend(j_idx, is_backend, nf_backend)
+
+        # 1024 is block size
+        kernel = disable_pairs!(nf_backend, 1024)
+        kernel(neighbor_finder.eligible, i_idx, j_idx, ndrange = length(i_idx))
+
+        return neighbor_finder
+
+    else # KernelAbstractions does not like the BitMatrix used by eligible on CPU
+
+        for cluster in constraint_clusters
+            for constraint in cluster.constraints
+                neighbor_finder.eligible[constraint.i, constraint.j] = false
+                neighbor_finder.eligible[constraint.j, constraint.i] = false
+            end
+        end
+        return neighbor_finder
     end
-    return neighbor_finder
+
 end
+
 # Check for interactions between clusters and build non-angle clusters
 function build_central_atom_clusters(
         n_atoms::Integer,
@@ -200,7 +254,7 @@ function build_central_atom_clusters(
 
     # Store constraints as directed edges, direction is arbitrary but necessary
     constraint_graph = SimpleDiGraph(n_atoms)
-    idx_dist_pairs = spzeros(n_atoms, n_atoms) * unit(D)
+    idx_dist_pairs = spzeros(float_type(D), n_atoms, n_atoms) * unit(D)
     
     for constraint in dist_constraints
         edge_added = add_edge!(constraint_graph, constraint.i, constraint.j)
@@ -307,6 +361,16 @@ function build_clusters(
     return clusters12, clusters23, clusters34, ConstraintCluster[]
 
 end
+
+# Fallback
+function build_clusters(
+    n_atoms::Integer,
+    dist_constraints::Nothing,
+    angle_constraints::Nothing
+)
+    return ConstraintCluster[], ConstraintCluster[], ConstraintCluster[], ConstraintCluster[]
+end
+
 
 
 #=
