@@ -246,8 +246,9 @@ end
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
     accels_t = forces_t ./ masses(sys)
     using_constraints = length(sys.constraints) > 0
+
     if using_constraints
-        copy!(cons_coord_storage, sys.coords)
+        cons_coord_storage = similar(sys.coords)
     end
 
     for step_n in 1:n_steps
@@ -409,8 +410,8 @@ end
     using_constraints = length(sys.constraints) > 0
 
     if using_constraints
-        copy!(cons_coord_storage, sys.coords)
-        copy!(cons_vel_storage, sys.velocities)
+        cons_coord_storage = similar(sys.coords)
+        cons_vel_storage = similar(sys.velocities)
     end
 
     for step_n in 1:n_steps

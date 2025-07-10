@@ -132,13 +132,11 @@ function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, backend)
     # Move to proper backend
     # Assume only other backend is CPU, in which case we do nothing.
     if typeof(backend) <: KernelAbstractions.GPU
-        println("HERE")
 
         clusters12_gpu = []; clusters23_gpu = []
         clusters34_gpu = []; angle_clusters_gpu = []
 
         if length(sr.clusters12) > 0
-            println("HERE2")
             clusters12_gpu = allocate(backend, eltype(sr.clusters12), length(sr.clusters12))
             copy!(clusters12_gpu, sr.clusters12)
         end
