@@ -439,9 +439,9 @@ save("polymer_angle.png", f)
 ```
 ![Polymer angles](images/polymer_angle.png)
 
-## Machine learning potentials
+## ACE potentials
 
-There is [an example](https://acesuit.github.io/ACEpotentials.jl/dev/tutorials/molly) of using ACE potentials in Molly.
+There is [an example](https://acesuit.github.io/ACEmd.jl/stable/molly) of using ACE potentials in Molly via [ACEmd.jl](https://github.com/ACEsuit/ACEmd.jl).
 
 ## Python ASE calculator
 

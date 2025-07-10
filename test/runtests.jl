@@ -1,4 +1,5 @@
 using Molly
+import ACEmd
 using AMDGPU
 using Aqua
 import AtomsBase
@@ -9,6 +10,7 @@ import BioStructures
 import Chemfiles
 using CUDA
 using Enzyme
+using ExtXYZ
 using FiniteDifferences
 using GPUArrays
 using KernelDensity
@@ -125,6 +127,7 @@ if GROUP in ("All", "NotGradients")
     include("minimization.jl")
     include("simulation.jl")
     include("agent.jl")
+    include("integration.jl")
 end
 
 if GROUP in ("All", "Protein", "NotGradients")
