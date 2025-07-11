@@ -489,7 +489,7 @@ interface described there.
 - `data::DA=nothing`: arbitrary data associated with the system.
 """
 mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
-                      L, F, E, K, M, DA} <: AtomsBase.AbstractSystem{D}
+                      L, F, E, K, M, IM, DA} <: AtomsBase.AbstractSystem{D}
     atoms::A
     coords::C
     boundary::B
@@ -507,6 +507,7 @@ mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
     energy_units::E
     k::K
     masses::M
+    inv_masses::IM
     data::DA
 end
 
@@ -605,14 +606,18 @@ function System(;
     constraints = Tuple(setup_constraints!(ca, neighbor_finder, coord_backend)[1] for ca in constraints)
     CN = typeof(constraints)
 
+    # Useful to have pre-compute
+    inv_masses = T(1) ./ atom_masses
+    IM = typeof(inv_masses)
+
 
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
 
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, DA}(
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, IM, DA}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, neighbor_finder, loggers,
-                    df, force_units, energy_units, k_converted, atom_masses, data)
+                    df, force_units, energy_units, k_converted, atom_masses, inv_masses, data)
 end
 
 """
