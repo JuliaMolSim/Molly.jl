@@ -375,7 +375,7 @@ function shake_gpu!(
         backend,
         shake_kernel,
         other_kernel_args...,
-    ) where {C <: AbstractVector{<:ConstraintCluster}}
+    ) where {C <: AbstractVector{<:ConstraintKernelData}}
     N_active_clusters = length(clusters)
 
     kern = shake_step!(backend, ca.gpu_block_size)
@@ -428,7 +428,7 @@ end
 # 3 atoms, 2 constraints
 # Constraints between 1-2 and 1-3
 @inline function shake3_kernel!(
-        cluster::ConstraintCluster{2,3}, 
+        cluster::Cluster23Data{L}, 
         r_t1::AbstractVector{<:AbstractVector{L}}, 
         r_t2::AbstractVector{<:AbstractVector{L}},
         m_inv::AbstractVector{M}, 
@@ -509,7 +509,7 @@ end
 # 4 atoms, 3 constraints
 # Constraints between 1-2, 1-3 and 1-4
 @inline function shake4_kernel!(
-        cluster::ConstraintCluster, 
+        cluster::Cluster34Data{L}, 
         r_t1::AbstractVector{<:AbstractVector{L}},
         r_t2::AbstractVector{<:AbstractVector{L}},
         m_inv::AbstractVector{M}, 
@@ -610,7 +610,7 @@ end
 # 3 atoms, 3 constraints
 # Constraints between 1-2, 1-3 and 2-3
 @inline function shake3_angle_kernel!(
-        cluster::ConstraintCluster, 
+        cluster::AngleClusterData{L}, 
         r_t1::AbstractVector{<:AbstractVector{L}},
         r_t2::AbstractVector{<:AbstractVector{L}},
         m_inv::AbstractVector{M}, 
@@ -797,6 +797,8 @@ function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; kwargs...)
 
 
     #* TODO LAUNCH ON SEPARATE STREAMS/TASKS
+    KernelAbstractions.synchronize(backend)
+    
     N12_clusters > 0 && r2_kernel(sys.coords, sys.velocities, sys.inv_masses, ca.clusters12, sys.boundary, ndrange = N12_clusters)
     N23_clusters > 0 && r3_kernel(sys.coords, sys.velocities, sys.inv_masses, ca.clusters23, sys.boundary, ndrange = N23_clusters)
     N34_clusters > 0 && r4_kernel(sys.coords, sys.velocities, sys.inv_masses, ca.clusters34, sys.boundary, ndrange = N34_clusters)

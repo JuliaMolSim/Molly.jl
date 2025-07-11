@@ -4,8 +4,6 @@ export
     check_velocity_constraints,
     setup_constraints!
 
-const CC = ConstraintCluster #alias so next line is shorter
-
 
 """
     SHAKE_RATTLE(n_atoms,
@@ -87,6 +85,11 @@ function SHAKE_RATTLE(n_atoms,
         end
     end
 
+    if isa(dist_constraints, AbstractGPUArray) || isa(angle_constraints, AbstractGPUArray)
+        error("Constraints should be passd to SHAKE_RATTLE on CPU. Data will be moved to GPU later.")
+    end
+
+
     clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, dist_constraints, angle_constraints)
 
     A = typeof(clusters12)
@@ -119,7 +122,7 @@ iters_max(sr::SHAKE_RATTLE) = value(sr.stats[3].max)
 iters_nmin(sr::SHAKE_RATTLE) = value(sr.stats[3].nmin)
 iters_nmax(sr::SHAKE_RATTLE) = value(sr.stats[3].nmax)
   
-function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, backend)
+function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
 
     # Disable Neighbor interactions that are constrained
     if typeof(neighbor_finder) != NoNeighborFinder
@@ -129,34 +132,31 @@ function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, backend)
         disable_constrained_interactions!(neighbor_finder, sr.angle_clusters)
     end
 
-    # Move to proper backend
-    # Assume only other backend is CPU, in which case we do nothing.
-    if typeof(backend) <: KernelAbstractions.GPU
+    # Move to proper backend, if CPU do nothing
+    if arr_type <: AbstractGPUArray
 
         clusters12_gpu = []; clusters23_gpu = []
         clusters34_gpu = []; angle_clusters_gpu = []
 
         if length(sr.clusters12) > 0
-            clusters12_gpu = allocate(backend, eltype(sr.clusters12), length(sr.clusters12))
-            copy!(clusters12_gpu, sr.clusters12)
+            clusters12_gpu = replace_storage(arr_type, sr.clusters12)
         end
         if length(sr.clusters23) > 0
-            clusters23_gpu = allocate(backend, eltype(sr.clusters23), length(sr.clusters23))
-            copy!(clusters23_gpu, sr.clusters23)
+            clusters23_gpu = replace_storage(arr_type, sr.clusters23)
         end
         if length(sr.clusters34) > 0
-            clusters34_gpu = allocate(backend, eltype(sr.clusters34), length(sr.clusters34))
-            copy!(clusters34_gpu, sr.clusters34)
+            clusters34_gpu = replace_storage(arr_type, sr.clusters34)
         end
         if length(sr.angle_clusters) > 0
-            angle_clusters_gpu = allocate(backend, eltype(sr.angle_clusters), length(sr.angle_clusters))
-            copy!(angle_clusters_gpu, sr.angle_clusters)
+            angle_clusters_gpu = replace_storage(arr_type, sr.angle_clusters)
         end
 
         sr = SHAKE_RATTLE(sr, clusters12_gpu, clusters23_gpu, clusters34_gpu, angle_clusters_gpu)
     end
 
-    return sr, neighbor_finder
+    # neighboor_finder is also modified
+    # but returning only sr makes life easier in types.jl
+    return sr
 
 end
 

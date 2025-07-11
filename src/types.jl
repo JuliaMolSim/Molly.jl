@@ -602,8 +602,7 @@ function System(;
     # Automatically disbales interactions between constrained atoms
     # and whatever else is implemented for the constraint type.
     # Constraints moved to GPU here if necessary.
-    coord_backend = get_backend(coords)
-    constraints = Tuple(setup_constraints!(ca, neighbor_finder, coord_backend)[1] for ca in constraints)
+    constraints = Tuple(setup_constraints!(ca, neighbor_finder, AT) for ca in constraints)
     CN = typeof(constraints)
 
     # Useful to have pre-compute
