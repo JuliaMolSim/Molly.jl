@@ -1,5 +1,14 @@
+# ACEmd test
+# See https://acesuit.github.io/ACEmd.jl/stable/molly
+# Separate since ACEmd is not in the general registry
+
+using Molly
+import ACEmd
+using ExtXYZ
+
+using Test
+
 @testset "ACEmd" begin
-    # See https://acesuit.github.io/ACEmd.jl/stable/molly
     fname_ace = joinpath(pkgdir(ACEmd), "data", "TiAl.json")
     fname_xyz = joinpath(pkgdir(ACEmd), "data", "TiAl-big.xyz")
 
