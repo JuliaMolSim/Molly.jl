@@ -3,7 +3,9 @@ export
     AngleConstraint,
     disable_constrained_interactions!,
     apply_position_constraints!,
-    apply_velocity_constraints!
+    apply_velocity_constraints!,
+    check_position_constraints,
+    check_velocity_constraints
 
 
 abstract type Constraint{D} end
@@ -16,9 +18,9 @@ abstract type Constraint{D} end
 
 Constraint between two atoms that maintains a fixed distance between the two atoms.
 """
-struct DistanceConstraint{D} <: Constraint{D}
-    i::Int
-    j::Int
+struct DistanceConstraint{D, I <: Integer} <: Constraint{D}
+    i::I
+    j::I
     dist::D
 end
 
@@ -45,10 +47,10 @@ ac = AngleConstraint(1, 2, 3, 104.5 * π / 180, 0.9572u"Å", 0.9572u"Å")
 ```
 where atom 1 is oxygen and atoms 2/3 are hydrogen.
 """
-struct AngleConstraint{D} <: Constraint{D}
-    i::Int # Central atom
-    j::Int
-    k::Int
+struct AngleConstraint{D, I <: Integer} <: Constraint{D}
+    i::I # Central atom
+    j::I
+    k::I
     dist_ij::D
     dist_ik::D
     dist_jk::D
@@ -65,7 +67,7 @@ function AngleConstraint(i, j, k, angle_jk, dist_ij, dist_ik)
     dist_jk = sqrt((dist_ij*dist_ij) + (dist_ik*dist_ik) -
                     (2 * dist_ij * dist_ik * cosθ))
 
-    return AngleConstraint{typeof(dist_ij)}(i, j, k, dist_ij, dist_ik, dist_jk)
+    return AngleConstraint{typeof(dist_ij), typeof(i)}(i, j, k, dist_ij, dist_ik, dist_jk)
 end
 
 to_distance_constraints(ac::AngleConstraint) = (
@@ -163,14 +165,20 @@ function disable_constrained_interactions!(
         constraint_clusters::AbstractVector
     )
 
+
+    atom_interactions = interactions.(constraint_clusters)
+
     if isa(neighbor_finder.eligible, AbstractGPUArray)
 
         # Collect pairs first
         i_idx = Int[]
         j_idx = Int[]
-        for cl in constraint_clusters
-            append!(i_idx, getproperty.(cl.constraints, :i))
-            append!(j_idx, getproperty.(cl.constraints, :j))
+
+        for interaction_list in atom_interactions
+            for (i, j, _) in interaction_list
+                push!(i_idx, i)
+                push!(j_idx, j)
+            end
         end
 
         nf_backend = get_backend(neighbor_finder.eligible)
@@ -187,12 +195,13 @@ function disable_constrained_interactions!(
 
     else # KernelAbstractions does not like the BitMatrix used by eligible on CPU
 
-        for cluster in constraint_clusters
-            for constraint in cluster.constraints
-                neighbor_finder.eligible[constraint.i, constraint.j] = false
-                neighbor_finder.eligible[constraint.j, constraint.i] = false
+        for interaction_list in atom_interactions
+            for (i, j, _) in interaction_list
+                neighbor_finder.eligible[i, j] = false
+                neighbor_finder.eligible[j, i] = false
             end
         end
+
         return neighbor_finder
     end
 
@@ -201,13 +210,13 @@ end
 # Check for interactions between angle and non-angle clusters,
 # builds only non-angle clusters
 function build_central_atom_clusters(
-        n_atoms::Integer,
-        dist_constraints::AbstractVector{DistanceConstraint{D}}
+        num_atoms::Integer,
+        dist_constraints::AbstractVector{<:DistanceConstraint{D}}
     ) where D
 
     # Store constraints as directed edges, direction is arbitrary but necessary
-    constraint_graph = SimpleDiGraph(n_atoms)
-    idx_dist_pairs = spzeros(float_type(D), n_atoms, n_atoms) * unit(D)
+    constraint_graph = SimpleDiGraph(num_atoms)
+    idx_dist_pairs = spzeros(float_type(D), num_atoms, num_atoms) * unit(D)
     
     for constraint in dist_constraints
         edge_added = add_edge!(constraint_graph, constraint.i, constraint.j)
@@ -240,16 +249,16 @@ function build_central_atom_clusters(
                 end
             end
 
-            unique_idxs, dists = make_cluster_data(is, js, [dists...])
-            N_constraint = length(is)
-            N_unique = length(unique_idxs)
+            cluster_data = make_cluster_data(is, js, [dists...])
+            N_constraint = n_constraints(cluster_data)
+            N_unique = n_atoms_cluster(cluster_data)
 
             if N_constraint == 1 && N_unique == 2 # Single bond constraint between two atoms
-                push!(clusters12, constraint_cluster)
+                push!(clusters12, cluster_data)
             elseif N_constraint == 2 && N_unique == 3 # Central atom with 2 bonds constrained
-                push!(clusters23, constraint_cluster)
+                push!(clusters23, cluster_data)
             elseif N_constraint == 3 && N_unique == 4 # Central atom 3 bonds constrained
-                push!(clusters34, constraint_cluster)
+                push!(clusters34, cluster_data)
             elseif N_constraint == 3 && N_unique == 3 # angle constraint
                 # Skip angle constraints, we will build them later if needed
                 continue
@@ -295,7 +304,7 @@ end
 function build_clusters(
         n_atoms::Integer,
         dist_constraints::Nothing,
-        angle_constraints::AbstractVector{AngleConstraint{D}}
+        angle_constraints::AbstractVector{<:AngleConstraint{D}}
     ) where D
     acc = StructArray(to_cluster_data(ac) for ac in angle_constraints)
     #* These are non-concrete...what should I do instead??
@@ -304,7 +313,7 @@ end
 
 function build_clusters(
         n_atoms::Integer,
-        dist_constraints::AbstractVector{DistanceConstraint{D}}, 
+        dist_constraints::AbstractVector{<:DistanceConstraint{D}}, 
         angle_constraints::Nothing
     ) where D
 
@@ -349,7 +358,7 @@ function n_dof_lost(D::Integer, constraint_clusters::AbstractVector)
     vibrational_dof_lost = 0
     # Assumes constraints are a non-linear chain
     for cluster in constraint_clusters
-        N = n_unique(cluster)
+        N = n_atoms_cluster(cluster)
         # If N > 2 assume non-linear (e.g. breaks for CO2)
         vibrational_dof_lost += ((N == 2) ? D*N - (2*D - 1) : D*(N - 2))
     end
@@ -404,4 +413,50 @@ function apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
         apply_velocity_constraints!(sys, ca)
     end
     return sys
+end
+
+
+"""
+    check_position_constraints(sys, constraints)
+
+Checks if the position constraints are satisfied by the current coordinates of `sys`.
+"""
+function check_position_constraints(sys, ca)
+    max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.coords)))
+    for cluster_type in cluster_keys(ca)
+        clusters = getproperty(ca, cluster_type)
+        for cluster in clusters
+            for (i, j, dist) in interactions(cluster)
+                dr = vector(sys.coords[i], sys.coords[j], sys.boundary)
+                err = abs(norm(dr) - dist)
+                if max_err < err
+                    max_err = err
+                end
+            end
+        end
+    end
+    return max_err < ca.dist_tolerance
+end
+
+"""
+    check_velocity_constraints(sys, constraints)
+
+Checks if the velocity constraints are satisfied by the current velocities of `sys`.
+"""
+function check_velocity_constraints(sys::System, ca)
+    max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
+    for cluster_type in cluster_keys(ca)
+        clusters = getproperty(ca, cluster_type)
+        for cluster in clusters
+            for (i, j, _) in interactions(cluster)
+                dr = vector(sys.coords[i], sys.coords[j], sys.boundary)
+                v_diff = sys.velocities[j] .- sys.velocities[i]
+                err = abs(dot(dr, v_diff))
+                if max_err < err
+                    max_err = err
+                end
+            end
+        end
+    end
+    return max_err < ca.vel_tolerance
 end

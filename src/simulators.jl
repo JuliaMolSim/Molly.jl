@@ -166,7 +166,7 @@ end
 
     for step_n in 1:n_steps
         if using_constraints
-            copy!(cons_coord_storage, sys.coords)
+            cons_coord_storage .= sys.coords
         end
 
         sys.coords .+= sys.velocities .* sim.dt .+ ((accels_t .* sim.dt .^ 2) ./ 2)

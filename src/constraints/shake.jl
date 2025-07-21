@@ -1,7 +1,5 @@
 export
     SHAKE_RATTLE,
-    check_position_constraints,
-    check_velocity_constraints,
     setup_constraints!
 
 
@@ -39,15 +37,15 @@ of the linear system solved to satisfy the RATTLE algorithm.
 - `gpu_block_size`: The number of threads per block to use for GPU calculations.
 - `max_iters`: The maximum number of iterations to perform when doing SHAKE. Defaults to 25.
 """
-struct SHAKE_RATTLE{A, B, C, D, E, F, S}
+struct SHAKE_RATTLE{A, B, C, D, E, F, I <: Integer, S}
     clusters12::A
     clusters23::B
     clusters34::C
     angle_clusters::D
     dist_tolerance::E
     vel_tolerance::F
-    gpu_block_size::Integer
-    max_iters::Integer
+    gpu_block_size::I
+    max_iters::I
     stats::S # keeps track of iters, average, variance, and max/min
 end
 
@@ -58,10 +56,10 @@ function SHAKE_RATTLE(n_atoms,
                      angle_constraints = nothing,
                      gpu_block_size = 64, max_iters = 25)
 
-    @assert ustrip(dist_tolerance) > 0.0 "dist_tolerance must be greater than zero"
-    @assert ustrip(vel_tolerance) > 0.0 "vel_tolerance must be greater than zero"
-    @assert !(isnothing(dist_constraints) && isnothing(angle_constraints)) "At least one of dist_constraints or angle_constraints must be provided"
-    @assert length(dist_constraints) > 0 || length(angle_constraints) > 0 "At least one of dist_constraints or angle_constraints must be non-empty"
+    ustrip(dist_tolerance) <= 0.0 && throw(ArgumentError("dist_tolerance must be greater than zero"))
+    ustrip(vel_tolerance) <= 0.0 && throw(ArgumentError("vel_tolerance must be greater than zero"))
+    (isnothing(dist_constraints) && isnothing(angle_constraints)) && throw(ArgumentError("At least one of dist_constraints or angle_constraints must be provided"))
+    (length(dist_constraints) < 0 && length(angle_constraints) < 0) && throw(ArgumentError("At least one of dist_constraints or angle_constraints must be non-empty"))
 
     if !isnothing(dist_constraints) && length(dist_constraints) == 0
         @warn "You passed an empty vector for `dist_constraints`, no distance constraints will be applied."
@@ -86,7 +84,7 @@ function SHAKE_RATTLE(n_atoms,
     end
 
     if isa(dist_constraints, AbstractGPUArray) || isa(angle_constraints, AbstractGPUArray)
-        error("Constraints should be passd to SHAKE_RATTLE on CPU. Data will be moved to GPU later.")
+        throw(ArgumentError("Constraints should be passd to SHAKE_RATTLE on CPU. Data will be moved to GPU later."))
     end
 
 
@@ -99,7 +97,7 @@ function SHAKE_RATTLE(n_atoms,
 
     stats = Series(Mean(), Variance(), Extrema())
 
-    return SHAKE_RATTLE{A, B, C, D, typeof(dist_tolerance), typeof(vel_tolerance), typeof(stats)}(
+    return SHAKE_RATTLE{A, B, C, D, typeof(dist_tolerance), typeof(vel_tolerance), typeof(max_iters), typeof(stats)}(
         clusters12, clusters23, clusters34, angle_clusters, dist_tolerance, vel_tolerance, gpu_block_size, max_iters, stats)
 end
 
@@ -160,48 +158,3 @@ function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
 
 end
 
-
-"""
-    check_position_constraints(sys, constraints)
-
-Checks if the position constraints are satisfied by the current coordinates of `sys`.
-"""
-function check_position_constraints(sys, ca::SHAKE_RATTLE)
-    max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.coords)))
-    for cluster_type in cluster_keys(ca)
-        clusters = getproperty(ca, cluster_type)
-        for cluster in clusters
-            for constraint in cluster.constraints
-                dr = vector(sys.coords[constraint.i], sys.coords[constraint.j], sys.boundary)
-                err = abs(norm(dr) - constraint.dist)
-                if max_err < err
-                    max_err = err
-                end
-            end
-        end
-    end
-    return max_err < ca.dist_tolerance
-end
-
-"""
-    check_velocity_constraints(sys, constraints)
-
-Checks if the velocity constraints are satisfied by the current velocities of `sys`.
-"""
-function check_velocity_constraints(sys::System, ca::SHAKE_RATTLE)
-    max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
-    for cluster_type in cluster_keys(ca)
-        clusters = getproperty(ca, cluster_type)
-        for cluster in clusters
-            for constraint in cluster.constraints
-                dr = vector(sys.coords[constraint.i], sys.coords[constraint.j], sys.boundary)
-                v_diff = sys.velocities[constraint.j] .- sys.velocities[constraint.i]
-                err = abs(dot(dr, v_diff))
-                if max_err < err
-                    max_err = err
-                end
-            end
-        end
-    end
-    return max_err < ca.vel_tolerance
-end

@@ -14,13 +14,13 @@ end
 
 @inline function solve2x2exactly(λ, A, C)
 
-    determinant = A[1, 1] * A[2, 2] - A[1, 2] * A[2, 1]
+    determinant = (A[1, 1] * A[2, 2]) - (A[1, 2] * A[2, 1])
 
     if iszero(determinant)
         error("SHAKE determinant is zero, cannot solve")
     end
 
-    inv_det = 1.0 / determinant
+    inv_det = inv(determinant)
 
     λ[1] = inv_det * ((A[2, 2] * C[1]) - (A[1, 2] * C[2]))
     λ[2] = inv_det * ((A[1, 1] * C[2]) - (A[2, 1] * C[1]))
@@ -37,7 +37,7 @@ end
         error("SHAKE determinant is zero, cannot solve")
     end
 
-    inv_det = 1.0 / determinant
+    inv_det = inv(determinant)
 
     A′[1,1] = inv_det * (A[2,2]*A[3,3] - A[2,3]*A[3,2])
     A′[1,2] = -inv_det * (A[1,2]*A[3,3] - A[1,3]*A[3,2])
@@ -60,6 +60,8 @@ end
 
 # 2 atoms, 1 constraint
 @kernel inbounds=true function rattle2_kernel!(
+    @Const(k1s),
+    @Const(k2s),
     @Const(r),
     v,
     @Const(m_inv),
@@ -70,15 +72,10 @@ end
 
     if idx <= length(clusters)
 
-        #* THIS NEEDLESSLY LOADS THE DIST CONSTRAINTS
-        #* RATTLE JUST NEEDS THE ATOM IDXS
-        cluster = clusters[idx]
-
         # Step 2 : Perform RATTLE, for a 2 atom cluster we
         # just re-arrange λ = A / c, since they are all scalars.
-
-        k1 = cluster.unique_atoms[1] # central atom
-        k2 = cluster.unique_atoms[2]
+        k1 = k1s[idx]
+        k2 = k2s[idx]
 
         v_k1 = v[k1] # uncoalesced read
         v_k2 = v[k2] # uncoalesced read
@@ -291,7 +288,9 @@ end
 
 # 2 atoms, 1 constraint
 @kernel inbounds=true function shake2_kernel!(
-    clusters12,
+    k1s,
+    k2s,
+    dists, 
     r_t1::T,
     r_t2::T,
     @Const(m_inv),
@@ -301,14 +300,11 @@ end
 
     idx = @index(Global, Linear) # Global Constraint Idx
     
-    if idx <= length(clusters12)
+    if idx <= length(k1s)
 
-        cluster = clusters12[idx]
-
-        k1 = cluster.unique_atoms[1] # central atom
-        k2 = cluster.unique_atoms[2]
-
-        distance = cluster.constraints[1].dist
+        k1 = k1s[idx] # central atom
+        k2 = k2s[idx]
+        distance = dists[idx]
 
         r_t2_k1 = r_t2[k1] # uncoalesced read
         r_t2_k2 = r_t2[k2] # uncoalesced read
@@ -371,14 +367,15 @@ end
 
 function shake_gpu!(
         clusters::C,
-        ca::SHAKE_RATTLE,
+        max_iters,
+        gpu_block_size,
         backend,
         shake_kernel,
         other_kernel_args...,
     ) where {C <: AbstractVector{<:ConstraintKernelData}}
     N_active_clusters = length(clusters)
 
-    kern = shake_step!(backend, ca.gpu_block_size)
+    kern = shake_step!(backend, gpu_block_size)
 
     active_idxs = allocate(backend, Int32, N_active_clusters)
     active_idxs .= 1:N_active_clusters
@@ -386,7 +383,7 @@ function shake_gpu!(
     still_active = allocate(backend, Bool, N_active_clusters)
 
     iter = 1
-    while iter <= ca.max_iters 
+    while iter <= max_iters
 
         kern(
             clusters, 
@@ -419,7 +416,7 @@ function shake_gpu!(
     # Keep track statistics on # of iterations
     fit!(ca.stats, iter)
 
-    if iter == ca.max_iters + 1
+    if iter == max_iters + 1
         @warn "SHAKE, $(Symbol(shake_kernel)), did not converge after $(ca.max_iters) iterations. Some constraints may not be satisfied."
     end
 
@@ -719,20 +716,27 @@ function apply_position_constraints!(
     N34_clusters = length(ca.clusters34)
     N_angle_clusters = length(ca.angle_clusters)
 
-    #* TODO LAUNCH ON SEPARATE STREAMS/TASKS
-    #* DOCS ON THSI ARE BLANK IN KA.jl
-
     KernelAbstractions.synchronize(backend)
 
     if N12_clusters > 0
         # 2 atom constraints are solved analytically, no need to iterate
         s2_kernel = shake2_kernel!(backend, ca.gpu_block_size)
-        s2_kernel(ca.clusters12, r_pre_unconstrained_update, sys.coords, sys.inv_masses, sys.boundary, ndrange = N12_clusters)
+        s2_kernel(
+            ca.clusters12.k1,
+            ca.clusters12.k2,
+            ca.clusters12.dist12, 
+            r_pre_unconstrained_update,
+            sys.coords,
+            sys.inv_masses,
+            sys.boundary,
+            ndrange = N12_clusters
+            )
     end
     if N23_clusters > 0 
         shake_gpu!(
             ca.clusters23,
-            ca,
+            ca.max_iters,
+            ca.gpu_block_size,
             backend,
             shake3_kernel!,
             r_pre_unconstrained_update,
@@ -746,7 +750,8 @@ function apply_position_constraints!(
     if N34_clusters > 0
         shake_gpu!(
             ca.clusters34,
-            ca,
+            ca.max_iters,
+            ca.gpu_block_size,
             backend,
             shake4_kernel!,
             r_pre_unconstrained_update,
@@ -760,7 +765,8 @@ function apply_position_constraints!(
     if N_angle_clusters > 0 
         shake_gpu!(
             ca.angle_clusters,
-            ca,
+            ca.max_iters,
+            ca.gpu_block_size,
             backend,
             shake3_angle_kernel!,
             r_pre_unconstrained_update,
@@ -799,7 +805,7 @@ function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; kwargs...)
     #* TODO LAUNCH ON SEPARATE STREAMS/TASKS
     KernelAbstractions.synchronize(backend)
     
-    N12_clusters > 0 && r2_kernel(sys.coords, sys.velocities, sys.inv_masses, ca.clusters12, sys.boundary, ndrange = N12_clusters)
+    N12_clusters > 0 && r2_kernel(ca.clusters12.k1, ca.clusters12.k2, sys.coords, sys.velocities, sys.inv_masses, ca.clusters12, sys.boundary, ndrange = N12_clusters)
     N23_clusters > 0 && r3_kernel(sys.coords, sys.velocities, sys.inv_masses, ca.clusters23, sys.boundary, ndrange = N23_clusters)
     N34_clusters > 0 && r4_kernel(sys.coords, sys.velocities, sys.inv_masses, ca.clusters34, sys.boundary, ndrange = N34_clusters)
     N_angle_clusters > 0 && r3_angle_kernel(sys.coords, sys.velocities, sys.inv_masses, ca.angle_clusters, sys.boundary, ndrange = N_angle_clusters)
