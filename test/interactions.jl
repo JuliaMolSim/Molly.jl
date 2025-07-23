@@ -556,3 +556,40 @@
         )
     end
 end
+
+@testset "Ewald" begin
+    dist_cutoff = 0.9u"nm"
+    ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"))
+    E_openmm = -5.465127432466375u"kJ/mol"
+    Fs_openmm = [
+        SVector(-72.48152122617766, 5.6452093242736225,  101.4156707298087  ),
+        SVector(17.520231752234416, 4.071455080698861,   -37.701631053185295),
+        SVector(30.858153727989023, -12.062341554089436, -32.14366235405959 ),
+        SVector(-7.936279084919704, -14.215671548792962, -8.295642564943837 ),
+        SVector(2.4095151618606145, 7.275822557366837,   4.433671630065675  ),
+        SVector(7.141770437453555,  8.540348761741292,   5.30999589638612   ),
+        SVector(-97.27674352036883, 14.881678867954054,  63.35431221886955  ),
+        SVector(48.485910228223275, 4.532352998517133,   -21.51089738652309 ),
+        SVector(71.2789625237053,   -18.668854487669485, -74.8618171164182  ),
+    ] * u"kJ * mol^-1 * nm^-1"
+
+    for AT in array_list
+        sys_init = System(
+            joinpath(data_dir, "water_3_molecules.pdb"),
+            ff;
+            dist_cutoff=dist_cutoff,
+            dist_neighbors=dist_cutoff,
+            array_type=AT,
+        )
+        ewald = Ewald(dist_cutoff=dist_cutoff, eligible=sys_init.neighbor_finder.eligible)
+        sys = System(
+            sys_init;
+            pairwise_inters=(),
+            specific_inter_lists=(),
+            general_inters=(ewald,),
+        )
+
+        @test potential_energy(sys) ≈ E_openmm atol=1e-4u"kJ/mol"
+        @test maximum(norm.(Array(forces(sys)) .- Fs_openmm)) < 1e-3u"kJ * mol^-1 * nm^-1"
+    end
+end
