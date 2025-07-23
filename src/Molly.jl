@@ -21,6 +21,7 @@ using KernelAbstractions
 using NearestNeighbors
 using PeriodicTable
 using SimpleCrystals
+using SpecialFunctions
 using Unitful
 using UnitfulAtomic
 using UnsafeAtomicsLLVM
@@ -51,6 +52,7 @@ include("interactions/cosine_angle.jl")
 include("interactions/urey_bradley.jl")
 include("interactions/periodic_torsion.jl")
 include("interactions/rb_torsion.jl")
+include("interactions/ewald.jl")
 include("interactions/implicit_solvent.jl")
 include("interactions/muller_brown.jl")
 include("energy.jl")
