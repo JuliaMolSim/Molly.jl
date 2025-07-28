@@ -908,13 +908,8 @@ function System(coord_file::AbstractString,
     specific_inter_lists = tuple(specific_inter_array...)
 
     if isnothing(boundary)
-        # Read from file and convert from Å
-        if units
-            box_size = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame))u"nm" / 10.0))
-        else
-            box_size = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame)) / 10.0))
-        end
-        boundary_used = CubicBoundary(box_size)
+        boundary_used = boundary_from_chemfiles(Chemfiles.UnitCell(frame), T,
+                                                (units ? u"nm" : NoUnits))
     else
         boundary_used = boundary
     end

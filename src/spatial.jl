@@ -208,6 +208,30 @@ function Chemfiles.UnitCell(b::TriclinicBoundary)
     end
 end
 
+function boundary_from_chemfiles(unit_cell, T=Float64, units=u"nm")
+    shape = Chemfiles.shape(unit_cell)
+    if shape == Chemfiles.Infinite
+        return CubicBoundary(T(Inf) * units)
+    elseif shape == Chemfiles.Orthorhombic
+        side_lengths = SVector{3}(T.(Chemfiles.lengths(unit_cell) * u"Å"))
+        if units == NoUnits
+            return CubicBoundary(ustrip.(u"nm", side_lengths)) # Assume nm
+        else
+            return CubicBoundary(uconvert.(units, side_lengths))
+        end
+    elseif shape == Chemfiles.Triclinic
+        side_lengths = SVector{3}(T.(Chemfiles.lengths(unit_cell) * u"Å"))
+        angles = SVector{3}(deg2rad.(T.(Chemfiles.angles(unit_cell))))
+        if units == NoUnits
+            return TriclinicBoundary(ustrip.(u"nm", side_lengths), angles) # Assume nm
+        else
+            return TriclinicBoundary(uconvert.(units, side_lengths), angles)
+        end
+    else
+        error("unrecognised Chemfiles cell shape $shape")
+    end
+end
+
 AtomsBase.n_dimensions(::CubicBoundary) = 3
 AtomsBase.n_dimensions(::RectangularBoundary) = 2
 AtomsBase.n_dimensions(::TriclinicBoundary) = 3
