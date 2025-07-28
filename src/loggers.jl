@@ -23,7 +23,9 @@ export
     AutoCorrelationLogger,
     AverageObservableLogger,
     ReplicaExchangeLogger,
-    MonteCarloLogger
+    MonteCarloLogger,
+    ImageFlagLogger, 
+    DisplacementLogger
 
 """
     apply_loggers!(system, neighbors=nothing, step_n=0, run_loggers=true;
@@ -299,6 +301,36 @@ end
 function virial_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
     return virial(sys, neighbors, step_n; n_threads=n_threads)
 end
+
+
+image_flag_wrapper(sys, args...; kwargs...) = copy(sys.image_flags)
+
+"""
+    ImageFlagLogger(n_steps; dims::Integer=3)
+
+    Log the image flags of a atoms in the system throughout a simulation.
+"""
+function ImageFlagLogger(n_steps::Integer; dims::Integer=3)
+    return GeneralObservableLogger(
+        image_flag_wrapper,
+        Array{SArray{Tuple{dims}, Int32, 1, dims}, 1},
+        n_steps,
+    )
+end
+
+displacement_helper(sys, args...; kwargs...) = #*TODO CALCULATE DISPLACEMENTS HERE
+
+"""
+    DisplacementLogger(n_steps; dims=3)
+"""
+function DisplacementLogger(T, n_steps::Integer; dims::Integer=3)
+    return GeneralObservableLogger(
+        disp_wrapper,
+        Array{SArray{Tuple{dims}, T, 1, dims}, 1},
+        n_steps,
+    )
+end
+
 
 """
     VirialLogger(n_steps)

@@ -489,7 +489,7 @@ interface described there.
 - `data::DA=nothing`: arbitrary data associated with the system.
 """
 mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
-                      L, F, E, K, M, DA} <: AtomsBase.AbstractSystem{D}
+                      L, F, E, K, M, DA, IF} <: AtomsBase.AbstractSystem{D}
     atoms::A
     coords::C
     boundary::B
@@ -508,6 +508,7 @@ mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
     k::K
     masses::M
     data::DA
+    image_flags::IF
 end
 
 function System(;
@@ -603,10 +604,13 @@ function System(;
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
 
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, DA}(
+    img_flags = similar(sys.coords, Int32)
+    IF = typeof(img_flags)
+
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, DA, IF}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, neighbor_finder, loggers,
-                    df, force_units, energy_units, k_converted, atom_masses, data)
+                    df, force_units, energy_units, k_converted, atom_masses, data, img_flags)
 end
 
 """
@@ -960,6 +964,15 @@ function ReplicaSystem(;
         end
     end
 
+    # Check if we need to calculate image flags
+    track_image_flags = map(replica_loggers) do loggers
+        if any(map(l -> l isa ImageFlagLogger || l isa DisplacementLogger, loggers))
+            return true
+        else
+            return false
+        end
+    end
+
     if isnothing(exchange_logger)
         exchange_logger = ReplicaExchangeLogger(T, n_replicas)
     end
@@ -1035,7 +1048,7 @@ function ReplicaSystem(;
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i],
             deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i],
-            force_units, energy_units, k_converted, atom_masses, nothing) for i in 1:n_replicas)
+            force_units, energy_units, k_converted, atom_masses, nothing, track_image_flags[i]) for i in 1:n_replicas)
     R = typeof(replicas)
 
     return ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA}(
