@@ -233,7 +233,7 @@ struct PME{T, D, E, A} <: AbstractEwald
     grid_fractions::Matrix{T}
     bsplines_θ::Matrix{T}
     bsplines_dθ::Matrix{T}
-    charge_grid::Vector{Complex{T}}
+    charge_grid::Array{Complex{T}, 3}
     bsplines_moduli::Vector{Vector{T}}
 end
 
@@ -243,7 +243,8 @@ function PME(boundary, n_atoms; error_tol::T=0.0005, dist_cutoff=1.0u"nm", order
     mesh_dims = pme_params.(box_sides(boundary), α, error_tol)
     grid_indices, grid_fractions = zeros(Int, 3, n_atoms), zeros(T, 3, n_atoms)
     bsplines_θ, bsplines_dθ = zeros(T, order*n_atoms, 3), zeros(T, order*n_atoms, 3)
-    charge_grid = zeros(Complex{T}, prod(mesh_dims))
+    # Ordered z/y/x for better memory access
+    charge_grid = zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1])
 
     bsplines_moduli = [zeros(T, mesh_dims[1]), zeros(T, mesh_dims[2]), zeros(T, mesh_dims[3])]
     nmax = maximum(mesh_dims)
@@ -355,7 +356,7 @@ function update_bsplines!(bsplines_θ::Matrix{T}, bsplines_dθ, grid_fractions, 
     return bsplines_θ, bsplines_dθ
 end
 
-function spread_charge!(charge_grid, grid_indices, bsplines_θ::Matrix{T}, mesh_dims,
+function spread_charge!(charge_grid::Array{Complex{T}, 3}, grid_indices, bsplines_θ, mesh_dims,
                         order, atoms) where T
     charge_grid .= Complex(zero(T), zero(T))
     for i in eachindex(atoms)
@@ -367,10 +368,9 @@ function spread_charge!(charge_grid, grid_indices, bsplines_θ::Matrix{T}, mesh_
                 yindex = (y0index + iy) % mesh_dims[2]
                 for iz in 0:(order-1)
                     zindex = (z0index + iz) % mesh_dims[3]
-                    index = xindex*mesh_dims[2]*mesh_dims[3] + yindex*mesh_dims[3] + zindex
                     cb = q * bsplines_θ[(i-1)*order+ix+1, 1] *
                                 bsplines_θ[(i-1)*order+iy+1, 2] * bsplines_θ[(i-1)*order+iz+1, 3]
-                    charge_grid[index+1] += Complex(cb, zero(T))
+                    charge_grid[zindex+1, yindex+1, xindex+1] += Complex(cb, zero(T))
                 end
             end
         end
@@ -378,7 +378,7 @@ function spread_charge!(charge_grid, grid_indices, bsplines_θ::Matrix{T}, mesh_
     return charge_grid
 end
 
-function recip_conv!(charge_grid::Vector{Complex{T}}, bsplines_moduli, recip_box,
+function recip_conv!(charge_grid::Array{Complex{T}, 3}, bsplines_moduli, recip_box,
                      ϵr, α, mesh_dims, boundary, energy_units) where T
     f = T(Molly.coulomb_const) / ϵr
     factor = T(π)^2 / α^2
@@ -400,13 +400,13 @@ function recip_conv!(charge_grid::Vector{Complex{T}}, bsplines_moduli, recip_box
                 end
                 mz = (kz < maxkz ? kz : kz - nz)
                 mhz = mx * recip_box[3][1] + my * recip_box[3][2] + mz * recip_box[3][3]
-                d1, d2 = reim(charge_grid[kx*ny*nz + ky*nz + kz + 1])
+                d1, d2 = reim(charge_grid[kz+1, ky+1, kx+1])
                 m2 = mhx^2 + mhy^2 + mhz^2
                 bz = bsplines_moduli[3][kz+1]
                 denom = m2 * bx * by * bz
                 eterm = f * exp(-factor * m2) / denom
                 eterm_nou = ustrip(energy_units, eterm)
-                charge_grid[kx*ny*nz + ky*nz + kz + 1] = Complex(d1*eterm_nou, d2*eterm_nou)
+                charge_grid[kz+1, ky+1, kx+1] = Complex(d1*eterm_nou, d2*eterm_nou)
                 struct2 = d1^2 + d2^2
                 esum += eterm * struct2
             end
@@ -415,7 +415,7 @@ function recip_conv!(charge_grid::Vector{Complex{T}}, bsplines_moduli, recip_box
     return esum / 2
 end
 
-function interpolate_force!(Fs, charge_grid::Vector{Complex{T}}, grid_indices, bsplines_θ,
+function interpolate_force!(Fs, charge_grid::Array{Complex{T}, 3}, grid_indices, bsplines_θ,
                             bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms) where T
     nx, ny, nz = mesh_dims
     for i in eachindex(atoms)
@@ -431,8 +431,7 @@ function interpolate_force!(Fs, charge_grid::Vector{Complex{T}}, grid_indices, b
                 for iz in 0:(order-1)
                     zindex = (z0index + iz) % mesh_dims[3]
                     tz, dtz = bsplines_θ[(i-1)*order+iz+1, 3], bsplines_dθ[(i-1)*order+iz+1, 3]
-                    index = xindex*mesh_dims[2]*mesh_dims[3] + yindex*mesh_dims[3] + zindex
-                    gridvalue = real(charge_grid[index + 1])
+                    gridvalue = real(charge_grid[zindex+1, yindex+1, xindex+1])
                     fx += dtx * ty * tz * gridvalue
                     fy += tx * dty * tz * gridvalue
                     fz += tx * ty * dtz * gridvalue
@@ -504,10 +503,10 @@ function ewald_pe_forces(sys::System{3, AT}, inter::PME{T}) where {AT, T}
     update_bsplines!(inter.bsplines_θ, inter.bsplines_dθ, inter.grid_fractions, order)
     spread_charge!(inter.charge_grid, inter.grid_indices, inter.bsplines_θ, mesh_dims,
                    order, atoms)
-    inter.charge_grid .= reshape(fft(reshape(inter.charge_grid, mesh_dims[3], mesh_dims[2], mesh_dims[1]), 1:3), prod(mesh_dims))
+    fft!(inter.charge_grid)
     reciprocal_space_E = recip_conv!(inter.charge_grid, inter.bsplines_moduli, recip_box, ϵr,
                     α, mesh_dims, boundary, energy_units)
-    inter.charge_grid .= reshape(bfft(reshape(inter.charge_grid, mesh_dims[3], mesh_dims[2], mesh_dims[1]), 1:3), prod(mesh_dims))
+    bfft!(inter.charge_grid)
     interpolate_force!(Fs, inter.charge_grid, inter.grid_indices, inter.bsplines_θ,
                        inter.bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms)
 
