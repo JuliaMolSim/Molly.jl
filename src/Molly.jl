@@ -15,6 +15,7 @@ using DataStructures
 using Distances
 using Distributions
 using EzXML
+using FFTW
 using GPUArrays
 using Graphs
 using KernelAbstractions

@@ -273,6 +273,28 @@ function AtomsBase.cell_vectors(b::TriclinicBoundary)
     return unit(b[1][1]) == NoUnits ? (bb .* u"nm") : bb
 end
 
+function invert_box_vectors(boundary::CubicBoundary)
+    sl = boundary.side_lengths
+    z = zero(inv(sl[1]))
+    recip_box = SVector(
+        SVector(inv(sl[1]), z, z),
+        SVector(z, inv(sl[2]), z),
+        SVector(z, z, inv(sl[3])),
+    )
+    return recip_box
+end
+
+function invert_box_vectors(boundary::TriclinicBoundary)
+    bv = boundary.basis_vectors
+    z = zero(bv[1][1]^2)
+    recip_box = SVector(
+        SVector(bv[2][2]*bv[3][3], z, z),
+        SVector(-bv[2][1]*bv[3][3], bv[1][1]*bv[3][3], z),
+        SVector(bv[2][1]*bv[3][2] - bv[2][2]*bv[3][1], -bv[1][1]*bv[3][2], bv[1][1]*bv[2][2]),
+    )
+    return recip_box ./ volume(boundary)
+end
+
 has_infinite_boundary(b::Union{CubicBoundary, RectangularBoundary}) = any(isinf, b.side_lengths)
 has_infinite_boundary(b::TriclinicBoundary) = false
 has_infinite_boundary(sys::System) = has_infinite_boundary(sys.boundary)
@@ -280,6 +302,9 @@ has_infinite_boundary(sys::System) = has_infinite_boundary(sys.boundary)
 n_infinite_dims(b::Union{CubicBoundary, RectangularBoundary}) = sum(isinf, b.side_lengths)
 n_infinite_dims(b::TriclinicBoundary) = 0
 n_infinite_dims(sys::System) = n_infinite_dims(sys.boundary)
+
+box_sides(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
+box_sides(b::TriclinicBoundary) = SVector(b[1][1], b[2][2], b[3][3])
 
 """
     volume(sys)
@@ -290,8 +315,7 @@ Calculate the volume (3D) or area (2D) of a [`System`](@ref) or bounding box.
 Returns infinite volume for infinite boundaries.
 """
 volume(sys) = volume(sys.boundary)
-volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
-volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
+volume(b::Union{CubicBoundary, RectangularBoundary, TriclinicBoundary}) = prod(box_sides(b))
 
 """
     density(sys)

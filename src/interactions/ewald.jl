@@ -2,11 +2,29 @@
 # Long range electrostatic summation methods
 # Based on the OpenMM source code
 
-export Ewald
+export
+    Ewald,
+    PME
+
+abstract type AbstractEwald end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
+                                                            inter::AbstractEwald; kwargs...)
+    return ewald_pe_forces(sys, inter)[1]
+end
+
+AtomsCalculators.@generate_interface function AtomsCalculators.forces(sys,
+                                                            inter::AbstractEwald; kwargs...)
+    return ewald_pe_forces(sys, inter)[2]
+end
+
+function AtomsCalculators.energy_forces(sys, inter::AbstractEwald; kwargs...)
+    E, Fs = ewald_pe_forces(sys, inter)
+    return (energy=E, forces=Fs)
+end
 
 """
-    Ewald(; error_tol=0.0005, dist_cutoff=1.0u"nm", eligible=nothing,
-            energy_units=u"kJ * mol^-1", length_units=u"nm")
+    Ewald(; error_tol=0.0005, dist_cutoff=1.0u"nm", eligible=nothing)
 
 Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
@@ -21,12 +39,10 @@ are eligible.
 Only compatible with 3D systems and [`CubicBoundary`](@ref).
 Runs on the CPU, even for GPU systems.
 """
-@kwdef struct Ewald{T, D, E, EU, LU}
+@kwdef struct Ewald{T, D, E} <: AbstractEwald
     error_tol::T = 0.0005
     dist_cutoff::D = 1.0u"nm"
     eligible::E = nothing
-    energy_units::EU = u"kJ * mol^-1"
-    length_units::LU = u"nm"
 end
 
 function ewald_error(αr::T, target, guess) where T
@@ -189,20 +205,314 @@ function ewald_pe_forces(sys::System{3, AT}, inter::Ewald{T}) where {AT, T}
     return total_E, AT(Fs)
 end
 
-AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
-                                                                inter::Ewald; kwargs...)
-    return ewald_pe_forces(sys, inter)[1]
+"""
+    PME(boundary, n_atoms; error_tol=0.0005, dist_cutoff=1.0u"nm", order=5,
+        ϵr=1.0, eligible=nothing)
+
+Particle mesh Ewald summation for long range electrostatics implemented as an
+AtomsCalculators.jl calculator.
+
+Calculates both the short and long range interactions, so should replace
+[`Coulomb`](@ref) rather than being used alongside it.
+`dist_cutoff` is the cutoff distance for short range interactions.
+`eligible` indicates pairs eligible for short range interaction, and can
+be a matrix like the neighbor list or `nothing` to indicate that all pairs
+are eligible.
+
+Only compatible with 3D systems.
+"""
+struct PME{T, D, E, A} <: AbstractEwald
+    error_tol::T
+    dist_cutoff::D
+    order::Int
+    ϵr::T
+    eligible::E
+    α::A
+    mesh_dims::SVector{3, Int}
+    grid_indices::Matrix{Int}
+    grid_fractions::Matrix{T}
+    bsplines_θ::Matrix{T}
+    bsplines_dθ::Matrix{T}
+    charge_grid::Vector{Complex{T}}
+    bsplines_moduli::Vector{Vector{T}}
 end
 
-AtomsCalculators.@generate_interface function AtomsCalculators.forces(sys,
-                                                                inter::Ewald; kwargs...)
-    return ewald_pe_forces(sys, inter)[2]
+function PME(boundary, n_atoms; error_tol::T=0.0005, dist_cutoff=1.0u"nm", order=5,
+             ϵr=one(error_tol), eligible=nothing) where T
+    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
+    mesh_dims = pme_params.(box_sides(boundary), α, error_tol)
+    grid_indices, grid_fractions = zeros(Int, 3, n_atoms), zeros(T, 3, n_atoms)
+    bsplines_θ, bsplines_dθ = zeros(T, order*n_atoms, 3), zeros(T, order*n_atoms, 3)
+    charge_grid = zeros(Complex{T}, prod(mesh_dims))
+
+    bsplines_moduli = [zeros(T, mesh_dims[1]), zeros(T, mesh_dims[2]), zeros(T, mesh_dims[3])]
+    nmax = maximum(mesh_dims)
+    data, ddata = zeros(T, order), zeros(T, order)
+    bsplines_data = zeros(T, nmax)
+    data[1] = one(T)
+    for k in 3:(order-1)
+        d = inv(k - one(T))
+        data[k] = zero(T)
+        for l in 1:(k-2)
+            data[k-l] = d * (l * data[k-l-1] + (k-l) * data[k-l])
+        end
+        data[1] *= d
+    end
+
+    ddata[1] = -data[1]
+    for k in 1:(order-1)
+        ddata[k+1] = data[k] - data[k+1]
+    end
+    d = inv(order - one(T))
+    data[order] = zero(T)
+
+    for l in 1:(order-2)
+        data[order-l] = d * (l * data[order-l-1] + (order-l) * data[order-l])
+    end
+    data[1] *= d
+
+    for i in 1:order
+        bsplines_data[i+1] = data[i]
+    end
+
+    for (d, ndata) in enumerate(mesh_dims)
+        for i in 1:ndata
+            sc, ss = zero(T), zero(T)
+            for j in 1:ndata
+                arg = 2 * T(π) * (i-1) * (j-1) / ndata
+                sc += bsplines_data[j] * cos(arg)
+                ss += bsplines_data[j] * sin(arg)
+            end
+            bsplines_moduli[d][i] = sc^2 + ss^2
+        end
+        for i in 1:ndata
+            if bsplines_moduli[d][i] < T(1e-7)
+                bsplines_moduli[d][i] = (bsplines_moduli[d][((i-2+ndata)%ndata)+1] +
+                                         bsplines_moduli[d][(i%ndata)+1]) / 2
+            end
+        end
+    end
+
+    return PME(error_tol, dist_cutoff, order, ϵr, eligible, α, mesh_dims,
+               grid_indices, grid_fractions, bsplines_θ, bsplines_dθ,
+               charge_grid, bsplines_moduli)
 end
 
-function AtomsCalculators.energy_forces(sys, inter::Ewald; kwargs...)
-    E, Fs = ewald_pe_forces(sys, inter)
-    return (energy=E, forces=Fs)
+function pme_params(side_length, α, error_tol::T) where T
+    s = ceil(Int, 2α * side_length / (3 * error_tol^T(0.2)))
+    return max(s, 6)
 end
 
-AtomsCalculators.energy_unit(inter::Ewald) = inter.energy_units
-AtomsCalculators.length_unit(inter::Ewald) = inter.length_units
+function grid_placement!(grid_indices, grid_fractions, coords, recip_box, mesh_dims)
+    for i in eachindex(coords)
+        for d in 1:3
+            t = sum(coords[i] .* SVector(recip_box[1][d], recip_box[2][d], recip_box[3][d]))
+            t = (t - floor(t)) * mesh_dims[d]
+            ti = floor(Int, t)
+            grid_fractions[d, i] = t - ti
+            grid_indices[d, i] = ti % mesh_dims[d]
+        end
+    end
+    return grid_indices, grid_fractions
+end
+
+function update_bsplines!(bsplines_θ::Matrix{T}, bsplines_dθ, grid_fractions, order) where T
+    for i in axes(grid_fractions, 2)
+        offset = (i - 1) * order
+        for j in 1:3
+            dr = grid_fractions[j, i]
+            bsplines_θ[offset + order, j] = zero(T)
+            bsplines_θ[offset + 2, j]     = dr
+            bsplines_θ[offset + 1, j]     = 1 - dr
+            for k in 3:(order-1)
+                d = inv(k - one(T))
+                bsplines_θ[offset + k, j] = d * dr * bsplines_θ[offset + k - 1, j]
+                for l in 1:(k-2)
+                    bsplines_θ[offset + k - l, j] = d * (
+                            (dr + l) * bsplines_θ[offset + k - l - 1, j] +
+                            (k - l - dr) * bsplines_θ[offset + k - l, j]
+                        )
+                end
+                bsplines_θ[offset + 1, j] *= d * (1 - dr)
+            end
+
+            bsplines_dθ[offset + 1, j] = -bsplines_θ[offset + 1, j]
+            for k in 1:(order-1)
+                bsplines_dθ[offset + k + 1, j] = bsplines_θ[offset + k, j] -
+                                                        bsplines_θ[offset + k + 1, j]
+            end
+            d = inv(order - one(T))
+            bsplines_θ[offset + order, j] = d * dr * bsplines_θ[offset + order - 1, j]
+            for l in 1:(order-2)
+                bsplines_θ[offset + order - l, j] = d * (
+                        (dr + l) * bsplines_θ[offset + order - l - 1, j] +
+                        (order - l - dr) * bsplines_θ[offset + order - l, j]
+                    )
+            end
+            bsplines_θ[offset + 1, j] *= d * (1 - dr)
+        end
+    end
+    return bsplines_θ, bsplines_dθ
+end
+
+function spread_charge!(charge_grid, grid_indices, bsplines_θ::Matrix{T}, mesh_dims,
+                        order, atoms) where T
+    charge_grid .= Complex(zero(T), zero(T))
+    for i in eachindex(atoms)
+        q = charge(atoms[i])
+        x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
+        for ix in 0:(order-1)
+            xindex = (x0index + ix) % mesh_dims[1]
+            for iy in 0:(order-1)
+                yindex = (y0index + iy) % mesh_dims[2]
+                for iz in 0:(order-1)
+                    zindex = (z0index + iz) % mesh_dims[3]
+                    index = xindex*mesh_dims[2]*mesh_dims[3] + yindex*mesh_dims[3] + zindex
+                    cb = q * bsplines_θ[(i-1)*order+ix+1, 1] *
+                                bsplines_θ[(i-1)*order+iy+1, 2] * bsplines_θ[(i-1)*order+iz+1, 3]
+                    charge_grid[index+1] += Complex(cb, zero(T))
+                end
+            end
+        end
+    end
+    return charge_grid
+end
+
+function recip_conv!(charge_grid::Vector{Complex{T}}, bsplines_moduli, recip_box,
+                     ϵr, α, mesh_dims, boundary, energy_units) where T
+    f = T(Molly.coulomb_const) / ϵr
+    factor = T(π)^2 / α^2
+    nx, ny, nz = mesh_dims
+    maxkx, maxky, maxkz = T(0.5)*(nx+1), T(0.5)*(ny+1), T(0.5)*(nz+1)
+    boxfactor = T(π) * volume(boundary)
+    esum = zero(T) * energy_units
+    for kx in 0:(nx-1)
+        mx = (kx < maxkx ? kx : kx - nx)
+        mhx = mx * recip_box[1][1]
+        bx = boxfactor * bsplines_moduli[1][kx+1]
+        for ky in 0:(ny-1)
+            my = (ky < maxky ? ky : ky - ny)
+            mhy = mx * recip_box[2][1] + my * recip_box[2][2]
+            by = bsplines_moduli[2][ky+1]
+            for kz in 0:(nz-1)
+                if iszero(kx) && iszero(ky) && iszero(kz)
+                    continue
+                end
+                mz = (kz < maxkz ? kz : kz - nz)
+                mhz = mx * recip_box[3][1] + my * recip_box[3][2] + mz * recip_box[3][3]
+                d1, d2 = reim(charge_grid[kx*ny*nz + ky*nz + kz + 1])
+                m2 = mhx^2 + mhy^2 + mhz^2
+                bz = bsplines_moduli[3][kz+1]
+                denom = m2 * bx * by * bz
+                eterm = f * exp(-factor * m2) / denom
+                eterm_nou = ustrip(energy_units, eterm)
+                charge_grid[kx*ny*nz + ky*nz + kz + 1] = Complex(d1*eterm_nou, d2*eterm_nou)
+                struct2 = d1^2 + d2^2
+                esum += eterm * struct2
+            end
+        end
+    end
+    return esum / 2
+end
+
+function interpolate_force!(Fs, charge_grid::Vector{Complex{T}}, grid_indices, bsplines_θ,
+                            bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms) where T
+    nx, ny, nz = mesh_dims
+    for i in eachindex(atoms)
+        fx, fy, fz = zero(T), zero(T), zero(T)
+        q = charge(atoms[i])
+        x0index, y0index, z0index = grid_indices[1, i], grid_indices[2, i], grid_indices[3, i]
+        for ix in 0:(order-1)
+            xindex = (x0index + ix) % mesh_dims[1]
+            tx, dtx = bsplines_θ[(i-1)*order+ix+1, 1], bsplines_dθ[(i-1)*order+ix+1, 1]
+            for iy in 0:(order-1)
+                yindex = (y0index + iy) % mesh_dims[2]
+                ty, dty = bsplines_θ[(i-1)*order+iy+1, 2], bsplines_dθ[(i-1)*order+iy+1, 2]
+                for iz in 0:(order-1)
+                    zindex = (z0index + iz) % mesh_dims[3]
+                    tz, dtz = bsplines_θ[(i-1)*order+iz+1, 3], bsplines_dθ[(i-1)*order+iz+1, 3]
+                    index = xindex*mesh_dims[2]*mesh_dims[3] + yindex*mesh_dims[3] + zindex
+                    gridvalue = real(charge_grid[index + 1])
+                    fx += dtx * ty * tz * gridvalue
+                    fy += tx * dty * tz * gridvalue
+                    fz += tx * ty * dtz * gridvalue
+                end
+            end
+        end
+        Fs[i] -= SVector(
+            q * (fx*nx*recip_box[1][1]),
+            q * (fx*nx*recip_box[2][1] + fy*ny*recip_box[2][2]),
+            q * (fx*nx*recip_box[3][1] + fy*ny*recip_box[3][2] + fz*nz*recip_box[3][3]),
+        ) * energy_units
+    end
+    return Fs
+end
+
+function ewald_pe_forces(sys::System{3, AT}, inter::PME{T}) where {AT, T}
+    n_atoms = length(sys)
+    atoms, coords, boundary, energy_units = sys.atoms, sys.coords, sys.boundary, sys.energy_units
+    order, ϵr, α, mesh_dims = inter.order, inter.ϵr, inter.α, inter.mesh_dims
+    eligible = (isnothing(inter.eligible) ? nothing : Array(inter.eligible))
+    partial_charges = Array(charges(sys))
+    V = volume(boundary)
+    sq_dist_cutoff = inter.dist_cutoff^2
+    f = T(Molly.coulomb_const)
+    sqrt_π = sqrt(T(π))
+    real_space_E = zero(T) * sys.energy_units
+    exclusion_E = zero(real_space_E)
+    Fs = zeros(SVector{3, typeof(zero(T) * sys.force_units)}, n_atoms)
+
+    for i in 1:n_atoms
+        charge_i = partial_charges[i]
+        for j in (i + 1):n_atoms
+            charge_ij = charge_i * partial_charges[j]
+            if isnothing(eligible) || eligible[i, j]
+                vec_ij = vector(coords[i], coords[j], boundary)
+                r2 = sum(abs2, vec_ij)
+                if r2 <= sq_dist_cutoff
+                    r = sqrt(r2)
+                    inv_r = inv(r)
+                    αr = α * r
+                    erfc_αr = erfc(αr)
+                    real_space_E += f * charge_ij * erfc_αr * inv_r
+                    dE_dr = f * charge_ij * inv_r^3 * (erfc_αr + 2 * αr * exp(-αr^2) / sqrt_π)
+                    F = dE_dr * vec_ij
+                    Fs[i] -= F
+                    Fs[j] += F
+                end
+            else
+                vec_ij = vector(coords[i], coords[j], boundary)
+                r = norm(vec_ij)
+                αr = α * r
+                erf_αr = erf(αr)
+                if erf_αr > T(1e-6)
+                    inv_r = inv(r)
+                    exclusion_E -= f * charge_ij * inv_r * erf_αr
+                    dE_dr = f * charge_ij * inv_r^3 * (erf_αr - 2 * αr * exp(-αr^2) / sqrt_π)
+                    F = dE_dr * vec_ij
+                    Fs[i] += F
+                    Fs[j] -= F
+                else
+                    exclusion_E -= α * 2 * f * charge_ij / sqrt_π
+                end
+            end
+        end
+    end
+
+    recip_box = invert_box_vectors(boundary)
+    grid_placement!(inter.grid_indices, inter.grid_fractions, coords, recip_box, mesh_dims)
+    update_bsplines!(inter.bsplines_θ, inter.bsplines_dθ, inter.grid_fractions, order)
+    spread_charge!(inter.charge_grid, inter.grid_indices, inter.bsplines_θ, mesh_dims,
+                   order, atoms)
+    inter.charge_grid .= reshape(fft(reshape(inter.charge_grid, mesh_dims[3], mesh_dims[2], mesh_dims[1]), 1:3), prod(mesh_dims))
+    reciprocal_space_E = recip_conv!(inter.charge_grid, inter.bsplines_moduli, recip_box, ϵr,
+                    α, mesh_dims, boundary, energy_units)
+    inter.charge_grid .= reshape(bfft(reshape(inter.charge_grid, mesh_dims[3], mesh_dims[2], mesh_dims[1]), 1:3), prod(mesh_dims))
+    interpolate_force!(Fs, inter.charge_grid, inter.grid_indices, inter.bsplines_θ,
+                       inter.bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms)
+
+    charge_E = -f * T(π) * sum(partial_charges)^2 / (2 * V * α^2)
+    self_E = f * -sum(abs2, partial_charges) * α / sqrt_π + charge_E
+    total_E = real_space_E + reciprocal_space_E + self_E + exclusion_E
+    return total_E, Fs
+end
