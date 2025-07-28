@@ -217,7 +217,7 @@ function kernel_min_max!(
                 end
             end
         end
-        if blockIdx().x == Int32(ceil(n/D32)) && r != Int32(0)
+        if blockIdx().x == ceil(Int32, n/D32) && r != Int32(0)
             for k in a:b
                 mins[blockIdx().x, k] = xyz_min[k] 
                 maxs[blockIdx().x, k] = xyz_max[k]
@@ -231,7 +231,7 @@ end
 function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
                                     compressed_eligible, compressed_special, ::Val{N}) where N
     a = Int32(1)
-    n_blocks = Int32(ceil(N / 32))
+    n_blocks = ceil(Int32, N / 32)
     r = Int32((N - 1) % 32 + 1)
     i = blockIdx().x
     j = blockIdx().y
@@ -342,7 +342,7 @@ function force_kernel!(
 
     a = Int32(1)
     b = Int32(D)
-    n_blocks = Int32(ceil(N / 32))
+    n_blocks = ceil(Int32, N / 32)
     i = blockIdx().x
     j = blockIdx().y
     i_0_tile = (i - a) * warpsize()
@@ -624,7 +624,7 @@ function energy_kernel!(
 
     a = Int32(1)
     b = Int32(D)
-    n_blocks = Int32(ceil(N / 32))
+    n_blocks = ceil(Int32, N / 32)
     r = Int32((N - 1) % 32 + 1)
     i = blockIdx().x
     j = blockIdx().y
