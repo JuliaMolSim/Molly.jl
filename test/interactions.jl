@@ -558,28 +558,30 @@
 end
 
 @testset "Ewald" begin
-    dist_cutoff = 0.9u"nm"
     ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"))
+    dist_cutoff = 0.9u"nm"
+
     E_openmm = -5.465127432466375u"kJ/mol"
     Fs_openmm = [
-        SVector(-72.48152122617766, 5.6452093242736225,  101.4156707298087  ),
-        SVector(17.520231752234416, 4.071455080698861,   -37.701631053185295),
+        SVector(-72.48152122617766, 5.6452093242736225 , 101.4156707298087  ),
+        SVector(17.520231752234416, 4.071455080698861  , -37.701631053185295),
         SVector(30.858153727989023, -12.062341554089436, -32.14366235405959 ),
         SVector(-7.936279084919704, -14.215671548792962, -8.295642564943837 ),
-        SVector(2.4095151618606145, 7.275822557366837,   4.433671630065675  ),
-        SVector(7.141770437453555,  8.540348761741292,   5.30999589638612   ),
-        SVector(-97.27674352036883, 14.881678867954054,  63.35431221886955  ),
-        SVector(48.485910228223275, 4.532352998517133,   -21.51089738652309 ),
-        SVector(71.2789625237053,   -18.668854487669485, -74.8618171164182  ),
+        SVector(2.4095151618606145, 7.275822557366837  , 4.433671630065675  ),
+        SVector(7.141770437453555 , 8.540348761741292  , 5.30999589638612   ),
+        SVector(-97.27674352036883, 14.881678867954054 , 63.35431221886955  ),
+        SVector(48.485910228223275, 4.532352998517133  , -21.51089738652309 ),
+        SVector(71.2789625237053  , -18.668854487669485, -74.8618171164182  ),
     ] * u"kJ * mol^-1 * nm^-1"
 
     for AT in array_list
         sys_init = System(
-            joinpath(data_dir, "water_3_molecules.pdb"),
+            joinpath(data_dir, "water_3mol_cubic.pdb"),
             ff;
+            array_type=AT,
             dist_cutoff=dist_cutoff,
             dist_neighbors=dist_cutoff,
-            array_type=AT,
+            center_coords=false,
         )
         ewald = Ewald(dist_cutoff=dist_cutoff, eligible=sys_init.neighbor_finder.eligible)
         sys = System(
@@ -589,7 +591,68 @@ end
             general_inters=(ewald,),
         )
 
-        @test potential_energy(sys) ≈ E_openmm atol=1e-4u"kJ/mol"
-        @test maximum(norm.(Array(forces(sys)) .- Fs_openmm)) < 1e-3u"kJ * mol^-1 * nm^-1"
+        @test potential_energy(sys) ≈ E_openmm atol=1e-8u"kJ/mol"
+        @test maximum(norm.(Array(forces(sys)) .- Fs_openmm)) < 1e-7u"kJ * mol^-1 * nm^-1"
+    end
+
+    pme_data = (
+        (
+            "water_3mol_cubic.pdb",
+            -5.460124320435284u"kJ/mol",
+            [
+                SVector(-72.57603365363543, 5.648072796188359  , 101.40821248959712 ),
+                SVector(17.558243038254187, 4.075128117683555  , -37.70060863840432 ),
+                SVector(30.881405092779705, -12.047169393065978, -32.137723916688024),
+                SVector(-7.789998310481266, -14.185855369417702, -8.35080870148926  ),
+                SVector(2.3519124244832277, 7.264285806008946  , 4.431212066763443  ),
+                SVector(7.085282096874462 , 8.530075688459654  , 5.32165402278671   ),
+                SVector(-97.20750157586099, 14.85484666061426  , 63.32187921636768  ),
+                SVector(48.50069206640984 , 4.544995194749845  , -21.497171353580004),
+                SVector(71.21703702929426 , -18.67010037709364 , -74.8362731945127  ),
+            ] * u"kJ * mol^-1 * nm^-1",
+        ),
+        (
+            "water_3mol_triclinic.pdb",
+            -5.461196031062514u"kJ/mol",
+            [
+                SVector(-72.42120264368016 , 5.691981530694477  , 101.42104318240557 ),
+                SVector(17.479150437776987 , 4.0540370559245105 , -37.70340648054405 ),
+                SVector(30.81579291744146  , -12.071913504082112, -32.146120279797024),
+                SVector(-7.9206682279130405, -14.187409961603702, -8.364883441632035 ),
+                SVector(2.3887077140251414 , 7.267025286293812  , 4.440580554656442  ),
+                SVector(7.142699528225474  , 8.538462949340726  , 5.330171779520562  ),
+                SVector(-97.10424848645062 , 14.864897047240834 , 63.32009574641273  ),
+                SVector(48.459298786113976 , 4.530578179190741  , -21.4941360532105  ),
+                SVector(71.12951420225025  , -18.681760708802052, -74.84152091219767 ),
+            ] * u"kJ * mol^-1 * nm^-1",
+        ),
+    )
+
+    for (pdb_fp, E_openmm, Fs_openmm) in pme_data
+        for AT in (Array,)
+            sys_init = System(
+                joinpath(data_dir, pdb_fp),
+                ff;
+                array_type=AT,
+                dist_cutoff=dist_cutoff,
+                dist_neighbors=dist_cutoff,
+                center_coords=false,
+            )
+            pme = PME(
+                sys_init.boundary,
+                length(sys_init);
+                dist_cutoff=dist_cutoff,
+                eligible=sys_init.neighbor_finder.eligible,
+            )
+            sys = System(
+                sys_init;
+                pairwise_inters=(),
+                specific_inter_lists=(),
+                general_inters=(pme,),
+            )
+
+            @test potential_energy(sys) ≈ E_openmm atol=1e-8u"kJ/mol"
+            @test maximum(norm.(Array(forces(sys)) .- Fs_openmm)) < 1e-7u"kJ * mol^-1 * nm^-1"
+        end
     end
 end
