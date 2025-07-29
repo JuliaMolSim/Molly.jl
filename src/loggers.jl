@@ -24,7 +24,6 @@ export
     AverageObservableLogger,
     ReplicaExchangeLogger,
     MonteCarloLogger,
-    ImageFlagLogger, 
     DisplacementLogger
 
 """
