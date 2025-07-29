@@ -365,7 +365,11 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=(coords=CoordinatesLogger(100),),
+        loggers=(
+            coords=CoordinatesLogger(100),
+            disp=DisplacementLogger(100)
+        ),
+
     )
 
     if run_cuda_tests
@@ -380,14 +384,19 @@ end
                 n_steps_reorder=10,
                 dist_cutoff=2.0u"nm",
             ),
-            loggers=(coords=CoordinatesLogger(100),),
+            loggers=(
+                coords=CoordinatesLogger(100),
+                disp=DisplacementLogger(100)
+            ),
         )
     end
 
     for simulator in simulators
         @time simulate!(s, simulator, n_steps; n_threads=1)
+        @test sum(first(values(s.loggers.disp))) == 0.0u"nm"
         if run_cuda_tests
             @time simulate!(s_gpu, simulator, n_steps; n_threads=1)
+            @test sum(first(values(s_gpu.loggers.disp))) == 0.0u"nm"
             coord_diff = sum(sum(map(x -> abs.(x), s.coords .- Array(s_gpu.coords)))) / (3 * n_atoms)
             E_diff = abs(potential_energy(s) - potential_energy(s_gpu))
             @test coord_diff < 1e-4u"nm"
