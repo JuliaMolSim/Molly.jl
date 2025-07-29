@@ -465,19 +465,15 @@ trim3D(v::SVector{3, T}, boundary::RectangularBoundary{T}) where T = SVector{2, 
 trim3D(v::SVector{3}, boundary) = v
 
 """
-    wrap_coord_1D(c, side_length, image_flag)
+    wrap_coord_1D(c, side_length)
 
 Ensure a 1D coordinate is within the bounding box and return the coordinate.
-Update image flags to track which box each atom is in.
 """
-function wrap_coord_1D(c, side_length, image_flag)
+function wrap_coord_1D(c, side_length)
     if isinf(side_length)
-        return c, image_flag
+        return c
     else
-        shift = floor(c / side_length)
-        c -= shift * side_length
-        image_flag += Int32(shift)
-        return c, image_flag
+        return c - floor(c / side_length) * side_length
     end
 end
 
@@ -486,29 +482,21 @@ end
 
 Ensure a coordinate is within the bounding box and return the coordinate.
 """
-wrap_coords(v, boundary::Union{CubicBoundary, RectangularBoundary}, img_flags) = wrap_coord_1D.(v, boundary, img_flags)
+wrap_coords(v, boundary::Union{CubicBoundary, RectangularBoundary}) = wrap_coord_1D.(v, boundary)
 
-function wrap_coords(v, boundary::TriclinicBoundary, img_flags)
+function wrap_coords(v, boundary::TriclinicBoundary)
     bv, rs = boundary.basis_vectors, boundary.reciprocal_size
     v_wrap = v
     # Bound in z-axis
-    iz = floor(v_wrap[3] * rs[3])
-    v_wrap -= bv[3] * iz
+    v_wrap -= bv[3] * floor(v_wrap[3] * rs[3])
     # Bound in y-axis
-    y_term = (v_wrap[2] - v_wrap[3] / boundary.tan_bprojyz_cprojyz)
-    iy = floor(y_term * rs[2])
-    v_wrap -= bv[2] * iy
-
+    v_wrap -= bv[2] * floor((v_wrap[2] - v_wrap[3] / boundary.tan_bprojyz_cprojyz) * rs[2])
     dz_projxy = v_wrap[3] / boundary.tan_c_cprojxy
     dx = dz_projxy * boundary.cos_a_cprojxy
     dy = dz_projxy * boundary.sin_a_cprojxy
-
     # Bound in x-axis
-    x_term = (v_wrap[1] - dx - (v_wrap[2] - dy) / boundary.tan_a_b)
-    ix = floor(x_term * rs[1])
-    v_wrap -= bv[1] * ix
-
-    return v_wrap, img_flags .+ SVector{Int32}(ix, iy, iz)
+    v_wrap -= bv[1] * floor((v_wrap[1] - dx - (v_wrap[2] - dy) / boundary.tan_a_b) * rs[1])
+    return v_wrap
 end
 
 """
