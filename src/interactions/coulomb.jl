@@ -342,6 +342,107 @@ end
     end
 end
 
+"""
+    CoulombEwald(; dist_cutoff, error_tol=0.0005, use_neighbors=false, weight_special=1,
+                 coulomb_const=coulomb_const)
+
+The short range Ewald electrostatic interaction between two atoms.
+
+Should be used alongside the [`Ewald`](@ref) or [`PME`](@ref) general interaction,
+which provide the long-range term.
+The `dist_cutoff` and `error_tol` should match.
+"""
+struct CoulombEwald{T, D, W, C, A}
+    dist_cutoff::D
+    error_tol::T
+    use_neighbors::Bool
+    weight_special::W
+    coulomb_const::C
+    α::A
+end
+
+function CoulombEwald(; dist_cutoff, error_tol=0.0005, use_neighbors=false,
+                      weight_special=1, coulomb_const=coulomb_const)
+    α = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
+    return CoulombEwald(dist_cutoff, error_tol, use_neighbors, weight_special, coulomb_const, α)
+end
+
+use_neighbors(inter::CoulombEwald) = inter.use_neighbors
+
+function Base.zero(coul::CoulombEwald{T, D, W, C, A}) where {T, D, W, C, A}
+    return CoulombEwald(
+        zero(D),
+        zero(T),
+        coul.use_neighbors,
+        zero(W),
+        zero(C),
+        zero(A),
+    )
+end
+
+function Base.:+(c1::CoulombEwald, c2::CoulombEwald)
+    return CoulombEwald(
+        c1.dist_cutoff + c2.dist_cutoff,
+        c1.error_tol + c2.error_tol,
+        c1.use_neighbors,
+        c1.weight_special + c2.weight_special,
+        c1.coulomb_const + c2.coulomb_const,
+        c1.α + c2.α,
+    )
+end
+
+@inline function force(inter::CoulombEwald{T},
+                       dr,
+                       atom_i,
+                       atom_j,
+                       force_units=u"kJ * mol^-1 * nm^-1",
+                       special=false,
+                       args...) where T
+    r2 = sum(abs2, dr)
+    if r2 > (inter.dist_cutoff ^ 2)
+        return ustrip.(zero(dr)) * force_units
+    end
+
+    ke, α = inter.coulomb_const, inter.α
+    qi, qj = atom_i.charge, atom_j.charge
+    r = √r2
+    inv_r = inv(r)
+    αr = α * r
+    erfc_αr = erfc(αr)
+    dE_dr = ke * qi * qj * inv_r^3 * (erfc_αr + 2 * αr * exp(-αr^2) / sqrt(T(π)))
+    F = dE_dr * dr
+    if special
+        return F * inter.weight_special
+    else
+        return F
+    end
+end
+
+@inline function potential_energy(inter::CoulombEwald,
+                                  dr,
+                                  atom_i,
+                                  atom_j,
+                                  energy_units=u"kJ * mol^-1",
+                                  special=false,
+                                  args...)
+    r2 = sum(abs2, dr)
+    if r2 > (inter.dist_cutoff ^ 2)
+        return ustrip(zero(dr[1])) * energy_units
+    end
+
+    ke, α = inter.coulomb_const, inter.α
+    qi, qj = atom_i.charge, atom_j.charge
+    r = √r2
+    inv_r = inv(r)
+    αr = α * r
+    erfc_αr = erfc(αr)
+    if special
+        return ke * qi * qj * erfc_αr * inv_r * inter.weight_special
+    else
+        return ke * qi * qj * erfc_αr * inv_r
+    end
+end
+
 @doc raw"""
     Yukawa(; cutoff, use_neighbors, weight_special, coulomb_const, kappa)
 
