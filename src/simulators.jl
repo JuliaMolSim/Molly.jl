@@ -68,15 +68,15 @@ Custom simulators should implement this function.
                            run_loggers=false,
                            rng=Random.default_rng())
     # @inline needed to avoid Enzyme error
-    sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E = potential_energy(sys, neighbors; n_threads=n_threads)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads, current_potential_energy=E)
     using_constraints = length(sys.constraints) > 0
     println(sim.log_stream, "Step 0 - potential energy ", E, " - max force N/A - N/A")
     hn = sim.step_size
-    coords_copy = zero(sys.coords)
-    F_nounits = ustrip_vec.(zero(sys.coords))
+    coords_copy = similar(sys.coords)
+    F_nounits = ustrip_vec.(similar(sys.coords))
     F = F_nounits .* sys.force_units
     forces_buffer = init_forces_buffer!(sys, F_nounits, n_threads)
 
@@ -89,7 +89,7 @@ Custom simulators should implement this function.
         coords_copy .= sys.coords
         sys.coords .+= hn .* F ./ max_force
         using_constraints && apply_position_constraints!(sys, coords_copy; n_threads=n_threads)
-        sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
 
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
@@ -145,23 +145,23 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            rng=Random.default_rng())
-    sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_nounits_t = ustrip_vec.(zero(sys.coords))
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
-    forces_nounits_t .= forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
-                                        n_threads=n_threads)
+    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
+                                       n_threads=n_threads)
     forces_t = forces_nounits_t .* sys.force_units
     accels_t = forces_t ./ masses(sys)
-    forces_nounits_t_dt = ustrip_vec.(zero(sys.coords))
+    forces_nounits_t_dt = ustrip_vec.(similar(sys.coords))
     forces_t_dt = forces_nounits_t_dt .* sys.force_units
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
     using_constraints = length(sys.constraints) > 0
     if using_constraints
-        cons_coord_storage = zero(sys.coords)
-        cons_vel_storage = zero(sys.velocities)
+        cons_coord_storage = similar(sys.coords)
+        cons_vel_storage = similar(sys.velocities)
     end
 
     for step_n in 1:n_steps
@@ -172,7 +172,7 @@ end
         sys.coords .+= sys.velocities .* sim.dt .+ ((accels_t .* sim.dt .^ 2) ./ 2)
         using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
                                                          sim.dt; n_threads=n_threads)
-        sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
 
         forces_nounits_t_dt .= forces_nounits!(forces_nounits_t_dt, sys, neighbors, forces_buffer,
                                                step_n; n_threads=n_threads)
@@ -236,17 +236,17 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            rng=Random.default_rng())
-    sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
-    forces_nounits_t = ustrip_vec.(zero(sys.coords))
+    forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
     accels_t = forces_t ./ masses(sys)
     using_constraints = length(sys.constraints) > 0
     if using_constraints
-        cons_coord_storage = zero(sys.coords)
+        cons_coord_storage = similar(sys.coords)
     end
 
     for step_n in 1:n_steps
@@ -268,7 +268,7 @@ end
             sys.velocities .= (sys.coords .- cons_coord_storage) ./ sim.dt
         end
 
-        sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -312,11 +312,11 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            rng=Random.default_rng())
-    sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
-    coords_last, coords_copy = zero(sys.coords), zero(sys.coords)
-    forces_nounits_t = ustrip_vec.(zero(sys.coords))
+    coords_last, coords_copy = similar(sys.coords), similar(sys.coords)
+    forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
     accels_t = forces_t ./ masses(sys)
@@ -339,7 +339,7 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
 
         using_constraints && apply_position_constraints!(sys, coords_copy; n_threads=n_threads)
 
-        sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         # This is accurate to O(dt)
         sys.velocities .= vector.(coords_copy, sys.coords, (sys.boundary,)) ./ sim.dt
 
@@ -396,19 +396,19 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            rng=Random.default_rng())
-    sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
-    forces_nounits_t = ustrip_vec.(zero(sys.coords))
+    forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
     accels_t = forces_t ./ masses(sys)
-    noise = zero(sys.velocities)
+    noise = similar(sys.velocities)
     using_constraints = length(sys.constraints) > 0
     if using_constraints
-        cons_coord_storage = zero(sys.coords)
-        cons_vel_storage = zero(sys.velocities)
+        cons_coord_storage = similar(sys.coords)
+        cons_vel_storage = similar(sys.velocities)
     end
 
     for step_n in 1:n_steps
@@ -432,7 +432,7 @@ end
 
         using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
                                                          sim.dt; n_threads=n_threads)
-        sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -504,17 +504,15 @@ end
     α_eff = exp.(-sim.friction * sim.dt .* M_inv / count('O', sim.splitting))
     σ_eff = sqrt.((1 * unit(eltype(α_eff))) .- (α_eff .^ 2))
 
-    sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
-    forces_nounits_t = ustrip_vec.(zero(sys.coords))
-    forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
-    forces_nounits_t .= forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
-                                        n_threads=n_threads)
+    forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
+    forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
     accels_t = forces_t ./ masses(sys)
-    noise = zero(sys.velocities)
+    noise = similar(sys.velocities)
 
     effective_dts = [sim.dt / count(c, sim.splitting) for c in sim.splitting]
 
@@ -553,7 +551,7 @@ end
             step!(args..., neighbors, step_n)
         end
 
-        sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
         end
@@ -568,7 +566,7 @@ end
 
 function A_step!(sys, dt_eff, neighbors, step_n)
     sys.coords .+= sys.velocities .* dt_eff
-    sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     return sys
 end
 
@@ -626,15 +624,15 @@ end
         @warn "OverdampedLangevin is not currently compatible with constraints, " *
               "constraints will be ignored"
     end
-    sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
-    forces_nounits_t = ustrip_vec.(zero(sys.coords))
+    forces_nounits_t = ustrip_vec.(similar(sys.coords))
     forces_t = forces_nounits_t .* sys.force_units
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
     accels_t = forces_t ./ masses(sys)
-    noise = zero(sys.velocities)
+    noise = similar(sys.velocities)
 
     for step_n in 1:n_steps
         forces_nounits_t .= forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, step_n;
@@ -644,7 +642,7 @@ end
 
         random_velocities!(noise, sys, sim.temperature; rng=rng)
         sys.coords .+= (accels_t ./ sim.friction) .* sim.dt .+ sqrt((2 / sim.friction) * sim.dt) .* noise
-        sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
 
         if !iszero(sim.remove_CM_motion) && step_n % sim.remove_CM_motion == 0
             remove_CM_motion!(sys)
@@ -701,16 +699,16 @@ end
         @warn "NoseHoover is not currently compatible with constraints, " *
               "constraints will be ignored"
     end
-    sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+    sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_nounits_t = ustrip_vec.(zero(sys.coords))
     forces_buffer = init_forces_buffer!(sys, forces_nounits_t, n_threads)
-    forces_nounits_t .= forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
-                                        n_threads=n_threads)
+    forces_nounits_t = forces_nounits!(forces_nounits_t, sys, neighbors, forces_buffer, 0;
+                                       n_threads=n_threads)
     forces_t = forces_nounits_t .* sys.force_units
     accels_t = forces_t ./ masses(sys)
-    forces_nounits_t_dt = ustrip_vec.(zero(sys.coords))
+    forces_nounits_t_dt = ustrip_vec.(similar(sys.coords))
     forces_t_dt = forces_nounits_t_dt .* sys.force_units
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
@@ -721,7 +719,7 @@ end
         v_half .= sys.velocities .+ (accels_t .- (sys.velocities .* zeta)) .* (sim.dt ./ 2)
 
         sys.coords .+= v_half .* sim.dt
-        sys.coords, sys.img_flags .= wrap_coords.(sys.coords, (sys.boundary,), sys.img_flags)
+        sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
 
         zeta_half = zeta + (sim.dt / (2 * (sim.damping^2))) *
                                 ((temperature(sys) / sim.temperature) - 1)
@@ -1064,7 +1062,7 @@ end
                            rng=Random.default_rng())
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E_old = potential_energy(sys, neighbors; n_threads=n_threads)
-    coords_old = zero(sys.coords)
+    coords_old = similar(sys.coords)
 
     for step_n in 1:n_steps
         coords_old .= sys.coords
