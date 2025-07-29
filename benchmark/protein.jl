@@ -32,6 +32,7 @@ function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
         array_type=AT,
         dist_cutoff=(units ? dist_cutoff * u"nm" : dist_cutoff),
         dist_neighbors=(units ? dist_neighbors * u"nm" : dist_neighbors),
+        nonbonded_method="cutoff",
     )
 
     dt = T(0.0005)

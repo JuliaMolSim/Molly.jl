@@ -24,6 +24,7 @@ ff = MolecularForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
+    nonbonded_method="cutoff",
     loggers=(temp=TemperatureLogger(100),),
 )
 

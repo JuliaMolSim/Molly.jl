@@ -453,6 +453,11 @@ are not available when reading Gromacs files.
 - `dist_neighbors=1.2u"nm"`: cutoff distance for the neighbor list, should not
     be less than `dist_cutoff`. Not relevant if [`GPUNeighborFinder`](@ref) is
     used since the neighbors are calculated each step.
+- `nonbonded_method="none"`: method for long range interaction summation,
+    options are "none" (short range only), "cutoff" (reaction field method),
+    "pme" (particle mesh Ewald summation) and "ewald" (Ewald summation, slow).
+- `ewald_error_tol=0.0005`: the error tolerance for Ewald summation, used when
+    `nonbonded_method` is "pme" or "ewald".
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
@@ -477,6 +482,8 @@ function System(coord_file::AbstractString,
                 array_type::Type{AT}=Array,
                 dist_cutoff=(units ? 1.0u"nm" : 1.0),
                 dist_neighbors=(units ? 1.2u"nm" : 1.2),
+                nonbonded_method="none",
+                ewald_error_tol=0.0005,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing,
@@ -831,29 +838,66 @@ function System(coord_file::AbstractString,
         energy_units = NoUnits
     end
 
-    using_neighbors = neighbor_finder_type != NoNeighborFinder
+    if isnothing(boundary)
+        boundary_used = boundary_from_chemfiles(Chemfiles.UnitCell(frame), T,
+                                                (units ? u"nm" : NoUnits))
+    else
+        boundary_used = boundary
+    end
+
+    using_neighbors = (neighbor_finder_type != NoNeighborFinder)
     lj = LennardJones(
         cutoff=DistanceCutoff(T(dist_cutoff)),
         use_neighbors=using_neighbors,
         weight_special=force_field.weight_14_lj,
     )
-    if isnothing(implicit_solvent)
-        crf = CoulombReactionField(
+    if nonbonded_method == "none"
+        coul = Coulomb(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=using_neighbors,
+            weight_special=force_field.weight_14_coulomb,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        general_inters_ewald = ()
+    elseif nonbonded_method == "cutoff"
+        coul = CoulombReactionField(
             dist_cutoff=T(dist_cutoff),
             solvent_dielectric=T(crf_solvent_dielectric),
             use_neighbors=using_neighbors,
             weight_special=force_field.weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
-    else
-        crf = Coulomb(
-            cutoff=DistanceCutoff(T(dist_cutoff)),
+        general_inters_ewald = ()
+    elseif nonbonded_method in ("ewald", "pme")
+        coul = CoulombEwald(
+            dist_cutoff=T(dist_cutoff),
+            error_tol=T(ewald_error_tol),
             use_neighbors=using_neighbors,
             weight_special=force_field.weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
+        if nonbonded_method == "ewald"
+            ewald = Ewald(
+                dist_cutoff=T(dist_cutoff),
+                error_tol=T(ewald_error_tol),
+                eligible=eligible,
+                special=special,
+            )
+        else
+            ewald = PME(
+                boundary,
+                n_atoms;
+                dist_cutoff=T(dist_cutoff),
+                error_tol=T(ewald_error_tol),
+                eligible=eligible,
+                special=special,
+            )
+        end
+        general_inters_ewald = (ewald,)
+    else
+        throw(ArgumentError("unknown non-bonded method: \"$nonbonded_method\""))
     end
-    pairwise_inters = (lj, crf)
+    pairwise_inters = (lj, coul)
 
     # All torsions should have the same number of terms for speed, GPU compatibility
     #   and for taking gradients
@@ -906,13 +950,6 @@ function System(coord_file::AbstractString,
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
-
-    if isnothing(boundary)
-        boundary_used = boundary_from_chemfiles(Chemfiles.UnitCell(frame), T,
-                                                (units ? u"nm" : NoUnits))
-    else
-        boundary_used = boundary
-    end
 
     # Convert from Å
     if units
@@ -975,19 +1012,20 @@ function System(coord_file::AbstractString,
 
     if !isnothing(implicit_solvent)
         if implicit_solvent == "obc1"
-            general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds;
+            general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds;
                                 kappa=kappa, use_OBC2=false),)
         elseif implicit_solvent == "obc2"
-            general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds;
+            general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds;
                                 kappa=kappa, use_OBC2=true),)
         elseif implicit_solvent == "gbn2"
-            general_inters = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
+            general_inters_is = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
         else
             throw(ArgumentError("unknown implicit solvent model: \"$implicit_solvent\""))
         end
     else
-        general_inters = ()
+        general_inters_is = ()
     end
+    general_inters = (general_inters_ewald..., general_inters_is...)
 
     k = units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k)
     return System(
@@ -1019,6 +1057,8 @@ function System(T::Type,
                 array_type::Type{AT}=Array,
                 dist_cutoff=(units ? 1.0u"nm" : 1.0),
                 dist_neighbors=(units ? 1.2u"nm" : 1.2),
+                nonbonded_method="none",
+                ewald_error_tol=0.0005,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing) where AT <: AbstractArray
@@ -1270,20 +1310,6 @@ function System(T::Type,
         special[j, i] = true
     end
 
-    using_neighbors = neighbor_finder_type != NoNeighborFinder
-    lj = LennardJones(
-        cutoff=DistanceCutoff(T(dist_cutoff)),
-        use_neighbors=using_neighbors,
-        weight_special=T(0.5),
-    )
-    crf = CoulombReactionField(
-        dist_cutoff=T(dist_cutoff),
-        solvent_dielectric=T(crf_solvent_dielectric),
-        use_neighbors=using_neighbors,
-        weight_special=T(0.5),
-        coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-    )
-
     if isnothing(boundary)
         box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
         box_size = units ? (box_size_vals)u"nm" : box_size_vals
@@ -1297,7 +1323,59 @@ function System(T::Type,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
-    pairwise_inters = (lj, crf)
+    using_neighbors = (neighbor_finder_type != NoNeighborFinder)
+    lj = LennardJones(
+        cutoff=DistanceCutoff(T(dist_cutoff)),
+        use_neighbors=using_neighbors,
+        weight_special=T(0.5),
+    )
+    if nonbonded_method == "none"
+        coul = Coulomb(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=using_neighbors,
+            weight_special=T(0.5),
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        general_inters = ()
+    elseif nonbonded_method == "cutoff"
+        coul = CoulombReactionField(
+            dist_cutoff=T(dist_cutoff),
+            solvent_dielectric=T(crf_solvent_dielectric),
+            use_neighbors=using_neighbors,
+            weight_special=T(0.5),
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        general_inters = ()
+    elseif nonbonded_method in ("ewald", "pme")
+        coul = CoulombEwald(
+            dist_cutoff=T(dist_cutoff),
+            error_tol=T(ewald_error_tol),
+            use_neighbors=using_neighbors,
+            weight_special=T(0.5),
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        if nonbonded_method == "ewald"
+            ewald = Ewald(
+                dist_cutoff=T(dist_cutoff),
+                error_tol=T(ewald_error_tol),
+                eligible=eligible,
+                special=special,
+            )
+        else
+            ewald = PME(
+                boundary,
+                n_atoms;
+                dist_cutoff=T(dist_cutoff),
+                error_tol=T(ewald_error_tol),
+                eligible=eligible,
+                special=special,
+            )
+        end
+        general_inters = (ewald,)
+    else
+        throw(ArgumentError("unknown non-bonded method: \"$nonbonded_method\""))
+    end
+    pairwise_inters = (lj, coul)
 
     # Only add present interactions and ensure that array types are concrete
     specific_inter_array = []
@@ -1391,6 +1469,7 @@ function System(T::Type,
         topology=topology,
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),

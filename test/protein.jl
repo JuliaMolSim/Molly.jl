@@ -12,6 +12,7 @@
             pdb_writer=StructureWriter(10, temp_fp_pdb),
             density=DensityLogger(10),
         ),
+        nonbonded_method="cutoff",
         data="test_data_peptide",
     )
     simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
@@ -67,6 +68,7 @@ end
             energy=TotalEnergyLogger(Float32, 10),
         ),
         units=false,
+        nonbonded_method="cutoff",
     )
     thermostat = AndersenThermostat(temp, 10.0f0)
     barostat = MonteCarloBarostat(press, temp, s.boundary; n_steps=20)
@@ -82,7 +84,8 @@ end
 @testset "OpenMM protein comparison" begin
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     show(devnull, ff)
-    sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; center_coords=false)
+    sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
+                 nonbonded_method="cutoff", center_coords=false)
     neighbors = find_neighbors(sys)
 
     @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 15954
@@ -166,6 +169,7 @@ end
         ff_nounits;
         velocities=copy(ustrip_vec.(velocities_start)),
         units=false,
+        nonbonded_method="cutoff",
         center_coords=false,
     )
     simulator_nounits = VelocityVerlet(dt=0.0005)
@@ -197,6 +201,7 @@ end
             ff;
             velocities=AT(copy(velocities_start)),
             array_type=AT,
+            nonbonded_method="cutoff",  
             center_coords=false,
         )
         @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
@@ -226,6 +231,7 @@ end
             velocities=AT(copy(ustrip_vec.(velocities_start))),
             units=false,
             array_type=AT,
+            nonbonded_method="cutoff",
             center_coords=false,
         )
         @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
@@ -269,6 +275,7 @@ end
                 array_type=AT,
                 dist_cutoff=5.0u"nm",
                 dist_neighbors=5.0u"nm",
+                nonbonded_method="cutoff",
                 implicit_solvent=solvent_model,
                 kappa=1.0u"nm^-1",
             )

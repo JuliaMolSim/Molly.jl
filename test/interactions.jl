@@ -581,14 +581,13 @@ end
             array_type=AT,
             dist_cutoff=dist_cutoff,
             dist_neighbors=dist_cutoff,
+            nonbonded_method="ewald",
             center_coords=false,
         )
-        ewald = Ewald(dist_cutoff=dist_cutoff, eligible=sys_init.neighbor_finder.eligible)
         sys = System(
             sys_init;
-            pairwise_inters=(),
+            pairwise_inters=(sys_init.pairwise_inters[2],),
             specific_inter_lists=(),
-            general_inters=(ewald,),
         )
 
         @test potential_energy(sys) ≈ E_openmm atol=1e-8u"kJ/mol"
@@ -636,19 +635,13 @@ end
                 array_type=AT,
                 dist_cutoff=dist_cutoff,
                 dist_neighbors=dist_cutoff,
+                nonbonded_method="pme",
                 center_coords=false,
-            )
-            pme = PME(
-                sys_init.boundary,
-                length(sys_init);
-                dist_cutoff=dist_cutoff,
-                eligible=sys_init.neighbor_finder.eligible,
             )
             sys = System(
                 sys_init;
-                pairwise_inters=(),
+                pairwise_inters=(sys_init.pairwise_inters[2],),
                 specific_inter_lists=(),
-                general_inters=(pme,),
             )
 
             @test potential_energy(sys) ≈ E_openmm atol=1e-8u"kJ/mol"

@@ -334,6 +334,7 @@ ff = MolecularForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
+    nonbonded_method="pme",
     loggers=(
         energy=TotalEnergyLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
@@ -384,6 +385,7 @@ Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topolog
 sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
+    nonbonded_method="pme",
     loggers=(
         temp=TemperatureLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
