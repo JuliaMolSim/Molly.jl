@@ -251,6 +251,7 @@ end
             ff;
             units=false,
             array_type=AT,
+            nonbonded_method="cutoff",
             implicit_solvent="gbn2",
             kappa=0.7,
         )

@@ -40,29 +40,32 @@ function find_excluded_pairs(eligible)
 end
 
 """
-    Ewald(; error_tol=0.0005, dist_cutoff=1.0u"nm", eligible=nothing)
+    Ewald(; dist_cutoff, error_tol=0.0005, eligible=nothing)
 
 Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
 
-Calculates both the short and long range interactions, so should replace
-[`Coulomb`](@ref) rather than being used alongside it.
+Should be used alongside the [`CoulombEwald`](@ref) pairwise interaction,
+which provide the short range term.
+The `dist_cutoff` and `error_tol` should match.
+
 `dist_cutoff` is the cutoff distance for short range interactions.
 `eligible` indicates pairs eligible for short range interaction, and can
 be a matrix like the neighbor list or `nothing` to indicate that all pairs
 are eligible.
 
+This algorithm is O(N^2) and in general [`PME`](@ref) should be used instead.
 Only compatible with 3D systems and [`CubicBoundary`](@ref).
 Runs on the CPU, even for GPU systems.
 """
 struct Ewald{T, D} <: AbstractEwald
-    error_tol::T
     dist_cutoff::D
+    error_tol::T
     excluded_pairs::Vector{Tuple{Int32, Int32}}
 end
 
-function Ewald(; error_tol=0.0005, dist_cutoff=1.0u"nm", eligible=nothing)
-    return Ewald(error_tol, dist_cutoff, find_excluded_pairs(eligible))
+function Ewald(; dist_cutoff, error_tol=0.0005, eligible=nothing, special=nothing)
+    return Ewald(dist_cutoff, error_tol, find_excluded_pairs(eligible))
 end
 
 function ewald_error(αr::T, target, guess) where T
@@ -135,30 +138,6 @@ function ewald_pe_forces(sys::System{3, AT}, inter::Ewald{T}) where {AT, T}
     f = T(Molly.coulomb_const)
     Fs = zeros(SVector{3, typeof(zero(T) * sys.force_units)}, n_atoms)
 
-    real_space_E = zero(T) * energy_units
-    sq_dist_cutoff = dist_cutoff^2
-    for i in 1:n_atoms
-        charge_i = partial_charges[i]
-        for j in (i + 1):n_atoms
-            charge_ij = charge_i * partial_charges[j]
-            if !((Int32(i), Int32(j)) in inter.excluded_pairs)
-                vec_ij = vector(coords[i], coords[j], boundary)
-                r2 = sum(abs2, vec_ij)
-                if r2 <= sq_dist_cutoff
-                    r = sqrt(r2)
-                    inv_r = inv(r)
-                    αr = α * r
-                    erfc_αr = erfc(αr)
-                    real_space_E += f * charge_ij * erfc_αr * inv_r
-                    dE_dr = f * charge_ij * inv_r^3 * (erfc_αr + 2 * αr * exp(-αr^2) / sqrt(T(π)))
-                    F = dE_dr * vec_ij
-                    Fs[i] -= F
-                    Fs[j] += F
-                end
-            end
-        end
-    end
-
     exclusion_E = excluded_interactions!(Fs, inter.excluded_pairs, partial_charges, coords,
                                          boundary, α, f, energy_units)
 
@@ -230,19 +209,21 @@ function ewald_pe_forces(sys::System{3, AT}, inter::Ewald{T}) where {AT, T}
 
     charge_E = -f * T(π) * sum(partial_charges)^2 / (2 * V * α^2)
     self_E = f * -sum(abs2, partial_charges) * α / sqrt(T(π)) + charge_E
-    total_E = real_space_E + reciprocal_space_E + self_E + exclusion_E
+    total_E = reciprocal_space_E + self_E + exclusion_E
     return total_E, AT(Fs)
 end
 
 """
-    PME(boundary, n_atoms; error_tol=0.0005, dist_cutoff=1.0u"nm", order=5,
+    PME(boundary, n_atoms; dist_cutoff, error_tol=0.0005, order=5,
         ϵr=1.0, eligible=nothing)
 
 Particle mesh Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
 
-Calculates both the short and long range interactions, so should replace
-[`Coulomb`](@ref) rather than being used alongside it.
+Should be used alongside the [`CoulombEwald`](@ref) pairwise interaction,
+which provide the short range term.
+The `dist_cutoff` and `error_tol` should match.
+
 `dist_cutoff` is the cutoff distance for short range interactions.
 `eligible` indicates pairs eligible for short range interaction, and can
 be a matrix like the neighbor list or `nothing` to indicate that all pairs
@@ -251,8 +232,8 @@ are eligible.
 Only compatible with 3D systems.
 """
 struct PME{T, D, A} <: AbstractEwald
-    error_tol::T
     dist_cutoff::D
+    error_tol::T
     order::Int
     ϵr::T
     excluded_pairs::Vector{Tuple{Int32, Int32}}
@@ -266,8 +247,8 @@ struct PME{T, D, A} <: AbstractEwald
     bsplines_moduli::Vector{Vector{T}}
 end
 
-function PME(boundary, n_atoms; error_tol::T=0.0005, dist_cutoff=1.0u"nm", order=5,
-             ϵr=one(error_tol), eligible=nothing) where T
+function PME(boundary, n_atoms; dist_cutoff, error_tol::T=0.0005, order=5,
+             ϵr=one(error_tol), eligible=nothing, special=nothing) where T
     α = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
     mesh_dims = pme_params.(box_sides(boundary), α, error_tol)
     grid_indices, grid_fractions = zeros(Int, 3, n_atoms), zeros(T, 3, n_atoms)
@@ -324,7 +305,7 @@ function PME(boundary, n_atoms; error_tol::T=0.0005, dist_cutoff=1.0u"nm", order
         end
     end
 
-    return PME(error_tol, dist_cutoff, order, ϵr, excluded_pairs, α, mesh_dims,
+    return PME(dist_cutoff, error_tol, order, ϵr, excluded_pairs, α, mesh_dims,
                grid_indices, grid_fractions, bsplines_θ, bsplines_dθ,
                charge_grid, bsplines_moduli)
 end
@@ -485,31 +466,6 @@ function ewald_pe_forces(sys::System{3, AT}, inter::PME{T}) where {AT, T}
     f = T(Molly.coulomb_const)
     Fs = zeros(SVector{3, typeof(zero(T) * sys.force_units)}, length(sys))
 
-    real_space_E = zero(T) * energy_units
-    sq_dist_cutoff = inter.dist_cutoff^2
-    n_atoms = length(sys)
-    for i in 1:n_atoms
-        charge_i = partial_charges[i]
-        for j in (i + 1):n_atoms
-            charge_ij = charge_i * partial_charges[j]
-            if !((Int32(i), Int32(j)) in inter.excluded_pairs)
-                vec_ij = vector(coords[i], coords[j], boundary)
-                r2 = sum(abs2, vec_ij)
-                if r2 <= sq_dist_cutoff
-                    r = sqrt(r2)
-                    inv_r = inv(r)
-                    αr = α * r
-                    erfc_αr = erfc(αr)
-                    real_space_E += f * charge_ij * erfc_αr * inv_r
-                    dE_dr = f * charge_ij * inv_r^3 * (erfc_αr + 2 * αr * exp(-αr^2) / sqrt(T(π)))
-                    F = dE_dr * vec_ij
-                    Fs[i] -= F
-                    Fs[j] += F
-                end
-            end
-        end
-    end
-
     exclusion_E = excluded_interactions!(Fs, inter.excluded_pairs, partial_charges, coords,
                                          boundary, α, f, energy_units)
 
@@ -527,6 +483,6 @@ function ewald_pe_forces(sys::System{3, AT}, inter::PME{T}) where {AT, T}
 
     charge_E = -f * T(π) * sum(partial_charges)^2 / (2 * V * α^2)
     self_E = f * -sum(abs2, partial_charges) * α / sqrt(T(π)) + charge_E
-    total_E = real_space_E + reciprocal_space_E + self_E + exclusion_E
+    total_E = reciprocal_space_E + self_E + exclusion_E
     return total_E, Fs
 end

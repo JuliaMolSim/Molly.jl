@@ -104,6 +104,7 @@ using Molly
 sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
+    nonbonded_method="pme",
     loggers=(
         temp=TemperatureLogger(10),
         writer=TrajectoryWriter(10, "traj_5XER_1ps.pdb"),

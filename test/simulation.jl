@@ -1091,8 +1091,8 @@ end
     BoxSizeLogger(n_steps) = GeneralObservableLogger(box_size_wrapper, typeof(1.0u"nm"), n_steps)
 
     sys = System(
-        coords=place_atoms(n_atoms, boundary),
         atoms=[Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms],
+        coords=place_atoms(n_atoms, boundary),
         boundary=boundary,
         pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
         loggers=(
