@@ -994,8 +994,8 @@ end
 
 Base.values(dl::DisplacementLogger) = dl.displacements
 
-function log_property!(dl::AverageObservableLogger{T}, s::System, neighbors=nothing,
-                        step_n::Integer=0; kwargs...) where T
+function log_property!(dl::DisplacementLogger, s::System, neighbors=nothing,
+                        step_n::Integer=0; kwargs...)
                         
     if (step_n % dl.n_update) == 0
         dl.last_displacements .+= vector.(dl.last_coords, s.coords, s.boundary)
