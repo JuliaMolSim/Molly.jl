@@ -983,7 +983,7 @@ function DisplacementLogger(T, n_steps::Integer; n_update::Integer = 1, dims::In
     return DisplacementLogger(n_steps; T = T, n_update = n_update, dims = dims)
 end
 
-function DisplacementLogger(n_steps; T = typeof(one(DefaultFloat)u"nm"), n_update::Integer = 1, dims::Integer = 3)
+function DisplacementLogger(n_steps::Integer; T = typeof(one(DefaultFloat)u"nm"), n_update::Integer = 1, dims::Integer = 3)
     B = SArray{Tuple{dims}, T, 1, dims}
     A = Array{B, 1}
     if n_update % n_steps != 0
@@ -1000,7 +1000,7 @@ function log_property!(dl::DisplacementLogger, s::System, neighbors=nothing,
     if (step_n % dl.n_update) == 0
         dl.last_displacements .+= vector.(dl.last_coords, s.coords, s.boundary)
         dl.last_coords .= s.coords
-        if (step_n % dl.n_update) == 0
+        if (step_n % dl.n_steps) == 0
             push!(dl.displacements, copy(dl.last_displacements))
         end
     end
