@@ -23,6 +23,22 @@ function AtomsCalculators.energy_forces(sys, inter::AbstractEwald; kwargs...)
     return (energy=E, forces=Fs)
 end
 
+function find_excluded_pairs(eligible)
+    excluded_pairs = Tuple{Int32, Int32}[]
+    if !isnothing(eligible)
+        n_atoms = size(eligible, 1)
+        eligible_cpu = Array(eligible)
+        for i in 1:n_atoms
+            for j in (i+1):n_atoms
+                if !eligible_cpu[i, j]
+                    push!(excluded_pairs, (Int32(i), Int32(j)))
+                end
+            end
+        end
+    end
+    return excluded_pairs
+end
+
 """
     Ewald(; error_tol=0.0005, dist_cutoff=1.0u"nm", eligible=nothing)
 
@@ -39,10 +55,14 @@ are eligible.
 Only compatible with 3D systems and [`CubicBoundary`](@ref).
 Runs on the CPU, even for GPU systems.
 """
-@kwdef struct Ewald{T, D, E} <: AbstractEwald
-    error_tol::T = 0.0005
-    dist_cutoff::D = 1.0u"nm"
-    eligible::E = nothing
+struct Ewald{T, D} <: AbstractEwald
+    error_tol::T
+    dist_cutoff::D
+    excluded_pairs::Vector{Tuple{Int32, Int32}}
+end
+
+function Ewald(; error_tol=0.0005, dist_cutoff=1.0u"nm", eligible=nothing)
+    return Ewald(error_tol, dist_cutoff, find_excluded_pairs(eligible))
 end
 
 function ewald_error(αr::T, target, guess) where T
@@ -76,9 +96,33 @@ function ewald_params(side_length, α, error_tol)
     return k
 end
 
+function excluded_interactions!(Fs, excluded_pairs, partial_charges::Vector{T}, coords,
+                                boundary, α, f, energy_units) where T
+    sqrt_π = sqrt(T(π))
+    exclusion_E = zero(T) * energy_units
+    for (i, j) in excluded_pairs
+        charge_ij = partial_charges[i] * partial_charges[j]
+        vec_ij = vector(coords[i], coords[j], boundary)
+        r = norm(vec_ij)
+        αr = α * r
+        erf_αr = erf(αr)
+        if erf_αr > T(1e-6)
+            inv_r = inv(r)
+            exclusion_E -= f * charge_ij * inv_r * erf_αr
+            dE_dr = f * charge_ij * inv_r^3 * (erf_αr - 2 * αr * exp(-αr^2) / sqrt_π)
+            F = dE_dr * vec_ij
+            Fs[i] += F
+            Fs[j] -= F
+        else
+            exclusion_E -= α * 2 * f * charge_ij / sqrt_π
+        end
+    end
+    return exclusion_E
+end
+
 function ewald_pe_forces(sys::System{3, AT}, inter::Ewald{T}) where {AT, T}
     n_atoms = length(sys)
-    coords, boundary = Array(sys.coords), sys.boundary
+    coords, boundary, energy_units = Array(sys.coords), sys.boundary, sys.energy_units
     dist_cutoff, error_tol = inter.dist_cutoff, inter.error_tol
     α = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
     nrx, nry, nrz = ewald_params.(boundary.side_lengths, α, error_tol)
@@ -86,21 +130,18 @@ function ewald_pe_forces(sys::System{3, AT}, inter::Ewald{T}) where {AT, T}
     if kmax < 1
         error("kmax for Ewald summation is $kmax, should be at least 1")
     end
-    eligible = (isnothing(inter.eligible) ? nothing : Array(inter.eligible))
     partial_charges = Array(charges(sys))
     V = volume(boundary)
-    sq_dist_cutoff = dist_cutoff^2
     f = T(Molly.coulomb_const)
-    sqrt_π = sqrt(T(π))
-    real_space_E = zero(T) * sys.energy_units
-    exclusion_E = zero(real_space_E)
     Fs = zeros(SVector{3, typeof(zero(T) * sys.force_units)}, n_atoms)
 
+    real_space_E = zero(T) * energy_units
+    sq_dist_cutoff = dist_cutoff^2
     for i in 1:n_atoms
         charge_i = partial_charges[i]
         for j in (i + 1):n_atoms
             charge_ij = charge_i * partial_charges[j]
-            if isnothing(eligible) || eligible[i, j]
+            if !((Int32(i), Int32(j)) in inter.excluded_pairs)
                 vec_ij = vector(coords[i], coords[j], boundary)
                 r2 = sum(abs2, vec_ij)
                 if r2 <= sq_dist_cutoff
@@ -109,29 +150,17 @@ function ewald_pe_forces(sys::System{3, AT}, inter::Ewald{T}) where {AT, T}
                     αr = α * r
                     erfc_αr = erfc(αr)
                     real_space_E += f * charge_ij * erfc_αr * inv_r
-                    dE_dr = f * charge_ij * inv_r^3 * (erfc_αr + 2 * αr * exp(-αr^2) / sqrt_π)
+                    dE_dr = f * charge_ij * inv_r^3 * (erfc_αr + 2 * αr * exp(-αr^2) / sqrt(T(π)))
                     F = dE_dr * vec_ij
                     Fs[i] -= F
                     Fs[j] += F
                 end
-            else
-                vec_ij = vector(coords[i], coords[j], boundary)
-                r = norm(vec_ij)
-                αr = α * r
-                erf_αr = erf(αr)
-                if erf_αr > T(1e-6)
-                    inv_r = inv(r)
-                    exclusion_E -= f * charge_ij * inv_r * erf_αr
-                    dE_dr = f * charge_ij * inv_r^3 * (erf_αr - 2 * αr * exp(-αr^2) / sqrt_π)
-                    F = dE_dr * vec_ij
-                    Fs[i] += F
-                    Fs[j] -= F
-                else
-                    exclusion_E -= α * 2 * f * charge_ij / sqrt_π
-                end
             end
         end
     end
+
+    exclusion_E = excluded_interactions!(Fs, inter.excluded_pairs, partial_charges, coords,
+                                         boundary, α, f, energy_units)
 
     recip_box_size = (2 * T(π)) ./ boundary.side_lengths
     eir = zeros(Complex{T}, kmax * n_atoms * 3)
@@ -139,7 +168,7 @@ function ewald_pe_forces(sys::System{3, AT}, inter::Ewald{T}) where {AT, T}
     tab_qxyz = zeros(Complex{T}, n_atoms)
     factor_ewald = -inv(4 * α^2)
     recip_coeff = f * 4 * T(π) / V
-    reciprocal_space_E = zero(real_space_E)
+    reciprocal_space_E = zero(T) * energy_units
 
     for i in 1:n_atoms
         for m in 1:3
@@ -200,7 +229,7 @@ function ewald_pe_forces(sys::System{3, AT}, inter::Ewald{T}) where {AT, T}
     end
 
     charge_E = -f * T(π) * sum(partial_charges)^2 / (2 * V * α^2)
-    self_E = f * -sum(abs2, partial_charges) * α / sqrt_π + charge_E
+    self_E = f * -sum(abs2, partial_charges) * α / sqrt(T(π)) + charge_E
     total_E = real_space_E + reciprocal_space_E + self_E + exclusion_E
     return total_E, AT(Fs)
 end
@@ -221,12 +250,12 @@ are eligible.
 
 Only compatible with 3D systems.
 """
-struct PME{T, D, E, A} <: AbstractEwald
+struct PME{T, D, A} <: AbstractEwald
     error_tol::T
     dist_cutoff::D
     order::Int
     ϵr::T
-    eligible::E
+    excluded_pairs::Vector{Tuple{Int32, Int32}}
     α::A
     mesh_dims::SVector{3, Int}
     grid_indices::Matrix{Int}
@@ -245,6 +274,7 @@ function PME(boundary, n_atoms; error_tol::T=0.0005, dist_cutoff=1.0u"nm", order
     bsplines_θ, bsplines_dθ = zeros(T, order*n_atoms, 3), zeros(T, order*n_atoms, 3)
     # Ordered z/y/x for better memory access
     charge_grid = zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1])
+    excluded_pairs = find_excluded_pairs(eligible)
 
     bsplines_moduli = [zeros(T, mesh_dims[1]), zeros(T, mesh_dims[2]), zeros(T, mesh_dims[3])]
     nmax = maximum(mesh_dims)
@@ -294,7 +324,7 @@ function PME(boundary, n_atoms; error_tol::T=0.0005, dist_cutoff=1.0u"nm", order
         end
     end
 
-    return PME(error_tol, dist_cutoff, order, ϵr, eligible, α, mesh_dims,
+    return PME(error_tol, dist_cutoff, order, ϵr, excluded_pairs, α, mesh_dims,
                grid_indices, grid_fractions, bsplines_θ, bsplines_dθ,
                charge_grid, bsplines_moduli)
 end
@@ -448,24 +478,21 @@ function interpolate_force!(Fs, charge_grid::Array{Complex{T}, 3}, grid_indices,
 end
 
 function ewald_pe_forces(sys::System{3, AT}, inter::PME{T}) where {AT, T}
-    n_atoms = length(sys)
     atoms, coords, boundary, energy_units = sys.atoms, sys.coords, sys.boundary, sys.energy_units
     order, ϵr, α, mesh_dims = inter.order, inter.ϵr, inter.α, inter.mesh_dims
-    eligible = (isnothing(inter.eligible) ? nothing : Array(inter.eligible))
     partial_charges = Array(charges(sys))
     V = volume(boundary)
-    sq_dist_cutoff = inter.dist_cutoff^2
     f = T(Molly.coulomb_const)
-    sqrt_π = sqrt(T(π))
-    real_space_E = zero(T) * sys.energy_units
-    exclusion_E = zero(real_space_E)
-    Fs = zeros(SVector{3, typeof(zero(T) * sys.force_units)}, n_atoms)
+    Fs = zeros(SVector{3, typeof(zero(T) * sys.force_units)}, length(sys))
 
+    real_space_E = zero(T) * energy_units
+    sq_dist_cutoff = inter.dist_cutoff^2
+    n_atoms = length(sys)
     for i in 1:n_atoms
         charge_i = partial_charges[i]
         for j in (i + 1):n_atoms
             charge_ij = charge_i * partial_charges[j]
-            if isnothing(eligible) || eligible[i, j]
+            if !((Int32(i), Int32(j)) in inter.excluded_pairs)
                 vec_ij = vector(coords[i], coords[j], boundary)
                 r2 = sum(abs2, vec_ij)
                 if r2 <= sq_dist_cutoff
@@ -474,29 +501,17 @@ function ewald_pe_forces(sys::System{3, AT}, inter::PME{T}) where {AT, T}
                     αr = α * r
                     erfc_αr = erfc(αr)
                     real_space_E += f * charge_ij * erfc_αr * inv_r
-                    dE_dr = f * charge_ij * inv_r^3 * (erfc_αr + 2 * αr * exp(-αr^2) / sqrt_π)
+                    dE_dr = f * charge_ij * inv_r^3 * (erfc_αr + 2 * αr * exp(-αr^2) / sqrt(T(π)))
                     F = dE_dr * vec_ij
                     Fs[i] -= F
                     Fs[j] += F
                 end
-            else
-                vec_ij = vector(coords[i], coords[j], boundary)
-                r = norm(vec_ij)
-                αr = α * r
-                erf_αr = erf(αr)
-                if erf_αr > T(1e-6)
-                    inv_r = inv(r)
-                    exclusion_E -= f * charge_ij * inv_r * erf_αr
-                    dE_dr = f * charge_ij * inv_r^3 * (erf_αr - 2 * αr * exp(-αr^2) / sqrt_π)
-                    F = dE_dr * vec_ij
-                    Fs[i] += F
-                    Fs[j] -= F
-                else
-                    exclusion_E -= α * 2 * f * charge_ij / sqrt_π
-                end
             end
         end
     end
+
+    exclusion_E = excluded_interactions!(Fs, inter.excluded_pairs, partial_charges, coords,
+                                         boundary, α, f, energy_units)
 
     recip_box = invert_box_vectors(boundary)
     grid_placement!(inter.grid_indices, inter.grid_fractions, coords, recip_box, mesh_dims)
@@ -511,7 +526,7 @@ function ewald_pe_forces(sys::System{3, AT}, inter::PME{T}) where {AT, T}
                        inter.bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms)
 
     charge_E = -f * T(π) * sum(partial_charges)^2 / (2 * V * α^2)
-    self_E = f * -sum(abs2, partial_charges) * α / sqrt_π + charge_E
+    self_E = f * -sum(abs2, partial_charges) * α / sqrt(T(π)) + charge_E
     total_E = real_space_E + reciprocal_space_E + self_E + exclusion_E
     return total_E, Fs
 end
