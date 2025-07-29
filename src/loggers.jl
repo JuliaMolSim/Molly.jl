@@ -303,35 +303,6 @@ function virial_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
 end
 
 
-image_flag_wrapper(sys, args...; kwargs...) = copy(sys.image_flags)
-
-"""
-    ImageFlagLogger(n_steps; dims::Integer=3)
-
-    Log the image flags of a atoms in the system throughout a simulation.
-"""
-function ImageFlagLogger(n_steps::Integer; dims::Integer=3)
-    return GeneralObservableLogger(
-        image_flag_wrapper,
-        Array{SArray{Tuple{dims}, Int32, 1, dims}, 1},
-        n_steps,
-    )
-end
-
-displacement_helper(sys, args...; kwargs...) = #*TODO CALCULATE DISPLACEMENTS HERE
-
-"""
-    DisplacementLogger(n_steps; dims=3)
-"""
-function DisplacementLogger(T, n_steps::Integer; dims::Integer=3)
-    return GeneralObservableLogger(
-        disp_wrapper,
-        Array{SArray{Tuple{dims}, T, 1, dims}, 1},
-        n_steps,
-    )
-end
-
-
 """
     VirialLogger(n_steps)
     VirialLogger(T, n_steps)
@@ -988,3 +959,56 @@ function log_property!(mcl::MonteCarloLogger{T},
     push!(mcl.state_changed, success)
     push!(mcl.energy_rates, energy_rate)
 end
+
+
+"""
+    DisplacementLogger(n_steps; n_update::Integer=1, dims::Integer=3)
+    DisplacementLogger(T, n_steps; n_update::Integer=1, dims::Integer=3)
+
+Log the displacements of atoms in a system throughout a simulation. Displacements are
+updated every `n_update` steps and saved every `n_steps` steps.
+
+The logger assumes a particle does not cross 2 periodic boxes in `n_update` steps. 
+By default `n_update` is set to one to mitigate this assumption, but it can be 
+set to a higher value to reduce cost. `n_update` must be a multiple of `n_steps`. 
+"""
+mutable struct DisplacementLogger{A, B}
+    displacements::Vector{A}
+    last_coords::Vector{B}
+    last_displacements::Vector{B}
+    n_steps::Int
+    n_update::Int
+end
+
+function DisplacementLogger(T, n_steps::Integer; n_update::Integer = 1, dims::Integer = 3)
+    return DisplacementLogger(n_steps; T = T, n_update = n_update, dims = dims)
+end
+
+function DisplacementLogger(n_steps; T = typeof(one(DefaultFloat)u"nm"), n_update::Integer = 1, dims::Integer = 3)
+    B = SArray{Tuple{dims}, T, 1, dims}
+    A = Array{B, 1}
+    if n_update % n_steps != 0
+        throw(ArgumentError("DisplacementLogger: n_update ($n_update) must be a multiple of n_steps ($(n_steps)) and >= n_steps"))
+    end
+    return DisplacementLogger{A, B}(A[], B[], B[], n_steps, n_update)
+end
+
+Base.values(dl::DisplacementLogger) = dl.displacements
+
+function log_property!(dl::AverageObservableLogger{T}, s::System, neighbors=nothing,
+                        step_n::Integer=0; kwargs...) where T
+                        
+    if (step_n % dl.n_update) == 0
+        dl.last_displacements .+= vector.(dl.last_coords, s.coords, s.boundary)
+        dl.last_coords .= s.coords
+        if (step_n % dl.n_update) == 0
+            push!(dl.displacements, copy(dl.last_displacements))
+        end
+    end
+end
+
+function Base.show(io::IO, dl::DisplacementLogger)
+    print(io, "DisplacementLogger with updating every ", dl.n_update, " steps, saving every ",
+            dl.n_steps, " steps with", length(dl.displacements), " displacements in storage.")
+end
+
