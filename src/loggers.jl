@@ -969,7 +969,7 @@ updated every `n_update` steps and saved every `n_steps` steps.
 
 The logger assumes a particle does not cross 2 periodic boxes in `n_update` steps. 
 By default `n_update` is set to one to mitigate this assumption, but it can be 
-set to a higher value to reduce cost. `n_update` must be a multiple of `n_steps`. 
+set to a higher value to reduce cost. `n_steps` must be a multiple of `n_update`. 
 """
 mutable struct DisplacementLogger{A, B}
     displacements::Vector{A}
@@ -986,8 +986,8 @@ end
 function DisplacementLogger(n_steps::Integer; T = typeof(one(DefaultFloat)u"nm"), n_update::Integer = 1, dims::Integer = 3)
     B = SArray{Tuple{dims}, T, 1, dims}
     A = Array{B, 1}
-    if n_update % n_steps != 0
-        throw(ArgumentError("DisplacementLogger: n_update ($n_update) must be a multiple of n_steps ($(n_steps)) and >= n_steps"))
+    if n_steps % n_update != 0
+        throw(ArgumentError("DisplacementLogger: n_steps ($n_steps) must be a multiple n_update ($(n_update)) and >= n_steps"))
     end
     return DisplacementLogger{A, B}(A[], B[], B[], n_steps, n_update)
 end
