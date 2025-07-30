@@ -961,11 +961,11 @@ end
 
 
 """
-    DisplacementLogger(n_steps; n_update::Integer=1, dims::Integer=3)
-    DisplacementLogger(T, n_steps; n_update::Integer=1, dims::Integer=3)
+    DisplacementLogger(n_steps, r0; n_update::Integer=1, dims::Integer=3)
 
 Log the displacements of atoms in a system throughout a simulation. Displacements are
-updated every `n_update` steps and saved every `n_steps` steps.
+updated every `n_update` steps and saved every `n_steps` steps. `r0` are the
+intitial refernce positions and should match the coords type in your `System` object.
 
 The logger assumes a particle does not cross 2 periodic boxes in `n_update` steps. 
 By default `n_update` is set to one to mitigate this assumption, but it can be 
@@ -973,39 +973,31 @@ set to a higher value to reduce cost. `n_steps` must be a multiple of `n_update`
 """
 mutable struct DisplacementLogger{A, B}
     displacements::Vector{A}
-    last_coords::Vector{B}
+    reference::Vector{B}
     last_displacements::Vector{B}
     n_steps::Int
     n_update::Int
 end
 
-function DisplacementLogger(T, n_steps::Integer; n_update::Integer = 1, dims::Integer = 3)
-    return DisplacementLogger(n_steps; T = T, n_update = n_update, dims = dims)
-end
 
-function DisplacementLogger(n_steps::Integer; T = typeof(one(DefaultFloat)u"nm"), n_update::Integer = 1, dims::Integer = 3)
+function DisplacementLogger(n_steps::Integer, r0;  n_update::Integer = 1, dims::Integer = 3)
+    T = eltype(first(r0))
     B = SArray{Tuple{dims}, T, 1, dims}
     A = Array{B, 1}
     if n_steps % n_update != 0
-        throw(ArgumentError("DisplacementLogger: n_steps ($n_steps) must be a multiple n_update ($(n_update)) and >= n_steps"))
+        throw(ArgumentError("DisplacementLogger: n_steps ($n_steps) must be a multiple n_update ($(n_update))"))
     end
-    return DisplacementLogger{A, B}(A[], B[], B[], n_steps, n_update)
+    return DisplacementLogger{A, B}(A[], copy(r0), zero(r0), n_steps, n_update)
 end
 
 Base.values(dl::DisplacementLogger) = dl.displacements
 
 function log_property!(dl::DisplacementLogger, s::System, neighbors=nothing,
                         step_n::Integer=0; kwargs...)
-
-    # Initialize the logger at step 0
-    if step_n == 0
-        dl.last_coords = copy(s.coords)
-        dl.last_displacements = zero(s.coords)
-    end
                         
     if (step_n % dl.n_update) == 0
-        dl.last_displacements .+= vector.(dl.last_coords, s.coords, s.boundary)
-        dl.last_coords .= s.coords
+        dl.last_displacements .+= vector.(dl.reference, s.coords, Ref(s.boundary))
+        dl.reference .= s.coords
         if (step_n % dl.n_steps) == 0
             push!(dl.displacements, copy(dl.last_displacements))
         end
