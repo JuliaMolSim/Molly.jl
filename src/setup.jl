@@ -891,6 +891,7 @@ function System(coord_file::AbstractString,
                 error_tol=T(ewald_error_tol),
                 eligible=eligible,
                 special=special,
+                array_type=AT,
             )
         end
         general_inters_ewald = (ewald,)

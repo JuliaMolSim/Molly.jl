@@ -226,7 +226,8 @@ end
 
 """
     PME(boundary, n_atoms; dist_cutoff, error_tol=0.0005, order=5,
-        ϵr=1.0, eligible=nothing, special=nothing, n_threads=Threads.nthreads())
+        ϵr=1.0, eligible=nothing, special=nothing, array_type=Array,
+        n_threads=Threads.nthreads())
 
 Particle mesh Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
@@ -241,11 +242,12 @@ be a matrix like the neighbor list or `nothing` to indicate that all pairs
 are eligible.
 `special` should also be given where relevant, as these interactions are
 excluded from long range calculation.
+`array_type` should match the array type of the system.
 `n_threads` is used to pre-allocate memory on CPU.
 
 Only compatible with 3D systems.
 """
-struct PME{T, D, A, C, F, B} <: AbstractEwald
+struct PME{T, D, A, I, M, C, CT, BM, F, B} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
     order::Int
@@ -253,29 +255,32 @@ struct PME{T, D, A, C, F, B} <: AbstractEwald
     excluded_pairs::Vector{Tuple{Int32, Int32}}
     α::A
     mesh_dims::SVector{3, Int}
-    grid_indices::Matrix{Int}
-    grid_fractions::Matrix{T}
-    bsplines_θ::Matrix{T}
-    bsplines_dθ::Matrix{T}
-    charge_grid::Array{Complex{T}, 3}
-    charge_grids_threads::C
-    bsplines_moduli::Vector{Vector{T}}
+    grid_indices::I
+    grid_fractions::M
+    bsplines_θ::M
+    bsplines_dθ::M
+    charge_grid::C
+    charge_grids_threads::CT
+    bsplines_moduli_x::BM
+    bsplines_moduli_y::BM
+    bsplines_moduli_z::BM
     fft_plan::F
     bfft_plan::B
 end
 
 function PME(boundary, n_atoms; dist_cutoff, error_tol::T=0.0005, order=5,
-             ϵr=one(error_tol), eligible=nothing, special=nothing,
-             n_threads::Integer=Threads.nthreads()) where T
+             ϵr=one(error_tol), eligible=nothing, special=nothing, array_type::Type{AT}=Array,
+             n_threads::Integer=Threads.nthreads()) where {T, AT}
     α = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
     mesh_dims = pme_params.(box_sides(boundary), α, error_tol)
-    grid_indices, grid_fractions = zeros(Int, 3, n_atoms), zeros(T, 3, n_atoms)
-    bsplines_θ, bsplines_dθ = zeros(T, order*n_atoms, 3), zeros(T, order*n_atoms, 3)
+    grid_indices, grid_fractions = AT(zeros(Int, 3, n_atoms)), AT(zeros(T, 3, n_atoms))
+    bsplines_θ = AT(zeros(T, order * n_atoms, 3))
+    bsplines_dθ = zero(bsplines_θ)
     # Ordered z/y/x for better memory access
-    charge_grid = zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1])
+    charge_grid = AT(zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1]))
     excluded_pairs = find_excluded_pairs(eligible, special)
 
-    bsplines_moduli = [zeros(T, mesh_dims[1]), zeros(T, mesh_dims[2]), zeros(T, mesh_dims[3])]
+    bsplines_moduli = (zeros(T, mesh_dims[1]), zeros(T, mesh_dims[2]), zeros(T, mesh_dims[3]))
     nmax = maximum(mesh_dims)
     data, ddata = zeros(T, order), zeros(T, order)
     bsplines_data = zeros(T, nmax)
@@ -323,7 +328,7 @@ function PME(boundary, n_atoms; dist_cutoff, error_tol::T=0.0005, order=5,
         end
     end
 
-    if n_threads == 1
+    if AT <: AbstractGPUArray || n_threads == 1
         charge_grids_threads = nothing
     else
         charge_grids_threads = [zero(charge_grid) for _ in 1:n_threads]
@@ -333,7 +338,8 @@ function PME(boundary, n_atoms; dist_cutoff, error_tol::T=0.0005, order=5,
 
     return PME(dist_cutoff, error_tol, order, ϵr, excluded_pairs, α, mesh_dims,
                grid_indices, grid_fractions, bsplines_θ, bsplines_dθ,
-               charge_grid, charge_grids_threads, bsplines_moduli, fft_plan, bfft_plan)
+               charge_grid, charge_grids_threads, AT(bsplines_moduli[1]),
+               AT(bsplines_moduli[2]), AT(bsplines_moduli[3]), fft_plan, bfft_plan)
 end
 
 function pme_params(side_length, α, error_tol::T) where T
@@ -438,8 +444,8 @@ function spread_charge!(charge_grid::Array{Complex{T}, 3}, charge_grids_threads,
     return charge_grid, charge_grids_threads
 end
 
-function recip_conv_inner!(charge_grid::Array{Complex{T}, 3}, bsplines_moduli, recip_box,
-                           ϵr, α, mesh_dims, boundary, energy_units,
+function recip_conv_inner!(charge_grid::Array{Complex{T}, 3}, bsm_x, bsm_y, bsm_z,
+                           recip_box, ϵr, α, mesh_dims, boundary, energy_units,
                            f, factor, boxfactor, kx) where T
     nx, ny, nz = mesh_dims
     maxkx, maxky, maxkz = T(0.5)*(nx+1), T(0.5)*(ny+1), T(0.5)*(nz+1)
@@ -447,11 +453,11 @@ function recip_conv_inner!(charge_grid::Array{Complex{T}, 3}, bsplines_moduli, r
     @inbounds begin
         mx = (kx < maxkx ? kx : kx - nx)
         mhx = mx * recip_box[1][1]
-        bx = boxfactor * bsplines_moduli[1][kx+1]
+        bx = boxfactor * bsm_x[kx+1]
         for ky in 0:(ny-1)
             my = (ky < maxky ? ky : ky - ny)
             mhy = mx * recip_box[2][1] + my * recip_box[2][2]
-            by = bsplines_moduli[2][ky+1]
+            by = bsm_y[ky+1]
             for kz in 0:(nz-1)
                 if iszero(kx) && iszero(ky) && iszero(kz)
                     continue
@@ -460,7 +466,7 @@ function recip_conv_inner!(charge_grid::Array{Complex{T}, 3}, bsplines_moduli, r
                 mhz = mx * recip_box[3][1] + my * recip_box[3][2] + mz * recip_box[3][3]
                 d1, d2 = reim(charge_grid[kz+1, ky+1, kx+1])
                 m2 = mhx^2 + mhy^2 + mhz^2
-                bz = bsplines_moduli[3][kz+1]
+                bz = bsm_z[kz+1]
                 denom = m2 * bx * by * bz
                 eterm = f * exp(-factor * m2) / denom
                 eterm_nou = ustrip(energy_units, eterm)
@@ -473,7 +479,7 @@ function recip_conv_inner!(charge_grid::Array{Complex{T}, 3}, bsplines_moduli, r
     return esum
 end
 
-function recip_conv!(charge_grid::Array{Complex{T}, 3}, bsplines_moduli, recip_box,
+function recip_conv!(charge_grid::Array{Complex{T}, 3}, bsm_x, bsm_y, bsm_z, recip_box,
                      ϵr, α, mesh_dims, boundary, energy_units, n_threads) where T
     f = T(Molly.coulomb_const) / ϵr
     factor = T(π)^2 / α^2
@@ -481,7 +487,7 @@ function recip_conv!(charge_grid::Array{Complex{T}, 3}, bsplines_moduli, recip_b
     if n_threads == 1
         esum = zero(T) * energy_units
         for kx in 0:(mesh_dims[1]-1)
-            esum_kx = recip_conv_inner!(charge_grid, bsplines_moduli, recip_box,
+            esum_kx = recip_conv_inner!(charge_grid, bsm_x, bsm_y, bsm_z, recip_box,
                                         ϵr, α, mesh_dims, boundary, energy_units,
                                         f, factor, boxfactor, kx)
             esum += esum_kx
@@ -490,7 +496,7 @@ function recip_conv!(charge_grid::Array{Complex{T}, 3}, bsplines_moduli, recip_b
         esum_threads = [zero(T) * energy_units for _ in 1:n_threads]
         Threads.@threads for chunk_i in 1:n_threads
             for kx in (chunk_i-1):n_threads:(mesh_dims[1]-1)
-                esum_kx = recip_conv_inner!(charge_grid, bsplines_moduli, recip_box,
+                esum_kx = recip_conv_inner!(charge_grid, bsm_x, bsm_y, bsm_z, recip_box,
                                             ϵr, α, mesh_dims, boundary, energy_units,
                                             f, factor, boxfactor, kx)
                 esum_threads[chunk_i] += esum_kx
@@ -539,7 +545,7 @@ end
 function ewald_pe_forces(sys::System{3, AT}, inter::PME{T};
                          n_threads::Integer=Threads.nthreads()) where {AT, T}
     Fs = zeros(SVector{3, typeof(zero(T) * sys.force_units)}, length(sys))
-    atoms, coords, boundary, energy_units = Array(sys.atoms), Array(sys.coords), sys.boundary, sys.energy_units
+    atoms, coords, boundary, energy_units = sys.atoms, sys.coords, sys.boundary, sys.energy_units
     order, ϵr, α, mesh_dims = inter.order, inter.ϵr, inter.α, inter.mesh_dims
     partial_charges = Array(charges(sys))
     V = volume(boundary)
@@ -554,7 +560,8 @@ function ewald_pe_forces(sys::System{3, AT}, inter::PME{T};
     spread_charge!(inter.charge_grid, inter.charge_grids_threads, inter.grid_indices,
                    inter.bsplines_θ, mesh_dims, order, atoms, n_threads)
     inter.fft_plan * inter.charge_grid
-    reciprocal_space_E = recip_conv!(inter.charge_grid, inter.bsplines_moduli, recip_box, ϵr,
+    reciprocal_space_E = recip_conv!(inter.charge_grid, inter.bsplines_moduli_x,
+                    inter.bsplines_moduli_y, inter.bsplines_moduli_z, recip_box, ϵr,
                     α, mesh_dims, boundary, energy_units, n_threads)
     inter.bfft_plan * inter.charge_grid
     interpolate_force!(Fs, inter.charge_grid, inter.grid_indices, inter.bsplines_θ,
