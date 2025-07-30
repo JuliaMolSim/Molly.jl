@@ -24,7 +24,7 @@ export
     AverageObservableLogger,
     ReplicaExchangeLogger,
     MonteCarloLogger,
-    DisplacementLogger
+    DisplacementsLogger
 
 """
     apply_loggers!(system, neighbors=nothing, step_n=0, run_loggers=true;
@@ -961,7 +961,7 @@ end
 
 
 """
-    DisplacementLogger(n_steps, r0; n_update::Integer=1, dims::Integer=3)
+    DisplacementsLogger(n_steps, r0; n_update::Integer=1, dims::Integer=3)
 
 Log the displacements of atoms in a system throughout a simulation. Displacements are
 updated every `n_update` steps and saved every `n_steps` steps. `r0` are the
@@ -971,7 +971,7 @@ The logger assumes a particle does not cross 2 periodic boxes in `n_update` step
 By default `n_update` is set to one to mitigate this assumption, but it can be 
 set to a higher value to reduce cost. `n_steps` must be a multiple of `n_update`. 
 """
-mutable struct DisplacementLogger{A, B}
+mutable struct DisplacementsLogger{A, B}
     displacements::Vector{A}
     reference::Vector{B}
     last_displacements::Vector{B}
@@ -980,19 +980,19 @@ mutable struct DisplacementLogger{A, B}
 end
 
 
-function DisplacementLogger(n_steps::Integer, r0;  n_update::Integer = 1, dims::Integer = 3)
+function DisplacementsLogger(n_steps::Integer, r0;  n_update::Integer = 1, dims::Integer = 3)
     T = eltype(first(r0))
     B = SArray{Tuple{dims}, T, 1, dims}
     A = Array{B, 1}
     if n_steps % n_update != 0
-        throw(ArgumentError("DisplacementLogger: n_steps ($n_steps) must be a multiple n_update ($(n_update))"))
+        throw(ArgumentError("DisplacementsLogger: n_steps ($n_steps) must be a multiple n_update ($(n_update))"))
     end
-    return DisplacementLogger{A, B}(A[], copy(r0), zero(r0), n_steps, n_update)
+    return DisplacementsLogger{A, B}(A[], copy(r0), zero(r0), n_steps, n_update)
 end
 
-Base.values(dl::DisplacementLogger) = dl.displacements
+Base.values(dl::DisplacementsLogger) = dl.displacements
 
-function log_property!(dl::DisplacementLogger, s::System, neighbors=nothing,
+function log_property!(dl::DisplacementsLogger, s::System, neighbors=nothing,
                         step_n::Integer=0; kwargs...)
                         
     if (step_n % dl.n_update) == 0
@@ -1004,8 +1004,8 @@ function log_property!(dl::DisplacementLogger, s::System, neighbors=nothing,
     end
 end
 
-function Base.show(io::IO, dl::DisplacementLogger)
-    print(io, "DisplacementLogger with updating every ", dl.n_update, " steps, saving every ",
+function Base.show(io::IO, dl::DisplacementsLogger)
+    print(io, "DisplacementsLogger with updating every ", dl.n_update, " steps, saving every ",
             dl.n_steps, " steps with", length(dl.displacements), " displacements in storage.")
 end
 

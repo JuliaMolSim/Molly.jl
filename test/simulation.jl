@@ -367,7 +367,7 @@ end
         ),
         loggers=(
             coords=CoordinatesLogger(100),
-            disp=DisplacementLogger(100)
+            disp=DisplacementsLogger(100, coords)
         ),
 
     )
@@ -386,14 +386,14 @@ end
             ),
             loggers=(
                 coords=CoordinatesLogger(100),
-                disp=DisplacementLogger(100)
+                disp=DisplacementsLogger(100, CuArray(coords))
             ),
         )
     end
 
     for simulator in simulators
         @time simulate!(s, simulator, n_steps; n_threads=1)
-        @test sum(first(values(s.loggers.disp))) == 0.0u"nm"
+        @test sum(sum(first(values(s.loggers.disp)))) == 0.0u"nm"
         if run_cuda_tests
             @time simulate!(s_gpu, simulator, n_steps; n_threads=1)
             @test sum(first(values(s_gpu.loggers.disp))) == 0.0u"nm"
