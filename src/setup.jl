@@ -885,7 +885,7 @@ function System(coord_file::AbstractString,
             )
         else
             ewald = PME(
-                boundary,
+                boundary_used,
                 n_atoms;
                 dist_cutoff=T(dist_cutoff),
                 error_tol=T(ewald_error_tol),
@@ -1363,7 +1363,7 @@ function System(T::Type,
             )
         else
             ewald = PME(
-                boundary,
+                boundary_used,
                 n_atoms;
                 dist_cutoff=T(dist_cutoff),
                 error_tol=T(ewald_error_tol),
