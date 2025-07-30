@@ -372,6 +372,8 @@ end
 
     )
 
+    @test_throws ArgumentError DisplacementsLogger(100, coords; n_update = 17)
+
     if run_cuda_tests
         s_gpu = System(
             atoms=CuArray([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.1u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
