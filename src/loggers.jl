@@ -1006,6 +1006,6 @@ end
 
 function Base.show(io::IO, dl::DisplacementsLogger)
     print(io, "DisplacementsLogger with updating every ", dl.n_update, " steps, saving every ",
-            dl.n_steps, " steps with", length(dl.displacements), " displacements in storage.")
+            dl.n_steps, " steps with ", length(dl.displacements), " displacements in storage.")
 end
 
