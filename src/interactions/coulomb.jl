@@ -344,7 +344,7 @@ end
 
 """
     CoulombEwald(; dist_cutoff, error_tol=0.0005, use_neighbors=false, weight_special=1,
-                 coulomb_const=coulomb_const)
+                 coulomb_const=coulomb_const, approximate_erfc=true)
 
 The short range Ewald electrostatic interaction between two atoms.
 
@@ -359,12 +359,14 @@ struct CoulombEwald{T, D, W, C, A}
     weight_special::W
     coulomb_const::C
     α::A
+    approximate_erfc::Bool
 end
 
 function CoulombEwald(; dist_cutoff, error_tol=0.0005, use_neighbors=false,
-                      weight_special=1, coulomb_const=coulomb_const)
+                      weight_special=1, coulomb_const=coulomb_const, approximate_erfc=true)
     α = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
-    return CoulombEwald(dist_cutoff, error_tol, use_neighbors, weight_special, coulomb_const, α)
+    return CoulombEwald(dist_cutoff, error_tol, use_neighbors, weight_special, coulomb_const,
+                        α, approximate_erfc)
 end
 
 use_neighbors(inter::CoulombEwald) = inter.use_neighbors
@@ -377,6 +379,7 @@ function Base.zero(coul::CoulombEwald{T, D, W, C, A}) where {T, D, W, C, A}
         zero(W),
         zero(C),
         zero(A),
+        coul.approximate_erfc,
     )
 end
 
@@ -388,7 +391,19 @@ function Base.:+(c1::CoulombEwald, c2::CoulombEwald)
         c1.weight_special + c2.weight_special,
         c1.coulomb_const + c2.coulomb_const,
         c1.α + c2.α,
+        c1.approximate_erfc,
     )
+end
+
+function calc_erfc(αr::T, approximate_erfc) where T
+    if approximate_erfc
+        # See the OpenMM source code, Abramowitz and Stegun 1964, and Hastings 1995
+        t = inv(one(T) + T(0.3275911) * αr)
+        return (T(0.254829592)+(T(-0.284496736)+(T(1.421413741)+
+                                    (T(-1.453152027)+T(1.061405429)*t)*t)*t)*t)*t*exp(-αr^2)
+    else
+        return erfc(αr)
+    end
 end
 
 @inline function force(inter::CoulombEwald{T},
@@ -408,7 +423,7 @@ end
     r = √r2
     inv_r = inv(r)
     αr = α * r
-    erfc_αr = erfc(αr)
+    erfc_αr = calc_erfc(αr, inter.approximate_erfc)
     dE_dr = ke * qi * qj * inv_r^3 * (erfc_αr + 2 * αr * exp(-αr^2) / sqrt(T(π)))
     F = dE_dr * dr
     if special
@@ -435,7 +450,7 @@ end
     r = √r2
     inv_r = inv(r)
     αr = α * r
-    erfc_αr = erfc(αr)
+    erfc_αr = calc_erfc(αr, inter.approximate_erfc)
     if special
         return ke * qi * qj * erfc_αr * inv_r * inter.weight_special
     else

@@ -594,9 +594,9 @@ end
                 specific_inter_lists=(),
             )
 
-            @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=1e-8u"kJ/mol"
+            @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=1e-4u"kJ/mol"
             fs = Array(forces(sys; n_threads=n_threads))
-            @test maximum(norm.(fs .- Fs_openmm)) < 1e-7u"kJ * mol^-1 * nm^-1"
+            @test maximum(norm.(fs .- Fs_openmm)) < 1e-4u"kJ * mol^-1 * nm^-1"
         end
     end
 
@@ -654,9 +654,9 @@ end
                     specific_inter_lists=(),
                 )
 
-                @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=1e-8u"kJ/mol"
+                @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=1e-4u"kJ/mol"
                 fs = Array(forces(sys; n_threads=n_threads))
-                @test maximum(norm.(fs .- Fs_openmm)) < 1e-7u"kJ * mol^-1 * nm^-1"
+                @test maximum(norm.(fs .- Fs_openmm)) < 1e-4u"kJ * mol^-1 * nm^-1"
             end
         end
     end
