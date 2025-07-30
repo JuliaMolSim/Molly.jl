@@ -387,12 +387,12 @@ function Base.:+(c1::CoulombEwald, c2::CoulombEwald)
     )
 end
 
-function calc_erfc(αr::T, approximate_erfc) where T
+function calc_erfc(αr::T, exp_mαr2, approximate_erfc) where T
     if approximate_erfc
         # See the OpenMM source code, Abramowitz and Stegun 1964, and Hastings 1995
         t = inv(one(T) + T(0.3275911) * αr)
         return (T(0.254829592)+(T(-0.284496736)+(T(1.421413741)+
-                                    (T(-1.453152027)+T(1.061405429)*t)*t)*t)*t)*t*exp(-αr^2)
+                                    (T(-1.453152027)+T(1.061405429)*t)*t)*t)*t)*t*exp_mαr2
     else
         return erfc(αr)
     end
@@ -411,13 +411,15 @@ end
     r = √r2
     inv_r = inv(r)
     αr = α * r
-    erfc_αr = calc_erfc(αr, inter.approximate_erfc)
-    dE_dr = ke * qi * qj * inv_r^3 * (erfc_αr + 2 * αr * exp(-αr^2) / sqrt(T(π)))
-    F = dE_dr * dr
+    exp_mαr2 = exp(-αr^2)
+    erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
+    f = ke * qi * qj * inv_r^3
     if special
-        return F * inter.weight_special * (r <= inter.dist_cutoff)
+        # Special interactions excluded from reciprocal calculation
+        # so have a standard interaction
+        return f * dr * inter.weight_special * (r <= inter.dist_cutoff)
     else
-        return F * (r <= inter.dist_cutoff)
+        return f * dr * (erfc_αr + 2 * αr * exp_mαr2 / sqrt(T(π))) * (r <= inter.dist_cutoff)
     end
 end
 
@@ -434,11 +436,13 @@ end
     r = √r2
     inv_r = inv(r)
     αr = α * r
-    erfc_αr = calc_erfc(αr, inter.approximate_erfc)
+    exp_mαr2 = exp(-αr^2)
+    erfc_αr = calc_erfc(αr, exp_mαr2, inter.approximate_erfc)
+    pe = ke * qi * qj * inv_r
     if special
-        return ke * qi * qj * erfc_αr * inv_r * inter.weight_special * (r <= inter.dist_cutoff)
+        return pe * inter.weight_special * (r <= inter.dist_cutoff)
     else
-        return ke * qi * qj * erfc_αr * inv_r * (r <= inter.dist_cutoff)
+        return pe * erfc_αr * (r <= inter.dist_cutoff)
     end
 end
 
