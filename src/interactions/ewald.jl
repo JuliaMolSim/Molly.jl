@@ -30,14 +30,15 @@ function AtomsCalculators.energy_forces(sys,
     return (energy=E, forces=Fs)
 end
 
-function find_excluded_pairs(eligible)
+function find_excluded_pairs(eligible, special)
     excluded_pairs = Tuple{Int32, Int32}[]
-    if !isnothing(eligible)
-        n_atoms = size(eligible, 1)
-        eligible_cpu = Array(eligible)
+    if !(isnothing(eligible) && isnothing(special))
+        n_atoms = (isnothing(eligible) ? size(special, 1) : size(eligible, 1))
+        eligible_cpu = (isnothing(eligible) ? trues( n_atoms, n_atoms) : Array(eligible))
+        special_cpu  = (isnothing(special ) ? falses(n_atoms, n_atoms) : Array(special ))
         for i in 1:n_atoms
             for j in (i+1):n_atoms
-                if !eligible_cpu[i, j]
+                if !eligible_cpu[i, j] || special_cpu[i, j]
                     push!(excluded_pairs, (Int32(i), Int32(j)))
                 end
             end
@@ -47,7 +48,7 @@ function find_excluded_pairs(eligible)
 end
 
 """
-    Ewald(; dist_cutoff, error_tol=0.0005, eligible=nothing)
+    Ewald(; dist_cutoff, error_tol=0.0005, eligible=nothing, special=nothing)
 
 Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
@@ -60,6 +61,8 @@ The `dist_cutoff` and `error_tol` should match.
 `eligible` indicates pairs eligible for short range interaction, and can
 be a matrix like the neighbor list or `nothing` to indicate that all pairs
 are eligible.
+`special` should also be given where relevant, as these interactions are
+excluded from long range calculation.
 
 This algorithm is O(N^2) and in general [`PME`](@ref) should be used instead.
 Only compatible with 3D systems and [`CubicBoundary`](@ref).
@@ -72,7 +75,7 @@ struct Ewald{T, D} <: AbstractEwald
 end
 
 function Ewald(; dist_cutoff, error_tol=0.0005, eligible=nothing, special=nothing)
-    return Ewald(dist_cutoff, error_tol, find_excluded_pairs(eligible))
+    return Ewald(dist_cutoff, error_tol, find_excluded_pairs(eligible, special))
 end
 
 function ewald_error(αr::T, target, guess) where T
@@ -223,7 +226,7 @@ end
 
 """
     PME(boundary, n_atoms; dist_cutoff, error_tol=0.0005, order=5,
-        ϵr=1.0, eligible=nothing, n_threads=Threads.nthreads())
+        ϵr=1.0, eligible=nothing, special=nothing, n_threads=Threads.nthreads())
 
 Particle mesh Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
@@ -236,6 +239,8 @@ The `dist_cutoff` and `error_tol` should match.
 `eligible` indicates pairs eligible for short range interaction, and can
 be a matrix like the neighbor list or `nothing` to indicate that all pairs
 are eligible.
+`special` should also be given where relevant, as these interactions are
+excluded from long range calculation.
 `n_threads` is used to pre-allocate memory on CPU.
 
 Only compatible with 3D systems.
@@ -268,7 +273,7 @@ function PME(boundary, n_atoms; dist_cutoff, error_tol::T=0.0005, order=5,
     bsplines_θ, bsplines_dθ = zeros(T, order*n_atoms, 3), zeros(T, order*n_atoms, 3)
     # Ordered z/y/x for better memory access
     charge_grid = zeros(Complex{T}, mesh_dims[3], mesh_dims[2], mesh_dims[1])
-    excluded_pairs = find_excluded_pairs(eligible)
+    excluded_pairs = find_excluded_pairs(eligible, special)
 
     bsplines_moduli = [zeros(T, mesh_dims[1]), zeros(T, mesh_dims[2]), zeros(T, mesh_dims[3])]
     nmax = maximum(mesh_dims)
