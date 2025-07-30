@@ -240,7 +240,7 @@ are eligible.
 
 Only compatible with 3D systems.
 """
-struct PME{T, D, A, C} <: AbstractEwald
+struct PME{T, D, A, C, F, B} <: AbstractEwald
     dist_cutoff::D
     error_tol::T
     order::Int
@@ -255,6 +255,8 @@ struct PME{T, D, A, C} <: AbstractEwald
     charge_grid::Array{Complex{T}, 3}
     charge_grids_threads::C
     bsplines_moduli::Vector{Vector{T}}
+    fft_plan::F
+    bfft_plan::B
 end
 
 function PME(boundary, n_atoms; dist_cutoff, error_tol::T=0.0005, order=5,
@@ -321,10 +323,12 @@ function PME(boundary, n_atoms; dist_cutoff, error_tol::T=0.0005, order=5,
     else
         charge_grids_threads = [zero(charge_grid) for _ in 1:n_threads]
     end
+    fft_plan  = plan_fft!(charge_grid)
+    bfft_plan = plan_bfft!(charge_grid)
 
     return PME(dist_cutoff, error_tol, order, ϵr, excluded_pairs, α, mesh_dims,
                grid_indices, grid_fractions, bsplines_θ, bsplines_dθ,
-               charge_grid, charge_grids_threads, bsplines_moduli)
+               charge_grid, charge_grids_threads, bsplines_moduli, fft_plan, bfft_plan)
 end
 
 function pme_params(side_length, α, error_tol::T) where T
@@ -544,10 +548,10 @@ function ewald_pe_forces(sys::System{3, AT}, inter::PME{T};
     update_bsplines!(inter.bsplines_θ, inter.bsplines_dθ, inter.grid_fractions, order, n_threads)
     spread_charge!(inter.charge_grid, inter.charge_grids_threads, inter.grid_indices,
                    inter.bsplines_θ, mesh_dims, order, atoms, n_threads)
-    fft!(inter.charge_grid)
+    inter.fft_plan * inter.charge_grid
     reciprocal_space_E = recip_conv!(inter.charge_grid, inter.bsplines_moduli, recip_box, ϵr,
                     α, mesh_dims, boundary, energy_units, n_threads)
-    bfft!(inter.charge_grid)
+    inter.bfft_plan * inter.charge_grid
     interpolate_force!(Fs, inter.charge_grid, inter.grid_indices, inter.bsplines_θ,
                        inter.bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
                        n_threads)
