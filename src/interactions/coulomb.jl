@@ -282,10 +282,6 @@ end
                        special=false,
                        args...)
     r2 = sum(abs2, dr)
-    if r2 > (inter.dist_cutoff ^ 2)
-        return ustrip.(zero(dr)) * force_units
-    end
-
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = √r2
@@ -301,9 +297,9 @@ end
     f = (ke * qi * qj) * (inv(r) - 2 * krf * r2) * inv(r2)
 
     if special
-        return f * dr * inter.weight_special
+        return f * dr * inter.weight_special * (r <= inter.dist_cutoff)
     else
-        return f * dr
+        return f * dr * (r <= inter.dist_cutoff)
     end
 end
 
@@ -315,10 +311,6 @@ end
                                   special=false,
                                   args...)
     r2 = sum(abs2, dr)
-    if r2 > (inter.dist_cutoff ^ 2)
-        return ustrip(zero(dr[1])) * energy_units
-    end
-
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     r = √r2
@@ -336,9 +328,9 @@ end
     pe = (ke * qi * qj) * (inv(r) + krf * r2 - crf)
 
     if special
-        return pe * inter.weight_special
+        return pe * inter.weight_special * (r <= inter.dist_cutoff)
     else
-        return pe
+        return pe * (r <= inter.dist_cutoff)
     end
 end
 
@@ -414,10 +406,6 @@ end
                        special=false,
                        args...) where T
     r2 = sum(abs2, dr)
-    if r2 > (inter.dist_cutoff ^ 2)
-        return ustrip.(zero(dr)) * force_units
-    end
-
     ke, α = inter.coulomb_const, inter.α
     qi, qj = atom_i.charge, atom_j.charge
     r = √r2
@@ -427,9 +415,9 @@ end
     dE_dr = ke * qi * qj * inv_r^3 * (erfc_αr + 2 * αr * exp(-αr^2) / sqrt(T(π)))
     F = dE_dr * dr
     if special
-        return F * inter.weight_special
+        return F * inter.weight_special * (r <= inter.dist_cutoff)
     else
-        return F
+        return F * (r <= inter.dist_cutoff)
     end
 end
 
@@ -441,10 +429,6 @@ end
                                   special=false,
                                   args...)
     r2 = sum(abs2, dr)
-    if r2 > (inter.dist_cutoff ^ 2)
-        return ustrip(zero(dr[1])) * energy_units
-    end
-
     ke, α = inter.coulomb_const, inter.α
     qi, qj = atom_i.charge, atom_j.charge
     r = √r2
@@ -452,9 +436,9 @@ end
     αr = α * r
     erfc_αr = calc_erfc(αr, inter.approximate_erfc)
     if special
-        return ke * qi * qj * erfc_αr * inv_r * inter.weight_special
+        return ke * qi * qj * erfc_αr * inv_r * inter.weight_special * (r <= inter.dist_cutoff)
     else
-        return ke * qi * qj * erfc_αr * inv_r
+        return ke * qi * qj * erfc_αr * inv_r * (r <= inter.dist_cutoff)
     end
 end
 
