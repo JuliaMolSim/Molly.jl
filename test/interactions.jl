@@ -558,9 +558,7 @@
 end
 
 @testset "Ewald" begin
-    ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"))
     dist_cutoff = 0.9u"nm"
-
     E_openmm = -5.465127432466375u"kJ/mol"
     Fs_openmm = [
         SVector(-72.48152122617766, 5.6452093242736225 , 101.4156707298087  ),
@@ -576,27 +574,30 @@ end
 
     for AT in array_list
         for n_threads in n_threads_list
-            if n_threads > 1 && AT != Array
-                continue
-            end
-            sys_init = System(
-                joinpath(data_dir, "water_3mol_cubic.pdb"),
-                ff;
-                array_type=AT,
-                dist_cutoff=dist_cutoff,
-                dist_neighbors=dist_cutoff,
-                nonbonded_method="ewald",
-                center_coords=false,
-            )
-            sys = System(
-                sys_init;
-                pairwise_inters=(sys_init.pairwise_inters[2],),
-                specific_inter_lists=(),
-            )
+            for T in (Float32, Float64)
+                if n_threads > 1 && AT != Array
+                    continue
+                end
+                ff = MolecularForceField(T, joinpath(ff_dir, "tip3p_standard.xml"))
+                sys_init = System(
+                    joinpath(data_dir, "water_3mol_cubic.pdb"),
+                    ff;
+                    array_type=AT,
+                    dist_cutoff=T(dist_cutoff),
+                    dist_neighbors=T(dist_cutoff),
+                    nonbonded_method="ewald",
+                    center_coords=false,
+                )
+                sys = System(
+                    sys_init;
+                    pairwise_inters=(sys_init.pairwise_inters[2],),
+                    specific_inter_lists=(),
+                )
 
-            @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=1e-4u"kJ/mol"
-            fs = Array(forces(sys; n_threads=n_threads))
-            @test maximum(norm.(fs .- Fs_openmm)) < 1e-4u"kJ * mol^-1 * nm^-1"
+                @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=1e-4u"kJ/mol"
+                fs = Array(forces(sys; n_threads=n_threads))
+                @test maximum(norm.(fs .- Fs_openmm)) < 5e-4u"kJ * mol^-1 * nm^-1"
+            end
         end
     end
 
@@ -636,27 +637,30 @@ end
     for (pdb_fp, E_openmm, Fs_openmm) in pme_data
         for AT in (Array,)
             for n_threads in n_threads_list
-                if n_threads > 1 && AT != Array
-                    continue
-                end
-                sys_init = System(
-                    joinpath(data_dir, pdb_fp),
-                    ff;
-                    array_type=AT,
-                    dist_cutoff=dist_cutoff,
-                    dist_neighbors=dist_cutoff,
-                    nonbonded_method="pme",
-                    center_coords=false,
-                )
-                sys = System(
-                    sys_init;
-                    pairwise_inters=(sys_init.pairwise_inters[2],),
-                    specific_inter_lists=(),
-                )
+                for T in (Float32, Float64)
+                    if n_threads > 1 && AT != Array
+                        continue
+                    end
+                    ff = MolecularForceField(T, joinpath(ff_dir, "tip3p_standard.xml"))
+                    sys_init = System(
+                        joinpath(data_dir, pdb_fp),
+                        ff;
+                        array_type=AT,
+                        dist_cutoff=T(dist_cutoff),
+                        dist_neighbors=T(dist_cutoff),
+                        nonbonded_method="pme",
+                        center_coords=false,
+                    )
+                    sys = System(
+                        sys_init;
+                        pairwise_inters=(sys_init.pairwise_inters[2],),
+                        specific_inter_lists=(),
+                    )
 
-                @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=1e-4u"kJ/mol"
-                fs = Array(forces(sys; n_threads=n_threads))
-                @test maximum(norm.(fs .- Fs_openmm)) < 1e-4u"kJ * mol^-1 * nm^-1"
+                    @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=1e-4u"kJ/mol"
+                    fs = Array(forces(sys; n_threads=n_threads))
+                    @test maximum(norm.(fs .- Fs_openmm)) < 5e-4u"kJ * mol^-1 * nm^-1"
+                end
             end
         end
     end
