@@ -225,7 +225,7 @@ function ewald_pe_forces(sys::System{3, AT}, inter::Ewald{T};
 end
 
 """
-    PME(boundary, n_atoms; dist_cutoff, error_tol=0.0005, order=5,
+    PME(dist_cutoff, boundary, n_atoms; error_tol=0.0005, order=5,
         ϵr=1.0, eligible=nothing, special=nothing, array_type=Array,
         n_threads=Threads.nthreads())
 
@@ -244,6 +244,10 @@ are eligible.
 excluded from long range calculation.
 `array_type` should match the array type of the system.
 `n_threads` is used to pre-allocate memory on CPU.
+
+This implementation is based on the implementation in OpenMM, which
+is based on the smooth PME algorithm from
+[Essmann et al. 1995](https://doi.org/10.1063/1.470117).
 
 Only compatible with 3D systems.
 """
@@ -268,7 +272,7 @@ struct PME{T, D, A, I, M, C, CT, BM, F, B} <: AbstractEwald
     bfft_plan::B
 end
 
-function PME(boundary, n_atoms; dist_cutoff, error_tol::T=0.0005, order=5,
+function PME(dist_cutoff, boundary, n_atoms; error_tol::T=0.0005, order=5,
              ϵr=one(error_tol), eligible=nothing, special=nothing, array_type::Type{AT}=Array,
              n_threads::Integer=Threads.nthreads()) where {T, AT}
     α = inv(dist_cutoff) * sqrt(-log(2 * error_tol))

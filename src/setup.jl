@@ -885,9 +885,9 @@ function System(coord_file::AbstractString,
             )
         else
             ewald = PME(
+                T(dist_cutoff),
                 boundary_used,
                 n_atoms;
-                dist_cutoff=T(dist_cutoff),
                 error_tol=T(ewald_error_tol),
                 eligible=eligible,
                 special=special,
@@ -1364,12 +1364,13 @@ function System(T::Type,
             )
         else
             ewald = PME(
+                T(dist_cutoff),
                 boundary_used,
                 n_atoms;
-                dist_cutoff=T(dist_cutoff),
                 error_tol=T(ewald_error_tol),
                 eligible=eligible,
                 special=special,
+                array_type=AT,
             )
         end
         general_inters = (ewald,)
