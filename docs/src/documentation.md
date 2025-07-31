@@ -1103,6 +1103,7 @@ The available loggers are:
 - [`GeneralObservableLogger`](@ref)
 - [`TemperatureLogger`](@ref)
 - [`CoordinatesLogger`](@ref)
+- [`DisplacementLogger`](@ref)
 - [`VelocitiesLogger`](@ref)
 - [`TotalEnergyLogger`](@ref)
 - [`KineticEnergyLogger`](@ref)

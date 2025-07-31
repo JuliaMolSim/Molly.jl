@@ -23,7 +23,8 @@ export
     AutoCorrelationLogger,
     AverageObservableLogger,
     ReplicaExchangeLogger,
-    MonteCarloLogger
+    MonteCarloLogger,
+    DisplacementsLogger
 
 """
     apply_loggers!(system, neighbors=nothing, step_n=0, run_loggers=true;
@@ -299,6 +300,7 @@ end
 function virial_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
     return virial(sys, neighbors, step_n; n_threads=n_threads)
 end
+
 
 """
     VirialLogger(n_steps)
@@ -956,3 +958,54 @@ function log_property!(mcl::MonteCarloLogger{T},
     push!(mcl.state_changed, success)
     push!(mcl.energy_rates, energy_rate)
 end
+
+
+"""
+    DisplacementsLogger(n_steps, r0; n_update::Integer=1, dims::Integer=3)
+
+Log the displacements of atoms in a system throughout a simulation. Displacements are
+updated every `n_update` steps and saved every `n_steps` steps. `r0` are the
+intitial refernce positions and should match the coords type in your `System` object.
+
+The logger assumes a particle does not cross 2 periodic boxes in `n_update` steps. 
+By default `n_update` is set to one to mitigate this assumption, but it can be 
+set to a higher value to reduce cost. `n_steps` must be a multiple of `n_update`. 
+"""
+mutable struct DisplacementsLogger{A, B}
+    displacements::Vector{A}
+    reference::Vector{B}
+    last_displacements::Vector{B}
+    n_steps::Int
+    n_update::Int
+end
+
+
+function DisplacementsLogger(n_steps::Integer, r0;  n_update::Integer = 1, dims::Integer = 3)
+    T = eltype(first(r0))
+    B = SArray{Tuple{dims}, T, 1, dims}
+    A = Array{B, 1}
+    if n_steps % n_update != 0
+        throw(ArgumentError("DisplacementsLogger: n_steps ($n_steps) must be a multiple n_update ($(n_update))"))
+    end
+    return DisplacementsLogger{A, B}(A[], copy(r0), zero(r0), n_steps, n_update)
+end
+
+Base.values(dl::DisplacementsLogger) = dl.displacements
+
+function log_property!(dl::DisplacementsLogger, s::System, neighbors=nothing,
+                        step_n::Integer=0; kwargs...)
+                        
+    if (step_n % dl.n_update) == 0
+        dl.last_displacements .+= vector.(dl.reference, s.coords, Ref(s.boundary))
+        dl.reference .= s.coords
+        if (step_n % dl.n_steps) == 0
+            push!(dl.displacements, copy(dl.last_displacements))
+        end
+    end
+end
+
+function Base.show(io::IO, dl::DisplacementsLogger)
+    print(io, "DisplacementsLogger with updating every ", dl.n_update, " steps, saving every ",
+            dl.n_steps, " steps with ", length(dl.displacements), " displacements in storage.")
+end
+
