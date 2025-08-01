@@ -635,7 +635,7 @@ end
     )
 
     for (pdb_fp, E_openmm, Fs_openmm) in pme_data
-        for AT in (Array,)
+        for AT in array_list
             for n_threads in n_threads_list
                 for T in (Float64, Float32)
                     if n_threads > 1 && AT != Array
