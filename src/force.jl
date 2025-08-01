@@ -169,14 +169,11 @@ end
 
 function forces_nounits!(fs_nounits, sys::System, neighbors, fs_chunks=nothing,
                          step_n::Integer=0; n_threads::Integer=Threads.nthreads())
-    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
-    pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
-    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
-    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
-    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
-    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
-
+    
     if length(sys.pairwise_inters) > 0
+        pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
+        pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
+
         if n_threads > 1
             pairwise_forces_threads!(fs_nounits, fs_chunks, sys.atoms, sys.coords, sys.velocities,
                                      sys.boundary, neighbors, sys.force_units, length(sys),
@@ -191,6 +188,11 @@ function forces_nounits!(fs_nounits, sys::System, neighbors, fs_chunks=nothing,
     end
 
     if length(sys.specific_inter_lists) > 0
+        sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
+        sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
+        sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
+        sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
+
         specific_forces!(fs_nounits, sys.atoms, sys.coords, sys.velocities, sys.boundary,
                          sys.force_units, sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, step_n)
     end

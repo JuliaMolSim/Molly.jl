@@ -26,13 +26,32 @@ export
 const DefaultFloat = Float64
 
 """
+Base type for all interaction types.
+"""
+abstract type Interaction end 
+
+"""
+Base type for all n-body interactions. `N` denotes the body order
+"""
+abstract type NBodyInteraction{N} <: Interaction end
+
+
+abstract type SpecificInteraction <: Interaction end
+abstract type GeneralInteraction <: Interaction end
+
+"""
+Type alias for pairwise interactions
+"""
+const PairwiseInteraction = NBodyInteraction{2}
+
+"""
     InteractionList1Atoms(is, inters)
     InteractionList1Atoms(is, inters, types)
     InteractionList1Atoms(inter_type)
 
 A list of specific interactions that involve one atom such as position restraints.
 """
-struct InteractionList1Atoms{I, T}
+struct InteractionList1Atoms{I, T} <: SpecificInteraction
     is::I
     inters::T
     types::Vector{String}
@@ -45,7 +64,7 @@ end
 
 A list of specific interactions that involve two atoms such as bond potentials.
 """
-struct InteractionList2Atoms{I, T}
+struct InteractionList2Atoms{I, T} <: SpecificInteraction
     is::I
     js::I
     inters::T
@@ -59,7 +78,7 @@ end
 
 A list of specific interactions that involve three atoms such as bond angle potentials.
 """
-struct InteractionList3Atoms{I, T}
+struct InteractionList3Atoms{I, T} <: SpecificInteraction
     is::I
     js::I
     ks::I
@@ -74,7 +93,7 @@ end
 
 A list of specific interactions that involve four atoms such as torsion potentials.
 """
-struct InteractionList4Atoms{I, T}
+struct InteractionList4Atoms{I, T} <: SpecificInteraction
     is::I
     js::I
     ks::I
@@ -608,6 +627,55 @@ function System(;
                     specific_inter_lists, general_inters, constraints, neighbor_finder, loggers,
                     df, force_units, energy_units, k_converted, atom_masses, data)
 end
+
+
+"""
+    System(sys; <keyword arguments>)
+
+Convenience constructor for `System` that takes all interactions in one tuple.
+These are passed through the `interactions` kwarg.
+"""
+function System(;
+                atoms,
+                coords,
+                boundary,
+                velocities=nothing,
+                atoms_data=[],
+                topology=nothing,
+                interactions=(),
+                constraints=(),
+                neighbor_finder=NoNeighborFinder(),
+                loggers=(),
+                force_units=u"kJ * mol^-1 * nm^-1",
+                energy_units=u"kJ * mol^-1",
+                k=default_k(energy_units),
+                data=nothing)
+
+    general_inters = filter(i -> i isa GeneralInteraction, interactions)
+    pairwise_inters = filter(i -> i isa PairwiseInteraction, interactions)
+    specific_inters = filter(i -> i isa SpecificInteraction, interactions)
+
+    return System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        atoms_data=atoms_data,
+        topology=topology,
+        pairwise_inters=pairwise_inters,
+        specific_inter_lists=specific_inters,
+        general_inters=general_inters,
+        constraints=constraints,
+        neighbor_finder=neighbor_finder,
+        loggers=loggers,
+        force_units=force_units,
+        energy_units=energy_units,
+        k=k,
+        data=data,
+    )
+
+end
+
 
 """
     System(sys; <keyword arguments>)

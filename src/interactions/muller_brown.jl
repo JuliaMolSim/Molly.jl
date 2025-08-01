@@ -16,7 +16,7 @@ It is often used for testing algorithms that find transition states or explore
 minimum energy pathways.
 There are 3 minima and 2 saddle points with the default parameters.
 """
-struct MullerBrown{D, T, L, F, E}
+struct MullerBrown{D, T, L, F, E} <: GeneralInteraction
     A::D  # Units of energy
     a::T  # Units of 1/L^2
     b::T  # Units of 1/L^2

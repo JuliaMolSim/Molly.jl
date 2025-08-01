@@ -13,7 +13,7 @@ hydrophobic solvent accessible surface area (SA) term.
 
 Custom GBSA methods should sub-type this abstract type.
 """
-abstract type AbstractGBSA end
+abstract type AbstractGBSA <: GeneralInteraction end
 
 # Default solvent dielectric is 78.5 for consistency with AMBER
 # Elsewhere it is 78.3
