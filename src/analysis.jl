@@ -45,8 +45,10 @@ function rmsd(coords_1::AbstractArray{SVector{D, T}},
     n_atoms = length(coords_1)
     trans_1 = mean(coords_1)
     trans_2 = mean(coords_2)
-    p = Array(reshape(reinterpret(T, coords_1), D, n_atoms)) .- repeat(reinterpret(T, trans_1), 1, n_atoms)
-    q = Array(reshape(reinterpret(T, coords_2), D, n_atoms)) .- repeat(reinterpret(T, trans_2), 1, n_atoms)
+    p = from_device(reshape(reinterpret(T, coords_1), D, n_atoms)) .-
+                                repeat(reinterpret(T, trans_1), 1, n_atoms)
+    q = from_device(reshape(reinterpret(T, coords_2), D, n_atoms)) .-
+                                repeat(reinterpret(T, trans_2), 1, n_atoms)
     cov = p * transpose(q)
     svd_res = svd(ustrip.(cov))
     Ut = transpose(svd_res.U)

@@ -257,7 +257,7 @@ is_carboxylate_O(at_data) = at_data.atom_type == "O2"
 
 function atoms_bonded_to_N(atoms_data, bonds)
     bonded_to_N = falses(length(atoms_data))
-    for (i, j) in zip(Array(bonds.is), Array(bonds.js))
+    for (i, j) in zip(from_device(bonds.is), from_device(bonds.js))
         if atoms_data[i].element == "N"
             bonded_to_N[j] = true
         end
@@ -411,17 +411,10 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E}},
         factor_solvent = zero(T(coulomb_const_units))
     end
 
-    if isa(atoms, AbstractGPUArray)
-        AT = array_type(atoms)
-        or = AT(offset_radii)
-        sor = AT(scaled_offset_radii)
-        is, js = AT(inds_i), AT(inds_j)
-    else
-        or = offset_radii
-        sor = scaled_offset_radii
-        is, js = inds_i, inds_j
-    end
-
+    AT = array_type(atoms)
+    or = to_device(offset_radii, AT)
+    sor = to_device(scaled_offset_radii, AT)
+    is, js = to_device(inds_i, AT), to_device(inds_j, AT)
     oris = @view or[is]
     orjs = @view or[js]
     srjs = @view sor[js]
@@ -564,21 +557,12 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E}},
         factor_solvent = zero(T(coulomb_const_units))
     end
 
-    if isa(atoms, AbstractGPUArray)
-        AT = array_type(atoms)
-        or = AT(offset_radii)
-        sor = AT(scaled_offset_radii)
-        is, js = AT(inds_i), AT(inds_j)
-        d0s, m0s = AT(table_d0), AT(table_m0)
-        αs, βs, γs = AT(αs_cpu), AT(βs_cpu), AT(γs_cpu)
-    else
-        or = offset_radii
-        sor = scaled_offset_radii
-        is, js = inds_i, inds_j
-        d0s, m0s = table_d0, table_m0
-        αs, βs, γs = αs_cpu, βs_cpu, γs_cpu
-    end
-
+    AT = array_type(atoms)
+    or = to_device(offset_radii, AT)
+    sor = to_device(scaled_offset_radii, AT)
+    is, js = to_device(inds_i, AT), to_device(inds_j, AT)
+    d0s, m0s = to_device(table_d0, AT), to_device(table_m0, AT)
+    αs, βs, γs = to_device(αs_cpu, AT), to_device(βs_cpu, AT), to_device(γs_cpu, AT)
     oris = @view or[is]
     orjs = @view or[js]
     srjs = @view sor[js]

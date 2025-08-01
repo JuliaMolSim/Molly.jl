@@ -912,9 +912,9 @@ function System(coord_file::AbstractString,
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            AT(bonds.is),
-            AT(bonds.js),
-            AT([bonds.inters...]),
+            to_device(bonds.is, AT),
+            to_device(bonds.js, AT),
+            to_device([bonds.inters...], AT),
             bonds.types,
         ))
         topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
@@ -923,30 +923,30 @@ function System(coord_file::AbstractString,
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
-            AT(angles.is),
-            AT(angles.js),
-            AT(angles.ks),
-            AT([angles.inters...]),
+            to_device(angles.is, AT),
+            to_device(angles.js, AT),
+            to_device(angles.ks, AT),
+            to_device([angles.inters...], AT),
             angles.types,
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            AT(torsions.is),
-            AT(torsions.js),
-            AT(torsions.ks),
-            AT(torsions.ls),
-            AT(torsion_inters_pad),
+            to_device(torsions.is, AT),
+            to_device(torsions.js, AT),
+            to_device(torsions.ks, AT),
+            to_device(torsions.ls, AT),
+            to_device(torsion_inters_pad, AT),
             torsions.types,
         ))
     end
     if length(impropers.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            AT(impropers.is),
-            AT(impropers.js),
-            AT(impropers.ks),
-            AT(impropers.ls),
-            AT(improper_inters_pad),
+            to_device(impropers.is, AT),
+            to_device(impropers.js, AT),
+            to_device(impropers.ks, AT),
+            to_device(impropers.ls, AT),
+            to_device(improper_inters_pad, AT),
             impropers.types,
         ))
     end
@@ -967,16 +967,16 @@ function System(coord_file::AbstractString,
         neighbor_finder = NoNeighborFinder()
     elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
-            eligible=AT(eligible),
+            eligible=to_device(eligible, AT),
             dist_cutoff=T(dist_cutoff), # Neighbors are computed each step so no buffer is needed
-            special=AT(special),
+            special=to_device(special, AT),
             n_steps_reorder=10,
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))
         neighbor_finder = DistanceNeighborFinder(
-            eligible=AT(eligible),
-            special=AT(special),
+            eligible=to_device(eligible, AT),
+            special=to_device(special, AT),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
@@ -991,15 +991,15 @@ function System(coord_file::AbstractString,
         )
     else
         neighbor_finder = neighbor_finder_type(
-            eligible=AT(eligible),
-            special=AT(special),
+            eligible=to_device(eligible, AT),
+            special=to_device(special, AT),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
     end
 
-    atoms = AT([atoms_abst...])
-    coords_dev = AT(coords)
+    atoms = to_device([atoms_abst...], AT)
+    coords_dev = to_device(coords, AT)
 
     if isnothing(velocities)
         if units
@@ -1383,9 +1383,9 @@ function System(T::Type,
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            AT(bonds.is),
-            AT(bonds.js),
-            AT([bonds.inters...]),
+            to_device(bonds.is, AT),
+            to_device(bonds.js, AT),
+            to_device([bonds.inters...], AT),
             bonds.types,
         ))
         topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
@@ -1394,20 +1394,20 @@ function System(T::Type,
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
-            AT(angles.is),
-            AT(angles.js),
-            AT(angles.ks),
-            AT([angles.inters...]),
+            to_device(angles.is, AT),
+            to_device(angles.js, AT),
+            to_device(angles.ks, AT),
+            to_device([angles.inters...], AT),
             angles.types,
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            AT(torsions.is),
-            AT(torsions.js),
-            AT(torsions.ks),
-            AT(torsions.ls),
-            AT([torsions.inters...]),
+            to_device(torsions.is, AT),
+            to_device(torsions.js, AT),
+            to_device(torsions.ks, AT),
+            to_device(torsions.ls, AT),
+            to_device([torsions.inters...], AT),
             torsions.types,
         ))
     end
@@ -1417,16 +1417,16 @@ function System(T::Type,
         neighbor_finder = NoNeighborFinder()
     elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
-            eligible=AT(eligible),
+            eligible=to_device(eligible, AT),
             dist_cutoff=T(dist_cutoff), # Neighbors are computed each step so no buffer is needed
-            special=AT(special),
+            special=to_device(special, AT),
             n_steps_reorder=10,
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))
         neighbor_finder = DistanceNeighborFinder(
-            eligible=AT(eligible),
-            special=AT(special),
+            eligible=to_device(eligible, AT),
+            special=to_device(special, AT),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
@@ -1441,15 +1441,15 @@ function System(T::Type,
         )
     else
         neighbor_finder = neighbor_finder_type(
-            eligible=AT(eligible),
-            special=AT(special),
+            eligible=to_device(eligible, AT),
+            special=to_device(special, AT),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
     end
 
-    atoms = AT([atoms_abst...])
-    coords_dev = AT(coords)
+    atoms = to_device([atoms_abst...], AT)
+    coords_dev = to_device(coords, AT)
 
     if isnothing(velocities)
         if units
@@ -1529,15 +1529,15 @@ function add_position_restraints(sys::System{<:Any, AT},
     types = String[]
     inters = HarmonicPositionRestraint[]
     atoms_data = length(sys.atoms_data) > 0 ? sys.atoms_data : fill(nothing, length(sys))
-    for (i, (at, at_data, k_res, x0)) in enumerate(zip(Array(sys.atoms), atoms_data, k_array,
-                                                       Array(restrain_coords)))
+    for (i, (at, at_data, k_res, x0)) in enumerate(zip(from_device(sys.atoms), atoms_data, k_array,
+                                                       from_device(restrain_coords)))
         if atom_selector(at, at_data)
             push!(is, i)
             push!(types, "")
             push!(inters, HarmonicPositionRestraint(k_res, x0))
         end
     end
-    restraints = InteractionList1Atoms(AT(is), AT([inters...]), types)
+    restraints = InteractionList1Atoms(to_device(is, AT), to_device([inters...], AT), types)
     sis = (sys.specific_inter_lists..., restraints)
     return System(
         atoms=deepcopy(sys.atoms),

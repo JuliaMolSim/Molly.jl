@@ -4,6 +4,7 @@
 module MollyCUDAExt
 
 using Molly
+using Molly: from_device, sum_pairwise_forces, sum_pairwise_potentials
 using CUDA
 using Atomix
 using KernelAbstractions
@@ -67,7 +68,7 @@ function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inte
     if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
         morton_bits = 4
         w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
-        morton_seq_cpu = sorted_morton_seq(Array(sys.coords), w, morton_bits)
+        morton_seq_cpu = sorted_morton_seq(from_device(sys.coords), w, morton_bits)
         copyto!(buffers.morton_seq, morton_seq_cpu)
         sys.neighbor_finder.initialized = true
         CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
@@ -95,7 +96,7 @@ function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, 
     r_cut = sys.neighbor_finder.dist_cutoff
     morton_bits = 4
     w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
-    morton_seq_cpu = sorted_morton_seq(Array(sys.coords), w, morton_bits)
+    morton_seq_cpu = sorted_morton_seq(from_device(sys.coords), w, morton_bits)
     copyto!(buffers.morton_seq, morton_seq_cpu)
     CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
             buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
@@ -414,7 +415,7 @@ function force_kernel!(
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
-                f = condition ? Molly.sum_pairwise_forces(
+                f = condition ? sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j_shuffle,
                     Val(force_units),
@@ -479,7 +480,7 @@ function force_kernel!(
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
-                f = condition ? Molly.sum_pairwise_forces(
+                f = condition ? sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(force_units),
@@ -529,7 +530,7 @@ function force_kernel!(
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
             condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
-            f = condition ? Molly.sum_pairwise_forces(
+            f = condition ? sum_pairwise_forces(
                 inters_tuple,
                 atoms_i, atoms_j,
                 Val(force_units),
@@ -576,7 +577,7 @@ function force_kernel!(
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
                 
-                f = condition ? Molly.sum_pairwise_forces(
+                f = condition ? sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(force_units),
@@ -692,7 +693,7 @@ function energy_kernel!(
                 r2 = sum(abs2, dr)
                 condition = eligible[laneid(), shuffle_idx] && Bool_excl && r2 <= r_cut * r_cut
 
-                pe = condition ? Molly.sum_pairwise_potentials(
+                pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j_shuffle,
                     Val(energy_units),
@@ -741,7 +742,7 @@ function energy_kernel!(
                 r2 = sum(abs2, dr)
                 condition = eligible[laneid(), m] && Bool_excl && r2 <= r_cut * r_cut
 
-                pe = condition ? Molly.sum_pairwise_potentials(
+                pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(energy_units),
@@ -775,7 +776,7 @@ function energy_kernel!(
             r2 = sum(abs2, dr)
             condition = eligible[laneid(), m] && r2 <= r_cut * r_cut
 
-            pe = condition ? Molly.sum_pairwise_potentials(
+            pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(energy_units),
@@ -810,7 +811,7 @@ function energy_kernel!(
                 r2 = sum(abs2, dr)
                 condition = eligible[laneid(), m] && r2 <= r_cut * r_cut
                 
-                pe = condition ? Molly.sum_pairwise_potentials(
+                pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(energy_units),
@@ -862,8 +863,8 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
                 j = j_0_tile + del_j
                 if i != j
                     atom_j, coord_j, vel_j = atoms[j], coords[j], velocities[j]
-                    f = Molly.sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i,
-                                                  coord_j, boundary, vel_i, vel_j, step_n)
+                    f = sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i,
+                                            coord_j, boundary, vel_i, vel_j, step_n)
                     for dim in 1:D
                         forces_shmem[dim, tidx] += -ustrip(f[dim])
                     end
@@ -887,7 +888,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
         @inbounds for _ in 1:tilesteps
             sync_warp()
             atom_j = atoms[j]
-            f = Molly.sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
+            f = sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
                                     boundary, vel_i, vel_j, step_n)
             for dim in 1:D
                 forces_shmem[dim, tidx] += -ustrip(f[dim])

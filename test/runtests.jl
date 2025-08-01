@@ -1,4 +1,5 @@
 using Molly
+using Molly: from_device, to_device
 using AMDGPU
 using Aqua
 import AtomsBase

@@ -71,14 +71,14 @@ function apply_coupling!(sys::System, thermostat::AndersenThermostat, sim,
     return false
 end
 
-function apply_coupling!(sys::System{D, AT, T}, thermostat::AndersenThermostat, sim,
+function apply_coupling!(sys::System{<:Any, AT, T}, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {D, AT <: AbstractGPUArray, T}
+                         rng=Random.default_rng()) where {AT <: AbstractGPUArray, T}
     atoms_to_bump = T.(rand(rng, length(sys)) .< (sim.dt / thermostat.coupling_const))
     atoms_to_leave = one(T) .- atoms_to_bump
-    atoms_to_bump_dev = AT(atoms_to_bump)
-    atoms_to_leave_dev = AT(atoms_to_leave)
+    atoms_to_bump_dev = to_device(atoms_to_bump, AT)
+    atoms_to_leave_dev = to_device(atoms_to_leave, AT)
     vs = random_velocities(sys, thermostat.temperature; rng=rng)
     sys.velocities .= sys.velocities .* atoms_to_leave_dev .+ vs .* atoms_to_bump_dev
     return false

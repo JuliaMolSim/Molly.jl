@@ -186,19 +186,19 @@
                                     DistanceNeighborFinder),
         )
         mcs = molecule_centers(sys.coords, sys.boundary, sys.topology)
-        @test isapprox(Array(mcs)[1], mean(sys.coords[1:1170]); atol=0.08u"nm")
+        @test isapprox(from_device(mcs)[1], mean(sys.coords[1:1170]); atol=0.08u"nm")
 
         # Mark all pairs as ineligible for pairwise interactions and check that the
         #   potential energy from the specific interactions does not change on scaling
         no_nbs = falses(length(sys), length(sys))
         if Molly.uses_gpu_neighbor_finder(AT)
             sys.neighbor_finder = GPUNeighborFinder(
-                eligible=AT(no_nbs),
+                eligible=to_device(no_nbs, AT),
                 dist_cutoff=1.0u"nm",
             )
         else
             sys.neighbor_finder = DistanceNeighborFinder(
-                eligible=AT(no_nbs),
+                eligible=to_device(no_nbs, AT),
                 dist_cutoff=1.0u"nm",
             )
         end
@@ -215,7 +215,7 @@
             scale_coords!(sys, inv(scale_factor))
             @test potential_energy(sys, find_neighbors(sys)) ≈ pe_start
         end
-        coords_diff = Array(sys.coords) .- Array(coords_start)
+        coords_diff = from_device(sys.coords) .- from_device(coords_start)
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 5e-4u"nm"
     end
 end
@@ -283,7 +283,7 @@ end
     neighbors = find_neighbors(sys)
 
     function sort_nbs(nbs_dev)
-        nbs = Array(nbs_dev)
+        nbs = from_device(nbs_dev)
         return sort(
             reorder_neighbors(nbs),
             lt=(t1, t2) -> t1[1] < t2[1] || (t1[1] == t2[1] && t1[2] < t2[2]),
@@ -351,7 +351,7 @@ end
     coords_2 = SVector{3, Float64}.(eachcol(cm_2)) / 10 * u"nm"
     @test rmsd(coords_1, coords_2) ≈ 2.54859467758795u"Å"
     for AT in array_list[2:end]
-        @test rmsd(AT(coords_1), AT(coords_2)) ≈ 2.54859467758795u"Å"
+        @test rmsd(to_device(coords_1, AT), to_device(coords_2, AT)) ≈ 2.54859467758795u"Å"
     end
 
     bb_atoms = BioStructures.collectatoms(struc[1], BioStructures.backboneselector)
