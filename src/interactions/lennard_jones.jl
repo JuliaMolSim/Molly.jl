@@ -20,7 +20,7 @@ and the force on each atom by
 \end{aligned}
 ```
 """
-@kwdef struct LennardJones{C, H, S, E, W}
+@kwdef struct LennardJones{C, H, S, E, W, NF} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
     shortcut::H = lj_zero_shortcut
@@ -154,7 +154,7 @@ r_{ij}^{\text{sc}} = \left(r_{ij}^6 + \alpha \sigma_{ij}^6 \lambda^p \right)^{1/
 ```
 If ``\alpha`` or ``\lambda`` are zero this gives the standard [`LennardJones`](@ref) potential.
 """
-@kwdef struct LennardJonesSoftCore{C, A, L, P, H, S, E, W, R}
+@kwdef struct LennardJonesSoftCore{C, A, L, P, H, S, E, W, R} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 1
     λ::L = 0
@@ -300,7 +300,7 @@ where
 
 If ``\lambda`` is one this gives the standard [`LennardJones`](@ref) potential.
 """
-@kwdef struct AshbaughHatch{C, H, S, E, L, W}
+@kwdef struct AshbaughHatch{C, H, S, E, L, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
     shortcut::H = lj_zero_shortcut
