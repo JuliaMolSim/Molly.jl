@@ -113,7 +113,7 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, ::Type{AT}) where AT
         neighbor_finder=neighbor_finder,
     )
 
-    n_threads = parallel ? Threads.nthreads() : 1
+    n_threads = (parallel ? Threads.nthreads() : 1)
     simulate!(sys, simulator, n_steps; n_threads=n_threads)
     return sys.coords
 end

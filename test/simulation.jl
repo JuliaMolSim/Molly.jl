@@ -4,26 +4,28 @@
         n_steps = 20_000
         temp = 100.0u"K"
         boundary = RectangularBoundary(2.0u"nm")
+        atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+                 for i in 1:n_atoms]
         simulator = VelocityVerlet(dt=0.001u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
         gen_temp_wrapper(s, args...; kwargs...) = temperature(s)
 
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
-                eligible=eligible=AT(trues(n_atoms, n_atoms)),
+                eligible=eligible=to_device(trues(n_atoms, n_atoms), AT),
                 n_steps_reorder=10,
                 dist_cutoff=2.0u"nm",
             )
         else
             neighbor_finder = DistanceNeighborFinder(
-                eligible=AT(trues(n_atoms, n_atoms)),
+                eligible=to_device(trues(n_atoms, n_atoms), AT),
                 n_steps=10,
                 dist_cutoff=2.0u"nm",
             )
         end
 
-        s = System(
-            atoms=AT([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
-            coords=AT(place_atoms(n_atoms, boundary; min_dist=0.3u"nm")),
+        sys = System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(place_atoms(n_atoms, boundary; min_dist=0.3u"nm"), AT),
             boundary=boundary,
             pairwise_inters=(LennardJones(use_neighbors=true),),
             neighbor_finder=neighbor_finder,
@@ -36,32 +38,32 @@
             ),
         )
 
-        random_velocities!(s, temp)
+        random_velocities!(sys, temp)
 
-        @test masses(s) == AT(fill(10.0u"g/mol", n_atoms))
-        @test AtomsBase.cell_vectors(s) == (
+        @test masses(sys) == to_device(fill(10.0u"g/mol", n_atoms), AT)
+        @test AtomsBase.cell_vectors(sys) == (
             SVector(2.0, 0.0)u"nm",
             SVector(0.0, 2.0)u"nm",
         )
 
-        show(devnull, s)
+        show(devnull, sys)
 
-        @time simulate!(s, simulator, n_steps; n_threads=1)
+        @time simulate!(sys, simulator, n_steps; n_threads=1)
 
-        @test length(values(s.loggers.coords)) == 201
-        final_coords = last(values(s.loggers.coords))
+        @test length(values(sys.loggers.coords)) == 201
+        final_coords = last(values(sys.loggers.coords))
         @test all(all(c .> 0.0u"nm") for c in final_coords)
         @test all(all(c .< boundary) for c in final_coords)
         displacements(final_coords, boundary)
         distances(final_coords, boundary)
         rdf(final_coords, boundary)
 
-        show(devnull, s.loggers.gen_temp)
-        show(devnull, s.loggers.avg_temp)
-        t, σ = values(s.loggers.avg_temp)
-        @test values(s.loggers.avg_temp; std=false) == t
-        @test isapprox(t, mean(values(s.loggers.temp)); atol=3σ)
-        run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_mp4)
+        show(devnull, sys.loggers.gen_temp)
+        show(devnull, sys.loggers.avg_temp)
+        t, σ = values(sys.loggers.avg_temp)
+        @test values(sys.loggers.avg_temp; std=false) == t
+        @test isapprox(t, mean(values(sys.loggers.temp)); atol=3σ)
+        run_visualize_tests && visualize(sys.loggers.coords, boundary, temp_fp_mp4)
     end
 end
 
@@ -303,6 +305,8 @@ end
     n_steps = 20_000
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
+    atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+             for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     simulators = [
         Verlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps")),
@@ -314,29 +318,28 @@ end
     for AT in array_list
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
-                eligible=AT(trues(n_atoms, n_atoms)),
+                eligible=to_device(trues(n_atoms, n_atoms), AT),
                 n_steps_reorder=10,
                 dist_cutoff=2.0u"nm",
             )
         else
             neighbor_finder = DistanceNeighborFinder(
-                eligible=AT(trues(n_atoms, n_atoms)),
+                eligible=to_device(trues(n_atoms, n_atoms), AT),
                 n_steps=10,
                 dist_cutoff=2.0u"nm",
             )
         end
-        s = System(
-            atoms=AT([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
-                      for i in 1:n_atoms]),
-            coords=AT(coords),
+        sys = System(
+            atoms=to_device(atoms, AT),
+            coords=to_device(coords, AT),
             boundary=boundary,
             pairwise_inters=(LennardJones(use_neighbors=true),),
             neighbor_finder=neighbor_finder,
             loggers=(coords=CoordinatesLogger(100),),
         )
-        random_velocities!(s, temp)
+        random_velocities!(sys, temp)
         for simulator in simulators
-            @time simulate!(s, simulator, n_steps; n_threads=1)
+            @time simulate!(sys, simulator, n_steps; n_threads=1)
         end
     end
 end
@@ -346,6 +349,8 @@ end
     n_steps = 1000
     temp = 298.0u"K"
     boundary = CubicBoundary(4.0u"nm")
+    atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.1u"nm", ϵ=0.2u"kJ * mol^-1")
+             for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
     velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
     simulators = [
@@ -354,8 +359,8 @@ end
         StormerVerlet(dt=0.002u"ps"),
     ]
 
-    s = System(
-        atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.1u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
+    sys = System(
+        atoms=atoms,
         coords=coords,
         velocities=velocities,
         boundary=boundary,
@@ -375,8 +380,8 @@ end
     @test_throws ArgumentError DisplacementsLogger(100, coords; n_update = 17)
 
     if run_cuda_tests
-        s_gpu = System(
-            atoms=CuArray([Atom(mass=10.0u"g/mol", charge=0.0, σ=0.1u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]),
+        sys_gpu = System(
+            atoms=CuArray(atoms),
             coords=CuArray(coords),
             velocities=CuArray(velocities),
             boundary=boundary,
@@ -394,14 +399,15 @@ end
     end
 
     for simulator in simulators
-        @time simulate!(s, simulator, n_steps; n_threads=1)
-        @test sum(sum(first(values(s.loggers.disp)))) == 0.0u"nm"
+        @time simulate!(sys, simulator, n_steps; n_threads=1)
+        @test sum(sum(first(values(sys.loggers.disp)))) == 0.0u"nm"
         if run_cuda_tests
-            @time simulate!(s_gpu, simulator, n_steps; n_threads=1)
-            @test sum(first(values(s_gpu.loggers.disp))) == 0.0u"nm"
-            coord_diff = sum(sum(map(x -> abs.(x), s.coords .- Array(s_gpu.coords)))) / (3 * n_atoms)
-            E_diff = abs(potential_energy(s) - potential_energy(s_gpu))
-            @test coord_diff < 1e-4u"nm"
+            @time simulate!(sys_gpu, simulator, n_steps; n_threads=1)
+            @test sum(first(values(sys_gpu.loggers.disp))) == 0.0u"nm"
+            coord_diff = sys.coords .- from_device(sys_gpu.coords)
+            coord_diff_size = sum(sum(map(x -> abs.(x), coord_diff))) / (3 * n_atoms)
+            E_diff = abs(potential_energy(sys) - potential_energy(sys_gpu))
+            @test coord_diff_size < 1e-4u"nm"
             @test E_diff < 5e-4u"kJ * mol^-1"
         end
     end
@@ -532,15 +538,15 @@ end
         end
 
         if run_cuda_tests
-            neighbor_finder_gpu = GPUNeighborFinder(eligible=CuArray(trues(n_atoms, n_atoms)), n_steps_reorder=10,
-                                                        dist_cutoff=1.2u"nm")
+            neighbor_finder_gpu = GPUNeighborFinder(eligible=CuArray(trues(n_atoms, n_atoms)),
+                                                    n_steps_reorder=10, dist_cutoff=1.2u"nm")
         end
 
         atoms = [Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]  
         coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")                                             
         velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
 
-        s = System(
+        sys = System(
             atoms=copy(atoms),
             coords=copy(coords),
             boundary=boundary,
@@ -548,11 +554,11 @@ end
             pairwise_inters=(inter,),
             neighbor_finder=neighbor_finder,
         )
-        E0 = potential_energy(s)
-        @time simulate!(s, simulator, n_steps)
+        E0 = potential_energy(sys)
+        @time simulate!(sys, simulator, n_steps)
 
         if run_cuda_tests
-            s_gpu = System(
+            sys_gpu = System(
                 atoms=CuArray(atoms),
                 coords=CuArray(coords),
                 boundary=boundary,
@@ -560,12 +566,13 @@ end
                 pairwise_inters=(inter,),
                 neighbor_finder=neighbor_finder_gpu,
             )
-            E_diff_start = abs(E0 - potential_energy(s_gpu))
+            E_diff_start = abs(E0 - potential_energy(sys_gpu))
             @test E_diff_start < 5e-4u"kJ * mol^-1"
-            @time simulate!(s_gpu, simulator, n_steps)
-            coord_diff = sum(sum(map(x -> abs.(x), s.coords .- Array(s_gpu.coords)))) / (3 * n_atoms)
-            E_diff = abs(potential_energy(s) - potential_energy(s_gpu))
-            @test coord_diff < 5e-4u"nm"
+            @time simulate!(sys_gpu, simulator, n_steps)
+            coord_diff = sys.coords .- from_device(sys_gpu.coords)
+            coord_diff_size = sum(sum(map(x -> abs.(x), coord_diff))) / (3 * n_atoms)
+            E_diff = abs(potential_energy(sys) - potential_energy(sys_gpu))
+            @test coord_diff_size < 5e-4u"nm"
             @test E_diff < 5e-3u"kJ * mol^-1"
         end
     end
@@ -679,8 +686,8 @@ end
         sim = Langevin(dt=0.001u"ps", temperature=300.0u"K", friction=1.0u"ps^-1")
 
         sys = System(
-            atoms=AT(atoms),
-            coords=AT(copy(starting_coords)),
+            atoms=to_device(atoms, AT),
+            coords=to_device(copy(starting_coords), AT),
             boundary=boundary,
             atoms_data=atoms_data,
             pairwise_inters=(LennardJones(),),
@@ -694,7 +701,7 @@ end
 
         @time simulate!(sys_res, sim, n_steps)
 
-        dists = norm.(vector.(starting_coords, Array(sys_res.coords), (boundary,)))
+        dists = norm.(vector.(starting_coords, from_device(sys_res.coords), (boundary,)))
         @test maximum(dists[1:n_atoms_res]) < 0.1u"nm"
         @test median(dists[(n_atoms_res + 1):end]) > 0.2u"nm"
     end
@@ -1177,8 +1184,8 @@ end
             end
 
             sys = System(
-                atoms=AT(atoms),
-                coords=AT(copy(coords)),
+                atoms=to_device(atoms, AT),
+                coords=to_device(copy(coords), AT),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1241,8 +1248,8 @@ end
             end
 
             sys = System(
-                atoms=AT(atoms),
-                coords=AT(copy(coords)),
+                atoms=to_device(atoms, AT),
+                coords=to_device(copy(coords), AT),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1310,8 +1317,8 @@ end
             end
 
             sys = System(
-                atoms=AT(atoms),
-                coords=AT(copy(coords)),
+                atoms=to_device(atoms, AT),
+                coords=to_device(copy(coords), AT),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1426,32 +1433,33 @@ end
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
     function test_sim(nft, parallel::Bool, f32::Bool, ::Type{AT}) where AT
+        T = (f32 ? Float32 : Float64)
         n_atoms = 400
         n_steps = 200
-        atom_mass = f32 ? 10.0f0u"g/mol" : 10.0u"g/mol"
-        boundary = f32 ? CubicBoundary(6.0f0u"nm") : CubicBoundary(6.0u"nm")
-        simulator = VelocityVerlet(dt=f32 ? 0.02f0u"ps" : 0.02u"ps")
-        k = f32 ? 10_000.0f0u"kJ * mol^-1 * nm^-2" : 10_000.0u"kJ * mol^-1 * nm^-2"
-        r0 = f32 ? 0.2f0u"nm" : 0.2u"nm"
+        atom_mass = T(10.0)u"g/mol"
+        boundary = CubicBoundary(T(6.0)u"nm")
+        simulator = VelocityVerlet(dt=T(0.02)u"ps")
+        k = T(10_000.0)u"kJ * mol^-1 * nm^-2"
+        r0 = T(0.2)u"nm"
         bonds = [HarmonicBond(k=k, r0=r0) for i in 1:(n_atoms ÷ 2)]
         specific_inter_lists = (InteractionList2Atoms(
-            AT(Int32.(collect(1:2:n_atoms))),
-            AT(Int32.(collect(2:2:n_atoms))),
-            AT(bonds),
+            to_device(Int32.(collect(1:2:n_atoms)), AT),
+            to_device(Int32.(collect(2:2:n_atoms)), AT),
+            to_device(bonds, AT),
         ),)
-        cutoff = DistanceCutoff(f32 ? 1.0f0u"nm" : 1.0u"nm")
+        cutoff = DistanceCutoff(T(1.0)u"nm")
 
         if nft == GPUNeighborFinder
             neighbor_finder = GPUNeighborFinder(
-                eligible=AT(trues(n_atoms, n_atoms)),
+                eligible=to_device(trues(n_atoms, n_atoms), AT),
                 n_steps_reorder=10,
-                dist_cutoff=f32 ? 1.0f0u"nm" : 1.0u"nm",
+                dist_cutoff=T(1.0)u"nm",
             )
         elseif nft == DistanceNeighborFinder
             neighbor_finder = DistanceNeighborFinder(
-                eligible=AT(trues(n_atoms, n_atoms)),
+                eligible=to_device(trues(n_atoms, n_atoms), AT),
                 n_steps=10,
-                dist_cutoff=f32 ? 1.5f0u"nm" : 1.5u"nm",
+                dist_cutoff=T(1.5)u"nm",
             )
         else
             neighbor_finder = NoNeighborFinder()
@@ -1459,12 +1467,12 @@ end
         pairwise_inters = (LennardJones(use_neighbors=(nft != NoNeighborFinder), cutoff=cutoff),)
         show(devnull, neighbor_finder)
 
-        coords = AT(copy(f32 ? starting_coords_f32 : starting_coords))
-        velocities = AT(copy(f32 ? starting_velocities_f32 : starting_velocities))
-        atoms = AT([Atom(charge=f32 ? 0.0f0 : 0.0, mass=atom_mass, σ=f32 ? 0.2f0u"nm" : 0.2u"nm",
-                                ϵ=f32 ? 0.2f0u"kJ * mol^-1" : 0.2u"kJ * mol^-1") for i in 1:n_atoms])
+        coords = to_device(copy(f32 ? starting_coords_f32 : starting_coords), AT)
+        velocities = to_device(copy(f32 ? starting_velocities_f32 : starting_velocities), AT)
+        atoms = to_device([Atom(charge=zero(T), mass=atom_mass, σ=T(0.2)u"nm",
+                                ϵ=T(0.2)u"kJ * mol^-1") for i in 1:n_atoms], AT)
 
-        s = System(
+        sys = System(
             atoms=atoms,
             coords=coords,
             boundary=boundary,
@@ -1474,14 +1482,14 @@ end
             neighbor_finder=neighbor_finder,
         )
 
-        @test is_on_gpu(s) == (AT <: AbstractGPUArray)
-        @test float_type(s) == (f32 ? Float32 : Float64)
+        @test is_on_gpu(sys) == (AT <: AbstractGPUArray)
+        @test float_type(sys) == T
 
-        n_threads = parallel ? Threads.nthreads() : 1
-        E_start = potential_energy(s; n_threads=n_threads)
+        n_threads = (parallel ? Threads.nthreads() : 1)
+        E_start = potential_energy(sys; n_threads=n_threads)
 
-        simulate!(s, simulator, n_steps; n_threads=n_threads)
-        return s.coords, E_start
+        simulate!(sys, simulator, n_steps; n_threads=n_threads)
+        return sys.coords, E_start
     end
 
     runs = [
@@ -1517,11 +1525,12 @@ end
     # Check all simulations give the same result to within some error
     for (name, args) in runs
         final_coords, E_start = test_sim(args...)
-        final_coords_f64 = [Float64.(c) for c in Array(final_coords)]
-        coord_diff = sum(sum(map(x -> abs.(x), final_coords_f64 .- final_coords_ref))) / (3 * n_atoms)
+        final_coords_f64 = [Float64.(c) for c in from_device(final_coords)]
+        coord_diff = final_coords_f64 .- final_coords_ref
+        coord_diff_size = sum(sum(map(x -> abs.(x), coord_diff))) / (3 * n_atoms)
         E_diff = abs(Float64(E_start) - E_start_ref)
-        @info "$(rpad(name, 19)) - difference per coordinate $coord_diff - potential energy difference $E_diff"
-        @test coord_diff < 1e-4u"nm"
+        @info "$(rpad(name, 19)) - difference per coordinate $coord_diff_size - potential energy difference $E_diff"
+        @test coord_diff_size < 1e-4u"nm"
         @test E_diff < 5e-4u"kJ * mol^-1"
     end
 end

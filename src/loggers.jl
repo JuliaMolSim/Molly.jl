@@ -378,7 +378,7 @@ end
 
 function write_pdb_coords(output, sys, atom_inds_arg=Int[], excluded_res=())
     atom_inds = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
-    coords_cpu = Array(sys.coords)
+    coords_cpu = from_device(sys.coords)
     for i in atom_inds
         coord, atom_data = coords_cpu[i], sys.atoms_data[i]
         if unit(first(coord)) == NoUnits
@@ -418,7 +418,7 @@ function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, exclud
             throw(ArgumentError("structure writing requires all atom_inds values to " *
                                 "be valid indices in the system"))
         end
-        atoms_cpu = Array(sys.atoms)
+        atoms_cpu = from_device(sys.atoms)
         for si in atom_inds
             atom, atom_data = atoms_cpu[si], sys.atoms_data[si]
             at = Chemfiles.Atom(atom_data.atom_name)
@@ -448,7 +448,7 @@ function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, exclud
     end
 
     coords_cf = Chemfiles.positions(frame)
-    coords = Array(sys.coords)
+    coords = from_device(sys.coords)
     for (ci, si) in enumerate(atom_inds)
         c = coords[si]
         if unit(eltype(c)) == NoUnits
@@ -462,7 +462,7 @@ function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, exclud
     if write_velocities
         Chemfiles.add_velocities!(frame)
         velocities_cf = Chemfiles.velocities(frame)
-        velocities = Array(sys.velocities)
+        velocities = from_device(sys.velocities)
         for (ci, si) in enumerate(atom_inds)
             v = velocities[si]
             if unit(eltype(v)) == NoUnits

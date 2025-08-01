@@ -679,11 +679,11 @@ function random_velocities(sys::AtomsBase.AbstractSystem{2}, temp; rng=Random.de
 end
 
 function random_velocities(sys::System{3, AT}, temp; rng=Random.default_rng()) where AT <: AbstractGPUArray
-    return AT(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
+    return to_device(random_velocity_3D.(from_device(masses(sys)), temp, sys.k, rng), AT)
 end
 
 function random_velocities(sys::System{2, AT}, temp; rng=Random.default_rng()) where AT <: AbstractGPUArray
-    return AT(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
+    return to_device(random_velocity_2D.(from_device(masses(sys)), temp, sys.k, rng), AT)
 end
 
 """
@@ -758,8 +758,8 @@ end
 Remove the center of mass motion from a [`System`](@ref).
 """
 function remove_CM_motion!(sys)
-    masses_cpu = Array(masses(sys))
-    velocities_cpu = Array(sys.velocities)
+    masses_cpu = from_device(masses(sys))
+    velocities_cpu = from_device(sys.velocities)
     cm_momentum = zero(eltype(velocities_cpu)) .* zero(eltype(masses_cpu))
     total_mass = zero(eltype(masses_cpu))
     for i in eachindex(sys)
@@ -806,11 +806,13 @@ end
 function virial(sys::System{D, AT, T}, neighbors_dev, step_n, pairwise_inters_nonl,
                             pairwise_inters_nl) where {D, AT, T}
     if AT <: AbstractGPUArray
-        coords, velocities, atoms = Array(sys.coords), Array(sys.velocities), Array(sys.atoms)
+        coords     = from_device(sys.coords)
+        velocities = from_device(sys.velocities)
+        atoms      = from_device(sys.atoms)
         if isnothing(neighbors_dev)
             neighbors = neighbors_dev
         else
-            neighbors = NeighborList(neighbors_dev.n, Array(neighbors_dev.list))
+            neighbors = NeighborList(neighbors_dev.n, from_device(neighbors_dev.list))
         end
     else
         coords, velocities, atoms = sys.coords, sys.velocities, sys.atoms
@@ -941,7 +943,7 @@ end
 
 function molecule_centers(coords::AbstractGPUArray, boundary, topology)
     AT = array_type(coords)
-    return AT(molecule_centers(Array(coords), boundary, topology))
+    return to_device(molecule_centers(from_device(coords), boundary, topology), AT)
 end
 
 # Allows scaling multiple vectors at once by broadcasting this function
@@ -969,7 +971,7 @@ function scale_coords!(sys::System{<:Any, AT}, scale_factor; ignore_molecules=fa
         error("scaling coordinates by molecule is not compatible with a TriclinicBoundary")
     else
         atom_molecule_inds = sys.topology.atom_molecule_inds
-        coords_nounits = Array(ustrip_vec.(sys.coords))
+        coords_nounits = from_device(ustrip_vec.(sys.coords))
         coord_units = unit(eltype(eltype(sys.coords)))
         boundary_nounits = ustrip(coord_units, sys.boundary)
         mol_centers = molecule_centers(coords_nounits, boundary_nounits, sys.topology)
@@ -992,7 +994,7 @@ function scale_coords!(sys::System{<:Any, AT}, scale_factor; ignore_molecules=fa
             coords_nounits[i] = wrap_coords(
                     coords_nounits[i] .+ shift_vecs[mi] .- center_shifts[mi], boundary_nounits)
         end
-        sys.coords .= AT(coords_nounits .* coord_units)
+        sys.coords .= to_device(coords_nounits .* coord_units, AT)
     end
     return sys
 end

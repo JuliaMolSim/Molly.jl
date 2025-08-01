@@ -245,7 +245,7 @@ function find_neighbors(sys::System{<:Any, AT},
         append!(neighbors_list, nl)
     end
 
-    return NeighborList(length(neighbors_list), AT(neighbors_list))
+    return NeighborList(length(neighbors_list), to_device(neighbors_list, AT))
 end
 
 """
@@ -369,7 +369,7 @@ function find_neighbors(sys::System{D, AT},
     if isnothing(current_neighbors)
         neighbors = NeighborList()
     elseif AT <: AbstractGPUArray
-        neighbors = NeighborList(current_neighbors.n, Array(current_neighbors.list))
+        neighbors = NeighborList(current_neighbors.n, from_device(current_neighbors.list))
     else
         neighbors = current_neighbors
     end
@@ -387,7 +387,7 @@ function find_neighbors(sys::System{D, AT},
 
     box = CellListMap.Box(clm_box_arg(sys.boundary), nf.dist_cutoff; lcell=1)
     parallel = n_threads > 1
-    cl = UpdateCellList!(Array(sys.coords), box, cl, aux; parallel=parallel)
+    cl = UpdateCellList!(from_device(sys.coords), box, cl, aux; parallel=parallel)
 
     map_pairwise!(
         (x, y, i, j, d2, pairs) -> push_pair!(pairs, i, j, nf.eligible, nf.special),
@@ -401,7 +401,7 @@ function find_neighbors(sys::System{D, AT},
 
     nf.cl = cl
     if AT <: AbstractGPUArray
-        return NeighborList(neighbors.n, AT(neighbors.list))
+        return NeighborList(neighbors.n, to_device(neighbors.list, AT))
     else
         return neighbors
     end

@@ -80,7 +80,7 @@ end
 
 function potential_energy(sys::System, neighbors, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads())
-    # Allow types like those from Measurements.jl
+    # Allow types like those from Measurements.jl, T from System is different
     T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
@@ -277,7 +277,7 @@ function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
                          sys.boundary, step_n, sys.energy_units, val_ft)
     end
 
-    pe = Array(pe_vec_nounits)[1] * sys.energy_units
+    pe = only(from_device(pe_vec_nounits)) * sys.energy_units
 
     for inter in values(sys.general_inters)
         pe += uconvert(

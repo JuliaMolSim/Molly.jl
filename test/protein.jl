@@ -52,9 +52,7 @@
     rm(temp_fp_pdb)
     @test BioStructures.countmodels(traj) == 11
     @test BioStructures.countatoms(first(traj)) == 5191
-end
 
-@testset "Peptide Float32 no units" begin
     n_steps = 1_000
     temp = 298.0f0
     press = Float32(ustrip(u"u * nm^-1 * ps^-2", 1.0f0u"bar"))
@@ -199,7 +197,7 @@ end
         sys = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
-            velocities=AT(copy(velocities_start)),
+            velocities=to_device(copy(velocities_start), AT),
             array_type=AT,
             nonbonded_method="cutoff",  
             center_coords=false,
@@ -212,8 +210,8 @@ end
 
         simulate!(sys, simulator, n_steps)
 
-        coords_diff = Array(sys.coords) .- wrap_coords.(coords_openmm, (sys.boundary,))
-        vels_diff = Array(sys.velocities) .- vels_openmm
+        coords_diff = from_device(sys.coords) .- wrap_coords.(coords_openmm, (sys.boundary,))
+        vels_diff = from_device(sys.velocities) .- vels_openmm
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
         @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 
@@ -228,7 +226,7 @@ end
         sys_nounits = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff_nounits;
-            velocities=AT(copy(ustrip_vec.(velocities_start))),
+            velocities=to_device(copy(ustrip_vec.(velocities_start)), AT),
             units=false,
             array_type=AT,
             nonbonded_method="cutoff",
@@ -243,8 +241,9 @@ end
 
         simulate!(sys_nounits, simulator_nounits, n_steps)
 
-        coords_diff = Array(sys_nounits.coords * u"nm") .- wrap_coords.(coords_openmm, (sys.boundary,))
-        vels_diff = Array(sys_nounits.velocities * u"nm * ps^-1") .- vels_openmm
+        coords_diff = from_device(sys_nounits.coords * u"nm") .-
+                                    wrap_coords.(coords_openmm, (sys.boundary,))
+        vels_diff = from_device(sys_nounits.velocities * u"nm * ps^-1") .- vels_openmm
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
         @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
 
@@ -282,11 +281,11 @@ end
             neighbors = find_neighbors(sys)
             forces_molly = forces(sys)
             @test !any(d -> any(abs.(d) .> 1e-6u"kJ * mol^-1 * nm^-1"),
-                        Array(forces_molly) .- Array(forces(sys, neighbors)))
+                        from_device(forces_molly) .- from_device(forces(sys, neighbors)))
             openmm_force_fp = joinpath(openmm_dir, "forces_$solvent_model.txt")
             forces_openmm = SVector{3}.(eachrow(readdlm(openmm_force_fp)))u"kJ * mol^-1 * nm^-1"
             @test !any(d -> any(abs.(d) .> 1e-3u"kJ * mol^-1 * nm^-1"),
-                        Array(forces_molly) .- forces_openmm)
+                        from_device(forces_molly) .- forces_openmm)
 
             E_molly = potential_energy(sys)
             @test E_molly ≈ potential_energy(sys, neighbors)
