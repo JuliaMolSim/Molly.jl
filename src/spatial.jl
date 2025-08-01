@@ -303,8 +303,10 @@ n_infinite_dims(b::Union{CubicBoundary, RectangularBoundary}) = sum(isinf, b.sid
 n_infinite_dims(b::TriclinicBoundary) = 0
 n_infinite_dims(sys::System) = n_infinite_dims(sys.boundary)
 
-box_sides(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
-box_sides(b::TriclinicBoundary) = SVector(b[1][1], b[2][2], b[3][3])
+@inline box_sides(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
+@inline box_sides(b::Union{CubicBoundary, RectangularBoundary}, i) = b.side_lengths[i]
+@inline box_sides(b::TriclinicBoundary) = SVector(b[1][1], b[2][2], b[3][3])
+@inline box_sides(b::TriclinicBoundary, i) = b[i][i]
 
 """
     volume(sys)

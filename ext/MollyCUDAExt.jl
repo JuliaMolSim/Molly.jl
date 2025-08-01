@@ -4,7 +4,7 @@
 module MollyCUDAExt
 
 using Molly
-using Molly: from_device, sum_pairwise_forces, sum_pairwise_potentials
+using Molly: from_device, box_sides, sum_pairwise_forces, sum_pairwise_potentials
 using CUDA
 using Atomix
 using KernelAbstractions
@@ -202,8 +202,8 @@ function kernel_min_max!(
     xyz_min = CuStaticSharedArray(C, b)
     xyz_max = CuStaticSharedArray(C, b)
     for k in a:b
-        xyz_min[k] = 10 * boundary.side_lengths[k] # very large (arbitrary) value
-        xyz_max[k] = -10 * boundary.side_lengths[k]
+        xyz_min[k] =  10 * box_sides(boundary, k) # very large (arbitrary) value
+        xyz_max[k] = -10 * box_sides(boundary, k)
     end
     if local_i == a
         for j in a:r
@@ -363,7 +363,7 @@ function force_kernel!(
         d_block = zero(C)
         dist_block = zero(C) * zero(C)
         @inbounds for k in a:b	
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
             dist_block += d_block * d_block	
         end
         if dist_block <= r_cut * r_cut
@@ -374,7 +374,7 @@ function force_kernel!(
             d_pb = zero(C)
             dist_pb = zero(C) * zero(C)
             @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
                 dist_pb += d_pb * d_pb
             end
 
@@ -430,6 +430,7 @@ function force_kernel!(
                     opposites_sum[shuffle_idx, k] -= ustrip(f[k])
                 end
             end
+
             sync_threads()
             @inbounds for k in a:b
                 CUDA.atomic_add!(
@@ -448,7 +449,7 @@ function force_kernel!(
         d_block = zero(C)
         dist_block = zero(C) * zero(C)
         @inbounds for k in a:b
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
             dist_block += d_block * d_block	
         end
 
@@ -460,7 +461,7 @@ function force_kernel!(
             d_pb = zero(C)
             dist_pb = zero(C) * zero(C)			
             @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
                 dist_pb += d_pb * d_pb
             end
             Bool_excl = dist_pb <= r_cut * r_cut
@@ -546,6 +547,7 @@ function force_kernel!(
             end
         end	
 
+        sync_threads()
         @inbounds for k in a:b
             # In this case i == j, so we can call atomic_add! only once
             CUDA.atomic_add!(
@@ -592,6 +594,8 @@ function force_kernel!(
                     opposites_sum[m, k] -= ustrip(f[k])
                 end
             end
+
+            sync_threads()
             @inbounds for k in a:b
                 CUDA.atomic_add!(
                     pointer(forces_nounits, s_idx_i * b - (b - k)), 
@@ -643,7 +647,7 @@ function energy_kernel!(
         d_block = zero(C)
         dist_block = zero(C) * zero(C)
         @inbounds for k in a:b	
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
             dist_block += d_block * d_block	
         end
         if dist_block <= r_cut * r_cut
@@ -654,7 +658,7 @@ function energy_kernel!(
             d_pb = zero(C)
             dist_pb = zero(C) * zero(C)
             @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
                 dist_pb += d_pb * d_pb
             end
             Bool_excl = dist_pb <= r_cut * r_cut
@@ -712,7 +716,7 @@ function energy_kernel!(
         d_block = zero(C)
         dist_block = zero(C) * zero(C)
         @inbounds for k in a:b
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
             dist_block += d_block * d_block	
         end
         if dist_block <= r_cut * r_cut 
@@ -723,7 +727,7 @@ function energy_kernel!(
             d_pb = zero(C)
             dist_pb = zero(C) * zero(C)			
             @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
                 dist_pb += d_pb * d_pb
             end
             Bool_excl = dist_pb <= r_cut * r_cut
