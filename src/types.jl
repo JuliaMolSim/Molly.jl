@@ -679,7 +679,7 @@ function System(crystal::Crystal{D};
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
                 data=nothing) where D
-    atoms = [Atom(index=i, charge=charge(a), mass=AtomsBase.mass(a))
+    atoms = [Atom(index=i, charge=ustrip(uconvert(u"C", charge(a)) / Unitful.q), mass=AtomsBase.mass(a))
              for (i, a) in enumerate(crystal.atoms)]
     atoms_data = [AtomData(element=String(atomic_symbol(a))) for a in crystal.atoms]
     coords = [SVector{D}(AtomsBase.position(crystal, i)) for i in 1:length(crystal)]
