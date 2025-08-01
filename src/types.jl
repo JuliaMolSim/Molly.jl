@@ -33,15 +33,10 @@ abstract type Interaction end
 """
 Base type for all n-body interactions. `N` denotes the body order
 """
-abstract type NBodyInteraction{N} <: Interaction end
-
-# this would require a lot of code changes, but I think 
-# could be worthwhile....
-# abstract type NBodyInteraction{N <: Integer, NF} <: Interaction end
-# use_neighbors(::NBodyInteraction{N, NF}) where {N, NF} = NF
+abstract type NBodyInteraction{N <: Integer} <: Interaction end
 
 
-abstract type SpecificInteraction{I, T} <: Interaction end
+abstract type SpecificInteraction <: Interaction end
 abstract type GeneralInteraction <: Interaction end
 
 """
@@ -57,7 +52,7 @@ const PairwiseInteraction = NBodyInteraction{2}
 
 A list of specific interactions that involve one atom such as position restraints.
 """
-struct InteractionList1Atoms{I, T} <: SpecificInteraction{I, T}
+struct InteractionList1Atoms{I, T} <: SpecificInteraction
     is::I
     inters::T
     types::Vector{String}
@@ -70,7 +65,7 @@ end
 
 A list of specific interactions that involve two atoms such as bond potentials.
 """
-struct InteractionList2Atoms{I, T} <: SpecificInteraction{I, T}
+struct InteractionList2Atoms{I, T} <: SpecificInteraction
     is::I
     js::I
     inters::T
@@ -84,7 +79,7 @@ end
 
 A list of specific interactions that involve three atoms such as bond angle potentials.
 """
-struct InteractionList3Atoms{I, T} <: SpecificInteraction{I, T}
+struct InteractionList3Atoms{I, T} <: SpecificInteraction
     is::I
     js::I
     ks::I
@@ -99,7 +94,7 @@ end
 
 A list of specific interactions that involve four atoms such as torsion potentials.
 """
-struct InteractionList4Atoms{I, T} <: SpecificInteraction{I, T}
+struct InteractionList4Atoms{I, T} <: SpecificInteraction
     is::I
     js::I
     ks::I
