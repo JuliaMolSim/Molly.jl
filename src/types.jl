@@ -33,7 +33,7 @@ abstract type Interaction end
 """
 Base type for all n-body interactions. `N` denotes the body order
 """
-abstract type NBodyInteraction{N <: Integer} <: Interaction end
+abstract type NBodyInteraction{N} <: Interaction end
 
 
 abstract type SpecificInteraction <: Interaction end
@@ -42,7 +42,6 @@ abstract type GeneralInteraction <: Interaction end
 """
 Type alias for pairwise interactions
 """
-# const PairwiseInteraction{NF} = NBodyInteraction{2, NF}
 const PairwiseInteraction = NBodyInteraction{2}
 
 """
