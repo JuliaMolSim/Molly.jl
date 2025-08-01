@@ -93,6 +93,15 @@ end
     @test length(sys.topology.molecule_atom_counts) == 4929
     @test sys.topology.molecule_atom_counts[1] == 1170
 
+    bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1)
+    @test bench_result.allocs <= 6
+    @test bench_result.memory <= 192
+    forces_nounits_t = ustrip_vec.(zero(sys.coords))
+    bench_result = @benchmark Molly.forces_nounits!($forces_nounits_t, $sys,
+                                        $neighbors; n_threads=1)
+    @test bench_result.allocs <= 3
+    @test bench_result.memory <= 144
+
     for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul", "all")
         if inter == "all"
             pin = sys.pairwise_inters

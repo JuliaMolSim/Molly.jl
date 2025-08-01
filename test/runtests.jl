@@ -6,6 +6,7 @@ import AtomsBase
 using AtomsBaseTesting
 import AtomsCalculators
 using AtomsCalculators.AtomsCalculatorsTesting
+using BenchmarkTools
 import BioStructures
 import Chemfiles
 using CUDA
