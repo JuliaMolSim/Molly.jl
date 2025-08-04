@@ -92,7 +92,7 @@ function excluded_interactions!(Fs::AbstractVector{SVector{D, C}}, buffer_Fs, bu
                                 boundary, α, f, force_units, energy_units) where {D, C, T}
     buffer_Fs .= zero(T)
     backend = get_backend(Fs)
-    n_threads_gpu = 512
+    n_threads_gpu = 128
     kernel! = excluded_interactions_kernel!(backend, n_threads_gpu)
     kernel!(buffer_Fs, buffer_Es, excluded_pairs, partial_charges, coords, boundary, α, f,
             energy_units; ndrange=length(excluded_pairs))
@@ -431,7 +431,7 @@ end
 
 function grid_placement!(grid_indices, grid_fractions, coords, recip_box, mesh_dims)
     backend = get_backend(grid_indices)
-    n_threads_gpu = 512
+    n_threads_gpu = 128
     kernel! = grid_placement_kernel!(backend, n_threads_gpu)
     kernel!(grid_indices, grid_fractions, coords, recip_box, mesh_dims; ndrange=length(coords))
     return grid_indices, grid_fractions
@@ -499,7 +499,7 @@ function update_bsplines!(bsplines_θ, bsplines_dθ, grid_fractions, order,
                           n_threads)
     n_atoms = size(grid_fractions, 2)
     backend = get_backend(bsplines_θ)
-    n_threads_gpu = 512
+    n_threads_gpu = 128
     kernel! = update_bsplines_kernel!(backend, n_threads_gpu)
     kernel!(bsplines_θ, bsplines_dθ, grid_fractions, order; ndrange=n_atoms)
     return bsplines_θ, bsplines_dθ
@@ -564,7 +564,7 @@ end
 function spread_charge!(charge_grid::AbstractArray{Complex{T}, 3}, buffer, grid_indices,
                         bsplines_θ, mesh_dims, order, atoms, n_threads) where T
     backend = get_backend(charge_grid)
-    n_threads_gpu = 512
+    n_threads_gpu = 128
     kernel! = spread_charge_kernel!(backend, n_threads_gpu)
     buffer .= zero(T)
     kernel!(buffer, grid_indices, bsplines_θ, mesh_dims, order, atoms; ndrange=length(atoms))
@@ -645,7 +645,7 @@ function recip_conv!(charge_grid::AbstractArray{Complex{T}, 3}, buffer, bsm_x, b
     factor = T(π)^2 / α^2
     boxfactor = T(π) * volume(boundary)
     backend = get_backend(charge_grid)
-    n_threads_gpu = 512
+    n_threads_gpu = 16
     kernel! = recip_conv_kernel!(backend, n_threads_gpu)
     kernel!(buffer, charge_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
             energy_units, f, factor, boxfactor; ndrange=ndrange)
@@ -713,7 +713,7 @@ function interpolate_force!(Fs, charge_grid::AbstractArray{T, 3}, grid_indices, 
                             bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
                             n_threads) where T
     backend = get_backend(Fs)
-    n_threads_gpu = 512
+    n_threads_gpu = 128
     kernel! = interpolate_force_kernel!(backend, n_threads_gpu)
     kernel!(Fs, charge_grid, grid_indices, bsplines_θ, bsplines_dθ, recip_box,
             mesh_dims, order, energy_units, atoms, Val(T); ndrange=length(atoms))
