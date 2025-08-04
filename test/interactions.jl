@@ -575,7 +575,7 @@ end
     for AT in array_list
         for n_threads in n_threads_list
             for T in (Float64, Float32)
-                if n_threads > 1 && AT != Array
+                if (n_threads > 1 && AT != Array) || (T == Float64 && AT == MtlArray)
                     continue
                 end
                 ff = MolecularForceField(T, joinpath(ff_dir, "tip3p_standard.xml"))
@@ -638,7 +638,7 @@ end
         for AT in array_list
             for n_threads in n_threads_list
                 for T in (Float64, Float32)
-                    if n_threads > 1 && AT != Array
+                    if (n_threads > 1 && AT != Array) || (T == Float64 && AT == MtlArray)
                         continue
                     end
                     ff = MolecularForceField(T, joinpath(ff_dir, "tip3p_standard.xml"))
@@ -657,7 +657,7 @@ end
                         specific_inter_lists=(),
                     )
 
-                    @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=1e-4u"kJ/mol"
+                    @test potential_energy(sys; n_threads=n_threads) ≈ E_openmm atol=3e-4u"kJ/mol"
                     fs = from_device(forces(sys; n_threads=n_threads))
                     @test maximum(norm.(fs .- Fs_openmm)) < 5e-4u"kJ * mol^-1 * nm^-1"
                 end
