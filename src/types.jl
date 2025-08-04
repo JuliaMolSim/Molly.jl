@@ -21,7 +21,10 @@ export
     masses,
     charges,
     MollyCalculator,
-    ASECalculator
+    ASECalculator,
+    NBodyInteraction,
+    SpecificInteraction,
+    PairwiseInteraction
 
 const DefaultFloat = Float64
 
@@ -35,9 +38,10 @@ Base type for all n-body interactions. `N` denotes the body order
 """
 abstract type NBodyInteraction{N} <: Interaction end
 
-
-abstract type SpecificInteraction <: Interaction end
-abstract type GeneralInteraction <: Interaction end
+"""
+Base type for all specific interactions. `N` denotes number of atoms in the interaction.
+"""
+abstract type SpecificInteraction{N} <: Interaction end
 
 """
 Type alias for pairwise interactions
@@ -51,7 +55,7 @@ const PairwiseInteraction = NBodyInteraction{2}
 
 A list of specific interactions that involve one atom such as position restraints.
 """
-struct InteractionList1Atoms{I, T} <: SpecificInteraction
+struct InteractionList1Atoms{I, T} <: SpecificInteraction{1}
     is::I
     inters::T
     types::Vector{String}
@@ -64,7 +68,7 @@ end
 
 A list of specific interactions that involve two atoms such as bond potentials.
 """
-struct InteractionList2Atoms{I, T} <: SpecificInteraction
+struct InteractionList2Atoms{I, T} <: SpecificInteraction{2}
     is::I
     js::I
     inters::T
@@ -78,7 +82,7 @@ end
 
 A list of specific interactions that involve three atoms such as bond angle potentials.
 """
-struct InteractionList3Atoms{I, T} <: SpecificInteraction
+struct InteractionList3Atoms{I, T} <: SpecificInteraction{3}
     is::I
     js::I
     ks::I
@@ -93,7 +97,7 @@ end
 
 A list of specific interactions that involve four atoms such as torsion potentials.
 """
-struct InteractionList4Atoms{I, T} <: SpecificInteraction
+struct InteractionList4Atoms{I, T} <: SpecificInteraction{4}
     is::I
     js::I
     ks::I
@@ -667,42 +671,27 @@ Convenience constructor for `System` that takes all interactions in one tuple.
 These are passed through the `interactions` kwarg.
 """
 function System(;
-                atoms,
-                coords,
-                boundary,
-                velocities=nothing,
-                atoms_data=[],
-                topology=nothing,
                 interactions=(),
-                constraints=(),
-                neighbor_finder=NoNeighborFinder(),
-                loggers=(),
-                force_units=u"kJ * mol^-1 * nm^-1",
-                energy_units=u"kJ * mol^-1",
-                k=default_k(energy_units),
-                data=nothing)
+                kwargs...
+            )
 
-    general_inters = filter(i -> i isa GeneralInteraction, interactions)
-    pairwise_inters = filter(i -> i isa PairwiseInteraction, interactions)
-    specific_inters = filter(i -> i isa SpecificInteraction, interactions)
+    pairwise_inter_idxs = findall(i -> i isa PairwiseInteraction, interactions)
+    specific_inter_idxs = findall(i -> i isa SpecificInteraction, interactions)
+    nbody_inter_idxs = findall(i -> i isa NBodyInteraction, interactions)
+
+    length(nbody_inter_idxs) > length(pairwise_inters_idxs) || error("Molly does not currently support n-body potentials beyond pair.")
+
+    # All remaining interactions assumed to be general
+    idxs = trues(length(interactions))
+    idxs[pairwise_inter_idxs] .= false
+    idxs[specific_inter_idxs] .= false
+    general_inters = interactions[idxs]
 
     return System(
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        velocities=velocities,
-        atoms_data=atoms_data,
-        topology=topology,
-        pairwise_inters=pairwise_inters,
-        specific_inter_lists=specific_inters,
+        pairwise_inters=pairwise_inters[pairwise_inter_idxs],
+        specific_inter_lists=specific_inters[specific_inter_idxs],
         general_inters=general_inters,
-        constraints=constraints,
-        neighbor_finder=neighbor_finder,
-        loggers=loggers,
-        force_units=force_units,
-        energy_units=energy_units,
-        k=k,
-        data=data,
+        kwargs...
     )
 
 end
