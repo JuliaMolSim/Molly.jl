@@ -138,7 +138,7 @@ struct Ewald{T, D} <: AbstractEwald
     excluded_pairs::Vector{Tuple{Int32, Int32}}
 end
 
-function Ewald(dist_cutoff;, error_tol=0.0005, eligible=nothing, special=nothing,
+function Ewald(dist_cutoff; error_tol=0.0005, eligible=nothing, special=nothing,
                array_type::Type{AT}=Array) where AT
     excluded_pairs = find_excluded_pairs(eligible, special)
     return Ewald(dist_cutoff, error_tol, excluded_pairs)
