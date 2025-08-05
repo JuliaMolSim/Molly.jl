@@ -2,6 +2,7 @@ export
     Coulomb,
     CoulombSoftCore,
     CoulombReactionField,
+    CoulombEwald,
     Yukawa
 
 const coulomb_const = 138.93545764u"kJ * mol^-1 * nm" # 1 / 4πϵ0

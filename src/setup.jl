@@ -458,6 +458,8 @@ are not available when reading Gromacs files.
     "pme" (particle mesh Ewald summation) and "ewald" (Ewald summation, slow).
 - `ewald_error_tol=0.0005`: the error tolerance for Ewald summation, used when
     `nonbonded_method` is "pme" or "ewald".
+- `approximate_pme=true`: whether to use an approximation to the erfc function,
+    used when `nonbonded_method` is "pme".
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
@@ -484,6 +486,7 @@ function System(coord_file::AbstractString,
                 dist_neighbors=(units ? 1.2u"nm" : 1.2),
                 nonbonded_method="none",
                 ewald_error_tol=0.0005,
+                approximate_pme=true,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing,
@@ -875,6 +878,7 @@ function System(coord_file::AbstractString,
             use_neighbors=using_neighbors,
             weight_special=force_field.weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+            approximate_erfc=approximate_pme,
         )
         if nonbonded_method == "ewald"
             ewald = Ewald(
@@ -1060,6 +1064,7 @@ function System(T::Type,
                 dist_neighbors=(units ? 1.2u"nm" : 1.2),
                 nonbonded_method="none",
                 ewald_error_tol=0.0005,
+                approximate_pme=true,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing) where AT <: AbstractArray
@@ -1354,6 +1359,7 @@ function System(T::Type,
             use_neighbors=using_neighbors,
             weight_special=T(0.5),
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+            approximate_erfc=approximate_pme,
         )
         if nonbonded_method == "ewald"
             ewald = Ewald(

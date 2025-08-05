@@ -84,6 +84,10 @@ end
     show(devnull, ff)
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
                  nonbonded_method="cutoff", center_coords=false)
+    sys_pme = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
+                     nonbonded_method="pme", center_coords=false)
+    sys_pme_exact = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
+                           nonbonded_method="pme", approximate_pme=false, center_coords=false)
     neighbors = find_neighbors(sys)
 
     @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 15954
@@ -104,11 +108,15 @@ end
 
     inters = (
         "bond_only", "angle_only", "proptor_only", "improptor_only", "lj_only", "coul_only",
-        "all_cut",
+        "all_cut", "all_pme", "all_pme_exact",
     )
     for inter in inters
-        if startswith(inter, "all")
+        if inter == "all_cut"
             pin = sys.pairwise_inters
+        elseif inter == "all_pme"
+            pin = sys_pme.pairwise_inters
+        elseif inter == "all_pme_exact"
+            pin = sys_pme_exact.pairwise_inters
         elseif inter == "lj_only"
             pin = sys.pairwise_inters[1:1]
         elseif inter == "coul_only"
@@ -131,26 +139,37 @@ end
             sils = ()
         end
 
+        if inter == "all_pme"
+            gis = sys_pme.general_inters
+        elseif inter == "all_pme_exact"
+            gis = sys_pme_exact.general_inters
+        else
+            gis = ()
+        end
+
         sys_part = System(
             atoms=sys.atoms,
             coords=sys.coords,
             boundary=sys.boundary,
             pairwise_inters=pin,
             specific_inter_lists=sils,
+            general_inters=gis,
             neighbor_finder=sys.neighbor_finder,
         )
 
         forces_molly = forces(sys_part, neighbors; n_threads=1)
         openmm_forces_fp = joinpath(openmm_dir, "forces_$inter.txt")
         forces_openmm = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
-        # All force terms on all atoms must match at some threshold
-        @test !any(d -> any(abs.(d) .> 1e-6u"kJ * mol^-1 * nm^-1"), forces_molly .- forces_openmm)
+        # All forces must match at some threshold
+        ftol = (inter == "all_pme" ? 1e-3 : 1e-7)u"kJ * mol^-1 * nm^-1"
+        @test maximum(norm.(forces_molly .- forces_openmm)) < ftol
 
         E_molly = potential_energy(sys_part, neighbors)
         openmm_E_fp = joinpath(openmm_dir, "energy_$inter.txt")
         E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
         # Energy must match at some threshold
-        @test E_molly - E_openmm < 1e-5u"kJ * mol^-1"
+        etol = (inter == "all_pme" ? 0.2 : 1e-5)u"kJ * mol^-1"
+        @test abs(E_molly - E_openmm) < etol
     end
 
     # Run a short simulation with all interactions
@@ -217,13 +236,17 @@ end
             ff;
             velocities=to_device(copy(velocities_start), AT),
             array_type=AT,
-            nonbonded_method="cutoff",  
+            nonbonded_method="cutoff",
             center_coords=false,
         )
         @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
         @test temperature(sys) ≈ 329.3202932884933u"K"
 
         neighbors = find_neighbors(sys)
+        openmm_forces_fp = joinpath(openmm_dir, "forces_all_cut.txt")
+        forces_openmm = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+        @test maximum(norm.(from_device(forces(sys, neighbors)) .- forces_openmm)) < 1e-7u"kJ * mol^-1 * nm^-1"
+        E_openmm = readdlm(joinpath(openmm_dir, "energy_all_cut.txt"))[1] * u"kJ * mol^-1"
         @test isapprox(potential_energy(sys, neighbors), E_openmm; atol=1e-5u"kJ * mol^-1")
 
         simulate!(sys, simulator, n_steps)
@@ -232,6 +255,39 @@ end
         vels_diff = from_device(sys.velocities) .- vels_openmm
         @test maximum(maximum(abs.(v)) for v in coords_diff) < 1e-9u"nm"
         @test maximum(maximum(abs.(v)) for v in vels_diff  ) < 1e-6u"nm * ps^-1"
+
+        sys_pme = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            velocities=to_device(copy(velocities_start), AT),
+            array_type=AT,
+            nonbonded_method="pme",
+            center_coords=false,
+        )
+
+        neighbors = find_neighbors(sys_pme)
+        openmm_forces_fp = joinpath(openmm_dir, "forces_all_pme.txt")
+        forces_openmm_pme = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+        @test maximum(norm.(from_device(forces(sys_pme, neighbors)) .- forces_openmm_pme)) < 1e-3u"kJ * mol^-1 * nm^-1"
+        E_openmm_pme = readdlm(joinpath(openmm_dir, "energy_all_pme.txt"))[1] * u"kJ * mol^-1"
+        @test isapprox(potential_energy(sys_pme, neighbors), E_openmm_pme; atol=0.2u"kJ * mol^-1")
+
+        sys_pme_exact = System(
+            joinpath(data_dir, "6mrr_equil.pdb"),
+            ff;
+            velocities=to_device(copy(velocities_start), AT),
+            array_type=AT,
+            nonbonded_method="pme",
+            approximate_pme=false,
+            center_coords=false,
+        )
+
+        neighbors = find_neighbors(sys_pme_exact)
+        openmm_forces_fp = joinpath(openmm_dir, "forces_all_pme_exact.txt")
+        forces_openmm_pme = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
+        @test maximum(norm.(from_device(forces(sys_pme_exact, neighbors)) .- forces_openmm_pme)) < 1e-7u"kJ * mol^-1 * nm^-1"
+        E_openmm_pme = readdlm(joinpath(openmm_dir, "energy_all_pme_exact.txt"))[1] * u"kJ * mol^-1"
+        @test isapprox(potential_energy(sys_pme_exact, neighbors), E_openmm_pme; atol=1e-5u"kJ * mol^-1")
 
         # Test Andersen thermostat on GPU
         simulator_and = Verlet(
@@ -298,18 +354,16 @@ end
             )
             neighbors = find_neighbors(sys)
             forces_molly = forces(sys)
-            @test !any(d -> any(abs.(d) .> 1e-6u"kJ * mol^-1 * nm^-1"),
-                        from_device(forces_molly) .- from_device(forces(sys, neighbors)))
+            @test maximum(norm.(forces_molly .- forces(sys, neighbors))) < 1e-10u"kJ * mol^-1 * nm^-1"
             openmm_force_fp = joinpath(openmm_dir, "forces_$solvent_model.txt")
             forces_openmm = SVector{3}.(eachrow(readdlm(openmm_force_fp)))u"kJ * mol^-1 * nm^-1"
-            @test !any(d -> any(abs.(d) .> 1e-3u"kJ * mol^-1 * nm^-1"),
-                        from_device(forces_molly) .- forces_openmm)
+            @test maximum(norm.(from_device(forces_molly) .- forces_openmm)) < 1e-3u"kJ * mol^-1 * nm^-1"
 
             E_molly = potential_energy(sys)
             @test E_molly ≈ potential_energy(sys, neighbors)
             openmm_E_fp = joinpath(openmm_dir, "energy_$solvent_model.txt")
             E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
-            @test E_molly - E_openmm < 1e-2u"kJ * mol^-1"
+            @test abs(E_molly - E_openmm) < 1e-2u"kJ * mol^-1"
 
             if solvent_model == "gbn2"
                 sim = SteepestDescentMinimizer(tol=400.0u"kJ * mol^-1 * nm^-1")
