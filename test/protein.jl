@@ -102,26 +102,30 @@ end
     @test bench_result.allocs <= 3
     @test bench_result.memory <= 144
 
-    for inter in ("bond", "angle", "proptor", "improptor", "lj", "coul", "all")
-        if inter == "all"
+    inters = (
+        "bond_only", "angle_only", "proptor_only", "improptor_only", "lj_only", "coul_only",
+        "all_cut",
+    )
+    for inter in inters
+        if startswith(inter, "all")
             pin = sys.pairwise_inters
-        elseif inter == "lj"
+        elseif inter == "lj_only"
             pin = sys.pairwise_inters[1:1]
-        elseif inter == "coul"
+        elseif inter == "coul_only"
             pin = sys.pairwise_inters[2:2]
         else
             pin = ()
         end
 
-        if inter == "all"
+        if startswith(inter, "all")
             sils = sys.specific_inter_lists
-        elseif inter == "bond"
+        elseif inter == "bond_only"
             sils = sys.specific_inter_lists[1:1]
-        elseif inter == "angle"
+        elseif inter == "angle_only"
             sils = sys.specific_inter_lists[2:2]
-        elseif inter == "proptor"
+        elseif inter == "proptor_only"
             sils = sys.specific_inter_lists[3:3]
-        elseif inter == "improptor"
+        elseif inter == "improptor_only"
             sils = sys.specific_inter_lists[4:4]
         else
             sils = ()
@@ -137,12 +141,14 @@ end
         )
 
         forces_molly = forces(sys_part, neighbors; n_threads=1)
-        forces_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "forces_$(inter)_only.txt"))))u"kJ * mol^-1 * nm^-1"
+        openmm_forces_fp = joinpath(openmm_dir, "forces_$inter.txt")
+        forces_openmm = SVector{3}.(eachrow(readdlm(openmm_forces_fp)))u"kJ * mol^-1 * nm^-1"
         # All force terms on all atoms must match at some threshold
         @test !any(d -> any(abs.(d) .> 1e-6u"kJ * mol^-1 * nm^-1"), forces_molly .- forces_openmm)
 
         E_molly = potential_energy(sys_part, neighbors)
-        E_openmm = readdlm(joinpath(openmm_dir, "energy_$(inter)_only.txt"))[1] * u"kJ * mol^-1"
+        openmm_E_fp = joinpath(openmm_dir, "energy_$inter.txt")
+        E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
         # Energy must match at some threshold
         @test E_molly - E_openmm < 1e-5u"kJ * mol^-1"
     end
@@ -150,15 +156,18 @@ end
     # Run a short simulation with all interactions
     n_steps = 100
     simulator = VelocityVerlet(dt=0.0005u"ps")
-    velocities_start = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))u"nm * ps^-1"
+    start_vels_fp = joinpath(openmm_dir, "velocities_300K.txt")
+    velocities_start = SVector{3}.(eachrow(readdlm(start_vels_fp)))u"nm * ps^-1"
     sys.velocities = copy(velocities_start)
     @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
     @test temperature(sys) ≈ 329.3202932884933u"K"
 
     simulate!(sys, simulator, n_steps; n_threads=Threads.nthreads())
 
-    coords_openmm = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "coordinates_$(n_steps)steps.txt"))))u"nm"
-    vels_openmm   = SVector{3}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_$(n_steps)steps.txt" ))))u"nm * ps^-1"
+    openmm_coords_fp = joinpath(openmm_dir, "coordinates_$(n_steps)steps.txt")
+    openmm_vels_fp   = joinpath(openmm_dir, "velocities_$(n_steps)steps.txt" )
+    coords_openmm = SVector{3}.(eachrow(readdlm(openmm_coords_fp)))u"nm"
+    vels_openmm   = SVector{3}.(eachrow(readdlm(openmm_vels_fp)))u"nm * ps^-1"
 
     coords_diff = sys.coords .- wrap_coords.(coords_openmm, (sys.boundary,))
     vels_diff = sys.velocities .- vels_openmm
@@ -183,7 +192,7 @@ end
     @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
     @test temperature(sys_nounits)u"K" ≈ 329.3202932884933u"K"
 
-    E_openmm = readdlm(joinpath(openmm_dir, "energy_all_only.txt"))[1] * u"kJ * mol^-1"
+    E_openmm = readdlm(joinpath(openmm_dir, "energy_all_cut.txt"))[1] * u"kJ * mol^-1"
     neighbors_nounits = find_neighbors(sys_nounits)
     @test isapprox(potential_energy(sys_nounits, neighbors_nounits) * u"kJ * mol^-1",
                     E_openmm; atol=1e-5u"kJ * mol^-1")
