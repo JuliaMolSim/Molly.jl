@@ -343,7 +343,10 @@ The short range Ewald electrostatic interaction between two atoms.
 
 Should be used alongside the [`Ewald`](@ref) or [`PME`](@ref) general interaction,
 which provide the long-range term.
-The `dist_cutoff` and `error_tol` should match.
+`dist_cutoff` and `error_tol` should match the general interaction.
+
+`dist_cutoff` is the cutoff distance for short range interactions.
+`approximate_erfc` determines whether to use a fast approximation to the erfc function.
 """
 struct CoulombEwald{T, D, W, C, A}
     dist_cutoff::D
