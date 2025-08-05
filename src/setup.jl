@@ -458,8 +458,8 @@ are not available when reading Gromacs files.
     "pme" (particle mesh Ewald summation) and "ewald" (Ewald summation, slow).
 - `ewald_error_tol=0.0005`: the error tolerance for Ewald summation, used when
     `nonbonded_method` is "pme" or "ewald".
-- `approximate_pme=true`: whether to use an approximation to the erfc function,
-    used when `nonbonded_method` is "pme".
+- `approximate_pme=true`: whether to use a fast approximation to the erfc
+    function, used when `nonbonded_method` is "pme".
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
@@ -882,7 +882,7 @@ function System(coord_file::AbstractString,
         )
         if nonbonded_method == "ewald"
             ewald = Ewald(
-                dist_cutoff=T(dist_cutoff),
+                T(dist_cutoff);
                 error_tol=T(ewald_error_tol),
                 eligible=eligible,
                 special=special,
@@ -900,7 +900,8 @@ function System(coord_file::AbstractString,
         end
         general_inters_ewald = (ewald,)
     else
-        throw(ArgumentError("unknown non-bonded method: \"$nonbonded_method\""))
+        throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
+                            "\"none\", \"cutoff\", \"pme\" and \"ewald\""))
     end
     pairwise_inters = (lj, coul)
 
@@ -1025,7 +1026,8 @@ function System(coord_file::AbstractString,
         elseif implicit_solvent == "gbn2"
             general_inters_is = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
         else
-            throw(ArgumentError("unknown implicit solvent model: \"$implicit_solvent\""))
+            throw(ArgumentError("unknown implicit solvent model \"$implicit_solvent\", " *
+                                "options are nothing, \"obc1\", \"obc2\" and \"gbn2\""))
         end
     else
         general_inters_is = ()
@@ -1363,7 +1365,7 @@ function System(T::Type,
         )
         if nonbonded_method == "ewald"
             ewald = Ewald(
-                dist_cutoff=T(dist_cutoff),
+                T(dist_cutoff);
                 error_tol=T(ewald_error_tol),
                 eligible=eligible,
                 special=special,
@@ -1381,7 +1383,8 @@ function System(T::Type,
         end
         general_inters = (ewald,)
     else
-        throw(ArgumentError("unknown non-bonded method: \"$nonbonded_method\""))
+        throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
+                            "\"none\", \"cutoff\", \"pme\" and \"ewald\""))
     end
     pairwise_inters = (lj, coul)
 

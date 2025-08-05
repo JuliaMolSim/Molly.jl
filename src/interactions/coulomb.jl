@@ -388,6 +388,27 @@ function Base.:+(c1::CoulombEwald, c2::CoulombEwald)
     )
 end
 
+function inject_interaction(inter::CoulombEwald, params_dic)
+    key_prefix = "inter_CE_"
+    return CoulombEwald(
+        dict_get(params_dic, key_prefix * "dist_cutoff", inter.dist_cutoff),
+        inter.error_tol,
+        inter.use_neighbors,
+        dict_get(params_dic, key_prefix * "weight_14", inter.weight_special),
+        dict_get(params_dic, key_prefix * "coulomb_const", inter.coulomb_const),
+        inter.α,
+        inter.approximate_erfc,
+    )
+end
+
+function extract_parameters!(params_dic, inter::CoulombEwald, ff)
+    key_prefix = "inter_CE_"
+    params_dic[key_prefix * "dist_cutoff"] = inter.dist_cutoff
+    params_dic[key_prefix * "weight_14"] = inter.weight_special
+    params_dic[key_prefix * "coulomb_const"] = inter.coulomb_const
+    return params_dic
+end
+
 function calc_erfc(αr::T, exp_mαr2, approximate_erfc) where T
     if approximate_erfc
         # See the OpenMM source code, Abramowitz and Stegun 1964, and Hastings 1995

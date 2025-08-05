@@ -30,7 +30,7 @@ class VelocityVerletIntegrator(CustomIntegrator):
 
 inters = [
     "bond_only", "angle_only", "proptor_only", "improptor_only", "lj_only", "coul_only",
-    "all_cut", "all_pme",
+    "all_cut", "all_pme", "all_pme_exact",
 ]
 
 for inter in inters:
@@ -45,7 +45,7 @@ for inter in inters:
             os.path.join(ff_dir, f"ff99SBildn_{inter}.xml"),
             os.path.join(ff_dir, f"tip3p_standard_{inter}.xml"),
         )
-    nonbondedMethod = PME if inter == "all_pme" else CutoffPeriodic
+    nonbondedMethod = PME if inter.startswith("all_pme") else CutoffPeriodic
 
     system = force_field.createSystem(
         pdb.topology,
@@ -72,7 +72,7 @@ for inter in inters:
         of.write(f"{energy.value_in_unit(energy.unit)}\n")
 
     # Run a short simulation with all interactions
-    if inter == "all_cut":
+    if inter == "all_pme":
         if os.path.isfile(vel_file):
             # Load velocities if they already exist
             velocities = []
