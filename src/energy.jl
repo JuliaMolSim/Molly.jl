@@ -105,7 +105,7 @@ function potential_energy(sys::System, neighbors, step_n::Integer=0;
 
     if length(sys.specific_inter_lists) > 0
         pe += specific_pe(sys.atoms, sys.coords, sys.velocities, sys.boundary, sys.energy_units,
-                          sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, Val(T), step_n)
+                          sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, T, step_n)
     end
 
     for inter in values(sys.general_inters)
@@ -209,7 +209,7 @@ function pairwise_pe_threads(atoms, coords, velocities, boundary, neighbors, ene
 end
 
 function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_atoms,
-                     sils_2_atoms, sils_3_atoms, sils_4_atoms, ::Val{T}, step_n=0) where T
+                     sils_2_atoms, sils_3_atoms, sils_4_atoms, T, step_n=0)
     pe = zero(T) * energy_units
 
     @inbounds for inter_list in sils_1_atoms
