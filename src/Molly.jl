@@ -26,7 +26,6 @@ using SimpleCrystals
 using SpecialFunctions
 using Unitful
 using UnitfulAtomic
-using UnsafeAtomicsLLVM
 
 using LinearAlgebra
 using Random
