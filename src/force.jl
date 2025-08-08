@@ -128,6 +128,8 @@ struct ForcesBuffer{F, C, M, R}
     box_mins::C
     box_maxs::C
     morton_seq::M
+    morton_seq_buffer_1::M
+    morton_seq_buffer_2::M
     compressed_eligible::R
     compressed_special::R
 end
@@ -139,15 +141,18 @@ function init_forces_buffer!(sys, forces_nounits::AbstractGPUArray{SVector{D, T}
     n_blocks = cld(N, 32)
     backend = get_backend(forces_nounits)
     fs_mat = KernelAbstractions.zeros(backend, T, D, N)
-    box_mins = KernelAbstractions.zeros(backend, C, n_blocks, D) 
-    box_maxs = KernelAbstractions.zeros(backend, C, n_blocks, D) 
+    box_mins = KernelAbstractions.zeros(backend, C, n_blocks, D)
+    box_maxs = KernelAbstractions.zeros(backend, C, n_blocks, D)
     morton_seq = KernelAbstractions.zeros(backend, Int32, N)
+    morton_seq_buffer_1 = KernelAbstractions.zeros(backend, Int32, N)
+    morton_seq_buffer_2 = KernelAbstractions.zeros(backend, Int32, N)
     compressed_eligible = KernelAbstractions.zeros(backend, UInt32, 32, n_blocks, n_blocks)
     compressed_special = KernelAbstractions.zeros(backend, UInt32, 32, n_blocks, n_blocks)
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
     end
-    return ForcesBuffer(fs_mat, box_mins, box_maxs, morton_seq, compressed_eligible, compressed_special)
+    return ForcesBuffer(fs_mat, box_mins, box_maxs, morton_seq, morton_seq_buffer_1,
+                        morton_seq_buffer_2, compressed_eligible, compressed_special)
 end
 
 """

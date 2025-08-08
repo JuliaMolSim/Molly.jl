@@ -4,7 +4,8 @@
 module MollyCUDAExt
 
 using Molly
-using Molly: from_device, box_sides, sum_pairwise_forces, sum_pairwise_potentials
+using Molly: from_device, box_sides, sorted_morton_seq!, sum_pairwise_forces,
+             sum_pairwise_potentials
 using CUDA
 using Atomix
 using KernelAbstractions
@@ -68,8 +69,7 @@ function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inte
     if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
         morton_bits = 4
         w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
-        morton_seq_cpu = sorted_morton_seq(from_device(sys.coords), w, morton_bits)
-        copyto!(buffers.morton_seq, morton_seq_cpu)
+        sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
         sys.neighbor_finder.initialized = true
         CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
@@ -96,9 +96,8 @@ function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, 
     r_cut = sys.neighbor_finder.dist_cutoff
     morton_bits = 4
     w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
-    morton_seq_cpu = sorted_morton_seq(from_device(sys.coords), w, morton_bits)
-    copyto!(buffers.morton_seq, morton_seq_cpu)
-    CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
+    sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
+    CUDA.@sync @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
             buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
             Val(N), sys.boundary, Val(D))
     CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
@@ -107,28 +106,6 @@ function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, 
             sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible,
             Val(T), Val(D))
     return pe_vec_nounits
-end
-
-function sorted_morton_seq(positions, w, bits::Int)
-    N = length(positions)
-    D = length(positions[1])
-    morton_sequence = Vector{Int32}(undef, N)
-    for i in 1:N
-        scaled_coords = floor.(Int32, positions[i] ./ w)
-        morton_sequence[i] = generalized_morton_code(scaled_coords, bits, D)
-    end
-    sort = Int32.(sortperm(morton_sequence))
-    return sort
-end
-
-function generalized_morton_code(indices, bits::Int, D::Int)
-    code = 0
-    for bit in 0:(bits-1)
-        for d in 1:D
-            code |= ((indices[d] >> bit) & 1) << (D * bit + (d - 1))
-        end
-    end
-    return Int32(code)
 end
 
 function boxes_dist(x1_min::D, x1_max::D, x2_min::D, x2_max::D, Lx::D) where D

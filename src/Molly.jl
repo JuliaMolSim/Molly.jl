@@ -4,6 +4,7 @@ using Reexport
 @reexport using StaticArrays
 @reexport using Unitful
 
+using AcceleratedKernels
 using Atomix
 import AtomsBase
 import AtomsCalculators
