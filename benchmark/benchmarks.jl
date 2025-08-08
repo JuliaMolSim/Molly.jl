@@ -82,7 +82,6 @@ function test_sim(nl::Bool, parallel::Bool, f32::Bool, ::Type{AT}) where AT
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
                 eligible=AT(trues(n_atoms, n_atoms)),
-                n_steps_reorder=10,
                 dist_cutoff=cutoff.dist_cutoff,
             )
         else

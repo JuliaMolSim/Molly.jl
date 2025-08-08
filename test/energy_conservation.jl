@@ -31,7 +31,6 @@ using Test
                 if Molly.uses_gpu_neighbor_finder(AT)
                     neighbor_finder=GPUNeighborFinder(
                         eligible=to_device(trues(n_atoms, n_atoms), AT),
-                        n_steps_reorder=10,
                         dist_cutoff=dist_cutoff,
                     )
                 else

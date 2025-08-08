@@ -975,7 +975,6 @@ function System(coord_file::AbstractString,
             eligible=to_device(eligible, AT),
             dist_cutoff=T(dist_cutoff), # Neighbors are computed each step so no buffer is needed
             special=to_device(special, AT),
-            n_steps_reorder=10,
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))
@@ -1429,7 +1428,6 @@ function System(T::Type,
             eligible=to_device(eligible, AT),
             dist_cutoff=T(dist_cutoff), # Neighbors are computed each step so no buffer is needed
             special=to_device(special, AT),
-            n_steps_reorder=10,
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))

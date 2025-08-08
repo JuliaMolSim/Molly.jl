@@ -12,7 +12,6 @@
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
                 eligible=eligible=to_device(trues(n_atoms, n_atoms), AT),
-                n_steps_reorder=10,
                 dist_cutoff=2.0u"nm",
             )
         else
@@ -319,7 +318,6 @@ end
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
                 eligible=to_device(trues(n_atoms, n_atoms), AT),
-                n_steps_reorder=10,
                 dist_cutoff=2.0u"nm",
             )
         else
@@ -388,7 +386,6 @@ end
             pairwise_inters=(LennardJones(use_neighbors=true),),
             neighbor_finder=GPUNeighborFinder(
                 eligible=CuArray(trues(n_atoms, n_atoms)),
-                n_steps_reorder=10,
                 dist_cutoff=2.0u"nm",
             ),
             loggers=(
@@ -539,7 +536,7 @@ end
 
         if run_cuda_tests
             neighbor_finder_gpu = GPUNeighborFinder(eligible=CuArray(trues(n_atoms, n_atoms)),
-                                                    n_steps_reorder=10, dist_cutoff=1.2u"nm")
+                                                    dist_cutoff=1.2u"nm")
         end
 
         atoms = [Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]  
@@ -1452,7 +1449,6 @@ end
         if nft == GPUNeighborFinder
             neighbor_finder = GPUNeighborFinder(
                 eligible=to_device(trues(n_atoms, n_atoms), AT),
-                n_steps_reorder=10,
                 dist_cutoff=T(1.0)u"nm",
             )
         elseif nft == DistanceNeighborFinder

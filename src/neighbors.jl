@@ -66,7 +66,7 @@ function GPUNeighborFinder(;
                             eligible,
                             dist_cutoff,
                             special=zero(eligible),
-                            n_steps_reorder=10,
+                            n_steps_reorder=25,
                             initialized=false)
     return GPUNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
                 eligible, dist_cutoff, special, n_steps_reorder, initialized)
