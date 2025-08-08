@@ -100,8 +100,8 @@ function excluded_interactions!(Fs::AbstractVector{SVector{D, C}}, buffer_Fs, bu
     return sum(buffer_Es) * energy_units
 end
 
-@kernel function excluded_interactions_kernel!(Fs_mat, exclusion_Es, excluded_pairs,
-                                        partial_charges, coords, boundary, α, f, energy_units)
+@kernel function excluded_interactions_kernel!(Fs_mat, exclusion_Es, @Const(excluded_pairs),
+                            @Const(partial_charges), @Const(coords), boundary, α, f, energy_units)
     ei = @index(Global, Linear)
     if ei <= length(excluded_pairs)
         i, j = excluded_pairs[ei]
@@ -721,7 +721,7 @@ end
 
 @kernel function interpolate_force_kernel!(Fs, @Const(charge_grid), @Const(grid_indices),
                         @Const(bsplines_θ), @Const(bsplines_dθ), recip_box, mesh_dims, order,
-                        energy_units, atoms, ::Val{T}) where T
+                        energy_units, @Const(atoms), ::Val{T}) where T
     i = @index(Global, Linear)
     if i <= length(atoms)
         interpolate_force_inner!(Fs, charge_grid, grid_indices, bsplines_θ,
