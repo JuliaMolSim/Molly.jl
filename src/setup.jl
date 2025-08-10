@@ -615,6 +615,7 @@ function System(coord_file::AbstractString,
                                     hetero_atom=hetero_atom))
         eligible[ai, ai] = false
     end
+    atoms = to_device([atoms_abst...], AT)
 
     for (a1z, a2z) in top_bonds
         atom_name_1 = chemfiles_name(top, a1z)
@@ -890,8 +891,8 @@ function System(coord_file::AbstractString,
         else
             ewald = PME(
                 T(dist_cutoff),
-                boundary_used,
-                n_atoms;
+                atoms,
+                boundary_used;
                 error_tol=T(ewald_error_tol),
                 eligible=eligible,
                 special=special,
@@ -967,6 +968,7 @@ function System(coord_file::AbstractString,
         coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
     end
     coords = wrap_coords.(coords, (boundary_used,))
+    coords_dev = to_device(coords, AT)
 
     if neighbor_finder_type == NoNeighborFinder
         neighbor_finder = NoNeighborFinder()
@@ -1001,9 +1003,6 @@ function System(coord_file::AbstractString,
             dist_cutoff=T(dist_neighbors),
         )
     end
-
-    atoms = to_device([atoms_abst...], AT)
-    coords_dev = to_device(coords, AT)
 
     if isnothing(velocities)
         if units
@@ -1292,6 +1291,7 @@ function System(T::Type,
             end
         end
     end
+    atoms = to_device([atoms_abst...], AT)
 
     # Calculate matrix of pairs eligible for non-bonded interactions
     n_atoms = length(coords_abst)
@@ -1329,6 +1329,7 @@ function System(T::Type,
         coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
     end
     coords = wrap_coords.(coords, (boundary_used,))
+    coords_dev = to_device(coords, AT)
 
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
     lj = LennardJones(
@@ -1372,8 +1373,8 @@ function System(T::Type,
         else
             ewald = PME(
                 T(dist_cutoff),
-                boundary_used,
-                n_atoms;
+                atoms,
+                boundary_used;
                 error_tol=T(ewald_error_tol),
                 eligible=eligible,
                 special=special,
@@ -1454,9 +1455,6 @@ function System(T::Type,
             dist_cutoff=T(dist_neighbors),
         )
     end
-
-    atoms = to_device([atoms_abst...], AT)
-    coords_dev = to_device(coords, AT)
 
     if isnothing(velocities)
         if units
