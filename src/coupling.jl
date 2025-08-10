@@ -158,8 +158,9 @@ end
 
 function BerendsenBarostat(pressure, coupling_const; compressibility=4.6e-5u"bar^-1",
                            max_scale_frac=0.1, n_steps=1)
-    return BerendsenBarostat(pressure, coupling_const, compressibility,
-                             max_scale_frac, n_steps)
+    T = typeof(ustrip(pressure))
+    return BerendsenBarostat(pressure, coupling_const, T(compressibility),
+                             T(max_scale_frac), n_steps)
 end
 
 function apply_coupling!(sys, barostat::BerendsenBarostat, sim, neighbors=nothing,
@@ -224,11 +225,12 @@ mutable struct MonteCarloBarostat{T, P, K, V}
     n_accepted::Int
 end
 
-function MonteCarloBarostat(P, T, boundary; n_steps=30, n_iterations=1, scale_factor=0.01,
+function MonteCarloBarostat(P, temp, boundary; n_steps=30, n_iterations=1, scale_factor=0.01,
                             scale_increment=1.1, max_volume_frac=0.3, trial_find_neighbors=false)
-    volume_scale = volume(boundary) * float_type(boundary)(scale_factor)
-    return MonteCarloBarostat(P, T, n_steps, n_iterations, volume_scale, scale_increment,
-                              max_volume_frac, trial_find_neighbors, 0, 0)
+    T = float_type(boundary)
+    volume_scale = volume(boundary) * T(scale_factor)
+    return MonteCarloBarostat(P, temp, n_steps, n_iterations, volume_scale, T(scale_increment),
+                              T(max_volume_frac), trial_find_neighbors, 0, 0)
 end
 
 function apply_coupling!(sys::System{D, AT, T}, barostat::MonteCarloBarostat, sim, neighbors=nothing,
@@ -341,8 +343,8 @@ mutable struct MonteCarloAnisotropicBarostat{D, T, P, K, V}
     n_accepted::Vector{Int}
 end
 
-function MonteCarloAnisotropicBarostat(pressure::SVector{D},
-                                       temperature,
+function MonteCarloAnisotropicBarostat(P::SVector{D},
+                                       temp,
                                        boundary;
                                        n_steps=30,
                                        n_iterations=1,
@@ -350,7 +352,8 @@ function MonteCarloAnisotropicBarostat(pressure::SVector{D},
                                        scale_increment=1.1,
                                        max_volume_frac=0.3,
                                        trial_find_neighbors=false) where D
-    volume_scale_factor = volume(boundary) * float_type(boundary)(scale_factor)
+    T = float_type(boundary)
+    volume_scale_factor = volume(boundary) * T(scale_factor)
     volume_scale = fill(volume_scale_factor, D)
     if AtomsBase.n_dimensions(boundary) != D
         throw(ArgumentError("pressure vector length ($(D)) must match boundary " *
@@ -358,13 +361,13 @@ function MonteCarloAnisotropicBarostat(pressure::SVector{D},
     end
 
     return MonteCarloAnisotropicBarostat(
-        pressure,
-        temperature,
+        P,
+        temp,
         n_steps,
         n_iterations,
         volume_scale,
-        scale_increment,
-        max_volume_frac,
+        T(scale_increment),
+        T(max_volume_frac),
         trial_find_neighbors,
         zeros(Int, D),
         zeros(Int, D),
@@ -502,9 +505,9 @@ mutable struct MonteCarloMembraneBarostat{T, P, K, V, S}
     constant_volume::Bool
 end
 
-function MonteCarloMembraneBarostat(pressure,
+function MonteCarloMembraneBarostat(P,
                                     tension,
-                                    temperature,
+                                    temp,
                                     boundary;
                                     n_steps=30,
                                     n_iterations=1,
@@ -515,7 +518,8 @@ function MonteCarloMembraneBarostat(pressure,
                                     xy_isotropy=false,
                                     z_axis_fixed=false,
                                     constant_volume=false)
-    volume_scale_factor = volume(boundary) * float_type(boundary)(scale_factor)
+    T = float_type(boundary)
+    volume_scale_factor = volume(boundary) * T(scale_factor)
     volume_scale = fill(volume_scale_factor, 3)
 
     if AtomsBase.n_dimensions(boundary) != 3
@@ -525,19 +529,19 @@ function MonteCarloMembraneBarostat(pressure,
         throw(ArgumentError("cannot keep z-axis fixed whilst keeping the volume constant"))
     end
 
-    pressX = pressure
-    pressY = pressure
-    pressZ = (z_axis_fixed || constant_volume) ? nothing : pressure
+    pressX = P
+    pressY = P
+    pressZ = ((z_axis_fixed || constant_volume) ? nothing : P)
 
     return MonteCarloMembraneBarostat(
         SVector(pressX, pressY, pressZ),
         tension,
-        temperature,
+        temp,
         n_steps,
         n_iterations,
         volume_scale,
-        scale_increment,
-        max_volume_frac,
+        T(scale_increment),
+        T(max_volume_frac),
         trial_find_neighbors,
         zeros(Int, 3),
         zeros(Int, 3),
