@@ -772,26 +772,31 @@ struct MyGeneralInter
     # Properties, e.g. a neural network model
 end
 ```
-Next, you need to define a method for the `AtomsCalculators.forces` function (note this is different to the [`force`](@ref) function above).
+Next, you need to define a method for the `AtomsCalculators.forces!` function (note this is different to the [`force`](@ref) function above, and to the [`forces`](@ref) function).
 ```julia
 import AtomsCalculators
 
-function AtomsCalculators.forces(sys,
-                                 inter::MyGeneralInter;
-                                 neighbors=nothing,
-                                 step_n=0,
-                                 n_threads=Threads.nthreads(),
-                                 kwargs...)
+function AtomsCalculators.forces!(fs,
+                                  sys,
+                                  inter::MyGeneralInter;
+                                  neighbors=nothing,
+                                  step_n=0,
+                                  n_threads=Threads.nthreads(),
+                                  kwargs...)
     # kwargs... is required, neighbors/step_n/n_threads can be omitted if not used
 
     # Calculate the forces on all atoms using the interaction and the system
-    # The output should have the same shape as the coordinates
+    # Add the forces to the existing forces, which have the same shape as the coordinates
     # For example, a neural network might do something like this
-    return inter.model(sys.coords, sys.atoms)
+    fs .+= inter.model(sys.coords, sys.atoms)
+    return fs
 end
 ```
 The neighbors calculated from the neighbor list are available in this function, but may or may not be used depending on context.
 You could carry out your own neighbor finding in this function if required.
+Since the forces are available for mutation in the function, general interactions can be used to modify the forces in arbitrary ways, though it is up to you to write an appropriate potential energy function if energies are required.
+In cases where the forces are not simply added to, the order of general interactions can matter.
+General interactions are applied after pairwise and specific interactions.
 Note that this function calculates forces not accelerations; if you have a neural network that calculates accelerations you should multiply these by `masses(sys)` to get the forces according to F=ma.
 
 A method for the `AtomsCalculators.potential_energy` function that takes the same arguments and returns a single value can also be defined.

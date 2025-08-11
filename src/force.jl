@@ -213,9 +213,8 @@ function forces!(fs, sys::System, neighbors, buffers, step_n::Integer=0;
 
     fs .= buffers.fs_nounits .* sys.force_units
     for inter in values(sys.general_inters)
-        fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, step_n=step_n,
-                                         n_threads=n_threads)
-        fs .+= fs_gen
+        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+                                 n_threads=n_threads)
     end
 
     return fs
@@ -408,9 +407,8 @@ function forces!(fs, sys::System{D, AT, T}, neighbors, buffers, step_n::Integer=
 
     fs .= reinterpret(SVector{D, T}, vec(buffers.fs_mat)) .* sys.force_units
     for inter in values(sys.general_inters)
-        fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, step_n=step_n,
-                                         n_threads=n_threads)
-        fs .+= fs_gen
+        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+                                 n_threads=n_threads)
     end
 
     return fs

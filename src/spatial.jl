@@ -926,7 +926,7 @@ function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topolo
         pit = T(π)
         twopit = 2 * pit
         n_molecules = length(topology.molecule_atom_counts)
-        unit_circle_angles = broadcast(coords, Ref(boundary.side_lengths)) do c, sl
+        unit_circle_angles = broadcast(coords, (boundary.side_lengths,)) do c, sl
             (c ./ sl) .* twopit .- pit # Run -π to π
         end
         mol_sin_sums = zeros(SVector{D, T}, n_molecules)
@@ -939,7 +939,7 @@ function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topolo
         for mi in 1:n_molecules
             frac_centers[mi] = (atan.(mol_sin_sums[mi], mol_cos_sums[mi]) .+ pit) ./ twopit
         end
-        return broadcast((c, b) -> c .* b, frac_centers, Ref(boundary.side_lengths))
+        return broadcast((c, b) -> c .* b, frac_centers, (boundary.side_lengths,))
     end
 end
 
@@ -968,7 +968,7 @@ Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set
 function scale_coords!(sys::System{<:Any, AT}, scale_factor; ignore_molecules=false) where AT
     if ignore_molecules || isnothing(sys.topology)
         sys.boundary = scale_boundary(sys.boundary, scale_factor)
-        sys.coords .= scale_vec.(sys.coords, Ref(scale_factor))
+        sys.coords .= scale_vec.(sys.coords, (scale_factor,))
     elseif sys.boundary isa TriclinicBoundary
         error("scaling coordinates by molecule is not compatible with a TriclinicBoundary")
     else
@@ -981,14 +981,14 @@ function scale_coords!(sys::System{<:Any, AT}, scale_factor; ignore_molecules=fa
         # This puts them all in the same periodic image which is required when scaling
         # This won't work if the molecule can't fit in one box when centered,
         #   but that would likely be a pathological case anyway
-        center_shifts = Ref(box_center(boundary_nounits)) .- mol_centers
+        center_shifts = (box_center(boundary_nounits),) .- mol_centers
         for i in eachindex(sys)
             coords_nounits[i] = wrap_coords(
                     coords_nounits[i] .+ center_shifts[atom_molecule_inds[i]], boundary_nounits)
         end
         # Move all atoms in a molecule by the same amount according to the molecule center
         # Then move the atoms back to the molecule center and wrap in the scaled boundary
-        shift_vecs = scale_vec.(mol_centers, Ref(scale_factor .- 1))
+        shift_vecs = scale_vec.(mol_centers, (scale_factor .- 1,))
         sys.boundary = scale_boundary(sys.boundary, scale_factor)
         boundary_nounits = ustrip(sys.boundary)
         for i in eachindex(sys)

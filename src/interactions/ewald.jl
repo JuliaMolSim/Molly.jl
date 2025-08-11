@@ -11,21 +11,35 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
                                             inter::AbstractEwald;
                                             n_threads::Integer=Threads.nthreads(),
                                             kwargs...)
-    return ewald_pe_forces(sys, inter; n_threads=n_threads)[1]
+    fs = zero_forces(sys)
+    pe = ewald_pe_forces!(fs, sys, inter; n_threads=n_threads)
+    return pe
 end
 
-AtomsCalculators.@generate_interface function AtomsCalculators.forces(sys,
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs,
+                                            sys,
                                             inter::AbstractEwald;
                                             n_threads::Integer=Threads.nthreads(),
                                             kwargs...)
-    return ewald_pe_forces(sys, inter; n_threads=n_threads)[2]
+    pe = ewald_pe_forces!(fs, sys, inter; n_threads=n_threads)
+    return fs
+end
+
+function AtomsCalculators.energy_forces!(fs,
+                                         sys,
+                                         inter::AbstractEwald;
+                                         n_threads::Integer=Threads.nthreads(),
+                                         kwargs...)
+    pe = ewald_pe_forces!(fs, sys, inter; n_threads=n_threads)
+    return (energy=pe, forces=fs)
 end
 
 function AtomsCalculators.energy_forces(sys,
                                         inter::AbstractEwald;
                                         n_threads::Integer=Threads.nthreads(),
                                         kwargs...)
-    E, Fs = ewald_pe_forces(sys, inter; n_threads=n_threads)
+    fs = zero_forces(sys)
+    pe = ewald_pe_forces!(fs, sys, inter; n_threads=n_threads)
     return (energy=E, forces=Fs)
 end
 
@@ -177,8 +191,8 @@ function ewald_params(side_length, α, error_tol)
     return k
 end
 
-function ewald_pe_forces(sys::System{3, AT}, inter::Ewald{T};
-                         n_threads::Integer=Threads.nthreads()) where {AT, T}
+function ewald_pe_forces!(Fs, sys::System{3, AT}, inter::Ewald{T};
+                          n_threads::Integer=Threads.nthreads()) where {AT, T}
     n_atoms = length(sys)
     atoms_cpu, coords_cpu = from_device(sys.atoms), from_device(sys.coords)
     boundary, energy_units = sys.boundary, sys.energy_units
@@ -192,7 +206,11 @@ function ewald_pe_forces(sys::System{3, AT}, inter::Ewald{T};
     partial_charges_cpu = charge.(atoms_cpu)
     V = volume(boundary)
     f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
-    Fs_cpu = zeros(SVector{3, typeof(zero(T) * sys.force_units)}, n_atoms)
+    if AT <: AbstractGPUArray
+        Fs_cpu = zeros(SVector{3, typeof(zero(T) * sys.force_units)}, n_atoms)
+    else
+        Fs_cpu = Fs
+    end
 
     exclusion_E = excluded_interactions!(Fs_cpu, nothing, nothing, inter.excluded_pairs,
                                          atoms_cpu, coords_cpu, boundary, α, f,
@@ -267,8 +285,10 @@ function ewald_pe_forces(sys::System{3, AT}, inter::Ewald{T};
     charge_E = -f * T(π) * sum(partial_charges_cpu)^2 / (2 * V * α^2)
     self_E = f * -sum(abs2, partial_charges_cpu) * α / sqrt(T(π)) + charge_E
     total_E = reciprocal_space_E + self_E + exclusion_E
-    Fs = to_device(Fs_cpu, AT)
-    return total_E, Fs
+    if AT <: AbstractGPUArray
+        Fs .+= to_device(Fs_cpu, AT)
+    end
+    return total_E
 end
 
 """
@@ -747,9 +767,8 @@ end
     end
 end
 
-function ewald_pe_forces(sys::System{3, AT}, inter::PME{T};
-                         n_threads::Integer=Threads.nthreads()) where {AT, T}
-    Fs = to_device(zeros(SVector{3, typeof(zero(T) * sys.force_units)}, length(sys)), AT)
+function ewald_pe_forces!(Fs, sys::System{3, AT}, inter::PME{T};
+                          n_threads::Integer=Threads.nthreads()) where {AT, T}
     atoms, coords, boundary, energy_units = sys.atoms, sys.coords, sys.boundary, sys.energy_units
     order, ϵr, α, mesh_dims = inter.order, inter.ϵr, inter.α, inter.mesh_dims
     V = volume(boundary)
@@ -783,5 +802,5 @@ function ewald_pe_forces(sys::System{3, AT}, inter::PME{T};
     charge_E = -f * T(π) * pc_sum^2 / (2 * V * α^2)
     self_E = f * -pc_abs2_sum * α / sqrt(T(π)) + charge_E
     total_E = reciprocal_space_E + self_E + exclusion_E
-    return total_E, Fs
+    return total_E
 end

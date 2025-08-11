@@ -901,10 +901,9 @@ function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, bounda
     end
 end
 
-function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
+function forces_gbsa!(fs, sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
     coords, boundary = sys.coords, sys.boundary
     born_forces_1 = copy(born_forces)
-    fs = ustrip_vec.(zero(coords)) * sys.force_units
     @inbounds for i in eachindex(sys)
         for j in eachindex(sys)
             bi, bj, fi, fj = gb_force_loop_1(
@@ -931,8 +930,8 @@ function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges
     return fs
 end
 
-function forces_gbsa(sys::System{D, AT, T}, inter, Bs, B_grads, I_grads, born_forces,
-                     atom_charges) where {D, AT <: AbstractGPUArray, T}
+function forces_gbsa!(fs, sys::System{D, AT, T}, inter, Bs, B_grads, I_grads, born_forces,
+                      atom_charges) where {D, AT <: AbstractGPUArray, T}
     fs_mat_1, born_forces_mod_ustrip = gbsa_force_1_gpu(sys.coords, sys.boundary, inter.dist_cutoff,
                         inter.factor_solute, inter.factor_solvent, inter.kappa, Bs, atom_charges,
                         sys.force_units)
@@ -941,7 +940,7 @@ function forces_gbsa(sys::System{D, AT, T}, inter, Bs, B_grads, I_grads, born_fo
                         born_forces_units, inter.offset_radii, inter.scaled_offset_radii,
                         sys.force_units, Val(T))
     fs_mat = fs_mat_1 .+ fs_mat_2
-    fs = reinterpret(SVector{D, T}, vec(fs_mat)) * sys.force_units
+    fs .+= reinterpret(SVector{D, T}, vec(fs_mat)) * sys.force_units
     return fs
 end
 
@@ -1078,7 +1077,8 @@ end
     end
 end
 
-function AtomsCalculators.forces(sys, inter::AbstractGBSA; kwargs...)
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
+                                                        inter::AbstractGBSA; kwargs...)
     Bs, B_grads, I_grads = born_radii_and_grad(inter, sys.coords, sys.boundary)
 
     if inter.use_ACE
@@ -1090,7 +1090,8 @@ function AtomsCalculators.forces(sys, inter::AbstractGBSA; kwargs...)
     end
 
     atom_charges = charge.(sys.atoms)
-    return forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
+    forces_gbsa!(fs, sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
+    return fs
 end
 
 function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,

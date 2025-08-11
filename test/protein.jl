@@ -100,9 +100,10 @@ end
     bench_result = @benchmark potential_energy($sys, $neighbors; n_threads=1)
     @test bench_result.allocs <= 6
     @test bench_result.memory <= 192
-    forces_nounits_t = ustrip_vec.(zero(sys.coords))
-    bench_result = @benchmark Molly.forces_nounits!($forces_nounits_t, $sys,
-                                        $neighbors; n_threads=1)
+    forces_t = Molly.zero_forces(sys)
+    forces_buffer = Molly.init_forces_buffer!(sys, 1)
+    bench_result = @benchmark Molly.forces!($forces_t, $sys, $neighbors, $forces_buffer;
+                                            n_threads=1)
     @test bench_result.allocs <= 3
     @test bench_result.memory <= 144
 

@@ -314,11 +314,11 @@ struct NNBonds{T}
     model::T
 end
 
-function AtomsCalculators.forces(sys, inter::NNBonds; kwargs...)
+function AtomsCalculators.forces!(fs, sys, inter::NNBonds; kwargs...)
     vec_ij = vector(sys.coords[1], sys.coords[3], sys.boundary)
     dist = norm(vec_ij)
     f = inter.model([dist])[1] * normalize(vec_ij)
-    fs = [f, zero(f), -f]
+    fs .+= [f, zero(f), -f]
     return fs
 end
 

@@ -45,7 +45,7 @@ end
 
 AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
                                                             inter::MullerBrown; kwargs...)
-    return sum(potential_muller_brown.(Ref(inter), sys.coords))
+    return sum(potential_muller_brown.((inter,), sys.coords))
 end
 
 @inline function potential_muller_brown(inter::MullerBrown, coord::SVector{2})
@@ -63,9 +63,10 @@ end
     return res
 end
 
-AtomsCalculators.@generate_interface function AtomsCalculators.forces(sys,
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
                                                             inter::MullerBrown; kwargs...)
-    return force_muller_brown.(Ref(inter), sys.coords)
+    fs .+= force_muller_brown.((inter,), sys.coords)
+    return fs
 end
 
 @inline function force_muller_brown(inter::MullerBrown, coord::SVector{2})

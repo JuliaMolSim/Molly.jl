@@ -96,21 +96,23 @@ end
 
 uconvert_vec(x...) = uconvert.(x...)
 
-function AtomsCalculators.forces(sys::System{D, AT, T},
-                                 ase_calc::ASECalculator;
-                                 kwargs...) where {D, AT, T}
+function AtomsCalculators.forces!(fs,
+                                  sys::System{D, AT, T},
+                                  ase_calc::ASECalculator;
+                                  kwargs...) where {D, AT, T}
     Molly.update_ase_calc!(ase_calc, sys)
     forces_py = ase_calc.ase_atoms.get_forces()
     forces_flat = reshape(transpose(pyconvert(Matrix{T}, forces_py)), length(sys) * D)
-    fs = reinterpret(SVector{D, T}, forces_flat)
+    fs_svec = reinterpret(SVector{D, T}, forces_flat)
     if sys.force_units == NoUnits
-        fs_unit = fs # Assume units are eV/Å
+        fs_unit = fs_svec # Assume units are eV/Å
     elseif dimension(sys.force_units) == u"𝐋 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        fs_unit = uconvert_vec.(sys.force_units, fs * Unitful.Na * u"eV/Å")
+        fs_unit = uconvert_vec.(sys.force_units, fs_svec * Unitful.Na * u"eV/Å")
     else
-        fs_unit = uconvert_vec.(sys.force_units, fs * u"eV/Å")
+        fs_unit = uconvert_vec.(sys.force_units, fs_svec * u"eV/Å")
     end
-    return to_device(fs_unit, AT)
+    fs .+= to_device(fs_unit, AT)
+    return fs
 end
 
 function AtomsCalculators.potential_energy(sys::System{<:Any, <:Any, T},

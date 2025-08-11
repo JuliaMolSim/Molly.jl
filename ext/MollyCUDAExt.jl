@@ -301,7 +301,7 @@ That's why the calculations are done in the following order:
 
 function force_kernel!( 
     sorted_seq,
-    forces_nounits, 
+    fs_mat, 
     mins::AbstractArray{C}, 
     maxs::AbstractArray{C},
     coords, 
@@ -411,11 +411,11 @@ function force_kernel!(
             sync_threads()
             @inbounds for k in a:b
                 CUDA.atomic_add!(
-                    pointer(forces_nounits, s_idx_i * b - (b - k)), 
+                    pointer(fs_mat, s_idx_i * b - (b - k)), 
                     -force_smem[laneid(), k]
                 ) 
                 CUDA.atomic_add!(
-                    pointer(forces_nounits, s_idx_j * b - (b - k)), 
+                    pointer(fs_mat, s_idx_j * b - (b - k)), 
                     -opposites_sum[laneid(), k]
                 ) 
             end
@@ -471,7 +471,7 @@ function force_kernel!(
                 @inbounds for k in a:b
                     force_smem[laneid(), k] += ustrip(f[k])
                     CUDA.atomic_add!(
-                        pointer(forces_nounits, s_idx_j * b - (b - k)), 
+                        pointer(fs_mat, s_idx_j * b - (b - k)), 
                         ustrip(f[k])
                     )
                 end
@@ -480,7 +480,7 @@ function force_kernel!(
             # Sum contributions of the r-block to the other standard blocks
             @inbounds for k in a:b
                 CUDA.atomic_add!(
-                    pointer(forces_nounits, s_idx_i * b - (b - k)), 
+                    pointer(fs_mat, s_idx_i * b - (b - k)), 
                     -force_smem[laneid(), k]
                 ) 
             end
@@ -528,7 +528,7 @@ function force_kernel!(
         @inbounds for k in a:b
             # In this case i == j, so we can call atomic_add! only once
             CUDA.atomic_add!(
-                pointer(forces_nounits, s_idx_i * b - (b - k)), 
+                pointer(fs_mat, s_idx_i * b - (b - k)), 
                 -force_smem[laneid(), k] - opposites_sum[laneid(), k]
             ) 
         end
@@ -575,7 +575,7 @@ function force_kernel!(
             sync_threads()
             @inbounds for k in a:b
                 CUDA.atomic_add!(
-                    pointer(forces_nounits, s_idx_i * b - (b - k)), 
+                    pointer(fs_mat, s_idx_i * b - (b - k)), 
                     -force_smem[laneid(), k] - opposites_sum[laneid(), k]
                 ) 
             end
