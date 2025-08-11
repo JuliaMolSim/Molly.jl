@@ -23,7 +23,6 @@ export
     MollyCalculator,
     ASECalculator,
     NBodyInteraction,
-    SpecificInteraction,
     PairwiseInteraction
 
 const DefaultFloat = Float64
