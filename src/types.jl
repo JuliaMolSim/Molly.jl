@@ -594,6 +594,14 @@ function System(;
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
+    if !all(isa.(values(pairwise_inters), PairwiseInteraction))
+        throw(ArgumentError("Not all pairwise_inters have supertype PairwiseInteraction. Got: $(supertype.(typeof.(pairwise_inters)))"))
+    end
+
+    if !all(isa.(values(specific_inter_lists), SpecificInteractionList))
+        throw(ArgumentError("Not all specific_inter_lists have supertype SpecificInteractionList. Got: $(supertype.(typeof.(specific_inter_lists)))"))
+    end
+
     if isa(atoms, AbstractGPUArray) && !isa(coords, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
