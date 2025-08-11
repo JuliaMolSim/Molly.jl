@@ -545,8 +545,8 @@ function System(;
                 velocities=nothing,
                 atoms_data=[],
                 topology=nothing,
-                pairwise_inters=(),
-                specific_inter_lists=(),
+                pairwise_inters::NTuple{NPI, PairwiseInteraction}=(),
+                specific_inter_lists::NTuple{NSI, SpecificInteractionList}=(),
                 general_inters=(),
                 constraints=(),
                 neighbor_finder=NoNeighborFinder(),
@@ -554,7 +554,7 @@ function System(;
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
-                data=nothing)
+                data=nothing) where {NPI, NSI}
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
     T = float_type(boundary)
@@ -661,42 +661,6 @@ function System(;
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, neighbor_finder, loggers,
                     df, force_units, energy_units, k_converted, atom_masses, total_mass, data)
-end
-
-
-"""
-    System(sys; <keyword arguments>)
-
-Convenience constructor for `System` that takes all interactions in one tuple.
-These are passed through the `interactions` kwarg.
-"""
-function System(interactions=();
-                kwargs...
-            )
-
-    pairwise_inter_idxs = findall(i -> i isa PairwiseInteraction, interactions)
-    specific_inter_idxs = findall(i -> i isa SpecificInteraction, interactions)
-    nbody_inter_idxs = findall(i -> i isa NBodyInteraction, interactions)
-
-    length(nbody_inter_idxs) > length(pairwise_inters_idxs) || error("Molly does not currently support n-body potentials beyond pair.")
-
-    # All remaining interactions assumed to be general
-    idxs = trues(length(interactions))
-    idxs[pairwise_inter_idxs] .= false
-    idxs[specific_inter_idxs] .= false
-    general_inters = interactions[idxs]
-
-    haskey(kwargs, "pairwise_inters") || @warn "Ignoring pairwise_inters kwarg, using interaction parameter"
-    haskey(kwargs, "specific_inter_lists") || @warn "Ignoring specific_inter_lists kwarg, using interaction parameter"
-    haskey(kwargs, "general_inters") || @warn "Ignoring general_inters kwarg, using interaction parameter"
-    
-    return System(
-        pairwise_inters=pairwise_inters[pairwise_inter_idxs],
-        specific_inter_lists=specific_inters[specific_inter_idxs],
-        general_inters=general_inters,
-        kwargs...
-    )
-
 end
 
 

@@ -20,7 +20,7 @@ and the force on each atom by
 \end{aligned}
 ```
 """
-@kwdef struct LennardJones{C, H, S, E, W, NF} <: PairwiseInteraction
+@kwdef struct LennardJones{C, H, S, E, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
     shortcut::H = lj_zero_shortcut

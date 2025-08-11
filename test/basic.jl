@@ -505,41 +505,6 @@ end
     end
 end
 
-@testset "Other System Constructors" begin
-
-    n_atoms = 100
-    n_steps = 100
-    temp = 298.0u"K"
-    boundary = CubicBoundary(2.0u"nm")
-
-    pairwise_inter_types = (
-        LennardJones(use_neighbors=true), 
-        LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),
-    )
-
-    atoms = [Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]  
-    coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")                                             
-
-    # interaction constructor
-    s = System(
-        interactions=pairwise_inter_types,
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        neighbor_finder=neighbor_finder,
-    )
-
-    # copy constructor
-    new_coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm") 
-    sys = System(s;
-                coords = new_coords,
-                kwargs...
-            )
-
-    # crystal constructor tested in simulation.jl
-    # AtomsBase constructor tested above 
-
-end
 
 @testset "AtomsCalculators" begin
     ab_sys = AtomsBase.AbstractSystem(
