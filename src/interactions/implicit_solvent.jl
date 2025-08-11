@@ -764,7 +764,7 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2{T}, coords::AbstractGPUA
     return Bs, B_grads, I_grads
 end
 
-function gpu_threads_blocks_gbsa(n_inters)
+function gpu_threads_gbsa(n_inters)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_IMPLICIT", "512"))
     return n_threads_gpu
 end
@@ -777,7 +777,7 @@ function gbsa_born_gpu(coords::AbstractArray{SVector{D, C}}, offset_radii, scale
     Is_nounits = KernelAbstractions.zeros(backend, T, n_atoms)
     I_grads_nounits = KernelAbstractions.zeros(backend, T, n_atoms, n_atoms)
     n_inters = n_atoms ^ 2
-    n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
+    n_threads_gpu = gpu_threads_gbsa(n_inters)
 
     kernel! = gbsa_born_kernel!(backend, n_threads_gpu)
     kernel!(Is_nounits, I_grads_nounits, coords, offset_radii,
@@ -952,7 +952,7 @@ function gbsa_force_1_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_c
     fs_mat = KernelAbstractions.zeros(backend, T, D, n_atoms)
     born_forces_mod_ustrip = KernelAbstractions.zeros(backend, T, n_atoms)
     n_inters = n_atoms_to_n_pairs(n_atoms) + n_atoms
-    n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
+    n_threads_gpu = gpu_threads_gbsa(n_inters)
 
     kernel! = gbsa_force_1_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, born_forces_mod_ustrip, coords, boundary, dist_cutoff,
@@ -969,7 +969,7 @@ function gbsa_force_2_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_c
     n_atoms = length(coords)
     fs_mat = KernelAbstractions.zeros(backend, T, D, n_atoms)
     n_inters = n_atoms ^ 2
-    n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
+    n_threads_gpu = gpu_threads_gbsa(n_inters)
 
     kernel! = gbsa_force_2_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, born_forces, coords, boundary, dist_cutoff, offset_radii,

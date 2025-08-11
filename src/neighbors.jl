@@ -134,7 +134,7 @@ function find_neighbors(sys::System,
     return NeighborList(length(neighbors_list), neighbors_list)
 end
 
-function gpu_threads_blocks_dnf(n_inters)
+function gpu_threads_dnf(n_inters)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_DISTANCENF", "512"))
     return n_threads_gpu
 end
@@ -173,7 +173,7 @@ function find_neighbors(sys::System{D, AT},
 
     nf.neighbors .= false
     n_inters = n_atoms_to_n_pairs(length(sys))
-    n_threads_gpu = gpu_threads_blocks_dnf(n_inters)
+    n_threads_gpu = gpu_threads_dnf(n_inters)
 
     backend = get_backend(sys.coords)
     kernel! = distance_neighbor_finder_kernel!(backend, n_threads_gpu)

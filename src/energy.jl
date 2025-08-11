@@ -257,7 +257,6 @@ end
 
 function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
-    val_ft = Val(T)
     pe_vec_nounits = KernelAbstractions.zeros(get_backend(sys.coords), T, 1)
     buffers = init_forces_buffer!(sys, 1, true)
 
@@ -274,7 +273,7 @@ function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
 
     for inter_list in values(sys.specific_inter_lists)
         specific_pe_gpu!(pe_vec_nounits, inter_list, sys.coords, sys.velocities, sys.atoms,
-                         sys.boundary, step_n, sys.energy_units, val_ft)
+                         sys.boundary, step_n, sys.energy_units, Val(T))
     end
 
     pe = only(from_device(pe_vec_nounits)) * sys.energy_units

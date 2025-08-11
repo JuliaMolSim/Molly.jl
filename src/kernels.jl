@@ -38,7 +38,7 @@ function gpu_threads_pairwise(n_neighbors)
 end
 
 function gpu_threads_specific(n_inters)
-    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_SPECIFIC", "128"))
+    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_SPECIFIC", "32"))
     return n_threads_gpu
 end
 

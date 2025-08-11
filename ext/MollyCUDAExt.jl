@@ -32,18 +32,6 @@ CUDA.shfl_recurse(op, x::SVector{1, C}) where C = SVector{1, C}(op(x[1]))
 CUDA.shfl_recurse(op, x::SVector{2, C}) where C = SVector{2, C}(op(x[1]), op(x[2]))
 CUDA.shfl_recurse(op, x::SVector{3, C}) where C = SVector{3, C}(op(x[1]), op(x[2]), op(x[3]))
 
-function cuda_threads_blocks_pairwise(n_neighbors)
-    n_threads_gpu = min(n_neighbors, parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512")))
-    n_blocks = cld(n_neighbors, n_threads_gpu)
-    return n_threads_gpu, n_blocks
-end
-
-function cuda_threads_blocks_specific(n_inters)
-    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_SPECIFIC", "128"))
-    n_blocks = cld(n_inters, n_threads_gpu)
-    return n_threads_gpu, n_blocks
-end
-
 function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters,
                                    nbs::Molly.NoNeighborList, step_n) where {D, AT <: CuArray, T}
     kernel = @cuda launch=false pairwise_force_kernel_nonl!(
