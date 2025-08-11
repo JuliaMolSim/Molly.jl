@@ -559,9 +559,10 @@ The force on each particle in the system is derived from the potential correspon
 ```
 
 In Molly there are three types of interactions:
-- Pairwise interactions are present between all or most atom pairs, and account for example for non-bonded terms in molecular mechanics force fields.
+- Pairwise interactions are present between all or most atom pairs, and account for example for non-bonded terms in molecular mechanics force fields. All pairwise interactions are a subtype of [`PairwiseInteraction`](@ref).
 - Specific interactions are present between specific atoms, and account for example for bonded terms in molecular mechanics force fields.
 - General interactions are a free-form interaction type that can access the whole system and outputs forces for all atoms. This is useful for neural network potentials, implicit solvent models and other cases that require maximum flexibility. General interactions should be compatible with the [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl) interface.
+
 
 The available pairwise interactions are:
 - [`LennardJones`](@ref)
@@ -609,7 +610,7 @@ The `atom_type` field of the atoms is available, allowing features like changing
 
 To define your own pairwise interaction, first define the `struct`:
 ```julia
-struct MyPairwiseInter{C}
+struct MyPairwiseInter{C} <: PairwiseInteraction
     # Any properties, e.g. cutoffs and interaction parameters
     cutoff::C
     param::Float64

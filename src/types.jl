@@ -670,8 +670,7 @@ end
 Convenience constructor for `System` that takes all interactions in one tuple.
 These are passed through the `interactions` kwarg.
 """
-function System(;
-                interactions=(),
+function System(interactions=();
                 kwargs...
             )
 
@@ -687,6 +686,10 @@ function System(;
     idxs[specific_inter_idxs] .= false
     general_inters = interactions[idxs]
 
+    haskey(kwargs, "pairwise_inters") || @warn "Ignoring pairwise_inters kwarg, using interaction parameter"
+    haskey(kwargs, "specific_inter_lists") || @warn "Ignoring specific_inter_lists kwarg, using interaction parameter"
+    haskey(kwargs, "general_inters") || @warn "Ignoring general_inters kwarg, using interaction parameter"
+    
     return System(
         pairwise_inters=pairwise_inters[pairwise_inter_idxs],
         specific_inter_lists=specific_inters[specific_inter_idxs],
