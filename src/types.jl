@@ -544,8 +544,8 @@ function System(;
                 velocities=nothing,
                 atoms_data=[],
                 topology=nothing,
-                pairwise_inters::NTuple{NPI, PairwiseInteraction}=(),
-                specific_inter_lists::NTuple{NSI, SpecificInteractionList}=(),
+                pairwise_inters=(),
+                specific_inter_lists=(),
                 general_inters=(),
                 constraints=(),
                 neighbor_finder=NoNeighborFinder(),
@@ -553,7 +553,7 @@ function System(;
                 force_units=u"kJ * mol^-1 * nm^-1",
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
-                data=nothing) where {NPI, NSI}
+                data=nothing)
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
     T = float_type(boundary)

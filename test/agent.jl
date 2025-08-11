@@ -75,7 +75,7 @@
     lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
     sir = SIRInteraction(0.5, 0.06, 0.01)
     @test !use_neighbors(sir)
-    pairwise_inters = (lj, sir)
+    pairwise_inters = (LennardJones=lj, SIR=sir)
     neighbor_finder = DistanceNeighborFinder(
         eligible=trues(n_people, n_people),
         n_steps=10,
