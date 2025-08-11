@@ -95,13 +95,14 @@ function excluded_interactions!(Fs::AbstractVector{SVector{D, C}}, buffer_Fs, bu
     n_threads_gpu = 128
     kernel! = excluded_interactions_kernel!(backend, n_threads_gpu)
     kernel!(buffer_Fs, buffer_Es, excluded_pairs, atoms, coords, boundary, α, f,
-            energy_units; ndrange=length(excluded_pairs))
+            energy_units, Val(T); ndrange=length(excluded_pairs))
     Fs .+= reinterpret(SVector{D, T}, vec(buffer_Fs)) .* force_units
     return sum(buffer_Es) * energy_units
 end
 
 @kernel function excluded_interactions_kernel!(Fs_mat, exclusion_Es, @Const(excluded_pairs),
-                            @Const(atoms), @Const(coords), boundary, α, f, energy_units)
+                            @Const(atoms), @Const(coords), boundary, α, f, energy_units,
+                            ::Val{T}) where T
     ei = @index(Global, Linear)
     if ei <= length(excluded_pairs)
         i, j = excluded_pairs[ei]
