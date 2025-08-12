@@ -31,7 +31,6 @@ using LinearAlgebra
 using Random
 using SparseArrays
 using Statistics
-using OnlineStats
 
 include("types.jl")
 include("units.jl")

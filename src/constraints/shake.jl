@@ -37,7 +37,7 @@ of the linear system solved to satisfy the RATTLE algorithm.
 - `gpu_block_size`: The number of threads per block to use for GPU calculations.
 - `max_iters`: The maximum number of iterations to perform when doing SHAKE. Defaults to 25.
 """
-struct SHAKE_RATTLE{A, B, C, D, E, F, I <: Integer, S}
+struct SHAKE_RATTLE{A, B, C, D, E, F, I <: Integer}
     clusters12::A
     clusters23::B
     clusters34::C
@@ -46,7 +46,6 @@ struct SHAKE_RATTLE{A, B, C, D, E, F, I <: Integer, S}
     vel_tolerance::F
     gpu_block_size::I
     max_iters::I
-    stats::S # keeps track of iters, average, variance, and max/min
 end
 
 function SHAKE_RATTLE(n_atoms,
@@ -87,7 +86,6 @@ function SHAKE_RATTLE(n_atoms,
         throw(ArgumentError("Constraints should be passd to SHAKE_RATTLE on CPU. Data will be moved to GPU later."))
     end
 
-
     clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, dist_constraints, angle_constraints)
 
     A = typeof(clusters12)
@@ -95,10 +93,8 @@ function SHAKE_RATTLE(n_atoms,
     C = typeof(clusters34)
     D = typeof(angle_clusters)
 
-    stats = Series(Mean(), Variance(), Extrema())
-
-    return SHAKE_RATTLE{A, B, C, D, typeof(dist_tolerance), typeof(vel_tolerance), typeof(max_iters), typeof(stats)}(
-        clusters12, clusters23, clusters34, angle_clusters, dist_tolerance, vel_tolerance, gpu_block_size, max_iters, stats)
+    return SHAKE_RATTLE{A, B, C, D, typeof(dist_tolerance), typeof(vel_tolerance), typeof(max_iters)}(
+        clusters12, clusters23, clusters34, angle_clusters, dist_tolerance, vel_tolerance, gpu_block_size, max_iters)
 end
 
 function SHAKE_RATTLE(sr::SHAKE_RATTLE, clusters12, clusters23, clusters34, angle_clusters)
@@ -107,19 +103,13 @@ function SHAKE_RATTLE(sr::SHAKE_RATTLE, clusters12, clusters23, clusters34, angl
     C = typeof(clusters34)
     D = typeof(angle_clusters)
 
-    return SHAKE_RATTLE{A, B, C, D, typeof(sr.dist_tolerance), typeof(sr.vel_tolerance), typeof(sr.max_iters), typeof(sr.stats)}(
+    return SHAKE_RATTLE{A, B, C, D, typeof(sr.dist_tolerance), typeof(sr.vel_tolerance), typeof(sr.max_iters)}(
         clusters12, clusters23, clusters34, angle_clusters,
-        sr.dist_tolerance, sr.vel_tolerance, sr.gpu_block_size, sr.max_iters, sr.stats)
+        sr.dist_tolerance, sr.vel_tolerance, sr.gpu_block_size, sr.max_iters)
 end
 
 cluster_keys(::SHAKE_RATTLE) = [:clusters12, :clusters23, :clusters34, :angle_clusters]
-iters_avg(sr::SHAKE_RATTLE) = value(sr.stats[1])
-iters_var(sr::SHAKE_RATTLE) = value(sr.stats[2])
-iters_min(sr::SHAKE_RATTLE) = value(sr.stats[3].min)
-iters_max(sr::SHAKE_RATTLE) = value(sr.stats[3].max)
-iters_nmin(sr::SHAKE_RATTLE) = value(sr.stats[3].nmin)
-iters_nmax(sr::SHAKE_RATTLE) = value(sr.stats[3].nmax)
-  
+
 function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
 
     # Disable Neighbor interactions that are constrained

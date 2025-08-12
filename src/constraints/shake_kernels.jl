@@ -355,7 +355,7 @@ end
 
         # Do one M-SHAKE iteration and check if it is converged or not
         is_active = shake_fn(
-            clusters[cluster_idx], #! might allocate new struct (indexing StructArray)
+            clusters[cluster_idx], #! allocates new struct (indexing StructArray)
             other_kernel_args...
         )
         still_active[cluster_idx] = is_active
@@ -380,6 +380,7 @@ function shake_gpu!(
     active_idxs .= 1:N_active_clusters
     # Doesnt need to be initialized, kernel will do that
     still_active = allocate(backend, Bool, N_active_clusters)
+    KA.pagelock!(backend, still_active)
 
     iter = 1
     while iter <= max_iters
