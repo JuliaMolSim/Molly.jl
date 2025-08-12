@@ -107,7 +107,7 @@ function SHAKE_RATTLE(sr::SHAKE_RATTLE, clusters12, clusters23, clusters34, angl
     C = typeof(clusters34)
     D = typeof(angle_clusters)
 
-    return SHAKE_RATTLE{A, B, C, D, typeof(sr.dist_tolerance), typeof(sr.vel_tolerance), typeof(sr.stats)}(
+    return SHAKE_RATTLE{A, B, C, D, typeof(sr.dist_tolerance), typeof(sr.vel_tolerance), typeof(sr.max_iters), typeof(sr.stats)}(
         clusters12, clusters23, clusters34, angle_clusters,
         sr.dist_tolerance, sr.vel_tolerance, sr.gpu_block_size, sr.max_iters, sr.stats)
 end

@@ -75,6 +75,5 @@ end
 
 interactions(kd::AngleClusterData) = ((kd.k1, kd.k2, kd.dist12), (kd.k1, kd.k3, kd.dist13), (kd.k2, kd.k3, kd.dist23))
 
-
 central_atom(kd::K) where {K <: ConstraintKernelData} = kd.k1
 float_type(::ConstraintKernelData{D}) where D = float_type(D)

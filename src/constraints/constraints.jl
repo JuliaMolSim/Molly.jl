@@ -298,7 +298,7 @@ function build_clusters(
         push!(clusters_angle, to_cluster(ac))
     end
 
-    return clusters12, clusters23, clusters34, [clusters_angle...]
+    return clusters12, clusters23, clusters34, StructArray(clusters_angle)
 end
 
 function build_clusters(
