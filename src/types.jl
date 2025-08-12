@@ -1084,6 +1084,7 @@ The partial charges of the atoms in a [`System`](@ref) or [`ReplicaSystem`](@ref
 """
 charges(s::Union{System, ReplicaSystem}) = charge.(s.atoms)
 charge(s::Union{System, ReplicaSystem}, i::Integer) = charge(s.atoms[i])
+charge(s::Union{System, ReplicaSystem}, ::Colon) = charge.(s.atoms)
 
 Base.getindex(s::Union{System, ReplicaSystem}, i::Union{Integer, AbstractVector}) = s.atoms[i]
 Base.length(s::Union{System, ReplicaSystem}) = length(s.atoms)
