@@ -339,13 +339,12 @@ end
 end
 
 @kernel inbounds=true function shake_step!( 
-        @Const(clusters::StructArray{C}),
         @Const(active_idxs),    
         still_active::AbstractVector{Bool},
         @Const(N_active),
         @Const(shake_fn),
-        other_kernel_args...;
-    ) where {C <: ConstraintKernelData}
+        kernel_args...;
+    )
 
     tid = @index(Global, Linear)
         
@@ -355,8 +354,8 @@ end
 
         # Do one M-SHAKE iteration and check if it is converged or not
         is_active = shake_fn(
-            clusters[cluster_idx], #! allocates new struct (indexing StructArray)
-            other_kernel_args...
+            cluster_idx,
+            kernel_args...
         )
         still_active[cluster_idx] = is_active
     end
@@ -386,11 +385,12 @@ function shake_gpu!(
     while iter <= max_iters
 
         kern(
-            clusters,
             active_idxs,    
             still_active,
             N_active_clusters,
             shake_kernel,
+            getproperty.(Ref(clusters), idx_keys(C))...,
+            getproperty.(Ref(clusters), dist_keys(C))...,
             other_kernel_args...;
             ndrange = N_active_clusters
         )
@@ -422,7 +422,10 @@ end
 # 3 atoms, 2 constraints
 # Constraints between 1-2 and 1-3
 @inline function shake3_kernel!(
-        ckd::Cluster23Data{L},
+        # ckd::Cluster23Data{L},
+        cluster_idx,
+        k1s, k2s, k3s,
+        dist12s, dist13s,
         r_t1::AbstractVector{<:AbstractVector{L}}, 
         r_t2::AbstractVector{<:AbstractVector{L}},
         m_inv::AbstractVector{M}, 
@@ -440,12 +443,12 @@ end
     C = @MVector zeros(C_type, 2) # Units are L^2
     λ = @MVector zeros(L_type, 2) # Units are M
 
-    k1 = ckd.k1 # central atom
-    k2 = ckd.k2
-    k3 = ckd.k3
+    k1 = k1s[cluster_idx] # central atom
+    k2 = k2s[cluster_idx]
+    k3 = k3s[cluster_idx]
 
-    dist12 = ckd.dist12
-    dist13 = ckd.dist13
+    dist12 = dist12s[cluster_idx]
+    dist13 = dist13s[cluster_idx]
 
     m1_inv = m_inv[k1] # uncoalesced read
     m2_inv = m_inv[k2] # uncoalesced read
@@ -503,7 +506,10 @@ end
 # 4 atoms, 3 constraints
 # Constraints between 1-2, 1-3 and 1-4
 @inline function shake4_kernel!(
-        ckd::Cluster34Data{L},
+        # ckd::Cluster34Data{L},
+        cluster_idx,
+        k1s, k2s, k3s, k4s,
+        dist12s, dist13s, dist14s,
         r_t1::AbstractVector{<:AbstractVector{L}},
         r_t2::AbstractVector{<:AbstractVector{L}},
         m_inv::AbstractVector{M}, 
@@ -523,14 +529,15 @@ end
     C = @MVector zeros(C_type, 3)
     λ = @MVector zeros(L_type, 3)
 
-    k1 = ckd.k1 # central atom
-    k2 = ckd.k2
-    k3 = ckd.k3
-    k4 = ckd.k4
+    k1 = k1s[cluster_idx] # central atom
+    k2 = k2s[cluster_idx]
+    k3 = k3s[cluster_idx]
+    k4 = k4s[cluster_idx]
 
-    dist12 = ckd.dist12
-    dist13 = ckd.dist13
-    dist14 = ckd.dist14
+    dist12 = dist12s[cluster_idx]
+    dist13 = dist13s[cluster_idx]
+    dist14 = dist14s[cluster_idx]
+
 
     m1_inv = m_inv[k1]; m2_inv = m_inv[k2];# uncoalesced read
     m3_inv = m_inv[k3]; m4_inv = m_inv[k4] # uncoalesced read
@@ -602,7 +609,10 @@ end
 # 3 atoms, 3 constraints
 # Constraints between 1-2, 1-3 and 2-3
 @inline function shake3_angle_kernel!(
-        ckd::AngleClusterData{L},
+        # ckd::AngleClusterData{L},
+        cluster_idx,
+        k1s, k2s, k3s,
+        dist12s, dist13s, dist23s,
         r_t1::AbstractVector{<:AbstractVector{L}},
         r_t2::AbstractVector{<:AbstractVector{L}},
         m_inv::AbstractVector{M}, 
@@ -622,13 +632,13 @@ end
     C = @MVector zeros(C_type, 3)
     λ = @MVector zeros(L_type, 3)
 
-    k1 = ckd.k1 # central atom
-    k2 = ckd.k2
-    k3 = ckd.k3
+    k1 = k1s[cluster_idx] # central atom
+    k2 = k2s[cluster_idx]
+    k3 = k3s[cluster_idx]
 
-    dist12 = ckd.dist12
-    dist13 = ckd.dist13
-    dist23 = ckd.dist23
+    dist12 = dist12s[cluster_idx]
+    dist13 = dist13s[cluster_idx]
+    dist23 = dist23s[cluster_idx]
 
     m1_inv = m_inv[k1]; m2_inv = m_inv[k2]; m3_inv = m_inv[k3] # uncoalesced read
 
