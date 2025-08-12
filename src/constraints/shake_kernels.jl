@@ -328,7 +328,7 @@ end
 
         α1 = (-b + sqrt(D)) / (2*a)
         α2 = (-b - sqrt(D)) / (2*a)
-        g = branchless_min(α1, α2)
+        g = ifelse(α1 <= α2, α1, α2)
 
         # Step 3: Update global memory
         r_t2[k1] += r12 .* (g*m1_inv)
