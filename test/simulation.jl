@@ -812,7 +812,6 @@ end
     @test check_velocity_constraints(sys, cons)
 end
 
-
 @testset "Constraints 4-atom" begin
     n_atoms = 40
     atom_mass = 10.0u"g/mol"
@@ -874,7 +873,6 @@ end
     @test check_position_constraints(sys, cons)
     @test check_velocity_constraints(sys, cons)
 end
-
 
 @testset "Constraints Angle" begin
     n_atoms = 30
@@ -1013,6 +1011,73 @@ end
     @test check_position_constraints(sys, cons)
     @test check_velocity_constraints(sys, cons)
 
+end
+
+@testset "GPU/CPU Constraints Protein No Solvent" begin
+   
+    pdb_fp = "1ubq_h.pdb" # No solvent
+    T = Float32
+
+    ff = MolecularForceField(
+        T,
+        joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
+        joinpath(data_dir, "force_fields", "his.xml"),
+    )
+
+    boundary = CubicBoundary(T(10.0)u"nm")
+    temp = T(100.0)u"K"
+    simulator = VelocityVerlet(dt=T(0.001)u"ps")
+
+    n_threads = (run_parallel_tests ? Threads.nthreads() : 1)
+    runs = (
+        (false, n_threads, "CPU $(n_threads) thread"),
+        (true , n_threads, "CUDA"         ),
+    )
+
+    for (gpu, n_threads, label) in runs
+
+        if !run_cuda_tests && gpu
+            continue 
+        end
+
+        AT = (gpu ? CuArray : Array)
+        sys_init = System(pdb_fp, ff; boundary=boundary, array_type=AT)
+        sys_cpu  = System(pdb_fp, ff; boundary=boundary, array_type=Array)
+
+        h_inds = findall(a -> a.mass == T(1.008)u"g/mol", sys_cpu.atoms)
+        bonds = sys_cpu.specific_inter_lists[1]
+        constraints_list = []
+        for (i, j, inter) in zip(bonds.is, bonds.js, bonds.inters)
+            if i in h_inds || j in h_inds
+                bond_length = norm(vector(sys_cpu.coords[i], sys_cpu.coords[j],
+                                        sys_cpu.boundary))
+                # Note the harmonic bond is not disabled
+                push!(constraints_list, DistanceConstraint(Int(i), Int(j), bond_length))
+            end
+        end
+
+        constraints = (SHAKE_RATTLE(
+            length(sys_cpu),
+            T(1e-6)u"nm",
+            T(1e-6)u"nm^2 * ps^-1";
+            dist_constraints=[constraints_list...],
+            gpu_block_size = 256
+        ),)
+
+        sys = System(sys_init; constraints=constraints)
+
+        minimizer = SteepestDescentMinimizer()
+        simulate!(sys, minimizer; n_threads=n_threads)
+        random_velocities!(sys, temp)
+
+        simulate!(sys, simulator, 100; n_threads=n_threads) # Compile
+        @elapsed simulate!(sys, simulator, 1000; n_threads=n_threads)
+                
+        @test check_position_constraints(sys, sys.constraints[1])
+        @test check_velocity_constraints(sys, sys.constraints[1])
+
+    end 
+    
 end
 
 @testset "Langevin splitting" begin
