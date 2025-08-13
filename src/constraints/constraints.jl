@@ -293,12 +293,9 @@ function build_clusters(
 
     # Now that we know angle_constraints do not interact with
     # any of the distance constraints we can build their clusters
-    clusters_angle = ConstraintCluster{3,3}[]
-    for ac in angle_constraints
-        push!(clusters_angle, to_cluster(ac))
-    end
+    clusters_angle = StructArray(to_cluster_data(ac) for ac in angle_constraints)
 
-    return clusters12, clusters23, clusters34, StructArray(clusters_angle)
+    return clusters12, clusters23, clusters34, clusters_angle
 end
 
 function build_clusters(
