@@ -1062,7 +1062,6 @@ neighbor_finder = DistanceNeighborFinder(
     eligible=trues(length(atoms), length(atoms)),
     dist_cutoff=1.5*r_cut,
 )
-disable_constrained_interactions!(neighbor_finder, shake.clusters)
 
 sys = System(
     atoms=atoms,

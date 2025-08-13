@@ -1,12 +1,19 @@
 export
     SHAKE_RATTLE,
-    check_position_constraints,
-    check_velocity_constraints
+    setup_constraints!
+
 
 """
-    SHAKE_RATTLE(constraints, n_atoms, dist_tolerance, vel_tolerance)
+    SHAKE_RATTLE(n_atoms,
+                dist_tolerance,
+                vel_tolerance;
+                dist_constraints = nothing,
+                angle_constraints = nothing,
+                gpu_block_size = 64,
+                max_iters = 25)
 
-Constrain distances during a simulation using the SHAKE and RATTLE algorithms.
+Constrain distances during a simulation using the SHAKE and RATTLE algorithms. 
+Either or both of `dist_constraints` and `angle_constraitns` must be passed.
 
 Velocity constraints will be imposed for simulators that integrate velocities such as
 [`VelocityVerlet`](@ref).
@@ -14,150 +21,136 @@ See [Ryckaert et al. 1977](https://doi.org/10.1016/0021-9991(77)90098-5) for SHA
 [Andersen 1983](https://doi.org/10.1016/0021-9991(83)90014-1) for RATTLE and
 [Elber et al. 2011](https://doi.org/10.1140%2Fepjst%2Fe2011-01525-9) for a derivation
 of the linear system solved to satisfy the RATTLE algorithm.
+[Krautler et al. 2000](https://onlinelibrary.wiley.com/doi/10.1002/1096-987X(20010415)22:5%3C501::AID-JCC1021%3E3.0.CO;2-V) for the M-SHAKE algorithm
 
-Not currently compatible with GPU simulation.
 
 # Arguments
-- `constraints`: a vector of constraints to be imposed on the system.
-- `n_atoms::Integer`: the number of atoms in the system.
+- `n_atoms`: Total number of atoms in the system.
 - `dist_tolerance`: the tolerance used to end the iterative procedure when calculating
     position constraints, should have the same units as the coordinates.
 - `vel_tolerance`: the tolerance used to end the iterative procedure when calculating
     velocity constraints, should have the same units as the velocities * the coordinates.
+- `dist_constraints`: A vector of [`DistanceConstraint`](@ref) objects that define the
+    distance constraints to be applied. If `nothing`, no distance constraints are applied.
+- `angle_constraints`: A vector of [`AngleConstraint`](@ref) objects that define the
+    angle constraints to be applied. If `nothing`, no angle constraints are applied.
+- `gpu_block_size`: The number of threads per block to use for GPU calculations. Defaults to 128.
+- `max_iters`: The maximum number of iterations to perform when doing SHAKE. Defaults to 25.
 """
-struct SHAKE_RATTLE{C, D, V}
-    clusters::C
-    dist_tolerance::D
-    vel_tolerance::V
+struct SHAKE_RATTLE{A, B, C, D, E, F, I <: Integer}
+    clusters12::A
+    clusters23::B
+    clusters34::C
+    angle_clusters::D
+    dist_tolerance::E
+    vel_tolerance::F
+    gpu_block_size::I
+    max_iters::I
 end
 
-function SHAKE_RATTLE(constraints, n_atoms::Integer, dist_tolerance, vel_tolerance)
-    clusters = build_clusters(n_atoms, constraints)
-    return SHAKE_RATTLE{typeof(clusters), typeof(dist_tolerance), typeof(vel_tolerance)}(
-            clusters, dist_tolerance, vel_tolerance)
-end
+function SHAKE_RATTLE(n_atoms,
+                     dist_tolerance,
+                     vel_tolerance;
+                     dist_constraints = nothing,
+                     angle_constraints = nothing,
+                     gpu_block_size = 128, max_iters = 25)
 
-function apply_position_constraints!(sys, ca::SHAKE_RATTLE, coord_storage;
-                                     n_threads::Integer=Threads.nthreads())
-    # SHAKE updates
-    converged = false
+    dc_isnothing = isnothing(dist_constraints)
+    ac_isnothing = isnothing(angle_constraints)
 
-    while !converged
-        for cluster in ca.clusters # Cannot parallelize this
-            for constraint in cluster.constraints
-                k1, k2 = constraint.i, constraint.j
+    dc_length = dc_isnothing ? 0 : length(dist_constraints)
+    ac_length = ac_isnothing ? 0 : length(angle_constraints)
 
-                # Vector between the atoms after unconstrained update (s)
-                s12 = vector(sys.coords[k1], sys.coords[k2], sys.boundary)
+    ustrip(dist_tolerance) <= 0.0 && throw(ArgumentError("dist_tolerance must be greater than zero"))
+    ustrip(vel_tolerance) <= 0.0 && throw(ArgumentError("vel_tolerance must be greater than zero"))
+    (dc_isnothing && ac_isnothing) && throw(ArgumentError("At least one of dist_constraints or angle_constraints must be provided"))
+    (dc_length == 0 && ac_length == 0) && throw(ArgumentError("At least one of dist_constraints or angle_constraints must be non-empty"))
 
-                # Vector between the atoms before unconstrained update (r)
-                r12 = vector(coord_storage[k1], coord_storage[k2], sys.boundary)
-
-                if abs(norm(s12) - constraint.dist) > ca.dist_tolerance
-                    m1_inv = inv(mass(sys.atoms[k1]))
-                    m2_inv = inv(mass(sys.atoms[k2]))
-                    a = (m1_inv + m2_inv)^2 * sum(abs2, r12)
-                    b = -2 * (m1_inv + m2_inv) * dot(r12, s12)
-                    c = sum(abs2, s12) - (constraint.dist)^2
-                    D = b^2 - 4*a*c
-
-                    if ustrip(D) < 0.0
-                        @warn "SHAKE determinant negative, setting to 0.0"
-                        D = zero(D)
-                    end
-
-                    # Quadratic solution for g
-                    α1 = (-b + sqrt(D)) / (2*a)
-                    α2 = (-b - sqrt(D)) / (2*a)
-
-                    g = abs(α1) <= abs(α2) ? α1 : α2
-
-                    # Update positions
-                    δri1 = r12 .* (g*m1_inv)
-                    δri2 = r12 .* (-g*m2_inv)
-
-                    sys.coords[k1] += δri1
-                    sys.coords[k2] += δri2
-                end
-            end
-        end
-
-        converged = check_position_constraints(sys, ca)
+    if !dc_isnothing && dc_length == 0
+        @warn "You passed an empty vector for `dist_constraints`, no distance constraints will be applied."
+        dist_constraints = nothing
     end
-    return sys
-end
 
-function apply_velocity_constraints!(sys, ca::SHAKE_RATTLE; n_threads::Integer=Threads.nthreads())
-    # RATTLE updates
-    converged = false
-
-    while !converged
-        for cluster in ca.clusters # Cannot parallelize this
-            for constraint in cluster.constraints
-                k1, k2 = constraint.i, constraint.j
-
-                inv_m1 = inv(mass(sys.atoms[k1]))
-                inv_m2 = inv(mass(sys.atoms[k2]))
-
-                # Vector between the atoms after SHAKE constraint
-                r_k1k2 = vector(sys.coords[k1], sys.coords[k2], sys.boundary)
-
-                # Difference between unconstrainted velocities
-                v_k1k2 = sys.velocities[k2] .- sys.velocities[k1]
-
-                err = abs(dot(r_k1k2, v_k1k2))
-                if err > ca.vel_tolerance
-                    # Re-arrange constraint equation to solve for Lagrange multiplier
-                    # This has a factor of dt which cancels out in the velocity update
-                    λₖ = -dot(r_k1k2, v_k1k2) / (dot(r_k1k2, r_k1k2) * (inv_m1 + inv_m2))
-
-                    # Correct velocities
-                    sys.velocities[k1] -= inv_m1 .* λₖ .* r_k1k2
-                    sys.velocities[k2] += inv_m2 .* λₖ .* r_k1k2
-                end
-            end
-        end
-
-        converged = check_velocity_constraints(sys, ca)
+    if !ac_isnothing && ac_length == 0
+        @warn "You passed an empty vector for `angle_constraints`, no angle constraints will be applied."
+        angle_constraints = nothing
     end
-    return sys
-end
 
-"""
-    check_position_constraints(sys, constraints)
-
-Checks if the position constraints are satisfied by the current coordinates of `sys`.
-"""
-function check_position_constraints(sys, ca::SHAKE_RATTLE)
-    max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.coords)))
-    for cluster in ca.clusters
-        for constraint in cluster.constraints
-            dr = vector(sys.coords[constraint.i], sys.coords[constraint.j], sys.boundary)
-            err = abs(norm(dr) - constraint.dist)
-            if max_err < err
-                max_err = err
-            end
+    if float_type(dist_tolerance) isa Float32 
+        if ustrip(dist_tolerance) <= Float32(1e-6) 
+            @warn "Using Float32 with a SHAKE dist_tolerance less than 1e-6. Might have convergence issues."
         end
     end
-    return max_err < ca.dist_tolerance
-end
 
-"""
-    check_velocity_constraints(sys, constraints)
-
-Checks if the velocity constraints are satisfied by the current velocities of `sys`.
-"""
-function check_velocity_constraints(sys::System, ca::SHAKE_RATTLE)
-    max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
-    for cluster in ca.clusters
-        for constraint in cluster.constraints
-            dr = vector(sys.coords[constraint.i], sys.coords[constraint.j], sys.boundary)
-            v_diff = sys.velocities[constraint.j] .- sys.velocities[constraint.i]
-            err = abs(dot(dr, v_diff))
-            if max_err < err
-                max_err = err
-            end
+    if float_type(vel_tolerance) isa Float32 
+        if ustrip(vel_tolerance) <= Float32(1e-6) 
+            @warn "Using Float32 with a RATTLE vel_tolerance less than 1e-6. Might have convergence issues."
         end
     end
-    return max_err < ca.vel_tolerance
+
+    if isa(dist_constraints, AbstractGPUArray) || isa(angle_constraints, AbstractGPUArray)
+        throw(ArgumentError("Constraints should be passd to SHAKE_RATTLE on CPU. Data will be moved to GPU later."))
+    end
+
+    clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, dist_constraints, angle_constraints)
+
+    A = typeof(clusters12)
+    B = typeof(clusters23)
+    C = typeof(clusters34)
+    D = typeof(angle_clusters)
+
+    return SHAKE_RATTLE{A, B, C, D, typeof(dist_tolerance), typeof(vel_tolerance), typeof(max_iters)}(
+        clusters12, clusters23, clusters34, angle_clusters, dist_tolerance, vel_tolerance, gpu_block_size, max_iters)
 end
+
+function SHAKE_RATTLE(sr::SHAKE_RATTLE, clusters12, clusters23, clusters34, angle_clusters)
+    A = typeof(clusters12)
+    B = typeof(clusters23)
+    C = typeof(clusters34)
+    D = typeof(angle_clusters)
+
+    return SHAKE_RATTLE{A, B, C, D, typeof(sr.dist_tolerance), typeof(sr.vel_tolerance), typeof(sr.max_iters)}(
+        clusters12, clusters23, clusters34, angle_clusters,
+        sr.dist_tolerance, sr.vel_tolerance, sr.gpu_block_size, sr.max_iters)
+end
+
+cluster_keys(::SHAKE_RATTLE) = [:clusters12, :clusters23, :clusters34, :angle_clusters]
+
+function setup_constraints!(sr::SHAKE_RATTLE, neighbor_finder, arr_type)
+
+    # Disable Neighbor interactions that are constrained
+    if typeof(neighbor_finder) != NoNeighborFinder
+        disable_constrained_interactions!(neighbor_finder, sr.clusters12)
+        disable_constrained_interactions!(neighbor_finder, sr.clusters23)
+        disable_constrained_interactions!(neighbor_finder, sr.clusters34)
+        disable_constrained_interactions!(neighbor_finder, sr.angle_clusters)
+    end
+
+    # Move to proper backend, if CPU do nothing
+    if arr_type <: AbstractGPUArray
+
+        clusters12_gpu = []; clusters23_gpu = []
+        clusters34_gpu = []; angle_clusters_gpu = []
+
+        if length(sr.clusters12) > 0
+            clusters12_gpu = replace_storage(arr_type, sr.clusters12)
+        end
+        if length(sr.clusters23) > 0
+            clusters23_gpu = replace_storage(arr_type, sr.clusters23)
+        end
+        if length(sr.clusters34) > 0
+            clusters34_gpu = replace_storage(arr_type, sr.clusters34)
+        end
+        if length(sr.angle_clusters) > 0
+            angle_clusters_gpu = replace_storage(arr_type, sr.angle_clusters)
+        end
+
+        sr = SHAKE_RATTLE(sr, clusters12_gpu, clusters23_gpu, clusters34_gpu, angle_clusters_gpu)
+    end
+
+    # neighboor_finder is also modified
+    # but returning only sr makes life easier in types.jl
+    return sr
+
+end
+

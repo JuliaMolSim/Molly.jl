@@ -493,7 +493,7 @@ interface described there.
 - `data::DA=nothing`: arbitrary data associated with the system.
 """
 mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
-                      L, F, E, K, M, DA} <: AtomsBase.AbstractSystem{D}
+                      L, F, E, K, M, IM, DA} <: AtomsBase.AbstractSystem{D}
     atoms::A
     coords::C
     boundary::B
@@ -511,6 +511,7 @@ mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
     energy_units::E
     k::K
     masses::M
+    inv_masses::IM
     data::DA
 end
 
@@ -542,7 +543,6 @@ function System(;
     PI = typeof(pairwise_inters)
     SI = typeof(specific_inter_lists)
     GI = typeof(general_inters)
-    CN = typeof(constraints)
     NF = typeof(neighbor_finder)
     L = typeof(loggers)
     F = typeof(force_units)
@@ -571,13 +571,6 @@ function System(;
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
-    df = n_dof(D, length(atoms), boundary)
-    if length(constraints) > 0
-        for ca in constraints
-            df -= n_dof_lost(D, ca.clusters)
-        end
-    end
-
     if isa(atoms, AbstractGPUArray) && !isa(coords, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
@@ -590,9 +583,6 @@ function System(;
     if isa(vels, AbstractGPUArray) && !isa(atoms, AbstractGPUArray)
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
-    if isa(atoms, AbstractGPUArray) && length(constraints) > 0
-        @warn "Constraints are not currently compatible with simulation on the GPU"
-    end
 
     atom_masses = mass.(atoms)
     M = typeof(atom_masses)
@@ -604,13 +594,33 @@ function System(;
         @warn "eltype of coords or velocities is not isbits, it is recomended to use a vector of SVector's for performance"
     end
 
+    df = n_dof(D, length(atoms), boundary)
+    if length(constraints) > 0
+        for ca in constraints
+            for cluster_type in cluster_keys(ca)
+                clusters = getproperty(ca, cluster_type)
+                df -= n_dof_lost(D, clusters)
+            end
+        end
+    end
+    # Automatically disbales interactions between constrained atoms
+    # and whatever else is implemented for the constraint type.
+    # Constraints moved to GPU here if necessary.
+    constraints = Tuple(setup_constraints!(ca, neighbor_finder, AT) for ca in constraints)
+    CN = typeof(constraints)
+
+    # Useful to have pre-compute
+    inv_masses = T(1) ./ atom_masses
+    IM = typeof(inv_masses)
+
+
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
 
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, DA}(
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, IM, DA}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, neighbor_finder, loggers,
-                    df, force_units, energy_units, k_converted, atom_masses, data)
+                    df, force_units, energy_units, k_converted, atom_masses, inv_masses, data)
 end
 
 """
@@ -1027,6 +1037,8 @@ function ReplicaSystem(;
 
     atom_masses = mass.(atoms)
     M = typeof(atom_masses)
+    inv_masses = T(1) ./ atom_masses
+    IM = typeof(inv_masses)
 
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
@@ -1034,12 +1046,12 @@ function ReplicaSystem(;
     replicas = Tuple(System{D, AT, T, A, C, B, V, AD, TO, typeof(replica_pairwise_inters[i]),
                         typeof(replica_specific_inter_lists[i]), typeof(replica_general_inters[i]),
                         typeof(replica_constraints[i]), NF, typeof(replica_loggers[i]), F, E, K,
-                        M, Nothing}(
+                        M, IM, Nothing}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i],
             deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i],
-            force_units, energy_units, k_converted, atom_masses, nothing) for i in 1:n_replicas)
+            force_units, energy_units, k_converted, atom_masses, inv_masses, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
 
     return ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA}(
@@ -1075,10 +1087,13 @@ is_on_gpu(::Union{System{D, AT}, ReplicaSystem{D, AT}, AT}) where {D, AT} = AT <
 """
     float_type(sys)
     float_type(boundary)
+    float_type(unitful_quantity)
 
-The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses.
+The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box or unitful uses.
 """
 float_type(::Union{System{D, AT, T}, ReplicaSystem{D, AT, T}}) where {D, AT, T} = T
+float_type(::Unitful.AbstractQuantity{T}) where T = T
+float_type(::Type{<:Unitful.AbstractQuantity{T}}) where T = T
 
 """
     masses(sys)
