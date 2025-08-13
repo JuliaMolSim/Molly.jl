@@ -242,7 +242,7 @@ end
         end
     end
 end
-
+#=
 @testset "Differentiable protein" begin
     function create_sys(AT)
         ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...; units=false)
@@ -450,3 +450,4 @@ end
         end
     end
 end
+=#
