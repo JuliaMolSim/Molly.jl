@@ -416,27 +416,85 @@ function apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
 end
 
 
+@kernel inbounds=true function max_dist_error(
+        @Const(clusters::StructArray{C}),
+        @Const(r),
+        @Const(boundary),
+        maximums::AbstractVector{T},
+    ) where {C <: ConstraintKernelData, T}
+
+    cluster_idx = @index(Global, Linear)
+
+    if cluster_idx <= length(clusters)
+        cluster_max = typemin(T)
+        for (i, j, dist) in interactions(clusters[cluster_idx])
+            dr = vector(r[i], r[j], boundary)
+            err = ustrip(abs(norm(dr) - dist))
+            cluster_max = ifelse(err > cluster_max, err, cluster_max)
+        end
+        maximums[cluster_idx] = cluster_max
+    end
+
+end
+
+@kernel inbounds=true function max_vel_error(
+        @Const(clusters::StructArray{C}),
+        @Const(r),
+        @Const(v),
+        @Const(boundary),
+        maximums::AbstractVector{T},
+    ) where {C <: ConstraintKernelData, T}
+
+    cluster_idx = @index(Global, Linear)
+
+    if cluster_idx <= length(clusters)
+        cluster_max = typemin(T)
+        for (i, j, _) in interactions(clusters[cluster_idx])
+            dr = vector(r[i], r[j], boundary)
+            v_diff = v[j] .- v[i]
+            err = ustrip(abs(dot(dr, v_diff)))
+            cluster_max = ifelse(err > cluster_max, err, cluster_max)
+        end
+        maximums[cluster_idx] = cluster_max
+    end
+    
+end
+
+
 """
     check_position_constraints(sys, constraints)
 
 Checks if the position constraints are satisfied by the current coordinates of `sys`.
 """
 function check_position_constraints(sys, ca)
-    max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.coords)))
+
+    err_unit = unit(eltype(eltype(sys.coords)))
+    if err_unit != unit(ca.dist_tolerance)
+        error(ArgumentError("Distance tolerance units in SHAKE are inconsistent with system coordinates."))
+    end
+
+    FT = float_type(sys)
+    cluster_maxes = FT[]
+
+    backend = get_backend(sys.coords)    
+    err_kernel = max_dist_error(backend, 128) #128 is block size
+
     for cluster_type in cluster_keys(ca)
         clusters = getproperty(ca, cluster_type)
-        for cluster in clusters
-            for (i, j, dist) in interactions(cluster)
-                dr = vector(sys.coords[i], sys.coords[j], sys.boundary)
-                err = abs(norm(dr) - dist)
-                if max_err < err
-                    max_err = err
-                end
-            end
+        if length(clusters) > 0
+            max_storage = allocate(backend, FT, length(clusters))
+            err_kernel(clusters, sys.coords, sys.boundary, max_storage; ndrange = length(clusters))
+            # not efficient to move to GPU first, but the array
+            # is usually small and this function is for testing
+            push!(cluster_maxes, reduce(max, Array(max_storage)))
         end
     end
-    return max_err < ca.dist_tolerance
+
+    KernelAbstractions.synchronize(backend)
+
+    return maximum(cluster_maxes) < ustrip(ca.dist_tolerance)
 end
+
 
 """
     check_velocity_constraints(sys, constraints)
@@ -444,19 +502,30 @@ end
 Checks if the velocity constraints are satisfied by the current velocities of `sys`.
 """
 function check_velocity_constraints(sys::System, ca)
-    max_err = typemin(float_type(sys)) * unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
+
+    err_unit = unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
+    if err_unit != unit(ca.vel_tolerance)
+        error(ArgumentError("Velocity tolerance units in RATTLE are inconsistent wwith system velocities and coordinates."))
+    end
+
+    FT = float_type(sys)
+    cluster_maxes = FT[]
+
+    backend = get_backend(sys.coords)
+    err_kernel = max_vel_error(backend, 128) #128 is block size
+
     for cluster_type in cluster_keys(ca)
         clusters = getproperty(ca, cluster_type)
-        for cluster in clusters
-            for (i, j, _) in interactions(cluster)
-                dr = vector(sys.coords[i], sys.coords[j], sys.boundary)
-                v_diff = sys.velocities[j] .- sys.velocities[i]
-                err = abs(dot(dr, v_diff))
-                if max_err < err
-                    max_err = err
-                end
-            end
+        if length(clusters) > 0
+            max_storage = allocate(backend, FT, length(clusters))
+            err_kernel(clusters, sys.coords, sys.velocities, sys.boundary, max_storage; ndrange = length(clusters))
+            # not efficient to move to GPU first, but the array
+            # is usually small and this function is for testing
+            push!(cluster_maxes, reduce(max, Array(max_storage)))
         end
     end
-    return max_err < ca.vel_tolerance
+
+    KernelAbstractions.synchronize(backend)
+
+    return maximum(cluster_maxes) < ustrip(ca.vel_tolerance)
 end

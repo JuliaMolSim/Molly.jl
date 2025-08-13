@@ -1,16 +1,6 @@
 # The RATTLE Equations are modified from LAMMPS:
 # https://github.com/lammps/lammps/blob/develop/src/RIGID/fix_rattle.cpp
 
-
-# Returns a if condition is true, b otherwise (without branching)
-@inline function branchless_select(condition, a, b)
-    return condition * a + (!condition) * b
-end
-
-@inline function branchless_min(a, b)
-    return branchless_select(a <= b, a, b)
-end
-
 @inline function solve2x2exactly(λ, A, C)
 
     determinant = (A[1, 1] * A[2, 2]) - (A[1, 2] * A[2, 1])
@@ -422,7 +412,6 @@ end
 # 3 atoms, 2 constraints
 # Constraints between 1-2 and 1-3
 @inline function shake3_kernel!(
-        # ckd::Cluster23Data{L},
         cluster_idx,
         k1s, k2s, k3s,
         dist12s, dist13s,
@@ -506,7 +495,6 @@ end
 # 4 atoms, 3 constraints
 # Constraints between 1-2, 1-3 and 1-4
 @inline function shake4_kernel!(
-        # ckd::Cluster34Data{L},
         cluster_idx,
         k1s, k2s, k3s, k4s,
         dist12s, dist13s, dist14s,
@@ -609,7 +597,6 @@ end
 # 3 atoms, 3 constraints
 # Constraints between 1-2, 1-3 and 2-3
 @inline function shake3_angle_kernel!(
-        # ckd::AngleClusterData{L},
         cluster_idx,
         k1s, k2s, k3s,
         dist12s, dist13s, dist23s,
