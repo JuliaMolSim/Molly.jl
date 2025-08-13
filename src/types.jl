@@ -1033,6 +1033,8 @@ function ReplicaSystem(;
 
     atom_masses = mass.(atoms)
     M = typeof(atom_masses)
+    inv_masses = T(1) ./ atom_masses
+    IM = typeof(inv_masses)
 
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
@@ -1040,12 +1042,12 @@ function ReplicaSystem(;
     replicas = Tuple(System{D, AT, T, A, C, B, V, AD, TO, typeof(replica_pairwise_inters[i]),
                         typeof(replica_specific_inter_lists[i]), typeof(replica_general_inters[i]),
                         typeof(replica_constraints[i]), NF, typeof(replica_loggers[i]), F, E, K,
-                        M, Nothing}(
+                        M, IM, Nothing}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i],
             deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i],
-            force_units, energy_units, k_converted, atom_masses, nothing) for i in 1:n_replicas)
+            force_units, energy_units, k_converted, atom_masses, inv_masses, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
 
     return ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA}(
