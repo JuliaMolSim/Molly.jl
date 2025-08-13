@@ -571,6 +571,11 @@ function System(coord_file::AbstractString,
         res = chemfiles_residue_for_atom(top, ai - 1)
         res_id = get_res_id(res)
         res_name = residue_name(res, res_id_to_standard, rename_terminal_res)
+        if !haskey(force_field.residue_types[res_name].types, atom_name)
+            error("atom name \"$atom_name\" not found in template for residue \"$res_name\", " *
+                  "available atom names are $(keys(force_field.residue_types[res_name].types)). " *
+                  "In future, Molly may match atoms based on topology rather than atom name.")
+        end
         at_type = force_field.residue_types[res_name].types[atom_name]
         if "chainname" in Chemfiles.list_properties(res)
             chain_id = Chemfiles.property(res, "chainname")
@@ -934,7 +939,8 @@ function System(coord_file::AbstractString,
             special=AT(special),
             n_steps_reorder=10,
         )
-    elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) && AT <: AbstractGPUArray
+    elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
+                (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))
         neighbor_finder = DistanceNeighborFinder(
             eligible=AT(eligible),
             special=AT(special),
@@ -1341,7 +1347,8 @@ function System(T::Type,
             special=AT(special),
             n_steps_reorder=10,
         )
-    elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) && AT <: AbstractGPUArray
+    elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
+                (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))
         neighbor_finder = DistanceNeighborFinder(
             eligible=AT(eligible),
             special=AT(special),

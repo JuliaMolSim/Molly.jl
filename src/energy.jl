@@ -78,8 +78,10 @@ function potential_energy(sys; n_threads::Integer=Threads.nthreads())
     return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads()) where {D, AT, T}
+function potential_energy(sys::System, neighbors, step_n::Integer=0;
+                          n_threads::Integer=Threads.nthreads())
+    # Allow types like those from Measurements.jl
+    T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))

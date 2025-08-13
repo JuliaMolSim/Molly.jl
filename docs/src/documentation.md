@@ -137,6 +137,11 @@ visualize(sys.loggers.coords, boundary, "sim_lj.mp4")
 ```
 ![LJ simulation](images/sim_lj.gif)
 
+A Molly [`System`](@ref) can also be constructed from an AtomsBase.jl system. For example:
+```julia
+System(ab_sys; force_units=u"kJ/Å", energy_units=u"kJ")
+```
+
 ## GPU acceleration
 
 To run simulations on the GPU you will need to have a GPU available and then load the appropriate package:
@@ -577,6 +582,7 @@ The available specific interactions are:
 - [`FENEBond`](@ref) - 2 atoms
 - [`HarmonicAngle`](@ref) - 3 atoms
 - [`CosineAngle`](@ref) - 3 atoms
+- [`UreyBradley`](@ref) - 3 atoms
 - [`PeriodicTorsion`](@ref) - 4 atoms
 - [`RBTorsion`](@ref) - 4 atoms
 
@@ -1097,6 +1103,7 @@ The available loggers are:
 - [`GeneralObservableLogger`](@ref)
 - [`TemperatureLogger`](@ref)
 - [`CoordinatesLogger`](@ref)
+- [`DisplacementLogger`](@ref)
 - [`VelocitiesLogger`](@ref)
 - [`TotalEnergyLogger`](@ref)
 - [`KineticEnergyLogger`](@ref)

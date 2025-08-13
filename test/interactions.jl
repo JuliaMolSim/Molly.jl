@@ -407,6 +407,30 @@
         atol=1e-9u"kJ * mol^-1",
     )
 
+    c3a = SVector(1.0, 1.2, 1.2)u"nm"
+    a1 = HarmonicAngle(k=300.0u"kJ * mol^-1", θ0=0.8)
+    fs = force(a1, c1, c2, c3a, boundary)
+    @test isapprox(
+        fs.f1,
+        SVector(0.0, -31.1343284689, -31.1343284689)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f2,
+        SVector(-21.9771730369, 14.6514486912, 14.6514486912)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f3,
+        SVector(21.9771730369, 16.4828797777, 16.4828797777)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(a1, c1, c2, c3a, boundary),
+        0.2908039228u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
     boundary_cosine = CubicBoundary(10.0u"nm")
     c1_cosine = SVector(1.0, 0.0, 0.0)u"nm"
     c2_cosine = SVector(2.0, 0.0, 0.0)u"nm"
@@ -459,6 +483,30 @@
     @test isapprox(
         potential_energy(ca2, c1_cosine, c2_cosine, c4_cosine, boundary_cosine),
         49.58u"kJ * mol^-1";
+        atol=1e-9u"kJ * mol^-1",
+    )
+
+    a1 = UreyBradley(kangle=300.0u"kJ * mol^-1", θ0=0.8,
+                     kbond=10_000.0u"kJ * mol^-1 * nm^-2", r0=0.3u"nm")
+    fs = force(a1, c1, c2, c3a, boundary)
+    @test isapprox(
+        fs.f1,
+        SVector(0.0, -152.4546720285, -152.4546720285)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f2,
+        SVector(-21.9771730369, 14.6514486912, 14.6514486912)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        fs.f3,
+        SVector(21.9771730369, 137.8032233372, 137.8032233372)u"kJ * mol^-1 * nm^-1";
+        atol=1e-9u"kJ * mol^-1 * nm^-1",
+    )
+    @test isapprox(
+        potential_energy(a1, c1, c2, c3a, boundary),
+        1.7626664989u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
 

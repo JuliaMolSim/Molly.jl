@@ -428,7 +428,7 @@ The [code is available](https://github.com/greener-group/GB99dms).
 
 ## Reversible simulation
 
-Molly.jl was also used to code [reversible simulation](https://arxiv.org/abs/2412.04374), an extension of differentiable simulation with RAD where the gradients are calculated explicitly.
+Molly.jl was also used to code [reversible simulation](https://doi.org/10.1073/pnas.2426058122), an extension of differentiable simulation with RAD where the gradients are calculated explicitly.
 This means the memory cost is constant in step number.
 
 ## Molecular loss functions

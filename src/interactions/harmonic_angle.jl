@@ -12,12 +12,10 @@ The potential energy is defined as
 V(\theta) = \frac{1}{2} k (\theta - \theta_0)^2
 ```
 """
-struct HarmonicAngle{K, D}
+@kwdef struct HarmonicAngle{K, D}
     k::K
     θ0::D
 end
-
-HarmonicAngle(; k, θ0) = HarmonicAngle(k, θ0)
 
 Base.zero(::HarmonicAngle{K, D}) where {K, D} = HarmonicAngle(k=zero(K), θ0=zero(D))
 

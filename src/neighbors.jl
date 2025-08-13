@@ -256,6 +256,7 @@ Find close atoms by distance using a cell list algorithm from CellListMap.jl.
 This is the recommended neighbor finder on CPU.
 `x0` and `unit_cell` are optional initial coordinates and system unit cell that improve the
 first approximation of the cell list structure.
+
 Can not be used if one or more dimensions has infinite boundaries.
 
 ### Example

@@ -10,12 +10,10 @@ The potential energy is defined as
 V(\boldsymbol{x}) = \frac{1}{2} k |\boldsymbol{x} - \boldsymbol{x}_0|^2
 ```
 """
-struct HarmonicPositionRestraint{K, C}
+@kwdef struct HarmonicPositionRestraint{K, C}
     k::K
     x0::C
 end
-
-HarmonicPositionRestraint(; k, x0) = HarmonicPositionRestraint(k, x0)
 
 @inline function force(pr::HarmonicPositionRestraint, coord_i, boundary, args...)
     ab = vector(coord_i, pr.x0, boundary)

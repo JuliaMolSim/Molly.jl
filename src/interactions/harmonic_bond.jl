@@ -10,12 +10,10 @@ The potential energy is defined as
 V(r) = \frac{1}{2} k (r - r_0)^2
 ```
 """
-struct HarmonicBond{K, D}
+@kwdef struct HarmonicBond{K, D}
     k::K
     r0::D
 end
-
-HarmonicBond(; k, r0) = HarmonicBond(k, r0)
 
 Base.zero(::HarmonicBond{K, D}) where {K, D} = HarmonicBond(k=zero(K), r0=zero(D))
 

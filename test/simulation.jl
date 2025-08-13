@@ -236,6 +236,28 @@ end
         @test BioStructures.countatoms(first(traj)) == 100
 
         run_visualize_tests && visualize(s.loggers.coords, boundary, temp_fp_mp4)
+
+        coords_unc = [c .± (abs(randn()) / 100)u"nm"         for c in s.coords    ]
+        vels_unc   = [v .± (abs(randn()) / 100)u"nm * ps^-1" for v in s.velocities]
+        @suppress_err begin
+            sys_unc = System(s; coords=coords_unc, velocities=vels_unc)
+            for n_threads in n_threads_list
+                @test typeof(potential_energy(sys_unc; n_threads=n_threads)) ==
+                                    typeof((1.0 ± 0.1)u"kJ * mol^-1")
+                @test abs(potential_energy(sys_unc; n_threads=n_threads) -
+                                    potential_energy(s; n_threads=n_threads)) < 0.1u"kJ * mol^-1"
+                @test typeof(kinetic_energy(sys_unc)) == typeof((1.0 ± 0.1)u"kJ * mol^-1")
+                @test typeof(temperature(sys_unc)) == typeof((1.0 ± 0.1)u"K")
+                @test abs(temperature(sys_unc) - temperature(s)) < 0.1u"K"
+                @test eltype(eltype(forces(sys_unc; n_threads=n_threads))) ==
+                                    typeof((1.0 ± 0.1)u"kJ * mol^-1 * nm^-1")
+            end
+            simulator_unc = VelocityVerlet(dt=0.002u"ps")
+            for n_threads in n_threads_list
+                simulate!(sys_unc, simulator_unc, 1; n_threads=n_threads,
+                          run_loggers=false)
+            end
+        end
     end
 end
 
@@ -343,8 +365,14 @@ end
             n_steps=10,
             dist_cutoff=2.0u"nm",
         ),
-        loggers=(coords=CoordinatesLogger(100),),
+        loggers=(
+            coords=CoordinatesLogger(100),
+            disp=DisplacementsLogger(100, coords)
+        ),
+
     )
+
+    @test_throws ArgumentError DisplacementsLogger(100, coords; n_update = 17)
 
     if run_cuda_tests
         s_gpu = System(
@@ -358,14 +386,19 @@ end
                 n_steps_reorder=10,
                 dist_cutoff=2.0u"nm",
             ),
-            loggers=(coords=CoordinatesLogger(100),),
+            loggers=(
+                coords=CoordinatesLogger(100),
+                disp=DisplacementsLogger(100, CuArray(coords))
+            ),
         )
     end
 
     for simulator in simulators
         @time simulate!(s, simulator, n_steps; n_threads=1)
+        @test sum(sum(first(values(s.loggers.disp)))) == 0.0u"nm"
         if run_cuda_tests
             @time simulate!(s_gpu, simulator, n_steps; n_threads=1)
+            @test sum(first(values(s_gpu.loggers.disp))) == 0.0u"nm"
             coord_diff = sum(sum(map(x -> abs.(x), s.coords .- Array(s_gpu.coords)))) / (3 * n_atoms)
             E_diff = abs(potential_energy(s) - potential_energy(s_gpu))
             @test coord_diff < 1e-4u"nm"
