@@ -50,7 +50,7 @@ MollyKernelDensityExt = "KernelDensity"
 MollyPythonCallExt = "PythonCall"
 
 [compat]
-AcceleratedKernels = "0.4.3"
+AcceleratedKernels = "0.4.2"
 Atomix = "0.1, 1.0"
 AtomsBase = "0.5"
 AtomsCalculators = "0.2"
