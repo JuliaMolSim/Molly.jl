@@ -334,6 +334,7 @@ ff = MolecularForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
+    nonbonded_method="pme",
     loggers=(
         energy=TotalEnergyLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
@@ -375,15 +376,19 @@ Residue patches, virtual sites, file includes and any force types other than `Ha
     Some PDB files that read in fine can be found [here](https://github.com/greener-group/GB99dms/tree/main/structures/training/conf_1).
 
 To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the array type for your GPU backend (for example `CuArray` for NVIDIA or `ROCArray` for AMD).
-You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
-The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
-Other options include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_neighbors`).
+The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
+The options are `"none"` (short range only), `"cutoff"` (reaction field method), `"pme"` (particle mesh Ewald summation) and `"ewald"` (Ewald summation, slow).
 
-Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files. For example:
+You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
+The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
+Other options detailed in the docstring for [`System`](@ref) include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_neighbors`).
+
+Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files, which should be considered experimental. For example:
 ```julia
 sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
+    nonbonded_method="pme",
     loggers=(
         temp=TemperatureLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
@@ -407,10 +412,6 @@ sys_res = add_position_restraints(
     atom_selector=is_heavy_atom,
 )
 ```
-
-The Gromacs setup procedure should be considered experimental.
-Currently Ewald summation methods, full support for constraint algorithms and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
-Stay tuned for developments in this area.
 
 ## Enhanced sampling
 
@@ -572,6 +573,7 @@ The available pairwise interactions are:
 - [`Coulomb`](@ref)
 - [`CoulombSoftCore`](@ref)
 - [`CoulombReactionField`](@ref)
+- [`CoulombEwald`](@ref)
 - [`Yukawa`](@ref)
 - [`Gravity`](@ref)
 
@@ -587,10 +589,15 @@ The available specific interactions are:
 - [`RBTorsion`](@ref) - 4 atoms
 
 The available general interactions are:
+- [`Ewald`](@ref)
+- [`PME`](@ref)
 - [`ImplicitSolventOBC`](@ref)
 - [`ImplicitSolventGBN2`](@ref)
 - [`MullerBrown`](@ref)
 - [`ASECalculator`](@ref)
+
+Some interactions combine instances of the above.
+For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbor finding algorithms.
 
 ### Pairwise interactions
 
@@ -765,26 +772,31 @@ struct MyGeneralInter
     # Properties, e.g. a neural network model
 end
 ```
-Next, you need to define a method for the `AtomsCalculators.forces` function (note this is different to the [`force`](@ref) function above).
+Next, you need to define a method for the `AtomsCalculators.forces!` function (note this is different to the [`force`](@ref) function above, and to the [`forces`](@ref) function).
 ```julia
 import AtomsCalculators
 
-function AtomsCalculators.forces(sys,
-                                 inter::MyGeneralInter;
-                                 neighbors=nothing,
-                                 step_n=0,
-                                 n_threads=Threads.nthreads(),
-                                 kwargs...)
+function AtomsCalculators.forces!(fs,
+                                  sys,
+                                  inter::MyGeneralInter;
+                                  neighbors=nothing,
+                                  step_n=0,
+                                  n_threads=Threads.nthreads(),
+                                  kwargs...)
     # kwargs... is required, neighbors/step_n/n_threads can be omitted if not used
 
     # Calculate the forces on all atoms using the interaction and the system
-    # The output should have the same shape as the coordinates
+    # Add the forces to the existing forces, which have the same shape as the coordinates
     # For example, a neural network might do something like this
-    return inter.model(sys.coords, sys.atoms)
+    fs .+= inter.model(sys.coords, sys.atoms)
+    return fs
 end
 ```
 The neighbors calculated from the neighbor list are available in this function, but may or may not be used depending on context.
 You could carry out your own neighbor finding in this function if required.
+Since the forces are available for mutation in the function, general interactions can be used to modify the forces in arbitrary ways, though it is up to you to write an appropriate potential energy function if energies are required.
+In cases where the forces are not simply added to, the order of general interactions can matter.
+General interactions are applied after pairwise and specific interactions.
 Note that this function calculates forces not accelerations; if you have a neural network that calculates accelerations you should multiply these by `masses(sys)` to get the forces according to F=ma.
 
 A method for the `AtomsCalculators.potential_energy` function that takes the same arguments and returns a single value can also be defined.

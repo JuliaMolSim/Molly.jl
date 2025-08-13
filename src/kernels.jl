@@ -38,7 +38,7 @@ function gpu_threads_pairwise(n_neighbors)
 end
 
 function gpu_threads_specific(n_inters)
-    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_SPECIFIC", "128"))
+    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_SPECIFIC", "32"))
     return n_threads_gpu
 end
 
@@ -362,4 +362,35 @@ end
         end
         Atomix.@atomic energy[1] += ustrip(pe)
     end
+end
+
+function sorted_morton_seq!(buffers, coords, w, morton_bits)
+    backend = get_backend(buffers.morton_seq)
+    n_threads_gpu = 32
+    kernel! = sorted_morton_seq_kernel!(backend, n_threads_gpu)
+    kernel!(buffers.morton_seq_buffer_1, coords, w, morton_bits; ndrange=length(coords))
+    AcceleratedKernels.sortperm!(buffers.morton_seq, buffers.morton_seq_buffer_1;
+                                 temp=buffers.morton_seq_buffer_2, block_size=512)
+    return buffers
+end
+
+@kernel function sorted_morton_seq_kernel!(morton_seq,
+                                           @Const(coords::AbstractVector{SVector{D, C}}),
+                                           w,
+                                           bits::Integer) where {D, C}
+    i = @index(Global, Linear)
+    @inbounds if i <= length(coords)
+        scaled_coord = floor.(Int32, coords[i] ./ w)
+        morton_seq[i] = generalized_morton_code(scaled_coord, bits, D)
+    end
+end
+
+function generalized_morton_code(indices, bits::Integer, D::Integer)
+    code = 0
+    for bit in 0:(bits-1)
+        for d in 1:D
+            code |= ((indices[d] >> bit) & 1) << (D * bit + (d - 1))
+        end
+    end
+    return Int32(code)
 end

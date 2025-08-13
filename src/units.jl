@@ -65,7 +65,7 @@ function check_system_units(masses, coords, velocities, energy_units, force_unit
 end
 
 function check_other_units(atoms_dev, boundary, sys_units::NamedTuple)
-    atoms = Array(atoms_dev)
+    atoms = from_device(atoms_dev)
     box_units = unit(length_type(boundary))
 
     if !all(sys_units[:length] .== box_units)
@@ -99,7 +99,7 @@ function validate_energy_units(energy_units)
 end
 
 function validate_masses(masses)
-    mass_units = unit.(Array(masses))
+    mass_units = unit.(from_device(masses))
     if !allequal(mass_units)
         throw(ArgumentError("atom array constructed with mixed mass units"))
     end
@@ -116,7 +116,7 @@ function validate_masses(masses)
 end
 
 function validate_coords(coords)
-    coord_units = map(Array(coords)) do coord
+    coord_units = map(from_device(coords)) do coord
         [unit(c) for c in coord]
     end
 
@@ -136,7 +136,7 @@ function validate_coords(coords)
 end
 
 function validate_velocities(velocities)
-    velocity_units = map(Array(velocities)) do vel
+    velocity_units = map(from_device(velocities)) do vel
         [unit(v) for v in vel]
     end
 

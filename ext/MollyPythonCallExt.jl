@@ -4,6 +4,7 @@
 module MollyPythonCallExt
 
 using Molly
+using Molly: from_device, to_device
 using PythonCall
 import AtomsCalculators
 using GPUArrays
@@ -40,15 +41,16 @@ function Molly.ASECalculator(;
     else
         throw(ArgumentError("either elements or atoms_data must be provided to ASECalculator"))
     end
-    atoms_cpu = Array(atoms)
+    atoms_cpu = from_device(atoms)
     if unit(boundary.side_lengths[1]) == NoUnits
         # Assume units are ASE units
-        coords_strip = pylist(Array(coords))
+        coords_strip = pylist(from_device(coords))
         box = boundary.side_lengths
         masses_strip = pylist(mass.(atoms_cpu))
-        velocities_strip = (isnothing(velocities) ? pybuiltins.None : pylist(Array(velocities)))
+        velocities_strip = (isnothing(velocities) ? pybuiltins.None :
+                            pylist(from_device(velocities)))
     else
-        coords_strip = pylist(ustrip_vec.(u"Å", Array(coords)))
+        coords_strip = pylist(ustrip_vec.(u"Å", from_device(coords)))
         box = ustrip.(u"Å", boundary.side_lengths)
         if dimension(mass(first(atoms_cpu))) == u"𝐌 * 𝐍^-1"
             masses_nomol = mass.(atoms_cpu) / Unitful.Na
@@ -57,7 +59,7 @@ function Molly.ASECalculator(;
         end
         masses_strip = pylist(ustrip.(u"u", masses_nomol))
         velocities_strip = (isnothing(velocities) ? pybuiltins.None :
-                                    pylist(ustrip_vec.(u"u^(-1/2) * eV^(1/2)", Array(velocities))))
+                            pylist(ustrip_vec.(u"u^(-1/2) * eV^(1/2)", from_device(velocities))))
     end
     ase_atoms = ase[].Atoms(
         element_string,
@@ -78,8 +80,8 @@ function Molly.update_ase_calc!(ase_calc, sys::System{<:Any, <:Any, T}) where T
         coords_nounits, velocities_nounits = sys.coords, sys.velocities
         box = sys.boundary.side_lengths
     else
-        coords_nounits = ustrip_vec.(u"Å", Array(sys.coords))
-        velocities_nounits = ustrip_vec.(u"u^(-1/2) * eV^(1/2)", Array(sys.velocities))
+        coords_nounits = ustrip_vec.(u"Å", from_device(sys.coords))
+        velocities_nounits = ustrip_vec.(u"u^(-1/2) * eV^(1/2)", from_device(sys.velocities))
         box = ustrip.(u"Å", sys.boundary.side_lengths)
     end
     coords_current = Py(Array(transpose(reshape(
@@ -94,26 +96,28 @@ end
 
 uconvert_vec(x...) = uconvert.(x...)
 
-function AtomsCalculators.forces(sys::System{D, AT, T},
-                                 ase_calc::ASECalculator;
-                                 kwargs...) where {D, AT, T}
+function AtomsCalculators.forces!(fs,
+                                  sys::System{D, AT, T},
+                                  ase_calc::ASECalculator;
+                                  kwargs...) where {D, AT, T}
     Molly.update_ase_calc!(ase_calc, sys)
     forces_py = ase_calc.ase_atoms.get_forces()
     forces_flat = reshape(transpose(pyconvert(Matrix{T}, forces_py)), length(sys) * D)
-    fs = reinterpret(SVector{D, T}, forces_flat)
+    fs_svec = reinterpret(SVector{D, T}, forces_flat)
     if sys.force_units == NoUnits
-        fs_unit = fs # Assume units are eV/Å
+        fs_unit = fs_svec # Assume units are eV/Å
     elseif dimension(sys.force_units) == u"𝐋 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        fs_unit = uconvert_vec.(sys.force_units, fs * Unitful.Na * u"eV/Å")
+        fs_unit = uconvert_vec.(sys.force_units, fs_svec * Unitful.Na * u"eV/Å")
     else
-        fs_unit = uconvert_vec.(sys.force_units, fs * u"eV/Å")
+        fs_unit = uconvert_vec.(sys.force_units, fs_svec * u"eV/Å")
     end
-    return AT(fs_unit)
+    fs .+= to_device(fs_unit, AT)
+    return fs
 end
 
-function AtomsCalculators.potential_energy(sys::System{D, AT, T},
+function AtomsCalculators.potential_energy(sys::System{<:Any, <:Any, T},
                                            ase_calc::ASECalculator;
-                                           kwargs...) where {D, AT, T}
+                                           kwargs...) where T
     Molly.update_ase_calc!(ase_calc, sys)
     pe_py = ase_calc.ase_atoms.get_potential_energy()
     pe = pyconvert(T, pe_py)

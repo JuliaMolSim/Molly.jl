@@ -184,22 +184,26 @@ function Base.:+(il1::InteractionList4Atoms{I, T}, il2::InteractionList4Atoms{I,
 end
 
 function inject_interaction_list(inter::InteractionList1Atoms, params_dic, AT)
-    inters_grad = AT(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
+                                inter.types, (params_dic,)), AT)
     InteractionList1Atoms(inter.is, inters_grad, inter.types)
 end
 
 function inject_interaction_list(inter::InteractionList2Atoms, params_dic, AT)
-    inters_grad = AT(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
+                                inter.types, (params_dic,)), AT)
     InteractionList2Atoms(inter.is, inter.js, inters_grad, inter.types)
 end
 
 function inject_interaction_list(inter::InteractionList3Atoms, params_dic, AT)
-    inters_grad = AT(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
+                                inter.types, (params_dic,)), AT)
     InteractionList3Atoms(inter.is, inter.js, inter.ks, inters_grad, inter.types)
 end
 
 function inject_interaction_list(inter::InteractionList4Atoms, params_dic, AT)
-    inters_grad = AT(inject_interaction.(Array(inter.inters), inter.types, (params_dic,)))
+    inters_grad = to_device(inject_interaction.(from_device(inter.inters),
+                                inter.types, (params_dic,)), AT)
     InteractionList4Atoms(inter.is, inter.js, inter.ks, inter.ls, inters_grad, inter.types)
 end
 
@@ -739,8 +743,8 @@ Allows gradients for individual parameters to be tracked.
 Returns atoms, pairwise interactions, specific interaction lists and general
 interactions.
 """
-function inject_gradients(sys::System{D, AT}, params_dic) where {D, AT}
-    atoms_grad = AT(inject_atom.(Array(sys.atoms), sys.atoms_data, (params_dic,)))
+function inject_gradients(sys::System{<:Any, AT}, params_dic) where AT
+    atoms_grad = to_device(inject_atom.(from_device(sys.atoms), sys.atoms_data, (params_dic,)), AT)
     if length(sys.pairwise_inters) > 0
         pis_grad = inject_interaction.(sys.pairwise_inters, (params_dic,))
     else
@@ -1054,6 +1058,13 @@ function ReplicaSystem(;
             atoms, n_replicas, atoms_data, exchange_logger, force_units,
             energy_units, k_converted, replicas, data)
 end
+
+# Avoid unnecessary Array calls on CPU
+from_device(x::Array) = x
+from_device(x) = Array(x)
+
+to_device(x::Array, ::Type{<:Array}) = x
+to_device(x, ::Type{AT}) where AT = AT(x)
 
 """
     array_type(sys)

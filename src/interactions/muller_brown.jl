@@ -43,8 +43,9 @@ function MullerBrown(; A=SVector(-200.0, -100.0, -170.0, 15.0)u"kJ * mol^-1",
         A, a, b, c, x0, y0, force_units, energy_units)
 end
 
-function AtomsCalculators.potential_energy(sys, inter::MullerBrown; kwargs...)
-    return sum(potential_muller_brown.(Ref(inter), sys.coords))
+AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(sys,
+                                                            inter::MullerBrown; kwargs...)
+    return sum(potential_muller_brown.((inter,), sys.coords))
 end
 
 @inline function potential_muller_brown(inter::MullerBrown, coord::SVector{2})
@@ -62,8 +63,10 @@ end
     return res
 end
 
-function AtomsCalculators.forces(sys, inter::MullerBrown; kwargs...)
-    return force_muller_brown.(Ref(inter), sys.coords)
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
+                                                            inter::MullerBrown; kwargs...)
+    fs .+= force_muller_brown.((inter,), sys.coords)
+    return fs
 end
 
 @inline function force_muller_brown(inter::MullerBrown, coord::SVector{2})

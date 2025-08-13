@@ -43,21 +43,22 @@
                     atol=1e-4u"kJ * mol^-1")
 
     for AT in array_list[2:end]
-        coords = AT([
+        atoms = [Atom(σ=(0.4 / (2 ^ (1 / 6)))u"nm", ϵ=1.0u"kJ * mol^-1") for i in 1:3]
+        coords = [
             SVector(1.0, 1.0, 1.0)u"nm",
             SVector(1.6, 1.0, 1.0)u"nm",
             SVector(1.4, 1.6, 1.0)u"nm",
-        ])
+        ]
         sys = System(
-            atoms=AT([Atom(σ=(0.4 / (2 ^ (1 / 6)))u"nm", ϵ=1.0u"kJ * mol^-1") for i in 1:3]),
-            coords=coords,
+            atoms=to_device(atoms, AT),
+            coords=to_device(coords, AT),
             boundary=CubicBoundary(5.0u"nm"),
             pairwise_inters=(LennardJones(),),
         )
         sim = SteepestDescentMinimizer(tol=1.0u"kJ * mol^-1 * nm^-1")
 
         simulate!(sys, sim)
-        dists = Array(distances(sys.coords, sys.boundary))
+        dists = from_device(distances(sys.coords, sys.boundary))
         dists_flat = dists[triu(trues(3, 3), 1)]
         @test all(x -> isapprox(x, 0.4u"nm"; atol=1e-2u"nm"), dists_flat)
         @test isapprox(potential_energy(sys), -3.0u"kJ * mol^-1";

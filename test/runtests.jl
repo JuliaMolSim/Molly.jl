@@ -1,10 +1,12 @@
 using Molly
+using Molly: from_device, to_device
 using AMDGPU
 using Aqua
 import AtomsBase
 using AtomsBaseTesting
 import AtomsCalculators
 using AtomsCalculators.AtomsCalculatorsTesting
+using BenchmarkTools
 import BioStructures
 import Chemfiles
 using CUDA
@@ -48,8 +50,8 @@ else
     @warn "The visualization tests will not be run as VISTESTS is set to 0"
 end
 
-const run_parallel_tests = Threads.nthreads() > 1
-const n_threads_list = run_parallel_tests ? (1, Threads.nthreads()) : (1,)
+const run_parallel_tests = (Threads.nthreads() > 1)
+const n_threads_list = (run_parallel_tests ? (1, Threads.nthreads()) : (1,))
 if run_parallel_tests
     @info "The parallel tests will be run as Julia is running on $(Threads.nthreads()) threads"
 else

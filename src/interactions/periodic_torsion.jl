@@ -68,7 +68,7 @@ end
 function extract_parameters!(params_dic,
                              inter::InteractionList4Atoms{<:Any, <:AbstractVector{<:PeriodicTorsion}},
                              ff)
-    for (torsion_type, torsion_inter) in zip(inter.types, Array(inter.inters))
+    for (torsion_type, torsion_inter) in zip(inter.types, from_device(inter.inters))
         if torsion_inter.proper
             key_prefix = "inter_PT_$(torsion_type)_"
         else

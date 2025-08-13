@@ -115,40 +115,54 @@ Base.:+(x::SpecificForce2Atoms, y::SpecificForce2Atoms) = SpecificForce2Atoms(x.
 Base.:+(x::SpecificForce3Atoms, y::SpecificForce3Atoms) = SpecificForce3Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3)
 Base.:+(x::SpecificForce4Atoms, y::SpecificForce4Atoms) = SpecificForce4Atoms(x.f1 + y.f1, x.f2 + y.f2, x.f3 + y.f3, x.f4 + y.f4)
 
-function init_forces_buffer!(sys, forces_nounits, n_threads)
-    if n_threads == 1
-        return nothing
-    else
-        return [similar(forces_nounits) for _ in 1:n_threads]
-    end
+struct ForcesBufferCPU{F, A}
+    fs_nounits::F
+    fs_chunks::A
 end
 
-struct ForcesBuffer{F, C, M, R}
+function init_forces_buffer!(sys, n_threads)
+    fs_nounits = ustrip_vec.(zero(sys.coords))
+    if n_threads == 1
+        fs_chunks = nothing
+    else
+        fs_chunks = [similar(fs_nounits) for _ in 1:n_threads]
+    end
+    return ForcesBufferCPU(fs_nounits, fs_chunks)
+end
+
+struct ForcesBufferGPU{F, C, M, R}
     fs_mat::F
     box_mins::C
     box_maxs::C
     morton_seq::M
+    morton_seq_buffer_1::M
+    morton_seq_buffer_2::M
     compressed_eligible::R
     compressed_special::R
 end
 
-function init_forces_buffer!(sys, forces_nounits::AbstractGPUArray{SVector{D, T}}, n_threads,
-                             for_pe::Bool=false) where {D, T}
-    N = length(forces_nounits)
+function init_forces_buffer!(sys::System{D, AT, T}, n_threads,
+                             for_pe::Bool=false) where {D, AT <: AbstractGPUArray, T}
+    N = length(sys)
     C = eltype(eltype(sys.coords))
     n_blocks = cld(N, 32)
-    backend = get_backend(forces_nounits)
+    backend = get_backend(sys.coords)
     fs_mat = KernelAbstractions.zeros(backend, T, D, N)
-    box_mins = KernelAbstractions.zeros(backend, C, n_blocks, D) 
-    box_maxs = KernelAbstractions.zeros(backend, C, n_blocks, D) 
+    box_mins = KernelAbstractions.zeros(backend, C, n_blocks, D)
+    box_maxs = KernelAbstractions.zeros(backend, C, n_blocks, D)
     morton_seq = KernelAbstractions.zeros(backend, Int32, N)
+    morton_seq_buffer_1 = KernelAbstractions.zeros(backend, Int32, N)
+    morton_seq_buffer_2 = KernelAbstractions.zeros(backend, Int32, N)
     compressed_eligible = KernelAbstractions.zeros(backend, UInt32, 32, n_blocks, n_blocks)
     compressed_special = KernelAbstractions.zeros(backend, UInt32, 32, n_blocks, n_blocks)
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
     end
-    return ForcesBuffer(fs_mat, box_mins, box_maxs, morton_seq, compressed_eligible, compressed_special)
+    return ForcesBufferGPU(fs_mat, box_mins, box_maxs, morton_seq, morton_seq_buffer_1,
+                           morton_seq_buffer_2, compressed_eligible, compressed_special)
 end
+
+zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 
 """
     forces(system, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
@@ -161,14 +175,14 @@ function forces(sys; n_threads::Integer=Threads.nthreads())
 end
 
 function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
-    forces_nounits = ustrip_vec.(zero(sys.coords))
-    forces_buffer = init_forces_buffer!(sys, forces_nounits, n_threads)
-    forces_nounits!(forces_nounits, sys, neighbors, forces_buffer, step_n; n_threads=n_threads)
-    return forces_nounits .* sys.force_units
+    forces_buffer = init_forces_buffer!(sys, n_threads)
+    fs = zero_forces(sys)
+    forces!(fs, sys, neighbors, forces_buffer, step_n; n_threads=n_threads)
+    return fs
 end
 
-function forces_nounits!(fs_nounits, sys::System, neighbors, fs_chunks=nothing,
-                         step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+function forces!(fs, sys::System, neighbors, buffers, step_n::Integer=0;
+                 n_threads::Integer=Threads.nthreads())
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
     sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
@@ -178,31 +192,32 @@ function forces_nounits!(fs_nounits, sys::System, neighbors, fs_chunks=nothing,
 
     if length(sys.pairwise_inters) > 0
         if n_threads > 1
-            pairwise_forces_threads!(fs_nounits, fs_chunks, sys.atoms, sys.coords, sys.velocities,
-                                     sys.boundary, neighbors, sys.force_units, length(sys),
-                                     pairwise_inters_nonl, pairwise_inters_nl, n_threads, step_n)
+            pairwise_forces_threads!(buffers.fs_nounits, buffers.fs_chunks, sys.atoms, sys.coords,
+                                     sys.velocities, sys.boundary, neighbors, sys.force_units,
+                                     length(sys), pairwise_inters_nonl, pairwise_inters_nl,
+                                     n_threads, step_n)
         else
-            pairwise_forces!(fs_nounits, sys.atoms, sys.coords, sys.velocities, sys.boundary,
+            pairwise_forces!(buffers.fs_nounits, sys.atoms, sys.coords, sys.velocities, sys.boundary,
                              neighbors, sys.force_units, length(sys), pairwise_inters_nonl,
                              pairwise_inters_nl, step_n)
         end
     else
-        fill!(fs_nounits, zero(eltype(fs_nounits)))
+        fill!(buffers.fs_nounits, zero(eltype(buffers.fs_nounits)))
     end
 
     if length(sys.specific_inter_lists) > 0
-        specific_forces!(fs_nounits, sys.atoms, sys.coords, sys.velocities, sys.boundary,
-                         sys.force_units, sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, step_n)
+        specific_forces!(buffers.fs_nounits, sys.atoms, sys.coords, sys.velocities, sys.boundary,
+                         sys.force_units, sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
+                         step_n)
     end
 
+    fs .= buffers.fs_nounits .* sys.force_units
     for inter in values(sys.general_inters)
-        fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, step_n=step_n,
-                                         n_threads=n_threads)
-        check_force_units(zero(eltype(fs_gen)), sys.force_units)
-        fs_nounits .+= ustrip_vec.(fs_gen)
+        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+                                 n_threads=n_threads)
     end
 
-    return fs_nounits
+    return fs
 end
 
 function pairwise_forces!(fs_nounits, atoms, coords, velocities, boundary, neighbors, force_units,
@@ -315,8 +330,8 @@ function pairwise_forces_threads!(fs_nounits, fs_chunks, atoms, coords, velociti
     return fs_nounits
 end
 
-function specific_forces!(fs_nounits, atoms, coords, velocities, boundary, force_units, sils_1_atoms, sils_2_atoms,
-                          sils_3_atoms, sils_4_atoms, step_n=0)
+function specific_forces!(fs_nounits, atoms, coords, velocities, boundary, force_units,
+                          sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, step_n=0)
     @inbounds for inter_list in sils_1_atoms
         for (i, inter) in zip(inter_list.is, inter_list.inters)
             sf = force(inter, coords[i], boundary, atoms[i], force_units, velocities[i], step_n)
@@ -369,11 +384,9 @@ function specific_forces!(fs_nounits, atoms, coords, velocities, boundary, force
     return fs_nounits
 end
 
-function forces_nounits!(fs_nounits, sys::System{D, AT, T}, neighbors,
-                         buffers, step_n::Integer=0;
-                         n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
+function forces!(fs, sys::System{D, AT, T}, neighbors, buffers, step_n::Integer=0;
+                 n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
     fill!(buffers.fs_mat, zero(T))
-    val_ft = Val(T)
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
@@ -389,17 +402,14 @@ function forces_nounits!(fs_nounits, sys::System{D, AT, T}, neighbors,
 
     for inter_list in values(sys.specific_inter_lists)
         specific_force_gpu!(buffers.fs_mat, inter_list, sys.coords, sys.velocities, sys.atoms,
-                            sys.boundary, step_n, sys.force_units, val_ft)
+                            sys.boundary, step_n, sys.force_units, Val(T))
     end
 
-    fs_nounits .= reinterpret(SVector{D, T}, vec(buffers.fs_mat))
-
+    fs .= reinterpret(SVector{D, T}, vec(buffers.fs_mat)) .* sys.force_units
     for inter in values(sys.general_inters)
-        fs_gen = AtomsCalculators.forces(sys, inter; neighbors=neighbors, step_n=step_n,
-                                         n_threads=n_threads)
-        check_force_units(zero(eltype(fs_gen)), sys.force_units)
-        fs_nounits .+= ustrip_vec.(fs_gen)
+        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+                                 n_threads=n_threads)
     end
 
-    return fs_nounits
+    return fs
 end
