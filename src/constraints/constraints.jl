@@ -273,8 +273,8 @@ end
 
 function build_clusters(
         n_atoms::Integer,
-        dist_constraints::AbstractVector{DistanceConstraint{D}},
-        angle_constraints::AbstractVector{AngleConstraint{D}}
+        dist_constraints::AbstractVector{<:DistanceConstraint{D}},
+        angle_constraints::AbstractVector{<:AngleConstraint{D}}
     ) where D
 
     #! avoid mutating input, dont love this...
