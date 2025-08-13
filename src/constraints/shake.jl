@@ -34,7 +34,7 @@ of the linear system solved to satisfy the RATTLE algorithm.
     distance constraints to be applied. If `nothing`, no distance constraints are applied.
 - `angle_constraints`: A vector of [`AngleConstraint`](@ref) objects that define the
     angle constraints to be applied. If `nothing`, no angle constraints are applied.
-- `gpu_block_size`: The number of threads per block to use for GPU calculations.
+- `gpu_block_size`: The number of threads per block to use for GPU calculations. Defaults to 128.
 - `max_iters`: The maximum number of iterations to perform when doing SHAKE. Defaults to 25.
 """
 struct SHAKE_RATTLE{A, B, C, D, E, F, I <: Integer}
@@ -53,19 +53,25 @@ function SHAKE_RATTLE(n_atoms,
                      vel_tolerance;
                      dist_constraints = nothing,
                      angle_constraints = nothing,
-                     gpu_block_size = 64, max_iters = 25)
+                     gpu_block_size = 128, max_iters = 25)
+
+    dc_isnothing = isnothing(dist_constraints)
+    ac_isnothing = isnothing(angle_constraints)
+
+    dc_length = dc_isnothing ? 0 : length(dist_constraints)
+    ac_length = ac_isnothing ? 0 : length(angle_constraints)
 
     ustrip(dist_tolerance) <= 0.0 && throw(ArgumentError("dist_tolerance must be greater than zero"))
     ustrip(vel_tolerance) <= 0.0 && throw(ArgumentError("vel_tolerance must be greater than zero"))
-    (isnothing(dist_constraints) && isnothing(angle_constraints)) && throw(ArgumentError("At least one of dist_constraints or angle_constraints must be provided"))
-    (length(dist_constraints) < 0 && length(angle_constraints) < 0) && throw(ArgumentError("At least one of dist_constraints or angle_constraints must be non-empty"))
+    (dc_isnothing && ac_isnothing) && throw(ArgumentError("At least one of dist_constraints or angle_constraints must be provided"))
+    (dc_length == 0 && ac_length == 0) && throw(ArgumentError("At least one of dist_constraints or angle_constraints must be non-empty"))
 
-    if !isnothing(dist_constraints) && length(dist_constraints) == 0
+    if !dc_isnothing && dc_length == 0
         @warn "You passed an empty vector for `dist_constraints`, no distance constraints will be applied."
         dist_constraints = nothing
     end
 
-    if !isnothing(angle_constraints) && length(angle_constraints) == 0
+    if !ac_isnothing && ac_length == 0
         @warn "You passed an empty vector for `angle_constraints`, no angle constraints will be applied."
         angle_constraints = nothing
     end
