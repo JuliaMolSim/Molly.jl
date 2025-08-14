@@ -2,10 +2,10 @@
 
 
 # No-op when backends are same
-to_backend(arr, old::T, new::T) where {T <: KA.Backend} = arr
+to_backend(arr, old::T, new::T) where {T <: Backend} = arr
 
 # Allocates and copies when backends are different
-function to_backend(arr, old::A, new::B) where {A <: KA.Backend, B <: KA.Backend}
+function to_backend(arr, old::A, new::B) where {A <: Backend, B <: Backend}
     out = allocate(new, eltype(arr), size(arr))
     copy!(out, arr)
     return out
