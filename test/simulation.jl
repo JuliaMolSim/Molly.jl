@@ -370,12 +370,12 @@ end
         ),
         loggers=(
             coords=CoordinatesLogger(100),
-            disp=DisplacementsLogger(100, coords)
+            disp=DisplacementsLogger(100, coords),
         ),
 
     )
 
-    @test_throws ArgumentError DisplacementsLogger(100, coords; n_update = 17)
+    @test_throws ArgumentError DisplacementsLogger(100, coords; n_steps_update=17)
 
     if run_cuda_tests
         sys_gpu = System(
@@ -390,17 +390,19 @@ end
             ),
             loggers=(
                 coords=CoordinatesLogger(100),
-                disp=DisplacementsLogger(100, CuArray(coords))
+                disp=DisplacementsLogger(100, CuArray(coords)),
             ),
         )
     end
 
     for simulator in simulators
         @time simulate!(sys, simulator, n_steps; n_threads=1)
-        @test sum(sum(first(values(sys.loggers.disp)))) == 0.0u"nm"
+        @test all(isequal(0.0u"nm"), norm.(first(values(sys.loggers.disp))))
+        @test mean(norm.(sys.loggers.disp.displacements[end])) > 0.005u"nm"
         if run_cuda_tests
             @time simulate!(sys_gpu, simulator, n_steps; n_threads=1)
-            @test sum(first(values(sys_gpu.loggers.disp))) == 0.0u"nm"
+            @test all(isequal(0.0u"nm"), norm.(first(values(sys_gpu.loggers.disp))))
+            @test mean(norm.(sys.loggers.disp.displacements[end])) > 0.005u"nm"
             coord_diff = sys.coords .- from_device(sys_gpu.coords)
             coord_diff_size = sum(sum(map(x -> abs.(x), coord_diff))) / (3 * n_atoms)
             E_diff = abs(potential_energy(sys) - potential_energy(sys_gpu))
