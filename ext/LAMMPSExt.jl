@@ -1,0 +1,161 @@
+module MollyLAMMPSExt
+
+using LAMMPS
+using Molly
+using Unitful
+
+const lammps_mass_units_map = Dict("metal" => u"g/mol", "real" => u"g/mol", "si" => u"kg")
+
+function convert_mass(m, lammps_units)
+    sys_mass_unit = unit(m)
+    lammps_mass_units = get(lammps_mass_units_map, lammps_units, sys_mass_unit)
+    lammps_mass_is_molar = (dimension(lammps_mass_units) == u"𝐌* 𝐍^-1")
+    sys_mass_is_molar = (dimension(sys_mass_unit) == u"𝐌* 𝐍^-1")
+
+    lammps_molar_sys_not = (lammps_mass_is_molar && (!sys_mass_is_molar))
+    sys_molar_lammps_not = (sys_mass_is_molar && (!lammps_mass_is_molar))
+
+    if lammps_molar_sys_not
+        return ustrip.(lammps_mass_units, Unitful.Na * m)
+    elseif sys_molar_lammps_not
+        return ustrip.(lammps_mass_units, m / Unitful.Na) 
+    else # both molar or both non-molar
+        return ustrip.(lammps_mass_units, m)
+    end
+end
+
+function check_lammps_units(energy_unit, force_unit, lammps_units)
+
+    length_unit = inv(force_unit / energy_unit)
+
+    err = (U, LE, LA, EE, EA) -> ArgumentError("You picked $(U) units. Expected length units $(LE) and got $(LA). Expected energy units $(EE) and got $(EA)")
+
+    if lammps_units == "metal"
+        if length_unit != u"angstrom" && energy_unit != u"eV"
+            error(err("metal", u"angstrom", length_unit, u"eV", energy_unit))
+        end
+    elseif lammps_units == "lj"
+        if length_unit != NoUnits && energy_unit != NoUnits
+            error(err("lj", "NoUnits", length_unit, "NoUnits", energy_unit))
+        end
+    elseif lammps_units == "real"
+        if length_unit != u"angstrom" && energy_unit != u"kcal/mol"
+            error(err("real", u"angstrom", length_unit, u"kcal/mol", energy_unit))
+        end
+    elseif lammps_units == "si"
+        if length_unit != u"m" && energy_unit != u"J"
+            error(err("si", u"m", length_unit, u"J", energy_unit))
+        end
+    else
+        error(ArgumentError("Unsupported LAMMPS unit system, $(lammps_units). Expected one of (metal, real, lj)."))
+    end
+
+end
+
+function Molly.LAMMPSCalculator(
+        sys::System{3, AT, T},
+        lammps_unit_system::String,
+        potential_definition::Union{String, Array{String}};
+        extra_lammps_commands::Union{String, Array{String}} = "",
+        mpi_comm=nothing,
+        logfile_path::String = "none"
+    ) where {AT, T}
+
+    # check that we're on CPU
+    if AT != Array
+        error(ArgumentError("LAMMPSCalculator only supports CPU execution."))
+    end
+
+    if sys.boundary == TriclinicBoundary
+        error(ArgumentError("LAMMPSCalculator does not support triclinic systems yet. PRs welcome :)"))
+    end
+
+    if has_infinite_boundary(sys.boundary)
+        error(ArgumentError("LAMMPSCalculator does not support systems with infinite boundaries. Must be fully periodic."))
+    end
+
+    if T != Float64
+        @warn "LAMMPS uses Float64, you are using $T. You might incur a penalty from type promotion."
+    end
+
+    check_lammps_units(sys.energy_units, sys.force_units, lammps_unit_system)
+
+    # setup box, atoms etc.
+    lmp = LMP(args = ["-screen","none"], comm = mpi_comm) #! DO WE NEED TO CALL close!
+
+    syms = atomic_symbol(sys, :) #! PROBABLY SHOULD ERROR IF ANY ARE MISSING
+    unique_syms = unique(syms)
+
+    if any(unique_syms) == :unknown
+        error(ArgumentError("All atoms must have atomic symbols to use LAMMPSCalculators"))
+    end
+
+    unqiue_sym_idxs = Dict(sym => findfirst.(x -> x == sym, syms) for sym in unique_syms)
+    type_map = Dict(sym => Int32(i) for (i, sym) in enumerate(unique_syms))
+    types = [type_map[sym] for sym in syms]
+    ids = collect(Int32, 1:length(sys))
+
+    command(lmp, """
+            log $(logfile_path)
+            units $(lammps_unit_system)
+            atom_style atomic
+            atom_modify map array sort 0 0
+        """)
+        # box tilt large #! FIGURE OUT WHAT THIS IS DOING??
+
+    xhi, yhi, zhi = ustrip.(sys.boundary)
+    command(lmp, """
+            boundary p p p
+            region cell block 0 $(xhi) 0 $(yhi) 0 $(zhi) units box
+            create_box $(length(unique_syms)) cell
+        """)
+
+    LAMMPS.create_atoms(
+        lmp,
+        reinterpret(reshape, Float64, sys.coords),
+        ids,
+        types
+    )   
+
+    m_lmp = Dict(type_map[sym] => convert_mass(mass(sys, i), lammps_units) for (sym, i) in unqiue_sym_idxs)
+    command(lmp, ["mass $(type) $(m)" for (type,m) in  m_lmp])
+
+    command(lmp, potential_definition)
+
+    if length(extra_lammps_commands) > 0
+        command(lmp, extra_lammps_commands)
+    end
+
+    #! IS THIS THE ONLY TIME WE NEED POTENTIAL ENERGY??
+    log_PE = any(x -> isa(x, PotentialEnergyLogger), sys.loggers)
+    log_PE && command(lmp, "compute pot_e all pe")
+
+    return LAMMPSCalculator(lmp, -1)
+end
+
+function maybe_run_lammps_calc!(lammps_calc, r::AbstractVector{T}, step_n) where T
+    if lammps_calc.last_updated != step_n
+        scatter!(lammps_calc.lmp, "x", reinterpret(reshape, Float64, r))
+        command(lmp, "run 0") #! CAN I USE NTHREADS???
+        lammps_calc.last_updated = step_n
+    end
+end
+
+#! WHAT SHOULD UNITS ON RETURN BE
+#! IF T HAS UNITS THAT WILL BREAK THIS
+function AtomsCalculators.forces!(fs::AbstractVector{T}, sys, inter::LAMMPSCalculator; step_n=0, kwargs...) where T
+    maybe_update_lammps_calc!(inter, sys.coords, step_n)
+    fs .= reinterpret(T, gather(inter.lmp, "f", Float64))
+    return fs
+end
+
+#! WHAT SHOULD UNITS ON RETURN BE
+function AtomsCalculators.potential_energy(sys, inter::LAMMPSCalculator; step_n=0, kwargs...)
+    maybe_update_lammps_calc!(inter, sys.coords, step_n)
+    return extract_compute(inter.lmp, "pot_e", STYLE_GLOBAL, TYPE_SCALAR)[1]
+end
+
+
+end # module MollyLAMMPSExt
+
+

@@ -1457,6 +1457,45 @@ end
 
 function update_ase_calc! end
 
+"""
+    LAMMPSCalculator(
+        sys::System{3, AT, T},
+        lammps_unit_system::String,
+        potential_definition::Union{String, Array{String}};
+        extra_lammps_commands::Union{String, Array{String}} = "",
+        comm::Union{Nothing, MPI.Comm}=nothing,
+        logfile_path::String = "none"
+    )
+
+Defines a general interaction that will call LAMMPS to calculate forces and energies. 
+
+Restrictions:
+-------------
+- CPU only
+- Floats promote to Float64
+- No TriclinicBoundary
+- 3D systems only
+- Fully periodic systems only
+
+Arguments:
+----------
+- `sys::System{3}`: The system object this interaction will be applied to. You still have to add this
+    interaction to the system object yourself after constructing the LAMMPSCalculator.
+- `lammps_unit_system::String` : String representing unit system passed to lammps unit command (e.g., metal)
+- `potential_definition::Union{String, Array{String}}` : Commands passed to lammps which define your interaction.
+    For example, to define LJ you pass:
+    `lj_cmds = ["pair_style lj/cut 8.5", "pair_coeff * * 0.0104 3.4", "pair_modify shift yes"]`
+- `extra_lammps_commands::Union{String, Array{String}}` : Any other commands you want to pass to LAMMPS. 
+    This feature is untested, but allows flexability to modify the LAMMPS system. 
+- `mpi_comm=nothing` : Optional MPI.Comm object passed to LAMMPS
+- `logfile_path::String = "none"` : Path where LAMMPS logfile is written. Defaults to no log file.
+"""
+mutable struct LAMMPSCalculator
+    lmp::LMP
+    last_updated::Int
+end
+
+
 iszero_value(x) = iszero(x)
 
 # Only use threading if a condition is true
