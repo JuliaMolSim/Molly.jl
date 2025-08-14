@@ -1015,7 +1015,7 @@ end
 
 @testset "GPU/CPU Constraints Protein No Solvent" begin
    
-    pdb_fp = "1ubq_h.pdb" # No solvent
+    pdb_fp = joinpath(data_dir, "1ubq_h.pdb") # No solvent
     T = Float32
 
     ff = MolecularForceField(
