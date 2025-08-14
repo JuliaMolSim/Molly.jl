@@ -679,7 +679,7 @@ function System(crystal::Crystal{D};
                 energy_units=u"kJ * mol^-1",
                 k=default_k(energy_units),
                 data=nothing) where D
-    atoms = [Atom(index=i, charge=charge(a), mass=AtomsBase.mass(a))
+    atoms = [Atom(index=i, charge=ustrip(uconvert(u"C", charge(a)) / Unitful.q), mass=AtomsBase.mass(a))
              for (i, a) in enumerate(crystal.atoms)]
     atoms_data = [AtomData(element=String(atomic_symbol(a))) for a in crystal.atoms]
     coords = [SVector{D}(AtomsBase.position(crystal, i)) for i in 1:length(crystal)]
@@ -1199,17 +1199,25 @@ end
 Base.show(io::IO, ::MIME"text/plain", s::Union{System, ReplicaSystem}) = show(io, s)
 
 """
-    System(abstract_system; force_units=u"kJ * mol^-1 * nm^-1", energy_units=u"kJ * mol^-1")
+    System(abstract_system; <keyword arguments>)
 
 Convert an AtomsBase `AbstractSystem` to a Molly `System`.
 
-`force_units` and `energy_units` should be set as appropriate.
-To add properties not present in the AtomsBase interface (e.g. pair potentials) use the
-convenience constructor `System(sys::System)`.
+The keyword arguments `force_units` and `energy_units` should be set as appropriate.
+Other keyword arguments are the same as for the main `System` constructor.
 """
 function System(sys::AtomsBase.AbstractSystem{D};
+                topology=nothing,
+                pairwise_inters=(),
+                specific_inter_lists=(),
+                general_inters=(),
+                constraints=(),
+                neighbor_finder=NoNeighborFinder(),
+                loggers=(),
                 force_units=u"kJ * mol^-1 * nm^-1",
-                energy_units=u"kJ * mol^-1") where D
+                energy_units=u"kJ * mol^-1",
+                k=default_k(energy_units),
+                data=nothing) where D
     bb = AtomsBase.cell_vectors(sys)
     is_cubic = true
     for (i, bv) in enumerate(bb)
@@ -1252,19 +1260,28 @@ function System(sys::AtomsBase.AbstractSystem{D};
     end
 
     # AtomsBase does not specify a type for coordinates or velocities so we convert to SVector
+    if !(:position in AtomsBase.atomkeys(sys))
+        throw(ArgumentError("failed to construct Molly System from AbstractSystem, " *
+                            "missing position key"))
+    end
     coords = map(AtomsBase.position(sys, :)) do r
         SVector(r...)
     end
-    vels = map(AtomsBase.velocity(sys, :)) do v
-        SVector(v...)
+
+    if :velocity in AtomsBase.atomkeys(sys)
+        vels = map(AtomsBase.velocity(sys, :)) do v
+            SVector(v...)
+        end
+    else
+        vels = nothing
     end
 
     mass_dim = dimension(AtomsBase.mass(sys, 1))
     if mass_dim == u"𝐌" && dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2"
-        throw(ArgumentError("When constructing System from AbstractSystem, energy units " *
+        throw(ArgumentError("when constructing System from AbstractSystem, energy units " *
                             "are molar but mass units are not"))
     elseif mass_dim == u"𝐌 * 𝐍^-1" && dimension(energy_units) == u"𝐋^2 * 𝐌 * 𝐓^-2"
-        throw(ArgumentError("When constructing System from AbstractSystem, mass units " *
+        throw(ArgumentError("when constructing System from AbstractSystem, mass units " *
                             "are molar but energy units are not"))
     end
 
@@ -1274,8 +1291,17 @@ function System(sys::AtomsBase.AbstractSystem{D};
         boundary=molly_boundary,
         velocities=vels,
         atoms_data=atoms_data,
+        topology=topology,
+        pairwise_inters=pairwise_inters,
+        specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
+        constraints=constraints,
+        neighbor_finder=neighbor_finder,
+        loggers=loggers,
         force_units=force_units,
         energy_units=energy_units,
+        k=k,
+        data=data,
     )
 end
 

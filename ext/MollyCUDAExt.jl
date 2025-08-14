@@ -74,7 +74,7 @@ function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inte
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     end
-    CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
+    CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max!(
                 buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
                 sys.boundary, Val(D))
     CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(
@@ -131,7 +131,6 @@ function generalized_morton_code(indices, bits::Int, D::Int)
 end
 
 function boxes_dist(x1_min::D, x1_max::D, x2_min::D, x2_max::D, Lx::D) where D
-
     a = abs(vector_1D(x2_max, x1_min, Lx))
     b = abs(vector_1D(x1_max, x2_min, Lx))
 
@@ -231,7 +230,6 @@ end
 
 function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
                                     compressed_eligible, compressed_special, ::Val{N}) where N
-
     a = Int32(1)
     n_blocks = Int32(ceil(N / 32))
     r = Int32((N - 1) % 32 + 1)

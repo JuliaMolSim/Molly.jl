@@ -12,6 +12,7 @@ using Enzyme
 using FiniteDifferences
 using GPUArrays
 using KernelDensity
+using Measurements
 using Metal
 using oneAPI
 import SimpleCrystals

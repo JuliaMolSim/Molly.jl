@@ -11,12 +11,10 @@ The potential energy is defined as
 V(\theta) = k(1 + \cos(\theta - \theta_0))
 ```
 """
-struct CosineAngle{K, D}
+@kwdef struct CosineAngle{K, D}
     k::K
     θ0::D
 end
-
-CosineAngle(; k, θ0) = CosineAngle(k, θ0)
 
 @inline function force(a::CosineAngle, coords_i, coords_j, coords_k, boundary, args...)
     # In 2D we use then eliminate the cross product
