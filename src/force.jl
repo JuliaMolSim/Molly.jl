@@ -122,11 +122,9 @@ end
 
 function init_forces_buffer!(sys, n_threads)
     fs_nounits = ustrip_vec.(zero(sys.coords))
-    if n_threads == 1
-        fs_chunks = nothing
-    else
-        fs_chunks = [similar(fs_nounits) for _ in 1:n_threads]
-    end
+    # Enzyme errors with nothing when n_threads is 1
+    n_copies = (n_threads == 1 ? 0 : n_threads)
+    fs_chunks = [similar(fs_nounits) for _ in 1:n_copies]
     return ForcesBufferCPU(fs_nounits, fs_chunks)
 end
 

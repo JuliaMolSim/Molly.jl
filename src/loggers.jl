@@ -383,6 +383,7 @@ function log_property!(dl::DisplacementsLogger, sys::System, neighbors=nothing,
         dl.last_displacements .+= vector.(dl.coords_ref, sys.coords, (sys.boundary,))
         dl.coords_ref .= sys.coords
         if (step_n % dl.n_steps) == 0
+            # Moved off device for storage
             push!(dl.displacements, Array(dl.last_displacements))
         end
     end
