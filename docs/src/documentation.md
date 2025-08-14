@@ -1340,15 +1340,23 @@ Currently, constraints are supported by the following simulators:
 
 See [this example](@ref "Constrained dynamics") for how to apply constraints to a system.
 Simulators incompatible with constraints will print a warning and continue when used with systems containing constraints.
-Constraints are not currently compatible with GPU simulation.
 
-In Molly, the SHAKE constraints for diatomic molecules are solved analytically while all larger constraints are solved iteratively.
-The velocity constraints imposed by RATTLE form a linear system of equations which could be solved exactly; however, this operation is expensive for clusters of more than 4 constraints.
-Therefore, RATTLE constraints can be solved by direct matrix inversion for small clusters (4 or fewer constraints) and iteratively otherwise (currently only solved iteratively).
-The number of constraints here does not refer to the total number of constraints in the system, rather to the total number of constraints in an independent cluster/molecule.
-For example, a water molecule can be constrained by 2 distance constraints and 1 angle constraint which is only 3 constraints.
-However, a C-C backbone of an organic molecule like octane would need 7 constraints to maintain all the C-C bond lengths.
-Constraining large clusters will result in a performance penalty.
+Molly supports [DistanceConstraint](@ref) and [AngleConstraint](@ref) on CPU and GPU. To use the GPU no-extra work is required, constraints are automatically moved from CPU to GPU. Distance constraints fix the distance between two atoms. Angle constraints are defined for tri-atomic molecules (e.g. water) and restrict the angle and the two bond lengths. 
+
+This diagram demonstrates the four allowed constraint types. 
+![Valid Constraints](images/constraints_diagram.png)
+- Single bond between two atoms (e.g. hydrogen molecule)
+- 3 atoms, 2 [DistanceConstraint](@ref), angle is free (e.g. the hydrogens on either carbon of ethelene)
+- 3 atoms, 1 [AngleConstraint](@ref), implemented as 3 distance constraints (e.g. a water molecule)
+- 3 atoms around 1 central atom, 3 [DistanceConstraint](@ref) (e.g. ammonia)
+
+> [!NOTE]
+> You cannot constrain a linear chain of four atoms or an angle of 180°. Constraints cannot be clustered beyond the four valid classes. For example, you could not constrain all the hydrogen bonds in ethelene and the double bond simultaneosly. This would create a cluster of 5 constraints which is forbidden.
+
+These constraints provide enough flexibility to constrain all hydrogen atoms on an organic molecule as well as water molecules.  
+
+All velocity constraints and diatomic distance constraints are solved analytically while larger constraints are linearized and solved iteratively via matrix inverse. The direct matrix inverse does not scale well beyond clusters with 3 constraints and is not implemented. Other methods can be used to solve larger constraint clusters but Molly does not support them. 
+
 
 ## Neighbor finders
 
