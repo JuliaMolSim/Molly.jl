@@ -24,6 +24,7 @@ ff = MolecularForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
+    nonbonded_method="cutoff",
     loggers=(temp=TemperatureLogger(100),),
 )
 
@@ -562,7 +563,7 @@ atoms_dftk = [Si, Si]
 
 dftk_interaction = DFTKInteraction(lattice, atoms_dftk)
 
-function AtomsCalculators.forces(sys, inter::DFTKInteraction; kwargs...)
+function AtomsCalculators.forces!(fs, sys, inter::DFTKInteraction; kwargs...)
     # Select model and basis
     model = model_LDA(inter.lattice, inter.atoms, sys.coords)
     kgrid = [4, 4, 4]     # k-point grid (Regular Monkhorst-Pack grid)
@@ -572,7 +573,8 @@ function AtomsCalculators.forces(sys, inter::DFTKInteraction; kwargs...)
     # Run the SCF procedure to obtain the ground state
     scfres = self_consistent_field(basis; tol=1e-5)
 
-    return compute_forces_cart(scfres)
+    fs .+= compute_forces_cart(scfres)
+    return fs
 end
 
 atoms = fill(Atom(mass=28.0), 2)
@@ -1060,7 +1062,6 @@ neighbor_finder = DistanceNeighborFinder(
     eligible=trues(length(atoms), length(atoms)),
     dist_cutoff=1.5*r_cut,
 )
-disable_constrained_interactions!(neighbor_finder, shake.clusters)
 
 sys = System(
     atoms=atoms,

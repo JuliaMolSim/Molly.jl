@@ -30,13 +30,12 @@ using Test
             if nl
                 if Molly.uses_gpu_neighbor_finder(AT)
                     neighbor_finder=GPUNeighborFinder(
-                        eligible=AT(trues(n_atoms, n_atoms)),
-                        n_steps_reorder=10,
+                        eligible=to_device(trues(n_atoms, n_atoms), AT),
                         dist_cutoff=dist_cutoff,
                     )
                 else
                     neighbor_finder=DistanceNeighborFinder(
-                        eligible=AT(trues(n_atoms, n_atoms)),
+                        eligible=to_device(trues(n_atoms, n_atoms), AT),
                         n_steps=10,
                         dist_cutoff=dist_cutoff,
                     )
@@ -46,8 +45,8 @@ using Test
             end
 
             sys = System(
-                atoms=AT(atoms),
-                coords=AT(coords),
+                atoms=to_device(atoms, AT),
+                coords=to_device(coords, AT),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(cutoff=cutoff, use_neighbors=ifelse(nl, true, false)),),
                 neighbor_finder=neighbor_finder,

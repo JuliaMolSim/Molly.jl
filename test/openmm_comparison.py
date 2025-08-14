@@ -1,5 +1,5 @@
 # Calculate energy and forces with OpenMM for comparison to Molly
-# Used OpenMM v7.7.0, Python v3.9.10
+# Used OpenMM v8.2.0, Python v3.11.12
 
 from openmm.app import *
 from openmm import *
@@ -28,22 +28,28 @@ class VelocityVerletIntegrator(CustomIntegrator):
         self.addComputePerDof("v", "v+0.5*dt*f/m+(x-x1)/dt")
         self.addConstrainVelocities()
 
-for inter in ["bond", "angle", "proptor", "improptor", "lj", "coul", "all"]:
+inters = [
+    "bond_only", "angle_only", "proptor_only", "improptor_only", "lj_only", "coul_only",
+    "all_cut", "all_pme", "all_pme_exact",
+]
+
+for inter in inters:
     pdb = PDBFile(pdb_file)
-    if inter == "all":
+    if inter.startswith("all"):
         force_field = ForceField(
             os.path.join(ff_dir, f"ff99SBildn.xml"),
             os.path.join(ff_dir, f"tip3p_standard.xml"),
         )
     else:
         force_field = ForceField(
-            os.path.join(ff_dir, f"ff99SBildn_{inter}_only.xml"),
-            os.path.join(ff_dir, f"tip3p_standard_{inter}_only.xml"),
+            os.path.join(ff_dir, f"ff99SBildn_{inter}.xml"),
+            os.path.join(ff_dir, f"tip3p_standard_{inter}.xml"),
         )
+    nonbondedMethod = PME if inter.startswith("all_pme") else CutoffPeriodic
 
     system = force_field.createSystem(
         pdb.topology,
-        nonbondedMethod=CutoffPeriodic,
+        nonbondedMethod=nonbondedMethod,
         nonbondedCutoff=1*nanometer,
         constraints=None,
         rigidWater=False,
@@ -58,15 +64,15 @@ for inter in ["bond", "angle", "proptor", "improptor", "lj", "coul", "all"]:
     energy = state.getPotentialEnergy()
     forces = state.getForces()
 
-    with open(os.path.join(out_dir, f"forces_{inter}_only.txt"), "w") as of:
+    with open(os.path.join(out_dir, f"forces_{inter}.txt"), "w") as of:
         for force in forces:
             of.write(f"{force.x} {force.y} {force.z}\n")
 
-    with open(os.path.join(out_dir, f"energy_{inter}_only.txt"), "w") as of:
+    with open(os.path.join(out_dir, f"energy_{inter}.txt"), "w") as of:
         of.write(f"{energy.value_in_unit(energy.unit)}\n")
 
     # Run a short simulation with all interactions
-    if inter == "all":
+    if inter == "all_pme":
         if os.path.isfile(vel_file):
             # Load velocities if they already exist
             velocities = []

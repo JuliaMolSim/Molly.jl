@@ -453,6 +453,13 @@ are not available when reading Gromacs files.
 - `dist_neighbors=1.2u"nm"`: cutoff distance for the neighbor list, should not
     be less than `dist_cutoff`. Not relevant if [`GPUNeighborFinder`](@ref) is
     used since the neighbors are calculated each step.
+- `nonbonded_method="none"`: method for long range interaction summation,
+    options are "none" (short range only), "cutoff" (reaction field method),
+    "pme" (particle mesh Ewald summation) and "ewald" (Ewald summation, slow).
+- `ewald_error_tol=0.0005`: the error tolerance for Ewald summation, used when
+    `nonbonded_method` is "pme" or "ewald".
+- `approximate_pme=true`: whether to use a fast approximation to the erfc
+    function, used when `nonbonded_method` is "pme".
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
@@ -477,6 +484,9 @@ function System(coord_file::AbstractString,
                 array_type::Type{AT}=Array,
                 dist_cutoff=(units ? 1.0u"nm" : 1.0),
                 dist_neighbors=(units ? 1.2u"nm" : 1.2),
+                nonbonded_method="none",
+                ewald_error_tol=0.0005,
+                approximate_pme=true,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing,
@@ -605,6 +615,7 @@ function System(coord_file::AbstractString,
                                     hetero_atom=hetero_atom))
         eligible[ai, ai] = false
     end
+    atoms = to_device([atoms_abst...], AT)
 
     for (a1z, a2z) in top_bonds
         atom_name_1 = chemfiles_name(top, a1z)
@@ -831,29 +842,69 @@ function System(coord_file::AbstractString,
         energy_units = NoUnits
     end
 
-    using_neighbors = neighbor_finder_type != NoNeighborFinder
+    if isnothing(boundary)
+        boundary_used = boundary_from_chemfiles(Chemfiles.UnitCell(frame), T,
+                                                (units ? u"nm" : NoUnits))
+    else
+        boundary_used = boundary
+    end
+
+    using_neighbors = (neighbor_finder_type != NoNeighborFinder)
     lj = LennardJones(
         cutoff=DistanceCutoff(T(dist_cutoff)),
         use_neighbors=using_neighbors,
         weight_special=force_field.weight_14_lj,
     )
-    if isnothing(implicit_solvent)
-        crf = CoulombReactionField(
+    if nonbonded_method == "none"
+        coul = Coulomb(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=using_neighbors,
+            weight_special=force_field.weight_14_coulomb,
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        general_inters_ewald = ()
+    elseif nonbonded_method == "cutoff"
+        coul = CoulombReactionField(
             dist_cutoff=T(dist_cutoff),
             solvent_dielectric=T(crf_solvent_dielectric),
             use_neighbors=using_neighbors,
             weight_special=force_field.weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
-    else
-        crf = Coulomb(
-            cutoff=DistanceCutoff(T(dist_cutoff)),
+        general_inters_ewald = ()
+    elseif nonbonded_method in ("ewald", "pme")
+        coul = CoulombEwald(
+            dist_cutoff=T(dist_cutoff),
+            error_tol=T(ewald_error_tol),
             use_neighbors=using_neighbors,
             weight_special=force_field.weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+            approximate_erfc=approximate_pme,
         )
+        if nonbonded_method == "ewald"
+            ewald = Ewald(
+                T(dist_cutoff);
+                error_tol=T(ewald_error_tol),
+                eligible=eligible,
+                special=special,
+            )
+        else
+            ewald = PME(
+                T(dist_cutoff),
+                atoms,
+                boundary_used;
+                error_tol=T(ewald_error_tol),
+                eligible=eligible,
+                special=special,
+                array_type=AT,
+            )
+        end
+        general_inters_ewald = (ewald,)
+    else
+        throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
+                            "\"none\", \"cutoff\", \"pme\" and \"ewald\""))
     end
-    pairwise_inters = (lj, crf)
+    pairwise_inters = (lj, coul)
 
     # All torsions should have the same number of terms for speed, GPU compatibility
     #   and for taking gradients
@@ -867,9 +918,9 @@ function System(coord_file::AbstractString,
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            AT(bonds.is),
-            AT(bonds.js),
-            AT([bonds.inters...]),
+            to_device(bonds.is, AT),
+            to_device(bonds.js, AT),
+            to_device([bonds.inters...], AT),
             bonds.types,
         ))
         topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
@@ -878,46 +929,34 @@ function System(coord_file::AbstractString,
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
-            AT(angles.is),
-            AT(angles.js),
-            AT(angles.ks),
-            AT([angles.inters...]),
+            to_device(angles.is, AT),
+            to_device(angles.js, AT),
+            to_device(angles.ks, AT),
+            to_device([angles.inters...], AT),
             angles.types,
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            AT(torsions.is),
-            AT(torsions.js),
-            AT(torsions.ks),
-            AT(torsions.ls),
-            AT(torsion_inters_pad),
+            to_device(torsions.is, AT),
+            to_device(torsions.js, AT),
+            to_device(torsions.ks, AT),
+            to_device(torsions.ls, AT),
+            to_device(torsion_inters_pad, AT),
             torsions.types,
         ))
     end
     if length(impropers.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            AT(impropers.is),
-            AT(impropers.js),
-            AT(impropers.ks),
-            AT(impropers.ls),
-            AT(improper_inters_pad),
+            to_device(impropers.is, AT),
+            to_device(impropers.js, AT),
+            to_device(impropers.ks, AT),
+            to_device(impropers.ls, AT),
+            to_device(improper_inters_pad, AT),
             impropers.types,
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
-
-    if isnothing(boundary)
-        # Read from file and convert from Å
-        if units
-            box_size = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame))u"nm" / 10.0))
-        else
-            box_size = SVector{3}(T.(Chemfiles.lengths(Chemfiles.UnitCell(frame)) / 10.0))
-        end
-        boundary_used = CubicBoundary(box_size)
-    else
-        boundary_used = boundary
-    end
 
     # Convert from Å
     if units
@@ -929,21 +968,21 @@ function System(coord_file::AbstractString,
         coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
     end
     coords = wrap_coords.(coords, (boundary_used,))
+    coords_dev = to_device(coords, AT)
 
     if neighbor_finder_type == NoNeighborFinder
         neighbor_finder = NoNeighborFinder()
     elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
-            eligible=AT(eligible),
+            eligible=to_device(eligible, AT),
             dist_cutoff=T(dist_cutoff), # Neighbors are computed each step so no buffer is needed
-            special=AT(special),
-            n_steps_reorder=10,
+            special=to_device(special, AT),
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))
         neighbor_finder = DistanceNeighborFinder(
-            eligible=AT(eligible),
-            special=AT(special),
+            eligible=to_device(eligible, AT),
+            special=to_device(special, AT),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
@@ -958,15 +997,12 @@ function System(coord_file::AbstractString,
         )
     else
         neighbor_finder = neighbor_finder_type(
-            eligible=AT(eligible),
-            special=AT(special),
+            eligible=to_device(eligible, AT),
+            special=to_device(special, AT),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
     end
-
-    atoms = AT([atoms_abst...])
-    coords_dev = AT(coords)
 
     if isnothing(velocities)
         if units
@@ -980,19 +1016,21 @@ function System(coord_file::AbstractString,
 
     if !isnothing(implicit_solvent)
         if implicit_solvent == "obc1"
-            general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds;
+            general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds;
                                 kappa=kappa, use_OBC2=false),)
         elseif implicit_solvent == "obc2"
-            general_inters = (ImplicitSolventOBC(atoms, atoms_data, bonds;
+            general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds;
                                 kappa=kappa, use_OBC2=true),)
         elseif implicit_solvent == "gbn2"
-            general_inters = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
+            general_inters_is = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
         else
-            throw(ArgumentError("unknown implicit solvent model: \"$implicit_solvent\""))
+            throw(ArgumentError("unknown implicit solvent model \"$implicit_solvent\", " *
+                                "options are nothing, \"obc1\", \"obc2\" and \"gbn2\""))
         end
     else
-        general_inters = ()
+        general_inters_is = ()
     end
+    general_inters = (general_inters_ewald..., general_inters_is...)
 
     k = units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k)
     return System(
@@ -1024,6 +1062,9 @@ function System(T::Type,
                 array_type::Type{AT}=Array,
                 dist_cutoff=(units ? 1.0u"nm" : 1.0),
                 dist_neighbors=(units ? 1.2u"nm" : 1.2),
+                nonbonded_method="none",
+                ewald_error_tol=0.0005,
+                approximate_pme=true,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing) where AT <: AbstractArray
@@ -1250,6 +1291,7 @@ function System(T::Type,
             end
         end
     end
+    atoms = to_device([atoms_abst...], AT)
 
     # Calculate matrix of pairs eligible for non-bonded interactions
     n_atoms = length(coords_abst)
@@ -1275,20 +1317,6 @@ function System(T::Type,
         special[j, i] = true
     end
 
-    using_neighbors = neighbor_finder_type != NoNeighborFinder
-    lj = LennardJones(
-        cutoff=DistanceCutoff(T(dist_cutoff)),
-        use_neighbors=using_neighbors,
-        weight_special=T(0.5),
-    )
-    crf = CoulombReactionField(
-        dist_cutoff=T(dist_cutoff),
-        solvent_dielectric=T(crf_solvent_dielectric),
-        use_neighbors=using_neighbors,
-        weight_special=T(0.5),
-        coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-    )
-
     if isnothing(boundary)
         box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
         box_size = units ? (box_size_vals)u"nm" : box_size_vals
@@ -1301,16 +1329,72 @@ function System(T::Type,
         coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
     end
     coords = wrap_coords.(coords, (boundary_used,))
+    coords_dev = to_device(coords, AT)
 
-    pairwise_inters = (lj, crf)
+    using_neighbors = (neighbor_finder_type != NoNeighborFinder)
+    lj = LennardJones(
+        cutoff=DistanceCutoff(T(dist_cutoff)),
+        use_neighbors=using_neighbors,
+        weight_special=T(0.5),
+    )
+    if nonbonded_method == "none"
+        coul = Coulomb(
+            cutoff=DistanceCutoff(T(dist_cutoff)),
+            use_neighbors=using_neighbors,
+            weight_special=T(0.5),
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        general_inters = ()
+    elseif nonbonded_method == "cutoff"
+        coul = CoulombReactionField(
+            dist_cutoff=T(dist_cutoff),
+            solvent_dielectric=T(crf_solvent_dielectric),
+            use_neighbors=using_neighbors,
+            weight_special=T(0.5),
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+        )
+        general_inters = ()
+    elseif nonbonded_method in ("ewald", "pme")
+        coul = CoulombEwald(
+            dist_cutoff=T(dist_cutoff),
+            error_tol=T(ewald_error_tol),
+            use_neighbors=using_neighbors,
+            weight_special=T(0.5),
+            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
+            approximate_erfc=approximate_pme,
+        )
+        if nonbonded_method == "ewald"
+            ewald = Ewald(
+                T(dist_cutoff);
+                error_tol=T(ewald_error_tol),
+                eligible=eligible,
+                special=special,
+            )
+        else
+            ewald = PME(
+                T(dist_cutoff),
+                atoms,
+                boundary_used;
+                error_tol=T(ewald_error_tol),
+                eligible=eligible,
+                special=special,
+                array_type=AT,
+            )
+        end
+        general_inters = (ewald,)
+    else
+        throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
+                            "\"none\", \"cutoff\", \"pme\" and \"ewald\""))
+    end
+    pairwise_inters = (lj, coul)
 
     # Only add present interactions and ensure that array types are concrete
     specific_inter_array = []
     if length(bonds.is) > 0
         push!(specific_inter_array, InteractionList2Atoms(
-            AT(bonds.is),
-            AT(bonds.js),
-            AT([bonds.inters...]),
+            to_device(bonds.is, AT),
+            to_device(bonds.js, AT),
+            to_device([bonds.inters...], AT),
             bonds.types,
         ))
         topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
@@ -1319,20 +1403,20 @@ function System(T::Type,
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
-            AT(angles.is),
-            AT(angles.js),
-            AT(angles.ks),
-            AT([angles.inters...]),
+            to_device(angles.is, AT),
+            to_device(angles.js, AT),
+            to_device(angles.ks, AT),
+            to_device([angles.inters...], AT),
             angles.types,
         ))
     end
     if length(torsions.is) > 0
         push!(specific_inter_array, InteractionList4Atoms(
-            AT(torsions.is),
-            AT(torsions.js),
-            AT(torsions.ks),
-            AT(torsions.ls),
-            AT([torsions.inters...]),
+            to_device(torsions.is, AT),
+            to_device(torsions.js, AT),
+            to_device(torsions.ks, AT),
+            to_device(torsions.ls, AT),
+            to_device([torsions.inters...], AT),
             torsions.types,
         ))
     end
@@ -1342,16 +1426,15 @@ function System(T::Type,
         neighbor_finder = NoNeighborFinder()
     elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT)
         neighbor_finder = GPUNeighborFinder(
-            eligible=AT(eligible),
+            eligible=to_device(eligible, AT),
             dist_cutoff=T(dist_cutoff), # Neighbors are computed each step so no buffer is needed
-            special=AT(special),
-            n_steps_reorder=10,
+            special=to_device(special, AT),
         )
     elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
                 (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))
         neighbor_finder = DistanceNeighborFinder(
-            eligible=AT(eligible),
-            special=AT(special),
+            eligible=to_device(eligible, AT),
+            special=to_device(special, AT),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
@@ -1366,15 +1449,12 @@ function System(T::Type,
         )
     else
         neighbor_finder = neighbor_finder_type(
-            eligible=AT(eligible),
-            special=AT(special),
+            eligible=to_device(eligible, AT),
+            special=to_device(special, AT),
             n_steps=10,
             dist_cutoff=T(dist_neighbors),
         )
     end
-
-    atoms = AT([atoms_abst...])
-    coords_dev = AT(coords)
 
     if isnothing(velocities)
         if units
@@ -1396,6 +1476,7 @@ function System(T::Type,
         topology=topology,
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
+        general_inters=general_inters,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),
@@ -1453,15 +1534,15 @@ function add_position_restraints(sys::System{<:Any, AT},
     types = String[]
     inters = HarmonicPositionRestraint[]
     atoms_data = length(sys.atoms_data) > 0 ? sys.atoms_data : fill(nothing, length(sys))
-    for (i, (at, at_data, k_res, x0)) in enumerate(zip(Array(sys.atoms), atoms_data, k_array,
-                                                       Array(restrain_coords)))
+    for (i, (at, at_data, k_res, x0)) in enumerate(zip(from_device(sys.atoms), atoms_data, k_array,
+                                                       from_device(restrain_coords)))
         if atom_selector(at, at_data)
             push!(is, i)
             push!(types, "")
             push!(inters, HarmonicPositionRestraint(k_res, x0))
         end
     end
-    restraints = InteractionList1Atoms(AT(is), AT([inters...]), types)
+    restraints = InteractionList1Atoms(to_device(is, AT), to_device([inters...], AT), types)
     sis = (sys.specific_inter_lists..., restraints)
     return System(
         atoms=deepcopy(sys.atoms),

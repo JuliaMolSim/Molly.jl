@@ -4,6 +4,7 @@ using Reexport
 @reexport using StaticArrays
 @reexport using Unitful
 
+using AcceleratedKernels
 using Atomix
 import AtomsBase
 import AtomsCalculators
@@ -15,15 +16,17 @@ using DataStructures
 using Distances
 using Distributions
 using EzXML
+using FFTW
 using GPUArrays
 using Graphs
 using KernelAbstractions
 using NearestNeighbors
 using PeriodicTable
 using SimpleCrystals
+using SpecialFunctions
 using Unitful
 using UnitfulAtomic
-using UnsafeAtomicsLLVM
+using StructArrays
 
 using LinearAlgebra
 using Random
@@ -51,11 +54,14 @@ include("interactions/cosine_angle.jl")
 include("interactions/urey_bradley.jl")
 include("interactions/periodic_torsion.jl")
 include("interactions/rb_torsion.jl")
+include("interactions/ewald.jl")
 include("interactions/implicit_solvent.jl")
 include("interactions/muller_brown.jl")
 include("energy.jl")
+include("constraints/constraints_kernel_helper.jl")
 include("constraints/constraints.jl")
 include("constraints/shake.jl")
+include("constraints/shake_kernels.jl")
 include("simulators.jl")
 include("coupling.jl")
 include("neighbors.jl")

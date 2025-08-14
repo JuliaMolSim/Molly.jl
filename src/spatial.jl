@@ -208,6 +208,30 @@ function Chemfiles.UnitCell(b::TriclinicBoundary)
     end
 end
 
+function boundary_from_chemfiles(unit_cell, T=Float64, units=u"nm")
+    shape = Chemfiles.shape(unit_cell)
+    if shape == Chemfiles.Infinite
+        return CubicBoundary(T(Inf) * units)
+    elseif shape == Chemfiles.Orthorhombic
+        side_lengths = SVector{3}(T.(Chemfiles.lengths(unit_cell) * u"Å"))
+        if units == NoUnits
+            return CubicBoundary(ustrip.(u"nm", side_lengths)) # Assume nm
+        else
+            return CubicBoundary(uconvert.(units, side_lengths))
+        end
+    elseif shape == Chemfiles.Triclinic
+        side_lengths = SVector{3}(T.(Chemfiles.lengths(unit_cell) * u"Å"))
+        angles = SVector{3}(deg2rad.(T.(Chemfiles.angles(unit_cell))))
+        if units == NoUnits
+            return TriclinicBoundary(ustrip.(u"nm", side_lengths), angles) # Assume nm
+        else
+            return TriclinicBoundary(uconvert.(units, side_lengths), angles)
+        end
+    else
+        error("unrecognised Chemfiles cell shape $shape")
+    end
+end
+
 AtomsBase.n_dimensions(::CubicBoundary) = 3
 AtomsBase.n_dimensions(::RectangularBoundary) = 2
 AtomsBase.n_dimensions(::TriclinicBoundary) = 3
@@ -249,6 +273,28 @@ function AtomsBase.cell_vectors(b::TriclinicBoundary)
     return unit(b[1][1]) == NoUnits ? (bb .* u"nm") : bb
 end
 
+function invert_box_vectors(boundary::CubicBoundary)
+    sl = boundary.side_lengths
+    z = zero(inv(sl[1]))
+    recip_box = SVector(
+        SVector(inv(sl[1]), z, z),
+        SVector(z, inv(sl[2]), z),
+        SVector(z, z, inv(sl[3])),
+    )
+    return recip_box
+end
+
+function invert_box_vectors(boundary::TriclinicBoundary)
+    bv = boundary.basis_vectors
+    z = zero(bv[1][1]^2)
+    recip_box = SVector(
+        SVector(bv[2][2]*bv[3][3], z, z),
+        SVector(-bv[2][1]*bv[3][3], bv[1][1]*bv[3][3], z),
+        SVector(bv[2][1]*bv[3][2] - bv[2][2]*bv[3][1], -bv[1][1]*bv[3][2], bv[1][1]*bv[2][2]),
+    )
+    return recip_box ./ volume(boundary)
+end
+
 has_infinite_boundary(b::Union{CubicBoundary, RectangularBoundary}) = any(isinf, b.side_lengths)
 has_infinite_boundary(b::TriclinicBoundary) = false
 has_infinite_boundary(sys::System) = has_infinite_boundary(sys.boundary)
@@ -256,6 +302,11 @@ has_infinite_boundary(sys::System) = has_infinite_boundary(sys.boundary)
 n_infinite_dims(b::Union{CubicBoundary, RectangularBoundary}) = sum(isinf, b.side_lengths)
 n_infinite_dims(b::TriclinicBoundary) = 0
 n_infinite_dims(sys::System) = n_infinite_dims(sys.boundary)
+
+@inline box_sides(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
+@inline box_sides(b::Union{CubicBoundary, RectangularBoundary}, i) = b.side_lengths[i]
+@inline box_sides(b::TriclinicBoundary) = SVector(b[1][1], b[2][2], b[3][3])
+@inline box_sides(b::TriclinicBoundary, i) = b[i][i]
 
 """
     volume(sys)
@@ -266,8 +317,7 @@ Calculate the volume (3D) or area (2D) of a [`System`](@ref) or bounding box.
 Returns infinite volume for infinite boundaries.
 """
 volume(sys) = volume(sys.boundary)
-volume(b::Union{CubicBoundary, RectangularBoundary}) = prod(b.side_lengths)
-volume(b::TriclinicBoundary) = b[1][1] * b[2][2] * b[3][3]
+volume(b::Union{CubicBoundary, RectangularBoundary, TriclinicBoundary}) = prod(box_sides(b))
 
 """
     density(sys)
@@ -631,11 +681,11 @@ function random_velocities(sys::AtomsBase.AbstractSystem{2}, temp; rng=Random.de
 end
 
 function random_velocities(sys::System{3, AT}, temp; rng=Random.default_rng()) where AT <: AbstractGPUArray
-    return AT(random_velocity_3D.(Array(masses(sys)), temp, sys.k, rng))
+    return to_device(random_velocity_3D.(from_device(masses(sys)), temp, sys.k, rng), AT)
 end
 
 function random_velocities(sys::System{2, AT}, temp; rng=Random.default_rng()) where AT <: AbstractGPUArray
-    return AT(random_velocity_2D.(Array(masses(sys)), temp, sys.k, rng))
+    return to_device(random_velocity_2D.(from_device(masses(sys)), temp, sys.k, rng), AT)
 end
 
 """
@@ -710,8 +760,8 @@ end
 Remove the center of mass motion from a [`System`](@ref).
 """
 function remove_CM_motion!(sys)
-    masses_cpu = Array(masses(sys))
-    velocities_cpu = Array(sys.velocities)
+    masses_cpu = from_device(masses(sys))
+    velocities_cpu = from_device(sys.velocities)
     cm_momentum = zero(eltype(velocities_cpu)) .* zero(eltype(masses_cpu))
     total_mass = zero(eltype(masses_cpu))
     for i in eachindex(sys)
@@ -758,11 +808,13 @@ end
 function virial(sys::System{D, AT, T}, neighbors_dev, step_n, pairwise_inters_nonl,
                             pairwise_inters_nl) where {D, AT, T}
     if AT <: AbstractGPUArray
-        coords, velocities, atoms = Array(sys.coords), Array(sys.velocities), Array(sys.atoms)
+        coords     = from_device(sys.coords)
+        velocities = from_device(sys.velocities)
+        atoms      = from_device(sys.atoms)
         if isnothing(neighbors_dev)
             neighbors = neighbors_dev
         else
-            neighbors = NeighborList(neighbors_dev.n, Array(neighbors_dev.list))
+            neighbors = NeighborList(neighbors_dev.n, from_device(neighbors_dev.list))
         end
     else
         coords, velocities, atoms = sys.coords, sys.velocities, sys.atoms
@@ -874,7 +926,7 @@ function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topolo
         pit = T(π)
         twopit = 2 * pit
         n_molecules = length(topology.molecule_atom_counts)
-        unit_circle_angles = broadcast(coords, Ref(boundary.side_lengths)) do c, sl
+        unit_circle_angles = broadcast(coords, (boundary.side_lengths,)) do c, sl
             (c ./ sl) .* twopit .- pit # Run -π to π
         end
         mol_sin_sums = zeros(SVector{D, T}, n_molecules)
@@ -887,13 +939,13 @@ function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topolo
         for mi in 1:n_molecules
             frac_centers[mi] = (atan.(mol_sin_sums[mi], mol_cos_sums[mi]) .+ pit) ./ twopit
         end
-        return broadcast((c, b) -> c .* b, frac_centers, Ref(boundary.side_lengths))
+        return broadcast((c, b) -> c .* b, frac_centers, (boundary.side_lengths,))
     end
 end
 
 function molecule_centers(coords::AbstractGPUArray, boundary, topology)
     AT = array_type(coords)
-    return AT(molecule_centers(Array(coords), boundary, topology))
+    return to_device(molecule_centers(from_device(coords), boundary, topology), AT)
 end
 
 # Allows scaling multiple vectors at once by broadcasting this function
@@ -916,12 +968,12 @@ Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set
 function scale_coords!(sys::System{<:Any, AT}, scale_factor; ignore_molecules=false) where AT
     if ignore_molecules || isnothing(sys.topology)
         sys.boundary = scale_boundary(sys.boundary, scale_factor)
-        sys.coords .= scale_vec.(sys.coords, Ref(scale_factor))
+        sys.coords .= scale_vec.(sys.coords, (scale_factor,))
     elseif sys.boundary isa TriclinicBoundary
         error("scaling coordinates by molecule is not compatible with a TriclinicBoundary")
     else
         atom_molecule_inds = sys.topology.atom_molecule_inds
-        coords_nounits = Array(ustrip_vec.(sys.coords))
+        coords_nounits = from_device(ustrip_vec.(sys.coords))
         coord_units = unit(eltype(eltype(sys.coords)))
         boundary_nounits = ustrip(coord_units, sys.boundary)
         mol_centers = molecule_centers(coords_nounits, boundary_nounits, sys.topology)
@@ -929,14 +981,14 @@ function scale_coords!(sys::System{<:Any, AT}, scale_factor; ignore_molecules=fa
         # This puts them all in the same periodic image which is required when scaling
         # This won't work if the molecule can't fit in one box when centered,
         #   but that would likely be a pathological case anyway
-        center_shifts = Ref(box_center(boundary_nounits)) .- mol_centers
+        center_shifts = (box_center(boundary_nounits),) .- mol_centers
         for i in eachindex(sys)
             coords_nounits[i] = wrap_coords(
                     coords_nounits[i] .+ center_shifts[atom_molecule_inds[i]], boundary_nounits)
         end
         # Move all atoms in a molecule by the same amount according to the molecule center
         # Then move the atoms back to the molecule center and wrap in the scaled boundary
-        shift_vecs = scale_vec.(mol_centers, Ref(scale_factor .- 1))
+        shift_vecs = scale_vec.(mol_centers, (scale_factor .- 1,))
         sys.boundary = scale_boundary(sys.boundary, scale_factor)
         boundary_nounits = ustrip(sys.boundary)
         for i in eachindex(sys)
@@ -944,7 +996,7 @@ function scale_coords!(sys::System{<:Any, AT}, scale_factor; ignore_molecules=fa
             coords_nounits[i] = wrap_coords(
                     coords_nounits[i] .+ shift_vecs[mi] .- center_shifts[mi], boundary_nounits)
         end
-        sys.coords .= AT(coords_nounits .* coord_units)
+        sys.coords .= to_device(coords_nounits .* coord_units, AT)
     end
     return sys
 end

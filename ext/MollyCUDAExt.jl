@@ -4,6 +4,8 @@
 module MollyCUDAExt
 
 using Molly
+using Molly: from_device, box_sides, sorted_morton_seq!, sum_pairwise_forces,
+             sum_pairwise_potentials
 using CUDA
 using Atomix
 using KernelAbstractions
@@ -30,18 +32,6 @@ CUDA.shfl_recurse(op, x::SVector{1, C}) where C = SVector{1, C}(op(x[1]))
 CUDA.shfl_recurse(op, x::SVector{2, C}) where C = SVector{2, C}(op(x[1]), op(x[2]))
 CUDA.shfl_recurse(op, x::SVector{3, C}) where C = SVector{3, C}(op(x[1]), op(x[2]), op(x[3]))
 
-function cuda_threads_blocks_pairwise(n_neighbors)
-    n_threads_gpu = min(n_neighbors, parse(Int, get(ENV, "MOLLY_GPUNTHREADS_PAIRWISE", "512")))
-    n_blocks = cld(n_neighbors, n_threads_gpu)
-    return n_threads_gpu, n_blocks
-end
-
-function cuda_threads_blocks_specific(n_inters)
-    n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_SPECIFIC", "128"))
-    n_blocks = cld(n_inters, n_threads_gpu)
-    return n_threads_gpu, n_blocks
-end
-
 function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters,
                                    nbs::Molly.NoNeighborList, step_n) where {D, AT <: CuArray, T}
     kernel = @cuda launch=false pairwise_force_kernel_nonl!(
@@ -67,8 +57,7 @@ function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inte
     if step_n % sys.neighbor_finder.n_steps_reorder == 0 || !sys.neighbor_finder.initialized
         morton_bits = 4
         w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
-        morton_seq_cpu = sorted_morton_seq(Array(sys.coords), w, morton_bits)
-        copyto!(buffers.morton_seq, morton_seq_cpu)
+        sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
         sys.neighbor_finder.initialized = true
         CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
@@ -95,9 +84,8 @@ function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, 
     r_cut = sys.neighbor_finder.dist_cutoff
     morton_bits = 4
     w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
-    morton_seq_cpu = sorted_morton_seq(Array(sys.coords), w, morton_bits)
-    copyto!(buffers.morton_seq, morton_seq_cpu)
-    CUDA.@sync @cuda blocks=(cld(N, WARPSIZE),) threads=(32,) kernel_min_max!(
+    sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
+    CUDA.@sync @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
             buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
             Val(N), sys.boundary, Val(D))
     CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
@@ -106,28 +94,6 @@ function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, 
             sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible,
             Val(T), Val(D))
     return pe_vec_nounits
-end
-
-function sorted_morton_seq(positions, w, bits::Int)
-    N = length(positions)
-    D = length(positions[1])
-    morton_sequence = Vector{Int32}(undef, N)
-    for i in 1:N
-        scaled_coords = floor.(Int32, positions[i] ./ w)
-        morton_sequence[i] = generalized_morton_code(scaled_coords, bits, D)
-    end
-    sort = Int32.(sortperm(morton_sequence))
-    return sort
-end
-
-function generalized_morton_code(indices, bits::Int, D::Int)
-    code = 0
-    for bit in 0:(bits-1)
-        for d in 1:D
-            code |= ((indices[d] >> bit) & 1) << (D * bit + (d - 1))
-        end
-    end
-    return Int32(code)
 end
 
 function boxes_dist(x1_min::D, x1_max::D, x2_min::D, x2_max::D, Lx::D) where D
@@ -201,8 +167,8 @@ function kernel_min_max!(
     xyz_min = CuStaticSharedArray(C, b)
     xyz_max = CuStaticSharedArray(C, b)
     for k in a:b
-        xyz_min[k] = 10 * boundary.side_lengths[k] # very large (arbitrary) value
-        xyz_max[k] = -10 * boundary.side_lengths[k]
+        xyz_min[k] =  10 * box_sides(boundary, k) # very large (arbitrary) value
+        xyz_max[k] = -10 * box_sides(boundary, k)
     end
     if local_i == a
         for j in a:r
@@ -217,7 +183,7 @@ function kernel_min_max!(
                 end
             end
         end
-        if blockIdx().x == Int32(ceil(n/D32)) && r != Int32(0)
+        if blockIdx().x == ceil(Int32, n/D32) && r != Int32(0)
             for k in a:b
                 mins[blockIdx().x, k] = xyz_min[k] 
                 maxs[blockIdx().x, k] = xyz_max[k]
@@ -231,7 +197,7 @@ end
 function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
                                     compressed_eligible, compressed_special, ::Val{N}) where N
     a = Int32(1)
-    n_blocks = Int32(ceil(N / 32))
+    n_blocks = ceil(Int32, N / 32)
     r = Int32((N - 1) % 32 + 1)
     i = blockIdx().x
     j = blockIdx().y
@@ -323,7 +289,7 @@ That's why the calculations are done in the following order:
 
 function force_kernel!( 
     sorted_seq,
-    forces_nounits, 
+    fs_mat, 
     mins::AbstractArray{C}, 
     maxs::AbstractArray{C},
     coords, 
@@ -342,7 +308,7 @@ function force_kernel!(
 
     a = Int32(1)
     b = Int32(D)
-    n_blocks = Int32(ceil(N / 32))
+    n_blocks = ceil(Int32, N / 32)
     i = blockIdx().x
     j = blockIdx().y
     i_0_tile = (i - a) * warpsize()
@@ -362,7 +328,7 @@ function force_kernel!(
         d_block = zero(C)
         dist_block = zero(C) * zero(C)
         @inbounds for k in a:b	
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
             dist_block += d_block * d_block	
         end
         if dist_block <= r_cut * r_cut
@@ -373,7 +339,7 @@ function force_kernel!(
             d_pb = zero(C)
             dist_pb = zero(C) * zero(C)
             @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
                 dist_pb += d_pb * d_pb
             end
 
@@ -414,7 +380,7 @@ function force_kernel!(
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
-                f = condition ? Molly.sum_pairwise_forces(
+                f = condition ? sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j_shuffle,
                     Val(force_units),
@@ -429,14 +395,15 @@ function force_kernel!(
                     opposites_sum[shuffle_idx, k] -= ustrip(f[k])
                 end
             end
+
             sync_threads()
             @inbounds for k in a:b
                 CUDA.atomic_add!(
-                    pointer(forces_nounits, s_idx_i * b - (b - k)), 
+                    pointer(fs_mat, s_idx_i * b - (b - k)), 
                     -force_smem[laneid(), k]
                 ) 
                 CUDA.atomic_add!(
-                    pointer(forces_nounits, s_idx_j * b - (b - k)), 
+                    pointer(fs_mat, s_idx_j * b - (b - k)), 
                     -opposites_sum[laneid(), k]
                 ) 
             end
@@ -447,7 +414,7 @@ function force_kernel!(
         d_block = zero(C)
         dist_block = zero(C) * zero(C)
         @inbounds for k in a:b
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
             dist_block += d_block * d_block	
         end
 
@@ -459,7 +426,7 @@ function force_kernel!(
             d_pb = zero(C)
             dist_pb = zero(C) * zero(C)			
             @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
                 dist_pb += d_pb * d_pb
             end
             Bool_excl = dist_pb <= r_cut * r_cut
@@ -479,7 +446,7 @@ function force_kernel!(
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
-                f = condition ? Molly.sum_pairwise_forces(
+                f = condition ? sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(force_units),
@@ -492,7 +459,7 @@ function force_kernel!(
                 @inbounds for k in a:b
                     force_smem[laneid(), k] += ustrip(f[k])
                     CUDA.atomic_add!(
-                        pointer(forces_nounits, s_idx_j * b - (b - k)), 
+                        pointer(fs_mat, s_idx_j * b - (b - k)), 
                         ustrip(f[k])
                     )
                 end
@@ -501,7 +468,7 @@ function force_kernel!(
             # Sum contributions of the r-block to the other standard blocks
             @inbounds for k in a:b
                 CUDA.atomic_add!(
-                    pointer(forces_nounits, s_idx_i * b - (b - k)), 
+                    pointer(fs_mat, s_idx_i * b - (b - k)), 
                     -force_smem[laneid(), k]
                 ) 
             end
@@ -529,7 +496,7 @@ function force_kernel!(
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
             condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
-            f = condition ? Molly.sum_pairwise_forces(
+            f = condition ? sum_pairwise_forces(
                 inters_tuple,
                 atoms_i, atoms_j,
                 Val(force_units),
@@ -545,10 +512,11 @@ function force_kernel!(
             end
         end	
 
+        sync_threads()
         @inbounds for k in a:b
             # In this case i == j, so we can call atomic_add! only once
             CUDA.atomic_add!(
-                pointer(forces_nounits, s_idx_i * b - (b - k)), 
+                pointer(fs_mat, s_idx_i * b - (b - k)), 
                 -force_smem[laneid(), k] - opposites_sum[laneid(), k]
             ) 
         end
@@ -576,7 +544,7 @@ function force_kernel!(
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
                 
-                f = condition ? Molly.sum_pairwise_forces(
+                f = condition ? sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(force_units),
@@ -591,9 +559,11 @@ function force_kernel!(
                     opposites_sum[m, k] -= ustrip(f[k])
                 end
             end
+
+            sync_threads()
             @inbounds for k in a:b
                 CUDA.atomic_add!(
-                    pointer(forces_nounits, s_idx_i * b - (b - k)), 
+                    pointer(fs_mat, s_idx_i * b - (b - k)), 
                     -force_smem[laneid(), k] - opposites_sum[laneid(), k]
                 ) 
             end
@@ -624,7 +594,7 @@ function energy_kernel!(
 
     a = Int32(1)
     b = Int32(D)
-    n_blocks = Int32(ceil(N / 32))
+    n_blocks = ceil(Int32, N / 32)
     r = Int32((N - 1) % 32 + 1)
     i = blockIdx().x
     j = blockIdx().y
@@ -642,7 +612,7 @@ function energy_kernel!(
         d_block = zero(C)
         dist_block = zero(C) * zero(C)
         @inbounds for k in a:b	
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
             dist_block += d_block * d_block	
         end
         if dist_block <= r_cut * r_cut
@@ -653,7 +623,7 @@ function energy_kernel!(
             d_pb = zero(C)
             dist_pb = zero(C) * zero(C)
             @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
                 dist_pb += d_pb * d_pb
             end
             Bool_excl = dist_pb <= r_cut * r_cut
@@ -692,7 +662,7 @@ function energy_kernel!(
                 r2 = sum(abs2, dr)
                 condition = eligible[laneid(), shuffle_idx] && Bool_excl && r2 <= r_cut * r_cut
 
-                pe = condition ? Molly.sum_pairwise_potentials(
+                pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j_shuffle,
                     Val(energy_units),
@@ -711,7 +681,7 @@ function energy_kernel!(
         d_block = zero(C)
         dist_block = zero(C) * zero(C)
         @inbounds for k in a:b
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
             dist_block += d_block * d_block	
         end
         if dist_block <= r_cut * r_cut 
@@ -722,7 +692,7 @@ function energy_kernel!(
             d_pb = zero(C)
             dist_pb = zero(C) * zero(C)			
             @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], boundary.side_lengths[k])
+                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
                 dist_pb += d_pb * d_pb
             end
             Bool_excl = dist_pb <= r_cut * r_cut
@@ -741,7 +711,7 @@ function energy_kernel!(
                 r2 = sum(abs2, dr)
                 condition = eligible[laneid(), m] && Bool_excl && r2 <= r_cut * r_cut
 
-                pe = condition ? Molly.sum_pairwise_potentials(
+                pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(energy_units),
@@ -775,7 +745,7 @@ function energy_kernel!(
             r2 = sum(abs2, dr)
             condition = eligible[laneid(), m] && r2 <= r_cut * r_cut
 
-            pe = condition ? Molly.sum_pairwise_potentials(
+            pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(energy_units),
@@ -810,7 +780,7 @@ function energy_kernel!(
                 r2 = sum(abs2, dr)
                 condition = eligible[laneid(), m] && r2 <= r_cut * r_cut
                 
-                pe = condition ? Molly.sum_pairwise_potentials(
+                pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(energy_units),
@@ -862,8 +832,8 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
                 j = j_0_tile + del_j
                 if i != j
                     atom_j, coord_j, vel_j = atoms[j], coords[j], velocities[j]
-                    f = Molly.sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i,
-                                                  coord_j, boundary, vel_i, vel_j, step_n)
+                    f = sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i,
+                                            coord_j, boundary, vel_i, vel_j, step_n)
                     for dim in 1:D
                         forces_shmem[dim, tidx] += -ustrip(f[dim])
                     end
@@ -887,7 +857,7 @@ function pairwise_force_kernel_nonl!(forces::AbstractArray{T}, coords_var, veloc
         @inbounds for _ in 1:tilesteps
             sync_warp()
             atom_j = atoms[j]
-            f = Molly.sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
+            f = sum_pairwise_forces(inters, atom_i, atom_j, Val(F), false, coord_i, coord_j,
                                     boundary, vel_i, vel_j, step_n)
             for dim in 1:D
                 forces_shmem[dim, tidx] += -ustrip(f[dim])

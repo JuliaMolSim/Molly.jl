@@ -16,6 +16,7 @@ export
     DensityLogger,
     VirialLogger,
     PressureLogger,
+    DisplacementsLogger,
     write_structure,
     TrajectoryWriter,
     StructureWriter,
@@ -23,8 +24,7 @@ export
     AutoCorrelationLogger,
     AverageObservableLogger,
     ReplicaExchangeLogger,
-    MonteCarloLogger,
-    DisplacementsLogger
+    MonteCarloLogger
 
 """
     apply_loggers!(system, neighbors=nothing, step_n=0, run_loggers=true;
@@ -301,7 +301,6 @@ function virial_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
     return virial(sys, neighbors, step_n; n_threads=n_threads)
 end
 
-
 """
     VirialLogger(n_steps)
     VirialLogger(T, n_steps)
@@ -342,6 +341,59 @@ function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(pressure_wrappe
             pl.n_steps, ", ", length(values(pl)), " pressures recorded")
 end
 
+"""
+    DisplacementsLogger(n_steps, coords_start; n_steps_update::Integer=10)
+
+Log the displacements of atoms in a system throughout a simulation, useful for calculating
+properties like mean square displacement in periodic systems.
+
+Displacements are updated every `n_steps_update` steps and a copy is saved every
+`n_steps` steps.
+`coords_start` are the initial reference positions and should match the coordinate type
+in the system.
+
+It is assumed that a particle does not cross half the box size in `n_steps_update` steps. 
+By default `n_steps_update` is set to 10 to mitigate this assumption, but it can be 
+set to a higher value to reduce cost.
+`n_steps` must be a multiple of `n_steps_update`. 
+"""
+mutable struct DisplacementsLogger{D, C}
+    displacements::D
+    coords_ref::C
+    last_displacements::C
+    n_steps::Int
+    n_steps_update::Int
+end
+
+function DisplacementsLogger(n_steps::Integer, coords_start; n_steps_update::Integer=10)
+    if n_steps % n_steps_update != 0
+        throw(ArgumentError("DisplacementsLogger n_steps ($n_steps) must be a multiple of " *
+                            "n_steps_update ($n_steps_update)"))
+    end
+    displacements = typeof(from_device(coords_start))[]
+    return DisplacementsLogger(displacements, copy(coords_start), zero(coords_start),
+                               n_steps, n_steps_update)
+end
+
+Base.values(dl::DisplacementsLogger) = dl.displacements
+
+function log_property!(dl::DisplacementsLogger, sys::System, neighbors=nothing,
+                       step_n::Integer=0; kwargs...)     
+    if (step_n % dl.n_steps_update) == 0
+        dl.last_displacements .+= vector.(dl.coords_ref, sys.coords, (sys.boundary,))
+        dl.coords_ref .= sys.coords
+        if (step_n % dl.n_steps) == 0
+            # Moved off device for storage
+            push!(dl.displacements, Array(dl.last_displacements))
+        end
+    end
+end
+
+function Base.show(io::IO, dl::DisplacementsLogger)
+    print(io, "DisplacementsLogger with update n_steps ", dl.n_steps_update, ", saving n_steps ",
+            dl.n_steps, ", ", length(dl.displacements), " displacements recorded")
+end
+
 pdb_cryst1_length(l_Å) = lpad(round(l_Å; digits=3), 9)
 pdb_cryst1_angle(θ_rad) = lpad(round(rad2deg(θ_rad); digits=2), 7)
 
@@ -378,7 +430,7 @@ end
 
 function write_pdb_coords(output, sys, atom_inds_arg=Int[], excluded_res=())
     atom_inds = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
-    coords_cpu = Array(sys.coords)
+    coords_cpu = from_device(sys.coords)
     for i in atom_inds
         coord, atom_data = coords_cpu[i], sys.atoms_data[i]
         if unit(first(coord)) == NoUnits
@@ -418,7 +470,7 @@ function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, exclud
             throw(ArgumentError("structure writing requires all atom_inds values to " *
                                 "be valid indices in the system"))
         end
-        atoms_cpu = Array(sys.atoms)
+        atoms_cpu = from_device(sys.atoms)
         for si in atom_inds
             atom, atom_data = atoms_cpu[si], sys.atoms_data[si]
             at = Chemfiles.Atom(atom_data.atom_name)
@@ -448,7 +500,7 @@ function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, exclud
     end
 
     coords_cf = Chemfiles.positions(frame)
-    coords = Array(sys.coords)
+    coords = from_device(sys.coords)
     for (ci, si) in enumerate(atom_inds)
         c = coords[si]
         if unit(eltype(c)) == NoUnits
@@ -462,7 +514,7 @@ function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, exclud
     if write_velocities
         Chemfiles.add_velocities!(frame)
         velocities_cf = Chemfiles.velocities(frame)
-        velocities = Array(sys.velocities)
+        velocities = from_device(sys.velocities)
         for (ci, si) in enumerate(atom_inds)
             v = velocities[si]
             if unit(eltype(v)) == NoUnits
@@ -778,7 +830,7 @@ function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothi
     buff_length = length(logger.history_A)
 
     if n_threads > 1
-        chunk_size = Int(ceil(buff_length / n_threads))
+        chunk_size = ceil(Int, buff_length / n_threads)
         ix_ranges = [i:min(i + chunk_size - 1, buff_length) for i in 1:chunk_size:buff_length]
         Threads.@threads for ixs in ix_ranges
             logger.sum_offset_products[ixs] .+= dot.(logger.history_A[ixs], (first(logger.history_B),))
@@ -958,54 +1010,3 @@ function log_property!(mcl::MonteCarloLogger{T},
     push!(mcl.state_changed, success)
     push!(mcl.energy_rates, energy_rate)
 end
-
-
-"""
-    DisplacementsLogger(n_steps, r0; n_update::Integer=1, dims::Integer=3)
-
-Log the displacements of atoms in a system throughout a simulation. Displacements are
-updated every `n_update` steps and saved every `n_steps` steps. `r0` are the
-intitial refernce positions and should match the coords type in your `System` object.
-
-The logger assumes a particle does not cross 2 periodic boxes in `n_update` steps. 
-By default `n_update` is set to one to mitigate this assumption, but it can be 
-set to a higher value to reduce cost. `n_steps` must be a multiple of `n_update`. 
-"""
-mutable struct DisplacementsLogger{A, B}
-    displacements::Vector{A}
-    reference::Vector{B}
-    last_displacements::Vector{B}
-    n_steps::Int
-    n_update::Int
-end
-
-
-function DisplacementsLogger(n_steps::Integer, r0;  n_update::Integer = 1, dims::Integer = 3)
-    T = eltype(first(r0))
-    B = SArray{Tuple{dims}, T, 1, dims}
-    A = Array{B, 1}
-    if n_steps % n_update != 0
-        throw(ArgumentError("DisplacementsLogger: n_steps ($n_steps) must be a multiple n_update ($(n_update))"))
-    end
-    return DisplacementsLogger{A, B}(A[], copy(r0), zero(r0), n_steps, n_update)
-end
-
-Base.values(dl::DisplacementsLogger) = dl.displacements
-
-function log_property!(dl::DisplacementsLogger, s::System, neighbors=nothing,
-                        step_n::Integer=0; kwargs...)
-                        
-    if (step_n % dl.n_update) == 0
-        dl.last_displacements .+= vector.(dl.reference, s.coords, Ref(s.boundary))
-        dl.reference .= s.coords
-        if (step_n % dl.n_steps) == 0
-            push!(dl.displacements, copy(dl.last_displacements))
-        end
-    end
-end
-
-function Base.show(io::IO, dl::DisplacementsLogger)
-    print(io, "DisplacementsLogger with updating every ", dl.n_update, " steps, saving every ",
-            dl.n_steps, " steps with ", length(dl.displacements), " displacements in storage.")
-end
-

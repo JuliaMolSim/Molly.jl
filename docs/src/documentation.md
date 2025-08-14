@@ -334,6 +334,7 @@ ff = MolecularForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
+    nonbonded_method="pme",
     loggers=(
         energy=TotalEnergyLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
@@ -375,15 +376,19 @@ Residue patches, virtual sites, file includes and any force types other than `Ha
     Some PDB files that read in fine can be found [here](https://github.com/greener-group/GB99dms/tree/main/structures/training/conf_1).
 
 To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the array type for your GPU backend (for example `CuArray` for NVIDIA or `ROCArray` for AMD).
-You can use an implicit solvent method by giving the `implicit_solvent` keyword argument to [`System`](@ref).
-The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
-Other options include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_neighbors`).
+The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
+The options are `"none"` (short range only), `"cutoff"` (reaction field method), `"pme"` (particle mesh Ewald summation) and `"ewald"` (Ewald summation, slow).
 
-Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files. For example:
+You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
+The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
+Other options detailed in the docstring for [`System`](@ref) include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_neighbors`).
+
+Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files, which should be considered experimental. For example:
 ```julia
 sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
+    nonbonded_method="pme",
     loggers=(
         temp=TemperatureLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
@@ -407,10 +412,6 @@ sys_res = add_position_restraints(
     atom_selector=is_heavy_atom,
 )
 ```
-
-The Gromacs setup procedure should be considered experimental.
-Currently Ewald summation methods, full support for constraint algorithms and high GPU performance are missing from the package, so Molly is not suitable for production simulations of biomolecules.
-Stay tuned for developments in this area.
 
 ## Enhanced sampling
 
@@ -572,6 +573,7 @@ The available pairwise interactions are:
 - [`Coulomb`](@ref)
 - [`CoulombSoftCore`](@ref)
 - [`CoulombReactionField`](@ref)
+- [`CoulombEwald`](@ref)
 - [`Yukawa`](@ref)
 - [`Gravity`](@ref)
 
@@ -587,10 +589,15 @@ The available specific interactions are:
 - [`RBTorsion`](@ref) - 4 atoms
 
 The available general interactions are:
+- [`Ewald`](@ref)
+- [`PME`](@ref)
 - [`ImplicitSolventOBC`](@ref)
 - [`ImplicitSolventGBN2`](@ref)
 - [`MullerBrown`](@ref)
 - [`ASECalculator`](@ref)
+
+Some interactions combine instances of the above.
+For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbor finding algorithms.
 
 ### Pairwise interactions
 
@@ -765,26 +772,31 @@ struct MyGeneralInter
     # Properties, e.g. a neural network model
 end
 ```
-Next, you need to define a method for the `AtomsCalculators.forces` function (note this is different to the [`force`](@ref) function above).
+Next, you need to define a method for the `AtomsCalculators.forces!` function (note this is different to the [`force`](@ref) function above, and to the [`forces`](@ref) function).
 ```julia
 import AtomsCalculators
 
-function AtomsCalculators.forces(sys,
-                                 inter::MyGeneralInter;
-                                 neighbors=nothing,
-                                 step_n=0,
-                                 n_threads=Threads.nthreads(),
-                                 kwargs...)
+function AtomsCalculators.forces!(fs,
+                                  sys,
+                                  inter::MyGeneralInter;
+                                  neighbors=nothing,
+                                  step_n=0,
+                                  n_threads=Threads.nthreads(),
+                                  kwargs...)
     # kwargs... is required, neighbors/step_n/n_threads can be omitted if not used
 
     # Calculate the forces on all atoms using the interaction and the system
-    # The output should have the same shape as the coordinates
+    # Add the forces to the existing forces, which have the same shape as the coordinates
     # For example, a neural network might do something like this
-    return inter.model(sys.coords, sys.atoms)
+    fs .+= inter.model(sys.coords, sys.atoms)
+    return fs
 end
 ```
 The neighbors calculated from the neighbor list are available in this function, but may or may not be used depending on context.
 You could carry out your own neighbor finding in this function if required.
+Since the forces are available for mutation in the function, general interactions can be used to modify the forces in arbitrary ways, though it is up to you to write an appropriate potential energy function if energies are required.
+In cases where the forces are not simply added to, the order of general interactions can matter.
+General interactions are applied after pairwise and specific interactions.
 Note that this function calculates forces not accelerations; if you have a neural network that calculates accelerations you should multiply these by `masses(sys)` to get the forces according to F=ma.
 
 A method for the `AtomsCalculators.potential_energy` function that takes the same arguments and returns a single value can also be defined.
@@ -1103,7 +1115,6 @@ The available loggers are:
 - [`GeneralObservableLogger`](@ref)
 - [`TemperatureLogger`](@ref)
 - [`CoordinatesLogger`](@ref)
-- [`DisplacementLogger`](@ref)
 - [`VelocitiesLogger`](@ref)
 - [`TotalEnergyLogger`](@ref)
 - [`KineticEnergyLogger`](@ref)
@@ -1113,6 +1124,7 @@ The available loggers are:
 - [`DensityLogger`](@ref)
 - [`VirialLogger`](@ref)
 - [`PressureLogger`](@ref)
+- [`DisplacementsLogger`](@ref)
 - [`TrajectoryWriter`](@ref)
 - [`StructureWriter`](@ref)
 - [`TimeCorrelationLogger`](@ref)
@@ -1328,15 +1340,23 @@ Currently, constraints are supported by the following simulators:
 
 See [this example](@ref "Constrained dynamics") for how to apply constraints to a system.
 Simulators incompatible with constraints will print a warning and continue when used with systems containing constraints.
-Constraints are not currently compatible with GPU simulation.
 
-In Molly, the SHAKE constraints for diatomic molecules are solved analytically while all larger constraints are solved iteratively.
-The velocity constraints imposed by RATTLE form a linear system of equations which could be solved exactly; however, this operation is expensive for clusters of more than 4 constraints.
-Therefore, RATTLE constraints can be solved by direct matrix inversion for small clusters (4 or fewer constraints) and iteratively otherwise (currently only solved iteratively).
-The number of constraints here does not refer to the total number of constraints in the system, rather to the total number of constraints in an independent cluster/molecule.
-For example, a water molecule can be constrained by 2 distance constraints and 1 angle constraint which is only 3 constraints.
-However, a C-C backbone of an organic molecule like octane would need 7 constraints to maintain all the C-C bond lengths.
-Constraining large clusters will result in a performance penalty.
+Molly supports [DistanceConstraint](@ref) and [AngleConstraint](@ref) on CPU and GPU. To use the GPU no-extra work is required, constraints are automatically moved from CPU to GPU. Distance constraints fix the distance between two atoms. Angle constraints are defined for tri-atomic molecules (e.g. water) and restrict the angle and the two bond lengths. 
+
+This diagram demonstrates the four allowed constraint types. 
+![Valid Constraints](images/constraints_diagram.png)
+- Single bond between two atoms (e.g. hydrogen molecule)
+- 3 atoms, 2 [DistanceConstraint](@ref), angle is free (e.g. the hydrogens on either carbon of ethelene)
+- 3 atoms, 1 [AngleConstraint](@ref), implemented as 3 distance constraints (e.g. a water molecule)
+- 3 atoms around 1 central atom, 3 [DistanceConstraint](@ref) (e.g. ammonia)
+
+> [!NOTE]
+> You cannot constrain a linear chain of four atoms or an angle of 180°. Constraints cannot be clustered beyond the four valid classes. For example, you could not constrain all the hydrogen bonds in ethelene and the double bond simultaneosly. This would create a cluster of 5 constraints which is forbidden.
+
+These constraints provide enough flexibility to constrain all hydrogen atoms on an organic molecule as well as water molecules.  
+
+All velocity constraints and diatomic distance constraints are solved analytically while larger constraints are linearized and solved iteratively via matrix inverse. The direct matrix inverse does not scale well beyond clusters with 3 constraints and is not implemented. Other methods can be used to solve larger constraint clusters but Molly does not support them. 
+
 
 ## Neighbor finders
 

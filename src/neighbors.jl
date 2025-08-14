@@ -66,7 +66,7 @@ function GPUNeighborFinder(;
                             eligible,
                             dist_cutoff,
                             special=zero(eligible),
-                            n_steps_reorder=10,
+                            n_steps_reorder=25,
                             initialized=false)
     return GPUNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
                 eligible, dist_cutoff, special, n_steps_reorder, initialized)
@@ -134,7 +134,7 @@ function find_neighbors(sys::System,
     return NeighborList(length(neighbors_list), neighbors_list)
 end
 
-function gpu_threads_blocks_dnf(n_inters)
+function gpu_threads_dnf(n_inters)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_DISTANCENF", "512"))
     return n_threads_gpu
 end
@@ -173,7 +173,7 @@ function find_neighbors(sys::System{D, AT},
 
     nf.neighbors .= false
     n_inters = n_atoms_to_n_pairs(length(sys))
-    n_threads_gpu = gpu_threads_blocks_dnf(n_inters)
+    n_threads_gpu = gpu_threads_dnf(n_inters)
 
     backend = get_backend(sys.coords)
     kernel! = distance_neighbor_finder_kernel!(backend, n_threads_gpu)
@@ -245,7 +245,7 @@ function find_neighbors(sys::System{<:Any, AT},
         append!(neighbors_list, nl)
     end
 
-    return NeighborList(length(neighbors_list), AT(neighbors_list))
+    return NeighborList(length(neighbors_list), to_device(neighbors_list, AT))
 end
 
 """
@@ -369,7 +369,7 @@ function find_neighbors(sys::System{D, AT},
     if isnothing(current_neighbors)
         neighbors = NeighborList()
     elseif AT <: AbstractGPUArray
-        neighbors = NeighborList(current_neighbors.n, Array(current_neighbors.list))
+        neighbors = NeighborList(current_neighbors.n, from_device(current_neighbors.list))
     else
         neighbors = current_neighbors
     end
@@ -387,7 +387,7 @@ function find_neighbors(sys::System{D, AT},
 
     box = CellListMap.Box(clm_box_arg(sys.boundary), nf.dist_cutoff; lcell=1)
     parallel = n_threads > 1
-    cl = UpdateCellList!(Array(sys.coords), box, cl, aux; parallel=parallel)
+    cl = UpdateCellList!(from_device(sys.coords), box, cl, aux; parallel=parallel)
 
     map_pairwise!(
         (x, y, i, j, d2, pairs) -> push_pair!(pairs, i, j, nf.eligible, nf.special),
@@ -401,7 +401,7 @@ function find_neighbors(sys::System{D, AT},
 
     nf.cl = cl
     if AT <: AbstractGPUArray
-        return NeighborList(neighbors.n, AT(neighbors.list))
+        return NeighborList(neighbors.n, to_device(neighbors.list, AT))
     else
         return neighbors
     end

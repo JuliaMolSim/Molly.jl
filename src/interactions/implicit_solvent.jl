@@ -257,7 +257,7 @@ is_carboxylate_O(at_data) = at_data.atom_type == "O2"
 
 function atoms_bonded_to_N(atoms_data, bonds)
     bonded_to_N = falses(length(atoms_data))
-    for (i, j) in zip(Array(bonds.is), Array(bonds.js))
+    for (i, j) in zip(from_device(bonds.is), from_device(bonds.js))
         if atoms_data[i].element == "N"
             bonded_to_N[j] = true
         end
@@ -399,7 +399,7 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E}},
     inds_j = hcat(1:n_atoms...)
     inds_i = permutedims(inds_j, (2, 1))
 
-    coulomb_const_units = units ? coulomb_const : ustrip(coulomb_const)
+    coulomb_const_units = (units ? coulomb_const : ustrip(coulomb_const))
     if !iszero_value(solute_dielectric)
         factor_solute = -T(coulomb_const_units) / T(solute_dielectric)
     else
@@ -411,17 +411,10 @@ function ImplicitSolventOBC(atoms::AbstractArray{Atom{TY, M, T, D, E}},
         factor_solvent = zero(T(coulomb_const_units))
     end
 
-    if isa(atoms, AbstractGPUArray)
-        AT = array_type(atoms)
-        or = AT(offset_radii)
-        sor = AT(scaled_offset_radii)
-        is, js = AT(inds_i), AT(inds_j)
-    else
-        or = offset_radii
-        sor = scaled_offset_radii
-        is, js = inds_i, inds_j
-    end
-
+    AT = array_type(atoms)
+    or = to_device(offset_radii, AT)
+    sor = to_device(scaled_offset_radii, AT)
+    is, js = to_device(inds_i, AT), to_device(inds_j, AT)
     oris = @view or[is]
     orjs = @view or[js]
     srjs = @view sor[js]
@@ -552,7 +545,7 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E}},
         table_m0 = ustrip.(table_m0_units)
     end
 
-    coulomb_const_units = units ? coulomb_const : ustrip(coulomb_const)
+    coulomb_const_units = (units ? coulomb_const : ustrip(coulomb_const))
     if !iszero_value(solute_dielectric)
         factor_solute = -T(coulomb_const_units) / T(solute_dielectric)
     else
@@ -564,21 +557,12 @@ function ImplicitSolventGBN2(atoms::AbstractArray{Atom{TY, M, T, D, E}},
         factor_solvent = zero(T(coulomb_const_units))
     end
 
-    if isa(atoms, AbstractGPUArray)
-        AT = array_type(atoms)
-        or = AT(offset_radii)
-        sor = AT(scaled_offset_radii)
-        is, js = AT(inds_i), AT(inds_j)
-        d0s, m0s = AT(table_d0), AT(table_m0)
-        αs, βs, γs = AT(αs_cpu), AT(βs_cpu), AT(γs_cpu)
-    else
-        or = offset_radii
-        sor = scaled_offset_radii
-        is, js = inds_i, inds_j
-        d0s, m0s = table_d0, table_m0
-        αs, βs, γs = αs_cpu, βs_cpu, γs_cpu
-    end
-
+    AT = array_type(atoms)
+    or = to_device(offset_radii, AT)
+    sor = to_device(scaled_offset_radii, AT)
+    is, js = to_device(inds_i, AT), to_device(inds_j, AT)
+    d0s, m0s = to_device(table_d0, AT), to_device(table_m0, AT)
+    αs, βs, γs = to_device(αs_cpu, AT), to_device(βs_cpu, AT), to_device(γs_cpu, AT)
     oris = @view or[is]
     orjs = @view or[js]
     srjs = @view sor[js]
@@ -780,7 +764,7 @@ function born_radii_and_grad(inter::ImplicitSolventGBN2{T}, coords::AbstractGPUA
     return Bs, B_grads, I_grads
 end
 
-function gpu_threads_blocks_gbsa(n_inters)
+function gpu_threads_gbsa(n_inters)
     n_threads_gpu = parse(Int, get(ENV, "MOLLY_GPUNTHREADS_IMPLICIT", "512"))
     return n_threads_gpu
 end
@@ -793,7 +777,7 @@ function gbsa_born_gpu(coords::AbstractArray{SVector{D, C}}, offset_radii, scale
     Is_nounits = KernelAbstractions.zeros(backend, T, n_atoms)
     I_grads_nounits = KernelAbstractions.zeros(backend, T, n_atoms, n_atoms)
     n_inters = n_atoms ^ 2
-    n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
+    n_threads_gpu = gpu_threads_gbsa(n_inters)
 
     kernel! = gbsa_born_kernel!(backend, n_threads_gpu)
     kernel!(Is_nounits, I_grads_nounits, coords, offset_radii,
@@ -917,10 +901,9 @@ function gb_force_loop_2(coord_i, coord_j, bi, ig, ori, srj, dist_cutoff, bounda
     end
 end
 
-function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
+function forces_gbsa!(fs, sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
     coords, boundary = sys.coords, sys.boundary
     born_forces_1 = copy(born_forces)
-    fs = ustrip_vec.(zero(coords)) * sys.force_units
     @inbounds for i in eachindex(sys)
         for j in eachindex(sys)
             bi, bj, fi, fj = gb_force_loop_1(
@@ -947,8 +930,8 @@ function forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges
     return fs
 end
 
-function forces_gbsa(sys::System{D, AT, T}, inter, Bs, B_grads, I_grads, born_forces,
-                     atom_charges) where {D, AT <: AbstractGPUArray, T}
+function forces_gbsa!(fs, sys::System{D, AT, T}, inter, Bs, B_grads, I_grads, born_forces,
+                      atom_charges) where {D, AT <: AbstractGPUArray, T}
     fs_mat_1, born_forces_mod_ustrip = gbsa_force_1_gpu(sys.coords, sys.boundary, inter.dist_cutoff,
                         inter.factor_solute, inter.factor_solvent, inter.kappa, Bs, atom_charges,
                         sys.force_units)
@@ -957,7 +940,7 @@ function forces_gbsa(sys::System{D, AT, T}, inter, Bs, B_grads, I_grads, born_fo
                         born_forces_units, inter.offset_radii, inter.scaled_offset_radii,
                         sys.force_units, Val(T))
     fs_mat = fs_mat_1 .+ fs_mat_2
-    fs = reinterpret(SVector{D, T}, vec(fs_mat)) * sys.force_units
+    fs .+= reinterpret(SVector{D, T}, vec(fs_mat)) * sys.force_units
     return fs
 end
 
@@ -969,7 +952,7 @@ function gbsa_force_1_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_c
     fs_mat = KernelAbstractions.zeros(backend, T, D, n_atoms)
     born_forces_mod_ustrip = KernelAbstractions.zeros(backend, T, n_atoms)
     n_inters = n_atoms_to_n_pairs(n_atoms) + n_atoms
-    n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
+    n_threads_gpu = gpu_threads_gbsa(n_inters)
 
     kernel! = gbsa_force_1_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, born_forces_mod_ustrip, coords, boundary, dist_cutoff,
@@ -986,7 +969,7 @@ function gbsa_force_2_gpu(coords::AbstractArray{SVector{D, C}}, boundary, dist_c
     n_atoms = length(coords)
     fs_mat = KernelAbstractions.zeros(backend, T, D, n_atoms)
     n_inters = n_atoms ^ 2
-    n_threads_gpu = gpu_threads_blocks_gbsa(n_inters)
+    n_threads_gpu = gpu_threads_gbsa(n_inters)
 
     kernel! = gbsa_force_2_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, born_forces, coords, boundary, dist_cutoff, offset_radii,
@@ -1094,7 +1077,8 @@ end
     end
 end
 
-function AtomsCalculators.forces(sys, inter::AbstractGBSA; kwargs...)
+AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs, sys,
+                                                        inter::AbstractGBSA; kwargs...)
     Bs, B_grads, I_grads = born_radii_and_grad(inter, sys.coords, sys.boundary)
 
     if inter.use_ACE
@@ -1106,7 +1090,8 @@ function AtomsCalculators.forces(sys, inter::AbstractGBSA; kwargs...)
     end
 
     atom_charges = charge.(sys.atoms)
-    return forces_gbsa(sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
+    forces_gbsa!(fs, sys, inter, Bs, B_grads, I_grads, born_forces, atom_charges)
+    return fs
 end
 
 function gb_energy_loop(coord_i, coord_j, i, j, charge_i, charge_j, Bi, Bj, ori,
