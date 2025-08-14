@@ -1029,18 +1029,9 @@ end
     simulator = VelocityVerlet(dt=T(0.001)u"ps")
 
     n_threads = (run_parallel_tests ? Threads.nthreads() : 1)
-    runs = (
-        (false, n_threads, "CPU $(n_threads) thread"),
-        (true , n_threads, "CUDA"         ),
-    )
 
-    for (gpu, n_threads, label) in runs
+    for AT in array_list
 
-        if !run_cuda_tests && gpu
-            continue 
-        end
-
-        AT = (gpu ? CuArray : Array)
         sys_init = System(pdb_fp, ff; boundary=boundary, array_type=AT)
         sys_cpu  = System(pdb_fp, ff; boundary=boundary, array_type=Array)
 
