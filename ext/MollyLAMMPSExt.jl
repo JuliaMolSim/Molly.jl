@@ -3,6 +3,8 @@ module MollyLAMMPSExt
 using LAMMPS
 using Molly
 using Unitful
+import AtomsCalculators
+import AtomsBase
 
 const lammps_mass_units_map = Dict("metal" => u"g/mol", "real" => u"g/mol", "si" => u"kg")
 
@@ -52,6 +54,8 @@ function check_lammps_units(energy_unit, force_unit, lammps_units)
 
 end
 
+#! TODO: POTENTIAL DEFINITIONS TYPICALLY USE TYPES
+#! BUT I AM ASSIGNING THOSE AUTOMAGICALLY
 function Molly.LAMMPSCalculator(
         sys::System{3, AT, T},
         lammps_unit_system::String,
@@ -70,8 +74,12 @@ function Molly.LAMMPSCalculator(
         error(ArgumentError("LAMMPSCalculator does not support triclinic systems yet. PRs welcome :)"))
     end
 
-    if has_infinite_boundary(sys.boundary)
+    if Molly.has_infinite_boundary(sys.boundary)
         error(ArgumentError("LAMMPSCalculator does not support systems with infinite boundaries. Must be fully periodic."))
+    end
+
+    if length(potential_definition) == 0
+        error(ArgumentError("Cannot pass emptry string as potential definition for LAMMPSCalculator"))
     end
 
     if T != Float64
@@ -81,18 +89,18 @@ function Molly.LAMMPSCalculator(
     check_lammps_units(sys.energy_units, sys.force_units, lammps_unit_system)
 
     # setup box, atoms etc.
-    lmp = LMP(args = ["-screen","none"], comm = mpi_comm) #! DO WE NEED TO CALL close!
+    lmp = LMP(["-screen","none"])#, mpi_comm) #! do I need to close?
 
-    syms = atomic_symbol(sys, :) #! PROBABLY SHOULD ERROR IF ANY ARE MISSING
-    unique_syms = unique(syms)
+    all_syms = Molly.atomic_symbol(sys)
+    unique_syms = unique(all_syms)
 
-    if any(unique_syms) == :unknown
+    if any(unique_syms .== :unknown)
         error(ArgumentError("All atoms must have atomic symbols to use LAMMPSCalculators"))
     end
 
-    unqiue_sym_idxs = Dict(sym => findfirst.(x -> x == sym, syms) for sym in unique_syms)
+    unique_sym_idxs = Dict(sym => findfirst(x -> x == sym, all_syms) for sym in unique_syms)
     type_map = Dict(sym => Int32(i) for (i, sym) in enumerate(unique_syms))
-    types = [type_map[sym] for sym in syms]
+    types = [type_map[sym] for sym in all_syms]
     ids = collect(Int32, 1:length(sys))
 
     command(lmp, """
@@ -110,6 +118,7 @@ function Molly.LAMMPSCalculator(
             create_box $(length(unique_syms)) cell
         """)
 
+    #! THIS DOESNT SEEM TO SET THE COORDINATES??
     LAMMPS.create_atoms(
         lmp,
         reinterpret(reshape, Float64, sys.coords),
@@ -117,7 +126,7 @@ function Molly.LAMMPSCalculator(
         types
     )   
 
-    m_lmp = Dict(type_map[sym] => convert_mass(mass(sys, i), lammps_units) for (sym, i) in unqiue_sym_idxs)
+    m_lmp = Dict(type_map[sym] => convert_mass(sys.masses[i], lammps_unit_system) for (sym, i) in unique_sym_idxs)
     command(lmp, ["mass $(type) $(m)" for (type,m) in  m_lmp])
 
     command(lmp, potential_definition)
@@ -130,7 +139,7 @@ function Molly.LAMMPSCalculator(
     log_PE = any(x -> isa(x, PotentialEnergyLogger), sys.loggers)
     log_PE && command(lmp, "compute pot_e all pe")
 
-    return LAMMPSCalculator(lmp, -1)
+    return LAMMPSCalculator{typeof(lmp)}(lmp, -1)
 end
 
 function maybe_run_lammps_calc!(lammps_calc, r::AbstractVector{T}, step_n) where T

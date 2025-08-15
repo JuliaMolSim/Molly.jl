@@ -21,7 +21,8 @@ export
     masses,
     charges,
     MollyCalculator,
-    ASECalculator
+    ASECalculator,
+    LAMMPSCalculator
 
 const DefaultFloat = Float64
 
@@ -1517,8 +1518,8 @@ Arguments:
 - `mpi_comm=nothing` : Optional MPI.Comm object passed to LAMMPS
 - `logfile_path::String = "none"` : Path where LAMMPS logfile is written. Defaults to no log file.
 """
-mutable struct LAMMPSCalculator
-    lmp::LMP
+mutable struct LAMMPSCalculator{T}
+    lmp::T # T will be LMP but that is not available here
     last_updated::Int
 end
 
