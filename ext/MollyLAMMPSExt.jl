@@ -60,9 +60,10 @@ function Molly.LAMMPSCalculator(
         sys::System{3, AT, T},
         lammps_unit_system::String,
         potential_definition::Union{String, Array{String}};
+        n_threads::Integer=Threads.nthreads(),
         extra_lammps_commands::Union{String, Array{String}} = "",
-        mpi_comm=nothing,
-        logfile_path::String = "none"
+        logfile_path::String = "none",
+        calculate_potential::Bool = false
     ) where {AT, T}
 
     # check that we're on CPU
@@ -75,7 +76,7 @@ function Molly.LAMMPSCalculator(
     end
 
     if Molly.has_infinite_boundary(sys.boundary)
-        error(ArgumentError("LAMMPSCalculator does not support systems with infinite boundaries. Must be fully periodic."))
+        error(ArgumentError("LAMMPSCalculator does not support systems with infinite boundaries. Must be fully periodic. PRs welcome :)"))
     end
 
     if length(potential_definition) == 0
@@ -88,8 +89,9 @@ function Molly.LAMMPSCalculator(
 
     check_lammps_units(sys.energy_units, sys.force_units, lammps_unit_system)
 
-    # setup box, atoms etc.
-    lmp = LMP(["-screen","none"])#, mpi_comm) #! do I need to close?
+    # If Molly ever uses MPI this can take the MPI.Comm handle
+    # For now just use OpenMP
+    lmp = LMP(["-screen","none", "-sf", "omp", "-pk", "omp", "$(n_threads)"])
 
     all_syms = Molly.atomic_symbol(sys)
     unique_syms = unique(all_syms)
@@ -109,7 +111,6 @@ function Molly.LAMMPSCalculator(
             atom_style atomic
             atom_modify map array sort 0 0
         """)
-        # box tilt large #! FIGURE OUT WHAT THIS IS DOING??
 
     xhi, yhi, zhi = ustrip.(sys.boundary)
     command(lmp, """
@@ -118,7 +119,6 @@ function Molly.LAMMPSCalculator(
             create_box $(length(unique_syms)) cell
         """)
 
-    #! THIS DOESNT SEEM TO SET THE COORDINATES??
     LAMMPS.create_atoms(
         lmp,
         reinterpret(reshape, Float64, sys.coords),
@@ -135,33 +135,34 @@ function Molly.LAMMPSCalculator(
         command(lmp, extra_lammps_commands)
     end
 
-    #! IS THIS THE ONLY TIME WE NEED POTENTIAL ENERGY??
-    log_PE = any(x -> isa(x, PotentialEnergyLogger), sys.loggers)
-    log_PE && command(lmp, "compute pot_e all pe")
+    calculate_potential |=  any(x -> isa(x, PotentialEnergyLogger) || isa(x, TotalEnergyLogger), sys.loggers)
+    calculate_potential && command(lmp, "compute pot_e all pe")
 
     return LAMMPSCalculator{typeof(lmp)}(lmp, -1)
 end
 
 function maybe_run_lammps_calc!(lammps_calc, r::AbstractVector{T}, step_n) where T
     if lammps_calc.last_updated != step_n
+        # Send current coordinates to LAMMPS
         scatter!(lammps_calc.lmp, "x", reinterpret(reshape, Float64, r))
-        command(lmp, "run 0") #! CAN I USE NTHREADS???
+        # Run a step, will execute the registered computes/fixes
+        command(lmp, "run 0")
         lammps_calc.last_updated = step_n
     end
 end
 
 #! WHAT SHOULD UNITS ON RETURN BE
-#! IF T HAS UNITS THAT WILL BREAK THIS
 function AtomsCalculators.forces!(fs::AbstractVector{T}, sys, inter::LAMMPSCalculator; step_n=0, kwargs...) where T
-    maybe_update_lammps_calc!(inter, sys.coords, step_n)
-    fs .= reinterpret(T, gather(inter.lmp, "f", Float64))
+    maybe_run_lammps_calc!(inter, sys.coords, step_n)
+    # fs .= reinterpret(T, gather(inter.lmp, "f", Float64))
+    gather!(inter.lmp, "f", reinterpret(reshape, Float64, fs)) 
     return fs
 end
 
 #! WHAT SHOULD UNITS ON RETURN BE
 function AtomsCalculators.potential_energy(sys, inter::LAMMPSCalculator; step_n=0, kwargs...)
-    maybe_update_lammps_calc!(inter, sys.coords, step_n)
-    return extract_compute(inter.lmp, "pot_e", STYLE_GLOBAL, TYPE_SCALAR)[1]
+    maybe_run_lammps_calc!(inter, sys.coords, step_n)
+    return extract_compute(inter.lmp, "pot_e", STYLE_GLOBAL, TYPE_SCALAR)[1] * sys.energy_units
 end
 
 

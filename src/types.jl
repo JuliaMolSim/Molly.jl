@@ -1490,12 +1490,14 @@ function update_ase_calc! end
         sys::System{3, AT, T},
         lammps_unit_system::String,
         potential_definition::Union{String, Array{String}};
+        n_threads::Integer=Threads.nthreads(),
         extra_lammps_commands::Union{String, Array{String}} = "",
-        comm::Union{Nothing, MPI.Comm}=nothing,
-        logfile_path::String = "none"
+        logfile_path::String = "none",
+        calculate_potential::Bool = false
     )
 
-Defines a general interaction that will call LAMMPS to calculate forces and energies. 
+Defines a general interaction that will call LAMMPS to calculate forces and energies. Any potential
+which supports OpenMP in LAMMPS will use `n_threads` threads to calculate forces and energies.
 
 Restrictions:
 -------------
@@ -1513,16 +1515,18 @@ Arguments:
 - `potential_definition::Union{String, Array{String}}` : Commands passed to lammps which define your interaction.
     For example, to define LJ you pass:
     `lj_cmds = ["pair_style lj/cut 8.5", "pair_coeff * * 0.0104 3.4", "pair_modify shift yes"]`
+- `n_threads::Integer=Threads.nthreads()` : Number of OpenMP threads LAMMPS is configured to use
 - `extra_lammps_commands::Union{String, Array{String}}` : Any other commands you want to pass to LAMMPS. 
     This feature is untested, but allows flexability to modify the LAMMPS system. 
-- `mpi_comm=nothing` : Optional MPI.Comm object passed to LAMMPS
 - `logfile_path::String = "none"` : Path where LAMMPS logfile is written. Defaults to no log file.
+- `calculate_potential::Bool = false`: Flag to set if LAMMPS should calculate potential energy. Will
+    automatically be turned on if loggers requiring potential energy are detected. Other use cases
+    like Monte-Carlo (and its associated barostat) require setting this flag to true. 
 """
 mutable struct LAMMPSCalculator{T}
     lmp::T # T will be LMP but that is not available here
     last_updated::Int
 end
-
 
 iszero_value(x) = iszero(x)
 
