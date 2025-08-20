@@ -135,7 +135,8 @@ function Molly.LAMMPSCalculator(
         command(lmp, extra_lammps_commands)
     end
 
-    calculate_potential |=  any(x -> isa(x, PotentialEnergyLogger) || isa(x, TotalEnergyLogger), sys.loggers)
+    #! NONE OF THESE ARE ACTUALLY TYPES DOES NOT WORK....
+    # calculate_potential |=  any(x -> isa(x, PotentialEnergyLogger) || isa(x, TotalEnergyLogger), sys.loggers)
     calculate_potential && command(lmp, "compute pot_e all pe")
 
     return LAMMPSCalculator{typeof(lmp)}(lmp, -1)
@@ -146,20 +147,17 @@ function maybe_run_lammps_calc!(lammps_calc, r::AbstractVector{T}, step_n) where
         # Send current coordinates to LAMMPS
         scatter!(lammps_calc.lmp, "x", reinterpret(reshape, Float64, r))
         # Run a step, will execute the registered computes/fixes
-        command(lmp, "run 0")
+        command(lammps_calc.lmp, "run 0")
         lammps_calc.last_updated = step_n
     end
 end
 
-#! WHAT SHOULD UNITS ON RETURN BE
 function AtomsCalculators.forces!(fs::AbstractVector{T}, sys, inter::LAMMPSCalculator; step_n=0, kwargs...) where T
     maybe_run_lammps_calc!(inter, sys.coords, step_n)
-    # fs .= reinterpret(T, gather(inter.lmp, "f", Float64))
     gather!(inter.lmp, "f", reinterpret(reshape, Float64, fs)) 
     return fs
 end
 
-#! WHAT SHOULD UNITS ON RETURN BE
 function AtomsCalculators.potential_energy(sys, inter::LAMMPSCalculator; step_n=0, kwargs...)
     maybe_run_lammps_calc!(inter, sys.coords, step_n)
     return extract_compute(inter.lmp, "pot_e", STYLE_GLOBAL, TYPE_SCALAR)[1] * sys.energy_units
