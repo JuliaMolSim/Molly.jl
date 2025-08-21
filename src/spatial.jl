@@ -773,6 +773,15 @@ function remove_CM_motion!(sys)
     return sys
 end
 
+function remove_CM_motion!(sys::System{<:Any, <:AbstractGPUArray})
+    ms = masses(sys)
+    cm_momentum = mapreduce((v, m) -> v .* m, +, sys.velocities, ms)
+    total_mass = sum(ms)
+    cm_velocity = cm_momentum / total_mass
+    sys.velocities .= sys.velocities .- (cm_velocity,)
+    return sys
+end
+
 @doc raw"""
     virial(sys, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
     virial(inter, sys, neighbors, step_n; n_threads=Threads.nthreads())
