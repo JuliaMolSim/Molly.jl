@@ -11,8 +11,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
                                             inter::AbstractEwald;
                                             n_threads::Integer=Threads.nthreads(),
                                             kwargs...)
-    fs = zero_forces(sys)
-    pe = ewald_pe_forces!(fs, sys, inter; n_threads=n_threads)
+    pe = ewald_pe_forces!(nothing, sys, inter; n_threads=n_threads)
     return pe
 end
 
@@ -40,7 +39,7 @@ function AtomsCalculators.energy_forces(sys,
                                         kwargs...)
     fs = zero_forces(sys)
     pe = ewald_pe_forces!(fs, sys, inter; n_threads=n_threads)
-    return (energy=E, forces=Fs)
+    return (energy=pe, forces=fs)
 end
 
 function find_excluded_pairs(eligible, special)
@@ -60,8 +59,8 @@ function find_excluded_pairs(eligible, special)
     return excluded_pairs
 end
 
-function excluded_interactions_inner!(Fs, atoms, coords, boundary, α, f, i, j,
-                                      ::Val{T}, ::Val{atomic}) where {T, atomic}
+function excluded_interactions_inner!(Fs, atoms, coords, boundary, α, f, i, j, ::Val{T},
+                        ::Val{calculate_forces}, ::Val{atomic}) where {T, calculate_forces, atomic}
     sqrt_π = sqrt(T(π))
     charge_ij = charge(atoms[i]) * charge(atoms[j])
     vec_ij = vector(coords[i], coords[j], boundary)
@@ -71,17 +70,19 @@ function excluded_interactions_inner!(Fs, atoms, coords, boundary, α, f, i, j,
     if erf_αr > T(1e-6)
         inv_r = inv(r)
         exclusion_E = -f * charge_ij * inv_r * erf_αr
-        dE_dr = f * charge_ij * inv_r^3 * (erf_αr - 2 * αr * exp(-αr^2) / sqrt_π)
-        F = dE_dr * vec_ij
-        if atomic
-            for dim in 1:3
-                fval = ustrip(F[dim])
-                Atomix.@atomic Fs[dim, i] +=  fval
-                Atomix.@atomic Fs[dim, j] += -fval
+        if calculate_forces
+            dE_dr = f * charge_ij * inv_r^3 * (erf_αr - 2 * αr * exp(-αr^2) / sqrt_π)
+            F = dE_dr * vec_ij
+            if atomic
+                for dim in 1:3
+                    fval = ustrip(F[dim])
+                    Atomix.@atomic Fs[dim, i] +=  fval
+                    Atomix.@atomic Fs[dim, j] += -fval
+                end
+            else
+                Fs[i] += F
+                Fs[j] -= F
             end
-        else
-            Fs[i] += F
-            Fs[j] -= F
         end
     else
         exclusion_E = -α * 2 * f * charge_ij / sqrt_π
@@ -89,39 +90,43 @@ function excluded_interactions_inner!(Fs, atoms, coords, boundary, α, f, i, j,
     return exclusion_E
 end
 
-function excluded_interactions!(Fs::Vector, buffer_Fs, buffer_Es, excluded_pairs,
-                                atoms, coords, boundary, α, f, force_units,
-                                energy_units, ::Val{T}) where T
+function excluded_interactions!(Fs, buffer_Fs, buffer_Es, excluded_pairs, atoms,
+                                coords::Vector, boundary, α, f, force_units, energy_units,
+                                calculate_forces, ::Val{T}) where T
     exclusion_E = zero(T) * energy_units
     for (i, j) in excluded_pairs
         E = excluded_interactions_inner!(Fs, atoms, coords, boundary, α, f,
-                                         i, j, Val(T), Val(false))
+                                         i, j, Val(T), Val(calculate_forces), Val(false))
         exclusion_E += E
     end
     return exclusion_E
 end
 
-function excluded_interactions!(Fs::AbstractVector{SVector{D, C}}, buffer_Fs, buffer_Es,
-                                excluded_pairs, atoms, coords, boundary, α, f, force_units,
-                                energy_units, ::Val{T}) where {D, C, T}
-    buffer_Fs .= zero(T)
-    backend = get_backend(Fs)
+function excluded_interactions!(Fs, buffer_Fs, buffer_Es, excluded_pairs, atoms,
+                                coords::AbstractVector{SVector{D, C}}, boundary, α, f, force_units,
+                                energy_units, calculate_forces, ::Val{T}) where {D, C, T}
+    if calculate_forces
+        buffer_Fs .= zero(T)
+    end
+    backend = get_backend(atoms)
     n_threads_gpu = 128
     kernel! = excluded_interactions_kernel!(backend, n_threads_gpu)
     kernel!(buffer_Fs, buffer_Es, excluded_pairs, atoms, coords, boundary, α, f,
-            energy_units, Val(T); ndrange=length(excluded_pairs))
-    Fs .+= reinterpret(SVector{D, T}, vec(buffer_Fs)) .* force_units
+            energy_units, Val(T), Val(calculate_forces); ndrange=length(excluded_pairs))
+    if calculate_forces
+        Fs .+= reinterpret(SVector{D, T}, vec(buffer_Fs)) .* force_units
+    end
     return sum(buffer_Es) * energy_units
 end
 
 @kernel function excluded_interactions_kernel!(Fs_mat, exclusion_Es, @Const(excluded_pairs),
                             @Const(atoms), @Const(coords), boundary, α, f, energy_units,
-                            ::Val{T}) where T
+                            ::Val{T}, ::Val{calculate_forces}) where {T, calculate_forces}
     ei = @index(Global, Linear)
     if ei <= length(excluded_pairs)
         i, j = excluded_pairs[ei]
         E = excluded_interactions_inner!(Fs_mat, atoms, coords, boundary, α, f,
-                                         i, j, Val(T), Val(true))
+                                         i, j, Val(T), Val(calculate_forces), Val(true))
         exclusion_Es[ei] = ustrip(energy_units, E)
     end
 end
@@ -190,11 +195,18 @@ function ewald_params(side_length, α, error_tol)
     return k
 end
 
-function ewald_pe_forces!(Fs, sys::System{3, AT}, inter::Ewald{T};
-                          n_threads::Integer=Threads.nthreads()) where {AT, T}
-    n_atoms = length(sys)
-    atoms_cpu, coords_cpu = from_device(sys.atoms), from_device(sys.coords)
-    boundary, energy_units = sys.boundary, sys.energy_units
+function ewald_pe_forces!(Fs, sys::System{3}, inter::AbstractEwald;
+                          n_threads::Integer=Threads.nthreads())
+    calculate_forces = !isnothing(Fs)
+    return ewald_pe_forces!(Fs, inter, sys.atoms, sys.coords, sys.boundary, sys.force_units,
+                            sys.energy_units, calculate_forces; n_threads=n_threads)
+end
+
+function ewald_pe_forces!(Fs, inter::Ewald{T}, atoms, coords, boundary, force_units, energy_units,
+                          calculate_forces=true; n_threads::Integer=Threads.nthreads()) where T
+    AT = array_type(atoms)
+    n_atoms = length(atoms)
+    atoms_cpu, coords_cpu = from_device(atoms), from_device(coords)
     dist_cutoff, error_tol = inter.dist_cutoff, inter.error_tol
     α = inv(dist_cutoff) * sqrt(-log(2 * error_tol))
     nrx, nry, nrz = ewald_params.(boundary.side_lengths, α, error_tol)
@@ -205,15 +217,15 @@ function ewald_pe_forces!(Fs, sys::System{3, AT}, inter::Ewald{T};
     partial_charges_cpu = charge.(atoms_cpu)
     V = volume(boundary)
     f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
-    if AT <: AbstractGPUArray
-        Fs_cpu = zeros(SVector{3, typeof(zero(T) * sys.force_units)}, n_atoms)
+    if AT <: AbstractGPUArray && calculate_forces
+        Fs_cpu = zeros(SVector{3, typeof(zero(T) * force_units)}, n_atoms)
     else
         Fs_cpu = Fs
     end
 
     exclusion_E = excluded_interactions!(Fs_cpu, nothing, nothing, inter.excluded_pairs,
                                          atoms_cpu, coords_cpu, boundary, α, f,
-                                         sys.force_units, energy_units, Val(T))
+                                         force_units, energy_units, calculate_forces, Val(T))
 
     recip_box_size = (2 * T(π)) ./ boundary.side_lengths
     eir = zeros(Complex{T}, kmax * n_atoms * 3)
@@ -272,7 +284,9 @@ function ewald_pe_forces!(Fs, sys::System{3, AT}, inter::Ewald{T};
                 ak = exp(k2 * factor_ewald) / k2
                 for n in 1:n_atoms
                     F = ak * (cs * imag(tab_qxyz[n]) - ss * real(tab_qxyz[n]))
-                    Fs_cpu[n] += 2 .* recip_coeff .* F .* SVector(kx, ky, kz)
+                    if calculate_forces
+                        Fs_cpu[n] += 2 .* recip_coeff .* F .* SVector(kx, ky, kz)
+                    end
                 end
                 reciprocal_space_E += recip_coeff * ak * (cs * cs + ss * ss)
                 lowrz = 1 - nrz
@@ -284,7 +298,7 @@ function ewald_pe_forces!(Fs, sys::System{3, AT}, inter::Ewald{T};
     charge_E = -f * T(π) * sum(partial_charges_cpu)^2 / (2 * V * α^2)
     self_E = f * -sum(abs2, partial_charges_cpu) * α / sqrt(T(π)) + charge_E
     total_E = reciprocal_space_E + self_E + exclusion_E
-    if AT <: AbstractGPUArray
+    if calculate_forces && AT <: AbstractGPUArray
         Fs .+= to_device(Fs_cpu, AT)
     end
     return total_E
@@ -808,17 +822,16 @@ end
 grad_safe_fft!( charge_grid, fft_plan ) = fft_plan  * charge_grid
 grad_safe_bfft!(charge_grid, bfft_plan) = bfft_plan * charge_grid
 
-function ewald_pe_forces!(Fs, sys::System{3, AT}, inter::PME{T};
-                          n_threads::Integer=Threads.nthreads()) where {AT, T}
+function ewald_pe_forces!(Fs, inter::PME{T}, atoms, coords, boundary, force_units, energy_units,
+                          calculate_forces=true; n_threads::Integer=Threads.nthreads()) where T
     n_thr = (inter.grad_safe ? 1 : n_threads) # Enzyme error with multiple threads
-    atoms, coords, boundary, energy_units = sys.atoms, sys.coords, sys.boundary, sys.energy_units
     order, ϵr, α, mesh_dims = inter.order, inter.ϵr, inter.α, inter.mesh_dims
     V = volume(boundary)
     f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
 
     exclusion_E = excluded_interactions!(Fs, inter.excluded_buffer_Fs, inter.excluded_buffer_Es,
                                          inter.excluded_pairs, atoms, coords, boundary, α, f,
-                                         sys.force_units, energy_units, Val(T))
+                                         force_units, energy_units, calculate_forces, Val(T))
 
     recip_box = invert_box_vectors(boundary)
     grid_placement!(inter.grid_indices, inter.grid_fractions, coords, recip_box, mesh_dims)
@@ -830,12 +843,14 @@ function ewald_pe_forces!(Fs, sys::System{3, AT}, inter::PME{T};
                     inter.bsplines_moduli_x, inter.bsplines_moduli_y, inter.bsplines_moduli_z,
                     recip_box, f / ϵr, α, mesh_dims, boundary, energy_units, n_thr)
     grad_safe_bfft!(inter.charge_grid, inter.bfft_plan)
-    interpolate_force!(Fs, inter.charge_grid, inter.grid_indices, inter.bsplines_θ,
-                       inter.bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
-                       n_thr)
+    if calculate_forces
+        interpolate_force!(Fs, inter.charge_grid, inter.grid_indices, inter.bsplines_θ,
+                        inter.bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
+                        n_thr)
+    end
 
     if isnothing(inter.pc_sum) || inter.grad_safe
-        partial_charges = charges(sys)
+        partial_charges = charge.(atoms)
         pc_sum = sum(partial_charges)
         pc_abs2_sum = sum(abs2, partial_charges)
     else
