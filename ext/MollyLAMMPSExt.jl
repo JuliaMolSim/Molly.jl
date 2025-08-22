@@ -139,6 +139,10 @@ function Molly.LAMMPSCalculator(
     # calculate_potential |=  any(x -> isa(x, PotentialEnergyLogger) || isa(x, TotalEnergyLogger), sys.loggers)
     calculate_potential && command(lmp, "compute pot_e all pe")
 
+    # This allows LAMMPS to register the computes/fixes
+    # and build the neighbor list. 
+    command(lmp, "run 0 post no")
+
     return LAMMPSCalculator{typeof(lmp)}(lmp, -1)
 end
 
@@ -147,7 +151,7 @@ function maybe_run_lammps_calc!(lammps_calc, r::AbstractVector{T}, step_n) where
         # Send current coordinates to LAMMPS
         scatter!(lammps_calc.lmp, "x", reinterpret(reshape, Float64, r))
         # Run a step, will execute the registered computes/fixes
-        command(lammps_calc.lmp, "run 0")
+        command(lammps_calc.lmp, "run 0 pre no post no")
         lammps_calc.last_updated = step_n
     end
 end
