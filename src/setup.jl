@@ -474,6 +474,8 @@ are not available when reading Gromacs files.
 - `rename_terminal_res=true`: whether to rename the first and last residues
     to match the appropriate atom templates, for example the first (N-terminal)
     residue could be changed from "MET" to "NMET".
+- `grad_safe=false`: should be set to `true` if the system is going to be used
+    with Enzyme.jl and `nonbonded_method` is "pme".
 """
 function System(coord_file::AbstractString,
                 force_field::MolecularForceField;
@@ -492,7 +494,8 @@ function System(coord_file::AbstractString,
                 data=nothing,
                 implicit_solvent=nothing,
                 kappa=0.0u"nm^-1",
-                rename_terminal_res::Bool=true) where AT <: AbstractArray
+                rename_terminal_res::Bool=true,
+                grad_safe::Bool=false) where AT <: AbstractArray
     if dist_neighbors < dist_cutoff
         throw(ArgumentError("dist_neighbors ($dist_neighbors) should not be less than " *
                             "dist_cutoff ($dist_cutoff)"))
@@ -896,7 +899,7 @@ function System(coord_file::AbstractString,
                 error_tol=T(ewald_error_tol),
                 eligible=eligible,
                 special=special,
-                array_type=AT,
+                grad_safe=grad_safe,
             )
         end
         general_inters_ewald = (ewald,)
@@ -1067,7 +1070,8 @@ function System(T::Type,
                 approximate_pme=true,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
-                data=nothing) where AT <: AbstractArray
+                data=nothing,
+                grad_safe::Bool=false) where AT <: AbstractArray
     if dist_neighbors < dist_cutoff
         throw(ArgumentError("dist_neighbors ($dist_neighbors) should not be less than " *
                             "dist_cutoff ($dist_cutoff)"))
@@ -1378,7 +1382,7 @@ function System(T::Type,
                 error_tol=T(ewald_error_tol),
                 eligible=eligible,
                 special=special,
-                array_type=AT,
+                grad_safe=grad_safe,
             )
         end
         general_inters = (ewald,)

@@ -153,8 +153,7 @@ struct Ewald{T, D} <: AbstractEwald
     excluded_pairs::Vector{Tuple{Int32, Int32}}
 end
 
-function Ewald(dist_cutoff; error_tol=0.0005, eligible=nothing, special=nothing,
-               array_type::Type{AT}=Array) where AT
+function Ewald(dist_cutoff; error_tol=0.0005, eligible=nothing, special=nothing)
     T = typeof(ustrip(dist_cutoff))
     excluded_pairs = find_excluded_pairs(eligible, special)
     return Ewald(dist_cutoff, T(error_tol), excluded_pairs)
@@ -294,7 +293,7 @@ end
 """
     PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
-        array_type=Array, n_threads=Threads.nthreads())
+        grad_safe=false, n_threads=Threads.nthreads())
 
 Particle mesh Ewald summation for long range electrostatics implemented as an
 AtomsCalculators.jl calculator.
@@ -311,8 +310,8 @@ are eligible.
 excluded from long range calculation.
 `fixed_charges` should be set to `false` if the partial charges can change,
 for example when using a polarizable force field.
-`array_type` should match the array type of the system and is used to
-pre-allocate memory.
+`grad_safe` should be set to `true` if gradients are going to be calculated
+with Enzyme.jl.
 `n_threads` is used to pre-allocate memory on CPU.
 
 This implementation is based on the implementation in OpenMM, which
@@ -345,12 +344,14 @@ struct PME{T, D, E, A, I, M, BM, C, CB, FB, EB, RB, P, F, B} <: AbstractEwald
     pc_abs2_sum::P
     fft_plan::F
     bfft_plan::B
+    grad_safe::Bool
 end
 
 function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
-             ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing,
-             array_type::Type{AT}=Array, n_threads::Integer=Threads.nthreads()) where AT
+             ϵr=1.0, fixed_charges=true, eligible=nothing, special=nothing, grad_safe=false,
+             n_threads::Integer=Threads.nthreads())
     T = typeof(ustrip(dist_cutoff))
+    AT = array_type(atoms)
     n_atoms = length(atoms)
     error_tol_T = T(error_tol)
     α = inv(dist_cutoff) * sqrt(-log(2 * error_tol_T))
@@ -425,7 +426,7 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         excluded_buffer_Fs, excluded_buffer_Es = nothing, nothing
     end
 
-    if fixed_charges
+    if fixed_charges && !grad_safe
         partial_charges = charge.(atoms)
         pc_sum = sum(partial_charges)
         pc_abs2_sum = sum(abs2, partial_charges)
@@ -442,7 +443,44 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     return PME(dist_cutoff, error_tol_T, order, T(ϵr), excluded_pairs, α, mesh_dims,
                grid_indices, grid_fractions, bsplines_θ, bsplines_dθ, bsm_x, bsm_y, bsm_z,
                charge_grid, charge_grid_buffer, excluded_buffer_Fs, excluded_buffer_Es,
-               recip_conv_buffer, pc_sum, pc_abs2_sum, fft_plan, bfft_plan)
+               recip_conv_buffer, pc_sum, pc_abs2_sum, fft_plan, bfft_plan, grad_safe)
+end
+
+zero_or_nothing(x) = zero(x)
+zero_or_nothing(x::Nothing) = nothing
+
+function Base.zero(pme::PME)
+    if pme.charge_grid_buffer isa Vector
+        charge_grid_buffer = zero.(pme.charge_grid_buffer)
+    else
+        charge_grid_buffer = zero_or_nothing(pme.charge_grid_buffer)
+    end
+    return PME(
+        zero(pme.dist_cutoff),
+        zero(pme.error_tol),
+        pme.order,
+        zero(pme.ϵr),
+        pme.excluded_pairs,
+        zero(pme.α),
+        pme.mesh_dims,
+        zero(pme.grid_indices),
+        zero(pme.grid_fractions),
+        zero(pme.bsplines_θ),
+        zero(pme.bsplines_dθ),
+        zero(pme.bsplines_moduli_x),
+        zero(pme.bsplines_moduli_y),
+        zero(pme.bsplines_moduli_z),
+        zero(pme.charge_grid),
+        charge_grid_buffer,
+        zero_or_nothing(pme.excluded_buffer_Fs),
+        zero_or_nothing(pme.excluded_buffer_Es),
+        zero_or_nothing(pme.recip_conv_buffer),
+        zero_or_nothing(pme.pc_sum),
+        zero_or_nothing(pme.pc_abs2_sum),
+        pme.fft_plan,
+        pme.bfft_plan,
+        pme.grad_safe,
+    )
 end
 
 function pme_params(side_length, α, error_tol::T) where T
@@ -767,8 +805,12 @@ end
     end
 end
 
+grad_safe_fft!( charge_grid, fft_plan ) = fft_plan  * charge_grid
+grad_safe_bfft!(charge_grid, bfft_plan) = bfft_plan * charge_grid
+
 function ewald_pe_forces!(Fs, sys::System{3, AT}, inter::PME{T};
                           n_threads::Integer=Threads.nthreads()) where {AT, T}
+    n_thr = (inter.grad_safe ? 1 : n_threads) # Enzyme error with multiple threads
     atoms, coords, boundary, energy_units = sys.atoms, sys.coords, sys.boundary, sys.energy_units
     order, ϵr, α, mesh_dims = inter.order, inter.ϵr, inter.α, inter.mesh_dims
     V = volume(boundary)
@@ -780,19 +822,19 @@ function ewald_pe_forces!(Fs, sys::System{3, AT}, inter::PME{T};
 
     recip_box = invert_box_vectors(boundary)
     grid_placement!(inter.grid_indices, inter.grid_fractions, coords, recip_box, mesh_dims)
-    update_bsplines!(inter.bsplines_θ, inter.bsplines_dθ, inter.grid_fractions, order, n_threads)
+    update_bsplines!(inter.bsplines_θ, inter.bsplines_dθ, inter.grid_fractions, order, n_thr)
     spread_charge!(inter.charge_grid, inter.charge_grid_buffer, inter.grid_indices,
-                   inter.bsplines_θ, mesh_dims, order, atoms, n_threads)
-    inter.fft_plan * inter.charge_grid
+                   inter.bsplines_θ, mesh_dims, order, atoms, n_thr)
+    grad_safe_fft!(inter.charge_grid, inter.fft_plan)
     reciprocal_space_E = recip_conv!(inter.charge_grid, inter.recip_conv_buffer,
                     inter.bsplines_moduli_x, inter.bsplines_moduli_y, inter.bsplines_moduli_z,
-                    recip_box, f / ϵr, α, mesh_dims, boundary, energy_units, n_threads)
-    inter.bfft_plan * inter.charge_grid
+                    recip_box, f / ϵr, α, mesh_dims, boundary, energy_units, n_thr)
+    grad_safe_bfft!(inter.charge_grid, inter.bfft_plan)
     interpolate_force!(Fs, inter.charge_grid, inter.grid_indices, inter.bsplines_θ,
                        inter.bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
-                       n_threads)
+                       n_thr)
 
-    if isnothing(inter.pc_sum)
+    if isnothing(inter.pc_sum) || inter.grad_safe
         partial_charges = charges(sys)
         pc_sum = sum(partial_charges)
         pc_abs2_sum = sum(abs2, partial_charges)
