@@ -34,7 +34,7 @@ end
 cutoff_points(::Type{DistanceCutoff{D, S, I}}) where {D, S, I} = 1
 
 force_divr_cutoff(::DistanceCutoff, r2, inter, params) = force_divr(inter, r2, inv(r2), params)
-potential_cutoff(::DistanceCutoff, r2, inter, params) = potential(inter, r2, inv(r2), params)
+pe_apply_cutoff(::DistanceCutoff, inter, r2, params) = pairwise_pe(inter, r2, params)
 
 """
     ShiftedPotentialCutoff(dist_cutoff)
@@ -57,8 +57,10 @@ function force_divr_cutoff(::ShiftedPotentialCutoff, r2, inter, params)
     return force_divr(inter, r2, inv(r2), params)
 end
 
-function potential_cutoff(cutoff::ShiftedPotentialCutoff, r2, inter, params)
-    potential(inter, r2, inv(r2), params) - potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
+function pe_apply_cutoff(cutoff::ShiftedPotentialCutoff, inter, r2, params)
+    pe_r = pairwise_pe(inter, r2, params)
+    pe_cut = pairwise_pe(inter, cutoff.sqdist_cutoff, params)
+    return pe_r - pe_cut
 end
 
 """
@@ -83,14 +85,12 @@ function force_divr_cutoff(cutoff::ShiftedForceCutoff, r2, inter, params)
            force_divr(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
 end
 
-function potential_cutoff(cutoff::ShiftedForceCutoff, r2, inter, params)
-    invr2 = inv(r2)
-    r = √r2
-    rc = cutoff.dist_cutoff
+function pe_apply_cutoff(cutoff::ShiftedForceCutoff, inter, r2, params)
+    r = sqrt(r2)
     fc = force_divr(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params) * r
-
-    potential(inter, r2, invr2, params) + (r - rc) * fc -
-        potential(inter, cutoff.sqdist_cutoff, cutoff.inv_sqdist_cutoff, params)
+    pe_r = pairwise_pe(inter, r2, params)
+    pe_cut = pairwise_pe(inter, cutoff.sqdist_cutoff, params)
+    return pe_r + (r - cutoff.dist_cutoff) * fc - pe_cut
 end
 
 """
@@ -121,23 +121,19 @@ cutoff_points(::Type{CubicSplineCutoff{D, S, I}}) where {D, S, I} = 2
 
 function force_divr_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
     r = √r2
-    t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff-cutoff.dist_activation)
-
-    Va = potential(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params)
+    t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff - cutoff.dist_activation)
+    Va = pairwise_pe(inter, cutoff.sqdist_activation, params)
     dVa = -force_divr(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params) *
             cutoff.dist_activation
-
     return -((6t^2 - 6t) * Va / (cutoff.dist_cutoff-cutoff.dist_activation) + (3t^2 - 4t + 1) * dVa)/r
 end
 
-function potential_cutoff(cutoff::CubicSplineCutoff, r2, inter, params)
+function pe_apply_cutoff(cutoff::CubicSplineCutoff, inter, r2, params)
     r = √r2
     t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff-cutoff.dist_activation)
-
-    Va = potential(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params)
+    Va = pairwise_pe(inter, cutoff.sqdist_activation, params)
     dVa = -force_divr(inter, cutoff.sqdist_activation, cutoff.inv_sqdist_activation, params) *
             cutoff.dist_activation
-
     return (2t^3 - 3t^2 + 1) * Va + (t^3 - 2t^2 + t) *
            (cutoff.dist_cutoff-cutoff.dist_activation) * dVa
 end
@@ -159,16 +155,16 @@ function force_divr_with_cutoff(inter, r2, params, cutoff::C, force_units) where
     end
 end
 
-function potential_with_cutoff(inter, r2, params, cutoff::C, energy_units) where C
+function pe_cutoff(cutoff::C, inter, r2, params, energy_units) where C
     if cutoff_points(C) == 0
-        return potential(inter, r2, inv(r2), params)
+        return pairwise_pe(inter, r2, params)
     elseif cutoff_points(C) == 1
-        return potential_cutoff(cutoff, r2, inter, params) * (r2 <= cutoff.sqdist_cutoff)
+        return pe_apply_cutoff(cutoff, inter, r2, params) * (r2 <= cutoff.sqdist_cutoff)
     elseif cutoff_points(C) == 2
         return ifelse(
             r2 < cutoff.sqdist_activation,
-            potential(inter, r2, inv(r2), params),
-            potential_cutoff(cutoff, r2, inter, params) * (r2 <= cutoff.sqdist_cutoff),
+            pairwise_pe(inter, r2, params),
+            pe_apply_cutoff(cutoff, inter, r2, params) * (r2 <= cutoff.sqdist_cutoff),
         )
     end
 end

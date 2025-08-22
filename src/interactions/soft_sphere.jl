@@ -71,10 +71,10 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    return potential_with_cutoff(inter, r2, params, cutoff, energy_units)
+    return pe_cutoff(cutoff, inter, r2, params, energy_units)
 end
 
-function potential(::SoftSphere, r2, invr2, (σ2, ϵ))
-    six_term = (σ2 * invr2) ^ 3
+function pairwise_pe(::SoftSphere, r2, (σ2, ϵ))
+    six_term = (σ2 / r2) ^ 3
     return 4ϵ * (six_term ^ 2)
 end

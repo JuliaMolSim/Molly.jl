@@ -45,9 +45,9 @@ end
                                   args...)
     r2 = sum(abs2, dr)
     params = (inter.G, mass(atom_i), mass(atom_j))
-    potential(inter, r2, inv(r2), params)
+    return pairwise_pe(inter, r2, params)
 end
 
-function potential(::Gravity, r2, invr2, (G, mi, mj))
-    return (-G * mi * mj) * √invr2
+function pairwise_pe(::Gravity, r2, (G, mi, mj))
+    return (-G * mi * mj) * inv(sqrt(r2))
 end

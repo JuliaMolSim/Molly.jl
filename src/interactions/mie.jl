@@ -115,10 +115,9 @@ end
     m = inter.m
     n = inter.n
     const_mn = inter.mn_fac * ϵ
-    σ_r = σ / r
-    params = (m, n, σ_r, const_mn)
+    params = (m, n, σ, const_mn)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
+    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -126,6 +125,7 @@ end
     end
 end
 
-function potential(::Mie, r2, invr2, (m, n, σ_r, const_mn))
+function pairwise_pe(::Mie, r2, (m, n, σ, const_mn))
+    σ_r = σ / sqrt(r2)
     return const_mn * (σ_r ^ n - σ_r ^ m)
 end

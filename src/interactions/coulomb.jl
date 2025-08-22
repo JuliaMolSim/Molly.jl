@@ -94,7 +94,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     params = (ke, qi, qj)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
+    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -102,8 +102,8 @@ end
     end
 end
 
-function potential(::Coulomb, r2, invr2, (ke, qi, qj))
-    return (ke * qi * qj) * √invr2
+function pairwise_pe(::Coulomb, r2, (ke, qi, qj))
+    return (ke * qi * qj) * sqrt(inv(r2))
 end
 
 @doc raw"""
@@ -203,7 +203,7 @@ end
     σ = inter.σ_mixing(atom_i, atom_j)
     params = (ke, qi, qj, σ, inter.σ6_fac)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
+    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -211,7 +211,7 @@ end
     end
 end
 
-function potential(::CoulombSoftCore, r2, invr2, (ke, qi, qj, σ, σ6_fac))
+function pairwise_pe(::CoulombSoftCore, r2, (ke, qi, qj, σ, σ6_fac))
     inv_rsc6 = inv(r2^3 + σ6_fac * σ^6)
     return (ke * qi * qj) * √cbrt(inv_rsc6)
 end
@@ -555,7 +555,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     params = (coulomb_const, qi, qj, inter.kappa)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
+    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -563,6 +563,7 @@ end
     end
 end
 
-function potential(::Yukawa, r2, invr2, (coulomb_const, qi, qj, kappa))
-    return (coulomb_const * qi * qj) * √invr2 * exp(-kappa * sqrt(r2))
+function pairwise_pe(::Yukawa, r2, (coulomb_const, qi, qj, kappa))
+    r = sqrt(r2)
+    return (coulomb_const * qi * qj) * inv(r) * exp(-kappa * r)
 end

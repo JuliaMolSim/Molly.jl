@@ -116,7 +116,7 @@ end
     r2 = sum(abs2, dr)
     params = (A, B, C)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
+    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -124,6 +124,6 @@ end
     end
 end
 
-function potential(::Buckingham, r2, invr2, (A, B, C))
-    return A * exp(-B * sqrt(r2)) - C * invr2^3
+function pairwise_pe(::Buckingham, r2, (A, B, C))
+    return A * exp(-B * sqrt(r2)) - C * inv(r2)^3
 end

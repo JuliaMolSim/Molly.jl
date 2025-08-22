@@ -120,7 +120,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
+    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -128,8 +128,8 @@ end
     end
 end
 
-function potential(::LennardJones, r2, invr2, (σ2, ϵ))
-    six_term = (σ2 * invr2) ^ 3
+function pairwise_pe(::LennardJones, r2, (σ2, ϵ))
+    six_term = (σ2 / r2) ^ 3
     return 4ϵ * (six_term ^ 2 - six_term)
 end
 
@@ -250,7 +250,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ, inter.σ6_fac)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
+    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -258,7 +258,7 @@ end
     end
 end
 
-function potential(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
+function pairwise_pe(::LennardJonesSoftCore, r2, (σ2, ϵ, σ6_fac))
     six_term = σ2^3 * inv(r2^3 + σ2^3 * σ6_fac)
     return 4ϵ * (six_term ^ 2 - six_term)
 end
@@ -400,7 +400,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ, λ)
 
-    pe = potential_with_cutoff(inter, r2, params, cutoff, energy_units)
+    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -408,10 +408,12 @@ end
     end
 end
 
-@inline function potential(::AshbaughHatch, r2, invr2, (σ2, ϵ, λ))
+@inline function pairwise_pe(::AshbaughHatch, r2, (σ2, ϵ, λ))
+    six_term = (σ2 / r2) ^ 3
+    lj_term = 4ϵ * (six_term ^ 2 - six_term)
     if r2 < (2^(1/3) * σ2)
-        return potential(LennardJones(), r2, invr2, (σ2, ϵ)) + ϵ * (1 - λ) 
+        return lj_term + ϵ * (1 - λ) 
     else
-        return λ * potential(LennardJones(), r2, invr2, (σ2, ϵ))
+        return λ * lj_term
     end
 end
