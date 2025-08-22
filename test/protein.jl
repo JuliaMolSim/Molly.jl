@@ -88,6 +88,8 @@ end
                      nonbonded_method="pme", center_coords=false)
     sys_pme_exact = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
                            nonbonded_method="pme", approximate_pme=false, center_coords=false)
+    zero(sys)
+    zero(sys_pme)
     neighbors = find_neighbors(sys)
 
     @test count(i -> is_any_atom(  sys.atoms[i], sys.atoms_data[i]), eachindex(sys)) == 15954
@@ -209,6 +211,7 @@ end
         approximate_pme=false,
         center_coords=false,
     )
+    zero(sys_nounits)
     simulator_nounits = VelocityVerlet(dt=0.0005)
     @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
     @test temperature(sys_nounits)u"K" ≈ 329.3202932884933u"K"
@@ -242,6 +245,7 @@ end
             nonbonded_method="cutoff",
             center_coords=false,
         )
+        zero(sys)
         @test kinetic_energy(sys) ≈ 65521.87288132431u"kJ * mol^-1"
         @test temperature(sys) ≈ 329.3202932884933u"K"
 
@@ -260,6 +264,7 @@ end
             nonbonded_method="pme",
             center_coords=false,
         )
+        zero(sys_pme)
 
         neighbors = find_neighbors(sys_pme)
         openmm_forces_fp = joinpath(openmm_dir, "forces_all_pme.txt")
@@ -312,6 +317,7 @@ end
             approximate_pme=false,
             center_coords=false,
         )
+        zero(sys_nounits)
         @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
         @test temperature(sys_nounits)u"K" ≈ 329.3202932884933u"K"
 

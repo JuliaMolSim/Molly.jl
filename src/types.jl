@@ -734,6 +734,32 @@ function System(crystal::Crystal{D};
     )
 end
 
+function Base.zero(sys::System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K,
+                               M, IM, DA}) where {D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+                                                  L, F, E, K, M, IM, DA}
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, IM, DA}(
+        zero.(sys.atoms),
+        zero(sys.coords),
+        zero(sys.boundary),
+        zero(sys.velocities),
+        sys.atoms_data,
+        sys.topology,
+        zero.(sys.pairwise_inters),
+        zero.(sys.specific_inter_lists),
+        zero.(sys.general_inters),
+        sys.constraints,
+        sys.neighbor_finder,
+        sys.loggers,
+        sys.df,
+        sys.force_units,
+        sys.energy_units,
+        zero(sys.k),
+        zero(sys.masses),
+        zero(sys.inv_masses),
+        sys.data,
+    )
+end
+
 """
     inject_gradients(sys, params_dic)
 
