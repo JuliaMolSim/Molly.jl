@@ -34,6 +34,70 @@
     @test all(forces_direct .≈ forces_grad)
 end
 
+@testset "Differentiable PME" begin
+    T = Float64
+    AT = Array
+    ff = MolecularForceField(
+        T,
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...,
+        units=false,
+    )
+    sys = System(
+        joinpath(data_dir, "6mrr_equil.pdb"),
+        ff;
+        units=false,
+        array_type=AT,
+        nonbonded_method="pme",
+        grad_safe=true,
+    )
+
+    pme = sys.general_inters[1]
+    Fs = zero(sys.coords)
+    d_sys = zero(sys)
+    d_pme = zero(pme)
+
+    pe = Molly.ewald_pe_forces!(Fs, sys, pme)
+    Fs_ad = zero(sys.coords)
+
+    pe_ad = autodiff(
+        ReverseWithPrimal,
+        Molly.ewald_pe_forces!,
+        Active,
+        Const(Fs_ad),
+        Duplicated(sys, d_sys),
+        Duplicated(pme, d_pme),
+    )[2]
+
+    @test pe_ad ≈ pe atol=1e-7
+    @test Fs_ad ≈ Fs atol=1e-10
+    @test -d_sys.coords ≈ Fs atol=1e-10
+
+    function coord_fdm(c)
+        coords_mod = copy(sys.coords)
+        coords_mod[1] = SVector(c, coords_mod[1][2], coords_mod[1][3])
+        sys_mod = System(deepcopy(sys); coords=coords_mod)
+        return Molly.ewald_pe_forces!(Fs, sys_mod, pme)
+    end
+
+    c = sys.coords[1][1]
+    coord_fdm(c)
+    coord_grad = central_fdm(5, 1)(coord_fdm, c)
+    @test d_sys.coords[1][1] ≈ coord_grad atol=1e-6
+
+    function charge_fdm(ch)
+        atoms_mod = copy(sys.atoms)
+        at = sys.atoms[1]
+        atoms_mod[1] = Atom(mass=at.mass, charge=ch, σ=at.σ, ϵ=at.σ)
+        sys_mod = System(deepcopy(sys); atoms=atoms_mod)
+        return Molly.ewald_pe_forces!(Fs, sys_mod, pme)
+    end
+
+    at = sys.atoms[1]
+    charge_fdm(charge(at))
+    charge_grad = central_fdm(5, 1)(charge_fdm, charge(at))
+    @test charge(d_sys.atoms[1]) ≈ charge_grad atol=1e-6
+end
+
 @testset "Differentiable simulation" begin
     runs = [ #               gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
         ("CPU"             , Array, false, false, false, false, false, 1e-4, 1e-4),
