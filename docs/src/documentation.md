@@ -876,15 +876,18 @@ The available cutoffs are:
 - [`ShiftedForceCutoff`](@ref)
 - [`CubicSplineCutoff`](@ref)
 
-The following interactions can use a cutoff:
+The following built-in interactions can use a cutoff:
 - [`LennardJones`](@ref)
 - [`LennardJonesSoftCore`](@ref)
+- [`AshbaughHatch`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
 - [`Buckingham`](@ref)
 - [`Coulomb`](@ref)
 - [`CoulombSoftCore`](@ref)
-In addition, [`CoulombReactionField`](@ref) and the implicit solvent models have a `dist_cutoff` argument for a cutoff distance.
+- [`Yukawa`](@ref)
+- [`Gravity`](@ref)
+In addition, [`CoulombReactionField`](@ref), [`CoulombEwald`](@ref) and the implicit solvent and Ewald general interactions have a `dist_cutoff` argument for a cutoff distance.
 
 ## Boundaries
 

@@ -1,7 +1,7 @@
 export Gravity
 
 @doc raw"""
-    Gravity(; G, use_neighbors)
+    Gravity(; cutoff, G, use_neighbors)
 
 The gravitational interaction between two atoms.
 
@@ -10,7 +10,8 @@ The potential energy is defined as
 V(r_{ij}) = -\frac{G m_i m_j}{r_{ij}}
 ```
 """
-@kwdef struct Gravity{T}
+@kwdef struct Gravity{T, C}
+    cutoff::C = NoCutoff()
     G::T = Unitful.G
     use_neighbors::Bool = false
 end
@@ -18,19 +19,20 @@ end
 use_neighbors(inter::Gravity) = inter.use_neighbors
 
 function Base.zero(gr::Gravity{T}) where T
-    return Gravity(zero(T), gr.use_neighbors)
+    return Gravity(gr.cutoff, zero(T), gr.use_neighbors)
 end
 
-Base.:+(g1::Gravity, g2::Gravity) = Gravity(g1.G + g2.G, g1.use_neighbors)
+Base.:+(g1::Gravity, g2::Gravity) = Gravity(g1.cutoff, g1.G + g2.G, g1.use_neighbors)
 
 @inline function force(inter::Gravity,
                        dr,
                        atom_i,
                        atom_j,
+                       force_units=u"kJ * mol^-1 * nm^-1",
                        args...)
     r2 = sum(abs2, dr)
     params = (inter.G, mass(atom_i), mass(atom_j))
-    f = force_divr(inter, r2, inv(r2), params)
+    f = force_divr_with_cutoff(inter, r2, params, inter.cutoff, force_units)
     return f * dr
 end
 
@@ -42,10 +44,11 @@ end
                                   dr,
                                   atom_i,
                                   atom_j,
+                                  energy_units=u"kJ * mol^-1",
                                   args...)
     r2 = sum(abs2, dr)
     params = (inter.G, mass(atom_i), mass(atom_j))
-    return pairwise_pe(inter, r2, params)
+    return pe_cutoff(inter.cutoff, inter, r2, params, energy_units)
 end
 
 function pairwise_pe(::Gravity, r2, (G, mi, mj))
