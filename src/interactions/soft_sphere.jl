@@ -45,13 +45,13 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
-    return f * dr
+    f = force_cutoff(cutoff, inter, r2, params, force_units)
+    return f * normalize(dr)
 end
 
-function force_divr(::SoftSphere, r2, invr2, (σ2, ϵ))
-    six_term = (σ2 * invr2) ^ 3
-    return (24ϵ * invr2) * 2 * six_term ^ 2
+function pairwise_force(::SoftSphere, r2, (σ2, ϵ))
+    six_term = (σ2 / r2) ^ 3
+    return (24ϵ / sqrt(r2)) * 2 * six_term ^ 2
 end
 
 @inline function potential_energy(inter::SoftSphere,

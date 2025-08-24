@@ -85,17 +85,18 @@ end
     r2 = sum(abs2, dr)
     params = (A, B, C)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
+    f = force_cutoff(cutoff, inter, r2, params, force_units)
+    fdr = f * normalize(dr)
     if special
-        return f * dr * inter.weight_special
+        return fdr * inter.weight_special
     else
-        return f * dr
+        return fdr
     end
 end
 
-function force_divr(::Buckingham, r2, invr2, (A, B, C))
+function pairwise_force(::Buckingham, r2, (A, B, C))
     r = sqrt(r2)
-    return A * B * exp(-B * r) / r - 6 * C * invr2^4
+    return A * B * exp(-B * r) - 6 * C * inv(r*r2^3)
 end
 
 @inline function potential_energy(inter::Buckingham,

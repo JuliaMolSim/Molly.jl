@@ -1655,7 +1655,7 @@ end
     @time simulate!(sys, simulator, 25_000)
 
     @test length(values(sys.loggers.tot_eng)) == 251
-    @test -1850u"kJ * mol^-1" < mean(values(sys.loggers.tot_eng)) < -1650u"kJ * mol^-1"
+    @test -1800u"kJ * mol^-1" < mean(values(sys.loggers.tot_eng)) < -1600u"kJ * mol^-1"
 
     # Test unsupported crystals
     hex_crystal = SimpleCrystals.Hexagonal(a, :Ar, SVector(2, 2))

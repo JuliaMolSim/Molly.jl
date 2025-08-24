@@ -69,16 +69,17 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     params = (ke, qi, qj)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
+    f = force_cutoff(cutoff, inter, r2, params, force_units)
+    fdr = f * normalize(dr)
     if special
-        return f * dr * inter.weight_special
+        return fdr * inter.weight_special
     else
-        return f * dr
+        return fdr
     end
 end
 
-function force_divr(::Coulomb, r2, invr2, (ke, qi, qj))
-    return (ke * qi * qj) / √(r2 ^ 3)
+function pairwise_force(::Coulomb, r2, (ke, qi, qj))
+    return (ke * qi * qj) / r2
 end
 
 @inline function potential_energy(inter::Coulomb{C},
@@ -173,20 +174,20 @@ end
     σ = inter.σ_mixing(atom_i, atom_j)
     params = (ke, qi, qj, σ, inter.σ6_fac)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
+    f = force_cutoff(cutoff, inter, r2, params, force_units)
+    fdr = f * normalize(dr)
     if special
-        return f * dr * inter.weight_special
+        return fdr * inter.weight_special
     else
-        return f * dr
+        return fdr
     end
 end
 
-function force_divr(::CoulombSoftCore, r2, invr2, (ke, qi, qj, σ, σ6_fac))
+function pairwise_force(::CoulombSoftCore, r2, (ke, qi, qj, σ, σ6_fac))
     inv_rsc6 = inv(r2^3 + σ6_fac * σ^6)
     inv_rsc2 = cbrt(inv_rsc6)
     inv_rsc3 = sqrt(inv_rsc6)
-    ff = (ke * qi * qj) * inv_rsc2 * sqrt(r2)^5 * inv_rsc2 * inv_rsc3
-    return ff * √invr2
+    return (ke * qi * qj) * inv_rsc2 * sqrt(r2)^5 * inv_rsc2 * inv_rsc3
 end
 
 @inline function potential_energy(inter::CoulombSoftCore,
@@ -213,7 +214,7 @@ end
 
 function pairwise_pe(::CoulombSoftCore, r2, (ke, qi, qj, σ, σ6_fac))
     inv_rsc6 = inv(r2^3 + σ6_fac * σ^6)
-    return (ke * qi * qj) * √cbrt(inv_rsc6)
+    return (ke * qi * qj) * sqrt(cbrt(inv_rsc6))
 end
 
 const crf_solvent_dielectric = 78.3
@@ -285,7 +286,7 @@ end
     r2 = sum(abs2, dr)
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    r = √r2
+    r = sqrt(r2)
     if special
         # 1-4 interactions do not use the reaction field approximation
         krf = (1 / (inter.dist_cutoff ^ 3)) * 0
@@ -314,7 +315,7 @@ end
     r2 = sum(abs2, dr)
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    r = √r2
+    r = sqrt(r2)
     if special
         # 1-4 interactions do not use the reaction field approximation
         krf = (1 / (inter.dist_cutoff ^ 3)) * 0
@@ -433,7 +434,7 @@ end
     r2 = sum(abs2, dr)
     ke, α = inter.coulomb_const, inter.α
     qi, qj = atom_i.charge, atom_j.charge
-    r = √r2
+    r = sqrt(r2)
     inv_r = inv(r)
     αr = α * r
     exp_mαr2 = exp(-αr^2)
@@ -458,7 +459,7 @@ end
     r2 = sum(abs2, dr)
     ke, α = inter.coulomb_const, inter.α
     qi, qj = atom_i.charge, atom_j.charge
-    r = √r2
+    r = sqrt(r2)
     inv_r = inv(r)
     αr = α * r
     exp_mαr2 = exp(-αr^2)
@@ -529,17 +530,18 @@ end
     kappa = inter.kappa
     params = (coulomb_const, qi, qj, kappa)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
+    f = force_cutoff(cutoff, inter, r2, params, force_units)
+    fdr = f * normalize(dr)
     if special
-        return f * dr * inter.weight_special
+        return fdr * inter.weight_special
     else
-        return f * dr
+        return fdr
     end
 end
 
-function force_divr(::Yukawa, r2, invr2, (coulomb_const, qi, qj, kappa))
+function pairwise_force(::Yukawa, r2, (coulomb_const, qi, qj, kappa))
     r = sqrt(r2)
-    return (coulomb_const * qi * qj) * exp(-kappa * r) * (kappa * r + 1) / r^3
+    return (coulomb_const * qi * qj) * exp(-kappa * r) * (kappa * r + 1) / r2
 end
 
 @inline function potential_energy(inter::Yukawa,

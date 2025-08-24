@@ -32,12 +32,12 @@ Base.:+(g1::Gravity, g2::Gravity) = Gravity(g1.cutoff, g1.G + g2.G, g1.use_neigh
                        args...)
     r2 = sum(abs2, dr)
     params = (inter.G, mass(atom_i), mass(atom_j))
-    f = force_divr_with_cutoff(inter, r2, params, inter.cutoff, force_units)
-    return f * dr
+    f = force_cutoff(inter.cutoff, inter, r2, params, force_units)
+    return f * normalize(dr)
 end
 
-function force_divr(::Gravity, r2, invr2, (G, mi, mj))
-    return (-G * mi * mj) / √(r2 ^ 3)
+function pairwise_force(::Gravity, r2, (G, mi, mj))
+    return (-G * mi * mj) / r2
 end
 
 @inline function potential_energy(inter::Gravity,

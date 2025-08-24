@@ -77,23 +77,24 @@ end
 
     cutoff = inter.cutoff
     r2 = sum(abs2, dr)
-    r = √r2
+    r = sqrt(r2)
     m = inter.m
     n = inter.n
     const_mn = inter.mn_fac * ϵ
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
+    f = force_cutoff(cutoff, inter, r2, params, force_units)
+    fdr = f * normalize(dr)
     if special
-        return f * dr * inter.weight_special
+        return fdr * inter.weight_special
     else
-        return f * dr
+        return fdr
     end
 end
 
-function force_divr(::Mie, r2, invr2, (m, n, σ_r, const_mn))
-    return -const_mn / r2 * (m * σ_r ^ m - n * σ_r ^ n)
+function pairwise_force(::Mie, r2, (m, n, σ_r, const_mn))
+    return -const_mn / sqrt(r2) * (m * σ_r ^ m - n * σ_r ^ n)
 end
 
 @inline function potential_energy(inter::Mie,
@@ -111,7 +112,7 @@ end
 
     cutoff = inter.cutoff
     r2 = sum(abs2, dr)
-    r = √r2
+    r = sqrt(r2)
     m = inter.m
     n = inter.n
     const_mn = inter.mn_fac * ϵ

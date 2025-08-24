@@ -89,17 +89,18 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
+    f = force_cutoff(cutoff, inter, r2, params, force_units)
+    fdr = f * normalize(dr)
     if special
-        return f * dr * inter.weight_special
+        return fdr * inter.weight_special
     else
-        return f * dr
+        return fdr
     end
 end
 
-function force_divr(::LennardJones, r2, invr2, (σ2, ϵ))
-    six_term = (σ2 * invr2) ^ 3
-    return (24ϵ * invr2) * (2 * six_term ^ 2 - six_term)
+function pairwise_force(::LennardJones, r2, (σ2, ϵ))
+    six_term = (σ2 / r2) ^ 3
+    return (24ϵ / sqrt(r2)) * (2 * six_term ^ 2 - six_term)
 end
 
 @inline function potential_energy(inter::LennardJones,
@@ -216,20 +217,20 @@ end
     σ2 = σ^2
     params = (σ2, ϵ, inter.σ6_fac)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
+    f = force_cutoff(cutoff, inter, r2, params, force_units)
+    fdr = f * normalize(dr)
     if special
-        return f * dr * inter.weight_special
+        return fdr * inter.weight_special
     else
-        return f * dr
+        return fdr
     end
 end
 
-function force_divr(::LennardJonesSoftCore, r2, invr2, (σ2, ϵ, σ6_fac))
+function pairwise_force(::LennardJonesSoftCore, r2, (σ2, ϵ, σ6_fac))
     inv_rsc6 = inv(r2^3 + σ2^3 * σ6_fac) # rsc = (r2^3 + α * σ2^3 * λ^p)^(1/6)
-    inv_rsc  = √cbrt(inv_rsc6)
+    inv_rsc  = sqrt(cbrt(inv_rsc6))
     six_term = σ2^3 * inv_rsc6
-    ff  = (24ϵ * inv_rsc) * (2 * six_term^2 - six_term) * (√r2 * inv_rsc)^5
-    return ff * √invr2
+    return (24ϵ * inv_rsc) * (2 * six_term^2 - six_term) * (sqrt(r2) * inv_rsc)^5
 end
 
 @inline function potential_energy(inter::LennardJonesSoftCore,
@@ -365,19 +366,22 @@ end
     σ2 = σ^2
     params = (σ2, ϵ, λ)
 
-    f = force_divr_with_cutoff(inter, r2, params, cutoff, force_units)
+    f = force_cutoff(cutoff, inter, r2, params, force_units)
+    fdr = f * normalize(dr)
     if special
-        return f * dr * inter.weight_special
+        return fdr * inter.weight_special
     else
-        return f * dr
+        return fdr
     end
 end
 
-@inline function force_divr(::AshbaughHatch, r2, invr2, (σ2, ϵ, λ))
+@inline function pairwise_force(::AshbaughHatch, r2, (σ2, ϵ, λ))
+    six_term = (σ2 / r2) ^ 3
+    lj_term = (24ϵ / sqrt(r2)) * (2 * six_term ^ 2 - six_term)
     if r2 < (2^(1/3) * σ2)
-        return  force_divr(LennardJones(), r2, invr2, (σ2, ϵ))
+        return lj_term
     else
-        return λ * force_divr(LennardJones(), r2, invr2, (σ2, ϵ)) 
+        return λ * lj_term
     end
 end
 
