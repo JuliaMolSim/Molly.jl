@@ -1496,8 +1496,9 @@ function update_ase_calc! end
         calculate_potential::Bool = false
     )
 
-Defines a general interaction that will call LAMMPS to calculate forces and energies. Any potential
-which supports OpenMP in LAMMPS will use `n_threads` threads to calculate forces and energies.
+Defines a general interaction that will call LAMMPS to calculate forces and energies. Forces
+and energies are calculated on a single thread. You must call LAMMPS.MPI.Init() for LAMMPS.jl
+to load the LAMMPS executable on systems where MPI is available.
 
 Restrictions:
 -------------
@@ -1515,7 +1516,9 @@ Arguments:
 - `potential_definition::Union{String, Array{String}}` : Commands passed to lammps which define your interaction.
     For example, to define LJ you pass:
     `lj_cmds = ["pair_style lj/cut 8.5", "pair_coeff * * 0.0104 3.4", "pair_modify shift yes"]`
-- `n_threads::Integer=Threads.nthreads()` : Number of OpenMP threads LAMMPS is configured to use
+- `label_type_map::Dict{Symbol, Int} = Dict{Symbol, Int}()` : By default atom types are assigned in the 
+    order they appear in the system. This can make defining the potential for multi-atomic systems
+    difficult. By providing this dictionary you can overide the type label assigned to each unique species. 
 - `extra_lammps_commands::Union{String, Array{String}}` : Any other commands you want to pass to LAMMPS. 
     This feature is untested, but allows flexability to modify the LAMMPS system. 
 - `logfile_path::String = "none"` : Path where LAMMPS logfile is written. Defaults to no log file.

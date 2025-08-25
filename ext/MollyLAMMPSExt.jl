@@ -57,13 +57,11 @@ function check_lammps_units(energy_unit, force_unit, lammps_units)
 
 end
 
-#! TODO: POTENTIAL DEFINITIONS TYPICALLY USE TYPES
-#! BUT I AM ASSIGNING THOSE AUTOMAGICALLY
 function Molly.LAMMPSCalculator(
         sys::System{3, AT, T},
         lammps_unit_system::String,
         potential_definition::Union{String, Array{String}};
-        n_threads::Integer=Threads.nthreads(),
+        label_type_map::Dict{Symbol, Int} = Dict{Symbol, Int}(),
         extra_lammps_commands::Union{String, Array{String}} = "",
         logfile_path::String = "none",
         calculate_potential::Bool = false
@@ -92,35 +90,66 @@ function Molly.LAMMPSCalculator(
 
     check_lammps_units(sys.energy_units, sys.force_units, lammps_unit_system)
 
-    # If Molly ever uses MPI this can take the MPI.Comm handle
-    # For now just use OpenMP
-    lmp = LMP(["-screen","none", "-sf", "omp", "-pk", "omp", "$(n_threads)"], LAMMPS.MPI.COMM_WORLD)
+    # OpenMP doesnt seem to make a difference...
+    # lmp = LMP(["-screen","none", "-sf", "omp", "-pk", "omp", "$(n_threads)"], LAMMPS.MPI.COMM_WORLD)
+    lmp = LMP(["-screen","none"], LAMMPS.MPI.COMM_WORLD)
 
     all_syms = Molly.atomic_symbol(sys)
     unique_syms = unique(all_syms)
+    unique_sym_idxs = Dict(sym => findfirst(x -> x == sym, all_syms) for sym in unique_syms)
 
     if any(unique_syms .== :unknown)
-        error(ArgumentError("All atoms must have atomic symbols to use LAMMPSCalculators"))
+        error(ArgumentError("All atoms must have atomic symbols to use LAMMPSCalculator"))
+    end
+    
+    ids = collect(Int32, 1:length(sys))
+    xhi, yhi, zhi = ustrip.(sys.boundary)
+
+    if length(label_type_map) == 0
+        label_type_map = Dict(sym => Int32(i) for (i, sym) in enumerate(unique_syms))
+        types = [label_type_map[sym] for sym in all_syms]
+    else 
+        unique_sym_user = keys(label_type_map)
+        if Set(unique_sym_user) != Set(unique_syms)
+            error(ArgumentError("You provided a label_type_map with $(unique_sym_user) symbols, but" *
+                " the system has $(unique_syms). They must match exactly if you pass label_type_map."))
+        end
+        types = [Int32(label_type_map[sym]) for sym in all_syms]
     end
 
-    unique_sym_idxs = Dict(sym => findfirst(x -> x == sym, all_syms) for sym in unique_syms)
-    type_map = Dict(sym => Int32(i) for (i, sym) in enumerate(unique_syms))
-    types = [type_map[sym] for sym in all_syms]
-    ids = collect(Int32, 1:length(sys))
+    m_lmp = Dict(label_type_map[sym] => convert_mass(sys.masses[i], lammps_unit_system) for (sym, i) in unique_sym_idxs)
 
-    command(lmp, """
+    label_map_cmd = "labelmap atom " * join(["$(i) $(sym)" for (sym,i) in label_type_map], " ") 
+
+    setup_cmd = """
             log $(logfile_path)
             units $(lammps_unit_system)
             atom_style atomic
             atom_modify map array sort 0 0
-        """)
-
-    xhi, yhi, zhi = ustrip.(sys.boundary)
-    command(lmp, """
+        """
+    
+    cell_cmd = """
             boundary p p p
             region cell block 0 $(xhi) 0 $(yhi) 0 $(zhi) units box
             create_box $(length(unique_syms)) cell
-        """)
+            $(label_map_cmd)
+        """
+    
+    mass_cmd = join(["mass $(type) $(m)" for (type,m) in  m_lmp], "\n")
+
+    if length(extra_lammps_commands) > 0
+        command(lmp, extra_lammps_commands)
+    end
+
+    #! NONE OF THESE ARE ACTUALLY TYPES DOES NOT WORK....
+    # calculate_potential |=  any(x -> isa(x, PotentialEnergyLogger) || isa(x, TotalEnergyLogger), sys.loggers)
+    if calculate_potential
+        command(lmp, "compute pot_e all pe")
+    end
+
+    command(lmp, setup_cmd)
+    command(lmp, cell_cmd)
+    command(lmp, mass_cmd)
 
     LAMMPS.create_atoms(
         lmp,
@@ -129,18 +158,14 @@ function Molly.LAMMPSCalculator(
         types
     )   
 
-    m_lmp = Dict(type_map[sym] => convert_mass(sys.masses[i], lammps_unit_system) for (sym, i) in unique_sym_idxs)
-    command(lmp, ["mass $(type) $(m)" for (type,m) in  m_lmp])
-
-    command(lmp, potential_definition)
-
-    if length(extra_lammps_commands) > 0
-        command(lmp, extra_lammps_commands)
+    try
+        command(lmp, potential_definition)
+    catch e
+        if startswith(e.msg, "Number of element to type mappings does")
+            @info "Ensure path to potential definition is wrapped in quotes if there are spaces in path."
+        end
+        rethrow(e)
     end
-
-    #! NONE OF THESE ARE ACTUALLY TYPES DOES NOT WORK....
-    # calculate_potential |=  any(x -> isa(x, PotentialEnergyLogger) || isa(x, TotalEnergyLogger), sys.loggers)
-    calculate_potential && command(lmp, "compute pot_e all pe")
 
     # This allows LAMMPS to register the computes/fixes
     # and build the neighbor list. 
