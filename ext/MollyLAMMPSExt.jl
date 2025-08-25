@@ -192,7 +192,7 @@ function maybe_run_lammps_calc!(lammps_calc, r::AbstractVector{T}, step_n) where
 end
 
 AtomsCalculators.energy_unit(calc::LAMMPSCalculator) = calc.energy_unit
-AtomCalculators.force_unit(calc::LAMMPSCalculator) = calc.energy_unit / calc.force_unit
+AtomsCalculators.force_unit(calc::LAMMPSCalculator) = calc.energy_unit / calc.force_unit
 
 function AtomsCalculators.forces!(fs::AbstractVector{T}, sys, inter::LAMMPSCalculator; step_n=0, kwargs...) where T
     maybe_run_lammps_calc!(inter, sys.coords, step_n)
