@@ -177,7 +177,7 @@ function Molly.LAMMPSCalculator(
     # and build the neighbor list. 
     command(lmp, "run 0 post no")
 
-    length_unit = inv(force_unit / energy_unit)
+    length_unit = inv(sys.force_units / sys.energy_units)
     return LAMMPSCalculator{typeof(lmp)}(lmp, -1, sys.energy_units, length_unit)
 end
 
