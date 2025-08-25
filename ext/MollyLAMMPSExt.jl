@@ -177,7 +177,8 @@ function Molly.LAMMPSCalculator(
     # and build the neighbor list. 
     command(lmp, "run 0 post no")
 
-    return LAMMPSCalculator{typeof(lmp)}(lmp, -1)
+    length_unit = inv(force_unit / energy_unit)
+    return LAMMPSCalculator{typeof(lmp)}(lmp, -1, sys.energy_units, length_unit)
 end
 
 function maybe_run_lammps_calc!(lammps_calc, r::AbstractVector{T}, step_n) where T
@@ -189,6 +190,9 @@ function maybe_run_lammps_calc!(lammps_calc, r::AbstractVector{T}, step_n) where
         lammps_calc.last_updated = step_n
     end
 end
+
+AtomsCalculators.energy_unit(calc::LAMMPSCalculator) = calc.energy_unit
+AtomCalculators.force_unit(calc::LAMMPSCalculator) = calc.energy_unit / calc.force_unit
 
 function AtomsCalculators.forces!(fs::AbstractVector{T}, sys, inter::LAMMPSCalculator; step_n=0, kwargs...) where T
     maybe_run_lammps_calc!(inter, sys.coords, step_n)

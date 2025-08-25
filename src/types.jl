@@ -1529,9 +1529,11 @@ Arguments:
     automatically be turned on if loggers requiring potential energy are detected. Other use cases
     like Monte-Carlo (and its associated barostat) require setting this flag to true. 
 """
-mutable struct LAMMPSCalculator{T}
+mutable struct LAMMPSCalculator{T, E, L}
     lmp::T # T will be LMP but that is not available here
     last_updated::Int
+    energy_unit::E
+    length_unit::L
 end
 
 iszero_value(x) = iszero(x)
