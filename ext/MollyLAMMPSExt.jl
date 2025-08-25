@@ -6,9 +6,6 @@ using Unitful
 import AtomsCalculators
 import AtomsBase
 
-
-LAMMPS.MPI.Init()
-
 const lammps_mass_units_map = Dict("metal" => u"g/mol", "real" => u"g/mol", "si" => u"kg")
 
 function convert_mass(m, lammps_units)
@@ -36,25 +33,34 @@ function check_lammps_units(energy_unit, force_unit, lammps_units)
     err = (U, LE, LA, EE, EA) -> ArgumentError("You picked $(U) units. Expected length units $(LE) and got $(LA). Expected energy units $(EE) and got $(EA)")
 
     if lammps_units == "metal"
-        if length_unit != u"angstrom" && energy_unit != u"eV"
+        if length_unit != u"angstrom" || energy_unit != u"eV"
             error(err("metal", u"angstrom", length_unit, u"eV", energy_unit))
         end
     elseif lammps_units == "lj"
-        if length_unit != NoUnits && energy_unit != NoUnits
+        if length_unit != NoUnits || energy_unit != NoUnits
             error(err("lj", "NoUnits", length_unit, "NoUnits", energy_unit))
         end
     elseif lammps_units == "real"
-        if length_unit != u"angstrom" && energy_unit != u"kcal/mol"
+        if length_unit != u"angstrom" || energy_unit != u"kcal/mol"
             error(err("real", u"angstrom", length_unit, u"kcal/mol", energy_unit))
         end
     elseif lammps_units == "si"
-        if length_unit != u"m" && energy_unit != u"J"
+        if length_unit != u"m" || energy_unit != u"J"
             error(err("si", u"m", length_unit, u"J", energy_unit))
         end
     else
-        error(ArgumentError("Unsupported LAMMPS unit system, $(lammps_units). Expected one of (metal, real, lj)."))
+        error(ArgumentError("Unsupported LAMMPS unit system, $(lammps_units). Expected one of (metal, real, lj, si)."))
     end
 
+end
+
+function has_logger_with_pe(sys)
+    for logger in sys.loggers
+        if logger.observable == Molly.potential_energy_wrapper || logger.observable == Molly.total_energy_wrapper
+            return true
+        end
+    end
+    return false
 end
 
 function Molly.LAMMPSCalculator(
@@ -142,7 +148,7 @@ function Molly.LAMMPSCalculator(
     end
 
     #! NONE OF THESE ARE ACTUALLY TYPES DOES NOT WORK....
-    # calculate_potential |=  any(x -> isa(x, PotentialEnergyLogger) || isa(x, TotalEnergyLogger), sys.loggers)
+    calculate_potential |= has_logger_with_pe(sys)
     if calculate_potential
         command(lmp, "compute pot_e all pe")
     end
