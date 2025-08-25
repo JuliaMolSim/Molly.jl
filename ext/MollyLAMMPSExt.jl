@@ -178,7 +178,8 @@ function Molly.LAMMPSCalculator(
     command(lmp, "run 0 post no")
 
     length_unit = inv(sys.force_units / sys.energy_units)
-    return LAMMPSCalculator{typeof(lmp)}(lmp, -1, sys.energy_units, length_unit)
+    return LAMMPSCalculator{typeof(lmp), typeof(sys.energy_units), typeof(length_unit)}(
+                            lmp, -1, sys.energy_units, length_unit)
 end
 
 function maybe_run_lammps_calc!(lammps_calc, r::AbstractVector{T}, step_n) where T
