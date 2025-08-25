@@ -63,14 +63,14 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...) where C
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     params = (ke, qi, qj)
 
-    f = force_cutoff(cutoff, inter, r2, params, force_units)
-    fdr = f * normalize(dr)
+    f = force_cutoff(cutoff, inter, r, params, force_units)
+    fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -78,8 +78,8 @@ end
     end
 end
 
-function pairwise_force(::Coulomb, r2, (ke, qi, qj))
-    return (ke * qi * qj) / r2
+function pairwise_force(::Coulomb, r, (ke, qi, qj))
+    return (ke * qi * qj) / r^2
 end
 
 @inline function potential_energy(inter::Coulomb{C},
@@ -89,13 +89,13 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...) where C
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     params = (ke, qi, qj)
 
-    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -103,8 +103,8 @@ end
     end
 end
 
-function pairwise_pe(::Coulomb, r2, (ke, qi, qj))
-    return (ke * qi * qj) * sqrt(inv(r2))
+function pairwise_pe(::Coulomb, r, (ke, qi, qj))
+    return (ke * qi * qj) * inv(r)
 end
 
 @doc raw"""
@@ -167,15 +167,15 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     σ = inter.σ_mixing(atom_i, atom_j)
     params = (ke, qi, qj, σ, inter.σ6_fac)
 
-    f = force_cutoff(cutoff, inter, r2, params, force_units)
-    fdr = f * normalize(dr)
+    f = force_cutoff(cutoff, inter, r, params, force_units)
+    fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -183,11 +183,12 @@ end
     end
 end
 
-function pairwise_force(::CoulombSoftCore, r2, (ke, qi, qj, σ, σ6_fac))
-    inv_rsc6 = inv(r2^3 + σ6_fac * σ^6)
+function pairwise_force(::CoulombSoftCore, r, (ke, qi, qj, σ, σ6_fac))
+    r5 = r^5
+    inv_rsc6 = inv(r5*r + σ6_fac * σ^6)
     inv_rsc2 = cbrt(inv_rsc6)
     inv_rsc3 = sqrt(inv_rsc6)
-    return (ke * qi * qj) * inv_rsc2 * sqrt(r2)^5 * inv_rsc2 * inv_rsc3
+    return (ke * qi * qj) * inv_rsc2 * r5 * inv_rsc2 * inv_rsc3
 end
 
 @inline function potential_energy(inter::CoulombSoftCore,
@@ -197,14 +198,14 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special=false,
                                   args...)
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     σ = inter.σ_mixing(atom_i, atom_j)
     params = (ke, qi, qj, σ, inter.σ6_fac)
 
-    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -212,8 +213,8 @@ end
     end
 end
 
-function pairwise_pe(::CoulombSoftCore, r2, (ke, qi, qj, σ, σ6_fac))
-    inv_rsc6 = inv(r2^3 + σ6_fac * σ^6)
+function pairwise_pe(::CoulombSoftCore, r, (ke, qi, qj, σ, σ6_fac))
+    inv_rsc6 = inv(r^6 + σ6_fac * σ^6)
     return (ke * qi * qj) * sqrt(cbrt(inv_rsc6))
 end
 
@@ -523,15 +524,15 @@ end
                        force_units=u"kJ * mol^-1 * nm^-1",
                        special=false,
                        args...)
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     kappa = inter.kappa
     params = (coulomb_const, qi, qj, kappa)
 
-    f = force_cutoff(cutoff, inter, r2, params, force_units)
-    fdr = f * normalize(dr)
+    f = force_cutoff(cutoff, inter, r, params, force_units)
+    fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -539,9 +540,8 @@ end
     end
 end
 
-function pairwise_force(::Yukawa, r2, (coulomb_const, qi, qj, kappa))
-    r = sqrt(r2)
-    return (coulomb_const * qi * qj) * exp(-kappa * r) * (kappa * r + 1) / r2
+function pairwise_force(::Yukawa, r, (coulomb_const, qi, qj, kappa))
+    return (coulomb_const * qi * qj) * exp(-kappa * r) * (kappa * r + 1) / r^2
 end
 
 @inline function potential_energy(inter::Yukawa,
@@ -551,13 +551,13 @@ end
                                   energy_units=u"kJ * mol^-1",
                                   special::Bool=false,
                                   args...)
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     cutoff = inter.cutoff
     coulomb_const = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
     params = (coulomb_const, qi, qj, inter.kappa)
 
-    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -565,7 +565,6 @@ end
     end
 end
 
-function pairwise_pe(::Yukawa, r2, (coulomb_const, qi, qj, kappa))
-    r = sqrt(r2)
+function pairwise_pe(::Yukawa, r, (coulomb_const, qi, qj, kappa))
     return (coulomb_const * qi * qj) * inv(r) * exp(-kappa * r)
 end

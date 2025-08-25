@@ -91,13 +91,13 @@ function potential_energy(sys::System, neighbors, step_n::Integer=0;
 
     if length(sys.pairwise_inters) > 0
         if n_threads > 1
-            pe = pairwise_pe_threads(sys.atoms, sys.coords, sys.velocities, sys.boundary,
-                                     neighbors, sys.energy_units, length(sys), pairwise_inters_nonl,
-                                     pairwise_inters_nl, Val(T), n_threads, step_n)
+            pe = pairwise_pe_loop_threads(sys.atoms, sys.coords, sys.velocities, sys.boundary,
+                                neighbors, sys.energy_units, length(sys), pairwise_inters_nonl,
+                                pairwise_inters_nl, Val(T), n_threads, step_n)
         else
-            pe = pairwise_pe(sys.atoms, sys.coords, sys.velocities, sys.boundary, neighbors,
-                             sys.energy_units, length(sys), pairwise_inters_nonl,
-                             pairwise_inters_nl, Val(T), step_n)
+            pe = pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary, neighbors,
+                                  sys.energy_units, length(sys), pairwise_inters_nonl,
+                                  pairwise_inters_nl, Val(T), step_n)
         end
     else
         pe = zero(T) * sys.energy_units
@@ -119,8 +119,9 @@ function potential_energy(sys::System, neighbors, step_n::Integer=0;
     return pe
 end
 
-function pairwise_pe(atoms, coords, velocities, boundary, neighbors, energy_units,
-                     n_atoms, pairwise_inters_nonl, pairwise_inters_nl, ::Val{T}, step_n=0) where T
+function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy_units,
+                          n_atoms, pairwise_inters_nonl, pairwise_inters_nl, ::Val{T},
+                          step_n=0) where T
     pe = zero(T) * energy_units
 
     @inbounds if length(pairwise_inters_nonl) > 0
@@ -161,9 +162,9 @@ function pairwise_pe(atoms, coords, velocities, boundary, neighbors, energy_unit
     return pe
 end
 
-function pairwise_pe_threads(atoms, coords, velocities, boundary, neighbors, energy_units, n_atoms,
-                             pairwise_inters_nonl, pairwise_inters_nl, ::Val{T}, n_threads,
-                             step_n=0) where T
+function pairwise_pe_loop_threads(atoms, coords, velocities, boundary, neighbors, energy_units,
+                                  n_atoms, pairwise_inters_nonl, pairwise_inters_nl, ::Val{T},
+                                  n_threads, step_n=0) where T
     pe_chunks_nounits = zeros(T, n_threads)
 
     if length(pairwise_inters_nonl) > 0
@@ -263,12 +264,12 @@ function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(length(sys))
-        pairwise_pe_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters_nonl, nbs, step_n)
+        pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters_nonl, nbs, step_n)
     end
 
     pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nl) > 0
-        pairwise_pe_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters_nl, neighbors, step_n)   
+        pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters_nl, neighbors, step_n)
     end
 
     for inter_list in values(sys.specific_inter_lists)

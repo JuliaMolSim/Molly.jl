@@ -85,12 +85,12 @@ end
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    f = force_cutoff(cutoff, inter, r2, params, force_units)
-    fdr = f * normalize(dr)
+    f = force_cutoff(cutoff, inter, r, params, force_units)
+    fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -98,9 +98,9 @@ end
     end
 end
 
-function pairwise_force(::LennardJones, r2, (σ2, ϵ))
-    six_term = (σ2 / r2) ^ 3
-    return (24ϵ / sqrt(r2)) * (2 * six_term ^ 2 - six_term)
+function pairwise_force(::LennardJones, r, (σ2, ϵ))
+    six_term = (σ2 / r^2) ^ 3
+    return (24ϵ / r) * (2 * six_term ^ 2 - six_term)
 end
 
 @inline function potential_energy(inter::LennardJones,
@@ -117,11 +117,11 @@ end
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -129,8 +129,8 @@ end
     end
 end
 
-function pairwise_pe(::LennardJones, r2, (σ2, ϵ))
-    six_term = (σ2 / r2) ^ 3
+function pairwise_pe(::LennardJones, r, (σ2, ϵ))
+    six_term = (σ2 / r^2) ^ 3
     return 4ϵ * (six_term ^ 2 - six_term)
 end
 
@@ -213,12 +213,12 @@ end
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     σ2 = σ^2
     params = (σ2, ϵ, inter.σ6_fac)
 
-    f = force_cutoff(cutoff, inter, r2, params, force_units)
-    fdr = f * normalize(dr)
+    f = force_cutoff(cutoff, inter, r, params, force_units)
+    fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -226,11 +226,11 @@ end
     end
 end
 
-function pairwise_force(::LennardJonesSoftCore, r2, (σ2, ϵ, σ6_fac))
-    inv_rsc6 = inv(r2^3 + σ2^3 * σ6_fac) # rsc = (r2^3 + α * σ2^3 * λ^p)^(1/6)
+function pairwise_force(::LennardJonesSoftCore, r, (σ2, ϵ, σ6_fac))
+    inv_rsc6 = inv(r^6 + σ2^3 * σ6_fac) # rsc = (r^6 + α * σ2^3 * λ^p)^(1/6)
     inv_rsc  = sqrt(cbrt(inv_rsc6))
     six_term = σ2^3 * inv_rsc6
-    return (24ϵ * inv_rsc) * (2 * six_term^2 - six_term) * (sqrt(r2) * inv_rsc)^5
+    return (24ϵ * inv_rsc) * (2 * six_term^2 - six_term) * (r * inv_rsc)^5
 end
 
 @inline function potential_energy(inter::LennardJonesSoftCore,
@@ -247,11 +247,11 @@ end
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     σ2 = σ^2
     params = (σ2, ϵ, inter.σ6_fac)
 
-    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -259,8 +259,8 @@ end
     end
 end
 
-function pairwise_pe(::LennardJonesSoftCore, r2, (σ2, ϵ, σ6_fac))
-    six_term = σ2^3 * inv(r2^3 + σ2^3 * σ6_fac)
+function pairwise_pe(::LennardJonesSoftCore, r, (σ2, ϵ, σ6_fac))
+    six_term = σ2^3 * inv(r^6 + σ2^3 * σ6_fac)
     return 4ϵ * (six_term ^ 2 - six_term)
 end
 
@@ -362,12 +362,12 @@ end
     λ = inter.λ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     σ2 = σ^2
     params = (σ2, ϵ, λ)
 
-    f = force_cutoff(cutoff, inter, r2, params, force_units)
-    fdr = f * normalize(dr)
+    f = force_cutoff(cutoff, inter, r, params, force_units)
+    fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -375,9 +375,10 @@ end
     end
 end
 
-@inline function pairwise_force(::AshbaughHatch, r2, (σ2, ϵ, λ))
+@inline function pairwise_force(::AshbaughHatch, r, (σ2, ϵ, λ))
+    r2 = r^2
     six_term = (σ2 / r2) ^ 3
-    lj_term = (24ϵ / sqrt(r2)) * (2 * six_term ^ 2 - six_term)
+    lj_term = (24ϵ / r) * (2 * six_term ^ 2 - six_term)
     if r2 < (2^(1/3) * σ2)
         return lj_term
     else
@@ -400,11 +401,11 @@ end
     λ = inter.λ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     σ2 = σ^2
     params = (σ2, ϵ, λ)
 
-    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -412,7 +413,8 @@ end
     end
 end
 
-@inline function pairwise_pe(::AshbaughHatch, r2, (σ2, ϵ, λ))
+@inline function pairwise_pe(::AshbaughHatch, r, (σ2, ϵ, λ))
+    r2 = r^2
     six_term = (σ2 / r2) ^ 3
     lj_term = 4ϵ * (six_term ^ 2 - six_term)
     if r2 < (2^(1/3) * σ2)

@@ -76,16 +76,15 @@ end
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r2 = sum(abs2, dr)
-    r = sqrt(r2)
+    r = norm(dr)
     m = inter.m
     n = inter.n
     const_mn = inter.mn_fac * ϵ
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)
 
-    f = force_cutoff(cutoff, inter, r2, params, force_units)
-    fdr = f * normalize(dr)
+    f = force_cutoff(cutoff, inter, r, params, force_units)
+    fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -93,8 +92,8 @@ end
     end
 end
 
-function pairwise_force(::Mie, r2, (m, n, σ_r, const_mn))
-    return -const_mn / sqrt(r2) * (m * σ_r ^ m - n * σ_r ^ n)
+function pairwise_force(::Mie, r, (m, n, σ_r, const_mn))
+    return -(const_mn / r) * (m * σ_r ^ m - n * σ_r ^ n)
 end
 
 @inline function potential_energy(inter::Mie,
@@ -111,14 +110,13 @@ end
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r2 = sum(abs2, dr)
-    r = sqrt(r2)
+    r = norm(dr)
     m = inter.m
     n = inter.n
     const_mn = inter.mn_fac * ϵ
     params = (m, n, σ, const_mn)
 
-    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -126,7 +124,7 @@ end
     end
 end
 
-function pairwise_pe(::Mie, r2, (m, n, σ, const_mn))
-    σ_r = σ / sqrt(r2)
+function pairwise_pe(::Mie, r, (m, n, σ, const_mn))
+    σ_r = σ / r
     return const_mn * (σ_r ^ n - σ_r ^ m)
 end

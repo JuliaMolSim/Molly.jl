@@ -82,11 +82,11 @@ end
     C = inter.C_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     params = (A, B, C)
 
-    f = force_cutoff(cutoff, inter, r2, params, force_units)
-    fdr = f * normalize(dr)
+    f = force_cutoff(cutoff, inter, r, params, force_units)
+    fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
     else
@@ -94,9 +94,8 @@ end
     end
 end
 
-function pairwise_force(::Buckingham, r2, (A, B, C))
-    r = sqrt(r2)
-    return A * B * exp(-B * r) - 6 * C * inv(r*r2^3)
+function pairwise_force(::Buckingham, r, (A, B, C))
+    return A * B * exp(-B * r) - 6 * C * inv(r)^7
 end
 
 @inline function potential_energy(inter::Buckingham,
@@ -114,10 +113,10 @@ end
     C = inter.C_mixing(atom_i, atom_j)
 
     cutoff = inter.cutoff
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     params = (A, B, C)
 
-    pe = pe_cutoff(cutoff, inter, r2, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
     if special
         return pe * inter.weight_special
     else
@@ -125,6 +124,6 @@ end
     end
 end
 
-function pairwise_pe(::Buckingham, r2, (A, B, C))
-    return A * exp(-B * sqrt(r2)) - C * inv(r2)^3
+function pairwise_pe(::Buckingham, r, (A, B, C))
+    return A * exp(-B * r) - C * inv(r)^6
 end

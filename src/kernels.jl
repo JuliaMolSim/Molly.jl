@@ -42,7 +42,7 @@ function gpu_threads_specific(n_inters)
     return n_threads_gpu
 end
 
-function pairwise_force_gpu!(buffers, sys::System{D, AT, T}, 
+function pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, 
                     pairwise_inters, neighbors, step_n) where {D, AT <: AbstractGPUArray, T}
     if isnothing(neighbors)
         error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
@@ -82,8 +82,8 @@ end
     end
 end
 
-function specific_force_gpu!(fs_mat, inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
-                            velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
+function specific_forces_gpu!(fs_mat, inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
+                              velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_1_atoms_kernel!(backend, n_threads_gpu)
@@ -93,8 +93,8 @@ function specific_force_gpu!(fs_mat, inter_list::InteractionList1Atoms, coords::
     return fs_mat
 end
 
-function specific_force_gpu!(fs_mat, inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
-                            velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
+function specific_forces_gpu!(fs_mat, inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
+                              velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_2_atoms_kernel!(backend, n_threads_gpu)
@@ -104,8 +104,8 @@ function specific_force_gpu!(fs_mat, inter_list::InteractionList2Atoms, coords::
     return fs_mat
 end
 
-function specific_force_gpu!(fs_mat, inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
-                            velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
+function specific_forces_gpu!(fs_mat, inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
+                              velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_3_atoms_kernel!(backend, n_threads_gpu)
@@ -115,8 +115,8 @@ function specific_force_gpu!(fs_mat, inter_list::InteractionList3Atoms, coords::
     return fs_mat
 end
 
-function specific_force_gpu!(fs_mat, inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
-                            velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
+function specific_forces_gpu!(fs_mat, inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
+                              velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_4_atoms_kernel!(backend, n_threads_gpu)
@@ -219,8 +219,9 @@ end
     end
 end
 
-function pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT},
-                         pairwise_inters, neighbors, step_n) where {D, AT <: AbstractGPUArray}
+function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, AT},
+                               pairwise_inters, neighbors,
+                               step_n) where {D, AT <: AbstractGPUArray}
     if isnothing(neighbors)
         error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
               "should use DistanceNeighborFinder instead")

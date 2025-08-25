@@ -30,14 +30,14 @@ Base.:+(g1::Gravity, g2::Gravity) = Gravity(g1.cutoff, g1.G + g2.G, g1.use_neigh
                        atom_j,
                        force_units=u"kJ * mol^-1 * nm^-1",
                        args...)
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     params = (inter.G, mass(atom_i), mass(atom_j))
-    f = force_cutoff(inter.cutoff, inter, r2, params, force_units)
-    return f * normalize(dr)
+    f = force_cutoff(inter.cutoff, inter, r, params, force_units)
+    return (f / r) * dr
 end
 
-function pairwise_force(::Gravity, r2, (G, mi, mj))
-    return (-G * mi * mj) / r2
+function pairwise_force(::Gravity, r, (G, mi, mj))
+    return (-G * mi * mj) / r^2
 end
 
 @inline function potential_energy(inter::Gravity,
@@ -46,11 +46,11 @@ end
                                   atom_j,
                                   energy_units=u"kJ * mol^-1",
                                   args...)
-    r2 = sum(abs2, dr)
+    r = norm(dr)
     params = (inter.G, mass(atom_i), mass(atom_j))
-    return pe_cutoff(inter.cutoff, inter, r2, params, energy_units)
+    return pe_cutoff(inter.cutoff, inter, r, params, energy_units)
 end
 
-function pairwise_pe(::Gravity, r2, (G, mi, mj))
-    return (-G * mi * mj) * inv(sqrt(r2))
+function pairwise_pe(::Gravity, r, (G, mi, mj))
+    return (-G * mi * mj) * inv(r)
 end

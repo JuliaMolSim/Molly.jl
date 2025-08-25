@@ -32,8 +32,8 @@ CUDA.shfl_recurse(op, x::SVector{1, C}) where C = SVector{1, C}(op(x[1]))
 CUDA.shfl_recurse(op, x::SVector{2, C}) where C = SVector{2, C}(op(x[1]), op(x[2]))
 CUDA.shfl_recurse(op, x::SVector{3, C}) where C = SVector{3, C}(op(x[1]), op(x[2]), op(x[3]))
 
-function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters,
-                                   nbs::Molly.NoNeighborList, step_n) where {D, AT <: CuArray, T}
+function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters,
+                            nbs::Molly.NoNeighborList, step_n) where {D, AT <: CuArray, T}
     kernel = @cuda launch=false pairwise_force_kernel_nonl!(
             buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, step_n,
             Val(D), Val(sys.force_units))
@@ -49,8 +49,8 @@ function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inte
     return buffers
 end
 
-function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters, nbs::Nothing,
-                                   step_n) where {D, AT <: CuArray, T}
+function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters,
+                        nbs::Nothing, step_n) where {D, AT <: CuArray, T}
     N = length(sys.coords)
     n_blocks = cld(N, WARPSIZE)
     r_cut = sys.neighbor_finder.dist_cutoff
@@ -74,8 +74,9 @@ function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inte
     return buffers
 end
 
-function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, pairwise_inters,
-                                nbs::Nothing, step_n) where {D, AT <: CuArray, T}
+function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T},
+                                     pairwise_inters, nbs::Nothing,
+                                     step_n) where {D, AT <: CuArray, T}
     # The ordering is always recomputed for potential energy
     # Different buffers are used to the forces case, so sys.neighbor_finder.initialized
     #   is not updated
