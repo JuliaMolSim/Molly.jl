@@ -6,6 +6,9 @@ using Unitful
 import AtomsCalculators
 import AtomsBase
 
+
+LAMMPS.MPI.Init()
+
 const lammps_mass_units_map = Dict("metal" => u"g/mol", "real" => u"g/mol", "si" => u"kg")
 
 function convert_mass(m, lammps_units)
@@ -91,7 +94,7 @@ function Molly.LAMMPSCalculator(
 
     # If Molly ever uses MPI this can take the MPI.Comm handle
     # For now just use OpenMP
-    lmp = LMP(["-screen","none", "-sf", "omp", "-pk", "omp", "$(n_threads)"])
+    lmp = LMP(["-screen","none", "-sf", "omp", "-pk", "omp", "$(n_threads)"], LAMMPS.MPI.COMM_WORLD)
 
     all_syms = Molly.atomic_symbol(sys)
     unique_syms = unique(all_syms)
