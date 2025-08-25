@@ -1500,6 +1500,9 @@ Defines a general interaction that will call LAMMPS to calculate forces and ener
 and energies are calculated on a single thread. You must call LAMMPS.MPI.Init() for LAMMPS.jl
 to load the LAMMPS executable on systems where MPI is available.
 
+The LAMMPS potential files can be found at:
+`abspath(dirname(LAMMPS.locate()), "..", "share", "lammps", "potentials")`
+
 Restrictions:
 -------------
 - CPU only
