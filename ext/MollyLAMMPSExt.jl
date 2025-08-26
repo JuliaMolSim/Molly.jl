@@ -147,7 +147,6 @@ function Molly.LAMMPSCalculator(
         command(lmp, extra_lammps_commands)
     end
 
-    #! NONE OF THESE ARE ACTUALLY TYPES DOES NOT WORK....
     calculate_potential |= has_logger_with_pe(sys)
     if calculate_potential
         command(lmp, "compute pot_e all pe")

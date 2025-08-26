@@ -1,6 +1,3 @@
-using LAMMPS
-using Molly
-
 @testset "Spatial" begin
     @test vector_1D(4.0, 6.0, 10.0) ==  2.0
     @test vector_1D(1.0, 9.0, 10.0) == -2.0

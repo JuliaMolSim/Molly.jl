@@ -1490,7 +1490,6 @@ function update_ase_calc! end
         sys::System{3, AT, T},
         lammps_unit_system::String,
         potential_definition::Union{String, Array{String}};
-        n_threads::Integer=Threads.nthreads(),
         extra_lammps_commands::Union{String, Array{String}} = "",
         logfile_path::String = "none",
         calculate_potential::Bool = false
