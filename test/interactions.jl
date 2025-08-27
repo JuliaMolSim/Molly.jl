@@ -557,6 +557,39 @@
     end
 end
 
+@testset "Cutoffs" begin
+    c1 = SVector(1.0, 1.0, 1.0)u"nm"
+    c2 = SVector(1.7, 1.0, 1.0)u"nm"
+    a1 = Atom(charge=1.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+    boundary = CubicBoundary(2.0u"nm")
+    dr12 = vector(c1, c2, boundary)
+    dist_cut = 0.8u"nm"
+    dist_act = 0.6u"nm"
+    fu, eu = u"kJ * mol^-1 * nm^-1", u"kJ * mol^-1"
+
+    cutoffs = [
+        (NoCutoff()                           , -0.04196301990 * fu, -0.00492640193 * eu),
+        (DistanceCutoff(dist_cut)             , -0.04196301990 * fu, -0.00492640193 * eu),
+        (ShiftedPotentialCutoff(dist_cut)     , -0.04196301990 * fu, -0.00270785727 * eu),
+        (ShiftedForceCutoff(dist_cut)         , -0.02537033587 * fu, -0.00104858887 * eu),
+        (CubicSplineCutoff(dist_act, dist_cut), -0.06201171875 * fu, -0.00312500000 * eu),
+    ]
+
+    for (cutoff, force_ref, pe_ref) in cutoffs
+        inter = LennardJones(cutoff=cutoff)
+        @test isapprox(
+            force(inter, dr12, a1, a1)[1],
+            force_ref;
+            atol=1e-9u"kJ * mol^-1 * nm^-1",
+        )
+        @test isapprox(
+            potential_energy(inter, dr12, a1, a1),
+            pe_ref;
+            atol=1e-9u"kJ * mol^-1",
+        )
+    end
+end
+
 @testset "Ewald" begin
     dist_cutoff = 0.9u"nm"
     E_openmm = -5.465127432466375u"kJ/mol"

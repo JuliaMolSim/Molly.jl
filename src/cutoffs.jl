@@ -98,18 +98,18 @@ cutoff_points(::Type{CubicSplineCutoff{D}}) where D = 2
 
 function pe_apply_cutoff(cutoff::CubicSplineCutoff, inter, r, params)
     t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff - cutoff.dist_activation)
-    Va = pairwise_pe(inter, cutoff.dist_activation, params)
-    dVa = -pairwise_force(inter, cutoff.dist_activation, params)
-    return (2t^3 - 3t^2 + 1) * Va + (t^3 - 2t^2 + t) *
-           (cutoff.dist_cutoff - cutoff.dist_activation) * dVa
+    pe_act = pairwise_pe(inter, cutoff.dist_activation, params)
+    dpe_dr_act = -pairwise_force(inter, cutoff.dist_activation, params)
+    return (2t^3 - 3t^2 + 1) * pe_act + (t^3 - 2t^2 + t) *
+           (cutoff.dist_cutoff - cutoff.dist_activation) * dpe_dr_act
 end
 
 function force_apply_cutoff(cutoff::CubicSplineCutoff, inter, r, params)
     t = (r - cutoff.dist_activation) / (cutoff.dist_cutoff - cutoff.dist_activation)
-    Va = pairwise_pe(inter, cutoff.dist_activation, params)
-    dVa = -pairwise_force(inter, cutoff.dist_activation, params)
-    return -(6t^2 - 6t) * Va / (cutoff.dist_cutoff - cutoff.dist_activation) -
-                    (3t^2 - 4t + 1) * dVa
+    pe_act = pairwise_pe(inter, cutoff.dist_activation, params)
+    dpe_dr_act = -pairwise_force(inter, cutoff.dist_activation, params)
+    return -(6t^2 - 6t) * pe_act / (cutoff.dist_cutoff - cutoff.dist_activation) -
+                    (3t^2 - 4t + 1) * dpe_dr_act
 end
 
 Base.:+(c1::T, ::T) where {T <: Union{NoCutoff, DistanceCutoff, ShiftedPotentialCutoff,
