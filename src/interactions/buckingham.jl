@@ -85,7 +85,7 @@ end
     r = norm(dr)
     params = (A, B, C)
 
-    f = force_cutoff(cutoff, inter, r, params, force_units)
+    f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
@@ -116,7 +116,7 @@ end
     r = norm(dr)
     params = (A, B, C)
 
-    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params)
     if special
         return pe * inter.weight_special
     else

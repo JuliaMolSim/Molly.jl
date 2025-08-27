@@ -45,7 +45,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    f = force_cutoff(cutoff, inter, r, params, force_units)
+    f = force_cutoff(cutoff, inter, r, params)
     return (f / r) * dr
 end
 
@@ -71,7 +71,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    return pe_cutoff(cutoff, inter, r, params, energy_units)
+    return pe_cutoff(cutoff, inter, r, params)
 end
 
 function pairwise_pe(::SoftSphere, r, (σ2, ϵ))

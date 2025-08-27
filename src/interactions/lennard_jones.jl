@@ -89,7 +89,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    f = force_cutoff(cutoff, inter, r, params, force_units)
+    f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
@@ -121,7 +121,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ)
 
-    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params)
     if special
         return pe * inter.weight_special
     else
@@ -217,7 +217,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ, inter.σ6_fac)
 
-    f = force_cutoff(cutoff, inter, r, params, force_units)
+    f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
@@ -251,7 +251,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ, inter.σ6_fac)
 
-    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params)
     if special
         return pe * inter.weight_special
     else
@@ -366,7 +366,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ, λ)
 
-    f = force_cutoff(cutoff, inter, r, params, force_units)
+    f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
@@ -405,7 +405,7 @@ end
     σ2 = σ^2
     params = (σ2, ϵ, λ)
 
-    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params)
     if special
         return pe * inter.weight_special
     else

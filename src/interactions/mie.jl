@@ -83,7 +83,7 @@ end
     σ_r = σ / r
     params = (m, n, σ_r, const_mn)
 
-    f = force_cutoff(cutoff, inter, r, params, force_units)
+    f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
@@ -116,7 +116,7 @@ end
     const_mn = inter.mn_fac * ϵ
     params = (m, n, σ, const_mn)
 
-    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params)
     if special
         return pe * inter.weight_special
     else

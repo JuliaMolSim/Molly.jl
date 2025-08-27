@@ -69,7 +69,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     params = (ke, qi, qj)
 
-    f = force_cutoff(cutoff, inter, r, params, force_units)
+    f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
@@ -95,7 +95,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     params = (ke, qi, qj)
 
-    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params)
     if special
         return pe * inter.weight_special
     else
@@ -174,7 +174,7 @@ end
     σ = inter.σ_mixing(atom_i, atom_j)
     params = (ke, qi, qj, σ, inter.σ6_fac)
 
-    f = force_cutoff(cutoff, inter, r, params, force_units)
+    f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
@@ -205,7 +205,7 @@ end
     σ = inter.σ_mixing(atom_i, atom_j)
     params = (ke, qi, qj, σ, inter.σ6_fac)
 
-    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params)
     if special
         return pe * inter.weight_special
     else
@@ -531,7 +531,7 @@ end
     kappa = inter.kappa
     params = (coulomb_const, qi, qj, kappa)
 
-    f = force_cutoff(cutoff, inter, r, params, force_units)
+    f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
     if special
         return fdr * inter.weight_special
@@ -557,7 +557,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     params = (coulomb_const, qi, qj, inter.kappa)
 
-    pe = pe_cutoff(cutoff, inter, r, params, energy_units)
+    pe = pe_cutoff(cutoff, inter, r, params)
     if special
         return pe * inter.weight_special
     else
