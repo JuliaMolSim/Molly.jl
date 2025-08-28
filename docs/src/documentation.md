@@ -609,8 +609,10 @@ The `atom_type` field of the atoms is available, allowing features like changing
 
 To define your own pairwise interaction, first define the `struct`:
 ```julia
-struct MyPairwiseInter
-    # Any properties, e.g. constants for the interaction or cutoff parameters
+struct MyPairwiseInter{C}
+    # Any properties, e.g. cutoffs and interaction parameters
+    cutoff::C
+    param::Float64
 end
 ```
 You can also define a [`use_neighbors`](@ref) method, which determines whether the neighbor list is used to omit distant atoms (`true`) or whether all atom pairs are always considered (`false`):
@@ -622,7 +624,7 @@ If it is `true`, you must specify a neighbor finder when setting up the [`System
 For built-in interactions this function accesses the `use_neighbors` field of the struct.
 To work on the GPU the `struct` should be a bits type, i.e. `isbitstype(MyPairwiseInter)` should be `true`.
 
-Next, you need to define a method for the [`force`](@ref) function acting between a pair of atoms.
+Next, you need to define a method for the [`force`](@ref) and `pairwise_force` functions acting between a pair of atoms.
 This has a set series of arguments:
 ```julia
 function Molly.force(inter::MyPairwiseInter,
@@ -637,16 +639,25 @@ function Molly.force(inter::MyPairwiseInter,
                      velocity_i,
                      velocity_j,
                      step_n)
+    r = norm(dr)
+    params = (inter.param,)
+    f = Molly.force_cutoff(inter.cutoff, inter, r, params)
+    # Multiply the force magnitude by the normalised vector between the atoms
+    fdr = f * vec_ij / r
+    return fdr
+end
+
+function Molly.pairwise_force(::MyPairwiseInter, r, params)
     # Replace this with your force calculation
     # A positive force causes the atoms to move apart
     f = 0.0
-
-    # Obtain a vector for the force
-    fdr = f * normalize(vec_ij)
-    return fdr
+    return f
 end
 ```
-Most of the arguments will generally not be used but are passed to allow maximum flexibility.
+The logic here is that any parameter mixing, shortcutting or setup is done in [`force`](@ref) then `force_cutoff` is used to apply the cutoff by calling `pairwise_force`, which calculates the force magnitude solely from interatomic distance `r`.
+`params` should not include any distance-based information, since `pairwise_force` may be called for other distances to apply the cutoff.
+
+Most of the arguments to [`force`](@ref) will generally not be used but are passed to allow maximum flexibility.
 You can use `args...` to indicate unused further arguments, e.g. `Molly.force(inter::MyPairwiseInter, vec_ij, args...)`.
 `vec_ij` is the vector between the closest images of atoms `i` and `j` accounting for the periodic boundary conditions.
 Atom properties can be accessed, e.g. `atom_i.σ`.
@@ -661,22 +672,22 @@ If you need a different version of the function on GPU, you can define `Molly.fo
 The argument `special` is a `Bool` determining whether the atom pair interaction should be treated as special.
 This is specified during neighbor finder construction.
 When simulating molecules, for example, non-bonded interactions for atoms in a 1-4 bonding arrangement (i-x-x-j) are often weighted by a factor such as 0.5.
-For interactions where this is relevant, `special` can be used to apply this weighting in the interaction.
+For interactions where this is relevant, `special` can be used to apply this weighting after calling `force_cutoff` in the [`force`](@ref) function.
 It can have a variety of uses depending on the context, for example if you have multiple interactions and want to exclude certain atom pairs from one of the interactions only.
 
 To use your custom interaction in a simulation, add it to the list of pairwise interactions:
 ```julia
-pairwise_inters = (MyPairwiseInter(),)
+pairwise_inters = (MyPairwiseInter(NoCutoff(), 1.0),)
 ```
 Then create a [`System`](@ref) and simulate as above.
 Note that you can also use a named tuple instead of a tuple if you want to access interactions by name:
 ```julia
-pairwise_inters = (MyPairwiseInter=MyPairwiseInter(),)
+pairwise_inters = (MyPairwiseInter=MyPairwiseInter(NoCutoff(), 1.0),)
 ```
 For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{Any}`.
 
-If you wish to calculate potential energies or log the energy throughout a simulation, you will need to define a method for the [`potential_energy`](@ref) function.
-This has the same arguments as [`force`](@ref), except the fifth argument is the energy units not the force units, and should return a single value corresponding to the potential energy:
+If you wish to calculate potential energies or log the energy throughout a simulation, you will need to define methods for the [`potential_energy`](@ref) and `pairwise_pe` functions.
+These have the same arguments and logic as [`force`](@ref), except the fifth argument to [`potential_energy`](@ref) is the energy units not the force units, and should return a single value corresponding to the potential energy:
 ```julia
 function Molly.potential_energy(inter::MyPairwiseInter,
                                 vec_ij,
@@ -690,12 +701,15 @@ function Molly.potential_energy(inter::MyPairwiseInter,
                                 velocity_i,
                                 velocity_j,
                                 step_n)
-    # Example Lennard-Jones interaction
-    σ = (atom_i.σ + atom_j.σ) / 2
-    ϵ = sqrt(atom_i.ϵ * atom_j.ϵ)
-    r = norm(vec_ij)
-    E = 4ϵ * ((σ/r)^6 - (σ/r)^12)
-    return E
+    r = norm(dr)
+    params = (inter.param,)
+    return Molly.pe_cutoff(inter.cutoff, inter, r, params)
+end
+
+function Molly.pairwise_pe(::MyPairwiseInter, r, params)
+    # Replace this with your potential energy calculation
+    pe = 0.0
+    return pe
 end
 ```
 
@@ -809,66 +823,12 @@ general_inters = (MyGeneralInter(),)
 
 ## Cutoffs
 
-The total potential energy of a system is given as a sum of the individual inter-particle potentials
-```math
-V(\vec{r}_1, \dotsc, \vec{r}_N) = \sum_{i<j}V_{ij}(r_{ij})
-```
+As most atomic interactions decay rapidly with the interatomic distance, a cutoff radius beyond which the interaction is ignored is often used.
+There are a number of approaches to avoid discontinuities in the force/potential energy at the cutoff distance.
+Since the cutoff strategy is independent of the interaction for which is used, each interaction is defined without including a specific cutoff.
+See [Pairwise interactions](@ref) for how to make a pairwise interaction compatible with arbitrary cutoffs.
+The corresponding interaction constructor has a `cutoff` field (default [`NoCutoff`](@ref) for the built-in interactions) which is then used via dispatch to apply the chosen cutoff, e.g. `SoftSphere(cutoff=ShiftedPotentialCutoff(1.2u"nm"))`.
 
-The forces acting on the particles are given by
-```math
-\vec{F}_i = -\sum_j \frac{dV_{ij}(r_{ij})}{dr_{ij}}\frac{\vec{r}_{ij}}{r_{ij}}
-```
-
-In the case of the Lennard-Jones potential, the inter-particle potential is given by
-```math
-V_{ij}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right]
-```
-and the forces are given by
-```math
-\begin{aligned}
-\vec{F}_i &= 24\varepsilon_{ij} \left(2\frac{\sigma_{ij}^{12}}{r_{ij}^{13}} - \frac{\sigma_{ij}^6}{r_{ij}^{7}}\right) \frac{\vec{r}_{ij}}{r_{ij}} \\
-&= \frac{24\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}^{6}}{r_{ij}^{6}}\right)^2 -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \vec{r}_{ij}
-\end{aligned}
-```
-
-As the potential, and thus also the force decreases rapidly with the distance, in almost every implementation of the Lennard-Jones force calculation there is a cutoff radius beyond which the force is set to 0.
-
-While this is often a sensible approach, it introduces a discontinuity in the force function and it requires us to also modify the potential, as beyond the cutoff radius the force would be 0, but the derivative of the unmodified potential is not. One way to truncate the potential is to shift the potential by its cutoff value.
-```math
-\begin{aligned}
-\vec{F}_{SP}(\vec{r}) &= \begin{cases}
-\vec{F}(\vec{r}), r < r_c \\
-0, r > r_c
-\end{cases} \\
-V_{SP}(r) &= \begin{cases}
-V(r) - V(r_c), r \le r_c \\
-0, r > r_c
-\end{cases}
-\end{aligned}
-```
-
-This way the potential function is continuous and the relation between forces and potentials is satisfied. This truncation method is called shifted potential cutoff.
-
-Another option is to shift the force in order to make it continuous
-```math
-\begin{aligned}
-F_{SF}(r) &= \begin{cases}
-F(r) - F(r_c), r \le r_c \\
-0, r > r_c
-\end{cases} \\
-V_{SF}(r) &= \begin{cases}
-V(r) - (r-r_c) V'(r_c) - V(r_c), r \le r_c \\
-0, r > r_c
-\end{cases}
-\end{aligned}
-```
-This requires a more complicated change in the potential in order to satisfy the relation between them. This method is called the shifted force cutoff. The continuity of the force is desirable as it may give better energy conservation properties as shown in [Toxvaerd 2011](http://aip.scitation.org/doi/10.1063/1.3558787).
-
-There are also more complicated truncation methods that interpolate between the original potential and 0, but we will consider those two for the moment.
-The truncation approximations that we use can significantly alter the qualitative features of the simulation as shown in many articles in the molecular dynamics literature ([Fitzner 2017](https://aip.scitation.org/doi/full/10.1063/1.4997698), [van der Spoel 2006](https://pubs.acs.org/doi/10.1021/ct0502256) and others).
-
-Since the truncation algorithm is independent of the interaction for which is used, each compatible interaction is defined without including cutoffs.
-The corresponding interaction constructor has a `cutoff` field (default [`NoCutoff`](@ref)) which is then used via dispatch to apply the chosen cutoff, e.g. `SoftSphere(cutoff=ShiftedPotentialCutoff(1.2u"nm"))`.
 The available cutoffs are:
 - [`NoCutoff`](@ref)
 - [`DistanceCutoff`](@ref)
@@ -888,6 +848,30 @@ The following built-in interactions can use a cutoff:
 - [`Yukawa`](@ref)
 - [`Gravity`](@ref)
 In addition, [`CoulombReactionField`](@ref), [`CoulombEwald`](@ref) and the implicit solvent and Ewald general interactions have a `dist_cutoff` argument for a cutoff distance.
+Cutoffs combine well with neighbor finders, provided that the cutoff distance is less than the neighbor distance (see [Neighbor finders](@ref) for more).
+
+To define a custom cutoff, you should first decide whether it has one cutoff point (the force/potential is modified up to the cutoff distance) or two (the force/potential is modified between an activation distance and the cutoff distance).
+Then, create a struct and cutoff functions:
+```julia
+struct MyCutoff{P, D} <: Molly.AbstractCutoff{1} # One cutoff point
+    dist_cutoff::D # This field is required
+end
+
+MyCutoff(dist_cutoff::D) where D = MyCutoff{1, D}(dist_cutoff)
+
+function Molly.pe_apply_cutoff(::MyCutoff, inter, r, params)
+    # Modify the potential energy, pairwise_pe with other values of r can be used
+    pe_r = pairwise_pe(inter, r, params)
+    return pe_r
+end
+
+function Molly.force_apply_cutoff(::MyCutoff, inter, r, params)
+    # Modify the force magnitude, pairwise_force with other values of r can be used
+    f_r = pairwise_force(inter, r, params)
+    return f_r
+end
+```
+The two cutoff point case is similar except it should sub-type `Molly.AbstractCutoff{2}` and the field `dist_activation` is also required in the struct.
 
 ## Boundaries
 

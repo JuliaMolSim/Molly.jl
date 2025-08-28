@@ -19,7 +19,7 @@ Differentiable simulation does not currently work with units and some components
 This is mentioned in the relevant docstrings.
 It is memory intensive on the GPU so using gradient checkpointing, e.g. with [Checkpointing.jl](https://github.com/Argonne-National-Laboratory/Checkpointing.jl), will likely be required for larger simulations.
 
-## Pairwise interactions
+## Pairwise interaction gradients
 
 First, we show how taking gradients through a simulation can be used to optimise an atom property in a [Lennard-Jones](https://en.wikipedia.org/wiki/Lennard-Jones_potential) fluid.
 In this type of simulation each atom has a σ value that determines how close it likes to get to other atoms.
@@ -165,7 +165,7 @@ In this case it is recommended to split up the simulation into a set of short si
 This runs an identical simulation but makes the intermediate coordinates and velocities available for use in calculating the final loss.
 For example, the RMSD could be calculated from the coordinates every 100 steps and added to a variable that is then divided by the number of chunks to get a loss value corresponding to the mean RMSD over the simulation.
 
-## Specific interactions
+## Specific interaction gradients
 
 Next we look at obtaining gradients through simulations with specific interactions, e.g. bonds or angles between specified atoms.
 We will simulate two triatomic molecules and search for a minimum energy bond angle that gives a desired distance between the atoms at the end of the simulation.
