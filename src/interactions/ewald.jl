@@ -630,30 +630,33 @@ end
 end
 
 function spread_charge!(charge_grid::Array{Complex{T}, 3}, buffer, grid_indices,
-                        bsplines_θ, mesh_dims, order, atoms, n_threads) where T
+                        bsplines_θ, mesh_dims, order, atoms, ::Val{1}) where T
     charge_grid .= zero(Complex{T})
-    if n_threads == 1
-        for i in eachindex(atoms)
-            spread_charge_inner!(charge_grid, grid_indices, bsplines_θ, mesh_dims,
-                                 order, atoms, i, Val(false))
+    for i in eachindex(atoms)
+        spread_charge_inner!(charge_grid, grid_indices, bsplines_θ, mesh_dims,
+                             order, atoms, i, Val(false))
+    end
+    return charge_grid, buffer
+end
+
+function spread_charge!(charge_grid::Array{Complex{T}, 3}, buffer, grid_indices, bsplines_θ,
+                        mesh_dims, order, atoms, ::Val{n_threads}) where {T, n_threads}
+    Threads.@threads for chunk_i in 1:n_threads
+        buffer[chunk_i] .= zero(Complex{T})
+        for i in chunk_i:n_threads:length(atoms)
+            spread_charge_inner!(buffer[chunk_i], grid_indices, bsplines_θ,
+                                 mesh_dims, order, atoms, i, Val(false))
         end
-    else
-        Threads.@threads for chunk_i in 1:n_threads
-            buffer[chunk_i] .= zero(Complex{T})
-            for i in chunk_i:n_threads:length(atoms)
-                spread_charge_inner!(buffer[chunk_i], grid_indices, bsplines_θ,
-                                     mesh_dims, order, atoms, i, Val(false))
-            end
-        end
-        for chunk_i in 1:n_threads
-            charge_grid .+= buffer[chunk_i]
-        end
+    end
+    charge_grid .= buffer[1]
+    for chunk_i in 2:n_threads
+        charge_grid .+= buffer[chunk_i]
     end
     return charge_grid, buffer
 end
 
 function spread_charge!(charge_grid::AbstractArray{Complex{T}, 3}, buffer, grid_indices,
-                        bsplines_θ, mesh_dims, order, atoms, n_threads) where T
+                        bsplines_θ, mesh_dims, order, atoms, n_threads_val) where T
     backend = get_backend(charge_grid)
     n_threads_gpu = 128
     kernel! = spread_charge_kernel!(backend, n_threads_gpu)
@@ -702,34 +705,40 @@ function recip_conv_inner!(charge_grid::AbstractArray{Complex{T}, 3}, bsm_x, bsm
 end
 
 function recip_conv!(charge_grid::Array{Complex{T}, 3}, buffer, bsm_x, bsm_y, bsm_z, recip_box,
-                     f_div_ϵr, α, mesh_dims, boundary, energy_units, n_threads) where T
+                     f_div_ϵr, α, mesh_dims, boundary, energy_units, ::Val{1}) where T
     factor = T(π)^2 / α^2
     boxfactor = T(π) * volume(boundary)
-    if n_threads == 1
-        esum = zero(T) * energy_units
-        for kx in 0:(mesh_dims[1]-1), ky in 0:(mesh_dims[2]-1), kz in 0:(mesh_dims[3]-1)
-            esum_val = recip_conv_inner!(charge_grid, bsm_x, bsm_y, bsm_z, recip_box,
-                                mesh_dims, energy_units, f_div_ϵr, factor, boxfactor, kx, ky, kz)
-            esum += esum_val
-        end
-    else
-        buffer .= zero(T)
-        Threads.@threads for chunk_i in 1:n_threads
-            for kx in (chunk_i-1):n_threads:(mesh_dims[1]-1)
-                for ky in 0:(mesh_dims[2]-1), kz in 0:(mesh_dims[3]-1)
-                    esum_val = recip_conv_inner!(charge_grid, bsm_x, bsm_y, bsm_z, recip_box,
-                                mesh_dims, energy_units, f_div_ϵr, factor, boxfactor, kx, ky, kz)
-                    buffer[chunk_i] += ustrip(energy_units, esum_val)
-                end
-            end
-        end
-        esum = sum(buffer) * energy_units
+    esum = zero(T) * energy_units
+    for kx in 0:(mesh_dims[1]-1), ky in 0:(mesh_dims[2]-1), kz in 0:(mesh_dims[3]-1)
+        esum_val = recip_conv_inner!(charge_grid, bsm_x, bsm_y, bsm_z, recip_box,
+                            mesh_dims, energy_units, f_div_ϵr, factor, boxfactor, kx, ky, kz)
+        esum += esum_val
     end
     return esum / 2
 end
 
-function recip_conv!(charge_grid::AbstractArray{Complex{T}, 3}, buffer, bsm_x, bsm_y, bsm_z,
-                     recip_box, f_div_ϵr, α, mesh_dims, boundary, energy_units, n_threads) where T
+function recip_conv!(charge_grid::Array{Complex{T}, 3}, buffer, bsm_x, bsm_y, bsm_z,
+                     recip_box, f_div_ϵr, α, mesh_dims, boundary, energy_units,
+                     ::Val{n_threads}) where {T, n_threads}
+    factor = T(π)^2 / α^2
+    boxfactor = T(π) * volume(boundary)
+    buffer .= zero(T)
+    Threads.@threads for chunk_i in 1:n_threads
+        for kx in (chunk_i-1):n_threads:(mesh_dims[1]-1)
+            for ky in 0:(mesh_dims[2]-1), kz in 0:(mesh_dims[3]-1)
+                esum_val = recip_conv_inner!(charge_grid, bsm_x, bsm_y, bsm_z, recip_box,
+                            mesh_dims, energy_units, f_div_ϵr, factor, boxfactor, kx, ky, kz)
+                buffer[chunk_i] += ustrip(energy_units, esum_val)
+            end
+        end
+    end
+    esum = sum(buffer) * energy_units
+    return esum / 2
+end
+
+function recip_conv!(charge_grid::AbstractArray{Complex{T}, 3}, buffer, bsm_x,
+                     bsm_y, bsm_z, recip_box, f_div_ϵr, α, mesh_dims, boundary, energy_units,
+                     n_threads_val) where T
     ndrange = Tuple(mesh_dims)
     factor = T(π)^2 / α^2
     boxfactor = T(π) * volume(boundary)
@@ -837,11 +846,11 @@ function ewald_pe_forces!(Fs, inter::PME{T}, atoms, coords, boundary, force_unit
     grid_placement!(inter.grid_indices, inter.grid_fractions, coords, recip_box, mesh_dims)
     update_bsplines!(inter.bsplines_θ, inter.bsplines_dθ, inter.grid_fractions, order, n_thr)
     spread_charge!(inter.charge_grid, inter.charge_grid_buffer, inter.grid_indices,
-                   inter.bsplines_θ, mesh_dims, order, atoms, n_thr)
+                   inter.bsplines_θ, mesh_dims, order, atoms, Val(n_thr))
     grad_safe_fft!(inter.charge_grid, inter.fft_plan)
     reciprocal_space_E = recip_conv!(inter.charge_grid, inter.recip_conv_buffer,
                     inter.bsplines_moduli_x, inter.bsplines_moduli_y, inter.bsplines_moduli_z,
-                    recip_box, f / ϵr, α, mesh_dims, boundary, energy_units, n_thr)
+                    recip_box, f / ϵr, α, mesh_dims, boundary, energy_units, Val(n_thr))
     grad_safe_bfft!(inter.charge_grid, inter.bfft_plan)
     if calculate_forces
         interpolate_force!(Fs, inter.charge_grid, inter.grid_indices, inter.bsplines_θ,
