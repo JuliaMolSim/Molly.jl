@@ -178,7 +178,7 @@ end
         temp = T(1.0)
         simulator = VelocityVerlet(
             dt=T(0.001),
-            coupling=RescaleThermostat(temp),
+            coupling=ImmediateThermostat(temp),
         )
         rng = Xoshiro(1000) # Same system every time, not required but increases stability
         coords = place_atoms(n_atoms, boundary; min_dist=T(0.6), max_attempts=500, rng=rng)

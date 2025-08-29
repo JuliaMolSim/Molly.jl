@@ -3,8 +3,8 @@
 export
     apply_coupling!,
     NoCoupling,
+    ImmediateThermostat,
     AndersenThermostat,
-    RescaleThermostat,
     BerendsenThermostat,
     BerendsenBarostat,
     MonteCarloBarostat,
@@ -44,6 +44,30 @@ struct NoCoupling end
 
 apply_coupling!(sys, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
 
+@doc raw"""
+    ImmediateThermostat(temperature)
+
+The immediate velocity rescaling thermostat for controlling temperature.
+
+Velocities are immediately rescaled to match a target temperature.
+The scaling factor for the velocities each step is
+```math
+\lambda = \sqrt{\frac{T_0}{T}}
+```
+
+This thermostat should be used with caution as it can lead to simulation
+artifacts.
+"""
+struct ImmediateThermostat{T}
+    temperature::T
+end
+
+function apply_coupling!(sys, thermostat::ImmediateThermostat, sim, neighbors=nothing,
+                         step_n::Integer=0; kwargs...)
+    sys.velocities .*= sqrt(thermostat.temperature / temperature(sys))
+    return false
+end
+
 """
     AndersenThermostat(temperature, coupling_const)
 
@@ -81,30 +105,6 @@ function apply_coupling!(sys::System{<:Any, AT, T}, thermostat::AndersenThermost
     atoms_to_leave_dev = to_device(atoms_to_leave, AT)
     vs = random_velocities(sys, thermostat.temperature; rng=rng)
     sys.velocities .= sys.velocities .* atoms_to_leave_dev .+ vs .* atoms_to_bump_dev
-    return false
-end
-
-@doc raw"""
-    RescaleThermostat(temperature)
-
-The velocity rescaling thermostat for controlling temperature.
-
-Velocities are immediately rescaled to match a target temperature.
-The scaling factor for the velocities each step is
-```math
-\lambda = \sqrt{\frac{T_0}{T}}
-```
-
-This thermostat should be used with caution as it can lead to simulation
-artifacts.
-"""
-struct RescaleThermostat{T}
-    temperature::T
-end
-
-function apply_coupling!(sys, thermostat::RescaleThermostat, sim, neighbors=nothing,
-                         step_n::Integer=0; kwargs...)
-    sys.velocities .*= sqrt(thermostat.temperature / temperature(sys))
     return false
 end
 

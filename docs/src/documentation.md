@@ -1050,8 +1050,9 @@ You do not have to define different versions though: you may only intend to use 
 
 Some simulators can be modified by adding coupling methods to allow properties like temperature and pressure to be controlled during a simulation.
 The available couplers are:
+- [`NoCoupling`](@ref)
+- [`ImmediateThermostat`](@ref)
 - [`AndersenThermostat`](@ref)
-- [`RescaleThermostat`](@ref)
 - [`BerendsenThermostat`](@ref)
 - [`BerendsenBarostat`](@ref)
 - [`MonteCarloBarostat`](@ref)

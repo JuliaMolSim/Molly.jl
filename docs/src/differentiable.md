@@ -58,7 +58,7 @@ boundary = CubicBoundary(3.0)
 temp = 1.0
 simulator = VelocityVerlet(
     dt=0.02,
-    coupling=RescaleThermostat(temp),
+    coupling=ImmediateThermostat(temp),
 )
 coords = place_atoms(n_atoms, boundary; min_dist=0.6)
 velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
