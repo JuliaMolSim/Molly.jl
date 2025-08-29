@@ -624,7 +624,8 @@ If it is `true`, you must specify a neighbor finder when setting up the [`System
 For built-in interactions this function accesses the `use_neighbors` field of the struct.
 To work on the GPU the `struct` should be a bits type, i.e. `isbitstype(MyPairwiseInter)` should be `true`.
 
-Next, you need to define a method for the [`force`](@ref) and `pairwise_force` functions acting between a pair of atoms.
+Next, you need to define a method for the [`force`](@ref) and [`pairwise_force`](@ref) functions acting between a pair of atoms.
+
 This has a set series of arguments:
 ```julia
 function Molly.force(inter::MyPairwiseInter,
@@ -654,8 +655,8 @@ function Molly.pairwise_force(::MyPairwiseInter, r, params)
     return f
 end
 ```
-The logic here is that any parameter mixing, shortcutting or setup is done in [`force`](@ref) then `force_cutoff` is used to apply the cutoff by calling `pairwise_force`, which calculates the force magnitude solely from interatomic distance `r`.
-`params` should not include any distance-based information, since `pairwise_force` may be called for other distances to apply the cutoff.
+The logic here is that any parameter mixing, shortcutting or setup is done in [`force`](@ref) then `force_cutoff` is used to apply the cutoff by calling [`pairwise_force`](@ref), which calculates the force magnitude solely from interatomic distance `r`.
+`params` should not include any distance-based information, since [`pairwise_force`](@ref) may be called for other distances to apply the cutoff.
 
 Most of the arguments to [`force`](@ref) will generally not be used but are passed to allow maximum flexibility.
 You can use `args...` to indicate unused further arguments, e.g. `Molly.force(inter::MyPairwiseInter, vec_ij, args...)`.
@@ -686,7 +687,7 @@ pairwise_inters = (MyPairwiseInter=MyPairwiseInter(NoCutoff(), 1.0),)
 ```
 For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{Any}`.
 
-If you wish to calculate potential energies or log the energy throughout a simulation, you will need to define methods for the [`potential_energy`](@ref) and `pairwise_pe` functions.
+If you wish to calculate potential energies or log the energy throughout a simulation, you will need to define methods for the [`potential_energy`](@ref) and [`pairwise_pe`](@ref) functions.
 These have the same arguments and logic as [`force`](@ref), except the fifth argument to [`potential_energy`](@ref) is the energy units not the force units, and should return a single value corresponding to the potential energy:
 ```julia
 function Molly.potential_energy(inter::MyPairwiseInter,

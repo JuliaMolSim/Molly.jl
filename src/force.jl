@@ -4,6 +4,7 @@
 export
     accelerations,
     force,
+    pairwise_force,
     SpecificForce1Atoms,
     SpecificForce2Atoms,
     SpecificForce3Atoms,
@@ -49,6 +50,18 @@ force_gpu(inter, ci, bnd, ai, fu, vi, sn) = force(inter, ci, bnd, ai, fu, vi, sn
 force_gpu(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn) = force(inter, ci, cj, bnd, ai, aj, fu, vi, vj, sn)
 force_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn) = force(inter, ci, cj, ck, bnd, ai, aj, ak, fu, vi, vj, vk, sn)
 force_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn) = force(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, fu, vi, vj, vk, vl, sn)
+
+"""
+    pairwise_force(inter, r, params)
+
+Calculate the force magnitude between two atoms separated by distance `r` due to a
+pairwise interaction.
+
+This function is used in [`force`](@ref) to apply cutoff strategies by calculating
+the force at different values of `r`.
+Consequently, the parameters `params` should not include terms that depend on distance.
+"""
+function pairwise_force end
 
 """
     SpecificForce1Atoms(f1)

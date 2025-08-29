@@ -4,7 +4,8 @@ export
     total_energy,
     kinetic_energy,
     temperature,
-    potential_energy
+    potential_energy,
+    pairwise_pe
 
 """
     total_energy(system, neighbors=find_neighbors(sys); n_threads=Threads.nthreads())
@@ -296,3 +297,15 @@ potential_energy_gpu(inter, ci, bnd, ai, eu, vi, sn) = potential_energy(inter, c
 potential_energy_gpu(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn) = potential_energy(inter, ci, cj, bnd, ai, aj, eu, vi, vj, sn)
 potential_energy_gpu(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn) = potential_energy(inter, ci, cj, ck, bnd, ai, aj, ak, eu, vi, vj, vk, sn)
 potential_energy_gpu(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn) = potential_energy(inter, ci, cj, ck, cl, bnd, ai, aj, ak, al, eu, vi, vj, vk, vl, sn)
+
+"""
+    pairwise_pe(inter, r, params)
+
+Calculate the potential energy between two atoms separated by distance `r` due to a
+pairwise interaction.
+
+This function is used in [`potential_energy`](@ref) to apply cutoff strategies by calculating
+the potential energy at different values of `r`.
+Consequently, the parameters `params` should not include terms that depend on distance.
+"""
+function pairwise_pe end
