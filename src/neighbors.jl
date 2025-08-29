@@ -139,10 +139,8 @@ function gpu_threads_dnf(n_inters)
     return n_threads_gpu
 end
 
-@kernel function distance_neighbor_finder_kernel!(neighbors,
-                                                  @Const(coords),
-                                                  @Const(eligible),
-                                                  boundary, sq_dist_neighbors)
+@kernel function distance_neighbor_finder_kernel!(neighbors, @Const(coords),
+                                                  @Const(eligible), boundary, sq_dist_cutoff)
     n_atoms = length(coords)
     n_inters = n_atoms_to_n_pairs(n_atoms)
     inter_i = @index(Global, Linear)
@@ -152,7 +150,7 @@ end
         if eligible[i, j]
             dr = vector(coords[i], coords[j], boundary)
             r2 = sum(abs2, dr)
-            if r2 <= sq_dist_neighbors
+            if r2 <= sq_dist_cutoff
                 neighbors[j, i] = true
             end
         end

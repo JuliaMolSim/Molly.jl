@@ -303,7 +303,8 @@ end
     # Test all neighbor finders agree for a larger system
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     dist_cutoff = 1.2u"nm"
-    sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff; dist_neighbors=dist_cutoff)
+    sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
+                 dist_cutoff=dist_cutoff, dist_buffer=0.0u"nm")
     neighbors_ref = find_neighbors(sys)
     n_neighbors_ref = 4602420
     @test length(neighbors_ref) == neighbors_ref.n == n_neighbors_ref

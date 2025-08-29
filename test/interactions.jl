@@ -617,7 +617,7 @@ end
                     ff;
                     array_type=AT,
                     dist_cutoff=T(dist_cutoff),
-                    dist_neighbors=T(dist_cutoff),
+                    dist_buffer=zero(T(dist_cutoff)),
                     nonbonded_method="ewald",
                     center_coords=false,
                 )
@@ -680,7 +680,7 @@ end
                         ff;
                         array_type=AT,
                         dist_cutoff=T(dist_cutoff),
-                        dist_neighbors=T(dist_cutoff),
+                        dist_buffer=zero(T(dist_cutoff)),
                         nonbonded_method="pme",
                         center_coords=false,
                     )

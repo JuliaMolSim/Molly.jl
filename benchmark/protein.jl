@@ -22,7 +22,6 @@ function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
     velocities_nounits = SVector{3, T}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))
     velocities = units ? velocities_nounits * u"nm * ps^-1" : velocities_nounits
     dist_cutoff = T(1.0)
-    dist_neighbors = (Molly.uses_gpu_neighbor_finder(AT) ? dist_cutoff : T(1.2))
 
     sys = System(
         joinpath(data_dir, "6mrr_equil.pdb"),
@@ -31,7 +30,6 @@ function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
         units=units,
         array_type=AT,
         dist_cutoff=(units ? dist_cutoff * u"nm" : dist_cutoff),
-        dist_neighbors=(units ? dist_neighbors * u"nm" : dist_neighbors),
         nonbonded_method="cutoff",
     )
 

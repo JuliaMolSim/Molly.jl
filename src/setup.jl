@@ -450,8 +450,8 @@ are not available when reading Gromacs files.
 - `array_type=Array`: the array type for the simulation, for example
     use `CuArray` or `ROCArray` for GPU support.
 - `dist_cutoff=1.0u"nm"`: cutoff distance for long-range interactions.
-- `dist_neighbors=1.2u"nm"`: cutoff distance for the neighbor list, should not
-    be less than `dist_cutoff`. Not relevant if [`GPUNeighborFinder`](@ref) is
+- `dist_buffer=0.2u"nm"`: distance added to `dist_cutoff` when calculating
+    neighbors every few steps. Not relevant if [`GPUNeighborFinder`](@ref) is
     used since the neighbors are calculated each step.
 - `nonbonded_method="none"`: method for long range interaction summation,
     options are "none" (short range only), "cutoff" (reaction field method),
@@ -485,7 +485,7 @@ function System(coord_file::AbstractString,
                 units::Bool=true,
                 array_type::Type{AT}=Array,
                 dist_cutoff=(units ? 1.0u"nm" : 1.0),
-                dist_neighbors=(units ? 1.2u"nm" : 1.2),
+                dist_buffer=(units ? 0.2u"nm" : 0.2),
                 nonbonded_method="none",
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
@@ -496,10 +496,10 @@ function System(coord_file::AbstractString,
                 kappa=0.0u"nm^-1",
                 rename_terminal_res::Bool=true,
                 grad_safe::Bool=false) where AT <: AbstractArray
-    if dist_neighbors < dist_cutoff
-        throw(ArgumentError("dist_neighbors ($dist_neighbors) should not be less than " *
-                            "dist_cutoff ($dist_cutoff)"))
+    if dist_buffer < zero(dist_buffer)
+        throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     end
+    dist_neighbors = dist_cutoff + dist_buffer
     T = typeof(force_field.weight_14_coulomb)
 
     # Chemfiles uses zero-based indexing, be careful
@@ -1064,7 +1064,7 @@ function System(T::Type,
                 units::Bool=true,
                 array_type::Type{AT}=Array,
                 dist_cutoff=(units ? 1.0u"nm" : 1.0),
-                dist_neighbors=(units ? 1.2u"nm" : 1.2),
+                dist_buffer=(units ? 0.2u"nm" : 0.2),
                 nonbonded_method="none",
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
@@ -1072,10 +1072,10 @@ function System(T::Type,
                 neighbor_finder_type=nothing,
                 data=nothing,
                 grad_safe::Bool=false) where AT <: AbstractArray
-    if dist_neighbors < dist_cutoff
-        throw(ArgumentError("dist_neighbors ($dist_neighbors) should not be less than " *
-                            "dist_cutoff ($dist_cutoff)"))
+    if dist_buffer < zero(dist_buffer)
+        throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     end
+    dist_neighbors = dist_cutoff + dist_buffer
 
     # Read force field and topology file
     atomtypes = Dict{String, Atom}()

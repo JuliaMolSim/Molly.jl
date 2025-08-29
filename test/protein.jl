@@ -363,7 +363,6 @@ end
                 boundary=CubicBoundary(100.0u"nm"),
                 array_type=AT,
                 dist_cutoff=5.0u"nm",
-                dist_neighbors=5.0u"nm",
                 nonbonded_method="none",
                 implicit_solvent=solvent_model,
                 kappa=1.0u"nm^-1",
