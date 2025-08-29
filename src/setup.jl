@@ -508,6 +508,18 @@ function System(coord_file::AbstractString,
     top = Chemfiles.Topology(frame)
     n_atoms = size(top)
 
+    if isnothing(boundary)
+        boundary_used = boundary_from_chemfiles(Chemfiles.UnitCell(frame), T,
+                                                (units ? u"nm" : NoUnits))
+    else
+        boundary_used = boundary
+    end
+    min_box_side = minimum(box_sides(boundary_used))
+    if min_box_side < (2 * dist_cutoff)
+        @warn "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
+              "($(2 * dist_cutoff)), this can lead to unphysical simulations"
+    end
+
     atoms_abst = Atom[]
     atoms_data = AtomData[]
     bonds = InteractionList2Atoms(HarmonicBond)
@@ -843,13 +855,6 @@ function System(coord_file::AbstractString,
     else
         force_units = NoUnits
         energy_units = NoUnits
-    end
-
-    if isnothing(boundary)
-        boundary_used = boundary_from_chemfiles(Chemfiles.UnitCell(frame), T,
-                                                (units ? u"nm" : NoUnits))
-    else
-        boundary_used = boundary
     end
 
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
@@ -1252,6 +1257,20 @@ function System(T::Type,
 
     # Read coordinate file and add solvent atoms
     lines = readlines(coord_file)
+
+    if isnothing(boundary)
+        box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
+        box_size = (units ? (box_size_vals)u"nm" : box_size_vals)
+        boundary_used = CubicBoundary(box_size)
+    else
+        boundary_used = boundary
+    end
+    min_box_side = minimum(box_sides(boundary_used))
+    if min_box_side < (2 * dist_cutoff)
+        @warn "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
+              "($(2 * dist_cutoff)), this can lead to unphysical simulations"
+    end
+
     coords_abst = SArray[]
     for (i, l) in enumerate(lines[3:end-1])
         coord = SVector(parse(T, l[21:28]), parse(T, l[29:36]), parse(T, l[37:44]))
@@ -1321,13 +1340,6 @@ function System(T::Type,
         special[j, i] = true
     end
 
-    if isnothing(boundary)
-        box_size_vals = SVector{3}(parse.(T, split(strip(lines[end]), r"\s+")))
-        box_size = units ? (box_size_vals)u"nm" : box_size_vals
-        boundary_used = CubicBoundary(box_size)
-    else
-        boundary_used = boundary
-    end
     coords = [coords_abst...]
     if center_coords
         coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
