@@ -75,11 +75,6 @@ function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inte
         #=if step_n % sys.neighbor_finder.n_steps_reorder == 0
             println("It's a TriclinicBoundary!")
         end=#
-        CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel_triclinic!(
-            buffers.morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords,
-            sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters,
-            sys.boundary, H, Hinv, step_n, buffers.compressed_special, buffers.compressed_eligible,
-            Val(T), Val(D))
         #=CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(
             buffers.morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords,
             sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters,
@@ -89,12 +84,12 @@ function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inte
         CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max!(
                     buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
                     sys.boundary, Val(D))
-        CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(
+    end
+    CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(
             buffers.morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords,
             sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
             Val(T), Val(D))
-    end
 
     return buffers
 end
@@ -110,29 +105,47 @@ function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, 
     morton_bits = 4
     w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
     sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
-    CUDA.@sync @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
-            buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
-            Val(N), sys.boundary, Val(D))
-    CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
+    if sys.boundary isa TriclinicBoundary
+    #if sys.boundary isa CubicBoundary
+        H = SMatrix{D, D, T}(
+            (sys.boundary.basis_vectors[j][i].val for j in 1:D, i in 1:D)...
+        )
+        Hinv = inv(H) 
+        CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
+                buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, H, Hinv, Val(N),
+                sys.boundary, Val(D))
+        CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
             buffers.morton_seq, pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords,
             sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
             sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible,
             Val(T), Val(D))
+    else
+        CUDA.@sync @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
+                buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
+                Val(N), sys.boundary, Val(D))
+        CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
+                buffers.morton_seq, pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords,
+                sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
+                sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible,
+                Val(T), Val(D))
+    end
     return pe_vec_nounits
 end
 
-function boxes_dist(x1_min::D, x1_max::D, x2_min::D, x2_max::D, Lx::D) where D
-    a = abs(vector_1D(x2_max, x1_min, Lx))
-    b = abs(vector_1D(x1_max, x2_min, Lx))
+function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVector{D, T}, r2_max::SVector{D, T}, boundary) where {D, T}
+    va = vector(r2_max, r1_min, boundary)
+    vb = vector(r1_max, r2_min, boundary)
+    a = SVector(abs(va[1]), abs(va[2]), abs(va[3]))
+    b = SVector(abs(vb[1]), abs(vb[2]), abs(vb[3]))
 
-    return ifelse(
-        x1_min - x2_max <= zero(D) && x2_min - x1_max <= zero(D),
-        zero(D),
-        ifelse(a < b, a, b)	
+    return SVector(
+        r1_min[1] - r2_max[1] <= zero(T) && r2_min[1] - r1_max[1] <= zero(T) ? zero(T) : ifelse(a[1] < b[1], a[1], b[1]),
+        r1_min[2] - r2_max[2] <= zero(T) && r2_min[2] - r1_max[2] <= zero(T) ? zero(T) : ifelse(a[2] < b[2], a[2], b[2]),
+        r1_min[3] - r2_max[3] <= zero(T) && r2_min[3] - r1_max[3] <= zero(T) ? zero(T) : ifelse(a[3] < b[3], a[3], b[3])
     )
 end
 
-function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVector{D, T}, r2_max::SVector{D, T}, boundary) where {D, T}
+function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVector{D, T}, r2_max::SVector{D, T}, boundary::TriclinicBoundary) where {D, T}
     r3 = r2_max - r1_min
     r2 = r3 - boundary.basis_vectors[3] .* round(r3[3] / boundary.basis_vectors[3][3])
     r1 = r2 - boundary.basis_vectors[2] .* round(r2[2] / boundary.basis_vectors[2][2])
@@ -150,13 +163,6 @@ function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVecto
         r_a[3] >= zero(T) && r_b[3] >= zero(T) ? zero(T) : ifelse(a[3] < b[3], a[3], b[3])
     )
 end
-
-#=function pbc_triclinic(r_a::SVector{D, T}, r_b::SVector{D, T}, boundary) where {D, T}
-    r3 = r_a - r_b
-    r2 = r3 - boundary.basis_vectors[3] .* round(r3[3] / boundary.basis_vectors[3][3])
-    r1 = r2 - boundary.basis_vectors[2] .* round(r2[2] / boundary.basis_vectors[2][2])
-    return boundary.basis_vectors[1] .* round(r1[1] / boundary.basis_vectors[1][1])
-end=#
 
 function kernel_min_max!(
     sorted_seq,
@@ -479,334 +485,15 @@ function force_kernel!(
 
     # The code is organised in 4 mutually excluding parts
     if j < n_blocks && i < j
-        d_block = zero(C)
-        dist_block = zero(C) * zero(C)
-        @inbounds for k in a:b	
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-            dist_block += d_block * d_block	
-        end
-        if dist_block <= r_cut * r_cut
-            s_idx_i = sorted_seq[index_i]
-            coords_i = coords[s_idx_i] 
-            vel_i = velocities[s_idx_i] 
-            atoms_i = atoms[s_idx_i]
-            d_pb = zero(C)
-            dist_pb = zero(C) * zero(C)
-            @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-                dist_pb += d_pb * d_pb
-            end
-
-            Bool_excl = dist_pb <= r_cut * r_cut
-            s_idx_j = sorted_seq[index_j]
-            coords_j = coords[s_idx_j]
-            vel_j = velocities[s_idx_j] 
-            shuffle_idx = laneid()
-            atoms_j = atoms[s_idx_j]
-            atype_j = atoms_j.atom_type
-            aindex_j = atoms_j.index
-            amass_j = atoms_j.mass
-            acharge_j = atoms_j.charge
-            aσ_j = atoms_j.σ
-            aϵ_j = atoms_j.ϵ
-            eligible_bitmask = UInt32(0)
-            special_bitmask = UInt32(0)
-            eligible_bitmask = eligible_compressed[laneid(), i, j]
-            special_bitmask = special_compressed[laneid(), i, j]
-
-            # Shuffle
-            for m in a:warpsize()
-                sync_warp()
-                coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, laneid() + a, warpsize())
-                vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, laneid() + a, warpsize())
-                shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, laneid() + a, warpsize())
-                atype_j = CUDA.shfl_sync(0xFFFFFFFF, atype_j, laneid() + a, warpsize())
-                aindex_j = CUDA.shfl_sync(0xFFFFFFFF, aindex_j, laneid() + a, warpsize())
-                amass_j = CUDA.shfl_sync(0xFFFFFFFF, amass_j, laneid() + a, warpsize())
-                acharge_j = CUDA.shfl_sync(0xFFFFFFFF, acharge_j, laneid() + a, warpsize())
-                aσ_j = CUDA.shfl_sync(0xFFFFFFFF, aσ_j, laneid() + a, warpsize())
-                aϵ_j = CUDA.shfl_sync(0xFFFFFFFF, aϵ_j, laneid() + a, warpsize())
-                
-                atoms_j_shuffle = Atom(atype_j, aindex_j, amass_j, acharge_j, aσ_j, aϵ_j)
-                dr = vector(coords_j, coords_i, boundary)
-                r2 = sum(abs2, dr)
-                excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
-                spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
-                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-
-                f = condition ? sum_pairwise_forces(
-                    inters_tuple,
-                    atoms_i, atoms_j_shuffle,
-                    Val(force_units),
-                    (spec & 0x1) == true,
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{D, T})
-
-                @inbounds for k in a:b
-                    force_smem[laneid(), k] += ustrip(f[k])
-                    opposites_sum[shuffle_idx, k] -= ustrip(f[k])
-                end
-            end
-
-            sync_threads()
-            @inbounds for k in a:b
-                CUDA.atomic_add!(
-                    pointer(fs_mat, s_idx_i * b - (b - k)), 
-                    -force_smem[laneid(), k]
-                ) 
-                CUDA.atomic_add!(
-                    pointer(fs_mat, s_idx_j * b - (b - k)), 
-                    -opposites_sum[laneid(), k]
-                ) 
-            end
-        end
-    end
-
-    if j == n_blocks && i < n_blocks
-        d_block = zero(C)
-        dist_block = zero(C) * zero(C)
-        @inbounds for k in a:b
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-            dist_block += d_block * d_block	
-        end
-
-        if dist_block <= r_cut * r_cut 
-            s_idx_i = sorted_seq[index_i]
-            coords_i = coords[s_idx_i]
-            vel_i = velocities[s_idx_i]
-            atoms_i = atoms[s_idx_i]
-            d_pb = zero(C)
-            dist_pb = zero(C) * zero(C)			
-            @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-                dist_pb += d_pb * d_pb
-            end
-            Bool_excl = dist_pb <= r_cut * r_cut
-            eligible_bitmask = UInt32(0)
-            special_bitmask = UInt32(0)
-            eligible_bitmask = eligible_compressed[laneid(), i, j]
-            special_bitmask = special_compressed[laneid(), i, j]
-            
-            for m in a:r
-                s_idx_j = sorted_seq[j_0_tile + m]
-                coords_j = coords[s_idx_j]
-                vel_j = velocities[s_idx_j]
-                atoms_j = atoms[s_idx_j]
-                dr = vector(coords_j, coords_i, boundary)
-                r2 = sum(abs2, dr)
-                excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
-                spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-
-                f = condition ? sum_pairwise_forces(
-                    inters_tuple,
-                    atoms_i, atoms_j,
-                    Val(force_units),
-                    (spec & 0x1) == true,
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{D, T})
-
-                @inbounds for k in a:b
-                    force_smem[laneid(), k] += ustrip(f[k])
-                    CUDA.atomic_add!(
-                        pointer(fs_mat, s_idx_j * b - (b - k)), 
-                        ustrip(f[k])
-                    )
-                end
-            end
-
-            # Sum contributions of the r-block to the other standard blocks
-            @inbounds for k in a:b
-                CUDA.atomic_add!(
-                    pointer(fs_mat, s_idx_i * b - (b - k)), 
-                    -force_smem[laneid(), k]
-                ) 
-            end
-        end
-    end
-
-    if i == j && i < n_blocks
-        s_idx_i = sorted_seq[index_i]
-        coords_i = coords[s_idx_i]
-        vel_i = velocities[s_idx_i]
-        atoms_i = atoms[s_idx_i]
-        eligible_bitmask = UInt32(0)
-        special_bitmask = UInt32(0)
-        eligible_bitmask = eligible_compressed[laneid(), i, j]
-        special_bitmask = special_compressed[laneid(), i, j]
-
-        for m in (laneid() + a) : warpsize()
-            s_idx_j = sorted_seq[j_0_tile + m]
-            coords_j = coords[s_idx_j]
-            vel_j = velocities[s_idx_j]
-            atoms_j = atoms[s_idx_j]
-            dr = vector(coords_j, coords_i, boundary)
-            r2 = sum(abs2, dr)
-            excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
-            spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-            condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-
-            f = condition ? sum_pairwise_forces(
-                inters_tuple,
-                atoms_i, atoms_j,
-                Val(force_units),
-                (spec & 0x1) == true,
-                coords_i, coords_j,
-                boundary,
-                vel_i, vel_j,
-                step_n) : zero(SVector{D, T})
-            
-            @inbounds for k in a:b
-                force_smem[laneid(), k] += ustrip(f[k])
-                opposites_sum[m, k] -= ustrip(f[k])
-            end
-        end	
-
-        sync_threads()
-        @inbounds for k in a:b
-            # In this case i == j, so we can call atomic_add! only once
-            CUDA.atomic_add!(
-                pointer(fs_mat, s_idx_i * b - (b - k)), 
-                -force_smem[laneid(), k] - opposites_sum[laneid(), k]
-            ) 
-        end
-    end
-
-    if i == n_blocks && j == n_blocks
-        if laneid() <= r
-            s_idx_i = sorted_seq[index_i]
-            coords_i = coords[s_idx_i]
-            vel_i = velocities[s_idx_i]
-            atoms_i = atoms[s_idx_i]
-            eligible_bitmask = UInt32(0)
-            special_bitmask = UInt32(0)
-            eligible_bitmask = eligible_compressed[laneid(), i, j]
-            special_bitmask = special_compressed[laneid(), i, j]
-
-            for m in (laneid() + a) : r
-                s_idx_j = sorted_seq[j_0_tile + m]
-                coords_j = coords[s_idx_j]
-                vel_j = velocities[s_idx_j]
-                atoms_j = atoms[s_idx_j]
-                dr = vector(coords_j, coords_i, boundary)
-                r2 = sum(abs2, dr)
-                excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
-                spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-                
-                f = condition ? sum_pairwise_forces(
-                    inters_tuple,
-                    atoms_i, atoms_j,
-                    Val(force_units),
-                    (spec & 0x1) == true,
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{D, T})
-
-                @inbounds for k in a:b
-                    force_smem[laneid(), k] += ustrip(f[k])
-                    opposites_sum[m, k] -= ustrip(f[k])
-                end
-            end
-
-            sync_threads()
-            @inbounds for k in a:b
-                CUDA.atomic_add!(
-                    pointer(fs_mat, s_idx_i * b - (b - k)), 
-                    -force_smem[laneid(), k] - opposites_sum[laneid(), k]
-                ) 
-            end
-        end
-    end
-
-    return nothing
-end
-
-function force_kernel_triclinic!( 
-    sorted_seq,
-    fs_mat, 
-    mins::AbstractArray{C}, 
-    maxs::AbstractArray{C},
-    coords, 
-    velocities,
-    atoms,
-    ::Val{N}, 
-    r_cut, 
-    ::Val{force_units},
-    inters_tuple,
-    boundary,
-    H, 
-    Hinv,
-    step_n,
-    special_compressed,
-    eligible_compressed,
-    ::Val{T},
-    ::Val{D}) where {N, C, force_units, T, D}
-
-    a = Int32(1)
-    b = Int32(D)
-    n_blocks = ceil(Int32, N / 32)
-    i = blockIdx().x
-    j = blockIdx().y
-    i_0_tile = (i - a) * warpsize()
-    j_0_tile = (j - a) * warpsize()
-    index_i = i_0_tile + laneid()
-    index_j = j_0_tile + laneid()
-    force_smem = CuStaticSharedArray(T, (32, 3))
-    opposites_sum = CuStaticSharedArray(T, (32, 3))
-    r = Int32((N - 1) % 32 + 1)
-    @inbounds for k in a:b
-        force_smem[laneid(), k] = zero(T)
-        opposites_sum[laneid(), k] = zero(T)
-    end
-
-    # The code is organised in 4 mutually excluding parts
-    if j < n_blocks && i < j
         dist_block = zero(C) * zero(C)
         r_max_i = SVector(maxs[i, 1], maxs[i, 2], maxs[i, 3])
         r_min_i = SVector(mins[i, 1], mins[i, 2], mins[i, 3])
         r_max_j = SVector(maxs[j, 1], maxs[j, 2], maxs[j, 3])
         r_min_j = SVector(mins[j, 1], mins[j, 2], mins[j, 3])
         d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
-        #=d_block = SVector(
-                        boxes_dist(mins[i, 1], maxs[i, 1], mins[j, 1], maxs[j, 1], box_sides(boundary, 1)),
-                        boxes_dist(mins[i, 2], maxs[i, 2], mins[j, 2], maxs[j, 2], box_sides(boundary, 2)),
-                        boxes_dist(mins[i, 3], maxs[i, 3], mins[j, 3], maxs[j, 3], box_sides(boundary, 3))
-                    )	
-        @inbounds for k in a:b
-            d_block_cart = H[k, 1]*d_block[1] + 
-                           H[k, 2]*d_block[2] + 
-                           H[k, 3]*d_block[3]
-            dist_block += d_block_cart * d_block_cart
-        end=#
         dist_block = sum(abs2, d_block)
         if dist_block <= r_cut * r_cut
             s_idx_i = sorted_seq[index_i]
-            #=r_i = coords[s_idx_i]
-            coords_i = SVector( 
-                Hinv[1,1]*r_i[1] + Hinv[1,2]*r_i[2] + Hinv[1,3]*r_i[3], # Transform to fractional space: s = Hinv * r so that pbc can be computed
-                Hinv[2,1]*r_i[1] + Hinv[2,2]*r_i[2] + Hinv[2,3]*r_i[3],
-                Hinv[3,1]*r_i[1] + Hinv[3,2]*r_i[2] + Hinv[3,3]*r_i[3]
-            )
-            vel_i = velocities[s_idx_i] 
-            atoms_i = atoms[s_idx_i]
-            d_pb = SVector(
-                        boxes_dist(coords_i[1], coords_i[1], mins[j, 1], maxs[j, 1], box_sides(boundary, 1)),
-                        boxes_dist(coords_i[2], coords_i[2], mins[j, 2], maxs[j, 2], box_sides(boundary, 2)),
-                        boxes_dist(coords_i[3], coords_i[3], mins[j, 3], maxs[j, 3], box_sides(boundary, 3))
-                    )
-            dist_pb = zero(C) * zero(C)
-            @inbounds for k in a:b
-                d_pb_cart = H[k, 1]*d_pb[1] + 
-                            H[k, 2]*d_pb[2] + 
-                            H[k, 3]*d_pb[3]
-                dist_pb += d_pb_cart * d_pb_cart
-            end=#
             coords_i = coords[s_idx_i] 
             vel_i = velocities[s_idx_i] 
             atoms_i = atoms[s_idx_i]
@@ -882,24 +569,21 @@ function force_kernel_triclinic!(
     end
 
     if j == n_blocks && i < n_blocks
-        d_block = zero(C)
-        dist_block = zero(C) * zero(C)
-        @inbounds for k in a:b
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-            dist_block += d_block * d_block	
-        end
+        r_max_i = SVector(maxs[i, 1], maxs[i, 2], maxs[i, 3])
+        r_min_i = SVector(mins[i, 1], mins[i, 2], mins[i, 3])
+        r_max_j = SVector(maxs[j, 1], maxs[j, 2], maxs[j, 3])
+        r_min_j = SVector(mins[j, 1], mins[j, 2], mins[j, 3])
+        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
+        dist_block = sum(abs2, d_block)
 
         if dist_block <= r_cut * r_cut 
             s_idx_i = sorted_seq[index_i]
             coords_i = coords[s_idx_i]
             vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
-            d_pb = zero(C)
-            dist_pb = zero(C) * zero(C)			
-            @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-                dist_pb += d_pb * d_pb
-            end
+            d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
+            dist_pb = sum(abs2, d_pb)
+
             Bool_excl = dist_pb <= r_cut * r_cut
             eligible_bitmask = UInt32(0)
             special_bitmask = UInt32(0)
@@ -1080,23 +764,21 @@ function energy_kernel!(
 
     # The code is organised in 4 mutually excluding parts
     if j < n_blocks && i < j
-        d_block = zero(C)
-        dist_block = zero(C) * zero(C)
-        @inbounds for k in a:b	
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-            dist_block += d_block * d_block	
-        end
+        r_max_i = SVector(maxs[i, 1], maxs[i, 2], maxs[i, 3])
+        r_min_i = SVector(mins[i, 1], mins[i, 2], mins[i, 3])
+        r_max_j = SVector(maxs[j, 1], maxs[j, 2], maxs[j, 3])
+        r_min_j = SVector(mins[j, 1], mins[j, 2], mins[j, 3])
+        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
+        dist_block = sum(abs2, d_block)
+
         if dist_block <= r_cut * r_cut
             s_idx_i = sorted_seq[index_i]
             coords_i = coords[s_idx_i] 
             vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
-            d_pb = zero(C)
-            dist_pb = zero(C) * zero(C)
-            @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-                dist_pb += d_pb * d_pb
-            end
+            d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
+            dist_pb = sum(abs2, d_pb)
+
             Bool_excl = dist_pb <= r_cut * r_cut
             s_idx_j = sorted_seq[index_j]
             coords_j = coords[s_idx_j]
@@ -1149,23 +831,21 @@ function energy_kernel!(
     end
 
     if j == n_blocks && i < n_blocks
-        d_block = zero(C)
-        dist_block = zero(C) * zero(C)
-        @inbounds for k in a:b
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-            dist_block += d_block * d_block	
-        end
+        r_max_i = SVector(maxs[i, 1], maxs[i, 2], maxs[i, 3])
+        r_min_i = SVector(mins[i, 1], mins[i, 2], mins[i, 3])
+        r_max_j = SVector(maxs[j, 1], maxs[j, 2], maxs[j, 3])
+        r_min_j = SVector(mins[j, 1], mins[j, 2], mins[j, 3])
+        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
+        dist_block = sum(abs2, d_block)
+
         if dist_block <= r_cut * r_cut 
             s_idx_i = sorted_seq[index_i]
             coords_i = coords[s_idx_i]
             vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
-            d_pb = zero(C)
-            dist_pb = zero(C) * zero(C)			
-            @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-                dist_pb += d_pb * d_pb
-            end
+            d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
+            dist_pb = sum(abs2, d_pb)
+
             Bool_excl = dist_pb <= r_cut * r_cut
             @inbounds for m in a:r
                 s_idx_j = sorted_seq[j_0_tile + m]
