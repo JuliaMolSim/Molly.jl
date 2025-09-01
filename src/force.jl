@@ -202,16 +202,10 @@ function forces!(fs, sys::System, neighbors, buffers, step_n::Integer=0;
     sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
 
     if length(sys.pairwise_inters) > 0
-        if n_threads > 1
-            pairwise_forces_loop_threads!(buffers.fs_nounits, buffers.fs_chunks, sys.atoms,
-                            sys.coords, sys.velocities, sys.boundary, neighbors, sys.force_units,
-                            length(sys), pairwise_inters_nonl, pairwise_inters_nl,
-                            n_threads, step_n)
-        else
-            pairwise_forces_loop!(buffers.fs_nounits, sys.atoms, sys.coords, sys.velocities,
-                            sys.boundary, neighbors, sys.force_units, length(sys),
-                            pairwise_inters_nonl, pairwise_inters_nl, step_n)
-        end
+        pairwise_forces_loop!(buffers.fs_nounits, buffers.fs_chunks, sys.atoms,
+                        sys.coords, sys.velocities, sys.boundary, neighbors, sys.force_units,
+                        length(sys), pairwise_inters_nonl, pairwise_inters_nl,
+                        Val(n_threads), step_n)
     else
         fill!(buffers.fs_nounits, zero(eltype(buffers.fs_nounits)))
     end
@@ -231,9 +225,9 @@ function forces!(fs, sys::System, neighbors, buffers, step_n::Integer=0;
     return fs
 end
 
-function pairwise_forces_loop!(fs_nounits, atoms, coords, velocities, boundary, neighbors,
-                               force_units, n_atoms, pairwise_inters_nonl, pairwise_inters_nl,
-                               step_n=0)
+function pairwise_forces_loop!(fs_nounits, fs_chunks, atoms, coords, velocities, boundary,
+                               neighbors, force_units, n_atoms, pairwise_inters_nonl,
+                               pairwise_inters_nl, ::Val{1}, step_n=0)
     fill!(fs_nounits, zero(eltype(fs_nounits)))
 
     @inbounds if length(pairwise_inters_nonl) > 0
@@ -277,9 +271,9 @@ function pairwise_forces_loop!(fs_nounits, atoms, coords, velocities, boundary, 
     return fs_nounits
 end
 
-function pairwise_forces_loop_threads!(fs_nounits, fs_chunks, atoms, coords, velocities, boundary,
-                                       neighbors, force_units, n_atoms, pairwise_inters_nonl,
-                                       pairwise_inters_nl, n_threads, step_n=0)
+function pairwise_forces_loop!(fs_nounits, fs_chunks, atoms, coords, velocities, boundary,
+                               neighbors, force_units, n_atoms, pairwise_inters_nonl,
+                               pairwise_inters_nl, ::Val{n_threads}, step_n=0) where n_threads
     if isnothing(fs_chunks)
         throw(ArgumentError("fs_chunks is not set but n_threads is > 1"))
     end

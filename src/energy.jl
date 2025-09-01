@@ -91,15 +91,9 @@ function potential_energy(sys::System, neighbors, step_n::Integer=0;
     sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
 
     if length(sys.pairwise_inters) > 0
-        if n_threads > 1
-            pe = pairwise_pe_loop_threads(sys.atoms, sys.coords, sys.velocities, sys.boundary,
-                                neighbors, sys.energy_units, length(sys), pairwise_inters_nonl,
-                                pairwise_inters_nl, Val(T), n_threads, step_n)
-        else
-            pe = pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary, neighbors,
-                                  sys.energy_units, length(sys), pairwise_inters_nonl,
-                                  pairwise_inters_nl, Val(T), step_n)
-        end
+        pe = pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
+                              neighbors, sys.energy_units, length(sys), pairwise_inters_nonl,
+                              pairwise_inters_nl, Val(T), Val(n_threads), step_n)
     else
         pe = zero(T) * sys.energy_units
     end
@@ -122,7 +116,7 @@ end
 
 function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy_units,
                           n_atoms, pairwise_inters_nonl, pairwise_inters_nl, ::Val{T},
-                          step_n=0) where T
+                          ::Val{1}, step_n=0) where T
     pe = zero(T) * energy_units
 
     @inbounds if length(pairwise_inters_nonl) > 0
@@ -163,9 +157,9 @@ function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy
     return pe
 end
 
-function pairwise_pe_loop_threads(atoms, coords, velocities, boundary, neighbors, energy_units,
-                                  n_atoms, pairwise_inters_nonl, pairwise_inters_nl, ::Val{T},
-                                  n_threads, step_n=0) where T
+function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy_units,
+                          n_atoms, pairwise_inters_nonl, pairwise_inters_nl, ::Val{T},
+                          ::Val{n_threads}, step_n=0) where {T, n_threads}
     pe_chunks_nounits = zeros(T, n_threads)
 
     if length(pairwise_inters_nonl) > 0
