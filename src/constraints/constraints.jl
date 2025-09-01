@@ -7,18 +7,12 @@ export
     check_position_constraints,
     check_velocity_constraints
 
-
-abstract type Constraint{D} end
-
 """
     DistanceConstraint(i, j, dist)
 
-
-    DistanceConstraint(i, j, dist)
-
-Constraint between two atoms that maintains a fixed distance between the two atoms.
+Constraint between two atoms that maintains a fixed distance between the atoms.
 """
-struct DistanceConstraint{D, I <: Integer} <: Constraint{D}
+struct DistanceConstraint{D, I}
     i::I
     j::I
     dist::D
@@ -47,7 +41,7 @@ ac = AngleConstraint(1, 2, 3, 104.5 * π / 180, 0.9572u"Å", 0.9572u"Å")
 ```
 where atom 1 is oxygen and atoms 2/3 are hydrogen.
 """
-struct AngleConstraint{D, I <: Integer} <: Constraint{D}
+struct AngleConstraint{D, I}
     i::I # Central atom
     j::I
     k::I
@@ -189,7 +183,7 @@ function disable_constrained_interactions!(
 
         # 1024 is block size
         kernel = disable_pairs!(nf_backend, 1024)
-        kernel(neighbor_finder.eligible, i_idx, j_idx, ndrange = length(i_idx))
+        kernel(neighbor_finder.eligible, i_idx, j_idx, ndrange=length(i_idx))
 
         return neighbor_finder
 
@@ -480,7 +474,7 @@ function check_position_constraints(sys, ca)
         clusters = getproperty(ca, cluster_type)
         if length(clusters) > 0
             max_storage = allocate(backend, FT, length(clusters))
-            err_kernel(clusters, sys.coords, sys.boundary, max_storage; ndrange = length(clusters))
+            err_kernel(clusters, sys.coords, sys.boundary, max_storage; ndrange=length(clusters))
             # not efficient to move to GPU first, but the array
             # is usually small and this function is for testing
             push!(cluster_maxes, reduce(max, Array(max_storage)))
@@ -515,7 +509,8 @@ function check_velocity_constraints(sys::System, ca)
         clusters = getproperty(ca, cluster_type)
         if length(clusters) > 0
             max_storage = allocate(backend, FT, length(clusters))
-            err_kernel(clusters, sys.coords, sys.velocities, sys.boundary, max_storage; ndrange = length(clusters))
+            err_kernel(clusters, sys.coords, sys.velocities, sys.boundary, max_storage;
+                       ndrange=length(clusters))
             # not efficient to move to GPU first, but the array
             # is usually small and this function is for testing
             push!(cluster_maxes, reduce(max, Array(max_storage)))

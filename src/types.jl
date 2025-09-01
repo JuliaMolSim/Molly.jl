@@ -493,7 +493,7 @@ interface described there.
 - `data::DA=nothing`: arbitrary data associated with the system.
 """
 mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
-                      L, F, E, K, M, IM, DA} <: AtomsBase.AbstractSystem{D}
+                      L, F, E, K, M, DA} <: AtomsBase.AbstractSystem{D}
     atoms::A
     coords::C
     boundary::B
@@ -511,7 +511,6 @@ mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
     energy_units::E
     k::K
     masses::M
-    inv_masses::IM
     data::DA
 end
 
@@ -609,18 +608,13 @@ function System(;
     constraints = Tuple(setup_constraints!(ca, neighbor_finder, AT) for ca in constraints)
     CN = typeof(constraints)
 
-    # Useful to have pre-compute
-    inv_masses = T(1) ./ atom_masses
-    IM = typeof(inv_masses)
-
-
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
 
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, IM, DA}(
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, DA}(
                     atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, neighbor_finder, loggers,
-                    df, force_units, energy_units, k_converted, atom_masses, inv_masses, data)
+                    df, force_units, energy_units, k_converted, atom_masses, data)
 end
 
 """
@@ -735,9 +729,9 @@ function System(crystal::Crystal{D};
 end
 
 function Base.zero(sys::System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K,
-                               M, IM, DA}) where {D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
-                                                  L, F, E, K, M, IM, DA}
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, IM, DA}(
+                               M, DA}) where {D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+                                              L, F, E, K, M, DA}
+    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, DA}(
         zero.(sys.atoms),
         zero(sys.coords),
         zero(sys.boundary),
@@ -755,7 +749,6 @@ function Base.zero(sys::System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
         sys.energy_units,
         zero(sys.k),
         zero(sys.masses),
-        zero(sys.inv_masses),
         sys.data,
     )
 end
@@ -1063,8 +1056,6 @@ function ReplicaSystem(;
 
     atom_masses = mass.(atoms)
     M = typeof(atom_masses)
-    inv_masses = T(1) ./ atom_masses
-    IM = typeof(inv_masses)
 
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
@@ -1072,12 +1063,12 @@ function ReplicaSystem(;
     replicas = Tuple(System{D, AT, T, A, C, B, V, AD, TO, typeof(replica_pairwise_inters[i]),
                         typeof(replica_specific_inter_lists[i]), typeof(replica_general_inters[i]),
                         typeof(replica_constraints[i]), NF, typeof(replica_loggers[i]), F, E, K,
-                        M, IM, Nothing}(
+                        M, Nothing}(
             atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
             replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i],
             deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i],
-            force_units, energy_units, k_converted, atom_masses, inv_masses, nothing) for i in 1:n_replicas)
+            force_units, energy_units, k_converted, atom_masses, nothing) for i in 1:n_replicas)
     R = typeof(replicas)
 
     return ReplicaSystem{D, AT, T, A, AD, EL, F, E, K, R, DA}(

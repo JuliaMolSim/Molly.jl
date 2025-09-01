@@ -1,6 +1,3 @@
-
-
-
 # No-op when backends are same
 to_backend(arr, old::T, new::T) where {T <: Backend} = arr
 
@@ -10,7 +7,6 @@ function to_backend(arr, old::A, new::B) where {A <: Backend, B <: Backend}
     copy!(out, arr)
     return out
 end
-
 
 # These types will enable coalesced memory access
 # via StructArray{ConstraintKernelData}
@@ -33,7 +29,6 @@ function ConstraintKernelData(k1::Int32, k2::Int32, dist12::D) where D
 end
 
 interactions(kd::Cluster12Data) = ((kd.k1, kd.k2, kd.dist12), )
-
 
 struct Cluster23Data{D} <: ConstraintKernelData{D, 2, 3}
     k1::Int32
@@ -81,7 +76,6 @@ end
 function ConstraintKernelData(k1::Int32, k2::Int32, k3::Int32, dist12::D, dist13::D, dist23::D) where D
     return AngleClusterData{D}(k1, k2, k3, dist12, dist13, dist23)
 end
-
 
 interactions(kd::AngleClusterData) = ((kd.k1, kd.k2, kd.dist12), (kd.k1, kd.k3, kd.dist13), (kd.k2, kd.k3, kd.dist23))
 idx_keys(::Type{<:AngleClusterData}) = (:k1, :k2, :k3)
