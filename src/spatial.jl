@@ -877,42 +877,46 @@ end
 @doc raw"""
     pressure(sys, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
 
-Calculate the pressure of a system.
+Calculate the tensorial pressure of a system.
 
 The pressure is defined as
 ```math
-P = \frac{1}{V} \left( NkT - \frac{2}{D} \Xi \right)
+P = \frac{ 2 \cdot K + W }{V}
 ```
-where `V` is the system volume, `N` is the number of atoms, `k` is the Boltzmann constant,
-`T` is the system temperature, `D` is the number of dimensions and `Ξ` is the virial
-calculated using [`virial`](@ref).
+where `V` is the system volume, `K` is the kinetic energy tensor calculated using [``](@ref)
+and W is the virial tensor, calculated along with the forces in the system.
 
-This should only be used on systems containing just pairwise interactions, or
-where the specific interactions, constraints and general interactions without
-[`virial`](@ref) defined do not contribute to the virial.
 Not compatible with infinite boundaries.
 """
 function pressure(sys; n_threads::Integer=Threads.nthreads())
     return pressure(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
+
 function pressure(sys::AtomsBase.AbstractSystem{D}, neighbors, step_n::Integer=0;
                   n_threads::Integer=Threads.nthreads()) where D
+
+    kinetic_energy(sys) # Always evaluate K in case velocities were rescaled by a thermostat
+
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
-    NkT = energy_remove_mol(length(sys) * sys.k * temperature(sys))
-    vir = energy_remove_mol(virial(sys, neighbors, step_n; n_threads=n_threads))
-    P = (NkT - (2 * vir) / D) / volume(sys.boundary)
+
+    K = energy_remove_mol.(sys.kin_tensor)  # (1/2) Σ m v⊗v
+    W = energy_remove_mol.(sys.virial)      # Σ r⊗f
+
+    P = (2 .* K .+ W) ./ volume(sys.boundary)
     if sys.energy_units == NoUnits || D != 3
         # If implied energy units are (u * nm^2 * ps^-2) and everything is
         #   consistent then this has implied units of (u * nm^-1 * ps^-2)
         #   for 3 dimensions and (u * ps^-2) for 2 dimensions
-        return P
+        sys.pres_tensor = P
     else
         # Sensible unit to return by default for 3 dimensions
-        return uconvert(u"bar", P)
+        P_bar = uconvert.(u"bar", P)
+        sys.pres_tensor = P_bar
     end
+    return sys.pres_tensor
 end
 
 """
