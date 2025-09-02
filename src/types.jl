@@ -465,6 +465,12 @@ interface described there.
 - `boundary::B`: the bounding box in which the simulation takes place.
 - `velocities::V=zero(coords) * u"ps^-1"`: the velocities of the atoms in the
     system.
+- `virial::VT=zeros(dims, dims) * u"kJ * mol^-1"`: the virial of the system, used to
+    calculate stresses and pressure.
+- `kin_tensor::VT=zeros(dims, dims) * u"kJ * mol^-1"`: the kinetik energy of the system
+    in tensorial form, useful to calculate the pressure.
+- `pres_tensor::VT=zeros(dims, dims) * u"bar"`: the pressure of the system in its 
+    tensorial form. Useful for non-isotropic barostats.
 - `atoms_data::AD=[]`: other data associated with the atoms, allowing the atoms to
     be bits types and hence work on the GPU.
 - `topology::TO=nothing`: topological information about the system such as which
@@ -492,12 +498,15 @@ interface described there.
     modified in some simulations. `k` is chosen based on the `energy_units` given.
 - `data::DA=nothing`: arbitrary data associated with the system.
 """
-mutable struct System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
+mutable struct System{D, AT, T, A, C, B, V, VT, KT, PT, AD, TO, PI, SI, GI, CN, NF,
                       L, F, E, K, M, IM, DA} <: AtomsBase.AbstractSystem{D}
     atoms::A
     coords::C
     boundary::B
     velocities::V
+    virial::VT
+    kin_tensor::KT
+    pres_tensor::PT
     atoms_data::AD
     topology::TO
     pairwise_inters::PI
@@ -520,6 +529,9 @@ function System(;
                 coords,
                 boundary,
                 velocities=nothing,
+                virial=nothing,
+                kin_tensor=nothing,
+                pres_tensor=nothing,
                 atoms_data=[],
                 topology=nothing,
                 pairwise_inters=(),
@@ -560,6 +572,36 @@ function System(;
         vels = velocities
     end
     V = typeof(vels)
+
+    if isnothing(virial)
+        d = size(boundary.side_lengths)[1]
+        if energy_units == NoUnits
+            virial = zeros(T, d, d)
+        else
+            virial = zeros(T, d, d) * energy_units
+        end
+    end
+    VT = typeof(virial)
+
+    if isnothing(kin_tensor)
+        d = size(boundary.side_lengths)[1]
+        if energy_units == NoUnits
+            kin_tensor = zeros(T, d, d)
+        else
+            kin_tensor = zeros(T, d, d) * energy_units
+        end
+    end
+    KT = typeof(kin_tensor)
+
+    if isnothing(pres_tensor)
+        d = size(boundary.side_lengths)[1]
+        if energy_units == NoUnits
+            pres_tensor = zeros(T, d, d)
+        else
+            pres_tensor = zeros(T, d, d) * u"bar"
+        end
+    end
+    PT = typeof(pres_tensor)
 
     if length(atoms) != length(coords)
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(coords)) coordinates"))
@@ -617,8 +659,8 @@ function System(;
     check_units(atoms, coords, vels, energy_units, force_units, pairwise_inters,
                 specific_inter_lists, general_inters, boundary)
 
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, IM, DA}(
-                    atoms, coords, boundary, vels, atoms_data, topology, pairwise_inters,
+    return System{D, AT, T, A, C, B, V, VT, KT, PT, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, IM, DA}(
+                    atoms, coords, boundary, vels, virial, kin_tensor, pres_tensor, atoms_data, topology, pairwise_inters,
                     specific_inter_lists, general_inters, constraints, neighbor_finder, loggers,
                     df, force_units, energy_units, k_converted, atom_masses, inv_masses, data)
 end
@@ -636,6 +678,9 @@ function System(sys::System;
                 coords=sys.coords,
                 boundary=sys.boundary,
                 velocities=sys.velocities,
+                virial=sys.virial,
+                kin_tensor=sys.kin_tensor,
+                pres_tensor=sys.pres_tensor,
                 atoms_data=sys.atoms_data,
                 topology=sys.topology,
                 pairwise_inters=sys.pairwise_inters,
@@ -653,6 +698,9 @@ function System(sys::System;
         coords=coords,
         boundary=boundary,
         velocities=velocities,
+        virial=virial,
+        kin_tensor=kin_tensor,
+        pres_tensor=pres_tensor,
         atoms_data=atoms_data,
         topology=topology,
         pairwise_inters=pairwise_inters,
@@ -683,6 +731,9 @@ the convenience constructor `System(sys; <keyword arguments>)`.
 function System(crystal::Crystal{D};
                 velocities=nothing,
                 topology=nothing,
+                virial=nothing,
+                kin_tensor=nothing,
+                pres_tensor=nothing,
                 pairwise_inters=(),
                 specific_inter_lists=(),
                 general_inters=(),
@@ -719,6 +770,9 @@ function System(crystal::Crystal{D};
         coords=coords,
         boundary=boundary,
         velocities=velocities,
+        virial=virial,
+        kin_tensor=kin_tensor,
+        pres_tensor=pres_tensor,
         atoms_data=atoms_data,
         topology=topology,
         pairwise_inters=pairwise_inters,
@@ -734,14 +788,18 @@ function System(crystal::Crystal{D};
     )
 end
 
-function Base.zero(sys::System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K,
-                               M, IM, DA}) where {D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
-                                                  L, F, E, K, M, IM, DA}
-    return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, IM, DA}(
+function Base.zero(sys::System{D, AT, T, A, C, B, V, VT, KT, PT,
+                   AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, IM, DA}) where 
+                   {D, AT, T, A, C, B, V, VT, KT, PT, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, IM, DA}
+
+    return System{D, AT, T, A, C, B, V, VT, KT, PT, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, IM, DA}(
         zero.(sys.atoms),
         zero(sys.coords),
         zero(sys.boundary),
         zero(sys.velocities),
+        zero(sys.virial),
+        zero(sys.kin_tensor),
+        zero(sys.pres_tensor),
         sys.atoms_data,
         sys.topology,
         zero.(sys.pairwise_inters),
@@ -909,6 +967,12 @@ function ReplicaSystem(;
                         boundary,
                         n_replicas,
                         replica_velocities=nothing,
+                        virial=nothing,
+                        replica_virial=nothing,
+                        kin_tensor=nothing,
+                        replica_kin_tensor=nothing,
+                        pres_tensor=nothing,
+                        replica_pres_tensor=nothing,
                         atoms_data=[],
                         topology=nothing,
                         replica_topology=nothing,
@@ -947,6 +1011,36 @@ function ReplicaSystem(;
         end
     end
     V = typeof(replica_velocities[1])
+
+    if isnothing(replica_virial)
+        d = size(boundary.side_lengths)[1]
+        if energy_units == NoUnits
+            replica_virial = zeros(T, d, d)
+        else
+            replica_virial = zeros(T, d, d) * energy_units
+        end
+    end
+    VT = typeof(replica_virial)
+
+    if isnothing(replica_kin_tensor)
+        d = size(boundary.side_lengths)[1]
+        if energy_units == NoUnits
+            replica_kin_tensor = zeros(T, d, d)
+        else
+            replica_kin_tensor = zeros(T, d, d) * energy_units
+        end
+    end
+    KT = typeof(replica_kin_tensor)
+
+    if isnothing(replica_pres_tensor)
+        d = size(boundary.side_lengths)[1]
+        if energy_units == NoUnits
+            replica_pres_tensor = zeros(T, d, d)
+        else
+            replica_pres_tensor = zeros(T, d, d) * u"bar"
+        end
+    end
+    PT = typeof(replica_pres_tensor)
 
     if isnothing(replica_topology)
         replica_topology = [topology for _ in 1:n_replicas]
@@ -1069,12 +1163,13 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, AT, T, A, C, B, V, AD, TO, typeof(replica_pairwise_inters[i]),
+    replicas = Tuple(System{D, AT, T, A, C, B, V, VT, KT, PT, AD, TO, typeof(replica_pairwise_inters[i]),
                         typeof(replica_specific_inter_lists[i]), typeof(replica_general_inters[i]),
                         typeof(replica_constraints[i]), NF, typeof(replica_loggers[i]), F, E, K,
                         M, IM, Nothing}(
-            atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
-            replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
+            atoms, replica_coords[i], boundary, replica_velocities[i],
+            replica_virial[i], replica_kin_tensor[i], replica_pres_tensor[i], 
+            atoms_data, replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i],
             deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i],
             force_units, energy_units, k_converted, atom_masses, inv_masses, nothing) for i in 1:n_replicas)
@@ -1343,6 +1438,9 @@ function System(sys::AtomsBase.AbstractSystem{D};
         coords=coords,
         boundary=molly_boundary,
         velocities=vels,
+        virial=nothing,
+        kin_tensor=nothing,
+        pres_tensor=nothing,
         atoms_data=atoms_data,
         topology=topology,
         pairwise_inters=pairwise_inters,
