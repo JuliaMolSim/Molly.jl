@@ -298,21 +298,20 @@ function Base.show(io::IO, dl::GeneralObservableLogger{T, typeof(density_wrapper
 end
 
 function virial_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
-    return virial(sys, neighbors, step_n; n_threads=n_threads)
+    return sys.virial
 end
 
 """
     VirialLogger(n_steps)
     VirialLogger(T, n_steps)
 
-Log the [`virial`](@ref) of a system throughout a simulation.
+Log the [`virial`](@ref) tensor of a system throughout a simulation.
 
-This should only be used on systems containing just pairwise interactions, or
-where the specific interactions, general interactions and constraints do not
+This should only be used on systems where the general interactions and constraints do not
 contribute to the virial.
 """
 VirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(virial_wrapper, T, n_steps)
-VirialLogger(n_steps::Integer) = VirialLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+VirialLogger(n_steps::Integer) = VirialLogger(typeof(Matrix{DefaultFloat}(undef, 3, 3).*u"kJ * mol^-1"), n_steps)
 
 function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)}) where T
     print(io, "VirialLogger{", eltype(values(vl)), "} with n_steps ",
@@ -429,9 +428,16 @@ function BioStructures.AtomRecord(at_data::AtomData, i, coord)
     )
 end
 
-function write_pdb_coords(output, sys, atom_inds_arg=Int[], excluded_res=())
+function write_pdb_coords(output, sys, correction::Symbol = :pbc, atom_inds_arg=Int[], excluded_res=())
+    if !(correction ∈ (:pbc, :wrap))
+        throw(ArgumentError("Argument $(correction) not recognised. Currently supported corrections are :wrap and :pbc"))
+    end
     atom_inds = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
     coords_cpu = from_device(sys.coords)
+    if correction == :pbc
+        coords_cpu = unwrap_molecules(coords_cpu, sys.boundary, sys.topology)
+        # Add logic if more correction types are added
+    end
     for i in atom_inds
         coord, atom_data = coords_cpu[i], sys.atoms_data[i]
         if unit(first(coord)) == NoUnits
@@ -452,7 +458,12 @@ function write_pdb_coords(output, sys, atom_inds_arg=Int[], excluded_res=())
 end
 
 function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, excluded_res,
-                          write_velocities, write_boundary, calc_topology, append)
+                          write_velocities, write_boundary, calc_topology, append; correction::Symbol = :pbc)
+
+    if !(correction ∈ (:pbc, :wrap))
+        throw(ArgumentError("Argument $(correction) not recognised. Currently supported corrections are :wrap and :pbc"))
+    end
+
     atom_inds_all_res = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
     if iszero(length(excluded_res))
         atom_inds = atom_inds_all_res
@@ -502,6 +513,10 @@ function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, exclud
 
     coords_cf = Chemfiles.positions(frame)
     coords = from_device(sys.coords)
+    if correction == :pbc
+        coords = unwrap_molecules(coords, sys.boundary, sys.topology)
+        #More logic if more correction types are added
+    end
     for (ci, si) in enumerate(atom_inds)
         c = coords[si]
         if unit(eltype(c)) == NoUnits
@@ -535,7 +550,7 @@ function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, exclud
 end
 
 """
-    write_structure(filepath, sys; format="", atom_inds=[],
+    write_structure(filepath, sys; correction=:pbc, format="", atom_inds=[],
                     excluded_res=String[], write_velocities=false,
                     write_boundary=true)
 
@@ -549,6 +564,9 @@ By default the format is guessed from the file extension but it can also
 be given as a string, e.g. `format="DCD"`.
 BioStructures.jl is used to write to the PDB format.
 
+The correction to be applied to the molecules is passed with the `correction` keyword. 
+So far, `:pbc` and `:wrap` are supported, the former keeps the molecules whole,
+whereas the latter wraps all atoms inside the simulation box, disregarding connectivity.
 The atom indices to be written can be given as a list or range to `atom_inds`,
 with all atoms being written by default.
 Residue names to be excluded can be given as `excluded_res`.
@@ -562,7 +580,7 @@ The file will be overwritten if it already exists.
 
 Not compatible with 2D systems.
 """
-function write_structure(filepath, sys; format::AbstractString="", atom_inds=Int[],
+function write_structure(filepath, sys; correction::Symbol = :pbc, format::AbstractString="", atom_inds=Int[],
                          excluded_res=(), write_velocities::Bool=false,
                          write_boundary=true)
     if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
@@ -571,13 +589,13 @@ function write_structure(filepath, sys; format::AbstractString="", atom_inds=Int
             if write_boundary && !has_infinite_boundary(sys.boundary)
                 println(output, pdb_cryst1_line(sys.boundary))
             end
-            write_pdb_coords(output, sys, atom_inds, excluded_res)
+            write_pdb_coords(output, sys, correction, atom_inds, excluded_res)
             println(output, "END")
         end
     else
         topology = Chemfiles.Topology()
         write_chemfiles!(topology, filepath, sys, uppercase(format), atom_inds,
-                         excluded_res, write_velocities, write_boundary, true, false)
+                         excluded_res, write_velocities, write_boundary, true, false; correction = correction)
     end
 end
 
@@ -617,6 +635,7 @@ mutable struct TrajectoryWriter{I, T}
     n_steps::Int
     filepath::String
     format::String
+    correction::Symbol
     atom_inds::I # Int[] or range
     excluded_res::Set{String}
     write_velocities::Bool
@@ -627,9 +646,13 @@ mutable struct TrajectoryWriter{I, T}
 end
 
 function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
-                          format::AbstractString="", atom_inds=Int[],
+                          format::AbstractString="", correction::Symbol = :pbc, atom_inds=Int[],
                           excluded_res=String[], write_velocities::Bool=false,
                           write_boundary::Bool=true)
+
+    if !(correction ∈ (:pbc, :wrap))
+        throw(ArgumentError("Argument $(correction) not recognised. Currently supported corrections are :wrap and :pbc"))
+    end
     topology = Chemfiles.Topology() # Added to later when sys is available
     if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
         format_used = "PDB"
@@ -637,7 +660,7 @@ function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
         # Chemfiles can deal with "" format
         format_used = uppercase(format)
     end
-    return TrajectoryWriter(n_steps, filepath, format_used, atom_inds,
+    return TrajectoryWriter(n_steps, filepath, format_used, correction, atom_inds,
                     Set(excluded_res), write_velocities, write_boundary, topology,
                     false, 0)
 end
@@ -659,14 +682,14 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
                     println(output, pdb_cryst1_line(sys.boundary))
                 end
                 println(output, "MODEL     ", lpad(logger.structure_n, 4))
-                write_pdb_coords(output, sys, logger.atom_inds, logger.excluded_res)
+                write_pdb_coords(output, sys, logger.correction, logger.atom_inds, logger.excluded_res)
                 println(output, "ENDMDL")
             end
         else
             write_chemfiles!(logger.topology, logger.filepath, sys, logger.format,
                              logger.atom_inds, logger.excluded_res,
                              logger.write_velocities, logger.write_boundary,
-                             !logger.topology_written, true)
+                             !logger.topology_written, true; correction = logger.correction)
             if !logger.topology_written
                 logger.topology_written = true
             end
