@@ -140,7 +140,19 @@ end
 
 ispositive(x) = x > zero(x)
 
-function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
+function TriclinicBoundary(bv::Union{SVector{3}, SMatrix{3,3}}; approx_images::Bool=true)
+
+    # Normalize input, if box matrix is passed turn into SVector{3, SVector{3, T}}
+    if bv isa SMatrix
+        bv = SVector(bv[1,:], bv[2,:], bv[3,:])
+    end
+
+    # numeric and unit types
+    NT  = typeof(ustrip(bv[1][1]))              # underlying floating type
+    uL  = (bv[1][1] isa Unitful.Quantity) ? unit(bv[1][1]) : one(NT)
+    tolL = sqrt(eps(NT)) * uL                   # length tolerance (with units)
+    tol0 = sqrt(eps(NT))                        # unitless tolerance
+
     if !ispositive(bv[1][1]) || !iszero_value(bv[1][2]) || !iszero_value(bv[1][3])
         throw(ArgumentError("first basis vector must be along the x-axis (no y or z component) " *
                             "and have a positive x component " *
@@ -156,45 +168,85 @@ function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
                             "when constructing a TriclinicBoundary, got $(bv[3])"))
     end
     reciprocal_size = SVector{3}(inv(bv[1][1]), inv(bv[2][2]), inv(bv[3][3]))
-    α = bond_angle(bv[2], bv[3])
-    β = bond_angle(bv[1], bv[3])
-    γ = bond_angle(bv[1], bv[2])
-    # Precompute angles to speed up coordinate wrapping
-    tan_bprojyz_cprojyz = tan(bond_angle(
-        SVector(zero(bv[2][1]), bv[2][2], bv[2][3]),
-        SVector(zero(bv[3][1]), bv[3][2], bv[3][3]),
-    ))
-    tan_c_cprojxy = tan(bond_angle(SVector(bv[3][1], bv[3][2], zero(bv[3][3])), bv[3]))
-    a_cprojxy = bond_angle(bv[1], SVector(bv[3][1], bv[3][2], zero(bv[3][3])))
-    tan_a_b = tan(bond_angle(bv[1], bv[2]))
-    return TriclinicBoundary{typeof(α), approx_images, eltype(eltype(bv)), eltype(reciprocal_size)}(
-                                bv, α, β, γ, reciprocal_size, tan_bprojyz_cprojyz, tan_c_cprojxy,
-                                cos(a_cprojxy), sin(a_cprojxy), tan_a_b)
+
+    # Angles (dimensionless, in radians)
+    α = NT(ustrip(bond_angle(bv[2], bv[3])))
+    β = NT(ustrip(bond_angle(bv[1], bv[3])))
+    γ = NT(ustrip(bond_angle(bv[1], bv[2])))
+
+    # tan(angle between b_yz and c_yz)
+    by, bz = bv[2][2], bv[2][3]
+    cy, cz = bv[3][2], bv[3][3]
+    n_byz = hypot(by, bz)
+    n_cyz = hypot(cy, cz)
+    tan_bprojyz_cprojyz =
+        (n_byz ≤ tolL || n_cyz ≤ tolL) ? zero(NT) :
+        let num = ustrip(abs(by*cz - bz*cy)), den = ustrip(by*cy + bz*cz)
+            abs(den) ≤ tol0 ? NT(Inf) : NT(abs(num/den))
+        end
+
+    # tan(angle between c and its xy-projection), and a vs c_xy direction
+    cx, cxy, cz3 = bv[3][1], bv[3][2], bv[3][3]
+    n_cxy = hypot(cx, cxy)
+    if n_cxy ≤ tolL
+        tan_c_cprojxy = NT(Inf)          # c ⟂ xy-plane
+        cos_a_cprojxy = one(NT)          # define dir(c_xy) = +x
+        sin_a_cprojxy = zero(NT)
+    else
+        tan_c_cprojxy = NT(ustrip(abs(cz3) / n_cxy))
+        cos_a_cprojxy = NT(ustrip(cx / n_cxy))
+        sin_a_cprojxy = NT(ustrip(cxy / n_cxy))
+    end
+
+    # tan(angle between a and b) = b_y / b_x
+    bx = bv[2][1]
+    tan_a_b = (abs(bx) ≤ tolL) ? NT(Inf) : NT(ustrip(bv[2][2] / bx))
+
+    return TriclinicBoundary{NT, approx_images, eltype(eltype(bv)), eltype(reciprocal_size)}(
+        bv, α, β, γ, reciprocal_size, tan_bprojyz_cprojyz, tan_c_cprojxy,
+        cos_a_cprojxy, sin_a_cprojxy, tan_a_b)
 end
 
-function TriclinicBoundary(bv_lengths::SVector{3}, angles::SVector{3}; kwargs...)
+function TriclinicBoundary(bv_lengths::SVector{3, L}, angles::SVector{3, A}; kwargs...) where {L, A}
     if any(!ispositive, bv_lengths)
-        throw(ArgumentError("basis vector lengths must be positive " *
-                            "when constructing a TriclinicBoundary, got $bv_lengths"))
+        throw(ArgumentError("basis vector lengths must be positive, got $bv_lengths"))
     end
-    if !all(a -> 0 < a < π, angles)
-        throw(ArgumentError("basis vector angles must be 0 to π radians " *
-                            "when constructing a TriclinicBoundary, got $angles"))
+    if !all(a -> 0 < ustrip(a) < π, angles)
+        throw(ArgumentError("angles must be in (0, π), got $angles"))
     end
-    α, β, γ = angles
-    cos_α, cos_β, cos_γ, sin_γ = cos(α), cos(β), cos(γ), sin(γ)
-    z = zero(bv_lengths[1])
-    v1 = SVector(bv_lengths[1], z, z)
-    v2 = SVector(bv_lengths[2] * cos_γ, bv_lengths[2] * sin_γ, z)
-    v3x = bv_lengths[3] * cos_β
-    v3y = bv_lengths[3] * (cos_α - cos_β * cos_γ) / sin_γ
-    v3z = sqrt(bv_lengths[3] ^ 2 - v3x ^ 2 - v3y ^ 2)
-    v3 = SVector(v3x, v3y, v3z)
-    return TriclinicBoundary(SVector{3}(v1, v2, v3); kwargs...)
+
+    # underlying numeric type and unit for lengths
+    NT  = typeof(ustrip(bv_lengths[1]))
+    has_units = bv_lengths[1] isa Unitful.Quantity
+    uL  = has_units ? unit(bv_lengths[1]) : one(NT)
+    tol0 = sqrt(eps(NT))
+
+    # compute in Float64 for stability
+    Tw = Float64
+    L1, L2, L3 = Tw.(ustrip.(bv_lengths))
+    α,  β,  γ  = Tw.(ustrip.(angles))
+    sγ, cγ = sincos(γ)
+    cα, cβ = cos(α), cos(β)
+
+    v1x, v1y, v1z = L1, 0.0, 0.0
+    v2x, v2y, v2z = L2*cγ, L2*sγ, 0.0
+    v3x = L3*cβ
+    v3y = L3*(cα - cβ*cγ)/sγ
+    v3z = sqrt(max(0.0, L3^2 - v3x^2 - v3y^2))
+
+    # convert back to input length type, zero-out tiny components
+    toL(x::Real) = ((abs(x) < tol0) ? zero(NT) : NT(x)) * uL
+    v1 = SVector(toL(v1x), toL(v1y), toL(v1z))
+    v2 = SVector(toL(v2x), toL(v2y), toL(v2z))
+    v3 = SVector(toL(v3x), toL(v3y), toL(v3z))
+
+    return TriclinicBoundary(SVector(v1, v2, v3); kwargs...)
 end
 
 TriclinicBoundary(v1, v2, v3; kwargs...) = TriclinicBoundary(SVector{3}(v1, v2, v3); kwargs...)
-TriclinicBoundary(arr; kwargs...) = TriclinicBoundary(SVector{3}(arr); kwargs...)
+TriclinicBoundary(arr; kwargs...)        = TriclinicBoundary(SVector{3}(arr); kwargs...)
+
+boxmatrix(b::TriclinicBoundary)   = SMatrix{3,3}(hcat(b.basis_vectors...) )
 
 Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
 Base.firstindex(b::TriclinicBoundary) = 1
