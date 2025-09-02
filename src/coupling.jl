@@ -4,6 +4,7 @@ export
     apply_coupling!,
     NoCoupling,
     ImmediateThermostat,
+    VelocityRescaleThermostat,
     AndersenThermostat,
     BerendsenThermostat,
     BerendsenBarostat,
@@ -67,6 +68,88 @@ function apply_coupling!(sys, thermostat::ImmediateThermostat, sim, neighbors=no
                          step_n::Integer=0; kwargs...)
     sys.velocities .*= sqrt(thermostat.temperature / temperature(sys))
     return false
+end
+
+@doc raw"""
+    VelocityRescaleThermostat(temperature, coupling_const; n_steps = 1, seed = 42)
+
+The stochastic velocity rescaling thermostat. See:
+
+[Bussi, Donadio & Parrinello (2007)](https://doi.org/10.1063/1.2408420)
+
+In brief, acts like the Berendsen thermostat but adds an 
+stochastic term, allowing correct sampling of isothermal ensembles.
+
+Let `Δt` be the step, `Nf` the kinetic DOFs actually used for `temperature(sys)`,
+`K = ½∑ m v²` the current kinetic energy, and `K̄ = ½ Nf k_B T`.
+
+Define `c = exp(-Δt/τ)`. Draw `R ~ 𝒩(0,1)` and `S ~ χ²_{Nf-1}`. Then
+
+```math
+\lambda^2 = c \;+\; (1-c)\,\frac{\bar K}{N_f K}\,(R^2 + S)\;+\;
+            2\sqrt{c(1-c)\,\frac{\bar K}{N_f K}}\;R,
+\qquad v' = \lambda\,v .
+```
+
+"""
+struct VelocityRescaleThermostat{T, C, N, S}
+    temperature::T
+    coupling_const::C
+    n_steps::N
+    seed::S
+end
+
+function VelocityRescaleThermostat(temperature, coupling_const; n_steps = 1, seed = 42)
+    return VelocityRescaleThermostat(temperature, coupling_const, n_steps, seed)
+end
+
+function apply_coupling!(sys::System{<:Any, AT}, thermostat::VelocityRescaleThermostat, sim, neighbors, step_n;
+                         n_threads::Integer=Threads.nthreads(), rng=Random.default_rng()) where {AT}
+
+    if step_n % thermostat.n_steps != 0
+        return false
+    end
+
+    # DOFs and current kinetic energy
+    Nf  = sys.df
+    Nf  > 0 || return false
+    masses = from_device(sys.masses)
+    vels   = from_device(sys.velocities)
+
+    K = kinetic_energy(sys)
+    
+    ustrip(K) > 0 || return false
+
+    # Target kinetic energy
+    Kbar = 0.5 * Nf * sys.k * thermostat.temperature  # unit-consistent with K
+
+    # Scalars
+    dt  = sim.dt
+    c   = exp(-dt / thermostat.coupling_const)              # e^{-Δt/τ}
+    A   = Kbar / (Nf * K)   # = (K̄/(Nf*K)), dimensionless
+
+    # Deterministic per-step RNG
+    rrng = MersenneTwister(UInt(thermostat.seed) ⊻ UInt(step_n))
+
+    # Draw R1 ~ N(0,1), and χ²_{Nf-1} via sum of squares
+    R1   = randn(rrng)
+    rsum = zero(eltype(R1))
+    @inbounds for _ in 1:(Nf-1)
+        x = randn(rrng); rsum += x*x
+    end
+
+    # λ² (Appendix A7). Guard tiny negatives from roundoff.
+    lam2 = c + (1 - c) * A * (R1*R1 + rsum) + 2 * sqrt(c * (1 - c) * A) * R1
+    lam2 = max(lam2, zero(lam2) + eps(Float64))
+    λ    = sqrt(lam2)
+
+    # Uniform rescale (preserves constraints; COM unchanged)
+    @inbounds for i in eachindex(vels)
+        vels[i] = λ * vels[i]
+    end
+    sys.velocities .= to_device(vels, AT)
+
+    return false  # no force recompute needed
 end
 
 """
