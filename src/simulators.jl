@@ -1105,7 +1105,7 @@ function random_normal_translation!(sys::System{D, AT, T};
     return sys
 end
 
-function random_unit_vector(float_type, dims, rng=Random.default_rng())
-    vec = randn(rng, float_type, dims)
+function random_unit_vector(T, dims, rng=Random.default_rng())
+    vec = randn(rng, T, dims)
     return vec / norm(vec)
 end

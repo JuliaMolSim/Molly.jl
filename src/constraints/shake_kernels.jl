@@ -269,14 +269,11 @@ end
     r_t1::T,
     r_t2::T,
     @Const(ms),
-    @Const(boundary)) where T
+    @Const(boundary::AbstractBoundary{<:Any, FT})) where {T, FT}
 
-    @uniform FT = float_type(boundary)
+    idx = @index(Global, Linear)
 
-    idx = @index(Global, Linear) # Global Constraint Idx
-    
     if idx <= length(k1s)
-
         k1 = k1s[idx] # central atom
         k2 = k2s[idx]
         distance = dists[idx]
@@ -400,13 +397,12 @@ end
         r_t1::AbstractVector{<:AbstractVector{L}}, 
         r_t2::AbstractVector{<:AbstractVector{L}},
         ms::AbstractVector{M}, 
-        boundary,
+        boundary::AbstractBoundary{<:Any, FT},
         dist_tol::L
-    ) where {L, M}
+    ) where {L, M, FT}
 
     @uniform A_type = typeof(zero(L) * zero(L) / zero(M))
     @uniform C_type = typeof(zero(L) * zero(L))
-    @uniform FT = float_type(boundary)
 
     # Allocate thread-local memory
     A = @MMatrix zeros(A_type, 2, 2) # Units are L^2 / M
@@ -476,11 +472,10 @@ end
         r_t1::AbstractVector{<:AbstractVector{L}},
         r_t2::AbstractVector{<:AbstractVector{L}},
         ms::AbstractVector{M}, 
-        boundary,
+        boundary::AbstractBoundary{<:Any, FT},
         dist_tol::L
-    ) where {L, M}   
+    ) where {L, M, FT}   
 
-    @uniform FT = float_type(boundary)
     @uniform A_type = typeof(zero(L) * zero(L) / zero(M))
     @uniform A_tmp_type = typeof(zero(M) / (zero(L) * zero(L)))
     @uniform C_type = typeof(zero(L) * zero(L))
@@ -570,11 +565,10 @@ end
         r_t1::AbstractVector{<:AbstractVector{L}},
         r_t2::AbstractVector{<:AbstractVector{L}},
         ms::AbstractVector{M}, 
-        boundary,
+        boundary::AbstractBoundary{<:Any, FT},
         dist_tol::L
-    ) where {L, M}
+    ) where {L, M, FT}
 
-    @uniform FT = float_type(boundary)
     @uniform A_type = typeof(zero(L) * zero(L) / zero(M))
     @uniform A_tmp_type = typeof(zero(M) / (zero(L) * zero(L)))
     @uniform C_type = typeof(zero(L) * zero(L))

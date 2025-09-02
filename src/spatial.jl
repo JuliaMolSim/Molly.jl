@@ -26,6 +26,8 @@ export
     scale_coords!,
     dipole_moment
 
+abstract type AbstractBoundary{D, T, C} end
+
 """
     CubicBoundary(x, y, z)
     CubicBoundary(x)
@@ -35,13 +37,14 @@ Cubic 3D bounding box defined by three side lengths.
 If one length is given then all three sides will have that length.
 Setting one or more values to `Inf` gives no boundary in that dimension.
 """
-struct CubicBoundary{T}
-    side_lengths::SVector{3, T}
-    function CubicBoundary(side_lengths::SVector{3, D}; check_positive::Bool=true) where D
+struct CubicBoundary{D, T, C} <: AbstractBoundary{D, T, C}
+    side_lengths::SVector{3, C}
+    function CubicBoundary(side_lengths::SVector{3, C2}; check_positive::Bool=true) where C2
         if check_positive && any(l -> l <= zero(l), side_lengths)
             throw(DomainError("side lengths must be positive, got $side_lengths"))
         end
-        new{D}(side_lengths)
+        T2 = typeof(ustrip(side_lengths[1]))
+        new{3, T2, C2}(side_lengths)
     end
 end
 
@@ -52,8 +55,8 @@ Base.getindex(b::CubicBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::CubicBoundary) = 1
 Base.lastindex(b::CubicBoundary) = 3
 
-function Base.zero(b::CubicBoundary{T}) where T
-    return CubicBoundary(zero(SVector{3, T}); check_positive=false)
+function Base.zero(b::CubicBoundary{3, <:Any, C}) where C
+    return CubicBoundary(zero(SVector{3, C}); check_positive=false)
 end
 
 function Base.:+(b1::CubicBoundary, b2::CubicBoundary)
@@ -78,13 +81,14 @@ Rectangular 2D bounding box defined by two side lengths.
 If one length is given then both sides will have that length.
 Setting one or more values to `Inf` gives no boundary in that dimension.
 """
-struct RectangularBoundary{T}
-    side_lengths::SVector{2, T}
-    function RectangularBoundary(side_lengths::SVector{2, D}; check_positive::Bool=true) where D
+struct RectangularBoundary{D, T, C} <: AbstractBoundary{D, T, C}
+    side_lengths::SVector{2, C}
+    function RectangularBoundary(side_lengths::SVector{2, C2}; check_positive::Bool=true) where C2
         if check_positive && any(l -> l <= zero(l), side_lengths)
             throw(DomainError("side lengths must be positive, got $side_lengths"))
         end
-        new{D}(side_lengths)
+        T2 = typeof(ustrip(side_lengths[1]))
+        new{2, T2, C2}(side_lengths)
     end
 end
 
@@ -95,8 +99,8 @@ Base.getindex(b::RectangularBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::RectangularBoundary) = 1
 Base.lastindex(b::RectangularBoundary) = 2
 
-function Base.zero(b::RectangularBoundary{T}) where T
-    return RectangularBoundary(zero(SVector{2, T}); check_positive=false)
+function Base.zero(b::RectangularBoundary{2, <:Any, C}) where C
+    return RectangularBoundary(zero(SVector{2, C}); check_positive=false)
 end
 
 function Base.:+(b1::RectangularBoundary, b2::RectangularBoundary)
@@ -125,8 +129,8 @@ Not currently able to simulate a cubic box, use [`CubicBoundary`](@ref) or small
 offsets instead.
 Not currently compatible with infinite boundaries.
 """
-struct TriclinicBoundary{T, A, D, I}
-    basis_vectors::SVector{3, SVector{3, D}}
+struct TriclinicBoundary{D, T, C, A, I} <: AbstractBoundary{D, T, C}
+    basis_vectors::SVector{3, SVector{3, C}}
     α::T
     β::T
     γ::T
@@ -167,7 +171,7 @@ function TriclinicBoundary(bv::SVector{3}; approx_images::Bool=true)
     tan_c_cprojxy = tan(bond_angle(SVector(bv[3][1], bv[3][2], zero(bv[3][3])), bv[3]))
     a_cprojxy = bond_angle(bv[1], SVector(bv[3][1], bv[3][2], zero(bv[3][3])))
     tan_a_b = tan(bond_angle(bv[1], bv[2]))
-    return TriclinicBoundary{typeof(α), approx_images, eltype(eltype(bv)), eltype(reciprocal_size)}(
+    return TriclinicBoundary{3, typeof(α), eltype(eltype(bv)), approx_images, eltype(reciprocal_size)}(
                                 bv, α, β, γ, reciprocal_size, tan_bprojyz_cprojyz, tan_c_cprojxy,
                                 cos(a_cprojxy), sin(a_cprojxy), tan_a_b)
 end
@@ -232,45 +236,39 @@ function boundary_from_chemfiles(unit_cell, T=Float64, units=u"nm")
     end
 end
 
-AtomsBase.n_dimensions(::CubicBoundary) = 3
-AtomsBase.n_dimensions(::RectangularBoundary) = 2
-AtomsBase.n_dimensions(::TriclinicBoundary) = 3
-
 Base.broadcastable(b::Union{CubicBoundary, RectangularBoundary}) = b.side_lengths
 
-float_type(b::Union{CubicBoundary, RectangularBoundary}) = typeof(ustrip(b[1]))
-float_type(b::TriclinicBoundary{T}) where {T} = T
-
-length_type(b::Union{CubicBoundary{T}, RectangularBoundary{T}}) where {T} = T
-length_type(b::TriclinicBoundary{T, A, D}) where {T, A, D} = D
+AtomsBase.n_dimensions(::AbstractBoundary{D}) where {D} = D
+float_type(::AbstractBoundary{<:Any, T}) where {T} = T
+length_type(b::AbstractBoundary{<:Any, <:Any, C}) where {C} = C
 
 Unitful.ustrip(b::CubicBoundary) = CubicBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::CubicBoundary) = CubicBoundary(ustrip.(u, b.side_lengths))
 Unitful.ustrip(b::RectangularBoundary) = RectangularBoundary(ustrip.(b.side_lengths))
 Unitful.ustrip(u::Unitful.Units, b::RectangularBoundary) = RectangularBoundary(ustrip.(u, b.side_lengths))
 
-function AtomsBase.cell_vectors(b::CubicBoundary)
-    z = zero(b[1])
+function AtomsBase.cell_vectors(b::CubicBoundary{3, <:Any, C}) where C
+    z = zero(C)
     bb = (
         SVector(b[1], z   , z   ),
         SVector(z   , b[2], z   ),
         SVector(z   , z   , b[3]),
     )
-    return unit(z) == NoUnits ? (bb .* u"nm") : bb # Assume nm without other information
+    return (unit(C) == NoUnits ? (bb .* u"nm") : bb) # Assume nm without other information
 end
 
-function AtomsBase.cell_vectors(b::RectangularBoundary)
-    z = zero(b[1])
+function AtomsBase.cell_vectors(b::RectangularBoundary{2, <:Any, C}) where C
+    z = zero(C)
     bb = (
         SVector(b[1], z   ),
         SVector(z   , b[2]),
     )
-    return unit(z) == NoUnits ? (bb .* u"nm") : bb
+    return (unit(C) == NoUnits ? (bb .* u"nm") : bb)
 end
 
-function AtomsBase.cell_vectors(b::TriclinicBoundary)
+function AtomsBase.cell_vectors(b::TriclinicBoundary{3, <:Any, C}) where C
     bb = (b.basis_vectors[1], b.basis_vectors[2], b.basis_vectors[3])
-    return unit(b[1][1]) == NoUnits ? (bb .* u"nm") : bb
+    return (unit(C) == NoUnits ? (bb .* u"nm") : bb)
 end
 
 function invert_box_vectors(boundary::CubicBoundary)
@@ -296,7 +294,7 @@ function invert_box_vectors(boundary::TriclinicBoundary)
 end
 
 has_infinite_boundary(b::Union{CubicBoundary, RectangularBoundary}) = any(isinf, b.side_lengths)
-has_infinite_boundary(b::TriclinicBoundary) = false
+has_infinite_boundary(b::TriclinicBoundary) = false # Not currently supported
 has_infinite_boundary(sys::System) = has_infinite_boundary(sys.boundary)
 
 n_infinite_dims(b::Union{CubicBoundary, RectangularBoundary}) = sum(isinf, b.side_lengths)
@@ -317,7 +315,7 @@ Calculate the volume (3D) or area (2D) of a [`System`](@ref) or bounding box.
 Returns infinite volume for infinite boundaries.
 """
 volume(sys) = volume(sys.boundary)
-volume(b::Union{CubicBoundary, RectangularBoundary, TriclinicBoundary}) = prod(box_sides(b))
+volume(b::AbstractBoundary) = prod(box_sides(b))
 
 """
     density(sys)
@@ -416,15 +414,15 @@ end
 
 Generate a random coordinate uniformly distributed within a bounding box.
 """
-function random_coord(boundary::CubicBoundary; rng=Random.default_rng())
-    return rand(rng, SVector{3, float_type(boundary)}) .* boundary
+function random_coord(boundary::CubicBoundary{3, T}; rng=Random.default_rng()) where T
+    return rand(rng, SVector{3, T}) .* boundary
 end
 
-function random_coord(boundary::RectangularBoundary; rng=Random.default_rng())
-    return rand(rng, SVector{2, float_type(boundary)}) .* boundary
+function random_coord(boundary::RectangularBoundary{2, T}; rng=Random.default_rng()) where T
+    return rand(rng, SVector{2, T}) .* boundary
 end
 
-function random_coord(boundary::TriclinicBoundary{T}; rng=Random.default_rng()) where T
+function random_coord(boundary::TriclinicBoundary{3, T}; rng=Random.default_rng()) where T
     return sum(rand(rng, SVector{3, T}) .* boundary.basis_vectors)
 end
 
@@ -474,7 +472,7 @@ function vector(c1, c2, boundary::RectangularBoundary)
     )
 end
 
-function vector(c1, c2, boundary::TriclinicBoundary{T, true}) where T
+function vector(c1, c2, boundary::TriclinicBoundary{3, T, <:Any, true}) where T
     dr = c2 - c1
     dr -= boundary.basis_vectors[3] * floor(dr[3] * boundary.reciprocal_size[3] + T(0.5))
     dr -= boundary.basis_vectors[2] * floor(dr[2] * boundary.reciprocal_size[2] + T(0.5))
@@ -482,7 +480,7 @@ function vector(c1, c2, boundary::TriclinicBoundary{T, true}) where T
     return dr
 end
 
-function vector(c1, c2, boundary::TriclinicBoundary{T, false}) where T
+function vector(c1, c2, boundary::TriclinicBoundary{3, T, <:Any, false}) where T
     bv = boundary.basis_vectors
     offsets = (-1, 0, 1)
     min_sqdist = typemax(c1[1] ^ 2)
@@ -680,11 +678,13 @@ function random_velocities(sys::AtomsBase.AbstractSystem{2}, temp; rng=Random.de
     return random_velocity_2D.(masses(sys), temp, sys.k, rng)
 end
 
-function random_velocities(sys::System{3, AT}, temp; rng=Random.default_rng()) where AT <: AbstractGPUArray
+function random_velocities(sys::System{3, AT}, temp;
+                           rng=Random.default_rng()) where AT <: AbstractGPUArray
     return to_device(random_velocity_3D.(from_device(masses(sys)), temp, sys.k, rng), AT)
 end
 
-function random_velocities(sys::System{2, AT}, temp; rng=Random.default_rng()) where AT <: AbstractGPUArray
+function random_velocities(sys::System{2, AT}, temp;
+                           rng=Random.default_rng()) where AT <: AbstractGPUArray
     return to_device(random_velocity_2D.(from_device(masses(sys)), temp, sys.k, rng), AT)
 end
 
@@ -921,13 +921,14 @@ If `topology=nothing` then the coordinates are returned.
 
 Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
 """
-function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topology) where {D, C}
+function molecule_centers(coords::AbstractArray{SVector{D, C}},
+                          boundary::AbstractBoundary{<:Any, T},
+                          topology) where {D, C, T}
     if isnothing(topology)
         return coords
     elseif boundary isa TriclinicBoundary
         error("calculating molecule centers is not compatible with a TriclinicBoundary")
     else
-        T = float_type(boundary)
         pit = T(π)
         twopit = 2 * pit
         n_molecules = length(topology.molecule_atom_counts)
@@ -948,7 +949,9 @@ function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topolo
     end
 end
 
-function molecule_centers(coords::AbstractGPUArray, boundary, topology)
+function molecule_centers(coords::AbstractGPUArray,
+                          boundary::AbstractBoundary{<:Any, T},
+                          topology) where T
     AT = array_type(coords)
     return to_device(molecule_centers(from_device(coords), boundary, topology), AT)
 end

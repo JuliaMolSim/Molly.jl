@@ -225,9 +225,9 @@ mutable struct MonteCarloBarostat{T, P, K, V}
     n_accepted::Int
 end
 
-function MonteCarloBarostat(P, temp, boundary; n_steps=30, n_iterations=1, scale_factor=0.01,
-                            scale_increment=1.1, max_volume_frac=0.3, trial_find_neighbors=false)
-    T = float_type(boundary)
+function MonteCarloBarostat(P, temp, boundary::AbstractBoundary{<:Any, T}; n_steps=30,
+                            n_iterations=1, scale_factor=0.01, scale_increment=1.1,
+                            max_volume_frac=0.3, trial_find_neighbors=false) where T
     volume_scale = volume(boundary) * T(scale_factor)
     return MonteCarloBarostat(P, temp, n_steps, n_iterations, volume_scale, T(scale_increment),
                               T(max_volume_frac), trial_find_neighbors, 0, 0)
@@ -345,19 +345,17 @@ end
 
 function MonteCarloAnisotropicBarostat(P::SVector{D},
                                        temp,
-                                       boundary;
+                                       boundary::AbstractBoundary{DB, T};
                                        n_steps=30,
                                        n_iterations=1,
                                        scale_factor=0.01,
                                        scale_increment=1.1,
                                        max_volume_frac=0.3,
-                                       trial_find_neighbors=false) where D
-    T = float_type(boundary)
+                                       trial_find_neighbors=false) where {D, DB, T}
     volume_scale_factor = volume(boundary) * T(scale_factor)
     volume_scale = fill(volume_scale_factor, D)
-    if AtomsBase.n_dimensions(boundary) != D
-        throw(ArgumentError("pressure vector length ($(D)) must match boundary " *
-                            "dimensionality ($(AtomsBase.n_dimensions(boundary)))"))
+    if DB != D
+        throw(ArgumentError("pressure vector length ($D) must match boundary dimensionality ($DB)"))
     end
 
     return MonteCarloAnisotropicBarostat(
@@ -508,7 +506,7 @@ end
 function MonteCarloMembraneBarostat(P,
                                     tension,
                                     temp,
-                                    boundary;
+                                    boundary::AbstractBoundary{D, T};
                                     n_steps=30,
                                     n_iterations=1,
                                     scale_factor=0.01,
@@ -517,18 +515,16 @@ function MonteCarloMembraneBarostat(P,
                                     trial_find_neighbors=false,
                                     xy_isotropy=false,
                                     z_axis_fixed=false,
-                                    constant_volume=false)
-    T = float_type(boundary)
-    volume_scale_factor = volume(boundary) * T(scale_factor)
-    volume_scale = fill(volume_scale_factor, 3)
-
-    if AtomsBase.n_dimensions(boundary) != 3
-        throw(ArgumentError("boundary dimensionality ($(AtomsBase.n_dimensions(boundary))) must be 3"))
+                                    constant_volume=false) where {D, T}
+    if D != 3
+        throw(ArgumentError("boundary dimensionality ($D) must be 3"))
     end
     if z_axis_fixed && constant_volume
         throw(ArgumentError("cannot keep z-axis fixed whilst keeping the volume constant"))
     end
 
+    volume_scale_factor = volume(boundary) * T(scale_factor)
+    volume_scale = fill(volume_scale_factor, 3)
     pressX = P
     pressY = P
     pressZ = ((z_axis_fixed || constant_volume) ? nothing : P)

@@ -457,16 +457,13 @@ end
 
 Checks if the position constraints are satisfied by the current coordinates of `sys`.
 """
-function check_position_constraints(sys, ca)
-
+function check_position_constraints(sys::System{<:Any, <:Any, FT}, ca) where FT
     err_unit = unit(eltype(eltype(sys.coords)))
     if err_unit != unit(ca.dist_tolerance)
         error(ArgumentError("Distance tolerance units in SHAKE are inconsistent with system coordinates."))
     end
 
-    FT = float_type(sys)
     cluster_maxes = FT[]
-
     backend = get_backend(sys.coords)    
     err_kernel = max_dist_error(backend, 128) #128 is block size
 
@@ -492,16 +489,13 @@ end
 
 Checks if the velocity constraints are satisfied by the current velocities of `sys`.
 """
-function check_velocity_constraints(sys::System, ca)
-
+function check_velocity_constraints(sys::System{<:Any, <:Any, FT}, ca) where FT
     err_unit = unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
     if err_unit != unit(ca.vel_tolerance)
         error(ArgumentError("Velocity tolerance units in RATTLE are inconsistent wwith system velocities and coordinates."))
     end
 
-    FT = float_type(sys)
     cluster_maxes = FT[]
-
     backend = get_backend(sys.coords)
     err_kernel = max_vel_error(backend, 128) #128 is block size
 
