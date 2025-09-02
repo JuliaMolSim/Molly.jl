@@ -13,6 +13,7 @@ export
     vector,
     wrap_coord_1D,
     wrap_coords,
+    unwrap_molecules,
     random_velocity,
     maxwell_boltzmann,
     random_velocities,
@@ -606,6 +607,85 @@ function wrap_coords(v, boundary::TriclinicBoundary)
     v_wrap -= bv[1] * floor((v_wrap[1] - dx - (v_wrap[2] - dy) / boundary.tan_a_b) * rs[1])
     return v_wrap
 end
+
+"""
+    unwrap_molecules(coords, boundary, topology)
+
+Return coordinates unwrapped so that every bonded pair is placed using
+the minimum-image displacement. Molecule connectivity is preserved.
+"""
+# neighbors may be `nothing` or a collection with items like (i,j, special)
+function unwrap_global(coords::AbstractVector{<:SVector{D}},
+                       boundary, topology; neighbors=nothing) where {D}
+    # --- frac<->cart ---
+    if hasproperty(boundary, :basis_vectors)
+        @assert D == 3
+        Bm = reduce(hcat, boundary.basis_vectors)   # unitful
+        B  = SMatrix{3,3}(Bm)
+        to_frac = (r::SVector{3}) -> B \ r          # dimensionless
+        to_cart = (f::SVector{3}) -> B * f          # length units
+    else
+        sl = boundary.side_lengths                  # SVector{D} with length units
+        to_frac = (r::SVector{D}) -> r ./ sl        # dimensionless
+        to_cart = (f::SVector{D}) -> f .* sl        # length units
+    end
+    wrap01(v) = v .- floor.(v .+ eps(eltype(v)))     # keep in [0,1)
+
+    # --- wrapped fractional coords ---
+    N  = length(coords)
+    f1 = to_frac(coords[1])
+    f  = Vector{typeof(f1)}(undef, N)                # dimensionless
+    @inbounds for i in 1:N
+        f[i] = wrap01(to_frac(coords[i]))
+    end
+
+    # --- global adjacency: bonds ∪ neighbor-list pairs ---
+    adj = [Int[] for _ in 1:N]
+    @inbounds for (i32,j32) in topology.bonded_atoms
+        i = Int(i32); j = Int(j32); push!(adj[i], j); push!(adj[j], i)
+    end
+    if neighbors !== nothing
+        @inbounds for ni in eachindex(neighbors)
+            i, j = neighbors[ni][1], neighbors[ni][2]
+            push!(adj[i], j); push!(adj[j], i)
+        end
+    end
+
+    # --- BFS over whole system (one lattice tiling) ---
+    u = similar(f)                                   # dimensionless
+    visited = falses(N)
+    @inbounds for seed in 1:N
+        visited[seed] && continue
+        u[seed] = f[seed]
+        visited[seed] = true
+        stack = Int[seed]
+        while !isempty(stack)
+            i = pop!(stack); fi = f[i]; ui = u[i]
+            for j in adj[i]
+                visited[j] && continue
+                df = f[j] - fi
+                df -= round.(df)                     # shift to (-0.5,0.5]
+                u[j] = ui + df
+                visited[j] = true
+                push!(stack, j)
+            end
+        end
+    end
+
+    # --- back to Cartesian with units ---
+    out = Vector{typeof(coords[1])}(undef, N)
+    @inbounds for i in 1:N
+        out[i] = to_cart(u[i])
+    end
+    return out
+end
+
+# Convenience wrappers
+unwrap_molecules(coords, boundary, topology) =
+    unwrap_global(from_device(coords), boundary, topology; neighbors = nothing)
+
+unwrap_molecules(sys::System; neighbors = nothing) =
+    unwrap_global(from_device(sys.coords), sys.boundary, sys.topology; neighbors)
 
 """
     random_velocity(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature;
