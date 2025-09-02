@@ -23,7 +23,7 @@ end
 
 kinetic_energy_noconvert(sys) = sum(masses(sys) .* sum.(abs2, sys.velocities)) / 2
 
-@doc raw"""
+raw"""
     kinetic_energy_tensor!(system)
 
 Calculate the kinetic energy of a system in its tensorial form.
@@ -66,6 +66,20 @@ function kinetic_energy(sys::System)
     return uconvert(sys.energy_units, ke)
 end
 
+@doc raw"""
+    virial(system)
+
+Forces a recomputation of the forces acting on the system
+and computes the virial tensor. The virial, in its most general
+form, is defined as:
+
+```math
+\bf{W} = \sum_i \bf{r_i} \otimes \bf{f_i}
+```
+where ``\bf{r_i}`` and ``\bf{f_i}`` are the position and force vectors,
+respectively, acting on the i``^{th}`` atom. In Molly.jl, we implement
+the [virial definition used in LAMMPS](https://docs.lammps.org/compute_stress_atom.html). 
+"""
 function virial(sys)
     _ = forces(sys) # Force recomputation
     return sys.virial

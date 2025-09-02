@@ -392,7 +392,7 @@ struct CRescaleBarostat{P, C, S, IC, T}
     n_steps::Int
 end
 
-function BerendsenBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
+function CRescaleBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
                            max_scale_frac=0.1, seed = 42, n_steps=1) where {PT, D}
 

@@ -850,8 +850,8 @@ The pressure is defined as
 ```math
 P = \frac{ 2 \cdot K + W }{V}
 ```
-where `V` is the system volume, `K` is the kinetic energy tensor calculated using [``](@ref)
-and W is the virial tensor, calculated along with the forces in the system.
+where `V` is the system volume, `K` is the kinetic energy tensor
+and W is the virial tensor.
 
 Not compatible with infinite boundaries.
 """
