@@ -23,20 +23,66 @@ end
 
 kinetic_energy_noconvert(sys) = sum(masses(sys) .* sum.(abs2, sys.velocities)) / 2
 
+raw"""
+    kinetic_energy_tensor!(system)
+
+Calculate the kinetic energy of a system in its tensorial form.
+
+The kinetic energy tensor is defined as
+```math
+bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
+```
+where ``m_i`` is the mass and ``\bf{v_i}`` is the velocity vector of atom ``i``.
+"""
+function kinetic_energy_tensor!(sys)
+    K = zero(sys.kin_tensor)  # same shape and units as target (energy)
+    fill!(K, zero(eltype(K)))
+    for (m, v) in zip(from_device(sys.masses), from_device(sys.velocities))
+        # m: mass per particle, v: velocity with units
+        K .+= m .* (v * transpose(v))  # units: energy
+    end
+    # Store the kinetic-energy tensor (½ Σ m v vᵀ), convertible to desired units
+    sys.kin_tensor .= 0.5 .* uconvert.(sys.energy_units, K)
+end
+
 @doc raw"""
     kinetic_energy(system)
 
-Calculate the kinetic energy of a system.
+Retrieve the kinetic energy of a system.
 
-The kinetic energy is defined as
+The scalar kinetic energy is defined as
 ```math
-E_k = \frac{1}{2} \sum_{i} m_i v_i^2
+K = \rm{Tr}\left[ \bf{K} \right]
 ```
-where ``m_i`` is the mass and ``v_i`` is the velocity of atom ``i``.
+
+where ``\bf{K}`` is the kinetic energy tensor:
+```math
+bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
+```
 """
 function kinetic_energy(sys::System)
-    ke = kinetic_energy_noconvert(sys)
+    kinetic_energy_tensor!(sys)
+    ke = tr(sys.kin_tensor)
     return uconvert(sys.energy_units, ke)
+end
+
+@doc raw"""
+    virial(system)
+
+Forces a recomputation of the forces acting on the system
+and computes the virial tensor. The virial, in its most general
+form, is defined as:
+
+```math
+\bf{W} = \sum_i \bf{r_i} \otimes \bf{f_i}
+```
+where ``\bf{r_i}`` and ``\bf{f_i}`` are the position and force vectors,
+respectively, acting on the i``^{th}`` atom. In Molly.jl, we implement
+the [virial definition used in LAMMPS](https://docs.lammps.org/compute_stress_atom.html). 
+"""
+function virial(sys)
+    _ = forces(sys) # Force recomputation
+    return sys.virial
 end
 
 """

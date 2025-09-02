@@ -320,21 +320,22 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)
 end
 
 function pressure_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
-    return pressure(sys, neighbors, step_n; n_threads=n_threads)
+
+    return pressure(sys, neighbors, step_n; n_threads = n_threads)
+
 end
 
 """
     PressureLogger(n_steps)
     PressureLogger(T, n_steps)
 
-Log the [`pressure`](@ref) of a system throughout a simulation.
+Log the [`pressure`](@ref) tensor of a system throughout a simulation.
 
-This should only be used on systems containing just pairwise interactions, or
-where the specific interactions, general interactions and constraints do not
+This should only be used on 3-dimensional systems where general interactions and constraints do not
 contribute to the pressure.
 """
 PressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(pressure_wrapper, T, n_steps)
-PressureLogger(n_steps::Integer) = PressureLogger(typeof(one(DefaultFloat)u"bar"), n_steps)
+PressureLogger(n_steps::Integer) = PressureLogger(typeof(Matrix{DefaultFloat}(undef, 3, 3).*u"bar"), n_steps)
 
 function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(pressure_wrapper)}) where T
     print(io, "PressureLogger{", eltype(values(pl)), "} with n_steps ",
