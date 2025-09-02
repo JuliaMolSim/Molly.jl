@@ -107,6 +107,7 @@ sys.pairwise_inters
 sys.constraints
 sys.neighbor_finder
 sys.loggers
+sys.total_mass
 
 # Write out the system to a file
 write_structure("file.pdb", sys)

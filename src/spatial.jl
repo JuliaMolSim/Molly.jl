@@ -763,21 +763,17 @@ function remove_CM_motion!(sys)
     masses_cpu = from_device(masses(sys))
     velocities_cpu = from_device(sys.velocities)
     cm_momentum = zero(eltype(velocities_cpu)) .* zero(eltype(masses_cpu))
-    total_mass = zero(eltype(masses_cpu))
     for i in eachindex(sys)
         cm_momentum += velocities_cpu[i] * masses_cpu[i]
-        total_mass += masses_cpu[i]
     end
-    cm_velocity = cm_momentum / total_mass
+    cm_velocity = cm_momentum / sys.total_mass
     sys.velocities .= sys.velocities .- (cm_velocity,)
     return sys
 end
 
 function remove_CM_motion!(sys::System{<:Any, <:AbstractGPUArray})
-    ms = masses(sys)
-    cm_momentum = mapreduce((v, m) -> v .* m, +, sys.velocities, ms)
-    total_mass = sum(ms)
-    cm_velocity = cm_momentum / total_mass
+    cm_momentum = mapreduce((v, m) -> v .* m, +, sys.velocities, masses(sys))
+    cm_velocity = cm_momentum / sys.total_mass
     sys.velocities .= sys.velocities .- (cm_velocity,)
     return sys
 end
