@@ -67,10 +67,20 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, pairwis
                 buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
                 sys.boundary, Val(D))
     CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(
-            buffers.morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords,
-            sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters,
+            buffers.morton_seq, 
+            buffers.fs_mat, 
+            buffers.virial_row_1, buffers.virial_row_2, buffers.virial_row_3, 
+            buffers.box_mins, buffers.box_maxs, 
+            sys.coords, sys.velocities, sys.atoms, 
+            Val(N), r_cut, Val(sys.force_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
             Val(T), Val(D))
+
+
+    sys.virial[1,:] .= vec(sum(Array(buffers.virial_row_1); dims=2)) * sys.energy_units
+    sys.virial[2,:] .= vec(sum(Array(buffers.virial_row_2); dims=2)) * sys.energy_units
+    sys.virial[3,:] .= vec(sum(Array(buffers.virial_row_3); dims=2)) * sys.energy_units
+
     return buffers
 end
 
@@ -290,7 +300,10 @@ That's why the calculations are done in the following order:
 
 function force_kernel!( 
     sorted_seq,
-    fs_mat, 
+    fs_mat,
+    virial_row_1,
+    virial_row_2,
+    virial_row_3,
     mins::AbstractArray{C}, 
     maxs::AbstractArray{C},
     coords, 
@@ -316,12 +329,24 @@ function force_kernel!(
     j_0_tile = (j - a) * warpsize()
     index_i = i_0_tile + laneid()
     index_j = j_0_tile + laneid()
-    force_smem = CuStaticSharedArray(T, (32, 3))
-    opposites_sum = CuStaticSharedArray(T, (32, 3))
+    force_smem = CuStaticSharedArray(T, (32, D))
+    opposites_sum = CuStaticSharedArray(T, (32, D))
+    virial_smem_1 = CuStaticSharedArray(T, (32, D))
+    opposite_virial_1 = CuStaticSharedArray(T, (32, D))
+    virial_smem_2 = CuStaticSharedArray(T, (32, D))
+    opposite_virial_2 = CuStaticSharedArray(T, (32, D))
+    virial_smem_3 = CuStaticSharedArray(T, (32, D))
+    opposite_virial_3 = CuStaticSharedArray(T, (32, D))
     r = Int32((N - 1) % 32 + 1)
     @inbounds for k in a:b
         force_smem[laneid(), k] = zero(T)
         opposites_sum[laneid(), k] = zero(T)
+        virial_smem_1[laneid(), k] = zero(T)
+        opposite_virial_1[laneid(), k] = zero(T)
+        virial_smem_2[laneid(), k] = zero(T)
+        opposite_virial_2[laneid(), k] = zero(T)
+        virial_smem_3[laneid(), k] = zero(T)
+        opposite_virial_3[laneid(), k] = zero(T)
     end
 
     # The code is organised in 4 mutually excluding parts
@@ -375,7 +400,7 @@ function force_kernel!(
                 aϵ_j = CUDA.shfl_sync(0xFFFFFFFF, aϵ_j, laneid() + a, warpsize())
                 
                 atoms_j_shuffle = Atom(atype_j, aindex_j, amass_j, acharge_j, aσ_j, aϵ_j)
-                dr = vector(coords_j, coords_i, boundary)
+                dr = vector(coords_i, coords_j, boundary) # Sign flip needed for virial, does not affect forces as only norm(dr) matters for them
                 r2 = sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
@@ -392,8 +417,14 @@ function force_kernel!(
                     step_n) : zero(SVector{D, T})
 
                 @inbounds for k in a:b
-                    force_smem[laneid(), k] += ustrip(f[k])
-                    opposites_sum[shuffle_idx, k] -= ustrip(f[k])
+                    force_smem[laneid(), k]           += ustrip(f[k])
+                    opposites_sum[shuffle_idx, k]     -= ustrip(f[k])
+                    virial_smem_1[laneid(), k]        += T(0.5) * ustrip(f[k]) * ustrip(dr[1])
+                    opposite_virial_1[shuffle_idx, k] -= T(0.5) * ustrip(f[k]) * ustrip(dr[1])
+                    virial_smem_2[laneid(), k]        += T(0.5) * ustrip(f[k]) * ustrip(dr[2])
+                    opposite_virial_2[shuffle_idx, k] -= T(0.5) * ustrip(f[k]) * ustrip(dr[2])
+                    virial_smem_3[laneid(), k]        += T(0.5) * ustrip(f[k]) * ustrip(dr[3])
+                    opposite_virial_3[shuffle_idx, k] -= T(0.5) * ustrip(f[k]) * ustrip(dr[3])
                 end
             end
 
@@ -406,7 +437,31 @@ function force_kernel!(
                 CUDA.atomic_add!(
                     pointer(fs_mat, s_idx_j * b - (b - k)), 
                     -opposites_sum[laneid(), k]
-                ) 
+                )
+                CUDA.atomic_add!(
+                    pointer(virial_row_1, s_idx_i * b - (b - k)),
+                    virial_smem_1[laneid(), k]
+                )
+                CUDA.atomic_add!(
+                    pointer(virial_row_1, s_idx_j * b - (b - k)),
+                    -opposite_virial_1[laneid(), k]
+                )
+                CUDA.atomic_add!(
+                    pointer(virial_row_2, s_idx_i * b - (b - k)),
+                    virial_smem_2[laneid(), k]
+                )
+                CUDA.atomic_add!(
+                    pointer(virial_row_2, s_idx_j * b - (b - k)),
+                    -opposite_virial_2[laneid(), k]
+                )
+                CUDA.atomic_add!(
+                    pointer(virial_row_3, s_idx_i * b - (b - k)),
+                    virial_smem_3[laneid(), k]
+                )
+                CUDA.atomic_add!(
+                    pointer(virial_row_3, s_idx_j * b - (b - k)),
+                    -opposite_virial_3[laneid(), k]
+                )
             end
         end
     end
@@ -441,7 +496,7 @@ function force_kernel!(
                 coords_j = coords[s_idx_j]
                 vel_j = velocities[s_idx_j]
                 atoms_j = atoms[s_idx_j]
-                dr = vector(coords_j, coords_i, boundary)
+                dr = vector(coords_i, coords_j, boundary)
                 r2 = sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
@@ -459,9 +514,24 @@ function force_kernel!(
 
                 @inbounds for k in a:b
                     force_smem[laneid(), k] += ustrip(f[k])
+                    virial_smem_1[laneid(), k] += T(0.5) * ustrip(f[k]) * ustrip(dr[1])
+                    virial_smem_2[laneid(), k] += T(0.5) * ustrip(f[k]) * ustrip(dr[2])
+                    virial_smem_3[laneid(), k] += T(0.5) * ustrip(f[k]) * ustrip(dr[3])
                     CUDA.atomic_add!(
                         pointer(fs_mat, s_idx_j * b - (b - k)), 
                         ustrip(f[k])
+                    )
+                    CUDA.atomic_add!(
+                        pointer(virial_row_1, s_idx_j * b - (b - k)),
+                        v1
+                    )
+                    CUDA.atomic_add!(
+                        pointer(virial_row_2, s_idx_j * b - (b - k)),
+                        v2
+                    )
+                    CUDA.atomic_add!(
+                        pointer(virial_row_3, s_idx_j * b - (b - k)),
+                        v3
                     )
                 end
             end
@@ -471,7 +541,19 @@ function force_kernel!(
                 CUDA.atomic_add!(
                     pointer(fs_mat, s_idx_i * b - (b - k)), 
                     -force_smem[laneid(), k]
-                ) 
+                )
+                CUDA.atomic_add!(
+                    pointer(virial_row_1, s_idx_i * b - (b - k)),
+                    virial_smem_1[laneid(), k]
+                )
+                CUDA.atomic_add!(
+                    pointer(virial_row_2, s_idx_i * b - (b - k)),
+                    virial_smem_2[laneid(), k]
+                )
+                CUDA.atomic_add!(
+                    pointer(virial_row_3, s_idx_i * b - (b - k)),
+                    virial_smem_3[laneid(), k]
+                )
             end
         end
     end
@@ -491,7 +573,7 @@ function force_kernel!(
             coords_j = coords[s_idx_j]
             vel_j = velocities[s_idx_j]
             atoms_j = atoms[s_idx_j]
-            dr = vector(coords_j, coords_i, boundary)
+            dr = vector(coords_i, coords_j, boundary)
             r2 = sum(abs2, dr)
             excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
@@ -508,8 +590,14 @@ function force_kernel!(
                 step_n) : zero(SVector{D, T})
             
             @inbounds for k in a:b
-                force_smem[laneid(), k] += ustrip(f[k])
-                opposites_sum[m, k] -= ustrip(f[k])
+                force_smem[laneid(), k]    += ustrip(f[k])
+                opposites_sum[m, k]        -= ustrip(f[k])
+                virial_smem_1[laneid(), k] += T(0.5) * ustrip(f[k]) * ustrip(dr[1])
+                virial_smem_2[laneid(), k] += T(0.5) * ustrip(f[k]) * ustrip(dr[2])
+                virial_smem_3[laneid(), k] += T(0.5) * ustrip(f[k]) * ustrip(dr[3])
+                opposite_virial_1[m, k]    -= T(0.5) * ustrip(f[k]) * ustrip(dr[1])
+                opposite_virial_2[m, k]    -= T(0.5) * ustrip(f[k]) * ustrip(dr[2])
+                opposite_virial_3[m, k]    -= T(0.5) * ustrip(f[k]) * ustrip(dr[3])
             end
         end	
 
@@ -519,7 +607,19 @@ function force_kernel!(
             CUDA.atomic_add!(
                 pointer(fs_mat, s_idx_i * b - (b - k)), 
                 -force_smem[laneid(), k] - opposites_sum[laneid(), k]
-            ) 
+            )
+            CUDA.atomic_add!(
+                pointer(virial_row_1, s_idx_i * b - (b - k)),
+                virial_smem_1[laneid(), k] - opposite_virial_1[laneid(), k]
+            )
+            CUDA.atomic_add!(
+                pointer(virial_row_2, s_idx_i * b - (b - k)),
+                virial_smem_2[laneid(), k] - opposite_virial_2[laneid(), k]
+            )
+            CUDA.atomic_add!(
+                pointer(virial_row_3, s_idx_i * b - (b - k)),
+                virial_smem_3[laneid(), k] - opposite_virial_3[laneid(), k]
+            )
         end
     end
 
@@ -539,7 +639,7 @@ function force_kernel!(
                 coords_j = coords[s_idx_j]
                 vel_j = velocities[s_idx_j]
                 atoms_j = atoms[s_idx_j]
-                dr = vector(coords_j, coords_i, boundary)
+                dr = vector(coords_i, coords_j, boundary)
                 r2 = sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
@@ -556,8 +656,14 @@ function force_kernel!(
                     step_n) : zero(SVector{D, T})
 
                 @inbounds for k in a:b
-                    force_smem[laneid(), k] += ustrip(f[k])
-                    opposites_sum[m, k] -= ustrip(f[k])
+                    force_smem[laneid(), k]    += ustrip(f[k])
+                    opposites_sum[m, k]        -= ustrip(f[k])
+                    virial_smem_1[laneid(), k] += T(0.5) * ustrip(f[k]) * ustrip(dr[1])
+                    virial_smem_2[laneid(), k] += T(0.5) * ustrip(f[k]) * ustrip(dr[2])
+                    virial_smem_3[laneid(), k] += T(0.5) * ustrip(f[k]) * ustrip(dr[3])
+                    opposite_virial_1[m, k]    -= T(0.5) * ustrip(f[k]) * ustrip(dr[1])
+                    opposite_virial_2[m, k]    -= T(0.5) * ustrip(f[k]) * ustrip(dr[2])
+                    opposite_virial_3[m, k]    -= T(0.5) * ustrip(f[k]) * ustrip(dr[3])
                 end
             end
 
@@ -566,7 +672,19 @@ function force_kernel!(
                 CUDA.atomic_add!(
                     pointer(fs_mat, s_idx_i * b - (b - k)), 
                     -force_smem[laneid(), k] - opposites_sum[laneid(), k]
-                ) 
+                )
+                CUDA.atomic_add!(
+                    pointer(virial_row_1, s_idx_i * b - (b - k)),
+                    virial_smem_1[laneid(), k] - opposite_virial_1[laneid(), k]
+                )
+                CUDA.atomic_add!(
+                    pointer(virial_row_2, s_idx_i * b - (b - k)),
+                    virial_smem_2[laneid(), k] - opposite_virial_2[laneid(), k]
+                )
+                CUDA.atomic_add!(
+                    pointer(virial_row_3, s_idx_i * b - (b - k)),
+                    virial_smem_3[laneid(), k] - opposite_virial_3[laneid(), k]
+                )
             end
         end
     end

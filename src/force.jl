@@ -145,8 +145,12 @@ function init_forces_buffer!(sys, n_threads)
     return ForcesBufferCPU(fs_nounits, fs_chunks, vir_nounits, vir_chunks)
 end
 
-struct ForcesBufferGPU{F, C, M, R}
+struct ForcesBufferGPU{F, V, VS, C, M, R}
     fs_mat::F
+    virial_row_1::V
+    virial_row_2::V
+    virial_row_3::V
+    virial_specific::VS
     box_mins::C
     box_maxs::C
     morton_seq::M
@@ -162,7 +166,11 @@ function init_forces_buffer!(sys::System{D, AT, T}, n_threads,
     C = eltype(eltype(sys.coords))
     n_blocks = cld(N, 32)
     backend = get_backend(sys.coords)
-    fs_mat = KernelAbstractions.zeros(backend, T, D, N)
+    fs_mat          = KernelAbstractions.zeros(backend, T, D, N)
+    virial_row_1    = KernelAbstractions.zeros(backend, T, D, N)
+    virial_row_2    = KernelAbstractions.zeros(backend, T, D, N)
+    virial_row_3    = KernelAbstractions.zeros(backend, T, D, N)
+    virial_specific = KernelAbstractions.zeros(backend, T, D, D)
     box_mins = KernelAbstractions.zeros(backend, C, n_blocks, D)
     box_maxs = KernelAbstractions.zeros(backend, C, n_blocks, D)
     morton_seq = KernelAbstractions.zeros(backend, Int32, N)
@@ -173,7 +181,7 @@ function init_forces_buffer!(sys::System{D, AT, T}, n_threads,
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
     end
-    return ForcesBufferGPU(fs_mat, box_mins, box_maxs, morton_seq, morton_seq_buffer_1,
+    return ForcesBufferGPU(fs_mat, virial_row_1, virial_row_2, virial_row_3, virial_specific, box_mins, box_maxs, morton_seq, morton_seq_buffer_1,
                            morton_seq_buffer_2, compressed_eligible, compressed_special)
 end
 
@@ -474,7 +482,16 @@ end
 
 function forces!(fs, sys::System{D, AT, T}, neighbors, buffers, step_n::Integer=0;
                  n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
+    
+    fill!(sys.virial, zero(T)*sys.energy_units)
+    fill!(sys.kin_tensor, zero(T)*sys.energy_units)
+    fill!(sys.pres_tensor, zero(T)*u"bar")
+    
     fill!(buffers.fs_mat, zero(T))
+    fill!(buffers.virial_row_1, zero(T))
+    fill!(buffers.virial_row_2, zero(T))
+    fill!(buffers.virial_row_3, zero(T))
+    fill!(buffers.virial_specific, zero(T))
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
@@ -489,11 +506,14 @@ function forces!(fs, sys::System{D, AT, T}, neighbors, buffers, step_n::Integer=
     end
 
     for inter_list in values(sys.specific_inter_lists)
-        specific_forces_gpu!(buffers.fs_mat, inter_list, sys.coords, sys.velocities, sys.atoms,
-                             sys.boundary, step_n, sys.force_units, Val(T))
+        specific_forces_gpu!(buffers.fs_mat, buffers.virial_specific,
+                            inter_list, sys.coords, sys.velocities, sys.atoms,
+                            sys.boundary, step_n, sys.force_units, Val(T))
     end
 
-    fs .= reinterpret(SVector{D, T}, vec(buffers.fs_mat)) .* sys.force_units
+    fs          .= reinterpret(SVector{D, T}, vec(buffers.fs_mat)) .* sys.force_units
+    sys.virial .+= from_device(buffers.virial_specific) .* sys.energy_units
+    
     for inter in values(sys.general_inters)
         AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads)
