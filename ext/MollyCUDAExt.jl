@@ -514,9 +514,12 @@ function force_kernel!(
 
                 @inbounds for k in a:b
                     force_smem[laneid(), k] += ustrip(f[k])
-                    virial_smem_1[laneid(), k] += T(0.5) * ustrip(f[k]) * ustrip(dr[1])
-                    virial_smem_2[laneid(), k] += T(0.5) * ustrip(f[k]) * ustrip(dr[2])
-                    virial_smem_3[laneid(), k] += T(0.5) * ustrip(f[k]) * ustrip(dr[3])
+                    v1 = T(0.5) * ustrip(f[k]) * ustrip(dr[1])
+                    v2 = T(0.5) * ustrip(f[k]) * ustrip(dr[2])
+                    v3 = T(0.5) * ustrip(f[k]) * ustrip(dr[3])
+                    virial_smem_1[laneid(), k] += v1
+                    virial_smem_2[laneid(), k] += v2
+                    virial_smem_3[laneid(), k] += v3
                     CUDA.atomic_add!(
                         pointer(fs_mat, s_idx_j * b - (b - k)), 
                         ustrip(f[k])
