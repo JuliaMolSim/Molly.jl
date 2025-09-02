@@ -66,6 +66,11 @@ function kinetic_energy(sys::System)
     return uconvert(sys.energy_units, ke)
 end
 
+function virial(sys)
+    _ = forces(sys) # Force recomputation
+    return sys.virial
+end
+
 """
     temperature(system)
 

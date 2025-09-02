@@ -134,7 +134,9 @@ function apply_coupling!(sys, thermostat::BerendsenThermostat, sim, neighbors=no
 end
 
 @doc raw"""
-    BerendsenBarostat(pressure, coupling_const; compressibility=4.6e-5u"bar^-1",
+    BerendsenBarostat(pressure, coupling_const; 
+                      coupling_type=:isotropic,
+                      compressibility=4.6e-5u"bar^-1",
                       max_scale_frac=0.1, n_steps=1)
 
 The Berendsen barostat for controlling pressure.
@@ -145,37 +147,214 @@ The scaling factor for the box every `n_steps` steps is
 ```
 with the fractional change limited to `max_scale_frac`.
 
+The scaling factor ``\mu`` is a matrix, allowing for non-isotropic
+pressure control. Available options are :isotropic, :semiisotropic and :anisotropic
+
 This barostat should be used with caution as it can lead to simulation
 artifacts.
 """
-struct BerendsenBarostat{P, C, IC, T}
+struct BerendsenBarostat{P, C, S, IC, T}
     pressure::P
     coupling_const::C
+    coupling_type::S
     compressibility::IC
     max_scale_frac::T
     n_steps::Int
 end
 
-function BerendsenBarostat(pressure, coupling_const; compressibility=4.6e-5u"bar^-1",
-                           max_scale_frac=0.1, n_steps=1)
-    T = typeof(ustrip(pressure))
-    return BerendsenBarostat(pressure, coupling_const, T(compressibility),
-                             T(max_scale_frac), n_steps)
+_isbar(x) = try;  uconvert(u"bar", x);      true; catch; false; end
+_isibar(x)= try;  uconvert(u"bar^-1", x);   true; catch; false; end
+
+function BerendsenBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
+                           coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
+                           max_scale_frac=0.1, n_steps=1) where {PT, D}
+
+    if !(coupling_type ∈ (:isotropic, :semiisotropic, :anisotropic))
+        throw(ArgumentError(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic")))
+    end
+
+    if coupling_type == :isotropic
+
+        if pressure isa SVector
+            throw(ArgumentError("isotropic: pressure must be a scalar"))
+        end
+        
+        if compressibility isa SVector 
+            throw(ArgumentError("isotropic: compressibility must be a scalar"))
+        end
+        
+        if !_isbar(pressure)
+            throw(ArgumentError("isotropic: pressure must have pressure units"))
+        end
+        
+        if !_isibar(compressibility)
+            throw(ArgumentError("isotropic: compressibility must have 1/pressure units"))
+        end
+
+        
+        # Use the caller’s units, but convert internal scalars consistently
+        P_units = unit(pressure)
+        K_units = unit(compressibility)
+        p = ustrip(uconvert(P_units, pressure))
+        κs = ustrip(uconvert(K_units, compressibility))
+
+        FT = typeof(p)
+
+        P = SMatrix{3,3,FT}(p,0,0, 0,p,0, 0,0,p) .* P_units
+        κ = SMatrix{3,3,FT}(κs,0,0, 0,κs,0, 0,0,κs) .* K_units
+
+        return BerendsenBarostat(P, coupling_const, :isotropic, κ, FT(max_scale_frac), n_steps)
+    end
+
+    if coupling_type == :semiisotropic
+
+        if !(pressure isa SVector{2})
+            throw(ArgumentError("semiisotropic: pressure must be a 2-vector (xy, z)"))
+        end
+        
+        if !(compressibility isa SVector{2}) 
+            throw(ArgumentError("semiisotropic: compressibility must be a 2-vector (xy, z)"))
+        end
+        
+        if !all(_isbar(pressure))
+            throw(ArgumentError("semiisotropic: pressure must have pressure units"))
+        end
+        
+        if !all(_isibar(compressibility))
+            throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
+        end
+
+        P_units = unit(pressure[1])
+        K_units = unit(compressibility[1])
+
+        p_xy = ustrip(uconvert(P_units, pressure[1]))
+        p_z  = ustrip(uconvert(P_units, pressure[2]))
+        κ_xy = ustrip(uconvert(K_units, compressibility[1]))
+        κ_z  = ustrip(uconvert(K_units, compressibility[2]))
+
+        FT = promote_type(typeof(p_xy), typeof(p_z))
+
+        P = SMatrix{3,3,FT}(p_xy,0,0, 0,p_xy,0, 0,0,p_z) .* P_units
+        κ = SMatrix{3,3,FT}(κ_xy,0,0, 0,κ_xy,0, 0,0,κ_z) .* K_units
+
+        return BerendsenBarostat(P, coupling_const, :semiisotropic, κ, FT(max_scale_frac), n_steps)
+    end
+        
+    if coupling_type == :anisotropic
+
+        if !(pressure isa SVector{6})
+            throw(ArgumentError("semiisotropic: pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
+        end
+        
+        if !(compressibility isa SVector{6}) 
+            throw(ArgumentError("semiisotropic: compressibility must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
+        end
+        
+        if !all(_isbar(pressure))
+            throw(ArgumentError("semiisotropic: pressure must have pressure units"))
+        end
+        
+        if !all(_isibar(compressibility))
+            throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
+        end
+
+
+        P_units = unit(pressure[1])
+        K_units = unit(compressibility[1])
+
+        px  = ustrip(uconvert(P_units, pressure[1]))
+        py  = ustrip(uconvert(P_units, pressure[2]))
+        pz  = ustrip(uconvert(P_units, pressure[3]))
+        pxy = ustrip(uconvert(P_units, pressure[4]))
+        pxz = ustrip(uconvert(P_units, pressure[5]))
+        pyz = ustrip(uconvert(P_units, pressure[6]))
+
+        κx  = ustrip(uconvert(K_units, compressibility[1]))
+        κy  = ustrip(uconvert(K_units, compressibility[2]))
+        κz  = ustrip(uconvert(K_units, compressibility[3]))
+        κxy = ustrip(uconvert(K_units, compressibility[4]))
+        κxz = ustrip(uconvert(K_units, compressibility[5]))
+        κyz = ustrip(uconvert(K_units, compressibility[6]))
+
+        FT = promote_type(typeof(px), typeof(py), typeof(pz), typeof(pxy), typeof(pxz), typeof(pyz))
+
+        P = SMatrix{3,3,FT}(px, pxy, pxz,
+                            pxy, py,  pyz,
+                            pxz, pyz, pz) .* P_units
+
+        κ = SMatrix{3,3,FT}(κx, κxy, κxz,
+                            κxy, κy,  κyz,
+                            κxz, κyz, κz) .* K_units
+
+        return BerendsenBarostat(P, coupling_const, :anisotropic, κ, FT(max_scale_frac), n_steps)
+    end
 end
 
 function apply_coupling!(sys, barostat::BerendsenBarostat, sim, neighbors=nothing,
                          step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
-    if !iszero(step_n % barostat.n_steps)
-        return false
+    if step_n % barostat.n_steps != 0; return false; end
+    FT = typeof(ustrip(sim.dt))
+
+    # pressure in barostat units
+    Pmeas = pressure(sys, neighbors, step_n; n_threads=n_threads)
+    tgt_unit = unit(barostat.pressure[1,1])
+    P = uconvert.(tgt_unit, Pmeas)
+
+    D   = size(P,1)
+    τp  = barostat.coupling_const
+    dt  = sim.dt
+    μ   = Matrix{FT}(I, D, D)
+
+    Pavg = tr(P)/FT(D)
+    Pxy  = D == 3 ? (P[1,1] + P[2,2]) / FT(2) : Pavg
+
+    if barostat.coupling_type == :isotropic
+        for d in 1:D
+            α = (barostat.compressibility[d,d] * dt) / (D*τp)
+            s = 1 + α * (Pavg - barostat.pressure[d,d])
+            μ[d,d] = clamp(s, 1 - barostat.max_scale_frac, 1 + barostat.max_scale_frac)
+        end
+
+    elseif barostat.coupling_type == :semiisotropic
+        @assert D == 3 "Cannot apply semi-isotropic in 2D."
+        for d in 1:2
+            α = (barostat.compressibility[d,d] * dt) / (FT(2)*τp)
+            s = 1 + α * (Pxy - barostat.pressure[d,d])
+            μ[d,d] = clamp(s, 1 - barostat.max_scale_frac, 1 + barostat.max_scale_frac)
+        end
+        αz = (barostat.compressibility[3,3] * dt) / τp
+        sz = 1 + αz * (P[3,3] - barostat.pressure[3,3])
+        μ[3,3] = clamp(sz, 1 - barostat.max_scale_frac, 1 + barostat.max_scale_frac)
+
+    elseif barostat.coupling_type == :anisotropic
+        # diagonals multiplicative
+        for d in 1:D
+            α = (barostat.compressibility[d,d] * dt) / τp
+            s = 1 + α * (P[d,d] - barostat.pressure[d,d])
+            μ[d,d] = clamp(s, 1 - barostat.max_scale_frac, 1 + barostat.max_scale_frac)
+        end
+        # shear increments (dimensionless), then project to triclinic
+        for i in 1:D, j in 1:D
+            i == j && continue
+            αij = (barostat.compressibility[i,j] * dt) / τp
+            Δ   = αij * (P[i,j] - barostat.pressure[i,j])
+            if isfinite(barostat.max_scale_frac)
+                Δ = clamp(Δ, -barostat.max_scale_frac, barostat.max_scale_frac)
+            end
+            μ[i,j] = Δ
+        end
+        if D == 3
+            # move upper triangle into lower (first-order) and zero upper
+            μ[2,1] += μ[1,2]
+            μ[3,1] += μ[1,3]
+            μ[3,2] += μ[2,3]
+            μ[1,2] = 0; μ[1,3] = 0; μ[2,3] = 0
+        end
+    else
+        error("Unsupported coupling_type=$(barostat.coupling_type)")
     end
-    P = pressure(sys, neighbors, step_n; n_threads=n_threads)
-    μ = 1 - ((barostat.compressibility * sim.dt) / (3 * barostat.coupling_const)) *
-                (barostat.pressure - P)
-    μ_clamp = clamp(μ, 1 - barostat.max_scale_frac, 1 + barostat.max_scale_frac)
-    if isone(μ_clamp)
-        return false
-    end
-    scale_coords!(sys, μ_clamp)    
+
+    scale_coords!(sys, SMatrix{D,D,FT}(μ))
     return true
 end
 

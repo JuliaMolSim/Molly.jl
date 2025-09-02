@@ -47,6 +47,9 @@ end
 
 CubicBoundary(x, y, z; kwargs...) = CubicBoundary(SVector{3}(x, y, z); kwargs...)
 CubicBoundary(x::Number; kwargs...) = CubicBoundary(SVector{3}(x, x, x); kwargs...)
+CubicBoundary(m::SMatrix{3,3}; kwargs...) = CubicBoundary(SVector{3}(m[1,1], m[2,2], m[3,3]); kwargs...)
+
+boxmatrix(b::CubicBoundary) = SMatrix{3,3}(ustrip(b.side_lengths[1]), 0, 0, 0, ustrip(b.side_lengths[2]), 0, 0, 0, ustrip(b.side_lengths[3])) * unit(b.side_lengths[1])
 
 Base.getindex(b::CubicBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::CubicBoundary) = 1
@@ -90,6 +93,9 @@ end
 
 RectangularBoundary(x, y; kwargs...) = RectangularBoundary(SVector{2}(x, y); kwargs...)
 RectangularBoundary(x::Number; kwargs...) = RectangularBoundary(SVector{2}(x, x); kwargs...)
+RectangularBoundary(m::SMatrix{3,3}; kwargs...) = RectangularBoundary(SVector{2}(m[1,1], m[2,2]); kwargs...)
+
+boxmatrix(b::RectangularBoundary) = SMatrix{3,3}(b.side_lengths[1],0,0, 0,b.side_lengths[2],0, 0,0,one(eltype(b.side_lengths)))
 
 Base.getindex(b::RectangularBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::RectangularBoundary) = 1
@@ -834,97 +840,6 @@ function remove_CM_motion!(sys::System{<:Any, <:AbstractGPUArray})
     return sys
 end
 
-@doc raw"""
-    virial(sys, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
-    virial(inter, sys, neighbors, step_n; n_threads=Threads.nthreads())
-
-Calculate the virial of a system or the virial resulting from a general interaction.
-
-The virial is defined as
-```math
-\Xi = -\frac{1}{2} \sum_{i,j>i} r_{ij} \cdot F_{ij}
-```
-Custom general interaction types can implement this function.
-
-This should only be used on systems containing just pairwise interactions, or
-where the specific interactions, constraints and general interactions without
-[`virial`](@ref) defined do not contribute to the virial.
-"""
-function virial(sys; n_threads::Integer=Threads.nthreads())
-    return virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
-end
-
-function virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
-    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
-    pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
-    v = virial(sys, neighbors, step_n, pairwise_inters_nonl, pairwise_inters_nl)
-
-    for inter in values(sys.general_inters)
-        v += virial(inter, sys, neighbors, step_n; n_threads=n_threads)
-    end
-
-    return v
-end
-
-function virial(sys::System{D, AT, T}, neighbors_dev, step_n, pairwise_inters_nonl,
-                            pairwise_inters_nl) where {D, AT, T}
-    if AT <: AbstractGPUArray
-        coords     = from_device(sys.coords)
-        velocities = from_device(sys.velocities)
-        atoms      = from_device(sys.atoms)
-        if isnothing(neighbors_dev)
-            neighbors = neighbors_dev
-        else
-            neighbors = NeighborList(neighbors_dev.n, from_device(neighbors_dev.list))
-        end
-    else
-        coords, velocities, atoms = sys.coords, sys.velocities, sys.atoms
-        neighbors = neighbors_dev
-    end
-
-    boundary = sys.boundary
-    v = zero(T) * sys.energy_units
-
-    @inbounds if length(pairwise_inters_nonl) > 0
-        n_atoms = length(sys)
-        for i in 1:n_atoms
-            for j in (i + 1):n_atoms
-                dr = vector(coords[i], coords[j], boundary)
-                f = force(pairwise_inters_nonl[1], dr, atoms[i], atoms[j], sys.force_units, false,
-                          coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
-                for inter in pairwise_inters_nonl[2:end]
-                    f += force(inter, dr, atoms[i], atoms[j], sys.force_units, false,
-                               coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
-                end
-                v += dot(f, dr)
-            end
-        end
-    end
-
-    @inbounds if length(pairwise_inters_nl) > 0
-        if isnothing(neighbors)
-            error("an interaction uses the neighbor list but neighbors is nothing")
-        end
-        for ni in eachindex(neighbors)
-            i, j, special = neighbors[ni]
-            dr = vector(coords[i], coords[j], boundary)
-            f = force(pairwise_inters_nl[1], dr, atoms[i], atoms[j], sys.force_units, special,
-                      coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
-            for inter in pairwise_inters_nl[2:end]
-                f += force(inter, dr, atoms[i], atoms[j], sys.force_units, special,
-                           coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
-            end
-            v += dot(f, dr)
-        end
-    end
-
-    return -v / 2
-end
-
-# Default for general interactions
-function virial(inter, sys::System{D, AT, T}, args...; kwargs...) where {D, AT, T}
-    return zero(T) * sys.energy_units
-end
 
 @doc raw"""
     pressure(sys, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
@@ -972,40 +887,126 @@ function pressure(sys::AtomsBase.AbstractSystem{D}, neighbors, step_n::Integer=0
 end
 
 """
-    molecule_centers(coords, boundary, topology)
+    molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topology) where {D,C}
 
-Calculate the coordinates of the center of each molecule in a system.
+Center-of-geometry per molecule using unwrapped **fractional** coordinates.
+Works for orthorhombic (with `boundary.side_lengths`) and triclinic (with `boundary.basis_vectors`).
 
-Accounts for periodic boundary conditions by using the circular mean.
-If `topology=nothing` then the coordinates are returned.
-
-Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
+Requires:
+- `topology.atom_molecule_inds :: AbstractVector{Int}` (length = n_atoms)
+- `topology.molecule_atom_counts :: AbstractVector{Int}`
+- `topology.bonded_atoms :: AbstractVector{<:Tuple{Int,Int}}` or `AbstractVector{SVector{2,Int}}`
 """
-function molecule_centers(coords::AbstractArray{SVector{D, C}}, boundary, topology) where {D, C}
+function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topology) where {D,C}
+    # Fallback
     if isnothing(topology)
         return coords
-    elseif boundary isa TriclinicBoundary
-        error("calculating molecule centers is not compatible with a TriclinicBoundary")
-    else
-        T = float_type(boundary)
-        pit = T(π)
-        twopit = 2 * pit
-        n_molecules = length(topology.molecule_atom_counts)
-        unit_circle_angles = broadcast(coords, (boundary.side_lengths,)) do c, sl
-            (c ./ sl) .* twopit .- pit # Run -π to π
-        end
-        mol_sin_sums = zeros(SVector{D, T}, n_molecules)
-        mol_cos_sums = zeros(SVector{D, T}, n_molecules)
-        for (uca, mi) in zip(unit_circle_angles, topology.atom_molecule_inds)
-            mol_sin_sums[mi] += sin.(uca)
-            mol_cos_sums[mi] += cos.(uca)
-        end
-        frac_centers = zeros(SVector{D, T}, n_molecules)
-        for mi in 1:n_molecules
-            frac_centers[mi] = (atan.(mol_sin_sums[mi], mol_cos_sums[mi]) .+ pit) ./ twopit
-        end
-        return broadcast((c, b) -> c .* b, frac_centers, (boundary.side_lengths,))
     end
+
+    # Helpers
+    wrap01(v) = v .- floor.(v)
+
+    # Boundary transforms
+    is_triclinic = hasproperty(boundary, :basis_vectors)
+    if is_triclinic && D != 3
+        error("Triclinic boundary only defined for D=3")
+    end
+
+    # Build frac<->cart transforms
+    if is_triclinic
+        Bm = reduce(hcat, boundary.basis_vectors)          # 3×3 Matrix
+        B  = SMatrix{3,3}(Bm)                              # cell matrix
+        to_frac = (r::SVector{3}) -> B \ r                     # fractional (dimensionless)
+        to_cart = (f::SVector{3}) -> B * f
+    else
+        sl = boundary.side_lengths                         # SVector{D}
+        to_frac = (r::SVector{D}) -> r ./ sl
+        to_cart = (f::SVector{D}) -> f .* sl
+    end
+
+    # Flatten coords
+    x = vec(coords)
+    N = length(x)
+
+    # Fractional, wrapped (avoid referring to `to_frac` in a type before it exists)
+    y1 = wrap01(to_frac(x[1]))
+    f  = Vector{typeof(y1)}(undef, N)
+    f[1] = y1
+    @inbounds for i in 2:N
+        f[i] = wrap01(to_frac(x[i]))
+    end
+
+    # Topology
+    atom_mol = topology.atom_molecule_inds
+    n_mol    = length(topology.molecule_atom_counts)
+    bonds    = topology.bonded_atoms
+
+    # Build per-atom neighbor list (bonds)
+    nbrs = [Int[] for _ in 1:N]
+    @inbounds for b in bonds
+        i, j = b[1], b[2]
+        push!(nbrs[i], j)
+        push!(nbrs[j], i)
+    end
+
+    # Group atoms by molecule
+    atoms_by_mol = [Int[] for _ in 1:n_mol]
+    @inbounds for i in 1:N
+        push!(atoms_by_mol[atom_mol[i]], i)
+    end
+
+    # Unwrapped fractional coords per atom (filled per molecule)
+    u = Vector{eltype(f)}(undef, N)
+
+    centers = Vector{SVector{D, eltype(x[1][1])}}(undef, n_mol)
+    for m in 1:n_mol
+        atoms = atoms_by_mol[m]
+        if isempty(atoms)
+            centers[m] = to_cart(zero(f[1]))
+            continue
+        end
+
+        visited = falses(N)
+
+        # Search over each connected component within the molecule
+        for seed in atoms
+            if visited[seed]; continue; end
+            u[seed] = f[seed]
+            visited[seed] = true
+            stack = [seed]
+            while !isempty(stack)
+                i = pop!(stack)
+                @inbounds for j in nbrs[i]
+                    # stay within molecule
+                    if atom_mol[j] != m || visited[j]; continue; end
+                    Δ = f[j] - f[i] - round.(f[j] - f[i])
+                    u[j] = u[i] + Δ
+                    visited[j] = true
+                    push!(stack, j)
+                end
+            end
+        end
+
+        # Any isolated atoms that had no bonds
+        @inbounds for i in atoms
+            if !visited[i]
+                u[i] = f[i]
+                visited[i] = true
+            end
+        end
+
+        # Mean in unwrapped fractional space
+        s = zero(u[atoms[1]])
+        @inbounds for i in atoms
+            s += u[i]
+        end
+        ū = s / length(atoms)
+
+        # Wrap back and convert to Cartesian
+        centers[m] = to_cart(wrap01(ū))
+    end
+
+    return centers
 end
 
 function molecule_centers(coords::AbstractGPUArray, boundary, topology)
@@ -1013,57 +1014,114 @@ function molecule_centers(coords::AbstractGPUArray, boundary, topology)
     return to_device(molecule_centers(from_device(coords), boundary, topology), AT)
 end
 
-# Allows scaling multiple vectors at once by broadcasting this function
-scale_vec(v, s) = v .* s
+rebuild_boundary(b::CubicBoundary,       box) = CubicBoundary(box)
+rebuild_boundary(b::RectangularBoundary, box) = RectangularBoundary(box)
+rebuild_boundary(b::TriclinicBoundary,   box) = TriclinicBoundary(box)
 
 """
-    scale_coords!(sys, scale_factor; ignore_molecules=false)
+    scale_coords!(sys::System{<:Any, AT}, μ::SMatrix{D,D};
+                  rotate::Bool = true,
+                  ignore_molecules::Bool = false,
+                  scale_velocities::Bool = false)
 
-Scale the coordinates and bounding box of a system by a scaling factor.
+Rigid-molecular barostat update with optional rotation.
 
-The scaling factor can be a single number or a `SVector` of the appropriate number
-of dimensions corresponding to the scaling factor for each axis.
-Velocities are not scaled.
-If the topology of the system is set then atoms in the same molecule will be
-moved by the same amount according to the center of coordinates of the molecule.
-This can be disabled with `ignore_molecules=true`.
-
-Not currently compatible with [`TriclinicBoundary`](@ref) if the topology is set.
+- Box:        B′ = μ * B
+- Positions:  r′ = μ * r  (implemented via COM affine + optional rotation of internal offsets)
+- Velocities: v′ = μ⁻¹ * v  (applied when `scale_velocities=true`)
 """
-function scale_coords!(sys::System{<:Any, AT}, scale_factor; ignore_molecules=false) where AT
+function scale_coords!(sys::System{<:Any, AT},
+                       μ::SMatrix{D,D};
+                       rotate::Bool           = true,
+                       ignore_molecules::Bool = false,
+                       scale_velocities::Bool = false) where {AT,D}
+
+    @assert !has_infinite_boundary(sys.boundary) "infinite boundary not supported"
+
+    μinv = inv(μ)
+
     if ignore_molecules || isnothing(sys.topology)
-        sys.boundary = scale_boundary(sys.boundary, scale_factor)
-        sys.coords .= scale_vec.(sys.coords, (scale_factor,))
-    elseif sys.boundary isa TriclinicBoundary
-        error("scaling coordinates by molecule is not compatible with a TriclinicBoundary")
+        # box
+        B  = SMatrix{D,D}(ustrip(boxmatrix(sys.boundary)))
+        Bu = unit(eltype(eltype(sys.coords)))
+        B′ = μ * B
+        sys.boundary = rebuild_boundary(sys.boundary, B′ .* Bu)
+        # coords
+        sys.coords .= to_device([μ * c for c in from_device(sys.coords)])  # keeps units
+        # velocities
+        if scale_velocities
+            sys.velocities .= to_device([μinv * v for v in from_device(sys.velocities)])
+        end
+        return sys
     else
-        atom_molecule_inds = sys.topology.atom_molecule_inds
-        coords_nounits = from_device(ustrip_vec.(sys.coords))
-        coord_units = unit(eltype(eltype(sys.coords)))
-        boundary_nounits = ustrip(coord_units, sys.boundary)
-        mol_centers = molecule_centers(coords_nounits, boundary_nounits, sys.topology)
-        # Shift molecules to the center of the box and wrap
-        # This puts them all in the same periodic image which is required when scaling
-        # This won't work if the molecule can't fit in one box when centered,
-        #   but that would likely be a pathological case anyway
-        center_shifts = (box_center(boundary_nounits),) .- mol_centers
-        for i in eachindex(sys)
-            coords_nounits[i] = wrap_coords(
-                    coords_nounits[i] .+ center_shifts[atom_molecule_inds[i]], boundary_nounits)
+        # units and host copies
+        coord_u = unit(eltype(eltype(sys.coords)))
+        coords  = from_device(ustrip_vec.(sys.coords))
+        b_old_u = sys.boundary
+        b_old   = ustrip(coord_u, b_old_u)
+
+        # cell matrices
+        B  = SMatrix{D,D}(ustrip(boxmatrix(b_old_u)))
+        B′ = μ * B
+
+        # topology
+        topo    = sys.topology
+        mol_of  = topo.atom_molecule_inds
+        centers = molecule_centers(coords, b_old, topo)
+        c_box   = box_center(b_old)
+
+        # center molecules into same image
+        Δcenter = [c_box - centers[m] for m in eachindex(centers)]
+        @inbounds for i in eachindex(coords)
+            coords[i] = wrap_coords(coords[i] + Δcenter[mol_of[i]], b_old)
         end
-        # Move all atoms in a molecule by the same amount according to the molecule center
-        # Then move the atoms back to the molecule center and wrap in the scaled boundary
-        shift_vecs = scale_vec.(mol_centers, (scale_factor .- 1,))
-        sys.boundary = scale_boundary(sys.boundary, scale_factor)
-        boundary_nounits = ustrip(sys.boundary)
-        for i in eachindex(sys)
-            mi = atom_molecule_inds[i]
-            coords_nounits[i] = wrap_coords(
-                    coords_nounits[i] .+ shift_vecs[mi] .- center_shifts[mi], boundary_nounits)
+
+        # new COMs
+        invB = inv(B)
+        centers′ = similar(centers)
+        @inbounds for m in eachindex(centers)
+            s    = invB * centers[m]
+            rcom = B′ * s                  # = μ * centers[m]
+            centers′[m] = rcom
         end
-        sys.coords .= to_device(coords_nounits .* coord_units, AT)
+
+        # rotation from right polar decomposition
+        sv = svd(Matrix(μ))
+        R  = rotate ? SMatrix{D,D}(sv.U * sv.Vt) : SMatrix{D,D}(I)
+        if rotate && det(R) < 0
+            idx  = argmin(sv.S)
+            Ufix = Matrix(sv.U); Ufix[:,idx] .*= -1
+            R    = SMatrix{D,D}(Ufix * sv.Vt)
+        end
+
+        # new boundary
+        b_new   = rebuild_boundary(b_old,  B′)
+        b_new_u = rebuild_boundary(b_old_u, B′ .* coord_u)
+
+        # place atoms
+        @inbounds for i in eachindex(coords)
+            m  = mol_of[i]
+            δ  = coords[i] - c_box
+            δ′ = R * δ
+            r′ = δ′ + centers′[m]
+            coords[i] = wrap_coords(r′, b_new)
+        end
+
+        # write back
+        sys.coords   .= to_device(coords .* coord_u, AT)
+        sys.boundary  = b_new_u
+
+        # velocities
+        if scale_velocities
+            vels = from_device(sys.velocities)          # keep units
+            @inbounds for i in eachindex(vels)
+                vels[i] = μinv * vels[i]
+            end
+            sys.velocities .= to_device(vels, AT)
+        end
+
+        return sys
     end
-    return sys
 end
 
 """
