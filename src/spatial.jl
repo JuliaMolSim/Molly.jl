@@ -848,10 +848,10 @@ Calculate the tensorial pressure of a system.
 
 The pressure is defined as
 ```math
-P = \frac{ 2 \cdot K + W }{V}
+\bf{P} = \frac{ 2 \cdot \bf{K} + \bf{W} }{V}
 ```
-where `V` is the system volume, `K` is the kinetic energy tensor
-and W is the virial tensor.
+where ``V`` is the system volume, ``\bf{K}`` is the kinetic energy tensor
+and ``\bf{W}`` is the virial tensor.
 
 Not compatible with infinite boundaries.
 """

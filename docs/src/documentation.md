@@ -1052,9 +1052,11 @@ Some simulators can be modified by adding coupling methods to allow properties l
 The available couplers are:
 - [`NoCoupling`](@ref)
 - [`ImmediateThermostat`](@ref)
+- [`VelocityRescaleThermostat`](@ref)
 - [`AndersenThermostat`](@ref)
 - [`BerendsenThermostat`](@ref)
 - [`BerendsenBarostat`](@ref)
+- [`CRescaleBarostat`](@ref)
 - [`MonteCarloBarostat`](@ref)
 - [`MonteCarloAnisotropicBarostat`](@ref)
 - [`MonteCarloMembraneBarostat`](@ref)
