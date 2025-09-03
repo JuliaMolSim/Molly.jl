@@ -175,7 +175,7 @@ function apply_coupling!(sys, barostat::BerendsenBarostat, sim, neighbors=nothin
     if isone(μ_clamp)
         return false
     end
-    scale_coords!(sys, μ_clamp)    
+    scale_coords!(sys, μ_clamp)
     return true
 end
 

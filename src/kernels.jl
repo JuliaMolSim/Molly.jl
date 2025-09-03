@@ -42,7 +42,7 @@ function gpu_threads_specific(n_inters)
     return n_threads_gpu
 end
 
-function pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, 
+function pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T},
                     pairwise_inters, neighbors, step_n) where {D, AT <: AbstractGPUArray, T}
     if isnothing(neighbors)
         error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *

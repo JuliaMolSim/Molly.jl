@@ -171,7 +171,7 @@ end
 @testset "Constraints angle" begin
     n_atoms = 30
     atom_mass = 10.0u"g/mol"
-    # Central atom
+    # Central atoms
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(3.0u"nm")
 
@@ -194,8 +194,8 @@ end
     )
     bond_length = 0.13u"nm"
 
-    is = collect(1:(n_atoms ÷ 3))
-    js = collect(((n_atoms ÷ 3) + 1):(2 * (n_atoms ÷ 3)))
+    js = collect(1:(n_atoms ÷ 3))
+    is = collect(((n_atoms ÷ 3) + 1):(2 * (n_atoms ÷ 3)))
     ks = collect((2 * (n_atoms ÷ 3) + 1):n_atoms)
     angle_constraints = [AngleConstraint(is[idx], js[idx], ks[idx], θ, bond_length, bond_length)
                          for idx in eachindex(is)]
@@ -230,7 +230,7 @@ end
 @testset "Constraints distance and angle" begin
     n_atoms = 60
     atom_mass = 10.0u"g/mol"
-    # Central atom
+    # Central atoms
     atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
     boundary = CubicBoundary(3.0u"nm")
 
@@ -263,8 +263,8 @@ end
     )
     bond_length = 0.13u"nm"
 
-    is = collect(1:(n_atoms ÷ 6)) # 1 - 10
-    js = collect((2 * (n_atoms ÷ 6) + 1):(3 * (n_atoms ÷ 6))) # 21 - 30
+    js = collect(1:(n_atoms ÷ 6)) # 1 - 10
+    is = collect((2 * (n_atoms ÷ 6) + 1):(3 * (n_atoms ÷ 6))) # 21 - 30
     ks = collect((3 * (n_atoms ÷ 6) + 1):(4 * (n_atoms ÷ 6))) # 31 - 40
     angle_constraints = [AngleConstraint(is[idx], js[idx], ks[idx], θ, bond_length, bond_length)
                          for idx in eachindex(is)]

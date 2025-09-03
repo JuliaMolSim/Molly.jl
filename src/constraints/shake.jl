@@ -11,8 +11,8 @@ export
                 gpu_block_size = 64,
                 max_iters = 25)
 
-Constrain distances during a simulation using the SHAKE and RATTLE algorithms. 
-Either or both of `dist_constraints` and `angle_constraitns` must be passed.
+Constrain distances during a simulation using the SHAKE and RATTLE algorithms.
+Either or both of `dist_constraints` and `angle_constraints` must be passed.
 
 Velocity constraints will be imposed for simulators that integrate velocities such as
 [`VelocityVerlet`](@ref).
@@ -21,7 +21,6 @@ See [Ryckaert et al. 1977](https://doi.org/10.1016/0021-9991(77)90098-5) for SHA
 [Elber et al. 2011](https://doi.org/10.1140%2Fepjst%2Fe2011-01525-9) for a derivation
 of the linear system solved to satisfy the RATTLE algorithm.
 [Krautler et al. 2000](https://onlinelibrary.wiley.com/doi/10.1002/1096-987X(20010415)22:5%3C501::AID-JCC1021%3E3.0.CO;2-V) for the M-SHAKE algorithm
-
 
 # Arguments
 - `n_atoms`: Total number of atoms in the system.
@@ -75,14 +74,14 @@ function SHAKE_RATTLE(n_atoms,
         angle_constraints = nothing
     end
 
-    if float_type(dist_tolerance) isa Float32 
-        if ustrip(dist_tolerance) <= Float32(1e-6) 
+    if float_type(dist_tolerance) isa Float32
+        if ustrip(dist_tolerance) <= Float32(1e-6)
             @warn "Using Float32 with a SHAKE dist_tolerance less than 1e-6. Might have convergence issues."
         end
     end
 
-    if float_type(vel_tolerance) isa Float32 
-        if ustrip(vel_tolerance) <= Float32(1e-6) 
+    if float_type(vel_tolerance) isa Float32
+        if ustrip(vel_tolerance) <= Float32(1e-6)
             @warn "Using Float32 with a RATTLE vel_tolerance less than 1e-6. Might have convergence issues."
         end
     end
@@ -175,7 +174,7 @@ end
 end
 
 @inline function solve_3x3_exactly!(λ, A, A′, C)
-    determinant = A[1,1]*A[2,2]*A[3,3] + A[1,2]*A[2,3]*A[3,1] + A[1,3]*A[2,1]*A[3,2] - 
+    determinant = A[1,1]*A[2,2]*A[3,3] + A[1,2]*A[2,3]*A[3,1] + A[1,3]*A[2,1]*A[3,2] -
                   A[1,1]*A[2,3]*A[3,2] - A[1,2]*A[2,1]*A[3,3] - A[1,3]*A[2,2]*A[3,1]
 
     if iszero(determinant)
@@ -220,7 +219,7 @@ end
 
         v_k1 = v[k1] # uncoalesced read
         v_k2 = v[k2] # uncoalesced read
-    
+
         m1_inv, m2_inv = inv(ms[k1]), inv(ms[k2]) # uncoalesced read
         r_k1k2  = vector(r[k1], r[k2], boundary) # uncoalesced read
         v_k1k2 = v_k2 .- v_k1
@@ -249,7 +248,7 @@ end
     @uniform C_type = typeof(zero(V) * zero(L))
     @uniform L_type = typeof(zero(C_type) / zero(A_type))
 
-    if idx <= length(k1s)        
+    if idx <= length(k1s)
         # Allocate thread-local memory
         A = @MMatrix zeros(A_type, 2, 2) # Units are L^2 / M
         C = @MVector zeros(C_type, 2) # Units are L^2 / T
@@ -318,7 +317,7 @@ end
         k4 = k4s[idx]
 
         r_k1 = r[k1] # uncoalesced read
-     
+
         m1_inv, m2_inv, m3_inv, m4_inv = inv(ms[k1]), inv(ms[k2]), inv(ms[k3]), inv(ms[k4]) # uncoalesced read
         r_k1k2  = vector(r_k1, r[k2], boundary) # uncoalesced read
         r_k1k3  = vector(r_k1, r[k3], boundary) # uncoalesced read
@@ -387,7 +386,7 @@ end
         r_k1 = r[k1]; v_k1 = v[k1]
         r_k2 = r[k2]; v_k2 = v[k2]
         r_k3 = r[k3]; v_k3 = v[k3]
-     
+
         m1_inv, m2_inv, m3_inv = inv(ms[k1]), inv(ms[k2]), inv(ms[k3]) # uncoalesced read
         r_k1k2  = vector(r_k1, r_k2, boundary) # uncoalesced read
         r_k1k3  = vector(r_k1, r_k3, boundary) # uncoalesced read
@@ -423,7 +422,7 @@ end
 @kernel inbounds=true function shake2_kernel!(
     @Const(k1s),
     @Const(k2s),
-    @Const(dists), 
+    @Const(dists),
     @Const(r_t1::T),
     r_t2::T,
     @Const(ms),
@@ -440,9 +439,9 @@ end
         r_t2_k2 = r_t2[k2] # uncoalesced read
         r_t1_k1 = r_t1[k1] # uncoalesced read
         r_t1_k2 = r_t1[k2] # uncoalesced read
-        
+
         # Vector between the atoms after unconstrained update (s)
-        s12 = vector(r_t2_k1, r_t2_k2, boundary) 
+        s12 = vector(r_t2_k1, r_t2_k2, boundary)
 
         # Vector between the atoms before unconstrained update (r)
         r12 = vector(r_t1_k1, r_t1_k2, boundary)
@@ -452,8 +451,8 @@ end
         b = -FT(2.0) * (m1_inv + m2_inv) * dot(r12, s12)
         c = sum(abs2, s12) - (distance)^2
         D = b^2 - FT(4.0)*a*c
-        
-        # Just let the system blow up?? 
+
+        # Just let the system blow up??
         # This usually happens when timestep too large or over constrained
         # if ustrip(D) < FT(0.0)
         #     error("SHAKE determinant negative: $(D)")
@@ -468,8 +467,8 @@ end
     end
 end
 
-@kernel inbounds=true function shake_step!( 
-        @Const(active_idxs),    
+@kernel inbounds=true function shake_step!(
+        @Const(active_idxs),
         still_active::AbstractVector{Bool},
         @Const(N_active),
         @Const(shake_fn),
@@ -477,7 +476,7 @@ end
     )
 
     tid = @index(Global, Linear)
-        
+
     if tid <= N_active
         # Get cluster-idx this thread will work on
         cluster_idx = active_idxs[tid]
@@ -513,7 +512,7 @@ function shake_gpu!(
     iter = 1
     while iter <= max_iters
         kern(
-            active_idxs,    
+            active_idxs,
             still_active,
             N_active_clusters,
             shake_kernel,
@@ -523,21 +522,21 @@ function shake_gpu!(
             ndrange=N_active_clusters,
         )
 
-        #* This compaction can be done ON GPU with 
+        #* This compaction can be done ON GPU with
         #* the scan imeplmented in AcceleratedKernels.jl + a scatter operation
         #* for now this is easier and (probably) faster for smaller systems
         #* On CUDA/AMD we could also pin this memory...
         still_active_host = Array(still_active) #! MOVING FROM DEVICE TO HOST
-        active_idxs_host  = findall(still_active_host) 
+        active_idxs_host  = findall(still_active_host)
 
         isempty(active_idxs_host) && break
 
         N_active_clusters = length(active_idxs_host)
         # Move active indices to the start. Anything at the end
-        # is ignored by kernel as only N_active_clusters 
+        # is ignored by kernel as only N_active_clusters
         # threads are launched.
         @views copy!(active_idxs[1:N_active_clusters], Int32.(active_idxs_host))#! MOVING FROM HOST TO DEVICE
-    
+
         iter += 1
     end
 
@@ -552,9 +551,9 @@ end
         cluster_idx,
         k1s, k2s, k3s,
         dist12s, dist13s,
-        r_t1::AbstractVector{<:AbstractVector{L}}, 
+        r_t1::AbstractVector{<:AbstractVector{L}},
         r_t2::AbstractVector{<:AbstractVector{L}},
-        ms::AbstractVector{M}, 
+        ms::AbstractVector{M},
         boundary::AbstractBoundary{<:Any, FT},
         dist_tol::L
     ) where {L, M, FT}
@@ -607,7 +606,7 @@ end
     r_t2[k2] -= Δ2
     r_t2[k3] -= Δ3
 
-    r_t2_k1 -= Δ1 
+    r_t2_k1 -= Δ1
     r_t2_k2 -= Δ2
     r_t2_k3 -= Δ3
 
@@ -629,10 +628,10 @@ end
         dist12s, dist13s, dist14s,
         r_t1::AbstractVector{<:AbstractVector{L}},
         r_t2::AbstractVector{<:AbstractVector{L}},
-        ms::AbstractVector{M}, 
+        ms::AbstractVector{M},
         boundary::AbstractBoundary{<:Any, FT},
         dist_tol::L
-    ) where {L, M, FT}   
+    ) where {L, M, FT}
 
     @uniform A_type = typeof(zero(L) * zero(L) / zero(M))
     @uniform A_tmp_type = typeof(zero(M) / (zero(L) * zero(L)))
@@ -652,7 +651,7 @@ end
     dist13 = dist13s[cluster_idx]
     dist14 = dist14s[cluster_idx]
 
-    m1_inv, m2_inv, m3_inv, m4_inv = inv(ms[k1]), inv(ms[k2]), inv(ms[k3]), inv(ms[k4]) # uncoalesced read    
+    m1_inv, m2_inv, m3_inv, m4_inv = inv(ms[k1]), inv(ms[k2]), inv(ms[k3]), inv(ms[k4]) # uncoalesced read
 
     r_t1_k1 = r_t1[k1] # uncoalesced read
     r_t2_k1 = r_t2[k1] # uncoalesced read
@@ -697,7 +696,7 @@ end
     r_t2[k4] -= Δ4
 
     # Check tolerances, just re-compute instead of uncoalesced read
-    r_t2_k1 -= Δ1 
+    r_t2_k1 -= Δ1
     r_t2_k2 -= Δ2
     r_t2_k3 -= Δ3
     r_t2_k4 -= Δ4
@@ -722,7 +721,7 @@ end
         dist12s, dist13s, dist23s,
         r_t1::AbstractVector{<:AbstractVector{L}},
         r_t2::AbstractVector{<:AbstractVector{L}},
-        ms::AbstractVector{M}, 
+        ms::AbstractVector{M},
         boundary::AbstractBoundary{<:Any, FT},
         dist_tol::L
     ) where {L, M, FT}
@@ -789,7 +788,7 @@ end
     r_t2[k3] -= Δ3
 
     # Check tolerances, just re-compute instead of uncoalesced read
-    r_t2_k1 -= Δ1 
+    r_t2_k1 -= Δ1
     r_t2_k2 -= Δ2
     r_t2_k3 -= Δ3
 
@@ -804,10 +803,10 @@ end
     # Constraint still active if either above tolerance
     return (tol12 > dist_tol) || (tol13 > dist_tol) || (tol23 > dist_tol)
 end
- 
+
 function apply_position_constraints!(
         sys::System,
-        ca::SHAKE_RATTLE, 
+        ca::SHAKE_RATTLE,
         r_pre_unconstrained_update;
         kwargs...
     )
@@ -827,7 +826,7 @@ function apply_position_constraints!(
         s2_kernel!(
             ca.clusters12.k1,
             ca.clusters12.k2,
-            ca.clusters12.dist12, 
+            ca.clusters12.dist12,
             r_pre_unconstrained_update,
             sys.coords,
             masses(sys),
@@ -835,7 +834,7 @@ function apply_position_constraints!(
             ndrange=N12_clusters,
             )
     end
-    if N23_clusters > 0 
+    if N23_clusters > 0
         shake_gpu!(
             ca.clusters23,
             ca.max_iters,
@@ -864,8 +863,8 @@ function apply_position_constraints!(
             ca.dist_tolerance
         )
     end
-    
-    if N_angle_clusters > 0 
+
+    if N_angle_clusters > 0
         shake_gpu!(
             ca.angle_clusters,
             ca.max_iters,
@@ -931,7 +930,7 @@ function apply_velocity_constraints!(sys::System, ca::SHAKE_RATTLE; kwargs...)
             ca.clusters34.k3,
             ca.clusters34.k4,
             sys.coords,
-            sys.velocities, 
+            sys.velocities,
             masses(sys),
             sys.boundary,
             ndrange=N34_clusters,

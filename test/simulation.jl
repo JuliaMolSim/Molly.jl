@@ -520,7 +520,7 @@ end
     boundary = CubicBoundary(2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps")
     pairwise_inter_types = (
-        LennardJones(use_neighbors=true), 
+        LennardJones(use_neighbors=true),
         LennardJones(use_neighbors=false),
         LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),
         LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), use_neighbors=true),
@@ -541,8 +541,9 @@ end
                                                     dist_cutoff=1.2u"nm")
         end
 
-        atoms = [Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]  
-        coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")                                             
+        atoms = [Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1")
+                 for i in 1:n_atoms]
+        coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
         velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
 
         sys = System(

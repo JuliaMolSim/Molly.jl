@@ -482,12 +482,12 @@ The potential energy is defined as
 ```math
 V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}} \exp(-\kappa r_{ij})
 ```
-and the force on each atom by 
+and the force on each atom by
 ```math
 F(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}^2} \exp(-\kappa r_{ij})\left(\kappa r_{ij} + 1\right) \vec{r}_{ij}
 ```
 """
-@kwdef struct Yukawa{C, W, T, K} 
+@kwdef struct Yukawa{C, W, T, K}
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
     weight_special::W = 1

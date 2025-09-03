@@ -325,7 +325,7 @@ end
 
     function test_energy_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
         atoms, pis, sis, gis = inject_gradients(sys_ref, params_dic)
-    
+
         sys = System(
             atoms=atoms,
             coords=coords,
@@ -337,10 +337,10 @@ end
             force_units=NoUnits,
             energy_units=NoUnits,
         )
-    
+
         return potential_energy(sys; n_threads=n_threads)
     end
-    
+
     function test_forces_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
         atoms, pis, sis, gis = inject_gradients(sys_ref, params_dic)
 
@@ -362,7 +362,7 @@ end
 
     function test_sim_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
         atoms, pis, sis, gis = inject_gradients(sys_ref, params_dic)
-    
+
         sys = System(
             atoms=atoms,
             coords=coords,

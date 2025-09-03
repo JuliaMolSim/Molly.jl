@@ -273,7 +273,7 @@ The Ashbaugh-Hatch potential ($V_{\text{AH}}$) is a modified Lennard-Jones ($V_{
 
 The potential energy is defined as
 ```math
-V_{\text{LJ}}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \\ 
+V_{\text{LJ}}(r_{ij}) = 4\varepsilon_{ij} \left[\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12} - \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \\
 ```
 ```math
 V_{\text{AH}}(r_{ij}) =
@@ -300,7 +300,7 @@ where
 
 If ``\lambda`` is one this gives the standard [`LennardJones`](@ref) potential.
 """
-@kwdef struct AshbaughHatch{C, H, S, E, L, W} 
+@kwdef struct AshbaughHatch{C, H, S, E, L, W}
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
     shortcut::H = lj_zero_shortcut
@@ -418,7 +418,7 @@ end
     six_term = (σ2 / r2) ^ 3
     lj_term = 4ϵ * (six_term ^ 2 - six_term)
     if r2 < (2^(1/3) * σ2)
-        return lj_term + ϵ * (1 - λ) 
+        return lj_term + ϵ * (1 - λ)
     else
         return λ * lj_term
     end
