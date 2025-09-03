@@ -76,13 +76,11 @@ function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inte
                     buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
                     sys.boundary, Val(D))
     end
-    pe_vec_nounits = KernelAbstractions.zeros(get_backend(sys.coords), T, 1)
-    CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true kernel_force_energy!(
-            buffers.morton_seq, buffers.fs_mat, pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords,
-            sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), Val(sys.energy_units), pairwise_inters,
+    CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(
+            buffers.morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords,
+            sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
             Val(T), Val(D))
-    println(Array(pe_vec_nounits)[1])
 
     return buffers
 end
@@ -102,6 +100,7 @@ function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, 
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     if sys.boundary isa TriclinicBoundary
+        println("Triclinic")
         H = SMatrix{D, D, T}(
             (sys.boundary.basis_vectors[j][i].val for j in 1:D, i in 1:D)...
         )
@@ -110,6 +109,7 @@ function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, 
                 buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
                 sys.boundary, Val(D))
     else
+        println("Cubic")
         CUDA.@sync @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
                 buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
                 Val(N), sys.boundary, Val(D))
@@ -327,18 +327,6 @@ function kernel_min_max_triclinic!(
             end
         end
     end
-
-    #=sync_threads()
-    if local_i == a
-        for k in a:b
-            mins[blockIdx().x, k] = H[k, 1]*mins[blockIdx().x, 1] + 
-                                    H[k, 2]*mins[blockIdx().x, 2] + 
-                                    H[k, 3]*mins[blockIdx().x, 3]
-            maxs[blockIdx().x, k] = H[k, 1]*maxs[blockIdx().x, 1] + 
-                                    H[k, 2]*maxs[blockIdx().x, 2] + 
-                                    H[k, 3]*maxs[blockIdx().x, 3] 
-        end
-    end=#
 
     return nothing
 end
@@ -929,337 +917,6 @@ function energy_kernel!(
                     vel_i, vel_j,
                     step_n) : zero(SVector{1, T})
                 E_smem[laneid()] += ustrip(pe[1])
-            end
-        end
-    end
-
-    sync_threads()
-    if threadIdx().x == a
-        sum_E = zero(T)
-        for k in a:warpsize()
-            sum_E += E_smem[k]
-        end
-        CUDA.atomic_add!(pointer(energy_nounits), sum_E)
-    end
-
-    return nothing
-end
-
-function kernel_force_energy!( 
-    sorted_seq,
-    fs_mat, 
-    energy_nounits,
-    mins::AbstractArray{C}, 
-    maxs::AbstractArray{C},
-    coords, 
-    velocities,
-    atoms,
-    ::Val{N}, 
-    r_cut, 
-    ::Val{force_units},
-    ::Val{energy_units},
-    inters_tuple,
-    boundary,
-    step_n,
-    special_compressed,
-    eligible_compressed,
-    ::Val{T},
-    ::Val{D}) where {N, C, force_units, energy_units, T, D}
-
-    a = Int32(1)
-    b = Int32(D)
-    n_blocks = ceil(Int32, N / 32)
-    i = blockIdx().x
-    j = blockIdx().y
-    i_0_tile = (i - a) * warpsize()
-    j_0_tile = (j - a) * warpsize()
-    index_i = i_0_tile + laneid()
-    index_j = j_0_tile + laneid()
-    force_smem = CuStaticSharedArray(T, (32, 3))
-    opposites_sum = CuStaticSharedArray(T, (32, 3))
-    E_smem = CuStaticSharedArray(T, 32)
-    E_smem[laneid()] = zero(T)
-    r = Int32((N - 1) % 32 + 1)
-    @inbounds for k in a:b
-        force_smem[laneid(), k] = zero(T)
-        opposites_sum[laneid(), k] = zero(T)
-    end
-
-    # The code is organised in 4 mutually excluding parts
-    if j < n_blocks && i < j
-        r_max_i = SVector(maxs[i, 1], maxs[i, 2], maxs[i, 3])
-        r_min_i = SVector(mins[i, 1], mins[i, 2], mins[i, 3])
-        r_max_j = SVector(maxs[j, 1], maxs[j, 2], maxs[j, 3])
-        r_min_j = SVector(mins[j, 1], mins[j, 2], mins[j, 3])
-        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
-        dist_block = sum(abs2, d_block)
-        if dist_block <= r_cut * r_cut
-            s_idx_i = sorted_seq[index_i]
-            coords_i = coords[s_idx_i] 
-            vel_i = velocities[s_idx_i] 
-            atoms_i = atoms[s_idx_i]
-            d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
-            dist_pb = sum(abs2, d_pb)
-
-            Bool_excl = dist_pb <= r_cut * r_cut
-            s_idx_j = sorted_seq[index_j]
-            coords_j = coords[s_idx_j]
-            vel_j = velocities[s_idx_j] 
-            shuffle_idx = laneid()
-            atoms_j = atoms[s_idx_j]
-            atype_j = atoms_j.atom_type
-            aindex_j = atoms_j.index
-            amass_j = atoms_j.mass
-            acharge_j = atoms_j.charge
-            aσ_j = atoms_j.σ
-            aϵ_j = atoms_j.ϵ
-            eligible_bitmask = UInt32(0)
-            special_bitmask = UInt32(0)
-            eligible_bitmask = eligible_compressed[laneid(), i, j]
-            special_bitmask = special_compressed[laneid(), i, j]
-
-            # Shuffle
-            for m in a:warpsize()
-                sync_warp()
-                coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, laneid() + a, warpsize())
-                vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, laneid() + a, warpsize())
-                shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, laneid() + a, warpsize())
-                atype_j = CUDA.shfl_sync(0xFFFFFFFF, atype_j, laneid() + a, warpsize())
-                aindex_j = CUDA.shfl_sync(0xFFFFFFFF, aindex_j, laneid() + a, warpsize())
-                amass_j = CUDA.shfl_sync(0xFFFFFFFF, amass_j, laneid() + a, warpsize())
-                acharge_j = CUDA.shfl_sync(0xFFFFFFFF, acharge_j, laneid() + a, warpsize())
-                aσ_j = CUDA.shfl_sync(0xFFFFFFFF, aσ_j, laneid() + a, warpsize())
-                aϵ_j = CUDA.shfl_sync(0xFFFFFFFF, aϵ_j, laneid() + a, warpsize())
-                
-                atoms_j_shuffle = Atom(atype_j, aindex_j, amass_j, acharge_j, aσ_j, aϵ_j)
-                dr = vector(coords_j, coords_i, boundary)
-                r2 = sum(abs2, dr)
-                excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
-                spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
-                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-
-                f = condition ? sum_pairwise_forces(
-                    inters_tuple,
-                    atoms_i, atoms_j_shuffle,
-                    Val(force_units),
-                    (spec & 0x1) == true,
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{D, T})
-                pe = condition ? sum_pairwise_potentials(
-                    inters_tuple,
-                    atoms_i, atoms_j_shuffle,
-                    Val(energy_units),
-                    (spec & 0x1) == true,
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{1, T})
-
-                E_smem[laneid()] += ustrip(pe[1])
-                @inbounds for k in a:b
-                    force_smem[laneid(), k] += ustrip(f[k])
-                    opposites_sum[shuffle_idx, k] -= ustrip(f[k])
-                end
-            end
-
-            sync_threads()
-            @inbounds for k in a:b
-                CUDA.atomic_add!(
-                    pointer(fs_mat, s_idx_i * b - (b - k)), 
-                    -force_smem[laneid(), k]
-                ) 
-                CUDA.atomic_add!(
-                    pointer(fs_mat, s_idx_j * b - (b - k)), 
-                    -opposites_sum[laneid(), k]
-                ) 
-            end
-        end
-    end
-
-    if j == n_blocks && i < n_blocks
-        r_max_i = SVector(maxs[i, 1], maxs[i, 2], maxs[i, 3])
-        r_min_i = SVector(mins[i, 1], mins[i, 2], mins[i, 3])
-        r_max_j = SVector(maxs[j, 1], maxs[j, 2], maxs[j, 3])
-        r_min_j = SVector(mins[j, 1], mins[j, 2], mins[j, 3])
-        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
-        dist_block = sum(abs2, d_block)
-
-        if dist_block <= r_cut * r_cut 
-            s_idx_i = sorted_seq[index_i]
-            coords_i = coords[s_idx_i]
-            vel_i = velocities[s_idx_i]
-            atoms_i = atoms[s_idx_i]
-            d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
-            dist_pb = sum(abs2, d_pb)
-
-            Bool_excl = dist_pb <= r_cut * r_cut
-            eligible_bitmask = UInt32(0)
-            special_bitmask = UInt32(0)
-            eligible_bitmask = eligible_compressed[laneid(), i, j]
-            special_bitmask = special_compressed[laneid(), i, j]
-            
-            for m in a:r
-                s_idx_j = sorted_seq[j_0_tile + m]
-                coords_j = coords[s_idx_j]
-                vel_j = velocities[s_idx_j]
-                atoms_j = atoms[s_idx_j]
-                dr = vector(coords_j, coords_i, boundary)
-                r2 = sum(abs2, dr)
-                excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
-                spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-
-                f = condition ? sum_pairwise_forces(
-                    inters_tuple,
-                    atoms_i, atoms_j,
-                    Val(force_units),
-                    (spec & 0x1) == true,
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{D, T})
-                pe = condition ? sum_pairwise_potentials(
-                    inters_tuple,
-                    atoms_i, atoms_j,
-                    Val(energy_units),
-                    (spec & 0x1) == true,
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{1, T})
-
-                E_smem[laneid()] += ustrip(pe[1])
-                @inbounds for k in a:b
-                    force_smem[laneid(), k] += ustrip(f[k])
-                    CUDA.atomic_add!(
-                        pointer(fs_mat, s_idx_j * b - (b - k)), 
-                        ustrip(f[k])
-                    )
-                end
-            end
-
-            # Sum contributions of the r-block to the other standard blocks
-            @inbounds for k in a:b
-                CUDA.atomic_add!(
-                    pointer(fs_mat, s_idx_i * b - (b - k)), 
-                    -force_smem[laneid(), k]
-                ) 
-            end
-        end
-    end
-
-    if i == j && i < n_blocks
-        s_idx_i = sorted_seq[index_i]
-        coords_i = coords[s_idx_i]
-        vel_i = velocities[s_idx_i]
-        atoms_i = atoms[s_idx_i]
-        eligible_bitmask = UInt32(0)
-        special_bitmask = UInt32(0)
-        eligible_bitmask = eligible_compressed[laneid(), i, j]
-        special_bitmask = special_compressed[laneid(), i, j]
-
-        for m in (laneid() + a) : warpsize()
-            s_idx_j = sorted_seq[j_0_tile + m]
-            coords_j = coords[s_idx_j]
-            vel_j = velocities[s_idx_j]
-            atoms_j = atoms[s_idx_j]
-            dr = vector(coords_j, coords_i, boundary)
-            r2 = sum(abs2, dr)
-            excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
-            spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-            condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-
-            f = condition ? sum_pairwise_forces(
-                inters_tuple,
-                atoms_i, atoms_j,
-                Val(force_units),
-                (spec & 0x1) == true,
-                coords_i, coords_j,
-                boundary,
-                vel_i, vel_j,
-                step_n) : zero(SVector{D, T})
-            pe = condition ? sum_pairwise_potentials(
-                inters_tuple,
-                atoms_i, atoms_j,
-                Val(energy_units),
-                (spec & 0x1) == true,
-                coords_i, coords_j,
-                boundary,
-                vel_i, vel_j,
-                step_n) : zero(SVector{1, T})
-            #@cuprintln(ustrip(pe[1]))
-            E_smem[laneid()] += ustrip(pe[1])
-            @inbounds for k in a:b
-                force_smem[laneid(), k] += ustrip(f[k])
-                opposites_sum[m, k] -= ustrip(f[k])
-            end
-        end	
-
-        sync_threads()
-        @inbounds for k in a:b
-            # In this case i == j, so we can call atomic_add! only once
-            CUDA.atomic_add!(
-                pointer(fs_mat, s_idx_i * b - (b - k)), 
-                -force_smem[laneid(), k] - opposites_sum[laneid(), k]
-            ) 
-        end
-    end
-
-    if i == n_blocks && j == n_blocks
-        if laneid() <= r
-            s_idx_i = sorted_seq[index_i]
-            coords_i = coords[s_idx_i]
-            vel_i = velocities[s_idx_i]
-            atoms_i = atoms[s_idx_i]
-            eligible_bitmask = UInt32(0)
-            special_bitmask = UInt32(0)
-            eligible_bitmask = eligible_compressed[laneid(), i, j]
-            special_bitmask = special_compressed[laneid(), i, j]
-
-            for m in (laneid() + a) : r
-                s_idx_j = sorted_seq[j_0_tile + m]
-                coords_j = coords[s_idx_j]
-                vel_j = velocities[s_idx_j]
-                atoms_j = atoms[s_idx_j]
-                dr = vector(coords_j, coords_i, boundary)
-                r2 = sum(abs2, dr)
-                excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
-                spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
-                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-                
-                f = condition ? sum_pairwise_forces(
-                    inters_tuple,
-                    atoms_i, atoms_j,
-                    Val(force_units),
-                    (spec & 0x1) == true,
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{D, T})
-                pe = condition ? sum_pairwise_potentials(
-                    inters_tuple,
-                    atoms_i, atoms_j,
-                    Val(energy_units),
-                    (spec & 0x1) == true,
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{1, T})
-                E_smem[laneid()] += ustrip(pe[1])
-
-                @inbounds for k in a:b
-                    force_smem[laneid(), k] += ustrip(f[k])
-                    opposites_sum[m, k] -= ustrip(f[k])
-                end
-            end
-
-            @inbounds for k in a:b
-                CUDA.atomic_add!(
-                    pointer(fs_mat, s_idx_i * b - (b - k)), 
-                    -force_smem[laneid(), k] - opposites_sum[laneid(), k]
-                ) 
             end
         end
     end
