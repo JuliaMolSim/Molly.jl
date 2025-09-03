@@ -77,10 +77,10 @@ The stochastic velocity rescaling thermostat. See:
 
 [Bussi, Donadio & Parrinello (2007)](https://doi.org/10.1063/1.2408420)
 
-In brief, acts like the Berendsen thermostat but adds an 
+In brief, acts like the [`BerendsenThermostat`](@ref) but adds an 
 stochastic term, allowing correct sampling of isothermal ensembles.
 
-Let `Δt` be the step, `Nf` the kinetic DOFs used to calculate the instantaneous
+Let `Δt` be the simulation timestep, `Nf` the kinetic DOFs used to calculate the instantaneous
 temperature of the system. Then, ``K = \frac{1}{2} \cdot \sum m \cdot v^2`` is the current
 kinetic energy, and ``K̄ = \frac{1}{2} Nf k_B T_0`` is the target kinetic energy for
 a reference temperature `T_0`.
@@ -115,7 +115,6 @@ function apply_coupling!(sys::System{<:Any, AT}, thermostat::VelocityRescaleTher
     # DOFs and current kinetic energy
     Nf  = sys.df
     Nf  > 0 || return false
-    masses = from_device(sys.masses)
     vels   = from_device(sys.velocities)
 
     K = kinetic_energy(sys)
@@ -140,12 +139,12 @@ function apply_coupling!(sys::System{<:Any, AT}, thermostat::VelocityRescaleTher
         x = randn(rrng); rsum += x*x
     end
 
-    # λ² (Appendix A7). Guard tiny negatives from roundoff.
+    # λ² (Appendix A7 in Bussi, Donadio & Parrinello (2007))
     lam2 = c + (1 - c) * A * (R1*R1 + rsum) + 2 * sqrt(c * (1 - c) * A) * R1
-    lam2 = max(lam2, zero(lam2) + eps(Float64))
+    lam2 = max(lam2, zero(lam2) + eps(Float64)) # Guard from small numbers
     λ    = sqrt(lam2)
 
-    # Uniform rescale (preserves constraints; COM unchanged)
+    # Uniform rescale
     @inbounds for i in eachindex(vels)
         vels[i] = λ * vels[i]
     end
@@ -238,7 +237,7 @@ allowing for non-isotropic pressure control. Available options are `:isotropic`,
 `:semiisotropic` and `:anisotropic`.
 
 This barostat should be used with caution as it known not to properly sample
-isobaric ensembles and can lead to simulation artifacts.
+isobaric ensembles and therefore can lead to simulation artifacts.
 """
 struct BerendsenBarostat{P, C, S, IC, T}
     pressure::P
@@ -365,11 +364,11 @@ function BerendsenBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
 
         FT = promote_type(typeof(px), typeof(py), typeof(pz), typeof(pxy), typeof(pxz), typeof(pyz))
 
-        P = SMatrix{3,3,FT}(px, pxy, pxz,
+        P = SMatrix{3,3,FT}(px,  pxy, pxz,
                             pxy, py,  pyz,
                             pxz, pyz, pz) .* P_units
 
-        κ = SMatrix{3,3,FT}(κx, κxy, κxz,
+        κ = SMatrix{3,3,FT}(κx,  κxy, κxz,
                             κxy, κy,  κyz,
                             κxz, κyz, κz) .* K_units
 
@@ -377,15 +376,12 @@ function BerendsenBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
     end
 end
 
-function apply_coupling!(sys, barostat::BerendsenBarostat, sim, neighbors=nothing,
-                         step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
+function apply_coupling!(sys, barostat::BerendsenBarostat{PT, CT, ST, ICT, FT}, sim, neighbors=nothing,
+                         step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...) where {PT, CT, ST, ICT, FT} # Avoids uconvert calls in method
     if step_n % barostat.n_steps != 0; return false; end
-    FT = typeof(ustrip(sim.dt))
-
+    
     # pressure in barostat units
-    Pmeas = pressure(sys, neighbors, step_n; n_threads=n_threads)
-    tgt_unit = unit(barostat.pressure[1,1])
-    P = uconvert.(tgt_unit, Pmeas)
+    P = pressure(sys, neighbors, step_n; n_threads=n_threads)
 
     D   = size(P,1)
     τp  = barostat.coupling_const
@@ -609,20 +605,16 @@ function CRescaleBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
     end
 end
 
-function apply_coupling!(sys, barostat::CRescaleBarostat, sim, neighbors=nothing,
-                         step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
+function apply_coupling!(sys::System{D, AT}, barostat::CRescaleBarostat{PT, CT, ST, ICT, FT}, sim, neighbors=nothing,
+                         step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...) where {D, AT, PT, CT, ST, ICT, FT}
     if step_n % barostat.n_steps != 0
         return false
     end
 
     # Pressure tensor in barostat units
-    Pmeas = pressure(sys, neighbors, step_n; n_threads=n_threads)
-    tgt_u = unit(barostat.pressure[1,1])
-    P     = uconvert.(tgt_u, Pmeas)
+    P = pressure(sys, neighbors, step_n; n_threads=n_threads)
 
     # Thermo factors
-    D         = 3
-    FT        = typeof(ustrip(sim.dt))
     V         = volume(sys.boundary)
     τp, dt    = barostat.coupling_const, sim.dt
     kT_energy = Unitful.k * temperature(sys)

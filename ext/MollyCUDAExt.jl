@@ -331,6 +331,22 @@ function force_kernel!(
     index_j = j_0_tile + laneid()
     force_smem = CuStaticSharedArray(T, (32, D))
     opposites_sum = CuStaticSharedArray(T, (32, D))
+    
+    #= 
+
+    We initialize the shared memory for the virial with the 
+    exact same layout as for the forces. We store each row
+    of the virial matrix separately, treating it as a vector,
+    to take advantage of the existing logic.
+
+    This means that we calculate the virial for each 
+    atom in the pair, and not for each interaction. Therefore, 
+    the 0.5 prefactor is needed, to account for 2 atoms equally,
+    unlike in the CPU path. In fact, this more closely follows
+    the definition found in the LAMMPS docs.
+     
+    =#
+    
     virial_smem_1 = CuStaticSharedArray(T, (32, D))
     opposite_virial_1 = CuStaticSharedArray(T, (32, D))
     virial_smem_2 = CuStaticSharedArray(T, (32, D))
@@ -400,7 +416,7 @@ function force_kernel!(
                 aϵ_j = CUDA.shfl_sync(0xFFFFFFFF, aϵ_j, laneid() + a, warpsize())
                 
                 atoms_j_shuffle = Atom(atype_j, aindex_j, amass_j, acharge_j, aσ_j, aϵ_j)
-                dr = vector(coords_i, coords_j, boundary) # Sign flip needed for virial, does not affect forces as only norm(dr) matters for them
+                dr = vector(coords_i, coords_j, boundary) # Sign flip (Giuseppe's kernel uses j, i) needed for virial, does not affect forces as only norm(dr) matters for them
                 r2 = sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
@@ -419,7 +435,7 @@ function force_kernel!(
                 @inbounds for k in a:b
                     force_smem[laneid(), k]           += ustrip(f[k])
                     opposites_sum[shuffle_idx, k]     -= ustrip(f[k])
-                    virial_smem_1[laneid(), k]        += T(0.5) * ustrip(f[k]) * ustrip(dr[1])
+                    virial_smem_1[laneid(), k]        += T(0.5) * ustrip(f[k]) * ustrip(dr[1]) # See large comment block above for 0.5 factor explanation
                     opposite_virial_1[shuffle_idx, k] -= T(0.5) * ustrip(f[k]) * ustrip(dr[1])
                     virial_smem_2[laneid(), k]        += T(0.5) * ustrip(f[k]) * ustrip(dr[2])
                     opposite_virial_2[shuffle_idx, k] -= T(0.5) * ustrip(f[k]) * ustrip(dr[2])

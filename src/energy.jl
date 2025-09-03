@@ -57,7 +57,7 @@ K = \rm{Tr}\left[ \bf{K} \right]
 
 where ``\bf{K}`` is the kinetic energy tensor:
 ```math
-bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
+\bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
 ```
 """
 function kinetic_energy(sys::System)

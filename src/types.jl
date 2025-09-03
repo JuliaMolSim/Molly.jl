@@ -467,7 +467,7 @@ interface described there.
     system.
 - `virial::VT=zeros(dims, dims) * u"kJ * mol^-1"`: the virial of the system, used to
     calculate stresses and pressure.
-- `kin_tensor::VT=zeros(dims, dims) * u"kJ * mol^-1"`: the kinetik energy of the system
+- `kin_tensor::VT=zeros(dims, dims) * u"kJ * mol^-1"`: the kinetic energy of the system
     in tensorial form, useful to calculate the pressure.
 - `pres_tensor::VT=zeros(dims, dims) * u"bar"`: the pressure of the system in its 
     tensorial form. Useful for non-isotropic barostats.

@@ -191,7 +191,8 @@ zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
     forces(system, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
 
 Calculate the forces on all atoms in a system using the pairwise, specific and
-general interactions.
+general interactions. This call also populates the [`virial`](@ref) tensor of
+the system.
 """
 function forces(sys; n_threads::Integer=Threads.nthreads())
     return forces(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
@@ -213,7 +214,7 @@ function forces!(fs, sys::System{D, AT, T}, neighbors, buffers, step_n::Integer=
     
     https://docs.lammps.org/compute_stress_atom.html
 
-    For now, KSpace, constraints and GeneralInteraction conributions are ignored.
+    TODO: For now, KSpace, constraints and GeneralInteraction conributions are ignored.
     This should change in the future.
     =#
     fill!(sys.virial, zero(T)*sys.energy_units)
@@ -482,11 +483,17 @@ end
 
 function forces!(fs, sys::System{D, AT, T}, neighbors, buffers, step_n::Integer=0;
                  n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
-    
+
+    #=
+    Ensure the appropriate tensors are set to zero at the beginning of the force call.
+    =#
     fill!(sys.virial, zero(T)*sys.energy_units)
     fill!(sys.kin_tensor, zero(T)*sys.energy_units)
     fill!(sys.pres_tensor, zero(T)*u"bar")
     
+    #=
+    Zero the buffers to store the calc. magnitudes. 
+    =#
     fill!(buffers.fs_mat, zero(T))
     fill!(buffers.virial_row_1, zero(T))
     fill!(buffers.virial_row_2, zero(T))

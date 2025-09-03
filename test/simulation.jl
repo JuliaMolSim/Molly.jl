@@ -1372,8 +1372,8 @@ end
     random_velocities!(sys, temp)
     simulate!(sys, simulator, n_steps)
 
-    @test 0.9u"bar" < mean(values(sys.loggers.pressure)[2001:end]) < 1.1u"bar"
-    @test std(values(sys.loggers.pressure)[2001:end]) < 0.2u"bar"
+    @test 0.9u"bar" < mean([tr(P) for P in values(sys.loggers.pressure)[2001:end]]) < 1.1u"bar" # Corrected for tensorial pressure
+    @test std([tr(P) for P in values(sys.loggers.pressure)[2001:end]]) < 0.2u"bar"
     @test 5.0u"nm" < mean(values(sys.loggers.box_size)[2001:end]) < 5.4u"nm"
     @test std(values(sys.loggers.box_size)[2001:end]) < 0.1u"nm"
 end

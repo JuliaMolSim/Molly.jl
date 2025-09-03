@@ -128,8 +128,6 @@ height/width.
 Setting the keyword argument `approx_images` to `false` means the exact closest
 image is found, which is slower.
 
-Not currently able to simulate a cubic box, use [`CubicBoundary`](@ref) or small
-offsets instead.
 Not currently compatible with infinite boundaries.
 """
 struct TriclinicBoundary{T, A, D, I}
@@ -376,7 +374,8 @@ Calculate the volume (3D) or area (2D) of a [`System`](@ref) or bounding box.
 Returns infinite volume for infinite boundaries.
 """
 volume(sys) = volume(sys.boundary)
-volume(b::Union{CubicBoundary, RectangularBoundary, TriclinicBoundary}) = prod(box_sides(b))
+#volume(b::Union{CubicBoundary, RectangularBoundary, TriclinicBoundary}) = prod(box_sides(b)) 
+volume(b::Union{CubicBoundary, RectangularBoundary, TriclinicBoundary}) = det(boxmatrix(b)) 
 
 """
     density(sys)
@@ -614,7 +613,6 @@ end
 Return coordinates unwrapped so that every bonded pair is placed using
 the minimum-image displacement. Molecule connectivity is preserved.
 """
-# neighbors may be `nothing` or a collection with items like (i,j, special)
 function unwrap_global(coords::AbstractVector{<:SVector{D}},
                        boundary, topology; neighbors=nothing) where {D}
     # --- frac<->cart ---
@@ -994,8 +992,8 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
 
     # Build frac<->cart transforms
     if is_triclinic
-        Bm = reduce(hcat, boundary.basis_vectors)          # 3×3 Matrix
-        B  = SMatrix{3,3}(Bm)                              # cell matrix
+        B = boxmatrix(boundary)#reduce(hcat, boundary.basis_vectors)          # 3×3 Matrix
+        #B  = SMatrix{3,3}(Bm)                              # cell matrix
         to_frac = (r::SVector{3}) -> B \ r                     # fractional (dimensionless)
         to_cart = (f::SVector{3}) -> B * f
     else
@@ -1008,7 +1006,7 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
     x = vec(coords)
     N = length(x)
 
-    # Fractional, wrapped (avoid referring to `to_frac` in a type before it exists)
+    # Fractional, wrapped
     y1 = wrap01(to_frac(x[1]))
     f  = Vector{typeof(y1)}(undef, N)
     f[1] = y1
@@ -1116,8 +1114,10 @@ function scale_coords!(sys::System{<:Any, AT},
                        ignore_molecules::Bool = false,
                        scale_velocities::Bool = false) where {AT,D}
 
-    @assert !has_infinite_boundary(sys.boundary) "infinite boundary not supported"
-
+    if has_infinite_boundary(sys.boundary)
+        throw(AssertionError("Infinite boundary not supported"))
+    end
+    
     μinv = inv(μ)
 
     if ignore_molecules || isnothing(sys.topology)
@@ -1127,10 +1127,10 @@ function scale_coords!(sys::System{<:Any, AT},
         B′ = μ * B
         sys.boundary = rebuild_boundary(sys.boundary, B′ .* Bu)
         # coords
-        sys.coords .= to_device([μ * c for c in from_device(sys.coords)])  # keeps units
+        sys.coords .= to_device([μ * c for c in from_device(sys.coords)], AT)  # keeps units
         # velocities
         if scale_velocities
-            sys.velocities .= to_device([μinv * v for v in from_device(sys.velocities)])
+            sys.velocities .= to_device([μinv * v for v in from_device(sys.velocities)], AT)
         end
         return sys
     else
@@ -1166,17 +1166,21 @@ function scale_coords!(sys::System{<:Any, AT},
         end
 
         # rotation from right polar decomposition
-        sv = svd(Matrix(μ))
-        R  = rotate ? SMatrix{D,D}(sv.U * sv.Vt) : SMatrix{D,D}(I)
-        if rotate && det(R) < 0
-            idx  = argmin(sv.S)
-            Ufix = Matrix(sv.U); Ufix[:,idx] .*= -1
-            R    = SMatrix{D,D}(Ufix * sv.Vt)
+        if rotate
+            sv = svd(Matrix(μ))
+            R  = SMatrix{D,D}(sv.U * sv.Vt)
+            if det(R) < 0 # Ensure right-handed rotation
+                idx  = argmin(sv.S)
+                Ufix = Matrix(sv.U); Ufix[:,idx] .*= -1
+                R    = SMatrix{D,D}(Ufix * sv.Vt)
+            end
+        else
+            R = SMatrix{D,D}(I)
         end
 
         # new boundary
-        b_new   = rebuild_boundary(b_old,  B′)
         b_new_u = rebuild_boundary(b_old_u, B′ .* coord_u)
+        b_new   = ustrip(coord_u, b_new_u) 
 
         # place atoms
         @inbounds for i in eachindex(coords)
