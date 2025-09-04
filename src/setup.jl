@@ -529,6 +529,7 @@ function System(coord_file::AbstractString,
     eligible = trues(n_atoms, n_atoms)
     special = falses(n_atoms, n_atoms)
     torsion_n_terms = 6
+    weight_14_coulomb, weight_14_lj = force_field.weight_14_coulomb, force_field.weight_14_lj
 
     top_bonds     = Vector{Int}[is for is in eachcol(Int.(Chemfiles.bonds(    top)))]
     top_angles    = Vector{Int}[is for is in eachcol(Int.(Chemfiles.angles(   top)))]
@@ -857,16 +858,6 @@ function System(coord_file::AbstractString,
         energy_units = NoUnits
     end
 
-    # All torsions should have the same number of terms for speed, GPU compatibility
-    #   and for taking gradients
-    # For now always pad to 6 terms
-    torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                            proper=t.proper, n_terms=torsion_n_terms)
-                                            for t in torsions.inters]
-    improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                            proper=t.proper, n_terms=torsion_n_terms)
-                                            for t in impropers.inters]
-
     # Convert from Å
     if units
         coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(Chemfiles.positions(frame))]
@@ -879,17 +870,27 @@ function System(coord_file::AbstractString,
     coords = wrap_coords.(coords, (boundary_used,))
     coords_dev = to_device(coords, AT)
 
+    # All torsions should have the same number of terms for speed, GPU compatibility
+    #   and for taking gradients
+    # For now always pad to 6 terms
+    torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                            proper=t.proper, n_terms=torsion_n_terms)
+                                            for t in torsions.inters]
+    improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                            proper=t.proper, n_terms=torsion_n_terms)
+                                            for t in impropers.inters]
+
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
     lj = LennardJones(
         cutoff=DistanceCutoff(T(dist_cutoff)),
         use_neighbors=using_neighbors,
-        weight_special=force_field.weight_14_lj,
+        weight_special=weight_14_lj,
     )
     if nonbonded_method == "none"
         coul = Coulomb(
             cutoff=DistanceCutoff(T(dist_cutoff)),
             use_neighbors=using_neighbors,
-            weight_special=force_field.weight_14_coulomb,
+            weight_special=weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
         general_inters_ewald = ()
@@ -898,7 +899,7 @@ function System(coord_file::AbstractString,
             dist_cutoff=T(dist_cutoff),
             solvent_dielectric=T(crf_solvent_dielectric),
             use_neighbors=using_neighbors,
-            weight_special=force_field.weight_14_coulomb,
+            weight_special=weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
         general_inters_ewald = ()
@@ -907,7 +908,7 @@ function System(coord_file::AbstractString,
             dist_cutoff=T(dist_cutoff),
             error_tol=T(ewald_error_tol),
             use_neighbors=using_neighbors,
-            weight_special=force_field.weight_14_coulomb,
+            weight_special=weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
             approximate_erfc=approximate_pme,
         )
@@ -1113,6 +1114,9 @@ function System(T::Type,
     angles = InteractionList3Atoms(HarmonicAngle)
     possible_torsions = Tuple{Int, Int, Int, Int}[]
     torsions = InteractionList4Atoms(RBTorsion)
+    impropers = InteractionList4Atoms(RBTorsion)
+    torsion_n_terms = 6
+    weight_14_lj, weight_14_coulomb = T(0.5), T(0.5)
 
     if units
         force_units = u"kJ * mol^-1 * nm^-1"
@@ -1369,17 +1373,20 @@ function System(T::Type,
     coords = wrap_coords.(coords, (boundary_used,))
     coords_dev = to_device(coords, AT)
 
+    torsion_inters_pad = torsions.inters
+    improper_inters_pad = impropers.inters
+
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
     lj = LennardJones(
         cutoff=DistanceCutoff(T(dist_cutoff)),
         use_neighbors=using_neighbors,
-        weight_special=T(0.5),
+        weight_special=weight_14_lj,
     )
     if nonbonded_method == "none"
         coul = Coulomb(
             cutoff=DistanceCutoff(T(dist_cutoff)),
             use_neighbors=using_neighbors,
-            weight_special=T(0.5),
+            weight_special=weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
         general_inters_ewald = ()
@@ -1388,7 +1395,7 @@ function System(T::Type,
             dist_cutoff=T(dist_cutoff),
             solvent_dielectric=T(crf_solvent_dielectric),
             use_neighbors=using_neighbors,
-            weight_special=T(0.5),
+            weight_special=weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
         general_inters_ewald = ()
@@ -1397,7 +1404,7 @@ function System(T::Type,
             dist_cutoff=T(dist_cutoff),
             error_tol=T(ewald_error_tol),
             use_neighbors=using_neighbors,
-            weight_special=T(0.5),
+            weight_special=weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
             approximate_erfc=approximate_pme,
         )
@@ -1454,8 +1461,18 @@ function System(T::Type,
             to_device(torsions.js, AT),
             to_device(torsions.ks, AT),
             to_device(torsions.ls, AT),
-            to_device([torsions.inters...], AT),
+            to_device(torsion_inters_pad, AT),
             torsions.types,
+        ))
+    end
+    if length(impropers.is) > 0
+        push!(specific_inter_array, InteractionList4Atoms(
+            to_device(impropers.is, AT),
+            to_device(impropers.js, AT),
+            to_device(impropers.ks, AT),
+            to_device(impropers.ls, AT),
+            to_device(improper_inters_pad, AT),
+            impropers.types,
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
