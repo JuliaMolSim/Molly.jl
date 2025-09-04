@@ -100,7 +100,6 @@ function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, 
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     if sys.boundary isa TriclinicBoundary
-        println("Triclinic")
         H = SMatrix{D, D, T}(
             (sys.boundary.basis_vectors[j][i].val for j in 1:D, i in 1:D)...
         )
@@ -109,7 +108,6 @@ function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, 
                 buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
                 sys.boundary, Val(D))
     else
-        println("Cubic")
         CUDA.@sync @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
                 buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
                 Val(N), sys.boundary, Val(D))
@@ -125,16 +123,13 @@ end
 function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVector{D, T}, r2_max::SVector{D, T}, boundary) where {D, T}
     va = vector(r2_max, r1_min, boundary)
     vb = vector(r1_max, r2_min, boundary)
-    a = SVector(abs(va[1]), abs(va[2]), abs(va[3]))
-    b = SVector(abs(vb[1]), abs(vb[2]), abs(vb[3]))
+    a = SVector{D}(ntuple(d -> abs(va[d]), D))
+    b = SVector{D}(ntuple(d -> abs(vb[d]), D))
 
-    return SVector(
-        r1_min[1] - r2_max[1] <= zero(T) && r2_min[1] - r1_max[1] <= zero(T) ? zero(T) : ifelse(a[1] < b[1], a[1], b[1]),
-        r1_min[2] - r2_max[2] <= zero(T) && r2_min[2] - r1_max[2] <= zero(T) ? zero(T) : ifelse(a[2] < b[2], a[2], b[2]),
-        r1_min[3] - r2_max[3] <= zero(T) && r2_min[3] - r1_max[3] <= zero(T) ? zero(T) : ifelse(a[3] < b[3], a[3], b[3])
-    )
+    return SVector(ntuple(d -> r1_min[d] - r2_max[d] <= zero(T) && r2_min[d] - r1_max[d] <= zero(T) ? zero(T) : ifelse(a[d] < b[d], a[d], b[d]), D))
 end
 
+# Triclinic boxes case is treated only in 3 dimensions
 function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVector{D, T}, r2_max::SVector{D, T}, boundary::TriclinicBoundary) where {D, T}
     r3 = r2_max - r1_min
     r2 = r3 - boundary.basis_vectors[3] .* round(r3[3] / boundary.basis_vectors[3][3])
@@ -265,8 +260,12 @@ function kernel_min_max_triclinic!(
         s_i = sorted_seq[i]
         r_i = coords[s_i]
         @inbounds for k in a:b
-            mins_smem[local_i, k] = Hinv[k,1]*r_i[1] + Hinv[k,2]*r_i[2] + Hinv[k,3]*r_i[3] # Transform to fractional space: s = Hinv * r
-            maxs_smem[local_i, k] = Hinv[k,1]*r_i[1] + Hinv[k,2]*r_i[2] + Hinv[k,3]*r_i[3]
+            val = zero(C)
+            for j in a:b
+                val += Hinv[k,j]*r_i[j]
+            end
+            mins_smem[local_i, k] = val 
+            maxs_smem[local_i, k] = val
         end
     end
     sync_threads() 
@@ -298,7 +297,11 @@ function kernel_min_max_triclinic!(
     if i > n - r && i <= n && local_i <= r
         r_i = coords[sorted_seq[i]]
         for k in a:b
-            r_smem[local_i, k] = Hinv[k,1]*r_i[1] + Hinv[k,2]*r_i[2] + Hinv[k,3]*r_i[3] # Transform to fractional space: s = Hinv * r
+            val = zero(C)
+            for j in a:b
+                val += Hinv[k,j]*r_i[j]
+            end
+            r_smem[local_i, k] = val # Transform to fractional space: s = Hinv * r
         end
     end
     xyz_min = CuStaticSharedArray(C, b)
@@ -462,10 +465,10 @@ function force_kernel!(
 
     # The code is organised in 4 mutually excluding parts
     if j < n_blocks && i < j
-        r_max_i = SVector(maxs[i, 1], maxs[i, 2], maxs[i, 3])
-        r_min_i = SVector(mins[i, 1], mins[i, 2], mins[i, 3])
-        r_max_j = SVector(maxs[j, 1], maxs[j, 2], maxs[j, 3])
-        r_min_j = SVector(mins[j, 1], mins[j, 2], mins[j, 3])
+        r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
+        r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
+        r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
+        r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
         d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
         dist_block = sum(abs2, d_block)
         if dist_block <= r_cut * r_cut
@@ -544,10 +547,10 @@ function force_kernel!(
     end
 
     if j == n_blocks && i < n_blocks
-        r_max_i = SVector(maxs[i, 1], maxs[i, 2], maxs[i, 3])
-        r_min_i = SVector(mins[i, 1], mins[i, 2], mins[i, 3])
-        r_max_j = SVector(maxs[j, 1], maxs[j, 2], maxs[j, 3])
-        r_min_j = SVector(mins[j, 1], mins[j, 2], mins[j, 3])
+        r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
+        r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
+        r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
+        r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
         d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
         dist_block = sum(abs2, d_block)
 
@@ -737,10 +740,10 @@ function energy_kernel!(
 
     # The code is organised in 4 mutually excluding parts
     if j < n_blocks && i < j
-        r_max_i = SVector(maxs[i, 1], maxs[i, 2], maxs[i, 3])
-        r_min_i = SVector(mins[i, 1], mins[i, 2], mins[i, 3])
-        r_max_j = SVector(maxs[j, 1], maxs[j, 2], maxs[j, 3])
-        r_min_j = SVector(mins[j, 1], mins[j, 2], mins[j, 3])
+        r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
+        r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
+        r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
+        r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
         d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
         dist_block = sum(abs2, d_block)
         if dist_block <= r_cut * r_cut
@@ -804,10 +807,10 @@ function energy_kernel!(
     end
 
     if j == n_blocks && i < n_blocks
-        r_max_i = SVector(maxs[i, 1], maxs[i, 2], maxs[i, 3])
-        r_min_i = SVector(mins[i, 1], mins[i, 2], mins[i, 3])
-        r_max_j = SVector(maxs[j, 1], maxs[j, 2], maxs[j, 3])
-        r_min_j = SVector(mins[j, 1], mins[j, 2], mins[j, 3])
+        r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
+        r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
+        r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
+        r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
         d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
         dist_block = sum(abs2, d_block)
 
