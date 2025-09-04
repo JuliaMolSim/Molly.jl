@@ -436,8 +436,8 @@ Read a Gromacs coordinate file and a Gromacs topology file with all
 includes collapsed into one file.
 
 Gromacs file reading should be considered experimental.
-The `implicit_solvent`, `kappa` and `rename_terminal_res` keyword arguments
-are not available when reading Gromacs files.
+The `rename_terminal_res` keyword argument is not available when reading
+Gromacs files.
 
 # Arguments
 - `boundary=nothing`: the bounding box used for simulation, read from the
@@ -857,6 +857,28 @@ function System(coord_file::AbstractString,
         energy_units = NoUnits
     end
 
+    # All torsions should have the same number of terms for speed, GPU compatibility
+    #   and for taking gradients
+    # For now always pad to 6 terms
+    torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                            proper=t.proper, n_terms=torsion_n_terms)
+                                            for t in torsions.inters]
+    improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                            proper=t.proper, n_terms=torsion_n_terms)
+                                            for t in impropers.inters]
+
+    # Convert from Å
+    if units
+        coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(Chemfiles.positions(frame))]
+    else
+        coords = [T.(SVector{3}(col) / 10.0) for col in eachcol(Chemfiles.positions(frame))]
+    end
+    if center_coords
+        coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
+    end
+    coords = wrap_coords.(coords, (boundary_used,))
+    coords_dev = to_device(coords, AT)
+
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
     lj = LennardJones(
         cutoff=DistanceCutoff(T(dist_cutoff)),
@@ -914,14 +936,6 @@ function System(coord_file::AbstractString,
     end
     pairwise_inters = (lj, coul)
 
-    # All torsions should have the same number of terms for speed, GPU compatibility
-    #   and for taking gradients
-    # For now always pad to 6 terms
-    torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                            proper=t.proper, n_terms=torsion_n_terms) for t in torsions.inters]
-    improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                            proper=t.proper, n_terms=torsion_n_terms) for t in impropers.inters]
-
     # Only add present interactions and ensure that array types are concrete
     specific_inter_array = []
     if length(bonds.is) > 0
@@ -965,18 +979,6 @@ function System(coord_file::AbstractString,
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
-
-    # Convert from Å
-    if units
-        coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(Chemfiles.positions(frame))]
-    else
-        coords = [T.(SVector{3}(col) / 10.0) for col in eachcol(Chemfiles.positions(frame))]
-    end
-    if center_coords
-        coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
-    end
-    coords = wrap_coords.(coords, (boundary_used,))
-    coords_dev = to_device(coords, AT)
 
     if neighbor_finder_type == NoNeighborFinder
         neighbor_finder = NoNeighborFinder()
@@ -1040,7 +1042,7 @@ function System(coord_file::AbstractString,
     end
     general_inters = (general_inters_ewald..., general_inters_is...)
 
-    k = units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k)
+    k = (units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k))
     return System(
         atoms=atoms,
         coords=coords_dev,
@@ -1060,6 +1062,18 @@ function System(coord_file::AbstractString,
     )
 end
 
+function element_from_mass(atom_mass, element_names, element_masses)
+    atom_mass_nounits = ustrip(atom_mass)
+    el = "?"
+    for (el_name, el_mass) in zip(element_names, element_masses)
+        if isapprox(atom_mass_nounits * u"u", el_mass; atol=0.01u"u")
+            el = el_name
+            break
+        end
+    end
+    return el
+end
+
 function System(T::Type,
                 coord_file::AbstractString,
                 top_file::AbstractString;
@@ -1076,6 +1090,8 @@ function System(T::Type,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing,
+                implicit_solvent=nothing,
+                kappa=0.0u"nm^-1",
                 grad_safe::Bool=false) where AT <: AbstractArray
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
@@ -1105,6 +1121,9 @@ function System(T::Type,
         force_units = NoUnits
         energy_units = NoUnits
     end
+
+    element_names  = [el.symbol      for el in PeriodicTable.elements]
+    element_masses = [el.atomic_mass for el in PeriodicTable.elements]
 
     current_field = ""
     for l in eachline(top_file)
@@ -1177,10 +1196,11 @@ function System(T::Type,
                 atom_mass = parse(T, c[8])
             end
             atom_index = length(atoms_abst) + 1
+            el = element_from_mass(atom_mass, element_names, element_masses)
             push!(atoms_abst, Atom(index=atom_index, mass=atom_mass, charge=ch, σ=atomtypes[attype].σ,
                                 ϵ=atomtypes[attype].ϵ))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=c[5], res_number=parse(Int, c[3]),
-                                        res_name=c[4]))
+                                        res_name=c[4], element=el))
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
             bn = "$(atoms_data[i].atom_type)/$(atoms_data[j].atom_type)"
@@ -1288,11 +1308,13 @@ function System(T::Type,
             if attype == "CL" # Temp hack to fix charges
                 temp_charge = T(-1.0)
             end
+            atom_mass = atomtypes[attype].mass
             atom_index = length(atoms_abst) + 1
-            push!(atoms_abst, Atom(index=atom_index, mass=atomtypes[attype].mass, charge=temp_charge,
+            el = element_from_mass(atom_mass, element_names, element_masses)
+            push!(atoms_abst, Atom(index=atom_index, mass=atom_mass, charge=temp_charge,
                                 σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=atname, res_number=parse(Int, l[1:5]),
-                                        res_name=strip(l[6:10])))
+                                        res_name=strip(l[6:10]), element=el))
 
             # Add O-H bonds and H-O-H angle in water
             if atname == "OW"
@@ -1360,7 +1382,7 @@ function System(T::Type,
             weight_special=T(0.5),
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
-        general_inters = ()
+        general_inters_ewald = ()
     elseif nonbonded_method == "cutoff"
         coul = CoulombReactionField(
             dist_cutoff=T(dist_cutoff),
@@ -1369,7 +1391,7 @@ function System(T::Type,
             weight_special=T(0.5),
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
-        general_inters = ()
+        general_inters_ewald = ()
     elseif nonbonded_method in ("ewald", "pme")
         coul = CoulombEwald(
             dist_cutoff=T(dist_cutoff),
@@ -1397,7 +1419,7 @@ function System(T::Type,
                 grad_safe=grad_safe,
             )
         end
-        general_inters = (ewald,)
+        general_inters_ewald = (ewald,)
     else
         throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
                             "\"none\", \"cutoff\", \"pme\" and \"ewald\""))
@@ -1482,7 +1504,25 @@ function System(T::Type,
         vels = velocities
     end
 
-    k = units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k)
+    if !isnothing(implicit_solvent)
+        if implicit_solvent == "obc1"
+            general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds;
+                                kappa=kappa, use_OBC2=false),)
+        elseif implicit_solvent == "obc2"
+            general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds;
+                                kappa=kappa, use_OBC2=true),)
+        elseif implicit_solvent == "gbn2"
+            general_inters_is = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
+        else
+            throw(ArgumentError("unknown implicit solvent model \"$implicit_solvent\", " *
+                                "options are nothing, \"obc1\", \"obc2\" and \"gbn2\""))
+        end
+    else
+        general_inters_is = ()
+    end
+    general_inters = (general_inters_ewald..., general_inters_is...)
+
+    k = (units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k))
     return System(
         atoms=atoms,
         coords=coords_dev,

@@ -21,7 +21,7 @@ using GPUArrays
 using Graphs
 using KernelAbstractions
 using NearestNeighbors
-using PeriodicTable
+import PeriodicTable
 using SimpleCrystals
 using SpecialFunctions
 using Unitful
