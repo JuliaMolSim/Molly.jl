@@ -64,8 +64,10 @@ function Molly.pairwise_force_gpu!(buffers, sys::System{D, AT, T}, pairwise_inte
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     end
     if sys.boundary isa TriclinicBoundary
-        H = SMatrix{D, D, T}(
-           (sys.boundary.basis_vectors[j][i].val for j in 1:D, i in 1:D)...
+        H = SMatrix{3,3,T}(
+            sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
+            sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
+            sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
         )
         Hinv = inv(H) 
         CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
@@ -100,8 +102,10 @@ function Molly.pairwise_pe_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T}, 
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     if sys.boundary isa TriclinicBoundary
-        H = SMatrix{D, D, T}(
-            (sys.boundary.basis_vectors[j][i].val for j in 1:D, i in 1:D)...
+        H = SMatrix{3,3,T}(
+            sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
+            sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
+            sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
         )
         Hinv = inv(H) 
         CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(

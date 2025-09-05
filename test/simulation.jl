@@ -1753,7 +1753,7 @@ end
     end
 
     function tric_or_cubic(name, triclinic)
-        triclinic == true ? name = name * " triclinic" :  name = name * " cubic"
+        name = triclinic == true ? name = name * " triclinic" :  name = name * " cubic"
         return name 
     end
 
