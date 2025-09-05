@@ -574,31 +574,28 @@ function System(;
     V = typeof(vels)
 
     if isnothing(virial)
-        d = size(boundary.side_lengths)[1]
         if energy_units == NoUnits
-            virial = zeros(T, d, d)
+            virial = zeros(T, D, D)
         else
-            virial = zeros(T, d, d) * energy_units
+            virial = zeros(T, D, D) * energy_units
         end
     end
     VT = typeof(virial)
 
     if isnothing(kin_tensor)
-        d = size(boundary.side_lengths)[1]
         if energy_units == NoUnits
-            kin_tensor = zeros(T, d, d)
+            kin_tensor = zeros(T, D, D)
         else
-            kin_tensor = zeros(T, d, d) * energy_units
+            kin_tensor = zeros(T, D, D) * energy_units
         end
     end
     KT = typeof(kin_tensor)
 
     if isnothing(pres_tensor)
-        d = size(boundary.side_lengths)[1]
         if energy_units == NoUnits
-            pres_tensor = zeros(T, d, d)
+            pres_tensor = zeros(T, D, D)
         else
-            pres_tensor = zeros(T, d, d) * u"bar"
+            pres_tensor = zeros(T, D, D) * u"bar"
         end
     end
     PT = typeof(pres_tensor)

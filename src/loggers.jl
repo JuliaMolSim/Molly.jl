@@ -298,7 +298,7 @@ function Base.show(io::IO, dl::GeneralObservableLogger{T, typeof(density_wrapper
 end
 
 function virial_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
-    return sys.virial
+    return deepcopy(sys.virial)
 end
 
 """
@@ -320,7 +320,9 @@ end
 
 function pressure_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
 
-    return pressure(sys, neighbors, step_n; n_threads = n_threads)
+    P = pressure(sys, neighbors, step_n; n_threads = n_threads)
+
+    return deepcopy(P)
 
 end
 

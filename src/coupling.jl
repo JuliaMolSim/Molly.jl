@@ -251,9 +251,9 @@ end
 _isbar(x) = try;  uconvert(u"bar", x);      true; catch; false; end
 _isibar(x)= try;  uconvert(u"bar^-1", x);   true; catch; false; end
 
-function BerendsenBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
+function BerendsenBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
-                           max_scale_frac=0.1, n_steps=1) where {PT, D}
+                           max_scale_frac=0.1, n_steps=1) where {PT}
 
     if !(coupling_type ∈ (:isotropic, :semiisotropic, :anisotropic))
         throw(ArgumentError(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic")))
@@ -261,11 +261,11 @@ function BerendsenBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
 
     if coupling_type == :isotropic
 
-        if pressure isa SVector
+        if pressure isa AbstractArray
             throw(ArgumentError("isotropic: pressure must be a scalar"))
         end
         
-        if compressibility isa SVector 
+        if compressibility isa AbstractArray
             throw(ArgumentError("isotropic: compressibility must be a scalar"))
         end
         
@@ -289,24 +289,24 @@ function BerendsenBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
         P = SMatrix{3,3,FT}(p,0,0, 0,p,0, 0,0,p) .* P_units
         κ = SMatrix{3,3,FT}(κs,0,0, 0,κs,0, 0,0,κs) .* K_units
 
-        return BerendsenBarostat(P, coupling_const, :isotropic, κ, FT(max_scale_frac), n_steps)
+        return BerendsenBarostat(P, coupling_const, coupling_type, κ, FT(max_scale_frac), n_steps)
     end
 
     if coupling_type == :semiisotropic
 
-        if !(pressure isa SVector{2})
+        if !(pressure isa AbstractArray && length(pressure) == 2)
             throw(ArgumentError("semiisotropic: pressure must be a 2-vector (xy, z)"))
         end
         
-        if !(compressibility isa SVector{2}) 
+        if !(compressibility isa AbstractArray && length(compressibility) == 2) 
             throw(ArgumentError("semiisotropic: compressibility must be a 2-vector (xy, z)"))
         end
-        
-        if !all(_isbar(pressure))
+
+        if !all(_isbar.(pressure))
             throw(ArgumentError("semiisotropic: pressure must have pressure units"))
         end
         
-        if !all(_isibar(compressibility))
+        if !all(_isibar.(compressibility))
             throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
         end
 
@@ -323,24 +323,24 @@ function BerendsenBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
         P = SMatrix{3,3,FT}(p_xy,0,0, 0,p_xy,0, 0,0,p_z) .* P_units
         κ = SMatrix{3,3,FT}(κ_xy,0,0, 0,κ_xy,0, 0,0,κ_z) .* K_units
 
-        return BerendsenBarostat(P, coupling_const, :semiisotropic, κ, FT(max_scale_frac), n_steps)
+        return BerendsenBarostat(P, coupling_const, coupling_type, κ, FT(max_scale_frac), n_steps)
     end
         
     if coupling_type == :anisotropic
 
-        if !(pressure isa SVector{6})
+        if !(pressure isa  AbstractArray && length(pressure) == 6)
             throw(ArgumentError("semiisotropic: pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
         
-        if !(compressibility isa SVector{6}) 
+        if !(compressibility isa  AbstractArray && length(pressure) == 6) 
             throw(ArgumentError("semiisotropic: compressibility must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
         
-        if !all(_isbar(pressure))
+        if !all(_isbar.(pressure))
             throw(ArgumentError("semiisotropic: pressure must have pressure units"))
         end
         
-        if !all(_isibar(compressibility))
+        if !all(_isibar.(compressibility))
             throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
         end
 
@@ -372,7 +372,7 @@ function BerendsenBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
                             κxy, κy,  κyz,
                             κxz, κyz, κz) .* K_units
 
-        return BerendsenBarostat(P, coupling_const, :anisotropic, κ, FT(max_scale_frac), n_steps)
+        return BerendsenBarostat(P, coupling_const, coupling_type, κ, FT(max_scale_frac), n_steps)
     end
 end
 
@@ -391,6 +391,7 @@ function apply_coupling!(sys, barostat::BerendsenBarostat{PT, CT, ST, ICT, FT}, 
     Pavg = tr(P)/FT(D)
     Pxy  = D == 3 ? (P[1,1] + P[2,2]) / FT(2) : Pavg
 
+    
     if barostat.coupling_type == :isotropic
         for d in 1:D
             α = (barostat.compressibility[d,d] * dt) / (D*τp)
@@ -426,15 +427,17 @@ function apply_coupling!(sys, barostat::BerendsenBarostat{PT, CT, ST, ICT, FT}, 
             end
             μ[i,j] = Δ
         end
-        if D == 3
-            # move upper triangle into lower (first-order) and zero upper
-            μ[2,1] += μ[1,2]
-            μ[3,1] += μ[1,3]
-            μ[3,2] += μ[2,3]
-            μ[1,2] = 0; μ[1,3] = 0; μ[2,3] = 0
-        end
+
     else
         error("Unsupported coupling_type=$(barostat.coupling_type)")
+    end
+
+    # Triclinic projector (move lower into upper, zero lower) before left-multiplying B' = μ B
+    if D == 3
+        μ[1,2] += μ[2,1]
+        μ[1,3] += μ[3,1]
+        μ[2,3] += μ[3,2]
+        μ[2,1] = 0; μ[3,1] = 0; μ[3,2] = 0
     end
 
     scale_coords!(sys, SMatrix{D,D,FT}(μ))
@@ -480,9 +483,9 @@ struct CRescaleBarostat{P, C, S, IC, T}
     n_steps::Int
 end
 
-function CRescaleBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
+function CRescaleBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
-                           max_scale_frac=0.1, seed = 42, n_steps=1) where {PT, D}
+                           max_scale_frac=0.1, seed = 42, n_steps=1) where {PT}
 
     if !(coupling_type ∈ (:isotropic, :semiisotropic, :anisotropic))
         throw(ArgumentError(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic")))
@@ -490,11 +493,11 @@ function CRescaleBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
 
     if coupling_type == :isotropic
 
-        if pressure isa SVector
+        if pressure isa AbstractArray
             throw(ArgumentError("isotropic: pressure must be a scalar"))
         end
         
-        if compressibility isa SVector 
+        if compressibility isa AbstractArray
             throw(ArgumentError("isotropic: compressibility must be a scalar"))
         end
         
@@ -518,24 +521,24 @@ function CRescaleBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
         P = SMatrix{3,3,FT}(p,0,0, 0,p,0, 0,0,p) .* P_units
         κ = SMatrix{3,3,FT}(κs,0,0, 0,κs,0, 0,0,κs) .* K_units
 
-        return CRescaleBarostat(P, coupling_const, :isotropic, κ, FT(max_scale_frac), seed, n_steps)
+        return CRescaleBarostat(P, coupling_const, coupling_type, κ, FT(max_scale_frac), seed, n_steps)
     end
 
     if coupling_type == :semiisotropic
 
-        if !(pressure isa SVector{2})
+        if !(pressure isa AbstractArray && length(pressure) == 2)
             throw(ArgumentError("semiisotropic: pressure must be a 2-vector (xy, z)"))
         end
         
-        if !(compressibility isa SVector{2}) 
+        if !(compressibility isa AbstractArray && length(compressibility) == 2) 
             throw(ArgumentError("semiisotropic: compressibility must be a 2-vector (xy, z)"))
         end
-        
-        if !all(_isbar(pressure))
+
+        if !all(_isbar.(pressure))
             throw(ArgumentError("semiisotropic: pressure must have pressure units"))
         end
         
-        if !all(_isibar(compressibility))
+        if !all(_isibar.(compressibility))
             throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
         end
 
@@ -552,24 +555,24 @@ function CRescaleBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
         P = SMatrix{3,3,FT}(p_xy,0,0, 0,p_xy,0, 0,0,p_z) .* P_units
         κ = SMatrix{3,3,FT}(κ_xy,0,0, 0,κ_xy,0, 0,0,κ_z) .* K_units
 
-        return CRescaleBarostat(P, coupling_const, :isotropic, κ, FT(max_scale_frac), seed, n_steps)
+        return CRescaleBarostat(P, coupling_const, coupling_type, κ, FT(max_scale_frac), seed, n_steps)
     end
         
     if coupling_type == :anisotropic
 
-        if !(pressure isa SVector{6})
+        if !(pressure isa  AbstractArray && length(pressure) == 6)
             throw(ArgumentError("semiisotropic: pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
         
-        if !(compressibility isa SVector{6}) 
+        if !(compressibility isa  AbstractArray && length(pressure) == 6) 
             throw(ArgumentError("semiisotropic: compressibility must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
         
-        if !all(_isbar(pressure))
+        if !all(_isbar.(pressure))
             throw(ArgumentError("semiisotropic: pressure must have pressure units"))
         end
         
-        if !all(_isibar(compressibility))
+        if !all(_isibar.(compressibility))
             throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
         end
 
@@ -601,7 +604,7 @@ function CRescaleBarostat(pressure::Union{PT, SVector{D, PT}}, coupling_const;
                             κxy, κy,  κyz,
                             κxz, κyz, κz) .* K_units
 
-        return CRescaleBarostat(P, coupling_const, :isotropic, κ, FT(max_scale_frac), seed, n_steps)
+        return CRescaleBarostat(P, coupling_const, coupling_type, κ, FT(max_scale_frac), seed, n_steps)
     end
 end
 
@@ -684,12 +687,12 @@ function apply_coupling!(sys::System{D, AT}, barostat::CRescaleBarostat{PT, CT, 
         error("Unsupported coupling_type=$(barostat.coupling_type)")
     end
 
-    # Triclinic projector (move upper into lower, zero upper) before left-multiplying B' = μ B
+    # Triclinic projector (move lower into upper, zero lower) before left-multiplying B' = μ B
     if D == 3
-        μ[2,1] += μ[1,2]
-        μ[3,1] += μ[1,3]
-        μ[3,2] += μ[2,3]
-        μ[1,2] = 0; μ[1,3] = 0; μ[2,3] = 0
+        μ[1,2] += μ[2,1]
+        μ[1,3] += μ[3,1]
+        μ[2,3] += μ[3,2]
+        μ[2,1] = 0; μ[3,1] = 0; μ[3,2] = 0
     end
 
     scale_coords!(sys, SMatrix{3,3,FT}(μ); scale_velocities = true)
@@ -697,7 +700,8 @@ function apply_coupling!(sys::System{D, AT}, barostat::CRescaleBarostat{PT, CT, 
 end
 
 @doc raw"""
-    MonteCarloBarostat(pressure, temperature, boundary; n_steps=30, n_iterations=1,
+    MonteCarloBarostat(pressure, temperature, boundary; coupling_type = :isotropic,
+                       n_steps=30, n_iterations=1,
                        scale_factor=0.01, scale_increment=1.1, max_volume_frac=0.3,
                        trial_find_neighbors=false)
 
@@ -710,13 +714,21 @@ At regular intervals a Monte Carlo step is attempted by scaling the coordinates 
 the bounding box by a randomly chosen amount.
 The step is accepted or rejected based on
 ```math
-\Delta W = \Delta E + P \Delta V - N k_B T \ln \left( \frac{V + \Delta V}{V} \right)
+\Delta G = \Delta E + \Delta W - N k_B T \ln \left( \frac{V + \Delta V}{V} \right)
 ```
-where `ΔE` is the change in potential energy, `P` is the equilibrium pressure, `ΔV` is
-the change in volume, `N` is the number of molecules in the system, `T` is the equilibrium
-temperature and `V` is the system volume.
-If `ΔW ≤ 0` the step is always accepted, if `ΔW > 0` the step is accepted with probability
-`exp(-ΔW/kT)`.
+where `ΔE` is the change in potential energy, `ΔV` is the change in volume, `N` is the 
+number of molecules in the system, `T` is the equilibrium temperature and `V` is the system
+volume. `ΔW` is the work done by scaling the simulation box and its specific form 
+changes depending on the type of scaling applied. In general and in the absence of shear stress:
+
+```math
+\Delta W = (V + \Delta V) \cdot \sum w_i \cdot  P_{i,i} \cdot \ln \left ( {\frac{V + \Delta V}{V}} \right )
+```
+
+where `w_i` is the proportional scaling along a specific box axis.
+
+If `ΔG ≤ 0` the step is always accepted, if `ΔG > 0` the step is accepted with
+probability `exp(-ΔG/kT)`.
 
 The scale factor is modified over time to maintain an acceptance rate of around half.
 If the topology of the system is set then molecules are moved as a unit so properties
@@ -727,11 +739,15 @@ does not actively control the temperature.
 It should be used alongside a temperature coupling method such as the [`Langevin`](@ref)
 simulator or [`AndersenThermostat`](@ref) coupling.
 The neighbor list is not updated when making trial moves or after accepted moves.
-Note that the barostat can change the bounding box of the system.
+Note that the barostat can change the bounding box of the system. Does not currently 
+work with shear stresses, the anisotropic variant only applies independent linear scaling
+of the box vectors. If shear deformation is required the [`BerendsenBarostat`](@ref) or,
+preferrably, the [`CRescaleBarostat`](@ref) should be used instead. 
 """
 mutable struct MonteCarloBarostat{T, P, K, V}
     pressure::P
     temperature::K
+    coupling_type::Symbol
     n_steps::Int
     n_iterations::Int
     volume_scale::V
@@ -742,418 +758,314 @@ mutable struct MonteCarloBarostat{T, P, K, V}
     n_accepted::Int
 end
 
-function MonteCarloBarostat(P, temp, boundary; n_steps=30, n_iterations=1, scale_factor=0.01,
-                            scale_increment=1.1, max_volume_frac=0.3, trial_find_neighbors=false)
+function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp, boundary; coupling_type::Symbol = :isotropic,
+                            n_steps=30, n_iterations=1, scale_factor=0.01,
+                            scale_increment=1.1, max_volume_frac=0.3, trial_find_neighbors=false) where {PT}
+    
     T = float_type(boundary)
     volume_scale = volume(boundary) * T(scale_factor)
-    return MonteCarloBarostat(P, temp, n_steps, n_iterations, volume_scale, T(scale_increment),
-                              T(max_volume_frac), trial_find_neighbors, 0, 0)
+
+    if !(coupling_type ∈ (:isotropic, :semiisotropic, :anisotropic))
+        throw(ArgumentError(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic")))
+    end
+
+    if coupling_type == :isotropic
+
+        if pressure isa AbstractArray
+            throw(ArgumentError("isotropic: pressure must be a scalar"))
+        end
+        
+        if !_isbar(pressure)
+            throw(ArgumentError("isotropic: pressure must have pressure units"))
+        end
+        
+        # Use the caller’s units, but convert internal scalars consistently
+        P_units = unit(pressure)
+        p = ustrip(uconvert(P_units, pressure))
+
+        FT = typeof(p)
+
+        P = SMatrix{3,3,FT}(p,0,0, 0,p,0, 0,0,p) .* P_units
+
+        return MonteCarloBarostat(P, temp, coupling_type,
+                                  n_steps, n_iterations, 
+                                  volume_scale, scale_increment,
+                                  max_volume_frac,
+                                  trial_find_neighbors, 0, 0)
+
+    end
+
+    if coupling_type == :semiisotropic
+
+        if !(pressure isa AbstractArray && length(pressure) == 2)
+            throw(ArgumentError("semiisotropic: pressure must be a 2-vector (xy, z)"))
+        end
+
+        if !all(_isbar.(pressure))
+            throw(ArgumentError("semiisotropic: pressure must have pressure units"))
+        end
+
+        P_units = unit(pressure[1])
+
+        p_xy = ustrip(uconvert(P_units, pressure[1]))
+        p_z  = ustrip(uconvert(P_units, pressure[2]))
+
+        FT = promote_type(typeof(p_xy), typeof(p_z))
+
+        P = SMatrix{3,3,FT}(p_xy,0,0, 0,p_xy,0, 0,0,p_z) .* P_units
+
+        return MonteCarloBarostat(P, temp, coupling_type,
+                                  n_steps, n_iterations, 
+                                  volume_scale, scale_increment,
+                                  max_volume_frac,
+                                  trial_find_neighbors, 0, 0)
+
+    end
+        
+    if coupling_type == :anisotropic
+
+        if !(pressure isa  AbstractArray && length(pressure) == 6)
+            throw(ArgumentError("semiisotropic: pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
+        end
+        
+        if !all(_isbar.(pressure))
+            throw(ArgumentError("semiisotropic: pressure must have pressure units"))
+        end
+
+        P_units = unit(pressure[1])
+
+        px  = ustrip(uconvert(P_units, pressure[1]))
+        py  = ustrip(uconvert(P_units, pressure[2]))
+        pz  = ustrip(uconvert(P_units, pressure[3]))
+        pxy = ustrip(uconvert(P_units, pressure[4]))
+        pxz = ustrip(uconvert(P_units, pressure[5]))
+        pyz = ustrip(uconvert(P_units, pressure[6]))
+
+        FT = promote_type(typeof(px), typeof(py), typeof(pz), typeof(pxy), typeof(pxz), typeof(pyz))
+
+        P = SMatrix{3,3,FT}(px, pxy, pxz,
+                            pxy, py,  pyz,
+                            pxz, pyz, pz) .* P_units
+
+        return MonteCarloBarostat(P, temp, coupling_type,
+                                  n_steps, n_iterations, 
+                                  volume_scale, scale_increment,
+                                  max_volume_frac,
+                                  trial_find_neighbors, 0, 0)
+
+    end
 end
 
 function apply_coupling!(sys::System{D, AT, T}, barostat::MonteCarloBarostat, sim, neighbors=nothing,
                          step_n::Integer=0; n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng()) where {D, AT, T}
+
     if !iszero(step_n % barostat.n_steps)
         return false
     end
 
-    kT = energy_remove_mol(sys.k * barostat.temperature)
-    n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
-    recompute_forces = false
-    old_coords = similar(sys.coords)
-
-    for attempt_n in 1:barostat.n_iterations
-        E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
-        V = volume(sys.boundary)
-        dV = barostat.volume_scale * (2 * rand(rng, T) - 1)
-        v_scale = (V + dV) / V
-        l_scale = (D == 2 ? sqrt(v_scale) : cbrt(v_scale))
-        old_coords .= sys.coords
-        old_boundary = sys.boundary
-        scale_coords!(sys, l_scale)
-
-        if barostat.trial_find_neighbors
-            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                             n_threads=n_threads)
-        else
-            # Assume neighbors are unchanged by the change in coordinates
-            # This may not be valid for larger changes
-            neighbors_trial = neighbors
-        end
-        E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
-        dE = energy_remove_mol(E_trial - E)
-        dW = dE + uconvert(unit(dE), barostat.pressure * dV) - n_molecules * kT * log(v_scale)
-        if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
-            recompute_forces = true
-            barostat.n_accepted += 1
-        else
-            sys.coords .= old_coords
-            sys.boundary = old_boundary
-        end
-        barostat.n_attempted += 1
-
-        # Modify size of volume change to keep accept/reject ratio roughly equal
-        if barostat.n_attempted >= 10
-            if barostat.n_accepted < 0.25 * barostat.n_attempted
-                barostat.volume_scale /= barostat.scale_increment
-                barostat.n_attempted = 0
-                barostat.n_accepted = 0
-            elseif barostat.n_accepted > 0.75 * barostat.n_attempted
-                barostat.volume_scale = min(barostat.volume_scale * barostat.scale_increment,
-                                            V * barostat.max_volume_frac)
-                barostat.n_attempted = 0
-                barostat.n_accepted = 0
-            end
-        end
-    end
-    return recompute_forces
-end
-
-@doc raw"""
-    MonteCarloAnisotropicBarostat(pressure, temperature, boundary; n_steps=30,
-                       n_iterations=1, scale_factor=0.01, scale_increment=1.1,
-                       max_volume_frac=0.3, trial_find_neighbors=false)
-
-The Monte Carlo anisotropic barostat for controlling pressure.
-
-For 3D systems, `pressure` is a `SVector` of length 3 with components pressX, pressY,
-and pressZ representing the target pressure in each axis.
-For 2D systems, `pressure` is a `SVector` of length 2 with components pressX and pressY.
-To keep an axis fixed, set the corresponding pressure to `nothing`.
-
-See [Chow and Ferguson 1995](https://doi.org/10.1016/0010-4655(95)00059-O),
-[Åqvist et al. 2004](https://doi.org/10.1016/j.cplett.2003.12.039) and the OpenMM
-source code.
-At regular intervals a Monte Carlo step is attempted by scaling the coordinates and
-the bounding box by a randomly chosen amount in a randomly selected axis.
-The step is accepted or rejected based on
-```math
-\Delta W = \Delta E + P \Delta V - N k_B T \ln \left( \frac{V + \Delta V}{V} \right)
-```
-where `ΔE` is the change in potential energy, `P` is the equilibrium pressure along the
-selected axis, `ΔV` is the change in volume, `N` is the number of molecules in the system,
-`T` is the equilibrium temperature and `V` is the system volume.
-If `ΔW ≤ 0` the step is always accepted, if `ΔW > 0` the step is accepted with probability
-`exp(-ΔW/kT)`.
-
-The scale factor is modified over time to maintain an acceptance rate of around half.
-If the topology of the system is set then molecules are moved as a unit so properties
-such as bond lengths do not change.
-
-The barostat assumes that the simulation is being run at a constant temperature but
-does not actively control the temperature.
-It should be used alongside a temperature coupling method such as the [`Langevin`](@ref)
-simulator or [`AndersenThermostat`](@ref) coupling.
-The neighbor list is not updated when making trial moves or after accepted moves.
-Note that the barostat can change the bounding box of the system.
-"""
-mutable struct MonteCarloAnisotropicBarostat{D, T, P, K, V}
-    pressure::SVector{D, P}
-    temperature::K
-    n_steps::Int
-    n_iterations::Int
-    volume_scale::V
-    scale_increment::T
-    max_volume_frac::T
-    trial_find_neighbors::Bool
-    n_attempted::Vector{Int}
-    n_accepted::Vector{Int}
-end
-
-function MonteCarloAnisotropicBarostat(P::SVector{D},
-                                       temp,
-                                       boundary;
-                                       n_steps=30,
-                                       n_iterations=1,
-                                       scale_factor=0.01,
-                                       scale_increment=1.1,
-                                       max_volume_frac=0.3,
-                                       trial_find_neighbors=false) where D
-    T = float_type(boundary)
-    volume_scale_factor = volume(boundary) * T(scale_factor)
-    volume_scale = fill(volume_scale_factor, D)
-    if AtomsBase.n_dimensions(boundary) != D
-        throw(ArgumentError("pressure vector length ($(D)) must match boundary " *
-                            "dimensionality ($(AtomsBase.n_dimensions(boundary)))"))
-    end
-
-    return MonteCarloAnisotropicBarostat(
-        P,
-        temp,
-        n_steps,
-        n_iterations,
-        volume_scale,
-        T(scale_increment),
-        T(max_volume_frac),
-        trial_find_neighbors,
-        zeros(Int, D),
-        zeros(Int, D),
-    )
-end
-
-function apply_coupling!(sys::System{D, AT, T},
-                         barostat::MonteCarloAnisotropicBarostat{D},
-                         sim,
-                         neighbors=nothing,
-                         step_n::Integer=0;
-                         n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {D, AT, T}
-    !iszero(step_n % barostat.n_steps) && return false
-    all(isnothing, barostat.pressure) && return false
+    Pxx = barostat.pressure[1,1]; Pyy = barostat.pressure[2,2]; Pzz = barostat.pressure[3,3]
 
     kT = energy_remove_mol(sys.k * barostat.temperature)
     n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
     recompute_forces = false
     old_coords = similar(sys.coords)
 
-    for attempt_n in 1:barostat.n_iterations
-        axis = 0
-        while true
-            axis = rand(rng, 1:D)
-            !isnothing(barostat.pressure[axis]) && break
-        end
-        mask1 = falses(D)
-        mask2 = trues(D)
-        mask1[axis] = true
-        mask2[axis] = false
+    if barostat.coupling_type == :isotropic
 
-        E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
-        V = volume(sys.boundary)
-        dV = barostat.volume_scale[axis] * (2 * rand(rng, T) - 1)
-        v_scale = (V + dV) / V
-        l_scale = SVector{D}(mask1 * v_scale + mask2)
-        old_coords .= sys.coords
-        old_boundary = sys.boundary
-        scale_coords!(sys, l_scale)
+        for attempt_n in 1:barostat.n_iterations
+        
+            E  = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
+            V  = volume(sys.boundary)
+            dV = barostat.volume_scale * (2 * rand(rng, T) - 1)
 
-        if barostat.trial_find_neighbors
-            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                             n_threads=n_threads)
-        else
-            # Assume neighbors are unchanged by the change in coordinates
-            # This may not be valid for larger changes
-            neighbors_trial = neighbors
-        end
-        E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
-        dE = energy_remove_mol(E_trial - E)
-        dW = dE + uconvert(unit(dE), barostat.pressure[axis] * dV) - n_molecules * kT * log(v_scale)
-        if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
-            recompute_forces = true
-            barostat.n_accepted[axis] += 1
-        else
-            sys.coords .= old_coords
-            sys.boundary = old_boundary
-        end
-        barostat.n_attempted[axis] += 1
+            v_scale = (V + dV)/V
 
-        # Modify size of volume change to keep accept/reject ratio roughly equal
-        if barostat.n_attempted[axis] >= 10
-            if barostat.n_accepted[axis] < 0.25 * barostat.n_attempted[axis]
-                barostat.volume_scale[axis] /= barostat.scale_increment
-                barostat.n_attempted[axis] = 0
-                barostat.n_accepted[axis] = 0
-            elseif barostat.n_accepted[axis] > 0.75 * barostat.n_attempted[axis]
-                barostat.volume_scale[axis] = min(barostat.volume_scale[axis] * barostat.scale_increment,
-                                                  V * barostat.max_volume_frac)
-                barostat.n_attempted[axis] = 0
-                barostat.n_accepted[axis] = 0
+            l_scale = cbrt(v_scale)
+
+            old_coords  .= sys.coords
+            old_boundary = sys.boundary
+            scale_coords!(sys, SMatrix{D, D, T}([l_scale 0 0;
+                                                 0 l_scale 0;
+                                                 0 0 l_scale]))
+
+            if barostat.trial_find_neighbors
+                neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                                 n_threads=n_threads)
+            else
+                # Assume neighbors are unchanged by the change in coordinates
+                # This may not be valid for larger changes
+                neighbors_trial = neighbors
+            end
+
+            E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
+            dE = energy_remove_mol(E_trial - E)
+
+            dW = dE + uconvert(unit(dE), (1/3)*tr(barostat.pressure) * dV) - n_molecules * kT * log(v_scale)
+
+            if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
+                recompute_forces = true
+                barostat.n_accepted += 1
+            else
+                sys.coords .= old_coords
+                sys.boundary = old_boundary
+            end
+            barostat.n_attempted += 1
+
+            # Modify size of volume change to keep accept/reject ratio roughly equal
+            if barostat.n_attempted >= 10
+                if barostat.n_accepted < 0.25 * barostat.n_attempted
+                    barostat.volume_scale /= barostat.scale_increment
+                    barostat.n_attempted = 0
+                    barostat.n_accepted = 0
+                elseif barostat.n_accepted > 0.75 * barostat.n_attempted
+                    barostat.volume_scale = min(barostat.volume_scale * barostat.scale_increment,
+                                                V * barostat.max_volume_frac)
+                    barostat.n_attempted = 0
+                    barostat.n_accepted = 0
+                end
             end
         end
-    end
-    return recompute_forces
-end
 
-@doc raw"""
-    MonteCarloMembraneBarostat(pressure, tension, temperature, boundary; n_steps=30,
-                       n_iterations=1, scale_factor=0.01, scale_increment=1.1,
-                       max_volume_frac=0.3, trial_find_neighbors=false,
-                       xy_isotropy=false, z_axis_fixed=false, constant_volume=false)
+    
+    elseif barostat.coupling_type == :semiisotropic
 
-The Monte Carlo membrane barostat for controlling pressure.
+        for attempt_n in 1:barostat.n_iterations
+        
+            E         = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
+            V         = volume(sys.boundary)
+            dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
+            V_plus_dV = V + dV
 
-Set the `xy_isotropy` flag to `true` to scale the x and y axes isotropically.
-Set the `z_axis_fixed` flag to `true` to uncouple the z-axis and keep it fixed.
-Set the `constant_volume` flag to `true` to keep the system volume constant by
-scaling the z-axis accordingly.
-The `z_axis_fixed` and `constant_volume` flags cannot be `true` simultaneously.
+            v_scale = V_plus_dV/V
 
-See [Chow and Ferguson 1995](https://doi.org/10.1016/0010-4655(95)00059-O),
-[Åqvist et al. 2004](https://doi.org/10.1016/j.cplett.2003.12.039) and the OpenMM
-source code.
-At regular intervals a Monte Carlo step is attempted by scaling the coordinates and
-the bounding box by a randomly chosen amount in a randomly selected axis.
-The step is accepted or rejected based on
-```math
-\Delta W = \Delta E + P \Delta V - \gamma \Delta A - N k_B T \ln \left( \frac{V + \Delta V}{V} \right)
-```
-where `ΔE` is the change in potential energy, `P` is the equilibrium pressure along the
-selected axis, `ΔV` is the change in volume, `γ` is the surface tension, `ΔA` is the change
-in surface area, `N` is the number of molecules in the system, `T` is the equilibrium
-temperature and `V` is the system volume.
-If `ΔW ≤ 0` the step is always accepted, if `ΔW > 0` the step is accepted with probability
-`exp(-ΔW/kT)`.
+            w1, w2 = rand(rng, T), rand(rng, T)
+            
+            s = w1+w2
+            
+            w1 = w1/s
+            w2 = w2/s
 
-The scale factor is modified over time to maintain an acceptance rate of around half.
-If the topology of the system is set then molecules are moved as a unit so properties
-such as bond lengths do not change.
+            l_scale_xy = v_scale^w1
+            l_scale_z  = v_scale^w2
 
-The barostat assumes that the simulation is being run at a constant temperature but
-does not actively control the temperature.
-It should be used alongside a temperature coupling method such as the [`Langevin`](@ref)
-simulator or [`AndersenThermostat`](@ref) coupling.
-The neighbor list is not updated when making trial moves or after accepted moves.
-Note that the barostat can change the bounding box of the system.
+            old_coords  .= sys.coords
+            old_boundary = sys.boundary
+            scale_coords!(sys, SMatrix{D, D, T}([l_scale_xy 0 0;
+                                                 0 l_scale_xy 0;
+                                                 0 0 l_scale_z]))
 
-This barostat is only available for 3D systems.
-"""
-mutable struct MonteCarloMembraneBarostat{T, P, K, V, S}
-    pressure::SVector{3, P}
-    tension::S
-    temperature::K
-    n_steps::Int
-    n_iterations::Int
-    volume_scale::V
-    scale_increment::T
-    max_volume_frac::T
-    trial_find_neighbors::Bool
-    n_attempted::Vector{Int}
-    n_accepted::Vector{Int}
-    xy_isotropy::Bool
-    constant_volume::Bool
-end
+            if barostat.trial_find_neighbors
+                neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                                 n_threads=n_threads)
+            else
+                # Assume neighbors are unchanged by the change in coordinates
+                # This may not be valid for larger changes
+                neighbors_trial = neighbors
+            end
 
-function MonteCarloMembraneBarostat(P,
-                                    tension,
-                                    temp,
-                                    boundary;
-                                    n_steps=30,
-                                    n_iterations=1,
-                                    scale_factor=0.01,
-                                    scale_increment=1.1,
-                                    max_volume_frac=0.3,
-                                    trial_find_neighbors=false,
-                                    xy_isotropy=false,
-                                    z_axis_fixed=false,
-                                    constant_volume=false)
-    T = float_type(boundary)
-    volume_scale_factor = volume(boundary) * T(scale_factor)
-    volume_scale = fill(volume_scale_factor, 3)
+            E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
+            dE = energy_remove_mol(E_trial - E)
 
-    if AtomsBase.n_dimensions(boundary) != 3
-        throw(ArgumentError("boundary dimensionality ($(AtomsBase.n_dimensions(boundary))) must be 3"))
-    end
-    if z_axis_fixed && constant_volume
-        throw(ArgumentError("cannot keep z-axis fixed whilst keeping the volume constant"))
-    end
+            work = ((w1/2)*Pxx + (w1/2)*Pyy + w2*Pzz) * V_plus_dV * log(v_scale)
+            
+            dW = dE + uconvert(unit(dE), work) - n_molecules * kT * log(v_scale)
 
-    pressX = P
-    pressY = P
-    pressZ = ((z_axis_fixed || constant_volume) ? nothing : P)
+            if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
+                recompute_forces = true
+                barostat.n_accepted += 1
+            else
+                sys.coords .= old_coords
+                sys.boundary = old_boundary
+            end
+            barostat.n_attempted += 1
 
-    return MonteCarloMembraneBarostat(
-        SVector(pressX, pressY, pressZ),
-        tension,
-        temp,
-        n_steps,
-        n_iterations,
-        volume_scale,
-        T(scale_increment),
-        T(max_volume_frac),
-        trial_find_neighbors,
-        zeros(Int, 3),
-        zeros(Int, 3),
-        xy_isotropy,
-        constant_volume,
-    )
-end
-
-function apply_coupling!(sys::System{D, AT, T},
-                         barostat::MonteCarloMembraneBarostat,
-                         sim,
-                         neighbors=nothing,
-                         step_n::Integer=0;
-                         n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {D, AT, T}
-    !iszero(step_n % barostat.n_steps) && return false
-
-    kT = energy_remove_mol(sys.k * barostat.temperature)
-    n_molecules = isnothing(sys.topology) ? length(sys) : length(sys.topology.molecule_atom_counts)
-    recompute_forces = false
-    old_coords = similar(sys.coords)
-
-    for attempt_n in 1:barostat.n_iterations
-        axis = 0
-        while true
-            axis = rand(rng, 1:D)
-            !isnothing(barostat.pressure[axis]) && break
-        end
-        if barostat.xy_isotropy && axis == 2
-            axis = 1
-        end
-
-        E = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
-        V = volume(sys.boundary)
-        dV = barostat.volume_scale[axis] * (2 * rand(rng, T) - 1)
-        v_scale = (V + dV) / V
-        l_scale = SVector{D, T}(one(T), one(T), one(T))
-        if (axis == 1 || axis == 2) && barostat.xy_isotropy
-            xy_scale = sqrt(v_scale)
-            l_scale = SVector{D}(xy_scale, xy_scale, one(T))
-        else
-            mask1 = falses(D)
-            mask2 = trues(D)
-            mask1[axis] = true
-            mask2[axis] = false
-            l_scale = SVector{D}(mask1 * v_scale + mask2)
-        end
-
-        if barostat.constant_volume
-            l_scale = SVector{D}(l_scale[1], l_scale[2], inv(l_scale[1] * l_scale[2]))
-            v_scale = one(T)
-            dV = zero(dV)
-        end
-
-        dA = sys.boundary[1] * sys.boundary[2] * (l_scale[1] * l_scale[2] - one(T))
-
-        old_coords .= sys.coords
-        old_boundary = sys.boundary
-        scale_coords!(sys, l_scale)
-
-        if barostat.trial_find_neighbors
-            neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
-                                             n_threads=n_threads)
-        else
-            # Assume neighbors are unchanged by the change in coordinates
-            # This may not be valid for larger changes
-            neighbors_trial = neighbors
-        end
-        E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
-        dE = energy_remove_mol(E_trial - E)
-        PdV = uconvert(unit(dE), barostat.pressure[axis] * dV)
-        γdA = uconvert(unit(dE), barostat.tension * dA)
-        dW = dE + PdV - γdA - n_molecules * kT * log(v_scale)
-        if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
-            recompute_forces = true
-            barostat.n_accepted[axis] += 1
-        else
-            sys.coords .= old_coords
-            sys.boundary = old_boundary
-        end
-        barostat.n_attempted[axis] += 1
-
-        # Modify size of volume change to keep accept/reject ratio roughly equal
-        if barostat.n_attempted[axis] >= 10
-          if barostat.n_accepted[axis] < 0.25 * barostat.n_attempted[axis]
-            barostat.volume_scale[axis] /= barostat.scale_increment
-                barostat.n_attempted[axis] = 0
-                barostat.n_accepted[axis] = 0
-              elseif barostat.n_accepted[axis] > 0.75 * barostat.n_attempted[axis]
-                barostat.volume_scale[axis] = min(barostat.volume_scale[axis] * barostat.scale_increment,
-                                            V * barostat.max_volume_frac)
-                barostat.n_attempted[axis] = 0
-                barostat.n_accepted[axis] = 0
+            # Modify size of volume change to keep accept/reject ratio roughly equal
+            if barostat.n_attempted >= 10
+                if barostat.n_accepted < 0.25 * barostat.n_attempted
+                    barostat.volume_scale /= barostat.scale_increment
+                    barostat.n_attempted = 0
+                    barostat.n_accepted = 0
+                elseif barostat.n_accepted > 0.75 * barostat.n_attempted
+                    barostat.volume_scale = min(barostat.volume_scale * barostat.scale_increment,
+                                                V * barostat.max_volume_frac)
+                    barostat.n_attempted = 0
+                    barostat.n_accepted = 0
+                end
             end
         end
+        
+    
+    elseif barostat.coupling_type == :anisotropic
+
+        for attempt_n in 1:barostat.n_iterations
+        
+            E         = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
+            V         = volume(sys.boundary)
+            dV        = barostat.volume_scale * (2 * rand(rng, T) - 1)
+            V_plus_dV = V + dV
+
+            v_scale = V_plus_dV / V
+
+            w1, w2, w3 = rand(rng, T), rand(rng, T), rand(rng, T)
+            
+            s = w1+w2+w3
+            
+            w1 = w1/s
+            w2 = w2/s
+            w3 = w3/s
+
+            l_scale_x = v_scale^w1
+            l_scale_y = v_scale^w2
+            l_scale_z = v_scale^w3
+
+            old_coords  .= sys.coords
+            old_boundary = sys.boundary
+            scale_coords!(sys, SMatrix{D, D, T}([l_scale_x 0 0;
+                                                 0 l_scale_y 0;
+                                                 0 0 l_scale_z]))
+
+            if barostat.trial_find_neighbors
+                neighbors_trial = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, true;
+                                                 n_threads=n_threads)
+            else
+                # Assume neighbors are unchanged by the change in coordinates
+                # This may not be valid for larger changes
+                neighbors_trial = neighbors
+            end
+
+            E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
+            dE = energy_remove_mol(E_trial - E)
+
+            work = (w1*Pxx + w2*Pyy + w3*Pzz) * V_plus_dV * log(v_scale)
+            dW = dE + uconvert(unit(dE), work) - n_molecules * kT * log(v_scale)
+
+            if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)
+                recompute_forces = true
+                barostat.n_accepted += 1
+            else
+                sys.coords .= old_coords
+                sys.boundary = old_boundary
+            end
+            barostat.n_attempted += 1
+
+            # Modify size of volume change to keep accept/reject ratio roughly equal
+            if barostat.n_attempted >= 10
+                if barostat.n_accepted < 0.25 * barostat.n_attempted
+                    barostat.volume_scale /= barostat.scale_increment
+                    barostat.n_attempted = 0
+                    barostat.n_accepted = 0
+                elseif barostat.n_accepted > 0.75 * barostat.n_attempted
+                    barostat.volume_scale = min(barostat.volume_scale * barostat.scale_increment,
+                                                V * barostat.max_volume_frac)
+                    barostat.n_attempted = 0
+                    barostat.n_accepted = 0
+                end
+            end
+        end
+    
     end
+
     return recompute_forces
+                    
 end

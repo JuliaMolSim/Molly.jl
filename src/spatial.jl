@@ -149,7 +149,7 @@ function TriclinicBoundary(bv::Union{SVector{3}, SMatrix{3,3}}; approx_images::B
 
     # Normalize input, if box matrix is passed turn into SVector{3, SVector{3, T}}
     if bv isa SMatrix
-        bv = SVector(bv[1,:], bv[2,:], bv[3,:])
+        bv = SVector(bv[:,1], bv[:,2], bv[:,3])
     end
 
     # numeric and unit types
@@ -212,7 +212,7 @@ function TriclinicBoundary(bv::Union{SVector{3}, SMatrix{3,3}}; approx_images::B
         cos_a_cprojxy, sin_a_cprojxy, tan_a_b)
 end
 
-function TriclinicBoundary(bv_lengths::SVector{3, L}, angles::SVector{3, A}; kwargs...) where {L, A}
+function TriclinicBoundary(bv_lengths, angles; kwargs...)
     if any(!ispositive, bv_lengths)
         throw(ArgumentError("basis vector lengths must be positive, got $bv_lengths"))
     end
@@ -607,12 +607,7 @@ function wrap_coords(v, boundary::TriclinicBoundary)
     return v_wrap
 end
 
-"""
-    unwrap_molecules(coords, boundary, topology)
 
-Return coordinates unwrapped so that every bonded pair is placed using
-the minimum-image displacement. Molecule connectivity is preserved.
-"""
 function unwrap_global(coords::AbstractVector{<:SVector{D}},
                        boundary, topology; neighbors=nothing) where {D}
     # --- frac<->cart ---
@@ -678,7 +673,12 @@ function unwrap_global(coords::AbstractVector{<:SVector{D}},
     return out
 end
 
-# Convenience wrappers
+"""
+    unwrap_molecules(coords, boundary, topology)
+
+Return coordinates unwrapped so that every bonded pair is placed using
+the minimum-image displacement. Molecule connectivity is preserved.
+"""
 unwrap_molecules(coords, boundary, topology) =
     unwrap_global(from_device(coords), boundary, topology; neighbors = nothing)
 
