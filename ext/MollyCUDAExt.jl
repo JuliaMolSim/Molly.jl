@@ -63,14 +63,27 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, pairwis
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     end
-    CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max!(
-                buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
+    if sys.boundary isa TriclinicBoundary
+        H = SMatrix{3,3,T}(
+            sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
+            sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
+            sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
+        )
+        Hinv = inv(H) 
+        CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
+                buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
                 sys.boundary, Val(D))
+    else
+        CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max!(
+                    buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Val(N),
+                    sys.boundary, Val(D))
+    end
     CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true force_kernel!(
             buffers.morton_seq, buffers.fs_mat, buffers.box_mins, buffers.box_maxs, sys.coords,
             sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.force_units), pairwise_inters,
             sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
             Val(T), Val(D))
+
     return buffers
 end
 
@@ -86,25 +99,58 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, AT,
     morton_bits = 4
     w = r_cut - typeof(ustrip(r_cut))(0.1) * unit(r_cut)
     sorted_morton_seq!(buffers, sys.coords, w, morton_bits)
-    CUDA.@sync @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
-            buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
-            Val(N), sys.boundary, Val(D))
+    CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true compress_boolean_matrices!(
+                buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
+                buffers.compressed_eligible, buffers.compressed_special, Val(N))
+    if sys.boundary isa TriclinicBoundary
+        H = SMatrix{3,3,T}(
+            sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
+            sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
+            sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
+        )
+        Hinv = inv(H) 
+        CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
+                buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
+                sys.boundary, Val(D))
+    else
+        CUDA.@sync @cuda blocks=cld(N, WARPSIZE) threads=32 kernel_min_max!(
+                buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords,
+                Val(N), sys.boundary, Val(D))
+    end
     CUDA.@sync @cuda blocks=(n_blocks, n_blocks) threads=(32, 1) always_inline=true energy_kernel!(
             buffers.morton_seq, pe_vec_nounits, buffers.box_mins, buffers.box_maxs, sys.coords,
             sys.velocities, sys.atoms, Val(N), r_cut, Val(sys.energy_units), pairwise_inters,
-            sys.boundary, step_n, sys.neighbor_finder.special, sys.neighbor_finder.eligible,
+            sys.boundary, step_n, buffers.compressed_special, buffers.compressed_eligible,
             Val(T), Val(D))
     return pe_vec_nounits
 end
 
-function boxes_dist(x1_min::D, x1_max::D, x2_min::D, x2_max::D, Lx::D) where D
-    a = abs(vector_1D(x2_max, x1_min, Lx))
-    b = abs(vector_1D(x1_max, x2_min, Lx))
+function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVector{D, T}, r2_max::SVector{D, T}, boundary) where {D, T}
+    va = vector(r2_max, r1_min, boundary)
+    vb = vector(r1_max, r2_min, boundary)
+    a = SVector{D}(ntuple(d -> abs(va[d]), D))
+    b = SVector{D}(ntuple(d -> abs(vb[d]), D))
 
-    return ifelse(
-        x1_min - x2_max <= zero(D) && x2_min - x1_max <= zero(D),
-        zero(D),
-        ifelse(a < b, a, b)	
+    return SVector(ntuple(d -> r1_min[d] - r2_max[d] <= zero(T) && r2_min[d] - r1_max[d] <= zero(T) ? zero(T) : ifelse(a[d] < b[d], a[d], b[d]), D))
+end
+
+# Triclinic boxes case is treated only in 3 dimensions
+function boxes_dist(r1_min::SVector{D, T}, r1_max::SVector{D, T}, r2_min::SVector{D, T}, r2_max::SVector{D, T}, boundary::TriclinicBoundary) where {D, T}
+    r3 = r2_max - r1_min
+    r2 = r3 - boundary.basis_vectors[3] .* round(r3[3] / boundary.basis_vectors[3][3])
+    r1 = r2 - boundary.basis_vectors[2] .* round(r2[2] / boundary.basis_vectors[2][2])
+    r_a = boundary.basis_vectors[1] .* round(r1[1] / boundary.basis_vectors[1][1])
+    a = SVector(abs(r_a[1]), abs(r_a[2]), abs(r_a[3]))
+    r3 = r1_max - r2_min
+    r2 = r3 - boundary.basis_vectors[3] .* round(r3[3] / boundary.basis_vectors[3][3])
+    r1 = r2 - boundary.basis_vectors[2] .* round(r2[2] / boundary.basis_vectors[2][2])
+    r_b = boundary.basis_vectors[1] .* round(r1[1] / boundary.basis_vectors[1][1])
+    b = SVector(abs(r_b[1]), abs(r_b[2]), abs(r_b[3]))
+
+    return SVector(
+        r_a[1] >= zero(T) && r_b[1] >= zero(T) ? zero(T) : ifelse(a[1] < b[1], a[1], b[1]),
+        r_a[2] >= zero(T) && r_b[2] >= zero(T) ? zero(T) : ifelse(a[2] < b[2], a[2], b[2]),
+        r_a[3] >= zero(T) && r_b[3] >= zero(T) ? zero(T) : ifelse(a[3] < b[3], a[3], b[3])
     )
 end
 
@@ -128,9 +174,9 @@ function kernel_min_max!(
     r_smem = CuStaticSharedArray(C, (r, b))
  
     if i <= n - r && local_i <= D32
+        s_i = sorted_seq[i]
         for k in a:b
-            s_i = sorted_seq[i]
-            mins_smem[local_i, k] = coords[s_i][k]
+            mins_smem[local_i, k] = coords[s_i][k] 
             maxs_smem[local_i, k] = coords[s_i][k]
         end
     end
@@ -163,6 +209,104 @@ function kernel_min_max!(
     if i > n - r && i <= n && local_i <= r
         for k in a:b
             r_smem[local_i, k] = coords[sorted_seq[i]][k]
+        end
+    end
+    xyz_min = CuStaticSharedArray(C, b)
+    xyz_max = CuStaticSharedArray(C, b)
+    for k in a:b
+        xyz_min[k] =  10 * box_sides(boundary, k) # very large (arbitrary) value
+        xyz_max[k] = -10 * box_sides(boundary, k)
+    end
+    if local_i == a
+        for j in a:r
+            @inbounds begin
+                for k in a:b
+                    if r_smem[j, k] < xyz_min[k] 
+                        xyz_min[k] = r_smem[j, k]
+                    end
+                    if r_smem[j, k] > xyz_max[k] 
+                        xyz_max[k] = r_smem[j, k]
+                    end
+                end
+            end
+        end
+        if blockIdx().x == ceil(Int32, n/D32) && r != Int32(0)
+            for k in a:b
+                mins[blockIdx().x, k] = xyz_min[k] 
+                maxs[blockIdx().x, k] = xyz_max[k]
+            end
+        end
+    end
+
+    return nothing
+end
+
+function kernel_min_max_triclinic!(
+    sorted_seq,
+    mins::AbstractArray{C}, 
+    maxs::AbstractArray{C}, 
+    coords, 
+    Hinv, 
+    ::Val{n}, 
+    boundary,
+    ::Val{D}) where {n, C, D}
+
+    D32 = Int32(32)
+    a = Int32(1)
+    b = Int32(D)
+    r = Int32(n % D32)
+    i = threadIdx().x + (blockIdx().x - a) * blockDim().x
+    local_i = threadIdx().x
+    mins_smem = CuStaticSharedArray(C, (D32, b))
+    maxs_smem = CuStaticSharedArray(C, (D32, b))
+    r_smem = CuStaticSharedArray(C, (r, b))
+ 
+    if i <= n - r && local_i <= D32
+        s_i = sorted_seq[i]
+        r_i = coords[s_i]
+        @inbounds for k in a:b
+            val = zero(C)
+            for j in a:b
+                val += Hinv[k,j]*r_i[j]
+            end
+            mins_smem[local_i, k] = val 
+            maxs_smem[local_i, k] = val
+        end
+    end
+    sync_threads() 
+    if i <= n - r && local_i <= D32
+        for p in a:Int32(log2(D32))
+            for k in a:b
+                @inbounds begin
+                    if local_i % Int32(2^p) == Int32(0)
+                        if mins_smem[local_i, k] > mins_smem[local_i - Int32(2^(p - 1)), k] 
+                            mins_smem[local_i, k] = mins_smem[local_i - Int32(2^(p - 1)), k]
+                        end
+                        if maxs_smem[local_i, k] < maxs_smem[local_i - Int32(2^(p - 1)), k] 
+                            maxs_smem[local_i, k] = maxs_smem[local_i - Int32(2^(p - 1)), k]
+                        end
+                    end
+                end
+            end
+        end 
+        if local_i == D32 
+            for k in a:b
+                mins[blockIdx().x, k] = mins_smem[local_i, k]
+                maxs[blockIdx().x, k] = maxs_smem[local_i, k]
+            end
+        end
+
+    end 
+
+    # Since the remainder array is low-dimensional, we do the scan
+    if i > n - r && i <= n && local_i <= r
+        r_i = coords[sorted_seq[i]]
+        for k in a:b
+            val = zero(C)
+            for j in a:b
+                val += Hinv[k,j]*r_i[j]
+            end
+            r_smem[local_i, k] = val # Transform to fractional space: s = Hinv * r
         end
     end
     xyz_min = CuStaticSharedArray(C, b)
@@ -326,23 +470,19 @@ function force_kernel!(
 
     # The code is organised in 4 mutually excluding parts
     if j < n_blocks && i < j
-        d_block = zero(C)
-        dist_block = zero(C) * zero(C)
-        @inbounds for k in a:b	
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-            dist_block += d_block * d_block	
-        end
+        r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
+        r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
+        r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
+        r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
+        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
+        dist_block = sum(abs2, d_block)
         if dist_block <= r_cut * r_cut
             s_idx_i = sorted_seq[index_i]
             coords_i = coords[s_idx_i] 
             vel_i = velocities[s_idx_i] 
             atoms_i = atoms[s_idx_i]
-            d_pb = zero(C)
-            dist_pb = zero(C) * zero(C)
-            @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-                dist_pb += d_pb * d_pb
-            end
+            d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
+            dist_pb = sum(abs2, d_pb)
 
             Bool_excl = dist_pb <= r_cut * r_cut
             s_idx_j = sorted_seq[index_j]
@@ -412,24 +552,21 @@ function force_kernel!(
     end
 
     if j == n_blocks && i < n_blocks
-        d_block = zero(C)
-        dist_block = zero(C) * zero(C)
-        @inbounds for k in a:b
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-            dist_block += d_block * d_block	
-        end
+        r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
+        r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
+        r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
+        r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
+        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
+        dist_block = sum(abs2, d_block)
 
         if dist_block <= r_cut * r_cut 
             s_idx_i = sorted_seq[index_i]
             coords_i = coords[s_idx_i]
             vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
-            d_pb = zero(C)
-            dist_pb = zero(C) * zero(C)			
-            @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-                dist_pb += d_pb * d_pb
-            end
+            d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
+            dist_pb = sum(abs2, d_pb)
+
             Bool_excl = dist_pb <= r_cut * r_cut
             eligible_bitmask = UInt32(0)
             special_bitmask = UInt32(0)
@@ -575,10 +712,10 @@ function force_kernel!(
 end
 
 function energy_kernel!( 
-    sorted_seq,
-    energy_nounits, 
+    sorted_seq, 
+    energy_nounits,
     mins::AbstractArray{C}, 
-    maxs::AbstractArray{C}, 
+    maxs::AbstractArray{C},
     coords, 
     velocities,
     atoms,
@@ -587,50 +724,45 @@ function energy_kernel!(
     ::Val{energy_units},
     inters_tuple,
     boundary,
-    step_n, 
-    special_matrix,
-    eligible_matrix,
+    step_n,
+    special_compressed,
+    eligible_compressed,
     ::Val{T},
     ::Val{D}) where {N, C, energy_units, T, D}
 
     a = Int32(1)
     b = Int32(D)
     n_blocks = ceil(Int32, N / 32)
-    r = Int32((N - 1) % 32 + 1)
     i = blockIdx().x
     j = blockIdx().y
-    i_0_tile = (i - 1) * warpsize()
-    j_0_tile = (j - 1) * warpsize()
+    i_0_tile = (i - a) * warpsize()
+    j_0_tile = (j - a) * warpsize()
     index_i = i_0_tile + laneid()
     index_j = j_0_tile + laneid()
     E_smem = CuStaticSharedArray(T, 32)
     E_smem[laneid()] = zero(T)
-    eligible = CuStaticSharedArray(Bool, (32, 32))
-    special = CuStaticSharedArray(Bool, (32, 32))
+    r = Int32((N - 1) % 32 + 1)
 
     # The code is organised in 4 mutually excluding parts
     if j < n_blocks && i < j
-        d_block = zero(C)
-        dist_block = zero(C) * zero(C)
-        @inbounds for k in a:b	
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-            dist_block += d_block * d_block	
-        end
+        r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
+        r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
+        r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
+        r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
+        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
+        dist_block = sum(abs2, d_block)
         if dist_block <= r_cut * r_cut
             s_idx_i = sorted_seq[index_i]
             coords_i = coords[s_idx_i] 
-            vel_i = velocities[s_idx_i]
+            vel_i = velocities[s_idx_i] 
             atoms_i = atoms[s_idx_i]
-            d_pb = zero(C)
-            dist_pb = zero(C) * zero(C)
-            @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-                dist_pb += d_pb * d_pb
-            end
+            d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
+            dist_pb = sum(abs2, d_pb)
+
             Bool_excl = dist_pb <= r_cut * r_cut
             s_idx_j = sorted_seq[index_j]
             coords_j = coords[s_idx_j]
-            vel_j = velocities[s_idx_j]
+            vel_j = velocities[s_idx_j] 
             shuffle_idx = laneid()
             atoms_j = atoms[s_idx_j]
             atype_j = atoms_j.atom_type
@@ -639,17 +771,16 @@ function energy_kernel!(
             acharge_j = atoms_j.charge
             aσ_j = atoms_j.σ
             aϵ_j = atoms_j.ϵ
-            @inbounds for m in a:warpsize()
-                eligible[laneid(), m] = eligible_matrix[s_idx_i, sorted_seq[j_0_tile + m]]
-                special[laneid(), m] = special_matrix[s_idx_i, sorted_seq[j_0_tile + m]]
-            end
+            eligible_bitmask = UInt32(0)
+            special_bitmask = UInt32(0)
+            eligible_bitmask = eligible_compressed[laneid(), i, j]
+            special_bitmask = special_compressed[laneid(), i, j]
 
             # Shuffle
             for m in a:warpsize()
                 sync_warp()
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, laneid() + a, warpsize())
                 vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, laneid() + a, warpsize())
-                s_idx_j = CUDA.shfl_sync(0xFFFFFFFF, s_idx_j, laneid() + a, warpsize())
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, laneid() + a, warpsize())
                 atype_j = CUDA.shfl_sync(0xFFFFFFFF, atype_j, laneid() + a, warpsize())
                 aindex_j = CUDA.shfl_sync(0xFFFFFFFF, aindex_j, laneid() + a, warpsize())
@@ -661,13 +792,15 @@ function energy_kernel!(
                 atoms_j_shuffle = Atom(atype_j, aindex_j, amass_j, acharge_j, aσ_j, aϵ_j)
                 dr = vector(coords_j, coords_i, boundary)
                 r2 = sum(abs2, dr)
-                condition = eligible[laneid(), shuffle_idx] && Bool_excl && r2 <= r_cut * r_cut
+                excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
+                spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
+                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
                 pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j_shuffle,
                     Val(energy_units),
-                    special[laneid(), shuffle_idx],
+                    (spec & 0x1) == true,
                     coords_i, coords_j,
                     boundary,
                     vel_i, vel_j,
@@ -679,29 +812,26 @@ function energy_kernel!(
     end
 
     if j == n_blocks && i < n_blocks
-        d_block = zero(C)
-        dist_block = zero(C) * zero(C)
-        @inbounds for k in a:b
-            d_block = boxes_dist(mins[i, k], maxs[i, k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-            dist_block += d_block * d_block	
-        end
+        r_max_i = SVector{D}(ntuple(d -> maxs[i, d], D))
+        r_min_i = SVector{D}(ntuple(d -> mins[i, d], D))
+        r_max_j = SVector{D}(ntuple(d -> maxs[j, d], D))
+        r_min_j = SVector{D}(ntuple(d -> mins[j, d], D))
+        d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
+        dist_block = sum(abs2, d_block)
+
         if dist_block <= r_cut * r_cut 
             s_idx_i = sorted_seq[index_i]
             coords_i = coords[s_idx_i]
             vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
-            d_pb = zero(C)
-            dist_pb = zero(C) * zero(C)			
-            @inbounds for k in a:b	
-                d_pb = boxes_dist(coords_i[k], coords_i[k], mins[j, k], maxs[j, k], box_sides(boundary, k))
-                dist_pb += d_pb * d_pb
-            end
+            d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
+            dist_pb = sum(abs2, d_pb)
+
             Bool_excl = dist_pb <= r_cut * r_cut
-            @inbounds for m in a:r
-                s_idx_j = sorted_seq[j_0_tile + m]
-                eligible[laneid(), m] = eligible_matrix[s_idx_i, s_idx_j]
-                special[laneid(), m] = special_matrix[s_idx_i, s_idx_j]
-            end
+            eligible_bitmask = UInt32(0)
+            special_bitmask = UInt32(0)
+            eligible_bitmask = eligible_compressed[laneid(), i, j]
+            special_bitmask = special_compressed[laneid(), i, j]
             
             for m in a:r
                 s_idx_j = sorted_seq[j_0_tile + m]
@@ -710,13 +840,15 @@ function energy_kernel!(
                 atoms_j = atoms[s_idx_j]
                 dr = vector(coords_j, coords_i, boundary)
                 r2 = sum(abs2, dr)
-                condition = eligible[laneid(), m] && Bool_excl && r2 <= r_cut * r_cut
+                excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
+                spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
+                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
                 pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(energy_units),
-                    special[laneid(), m],
+                    (spec & 0x1) == true,
                     coords_i, coords_j,
                     boundary,
                     vel_i, vel_j,
@@ -732,30 +864,31 @@ function energy_kernel!(
         coords_i = coords[s_idx_i]
         vel_i = velocities[s_idx_i]
         atoms_i = atoms[s_idx_i]
-        @inbounds for m in a:warpsize()
-            s_idx_j = sorted_seq[j_0_tile + m]
-            eligible[laneid(), m] = eligible_matrix[s_idx_i, s_idx_j]
-            special[laneid(), m] = special_matrix[s_idx_i, s_idx_j]
-        end
-        @inbounds for m in (laneid() + a) : warpsize()
+        eligible_bitmask = UInt32(0)
+        special_bitmask = UInt32(0)
+        eligible_bitmask = eligible_compressed[laneid(), i, j]
+        special_bitmask = special_compressed[laneid(), i, j]
+
+        for m in (laneid() + a) : warpsize()
             s_idx_j = sorted_seq[j_0_tile + m]
             coords_j = coords[s_idx_j]
             vel_j = velocities[s_idx_j]
             atoms_j = atoms[s_idx_j]
             dr = vector(coords_j, coords_i, boundary)
             r2 = sum(abs2, dr)
-            condition = eligible[laneid(), m] && r2 <= r_cut * r_cut
+            excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
+            spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
+            condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
 
             pe = condition ? sum_pairwise_potentials(
-                    inters_tuple,
-                    atoms_i, atoms_j,
-                    Val(energy_units),
-                    special[laneid(), m],
-                    coords_i, coords_j,
-                    boundary,
-                    vel_i, vel_j,
-                    step_n) : zero(SVector{1, T})
-
+                inters_tuple,
+                atoms_i, atoms_j,
+                Val(energy_units),
+                (spec & 0x1) == true,
+                coords_i, coords_j,
+                boundary,
+                vel_i, vel_j,
+                step_n) : zero(SVector{1, T})
             E_smem[laneid()] += ustrip(pe[1])
         end	
     end
@@ -766,36 +899,37 @@ function energy_kernel!(
             coords_i = coords[s_idx_i]
             vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
-            @inbounds for m in a:r
-                s_idx_j = sorted_seq[j_0_tile + m]
-                eligible[laneid(), m] = eligible_matrix[s_idx_i, s_idx_j]
-                special[laneid(), m] = special_matrix[s_idx_i, s_idx_j]
-            end
+            eligible_bitmask = UInt32(0)
+            special_bitmask = UInt32(0)
+            eligible_bitmask = eligible_compressed[laneid(), i, j]
+            special_bitmask = special_compressed[laneid(), i, j]
 
-            @inbounds for m in (laneid() + a) : r
+            for m in (laneid() + a) : r
                 s_idx_j = sorted_seq[j_0_tile + m]
                 coords_j = coords[s_idx_j]
                 vel_j = velocities[s_idx_j]
                 atoms_j = atoms[s_idx_j]
                 dr = vector(coords_j, coords_i, boundary)
                 r2 = sum(abs2, dr)
-                condition = eligible[laneid(), m] && r2 <= r_cut * r_cut
+                excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
+                spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
+                condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
                 
                 pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j,
                     Val(energy_units),
-                    special[laneid(), m],
+                    (spec & 0x1) == true,
                     coords_i, coords_j,
                     boundary,
                     vel_i, vel_j,
                     step_n) : zero(SVector{1, T})
-
                 E_smem[laneid()] += ustrip(pe[1])
             end
         end
     end
 
+    sync_threads()
     if threadIdx().x == a
         sum_E = zero(T)
         for k in a:warpsize()
@@ -803,6 +937,7 @@ function energy_kernel!(
         end
         CUDA.atomic_add!(pointer(energy_nounits), sum_E)
     end
+
     return nothing
 end
 
