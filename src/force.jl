@@ -489,7 +489,11 @@ function forces!(fs, sys::System{D, AT, T}, neighbors, buffers, step_n::Integer=
     =#
     fill!(sys.virial, zero(T)*sys.energy_units)
     fill!(sys.kin_tensor, zero(T)*sys.energy_units)
-    fill!(sys.pres_tensor, zero(T)*u"bar")
+    if sys.energy_units == NoUnits
+        fill!(sys.pres_tensor, zero(T))
+    else
+        fill!(sys.pres_tensor, zero(T)*u"bar")
+    end
     
     #=
     Zero the buffers to store the calc. magnitudes. 
