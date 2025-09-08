@@ -453,6 +453,13 @@ Gromacs files.
 - `dist_buffer=0.2u"nm"`: distance added to `dist_cutoff` when calculating
     neighbors every few steps. Not relevant if [`GPUNeighborFinder`](@ref) is
     used since the neighbors are calculated each step.
+- `constraints=:none`: which constraints to apply during the simulation, options
+    are `:none`, `:hbonds` (bonds involving hydrogen), `:allbonds` and `:hangles`
+    (all bonds plus H-X-H and H-O-X angles). Note that not all options may be
+    supported depending on the bonding topology.
+- `rigid_water=false`: whether to constrain the bonds and angle in water
+    molecules. Applied on top of `constraints`, so `constraints=:hangles` and
+    `rigid_water=false` gives rigid water.
 - `nonbonded_method="none"`: method for long range interaction summation,
     options are "none" (short range only), "cutoff" (reaction field method),
     "pme" (particle mesh Ewald summation) and "ewald" (Ewald summation, slow).
@@ -486,6 +493,8 @@ function System(coord_file::AbstractString,
                 array_type::Type{AT}=Array,
                 dist_cutoff=(units ? 1.0u"nm" : 1.0),
                 dist_buffer=(units ? 0.2u"nm" : 0.2),
+                constraints=:none,
+                rigid_water=false,
                 nonbonded_method="none",
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
@@ -881,9 +890,10 @@ function System(coord_file::AbstractString,
 
     return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
                   loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
-                  improper_inters_pad, eligible, special, units, dist_cutoff, nonbonded_method,
-                  ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent,
-                  kappa, grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb)
+                  improper_inters_pad, eligible, special, units, dist_cutoff, constraints,
+                  rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
+                  neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
+                  weight_14_lj, weight_14_coulomb)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
@@ -908,6 +918,8 @@ function System(T::Type,
                 array_type::Type{AT}=Array,
                 dist_cutoff=(units ? 1.0u"nm" : 1.0),
                 dist_buffer=(units ? 0.2u"nm" : 0.2),
+                constraints=:none,
+                rigid_water=false,
                 nonbonded_method="none",
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
@@ -1200,20 +1212,98 @@ function System(T::Type,
 
     return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
                   loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
-                  improper_inters_pad, eligible, special, units, dist_cutoff, nonbonded_method,
-                  ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent,
-                  kappa, grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb)
+                  improper_inters_pad, eligible, special, units, dist_cutoff, constraints,
+                  rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
+                  neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
+                  weight_14_lj, weight_14_coulomb)
 end
 
 function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
     return System(DefaultFloat, coord_file, top_file; kwargs...)
 end
 
+const water_residue_names = ("SOL", "WAT", "HOH", "H2O")
+
+# H-X-H and H-O-X angles, where X is any element
+function is_h_angle(atoms_data, i, j, k)
+    el_i, el_j, el_k = atoms_data[i].element, atoms_data[j].element, atoms_data[k].element
+    return (el_i == "H" && el_k == "H") || (el_j == "O" && (el_i == "H" || el_k == "H"))
+end
+
+function find_bond_r0(bonds_all, i, j)
+    for (bi, bj, inter) in zip(bonds_all.is, bonds_all.js, bonds_all.inters)
+        if (bi, bj) == (i, j) || (bj, bi) == (i, j)
+            return inter.r0
+        end
+    end
+    error("atoms $i and $j are in an angle constraint but the bond cannot be found")
+end
+
+function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_type, rigid_water)
+    if constraints_type == :none || iszero(length(bonds_all.is))
+        return (), bonds_all, angles_all
+    end
+
+    bonds = InteractionList2Atoms(HarmonicBond)
+    angles = InteractionList3Atoms(HarmonicAngle)
+    dist_constraints, angle_constraints = [], []
+    angle_dist_pairs = Set{Tuple{Int, Int}}()
+
+    for (i, j, k, inter, type) in zip(angles_all.is, angles_all.js, angles_all.ks,
+                                      angles_all.inters, angles_all.types)
+        if (constraints_type == :hangles && is_h_angle(atoms_data, i, j, k)) ||
+                (rigid_water && atoms_data[i].res_name in water_residue_names)
+            r0_ij = find_bond_r0(bonds_all, i, j)
+            r0_jk = find_bond_r0(bonds_all, j, k)
+            push!(angle_constraints, AngleConstraint(i, j, k, inter.θ0, r0_ij, r0_jk))
+            push!(angle_dist_pairs, (min(i, j), max(i, j)))
+            push!(angle_dist_pairs, (min(j, k), max(j, k)))
+        else
+            push!(angles.is, i)
+            push!(angles.js, j)
+            push!(angles.ks, k)
+            push!(angles.inters, inter)
+            push!(angles.types, type)
+        end
+    end
+
+    for (i, j, inter, type) in zip(bonds_all.is, bonds_all.js, bonds_all.inters, bonds_all.types)
+        if constraints_type in (:allbonds, :hangles) ||
+                (constraints_type == :hbonds && (atoms_data[i].element == "H" || atoms_data[j].element == "H")) ||
+                (rigid_water && atoms_data[i].res_name in water_residue_names)
+            if !((min(i, j), max(i, j)) in angle_dist_pairs)
+                # Only add distance constraints that are not part of an angle constraint
+                push!(dist_constraints, DistanceConstraint(i, j, inter.r0))
+            end
+        else
+            push!(bonds.is, i)
+            push!(bonds.js, j)
+            push!(bonds.inters, inter)
+            push!(bonds.types, type)
+        end
+    end
+
+    if length(dist_constraints) > 0 || length(angle_constraints) > 0
+        shake = SHAKE_RATTLE(
+            length(atoms_data),
+            T(1e-6)u"nm",
+            T(1e-6)u"nm^2 * ps^-1";
+            dist_constraints=[dist_constraints...],
+            angle_constraints=[angle_constraints...],
+        )
+        constraints = (shake,)
+    else
+        constraints = ()
+    end
+    return constraints, bonds, angles 
+end
+
 function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
-                loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
-                improper_inters_pad, eligible, special, units, dist_cutoff, nonbonded_method,
-                ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent,
-                kappa, grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb)
+                loggers, data, bonds_all, angles_all, torsions, impropers, torsion_inters_pad,
+                improper_inters_pad, eligible, special, units, dist_cutoff, constraints_type,
+                rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
+                neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
+                weight_14_lj, weight_14_coulomb)
     coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
     lj = LennardJones(
@@ -1272,6 +1362,15 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
     end
     pairwise_inters = (lj, coul)
 
+    if length(bonds_all.is) > 0
+        topology = MolecularTopology(bonds_all.is, bonds_all.js, length(coords_dev))
+    else
+        topology = nothing
+    end
+
+    constraints, bonds, angles = exchange_constraints(T, bonds_all, angles_all, atoms_data,
+                                                      constraints_type, rigid_water)
+
     # Only add present interactions and ensure that array types are concrete
     specific_inter_array = []
     if length(bonds.is) > 0
@@ -1281,9 +1380,6 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
             to_device([bonds.inters...], AT),
             bonds.types,
         ))
-        topology = MolecularTopology(bonds.is, bonds.js, length(coords_dev))
-    else
-        topology = nothing
     end
     if length(angles.is) > 0
         push!(specific_inter_array, InteractionList3Atoms(
@@ -1386,6 +1482,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
         pairwise_inters=pairwise_inters,
         specific_inter_lists=specific_inter_lists,
         general_inters=general_inters,
+        constraints=constraints,
         neighbor_finder=neighbor_finder,
         loggers=loggers,
         force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),

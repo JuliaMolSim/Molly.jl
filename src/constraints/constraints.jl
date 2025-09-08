@@ -1,7 +1,6 @@
 export
     DistanceConstraint,
     AngleConstraint,
-    disable_constrained_interactions!,
     apply_position_constraints!,
     apply_velocity_constraints!,
     check_position_constraints,
@@ -183,7 +182,6 @@ function disable_constrained_interactions!(
 
         return neighbor_finder
     end
-
 end
 
 # Check for interactions between angle and non-angle clusters,
@@ -195,15 +193,16 @@ function build_central_atom_clusters(
 
     # Store constraints as directed edges, direction is arbitrary but necessary
     constraint_graph = SimpleDiGraph(num_atoms)
-    idx_dist_pairs = spzeros(float_type(D), num_atoms, num_atoms) * unit(D)
+    idx_dist_pairs = spzeros(D, num_atoms, num_atoms)
 
     for constraint in dist_constraints
-        edge_added = add_edge!(constraint_graph, constraint.i, constraint.j)
+        i, j = constraint.i, constraint.j
+        edge_added = add_edge!(constraint_graph, i, j)
         if edge_added
-            idx_dist_pairs[constraint.i, constraint.j] = constraint.dist
-            idx_dist_pairs[constraint.j, constraint.i] = constraint.dist
+            idx_dist_pairs[i, j] = constraint.dist
+            idx_dist_pairs[j, i] = constraint.dist
         else
-            @warn "Duplicate constraint in the system, it will be ignored"
+            @warn "Duplicate constraint in the system between atoms $i and $j, it will be ignored"
         end
     end
 
@@ -252,63 +251,33 @@ function build_central_atom_clusters(
     return StructArray(clusters12), StructArray(clusters23), StructArray(clusters34)
 end
 
-function build_clusters(
-        n_atoms::Integer,
-        dist_constraints::AbstractVector{<:DistanceConstraint{D}},
-        angle_constraints::AbstractVector{<:AngleConstraint{D}}
-    ) where D
-
-    #! avoid mutating input, dont love this...
-    dist_constraints = copy(dist_constraints)
+function build_clusters(n_atoms::Integer, dist_constraints, angle_constraints)
+    if isnothing(dist_constraints)
+        dist_constraints_cp = []
+    else
+        dist_constraints_cp = copy(dist_constraints)
+    end
 
     # Convert angle constraints to distance constraints.
     # This is purely to check if they are connected to other
     # clusters in the DAG
-    for ac in angle_constraints
-        push!(dist_constraints, to_distance_constraints(ac)...)
+    if !isnothing(angle_constraints)
+        for ac in angle_constraints
+            push!(dist_constraints_cp, to_distance_constraints(ac)...)
+        end
     end
 
     # Check for interactions between clusters and build non-angle clusters
-    clusters12, clusters23, clusters34 =
-        build_central_atom_clusters(n_atoms, dist_constraints)
+    clusters12, clusters23, clusters34 = build_central_atom_clusters(n_atoms, dist_constraints_cp)
 
     # Now that we know angle_constraints do not interact with
     # any of the distance constraints we can build their clusters
-    clusters_angle = StructArray(to_cluster_data(ac) for ac in angle_constraints)
-
+    if !isnothing(angle_constraints) && length(angle_constraints) > 0
+        clusters_angle = StructArray(to_cluster_data(ac) for ac in angle_constraints)
+    else
+        clusters_angle = NoClusterData[]
+    end
     return clusters12, clusters23, clusters34, clusters_angle
-end
-
-function build_clusters(
-        n_atoms::Integer,
-        dist_constraints::Nothing,
-        angle_constraints::AbstractVector{<:AngleConstraint{D}}
-    ) where D
-    acc = StructArray(to_cluster_data(ac) for ac in angle_constraints)
-    #* These are non-concrete...what should I do instead??
-    return NoClusterData[], NoClusterData[], NoClusterData[], acc
-end
-
-function build_clusters(
-        n_atoms::Integer,
-        dist_constraints::AbstractVector{<:DistanceConstraint{D}},
-        angle_constraints::Nothing
-    ) where D
-
-    clusters12, clusters23, clusters34 =
-        build_central_atom_clusters(n_atoms, dist_constraints)
-
-    return clusters12, clusters23, clusters34, NoClusterData[]
-
-end
-
-# Fallback
-function build_clusters(
-    n_atoms::Integer,
-    dist_constraints::Nothing,
-    angle_constraints::Nothing
-)
-    return NoClusterData[], NoClusterData[], NoClusterData[], NoClusterData[]
 end
 
 #=
@@ -408,7 +377,6 @@ end
         end
         maximums[cluster_idx] = cluster_max
     end
-
 end
 
 @kernel inbounds=true function max_vel_error(
@@ -580,4 +548,3 @@ idx_keys(::Type{<:AngleClusterData}) = (:k1, :k2, :k3)
 dist_keys(::Type{<:AngleClusterData}) = (:dist12, :dist13, :dist23)
 
 central_atom(kd::K) where {K <: ConstraintKernelData} = kd.k1
-float_type(::ConstraintKernelData{D}) where D = float_type(D)

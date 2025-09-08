@@ -1,15 +1,8 @@
-export
-    SHAKE_RATTLE,
-    setup_constraints!
+export SHAKE_RATTLE
 
 """
-    SHAKE_RATTLE(n_atoms,
-                dist_tolerance,
-                vel_tolerance;
-                dist_constraints = nothing,
-                angle_constraints = nothing,
-                gpu_block_size = 64,
-                max_iters = 25)
+    SHAKE_RATTLE(n_atoms, dist_tolerance, vel_tolerance; dist_constraints=nothing,
+                 angle_constraints=nothing, gpu_block_size=128, max_iters=25)
 
 Constrain distances during a simulation using the SHAKE and RATTLE algorithms.
 Either or both of `dist_constraints` and `angle_constraints` must be passed.
@@ -24,16 +17,16 @@ of the linear system solved to satisfy the RATTLE algorithm.
 
 # Arguments
 - `n_atoms`: Total number of atoms in the system.
-- `dist_tolerance`: the tolerance used to end the iterative procedure when calculating
+- `dist_tolerance=1e-8u"nm"`: the tolerance used to end the iterative procedure when calculating
     position constraints, should have the same units as the coordinates.
-- `vel_tolerance`: the tolerance used to end the iterative procedure when calculating
+- `vel_tolerance=1e-8u"nm^2 * ps^-1"`: the tolerance used to end the iterative procedure when calculating
     velocity constraints, should have the same units as the velocities * the coordinates.
-- `dist_constraints`: A vector of [`DistanceConstraint`](@ref) objects that define the
+- `dist_constraints=nothing`: A vector of [`DistanceConstraint`](@ref) objects that define the
     distance constraints to be applied. If `nothing`, no distance constraints are applied.
-- `angle_constraints`: A vector of [`AngleConstraint`](@ref) objects that define the
+- `angle_constraints=nothing`: A vector of [`AngleConstraint`](@ref) objects that define the
     angle constraints to be applied. If `nothing`, no angle constraints are applied.
-- `gpu_block_size`: The number of threads per block to use for GPU calculations. Defaults to 128.
-- `max_iters`: The maximum number of iterations to perform when doing SHAKE. Defaults to 25.
+- `gpu_block_size=128`: The number of threads per block to use for GPU calculations.
+- `max_iters=25`: The maximum number of iterations to perform when doing SHAKE.
 """
 struct SHAKE_RATTLE{A, B, C, D, E, F, I <: Integer}
     clusters12::A
@@ -47,69 +40,47 @@ struct SHAKE_RATTLE{A, B, C, D, E, F, I <: Integer}
 end
 
 function SHAKE_RATTLE(n_atoms,
-                     dist_tolerance,
-                     vel_tolerance;
-                     dist_constraints = nothing,
-                     angle_constraints = nothing,
-                     gpu_block_size = 128, max_iters = 25)
+                      dist_tolerance=1e-8u"nm",
+                      vel_tolerance=1e-8u"nm^2 * ps^-1";
+                      dist_constraints=nothing,
+                      angle_constraints=nothing,
+                      gpu_block_size=128,
+                      max_iters=25)
+    ustrip(dist_tolerance) <= 0 && throw(ArgumentError("dist_tolerance must be greater than zero"))
+    ustrip(vel_tolerance ) <= 0 && throw(ArgumentError("vel_tolerance must be greater than zero" ))
 
-    dc_isnothing = isnothing(dist_constraints)
-    ac_isnothing = isnothing(angle_constraints)
-
-    dc_length = dc_isnothing ? 0 : length(dist_constraints)
-    ac_length = ac_isnothing ? 0 : length(angle_constraints)
-
-    ustrip(dist_tolerance) <= 0.0 && throw(ArgumentError("dist_tolerance must be greater than zero"))
-    ustrip(vel_tolerance) <= 0.0 && throw(ArgumentError("vel_tolerance must be greater than zero"))
-    (dc_isnothing && ac_isnothing) && throw(ArgumentError("At least one of dist_constraints or angle_constraints must be provided"))
-    (dc_length == 0 && ac_length == 0) && throw(ArgumentError("At least one of dist_constraints or angle_constraints must be non-empty"))
-
-    if !dc_isnothing && dc_length == 0
-        @warn "You passed an empty vector for `dist_constraints`, no distance constraints will be applied."
-        dist_constraints = nothing
+    dc_present = !isnothing(dist_constraints ) && length(dist_constraints ) > 0
+    ac_present = !isnothing(angle_constraints) && length(angle_constraints) > 0
+    if !(dc_present || ac_present)
+        throw(ArgumentError("at least one of dist_constraints or angle_constraints must be " *
+                            "provided to SHAKE_RATTLE"))
     end
 
-    if !ac_isnothing && ac_length == 0
-        @warn "You passed an empty vector for `angle_constraints`, no angle constraints will be applied."
-        angle_constraints = nothing
+    if typeof(ustrip(dist_tolerance)) == Float32 && ustrip(dist_tolerance) <= Float32(1e-6)
+        @warn "Using Float32 with a SHAKE dist_tolerance less than 1e-6, this may lead " *
+              "to convergence issues"
     end
 
-    if float_type(dist_tolerance) isa Float32
-        if ustrip(dist_tolerance) <= Float32(1e-6)
-            @warn "Using Float32 with a SHAKE dist_tolerance less than 1e-6. Might have convergence issues."
-        end
-    end
-
-    if float_type(vel_tolerance) isa Float32
-        if ustrip(vel_tolerance) <= Float32(1e-6)
-            @warn "Using Float32 with a RATTLE vel_tolerance less than 1e-6. Might have convergence issues."
-        end
+    if typeof(ustrip(vel_tolerance)) == Float32 && ustrip(vel_tolerance) <= Float32(1e-6)
+        @warn "Using Float32 with a RATTLE vel_tolerance less than 1e-6, this may lead " *
+              "to convergence issues"
     end
 
     if isa(dist_constraints, AbstractGPUArray) || isa(angle_constraints, AbstractGPUArray)
-        throw(ArgumentError("Constraints should be passd to SHAKE_RATTLE on CPU. Data will be moved to GPU later."))
+        throw(ArgumentError("constraints should be passd to SHAKE_RATTLE on CPU, data will " *
+                            "be moved to GPU later"))
     end
 
-    clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, dist_constraints, angle_constraints)
+    clusters12, clusters23, clusters34, angle_clusters = build_clusters(n_atoms, dist_constraints,
+                                                                        angle_constraints)
 
-    A = typeof(clusters12)
-    B = typeof(clusters23)
-    C = typeof(clusters34)
-    D = typeof(angle_clusters)
-
-    return SHAKE_RATTLE{A, B, C, D, typeof(dist_tolerance), typeof(vel_tolerance), typeof(max_iters)}(
-        clusters12, clusters23, clusters34, angle_clusters, dist_tolerance, vel_tolerance, gpu_block_size, max_iters)
+    return SHAKE_RATTLE(clusters12, clusters23, clusters34, angle_clusters, dist_tolerance,
+                        vel_tolerance, gpu_block_size, max_iters)
 end
 
 function SHAKE_RATTLE(sr::SHAKE_RATTLE, clusters12, clusters23, clusters34, angle_clusters)
-    A = typeof(clusters12)
-    B = typeof(clusters23)
-    C = typeof(clusters34)
-    D = typeof(angle_clusters)
-
-    return SHAKE_RATTLE{A, B, C, D, typeof(sr.dist_tolerance), typeof(sr.vel_tolerance), typeof(sr.max_iters)}(
-        clusters12, clusters23, clusters34, angle_clusters,
-        sr.dist_tolerance, sr.vel_tolerance, sr.gpu_block_size, sr.max_iters)
+    return SHAKE_RATTLE(clusters12, clusters23, clusters34, angle_clusters, sr.dist_tolerance,
+                        sr.vel_tolerance, sr.gpu_block_size, sr.max_iters)
 end
 
 function Base.show(io::IO, sr::SHAKE_RATTLE)

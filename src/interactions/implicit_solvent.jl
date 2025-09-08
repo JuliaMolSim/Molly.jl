@@ -333,7 +333,7 @@ end
 
 Onufriev-Bashford-Case GBSA model implemented as an AtomsCalculators.jl calculator.
 
-Should be used along with a [`Coulomb`](@ref) or [`CoulombReactionField`](@ref) interaction.
+Should be used along with a Coulomb interaction.
 The keyword argument `use_OBC2` determines whether to use parameter set
 I (`false`, the default) or II (`true`).
 """
@@ -439,7 +439,7 @@ end
 
 GBn2 solvation model implemented as an AtomsCalculators.jl calculator.
 
-Should be used along with a [`Coulomb`](@ref) or [`CoulombReactionField`](@ref) interaction.
+Should be used along with a Coulomb interaction.
 """
 struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, TD, TM, DI} <: AbstractGBSA
     offset_radii::VD

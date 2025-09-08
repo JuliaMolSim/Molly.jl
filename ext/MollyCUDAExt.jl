@@ -69,7 +69,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, pairwis
             sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
             sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
         )
-        Hinv = inv(H) 
+        Hinv = inv(H)
         CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
                 buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
                 sys.boundary, Val(D))
@@ -108,7 +108,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, AT,
             sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
             sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
         )
-        Hinv = inv(H) 
+        Hinv = inv(H)
         CUDA.@sync @cuda blocks=n_blocks threads=32 kernel_min_max_triclinic!(
                 buffers.morton_seq, buffers.box_mins, buffers.box_maxs, sys.coords, Hinv, Val(N),
                 sys.boundary, Val(D))
@@ -156,10 +156,10 @@ end
 
 function kernel_min_max!(
     sorted_seq,
-    mins::AbstractArray{C}, 
-    maxs::AbstractArray{C}, 
-    coords, 
-    ::Val{n}, 
+    mins::AbstractArray{C},
+    maxs::AbstractArray{C},
+    coords,
+    ::Val{n},
     boundary,
     ::Val{D}) where {n, C, D}
 
@@ -172,38 +172,38 @@ function kernel_min_max!(
     mins_smem = CuStaticSharedArray(C, (D32, b))
     maxs_smem = CuStaticSharedArray(C, (D32, b))
     r_smem = CuStaticSharedArray(C, (r, b))
- 
+
     if i <= n - r && local_i <= D32
         s_i = sorted_seq[i]
         for k in a:b
-            mins_smem[local_i, k] = coords[s_i][k] 
+            mins_smem[local_i, k] = coords[s_i][k]
             maxs_smem[local_i, k] = coords[s_i][k]
         end
     end
-    sync_threads() 
+    sync_threads()
     if i <= n - r && local_i <= D32
         for p in a:Int32(log2(D32))
             for k in a:b
                 @inbounds begin
                     if local_i % Int32(2^p) == Int32(0)
-                        if mins_smem[local_i, k] > mins_smem[local_i - Int32(2^(p - 1)), k] 
+                        if mins_smem[local_i, k] > mins_smem[local_i - Int32(2^(p - 1)), k]
                             mins_smem[local_i, k] = mins_smem[local_i - Int32(2^(p - 1)), k]
                         end
-                        if maxs_smem[local_i, k] < maxs_smem[local_i - Int32(2^(p - 1)), k] 
+                        if maxs_smem[local_i, k] < maxs_smem[local_i - Int32(2^(p - 1)), k]
                             maxs_smem[local_i, k] = maxs_smem[local_i - Int32(2^(p - 1)), k]
                         end
                     end
                 end
             end
-        end 
-        if local_i == D32 
+        end
+        if local_i == D32
             for k in a:b
                 mins[blockIdx().x, k] = mins_smem[local_i, k]
                 maxs[blockIdx().x, k] = maxs_smem[local_i, k]
             end
         end
 
-    end 
+    end
 
     # Since the remainder array is low-dimensional, we do the scan
     if i > n - r && i <= n && local_i <= r
@@ -221,10 +221,10 @@ function kernel_min_max!(
         for j in a:r
             @inbounds begin
                 for k in a:b
-                    if r_smem[j, k] < xyz_min[k] 
+                    if r_smem[j, k] < xyz_min[k]
                         xyz_min[k] = r_smem[j, k]
                     end
-                    if r_smem[j, k] > xyz_max[k] 
+                    if r_smem[j, k] > xyz_max[k]
                         xyz_max[k] = r_smem[j, k]
                     end
                 end
@@ -232,7 +232,7 @@ function kernel_min_max!(
         end
         if blockIdx().x == ceil(Int32, n/D32) && r != Int32(0)
             for k in a:b
-                mins[blockIdx().x, k] = xyz_min[k] 
+                mins[blockIdx().x, k] = xyz_min[k]
                 maxs[blockIdx().x, k] = xyz_max[k]
             end
         end
@@ -243,11 +243,11 @@ end
 
 function kernel_min_max_triclinic!(
     sorted_seq,
-    mins::AbstractArray{C}, 
-    maxs::AbstractArray{C}, 
-    coords, 
-    Hinv, 
-    ::Val{n}, 
+    mins::AbstractArray{C},
+    maxs::AbstractArray{C},
+    coords,
+    Hinv,
+    ::Val{n},
     boundary,
     ::Val{D}) where {n, C, D}
 
@@ -260,7 +260,7 @@ function kernel_min_max_triclinic!(
     mins_smem = CuStaticSharedArray(C, (D32, b))
     maxs_smem = CuStaticSharedArray(C, (D32, b))
     r_smem = CuStaticSharedArray(C, (r, b))
- 
+
     if i <= n - r && local_i <= D32
         s_i = sorted_seq[i]
         r_i = coords[s_i]
@@ -269,34 +269,34 @@ function kernel_min_max_triclinic!(
             for j in a:b
                 val += Hinv[k,j]*r_i[j]
             end
-            mins_smem[local_i, k] = val 
+            mins_smem[local_i, k] = val
             maxs_smem[local_i, k] = val
         end
     end
-    sync_threads() 
+    sync_threads()
     if i <= n - r && local_i <= D32
         for p in a:Int32(log2(D32))
             for k in a:b
                 @inbounds begin
                     if local_i % Int32(2^p) == Int32(0)
-                        if mins_smem[local_i, k] > mins_smem[local_i - Int32(2^(p - 1)), k] 
+                        if mins_smem[local_i, k] > mins_smem[local_i - Int32(2^(p - 1)), k]
                             mins_smem[local_i, k] = mins_smem[local_i - Int32(2^(p - 1)), k]
                         end
-                        if maxs_smem[local_i, k] < maxs_smem[local_i - Int32(2^(p - 1)), k] 
+                        if maxs_smem[local_i, k] < maxs_smem[local_i - Int32(2^(p - 1)), k]
                             maxs_smem[local_i, k] = maxs_smem[local_i - Int32(2^(p - 1)), k]
                         end
                     end
                 end
             end
-        end 
-        if local_i == D32 
+        end
+        if local_i == D32
             for k in a:b
                 mins[blockIdx().x, k] = mins_smem[local_i, k]
                 maxs[blockIdx().x, k] = maxs_smem[local_i, k]
             end
         end
 
-    end 
+    end
 
     # Since the remainder array is low-dimensional, we do the scan
     if i > n - r && i <= n && local_i <= r
@@ -319,10 +319,10 @@ function kernel_min_max_triclinic!(
         for j in a:r
             @inbounds begin
                 for k in a:b
-                    if r_smem[j, k] < xyz_min[k] 
+                    if r_smem[j, k] < xyz_min[k]
                         xyz_min[k] = r_smem[j, k]
                     end
-                    if r_smem[j, k] > xyz_max[k] 
+                    if r_smem[j, k] > xyz_max[k]
                         xyz_max[k] = r_smem[j, k]
                     end
                 end
@@ -330,7 +330,7 @@ function kernel_min_max_triclinic!(
         end
         if blockIdx().x == ceil(Int32, n/D32) && r != Int32(0)
             for k in a:b
-                mins[blockIdx().x, k] = xyz_min[k] 
+                mins[blockIdx().x, k] = xyz_min[k]
                 maxs[blockIdx().x, k] = xyz_max[k]
             end
         end
@@ -351,7 +351,7 @@ function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
     index_i = i_0_tile + laneid()
     index_j = j_0_tile + laneid()
 
-    if j < n_blocks && i <= j 
+    if j < n_blocks && i <= j
         s_idx_i = sorted_seq[index_i]
         eligible_bitmask = UInt32(0)
         special_bitmask = UInt32(0)
@@ -397,7 +397,7 @@ function compress_boolean_matrices!(sorted_seq, eligible_matrix, special_matrix,
 end
 
 #=
-**The No-neighborlist pairwise force summation kernel (algorithm by Eastman, see https://onlinelibrary.wiley.com/doi/full/10.1002/jcc.21413)**: 
+**The No-neighborlist pairwise force summation kernel (algorithm by Eastman, see https://onlinelibrary.wiley.com/doi/full/10.1002/jcc.21413)**:
 1. Case j < n_blocks && i < j, i.e., `WARPSIZE`×`WARPSIZE` tiles: For such tiles each row is assiged to a different thread in a warp which calculates the
 forces for the entire row in `WARPSIZE` steps. This is done such that some data can be shuffled from `i+1`'th thread to `i`'th thread in each
 subsequent iteration of the force calculation in a row. If `a, b, ...` are different atoms and `1, 2, ...` are order in which each thread calculates
@@ -432,16 +432,16 @@ That's why the calculations are done in the following order:
 ```
 =#
 
-function force_kernel!( 
+function force_kernel!(
     sorted_seq,
-    fs_mat, 
-    mins::AbstractArray{C}, 
+    fs_mat,
+    mins::AbstractArray{C},
     maxs::AbstractArray{C},
-    coords, 
+    coords,
     velocities,
     atoms,
-    ::Val{N}, 
-    r_cut, 
+    ::Val{N},
+    r_cut,
     ::Val{force_units},
     inters_tuple,
     boundary,
@@ -478,8 +478,8 @@ function force_kernel!(
         dist_block = sum(abs2, d_block)
         if dist_block <= r_cut * r_cut
             s_idx_i = sorted_seq[index_i]
-            coords_i = coords[s_idx_i] 
-            vel_i = velocities[s_idx_i] 
+            coords_i = coords[s_idx_i]
+            vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
             d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
             dist_pb = sum(abs2, d_pb)
@@ -487,7 +487,7 @@ function force_kernel!(
             Bool_excl = dist_pb <= r_cut * r_cut
             s_idx_j = sorted_seq[index_j]
             coords_j = coords[s_idx_j]
-            vel_j = velocities[s_idx_j] 
+            vel_j = velocities[s_idx_j]
             shuffle_idx = laneid()
             atoms_j = atoms[s_idx_j]
             atype_j = atoms_j.atom_type
@@ -513,7 +513,7 @@ function force_kernel!(
                 acharge_j = CUDA.shfl_sync(0xFFFFFFFF, acharge_j, laneid() + a, warpsize())
                 aσ_j = CUDA.shfl_sync(0xFFFFFFFF, aσ_j, laneid() + a, warpsize())
                 aϵ_j = CUDA.shfl_sync(0xFFFFFFFF, aϵ_j, laneid() + a, warpsize())
-                
+
                 atoms_j_shuffle = Atom(atype_j, aindex_j, amass_j, acharge_j, aσ_j, aϵ_j)
                 dr = vector(coords_j, coords_i, boundary)
                 r2 = sum(abs2, dr)
@@ -540,13 +540,13 @@ function force_kernel!(
             sync_threads()
             @inbounds for k in a:b
                 CUDA.atomic_add!(
-                    pointer(fs_mat, s_idx_i * b - (b - k)), 
+                    pointer(fs_mat, s_idx_i * b - (b - k)),
                     -force_smem[laneid(), k]
-                ) 
+                )
                 CUDA.atomic_add!(
-                    pointer(fs_mat, s_idx_j * b - (b - k)), 
+                    pointer(fs_mat, s_idx_j * b - (b - k)),
                     -opposites_sum[laneid(), k]
-                ) 
+                )
             end
         end
     end
@@ -559,7 +559,7 @@ function force_kernel!(
         d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
         dist_block = sum(abs2, d_block)
 
-        if dist_block <= r_cut * r_cut 
+        if dist_block <= r_cut * r_cut
             s_idx_i = sorted_seq[index_i]
             coords_i = coords[s_idx_i]
             vel_i = velocities[s_idx_i]
@@ -572,7 +572,7 @@ function force_kernel!(
             special_bitmask = UInt32(0)
             eligible_bitmask = eligible_compressed[laneid(), i, j]
             special_bitmask = special_compressed[laneid(), i, j]
-            
+
             for m in a:r
                 s_idx_j = sorted_seq[j_0_tile + m]
                 coords_j = coords[s_idx_j]
@@ -597,7 +597,7 @@ function force_kernel!(
                 @inbounds for k in a:b
                     force_smem[laneid(), k] += ustrip(f[k])
                     CUDA.atomic_add!(
-                        pointer(fs_mat, s_idx_j * b - (b - k)), 
+                        pointer(fs_mat, s_idx_j * b - (b - k)),
                         ustrip(f[k])
                     )
                 end
@@ -606,9 +606,9 @@ function force_kernel!(
             # Sum contributions of the r-block to the other standard blocks
             @inbounds for k in a:b
                 CUDA.atomic_add!(
-                    pointer(fs_mat, s_idx_i * b - (b - k)), 
+                    pointer(fs_mat, s_idx_i * b - (b - k)),
                     -force_smem[laneid(), k]
-                ) 
+                )
             end
         end
     end
@@ -643,7 +643,7 @@ function force_kernel!(
                 boundary,
                 vel_i, vel_j,
                 step_n) : zero(SVector{D, T})
-            
+
             @inbounds for k in a:b
                 force_smem[laneid(), k] += ustrip(f[k])
                 opposites_sum[m, k] -= ustrip(f[k])
@@ -654,9 +654,9 @@ function force_kernel!(
         @inbounds for k in a:b
             # In this case i == j, so we can call atomic_add! only once
             CUDA.atomic_add!(
-                pointer(fs_mat, s_idx_i * b - (b - k)), 
+                pointer(fs_mat, s_idx_i * b - (b - k)),
                 -force_smem[laneid(), k] - opposites_sum[laneid(), k]
-            ) 
+            )
         end
     end
 
@@ -681,7 +681,7 @@ function force_kernel!(
                 excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-                
+
                 f = condition ? sum_pairwise_forces(
                     inters_tuple,
                     atoms_i, atoms_j,
@@ -701,9 +701,9 @@ function force_kernel!(
             sync_threads()
             @inbounds for k in a:b
                 CUDA.atomic_add!(
-                    pointer(fs_mat, s_idx_i * b - (b - k)), 
+                    pointer(fs_mat, s_idx_i * b - (b - k)),
                     -force_smem[laneid(), k] - opposites_sum[laneid(), k]
-                ) 
+                )
             end
         end
     end
@@ -711,16 +711,16 @@ function force_kernel!(
     return nothing
 end
 
-function energy_kernel!( 
-    sorted_seq, 
+function energy_kernel!(
+    sorted_seq,
     energy_nounits,
-    mins::AbstractArray{C}, 
+    mins::AbstractArray{C},
     maxs::AbstractArray{C},
-    coords, 
+    coords,
     velocities,
     atoms,
-    ::Val{N}, 
-    r_cut, 
+    ::Val{N},
+    r_cut,
     ::Val{energy_units},
     inters_tuple,
     boundary,
@@ -753,8 +753,8 @@ function energy_kernel!(
         dist_block = sum(abs2, d_block)
         if dist_block <= r_cut * r_cut
             s_idx_i = sorted_seq[index_i]
-            coords_i = coords[s_idx_i] 
-            vel_i = velocities[s_idx_i] 
+            coords_i = coords[s_idx_i]
+            vel_i = velocities[s_idx_i]
             atoms_i = atoms[s_idx_i]
             d_pb = boxes_dist(coords_i, coords_i, r_min_j, r_max_j, boundary)
             dist_pb = sum(abs2, d_pb)
@@ -762,7 +762,7 @@ function energy_kernel!(
             Bool_excl = dist_pb <= r_cut * r_cut
             s_idx_j = sorted_seq[index_j]
             coords_j = coords[s_idx_j]
-            vel_j = velocities[s_idx_j] 
+            vel_j = velocities[s_idx_j]
             shuffle_idx = laneid()
             atoms_j = atoms[s_idx_j]
             atype_j = atoms_j.atom_type
@@ -788,7 +788,7 @@ function energy_kernel!(
                 acharge_j = CUDA.shfl_sync(0xFFFFFFFF, acharge_j, laneid() + a, warpsize())
                 aσ_j = CUDA.shfl_sync(0xFFFFFFFF, aσ_j, laneid() + a, warpsize())
                 aϵ_j = CUDA.shfl_sync(0xFFFFFFFF, aϵ_j, laneid() + a, warpsize())
-                
+
                 atoms_j_shuffle = Atom(atype_j, aindex_j, amass_j, acharge_j, aσ_j, aϵ_j)
                 dr = vector(coords_j, coords_i, boundary)
                 r2 = sum(abs2, dr)
@@ -819,7 +819,7 @@ function energy_kernel!(
         d_block = boxes_dist(r_min_i, r_max_i, r_min_j, r_max_j, boundary)
         dist_block = sum(abs2, d_block)
 
-        if dist_block <= r_cut * r_cut 
+        if dist_block <= r_cut * r_cut
             s_idx_i = sorted_seq[index_i]
             coords_i = coords[s_idx_i]
             vel_i = velocities[s_idx_i]
@@ -832,7 +832,7 @@ function energy_kernel!(
             special_bitmask = UInt32(0)
             eligible_bitmask = eligible_compressed[laneid(), i, j]
             special_bitmask = special_compressed[laneid(), i, j]
-            
+
             for m in a:r
                 s_idx_j = sorted_seq[j_0_tile + m]
                 coords_j = coords[s_idx_j]
@@ -914,7 +914,7 @@ function energy_kernel!(
                 excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
                 condition = (excl & 0x1) == true && r2 <= r_cut * r_cut
-                
+
                 pe = condition ? sum_pairwise_potentials(
                     inters_tuple,
                     atoms_i, atoms_j,

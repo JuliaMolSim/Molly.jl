@@ -605,9 +605,6 @@ function System(;
             end
         end
     end
-    # Automatically disbales interactions between constrained atoms
-    # and whatever else is implemented for the constraint type.
-    # Constraints moved to GPU here if necessary.
     constraints = Tuple(setup_constraints!(ca, neighbor_finder, AT) for ca in constraints)
     CN = typeof(constraints)
 
@@ -1110,13 +1107,10 @@ is_on_gpu(::Union{System{D, AT}, ReplicaSystem{D, AT}, AT}) where {D, AT} = AT <
 """
     float_type(sys)
     float_type(boundary)
-    float_type(unitful_quantity)
 
-The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box or unitful uses.
+The float type a [`System`](@ref), [`ReplicaSystem`](@ref) or bounding box uses.
 """
 float_type(::Union{System{D, AT, T}, ReplicaSystem{D, AT, T}}) where {D, AT, T} = T
-float_type(::Unitful.AbstractQuantity{T}) where {T} = T
-float_type(::Type{<:Unitful.AbstractQuantity{T}}) where {T} = T
 
 """
     masses(sys)

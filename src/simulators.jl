@@ -165,7 +165,6 @@ end
         end
 
         sys.coords .+= sys.velocities .* sim.dt .+ accels_t .* dt_sq_div2
-
         using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
                                                          sim.dt; n_threads=n_threads)
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
@@ -236,9 +235,7 @@ end
     forces_t = zero_forces(sys)
     forces_buffer = init_forces_buffer!(sys, n_threads)
     accels_t = forces_t ./ masses(sys)
-
     using_constraints = (length(sys.constraints) > 0)
-
     if using_constraints
         cons_coord_storage = zero(sys.coords)
     end
@@ -394,7 +391,6 @@ end
     accels_t = forces_t ./ masses(sys)
     noise = zero(sys.velocities)
     using_constraints = (length(sys.constraints) > 0)
-
     if using_constraints
         cons_coord_storage = zero(sys.coords)
         cons_vel_storage = zero(sys.velocities)
@@ -409,7 +405,7 @@ end
         apply_velocity_constraints!(sys; n_threads=n_threads)
 
         if using_constraints
-            copy!(cons_coord_storage, sys.coords)
+            cons_coord_storage .= sys.coords
         end
         sys.coords .+= sys.velocities .* dt_div2
 
