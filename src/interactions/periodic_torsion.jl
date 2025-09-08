@@ -10,6 +10,8 @@ The potential energy is defined as
 ```math
 V(\phi) = \sum_{n=1}^N k_n (1 + \cos(n \phi - \phi_{s,n}))
 ```
+
+Only compatible with 3D systems.
 """
 struct PeriodicTorsion{N, T, E}
     periodicities::NTuple{N, Int}

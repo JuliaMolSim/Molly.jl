@@ -427,7 +427,7 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
     end
 
     if AT <: AbstractGPUArray
-        charge_grid_buffer = to_device(zeros(T, size(charge_grid)), AT)   
+        charge_grid_buffer = to_device(zeros(T, size(charge_grid)), AT)
         recip_conv_buffer  = to_device(zeros(T, mesh_dims...), AT)
         excluded_buffer_Fs = to_device(zeros(T, 3, n_atoms), AT)
         excluded_buffer_Es = to_device(zeros(T, length(excluded_pairs)), AT)

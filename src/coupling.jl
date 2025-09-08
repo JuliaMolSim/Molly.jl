@@ -758,12 +758,11 @@ mutable struct MonteCarloBarostat{T, P, K, V}
     n_accepted::Int
 end
 
-function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp, boundary; coupling_type::Symbol = :isotropic,
+function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp, boundary::AbstractBoundary{<:Any, FT}; coupling_type::Symbol = :isotropic,
                             n_steps=30, n_iterations=1, scale_factor=0.01,
-                            scale_increment=1.1, max_volume_frac=0.3, trial_find_neighbors=false) where {PT}
+                            scale_increment=1.1, max_volume_frac=0.3, trial_find_neighbors=false) where {PT, FT}
     
-    T = float_type(boundary)
-    volume_scale = volume(boundary) * T(scale_factor)
+    volume_scale = volume(boundary) * FT(scale_factor)
 
     if !(coupling_type ∈ (:isotropic, :semiisotropic, :anisotropic))
         throw(ArgumentError(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic")))
@@ -782,8 +781,6 @@ function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp, bounda
         # Use the caller’s units, but convert internal scalars consistently
         P_units = unit(pressure)
         p = ustrip(uconvert(P_units, pressure))
-
-        FT = typeof(p)
 
         P = SMatrix{3,3,FT}(p,0,0, 0,p,0, 0,0,p) .* P_units
 

@@ -21,7 +21,7 @@ using GPUArrays
 using Graphs
 using KernelAbstractions
 using NearestNeighbors
-using PeriodicTable
+import PeriodicTable
 using SimpleCrystals
 using SpecialFunctions
 using Unitful
@@ -58,10 +58,8 @@ include("interactions/ewald.jl")
 include("interactions/implicit_solvent.jl")
 include("interactions/muller_brown.jl")
 include("energy.jl")
-include("constraints/constraints_kernel_helper.jl")
 include("constraints/constraints.jl")
 include("constraints/shake.jl")
-include("constraints/shake_kernels.jl")
 include("simulators.jl")
 include("coupling.jl")
 include("neighbors.jl")

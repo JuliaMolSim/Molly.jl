@@ -436,8 +436,8 @@ Read a Gromacs coordinate file and a Gromacs topology file with all
 includes collapsed into one file.
 
 Gromacs file reading should be considered experimental.
-The `implicit_solvent`, `kappa` and `rename_terminal_res` keyword arguments
-are not available when reading Gromacs files.
+The `rename_terminal_res` keyword argument is not available when reading
+Gromacs files.
 
 # Arguments
 - `boundary=nothing`: the bounding box used for simulation, read from the
@@ -529,6 +529,7 @@ function System(coord_file::AbstractString,
     eligible = trues(n_atoms, n_atoms)
     special = falses(n_atoms, n_atoms)
     torsion_n_terms = 6
+    weight_14_coulomb, weight_14_lj = force_field.weight_14_coulomb, force_field.weight_14_lj
 
     top_bonds     = Vector{Int}[is for is in eachcol(Int.(Chemfiles.bonds(    top)))]
     top_angles    = Vector{Int}[is for is in eachcol(Int.(Chemfiles.angles(   top)))]
@@ -857,115 +858,6 @@ function System(coord_file::AbstractString,
         energy_units = NoUnits
     end
 
-    using_neighbors = (neighbor_finder_type != NoNeighborFinder)
-    lj = LennardJones(
-        cutoff=DistanceCutoff(T(dist_cutoff)),
-        use_neighbors=using_neighbors,
-        weight_special=force_field.weight_14_lj,
-    )
-    if nonbonded_method == "none"
-        coul = Coulomb(
-            cutoff=DistanceCutoff(T(dist_cutoff)),
-            use_neighbors=using_neighbors,
-            weight_special=force_field.weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-        )
-        general_inters_ewald = ()
-    elseif nonbonded_method == "cutoff"
-        coul = CoulombReactionField(
-            dist_cutoff=T(dist_cutoff),
-            solvent_dielectric=T(crf_solvent_dielectric),
-            use_neighbors=using_neighbors,
-            weight_special=force_field.weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-        )
-        general_inters_ewald = ()
-    elseif nonbonded_method in ("ewald", "pme")
-        coul = CoulombEwald(
-            dist_cutoff=T(dist_cutoff),
-            error_tol=T(ewald_error_tol),
-            use_neighbors=using_neighbors,
-            weight_special=force_field.weight_14_coulomb,
-            coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
-            approximate_erfc=approximate_pme,
-        )
-        if nonbonded_method == "ewald"
-            ewald = Ewald(
-                T(dist_cutoff);
-                error_tol=T(ewald_error_tol),
-                eligible=eligible,
-                special=special,
-            )
-        else
-            ewald = PME(
-                T(dist_cutoff),
-                atoms,
-                boundary_used;
-                error_tol=T(ewald_error_tol),
-                eligible=eligible,
-                special=special,
-                grad_safe=grad_safe,
-            )
-        end
-        general_inters_ewald = (ewald,)
-    else
-        throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
-                            "\"none\", \"cutoff\", \"pme\" and \"ewald\""))
-    end
-    pairwise_inters = (lj, coul)
-
-    # All torsions should have the same number of terms for speed, GPU compatibility
-    #   and for taking gradients
-    # For now always pad to 6 terms
-    torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                            proper=t.proper, n_terms=torsion_n_terms) for t in torsions.inters]
-    improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                            proper=t.proper, n_terms=torsion_n_terms) for t in impropers.inters]
-
-    # Only add present interactions and ensure that array types are concrete
-    specific_inter_array = []
-    if length(bonds.is) > 0
-        push!(specific_inter_array, InteractionList2Atoms(
-            to_device(bonds.is, AT),
-            to_device(bonds.js, AT),
-            to_device([bonds.inters...], AT),
-            bonds.types,
-        ))
-        topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
-    else
-        topology = nothing
-    end
-    if length(angles.is) > 0
-        push!(specific_inter_array, InteractionList3Atoms(
-            to_device(angles.is, AT),
-            to_device(angles.js, AT),
-            to_device(angles.ks, AT),
-            to_device([angles.inters...], AT),
-            angles.types,
-        ))
-    end
-    if length(torsions.is) > 0
-        push!(specific_inter_array, InteractionList4Atoms(
-            to_device(torsions.is, AT),
-            to_device(torsions.js, AT),
-            to_device(torsions.ks, AT),
-            to_device(torsions.ls, AT),
-            to_device(torsion_inters_pad, AT),
-            torsions.types,
-        ))
-    end
-    if length(impropers.is) > 0
-        push!(specific_inter_array, InteractionList4Atoms(
-            to_device(impropers.is, AT),
-            to_device(impropers.js, AT),
-            to_device(impropers.ks, AT),
-            to_device(impropers.ls, AT),
-            to_device(improper_inters_pad, AT),
-            impropers.types,
-        ))
-    end
-    specific_inter_lists = tuple(specific_inter_array...)
-
     # Convert from Å
     if units
         coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(Chemfiles.positions(frame))]
@@ -976,88 +868,34 @@ function System(coord_file::AbstractString,
         coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
     end
     coords = wrap_coords.(coords, (boundary_used,))
-    coords_dev = to_device(coords, AT)
 
-    if neighbor_finder_type == NoNeighborFinder
-        neighbor_finder = NoNeighborFinder()
-    elseif neighbor_finder_type in (nothing, GPUNeighborFinder) && uses_gpu_neighbor_finder(AT)
-        neighbor_finder = GPUNeighborFinder(
-            eligible=to_device(eligible, AT),
-            dist_cutoff=T(dist_cutoff), # Neighbors are computed each step so no buffer is needed
-            special=to_device(special, AT),
-        )
-    elseif neighbor_finder_type in (nothing, DistanceNeighborFinder) &&
-                (AT <: AbstractGPUArray || has_infinite_boundary(boundary_used))
-        neighbor_finder = DistanceNeighborFinder(
-            eligible=to_device(eligible, AT),
-            special=to_device(special, AT),
-            n_steps=10,
-            dist_cutoff=T(dist_neighbors),
-        )
-    elseif neighbor_finder_type in (nothing, CellListMapNeighborFinder) && !(AT <: AbstractGPUArray)
-        neighbor_finder = CellListMapNeighborFinder(
-            eligible=eligible,
-            special=special,
-            n_steps=10,
-            x0=coords,
-            unit_cell=boundary_used,
-            dist_cutoff=T(dist_neighbors),
-        )
-    else
-        neighbor_finder = neighbor_finder_type(
-            eligible=to_device(eligible, AT),
-            special=to_device(special, AT),
-            n_steps=10,
-            dist_cutoff=T(dist_neighbors),
-        )
-    end
+    # All torsions should have the same number of terms for speed, GPU compatibility
+    #   and for taking gradients
+    # For now always pad to 6 terms
+    torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                            proper=t.proper, n_terms=torsion_n_terms)
+                                            for t in torsions.inters]
+    improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                            proper=t.proper, n_terms=torsion_n_terms)
+                                            for t in impropers.inters]
 
-    if isnothing(velocities)
-        if units
-            vels = zero(ustrip_vec.(coords_dev))u"nm * ps^-1"
-        else
-            vels = zero(coords_dev)
+    return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
+                  loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
+                  improper_inters_pad, eligible, special, units, dist_cutoff, nonbonded_method,
+                  ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent,
+                  kappa, grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb)
+end
+
+function element_from_mass(atom_mass, element_names, element_masses)
+    atom_mass_nounits = ustrip(atom_mass)
+    el = "?"
+    for (el_name, el_mass) in zip(element_names, element_masses)
+        if isapprox(atom_mass_nounits * u"u", el_mass; atol=0.01u"u")
+            el = el_name
+            break
         end
-    else
-        vels = velocities
     end
-
-    if !isnothing(implicit_solvent)
-        if implicit_solvent == "obc1"
-            general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds;
-                                kappa=kappa, use_OBC2=false),)
-        elseif implicit_solvent == "obc2"
-            general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds;
-                                kappa=kappa, use_OBC2=true),)
-        elseif implicit_solvent == "gbn2"
-            general_inters_is = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
-        else
-            throw(ArgumentError("unknown implicit solvent model \"$implicit_solvent\", " *
-                                "options are nothing, \"obc1\", \"obc2\" and \"gbn2\""))
-        end
-    else
-        general_inters_is = ()
-    end
-    general_inters = (general_inters_ewald..., general_inters_is...)
-
-    k = units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k)
-    return System(
-        atoms=atoms,
-        coords=coords_dev,
-        boundary=boundary_used,
-        velocities=vels,
-        atoms_data=atoms_data,
-        topology=topology,
-        pairwise_inters=pairwise_inters,
-        specific_inter_lists=specific_inter_lists,
-        general_inters=general_inters,
-        neighbor_finder=neighbor_finder,
-        loggers=loggers,
-        force_units=(units ? u"kJ * mol^-1 * nm^-1" : NoUnits),
-        energy_units=(units ? u"kJ * mol^-1" : NoUnits),
-        k=k,
-        data=data,
-    )
+    return el
 end
 
 function System(T::Type,
@@ -1076,6 +914,8 @@ function System(T::Type,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing,
+                implicit_solvent=nothing,
+                kappa=0.0u"nm^-1",
                 grad_safe::Bool=false) where AT <: AbstractArray
     if dist_buffer < zero(dist_buffer)
         throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
@@ -1097,6 +937,9 @@ function System(T::Type,
     angles = InteractionList3Atoms(HarmonicAngle)
     possible_torsions = Tuple{Int, Int, Int, Int}[]
     torsions = InteractionList4Atoms(RBTorsion)
+    impropers = InteractionList4Atoms(RBTorsion)
+    torsion_n_terms = 6
+    weight_14_lj, weight_14_coulomb = T(0.5), T(0.5)
 
     if units
         force_units = u"kJ * mol^-1 * nm^-1"
@@ -1105,6 +948,9 @@ function System(T::Type,
         force_units = NoUnits
         energy_units = NoUnits
     end
+
+    element_names  = [el.symbol      for el in PeriodicTable.elements]
+    element_masses = [el.atomic_mass for el in PeriodicTable.elements]
 
     current_field = ""
     for l in eachline(top_file)
@@ -1177,10 +1023,11 @@ function System(T::Type,
                 atom_mass = parse(T, c[8])
             end
             atom_index = length(atoms_abst) + 1
+            el = element_from_mass(atom_mass, element_names, element_masses)
             push!(atoms_abst, Atom(index=atom_index, mass=atom_mass, charge=ch, σ=atomtypes[attype].σ,
                                 ϵ=atomtypes[attype].ϵ))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=c[5], res_number=parse(Int, c[3]),
-                                        res_name=c[4]))
+                                        res_name=c[4], element=el))
         elseif current_field == "bonds"
             i, j = parse.(Int, c[1:2])
             bn = "$(atoms_data[i].atom_type)/$(atoms_data[j].atom_type)"
@@ -1288,11 +1135,13 @@ function System(T::Type,
             if attype == "CL" # Temp hack to fix charges
                 temp_charge = T(-1.0)
             end
+            atom_mass = atomtypes[attype].mass
             atom_index = length(atoms_abst) + 1
-            push!(atoms_abst, Atom(index=atom_index, mass=atomtypes[attype].mass, charge=temp_charge,
+            el = element_from_mass(atom_mass, element_names, element_masses)
+            push!(atoms_abst, Atom(index=atom_index, mass=atom_mass, charge=temp_charge,
                                 σ=atomtypes[attype].σ, ϵ=atomtypes[attype].ϵ))
             push!(atoms_data, AtomData(atom_type=attype, atom_name=atname, res_number=parse(Int, l[1:5]),
-                                        res_name=strip(l[6:10])))
+                                        res_name=strip(l[6:10]), element=el))
 
             # Add O-H bonds and H-O-H angle in water
             if atname == "OW"
@@ -1345,37 +1194,56 @@ function System(T::Type,
         coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
     end
     coords = wrap_coords.(coords, (boundary_used,))
-    coords_dev = to_device(coords, AT)
 
+    torsion_inters_pad = torsions.inters
+    improper_inters_pad = impropers.inters
+
+    return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
+                  loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
+                  improper_inters_pad, eligible, special, units, dist_cutoff, nonbonded_method,
+                  ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent,
+                  kappa, grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb)
+end
+
+function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
+    return System(DefaultFloat, coord_file, top_file; kwargs...)
+end
+
+function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
+                loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
+                improper_inters_pad, eligible, special, units, dist_cutoff, nonbonded_method,
+                ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent,
+                kappa, grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb)
+    coords_dev = to_device(coords, AT)
     using_neighbors = (neighbor_finder_type != NoNeighborFinder)
     lj = LennardJones(
         cutoff=DistanceCutoff(T(dist_cutoff)),
         use_neighbors=using_neighbors,
-        weight_special=T(0.5),
+        weight_special=weight_14_lj,
     )
     if nonbonded_method == "none"
         coul = Coulomb(
             cutoff=DistanceCutoff(T(dist_cutoff)),
             use_neighbors=using_neighbors,
-            weight_special=T(0.5),
+            weight_special=weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
-        general_inters = ()
+        general_inters_ewald = ()
     elseif nonbonded_method == "cutoff"
         coul = CoulombReactionField(
             dist_cutoff=T(dist_cutoff),
             solvent_dielectric=T(crf_solvent_dielectric),
             use_neighbors=using_neighbors,
-            weight_special=T(0.5),
+            weight_special=weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
-        general_inters = ()
+        general_inters_ewald = ()
     elseif nonbonded_method in ("ewald", "pme")
         coul = CoulombEwald(
             dist_cutoff=T(dist_cutoff),
             error_tol=T(ewald_error_tol),
             use_neighbors=using_neighbors,
-            weight_special=T(0.5),
+            weight_special=weight_14_coulomb,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
             approximate_erfc=approximate_pme,
         )
@@ -1397,7 +1265,7 @@ function System(T::Type,
                 grad_safe=grad_safe,
             )
         end
-        general_inters = (ewald,)
+        general_inters_ewald = (ewald,)
     else
         throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
                             "\"none\", \"cutoff\", \"pme\" and \"ewald\""))
@@ -1413,7 +1281,7 @@ function System(T::Type,
             to_device([bonds.inters...], AT),
             bonds.types,
         ))
-        topology = MolecularTopology(bonds.is, bonds.js, n_atoms)
+        topology = MolecularTopology(bonds.is, bonds.js, length(coords_dev))
     else
         topology = nothing
     end
@@ -1432,8 +1300,18 @@ function System(T::Type,
             to_device(torsions.js, AT),
             to_device(torsions.ks, AT),
             to_device(torsions.ls, AT),
-            to_device([torsions.inters...], AT),
+            to_device(torsion_inters_pad, AT),
             torsions.types,
+        ))
+    end
+    if length(impropers.is) > 0
+        push!(specific_inter_array, InteractionList4Atoms(
+            to_device(impropers.is, AT),
+            to_device(impropers.js, AT),
+            to_device(impropers.ks, AT),
+            to_device(impropers.ls, AT),
+            to_device(improper_inters_pad, AT),
+            impropers.types,
         ))
     end
     specific_inter_lists = tuple(specific_inter_array...)
@@ -1479,10 +1357,25 @@ function System(T::Type,
             vels = zero(coords_dev)
         end
     else
-        vels = velocities
+        vels = to_device(velocities, AT)
     end
 
-    k = units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k)
+    if !isnothing(implicit_solvent)
+        if implicit_solvent in ("obc1", "obc2")
+            general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds;
+                                 kappa=kappa, use_OBC2=(implicit_solvent == "obc2")),)
+        elseif implicit_solvent == "gbn2"
+            general_inters_is = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
+        else
+            throw(ArgumentError("unknown implicit solvent model \"$implicit_solvent\", " *
+                                "options are nothing, \"obc1\", \"obc2\" and \"gbn2\""))
+        end
+    else
+        general_inters_is = ()
+    end
+    general_inters = (general_inters_ewald..., general_inters_is...)
+
+    k = (units ? Unitful.Na * Unitful.k : ustrip(u"kJ * K^-1 * mol^-1", Unitful.Na * Unitful.k))
     return System(
         atoms=atoms,
         coords=coords_dev,
@@ -1500,10 +1393,6 @@ function System(T::Type,
         k=k,
         data=data,
     )
-end
-
-function System(coord_file::AbstractString, top_file::AbstractString; kwargs...)
-    return System(DefaultFloat, coord_file, top_file; kwargs...)
 end
 
 """

@@ -107,6 +107,7 @@ sys.pairwise_inters
 sys.constraints
 sys.neighbor_finder
 sys.loggers
+sys.total_mass
 
 # Write out the system to a file
 write_structure("file.pdb", sys)
@@ -1345,7 +1346,6 @@ This diagram demonstrates the four allowed constraint types.
 These constraints provide enough flexibility to constrain all hydrogen atoms on an organic molecule as well as water molecules.  
 
 All velocity constraints and diatomic distance constraints are solved analytically while larger constraints are linearized and solved iteratively via matrix inverse. The direct matrix inverse does not scale well beyond clusters with 3 constraints and is not implemented. Other methods can be used to solve larger constraint clusters but Molly does not support them. 
-
 
 ## Neighbor finders
 

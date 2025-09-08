@@ -520,7 +520,7 @@ end
     boundary = CubicBoundary(2.0u"nm")
     simulator = VelocityVerlet(dt=0.002u"ps")
     pairwise_inter_types = (
-        LennardJones(use_neighbors=true), 
+        LennardJones(use_neighbors=true),
         LennardJones(use_neighbors=false),
         LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),
         LennardJones(cutoff=ShiftedPotentialCutoff(1.0u"nm"), use_neighbors=true),
@@ -541,8 +541,9 @@ end
                                                     dist_cutoff=1.2u"nm")
         end
 
-        atoms = [Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]  
-        coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")                                             
+        atoms = [Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1")
+                 for i in 1:n_atoms]
+        coords = place_atoms(n_atoms, boundary; min_dist=0.2u"nm")
         velocities = [random_velocity(10.0u"g/mol", temp) .* 0.01 for i in 1:n_atoms]
 
         sys = System(
@@ -704,373 +705,6 @@ end
         @test maximum(dists[1:n_atoms_res]) < 0.1u"nm"
         @test median(dists[(n_atoms_res + 1):end]) > 0.2u"nm"
     end
-end
-
-@testset "Constraints diatomic" begin
-    r_cut = 8.5u"Å"
-    temp = 300.0u"K"
-    atom_mass = 1.00794u"g/mol"
-    n_atoms = 400
-    hydrogen_data = readdlm(joinpath(data_dir, "initial_hydrogen_data.atom"); skipstart=9)
-    coords_matrix = hydrogen_data[:, 2:4]
-    vel_matrix = hydrogen_data[:, 5:7]
-
-    simulators = (
-        VelocityVerlet(dt=0.002u"ps"),
-        Verlet(dt=0.002u"ps"),
-        StormerVerlet(dt=0.002u"ps"),
-        Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
-    )
-
-    bond_length = 0.74u"Å"
-    constraints = [DistanceConstraint(j, j + 1, bond_length) for j in 1:2:n_atoms]
-    atoms = [Atom(index=j, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for j in 1:n_atoms]
-    cons = SHAKE_RATTLE(n_atoms, 1e-8u"Å", 1e-8u"Å^2 * ps^-1"; dist_constraints = constraints)
-
-    @test length(cons.clusters12) == (n_atoms ÷ 2)
-
-    boundary = CubicBoundary(200.0u"Å")
-    lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
-    neighbor_finder = DistanceNeighborFinder(
-        eligible=trues(n_atoms, n_atoms),
-        dist_cutoff=1.5*r_cut,
-    )
-
-    for simulator in simulators
-        coords = [SVector(coords_matrix[j, 1]u"Å", coords_matrix[j, 2]u"Å", coords_matrix[j, 3]u"Å") for j in 1:n_atoms]
-        velocities = [1000 * SVector(vel_matrix[j, :]u"Å/ps"...) for j in 1:n_atoms]
-
-        sys = System(
-            atoms=atoms,
-            coords=coords,
-            boundary=boundary,
-            velocities=velocities,
-            pairwise_inters=(lj,),
-            neighbor_finder=neighbor_finder,
-            constraints=(cons,),
-            energy_units=u"kcal * mol^-1",
-            force_units=u"kcal * mol^-1 * Å^-1",
-        )
-
-        simulate!(sys, simulator, 10_000)
-
-        @test check_position_constraints(sys, cons)
-        if simulator isa VelocityVerlet
-            @test check_velocity_constraints(sys, cons)
-        end
-    end
-end
-
-@testset "Constraints triatomic" begin
-    n_atoms = 30
-    atom_mass = 10.0u"g/mol"
-    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    boundary = CubicBoundary(2.0u"nm")
-
-    coords = place_atoms(n_atoms ÷ 3, boundary, min_dist=0.3u"nm")
-
-    for i in 1:(n_atoms ÷ 3)
-        push!(coords, coords[i] .+ [0.13, 0.0, 0.0]u"nm")
-    end
-
-    for i in 1:(n_atoms ÷ 3)
-        push!(coords, coords[i] .+ [0.26, 0.0, 0.0]u"nm")
-    end
-
-    temp = 100.0u"K"
-    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-
-    neighbor_finder = DistanceNeighborFinder(eligible=trues(n_atoms, n_atoms),n_steps=10, dist_cutoff=1.5u"nm")
-    bond_length = 0.13u"nm"
-
-    is = collect(1:(2 * (n_atoms ÷ 3)))
-    js = collect(((n_atoms ÷ 3) + 1):n_atoms)
-    constraints = [DistanceConstraint(is[idx], js[idx], bond_length) for idx in eachindex(is)]
-    cons = SHAKE_RATTLE(n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps"; dist_constraints = constraints)
-
-    @test length(cons.clusters23) == (n_atoms ÷ 3)
-
-    sys = System(
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
-        constraints=(cons,),
-        neighbor_finder=neighbor_finder
-    )
-
-    old_coords = copy(sys.coords)
-
-    for i in eachindex(sys.coords)
-        sys.coords[i]     += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
-        sys.velocities[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm/ps"
-    end
-
-    apply_position_constraints!(sys, old_coords)
-    apply_velocity_constraints!(sys)
-
-    @test check_position_constraints(sys, cons)
-    @test check_velocity_constraints(sys, cons)
-end
-
-@testset "Constraints 4-atom" begin
-    n_atoms = 40
-    atom_mass = 10.0u"g/mol"
-    #central atom
-    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    boundary = CubicBoundary(3.0u"nm")
-
-    coords = place_atoms(n_atoms ÷ 4, boundary, min_dist=0.3u"nm")
-
-    for i in 1:(n_atoms ÷ 4)
-        push!(coords, coords[i] .+ [0.13, 0.0, 0.0]u"nm")
-    end
-
-    for i in 1:(n_atoms ÷ 4)
-        push!(coords, coords[i] .- [0.13, 0.0, 0.0]u"nm")
-    end
-
-    for i in 1:(n_atoms ÷ 4)
-        push!(coords, coords[i] .+ [0.0, 0.13, 0.0]u"nm")
-    end
-
-    temp = 100.0u"K"
-    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-
-    neighbor_finder = DistanceNeighborFinder(
-        eligible=trues(n_atoms, n_atoms),
-        n_steps=10,
-        dist_cutoff=1.5u"nm"
-    )
-    bond_length = 0.13u"nm"
-
-    is = repeat(1:(n_atoms ÷ 4), 3) # central atom in every cluster
-    js = collect(((n_atoms ÷ 4) + 1):n_atoms)
-    constraints = [DistanceConstraint(is[idx], js[idx], bond_length) for idx in eachindex(is)]
-    cons = SHAKE_RATTLE(n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps"; dist_constraints = constraints)
-
-    @test length(cons.clusters34) == (n_atoms ÷ 4)
-
-    sys = System(
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
-        constraints=(cons,),
-        neighbor_finder=neighbor_finder
-    )
-
-    old_coords = copy(sys.coords)
-
-    for i in eachindex(sys.coords)
-        sys.coords[i]     += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
-        sys.velocities[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm/ps"
-    end
-
-    apply_position_constraints!(sys, old_coords)
-    apply_velocity_constraints!(sys)
-
-    @test check_position_constraints(sys, cons)
-    @test check_velocity_constraints(sys, cons)
-end
-
-@testset "Constraints Angle" begin
-    n_atoms = 30
-    atom_mass = 10.0u"g/mol"
-    #central atom
-    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    boundary = CubicBoundary(3.0u"nm")
-
-    coords = place_atoms(n_atoms ÷ 3, boundary, min_dist=0.3u"nm")
-
-    for i in 1:(n_atoms ÷ 3)
-        push!(coords, coords[i] .- [0.13, 0.0, 0.0]u"nm")
-    end
-
-    θ = (2 * pi) / 3 
-    for i in 1:(n_atoms ÷ 3)
-        push!(coords, coords[i] .+ [0.13*cos(π - θ), 0.13*sin(π - θ), 0.0]u"nm")
-    end
-
-    temp = 100.0u"K"
-    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-
-    neighbor_finder = DistanceNeighborFinder(
-        eligible=trues(n_atoms, n_atoms),
-        n_steps=10,
-        dist_cutoff=1.5u"nm"
-    )
-    bond_length = 0.13u"nm"
-
-    is = collect(1:(n_atoms ÷ 3))
-    js = collect( ((n_atoms ÷ 3) + 1) : 2*(n_atoms ÷ 3))
-    ks = collect( (2*(n_atoms ÷ 3) + 1) : n_atoms)
-    angle_constraints = [AngleConstraint(is[idx], js[idx], ks[idx], θ, bond_length, bond_length) for idx in eachindex(is)]
-    cons = SHAKE_RATTLE(n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps"; angle_constraints = angle_constraints)
-
-    @test length(cons.angle_clusters) == (n_atoms ÷ 3)
-
-    sys = System(
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
-        constraints=(cons,),
-        neighbor_finder=neighbor_finder
-    )
-
-    old_coords = copy(sys.coords)
-
-    for i in eachindex(sys.coords)
-        sys.coords[i]     += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
-        sys.velocities[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm/ps"
-    end
-
-    apply_position_constraints!(sys, old_coords)
-    apply_velocity_constraints!(sys)
-
-    @test check_position_constraints(sys, cons)
-    @test check_velocity_constraints(sys, cons)
-end
-
-@testset "Angle + Dist Constraints" begin
-    n_atoms = 60
-    atom_mass = 10.0u"g/mol"
-    #central atom
-    atoms = [Atom(mass=atom_mass, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms]
-    boundary = CubicBoundary(3.0u"nm")
-
-    coords = place_atoms(20, boundary, min_dist=0.3u"nm")
-
-    # ANGLE CONSTRAINTS
-    for i in 1:(n_atoms ÷ 6) # Atoms 21 -30
-        push!(coords, coords[i] .- [0.13, 0.0, 0.0]u"nm")
-    end
-
-    θ = (2 * pi) / 3 
-    for i in 1:(n_atoms ÷ 6) # Atoms 31 - 40
-        push!(coords, coords[i] .+ [0.13*cos(π - θ), 0.13*sin(π - θ), 0.0]u"nm")
-    end
-
-    # CENTRAL ATOM CONSTRAINTS
-    for i in ((n_atoms ÷ 6) + 1):2*(n_atoms ÷ 6) # Atoms 41 - 50
-        push!(coords, coords[i] .+ [0.13, 0.0, 0.0]u"nm")
-    end
-
-    for i in ((n_atoms ÷ 6) + 1):2*(n_atoms ÷ 6) # Atoms 51 - 60
-        push!(coords, coords[i] .+ [0.26, 0.0, 0.0]u"nm")
-    end
-
-    temp = 100.0u"K"
-    velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-
-    neighbor_finder = DistanceNeighborFinder(
-        eligible=trues(n_atoms, n_atoms),
-        n_steps=10,
-        dist_cutoff=1.5u"nm"
-    )
-    bond_length = 0.13u"nm"
-
-    is = collect(1:(n_atoms ÷ 6)) # 1 - 10
-    js = collect( (2*(n_atoms ÷ 6) + 1) : 3*(n_atoms ÷ 6)) # 21 - 30
-    ks = collect( (3*(n_atoms ÷ 6) + 1) : 4*(n_atoms ÷ 6)) # 31 - 40
-    angle_constraints = [AngleConstraint(is[idx], js[idx], ks[idx], θ, bond_length, bond_length) for idx in eachindex(is)]
-    
-    is = repeat(collect(((n_atoms ÷ 6) + 1):2*(n_atoms ÷ 6)), 2) # 11 - 20
-    js = collect( (4*(n_atoms ÷ 6) + 1) : n_atoms) # 41 - 60
-    distance_constraints = [DistanceConstraint(is[idx], js[idx], bond_length) for idx in eachindex(is)]
-
-    cons = SHAKE_RATTLE(n_atoms, 1e-8u"nm",  1e-8u"nm^2/ps"; 
-                        dist_constraints = distance_constraints, 
-                        angle_constraints = angle_constraints)
-
-    @test length(cons.angle_clusters) == length(angle_constraints)
-    @test length(cons.clusters23) == 10  
-
-    sys = System(
-        atoms=atoms,
-        coords=coords,
-        boundary=boundary,
-        velocities=velocities,
-        pairwise_inters=(LennardJones(use_neighbors=true),),
-        constraints=(cons,),
-        neighbor_finder=neighbor_finder
-    )
-
-    old_coords = copy(sys.coords)
-
-    for i in eachindex(sys.coords)
-        sys.coords[i]     += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm"
-        sys.velocities[i] += [rand()*0.01, rand()*0.01, rand()*0.01]u"nm/ps"
-    end
-
-    apply_position_constraints!(sys, old_coords)
-    apply_velocity_constraints!(sys)
-
-    @test check_position_constraints(sys, cons)
-    @test check_velocity_constraints(sys, cons)
-
-end
-
-@testset "GPU/CPU Constraints Protein No Solvent" begin
-   
-    pdb_fp = joinpath(data_dir, "1ubq_h.pdb") # No solvent
-    T = Float32
-
-    ff = MolecularForceField(
-        T,
-        joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
-        joinpath(data_dir, "force_fields", "his.xml"),
-    )
-
-    boundary = CubicBoundary(T(10.0)u"nm")
-    temp = T(100.0)u"K"
-    simulator = VelocityVerlet(dt=T(0.001)u"ps")
-
-    n_threads = (run_parallel_tests ? Threads.nthreads() : 1)
-
-    for AT in array_list
-
-        sys_init = System(pdb_fp, ff; boundary=boundary, array_type=AT)
-        sys_cpu  = System(pdb_fp, ff; boundary=boundary, array_type=Array)
-
-        h_inds = findall(a -> a.mass == T(1.008)u"g/mol", sys_cpu.atoms)
-        bonds = sys_cpu.specific_inter_lists[1]
-        constraints_list = []
-        for (i, j, inter) in zip(bonds.is, bonds.js, bonds.inters)
-            if i in h_inds || j in h_inds
-                bond_length = norm(vector(sys_cpu.coords[i], sys_cpu.coords[j],
-                                        sys_cpu.boundary))
-                # Note the harmonic bond is not disabled
-                push!(constraints_list, DistanceConstraint(Int(i), Int(j), bond_length))
-            end
-        end
-
-        constraints = (SHAKE_RATTLE(
-            length(sys_cpu),
-            T(1e-6)u"nm",
-            T(1e-6)u"nm^2 * ps^-1";
-            dist_constraints=[constraints_list...],
-            gpu_block_size = 256
-        ),)
-
-        sys = System(sys_init; constraints=constraints)
-
-        minimizer = SteepestDescentMinimizer()
-        simulate!(sys, minimizer; n_threads=n_threads)
-        random_velocities!(sys, temp)
-
-        simulate!(sys, simulator, 100; n_threads=n_threads) # Compile
-        @elapsed simulate!(sys, simulator, 1000; n_threads=n_threads)
-                
-        @test check_position_constraints(sys, sys.constraints[1])
-        @test check_velocity_constraints(sys, sys.constraints[1])
-
-    end 
-    
 end
 
 @testset "Langevin splitting" begin
@@ -1949,8 +1583,8 @@ end
         velocities=velocities,
         pairwise_inters=(LennardJones(cutoff=ShiftedForceCutoff(r_cut)),),
         loggers=(tot_eng=TotalEnergyLogger(100),),
-        energy_units=u"kJ * mol^-1",
         force_units=u"kJ * mol^-1 * nm^-1",
+        energy_units=u"kJ * mol^-1",
     )
 
     sys_cp = System(sys)
@@ -2005,19 +1639,27 @@ end
 @testset "Different implementations" begin
     n_atoms = 400
     atom_mass = 10.0u"g/mol"
-    boundary = CubicBoundary(6.0u"nm")
+    v1 = SVector(5.0u"nm", 0.0u"nm", 0.0u"nm")
+    v2 = SVector(2.0u"nm", 6.0u"nm", 0.0u"nm")
+    v3 = SVector(3.0u"nm", 4.0u"nm", 7.0u"nm")
+    boundary_cubic = CubicBoundary(6.0u"nm")
+    boundary_triclinic = TriclinicBoundary(v1, v2, v3)
     temp = 1.0u"K"
-    starting_coords = place_diatomics(n_atoms ÷ 2, boundary, 0.2u"nm"; min_dist=0.2u"nm")
+    starting_coords_cubic = place_diatomics(n_atoms ÷ 2, boundary_cubic, 0.2u"nm"; min_dist=0.2u"nm")
+    starting_coords_f32_cubic = [Float32.(c) for c in starting_coords_cubic]
+    starting_coords_triclinic = place_diatomics(n_atoms ÷ 2, boundary_triclinic, 0.2u"nm"; min_dist=0.2u"nm")
+    starting_coords_f32_triclinic = [Float32.(c) for c in starting_coords_triclinic]
     starting_velocities = [random_velocity(atom_mass, temp) for i in 1:n_atoms]
-    starting_coords_f32 = [Float32.(c) for c in starting_coords]
     starting_velocities_f32 = [Float32.(c) for c in starting_velocities]
 
-    function test_sim(nft, parallel::Bool, f32::Bool, ::Type{AT}) where AT
+    function test_sim(nft, parallel::Bool, f32::Bool, ::Type{AT}, triclinic::Bool) where AT
         T = (f32 ? Float32 : Float64)
         n_atoms = 400
         n_steps = 200
         atom_mass = T(10.0)u"g/mol"
-        boundary = CubicBoundary(T(6.0)u"nm")
+        boundary = triclinic ? TriclinicBoundary(T.(v1), T.(v2), T.(v3)) : CubicBoundary(T(6.0)u"nm")
+        starting_coords = triclinic ? starting_coords_triclinic : starting_coords_cubic
+        starting_coords_f32 = triclinic ? starting_coords_f32_triclinic : starting_coords_f32_cubic
         simulator = VelocityVerlet(dt=T(0.02)u"ps")
         k = T(10_000.0)u"kJ * mol^-1 * nm^-2"
         r0 = T(0.2)u"nm"
@@ -2071,6 +1713,11 @@ end
         return sys.coords, E_start
     end
 
+    function tric_or_cubic(name, triclinic)
+        name = triclinic == true ? name = name * " triclinic" :  name = name * " cubic"
+        return name 
+    end
+
     runs = [
         ("CPU"       , [NoNeighborFinder      , false, false, Array]),
         ("CPU f32"   , [NoNeighborFinder      , false, true , Array]),
@@ -2100,16 +1747,19 @@ end
         push!(runs, ("$AT f32 NL", [DistanceNeighborFinder, false, true , AT]))
     end
 
-    final_coords_ref, E_start_ref = test_sim(runs[1][2]...)
     # Check all simulations give the same result to within some error
-    for (name, args) in runs
-        final_coords, E_start = test_sim(args...)
-        final_coords_f64 = [Float64.(c) for c in from_device(final_coords)]
-        coord_diff = final_coords_f64 .- final_coords_ref
-        coord_diff_size = sum(sum(map(x -> abs.(x), coord_diff))) / (3 * n_atoms)
-        E_diff = abs(Float64(E_start) - E_start_ref)
-        @info "$(rpad(name, 19)) - difference per coordinate $coord_diff_size - potential energy difference $E_diff"
-        @test coord_diff_size < 1e-4u"nm"
-        @test E_diff < 5e-4u"kJ * mol^-1"
+    for triclinic in (true, false)
+        final_coords_ref, E_start_ref = test_sim(runs[1][2]..., triclinic)
+        for (name, args) in runs
+            final_coords, E_start = test_sim(args..., triclinic)
+            final_coords_f64 = [Float64.(c) for c in from_device(final_coords)]
+            coord_diff = final_coords_f64 .- final_coords_ref
+            coord_diff_size = sum(sum(map(x -> abs.(x), coord_diff))) / (3 * n_atoms)
+            E_diff = abs(Float64(E_start) - E_start_ref)
+            name = tric_or_cubic(name, triclinic)
+            @info "$(rpad(name, 19)) - difference per coordinate $coord_diff_size - potential energy difference $E_diff"
+            @test coord_diff_size < 1e-4u"nm"
+            @test E_diff < 5e-4u"kJ * mol^-1"
+        end
     end
 end

@@ -42,7 +42,7 @@ function gpu_threads_specific(n_inters)
     return n_threads_gpu
 end
 
-function pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, 
+function pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T},
                     pairwise_inters, neighbors, step_n) where {D, AT <: AbstractGPUArray, T}
     if isnothing(neighbors)
         error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
@@ -93,7 +93,7 @@ function specific_forces_gpu!(fs_mat, virial, inter_list::InteractionList1Atoms,
     kernel! = specific_force_1_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, virial, coords, velocities, atoms, boundary, step_n, inter_list.is,
             inter_list.inters, Val(D), Val(force_units);
-            ndrange = length(inter_list))
+            ndrange=length(inter_list))
     return fs_mat
 end
 
@@ -104,7 +104,7 @@ function specific_forces_gpu!(fs_mat, virial, inter_list::InteractionList2Atoms,
     kernel! = specific_force_2_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, virial, coords, velocities, atoms, boundary, step_n, inter_list.is,
             inter_list.js, inter_list.inters, Val(D), Val(force_units);
-            ndrange = length(inter_list))
+            ndrange=length(inter_list))
     return fs_mat
 end
 
@@ -115,7 +115,7 @@ function specific_forces_gpu!(fs_mat, virial, inter_list::InteractionList3Atoms,
     kernel! = specific_force_3_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, virial, coords, velocities, atoms, boundary, step_n, inter_list.is,
             inter_list.js, inter_list.ks, inter_list.inters, Val(D),
-            Val(force_units); ndrange = length(inter_list))
+            Val(force_units); ndrange=length(inter_list))
     return fs_mat
 end
 
@@ -126,7 +126,7 @@ function specific_forces_gpu!(fs_mat, virial, inter_list::InteractionList4Atoms,
     kernel! = specific_force_4_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, virial, coords, velocities, atoms, boundary, step_n, inter_list.is,
             inter_list.js, inter_list.ks, inter_list.ls, inter_list.inters,
-            Val(D), Val(force_units); ndrange = length(inter_list))
+            Val(D), Val(force_units); ndrange=length(inter_list))
     return fs_mat
 end
 
@@ -296,7 +296,7 @@ function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList1Atoms, coo
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_pe_1_atoms_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.inters, Val(energy_units); ndrange = length(inter_list))
+            inter_list.inters, Val(energy_units); ndrange=length(inter_list))
     return pe_vec_nounits
 end
 
@@ -306,7 +306,7 @@ function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList2Atoms, coo
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_pe_2_atoms_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.js, inter_list.inters, Val(energy_units); ndrange = length(inter_list))
+            inter_list.js, inter_list.inters, Val(energy_units); ndrange=length(inter_list))
     return pe_vec_nounits
 end
 
@@ -317,7 +317,7 @@ function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList3Atoms, coo
     kernel! = specific_pe_3_atoms_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
             inter_list.js, inter_list.ks, inter_list.inters, Val(energy_units);
-            ndrange = length(inter_list))
+            ndrange=length(inter_list))
     return pe_vec_nounits
 end
 
@@ -328,7 +328,7 @@ function specific_pe_gpu!(pe_vec_nounits, inter_list::InteractionList4Atoms, coo
     kernel! = specific_pe_4_atoms_kernel!(backend, n_threads_gpu)
     kernel!(pe_vec_nounits, coords, velocities, atoms, boundary, step_n, inter_list.is,
             inter_list.js, inter_list.ks, inter_list.ls, inter_list.inters, Val(energy_units);
-            ndrange = length(inter_list))
+            ndrange=length(inter_list))
     return pe_vec_nounits
 end
 

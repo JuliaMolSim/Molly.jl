@@ -354,10 +354,10 @@ Displacements are updated every `n_steps_update` steps and a copy is saved every
 `coords_start` are the initial reference positions and should match the coordinate type
 in the system.
 
-It is assumed that a particle does not cross half the box size in `n_steps_update` steps. 
-By default `n_steps_update` is set to 10 to mitigate this assumption, but it can be 
+It is assumed that a particle does not cross half the box size in `n_steps_update` steps.
+By default `n_steps_update` is set to 10 to mitigate this assumption, but it can be
 set to a higher value to reduce cost.
-`n_steps` must be a multiple of `n_steps_update`. 
+`n_steps` must be a multiple of `n_steps_update`.
 """
 mutable struct DisplacementsLogger{D, C}
     displacements::D
@@ -380,7 +380,7 @@ end
 Base.values(dl::DisplacementsLogger) = dl.displacements
 
 function log_property!(dl::DisplacementsLogger, sys::System, neighbors=nothing,
-                       step_n::Integer=0; kwargs...)     
+                       step_n::Integer=0; kwargs...)
     if (step_n % dl.n_steps_update) == 0
         dl.last_displacements .+= vector.(dl.coords_ref, sys.coords, (sys.boundary,))
         dl.coords_ref .= sys.coords

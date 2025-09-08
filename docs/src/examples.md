@@ -1041,9 +1041,10 @@ temp = 300.0u"K"
 atom_mass = 1.00794u"g/mol"
 
 n_atoms_half = 200
-atoms = [Atom(index=i, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1") for i in 1:n_atoms_half]
+atoms = [Atom(index=i, mass=atom_mass, σ=2.8279u"Å", ϵ=0.074u"kcal* mol^-1")
+         for i in 1:n_atoms_half]
 max_coord = 200.0u"Å"
-coords = [max_coord .* rand(SVector{3}) for i in 1:n_atoms_half]
+coords = max_coord .* rand(SVector{3, Float64}, n_atoms_half)
 boundary = CubicBoundary(200.0u"Å")
 lj = LennardJones(cutoff=ShiftedPotentialCutoff(r_cut), use_neighbors=true)
 
@@ -1056,7 +1057,12 @@ for j in 1:n_atoms_half
     push!(constraints, DistanceConstraint(j, j + n_atoms_half, bond_length))
 end
 
-shake = SHAKE_RATTLE([constraints...], length(atoms), 1e-8u"Å", 1e-8u"Å^2 * ps^-1")
+shake = SHAKE_RATTLE(
+    length(atoms),
+    1e-8u"Å",
+    1e-8u"Å^2 * ps^-1";
+    dist_constraints=[constraints...],
+)
 
 neighbor_finder = DistanceNeighborFinder(
     eligible=trues(length(atoms), length(atoms)),
