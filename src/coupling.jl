@@ -807,8 +807,6 @@ function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp, bounda
         p_xy = ustrip(uconvert(P_units, pressure[1]))
         p_z  = ustrip(uconvert(P_units, pressure[2]))
 
-        FT = promote_type(typeof(p_xy), typeof(p_z))
-
         P = SMatrix{3,3,FT}(p_xy,0,0, 0,p_xy,0, 0,0,p_z) .* P_units
 
         return MonteCarloBarostat(P, temp, coupling_type,
@@ -837,8 +835,6 @@ function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp, bounda
         pxy = ustrip(uconvert(P_units, pressure[4]))
         pxz = ustrip(uconvert(P_units, pressure[5]))
         pyz = ustrip(uconvert(P_units, pressure[6]))
-
-        FT = promote_type(typeof(px), typeof(py), typeof(pz), typeof(pxy), typeof(pxz), typeof(pyz))
 
         P = SMatrix{3,3,FT}(px, pxy, pxz,
                             pxy, py,  pyz,
