@@ -9,9 +9,7 @@ export
     BerendsenThermostat,
     BerendsenBarostat,
     CRescaleBarostat,
-    MonteCarloBarostat,
-    MonteCarloAnisotropicBarostat,
-    MonteCarloMembraneBarostat
+    MonteCarloBarostat
 
 """
     apply_coupling!(system, coupling, simulator, neighbors=nothing, step_n=0;
