@@ -46,6 +46,8 @@ struct NoCoupling end
 
 apply_coupling!(sys, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
 
+needs_virial(c::NoCoupling) = false
+
 @doc raw"""
     ImmediateThermostat(temperature)
 
@@ -69,6 +71,8 @@ function apply_coupling!(sys, thermostat::ImmediateThermostat, sim, neighbors=no
     sys.velocities .*= sqrt(thermostat.temperature / temperature(sys))
     return false
 end
+
+needs_virial(c::ImmediateThermostat) = false
 
 @doc raw"""
     VelocityRescaleThermostat(temperature, coupling_const; n_steps = 1, seed = 42)
@@ -153,6 +157,8 @@ function apply_coupling!(sys::System{<:Any, AT}, thermostat::VelocityRescaleTher
     return false  # no force recompute needed
 end
 
+needs_virial(c::VelocityRescaleThermostat) = false
+
 """
     AndersenThermostat(temperature, coupling_const)
 
@@ -193,6 +199,8 @@ function apply_coupling!(sys::System{<:Any, AT, T}, thermostat::AndersenThermost
     return false
 end
 
+needs_virial(c::AndersenThermostat) = false
+
 @doc raw"""
     BerendsenThermostat(temperature, coupling_const)
 
@@ -217,6 +225,8 @@ function apply_coupling!(sys, thermostat::BerendsenThermostat, sim, neighbors=no
     sys.velocities .*= sqrt(λ2)
     return false
 end
+
+needs_virial(c::BerendsenThermostat) = false
 
 @doc raw"""
     BerendsenBarostat(pressure, coupling_const; 
@@ -443,6 +453,8 @@ function apply_coupling!(sys, barostat::BerendsenBarostat{PT, CT, ST, ICT, FT}, 
     scale_coords!(sys, SMatrix{D,D,FT}(μ))
     return true
 end
+
+needs_virial(c::BerendsenBarostat) = true
 
 @doc raw"""
     CRescaleBarostat(pressure, coupling_const; 
@@ -698,6 +710,8 @@ function apply_coupling!(sys::System{D, AT}, barostat::CRescaleBarostat{PT, CT, 
     scale_coords!(sys, SMatrix{3,3,FT}(μ); scale_velocities = true)
     return true
 end
+
+needs_virial(c::CRescaleBarostat) = true
 
 @doc raw"""
     MonteCarloBarostat(pressure, temperature, boundary; coupling_type = :isotropic,
@@ -1062,3 +1076,5 @@ function apply_coupling!(sys::System{D, AT, T}, barostat::MonteCarloBarostat, si
     return recompute_forces
                     
 end
+
+needs_virial(c::MonteCarloBarostat) = false

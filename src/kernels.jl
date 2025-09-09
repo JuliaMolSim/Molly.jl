@@ -43,7 +43,7 @@ function gpu_threads_specific(n_inters)
 end
 
 function pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T},
-                    pairwise_inters, neighbors, step_n) where {D, AT <: AbstractGPUArray, T}
+                    pairwise_inters, neighbors, ::Val{Virial}, step_n) where {D, AT <: AbstractGPUArray, T, Virial}
     if isnothing(neighbors)
         error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
               "should use DistanceNeighborFinder instead")
@@ -58,7 +58,7 @@ function pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T},
         n_threads_gpu = gpu_threads_pairwise(length(nbs))
         kernel! = pairwise_force_kernel_nl!(backend, n_threads_gpu)
         kernel!(buffers.fs_mat, buffers.virial_specific, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters,
-                nbs, step_n, Val(D), Val(sys.force_units); ndrange=length(nbs))
+                nbs, step_n, Val(Virial), Val(D), Val(sys.force_units); ndrange=length(nbs))
     end
     return buffers
 end
@@ -66,8 +66,8 @@ end
 @kernel inbounds=true function pairwise_force_kernel_nl!(forces, virial, @Const(coords),
                                            @Const(velocities), @Const(atoms),
                                            boundary, inters,
-                                           @Const(neighbors), step_n, ::Val{D},
-                                           ::Val{F}) where {D, F}
+                                           @Const(neighbors), step_n, ::Val{Virial}, ::Val{D},
+                                           ::Val{F}) where {Virial, D, F}
     inter_i = @index(Global, Linear)
     FT = eltype(forces)
 
@@ -79,54 +79,56 @@ end
             fval = ustrip(f[dim])
             Atomix.@atomic forces[dim, i] += -fval
             Atomix.@atomic forces[dim, j] +=  fval
-            Atomix.@atomic virial[dim, 1] += ustrip(dr[1]) * ustrip(fs.f1[dim])
-            Atomix.@atomic virial[dim, 2] += ustrip(dr[2]) * ustrip(fs.f1[dim])
-            Atomix.@atomic virial[dim, 3] += ustrip(dr[3]) * ustrip(fs.f1[dim])
+            if Virial
+                Atomix.@atomic virial[dim, 1] += ustrip(dr[1]) * ustrip(fs.f1[dim])
+                Atomix.@atomic virial[dim, 2] += ustrip(dr[2]) * ustrip(fs.f1[dim])
+                Atomix.@atomic virial[dim, 3] += ustrip(dr[3]) * ustrip(fs.f1[dim])
+            end
         end
     end
 end
 
 function specific_forces_gpu!(fs_mat, virial, inter_list::InteractionList1Atoms, coords::AbstractArray{SVector{D, C}},
-                              velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
+                              velocities, atoms, boundary, ::Val{Virial}, step_n, force_units, ::Val{T}) where {D, C, Virial, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_1_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, virial, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.inters, Val(D), Val(force_units);
+            inter_list.inters, Val(Virial), Val(D), Val(force_units);
             ndrange=length(inter_list))
     return fs_mat
 end
 
 function specific_forces_gpu!(fs_mat, virial, inter_list::InteractionList2Atoms, coords::AbstractArray{SVector{D, C}},
-                              velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
+                              velocities, atoms, boundary, ::Val{Virial}, step_n, force_units, ::Val{T}) where {D, C, T, Virial}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_2_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, virial, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.js, inter_list.inters, Val(D), Val(force_units);
+            inter_list.js, inter_list.inters, Val(Virial), Val(D), Val(force_units);
             ndrange=length(inter_list))
     return fs_mat
 end
 
 function specific_forces_gpu!(fs_mat, virial, inter_list::InteractionList3Atoms, coords::AbstractArray{SVector{D, C}},
-                              velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
+                              velocities, atoms, boundary, ::Val{Virial}, step_n, force_units, ::Val{T}) where {D, C, Virial, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_3_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, virial, coords, velocities, atoms, boundary, step_n, inter_list.is,
-            inter_list.js, inter_list.ks, inter_list.inters, Val(D),
-            Val(force_units); ndrange=length(inter_list))
+            inter_list.js, inter_list.ks, inter_list.inters, Val(Virial),
+            Val(D), Val(force_units); ndrange=length(inter_list))
     return fs_mat
 end
 
 function specific_forces_gpu!(fs_mat, virial, inter_list::InteractionList4Atoms, coords::AbstractArray{SVector{D, C}},
-                              velocities, atoms, boundary, step_n, force_units, ::Val{T}) where {D, C, T}
+                              velocities, atoms, boundary, ::Val{Virial}, step_n, force_units, ::Val{T}) where {D, C, Virial, T}
     backend = get_backend(coords)
     n_threads_gpu = gpu_threads_specific(length(inter_list))
     kernel! = specific_force_4_atoms_kernel!(backend, n_threads_gpu)
     kernel!(fs_mat, virial, coords, velocities, atoms, boundary, step_n, inter_list.is,
             inter_list.js, inter_list.ks, inter_list.ls, inter_list.inters,
-            Val(D), Val(force_units); ndrange=length(inter_list))
+            Val(Virial), Val(D), Val(force_units); ndrange=length(inter_list))
     return fs_mat
 end
 
@@ -134,8 +136,8 @@ end
                                                 @Const(velocities),
                                                 @Const(atoms), boundary,
                                                 step_n, @Const(is),
-                                                @Const(inters), ::Val{D},
-                                                ::Val{F}) where {D, F}
+                                                @Const(inters), ::Val{Virial}, ::Val{D},
+                                                ::Val{F}) where {Virial, D, F}
     inter_i = @index(Global, Linear)
 
     if inter_i <= length(is)
@@ -148,9 +150,11 @@ end
             
             Atomix.@atomic forces[dim, i] += ustrip(fs.f1[dim])
 
-            Atomix.@atomic virial[dim, 1] += ustrip(coords[i][1]) * ustrip(fs.f1[dim])
-            Atomix.@atomic virial[dim, 2] += ustrip(coords[i][2]) * ustrip(fs.f1[dim])
-            Atomix.@atomic virial[dim, 3] += ustrip(coords[i][3]) * ustrip(fs.f1[dim])
+            if Virial
+                Atomix.@atomic virial[dim, 1] += ustrip(coords[i][1]) * ustrip(fs.f1[dim])
+                Atomix.@atomic virial[dim, 2] += ustrip(coords[i][2]) * ustrip(fs.f1[dim])
+                Atomix.@atomic virial[dim, 3] += ustrip(coords[i][3]) * ustrip(fs.f1[dim])
+            end
 
         end
     end
@@ -160,8 +164,8 @@ end
                                                 @Const(velocities),
                                                 @Const(atoms), boundary,
                                                 step_n, @Const(is), @Const(js),
-                                                @Const(inters), ::Val{D},
-                                                ::Val{F}) where {D, F}
+                                                @Const(inters), ::Val{Virial}, ::Val{D},
+                                                ::Val{F}) where {Virial, D, F}
     inter_i = @index(Global, Linear)
     FT = eltype(forces)
 
@@ -177,9 +181,11 @@ end
             Atomix.@atomic forces[dim, i] += ustrip(fs.f1[dim])
             Atomix.@atomic forces[dim, j] += ustrip(fs.f2[dim])
 
-            Atomix.@atomic virial[dim, 1] += ustrip(dr[1]) * ustrip(fs.f1[dim])
-            Atomix.@atomic virial[dim, 2] += ustrip(dr[2]) * ustrip(fs.f1[dim])
-            Atomix.@atomic virial[dim, 3] += ustrip(dr[3]) * ustrip(fs.f1[dim])
+            if Virial
+                Atomix.@atomic virial[dim, 1] += ustrip(dr[1]) * ustrip(fs.f1[dim])
+                Atomix.@atomic virial[dim, 2] += ustrip(dr[2]) * ustrip(fs.f1[dim])
+                Atomix.@atomic virial[dim, 3] += ustrip(dr[3]) * ustrip(fs.f1[dim])
+            end
 
         end
     end
@@ -190,8 +196,8 @@ end
                                                 @Const(atoms), boundary,
                                                 step_n, @Const(is),
                                                 @Const(js), @Const(ks),
-                                                @Const(inters), ::Val{D},
-                                                ::Val{F}) where {D, F}
+                                                @Const(inters), ::Val{Virial}, ::Val{D},
+                                                ::Val{F}) where {Virial, D, F}
     inter_i = @index(Global, Linear)
     FT = eltype(forces)
 
@@ -209,9 +215,12 @@ end
             Atomix.@atomic forces[dim, j] += ustrip(fs.f2[dim])
             Atomix.@atomic forces[dim, k] += ustrip(fs.f3[dim])
 
-            Atomix.@atomic virial[dim, 1] += (ustrip(r_ik[1]) * ustrip(fs.f1[dim]) + ustrip(r_jk[1]) * ustrip(fs.f2[dim]))
-            Atomix.@atomic virial[dim, 2] += (ustrip(r_ik[2]) * ustrip(fs.f1[dim]) + ustrip(r_jk[2]) * ustrip(fs.f2[dim]))
-            Atomix.@atomic virial[dim, 3] += (ustrip(r_ik[3]) * ustrip(fs.f1[dim]) + ustrip(r_jk[3]) * ustrip(fs.f2[dim]))
+            if Virial
+                Atomix.@atomic virial[dim, 1] += (ustrip(r_ik[1]) * ustrip(fs.f1[dim]) + ustrip(r_jk[1]) * ustrip(fs.f2[dim]))
+                Atomix.@atomic virial[dim, 2] += (ustrip(r_ik[2]) * ustrip(fs.f1[dim]) + ustrip(r_jk[2]) * ustrip(fs.f2[dim]))
+                Atomix.@atomic virial[dim, 3] += (ustrip(r_ik[3]) * ustrip(fs.f1[dim]) + ustrip(r_jk[3]) * ustrip(fs.f2[dim]))
+            end
+
         end
     end
 end
@@ -222,8 +231,8 @@ end
                                                 step_n, @Const(is),
                                                 @Const(js), @Const(ks),
                                                 @Const(ls),
-                                                @Const(inters), ::Val{D},
-                                                ::Val{F}) where {D, F}
+                                                @Const(inters), ::Val{Virial}, ::Val{D},
+                                                ::Val{F}) where {Virial, D, F}
     inter_i = @index(Global, Linear)
     FT = eltype(forces)
 
@@ -244,9 +253,11 @@ end
             Atomix.@atomic forces[dim, k] += ustrip(fs.f3[dim])
             Atomix.@atomic forces[dim, l] += ustrip(fs.f4[dim])
 
-            Atomix.@atomic virial[dim, 1] += (ustrip(r_il[1]) * ustrip(fs.f1[dim]) + ustrip(r_jl[1]) * ustrip(fs.f2[dim]) + ustrip(r_kl[1]) * ustrip(fs.f3[dim]))
-            Atomix.@atomic virial[dim, 2] += (ustrip(r_il[2]) * ustrip(fs.f1[dim]) + ustrip(r_jl[2]) * ustrip(fs.f2[dim]) + ustrip(r_kl[2]) * ustrip(fs.f3[dim]))
-            Atomix.@atomic virial[dim, 3] += (ustrip(r_il[3]) * ustrip(fs.f1[dim]) + ustrip(r_jl[3]) * ustrip(fs.f2[dim]) + ustrip(r_kl[3]) * ustrip(fs.f3[dim]))
+            if Virial
+                Atomix.@atomic virial[dim, 1] += (ustrip(r_il[1]) * ustrip(fs.f1[dim]) + ustrip(r_jl[1]) * ustrip(fs.f2[dim]) + ustrip(r_kl[1]) * ustrip(fs.f3[dim]))
+                Atomix.@atomic virial[dim, 2] += (ustrip(r_il[2]) * ustrip(fs.f1[dim]) + ustrip(r_jl[2]) * ustrip(fs.f2[dim]) + ustrip(r_kl[2]) * ustrip(fs.f3[dim]))
+                Atomix.@atomic virial[dim, 3] += (ustrip(r_il[3]) * ustrip(fs.f1[dim]) + ustrip(r_jl[3]) * ustrip(fs.f2[dim]) + ustrip(r_kl[3]) * ustrip(fs.f3[dim]))
+            end
 
         end
     end
