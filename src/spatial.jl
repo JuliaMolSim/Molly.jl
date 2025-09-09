@@ -149,7 +149,7 @@ end
 
 ispositive(x) = x > zero(x)
 
-function TriclinicBoundary(bv::Union{SVector{3}, SMatrix{3,3}}; approx_images::Bool=true)
+function TriclinicBoundary(bv::Union{SVector{3,<:SVector{3}}, SMatrix{3,3}}; approx_images::Bool=true)
 
     # Normalize input, if box matrix is passed turn into SVector{3, SVector{3, T}}
     if bv isa SMatrix
@@ -211,9 +211,11 @@ function TriclinicBoundary(bv::Union{SVector{3}, SMatrix{3,3}}; approx_images::B
     bx = bv[2][1]
     tan_a_b = (abs(bx) ≤ tolL) ? NT(Inf) : NT(ustrip(bv[2][2] / bx))
 
-    return TriclinicBoundary{NT, approx_images, eltype(eltype(bv)), eltype(reciprocal_size)}(
-        bv, α, β, γ, reciprocal_size, tan_bprojyz_cprojyz, tan_c_cprojxy,
-        cos_a_cprojxy, sin_a_cprojxy, tan_a_b)
+    return TriclinicBoundary{3, NT, eltype(eltype(bv)), approx_images, eltype(reciprocal_size)}(
+                bv, α, β, γ, reciprocal_size,
+                tan_bprojyz_cprojyz, tan_c_cprojxy,
+                cos_a_cprojxy, sin_a_cprojxy, tan_a_b
+            )
 end
 
 function TriclinicBoundary(bv_lengths, angles; kwargs...)
