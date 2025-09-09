@@ -46,8 +46,8 @@ function SHAKE_RATTLE(n_atoms,
                       angle_constraints=nothing,
                       gpu_block_size=128,
                       max_iters=25)
-    ustrip(dist_tolerance) <= 0 && throw(ArgumentError("dist_tolerance must be greater than zero"))
-    ustrip(vel_tolerance ) <= 0 && throw(ArgumentError("vel_tolerance must be greater than zero" ))
+    ustrip(dist_tolerance) > 0 || throw(ArgumentError("dist_tolerance must be greater than zero"))
+    ustrip(vel_tolerance ) > 0 || throw(ArgumentError("vel_tolerance must be greater than zero" ))
 
     dc_present = !isnothing(dist_constraints ) && length(dist_constraints ) > 0
     ac_present = !isnothing(angle_constraints) && length(angle_constraints) > 0
@@ -56,12 +56,12 @@ function SHAKE_RATTLE(n_atoms,
                             "provided to SHAKE_RATTLE"))
     end
 
-    if typeof(ustrip(dist_tolerance)) == Float32 && ustrip(dist_tolerance) <= Float32(1e-6)
+    if typeof(ustrip(dist_tolerance)) == Float32 && ustrip(dist_tolerance) < Float32(1e-6)
         @warn "Using Float32 with a SHAKE dist_tolerance less than 1e-6, this may lead " *
               "to convergence issues"
     end
 
-    if typeof(ustrip(vel_tolerance)) == Float32 && ustrip(vel_tolerance) <= Float32(1e-6)
+    if typeof(ustrip(vel_tolerance)) == Float32 && ustrip(vel_tolerance) < Float32(1e-6)
         @warn "Using Float32 with a RATTLE vel_tolerance less than 1e-6, this may lead " *
               "to convergence issues"
     end
@@ -177,7 +177,7 @@ end
     @Const(r),
     v,
     @Const(ms),
-    @Const(boundary))
+    boundary)
 
     idx = @index(Global, Linear)
 
@@ -209,10 +209,10 @@ end
     @Const(k1s),
     @Const(k2s),
     @Const(k3s),
-    @Const(r::AbstractVector{<:AbstractVector{L}}),
+    r::AbstractVector{<:AbstractVector{L}},
     v::AbstractVector{<:AbstractVector{V}},
-    @Const(ms::AbstractVector{M}),
-    @Const(boundary)) where {L, V, M}
+    ms::AbstractVector{M},
+    boundary) where {L, V, M}
 
     idx = @index(Global, Linear) # Global Constraint Idx
     @uniform A_type = typeof(zero(L) * zero(L) / zero(M))
@@ -265,10 +265,10 @@ end
     @Const(k2s),
     @Const(k3s),
     @Const(k4s),
-    @Const(r::AbstractVector{<:AbstractVector{L}}),
+    r::AbstractVector{<:AbstractVector{L}},
     v::AbstractVector{<:AbstractVector{V}},
-    @Const(ms::AbstractVector{M}),
-    @Const(boundary)) where {L, V, M}
+    ms::AbstractVector{M},
+    boundary) where {L, V, M}
 
     idx = @index(Global, Linear)
     @uniform A_type = typeof(zero(L) * zero(L) / zero(M))
@@ -331,10 +331,10 @@ end
     @Const(k1s),
     @Const(k2s),
     @Const(k3s),
-    @Const(r::AbstractVector{<:AbstractVector{L}}),
+    r::AbstractVector{<:AbstractVector{L}},
     v::AbstractVector{<:AbstractVector{V}},
-    @Const(ms::AbstractVector{M}),
-    @Const(boundary)) where {L, V, M}
+    ms::AbstractVector{M},
+    boundary) where {L, V, M}
 
     idx = @index(Global, Linear)
     @uniform A_type = typeof(zero(L) * zero(L) / zero(M))
@@ -394,10 +394,10 @@ end
     @Const(k1s),
     @Const(k2s),
     @Const(dists),
-    @Const(r_t1::T),
+    @Const(r_t1),
     r_t2::T,
     @Const(ms),
-    @Const(boundary::AbstractBoundary{<:Any, FT})) where {T, FT}
+    boundary::AbstractBoundary{<:Any, FT}) where {T, FT}
 
     idx = @index(Global, Linear)
 
@@ -419,9 +419,9 @@ end
 
         m1_inv, m2_inv = inv(ms[k1]), inv(ms[k2])
         a = (m1_inv + m2_inv)^2 * sum(abs2, r12)
-        b = -FT(2.0) * (m1_inv + m2_inv) * dot(r12, s12)
+        b = -2 * (m1_inv + m2_inv) * dot(r12, s12)
         c = sum(abs2, s12) - (distance)^2
-        D = b^2 - FT(4.0)*a*c
+        D = b^2 - 4*a*c
 
         # Just let the system blow up??
         # This usually happens when timestep too large or over constrained
@@ -441,8 +441,8 @@ end
 @kernel inbounds=true function shake_step!(
         @Const(active_idxs),
         still_active::AbstractVector{Bool},
-        @Const(N_active),
-        @Const(shake_fn),
+        N_active,
+        shake_fn,
         kernel_args...,
     )
 
@@ -559,10 +559,10 @@ end
     s_k1k3 = vector(r_t2_k1, r_t2_k3, boundary)
 
     # Matrix element i, j represents interaction of constraint i with constraint j
-    A[1,1] = -FT(2.0) * dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # Set constraint 1 as between k1-k2
-    A[2,2] = -FT(2.0) * dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # Set constraint 1 as between k1-k3
-    A[1,2] = -FT(2.0) * dot(r_k1k3, s_k1k2) * m1_inv
-    A[2,1] = -FT(2.0) * dot(r_k1k2, s_k1k3) * m1_inv
+    A[1,1] = -2 * dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # Set constraint 1 as between k1-k2
+    A[2,2] = -2 * dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # Set constraint 1 as between k1-k3
+    A[1,2] = -2 * dot(r_k1k3, s_k1k2) * m1_inv
+    A[2,1] = -2 * dot(r_k1k2, s_k1k3) * m1_inv
 
     C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12))
     C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13))
@@ -640,15 +640,15 @@ end
     s_k1k4 = vector(r_t2_k1, r_t2_k4, boundary)
 
     # Matrix element i, j represents interaction of constraint i with constraint j
-    A[1,1] = -FT(2.0) * dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # Set constraint 1 as between k1-k2
-    A[2,2] = -FT(2.0) * dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # Set constraint 2 as between k1-k3
-    A[3,3] = -FT(2.0) * dot(r_k1k4, s_k1k4) * (m1_inv + m4_inv) # Set constraint 3 as between k1-k4
-    A[1,2] = -FT(2.0) * dot(r_k1k3, s_k1k2) * m1_inv
-    A[2,1] = -FT(2.0) * dot(r_k1k2, s_k1k3) * m1_inv
-    A[1,3] = -FT(2.0) * dot(r_k1k4, s_k1k2) * m1_inv
-    A[3,1] = -FT(2.0) * dot(r_k1k2, s_k1k4) * m1_inv
-    A[2,3] = -FT(2.0) * dot(r_k1k4, s_k1k3) * m1_inv
-    A[3,2] = -FT(2.0) * dot(r_k1k3, s_k1k4) * m1_inv
+    A[1,1] = -2 * dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # Set constraint 1 as between k1-k2
+    A[2,2] = -2 * dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # Set constraint 2 as between k1-k3
+    A[3,3] = -2 * dot(r_k1k4, s_k1k4) * (m1_inv + m4_inv) # Set constraint 3 as between k1-k4
+    A[1,2] = -2 * dot(r_k1k3, s_k1k2) * m1_inv
+    A[2,1] = -2 * dot(r_k1k2, s_k1k3) * m1_inv
+    A[1,3] = -2 * dot(r_k1k4, s_k1k2) * m1_inv
+    A[3,1] = -2 * dot(r_k1k2, s_k1k4) * m1_inv
+    A[2,3] = -2 * dot(r_k1k4, s_k1k3) * m1_inv
+    A[3,2] = -2 * dot(r_k1k3, s_k1k4) * m1_inv
 
     C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12))
     C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13))
@@ -734,15 +734,15 @@ end
     s_k2k3 = vector(r_t2_k2, r_t2_k3, boundary)
 
     # Matrix element i, j represents interaction of constraint i with constraint j
-    A[1,1] = -FT(2.0) * dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # Set constraint 1 as between k1-k2
-    A[2,2] = -FT(2.0) * dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # Set constraint 2 as between k1-k3
-    A[3,3] = -FT(2.0) * dot(r_k2k3, s_k2k3) * (m2_inv + m3_inv) # Set constraint 3 as between k2-k3
-    A[1,2] = -FT(2.0) * dot(r_k1k3, s_k1k2) * m1_inv
-    A[2,1] = -FT(2.0) * dot(r_k1k2, s_k1k3) * m1_inv
-    A[1,3] = -FT(2.0) * dot(r_k2k3, s_k1k2) * (-m2_inv)
-    A[3,1] = -FT(2.0) * dot(r_k1k2, s_k1k3) * (-m2_inv)
-    A[2,3] = -FT(2.0) * dot(r_k2k3, s_k1k3) * m3_inv
-    A[3,2] = -FT(2.0) * dot(r_k1k3, s_k2k3) * m3_inv
+    A[1,1] = -2 * dot(r_k1k2, s_k1k2) * (m1_inv + m2_inv) # Set constraint 1 as between k1-k2
+    A[2,2] = -2 * dot(r_k1k3, s_k1k3) * (m1_inv + m3_inv) # Set constraint 2 as between k1-k3
+    A[3,3] = -2 * dot(r_k2k3, s_k2k3) * (m2_inv + m3_inv) # Set constraint 3 as between k2-k3
+    A[1,2] = -2 * dot(r_k1k3, s_k1k2) * m1_inv
+    A[2,1] = -2 * dot(r_k1k2, s_k1k3) * m1_inv
+    A[1,3] = -2 * dot(r_k2k3, s_k1k2) * (-m2_inv)
+    A[3,1] = -2 * dot(r_k1k2, s_k1k3) * (-m2_inv)
+    A[2,3] = -2 * dot(r_k2k3, s_k1k3) * m3_inv
+    A[3,2] = -2 * dot(r_k1k3, s_k2k3) * m3_inv
 
     C[1] = (dot(s_k1k2, s_k1k2) - (dist12*dist12))
     C[2] = (dot(s_k1k3, s_k1k3) - (dist13*dist13))

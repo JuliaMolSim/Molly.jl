@@ -305,53 +305,48 @@ end
 end
 
 @testset "Constraints protein CPU/GPU" begin
-    pdb_fp = joinpath(data_dir, "1ubq_h.pdb") # No solvent
+    pdb_fp = joinpath(data_dir, "1ubq.pdb") # No solvent
     T = Float32
-
     ff = MolecularForceField(
         T,
         joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
         joinpath(data_dir, "force_fields", "his.xml"),
     )
-
     boundary = CubicBoundary(T(10.0)u"nm")
     temp = T(100.0)u"K"
+    minimizer = SteepestDescentMinimizer()
     simulator = VelocityVerlet(dt=T(0.001)u"ps")
 
     for AT in array_list
-        sys_init = System(pdb_fp, ff; boundary=boundary, array_type=AT)
-        sys_cpu  = System(pdb_fp, ff; boundary=boundary, array_type=Array)
+        for rigid_water in (false, true)
+            sys = System(
+                pdb_fp,
+                ff;
+                boundary=boundary,
+                array_type=AT,
+                constraints=:hbonds,
+                rigid_water=rigid_water,
+            )
 
-        h_inds = findall(a -> a.mass == T(1.008)u"g/mol", sys_cpu.atoms)
-        bonds = sys_cpu.specific_inter_lists[1]
-        constraints_list = []
-        for (i, j, inter) in zip(bonds.is, bonds.js, bonds.inters)
-            if i in h_inds || j in h_inds
-                bond_length = norm(vector(sys_cpu.coords[i], sys_cpu.coords[j],
-                                   sys_cpu.boundary))
-                # Note the harmonic bond is not disabled
-                push!(constraints_list, DistanceConstraint(i, j, bond_length))
-            end
+            simulate!(sys, minimizer)
+            random_velocities!(sys, temp)
+
+            simulate!(sys, simulator, 20)
+            @time simulate!(sys, simulator, 1000)
+
+            @test check_position_constraints(sys, sys.constraints[1])
+            @test check_velocity_constraints(sys, sys.constraints[1])
+
+            coords_copy = copy(sys.coords)
+            sys.coords     .+= randn(SVector{3, T}, length(sys))u"nm"         ./ 100
+            sys.velocities .+= randn(SVector{3, T}, length(sys))u"nm * ps^-1" ./ 100
+            @test !check_position_constraints(sys, sys.constraints[1])
+            @test !check_velocity_constraints(sys, sys.constraints[1])
+
+            apply_position_constraints!(sys, coords_copy)
+            apply_velocity_constraints!(sys)
+            @test check_position_constraints(sys, sys.constraints[1])
+            @test check_velocity_constraints(sys, sys.constraints[1])
         end
-
-        shake = SHAKE_RATTLE(
-            length(sys_cpu),
-            T(1e-6)u"nm",
-            T(1e-6)u"nm^2 * ps^-1";
-            dist_constraints=[constraints_list...],
-            gpu_block_size=256,
-        )
-
-        sys = System(sys_init; constraints=(shake,))
-
-        minimizer = SteepestDescentMinimizer()
-        simulate!(sys, minimizer)
-        random_velocities!(sys, temp)
-
-        simulate!(sys, simulator, 20)
-        @time simulate!(sys, simulator, 1000)
-
-        @test check_position_constraints(sys, sys.constraints[1])
-        @test check_velocity_constraints(sys, sys.constraints[1])
     end
 end

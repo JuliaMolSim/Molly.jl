@@ -1239,7 +1239,8 @@ function find_bond_r0(bonds_all, i, j)
     error("atoms $i and $j are in an angle constraint but the bond cannot be found")
 end
 
-function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_type, rigid_water)
+function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_type,
+                              rigid_water, units)
     if constraints_type == :none || iszero(length(bonds_all.is))
         return (), bonds_all, angles_all
     end
@@ -1286,8 +1287,8 @@ function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_
     if length(dist_constraints) > 0 || length(angle_constraints) > 0
         shake = SHAKE_RATTLE(
             length(atoms_data),
-            T(1e-6)u"nm",
-            T(1e-6)u"nm^2 * ps^-1";
+            (units ? T(1e-6)u"nm" : T(1e-6)),
+            (units ? T(1e-6)u"nm^2 * ps^-1" : T(1e-6));
             dist_constraints=[dist_constraints...],
             angle_constraints=[angle_constraints...],
         )
@@ -1369,7 +1370,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
     end
 
     constraints, bonds, angles = exchange_constraints(T, bonds_all, angles_all, atoms_data,
-                                                      constraints_type, rigid_water)
+                                                      constraints_type, rigid_water, units)
 
     # Only add present interactions and ensure that array types are concrete
     specific_inter_array = []

@@ -29,7 +29,7 @@ None of the atoms in this constraint should be constrained with atoms not part
 of this constraint.
 
 For example, a water molecule can be defined as
-`AngleConstraint(1, 2, 3, degr2rad(104.5), 0.9572u"Å", 0.9572u"Å")`
+`AngleConstraint(1, 2, 3, deg2rad(104.5), 0.9572u"Å", 0.9572u"Å")`
 where atom 2 is oxygen and atoms 1/3 are hydrogen.
 
 Linear molecules like CO2 can not be constrained.
@@ -41,15 +41,14 @@ struct AngleConstraint{D, I}
     dist_ij::D
     dist_jk::D
     dist_ik::D
-end
-
-function AngleConstraint(i, j, k, angle_ijk, dist_ij, dist_jk)
-    cos_θ = cos(angle_ijk)
-    if cos_θ == -1
-        throw(ArgumentError("disallowed linear angle constraint found between atoms $i/$j/$k"))
+    function AngleConstraint(i, j, k, angle_ijk, dist_ij, dist_jk)
+        cos_θ = cos(angle_ijk)
+        if cos_θ == -1
+            throw(ArgumentError("disallowed linear angle constraint found between atoms $i/$j/$k"))
+        end
+        dist_ik = sqrt(dist_ij^2 + dist_jk^2 - 2*dist_ij*dist_jk*cos_θ)
+        return new{typeof(dist_ij), typeof(i)}(i, j, k, dist_ij, dist_jk, dist_ik)
     end
-    dist_ik = sqrt(dist_ij^2 + dist_jk^2 - 2*dist_ij*dist_jk*cos_θ)
-    return AngleConstraint(i, j, k, dist_ij, dist_jk, dist_ik)
 end
 
 to_distance_constraints(ac::AngleConstraint) = (
@@ -129,7 +128,7 @@ function make_cluster_data(raw_is, raw_js, raw_ds)
 end
 
 # Kernel to support when neighbor finder is on GPU
-@kernel function disable_pairs!(eligible, idx_i, idx_j)
+@kernel function disable_pairs!(eligible, @Const(idx_i), @Const(idx_j))
     tid = @index(Global, Linear)
     if tid <= length(idx_i)
         i = idx_i[tid]
@@ -362,7 +361,7 @@ end
 @kernel inbounds=true function max_dist_error(
         @Const(clusters::StructArray),
         @Const(r),
-        @Const(boundary),
+        boundary,
         maximums::AbstractVector{T},
     ) where T
 
@@ -383,7 +382,7 @@ end
         @Const(clusters::StructArray),
         @Const(r),
         @Const(v),
-        @Const(boundary),
+        boundary,
         maximums::AbstractVector{T},
     ) where T
 
