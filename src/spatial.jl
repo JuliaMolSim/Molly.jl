@@ -939,7 +939,7 @@ function pressure(sys::AtomsBase.AbstractSystem{D}, neighbors, step_n::Integer=0
     if recompute
         _ = forces(sys; Virial = true)
     end
-    
+
     kinetic_energy(sys) # Always evaluate K in case velocities were rescaled by a thermostat
 
     if has_infinite_boundary(sys.boundary)
@@ -963,8 +963,14 @@ function pressure(sys::AtomsBase.AbstractSystem{D}, neighbors, step_n::Integer=0
     return sys.pres_tensor
 end
 
-function scalar_pressure(sys::System{D}; n_threads::Integer=Threads.nthreads())
-    P = pressure(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads) where D
+@doc raw"""
+    scalar_pressure(sys::System{D}; n_threads::Integer=Threads.nthreads())
+
+Retrieves the pressure as a scalar instead of as a tensor. Recomputes the forces
+when called.
+"""
+function scalar_pressure(sys::System{D}; n_threads::Integer=Threads.nthreads()) where D
+    P = pressure(sys, find_neighbors(sys; n_threads=n_threads); recompute = true, n_threads=n_threads)
     return (1/D) * tr(P)
 end
 

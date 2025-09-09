@@ -15,7 +15,9 @@ export
     VolumeLogger,
     DensityLogger,
     VirialLogger,
+    ScalarVirialLogger,
     PressureLogger,
+    ScalarPressureLogger,
     DisplacementsLogger,
     write_structure,
     TrajectoryWriter,
@@ -313,11 +315,6 @@ contribute to the virial.
 """
 VirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(virial_wrapper, T, n_steps)
 VirialLogger(n_steps::Integer) = VirialLogger(typeof(Matrix{DefaultFloat}(undef, 3, 3).*u"kJ * mol^-1"), n_steps)
-
-function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)}) where T
-    print(io, "VirialLogger{", eltype(values(vl)), "} with n_steps ",
-            vl.n_steps, ", ", length(values(vl)), " virials recorded")
-end
 
 function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)}) where T
     print(io, "VirialLogger{", eltype(values(vl)), "} with n_steps ",

@@ -87,6 +87,13 @@ function virial(sys)
     return sys.virial
 end
 
+
+@doc """
+    scalar_virial(sys)
+
+Retrieves the virial of the system as a scalar instead of as a tensor. Needs
+to recompute the forces.
+"""
 function scalar_virial(sys)
     _ = forces(sys; Virial = true)
     return tr(sys.virial) 
