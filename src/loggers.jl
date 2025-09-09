@@ -298,7 +298,8 @@ function Base.show(io::IO, dl::GeneralObservableLogger{T, typeof(density_wrapper
 end
 
 function virial_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
-    return deepcopy(sys.virial)
+    V = virial(sys)
+    return deepcopy(V)
 end
 
 """
@@ -318,9 +319,36 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)
             vl.n_steps, ", ", length(values(vl)), " virials recorded")
 end
 
+function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)}) where T
+    print(io, "VirialLogger{", eltype(values(vl)), "} with n_steps ",
+            vl.n_steps, ", ", length(values(vl)), " virials recorded")
+end
+
+function scalar_virial_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
+    V = scalar_virial(sys)
+    return deepcopy(V)
+end
+
+"""
+    ScalarVirialLogger(n_steps)
+    ScalarVirialLogger(T, n_steps)
+
+Log the [`scalar_virial`](@ref) tensor of a system throughout a simulation.
+
+This should only be used on systems where the general interactions and constraints do not
+contribute to the virial.
+"""
+ScalarVirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_virial_wrapper, T, n_steps)
+ScalarVirialLogger(n_steps::Integer) = VirialLogger(typeof(one(DefaultFloat)*u"kJ * mol^-1"), n_steps)
+
+function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(scalar_virial_wrapper)}) where T
+    print(io, "ScalarVirialLogger{", eltype(values(vl)), "} with n_steps ",
+            vl.n_steps, ", ", length(values(vl)), " virials recorded")
+end
+
 function pressure_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
 
-    P = pressure(sys, neighbors, step_n; n_threads = n_threads)
+    P = pressure(sys, neighbors, step_n; recompute = true, n_threads = n_threads)
 
     return deepcopy(P)
 
@@ -340,6 +368,31 @@ PressureLogger(n_steps::Integer) = PressureLogger(typeof(Matrix{DefaultFloat}(un
 
 function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(pressure_wrapper)}) where T
     print(io, "PressureLogger{", eltype(values(pl)), "} with n_steps ",
+            pl.n_steps, ", ", length(values(pl)), " pressures recorded")
+end
+
+function scalar_pressure_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
+
+    P = scalar_pressure(sys)
+
+    return deepcopy(P)
+
+end
+
+"""
+    ScalarPressureLogger(n_steps)
+    ScalarPressureLogger(T, n_steps)
+
+Log the [`scalar_pressure`](@ref) tensor of a system throughout a simulation.
+
+This should only be used on 3-dimensional systems where general interactions and constraints do not
+contribute to the pressure.
+"""
+ScalarPressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_pressure_wrapper, T, n_steps)
+ScalarPressureLogger(n_steps::Integer) = PressureLogger(typeof(one(DefaultFloat)*u"bar"), n_steps)
+
+function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(scalar_pressure_wrapper)}) where T
+    print(io, "ScalarPressureLogger{", eltype(values(pl)), "} with n_steps ",
             pl.n_steps, ", ", length(values(pl)), " pressures recorded")
 end
 

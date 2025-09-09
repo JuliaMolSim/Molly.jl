@@ -3,6 +3,8 @@
 export
     total_energy,
     kinetic_energy,
+    virial,
+    scalar_virial,
     temperature,
     potential_energy,
     pairwise_pe
@@ -81,8 +83,13 @@ respectively, acting on the i``^{th}`` atom. In Molly.jl, we implement
 the [virial definition used in LAMMPS](https://docs.lammps.org/compute_stress_atom.html). 
 """
 function virial(sys)
-    _ = forces(sys) # Force recomputation
+    _ = forces(sys; Virial = true) # Force recomputation
     return sys.virial
+end
+
+function scalar_virial(sys)
+    _ = forces(sys; Virial = true)
+    return tr(sys.virial) 
 end
 
 """

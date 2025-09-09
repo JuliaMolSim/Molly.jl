@@ -21,8 +21,8 @@ export
     bond_angle,
     torsion_angle,
     remove_CM_motion!,
-    virial,
     pressure,
+    scalar_pressure,
     molecule_centers,
     scale_coords!,
     dipole_moment
@@ -934,8 +934,12 @@ end
 
 
 function pressure(sys::AtomsBase.AbstractSystem{D}, neighbors, step_n::Integer=0;
-                  n_threads::Integer=Threads.nthreads()) where D
+                  recompute::Bool = false, n_threads::Integer=Threads.nthreads()) where D
 
+    if recompute
+        _ = forces(sys; Virial = true)
+    end
+    
     kinetic_energy(sys) # Always evaluate K in case velocities were rescaled by a thermostat
 
     if has_infinite_boundary(sys.boundary)
@@ -957,6 +961,11 @@ function pressure(sys::AtomsBase.AbstractSystem{D}, neighbors, step_n::Integer=0
         sys.pres_tensor = P_bar
     end
     return sys.pres_tensor
+end
+
+function scalar_pressure(sys::System{D}; n_threads::Integer=Threads.nthreads())
+    P = pressure(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads) where D
+    return (1/D) * tr(P)
 end
 
 """

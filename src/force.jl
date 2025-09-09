@@ -194,14 +194,14 @@ Calculate the forces on all atoms in a system using the pairwise, specific and
 general interactions. This call also populates the [`virial`](@ref) tensor of
 the system.
 """
-function forces(sys; n_threads::Integer=Threads.nthreads())
-    return forces(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+function forces(sys; Virial::Bool = false, n_threads::Integer=Threads.nthreads())
+    return forces(sys, find_neighbors(sys; n_threads=n_threads); Virial = Virial, n_threads=n_threads)
 end
 
-function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+function forces(sys, neighbors, step_n::Integer=0; Virial::Bool = false, n_threads::Integer=Threads.nthreads())
     forces_buffer = init_forces_buffer!(sys, n_threads)
     fs = zero_forces(sys)
-    forces!(fs, sys, neighbors, forces_buffer, step_n; n_threads=n_threads)
+    forces!(fs, sys, neighbors, forces_buffer, Val(Virial), step_n; n_threads=n_threads)
     return fs
 end
 
