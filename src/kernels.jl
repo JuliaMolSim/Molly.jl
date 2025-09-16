@@ -75,14 +75,16 @@ end
         i, j, special = neighbors[inter_i]
         f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), special, coords[i], coords[j],
                                 boundary, velocities[i], velocities[j], step_n)
+        # Displacement from i to j (minimum image)
+        dr = vector(coords[i], coords[j], boundary)
         for dim in 1:D
             fval = ustrip(f[dim])
             Atomix.@atomic forces[dim, i] += -fval
             Atomix.@atomic forces[dim, j] +=  fval
             if Virial
-                Atomix.@atomic virial[dim, 1] += ustrip(dr[1]) * ustrip(fs.f1[dim])
-                Atomix.@atomic virial[dim, 2] += ustrip(dr[2]) * ustrip(fs.f1[dim])
-                Atomix.@atomic virial[dim, 3] += ustrip(dr[3]) * ustrip(fs.f1[dim])
+                @inbounds for alpha in 1:D
+                    Atomix.@atomic virial[dim, alpha] += ustrip(dr[alpha]) * fval
+                end
             end
         end
     end
@@ -151,9 +153,9 @@ end
             Atomix.@atomic forces[dim, i] += ustrip(fs.f1[dim])
 
             if Virial
-                Atomix.@atomic virial[dim, 1] += ustrip(coords[i][1]) * ustrip(fs.f1[dim])
-                Atomix.@atomic virial[dim, 2] += ustrip(coords[i][2]) * ustrip(fs.f1[dim])
-                Atomix.@atomic virial[dim, 3] += ustrip(coords[i][3]) * ustrip(fs.f1[dim])
+                @inbounds for alpha in 1:D
+                    Atomix.@atomic virial[dim, alpha] += ustrip(coords[i][alpha]) * ustrip(fs.f1[dim])
+                end
             end
 
         end
@@ -182,9 +184,9 @@ end
             Atomix.@atomic forces[dim, j] += ustrip(fs.f2[dim])
 
             if Virial
-                Atomix.@atomic virial[dim, 1] += ustrip(dr[1]) * ustrip(fs.f1[dim])
-                Atomix.@atomic virial[dim, 2] += ustrip(dr[2]) * ustrip(fs.f1[dim])
-                Atomix.@atomic virial[dim, 3] += ustrip(dr[3]) * ustrip(fs.f1[dim])
+                @inbounds for alpha in 1:D
+                    Atomix.@atomic virial[dim, alpha] += ustrip(dr[alpha]) * ustrip(fs.f1[dim])
+                end
             end
 
         end
@@ -216,9 +218,9 @@ end
             Atomix.@atomic forces[dim, k] += ustrip(fs.f3[dim])
 
             if Virial
-                Atomix.@atomic virial[dim, 1] += (ustrip(r_ik[1]) * ustrip(fs.f1[dim]) + ustrip(r_jk[1]) * ustrip(fs.f2[dim]))
-                Atomix.@atomic virial[dim, 2] += (ustrip(r_ik[2]) * ustrip(fs.f1[dim]) + ustrip(r_jk[2]) * ustrip(fs.f2[dim]))
-                Atomix.@atomic virial[dim, 3] += (ustrip(r_ik[3]) * ustrip(fs.f1[dim]) + ustrip(r_jk[3]) * ustrip(fs.f2[dim]))
+                @inbounds for alpha in 1:D
+                    Atomix.@atomic virial[dim, alpha] += (ustrip(r_ik[alpha]) * ustrip(fs.f1[dim]) + ustrip(r_jk[alpha]) * ustrip(fs.f2[dim]))
+                end
             end
 
         end
@@ -254,9 +256,9 @@ end
             Atomix.@atomic forces[dim, l] += ustrip(fs.f4[dim])
 
             if Virial
-                Atomix.@atomic virial[dim, 1] += (ustrip(r_il[1]) * ustrip(fs.f1[dim]) + ustrip(r_jl[1]) * ustrip(fs.f2[dim]) + ustrip(r_kl[1]) * ustrip(fs.f3[dim]))
-                Atomix.@atomic virial[dim, 2] += (ustrip(r_il[2]) * ustrip(fs.f1[dim]) + ustrip(r_jl[2]) * ustrip(fs.f2[dim]) + ustrip(r_kl[2]) * ustrip(fs.f3[dim]))
-                Atomix.@atomic virial[dim, 3] += (ustrip(r_il[3]) * ustrip(fs.f1[dim]) + ustrip(r_jl[3]) * ustrip(fs.f2[dim]) + ustrip(r_kl[3]) * ustrip(fs.f3[dim]))
+                @inbounds for alpha in 1:D
+                    Atomix.@atomic virial[dim, alpha] += (ustrip(r_il[alpha]) * ustrip(fs.f1[dim]) + ustrip(r_jl[alpha]) * ustrip(fs.f2[dim]) + ustrip(r_kl[alpha]) * ustrip(fs.f3[dim]))
+                end
             end
 
         end
