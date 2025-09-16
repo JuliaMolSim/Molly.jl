@@ -336,7 +336,7 @@ This should only be used on systems where the general interactions and constrain
 contribute to the virial.
 """
 ScalarVirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_virial_wrapper, T, n_steps)
-ScalarVirialLogger(n_steps::Integer) = VirialLogger(typeof(one(DefaultFloat)*u"kJ * mol^-1"), n_steps)
+ScalarVirialLogger(n_steps::Integer) = ScalarVirialLogger(typeof(one(DefaultFloat)*u"kJ * mol^-1"), n_steps)
 
 function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(scalar_virial_wrapper)}) where T
     print(io, "ScalarVirialLogger{", eltype(values(vl)), "} with n_steps ",
@@ -386,7 +386,7 @@ This should only be used on 3-dimensional systems where general interactions and
 contribute to the pressure.
 """
 ScalarPressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_pressure_wrapper, T, n_steps)
-ScalarPressureLogger(n_steps::Integer) = PressureLogger(typeof(one(DefaultFloat)*u"bar"), n_steps)
+ScalarPressureLogger(n_steps::Integer) = ScalarPressureLogger(typeof(one(DefaultFloat)*u"bar"), n_steps)
 
 function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(scalar_pressure_wrapper)}) where T
     print(io, "ScalarPressureLogger{", eltype(values(pl)), "} with n_steps ",
