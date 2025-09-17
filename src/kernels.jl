@@ -69,10 +69,11 @@ end
                                            @Const(neighbors), step_n, ::Val{Virial}, ::Val{D},
                                            ::Val{F}) where {Virial, D, F}
     inter_i = @index(Global, Linear)
-    FT = eltype(forces)
 
     if inter_i <= length(neighbors)
         i, j, special = neighbors[inter_i]
+        dr = vector(coords[i], coords[j], boundary)
+        dr_vals = ntuple(col -> ustrip(dr[col]), D)
         f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), special, coords[i], coords[j],
                                 boundary, velocities[i], velocities[j], step_n)
         # Displacement from i to j (minimum image)
@@ -148,16 +149,15 @@ end
         if unit(fs.f1[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
+        coord_vals = ntuple(col -> ustrip(coords[i][col]), D)
         for dim in 1:D
-            
-            Atomix.@atomic forces[dim, i] += ustrip(fs.f1[dim])
-
+            fval = ustrip(fs.f1[dim])
+            Atomix.@atomic forces[dim, i] += fval
             if Virial
                 @inbounds for alpha in 1:D
                     Atomix.@atomic virial[dim, alpha] += ustrip(coords[i][alpha]) * ustrip(fs.f1[dim])
                 end
             end
-
         end
     end
 end
@@ -169,8 +169,6 @@ end
                                                 @Const(inters), ::Val{Virial}, ::Val{D},
                                                 ::Val{F}) where {Virial, D, F}
     inter_i = @index(Global, Linear)
-    FT = eltype(forces)
-
     if inter_i <= length(is)
         i, j = is[inter_i], js[inter_i]
         dr = vector(coords[j], coords[i], boundary)
@@ -179,10 +177,12 @@ end
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
+        r_vals = ntuple(col -> ustrip(dr[col]), D)
         for dim in 1:D
-            Atomix.@atomic forces[dim, i] += ustrip(fs.f1[dim])
-            Atomix.@atomic forces[dim, j] += ustrip(fs.f2[dim])
-
+            f1val = ustrip(fs.f1[dim])
+            f2val = ustrip(fs.f2[dim])
+            Atomix.@atomic forces[dim, i] += f1val
+            Atomix.@atomic forces[dim, j] += f2val
             if Virial
                 @inbounds for alpha in 1:D
                     Atomix.@atomic virial[dim, alpha] += ustrip(dr[alpha]) * ustrip(fs.f1[dim])
@@ -212,11 +212,15 @@ end
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
+        r_ik_vals = ntuple(col -> ustrip(r_ik[col]), D)
+        r_jk_vals = ntuple(col -> ustrip(r_jk[col]), D)
         for dim in 1:D
-            Atomix.@atomic forces[dim, i] += ustrip(fs.f1[dim])
-            Atomix.@atomic forces[dim, j] += ustrip(fs.f2[dim])
-            Atomix.@atomic forces[dim, k] += ustrip(fs.f3[dim])
-
+            f1val = ustrip(fs.f1[dim])
+            f2val = ustrip(fs.f2[dim])
+            f3val = ustrip(fs.f3[dim])
+            Atomix.@atomic forces[dim, i] += f1val
+            Atomix.@atomic forces[dim, j] += f2val
+            Atomix.@atomic forces[dim, k] += f3val
             if Virial
                 @inbounds for alpha in 1:D
                     Atomix.@atomic virial[dim, alpha] += (ustrip(r_ik[alpha]) * ustrip(fs.f1[dim]) + ustrip(r_jk[alpha]) * ustrip(fs.f2[dim]))
@@ -249,12 +253,18 @@ end
         if unit(fs.f1[1]) != F || unit(fs.f2[1]) != F || unit(fs.f3[1]) != F || unit(fs.f4[1]) != F
             error("wrong force unit returned, was expecting $F")
         end
+        r_il_vals = ntuple(col -> ustrip(r_il[col]), D)
+        r_jl_vals = ntuple(col -> ustrip(r_jl[col]), D)
+        r_kl_vals = ntuple(col -> ustrip(r_kl[col]), D)
         for dim in 1:D
-            Atomix.@atomic forces[dim, i] += ustrip(fs.f1[dim])
-            Atomix.@atomic forces[dim, j] += ustrip(fs.f2[dim])
-            Atomix.@atomic forces[dim, k] += ustrip(fs.f3[dim])
-            Atomix.@atomic forces[dim, l] += ustrip(fs.f4[dim])
-
+            f1val = ustrip(fs.f1[dim])
+            f2val = ustrip(fs.f2[dim])
+            f3val = ustrip(fs.f3[dim])
+            f4val = ustrip(fs.f4[dim])
+            Atomix.@atomic forces[dim, i] += f1val
+            Atomix.@atomic forces[dim, j] += f2val
+            Atomix.@atomic forces[dim, k] += f3val
+            Atomix.@atomic forces[dim, l] += f4val
             if Virial
                 @inbounds for alpha in 1:D
                     Atomix.@atomic virial[dim, alpha] += (ustrip(r_il[alpha]) * ustrip(fs.f1[dim]) + ustrip(r_jl[alpha]) * ustrip(fs.f2[dim]) + ustrip(r_kl[alpha]) * ustrip(fs.f3[dim]))

@@ -187,6 +187,7 @@ end
 
 function potential_energy_wrapper(sys, neighbors, step_n::Integer; n_threads::Integer,
                                   current_potential_energy=nothing, kwargs...)
+    @show step_n
     if isnothing(current_potential_energy)
         return potential_energy(sys, neighbors, step_n; n_threads=n_threads)
     else
