@@ -44,7 +44,7 @@ struct NoCoupling end
 
 apply_coupling!(sys, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
 
-needs_virial(c::NoCoupling) = false
+needs_virial(c::NoCoupling) = (truth = false, steps = Inf)
 
 @doc raw"""
     ImmediateThermostat(temperature)
@@ -70,7 +70,7 @@ function apply_coupling!(sys, thermostat::ImmediateThermostat, sim, neighbors=no
     return false
 end
 
-needs_virial(c::ImmediateThermostat) = false
+needs_virial(c::ImmediateThermostat) = (truth = false, steps = Inf)
 
 @doc raw"""
     VelocityRescaleThermostat(temperature, coupling_const; n_steps = 1, seed = 42)
@@ -117,19 +117,19 @@ function apply_coupling!(sys::System{<:Any, AT}, thermostat::VelocityRescaleTher
     # DOFs and current kinetic energy
     Nf  = sys.df
     Nf  > 0 || return false
-    vels   = from_device(sys.velocities)
+    vels = from_device(sys.velocities)
 
     K = kinetic_energy(sys)
-    
     ustrip(K) > 0 || return false
 
     # Target kinetic energy
     Kbar = 0.5 * Nf * sys.k * thermostat.temperature  # unit-consistent with K
-
+    
     # Scalars
-    dt  = sim.dt
-    c   = exp(-dt / thermostat.coupling_const)              # e^{-Δt/τ}
-    A   = Kbar / (Nf * K)   # = (K̄/(Nf*K)), dimensionless
+    dt  = sim.dt * thermostat.n_steps
+    τ   = uconvert(unit(dt), thermostat.coupling_const)
+    c   = exp(-dt / τ)              # e^{-Δt/τ}
+    A   = Kbar / (Nf * K)           # = (K̄/(Nf*K)), dimensionless
 
     # Deterministic per-step RNG
     rrng = MersenneTwister(UInt(thermostat.seed) ⊻ UInt(step_n))
@@ -141,12 +141,12 @@ function apply_coupling!(sys::System{<:Any, AT}, thermostat::VelocityRescaleTher
         x = randn(rrng); rsum += x*x
     end
 
-    # λ² (Appendix A7 in Bussi, Donadio & Parrinello (2007))
+    # λ² (Appendix A7). Guard tiny negatives from roundoff.
     lam2 = c + (1 - c) * A * (R1*R1 + rsum) + 2 * sqrt(c * (1 - c) * A) * R1
-    lam2 = max(lam2, zero(lam2) + eps(Float64)) # Guard from small numbers
+    lam2 = max(lam2, zero(lam2) + eps(Float64))
     λ    = sqrt(lam2)
 
-    # Uniform rescale
+    # Uniform rescale (preserves constraints; COM unchanged)
     @inbounds for i in eachindex(vels)
         vels[i] = λ * vels[i]
     end
@@ -155,7 +155,7 @@ function apply_coupling!(sys::System{<:Any, AT}, thermostat::VelocityRescaleTher
     return false  # no force recompute needed
 end
 
-needs_virial(c::VelocityRescaleThermostat) = false
+needs_virial(c::VelocityRescaleThermostat) = (truth = false, steps = Inf)
 
 """
     AndersenThermostat(temperature, coupling_const)
@@ -197,7 +197,7 @@ function apply_coupling!(sys::System{<:Any, AT, T}, thermostat::AndersenThermost
     return false
 end
 
-needs_virial(c::AndersenThermostat) = false
+needs_virial(c::AndersenThermostat) = (truth = false, steps = Inf)
 
 @doc raw"""
     BerendsenThermostat(temperature, coupling_const)
@@ -224,7 +224,7 @@ function apply_coupling!(sys, thermostat::BerendsenThermostat, sim, neighbors=no
     return false
 end
 
-needs_virial(c::BerendsenThermostat) = false
+needs_virial(c::BerendsenThermostat) = (truth = false, steps = Inf)
 
 @doc raw"""
     BerendsenBarostat(pressure, coupling_const; 
@@ -393,7 +393,7 @@ function apply_coupling!(sys, barostat::BerendsenBarostat{PT, CT, ST, ICT, FT}, 
 
     D   = size(P,1)
     τp  = barostat.coupling_const
-    dt  = sim.dt
+    dt  = sim.dt * barostat.n_steps
     μ   = Matrix{FT}(I, D, D)
 
     Pavg = tr(P)/FT(D)
@@ -452,7 +452,7 @@ function apply_coupling!(sys, barostat::BerendsenBarostat{PT, CT, ST, ICT, FT}, 
     return true
 end
 
-needs_virial(c::BerendsenBarostat) = true
+needs_virial(c::BerendsenBarostat) = (truth = false, steps = c.n_steps)
 
 @doc raw"""
     CRescaleBarostat(pressure, coupling_const; 
@@ -629,7 +629,7 @@ function apply_coupling!(sys::System{D, AT}, barostat::CRescaleBarostat{PT, CT, 
 
     # Thermo factors
     V         = volume(sys.boundary)
-    τp, dt    = barostat.coupling_const, sim.dt
+    τp, dt    = barostat.coupling_const, sim.dt * barostat.n_steps
     kT_energy = Unitful.k * temperature(sys)
     kT_pv     = uconvert(unit(P[1,1]) * unit(V), kT_energy)
 
@@ -709,7 +709,7 @@ function apply_coupling!(sys::System{D, AT}, barostat::CRescaleBarostat{PT, CT, 
     return true
 end
 
-needs_virial(c::CRescaleBarostat) = true
+needs_virial(c::CRescaleBarostat) = (truth = false, steps = c.n_steps)
 
 @doc raw"""
     MonteCarloBarostat(pressure, temperature, boundary; coupling_type = :isotropic,
@@ -1075,4 +1075,4 @@ function apply_coupling!(sys::System{D, AT, T}, barostat::MonteCarloBarostat, si
                     
 end
 
-needs_virial(c::MonteCarloBarostat) = false
+needs_virial(c::MonteCarloBarostat) = (truth = false, steps = Inf)

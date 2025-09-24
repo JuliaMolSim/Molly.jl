@@ -408,13 +408,12 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
     @inbounds for inter_list in sils_1_atoms
         for (i, inter) in zip(inter_list.is, inter_list.inters)
             
-            r_i = coords[i]
-            
             sf = force(inter, coords[i], boundary, atoms[i], force_units, velocities[i], step_n)
             check_force_units(sf.f1, force_units)
             fs_nounits[i] += ustrip.(sf.f1)
 
             if Virial
+                r_i = coords[i]
                 v = r_i * transpose(sf.f1)
                 vir_nounits  .+= ustrip.(v)
             end
@@ -423,8 +422,6 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
 
     @inbounds for inter_list in sils_2_atoms
         for (i, j, inter) in zip(inter_list.is, inter_list.js, inter_list.inters)
-
-            r_ij = vector(coords[j], coords[i], boundary)
             
             sf = force(inter, coords[i], coords[j], boundary, atoms[i], atoms[j], force_units,
                        velocities[i], velocities[j], step_n)
@@ -434,7 +431,8 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
             fs_nounits[j] += ustrip.(sf.f2)
 
             if Virial
-                v = r_ij * transpose(sf.f1)
+                r_ji = vector(coords[j], coords[i], boundary)  # second atom is the reference
+                v = r_ji * transpose(sf.f1)
                 vir_nounits .+= ustrip.(v)
             end
 
@@ -443,9 +441,6 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
 
     @inbounds for inter_list in sils_3_atoms
         for (i, j, k, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.inters)
-
-            r_ik = vector(coords[k], coords[i], boundary)
-            r_jk = vector(coords[k], coords[j], boundary)
 
             sf = force(inter, coords[i], coords[j], coords[k], boundary, atoms[i], atoms[j],
                        atoms[k], force_units, velocities[i], velocities[j], velocities[k], step_n)
@@ -457,10 +452,9 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
             fs_nounits[k] += ustrip.(sf.f3)
 
             if Virial
-                v1 = r_ik * transpose(sf.f1)
-                v2 = r_jk * transpose(sf.f2)
-
-                vir_nounits .+= ustrip.((v1 + v2))
+                r_ji = vector(coords[j], coords[i], boundary)  # r_i - r_j (second atom is the reference, MIC)
+                r_jk = vector(coords[j], coords[k], boundary)  # r_k - r_j (second atom is the reference)
+                vir_nounits .+= ustrip.(r_ji * transpose(sf.f1) + r_jk * transpose(sf.f3))
             end
 
         end
@@ -470,9 +464,6 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
         for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
                                        inter_list.inters)
 
-            r_il = vector(coords[l], coords[i], boundary)
-            r_jl = vector(coords[l], coords[j], boundary)
-            r_kl = vector(coords[l], coords[k], boundary)
 
             sf = force(inter, coords[i], coords[j], coords[k], coords[l], boundary, atoms[i],
                        atoms[j], atoms[k], atoms[l], force_units, velocities[i], velocities[j],
@@ -487,11 +478,12 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
             fs_nounits[l] += ustrip.(sf.f4)
 
             if Virial
-                v1 = r_il * transpose(sf.f1)
-                v2 = r_jl * transpose(sf.f2)
-                v3 = r_kl * transpose(sf.f3)
-
-                vir_nounits .+= ustrip.((v1 + v2 + v3))
+                r_ji = vector(coords[j], coords[i], boundary)  # r_i - r_j
+                r_jk = vector(coords[j], coords[k], boundary)  # r_k - r_j
+                r_jl = vector(coords[j], coords[l], boundary)  # r_l - r_j  (direct MIC, not sum)
+                vir_nounits .+= ustrip.(r_ji * transpose(sf.f1) +
+                                        r_jk * transpose(sf.f3) +
+                                        r_jl * transpose(sf.f4) )
             end
         end
     end

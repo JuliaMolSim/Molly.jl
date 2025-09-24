@@ -144,7 +144,19 @@ end
                            run_loggers=true,
                            rng=Random.default_rng())
 
-    needs_vir = sim.coupling isa NoCoupling ? false : any(needs_virial, sim.coupling)
+    needs_vir_steps = Inf
+    needs_vir       = false
+
+    for coupler in sim.coupling
+        vir = needs_virial(coupler)
+        if vir.truth
+            needs_vir = true
+            if vir.steps < needs_vir.steps
+                needs_vir_steps = vir.steps
+            end
+        end
+    end
+
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -166,6 +178,8 @@ end
         if using_constraints
             cons_coord_storage .= sys.coords
         end
+
+        needs_vir = step_n % needs_vir_steps == 0 ? true : false
 
         sys.coords .+= sys.velocities .* sim.dt .+ accels_t .* dt_sq_div2
 
@@ -233,7 +247,17 @@ end
                            run_loggers=true,
                            rng=Random.default_rng())
 
-    needs_vir = sim.coupling isa NoCoupling ? false : any(needs_virial, sim.coupling)
+    needs_vir_steps = Inf
+
+    for coupler in sim.coupling
+        vir = needs_virial(coupler)
+        if vir.truth
+            if vir.steps < needs_vir.steps
+                needs_vir_steps = vir.steps
+            end
+        end
+    end
+
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -249,6 +273,9 @@ end
     end
 
     for step_n in 1:n_steps
+
+        needs_vir = step_n % needs_vir_steps == 0 ? true : false
+        
         forces!(forces_t, sys, neighbors, forces_buffer, Val(needs_vir), step_n; n_threads=n_threads)
         accels_t .= forces_t ./ masses(sys)
 
@@ -310,7 +337,17 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
                            run_loggers=true,
                            rng=Random.default_rng())
 
-    needs_vir = sim.coupling isa NoCoupling ? false : any(needs_virial, sim.coupling)
+    needs_vir_steps = Inf
+
+    for coupler in sim.coupling
+        vir = needs_virial(coupler)
+        if vir.truth
+            if vir.steps < needs_vir.steps
+                needs_vir_steps = vir.steps
+            end
+        end
+    end
+
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads)
@@ -322,6 +359,9 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
     dt_sq = sim.dt^2
 
     for step_n in 1:n_steps
+
+        needs_vir = step_n % needs_vir_steps == 0 ? true : false
+
         forces!(forces_t, sys, neighbors, forces_buffer, Val(needs_vir), step_n; n_threads=n_threads)
         accels_t .= forces_t ./ masses(sys)
 
@@ -393,7 +433,17 @@ end
                            run_loggers=true,
                            rng=Random.default_rng())
 
-    needs_vir = sim.coupling isa NoCoupling ? false : any(needs_virial, sim.coupling)
+    needs_vir_steps = Inf
+
+    for coupler in sim.coupling
+        vir = needs_virial(coupler)
+        if vir.truth
+            if vir.steps < needs_vir.steps
+                needs_vir_steps = vir.steps
+            end
+        end
+    end
+
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -411,6 +461,9 @@ end
     dt_div2 = sim.dt / 2
 
     for step_n in 1:n_steps
+
+        needs_vir = step_n % needs_vir_steps == 0 ? true : false
+
         forces!(forces_t, sys, neighbors, forces_buffer, Val(needs_vir), step_n; n_threads=n_threads)
         accels_t .= forces_t ./ masses(sys)
 
@@ -692,13 +745,24 @@ end
         @warn "NoseHoover is not currently compatible with constraints, " *
               "constraints will be ignored"
     end
-    needs_vir = sim.coupling isa NoCoupling ? false : any(needs_virial, sim.coupling)
+    
+    needs_vir_steps = Inf
+
+    for coupler in sim.coupling
+        vir = needs_virial(coupler)
+        if vir.truth
+            if vir.steps < needs_vir.steps
+                needs_vir_steps = vir.steps
+            end
+        end
+    end
+
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_t, forces_t_dt = zero_forces(sys), zero_forces(sys)
     forces_buffer = init_forces_buffer!(sys, n_threads)
-    forces!(forces_t, sys, neighbors, forces_buffer, Val(needs_vir), 0; n_threads=n_threads)
+    forces!(forces_t, sys, neighbors, forces_buffer, Val(true), 0; n_threads=n_threads)
     accels_t = forces_t ./ masses(sys)
     accels_t_dt = zero(accels_t)
     apply_loggers!(sys, neighbors, 0, run_loggers; n_threads=n_threads, current_forces=forces_t)
@@ -707,6 +771,9 @@ end
     dt_div2 = sim.dt / 2
 
     for step_n in 1:n_steps
+
+        needs_vir = step_n % needs_vir_steps == 0 ? true : false
+
         v_half .= sys.velocities .+ (accels_t .- (sys.velocities .* zeta)) .* dt_div2
 
         sys.coords .+= v_half .* sim.dt

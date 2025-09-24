@@ -105,7 +105,7 @@ end
 Calculate the temperature of a system from the kinetic energy of the atoms.
 """
 function temperature(sys)
-    ke = kinetic_energy_noconvert(sys)
+    ke = kinetic_energy(sys)
     temp = 2 * ke / (sys.df * sys.k)
     if sys.energy_units == NoUnits
         return temp
