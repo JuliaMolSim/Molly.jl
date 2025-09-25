@@ -151,7 +151,7 @@ end
         vir = needs_virial(coupler)
         if vir.truth
             needs_vir = true
-            if vir.steps < needs_vir.steps
+            if vir.steps < needs_vir_steps
                 needs_vir_steps = vir.steps
             end
         end
@@ -252,7 +252,7 @@ end
     for coupler in sim.coupling
         vir = needs_virial(coupler)
         if vir.truth
-            if vir.steps < needs_vir.steps
+            if vir.steps < needs_vir_steps
                 needs_vir_steps = vir.steps
             end
         end
@@ -342,7 +342,7 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
     for coupler in sim.coupling
         vir = needs_virial(coupler)
         if vir.truth
-            if vir.steps < needs_vir.steps
+            if vir.steps < needs_vir_steps
                 needs_vir_steps = vir.steps
             end
         end
@@ -438,7 +438,7 @@ end
     for coupler in sim.coupling
         vir = needs_virial(coupler)
         if vir.truth
-            if vir.steps < needs_vir.steps
+            if vir.steps < needs_vir_steps
                 needs_vir_steps = vir.steps
             end
         end
@@ -751,7 +751,7 @@ end
     for coupler in sim.coupling
         vir = needs_virial(coupler)
         if vir.truth
-            if vir.steps < needs_vir.steps
+            if vir.steps < needs_vir_steps
                 needs_vir_steps = vir.steps
             end
         end

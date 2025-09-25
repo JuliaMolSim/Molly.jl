@@ -452,7 +452,7 @@ function apply_coupling!(sys, barostat::BerendsenBarostat{PT, CT, ST, ICT, FT}, 
     return true
 end
 
-needs_virial(c::BerendsenBarostat) = (truth = false, steps = c.n_steps)
+needs_virial(c::BerendsenBarostat) = (truth = true, steps = c.n_steps)
 
 @doc raw"""
     CRescaleBarostat(pressure, coupling_const; 
@@ -709,7 +709,7 @@ function apply_coupling!(sys::System{D, AT}, barostat::CRescaleBarostat{PT, CT, 
     return true
 end
 
-needs_virial(c::CRescaleBarostat) = (truth = false, steps = c.n_steps)
+needs_virial(c::CRescaleBarostat) = (truth = true, steps = c.n_steps)
 
 @doc raw"""
     MonteCarloBarostat(pressure, temperature, boundary; coupling_type = :isotropic,
