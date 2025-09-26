@@ -247,7 +247,7 @@ function forces!(fs, sys::System{D, AT, T}, neighbors, buffers, ::Val{Virial}, s
     sys.virial .= buffers.vir_nounits .* sys.energy_units
 
     for inter in values(sys.general_inters)
-        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+        AtomsCalculators.forces!(fs, sys, inter; Virial = Virial, neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads)
     end
 
@@ -539,7 +539,7 @@ function forces!(fs, sys::System{D, AT, T}, neighbors, buffers, ::Val{Virial}, s
     end
 
     for inter in values(sys.general_inters)
-        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+        AtomsCalculators.forces!(fs, sys, inter; Virial = Virial, neighbors=neighbors, step_n=step_n,
                                  n_threads=n_threads)
     end
 

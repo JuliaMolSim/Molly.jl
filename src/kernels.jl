@@ -154,7 +154,7 @@ end
             Atomix.@atomic forces[dim, i] += fval
             if Virial
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic virial[dim, alpha] += ustrip(coords[i][alpha]) * ustrip(fs.f1[dim])
+                    Atomix.@atomic virial[alpha, dim] += ustrip(coords[i][alpha]) * ustrip(fs.f1[dim])
                 end
             end
         end
@@ -183,7 +183,7 @@ end
             if Virial
                 r_ji = vector(coords[j], coords[i], boundary)  # second atom is the reference
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic virial[dim, alpha] += ustrip(r_ji[alpha]) * ustrip(fs.f1[dim])
+                    Atomix.@atomic virial[alpha, dim] += ustrip(r_ji[alpha]) * ustrip(fs.f1[dim])
                 end
             end
 
@@ -219,7 +219,7 @@ end
                 r_ji = vector(coords[j], coords[i], boundary)  # r_i - r_j (second atom is the reference, MIC)
                 r_jk = vector(coords[j], coords[k], boundary)  # r_k - r_j (second atom is the reference)
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic virial[dim, alpha] += (ustrip(r_ji[alpha]) * ustrip(fs.f1[dim]) +
+                    Atomix.@atomic virial[alpha, dim] += (ustrip(r_ji[alpha]) * ustrip(fs.f1[dim]) +
                                                           ustrip(r_jk[alpha]) * ustrip(fs.f3[dim]))
                 end
             end
@@ -262,7 +262,7 @@ end
                 r_jk = vector(coords[j], coords[k], boundary)  # r_k - r_j
                 r_jl = vector(coords[j], coords[l], boundary)  # r_l - r_j
                 @inbounds for alpha in 1:D
-                    Atomix.@atomic virial[dim, alpha] += (ustrip(r_ji[alpha]) * ustrip(fs.f1[dim]) +
+                    Atomix.@atomic virial[alpha, dim] += (ustrip(r_ji[alpha]) * ustrip(fs.f1[dim]) +
                                                           ustrip(r_jk[alpha]) * ustrip(fs.f3[dim]) +  
                                                           ustrip(r_jl[alpha]) * ustrip(fs.f4[dim]))
                 end
