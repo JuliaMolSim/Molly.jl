@@ -260,9 +260,10 @@ function ewald_pe_forces!(Fs, Vir, inter::Ewald{T}, atoms, coords, boundary, for
         Fs_cpu = Fs
     end
 
-    exclusion_E = excluded_interactions!(Fs_cpu, nothing, nothing, inter.excluded_pairs,
+    exclusion_E = excluded_interactions!(Fs_cpu, Vir, nothing, nothing, nothing, inter.excluded_pairs,
                                          atoms_cpu, coords_cpu, boundary, α, f,
                                          force_units, energy_units, calculate_forces, Val(T), Val(Virial))
+
 
     recip_box_size = (2 * T(π)) ./ boundary.side_lengths
     eir = zeros(Complex{T}, kmax * n_atoms * 3)
@@ -325,6 +326,20 @@ function ewald_pe_forces!(Fs, Vir, inter::Ewald{T}, atoms, coords, boundary, for
                         Fs_cpu[n] += 2 .* recip_coeff .* F .* SVector(kx, ky, kz)
                     end
                 end
+
+                if Virial
+                    Ek = recip_coeff * ak * (cs*cs + ss*ss) * energy_units   # E_k
+                    invk2 = one(T)/k2
+                    cfac  = 2*(one(T) + (-factor_ewald)*k2) * invk2          # 2*(1 + k^2/(4α^2))/k^2
+                    gxx = 1 - cfac*kx*kx
+                    gxy =   - cfac*kx*ky
+                    gxz =   - cfac*kx*kz
+                    gyy = 1 - cfac*ky*ky
+                    gyz =   - cfac*ky*kz
+                    gzz = 1 - cfac*kz*kz
+                    Vir .+= Ek .* SMatrix{3,3,T}(gxx,gxy,gxz, gxy,gyy,gyz, gxz,gyz,gzz)
+                end
+
                 reciprocal_space_E += recip_coeff * ak * (cs * cs + ss * ss)
                 lowrz = 1 - nrz
             end
@@ -335,6 +350,12 @@ function ewald_pe_forces!(Fs, Vir, inter::Ewald{T}, atoms, coords, boundary, for
     charge_E = -f * T(π) * sum(partial_charges_cpu)^2 / (2 * V * α^2)
     self_E = f * -sum(abs2, partial_charges_cpu) * α / sqrt(T(π)) + charge_E
     total_E = reciprocal_space_E + self_E + exclusion_E
+
+    if Virial
+        # E_charge = -A/V with A = f*π*Q^2/(2α^2) ⇒ W_charge = -E_charge * I
+        Vir .+= (-charge_E) .* I(3)
+    end
+
     if calculate_forces && AT <: AbstractGPUArray
         Fs .+= to_device(Fs_cpu, AT)
     end
@@ -767,7 +788,7 @@ function recip_conv_inner!(Vir, charge_grid::AbstractArray{Complex{T}, 3}, bsm_x
                 end
             else
                 Vir .+= Ek .* G
-            end         
+            end
         end
 
     end

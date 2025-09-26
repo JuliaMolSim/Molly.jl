@@ -214,7 +214,7 @@ function forces!(fs, sys::System{D, AT, T}, neighbors, buffers, ::Val{Virial}, s
     
     https://docs.lammps.org/compute_stress_atom.html
 
-    TODO: For now, KSpace, constraints and GeneralInteraction conributions are ignored.
+    TODO: For now, constraints and GeneralInteraction conributions are ignored.
     This should change in the future.
     =#
     fill!(sys.virial, zero(T)*sys.energy_units)
@@ -532,7 +532,7 @@ function forces!(fs, sys::System{D, AT, T}, neighbors, buffers, ::Val{Virial}, s
                             sys.boundary, Val(Virial), step_n, sys.force_units, Val(T))
     end
 
-    fs          .= reinterpret(SVector{D, T}, vec(buffers.fs_mat)) .* sys.force_units
+    fs .= reinterpret(SVector{D, T}, vec(buffers.fs_mat)) .* sys.force_units
 
     if Virial
         sys.virial .+= from_device(buffers.virial_specific) .* sys.energy_units
