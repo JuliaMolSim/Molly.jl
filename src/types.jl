@@ -547,6 +547,7 @@ function System(;
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
     T = float_type(boundary)
+    CT = typeof(ustrip(oneunit(eltype(eltype(coords))))) # Allows propagation of uncertainties to tensors
     A = typeof(atoms)
     C = typeof(coords)
     B = typeof(boundary)
@@ -575,27 +576,27 @@ function System(;
 
     if isnothing(virial)
         if energy_units == NoUnits
-            virial = zeros(T, D, D)
+            virial = zeros(CT, D, D)
         else
-            virial = zeros(T, D, D) * energy_units
+            virial = zeros(CT, D, D) * energy_units
         end
     end
     VT = typeof(virial)
 
     if isnothing(kin_tensor)
         if energy_units == NoUnits
-            kin_tensor = zeros(T, D, D)
+            kin_tensor = zeros(CT, D, D)
         else
-            kin_tensor = zeros(T, D, D) * energy_units
+            kin_tensor = zeros(CT, D, D) * energy_units
         end
     end
     KT = typeof(kin_tensor)
 
     if isnothing(pres_tensor)
         if energy_units == NoUnits
-            pres_tensor = zeros(T, D, D)
+            pres_tensor = zeros(CT, D, D)
         else
-            pres_tensor = zeros(T, D, D) * u"bar"
+            pres_tensor = zeros(CT, D, D) * u"bar"
         end
     end
     PT = typeof(pres_tensor)
@@ -1009,32 +1010,30 @@ function ReplicaSystem(;
     if isnothing(replica_virial)
         d = size(boundary.side_lengths)[1]
         if energy_units == NoUnits
-            replica_virial = zeros(T, d, d)
+            replica_virial = [zeros(T, d, d) for _ in 1:n_replicas]
         else
-            replica_virial = zeros(T, d, d) * energy_units
+            replica_virial = [zeros(T, d, d) * energy_units for _ in 1:n_replicas]
         end
     end
-    VT = typeof(replica_virial)
+    VT = typeof(replica_virial[1])
 
     if isnothing(replica_kin_tensor)
-        d = size(boundary.side_lengths)[1]
         if energy_units == NoUnits
-            replica_kin_tensor = zeros(T, d, d)
+            replica_kin_tensor = [zeros(T, D, D) for _ in 1:n_replicas]
         else
-            replica_kin_tensor = zeros(T, d, d) * energy_units
+            replica_kin_tensor = [zeros(T, D, D) * energy_units for _ in 1:n_replicas]
         end
     end
-    KT = typeof(replica_kin_tensor)
+    KT = typeof(replica_kin_tensor[1])
 
     if isnothing(replica_pres_tensor)
-        d = size(boundary.side_lengths)[1]
         if energy_units == NoUnits
-            replica_pres_tensor = zeros(T, d, d)
+            replica_pres_tensor = [zeros(T, D, D) for _ in 1:n_replicas]
         else
-            replica_pres_tensor = zeros(T, d, d) * u"bar"
+            replica_pres_tensor = [zeros(T, D, D) * u"bar" for _ in 1:n_replicas]
         end
     end
-    PT = typeof(replica_pres_tensor)
+    PT = typeof(replica_pres_tensor[1])
 
     if isnothing(replica_topology)
         replica_topology = [topology for _ in 1:n_replicas]

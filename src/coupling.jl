@@ -256,8 +256,17 @@ struct BerendsenBarostat{P, C, S, IC, T}
     n_steps::Int
 end
 
-_isbar(x) = try;  uconvert(u"bar", x);      true; catch; false; end
-_isibar(x)= try;  uconvert(u"bar^-1", x);   true; catch; false; end
+_isbar(x) = try
+    x isa Number && unit(x) == NoUnits ? true : (uconvert(u"bar", x); true)
+catch
+    false
+end
+
+_isibar(x) = try
+    x isa Number && unit(x) == NoUnits ? true : (uconvert(u"bar^-1", x); true)
+catch
+    false
+end
 
 function BerendsenBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",

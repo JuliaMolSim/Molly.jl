@@ -27,7 +27,7 @@ using Test
 
     simulator = VelocityVerlet(
         dt=1.0u"fs",
-        coupling=AndersenThermostat(temp, 1.0u"ps"),
+        coupling=(AndersenThermostat(temp, 1.0u"ps"),),
     )
 
     simulate!(sys, simulator, 100)

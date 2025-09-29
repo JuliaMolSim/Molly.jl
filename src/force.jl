@@ -214,7 +214,7 @@ function forces!(fs, sys::System{D, AT, T}, neighbors, buffers, ::Val{Virial}, s
     
     https://docs.lammps.org/compute_stress_atom.html
 
-    TODO: For now, constraints and GeneralInteraction conributions are ignored.
+    TODO: For now, constraints and GeneralInteraction contributions (except for Ewald) are ignored.
     This should change in the future.
     =#
     fill!(sys.virial, zero(T)*sys.energy_units)

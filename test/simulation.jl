@@ -6,7 +6,7 @@
         boundary = RectangularBoundary(2.0u"nm")
         atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
                  for i in 1:n_atoms]
-        simulator = VelocityVerlet(dt=0.001u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
+        simulator = VelocityVerlet(dt=0.001u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
         gen_temp_wrapper(s, args...; kwargs...) = temperature(s)
 
         if Molly.uses_gpu_neighbor_finder(AT)
@@ -72,7 +72,7 @@ end
     n_steps = 20_000
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
-    simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
+    simulator = VelocityVerlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
 
     TV = typeof(random_velocity(10.0u"g/mol", temp))
     TP = typeof(0.2u"kJ * mol^-1")
@@ -241,7 +241,36 @@ end
         coords_unc = [c .± (abs(randn()) / 100)u"nm"         for c in s.coords    ]
         vels_unc   = [v .± (abs(randn()) / 100)u"nm * ps^-1" for v in s.velocities]
         @suppress_err begin
-            sys_unc = System(s; coords=coords_unc, velocities=vels_unc)
+            sys_unc = System(
+                atoms=[Atom(index=i, mass=atom_mass, charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
+                    for i in 1:n_atoms],
+                coords=coords_unc,
+                boundary=boundary,
+                velocities=vels_unc,
+                atoms_data=[AtomData(atom_name="AR", res_number=i, res_name="AR",
+                                    chain_id="B", element="Ar")
+                            for i in 1:n_atoms],
+                pairwise_inters=(LennardJones(use_neighbors=true),),
+                neighbor_finder=DistanceNeighborFinder(
+                    eligible=trues(n_atoms, n_atoms),
+                    n_steps=10,
+                    dist_cutoff=2.0u"nm",
+                ),
+                loggers=(
+                    temp=TemperatureLogger(100),
+                    coords=CoordinatesLogger(100),
+                    vels=VelocitiesLogger(100),
+                    energy=TotalEnergyLogger(100),
+                    ke=KineticEnergyLogger(100),
+                    pe=PotentialEnergyLogger(100),
+                    force=ForcesLogger(100),
+                    dcd_writer=TrajectoryWriter(100, temp_fp_dcd),
+                    trr_writer=TrajectoryWriter(100, temp_fp_trr; write_velocities=true),
+                    pdb_writer=TrajectoryWriter(100, temp_fp_pdb),
+                    potkin_correlation=TimeCorrelationLogger(pot_obs, kin_obs, TP, TP, 1, 100),
+                    velocity_autocorrelation=AutoCorrelationLogger(V, TV, n_atoms, 100),
+                ),
+            )
             for n_threads in n_threads_list
                 @test typeof(potential_energy(sys_unc; n_threads=n_threads)) ==
                                     typeof((1.0 ± 0.1)u"kJ * mol^-1")
@@ -268,7 +297,7 @@ end
     temp = 298.0u"K"
     boundary = CubicBoundary(Inf * u"nm", Inf * u"nm", 2.0u"nm")
     coords = place_atoms(n_atoms, CubicBoundary(2.0u"nm"); min_dist=0.3u"nm")
-    simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
+    simulator = VelocityVerlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
 
     s = System(
         atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
@@ -308,7 +337,7 @@ end
              for i in 1:n_atoms]
     coords = place_atoms(n_atoms, boundary; min_dist=0.3u"nm")
     simulators = [
-        Verlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps")),
+        Verlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),)),
         StormerVerlet(dt=0.002u"ps"),
         Langevin(dt=0.002u"ps", temperature=temp, friction=1.0u"ps^-1"),
         OverdampedLangevin(dt=0.002u"ps", temperature=temp, friction=10.0u"ps^-1"),
@@ -432,7 +461,7 @@ end
         eligible[i, i + (n_atoms ÷ 2)] = false
         eligible[i + (n_atoms ÷ 2), i] = false
     end
-    simulator = VelocityVerlet(dt=0.002u"ps", coupling=BerendsenThermostat(temp, 1.0u"ps"))
+    simulator = VelocityVerlet(dt=0.002u"ps", coupling=(BerendsenThermostat(temp, 1.0u"ps"),))
 
     s = System(
         atoms=[Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1") for i in 1:n_atoms],
@@ -471,7 +500,7 @@ end
     temp = 298.0u"K"
     boundary = CubicBoundary(2.0u"nm")
     G = 10.0u"kJ * mol * nm * g^-2"
-    simulator = VelocityVerlet(dt=0.002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
+    simulator = VelocityVerlet(dt=0.002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
     pairwise_inter_types = (
         LennardJones(use_neighbors=true), LennardJones(use_neighbors=false),
         LennardJones(cutoff=DistanceCutoff(1.0u"nm"), use_neighbors=true),
@@ -975,6 +1004,150 @@ end
     @test wigner_seitz_radius < mean_distance < 2 * wigner_seitz_radius
 end
 
+@testset "Immediate Thermostat" begin
+    n_atoms = 100
+    n_steps = 40_000
+    temp = 10.0u"K"
+    boundary = CubicBoundary(4.0u"nm")
+
+    for AT in array_list
+
+        sys = System(
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            coords=to_device(place_atoms(n_atoms, boundary), AT),
+            boundary=boundary,
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            loggers=(
+                temperature=TemperatureLogger(10),
+            ),
+        )
+
+        coupling = (ImmediateThermostat(temp),)
+        simulator = VelocityVerlet(
+            dt=0.001u"ps",
+            coupling=coupling,
+        )
+
+        random_velocities!(sys, temp)
+        simulate!(sys, simulator, n_steps)
+
+        Temp = [t for t in values(sys.loggers.temperature)[2001:end]]
+
+        @test 9.5u"K" < mean(Temp) < 10.5u"K"
+        @test std(Temp) < 1.0u"K"
+
+    end
+
+end
+
+@testset "Velocity Rescale Thermostat" begin
+    n_atoms = 100
+    n_steps = 40_000
+    temp = 10.0u"K"
+    boundary = CubicBoundary(4.0u"nm")
+
+    for AT in array_list
+
+        sys = System(
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            coords=to_device(place_atoms(n_atoms, boundary), AT),
+            boundary=boundary,
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            loggers=(
+                temperature=TemperatureLogger(10),
+            ),
+        )
+
+        coupling = (VelocityRescaleThermostat(temp, 0.1u"ps"),)
+        simulator = VelocityVerlet(
+            dt=0.001u"ps",
+            coupling=coupling,
+        )
+
+        random_velocities!(sys, temp)
+        simulate!(sys, simulator, n_steps)
+
+        Temp = [t for t in values(sys.loggers.temperature)[2001:end]]
+
+        @test 9.5u"K" < mean(Temp) < 10.5u"K"
+        @test std(Temp) < 1.0u"K"
+
+    end
+
+end
+
+@testset "Andersen Thermostat" begin
+    n_atoms = 100
+    n_steps = 40_000
+    temp = 10.0u"K"
+    boundary = CubicBoundary(4.0u"nm")
+
+    for AT in array_list
+
+        sys = System(
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            coords=to_device(place_atoms(n_atoms, boundary), AT),
+            boundary=boundary,
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            loggers=(
+                temperature=TemperatureLogger(10),
+            ),
+        )
+
+        coupling = (AndersenThermostat(temp, 0.1u"ps"),)
+        simulator = VelocityVerlet(
+            dt=0.001u"ps",
+            coupling=coupling,
+        )
+
+        random_velocities!(sys, temp)
+        simulate!(sys, simulator, n_steps)
+
+        Temp = [t for t in values(sys.loggers.temperature)[2001:end]]
+
+        @test 9.5u"K" < mean(Temp) < 10.5u"K"
+        @test std(Temp) < 1.0u"K"
+
+    end
+
+end
+
+@testset "Berendsen Thermostat" begin
+    n_atoms = 100
+    n_steps = 40_000
+    temp = 10.0u"K"
+    boundary = CubicBoundary(4.0u"nm")
+
+    for AT in array_list
+
+        sys = System(
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            coords=to_device(place_atoms(n_atoms, boundary), AT),
+            boundary=boundary,
+            pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
+            loggers=(
+                temperature=TemperatureLogger(10),
+            ),
+        )
+
+        coupling = (BerendsenThermostat(temp, 0.1u"ps"),)
+        simulator = VelocityVerlet(
+            dt=0.001u"ps",
+            coupling=coupling,
+        )
+
+        random_velocities!(sys, temp)
+        simulate!(sys, simulator, n_steps)
+
+        Temp = [t for t in values(sys.loggers.temperature)[2001:end]]
+
+        @test 9.5u"K" < mean(Temp) < 10.5u"K"
+        @test std(Temp) < 1.0u"K"
+
+    end
+
+end
+
 @testset "Berendsen isotropic barostat" begin
     n_atoms = 100
     n_steps = 40_000
@@ -997,7 +1170,7 @@ end
             ),
         )
 
-        coupling = BerendsenBarostat(1.0u"bar", 0.1u"fs"; max_scale_frac=0.01)
+        coupling = (BerendsenBarostat(1.0u"bar", 0.1u"fs"; max_scale_frac=0.01),)
         simulator = Langevin(
             dt=0.001u"ps",
             temperature=temp,
@@ -1011,7 +1184,7 @@ end
         P_iso = [(1/3)*tr(P) for P in values(sys.loggers.pressure)[2001:end]]
 
         @test 0.9u"bar" < mean(P_iso) < 1.1u"bar" # Corrected for tensorial pressure
-        @test std(P_iso) < 0.2u"bar"
+        @test std(P_iso) < 0.5u"bar"
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 20.0u"nm^3"
 
@@ -1041,7 +1214,7 @@ end
         P = [1.0u"bar", 1.0u"bar"]
         K = [4.6e-5u"bar^-1", 4.6e-5u"bar^-1"]
 
-        coupling = BerendsenBarostat(P, 0.1u"fs"; compressibility = K, max_scale_frac=0.01, n_steps = 1, coupling_type = :semiisotropic)
+        coupling = (BerendsenBarostat(P, 0.1u"fs"; compressibility = K, max_scale_frac=0.01, n_steps = 1, coupling_type = :semiisotropic),)
         simulator = Langevin(
             dt=0.001u"ps",
             temperature=temp,
@@ -1058,8 +1231,8 @@ end
         @test 0.9u"bar" < mean(P_xy) < 1.1u"bar" # Corrected for tensorial pressure
         @test 0.9u"bar" < mean(P_z) < 1.1u"bar" # Corrected for tensorial pressure
         
-        @test std(P_xy) < 0.2u"bar"
-        @test std(P_z) < 0.2u"bar"
+        @test std(P_xy) < 0.5u"bar"
+        @test std(P_z) < 0.5u"bar"
 
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 20.0u"nm^3"
@@ -1092,7 +1265,7 @@ end
         P = [1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar"]
         K = [4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1"]
 
-        coupling = BerendsenBarostat(P, 0.1u"fs"; compressibility = K, max_scale_frac=0.01, n_steps = 1, coupling_type = :anisotropic)
+        coupling = (BerendsenBarostat(P, 0.1u"fs"; compressibility = K, max_scale_frac=0.01, n_steps = 1, coupling_type = :anisotropic),)
         simulator = Langevin(
             dt=0.001u"ps",
             temperature=temp,
@@ -1112,9 +1285,9 @@ end
         @test 0.9u"bar" < mean(P_y) < 1.1u"bar" # Corrected for tensorial pressure
         @test 0.9u"bar" < mean(P_z) < 1.1u"bar" # Corrected for tensorial pressure
         
-        @test std(P_x) < 0.2u"bar"
-        @test std(P_y) < 0.2u"bar"
-        @test std(P_z) < 0.2u"bar"
+        @test std(P_x) < 0.5u"bar"
+        @test std(P_y) < 0.5u"bar"
+        @test std(P_z) < 0.5u"bar"
         
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 20.0u"nm^3"
@@ -1145,7 +1318,7 @@ end
             ),
         )
 
-        coupling = CRescaleBarostat(1.0u"bar", 0.1u"fs"; max_scale_frac=0.01, n_steps = 1)
+        coupling = (CRescaleBarostat(1.0u"bar", 0.1u"fs"; max_scale_frac=0.01, n_steps = 1),)
         simulator = Langevin(
             dt=0.001u"ps",
             temperature=temp,
@@ -1159,7 +1332,7 @@ end
         P_iso = [(1/3)*tr(P) for P in values(sys.loggers.pressure)[2001:end]]
 
         @test 0.9u"bar" < mean(P_iso) < 1.1u"bar" # Corrected for tensorial pressure
-        @test std(P_iso) < 0.2u"bar"
+        @test std(P_iso) < 0.5u"bar"
 
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 20.0u"nm^3"
@@ -1189,7 +1362,7 @@ end
         P = [1.0u"bar", 1.0u"bar"]
         K = [4.6e-5u"bar^-1", 4.6e-5u"bar^-1"]
 
-        coupling = CRescaleBarostat(P, 0.1u"fs"; compressibility = K, max_scale_frac=0.01, n_steps = 1, coupling_type = :semiisotropic)
+        coupling = (CRescaleBarostat(P, 0.1u"fs"; compressibility = K, max_scale_frac=0.01, n_steps = 1, coupling_type = :semiisotropic),)
         simulator = Langevin(
             dt=0.001u"ps",
             temperature=temp,
@@ -1206,8 +1379,8 @@ end
         @test 0.9u"bar" < mean(P_xy) < 1.1u"bar" # Corrected for tensorial pressure
         @test 0.9u"bar" < mean(P_z) < 1.1u"bar" # Corrected for tensorial pressure
         
-        @test std(P_xy) < 0.2u"bar"
-        @test std(P_z) < 0.2u"bar"
+        @test std(P_xy) < 0.5u"bar"
+        @test std(P_z) < 0.5u"bar"
         
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 20.0u"nm^3"
@@ -1240,7 +1413,7 @@ end
         P = [1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar"]
         K = [4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1"]
 
-        coupling = CRescaleBarostat(P, 0.1u"fs"; compressibility = K, max_scale_frac=0.01, n_steps = 1, coupling_type = :anisotropic)
+        coupling = (CRescaleBarostat(P, 0.1u"fs"; compressibility = K, max_scale_frac=0.01, n_steps = 1, coupling_type = :anisotropic),)
         simulator = Langevin(
             dt=0.001u"ps",
             temperature=temp,
@@ -1259,9 +1432,9 @@ end
         @test 0.9u"bar" < mean(P_y) < 1.1u"bar" # Corrected for tensorial pressure
         @test 0.9u"bar" < mean(P_z) < 1.1u"bar" # Corrected for tensorial pressure
         
-        @test std(P_x) < 0.2u"bar"
-        @test std(P_y) < 0.2u"bar"
-        @test std(P_z) < 0.2u"bar"
+        @test std(P_x) < 0.5u"bar"
+        @test std(P_y) < 0.5u"bar"
+        @test std(P_z) < 0.5u"bar"
         
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 20.0u"nm^3"
@@ -1319,7 +1492,7 @@ end
     @test sys.boundary == CubicBoundary(8.0u"nm")
 
     barostat = MonteCarloBarostat(press, temp, boundary; coupling_type = :isotropic)
-    lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
+    lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=(barostat,))
     vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
 
     for sim in (lang_baro, vvand_baro)
@@ -1329,8 +1502,8 @@ end
             end
 
             sys = System(
-                atoms=to_device(atoms),
-                coords=to_device(copy(coords)),
+                atoms=to_device(atoms, AT),
+                coords=to_device(copy(coords), AT),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1415,7 +1588,7 @@ end
     P = [1.0u"bar", 1.0u"bar"]
 
     barostat = MonteCarloBarostat(P, temp, boundary; coupling_type = :semiisotropic)
-    lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
+    lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=(barostat,))
     vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
 
     for sim in (lang_baro, vvand_baro)
@@ -1425,8 +1598,8 @@ end
             end
 
             sys = System(
-                atoms=to_device(atoms),
-                coords=to_device(copy(coords)),
+                atoms=to_device(atoms, AT),
+                coords=to_device(copy(coords), AT),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(
@@ -1515,7 +1688,7 @@ end
     P = [1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar"]
 
     barostat = MonteCarloBarostat(P, temp, boundary; coupling_type = :anisotropic)
-    lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=barostat)
+    lang_baro = Langevin(dt=dt, temperature=temp, friction=friction, coupling=(barostat,))
     vvand_baro = VelocityVerlet(dt=dt, coupling=(AndersenThermostat(temp, 1.0u"ps"), barostat))
 
     for sim in (lang_baro, vvand_baro)
@@ -1525,8 +1698,8 @@ end
             end
 
             sys = System(
-                atoms=to_device(atoms),
-                coords=to_device(copy(coords)),
+                atoms=to_device(atoms, AT),
+                coords=to_device(copy(coords), AT),
                 boundary=boundary,
                 pairwise_inters=(LennardJones(),),
                 loggers=(

@@ -672,6 +672,11 @@ Velocities can be written in addition to coordinates by setting
 `write_velocities=true`.
 Chemfiles does not support writing velocities to all file formats.
 
+The correction to be applied to the molecules is passed with the `correction` keyword. 
+So far, `:pbc` and `:wrap` are supported, the former keeps the molecules whole,
+whereas the latter wraps all atoms inside the simulation box, disregarding connectivity.
+Defaults to `:wrap`.
+
 The [`System`](@ref) should have `atoms_data` defined, and `topology` if bonding
 information is required.
 The file will be appended to, so should be deleted before simulation if it
@@ -697,7 +702,7 @@ mutable struct TrajectoryWriter{I, T}
 end
 
 function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
-                          format::AbstractString="", correction::Symbol = :pbc, atom_inds=Int[],
+                          format::AbstractString="", correction::Symbol = :wrap, atom_inds=Int[],
                           excluded_res=String[], write_velocities::Bool=false,
                           write_boundary::Bool=true)
 
@@ -766,9 +771,9 @@ different box sizes at later snapshots will not be recorded.
 The CRYST1 record is not written for infinite boundaries.
 """
 function StructureWriter(n_steps::Integer, filepath::AbstractString,
-                         excluded_res=String[]; atom_inds=Int[])
+                         excluded_res=String[]; atom_inds=Int[], correction = :wrap)
     # This aliasing function will be removed in the next breaking release
-    return TrajectoryWriter(n_steps, filepath, "PDB", atom_inds,
+    return TrajectoryWriter(n_steps, filepath, "PDB", correction, atom_inds,
                     Set(excluded_res), false, true, Chemfiles.Topology(),
                     false, 0)
 end

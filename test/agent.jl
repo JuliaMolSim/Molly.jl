@@ -83,7 +83,7 @@
     )
     simulator = VelocityVerlet(
         dt=0.02,
-        coupling=AndersenThermostat(temp, 5.0),
+        coupling=(AndersenThermostat(temp, 5.0),),
     )
 
     sys = System(

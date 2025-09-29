@@ -631,15 +631,17 @@ function unwrap_global(coords::AbstractVector{<:SVector{D}},
         f[i] = wrap01(to_frac(coords[i]))
     end
 
-    # --- global adjacency: bonds ∪ neighbor-list pairs ---
+    # --- global adjacency: bonds ∪ neighbor-list pairs ---    
     adj = [Int[] for _ in 1:N]
-    @inbounds for (i32,j32) in topology.bonded_atoms
-        i = Int(i32); j = Int(j32); push!(adj[i], j); push!(adj[j], i)
-    end
-    if neighbors !== nothing
-        @inbounds for ni in eachindex(neighbors)
-            i, j = neighbors[ni][1], neighbors[ni][2]
-            push!(adj[i], j); push!(adj[j], i)
+    if topology !== nothing
+        @inbounds for (i32,j32) in topology.bonded_atoms
+            i = Int(i32); j = Int(j32); push!(adj[i], j); push!(adj[j], i)
+        end
+        if neighbors !== nothing
+            @inbounds for ni in eachindex(neighbors)
+                i, j = neighbors[ni][1], neighbors[ni][2]
+                push!(adj[i], j); push!(adj[j], i)
+            end
         end
     end
 

@@ -144,15 +144,23 @@ end
                            run_loggers=true,
                            rng=Random.default_rng())
 
-    needs_vir_steps = Inf
-    needs_vir       = false
+    if sim.coupling isa NoCoupling
 
-    for coupler in sim.coupling
-        vir = needs_virial(coupler)
-        if vir.truth
-            needs_vir = true
-            if vir.steps < needs_vir_steps
-                needs_vir_steps = vir.steps
+        needs_vir_steps = Inf
+        needs_vir       = false
+    
+    else
+
+        needs_vir_steps = Inf
+        needs_vir       = false
+
+        for coupler in sim.coupling
+            vir = needs_virial(coupler)
+            if vir.truth
+                needs_vir = true
+                if vir.steps < needs_vir_steps
+                    needs_vir_steps = vir.steps
+                end
             end
         end
     end
@@ -247,13 +255,23 @@ end
                            run_loggers=true,
                            rng=Random.default_rng())
 
-    needs_vir_steps = Inf
+    if sim.coupling isa NoCoupling
 
-    for coupler in sim.coupling
-        vir = needs_virial(coupler)
-        if vir.truth
-            if vir.steps < needs_vir_steps
-                needs_vir_steps = vir.steps
+        needs_vir_steps = Inf
+        needs_vir       = false
+    
+    else
+
+        needs_vir_steps = Inf
+        needs_vir       = false
+
+        for coupler in sim.coupling
+            vir = needs_virial(coupler)
+            if vir.truth
+                needs_vir = true
+                if vir.steps < needs_vir_steps
+                    needs_vir_steps = vir.steps
+                end
             end
         end
     end
@@ -337,13 +355,23 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
                            run_loggers=true,
                            rng=Random.default_rng())
 
-    needs_vir_steps = Inf
+    if sim.coupling isa NoCoupling
 
-    for coupler in sim.coupling
-        vir = needs_virial(coupler)
-        if vir.truth
-            if vir.steps < needs_vir_steps
-                needs_vir_steps = vir.steps
+        needs_vir_steps = Inf
+        needs_vir       = false
+    
+    else
+
+        needs_vir_steps = Inf
+        needs_vir       = false
+
+        for coupler in sim.coupling
+            vir = needs_virial(coupler)
+            if vir.truth
+                needs_vir = true
+                if vir.steps < needs_vir_steps
+                    needs_vir_steps = vir.steps
+                end
             end
         end
     end
@@ -433,13 +461,23 @@ end
                            run_loggers=true,
                            rng=Random.default_rng())
 
-    needs_vir_steps = Inf
+    if sim.coupling isa NoCoupling
 
-    for coupler in sim.coupling
-        vir = needs_virial(coupler)
-        if vir.truth
-            if vir.steps < needs_vir_steps
-                needs_vir_steps = vir.steps
+        needs_vir_steps = Inf
+        needs_vir       = false
+    
+    else
+
+        needs_vir_steps = Inf
+        needs_vir       = false
+
+        for coupler in sim.coupling
+            vir = needs_virial(coupler)
+            if vir.truth
+                needs_vir = true
+                if vir.steps < needs_vir_steps
+                    needs_vir_steps = vir.steps
+                end
             end
         end
     end
@@ -746,13 +784,23 @@ end
               "constraints will be ignored"
     end
     
-    needs_vir_steps = Inf
+    if sim.coupling isa NoCoupling
 
-    for coupler in sim.coupling
-        vir = needs_virial(coupler)
-        if vir.truth
-            if vir.steps < needs_vir_steps
-                needs_vir_steps = vir.steps
+        needs_vir_steps = Inf
+        needs_vir       = false
+    
+    else
+
+        needs_vir_steps = Inf
+        needs_vir       = false
+
+        for coupler in sim.coupling
+            vir = needs_virial(coupler)
+            if vir.truth
+                needs_vir = true
+                if vir.steps < needs_vir_steps
+                    needs_vir_steps = vir.steps
+                end
             end
         end
     end
