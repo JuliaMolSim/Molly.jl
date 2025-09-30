@@ -1098,6 +1098,16 @@ end
 The functions [`random_velocity`](@ref), [`maxwell_boltzmann`](@ref) and [`temperature`](@ref) may be useful here.
 To use your custom coupler, give it as the `coupling` argument to the simulator as above.
 
+Note that as some of the coupling methods need the [`virial`](@ref) to properly work, any newly defined custom coupler
+should be accompanied by a function that tells Molly if it also needs the virial tensor and the amount of simulation
+steps between integrations of the coupler.
+```julia
+# In case you need the virial
+needs_virial(c::MyCoupler) = (truth = true, steps = c.n_steps)
+# In case you do NOT need the virial
+needs_virial(c::MyCoupler) = (truth = false, steps = Inf)
+```
+
 ## Loggers
 
 Loggers record properties of the simulation to allow monitoring and analysis.

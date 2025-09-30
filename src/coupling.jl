@@ -23,11 +23,11 @@ This information is useful for some simulators.
 If `coupling` is a tuple or named tuple then each coupler will be applied in turn.
 Custom couplers should implement this function.
 """
-function apply_coupling!(sys, couplers::Union{Tuple, NamedTuple}, sim, neighbors,
+function apply_coupling!(sys, buffers, couplers::Union{Tuple, NamedTuple}, sim, neighbors,
                          step_n; kwargs...)
     recompute_forces = false
     for coupler in couplers
-        rf = apply_coupling!(sys, coupler, sim, neighbors, step_n; kwargs...)
+        rf = apply_coupling!(sys, buffers, coupler, sim, neighbors, step_n; kwargs...)
         if rf
             recompute_forces = true
         end
@@ -42,7 +42,7 @@ Placeholder coupler that does nothing.
 """
 struct NoCoupling end
 
-apply_coupling!(sys, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
+apply_coupling!(sys, buffers, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
 
 needs_virial(c::NoCoupling) = (truth = false, steps = Inf)
 
@@ -64,9 +64,9 @@ struct ImmediateThermostat{T}
     temperature::T
 end
 
-function apply_coupling!(sys, thermostat::ImmediateThermostat, sim, neighbors=nothing,
+function apply_coupling!(sys, buffers, thermostat::ImmediateThermostat, sim, neighbors=nothing,
                          step_n::Integer=0; kwargs...)
-    sys.velocities .*= sqrt(thermostat.temperature / temperature(sys))
+    sys.velocities .*= sqrt(thermostat.temperature / temperature(sys; kin_tensor = buffers.kin_tensor, recompute = true))
     return false
 end
 
@@ -107,7 +107,7 @@ function VelocityRescaleThermostat(temperature, coupling_const; n_steps = 1, see
     return VelocityRescaleThermostat(temperature, coupling_const, n_steps, seed)
 end
 
-function apply_coupling!(sys::System{<:Any, AT}, thermostat::VelocityRescaleThermostat, sim, neighbors, step_n;
+function apply_coupling!(sys::System{<:Any, AT}, buffers, thermostat::VelocityRescaleThermostat, sim, neighbors, step_n;
                          n_threads::Integer=Threads.nthreads(), rng=Random.default_rng()) where {AT}
 
     if step_n % thermostat.n_steps != 0
@@ -119,7 +119,7 @@ function apply_coupling!(sys::System{<:Any, AT}, thermostat::VelocityRescaleTher
     Nf  > 0 || return false
     vels = from_device(sys.velocities)
 
-    K = kinetic_energy(sys)
+    K = kinetic_energy(sys; kin_tensor = buffers.kin_tensor)
     ustrip(K) > 0 || return false
 
     # Target kinetic energy
@@ -171,7 +171,7 @@ struct AndersenThermostat{T, C}
     coupling_const::C
 end
 
-function apply_coupling!(sys::System, thermostat::AndersenThermostat, sim,
+function apply_coupling!(sys::System, buffers, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng())
@@ -184,7 +184,7 @@ function apply_coupling!(sys::System, thermostat::AndersenThermostat, sim,
     return false
 end
 
-function apply_coupling!(sys::System{<:Any, AT, T}, thermostat::AndersenThermostat, sim,
+function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::AndersenThermostat, sim,
                          neighbors=nothing, step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng()) where {AT <: AbstractGPUArray, T}
@@ -217,9 +217,9 @@ struct BerendsenThermostat{T, C}
     coupling_const::C
 end
 
-function apply_coupling!(sys, thermostat::BerendsenThermostat, sim, neighbors=nothing,
+function apply_coupling!(sys, buffers, thermostat::BerendsenThermostat, sim, neighbors=nothing,
                          step_n::Integer=0; kwargs...)
-    λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temperature(sys)) - 1)
+    λ2 = 1 + (sim.dt / thermostat.coupling_const) * ((thermostat.temperature / temperature(sys; kin_tensor = buffers.kin_tensor, recompute = true)) - 1)
     sys.velocities .*= sqrt(λ2)
     return false
 end
@@ -256,17 +256,11 @@ struct BerendsenBarostat{P, C, S, IC, T}
     n_steps::Int
 end
 
-_isbar(x) = try
-    x isa Number && unit(x) == NoUnits ? true : (uconvert(u"bar", x); true)
-catch
-    false
-end
+const DIM_P     = dimension(1u"Pa")
+const DIM_INV_P = dimension(1/u"Pa")
 
-_isibar(x) = try
-    x isa Number && unit(x) == NoUnits ? true : (uconvert(u"bar^-1", x); true)
-catch
-    false
-end
+_isbar(x::Number)  = (unit(x) == NoUnits) || (dimension(x) == DIM_P)
+_isibar(x::Number) = (unit(x) == NoUnits) || (dimension(x) == DIM_INV_P)
 
 function BerendsenBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
@@ -298,8 +292,8 @@ function BerendsenBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_cons
         # Use the caller’s units, but convert internal scalars consistently
         P_units = unit(pressure)
         K_units = unit(compressibility)
-        p = ustrip(uconvert(P_units, pressure))
-        κs = ustrip(uconvert(K_units, compressibility))
+        p = ustrip(P_units, pressure)
+        κs = ustrip(K_units, compressibility)
 
         FT = typeof(p)
 
@@ -330,10 +324,10 @@ function BerendsenBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_cons
         P_units = unit(pressure[1])
         K_units = unit(compressibility[1])
 
-        p_xy = ustrip(uconvert(P_units, pressure[1]))
-        p_z  = ustrip(uconvert(P_units, pressure[2]))
-        κ_xy = ustrip(uconvert(K_units, compressibility[1]))
-        κ_z  = ustrip(uconvert(K_units, compressibility[2]))
+        p_xy = ustrip(P_units, pressure[1])
+        p_z  = ustrip(P_units, pressure[2])
+        κ_xy = ustrip(K_units, compressibility[1])
+        κ_z  = ustrip(K_units, compressibility[2])
 
         FT = promote_type(typeof(p_xy), typeof(p_z))
 
@@ -365,19 +359,19 @@ function BerendsenBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_cons
         P_units = unit(pressure[1])
         K_units = unit(compressibility[1])
 
-        px  = ustrip(uconvert(P_units, pressure[1]))
-        py  = ustrip(uconvert(P_units, pressure[2]))
-        pz  = ustrip(uconvert(P_units, pressure[3]))
-        pxy = ustrip(uconvert(P_units, pressure[4]))
-        pxz = ustrip(uconvert(P_units, pressure[5]))
-        pyz = ustrip(uconvert(P_units, pressure[6]))
+        px  = ustrip(P_units, pressure[1])
+        py  = ustrip(P_units, pressure[2])
+        pz  = ustrip(P_units, pressure[3])
+        pxy = ustrip(P_units, pressure[4])
+        pxz = ustrip(P_units, pressure[5])
+        pyz = ustrip(P_units, pressure[6])
 
-        κx  = ustrip(uconvert(K_units, compressibility[1]))
-        κy  = ustrip(uconvert(K_units, compressibility[2]))
-        κz  = ustrip(uconvert(K_units, compressibility[3]))
-        κxy = ustrip(uconvert(K_units, compressibility[4]))
-        κxz = ustrip(uconvert(K_units, compressibility[5]))
-        κyz = ustrip(uconvert(K_units, compressibility[6]))
+        κx  = ustrip(K_units, compressibility[1])
+        κy  = ustrip(K_units, compressibility[2])
+        κz  = ustrip(K_units, compressibility[3])
+        κxy = ustrip(K_units, compressibility[4])
+        κxz = ustrip(K_units, compressibility[5])
+        κyz = ustrip(K_units, compressibility[6])
 
         FT = promote_type(typeof(px), typeof(py), typeof(pz), typeof(pxy), typeof(pxz), typeof(pyz))
 
@@ -393,14 +387,14 @@ function BerendsenBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_cons
     end
 end
 
-function apply_coupling!(sys, barostat::BerendsenBarostat{PT, CT, ST, ICT, FT}, sim, neighbors=nothing,
-                         step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...) where {PT, CT, ST, ICT, FT} # Avoids uconvert calls in method
-    if step_n % barostat.n_steps != 0; return false; end
+function apply_coupling!(sys::System{D}, buffers, barostat::BerendsenBarostat{PT, CT, ST, ICT, FT}, sim, neighbors=nothing,
+                         step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...) where {D, PT, CT, ST, ICT, FT} # Avoids uconvert calls in method
+    
+    step_n % barostat.n_steps != 0 && return false
     
     # pressure in barostat units
-    P = pressure(sys, neighbors, step_n; n_threads=n_threads)
+    P = pressure(sys, buffers, neighbors, step_n; n_threads=n_threads)
 
-    D   = size(P,1)
     τp  = barostat.coupling_const
     dt  = sim.dt * barostat.n_steps
     μ   = Matrix{FT}(I, D, D)
@@ -408,7 +402,6 @@ function apply_coupling!(sys, barostat::BerendsenBarostat{PT, CT, ST, ICT, FT}, 
     Pavg = tr(P)/FT(D)
     Pxy  = D == 3 ? (P[1,1] + P[2,2]) / FT(2) : Pavg
 
-    
     if barostat.coupling_type == :isotropic
         for d in 1:D
             α = (barostat.compressibility[d,d] * dt) / (D*τp)
@@ -417,7 +410,10 @@ function apply_coupling!(sys, barostat::BerendsenBarostat{PT, CT, ST, ICT, FT}, 
         end
 
     elseif barostat.coupling_type == :semiisotropic
-        @assert D == 3 "Cannot apply semi-isotropic in 2D."
+
+        if D != 3
+            throw(ArgumentError("Cannot apply semi-isotropic in 2D."))
+        end
         for d in 1:2
             α = (barostat.compressibility[d,d] * dt) / (FT(2)*τp)
             s = 1 + α * (Pxy - barostat.pressure[d,d])
@@ -532,8 +528,8 @@ function CRescaleBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const
         # Use the caller’s units, but convert internal scalars consistently
         P_units = unit(pressure)
         K_units = unit(compressibility)
-        p = ustrip(uconvert(P_units, pressure))
-        κs = ustrip(uconvert(K_units, compressibility))
+        p = ustrip(P_units, pressure)
+        κs = ustrip(K_units, compressibility)
 
         FT = typeof(p)
 
@@ -564,10 +560,10 @@ function CRescaleBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const
         P_units = unit(pressure[1])
         K_units = unit(compressibility[1])
 
-        p_xy = ustrip(uconvert(P_units, pressure[1]))
-        p_z  = ustrip(uconvert(P_units, pressure[2]))
-        κ_xy = ustrip(uconvert(K_units, compressibility[1]))
-        κ_z  = ustrip(uconvert(K_units, compressibility[2]))
+        p_xy = ustrip(P_units, pressure[1])
+        p_z  = ustrip(P_units, pressure[2])
+        κ_xy = ustrip(K_units, compressibility[1])
+        κ_z  = ustrip(K_units, compressibility[2])
 
         FT = promote_type(typeof(p_xy), typeof(p_z))
 
@@ -599,19 +595,19 @@ function CRescaleBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const
         P_units = unit(pressure[1])
         K_units = unit(compressibility[1])
 
-        px  = ustrip(uconvert(P_units, pressure[1]))
-        py  = ustrip(uconvert(P_units, pressure[2]))
-        pz  = ustrip(uconvert(P_units, pressure[3]))
-        pxy = ustrip(uconvert(P_units, pressure[4]))
-        pxz = ustrip(uconvert(P_units, pressure[5]))
-        pyz = ustrip(uconvert(P_units, pressure[6]))
+        px  = ustrip(P_units, pressure[1])
+        py  = ustrip(P_units, pressure[2])
+        pz  = ustrip(P_units, pressure[3])
+        pxy = ustrip(P_units, pressure[4])
+        pxz = ustrip(P_units, pressure[5])
+        pyz = ustrip(P_units, pressure[6])
 
-        κx  = ustrip(uconvert(K_units, compressibility[1]))
-        κy  = ustrip(uconvert(K_units, compressibility[2]))
-        κz  = ustrip(uconvert(K_units, compressibility[3]))
-        κxy = ustrip(uconvert(K_units, compressibility[4]))
-        κxz = ustrip(uconvert(K_units, compressibility[5]))
-        κyz = ustrip(uconvert(K_units, compressibility[6]))
+        κx  = ustrip(K_units, compressibility[1])
+        κy  = ustrip(K_units, compressibility[2])
+        κz  = ustrip(K_units, compressibility[3])
+        κxy = ustrip(K_units, compressibility[4])
+        κxz = ustrip(K_units, compressibility[5])
+        κyz = ustrip(K_units, compressibility[6])
 
         FT = promote_type(typeof(px), typeof(py), typeof(pz), typeof(pxy), typeof(pxz), typeof(pyz))
 
@@ -627,19 +623,17 @@ function CRescaleBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const
     end
 end
 
-function apply_coupling!(sys::System{D, AT}, barostat::CRescaleBarostat{PT, CT, ST, ICT, FT}, sim, neighbors=nothing,
+function apply_coupling!(sys::System{D, AT}, buffers, barostat::CRescaleBarostat{PT, CT, ST, ICT, FT}, sim, neighbors=nothing,
                          step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...) where {D, AT, PT, CT, ST, ICT, FT}
-    if step_n % barostat.n_steps != 0
-        return false
-    end
+    step_n % barostat.n_steps != 0 && return false
 
     # Pressure tensor in barostat units
-    P = pressure(sys, neighbors, step_n; n_threads=n_threads)
+    P = pressure(sys, buffers, neighbors, step_n; n_threads=n_threads)
 
     # Thermo factors
     V         = volume(sys.boundary)
     τp, dt    = barostat.coupling_const, sim.dt * barostat.n_steps
-    kT_energy = Unitful.k * temperature(sys)
+    kT_energy = Unitful.k * temperature(sys; kin_tensor = buffers.kin_tensor)
     kT_pv     = uconvert(unit(P[1,1]) * unit(V), kT_energy)
 
     scalarP(P) = (P[1,1] + P[2,2] + P[3,3]) / D
@@ -663,7 +657,9 @@ function apply_coupling!(sys::System{D, AT}, barostat::CRescaleBarostat{PT, CT, 
         end
 
     elseif barostat.coupling_type == :semiisotropic
-        @assert size(P,1) == 3
+        if D != 3
+            throw(ArgumentError("Cannot apply semi-isotropic in 2D."))
+        end
         Pxy = xyP(P); gxy, gz = ξ(), ξ()
         for d in 1:2
             α = (barostat.compressibility[d,d] * dt) / τp
@@ -801,7 +797,7 @@ function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp, bounda
         
         # Use the caller’s units, but convert internal scalars consistently
         P_units = unit(pressure)
-        p = ustrip(uconvert(P_units, pressure))
+        p = ustrip(P_units, pressure)
 
         P = SMatrix{3,3,FT}(p,0,0, 0,p,0, 0,0,p) .* P_units
 
@@ -825,8 +821,8 @@ function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp, bounda
 
         P_units = unit(pressure[1])
 
-        p_xy = ustrip(uconvert(P_units, pressure[1]))
-        p_z  = ustrip(uconvert(P_units, pressure[2]))
+        p_xy = ustrip(P_units, pressure[1])
+        p_z  = ustrip(P_units, pressure[2])
 
         P = SMatrix{3,3,FT}(p_xy,0,0, 0,p_xy,0, 0,0,p_z) .* P_units
 
@@ -850,12 +846,12 @@ function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp, bounda
 
         P_units = unit(pressure[1])
 
-        px  = ustrip(uconvert(P_units, pressure[1]))
-        py  = ustrip(uconvert(P_units, pressure[2]))
-        pz  = ustrip(uconvert(P_units, pressure[3]))
-        pxy = ustrip(uconvert(P_units, pressure[4]))
-        pxz = ustrip(uconvert(P_units, pressure[5]))
-        pyz = ustrip(uconvert(P_units, pressure[6]))
+        px  = ustrip(P_units, pressure[1])
+        py  = ustrip(P_units, pressure[2])
+        pz  = ustrip(P_units, pressure[3])
+        pxy = ustrip(P_units, pressure[4])
+        pxz = ustrip(P_units, pressure[5])
+        pyz = ustrip(P_units, pressure[6])
 
         P = SMatrix{3,3,FT}(px, pxy, pxz,
                             pxy, py,  pyz,
@@ -870,7 +866,7 @@ function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp, bounda
     end
 end
 
-function apply_coupling!(sys::System{D, AT, T}, barostat::MonteCarloBarostat, sim, neighbors=nothing,
+function apply_coupling!(sys::System{D, AT, T}, buffers, barostat::MonteCarloBarostat, sim, neighbors=nothing,
                          step_n::Integer=0; n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng()) where {D, AT, T}
 
@@ -926,19 +922,6 @@ function apply_coupling!(sys::System{D, AT, T}, barostat::MonteCarloBarostat, si
             end
             barostat.n_attempted += 1
 
-            # Modify size of volume change to keep accept/reject ratio roughly equal
-            if barostat.n_attempted >= 10
-                if barostat.n_accepted < 0.25 * barostat.n_attempted
-                    barostat.volume_scale /= barostat.scale_increment
-                    barostat.n_attempted = 0
-                    barostat.n_accepted = 0
-                elseif barostat.n_accepted > 0.75 * barostat.n_attempted
-                    barostat.volume_scale = min(barostat.volume_scale * barostat.scale_increment,
-                                                V * barostat.max_volume_frac)
-                    barostat.n_attempted = 0
-                    barostat.n_accepted = 0
-                end
-            end
         end
 
     
@@ -994,19 +977,6 @@ function apply_coupling!(sys::System{D, AT, T}, barostat::MonteCarloBarostat, si
             end
             barostat.n_attempted += 1
 
-            # Modify size of volume change to keep accept/reject ratio roughly equal
-            if barostat.n_attempted >= 10
-                if barostat.n_accepted < 0.25 * barostat.n_attempted
-                    barostat.volume_scale /= barostat.scale_increment
-                    barostat.n_attempted = 0
-                    barostat.n_accepted = 0
-                elseif barostat.n_accepted > 0.75 * barostat.n_attempted
-                    barostat.volume_scale = min(barostat.volume_scale * barostat.scale_increment,
-                                                V * barostat.max_volume_frac)
-                    barostat.n_attempted = 0
-                    barostat.n_accepted = 0
-                end
-            end
         end
         
     
@@ -1063,21 +1033,20 @@ function apply_coupling!(sys::System{D, AT, T}, barostat::MonteCarloBarostat, si
             end
             barostat.n_attempted += 1
 
-            # Modify size of volume change to keep accept/reject ratio roughly equal
-            if barostat.n_attempted >= 10
-                if barostat.n_accepted < 0.25 * barostat.n_attempted
-                    barostat.volume_scale /= barostat.scale_increment
-                    barostat.n_attempted = 0
-                    barostat.n_accepted = 0
-                elseif barostat.n_accepted > 0.75 * barostat.n_attempted
-                    barostat.volume_scale = min(barostat.volume_scale * barostat.scale_increment,
-                                                V * barostat.max_volume_frac)
-                    barostat.n_attempted = 0
-                    barostat.n_accepted = 0
-                end
-            end
         end
     
+    end
+
+    if barostat.n_attempted >= 10
+        V_now = volume(sys.boundary)
+        if barostat.n_accepted < 0.25 * barostat.n_attempted
+            barostat.volume_scale /= barostat.scale_increment
+        elseif barostat.n_accepted > 0.75 * barostat.n_attempted
+            barostat.volume_scale = min(barostat.volume_scale * barostat.scale_increment,
+                                        V_now * barostat.max_volume_frac)
+        end
+        barostat.n_attempted = 0
+        barostat.n_accepted  = 0
     end
 
     return recompute_forces
@@ -1085,3 +1054,27 @@ function apply_coupling!(sys::System{D, AT, T}, barostat::MonteCarloBarostat, si
 end
 
 needs_virial(c::MonteCarloBarostat) = (truth = false, steps = Inf)
+
+# Return whether virial is needed and the step cadence to compute it.
+needs_virial_schedule(c::NoCoupling) = (false, Inf)
+
+needs_virial_schedule(c) = begin
+    v = needs_virial(c)
+    v.truth ? (true, v.steps) : (false, Inf)
+end
+
+function needs_virial_schedule(cs::Union{Tuple, NamedTuple})
+    steps = Int[]
+    for c in cs
+        v = needs_virial(c)
+        v.truth && push!(steps, v.steps)
+    end
+    isempty(steps) && return (false, Inf)
+    smin = minimum(steps)
+    for s in steps
+        if s % smin != 0
+            throw(ArgumentError("Incompatible virial step requirements: $(steps). All must be multiples of $smin."))
+        end
+    end
+    return (true, smin)
+end

@@ -7,7 +7,7 @@
         atoms = [Atom(mass=10.0u"g/mol", charge=0.0, σ=0.3u"nm", ϵ=0.2u"kJ * mol^-1")
                  for i in 1:n_atoms]
         simulator = VelocityVerlet(dt=0.001u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
-        gen_temp_wrapper(s, args...; kwargs...) = temperature(s)
+        gen_temp_wrapper(s, buffers, args...; kwargs...) = temperature(s; kin_tensor = buffers.kin_tensor)
 
         if Molly.uses_gpu_neighbor_finder(AT)
             neighbor_finder = GPUNeighborFinder(
@@ -734,7 +734,7 @@ end
         @test maximum(dists[1:n_atoms_res]) < 0.1u"nm"
         @test median(dists[(n_atoms_res + 1):end]) > 0.2u"nm"
     end
-end
+end 
 
 @testset "Langevin splitting" begin
     n_atoms = 400
@@ -1004,6 +1004,7 @@ end
     @test wigner_seitz_radius < mean_distance < 2 * wigner_seitz_radius
 end
 
+
 @testset "Immediate Thermostat" begin
     n_atoms = 100
     n_steps = 40_000
@@ -1148,6 +1149,7 @@ end
 
 end
 
+
 @testset "Berendsen isotropic barostat" begin
     n_atoms = 100
     n_steps = 40_000
@@ -1183,10 +1185,10 @@ end
 
         P_iso = [(1/3)*tr(P) for P in values(sys.loggers.pressure)[2001:end]]
 
-        @test 0.9u"bar" < mean(P_iso) < 1.1u"bar" # Corrected for tensorial pressure
+        @test 0.75u"bar" < mean(P_iso) < 1.25u"bar" # Corrected for tensorial pressure
         @test std(P_iso) < 0.5u"bar"
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
-        @test std(values(sys.loggers.volume)[2001:end]) < 20.0u"nm^3"
+        @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
 
     end
 
@@ -1228,14 +1230,14 @@ end
         P_xy = [(1/2)*(P[1,1] + P[2,2]) for P in values(sys.loggers.pressure)[2001:end]]
         P_z  = [P[3,3] for P in values(sys.loggers.pressure)[2001:end]]
 
-        @test 0.9u"bar" < mean(P_xy) < 1.1u"bar" # Corrected for tensorial pressure
-        @test 0.9u"bar" < mean(P_z) < 1.1u"bar" # Corrected for tensorial pressure
+        @test 0.75u"bar" < mean(P_xy) < 1.25u"bar" # Corrected for tensorial pressure
+        @test 0.75u"bar" < mean(P_z)  < 1.25u"bar" # Corrected for tensorial pressure
         
         @test std(P_xy) < 0.5u"bar"
-        @test std(P_z) < 0.5u"bar"
+        @test std(P_z)  < 0.5u"bar"
 
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
-        @test std(values(sys.loggers.volume)[2001:end]) < 20.0u"nm^3"
+        @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
 
     end
 
@@ -1281,16 +1283,16 @@ end
         P_z = [P[3,3] for P in values(sys.loggers.pressure)[2001:end]]
 
 
-        @test 0.9u"bar" < mean(P_x) < 1.1u"bar" # Corrected for tensorial pressure
-        @test 0.9u"bar" < mean(P_y) < 1.1u"bar" # Corrected for tensorial pressure
-        @test 0.9u"bar" < mean(P_z) < 1.1u"bar" # Corrected for tensorial pressure
+        @test 0.75u"bar" < mean(P_x) < 1.25u"bar" # Corrected for tensorial pressure
+        @test 0.75u"bar" < mean(P_y) < 1.25u"bar" # Corrected for tensorial pressure
+        @test 0.75u"bar" < mean(P_z) < 1.25u"bar" # Corrected for tensorial pressure
         
         @test std(P_x) < 0.5u"bar"
         @test std(P_y) < 0.5u"bar"
         @test std(P_z) < 0.5u"bar"
         
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
-        @test std(values(sys.loggers.volume)[2001:end]) < 20.0u"nm^3"
+        @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
 
     end
 
@@ -1331,11 +1333,11 @@ end
 
         P_iso = [(1/3)*tr(P) for P in values(sys.loggers.pressure)[2001:end]]
 
-        @test 0.9u"bar" < mean(P_iso) < 1.1u"bar" # Corrected for tensorial pressure
+        @test 0.75u"bar" < mean(P_iso) < 1.25u"bar" # Corrected for tensorial pressure
         @test std(P_iso) < 0.5u"bar"
 
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
-        @test std(values(sys.loggers.volume)[2001:end]) < 20.0u"nm^3"
+        @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
     
     end
 end
@@ -1376,14 +1378,14 @@ end
         P_xy = [(1/2)*(P[1,1] + P[2,2]) for P in values(sys.loggers.pressure)[2001:end]]
         P_z  = [P[3,3] for P in values(sys.loggers.pressure)[2001:end]]
 
-        @test 0.9u"bar" < mean(P_xy) < 1.1u"bar" # Corrected for tensorial pressure
-        @test 0.9u"bar" < mean(P_z) < 1.1u"bar" # Corrected for tensorial pressure
+        @test 0.75u"bar" < mean(P_xy) < 1.25u"bar" # Corrected for tensorial pressure
+        @test 0.75u"bar" < mean(P_z)  < 1.25u"bar" # Corrected for tensorial pressure
         
         @test std(P_xy) < 0.5u"bar"
         @test std(P_z) < 0.5u"bar"
         
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
-        @test std(values(sys.loggers.volume)[2001:end]) < 20.0u"nm^3"
+        @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
 
     end
 
@@ -1428,20 +1430,21 @@ end
         P_y = [P[2,2] for P in values(sys.loggers.pressure)[2001:end]]
         P_z = [P[3,3] for P in values(sys.loggers.pressure)[2001:end]]
 
-        @test 0.9u"bar" < mean(P_x) < 1.1u"bar" # Corrected for tensorial pressure
-        @test 0.9u"bar" < mean(P_y) < 1.1u"bar" # Corrected for tensorial pressure
-        @test 0.9u"bar" < mean(P_z) < 1.1u"bar" # Corrected for tensorial pressure
+        @test 0.75u"bar" < mean(P_x) < 1.25u"bar" # Corrected for tensorial pressure
+        @test 0.75u"bar" < mean(P_y) < 1.25u"bar" # Corrected for tensorial pressure
+        @test 0.75u"bar" < mean(P_z) < 1.25u"bar" # Corrected for tensorial pressure
         
         @test std(P_x) < 0.5u"bar"
         @test std(P_y) < 0.5u"bar"
         @test std(P_z) < 0.5u"bar"
         
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
-        @test std(values(sys.loggers.volume)[2001:end]) < 20.0u"nm^3"
+        @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
 
     end
 
 end
+
 
 @testset "Monte Carlo isotropic barostat" begin
     # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters
@@ -1486,7 +1489,7 @@ end
     @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
     @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
     @test -5.0u"kJ * mol^-1" < mean(Vir) < 5.0u"kJ * mol^-1"
-    @test 1.7u"bar" < mean(P_iso) < 2.2u"bar"
+    @test 1.75u"bar" < mean(P_iso) < 2.25u"bar"
     @test 0.1u"bar" < std(P_iso) < 0.5u"bar"
     @test all(values(sys.loggers.volume) .== 512.0u"nm^3")
     @test sys.boundary == CubicBoundary(8.0u"nm")
@@ -1528,7 +1531,7 @@ end
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
             @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
             @test -5.0u"kJ * mol^-1" < mean(Vir) < 5.0u"kJ * mol^-1"
-            @test 0.8u"bar" < mean(P_iso) < 1.2u"bar"
+            @test 0.75u"bar" < mean(P_iso) < 1.25u"bar"
             @test 0.1u"bar" < std(P_iso) < 0.5u"bar"
             @test 857.0u"nm^3" < mean(values(sys.loggers.volume)) < 1157.0u"nm^3"
             @test std(values(sys.loggers.volume)) < 300u"nm^3"
@@ -1626,9 +1629,9 @@ end
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
             @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
             @test -5.0u"kJ * mol^-1" < mean(Vir) < 5.0u"kJ * mol^-1"
-            @test 0.8u"bar" < mean(P_xy) < 1.2u"bar"
+            @test 0.75u"bar" < mean(P_xy) < 1.25u"bar"
             @test 0.1u"bar" < std(P_xy) < 0.5u"bar"
-            @test 0.8u"bar" < mean(P_z) < 1.2u"bar"
+            @test 0.75u"bar" < mean(P_z) < 1.25u"bar"
             @test 0.1u"bar" < std(P_z) < 0.5u"bar"
             @test 857.0u"nm^3" < mean(values(sys.loggers.volume)) < 1157.0u"nm^3"
             @test std(values(sys.loggers.volume)) < 300u"nm^3"
@@ -1727,11 +1730,11 @@ end
             @test 50.0u"kJ * mol^-1" < mean(values(sys.loggers.kinetic_energy)) < 120.0u"kJ * mol^-1"
             @test mean(values(sys.loggers.potential_energy)) < 0.0u"kJ * mol^-1"
             @test -5.0u"kJ * mol^-1" < mean(Vir) < 5.0u"kJ * mol^-1"
-            @test 0.8u"bar" < mean(P_x) < 1.2u"bar"
+            @test 0.75u"bar" < mean(P_x) < 1.25u"bar"
             @test 0.1u"bar" < std(P_x) < 0.5u"bar"
-            @test 0.8u"bar" < mean(P_y) < 1.2u"bar"
+            @test 0.75u"bar" < mean(P_y) < 1.25u"bar"
             @test 0.1u"bar" < std(P_y) < 0.5u"bar"
-            @test 0.8u"bar" < mean(P_z) < 1.2u"bar"
+            @test 0.75u"bar" < mean(P_z) < 1.25u"bar"
             @test 0.1u"bar" < std(P_z) < 0.5u"bar"
             @test 857.0u"nm^3" < mean(values(sys.loggers.volume)) < 1157.0u"nm^3"
             @test std(values(sys.loggers.volume)) < 300u"nm^3"

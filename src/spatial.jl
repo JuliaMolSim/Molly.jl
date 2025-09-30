@@ -919,7 +919,7 @@ end
 
 
 @doc raw"""
-    pressure(sys, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
+    pressure(sys; n_threads=Threads.nthreads())
 
 Calculate the tensorial pressure of a system.
 
@@ -933,49 +933,55 @@ and ``\bf{W}`` is the virial tensor.
 Not compatible with infinite boundaries.
 """
 function pressure(sys; n_threads::Integer=Threads.nthreads())
-    return pressure(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+
+    return pressure(sys, nothing, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads, recompute = true)
 end
 
 
-function pressure(sys::AtomsBase.AbstractSystem{D}, neighbors, step_n::Integer=0;
+function pressure(sys::AtomsBase.AbstractSystem{D}, buffers, neighbors, step_n::Integer=0;
                   recompute::Bool = false, n_threads::Integer=Threads.nthreads()) where D
 
     if recompute
-        _ = forces(sys; Virial = true)
+        _, buffers = forces!(zero_forces(sys), sys, neighbors, buffers, Val(true), step_n; n_threads = n_threads)
+        kin_tensor = buffers.kin_tensor
+        vir_tensor = buffers.virial
+    else
+        kin_tensor = buffers.kin_tensor
+        vir_tensor = buffers.virial
     end
 
-    kinetic_energy(sys) # Always evaluate K in case velocities were rescaled by a thermostat
+    kinetic_energy(sys; kin_tensor = kin_tensor) # Always evaluate K in case velocities were rescaled by a thermostat
 
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
 
-    K = energy_remove_mol.(sys.kin_tensor)  # (1/2) Σ m v⊗v
-    W = energy_remove_mol.(sys.virial)      # Σ r⊗f
+    K = energy_remove_mol.(kin_tensor)  # (1/2) Σ m v⊗v
+    W = energy_remove_mol.(vir_tensor)  # Σ r⊗f
 
     P = (2 .* K .+ W) ./ volume(sys.boundary)
     if sys.energy_units == NoUnits || D != 3
         # If implied energy units are (u * nm^2 * ps^-2) and everything is
         #   consistent then this has implied units of (u * nm^-1 * ps^-2)
         #   for 3 dimensions and (u * ps^-2) for 2 dimensions
-        sys.pres_tensor = P
+        buffers.pres_tensor .= P
     else
         # Sensible unit to return by default for 3 dimensions
         P_bar = uconvert.(u"bar", P)
-        sys.pres_tensor = P_bar
+        buffers.pres_tensor .= P_bar
     end
-    return sys.pres_tensor
+    return buffers.pres_tensor
 end
 
 @doc raw"""
-    scalar_pressure(sys::System{D}; n_threads::Integer=Threads.nthreads())
+    scalar_pressure(sys::System{D}, buffers = nothing; n_threads::Integer=Threads.nthreads())
 
 Retrieves the pressure as a scalar instead of as a tensor. Recomputes the forces
 when called.
 """
-function scalar_pressure(sys::System{D}; n_threads::Integer=Threads.nthreads()) where D
-    P = pressure(sys, find_neighbors(sys; n_threads=n_threads); recompute = true, n_threads=n_threads)
-    return (1/D) * tr(P)
+function scalar_pressure(sys::System{D, AT, T}, buffers = nothing; n_threads::Integer=Threads.nthreads()) where {D, AT, T}
+    P = pressure(sys, buffers, find_neighbors(sys; n_threads=n_threads); recompute = true, n_threads=n_threads)
+    return T((1/D) * tr(P))
 end
 
 """
@@ -1138,7 +1144,7 @@ function scale_coords!(sys::System{<:Any, AT},
 
     if ignore_molecules || isnothing(sys.topology)
         # box
-        B  = SMatrix{D,D}(ustrip(boxmatrix(sys.boundary)))
+        B  = SMatrix{D,D}(ustrip.(boxmatrix(sys.boundary)))
         Bu = unit(eltype(eltype(sys.coords)))
         B′ = μ * B
         sys.boundary = rebuild_boundary(sys.boundary, B′ .* Bu)
@@ -1157,7 +1163,7 @@ function scale_coords!(sys::System{<:Any, AT},
         b_old   = ustrip(coord_u, b_old_u)
 
         # cell matrices
-        B  = SMatrix{D,D}(ustrip(boxmatrix(b_old_u)))
+        B  = SMatrix{D,D}(ustrip.(boxmatrix(b_old_u)))
         B′ = μ * B
 
         # topology

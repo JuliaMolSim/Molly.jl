@@ -51,7 +51,7 @@
     end
 
     # Test log_property! definition rather than just using GeneralObservableLogger
-    function Molly.log_property!(logger::SIRLogger, sys, neighbors, step_n; kwargs...)
+    function Molly.log_property!(logger::SIRLogger, sys, buffers, neighbors, step_n; kwargs...)
         if step_n % logger.n_steps == 0
             counts_sir = [
                 count(p -> p.status == susceptible, sys.atoms),
