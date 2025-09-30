@@ -1241,7 +1241,7 @@ end
 
 function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_type,
                               rigid_water, units)
-    if constraints_type == :none || iszero(length(bonds_all.is))
+    if (constraints_type == :none && !rigid_water) || iszero(length(bonds_all.is))
         return (), bonds_all, angles_all
     end
 

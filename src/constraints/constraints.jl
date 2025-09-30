@@ -4,7 +4,8 @@ export
     apply_position_constraints!,
     apply_velocity_constraints!,
     check_position_constraints,
-    check_velocity_constraints
+    check_velocity_constraints,
+    check_constraints
 
 """
     DistanceConstraint(i, j, dist)
@@ -57,22 +58,14 @@ to_distance_constraints(ac::AngleConstraint) = (
     DistanceConstraint(ac.i, ac.k, ac.dist_ik), # i-j-k angle
 )
 
-function to_cluster_data(ac::AngleConstraint)
-    # Note switch of central atom from j (consistent with HarmonicAngle)
-    # to i (consistent with other constraint clusters)
-    return AngleClusterData(Int32(ac.j), Int32(ac.i), Int32(ac.k),
-                            ac.dist_ij, ac.dist_jk, ac.dist_ik)
-end
-
-# This finds the unique atom indicies given a the lists (is and js)
+# This finds the unique atom indices given the lists (is and js)
 # of atoms that participate in a constraint clusters.
 # The first atom in the result is the atom at the center of the cluster
 function order_atoms(is, js)
-    counts = Dict{Int,Int}()
+    counts = Dict{Int, Int}()
     for atom in is
         counts[atom] = get(counts, atom, 0) + 1
     end
-
     for atom in js
         counts[atom] = get(counts, atom, 0) + 1
     end
@@ -81,7 +74,7 @@ function order_atoms(is, js)
     unique_atoms = collect(keys(counts))
 
     if length(central_atoms) == 1
-        central = central_atoms[1]
+        central = only(central_atoms)
         unique_atoms = [central; filter(x -> x != central, unique_atoms)]
         return unique_atoms
     elseif length(central_atoms) == 0 # Will trigger if just 1 bond in constraint (e.g. C-C)
@@ -103,14 +96,13 @@ function make_cluster_data(raw_is, raw_js, raw_ds)
     is_single_bond = (N_constraints == 1)
     is_angle_cluster = (N_constraints == 3 && N_unique_atoms == 3)
 
-    if is_single_bond || is_angle_cluster # no central atom, order agnostic
+    if is_single_bond || is_angle_cluster # No central atom, order agnostic
         return ConstraintKernelData(Int32.(raw_unique_idxs)..., raw_ds...)
-    else # order matters, need to place central atom first
+    else # Order matters, need to place central atom first
         unique_idxs = order_atoms(raw_is, raw_js)
         central = unique_idxs[1]
         others  = unique_idxs[2:end]
-        M       = length(others)
-
+        M = length(others)
         dists = Vector{eltype(raw_ds)}(undef, M)
 
         # Figure out which distance goes with new pairings
@@ -122,7 +114,6 @@ function make_cluster_data(raw_is, raw_js, raw_ds)
                 end
             end
         end
-
         return ConstraintKernelData(Int32.(unique_idxs)..., dists...)
     end
 end
@@ -138,18 +129,10 @@ end
     end
 end
 
-function disable_constrained_interactions!(
-        neighbor_finder,
-        constraint_clusters::AbstractVector
-    )
-
-    atom_interactions = interactions.(constraint_clusters)
-
+function disable_constrained_interactions!(neighbor_finder, constraint_clusters)
+    atom_interactions = cluster_interactions.(constraint_clusters)
     if isa(neighbor_finder.eligible, AbstractGPUArray)
-
-        # Collect pairs first
-        i_idx = Int[]
-        j_idx = Int[]
+        i_idx, j_idx = Int[], Int[]
 
         for interaction_list in atom_interactions
             for (i, j, _) in interaction_list
@@ -164,32 +147,24 @@ function disable_constrained_interactions!(
         i_idx = to_backend(i_idx, is_backend, nf_backend)
         j_idx = to_backend(j_idx, is_backend, nf_backend)
 
-        # 1024 is block size
         kernel = disable_pairs!(nf_backend, 1024)
         kernel(neighbor_finder.eligible, i_idx, j_idx, ndrange=length(i_idx))
-
         return neighbor_finder
-
     else # KernelAbstractions does not like the BitMatrix used by eligible on CPU
-
         for interaction_list in atom_interactions
             for (i, j, _) in interaction_list
                 neighbor_finder.eligible[i, j] = false
                 neighbor_finder.eligible[j, i] = false
             end
         end
-
         return neighbor_finder
     end
 end
 
 # Check for interactions between angle and non-angle clusters,
 # builds only non-angle clusters
-function build_central_atom_clusters(
-        num_atoms::Integer,
-        dist_constraints::AbstractVector{<:DistanceConstraint{D}}
-    ) where D
-
+function build_central_atom_clusters(num_atoms::Integer,
+                            dist_constraints::AbstractVector{<:DistanceConstraint{D}}) where D
     # Store constraints as directed edges, direction is arbitrary but necessary
     constraint_graph = SimpleDiGraph(num_atoms)
     idx_dist_pairs = spzeros(D, num_atoms, num_atoms)
@@ -207,7 +182,6 @@ function build_central_atom_clusters(
 
     # Get groups of constraints that are connected to eachother
     cc = connected_components(constraint_graph)
-
     clusters12 = Cluster12Data{D}[]
     clusters23 = Cluster23Data{D}[]
     clusters34 = Cluster34Data{D}[]
@@ -216,7 +190,8 @@ function build_central_atom_clusters(
     for (_, atom_idxs) in enumerate(cc)
         # Loop over atoms in connected region to build cluster
         if length(atom_idxs) > 1 # connected_components gives unconnected vertices as well
-            is = Int[]; js = Int[]; dists = []
+            is, js = Int[], Int[]
+            dists = []
             for ai in atom_idxs
                 neigh_idxs = neighbors(constraint_graph, ai)
                 for neigh_idx in neigh_idxs
@@ -257,7 +232,7 @@ function build_clusters(n_atoms::Integer, dist_constraints, angle_constraints)
         dist_constraints_cp = copy(dist_constraints)
     end
 
-    # Convert angle constraints to distance constraints.
+    # Convert angle constraints to distance constraints
     # This is purely to check if they are connected to other
     # clusters in the DAG
     if !isnothing(angle_constraints)
@@ -267,12 +242,13 @@ function build_clusters(n_atoms::Integer, dist_constraints, angle_constraints)
     end
 
     # Check for interactions between clusters and build non-angle clusters
-    clusters12, clusters23, clusters34 = build_central_atom_clusters(n_atoms, dist_constraints_cp)
+    clusters12, clusters23, clusters34 = build_central_atom_clusters(n_atoms,
+                                                            [dist_constraints_cp...])
 
     # Now that we know angle_constraints do not interact with
     # any of the distance constraints we can build their clusters
     if !isnothing(angle_constraints) && length(angle_constraints) > 0
-        clusters_angle = StructArray(to_cluster_data(ac) for ac in angle_constraints)
+        clusters_angle = StructArray(AngleClusterData(ac) for ac in angle_constraints)
     else
         clusters_angle = NoClusterData[]
     end
@@ -317,39 +293,34 @@ end
     apply_position_constraints!(sys, coord_storage)
     apply_position_constraints!(sys, coord_storage, vel_storage, dt)
 
-Applies the system constraints to the coordinates.
+Apply the coordinate constraints to the system.
 
-If `vel_storage` and `dt` are provided then velocity corrections are applied as well.
+If `vel_storage` and `dt` are provided then velocity constraints are applied as well.
 """
 function apply_position_constraints!(sys, coord_storage; n_threads::Integer=Threads.nthreads())
     for ca in sys.constraints
-        apply_position_constraints!(sys, ca, coord_storage; n_threads = n_threads)
+        apply_position_constraints!(sys, ca, coord_storage; n_threads=n_threads)
     end
     return sys
 end
 
 function apply_position_constraints!(sys, coord_storage, vel_storage, dt;
-                                        n_threads::Integer=Threads.nthreads())
-
+                                     n_threads::Integer=Threads.nthreads())
     if length(sys.constraints) > 0
-
         vel_storage .= -sys.coords ./ dt
-
         for ca in sys.constraints
             apply_position_constraints!(sys, ca, coord_storage; n_threads = n_threads)
         end
-
         vel_storage .+= sys.coords ./ dt
         sys.velocities .+= vel_storage
     end
-
     return sys
 end
 
 """
     apply_velocity_constraints!(sys)
 
-Applies the system constraints to the velocities.
+Apply the velocity constraints to the system.
 """
 function apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
     for ca in sys.constraints
@@ -358,93 +329,90 @@ function apply_velocity_constraints!(sys; n_threads::Integer=Threads.nthreads())
     return sys
 end
 
-@kernel inbounds=true function max_dist_error(
-        @Const(clusters::StructArray),
-        @Const(r),
-        boundary,
-        maximums::AbstractVector{T},
-    ) where T
-
+@kernel inbounds=true function max_dist_error(@Const(clusters),
+                                              @Const(coords),
+                                              boundary,
+                                              maximums::AbstractVector{T}) where T
     cluster_idx = @index(Global, Linear)
-
     if cluster_idx <= length(clusters)
         cluster_max = typemin(T)
-        for (i, j, dist) in interactions(clusters[cluster_idx])
-            dr = vector(r[i], r[j], boundary)
+        for (i, j, dist) in cluster_interactions(clusters[cluster_idx])
+            dr = vector(coords[i], coords[j], boundary)
             err = ustrip(abs(norm(dr) - dist))
-            cluster_max = ifelse(err > cluster_max, err, cluster_max)
+            cluster_max = max(err, cluster_max)
         end
         maximums[cluster_idx] = cluster_max
     end
 end
 
-@kernel inbounds=true function max_vel_error(
-        @Const(clusters::StructArray),
-        @Const(r),
-        @Const(v),
-        boundary,
-        maximums::AbstractVector{T},
-    ) where T
-
+@kernel inbounds=true function max_vel_error(@Const(clusters),
+                                             @Const(coords),
+                                             @Const(velocities),
+                                             boundary,
+                                             maximums::AbstractVector{T}) where T
     cluster_idx = @index(Global, Linear)
-
     if cluster_idx <= length(clusters)
         cluster_max = typemin(T)
-        for (i, j, _) in interactions(clusters[cluster_idx])
-            dr = vector(r[i], r[j], boundary)
-            v_diff = v[j] .- v[i]
+        for (i, j, _) in cluster_interactions(clusters[cluster_idx])
+            dr = vector(coords[i], coords[j], boundary)
+            v_diff = velocities[j] .- velocities[i]
             err = ustrip(abs(dot(dr, v_diff)))
-            cluster_max = ifelse(err > cluster_max, err, cluster_max)
+            cluster_max = max(err, cluster_max)
         end
         maximums[cluster_idx] = cluster_max
     end
 end
 
 """
+    check_position_constraints(sys)
     check_position_constraints(sys, constraints)
 
-Checks if the position constraints are satisfied by the current coordinates of `sys`.
+Check whether the coordinates of a system satisfy the position constraints.
 """
+check_position_constraints(sys) = all(ca -> check_position_constraints(sys, ca), sys.constraints)
+
 function check_position_constraints(sys::System{<:Any, <:Any, FT}, ca) where FT
     err_unit = unit(eltype(eltype(sys.coords)))
     if err_unit != unit(ca.dist_tolerance)
-        throw(ArgumentError("Distance tolerance units in SHAKE are inconsistent with system coordinates."))
+        throw(ArgumentError("distance tolerance units in SHAKE ($(unit(ca.dist_tolerance))) " *
+                            "are inconsistent with system coordinate units ($err_unit)"))
     end
 
     cluster_maxes = FT[]
     backend = get_backend(sys.coords)
-    err_kernel = max_dist_error(backend, 128) #128 is block size
+    err_kernel = max_dist_error(backend, 128)
 
     for cluster_type in cluster_keys(ca)
         clusters = getproperty(ca, cluster_type)
         if length(clusters) > 0
             max_storage = allocate(backend, FT, length(clusters))
             err_kernel(clusters, sys.coords, sys.boundary, max_storage; ndrange=length(clusters))
-            # not efficient to move to GPU first, but the array
-            # is usually small and this function is for testing
             push!(cluster_maxes, reduce(max, Array(max_storage)))
         end
     end
 
     KernelAbstractions.synchronize(backend)
-
     return maximum(cluster_maxes) < ustrip(ca.dist_tolerance)
 end
 
 """
+    check_velocity_constraints(sys)
     check_velocity_constraints(sys, constraints)
 
-Checks if the velocity constraints are satisfied by the current velocities of `sys`.
+Check whether the velocities of a system satisfy the velocity constraints.
 """
+check_velocity_constraints(sys) = all(ca -> check_velocity_constraints(sys, ca), sys.constraints)
+
 function check_velocity_constraints(sys::System{<:Any, <:Any, FT}, ca) where FT
     err_unit = unit(eltype(eltype(sys.velocities))) * unit(eltype(eltype(sys.coords)))
     if err_unit != unit(ca.vel_tolerance)
-        throw(ArgumentError("Velocity tolerance units in RATTLE are inconsistent wwith system velocities and coordinates."))
+        throw(ArgumentError("velocity tolerance units in RATTLE ($(unit(ca.vel_tolerance))) " *
+                    "are inconsistent with system velocity and coordinate units ($err_unit)"))
     end
 
     cluster_maxes = FT[]
     backend = get_backend(sys.coords)
-    err_kernel = max_vel_error(backend, 128) #128 is block size
+    err_kernel = max_vel_error(backend, 128)
 
     for cluster_type in cluster_keys(ca)
         clusters = getproperty(ca, cluster_type)
@@ -452,15 +420,25 @@ function check_velocity_constraints(sys::System{<:Any, <:Any, FT}, ca) where FT
             max_storage = allocate(backend, FT, length(clusters))
             err_kernel(clusters, sys.coords, sys.velocities, sys.boundary, max_storage;
                        ndrange=length(clusters))
-            # not efficient to move to GPU first, but the array
-            # is usually small and this function is for testing
             push!(cluster_maxes, reduce(max, Array(max_storage)))
         end
     end
 
     KernelAbstractions.synchronize(backend)
-
     return maximum(cluster_maxes) < ustrip(ca.vel_tolerance)
+end
+
+"""
+    check_constraints(sys)
+    check_constraints(sys, constraints)
+
+Check whether the coordinates and velocities of a system satisfy the
+coordinate and velocity constraints.
+"""
+check_constraints(sys) = all(ca -> check_constraints(sys, ca), sys.constraints)
+
+function check_constraints(sys, ca)
+    return check_position_constraints(sys, ca) && check_velocity_constraints(sys, ca)
 end
 
 # No-op when backends are same
@@ -473,12 +451,11 @@ function to_backend(arr, old::A, new::B) where {A <: Backend, B <: Backend}
     return out
 end
 
-# These types will enable coalesced memory access
-# via StructArray{ConstraintKernelData}
+# These types will enable coalesced memory access via StructArray{ConstraintKernelData}
 abstract type ConstraintKernelData{D, N, M} end
 
-n_constraints(::ConstraintKernelData{D,N,M}) where {D,N,M} = N
-n_atoms_cluster(::ConstraintKernelData{D,N,M}) where {D,N,M} = M
+n_constraints(::ConstraintKernelData{<:Any, N}) where {N} = N
+n_atoms_cluster(::ConstraintKernelData{<:Any, <:Any, M}) where {M} = M
 
 struct NoClusterData <: ConstraintKernelData{Nothing, 0, 0} end
 
@@ -493,7 +470,7 @@ function ConstraintKernelData(k1::Int32, k2::Int32, dist12::D) where D
     return Cluster12Data{D}(k1, k2, dist12)
 end
 
-interactions(kd::Cluster12Data) = ((kd.k1, kd.k2, kd.dist12), )
+cluster_interactions(kd::Cluster12Data) = ((kd.k1, kd.k2, kd.dist12),)
 
 struct Cluster23Data{D} <: ConstraintKernelData{D, 2, 3}
     k1::Int32
@@ -507,7 +484,10 @@ function ConstraintKernelData(k1::Int32, k2::Int32, k3::Int32, dist12::D, dist13
     return Cluster23Data{D}(k1, k2, k3, dist12, dist13)
 end
 
-interactions(kd::Cluster23Data) = ((kd.k1, kd.k2, kd.dist12), (kd.k1, kd.k3, kd.dist13))
+cluster_interactions(kd::Cluster23Data) = (
+    (kd.k1, kd.k2, kd.dist12),
+    (kd.k1, kd.k3, kd.dist13),
+)
 idx_keys(::Type{<:Cluster23Data}) = (:k1, :k2, :k3)
 dist_keys(::Type{<:Cluster23Data}) = (:dist12, :dist13)
 
@@ -521,11 +501,16 @@ struct Cluster34Data{D} <: ConstraintKernelData{D, 3, 4}
     dist14::D
 end
 
-function ConstraintKernelData(k1::Int32, k2::Int32, k3::Int32, k4::Int32, dist12::D, dist13::D, dist14::D) where D
+function ConstraintKernelData(k1::Int32, k2::Int32, k3::Int32, k4::Int32, dist12::D,
+                              dist13::D, dist14::D) where D
     return Cluster34Data{D}(k1, k2, k3, k4, dist12, dist13, dist14)
 end
 
-interactions(kd::Cluster34Data) = ((kd.k1, kd.k2, kd.dist12), (kd.k1, kd.k3, kd.dist13), (kd.k1, kd.k4, kd.dist14))
+cluster_interactions(kd::Cluster34Data) = (
+    (kd.k1, kd.k2, kd.dist12),
+    (kd.k1, kd.k3, kd.dist13),
+    (kd.k1, kd.k4, kd.dist14),
+)
 idx_keys(::Type{<:Cluster34Data}) = (:k1, :k2, :k3, :k4)
 dist_keys(::Type{<:Cluster34Data}) = (:dist12, :dist13, :dist14)
 
@@ -538,12 +523,22 @@ struct AngleClusterData{D} <: ConstraintKernelData{D, 3, 3}
     dist23::D
 end
 
-function ConstraintKernelData(k1::Int32, k2::Int32, k3::Int32, dist12::D, dist13::D, dist23::D) where D
+function AngleClusterData(ac::AngleConstraint)
+    # Note switch of central atom from j (consistent with HarmonicAngle)
+    # to i (consistent with other constraint clusters)
+    return AngleClusterData(Int32(ac.j), Int32(ac.i), Int32(ac.k),
+                            ac.dist_ij, ac.dist_jk, ac.dist_ik)
+end
+
+function ConstraintKernelData(k1::Int32, k2::Int32, k3::Int32, dist12::D,
+                              dist13::D, dist23::D) where D
     return AngleClusterData{D}(k1, k2, k3, dist12, dist13, dist23)
 end
 
-interactions(kd::AngleClusterData) = ((kd.k1, kd.k2, kd.dist12), (kd.k1, kd.k3, kd.dist13), (kd.k2, kd.k3, kd.dist23))
+cluster_interactions(kd::AngleClusterData) = (
+    (kd.k1, kd.k2, kd.dist12),
+    (kd.k1, kd.k3, kd.dist13),
+    (kd.k2, kd.k3, kd.dist23),
+)
 idx_keys(::Type{<:AngleClusterData}) = (:k1, :k2, :k3)
 dist_keys(::Type{<:AngleClusterData}) = (:dist12, :dist13, :dist23)
-
-central_atom(kd::K) where {K <: ConstraintKernelData} = kd.k1

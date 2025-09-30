@@ -334,19 +334,22 @@ end
             simulate!(sys, simulator, 20)
             @time simulate!(sys, simulator, 1000)
 
-            @test check_position_constraints(sys, sys.constraints[1])
-            @test check_velocity_constraints(sys, sys.constraints[1])
+            @test check_position_constraints(sys)
+            @test check_velocity_constraints(sys)
+            @test check_constraints(sys)
 
             coords_copy = copy(sys.coords)
             sys.coords     .+= randn(SVector{3, T}, length(sys))u"nm"         ./ 100
             sys.velocities .+= randn(SVector{3, T}, length(sys))u"nm * ps^-1" ./ 100
-            @test !check_position_constraints(sys, sys.constraints[1])
-            @test !check_velocity_constraints(sys, sys.constraints[1])
+            @test !check_position_constraints(sys)
+            @test !check_velocity_constraints(sys)
+            @test !check_constraints(sys)
 
             apply_position_constraints!(sys, coords_copy)
             apply_velocity_constraints!(sys)
-            @test check_position_constraints(sys, sys.constraints[1])
-            @test check_velocity_constraints(sys, sys.constraints[1])
+            @test check_position_constraints(sys)
+            @test check_velocity_constraints(sys)
+            @test check_constraints(sys)
         end
     end
 end
