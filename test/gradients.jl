@@ -56,7 +56,7 @@ end
     d_sys = zero(sys)
     d_pme = zero(pme)
 
-    pe = Molly.ewald_pe_forces!(Fs, sys, pme)
+    pe = Molly.ewald_pe_forces!(Fs, nothing, sys, pme, Val(false))
     Fs_ad = zero(sys.coords)
 
     pe_ad = autodiff(
@@ -64,8 +64,10 @@ end
         Molly.ewald_pe_forces!,
         Active,
         Const(Fs_ad),
+        Const(nothing),
         Duplicated(sys, d_sys),
         Duplicated(pme, d_pme),
+        Const(Val(false)),
     )[2]
 
     @test pe_ad ≈ pe atol=1e-7
@@ -76,7 +78,7 @@ end
         coords_mod = copy(sys.coords)
         coords_mod[1] = SVector(c, coords_mod[1][2], coords_mod[1][3])
         sys_mod = System(deepcopy(sys); coords=coords_mod)
-        return Molly.ewald_pe_forces!(Fs, sys_mod, pme)
+        return Molly.ewald_pe_forces!(Fs, nothing, sys_mod, pme, Val(false))
     end
 
     c = sys.coords[1][1]
@@ -89,7 +91,7 @@ end
         at = sys.atoms[1]
         atoms_mod[1] = Atom(mass=at.mass, charge=ch, σ=at.σ, ϵ=at.σ)
         sys_mod = System(deepcopy(sys); atoms=atoms_mod)
-        return Molly.ewald_pe_forces!(Fs, sys_mod, pme)
+        return Molly.ewald_pe_forces!(Fs, nothing, sys_mod, pme, Val(false))
     end
 
     at = sys.atoms[1]
@@ -178,7 +180,7 @@ end
         temp = T(1.0)
         simulator = VelocityVerlet(
             dt=T(0.001),
-            coupling=ImmediateThermostat(temp),
+            coupling=(ImmediateThermostat(temp),),
         )
         rng = Xoshiro(1000) # Same system every time, not required but increases stability
         coords = place_atoms(n_atoms, boundary; min_dist=T(0.6), max_attempts=500, rng=rng)

@@ -15,7 +15,9 @@ export
     VolumeLogger,
     DensityLogger,
     VirialLogger,
+    ScalarVirialLogger,
     PressureLogger,
+    ScalarPressureLogger,
     DisplacementsLogger,
     write_structure,
     TrajectoryWriter,
@@ -27,7 +29,7 @@ export
     MonteCarloLogger
 
 """
-    apply_loggers!(system, neighbors=nothing, step_n=0, run_loggers=true;
+    apply_loggers!(system, buffers, neighbors=nothing, step_n=0, run_loggers=true;
                    n_threads=Threads.nthreads(), kwargs...)
 
 Run the loggers associated with a system.
@@ -37,11 +39,11 @@ are not run before the first step.
 Additional keyword arguments can be passed to the loggers if required.
 Ignored for gradient calculation during automatic differentiation.
 """
-function apply_loggers!(sys::System, neighbors=nothing, step_n::Integer=0, run_loggers=true;
+function apply_loggers!(sys::System, buffers, neighbors=nothing, step_n::Integer=0, run_loggers=true;
                         n_threads::Integer=Threads.nthreads(), kwargs...)
     if run_loggers == true || (run_loggers == :skipzero && step_n != 0)
         for logger in values(sys.loggers)
-            log_property!(logger, sys, neighbors, step_n; n_threads=n_threads, kwargs...)
+            log_property!(logger, sys, buffers, neighbors, step_n; n_threads=n_threads, kwargs...)
         end
     end
     return sys
@@ -75,7 +77,7 @@ Access the stored observations in a logger.
 Base.values(logger::GeneralObservableLogger) = logger.history
 
 """
-    log_property!(logger, system, neighbors=nothing, step_n=0;
+    log_property!(logger, system, buffers, neighbors=nothing, step_n=0;
                   n_threads=Threads.nthreads(), kwargs...)
 
 Log a property of a system throughout a simulation.
@@ -83,10 +85,10 @@ Log a property of a system throughout a simulation.
 Custom loggers should implement this function.
 Additional keyword arguments can be passed to the logger if required.
 """
-function log_property!(logger::GeneralObservableLogger, s::System, neighbors=nothing,
+function log_property!(logger::GeneralObservableLogger, s::System, buffers, neighbors=nothing,
                         step_n::Integer=0; kwargs...)
     if (step_n % logger.n_steps) == 0
-        obs = logger.observable(s, neighbors, step_n; kwargs...)
+        obs = logger.observable(s, buffers, neighbors, step_n; kwargs...)
         push!(logger.history, obs)
     end
 end
@@ -97,7 +99,9 @@ function Base.show(io::IO, gol::GeneralObservableLogger)
             gol.observable)
 end
 
-temperature_wrapper(sys, args...; kwargs...) = temperature(sys)
+function temperature_wrapper(sys, buffers, args...; kwargs...)
+    return temperature(sys)
+end
 
 """
     TemperatureLogger(n_steps)
@@ -164,7 +168,10 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(velocities_wrap
             length(values(vl)) > 0 ? length(first(values(vl))) : "?", " atoms")
 end
 
-kinetic_energy_wrapper(sys, args...; kwargs...) = kinetic_energy(sys)
+function kinetic_energy_wrapper(sys::System{D, AT, T}, buffers, args...; kwargs...) where {D, AT, T}
+    return kinetic_energy(sys)
+end
+
 
 """
     KineticEnergyLogger(n_steps)
@@ -183,7 +190,7 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(kinetic_energy_
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-function potential_energy_wrapper(sys, neighbors, step_n::Integer; n_threads::Integer,
+function potential_energy_wrapper(sys, buffers, neighbors, step_n::Integer; n_threads::Integer,
                                   current_potential_energy=nothing, kwargs...)
     if isnothing(current_potential_energy)
         return potential_energy(sys, neighbors, step_n; n_threads=n_threads)
@@ -209,8 +216,8 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(potential_energ
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-function total_energy_wrapper(sys, args...; kwargs...)
-    return kinetic_energy(sys) + potential_energy_wrapper(sys, args...; kwargs...)
+function total_energy_wrapper(sys, buffers, args...; kwargs...)
+    return kinetic_energy(sys) + potential_energy_wrapper(sys, buffers, args...; kwargs...)
 end
 
 """
@@ -227,7 +234,7 @@ function Base.show(io::IO, el::GeneralObservableLogger{T, typeof(total_energy_wr
             el.n_steps, ", ", length(values(el)), " energies recorded")
 end
 
-function forces_wrapper(sys, neighbors, step_n::Integer; n_threads::Integer,
+function forces_wrapper(sys, buffers, neighbors, step_n::Integer; n_threads::Integer,
                         current_forces=nothing, kwargs...)
     if isnothing(current_forces)
         return forces(sys, neighbors, step_n; n_threads=n_threads)
@@ -297,47 +304,110 @@ function Base.show(io::IO, dl::GeneralObservableLogger{T, typeof(density_wrapper
             dl.n_steps, ", ", length(values(dl)), " densities recorded")
 end
 
-function virial_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
-    return virial(sys, neighbors, step_n; n_threads=n_threads)
+function virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
+    if all(iszero.(buffers.virial))
+        V = virial(sys)
+        return copy(V)
+    else
+        return copy(buffers.virial)
+    end
 end
 
 """
     VirialLogger(n_steps)
     VirialLogger(T, n_steps)
 
-Log the [`virial`](@ref) of a system throughout a simulation.
+Log the [`virial`](@ref) tensor of a system throughout a simulation.
 
-This should only be used on systems containing just pairwise interactions, or
-where the specific interactions, general interactions and constraints do not
+This should only be used on systems where the general interactions and constraints do not
 contribute to the virial.
 """
 VirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(virial_wrapper, T, n_steps)
-VirialLogger(n_steps::Integer) = VirialLogger(typeof(one(DefaultFloat)u"kJ * mol^-1"), n_steps)
+VirialLogger(n_steps::Integer) = VirialLogger(typeof(Matrix{DefaultFloat}(undef, 3, 3).*u"kJ * mol^-1"), n_steps)
 
 function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)}) where T
     print(io, "VirialLogger{", eltype(values(vl)), "} with n_steps ",
             vl.n_steps, ", ", length(values(vl)), " virials recorded")
 end
 
-function pressure_wrapper(sys, neighbors, step_n; n_threads, kwargs...)
-    return pressure(sys, neighbors, step_n; n_threads=n_threads)
+function scalar_virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
+    if all(iszero.(buffers.virial))
+        V = scalar_virial(sys)
+        return copy(V)
+    else
+        return copy(tr(buffers.virial))
+    end
+end
+
+"""
+    ScalarVirialLogger(n_steps)
+    ScalarVirialLogger(T, n_steps)
+
+Log the [`scalar_virial`](@ref) tensor of a system throughout a simulation.
+
+This should only be used on systems where the general interactions and constraints do not
+contribute to the virial.
+"""
+ScalarVirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_virial_wrapper, T, n_steps)
+ScalarVirialLogger(n_steps::Integer) = ScalarVirialLogger(typeof(one(DefaultFloat)*u"kJ * mol^-1"), n_steps)
+
+function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(scalar_virial_wrapper)}) where T
+    print(io, "ScalarVirialLogger{", eltype(values(vl)), "} with n_steps ",
+            vl.n_steps, ", ", length(values(vl)), " virials recorded")
+end
+
+function pressure_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
+
+    if all(iszero.(buffers.pres_tensor))
+        P = pressure(sys, buffers, neighbors, step_n; recompute = true, n_threads = n_threads)
+        return copy(P)
+    else
+        return copy(buffers.pres_tensor)
+    end
 end
 
 """
     PressureLogger(n_steps)
     PressureLogger(T, n_steps)
 
-Log the [`pressure`](@ref) of a system throughout a simulation.
+Log the [`pressure`](@ref) tensor of a system throughout a simulation.
 
-This should only be used on systems containing just pairwise interactions, or
-where the specific interactions, general interactions and constraints do not
+This should only be used on 3-dimensional systems where general interactions and constraints do not
 contribute to the pressure.
 """
 PressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(pressure_wrapper, T, n_steps)
-PressureLogger(n_steps::Integer) = PressureLogger(typeof(one(DefaultFloat)u"bar"), n_steps)
+PressureLogger(n_steps::Integer) = PressureLogger(typeof(Matrix{DefaultFloat}(undef, 3, 3).*u"bar"), n_steps)
 
 function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(pressure_wrapper)}) where T
     print(io, "PressureLogger{", eltype(values(pl)), "} with n_steps ",
+            pl.n_steps, ", ", length(values(pl)), " pressures recorded")
+end
+
+function scalar_pressure_wrapper(sys::System{D, AT, T}, buffers, neighbors, step_n; n_threads, kwargs...) where {D, AT, T}
+
+    if all(iszero.(buffers.pres_tensor))
+        P = scalar_pressure(sys, buffers)
+        return copy(P)
+    else
+        P = T((1/D) * tr(copy(buffers.pres_tensor)))
+    end
+
+end
+
+"""
+    ScalarPressureLogger(n_steps)
+    ScalarPressureLogger(T, n_steps)
+
+Log the [`scalar_pressure`](@ref) tensor of a system throughout a simulation.
+
+This should only be used on 3-dimensional systems where general interactions and constraints do not
+contribute to the pressure.
+"""
+ScalarPressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_pressure_wrapper, T, n_steps)
+ScalarPressureLogger(n_steps::Integer) = ScalarPressureLogger(typeof(one(DefaultFloat)*u"bar"), n_steps)
+
+function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(scalar_pressure_wrapper)}) where T
+    print(io, "ScalarPressureLogger{", eltype(values(pl)), "} with n_steps ",
             pl.n_steps, ", ", length(values(pl)), " pressures recorded")
 end
 
@@ -377,7 +447,7 @@ end
 
 Base.values(dl::DisplacementsLogger) = dl.displacements
 
-function log_property!(dl::DisplacementsLogger, sys::System, neighbors=nothing,
+function log_property!(dl::DisplacementsLogger, sys::System, buffers, neighbors=nothing,
                        step_n::Integer=0; kwargs...)
     if (step_n % dl.n_steps_update) == 0
         dl.last_displacements .+= vector.(dl.coords_ref, sys.coords, (sys.boundary,))
@@ -428,9 +498,16 @@ function BioStructures.AtomRecord(at_data::AtomData, i, coord)
     )
 end
 
-function write_pdb_coords(output, sys, atom_inds_arg=Int[], excluded_res=())
+function write_pdb_coords(output, sys, correction::Symbol = :pbc, atom_inds_arg=Int[], excluded_res=())
+    if !(correction ∈ (:pbc, :wrap))
+        throw(ArgumentError("Argument $(correction) not recognised. Currently supported corrections are :wrap and :pbc"))
+    end
     atom_inds = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
     coords_cpu = from_device(sys.coords)
+    if correction == :pbc
+        coords_cpu = unwrap_molecules(coords_cpu, sys.boundary, sys.topology)
+        # Add logic if more correction types are added
+    end
     for i in atom_inds
         coord, atom_data = coords_cpu[i], sys.atoms_data[i]
         if unit(first(coord)) == NoUnits
@@ -451,7 +528,12 @@ function write_pdb_coords(output, sys, atom_inds_arg=Int[], excluded_res=())
 end
 
 function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, excluded_res,
-                          write_velocities, write_boundary, calc_topology, append)
+                          write_velocities, write_boundary, calc_topology, append; correction::Symbol = :pbc)
+
+    if !(correction ∈ (:pbc, :wrap))
+        throw(ArgumentError("Argument $(correction) not recognised. Currently supported corrections are :wrap and :pbc"))
+    end
+
     atom_inds_all_res = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
     if iszero(length(excluded_res))
         atom_inds = atom_inds_all_res
@@ -501,6 +583,10 @@ function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, exclud
 
     coords_cf = Chemfiles.positions(frame)
     coords = from_device(sys.coords)
+    if correction == :pbc
+        coords = unwrap_molecules(coords, sys.boundary, sys.topology)
+        #More logic if more correction types are added
+    end
     for (ci, si) in enumerate(atom_inds)
         c = coords[si]
         if unit(eltype(c)) == NoUnits
@@ -534,7 +620,7 @@ function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, exclud
 end
 
 """
-    write_structure(filepath, sys; format="", atom_inds=[],
+    write_structure(filepath, sys; correction=:pbc, format="", atom_inds=[],
                     excluded_res=String[], write_velocities=false,
                     write_boundary=true)
 
@@ -548,6 +634,9 @@ By default the format is guessed from the file extension but it can also
 be given as a string, e.g. `format="DCD"`.
 BioStructures.jl is used to write to the PDB format.
 
+The correction to be applied to the molecules is passed with the `correction` keyword. 
+So far, `:pbc` and `:wrap` are supported, the former keeps the molecules whole,
+whereas the latter wraps all atoms inside the simulation box, disregarding connectivity.
 The atom indices to be written can be given as a list or range to `atom_inds`,
 with all atoms being written by default.
 Residue names to be excluded can be given as `excluded_res`.
@@ -561,7 +650,7 @@ The file will be overwritten if it already exists.
 
 Not compatible with 2D systems.
 """
-function write_structure(filepath, sys; format::AbstractString="", atom_inds=Int[],
+function write_structure(filepath, sys; correction::Symbol = :pbc, format::AbstractString="", atom_inds=Int[],
                          excluded_res=(), write_velocities::Bool=false,
                          write_boundary=true)
     if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
@@ -570,13 +659,13 @@ function write_structure(filepath, sys; format::AbstractString="", atom_inds=Int
             if write_boundary && !has_infinite_boundary(sys.boundary)
                 println(output, pdb_cryst1_line(sys.boundary))
             end
-            write_pdb_coords(output, sys, atom_inds, excluded_res)
+            write_pdb_coords(output, sys, correction, atom_inds, excluded_res)
             println(output, "END")
         end
     else
         topology = Chemfiles.Topology()
         write_chemfiles!(topology, filepath, sys, uppercase(format), atom_inds,
-                         excluded_res, write_velocities, write_boundary, true, false)
+                         excluded_res, write_velocities, write_boundary, true, false; correction = correction)
     end
 end
 
@@ -602,6 +691,11 @@ Velocities can be written in addition to coordinates by setting
 `write_velocities=true`.
 Chemfiles does not support writing velocities to all file formats.
 
+The correction to be applied to the molecules is passed with the `correction` keyword. 
+So far, `:pbc` and `:wrap` are supported, the former keeps the molecules whole,
+whereas the latter wraps all atoms inside the simulation box, disregarding connectivity.
+Defaults to `:wrap`.
+
 The [`System`](@ref) should have `atoms_data` defined, and `topology` if bonding
 information is required.
 The file will be appended to, so should be deleted before simulation if it
@@ -616,6 +710,7 @@ mutable struct TrajectoryWriter{I, T}
     n_steps::Int
     filepath::String
     format::String
+    correction::Symbol
     atom_inds::I # Int[] or range
     excluded_res::Set{String}
     write_velocities::Bool
@@ -626,9 +721,13 @@ mutable struct TrajectoryWriter{I, T}
 end
 
 function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
-                          format::AbstractString="", atom_inds=Int[],
+                          format::AbstractString="", correction::Symbol = :wrap, atom_inds=Int[],
                           excluded_res=String[], write_velocities::Bool=false,
                           write_boundary::Bool=true)
+
+    if !(correction ∈ (:pbc, :wrap))
+        throw(ArgumentError("Argument $(correction) not recognised. Currently supported corrections are :wrap and :pbc"))
+    end
     topology = Chemfiles.Topology() # Added to later when sys is available
     if uppercase(format) == "PDB" || uppercase(splitext(filepath)[2]) == ".PDB"
         format_used = "PDB"
@@ -636,7 +735,7 @@ function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
         # Chemfiles can deal with "" format
         format_used = uppercase(format)
     end
-    return TrajectoryWriter(n_steps, filepath, format_used, atom_inds,
+    return TrajectoryWriter(n_steps, filepath, format_used, correction, atom_inds,
                     Set(excluded_res), write_velocities, write_boundary, topology,
                     false, 0)
 end
@@ -646,7 +745,7 @@ function Base.show(io::IO, tw::TrajectoryWriter)
             tw.filepath, "\", ", tw.structure_n, " frames written")
 end
 
-function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
+function log_property!(logger::TrajectoryWriter, sys::System, buffers, neighbors=nothing,
                        step_n::Integer=0; kwargs...)
     if step_n % logger.n_steps == 0
         logger.structure_n += 1
@@ -658,14 +757,14 @@ function log_property!(logger::TrajectoryWriter, sys::System, neighbors=nothing,
                     println(output, pdb_cryst1_line(sys.boundary))
                 end
                 println(output, "MODEL     ", lpad(logger.structure_n, 4))
-                write_pdb_coords(output, sys, logger.atom_inds, logger.excluded_res)
+                write_pdb_coords(output, sys, logger.correction, logger.atom_inds, logger.excluded_res)
                 println(output, "ENDMDL")
             end
         else
             write_chemfiles!(logger.topology, logger.filepath, sys, logger.format,
                              logger.atom_inds, logger.excluded_res,
                              logger.write_velocities, logger.write_boundary,
-                             !logger.topology_written, true)
+                             !logger.topology_written, true; correction = logger.correction)
             if !logger.topology_written
                 logger.topology_written = true
             end
@@ -691,9 +790,9 @@ different box sizes at later snapshots will not be recorded.
 The CRYST1 record is not written for infinite boundaries.
 """
 function StructureWriter(n_steps::Integer, filepath::AbstractString,
-                         excluded_res=String[]; atom_inds=Int[])
+                         excluded_res=String[]; atom_inds=Int[], correction = :wrap)
     # This aliasing function will be removed in the next breaking release
-    return TrajectoryWriter(n_steps, filepath, "PDB", atom_inds,
+    return TrajectoryWriter(n_steps, filepath, "PDB", correction, atom_inds,
                     Set(excluded_res), false, true, Chemfiles.Topology(),
                     false, 0)
 end
@@ -802,11 +901,11 @@ function Base.show(io::IO, tcl::TimeCorrelationLogger{TA, TA2, TA, TA2, TAB, TFA
             tcl.observableA)
 end
 
-function log_property!(logger::TimeCorrelationLogger, s::System, neighbors=nothing,
+function log_property!(logger::TimeCorrelationLogger, s::System, buffers, neighbors=nothing,
                         step_n::Integer=0; n_threads::Integer=Threads.nthreads(), kwargs...)
     A = logger.observableA(s, neighbors, step_n; n_threads=n_threads, kwargs...)
     if logger.observableA != logger.observableB
-        B = logger.observableB(s, neighbors, step_n; n_threads=n_threads, kwargs...)
+        B = logger.observableB(s, buffers, neighbors, step_n; n_threads=n_threads, kwargs...)
     else
         B = A
     end
@@ -903,10 +1002,10 @@ function Base.values(aol::AverageObservableLogger; std::Bool=true)
     end
 end
 
-function log_property!(aol::AverageObservableLogger{T}, s::System, neighbors=nothing,
+function log_property!(aol::AverageObservableLogger{T}, s::System, buffers, neighbors=nothing,
                         step_n::Integer=0; kwargs...) where T
     if (step_n % aol.n_steps) == 0
-        obs = aol.observable(s, neighbors, step_n; kwargs...)
+        obs = aol.observable(s, buffers, neighbors, step_n; kwargs...)
         push!(aol.current_block, obs)
 
         if length(aol.current_block) == aol.current_block_size
@@ -958,6 +1057,7 @@ ReplicaExchangeLogger(n_replicas::Integer) = ReplicaExchangeLogger(DefaultFloat,
 
 function log_property!(rexl::ReplicaExchangeLogger,
                        sys::ReplicaSystem,
+                       buffers,
                        neighbors=nothing,
                        step_n::Integer=0;
                        indices,
@@ -998,6 +1098,7 @@ MonteCarloLogger(T::DataType=DefaultFloat) = MonteCarloLogger{T}(0, 0, T[], BitV
 
 function log_property!(mcl::MonteCarloLogger{T},
                         sys::System,
+                        buffers,
                         neighbors=nothing,
                         step_n::Integer=0;
                         success::Bool,

@@ -167,13 +167,13 @@
     boundary = CubicBoundary(2.0)
     topology = MolecularTopology([1, 1, 1, 2], [3, 1], [(1, 2), (2, 3)])
     mcs = molecule_centers(coords, boundary, topology)
-    @test mcs == [SVector(0.05, 0.0, 0.0), SVector(1.0, 1.0, 1.0)]
+    @test isapprox(mcs, [SVector(0.05, 0.0, 0.0), SVector(1.0, 1.0, 1.0)]; atol=1e-6)
 
     coords = [SVector(1.95, 0.0), SVector(0.05, 0.0), SVector(0.15, 0.0),
               SVector(1.0 , 1.0)]
     boundary = RectangularBoundary(2.0)
     mcs = molecule_centers(coords, boundary, topology)
-    @test mcs == [SVector(0.05, 0.0), SVector(1.0, 1.0)]
+    @test isapprox(mcs, [SVector(0.05, 0.0), SVector(1.0, 1.0)]; atol=1e-6)
 
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     for AT in array_list
@@ -204,7 +204,7 @@
         end
         coords_start = copy(sys.coords)
         pe_start = potential_energy(sys, find_neighbors(sys))
-        scale_factor = 1.02
+        scale_factor = SMatrix{3,3}([1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0]) * 1.02
         n_scales = 10
 
         for i in 1:n_scales

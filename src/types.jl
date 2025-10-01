@@ -535,6 +535,7 @@ function System(;
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
     T = float_type(boundary)
+    CT = typeof(ustrip(oneunit(eltype(eltype(coords))))) # Allows propagation of uncertainties to tensors
     A = typeof(atoms)
     C = typeof(coords)
     B = typeof(boundary)
@@ -731,9 +732,10 @@ function System(crystal::Crystal{D};
     )
 end
 
-function Base.zero(sys::System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K,
-                               M, TM, DA}) where {D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF,
-                                                  L, F, E, K, M, TM, DA}
+function Base.zero(sys::System{D, AT, T, A, C, B, V,
+                   AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}) where 
+                   {D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}
+
     return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}(
         zero.(sys.atoms),
         zero(sys.coords),
@@ -1070,8 +1072,8 @@ function ReplicaSystem(;
                         typeof(replica_specific_inter_lists[i]), typeof(replica_general_inters[i]),
                         typeof(replica_constraints[i]), NF, typeof(replica_loggers[i]), F, E, K,
                         M, TM, Nothing}(
-            atoms, replica_coords[i], boundary, replica_velocities[i], atoms_data,
-            replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
+            atoms, replica_coords[i], boundary, replica_velocities[i],
+            atoms_data, replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i],
             deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i], force_units,
             energy_units, k_converted, atom_masses, total_mass, nothing) for i in 1:n_replicas)
