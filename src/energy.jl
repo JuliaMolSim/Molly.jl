@@ -37,6 +37,7 @@ bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
 where ``m_i`` is the mass and ``\bf{v_i}`` is the velocity vector of atom ``i``.
 """
 function kinetic_energy_tensor!(sys::System{D, AT, T}, kin_tensor) where {D, AT, T}
+    fill!(kin_tensor, zero(T)*sys.energy_units)
     half = T(0.5)
     for (m, v) in zip(from_device(sys.masses), from_device(sys.velocities))
         # m: mass per particle, v: velocity with units

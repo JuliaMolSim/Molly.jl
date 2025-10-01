@@ -393,7 +393,7 @@ function apply_coupling!(sys::System{D}, buffers, barostat::BerendsenBarostat{PT
     step_n % barostat.n_steps != 0 && return false
     
     # pressure in barostat units
-    P = pressure(sys, buffers, neighbors, step_n; n_threads=n_threads)
+    P = pressure(sys, buffers, neighbors, step_n; n_threads=n_threads, recompute = false)
 
     τp  = barostat.coupling_const
     dt  = sim.dt * barostat.n_steps
@@ -628,7 +628,7 @@ function apply_coupling!(sys::System{D, AT}, buffers, barostat::CRescaleBarostat
     step_n % barostat.n_steps != 0 && return false
 
     # Pressure tensor in barostat units
-    P = pressure(sys, buffers, neighbors, step_n; n_threads=n_threads)
+    P = pressure(sys, buffers, neighbors, step_n; n_threads=n_threads, recompute = false)
 
     # Thermo factors
     V         = volume(sys.boundary)

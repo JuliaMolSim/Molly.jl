@@ -950,8 +950,7 @@ function pressure(sys::AtomsBase.AbstractSystem{D}, buffers, neighbors, step_n::
         vir_tensor = buffers.virial
     end
 
-    kinetic_energy(sys; kin_tensor = kin_tensor) # Always evaluate K in case velocities were rescaled by a thermostat
-
+    kinetic_energy_tensor!(sys, kin_tensor) # Always evaluate K in case velocities were rescaled by a thermostat
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
