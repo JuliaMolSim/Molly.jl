@@ -11,6 +11,8 @@ export
     CRescaleBarostat,
     MonteCarloBarostat
 
+default_seed() = rand(RandomDevice(), UInt64) # For stochastic couplers
+
 """
     apply_coupling!(system, coupling, simulator, neighbors=nothing, step_n=0;
                     n_threads=Threads.nthreads(), rng=Random.default_rng())
@@ -73,7 +75,7 @@ end
 needs_virial(c::ImmediateThermostat) = (truth = false, steps = Inf)
 
 @doc raw"""
-    VelocityRescaleThermostat(temperature, coupling_const; n_steps = 1, seed = 42)
+    VelocityRescaleThermostat(temperature, coupling_const; n_steps = 1, seed::UInt64 = default_seed())
 
 The stochastic velocity rescaling thermostat. See:
 
@@ -103,7 +105,7 @@ struct VelocityRescaleThermostat{T, C, N, S}
     seed::S
 end
 
-function VelocityRescaleThermostat(temperature, coupling_const; n_steps = 1, seed = 42)
+function VelocityRescaleThermostat(temperature, coupling_const; n_steps = 1, seed::UInt64 = default_seed())
     return VelocityRescaleThermostat(temperature, coupling_const, n_steps, seed)
 end
 
@@ -500,7 +502,7 @@ end
 
 function CRescaleBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
-                           max_scale_frac=0.1, seed = 42, n_steps=1) where {PT}
+                           max_scale_frac=0.1, seed::UInt64 = default_seed(), n_steps=1) where {PT}
 
     if !(coupling_type ∈ (:isotropic, :semiisotropic, :anisotropic))
         throw(ArgumentError(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic")))

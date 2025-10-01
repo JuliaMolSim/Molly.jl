@@ -82,7 +82,10 @@ form, is defined as:
 ```
 where ``\bf{r_i}`` and ``\bf{f_i}`` are the position and force vectors,
 respectively, acting on the i``^{th}`` atom. In Molly.jl, we implement
-the [virial definition used in LAMMPS](https://docs.lammps.org/compute_stress_atom.html). 
+the [virial definition used in LAMMPS](https://docs.lammps.org/compute_stress_atom.html),
+and take into account pairwise and specific interactions, as well as the K-space
+contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods, computed as indicated
+in the [original paper](https://doi.org/10.1063/1.470117).
 """
 function virial(sys)
     _, virial = forces(sys; needs_virial = true) # Force recomputation

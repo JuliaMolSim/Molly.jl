@@ -1107,6 +1107,8 @@ needs_virial(c::MyCoupler) = (truth = true, steps = c.n_steps)
 # In case you do NOT need the virial
 needs_virial(c::MyCoupler) = (truth = false, steps = Inf)
 ```
+The use of the [`virial`](@ref) tensor allows for non-isotripic pressure control. Molly follows the [definition](https://docs.lammps.org/compute_stress_atom.html) of LAMMPS, and takes into account specific and pairwise interactions;
+as well as the contribution of the K-space of the [`Ewald`](@ref) and [`PME`](@ref) methods.
 
 ## Loggers
 
@@ -1123,7 +1125,9 @@ The available loggers are:
 - [`VolumeLogger`](@ref)
 - [`DensityLogger`](@ref)
 - [`VirialLogger`](@ref)
+- [`ScalarVirialLogger`](@ref)
 - [`PressureLogger`](@ref)
+- [`ScalarPressureLogger`](@ref)
 - [`DisplacementsLogger`](@ref)
 - [`TrajectoryWriter`](@ref)
 - [`StructureWriter`](@ref)
