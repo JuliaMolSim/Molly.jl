@@ -3,6 +3,8 @@
 export
     total_energy,
     kinetic_energy,
+    virial,
+    scalar_virial,
     temperature,
     potential_energy,
     pairwise_pe
@@ -23,29 +25,100 @@ end
 
 kinetic_energy_noconvert(sys) = sum(masses(sys) .* sum.(abs2, sys.velocities)) / 2
 
-@doc raw"""
-    kinetic_energy(system)
+raw"""
+    kinetic_energy_tensor!(system, kin_tensor)
 
-Calculate the kinetic energy of a system.
+Calculate the kinetic energy of a system in its tensorial form.
 
-The kinetic energy is defined as
+The kinetic energy tensor is defined as
 ```math
-E_k = \frac{1}{2} \sum_{i} m_i v_i^2
+bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
 ```
-where ``m_i`` is the mass and ``v_i`` is the velocity of atom ``i``.
+where ``m_i`` is the mass and ``\bf{v_i}`` is the velocity vector of atom ``i``.
 """
-function kinetic_energy(sys::System)
-    ke = kinetic_energy_noconvert(sys)
-    return uconvert(sys.energy_units, ke)
+function kinetic_energy_tensor!(sys::System{D, AT, T}, kin_tensor) where {D, AT, T}
+    fill!(kin_tensor, zero(T)*sys.energy_units)
+    half = T(0.5)
+    for (m, v) in zip(from_device(sys.masses), from_device(sys.velocities))
+        # m: mass per particle, v: velocity with units
+        kin_tensor .+= half .* uconvert.(sys.energy_units, m .* (v * transpose(v)))  # units: energy
+    end
+end
+
+@doc raw"""
+    kinetic_energy(system; kin_tensor = nothing)
+
+Retrieve the kinetic energy of a system.
+
+The scalar kinetic energy is defined as
+```math
+K = \rm{Tr}\left[ \bf{K} \right]
+```
+
+where ``\bf{K}`` is the kinetic energy tensor:
+```math
+\bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
+```
+"""
+function kinetic_energy(sys::System{D, AT, T}; kin_tensor = nothing) where {D, AT, T}
+    if kin_tensor === nothing
+        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords))))) # Allows propagation of uncertainties to tensors
+        kin_tensor = zeros(CT, D, D) * sys.energy_units
+    end
+    kinetic_energy_tensor!(sys, kin_tensor)
+    ke = tr(kin_tensor)
+    return ke
+end
+
+@doc raw"""
+    virial(system)
+
+Forces a recomputation of the forces acting on the system
+and computes the virial tensor. The virial, in its most general
+form, is defined as:
+
+```math
+\bf{W} = \sum_i \bf{r_i} \otimes \bf{f_i}
+```
+where ``\bf{r_i}`` and ``\bf{f_i}`` are the position and force vectors,
+respectively, acting on the i``^{th}`` atom. In Molly.jl, we implement
+the [virial definition used in LAMMPS](https://docs.lammps.org/compute_stress_atom.html),
+and take into account pairwise and specific interactions, as well as the K-space
+contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods, computed as indicated
+in the [original paper](https://doi.org/10.1063/1.470117).
+"""
+function virial(sys)
+    _, virial = forces(sys; needs_virial = true) # Force recomputation
+    return virial
+end
+
+
+@doc """
+    scalar_virial(sys)
+
+Retrieves the virial of the system as a scalar instead of as a tensor. Needs
+to recompute the forces.
+"""
+function scalar_virial(sys)
+    _, virial = forces(sys; needs_virial = true)
+    return tr(virial) 
 end
 
 """
-    temperature(system)
+    temperature(system; kin_tensor = nothing, recompute = true)
 
 Calculate the temperature of a system from the kinetic energy of the atoms.
 """
-function temperature(sys)
-    ke = kinetic_energy_noconvert(sys)
+function temperature(sys::System{D, AT, T}; kin_tensor = nothing, recompute = true) where {D, AT, T}
+    if kin_tensor === nothing
+        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords))))) # Allows propagation of uncertainties to tensors
+        kin_tensor = zeros(CT, D, D) * sys.energy_units
+    end
+    if recompute
+        ke = kinetic_energy(sys; kin_tensor = kin_tensor)
+    else
+        ke = tr(kin_tensor)
+    end
     temp = 2 * ke / (sys.df * sys.k)
     if sys.energy_units == NoUnits
         return temp
@@ -254,7 +327,7 @@ end
 function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
     pe_vec_nounits = KernelAbstractions.zeros(get_backend(sys.coords), T, 1)
-    buffers = init_forces_buffer!(sys, 1, true)
+    buffers = init_buffers!(sys, 1, true)
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0

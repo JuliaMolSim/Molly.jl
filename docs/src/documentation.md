@@ -1053,12 +1053,12 @@ Some simulators can be modified by adding coupling methods to allow properties l
 The available couplers are:
 - [`NoCoupling`](@ref)
 - [`ImmediateThermostat`](@ref)
+- [`VelocityRescaleThermostat`](@ref)
 - [`AndersenThermostat`](@ref)
 - [`BerendsenThermostat`](@ref)
 - [`BerendsenBarostat`](@ref)
+- [`CRescaleBarostat`](@ref)
 - [`MonteCarloBarostat`](@ref)
-- [`MonteCarloAnisotropicBarostat`](@ref)
-- [`MonteCarloMembraneBarostat`](@ref)
 Currently the [`VelocityVerlet`](@ref), [`Verlet`](@ref), [`StormerVerlet`](@ref), [`Langevin`](@ref) and [`NoseHoover`](@ref) simulators support coupling methods, with the default being [`NoCoupling`](@ref).
 Couplers are given to the `coupling` keyword argument during simulator construction:
 ```julia
@@ -1098,6 +1098,18 @@ end
 The functions [`random_velocity`](@ref), [`maxwell_boltzmann`](@ref) and [`temperature`](@ref) may be useful here.
 To use your custom coupler, give it as the `coupling` argument to the simulator as above.
 
+Note that as some of the coupling methods need the [`virial`](@ref) to properly work, any newly defined custom coupler
+should be accompanied by a function that tells Molly if it also needs the virial tensor and the amount of simulation
+steps between integrations of the coupler.
+```julia
+# In case you need the virial
+needs_virial(c::MyCoupler) = (truth = true, steps = c.n_steps)
+# In case you do NOT need the virial
+needs_virial(c::MyCoupler) = (truth = false, steps = Inf)
+```
+The use of the [`virial`](@ref) tensor allows for non-isotripic pressure control. Molly follows the [definition](https://docs.lammps.org/compute_stress_atom.html) of LAMMPS, and takes into account specific and pairwise interactions;
+as well as the contribution of the K-space of the [`Ewald`](@ref) and [`PME`](@ref) methods.
+
 ## Loggers
 
 Loggers record properties of the simulation to allow monitoring and analysis.
@@ -1113,7 +1125,9 @@ The available loggers are:
 - [`VolumeLogger`](@ref)
 - [`DensityLogger`](@ref)
 - [`VirialLogger`](@ref)
+- [`ScalarVirialLogger`](@ref)
 - [`PressureLogger`](@ref)
+- [`ScalarPressureLogger`](@ref)
 - [`DisplacementsLogger`](@ref)
 - [`TrajectoryWriter`](@ref)
 - [`StructureWriter`](@ref)
