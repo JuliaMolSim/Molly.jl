@@ -475,7 +475,7 @@ and
 
 [Del Tatto, Raiteri, Bernetti & Bussi (2022)] (https://doi.org/10.3390/app12031139)
 
-I brief, this is an extension of the Berendsen barostat that includes an 
+In brief, this is an extension of the Berendsen barostat that includes an 
 stochastic term to the scaling matrix. This allows to properly
 sample isobaric ensembles.
 
@@ -487,8 +487,7 @@ Where ``\kappa_T`` is the isothermal compressibility, ``\tau_P`` is the barostat
 and ``\rm{dW}`` represents a Wiener process.
 
 The scaling factor ``\mu`` is a matrix, allowing for non-isotropic
-pressure control. Available options are `:isotropic`, `:semiisotropic` and `:anisotropic`
-
+pressure control. Available options are `:isotropic`, `:semiisotropic` and `:anisotropic`.
 """
 struct CRescaleBarostat{P, C, S, IC, T}
     pressure::P
@@ -1057,12 +1056,10 @@ end
 
 needs_virial(c::MonteCarloBarostat) = (truth = false, steps = Inf)
 
-# Return whether virial is needed and the step cadence to compute it.
-needs_virial_schedule(c::NoCoupling) = (false, Inf)
-
-needs_virial_schedule(c) = begin
+# Return whether virial is needed and the step cadence to compute it
+function needs_virial_schedule(c)
     v = needs_virial(c)
-    v.truth ? (true, v.steps) : (false, Inf)
+    return v.truth ? (true, v.steps) : (false, Inf)
 end
 
 function needs_virial_schedule(cs::Union{Tuple, NamedTuple})

@@ -1889,11 +1889,6 @@ end
         return sys.coords, E_start
     end
 
-    function tric_or_cubic(name, triclinic)
-        name = triclinic == true ? name = name * " triclinic" :  name = name * " cubic"
-        return name 
-    end
-
     runs = [
         ("CPU"       , [NoNeighborFinder      , false, false, Array]),
         ("CPU f32"   , [NoNeighborFinder      , false, true , Array]),
@@ -1924,7 +1919,7 @@ end
     end
 
     # Check all simulations give the same result to within some error
-    for triclinic in (true, false)
+    for triclinic in (false, true)
         final_coords_ref, E_start_ref = test_sim(runs[1][2]..., triclinic)
         for (name, args) in runs
             final_coords, E_start = test_sim(args..., triclinic)
@@ -1932,8 +1927,8 @@ end
             coord_diff = final_coords_f64 .- final_coords_ref
             coord_diff_size = sum(sum(map(x -> abs.(x), coord_diff))) / (3 * n_atoms)
             E_diff = abs(Float64(E_start) - E_start_ref)
-            name = tric_or_cubic(name, triclinic)
-            @info "$(rpad(name, 19)) - difference per coordinate $coord_diff_size - potential energy difference $E_diff"
+            name = (triclinic ? "$name triclinic" : "$name cubic")
+            @info "$(rpad(name, 29)) - difference per coordinate $coord_diff_size - potential energy difference $E_diff"
             @test coord_diff_size < 1e-4u"nm"
             @test E_diff < 5e-4u"kJ * mol^-1"
         end

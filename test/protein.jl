@@ -15,7 +15,7 @@
         nonbonded_method="cutoff",
         data="test_data_peptide",
     )
-    simulator = VelocityVerlet(dt=0.0002u"ps", coupling=(AndersenThermostat(temp, 10.0u"ps"),))
+    simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
 
     true_n_atoms = 5191
     @test length(s.atoms) == true_n_atoms
@@ -302,7 +302,7 @@ end
         # Test Andersen thermostat on GPU
         simulator_and = Verlet(
             dt=0.0005u"ps",
-            coupling=(AndersenThermostat(321.0u"K", 10.0u"ps"),),
+            coupling=AndersenThermostat(321.0u"K", 10.0u"ps"),
         )
         simulate!(sys_pme_exact, simulator_and, n_steps)
         @test temperature(sys_pme_exact) > 400.0u"K"
@@ -338,7 +338,7 @@ end
 
         simulator_and_nounits = Verlet(
             dt=0.0005,
-            coupling=(AndersenThermostat(321.0, 10.0),),
+            coupling=AndersenThermostat(321.0, 10.0),
         )
         simulate!(sys_nounits, simulator_and_nounits, n_steps)
         @test temperature(sys_nounits) > 400.0
