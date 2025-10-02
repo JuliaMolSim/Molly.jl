@@ -1036,9 +1036,7 @@ end
 
         @test 9.5u"K" < mean(Temp) < 10.5u"K"
         @test std(Temp) < 1.0u"K"
-
     end
-
 end
 
 @testset "Velocity Rescale Thermostat" begin
@@ -1144,11 +1142,8 @@ end
 
         @test 9.5u"K" < mean(Temp) < 10.5u"K"
         @test std(Temp) < 1.0u"K"
-
     end
-
 end
-
 
 @testset "Berendsen isotropic barostat" begin
     n_atoms = 100
@@ -1282,7 +1277,6 @@ end
         P_y = [P[2,2] for P in values(sys.loggers.pressure)[2001:end]]
         P_z = [P[3,3] for P in values(sys.loggers.pressure)[2001:end]]
 
-
         @test 0.75u"bar" < mean(P_x) < 1.25u"bar" # Corrected for tensorial pressure
         @test 0.75u"bar" < mean(P_y) < 1.25u"bar" # Corrected for tensorial pressure
         @test 0.75u"bar" < mean(P_z) < 1.25u"bar" # Corrected for tensorial pressure
@@ -1293,9 +1287,7 @@ end
         
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
-
     end
-
 end
 
 @testset "C-Rescale isotropic barostat" begin
@@ -1440,11 +1432,8 @@ end
         
         @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
-
     end
-
 end
-
 
 @testset "Monte Carlo isotropic barostat" begin
     # See http://www.sklogwiki.org/SklogWiki/index.php/Argon for parameters

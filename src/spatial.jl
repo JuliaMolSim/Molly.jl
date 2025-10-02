@@ -606,7 +606,6 @@ function wrap_coords(v, boundary::TriclinicBoundary)
     return v_wrap
 end
 
-
 function unwrap_global(coords::AbstractVector{<:SVector{D}},
                        boundary, topology; neighbors=nothing) where {D}
     # --- frac<->cart ---
@@ -917,7 +916,6 @@ function remove_CM_motion!(sys::System{<:Any, <:AbstractGPUArray})
     return sys
 end
 
-
 @doc raw"""
     pressure(sys; n_threads=Threads.nthreads())
 
@@ -936,7 +934,6 @@ function pressure(sys; n_threads::Integer=Threads.nthreads())
 
     return pressure(sys, nothing, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads, recompute = true)
 end
-
 
 function pressure(sys::AtomsBase.AbstractSystem{D}, buffers, neighbors, step_n::Integer=0;
                   recompute::Bool = false, n_threads::Integer=Threads.nthreads()) where D

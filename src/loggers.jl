@@ -172,7 +172,6 @@ function kinetic_energy_wrapper(sys::System{D, AT, T}, buffers, args...; kwargs.
     return kinetic_energy(sys)
 end
 
-
 """
     KineticEnergyLogger(n_steps)
     KineticEnergyLogger(T, n_steps)

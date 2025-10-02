@@ -23,8 +23,6 @@ function total_energy(sys, neighbors; n_threads::Integer=Threads.nthreads())
     return kinetic_energy(sys) + potential_energy(sys, neighbors; n_threads=n_threads)
 end
 
-kinetic_energy_noconvert(sys) = sum(masses(sys) .* sum.(abs2, sys.velocities)) / 2
-
 raw"""
     kinetic_energy_tensor!(system, kin_tensor)
 
@@ -37,32 +35,32 @@ bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
 where ``m_i`` is the mass and ``\bf{v_i}`` is the velocity vector of atom ``i``.
 """
 function kinetic_energy_tensor!(sys::System{D, AT, T}, kin_tensor) where {D, AT, T}
-    fill!(kin_tensor, zero(T)*sys.energy_units)
+    fill!(kin_tensor, zero(T) * sys.energy_units)
     half = T(0.5)
     for (m, v) in zip(from_device(sys.masses), from_device(sys.velocities))
         # m: mass per particle, v: velocity with units
-        kin_tensor .+= half .* uconvert.(sys.energy_units, m .* (v * transpose(v)))  # units: energy
+        kin_tensor .+= half .* uconvert.(sys.energy_units, m .* (v * transpose(v)))
     end
 end
 
 @doc raw"""
-    kinetic_energy(system; kin_tensor = nothing)
+    kinetic_energy(system; kin_tensor=nothing)
 
-Retrieve the kinetic energy of a system.
+Calculate the kinetic energy of a system.
 
 The scalar kinetic energy is defined as
 ```math
 K = \rm{Tr}\left[ \bf{K} \right]
 ```
-
 where ``\bf{K}`` is the kinetic energy tensor:
 ```math
 \bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
 ```
 """
-function kinetic_energy(sys::System{D, AT, T}; kin_tensor = nothing) where {D, AT, T}
-    if kin_tensor === nothing
-        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords))))) # Allows propagation of uncertainties to tensors
+function kinetic_energy(sys::System{D, AT, T}; kin_tensor=nothing) where {D, AT, T}
+    if isnothing(kin_tensor)
+        # Allows propagation of uncertainties to tensors
+        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
         kin_tensor = zeros(CT, D, D) * sys.energy_units
     end
     kinetic_energy_tensor!(sys, kin_tensor)
@@ -88,10 +86,9 @@ contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods, computed as indic
 in the [original paper](https://doi.org/10.1063/1.470117).
 """
 function virial(sys)
-    _, virial = forces(sys; needs_virial = true) # Force recomputation
+    _, virial = forces(sys; needs_virial=true)
     return virial
 end
-
 
 @doc """
     scalar_virial(sys)
@@ -100,22 +97,23 @@ Retrieves the virial of the system as a scalar instead of as a tensor. Needs
 to recompute the forces.
 """
 function scalar_virial(sys)
-    _, virial = forces(sys; needs_virial = true)
+    _, virial = forces(sys; needs_virial=true)
     return tr(virial) 
 end
 
 """
-    temperature(system; kin_tensor = nothing, recompute = true)
+    temperature(system; kin_tensor=nothing, recompute=true)
 
 Calculate the temperature of a system from the kinetic energy of the atoms.
 """
-function temperature(sys::System{D, AT, T}; kin_tensor = nothing, recompute = true) where {D, AT, T}
-    if kin_tensor === nothing
-        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords))))) # Allows propagation of uncertainties to tensors
+function temperature(sys::System{D, AT, T}; kin_tensor=nothing, recompute=true) where {D, AT, T}
+    if isnothing(kin_tensor)
+        # Allows propagation of uncertainties to tensors
+        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
         kin_tensor = zeros(CT, D, D) * sys.energy_units
     end
     if recompute
-        ke = kinetic_energy(sys; kin_tensor = kin_tensor)
+        ke = kinetic_energy(sys; kin_tensor=kin_tensor)
     else
         ke = tr(kin_tensor)
     end

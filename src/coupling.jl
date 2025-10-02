@@ -94,7 +94,7 @@ Define ``c = e^{-Δt/τ}``. Draw ``R \sim 𝒩(0,1)`` and ``S \sim \chi^{2}_{Nf-
 \qquad v' = \lambda\,v .
 ```
 """
-struct VelocityRescaleThermostat{T, C, N, S}
+struct VelocityRescaleThermostat{T, C, N}
     temperature::T
     coupling_const::C
     n_steps::N
@@ -447,7 +447,7 @@ needs_virial(c::BerendsenBarostat) = (truth = true, steps = c.n_steps)
                      compressibility=4.6e-5u"bar^-1",
                      max_scale_frac=0.1, n_steps=1)
 
-The Stochastic Cell Rescale barostat.
+The stochastic cell rescale barostat.
 
 See [Bernetti and Bussi 2020] (https://doi.org/10.1063/5.0020514)
 and [Del Tatto et al. 2022] (https://doi.org/10.3390/app12031139).
@@ -598,7 +598,7 @@ function apply_coupling!(sys::System{D, AT},
     # Thermo factors
     V         = volume(sys.boundary)
     τp, dt    = barostat.coupling_const, sim.dt * barostat.n_steps
-    kT_energy = Unitful.k * temperature(sys; kin_tensor = buffers.kin_tensor)
+    kT_energy = sys.k * temperature(sys; kin_tensor = buffers.kin_tensor)
     kT_pv     = uconvert(unit(P[1,1]) * unit(V), kT_energy)
 
     scalarP(P) = (P[1,1] + P[2,2] + P[3,3]) / D

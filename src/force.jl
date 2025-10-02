@@ -485,8 +485,6 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
     @inbounds for inter_list in sils_4_atoms
         for (i, j, k, l, inter) in zip(inter_list.is, inter_list.js, inter_list.ks, inter_list.ls,
                                        inter_list.inters)
-
-
             sf = force(inter, coords[i], coords[j], coords[k], coords[l], boundary, atoms[i],
                        atoms[j], atoms[k], atoms[l], force_units, velocities[i], velocities[j],
                        velocities[k], velocities[l], step_n)

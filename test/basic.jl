@@ -469,14 +469,14 @@ end
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_wrong)
 
     # Mixed units or other invalid units
-    bad_velo = [random_velocity(1.0u"g/mol",10u"K",Unitful.k*Unitful.Na) .* 2u"g"]
+    bad_velo = [random_velocity(1.0u"g/mol", 10u"K", Unitful.k * Unitful.Na) .* 2u"g"]
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,
                                       velocities=bad_velo)
 
     bad_coord = place_atoms(1, b_right; min_dist=0.01u"nm") .* u"ps"
     @test_throws ArgumentError System(atoms=atoms, coords=bad_coord, boundary=b_right)
 
-    good_velo = [random_velocity(1.0u"g/mol", 10u"K",Unitful.k*Unitful.Na)]
+    good_velo = [random_velocity(1.0u"g/mol", 10u"K", Unitful.k * Unitful.Na)]
     @test_throws ArgumentError System(atoms=atoms, coords=coords, boundary=b_right,
         velocities=good_velo, energy_units=NoUnits, force_units=NoUnits)
 

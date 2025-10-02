@@ -978,7 +978,7 @@ function Molly.simulate!(sys,
         sys.velocities .+= (accels_t .+ accels_t_dt) .* sim.dt / 2
 
         # Apply coupling like this
-        recompute_forces = apply_coupling!(sys, sim.coupling, sim, neighbors, step_n;
+        recompute_forces = apply_coupling!(sys, buffers, sim.coupling, sim, neighbors, step_n;
                                            n_threads=n_threads)
 
         # Remove center of mass motion like this
@@ -986,7 +986,7 @@ function Molly.simulate!(sys,
 
         # Apply the loggers like this
         # Computed quantities can also be given as keyword arguments to apply_loggers!
-        apply_loggers!(sys, neighbors, step_n, run_loggers; n_threads=n_threads)
+        apply_loggers!(sys, buffers, neighbors, step_n, run_loggers; n_threads=n_threads)
 
         # Find new neighbors like this
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n, recompute_forces;
@@ -1086,7 +1086,7 @@ end
 ```
 Then, define the function that implements the coupling every time step:
 ```julia
-function Molly.apply_coupling!(sys, coupling::MyCoupler, sim, neighbors, step_n;
+function Molly.apply_coupling!(sys, buffers, coupling::MyCoupler, sim, neighbors, step_n;
                                n_threads=Threads.nthreads(), rng=Random.default_rng())
     # Do something to the simulation, e.g. scale the velocities
     # Return whether the coupling has invalidated the currently stored forces,
@@ -1107,8 +1107,8 @@ needs_virial(c::MyCoupler) = (truth = true, steps = c.n_steps)
 # In case you do NOT need the virial
 needs_virial(c::MyCoupler) = (truth = false, steps = Inf)
 ```
-The use of the [`virial`](@ref) tensor allows for non-isotripic pressure control. Molly follows the [definition](https://docs.lammps.org/compute_stress_atom.html) of LAMMPS, and takes into account specific and pairwise interactions;
-as well as the contribution of the K-space of the [`Ewald`](@ref) and [`PME`](@ref) methods.
+The use of the [`virial`](@ref) tensor allows for non-isotripic pressure control.
+Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the K-space of the [`Ewald`](@ref) and [`PME`](@ref) methods.
 
 ## Loggers
 
