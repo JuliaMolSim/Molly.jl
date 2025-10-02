@@ -598,7 +598,7 @@ function apply_coupling!(sys::System{D, AT},
     # Thermo factors
     V         = volume(sys.boundary)
     τp, dt    = barostat.coupling_const, sim.dt * barostat.n_steps
-    kT_energy = sys.k * temperature(sys; kin_tensor = buffers.kin_tensor)
+    kT_energy = energy_remove_mol(sys.k * temperature(sys; kin_tensor=buffers.kin_tensor))
     kT_pv     = uconvert(unit(P[1,1]) * unit(V), kT_energy)
 
     scalarP(P) = (P[1,1] + P[2,2] + P[3,3]) / D
