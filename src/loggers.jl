@@ -499,7 +499,7 @@ function BioStructures.AtomRecord(at_data::AtomData, i, coord)
 end
 
 function write_pdb_coords(output, sys, correction::Symbol = :pbc, atom_inds_arg=Int[], excluded_res=())
-    if !(correction ∈ (:pbc, :wrap))
+    if !(correction in (:pbc, :wrap))
         throw(ArgumentError("Argument $(correction) not recognised. Currently supported corrections are :wrap and :pbc"))
     end
     atom_inds = (iszero(length(atom_inds_arg)) ? eachindex(sys) : atom_inds_arg)
@@ -530,7 +530,7 @@ end
 function write_chemfiles!(topology, filepath, sys, format, atom_inds_arg, excluded_res,
                           write_velocities, write_boundary, calc_topology, append; correction::Symbol = :pbc)
 
-    if !(correction ∈ (:pbc, :wrap))
+    if !(correction in (:pbc, :wrap))
         throw(ArgumentError("Argument $(correction) not recognised. Currently supported corrections are :wrap and :pbc"))
     end
 
@@ -725,7 +725,7 @@ function TrajectoryWriter(n_steps::Integer, filepath::AbstractString;
                           excluded_res=String[], write_velocities::Bool=false,
                           write_boundary::Bool=true)
 
-    if !(correction ∈ (:pbc, :wrap))
+    if !(correction in (:pbc, :wrap))
         throw(ArgumentError("Argument $(correction) not recognised. Currently supported corrections are :wrap and :pbc"))
     end
     topology = Chemfiles.Topology() # Added to later when sys is available
