@@ -247,13 +247,16 @@ function find_neighbors(sys::System{<:Any, AT},
 end
 
 """
-    CellListMapNeighborFinder(; eligible, dist_cutoff, special, n_steps, x0, unit_cell)
+    CellListMapNeighborFinder(; eligible, dist_cutoff, special, n_steps, x0,
+                              unit_cell, dims)
 
 Find close atoms by distance using a cell list algorithm from CellListMap.jl.
 
 This is the recommended neighbor finder on CPU.
 `x0` and `unit_cell` are optional initial coordinates and system unit cell that improve the
 first approximation of the cell list structure.
+The number of dimensions `dims` is inferred from `unit_cell` or `x0`, or assumed
+to be 3 otherwise.
 
 Can not be used if one or more dimensions has infinite boundaries.
 """
@@ -281,28 +284,43 @@ function CellListMapNeighborFinder(;
                                    n_steps=10,
                                    x0=nothing,
                                    unit_cell=nothing,
+                                   dims=nothing,
                                    number_of_batches=(0, 0)) where T
-    np = size(eligible, 1)
+    n_atoms = size(eligible, 1)
+    if !isnothing(dims)
+        D = dims
+    elseif !isnothing(unit_cell)
+        D = n_dimensions(unit_cell)
+    elseif !isnothing(x0)
+        D = size(eltype(coords))[1]
+    else
+        D = 3
+    end
+
     if isnothing(unit_cell)
         twice_cutoff = nextfloat(2 * dist_cutoff)
         if unit(dist_cutoff) == NoUnits
-            side = max(twice_cutoff, T((np * 0.01) ^ (1 / 3)))
+            side = max(twice_cutoff, T((n_atoms * 0.01) ^ (1 / 3)))
         else
-            side = max(twice_cutoff, uconvert(unit(dist_cutoff), T((np * 0.01u"nm^3") ^ (1 / 3))))
+            side = max(
+                twice_cutoff,
+                uconvert(unit(dist_cutoff), T((n_atoms * 0.01u"nm^3") ^ (1 / 3))),
+            )
         end
-        sides = SVector(side, side, side)
+        sides = SVector(fill(side, D)...)
         box = CellListMap.Box(sides, dist_cutoff)
     else
         box = CellListMap.Box(clm_box_arg(unit_cell), dist_cutoff)
     end
     if isnothing(x0)
-        x = [ustrip.(diag(box.input_unit_cell.matrix)) .* rand(SVector{3, T}) for _ in 1:np]
+        x = [ustrip.(diag(box.input_unit_cell.matrix)) .* rand(SVector{D, T}) for _ in 1:n_atoms]
     else
         x = x0
     end
+
     # Construct the cell list for the first time, to allocate
     cl = CellList(x, box; parallel=true, nbatches=number_of_batches)
-    return CellListMapNeighborFinder{3, T}(
+    return CellListMapNeighborFinder{D, T}(
         eligible, dist_cutoff, special, n_steps,
         cl, CellListMap.AuxThreaded(cl),
         [NeighborList(0, [(Int32(0), Int32(0), false)]) for _ in 1:CellListMap.nbatches(cl)],
