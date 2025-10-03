@@ -23,7 +23,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs,
                                             n_threads::Integer=Threads.nthreads(),
                                             kwargs...)
     if needs_virial
-        CT = typeof(ustrip(oneunit(eltype(eltype(coords)))))
+        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
         virial = zeros(CT, 3, 3) .* sys.energy_units
     else
         virial = nothing
@@ -42,7 +42,7 @@ function AtomsCalculators.energy_forces!(fs,
                                          n_threads::Integer=Threads.nthreads(),
                                          kwargs...)
     if needs_virial
-        CT = typeof(ustrip(oneunit(eltype(eltype(coords)))))
+        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
         virial = zeros(CT, 3, 3) .* sys.energy_units
     else
         virial = nothing
@@ -58,7 +58,7 @@ function AtomsCalculators.energy_forces(sys::System,
                                         kwargs...)
     fs = zero_forces(sys)
     if needs_virial
-        CT = typeof(ustrip(oneunit(eltype(eltype(coords)))))
+        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
         virial = zeros(CT, 3, 3) .* sys.energy_units
     else
         virial = nothing
