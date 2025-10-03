@@ -268,7 +268,6 @@ function ewald_pe_forces!(Fs, Vir, inter::Ewald{T}, atoms, coords, boundary, for
                                          atoms_cpu, coords_cpu, boundary, α, f,
                                          force_units, energy_units, calculate_forces, Val(T), Val(needs_virial))
 
-
     recip_box_size = (2 * T(π)) ./ boundary.side_lengths
     eir = zeros(Complex{T}, kmax * n_atoms * 3)
     tab_xy = zeros(Complex{T}, n_atoms)
@@ -332,9 +331,9 @@ function ewald_pe_forces!(Fs, Vir, inter::Ewald{T}, atoms, coords, boundary, for
                 end
 
                 if needs_virial
-                    Ek = recip_coeff * ak * (cs*cs + ss*ss)  # E_k
+                    Ek = recip_coeff * ak * (cs*cs + ss*ss) # E_k
                     invk2 = one(T)/k2
-                    cfac  = 2*(one(T) + (-factor_ewald)*k2) * invk2          # 2*(1 + k^2/(4α^2))/k^2
+                    cfac  = 2*(one(T) + (-factor_ewald)*k2) * invk2 # 2*(1 + k^2/(4α^2))/k^2
                     gxx = 1 - cfac*kx*kx
                     gxy =   - cfac*kx*ky
                     gxz =   - cfac*kx*kz
