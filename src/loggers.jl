@@ -304,7 +304,7 @@ function Base.show(io::IO, dl::GeneralObservableLogger{T, typeof(density_wrapper
 end
 
 function virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
-    if all(iszero.(buffers.virial))
+    if all(iszero, buffers.virial)
         V = virial(sys)
         return copy(V)
     else
@@ -317,9 +317,6 @@ end
     VirialLogger(T, n_steps)
 
 Log the [`virial`](@ref) tensor of a system throughout a simulation.
-
-This should only be used on systems where the general interactions and constraints do not
-contribute to the virial.
 """
 VirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(virial_wrapper, T, n_steps)
 VirialLogger(n_steps::Integer) = VirialLogger(typeof(Matrix{DefaultFloat}(undef, 3, 3).*u"kJ * mol^-1"), n_steps)
@@ -330,11 +327,10 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(virial_wrapper)
 end
 
 function scalar_virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
-    if all(iszero.(buffers.virial))
-        V = scalar_virial(sys)
-        return copy(V)
+    if all(iszero, buffers.virial)
+        return scalar_virial(sys)
     else
-        return copy(tr(buffers.virial))
+        return tr(buffers.virial)
     end
 end
 
@@ -343,9 +339,6 @@ end
     ScalarVirialLogger(T, n_steps)
 
 Log the [`scalar_virial`](@ref) tensor of a system throughout a simulation.
-
-This should only be used on systems where the general interactions and constraints do not
-contribute to the virial.
 """
 ScalarVirialLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_virial_wrapper, T, n_steps)
 ScalarVirialLogger(n_steps::Integer) = ScalarVirialLogger(typeof(one(DefaultFloat)*u"kJ * mol^-1"), n_steps)
@@ -356,9 +349,8 @@ function Base.show(io::IO, vl::GeneralObservableLogger{T, typeof(scalar_virial_w
 end
 
 function pressure_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
-
-    if all(iszero.(buffers.pres_tensor))
-        P = pressure(sys, buffers, neighbors, step_n; recompute = true, n_threads = n_threads)
+    if all(iszero, buffers.pres_tensor)
+        P = pressure(sys, buffers, neighbors, step_n; recompute=true, n_threads=n_threads)
         return copy(P)
     else
         return copy(buffers.pres_tensor)
@@ -371,8 +363,7 @@ end
 
 Log the [`pressure`](@ref) tensor of a system throughout a simulation.
 
-This should only be used on 3-dimensional systems where general interactions and constraints do not
-contribute to the pressure.
+This should only be used on 3-dimensional systems.
 """
 PressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(pressure_wrapper, T, n_steps)
 PressureLogger(n_steps::Integer) = PressureLogger(typeof(Matrix{DefaultFloat}(undef, 3, 3).*u"bar"), n_steps)
@@ -382,15 +373,13 @@ function Base.show(io::IO, pl::GeneralObservableLogger{T, typeof(pressure_wrappe
             pl.n_steps, ", ", length(values(pl)), " pressures recorded")
 end
 
-function scalar_pressure_wrapper(sys::System{D, AT, T}, buffers, neighbors, step_n; n_threads, kwargs...) where {D, AT, T}
-
-    if all(iszero.(buffers.pres_tensor))
-        P = scalar_pressure(sys, buffers)
-        return copy(P)
+function scalar_pressure_wrapper(sys::System{D}, buffers, neighbors, step_n; n_threads,
+                                 kwargs...) where D
+    if all(iszero, buffers.pres_tensor)
+        return scalar_pressure(sys, buffers)
     else
-        P = T((1/D) * tr(copy(buffers.pres_tensor)))
+        return tr(buffers.pres_tensor) / D
     end
-
 end
 
 """

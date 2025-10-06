@@ -126,7 +126,8 @@ function temperature(sys::System{D, AT, T}; kin_tensor=nothing, recompute=true) 
 end
 
 """
-    potential_energy(system, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
+    potential_energy(system, neighbors=find_neighbors(system), step_n=0;
+                     n_threads=Threads.nthreads())
 
 Calculate the potential energy of a system using the pairwise, specific and
 general interactions.

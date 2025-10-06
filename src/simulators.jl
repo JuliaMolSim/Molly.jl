@@ -730,7 +730,7 @@ end
         sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
 
         zeta_half = zeta + (sim.dt / (2 * (sim.damping^2))) *
-                                ((temperature(sys; kin_tensor = buffers.kin_tensor) / sim.temperature) - 1)
+                        ((temperature(sys; kin_tensor=buffers.kin_tensor) / sim.temperature) - 1)
         KE_half = sum(masses(sys) .* sum.(abs2, v_half)) / 2
         T_half = uconvert(unit(sim.temperature), 2 * KE_half / (sys.df * sys.k))
         zeta = zeta_half + (sim.dt / (2 * (sim.damping^2))) * ((T_half / sim.temperature) - 1)

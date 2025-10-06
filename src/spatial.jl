@@ -936,10 +936,10 @@ function pressure(sys; n_threads::Integer=Threads.nthreads())
 end
 
 function pressure(sys::AtomsBase.AbstractSystem{D}, buffers, neighbors, step_n::Integer=0;
-                  recompute::Bool = false, n_threads::Integer=Threads.nthreads()) where D
-
+                  recompute::Bool=false, n_threads::Integer=Threads.nthreads()) where D
     if recompute
-        _, buffers = forces!(zero_forces(sys), sys, neighbors, buffers, Val(true), step_n; n_threads = n_threads)
+        _, buffers = forces!(zero_forces(sys), sys, neighbors, buffers, Val(true), step_n;
+                             n_threads=n_threads)
         kin_tensor = buffers.kin_tensor
         vir_tensor = buffers.virial
     else
@@ -947,13 +947,14 @@ function pressure(sys::AtomsBase.AbstractSystem{D}, buffers, neighbors, step_n::
         vir_tensor = buffers.virial
     end
 
-    kinetic_energy_tensor!(sys, kin_tensor) # Always evaluate K in case velocities were rescaled by a thermostat
+    # Always evaluate K in case velocities were rescaled by a thermostat
+    kinetic_energy_tensor!(sys, kin_tensor)
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
 
-    K = energy_remove_mol.(kin_tensor)  # (1/2) Σ m v⊗v
-    W = energy_remove_mol.(vir_tensor)  # Σ r⊗f
+    K = energy_remove_mol.(kin_tensor) # (1/2) Σ m v⊗v
+    W = energy_remove_mol.(vir_tensor) # Σ r⊗f
 
     P = (2 .* K .+ W) ./ volume(sys.boundary)
     if sys.energy_units == NoUnits || D != 3
@@ -969,15 +970,18 @@ function pressure(sys::AtomsBase.AbstractSystem{D}, buffers, neighbors, step_n::
     return buffers.pres_tensor
 end
 
-@doc raw"""
-    scalar_pressure(sys::System{D}, buffers = nothing; n_threads::Integer=Threads.nthreads())
-
-Retrieves the pressure as a scalar instead of as a tensor. Recomputes the forces
-when called.
 """
-function scalar_pressure(sys::System{D, AT, T}, buffers = nothing; n_threads::Integer=Threads.nthreads()) where {D, AT, T}
-    P = pressure(sys, buffers, find_neighbors(sys; n_threads=n_threads); recompute = true, n_threads=n_threads)
-    return T((1/D) * tr(P))
+    scalar_pressure(sys::System, buffers=nothing; n_threads::Integer=Threads.nthreads())
+
+Calculates the pressure as a scalar instead of as a tensor.
+
+Recomputes the forces when called.
+"""
+function scalar_pressure(sys::System{D}, buffers=nothing;
+                         n_threads::Integer=Threads.nthreads()) where D
+    P = pressure(sys, buffers, find_neighbors(sys; n_threads=n_threads);
+                 recompute=true,n_threads=n_threads)
+    return tr(P) / D
 end
 
 """
@@ -1008,12 +1012,11 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
 
     # Build frac<->cart transforms
     if is_triclinic
-        B = boxmatrix(boundary)#reduce(hcat, boundary.basis_vectors)          # 3×3 Matrix
-        #B  = SMatrix{3,3}(Bm)                              # cell matrix
-        to_frac = (r::SVector{3}) -> B \ r                     # fractional (dimensionless)
+        B = boxmatrix(boundary)
+        to_frac = (r::SVector{3}) -> B \ r
         to_cart = (f::SVector{3}) -> B * f
     else
-        sl = boundary.side_lengths                         # SVector{D}
+        sl = boundary.side_lengths
         to_frac = (r::SVector{D}) -> r ./ sl
         to_cart = (f::SVector{D}) -> f .* sl
     end

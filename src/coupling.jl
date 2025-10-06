@@ -117,7 +117,7 @@ function apply_coupling!(sys::System{<:Any, AT}, buffers, thermostat::VelocityRe
     Nf  > 0 || return false
     vels = from_device(sys.velocities)
 
-    K = kinetic_energy(sys; kin_tensor = buffers.kin_tensor)
+    K = kinetic_energy(sys; kin_tensor=buffers.kin_tensor)
     ustrip(K) > 0 || return false
 
     # Target kinetic energy
@@ -259,7 +259,7 @@ const DIM_INV_P = dimension(1/u"Pa")
 isbar(x::Number)  = (unit(x) == NoUnits || dimension(x) == DIM_P)
 isibar(x::Number) = (unit(x) == NoUnits || dimension(x) == DIM_INV_P)
 
-function BerendsenBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const;
+function BerendsenBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
                            max_scale_frac=0.1, n_steps=1) where {PT}
 
@@ -268,23 +268,23 @@ function BerendsenBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_cons
     end
 
     if coupling_type == :isotropic
-        if pressure isa AbstractArray
-            throw(ArgumentError("isotropic: pressure must be a scalar"))
+        if press isa AbstractArray
+            throw(ArgumentError("isotropic: press must be a scalar"))
         end
         if compressibility isa AbstractArray
             throw(ArgumentError("isotropic: compressibility must be a scalar"))
         end
-        if !isbar(pressure)
-            throw(ArgumentError("isotropic: pressure must have pressure units"))
+        if !isbar(press)
+            throw(ArgumentError("isotropic: press must have press units"))
         end
         if !isibar(compressibility)
-            throw(ArgumentError("isotropic: compressibility must have 1/pressure units"))
+            throw(ArgumentError("isotropic: compressibility must have 1/press units"))
         end
 
-        # Use the caller’s units, but convert internal scalars consistently
-        P_units = unit(pressure)
+        # Use the caller's units, but convert internal scalars consistently
+        P_units = unit(press)
         K_units = unit(compressibility)
-        p = ustrip(P_units, pressure)
+        p = ustrip(P_units, press)
         κs = ustrip(K_units, compressibility)
 
         FT = typeof(p)
@@ -295,24 +295,24 @@ function BerendsenBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_cons
     end
 
     if coupling_type == :semiisotropic
-        if !(pressure isa AbstractArray && length(pressure) == 2)
+        if !(press isa AbstractArray && length(press) == 2)
             throw(ArgumentError("semiisotropic: pressure must be a 2-vector (xy, z)"))
         end
         if !(compressibility isa AbstractArray && length(compressibility) == 2)
             throw(ArgumentError("semiisotropic: compressibility must be a 2-vector (xy, z)"))
         end
-        if !all(isbar, pressure)
+        if !all(isbar, press)
             throw(ArgumentError("semiisotropic: pressure must have pressure units"))
         end
         if !all(isibar, compressibility)
             throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
         end
 
-        P_units = unit(pressure[1])
+        P_units = unit(press[1])
         K_units = unit(compressibility[1])
 
-        p_xy = ustrip(P_units, pressure[1])
-        p_z  = ustrip(P_units, pressure[2])
+        p_xy = ustrip(P_units, press[1])
+        p_z  = ustrip(P_units, press[2])
         κ_xy = ustrip(K_units, compressibility[1])
         κ_z  = ustrip(K_units, compressibility[2])
 
@@ -325,28 +325,28 @@ function BerendsenBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_cons
     end
 
     if coupling_type == :anisotropic
-        if !(pressure isa  AbstractArray && length(pressure) == 6)
+        if !(press isa  AbstractArray && length(press) == 6)
             throw(ArgumentError("semiisotropic: pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
-        if !(compressibility isa  AbstractArray && length(pressure) == 6)
+        if !(compressibility isa  AbstractArray && length(press) == 6)
             throw(ArgumentError("semiisotropic: compressibility must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
-        if !all(isbar, pressure)
+        if !all(isbar, press)
             throw(ArgumentError("semiisotropic: pressure must have pressure units"))
         end
         if !all(isibar, compressibility)
             throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
         end
 
-        P_units = unit(pressure[1])
+        P_units = unit(press[1])
         K_units = unit(compressibility[1])
 
-        px  = ustrip(P_units, pressure[1])
-        py  = ustrip(P_units, pressure[2])
-        pz  = ustrip(P_units, pressure[3])
-        pxy = ustrip(P_units, pressure[4])
-        pxz = ustrip(P_units, pressure[5])
-        pyz = ustrip(P_units, pressure[6])
+        px  = ustrip(P_units, press[1])
+        py  = ustrip(P_units, press[2])
+        pz  = ustrip(P_units, press[3])
+        pxy = ustrip(P_units, press[4])
+        pxz = ustrip(P_units, press[5])
+        pyz = ustrip(P_units, press[6])
 
         κx  = ustrip(K_units, compressibility[1])
         κy  = ustrip(K_units, compressibility[2])
@@ -474,7 +474,7 @@ struct CRescaleBarostat{P, C, S, IC, T}
     n_steps::Int
 end
 
-function CRescaleBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const;
+function CRescaleBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
                            max_scale_frac=0.1, n_steps=1) where {PT}
 
@@ -483,23 +483,23 @@ function CRescaleBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const
     end
 
     if coupling_type == :isotropic
-        if pressure isa AbstractArray
+        if press isa AbstractArray
             throw(ArgumentError("isotropic: pressure must be a scalar"))
         end
         if compressibility isa AbstractArray
             throw(ArgumentError("isotropic: compressibility must be a scalar"))
         end
-        if !isbar(pressure)
+        if !isbar(press)
             throw(ArgumentError("isotropic: pressure must have pressure units"))
         end
         if !isibar(compressibility)
             throw(ArgumentError("isotropic: compressibility must have 1/pressure units"))
         end
 
-        # Use the caller’s units, but convert internal scalars consistently
-        P_units = unit(pressure)
+        # Use the caller's units, but convert internal scalars consistently
+        P_units = unit(press)
         K_units = unit(compressibility)
-        p = ustrip(P_units, pressure)
+        p = ustrip(P_units, press)
         κs = ustrip(K_units, compressibility)
 
         FT = typeof(p)
@@ -510,24 +510,24 @@ function CRescaleBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const
     end
 
     if coupling_type == :semiisotropic
-        if !(pressure isa AbstractArray && length(pressure) == 2)
+        if !(press isa AbstractArray && length(press) == 2)
             throw(ArgumentError("semiisotropic: pressure must be a 2-vector (xy, z)"))
         end
         if !(compressibility isa AbstractArray && length(compressibility) == 2)
             throw(ArgumentError("semiisotropic: compressibility must be a 2-vector (xy, z)"))
         end
-        if !all(isbar, pressure)
+        if !all(isbar, press)
             throw(ArgumentError("semiisotropic: pressure must have pressure units"))
         end
         if !all(isibar, compressibility)
             throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
         end
 
-        P_units = unit(pressure[1])
+        P_units = unit(press[1])
         K_units = unit(compressibility[1])
 
-        p_xy = ustrip(P_units, pressure[1])
-        p_z  = ustrip(P_units, pressure[2])
+        p_xy = ustrip(P_units, press[1])
+        p_z  = ustrip(P_units, press[2])
         κ_xy = ustrip(K_units, compressibility[1])
         κ_z  = ustrip(K_units, compressibility[2])
 
@@ -539,28 +539,28 @@ function CRescaleBarostat(pressure::Union{PT, AbstractArray{PT}}, coupling_const
     end
 
     if coupling_type == :anisotropic
-        if !(pressure isa  AbstractArray && length(pressure) == 6)
+        if !(press isa  AbstractArray && length(press) == 6)
             throw(ArgumentError("semiisotropic: pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
-        if !(compressibility isa  AbstractArray && length(pressure) == 6)
+        if !(compressibility isa  AbstractArray && length(press) == 6)
             throw(ArgumentError("semiisotropic: compressibility must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
-        if !all(isbar, pressure)
+        if !all(isbar, press)
             throw(ArgumentError("semiisotropic: pressure must have pressure units"))
         end
         if !all(isibar, compressibility)
             throw(ArgumentError("semiisotropic: compressibility must have 1/pressure units"))
         end
 
-        P_units = unit(pressure[1])
+        P_units = unit(press[1])
         K_units = unit(compressibility[1])
 
-        px  = ustrip(P_units, pressure[1])
-        py  = ustrip(P_units, pressure[2])
-        pz  = ustrip(P_units, pressure[3])
-        pxy = ustrip(P_units, pressure[4])
-        pxz = ustrip(P_units, pressure[5])
-        pyz = ustrip(P_units, pressure[6])
+        px  = ustrip(P_units, press[1])
+        py  = ustrip(P_units, press[2])
+        pz  = ustrip(P_units, press[3])
+        pxy = ustrip(P_units, press[4])
+        pxz = ustrip(P_units, press[5])
+        pyz = ustrip(P_units, press[6])
 
         κx  = ustrip(K_units, compressibility[1])
         κy  = ustrip(K_units, compressibility[2])
@@ -745,7 +745,7 @@ mutable struct MonteCarloBarostat{T, P, K, V}
     n_accepted::Int
 end
 
-function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp,
+function MonteCarloBarostat(press::Union{PT, AbstractArray{PT}}, temp,
                             boundary::AbstractBoundary{<:Any, FT}; coupling_type::Symbol=:isotropic,
                             n_steps=30, n_iterations=1, scale_factor=0.01, scale_increment=1.1,
                             max_volume_frac=0.3, trial_find_neighbors=false) where {PT, FT}
@@ -756,16 +756,16 @@ function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp,
     end
 
     if coupling_type == :isotropic
-        if pressure isa AbstractArray
+        if press isa AbstractArray
             throw(ArgumentError("isotropic: pressure must be a scalar"))
         end
-        if !isbar(pressure)
+        if !isbar(press)
             throw(ArgumentError("isotropic: pressure must have pressure units"))
         end
 
-        # Use the caller’s units, but convert internal scalars consistently
-        P_units = unit(pressure)
-        p = ustrip(P_units, pressure)
+        # Use the caller's units, but convert internal scalars consistently
+        P_units = unit(press)
+        p = ustrip(P_units, press)
         P = SMatrix{3,3,FT}(p,0,0, 0,p,0, 0,0,p) .* P_units
 
         return MonteCarloBarostat(P, temp, coupling_type,
@@ -776,16 +776,16 @@ function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp,
     end
 
     if coupling_type == :semiisotropic
-        if !(pressure isa AbstractArray && length(pressure) == 2)
+        if !(press isa AbstractArray && length(press) == 2)
             throw(ArgumentError("semiisotropic: pressure must be a 2-vector (xy, z)"))
         end
-        if !all(isbar, pressure)
+        if !all(isbar, press)
             throw(ArgumentError("semiisotropic: pressure must have pressure units"))
         end
 
-        P_units = unit(pressure[1])
-        p_xy = ustrip(P_units, pressure[1])
-        p_z  = ustrip(P_units, pressure[2])
+        P_units = unit(press[1])
+        p_xy = ustrip(P_units, press[1])
+        p_z  = ustrip(P_units, press[2])
         P = SMatrix{3,3,FT}(p_xy,0,0, 0,p_xy,0, 0,0,p_z) .* P_units
 
         return MonteCarloBarostat(P, temp, coupling_type,
@@ -796,21 +796,21 @@ function MonteCarloBarostat(pressure::Union{PT, AbstractArray{PT}}, temp,
     end
 
     if coupling_type == :anisotropic
-        if !(pressure isa  AbstractArray && length(pressure) == 6)
+        if !(press isa  AbstractArray && length(press) == 6)
             throw(ArgumentError("semiisotropic: pressure must be a 6-vector (x, y, z, xy/yx, xz/zx, yz/zy)"))
         end
-        if !all(isbar, pressure)
+        if !all(isbar, press)
             throw(ArgumentError("semiisotropic: pressure must have pressure units"))
         end
 
-        P_units = unit(pressure[1])
+        P_units = unit(press[1])
 
-        px  = ustrip(P_units, pressure[1])
-        py  = ustrip(P_units, pressure[2])
-        pz  = ustrip(P_units, pressure[3])
-        pxy = ustrip(P_units, pressure[4])
-        pxz = ustrip(P_units, pressure[5])
-        pyz = ustrip(P_units, pressure[6])
+        px  = ustrip(P_units, press[1])
+        py  = ustrip(P_units, press[2])
+        pz  = ustrip(P_units, press[3])
+        pxy = ustrip(P_units, press[4])
+        pxz = ustrip(P_units, press[5])
+        pyz = ustrip(P_units, press[6])
 
         P = SMatrix{3,3,FT}(px, pxy, pxz,
                             pxy, py,  pyz,
