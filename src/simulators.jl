@@ -144,9 +144,7 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            rng=Random.default_rng())
-
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
-
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -235,9 +233,7 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            rng=Random.default_rng())
-
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
-
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -314,9 +310,7 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            rng=Random.default_rng())
-
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
-
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     forces_t = zero_forces(sys)
@@ -401,9 +395,7 @@ end
                            n_threads::Integer=Threads.nthreads(),
                            run_loggers=true,
                            rng=Random.default_rng())
-
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
-
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
@@ -704,9 +696,7 @@ end
         @warn "NoseHoover is not currently compatible with constraints, " *
               "constraints will be ignored"
     end
-    
     needs_vir, needs_vir_steps = needs_virial_schedule(sim.coupling)
-
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     !iszero(sim.remove_CM_motion) && remove_CM_motion!(sys)
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)

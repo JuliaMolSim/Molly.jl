@@ -88,6 +88,7 @@ total_energy(sys)     #  78.56681422361234 kJ mol^-1
 
 forces(sys)
 accelerations(sys)
+virial(sys)
 
 masses(sys)
 density(sys) # 207.56738339673083 kg m^-3
@@ -1103,9 +1104,9 @@ should be accompanied by a function that tells Molly if it also needs the virial
 steps between integrations of the coupler.
 ```julia
 # In case you need the virial
-needs_virial(c::MyCoupler) = (truth = true, steps = c.n_steps)
+Molly.needs_virial(c::MyCoupler) = (truth = true, steps = c.n_steps)
 # In case you do NOT need the virial
-needs_virial(c::MyCoupler) = (truth = false, steps = Inf)
+Molly.needs_virial(c::MyCoupler) = (truth = false, steps = Inf)
 ```
 The use of the [`virial`](@ref) tensor allows for non-isotripic pressure control.
 Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the K-space of the [`Ewald`](@ref) and [`PME`](@ref) methods.

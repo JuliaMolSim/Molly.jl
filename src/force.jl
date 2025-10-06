@@ -9,10 +9,12 @@ export
     SpecificForce2Atoms,
     SpecificForce3Atoms,
     SpecificForce4Atoms,
-    forces
+    forces,
+    forces_virial
 
 """
-    accelerations(system, neighbors=find_neighbors(sys), step_n=0; n_threads=Threads.nthreads())
+    accelerations(system, neighbors=find_neighbors(system), step_n=0;
+                  n_threads=Threads.nthreads())
 
 Calculate the accelerations of all atoms in a system using the pairwise,
 specific and general interactions and Newton's second law of motion.
@@ -175,7 +177,6 @@ function init_buffers!(sys::System{D, AT, T}, n_threads,
                              for_pe::Bool=false) where {D, AT <: AbstractGPUArray, T}
     N = length(sys)
     C = eltype(eltype(sys.coords))
-    # Allows propagation of uncertainties to tensors
     CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
     n_blocks = cld(N, 32)
     backend = get_backend(sys.coords)
@@ -208,34 +209,48 @@ end
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
 
 """
-    forces(system, neighbors=find_neighbors(sys), step_n=0; needs_virial=false,
+    forces(system, neighbors=find_neighbors(system), step_n=0;
            n_threads=Threads.nthreads())
 
 Calculate the forces on all atoms in a system using the pairwise, specific and
-general interactions. This call also populates the [`virial`](@ref) tensor of
-the system.
+general interactions.
 """
-function forces(sys; needs_virial::Bool = false, n_threads::Integer=Threads.nthreads())
-    return forces(sys, find_neighbors(sys; n_threads=n_threads); needs_virial=needs_virial,
-                  n_threads=n_threads)
+function forces(sys; n_threads::Integer=Threads.nthreads())
+    return forces(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function forces(sys, neighbors, step_n::Integer=0; needs_virial::Bool=false,
-                n_threads::Integer=Threads.nthreads())
+function forces(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
     buffers = init_buffers!(sys, n_threads)
     fs = zero_forces(sys)
-    forces!(fs, sys, neighbors, buffers, Val(needs_virial), step_n; n_threads=n_threads)
-    if needs_virial
-        return fs, buffers.virial
-    else
-        return fs
-    end
+    forces!(fs, sys, neighbors, buffers, Val(false), step_n; n_threads=n_threads)
+    return fs
+end
+
+"""
+    forces_virial(system, neighbors=find_neighbors(system), step_n=0;
+                  n_threads=Threads.nthreads())
+
+Calculate the forces on all atoms in a system and the virial using the pairwise,
+specific and general interactions.
+
+Returns a tuple of the forces and the virial.
+This is faster than calling [`forces`](@ref) and [`virial`](@ref) separately.
+"""
+function forces_virial(sys; n_threads::Integer=Threads.nthreads())
+    return forces_virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+end
+
+function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+    buffers = init_buffers!(sys, n_threads)
+    fs = zero_forces(sys)
+    forces!(fs, sys, neighbors, buffers, Val(true), step_n; n_threads=n_threads)
+    return fs, buffers.virial
 end
 
 function forces!(fs, sys::System{D, AT, T}, neighbors, buffers::BuffersCPU,
-                 ::Val{needs_virial}, step_n::Integer=0;
-                 n_threads::Integer=Threads.nthreads()) where {D, AT, T, needs_virial}
-    if needs_virial
+                 ::Val{needs_vir}, step_n::Integer=0;
+                 n_threads::Integer=Threads.nthreads()) where {D, AT, T, needs_vir}
+    if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
     end
     fill!(buffers.kin_tensor,  zero(T) * sys.energy_units)
@@ -252,7 +267,7 @@ function forces!(fs, sys::System{D, AT, T}, neighbors, buffers::BuffersCPU,
         pairwise_forces_loop!(buffers.fs_nounits, buffers.fs_chunks, buffers.vir_nounits,
                 buffers.vir_chunks, sys.atoms, sys.coords, sys.velocities, sys.boundary, neighbors,
                 sys.force_units, length(sys), pairwise_inters_nonl, pairwise_inters_nl,
-                Val(n_threads), Val(needs_virial), step_n)
+                Val(n_threads), Val(needs_vir), step_n)
     else
         fill!(buffers.fs_nounits, zero(eltype(buffers.fs_nounits)))
     end
@@ -260,17 +275,17 @@ function forces!(fs, sys::System{D, AT, T}, neighbors, buffers::BuffersCPU,
     if length(sys.specific_inter_lists) > 0
         specific_forces!(buffers.fs_nounits, buffers.vir_nounits, sys.atoms, sys.coords,
                          sys.velocities, sys.boundary, sys.force_units, sils_1_atoms, sils_2_atoms,
-                         sils_3_atoms, sils_4_atoms, Val(needs_virial), step_n)
+                         sils_3_atoms, sils_4_atoms, Val(needs_vir), step_n)
     end
 
     fs .= buffers.fs_nounits .* sys.force_units
-    if needs_virial
+    if needs_vir
         buffers.virial .= buffers.vir_nounits .* sys.energy_units
     end
 
     for inter in values(sys.general_inters)
-        AtomsCalculators.forces!(fs, sys, inter; buffers=buffers, needs_virial=needs_virial,
-                                 neighbors=neighbors, step_n=step_n, n_threads=n_threads)
+        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+                                 n_threads=n_threads, buffers=buffers, needs_vir=needs_vir)
     end
 
     return fs, buffers
@@ -279,9 +294,9 @@ end
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
                                velocities, boundary, neighbors, force_units, n_atoms,
                                pairwise_inters_nonl, pairwise_inters_nl, ::Val{1},
-                               ::Val{needs_virial}, step_n=0) where needs_virial
+                               ::Val{needs_vir}, step_n=0) where needs_vir
     fill!(fs_nounits, zero(eltype(fs_nounits)))
-    if needs_virial
+    if needs_vir
         fill!(vir_nounits, zero(eltype(vir_nounits)))
     end
 
@@ -300,7 +315,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                 fs_nounits[i] -= f_ustrip
                 fs_nounits[j] += f_ustrip
 
-                if needs_virial
+                if needs_vir
                     # Kronecker product of vector along which force acts and force itself
                     v = dr * transpose(f)
                     vir_nounits .+= ustrip.(v)
@@ -327,7 +342,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
             fs_nounits[i] -= f_ustrip
             fs_nounits[j] += f_ustrip
 
-            if needs_virial
+            if needs_vir
                 v = dr * transpose(f)
                 vir_nounits .+= ustrip.(v)
             end
@@ -341,11 +356,11 @@ end
 function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, atoms, coords,
                                velocities, boundary, neighbors, force_units, n_atoms,
                                pairwise_inters_nonl, pairwise_inters_nl, ::Val{n_threads},
-                               ::Val{needs_virial}, step_n=0) where {n_threads, needs_virial}
-    if isnothing(fs_chunks) || (needs_virial && isnothing(vir_chunks))
+                               ::Val{needs_vir}, step_n=0) where {n_threads, needs_vir}
+    if isnothing(fs_chunks) || (needs_vir && isnothing(vir_chunks))
         throw(ArgumentError("fs_chunks / vir_chunks is not set but n_threads is > 1"))
     end
-    if (length(fs_chunks) != n_threads) || (needs_virial && length(vir_chunks) != n_threads)
+    if (length(fs_chunks) != n_threads) || (needs_vir && length(vir_chunks) != n_threads)
         throw(ArgumentError("length of fs_chunks ($(length(fs_chunks))) or vir_chunks " *
                             "($(length(vir_chunks))) does not match n_threads ($n_threads)"))
     end
@@ -353,7 +368,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     @inbounds for chunk_i in 1:n_threads
         fill!(fs_chunks[chunk_i], zero(FT))
     end
-    if needs_virial
+    if needs_vir
         FTv = eltype(vir_nounits)
         @inbounds for chunk_i in 1:n_threads
             fill!(vir_chunks[chunk_i], zero(FTv))
@@ -377,7 +392,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                     fs_chunks[chunk_i][i] -= f_ustrip
                     fs_chunks[chunk_i][j] += f_ustrip
 
-                    if needs_virial
+                    if needs_vir
                         v = dr * transpose(f)
                         vir_chunks[chunk_i] .+= ustrip.(v)
                     end
@@ -405,7 +420,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
                 fs_chunks[chunk_i][i] -= f_ustrip
                 fs_chunks[chunk_i][j] += f_ustrip
 
-                if needs_virial
+                if needs_vir
                     v = dr * transpose(f)
                     vir_chunks[chunk_i] .+= ustrip.(v)
                 end
@@ -414,12 +429,12 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
     end
 
     @inbounds fs_nounits .= fs_chunks[1]
-    if needs_virial
+    if needs_vir
         @inbounds vir_nounits .= vir_chunks[1]
     end
     @inbounds for chunk_i in 2:n_threads
         fs_nounits  .+= fs_chunks[chunk_i]
-        if needs_virial
+        if needs_vir
             vir_nounits .+= vir_chunks[chunk_i]
         end
     end
@@ -429,14 +444,14 @@ end
 
 function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, boundary, force_units,
                           sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms,
-                          ::Val{needs_virial}, step_n=0) where needs_virial
+                          ::Val{needs_vir}, step_n=0) where needs_vir
     @inbounds for inter_list in sils_1_atoms
         for (i, inter) in zip(inter_list.is, inter_list.inters)
             sf = force(inter, coords[i], boundary, atoms[i], force_units, velocities[i], step_n)
             check_force_units(sf.f1, force_units)
             fs_nounits[i] += ustrip.(sf.f1)
 
-            if needs_virial
+            if needs_vir
                 r_i = coords[i]
                 v = r_i * transpose(sf.f1)
                 vir_nounits .+= ustrip.(v)
@@ -453,7 +468,7 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
             fs_nounits[i] += ustrip.(sf.f1)
             fs_nounits[j] += ustrip.(sf.f2)
 
-            if needs_virial
+            if needs_vir
                 r_ji = vector(coords[j], coords[i], boundary) # Second atom is the reference
                 v = r_ji * transpose(sf.f1)
                 vir_nounits .+= ustrip.(v)
@@ -473,7 +488,7 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
             fs_nounits[j] += ustrip.(sf.f2)
             fs_nounits[k] += ustrip.(sf.f3)
 
-            if needs_virial
+            if needs_vir
                 r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j (second atom is the reference, MIC)
                 r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j (second atom is the reference)
                 vir_nounits .+= ustrip.(r_ji * transpose(sf.f1) + r_jk * transpose(sf.f3))
@@ -497,7 +512,7 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
             fs_nounits[k] += ustrip.(sf.f3)
             fs_nounits[l] += ustrip.(sf.f4)
 
-            if needs_virial
+            if needs_vir
                 r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j
                 r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
                 r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j (direct MIC, not sum)
@@ -511,10 +526,10 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
     return fs_nounits
 end
 
-function forces!(fs, sys::System{D, AT, T}, neighbors, buffers::BuffersGPU, ::Val{needs_virial},
+function forces!(fs, sys::System{D, AT, T}, neighbors, buffers::BuffersGPU, ::Val{needs_vir},
                  step_n::Integer=0; n_threads::Integer=Threads.nthreads()) where {D,
-                                                        AT <: AbstractGPUArray, T, needs_virial}
-    if needs_virial
+                                                        AT <: AbstractGPUArray, T, needs_vir}
+    if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
         fill!(buffers.virial_row_1, zero(T))
         fill!(buffers.virial_row_2, zero(T))
@@ -529,29 +544,29 @@ function forces!(fs, sys::System{D, AT, T}, neighbors, buffers::BuffersGPU, ::Va
     if length(pairwise_inters_nonl) > 0
         n = length(sys)
         nbs = NoNeighborList(n)
-        pairwise_forces_loop_gpu!(buffers, sys, pairwise_inters_nonl, nbs, Val(needs_virial), step_n)
+        pairwise_forces_loop_gpu!(buffers, sys, pairwise_inters_nonl, nbs, Val(needs_vir), step_n)
     end
 
     pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nl) > 0
-        pairwise_forces_loop_gpu!(buffers, sys, pairwise_inters_nl, neighbors, Val(needs_virial), step_n)
+        pairwise_forces_loop_gpu!(buffers, sys, pairwise_inters_nl, neighbors, Val(needs_vir), step_n)
     end
 
     for inter_list in values(sys.specific_inter_lists)
         specific_forces_gpu!(buffers.fs_mat, buffers.virial_nounits,
                             inter_list, sys.coords, sys.velocities, sys.atoms,
-                            sys.boundary, Val(needs_virial), step_n, sys.force_units, Val(T))
+                            sys.boundary, Val(needs_vir), step_n, sys.force_units, Val(T))
     end
 
     fs .= reinterpret(SVector{D, T}, vec(buffers.fs_mat)) .* sys.force_units
 
-    if needs_virial
+    if needs_vir
         buffers.virial .+= from_device(buffers.virial_nounits) .* sys.energy_units
     end
 
     for inter in values(sys.general_inters)
-        AtomsCalculators.forces!(fs, sys, inter; buffers = buffers, needs_virial = needs_virial, neighbors = neighbors, step_n = step_n,
-                                 n_threads=n_threads)
+        AtomsCalculators.forces!(fs, sys, inter; neighbors=neighbors, step_n=step_n,
+                                 n_threads=n_threads, buffers=buffers, needs_vir=needs_vir)
     end
 
     return fs, buffers
