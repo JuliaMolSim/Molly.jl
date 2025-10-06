@@ -369,6 +369,7 @@ end
             )
             neighbors = find_neighbors(sys)
             forces_molly = forces(sys)
+            @test maximum(norm.(forces_molly .- forces_virial(sys)[1] )) < 1e-10u"kJ * mol^-1 * nm^-1"
             @test maximum(norm.(forces_molly .- forces(sys, neighbors))) < 1e-10u"kJ * mol^-1 * nm^-1"
             openmm_force_fp = joinpath(openmm_dir, "forces_$solvent_model.txt")
             forces_openmm = SVector{3}.(eachrow(readdlm(openmm_force_fp)))u"kJ * mol^-1 * nm^-1"
