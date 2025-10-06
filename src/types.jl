@@ -923,16 +923,16 @@ function ReplicaSystem(;
                         energy_units=u"kJ * mol^-1",
                         k=default_k(energy_units),
                         data=nothing)
-    D = AtomsBase.n_dimensions(boundary)
+    D = AtomsBase.n_dimensions(boundary[1])
     AT = array_type(replica_coords[1])
-    T = float_type(boundary)
+    T = float_type(boundary[1])
     A = typeof(atoms)
     AD = typeof(atoms_data)
     F = typeof(force_units)
     E = typeof(energy_units)
     DA = typeof(data)
     C = typeof(replica_coords[1])
-    B = typeof(boundary)
+    B = typeof(boundary[1])
     NF = typeof(neighbor_finder)
 
     if isnothing(replica_velocities)
@@ -973,7 +973,7 @@ function ReplicaSystem(;
                             * "does not match number of replicas ($n_replicas)"))
     end
 
-    df = n_dof(D, length(atoms), boundary)
+    df = n_dof(D, length(atoms), boundary[1])
     if isnothing(replica_constraints)
         if length(constraints) > 0
             for ca in constraints
@@ -1069,7 +1069,7 @@ function ReplicaSystem(;
                         typeof(replica_specific_inter_lists[i]), typeof(replica_general_inters[i]),
                         typeof(replica_constraints[i]), NF, typeof(replica_loggers[i]), F, E, K,
                         M, TM, Nothing}(
-            atoms, replica_coords[i], boundary, replica_velocities[i],
+            atoms, replica_coords[i], boundary[i], replica_velocities[i],
             atoms_data, replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i],
             deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i], force_units,

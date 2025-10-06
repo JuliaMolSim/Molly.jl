@@ -33,6 +33,8 @@ using Random
 using SparseArrays
 using Statistics
 
+using ProgressBars # Nice way of showing progress
+
 include("types.jl")
 include("units.jl")
 include("spatial.jl")
@@ -66,5 +68,8 @@ include("neighbors.jl")
 include("loggers.jl")
 include("analysis.jl")
 include("setup.jl")
+include("free_energy/stats.jl")
+include("free_energy/mbar.jl")
+include("trajectories.jl")
 
 end
