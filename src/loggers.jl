@@ -305,8 +305,7 @@ end
 
 function virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
     if all(iszero, buffers.virial)
-        V = virial(sys)
-        return copy(V)
+        return virial(sys, neighbors, step_n; n_threads=n_threads)
     else
         return copy(buffers.virial)
     end
@@ -328,7 +327,7 @@ end
 
 function scalar_virial_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
     if all(iszero, buffers.virial)
-        return scalar_virial(sys)
+        return scalar_virial(sys, neighbors, step_n; n_threads=n_threads)
     else
         return tr(buffers.virial)
     end
@@ -350,7 +349,7 @@ end
 
 function pressure_wrapper(sys, buffers, neighbors, step_n; n_threads, kwargs...)
     if all(iszero, buffers.pres_tensor)
-        P = pressure(sys, buffers, neighbors, step_n; recompute=true, n_threads=n_threads)
+        P = pressure(sys, neighbors, step_n, buffers; recompute=true, n_threads=n_threads)
         return copy(P)
     else
         return copy(buffers.pres_tensor)
@@ -376,7 +375,7 @@ end
 function scalar_pressure_wrapper(sys::System{D}, buffers, neighbors, step_n; n_threads,
                                  kwargs...) where D
     if all(iszero, buffers.pres_tensor)
-        return scalar_pressure(sys, buffers)
+        return scalar_pressure(sys, neighbors, step_n, buffers; n_threads=n_threads)
     else
         return tr(buffers.pres_tensor) / D
     end
@@ -386,10 +385,9 @@ end
     ScalarPressureLogger(n_steps)
     ScalarPressureLogger(T, n_steps)
 
-Log the [`scalar_pressure`](@ref) tensor of a system throughout a simulation.
+Log the [`scalar_pressure`](@ref) of a system throughout a simulation.
 
-This should only be used on 3-dimensional systems where general interactions and constraints do not
-contribute to the pressure.
+This should only be used on 3-dimensional systems.
 """
 ScalarPressureLogger(T::Type, n_steps::Integer) = GeneralObservableLogger(scalar_pressure_wrapper, T, n_steps)
 ScalarPressureLogger(n_steps::Integer) = ScalarPressureLogger(typeof(one(DefaultFloat)*u"bar"), n_steps)

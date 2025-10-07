@@ -71,7 +71,7 @@ end
     virial(system, neighbors=find_neighbors(system), step_n=0;
            n_threads=Threads.nthreads())
 
-Calculate the virial tensor.
+Calculate the virial tensor of the system.
 
 The virial, in its most general form, is defined as:
 ```math
@@ -100,9 +100,9 @@ end
     scalar_virial(system, neighbors=find_neighbors(system), step_n=0;
                   n_threads=Threads.nthreads())
 
-Calculate the virial of the system as a scalar instead of as a tensor.
+Calculate the virial of the system as a scalar.
 
-To calculate the virial tensor, see [`virial`](@ref).
+This is the trace of the [`virial`](@ref) tensor.
 """
 function scalar_virial(sys; n_threads::Integer=Threads.nthreads())
     return scalar_virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
