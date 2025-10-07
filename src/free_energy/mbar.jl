@@ -170,19 +170,29 @@ Returns
 function mbar_init(u::AbstractMatrix, win_of::AbstractVector{<:Integer};
                    gauge_ref::Int=1, N_counts::Union{Nothing,AbstractVector{<:Integer}}=nothing)
     N, K = size(u)
-    @assert length(win_of) == N "win_of length must equal number of columns in u"
-    @assert 1 ≤ gauge_ref ≤ K "gauge_ref out of range"
+    if length(win_of) != N
+        throw(ArgumentError("Length of win_of must equal number of columns in u"))
+    end
+    if !(1 ≤ gauge_ref ≤ K)
+        throw(ArgumentError("gauge_ref out of range"))
+    end
 
     if N_counts !== nothing
-        @assert length(N_counts) == K "N_counts must have length K"
+        if length(N_counts) != K
+            throw(ArgumentError("N_counts must have length K"))
+        end
         # verify counts match win_of
         counts = zeros(Int, K)
         @inbounds for n in 1:N
             k = win_of[n]
-            @assert 1 ≤ k ≤ K "win_of contains invalid state index $k"
+            if !(1 ≤ k ≤ K)
+                throw(ArgumentError("win_of contains invalid state index $k"))
+            end
             counts[k] += 1
         end
-        @assert counts == N_counts "win_of-derived counts differ from N_counts"
+        if !(counts == N_counts)
+            throw(ArgumentError("win_of-derived counts differ from N_counts"))
+        end
     end
 
     f = Vector{Float64}(undef, K)
@@ -195,7 +205,9 @@ function mbar_init(u::AbstractMatrix, win_of::AbstractVector{<:Integer};
                 cnt   += 1
             end
         end
-        @assert cnt > 0 "State $k has no frames"
+        if !(cnt > 0)
+            throw(ArgumentError("State $k has no frames"))
+        end
         f[k] = -(sum_u / cnt)
     end
 
@@ -263,8 +275,12 @@ Compute log Dₙ = log ∑_k N_k exp(f_k − u[n,k]) for each frame n (log-sum-e
 """
 function mbar_logD(u::AbstractMatrix, f::AbstractVector, logN::AbstractVector)
     N, K = size(u)
-    @assert length(f) == K
-    @assert length(logN) == K
+    if length(f) != K
+        throw(ArgumentError("Length of f must be equal to the number of thermodynamic states (K = $(K))"))
+    end
+    if length(logN) != K
+        throw(ArgumentError("Length of logN must be equal to the number of thermodynamic states (K = $(K))"))
+    end
     logD = Vector{Float64}(undef, N)
     @inbounds for n in 1:N
         m = -Inf
@@ -288,7 +304,12 @@ W[n,k] = exp( f[k] − u[n,k] − logD[n] ), with `u` as N×K. `logN` only enter
 """
 function mbar_weights_sampled(u::AbstractMatrix, f::AbstractVector, logN::AbstractVector; logD_n=nothing)
     N, K = size(u)
-    @assert length(f) == K == length(logN)
+    if length(f) != K
+        throw(ArgumentError("Length of f must be equal to the number of thermodynamic states (K = $(K))"))
+    end
+    if length(logN) != K
+        throw(ArgumentError("Length of logN must be equal to the number of thermodynamic states (K = $(K))"))
+    end
     logD = isnothing(logD_n) ? mbar_logD(u, f, logN) : logD_n
     W = Matrix{Float64}(undef, N, K)
     min_x =  Inf; max_x = -Inf
@@ -315,11 +336,18 @@ wₙ ∝ exp( −(u_target[n] − sₙ) ) / Dₙ where `sₙ` are the same per-f
 Pass `shifts` you subtracted from `u`; if none were used, leave default.
 """
 function mbar_weights_target(u_target::AbstractVector, logD_n::AbstractVector; shifts::Union{Nothing,AbstractVector}=nothing)
-    @assert length(u_target) == length(logD_n)
     N = length(u_target)
-    if shifts !== nothing
-        @assert length(shifts) == N
+    
+    if N != length(logD_n)
+        throw(ArgumentError("u_target must be of equal length as logD_n"))
     end
+    
+    if shifts !== nothing
+        if length(shifts) != N
+            throw(ArgumentError("shifts must be of equal length as u_target"))
+        end
+    end
+    
     # vₙ = −(u_tgt[n] − sₙ) − logDₙ
     @inbounds begin
         m = -Inf
@@ -358,7 +386,9 @@ function mbar_weights(u::AbstractMatrix,
                       N_counts::AbstractVector;
                       shifts::Union{Nothing,AbstractVector}=nothing,
                       check::Bool=true)
-    @assert all(isfinite.(u)) && all(isfinite.(u_target)) && all(isfinite.(f))
+    if !all(isfinite.(u)) && all(isfinite.(u_target)) && all(isfinite.(f))
+        throw(ArgumentError("Infintie values found in inputs"))
+    end
     @assert length(logN) == length(N_counts) && all(N_counts .> 0)
     logD = mbar_logD(u, f, logN)
     W, _ = mbar_weights_sampled(u, f, logN; logD_n=logD)
@@ -403,8 +433,10 @@ Assumes `u` is K×N reduced potentials with per-frame shifts already applied.
 function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
                               f::AbstractVector, N_counts::AbstractVector,
                               logN::AbstractVector, R_k::Vector;
-                              nbins::Union{Int,Nothing}=nothing, edges=nothing, kBT=nothing,
-                              zero::Symbol=:min, rmin=nothing, rmax=nothing)
+                              shifts = nothing,
+                              nbins::Union{Int,Nothing} = nothing, edges = nothing, kBT = nothing,
+                              zero::Symbol = :min, rmin = nothing, rmax = nothing,
+                              adaptive::Bool = true)
 
     N, K = size(u)
     @assert length(u_target) == N
@@ -451,17 +483,22 @@ function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
     else
         edges = collect(edges)
     end
+
     nb = length(edges) - 1
     widths  = [edges[i+1] - edges[i] for i in 1:nb]
     centers = [(edges[i+1] + edges[i]) / 2 for i in 1:nb]
     Δr_inv  = 1.0 ./ Float64.(ustrip.(widths))  # for density
 
     # Sampled and target-state weights via mbar_weights (Eq. 9 and 13–15)
-    W_sampled, W_na, logD = mbar_weights(u, u_target, f, logN, N_counts; check=false)
+    W_sampled, W_na, logD = mbar_weights(u, u_target, f, logN, N_counts; shifts = shifts, check = false)
+    rownorm = N_counts' * W_sampled'              # length-N vector of ∑k N_k W[n,k]
+    W_sampled ./= rownorm'                        # enforce exact normalization
+
     W_samp = permutedims(W_sampled)  # N×K for concatenation with W_nA/W_na
 
     # Precompute vₙ = −u_target(n) − logDₙ for later use in ĉA (Eq. 14)
-    v = @. -Float64(u_target) - logD
+    s = isnothing(shifts) ? 0.0 : shifts        # scalar 0.0 or Vector
+    v = @. -Float64(u_target) + s - logD
 
     @assert all(isfinite.(W_na)) "Non-finite values in W_na"
     any(iszero, W_na) && @warn "W_na contains zeros; possible underflow"
@@ -483,6 +520,8 @@ function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
     W_nA  = similar(A)
     W_aug = Matrix{Float64}(undef, K + 2, N)
     @views W_aug[1:K, :] .= W_samp
+
+    bin_ess = ess_per_bin(edges, R_flat, W_na)
 
     # Loop over bins, build augmented W = [W_samp  W_nA  W_na], then Σ̂ via Eq. (8)/(D6)
     for i in 1:nb
@@ -548,6 +587,8 @@ function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
     # Apply same shift to uncertainties? Not needed; sigma_F unaffected by additive constant.
 
     F_energy = isnothing(kBT) ? nothing : (F .* kBT)
-    return (centers=centers, F=F, F_energy=F_energy, p=p, widths=widths, edges=edges,
-            sigma_F=sigma_F, var_p=var_p)
+    return (centers = centers, widths = widths, edges = edges,
+            ess_per_bin = bin_ess,
+            F = F, F_energy = F_energy, sigma_F = sigma_F, 
+            p = p,  var_p = var_p )
 end

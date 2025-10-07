@@ -74,3 +74,26 @@ end
 function subsample(series::AbstractVector, stride::Int; first::Int = 1)
     return series[first:stride:end]
 end
+
+# ESS of a mask (no views with Bool indexing)
+@inline function ess_mask(mask::AbstractVector{Bool}, w::AbstractVector)
+    s = 0.0; ssq = 0.0
+    @inbounds @simd for i in eachindex(mask, w)
+        if mask[i]
+            wi = float(w[i]); s += wi; ssq += wi*wi
+        end
+    end
+    (s>0 && ssq>0) ? (s*s/ssq) : 0.0
+end
+
+# Per-partition ESS
+function ess_per_bin(edges::AbstractVector, r::AbstractVector, w::AbstractVector)
+    nb = length(edges)-1
+    idx = searchsortedlast.(Ref(edges), r)
+    idx[(idx .== nb+1) .& (r .== edges[end])] .= nb
+    e = Vector{Float64}(undef, nb)
+    @inbounds for i in 1:nb
+        e[i] = ess_mask(idx .== i, w)
+    end
+    e
+end
