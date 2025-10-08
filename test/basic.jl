@@ -396,6 +396,7 @@ end
         n_replicas=n_replicas,
         replica_velocities=replica_velocities,
         pairwise_inters=pairwise_inters,
+        neighbor_finder=neighbor_finder,
     )
 
     sys = System(
@@ -404,11 +405,13 @@ end
         boundary=boundary,
         velocities=nothing,
         pairwise_inters=pairwise_inters,
+        neighbor_finder=neighbor_finder,
     )
 
+    sys_fields = [getfield(sys, f) for f in fieldnames(System) if f != :neighbor_finder]
     for i in 1:n_replicas
-        repsys_fields = [getfield(repsys.replicas[i], f) for f in fieldnames(System)]
-        sys_fields = [getfield(sys, f) for f in fieldnames(System)]
+        repsys_fields = [getfield(repsys.replicas[i], f)
+                         for f in fieldnames(System) if f != :neighbor_finder]
         @test all(repsys_fields .== sys_fields)
     end
 
@@ -439,14 +442,14 @@ end
     @test repsys2.data == "test_data_repsys"
     @test sys2.data == "test_data_sys"
 
+    l2 = sys2.loggers
+    nf2 = [getproperty(sys2.neighbor_finder, p) for p in propertynames(sys2.neighbor_finder)]
     for i in 1:n_replicas
         l1 = repsys2.replicas[i].loggers
-        l2 = sys2.loggers
         @test typeof(l1) == typeof(l2)
         @test propertynames(l1) == propertynames(l2)
-
-        nf1 = [getproperty(repsys2.replicas[i].neighbor_finder, p) for p in propertynames(repsys2.replicas[i].neighbor_finder)]
-        nf2 = [getproperty(sys2.neighbor_finder, p) for p in propertynames(sys2.neighbor_finder)]
+        nf1 = [getproperty(repsys2.replicas[i].neighbor_finder, p)
+               for p in propertynames(repsys2.replicas[i].neighbor_finder)]
         @test all(nf1 .== nf2)
     end
 end
