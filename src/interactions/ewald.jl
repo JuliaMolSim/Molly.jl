@@ -24,13 +24,13 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs,
                                             kwargs...)
     if needs_vir
         CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
-        virial = zeros(CT, 3, 3) .* sys.energy_units
+        vir = zeros(CT, 3, 3) .* sys.energy_units
     else
-        virial = nothing
+        vir = nothing
     end
-    pe = ewald_pe_forces!(fs, virial, sys, inter, Val(needs_vir); n_threads=n_threads)
+    pe = ewald_pe_forces!(fs, vir, sys, inter, Val(needs_vir); n_threads=n_threads)
     if needs_vir
-        buffers.virial .+= virial 
+        buffers.virial .+= vir 
     end
     return fs
 end
@@ -70,7 +70,7 @@ function find_excluded_pairs(eligible, special)
     return excluded_pairs
 end
 
-function excluded_interactions_inner!(Fs, Vir, atoms, coords, boundary, α, f, i, j,
+function excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f, i, j,
                             ::Val{T}, ::Val{calculate_forces}, ::Val{atomic},
                             ::Val{needs_vir}) where {T, calculate_forces, atomic, needs_vir}
     sqrt_π = sqrt(T(π))
@@ -92,7 +92,7 @@ function excluded_interactions_inner!(Fs, Vir, atoms, coords, boundary, α, f, i
                     Atomix.@atomic Fs[dim, j] += -fval
                     if needs_vir
                         for alpha in 1:3
-                            Atomix.@atomic Vir[alpha, dim] += ustrip(vec_ij[alpha]) * fval
+                            Atomix.@atomic vir[alpha, dim] += ustrip(vec_ij[alpha]) * fval
                         end
                     end
                 end
@@ -100,7 +100,7 @@ function excluded_interactions_inner!(Fs, Vir, atoms, coords, boundary, α, f, i
                 Fs[i] += F
                 Fs[j] -= F
                 if needs_vir
-                    Vir .+= vec_ij * transpose(F)
+                    vir .+= vec_ij * transpose(F)
                 end
             end
         end
@@ -110,25 +110,26 @@ function excluded_interactions_inner!(Fs, Vir, atoms, coords, boundary, α, f, i
     return exclusion_E
 end
 
-function excluded_interactions!(Fs, Vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
+function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
                                 coords::Vector, boundary, α, f, force_units, energy_units,
                                 calculate_forces, ::Val{T},
                                 ::Val{needs_vir}) where {T, needs_vir}
     exclusion_E = zero(T) * energy_units
     for (i, j) in excluded_pairs
-        E = excluded_interactions_inner!(Fs, Vir, atoms, coords, boundary, α, f,
+        E = excluded_interactions_inner!(Fs, vir, atoms, coords, boundary, α, f,
                             i, j, Val(T), Val(calculate_forces), Val(false), Val(needs_vir))
         exclusion_E += E
     end
     return exclusion_E
 end
 
-function excluded_interactions!(Fs, Vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
+function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, excluded_pairs, atoms,
                                 coords::AbstractVector{SVector{D, C}}, boundary, α, f, force_units,
                                 energy_units, calculate_forces, ::Val{T},
                                 ::Val{needs_vir}) where {D, C, T, needs_vir}
     if calculate_forces
         buffer_Fs .= zero(T)
+        virial_buffer .= zero(T)
     end
     backend = get_backend(atoms)
     n_threads_gpu = 128
@@ -140,20 +141,20 @@ function excluded_interactions!(Fs, Vir, buffer_Fs, virial_buffer, buffer_Es, ex
     if calculate_forces
         Fs .+= reinterpret(SVector{D, T}, vec(buffer_Fs)) .* force_units
         if needs_vir
-            Vir .+= from_device(virial_buffer) .* energy_units
+            vir .+= from_device(virial_buffer) .* energy_units
         end
     end
     return sum(buffer_Es) * energy_units
 end
 
-@kernel function excluded_interactions_kernel!(Fs_mat, virial, exclusion_Es, @Const(excluded_pairs),
+@kernel function excluded_interactions_kernel!(Fs_mat, vir, exclusion_Es, @Const(excluded_pairs),
                             @Const(atoms), @Const(coords), boundary, α, f, energy_units,
                             ::Val{T}, ::Val{calculate_forces},
                             ::Val{needs_vir}) where {T, calculate_forces, needs_vir}
     ei = @index(Global, Linear)
     if ei <= length(excluded_pairs)
         i, j = excluded_pairs[ei]
-        E = excluded_interactions_inner!(Fs_mat, virial, atoms, coords, boundary, α, f,
+        E = excluded_interactions_inner!(Fs_mat, vir, atoms, coords, boundary, α, f,
                                 i, j, Val(T), Val(calculate_forces), Val(true), Val(needs_vir))
         exclusion_Es[ei] = ustrip(energy_units, E)
     end
@@ -223,15 +224,15 @@ function ewald_params(side_length, α, error_tol)
     return k
 end
 
-function ewald_pe_forces!(Fs, Vir, sys::System{3}, inter::AbstractEwald, ::Val{needs_vir};
+function ewald_pe_forces!(Fs, vir, sys::System{3}, inter::AbstractEwald, ::Val{needs_vir};
                           n_threads::Integer=Threads.nthreads()) where needs_vir
     calculate_forces = !isnothing(Fs)
-    return ewald_pe_forces!(Fs, Vir, inter, sys.atoms, sys.coords, sys.boundary, sys.force_units,
+    return ewald_pe_forces!(Fs, vir, inter, sys.atoms, sys.coords, sys.boundary, sys.force_units,
                             sys.energy_units, Val(needs_vir), calculate_forces;
                             n_threads=n_threads)
 end
 
-function ewald_pe_forces!(Fs, Vir, inter::Ewald{T}, atoms, coords, boundary, force_units,
+function ewald_pe_forces!(Fs, vir, inter::Ewald{T}, atoms, coords, boundary, force_units,
                           energy_units, ::Val{needs_vir}, calculate_forces=true;
                           n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
     AT = array_type(atoms)
@@ -253,7 +254,7 @@ function ewald_pe_forces!(Fs, Vir, inter::Ewald{T}, atoms, coords, boundary, for
         Fs_cpu = Fs
     end
 
-    exclusion_E = excluded_interactions!(Fs_cpu, Vir, nothing, nothing, nothing,
+    exclusion_E = excluded_interactions!(Fs_cpu, vir, nothing, nothing, nothing,
                         inter.excluded_pairs, atoms_cpu, coords_cpu, boundary, α, f, force_units,
                         energy_units, calculate_forces, Val(T), Val(needs_vir))
 
@@ -329,7 +330,7 @@ function ewald_pe_forces!(Fs, Vir, inter::Ewald{T}, atoms, coords, boundary, for
                     gyy = 1 - cfac*ky*ky
                     gyz =   - cfac*ky*kz
                     gzz = 1 - cfac*kz*kz
-                    Vir .+= Ek .* SMatrix{3,3,T}(gxx,gxy,gxz, gxy,gyy,gyz, gxz,gyz,gzz)
+                    vir .+= Ek .* SMatrix{3,3,T}(gxx,gxy,gxz, gxy,gyy,gyz, gxz,gyz,gzz)
                 end
 
                 reciprocal_space_E += recip_coeff * ak * (cs * cs + ss * ss)
@@ -345,7 +346,7 @@ function ewald_pe_forces!(Fs, Vir, inter::Ewald{T}, atoms, coords, boundary, for
 
     if needs_vir
         # E_charge = -A/V with A = f*π*Q^2/(2α^2) ⇒ W_charge = -E_charge * I
-        Vir .+= (-charge_E) .* I(3)
+        vir .+= (-charge_E) .* I(3)
     end
 
     if calculate_forces && AT <: AbstractGPUArray
@@ -487,11 +488,11 @@ function PME(dist_cutoff, atoms, boundary; error_tol=0.0005, order=5,
         charge_grid_buffer = [zero(charge_grid) for _ in 1:n_threads]
         recip_conv_buffer = zeros(T, n_threads)
         excluded_buffer_Fs, excluded_buffer_Es = nothing, nothing
-        virial_buffer = nothing
+        virial_buffer = [zeros(T, 3, 3) for _ in 1:n_threads]
     else
         charge_grid_buffer, recip_conv_buffer = nothing, nothing
         excluded_buffer_Fs, excluded_buffer_Es = nothing, nothing
-        virial_buffer = nothing
+        virial_buffer = [zeros(T, 3, 3)]
     end
 
     if fixed_charges && !grad_safe
@@ -731,7 +732,7 @@ end
     end
 end
 
-function recip_conv_inner!(Vir, charge_grid::AbstractArray{Complex{T}, 3}, bsm_x, bsm_y, bsm_z,
+function recip_conv_inner!(vir_nou, charge_grid::AbstractArray{Complex{T}, 3}, bsm_x, bsm_y, bsm_z,
                            recip_box, mesh_dims, energy_units, f_div_ϵr, factor, boxfactor,
                            kx, ky, kz, ::Val{needs_vir},
                            ::Val{atomic}) where {T, needs_vir, atomic}
@@ -773,62 +774,75 @@ function recip_conv_inner!(Vir, charge_grid::AbstractArray{Complex{T}, 3}, bsm_x
             G = SMatrix{3, 3, T}(gxx, gxy, gxz,
                                  gxy, gyy, gyz,
                                  gxz, gyz, gzz)
+            Ek_nou = ustrip(energy_units, Ek)
             if atomic
-                Ek_nou = ustrip(Ek)
                 for d1 in 1:3
                     for d2 in 1:3
-                        Atomix.@atomic Vir[d1, d2] += Ek_nou * G[d1, d2]
+                        Atomix.@atomic vir_nou[d1, d2] += Ek_nou * G[d1, d2]
                     end
                 end
             else
-                Vir .+= Ek .* G
+                vir_nou .+= Ek_nou .* G
             end
         end
-
     end
     return eterm * struct2
 end
 
-function recip_conv!(Vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buffer,
+function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buffer,
                      bsm_x, bsm_y, bsm_z, recip_box, f_div_ϵr, α, mesh_dims, boundary,
                      energy_units, ::Val{1}, ::Val{needs_vir}) where {T, needs_vir}
+    if needs_vir
+        buffer_virial[1] .= zero(T)
+    end
     factor = T(π)^2 / α^2
     boxfactor = T(π) * volume(boundary)
     esum = zero(T) * energy_units
     for kx in 0:(mesh_dims[1]-1), ky in 0:(mesh_dims[2]-1), kz in 0:(mesh_dims[3]-1)
-        esum_val = recip_conv_inner!(Vir, charge_grid, bsm_x, bsm_y, bsm_z, recip_box,
+        esum_val = recip_conv_inner!(buffer_virial[1], charge_grid, bsm_x, bsm_y, bsm_z, recip_box,
                             mesh_dims, energy_units, f_div_ϵr, factor, boxfactor, kx, ky, kz,
                             Val(needs_vir), Val(false))
         esum += esum_val
     end
+    if needs_vir
+        vir .+= buffer_virial[1] .* energy_units
+    end
     return esum / 2
 end
 
-function recip_conv!(Vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buffer,
+function recip_conv!(vir, buffer_virial, charge_grid::Array{Complex{T}, 3}, buffer,
                      bsm_x, bsm_y, bsm_z, recip_box, f_div_ϵr, α, mesh_dims, boundary, energy_units,
                      ::Val{n_threads}, ::Val{needs_vir}) where {T, n_threads, needs_vir}
     factor = T(π)^2 / α^2
     boxfactor = T(π) * volume(boundary)
     buffer .= zero(T)
     Threads.@threads for chunk_i in 1:n_threads
+        if needs_vir
+            buffer_virial[chunk_i] .= zero(T)
+        end
         for kx in (chunk_i-1):n_threads:(mesh_dims[1]-1)
             for ky in 0:(mesh_dims[2]-1), kz in 0:(mesh_dims[3]-1)
-                esum_val = recip_conv_inner!(Vir, charge_grid, bsm_x, bsm_y, bsm_z, recip_box,
-                            mesh_dims, energy_units, f_div_ϵr, factor, boxfactor, kx, ky, kz,
-                            Val(needs_vir), Val(false))
+                esum_val = recip_conv_inner!(buffer_virial[chunk_i], charge_grid, bsm_x, bsm_y,
+                            bsm_z, recip_box, mesh_dims, energy_units, f_div_ϵr, factor, boxfactor,
+                            kx, ky, kz, Val(needs_vir), Val(false))
                 buffer[chunk_i] += ustrip(energy_units, esum_val)
             end
         end
     end
     esum = sum(buffer) * energy_units
+    if needs_vir
+        for chunk_i in 1:n_threads
+            vir .+= buffer_virial[chunk_i] .* energy_units
+        end
+    end
     return esum / 2
 end
 
-function recip_conv!(Vir, buffer_virial, charge_grid::AbstractArray{Complex{T}, 3}, buffer, bsm_x,
+function recip_conv!(vir, buffer_virial, charge_grid::AbstractArray{Complex{T}, 3}, buffer, bsm_x,
                      bsm_y, bsm_z, recip_box, f_div_ϵr, α, mesh_dims, boundary, energy_units,
                      n_threads_val, ::Val{needs_vir}) where {T, needs_vir}
     if needs_vir
-        fill!(buffer_virial, zero(T))
+        buffer_virial .= zero(T)
     end
     ndrange = Tuple(mesh_dims)
     factor = T(π)^2 / α^2
@@ -839,18 +853,18 @@ function recip_conv!(Vir, buffer_virial, charge_grid::AbstractArray{Complex{T}, 
     kernel!(buffer_virial, buffer, charge_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
             energy_units, f_div_ϵr, factor, boxfactor, Val(needs_vir); ndrange=ndrange)
     if needs_vir
-        Vir .+= from_device(buffer_virial) .* energy_units
+        vir .+= from_device(buffer_virial) .* energy_units
     end
     return sum(buffer) * energy_units / 2
 end
 
-@kernel function recip_conv_kernel!(Vir, esum_arr, charge_grid, @Const(bsm_x), @Const(bsm_y),
+@kernel function recip_conv_kernel!(vir, esum_arr, charge_grid, @Const(bsm_x), @Const(bsm_y),
                                     @Const(bsm_z), recip_box, mesh_dims, energy_units,
                                     f_div_ϵr, factor, boxfactor,
                                     ::Val{needs_vir}) where needs_vir
     kxp1, kyp1, kzp1 = @index(Global, NTuple)
     if kxp1 <= mesh_dims[1] && kyp1 <= mesh_dims[2] && kzp1 <= mesh_dims[3]
-        esum = recip_conv_inner!(Vir, charge_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
+        esum = recip_conv_inner!(vir, charge_grid, bsm_x, bsm_y, bsm_z, recip_box, mesh_dims,
                                  energy_units, f_div_ϵr, factor, boxfactor,
                                  kxp1-1, kyp1-1, kzp1-1, Val(needs_vir), Val(true))
         esum_arr[kxp1, kyp1, kzp1] = ustrip(energy_units, esum)
@@ -928,7 +942,7 @@ end
 grad_safe_fft!( charge_grid, fft_plan ) = fft_plan  * charge_grid
 grad_safe_bfft!(charge_grid, bfft_plan) = bfft_plan * charge_grid
 
-function ewald_pe_forces!(Fs, Vir, inter::PME{T}, atoms, coords, boundary, force_units,
+function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force_units,
                           energy_units, ::Val{needs_vir}, calculate_forces=true;
                           n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
     n_thr = (inter.grad_safe ? 1 : n_threads) # Enzyme error with multiple threads
@@ -936,7 +950,7 @@ function ewald_pe_forces!(Fs, Vir, inter::PME{T}, atoms, coords, boundary, force
     V = volume(boundary)
     f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
 
-    exclusion_E = excluded_interactions!(Fs, Vir, inter.excluded_buffer_Fs, inter.virial_buffer, 
+    exclusion_E = excluded_interactions!(Fs, vir, inter.excluded_buffer_Fs, inter.virial_buffer, 
                     inter.excluded_buffer_Es, inter.excluded_pairs, atoms, coords, boundary, α, f,
                     force_units, energy_units, calculate_forces, Val(T), Val(needs_vir))
 
@@ -946,7 +960,7 @@ function ewald_pe_forces!(Fs, Vir, inter::PME{T}, atoms, coords, boundary, force
     spread_charge!(inter.charge_grid, inter.charge_grid_buffer, inter.grid_indices,
                    inter.bsplines_θ, mesh_dims, order, atoms, Val(n_thr))
     grad_safe_fft!(inter.charge_grid, inter.fft_plan)
-    reciprocal_space_E = recip_conv!(Vir, inter.virial_buffer, inter.charge_grid,
+    reciprocal_space_E = recip_conv!(vir, inter.virial_buffer, inter.charge_grid,
                     inter.recip_conv_buffer, inter.bsplines_moduli_x, inter.bsplines_moduli_y,
                     inter.bsplines_moduli_z, recip_box, f / ϵr, α, mesh_dims, boundary,
                     energy_units, Val(n_thr), Val(needs_vir))
