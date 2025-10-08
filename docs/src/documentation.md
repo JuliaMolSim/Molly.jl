@@ -49,7 +49,7 @@ vector(coords[1], coords[2], boundary)
   0.8359421827141784 nm
 ```
 
-Now we can define our pairwise interactions, i.e. those between most or all atom pairs.
+Now we can define our pairwise interactions, i.e. those between most or all atom pairs, as a tuple.
 Because we have defined the relevant parameters for the atoms, we can use the built-in [`LennardJones`](@ref) type.
 ```julia
 pairwise_inters = (LennardJones(),) # Don't forget the trailing comma!
@@ -89,6 +89,8 @@ total_energy(sys)     #  78.56681422361234 kJ mol^-1
 forces(sys)
 accelerations(sys)
 virial(sys)
+pressure(sys)
+dipole_moment(sys)
 
 masses(sys)
 density(sys) # 207.56738339673083 kg m^-3
@@ -113,11 +115,6 @@ sys.total_mass
 # Write out the system to a file
 write_structure("file.pdb", sys)
 write_structure("file.mol2", sys)
-
-# For certain systems
-virial(sys)
-pressure(sys)
-dipole_moment(sys)
 
 # AtomsBase.jl interface
 import AtomsBase
@@ -222,7 +219,7 @@ bonds = InteractionList2Atoms(
     [HarmonicBond(k=300_000.0u"kJ * mol^-1 * nm^-2", r0=0.1u"nm") for i in 1:(n_atoms ÷ 2)],
 )
 
-specific_inter_lists = (bonds,)
+specific_inter_lists = (bonds,) # Don't forget the trailing comma!
 ```
 This time we are also going to use a neighbor list to speed up the Lennard-Jones calculation since we don't care about interactions beyond a certain distance.
 We can use the built-in [`DistanceNeighborFinder`](@ref).
@@ -668,9 +665,11 @@ Atom properties can be accessed, e.g. `atom_i.σ`.
 `step_n` is the step number in the simulator, allowing time-dependent interactions.
 Beware that this step counter starts from 1 every time [`simulate!`](@ref) is called, and can also be 0 to calculate forces before the first step.
 It also doesn't work with [`simulate_remd!`](@ref).
+
 Typically the force function is where most computation time is spent during the simulation, so consider optimising this function if you want high performance.
 One nice feature of Molly is that this function will work on both the CPU and the GPU.
 If you need a different version of the function on GPU, you can define `Molly.force_gpu` (and `Molly.potential_energy_gpu`).
+Virial computation is done automatically when required using the force function.
 
 The argument `special` is a `Bool` determining whether the atom pair interaction should be treated as special.
 This is specified during neighbor finder construction.
@@ -680,14 +679,13 @@ It can have a variety of uses depending on the context, for example if you have 
 
 To use your custom interaction in a simulation, add it to the list of pairwise interactions:
 ```julia
-pairwise_inters = (MyPairwiseInter(NoCutoff(), 1.0),)
+pairwise_inters = (MyPairwiseInter(NoCutoff(), 1.0),) # Don't forget the trailing comma!
 ```
 Then create a [`System`](@ref) and simulate as above.
 Note that you can also use a named tuple instead of a tuple if you want to access interactions by name:
 ```julia
 pairwise_inters = (MyPairwiseInter=MyPairwiseInter(NoCutoff(), 1.0),)
 ```
-For performance reasons it is best to [avoid containers with abstract type parameters](https://docs.julialang.org/en/v1/manual/performance-tips/#man-performance-abstract-container-1), such as `Vector{Any}`.
 
 If you wish to calculate potential energies or log the energy throughout a simulation, you will need to define methods for the [`potential_energy`](@ref) and [`pairwise_pe`](@ref) functions.
 These have the same arguments and logic as [`force`](@ref), except the fifth argument to [`potential_energy`](@ref) is the energy units not the force units, and should return a single value corresponding to the potential energy:
@@ -749,6 +747,8 @@ end
 ```
 Again, most of these arguments are rarely used and can be replaced with `args...`.
 The 3 atom case would define `Molly.force(inter::MySpecificInter, coord_i, coord_j, coord_k, boundary, atom_i, atom_j, atom_k, force_units, velocity_i, velocity_j, velocity_k)` and return `SpecificForce3Atoms(f1, f2, f3)`.
+Virial computation is done automatically when required using the force function.
+
 To use your custom interaction, add it to the specific interaction lists along with the atom indices:
 ```julia
 specific_inter_lists = (
@@ -756,7 +756,7 @@ specific_inter_lists = (
         [1, 3],
         [2, 4],
         [MySpecificInter(), MySpecificInter()],
-    ),
+    ), # Don't forget the trailing comma!
 )
 ```
 For 3 atom interactions use [`InteractionList3Atoms`](@ref) and pass 3 sets of indices.
@@ -816,11 +816,21 @@ In cases where the forces are not simply added to, the order of general interact
 General interactions are applied after pairwise and specific interactions.
 Note that this function calculates forces not accelerations; if you have a neural network that calculates accelerations you should multiply these by `masses(sys)` to get the forces according to F=ma.
 
+If you want to use the [`virial`](@ref) in your simulation, for example for to control pressure, you will also need to calculate the contribution to the virial in the `AtomsCalculators.forces!` function.
+To do this, the function should take the additional keyword arguments `needs_vir` and `buffers` that will be passed by the simulator.
+`needs_vir` is a `Bool` that determines whether the virial is needed that call and `buffers.virial` contains the virial tensor.
+For example, the following could go in the function above:
+```julia
+    if needs_vir
+        # The virial is a 3x3 SMatrix with units of energy
+        buffers.virial .+= rand(SMatrix{3, 3, Float64}) * sys.energy_units
+    end
+```
+
 A method for the `AtomsCalculators.potential_energy` function that takes the same arguments and returns a single value can also be defined.
-A method for the [`virial`](@ref) function can also be defined, allowing virial and pressure calculation when using custom general interactions.
 To use your custom interaction in a simulation, add it to the list of general interactions:
 ```julia
-general_inters = (MyGeneralInter(),)
+general_inters = (MyGeneralInter(),) # Don't forget the trailing comma!
 ```
 `general_inters=general_inters` can be given as a keyword argument when setting up the [`System`](@ref).
 
@@ -1108,8 +1118,9 @@ Molly.needs_virial(c::MyCoupler) = (truth = true, steps = c.n_steps)
 # In case you do NOT need the virial
 Molly.needs_virial(c::MyCoupler) = (truth = false, steps = Inf)
 ```
-The use of the [`virial`](@ref) tensor allows for non-isotripic pressure control.
-Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the K-space of the [`Ewald`](@ref) and [`PME`](@ref) methods.
+The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
+Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods.
+As described previously, custom general interactions should implement virial calculation if required.
 
 ## Loggers
 

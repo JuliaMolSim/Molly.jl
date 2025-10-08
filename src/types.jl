@@ -1483,6 +1483,7 @@ Contrary to the rest of Molly, unitless quantities are assumed to have ASE units
 Unitful quantities will be converted as appropriate.
 
 Not currently compatible with [`TriclinicBoundary`](@ref).
+Not currently compatible with virial calculation.
 
 # Arguments
 - `ase_calc`: the ASE calculator created with PythonCall.

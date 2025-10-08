@@ -15,6 +15,8 @@ This potential is only compatible with 2D systems.
 It is often used for testing algorithms that find transition states or explore
 minimum energy pathways.
 There are 3 minima and 2 saddle points with the default parameters.
+
+Not currently compatible with virial calculation.
 """
 struct MullerBrown{D, T, L, F, E}
     A::D  # Units of energy
