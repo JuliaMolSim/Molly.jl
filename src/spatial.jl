@@ -947,21 +947,16 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
     end
     if recompute
         forces!(zero_forces(sys), sys, neighbors, buffers, Val(true), step_n; n_threads=n_threads)
-        kin_tensor = buffers.kin_tensor
-        vir_tensor = buffers.virial
-    else
-        kin_tensor = buffers.kin_tensor
-        vir_tensor = buffers.virial
     end
 
     # Always evaluate K in case velocities were rescaled by a thermostat
-    kinetic_energy_tensor!(sys, kin_tensor)
+    kinetic_energy_tensor!(sys, buffers.kin_tensor)
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
 
-    K = energy_remove_mol.(kin_tensor) # (1/2) Σ m v⊗v
-    W = energy_remove_mol.(vir_tensor) # Σ r⊗f
+    K = energy_remove_mol.(buffers.kin_tensor) # (1/2) Σ m v⊗v
+    W = energy_remove_mol.(buffers.virial) # Σ r⊗f
 
     P = (2 .* K .+ W) ./ volume(sys.boundary)
     if sys.energy_units == NoUnits || D != 3

@@ -22,16 +22,8 @@ AtomsCalculators.@generate_interface function AtomsCalculators.forces!(fs,
                                             buffers=nothing,
                                             needs_vir=false,
                                             kwargs...)
-    if needs_vir
-        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
-        vir = zeros(CT, 3, 3) .* sys.energy_units
-    else
-        vir = nothing
-    end
+    vir = (needs_vir ? buffers.virial : nothing)
     pe = ewald_pe_forces!(fs, vir, sys, inter, Val(needs_vir); n_threads=n_threads)
-    if needs_vir
-        buffers.virial .+= vir 
-    end
     return fs
 end
 
@@ -129,7 +121,9 @@ function excluded_interactions!(Fs, vir, buffer_Fs, virial_buffer, buffer_Es, ex
                                 ::Val{needs_vir}) where {D, C, T, needs_vir}
     if calculate_forces
         buffer_Fs .= zero(T)
-        virial_buffer .= zero(T)
+        if needs_vir
+            virial_buffer .= zero(T)
+        end
     end
     backend = get_backend(atoms)
     n_threads_gpu = 128
