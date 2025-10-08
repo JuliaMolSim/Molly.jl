@@ -109,6 +109,13 @@ end
     @test bench_result.allocs <= 3
     @test bench_result.memory <= 144
 
+    scalar_vir = scalar_virial(sys_pme)
+    scalar_P = scalar_pressure(sys_pme)
+    @test scalar_vir ≈ tr(virial(sys_pme))
+    @test scalar_P ≈ tr(pressure(sys_pme)) / 3
+    @test scalar_vir ≈ scalar_virial(sys_pme; n_threads=1)
+    @test scalar_P ≈ scalar_pressure(sys_pme; n_threads=1)
+
     inters = (
         "bond_only", "angle_only", "proptor_only", "improptor_only", "lj_only", "coul_only",
         "all_cut", "all_pme", "all_pme_exact",
@@ -215,6 +222,8 @@ end
     simulator_nounits = VelocityVerlet(dt=0.0005)
     @test kinetic_energy(sys_nounits)u"kJ * mol^-1" ≈ 65521.87288132431u"kJ * mol^-1"
     @test temperature(sys_nounits)u"K" ≈ 329.3202932884933u"K"
+    @test scalar_virial(sys_nounits) ≈ tr(virial(sys_nounits))
+    @test scalar_pressure(sys_nounits) ≈ tr(pressure(sys_nounits)) / 3
 
     E_openmm_pme = readdlm(joinpath(openmm_dir, "energy_all_pme_exact.txt"))[1] * u"kJ * mol^-1"
     neighbors_nounits = find_neighbors(sys_nounits)
@@ -272,6 +281,9 @@ end
         @test maximum(norm.(from_device(forces(sys_pme, neighbors)) .- forces_openmm_pme)) < 1e-3u"kJ * mol^-1 * nm^-1"
         E_openmm_pme = readdlm(joinpath(openmm_dir, "energy_all_pme.txt"))[1] * u"kJ * mol^-1"
         @test isapprox(potential_energy(sys_pme, neighbors), E_openmm_pme; atol=0.2u"kJ * mol^-1")
+        sys_pme.velocities .= (zero(SVector{3, Float64}) * u"nm * ps^-1",)
+        @test scalar_virial(sys_pme) ≈ scalar_vir
+        @test scalar_pressure(sys_pme) ≈ scalar_P
 
         sys_pme_exact = System(
             joinpath(data_dir, "6mrr_equil.pdb"),
