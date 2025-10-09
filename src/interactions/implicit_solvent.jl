@@ -2,17 +2,13 @@
 # Based on the OpenMM source code
 
 export
-    AbstractGBSA,
     ImplicitSolventOBC,
     ImplicitSolventGBN2,
     born_radii_and_grad
 
-"""
-Generalized Born (GB) implicit solvent models augmented with the
-hydrophobic solvent accessible surface area (SA) term.
-
-Custom GBSA methods should sub-type this abstract type.
-"""
+# Generalized Born (GB) implicit solvent models augmented with the
+#   hydrophobic solvent accessible surface area (SA) term
+# Custom GBSA methods should sub-type this abstract type
 abstract type AbstractGBSA end
 
 # Default solvent dielectric is 78.5 for consistency with AMBER
@@ -336,6 +332,8 @@ Onufriev-Bashford-Case GBSA model implemented as an AtomsCalculators.jl calculat
 Should be used along with a Coulomb interaction.
 The keyword argument `use_OBC2` determines whether to use parameter set
 I (`false`, the default) or II (`true`).
+
+Not currently compatible with virial calculation.
 """
 struct ImplicitSolventOBC{T, D, V, K, S, F, I, DI} <: AbstractGBSA
     offset_radii::V
@@ -440,6 +438,8 @@ end
 GBn2 solvation model implemented as an AtomsCalculators.jl calculator.
 
 Should be used along with a Coulomb interaction.
+
+Not currently compatible with virial calculation.
 """
 struct ImplicitSolventGBN2{T, D, VT, VD, K, S, F, I, TD, TM, DI} <: AbstractGBSA
     offset_radii::VD

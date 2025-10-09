@@ -917,9 +917,10 @@ function remove_CM_motion!(sys::System{<:Any, <:AbstractGPUArray})
 end
 
 @doc raw"""
-    pressure(sys; n_threads=Threads.nthreads())
+    pressure(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
+             recompute=true, n_threads=Threads.nthreads())
 
-Calculate the tensorial pressure of a system.
+Calculate the pressure tensor of the system.
 
 The pressure is defined as
 ```math
@@ -928,33 +929,34 @@ The pressure is defined as
 where ``V`` is the system volume, ``\bf{K}`` is the kinetic energy tensor
 and ``\bf{W}`` is the virial tensor.
 
+To calculate the scalar pressure, see [`scalar_pressure`](@ref).
+
 Not compatible with infinite boundaries.
 """
 function pressure(sys; n_threads::Integer=Threads.nthreads())
-
-    return pressure(sys, nothing, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads, recompute = true)
+    return pressure(sys, find_neighbors(sys; n_threads=n_threads), 0, nothing;
+                    recompute=true, n_threads=n_threads)
 end
 
-function pressure(sys::AtomsBase.AbstractSystem{D}, buffers, neighbors, step_n::Integer=0;
-                  recompute::Bool=false, n_threads::Integer=Threads.nthreads()) where D
-    if recompute
-        _, buffers = forces!(zero_forces(sys), sys, neighbors, buffers, Val(true), step_n;
-                             n_threads=n_threads)
-        kin_tensor = buffers.kin_tensor
-        vir_tensor = buffers.virial
+function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothing;
+                  recompute::Bool=true, n_threads::Integer=Threads.nthreads()) where D
+    if isnothing(buffers_in)
+        buffers = init_buffers!(sys, n_threads)
     else
-        kin_tensor = buffers.kin_tensor
-        vir_tensor = buffers.virial
+        buffers = buffers_in
+    end
+    if recompute
+        forces!(zero_forces(sys), sys, neighbors, buffers, Val(true), step_n; n_threads=n_threads)
     end
 
     # Always evaluate K in case velocities were rescaled by a thermostat
-    kinetic_energy_tensor!(sys, kin_tensor)
+    kinetic_energy_tensor!(sys, buffers.kin_tensor)
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
 
-    K = energy_remove_mol.(kin_tensor) # (1/2) Σ m v⊗v
-    W = energy_remove_mol.(vir_tensor) # Σ r⊗f
+    K = energy_remove_mol.(buffers.kin_tensor) # (1/2) Σ m v⊗v
+    W = energy_remove_mol.(buffers.virial) # Σ r⊗f
 
     P = (2 .* K .+ W) ./ volume(sys.boundary)
     if sys.energy_units == NoUnits || D != 3
@@ -971,16 +973,21 @@ function pressure(sys::AtomsBase.AbstractSystem{D}, buffers, neighbors, step_n::
 end
 
 """
-    scalar_pressure(sys::System, buffers=nothing; n_threads::Integer=Threads.nthreads())
+    scalar_pressure(system, neighbors=find_neighbors(system), step_n=0, buffers=nothing;
+                    recompute=true, n_threads=Threads.nthreads())
 
-Calculates the pressure as a scalar instead of as a tensor.
+Calculate the pressure of the system as a scalar.
 
-Recomputes the forces when called.
+This is the trace of the [`pressure`](@ref) tensor.
 """
-function scalar_pressure(sys::System{D}, buffers=nothing;
-                         n_threads::Integer=Threads.nthreads()) where D
-    P = pressure(sys, buffers, find_neighbors(sys; n_threads=n_threads);
-                 recompute=true,n_threads=n_threads)
+function scalar_pressure(sys; n_threads::Integer=Threads.nthreads())
+    return scalar_pressure(sys, find_neighbors(sys; n_threads=n_threads), 0, nothing;
+                           recompute=true, n_threads=n_threads)
+end
+
+function scalar_pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers=nothing;
+                         recompute::Bool=true, n_threads::Integer=Threads.nthreads()) where D
+    P = pressure(sys, neighbors, step_n, buffers; recompute=recompute, n_threads=n_threads)
     return tr(P) / D
 end
 

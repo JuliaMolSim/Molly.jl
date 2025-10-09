@@ -585,6 +585,28 @@ function System(;
         throw(ArgumentError("the velocities are on the GPU but the atoms are not"))
     end
 
+    if !any(TT -> (pairwise_inters isa TT), (Tuple, NamedTuple))
+        throw(ArgumentError("pairwise_inters should be a Tuple or a NamedTuple but has " *
+                            "type $(typeof(pairwise_inters))"))
+    end
+    if !any(TT -> (specific_inter_lists isa TT), (Tuple, NamedTuple))
+        throw(ArgumentError("specific_inter_lists should be a Tuple or a NamedTuple but has " *
+                            "type $(typeof(specific_inter_lists))"))
+    end
+    if !any(TT -> (general_inters isa TT), (Tuple, NamedTuple))
+        throw(ArgumentError("general_inters should be a Tuple or a NamedTuple but has " *
+                            "type $(typeof(general_inters))"))
+    end
+
+    if neighbor_finder isa NoNeighborFinder && any(use_neighbors, values(pairwise_inters))
+        throw(ArgumentError("neighbor_finder is NoNeighborFinder but one of pairwise_inters " *
+                            "uses the neighbor list"))
+    end
+    if !(neighbor_finder isa NoNeighborFinder) && !all(use_neighbors, values(pairwise_inters))
+        @warn "A neighbor finder is used but one of pairwise_inters does not use the neighbor " *
+              "finder, this may not be intended"
+    end
+
     atom_masses = mass.(atoms)
     M = typeof(atom_masses)
     total_mass = sum(atom_masses)
@@ -1483,6 +1505,7 @@ Contrary to the rest of Molly, unitless quantities are assumed to have ASE units
 Unitful quantities will be converted as appropriate.
 
 Not currently compatible with [`TriclinicBoundary`](@ref).
+Not currently compatible with virial calculation.
 
 # Arguments
 - `ase_calc`: the ASE calculator created with PythonCall.

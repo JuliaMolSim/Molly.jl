@@ -1163,6 +1163,7 @@ end
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
             loggers=(
                 pressure=PressureLogger(10),
+                scalar_pressure=ScalarPressureLogger(10),
                 volume=VolumeLogger(10),
             ),
         )
@@ -1204,6 +1205,7 @@ end
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
             loggers=(
                 pressure=PressureLogger(10),
+                scalar_pressure=ScalarPressureLogger(10),
                 volume=VolumeLogger(10),
             ),
         )
@@ -1255,6 +1257,7 @@ end
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
             loggers=(
                 pressure=PressureLogger(10),
+                scalar_pressure=ScalarPressureLogger(10),
                 volume=VolumeLogger(10),
             ),
         )
@@ -1308,6 +1311,7 @@ end
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
             loggers=(
                 pressure=PressureLogger(10),
+                scalar_pressure=ScalarPressureLogger(10),
                 volume=VolumeLogger(10),
             ),
         )
@@ -1349,6 +1353,7 @@ end
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
             loggers=(
                 pressure=PressureLogger(10),
+                scalar_pressure=ScalarPressureLogger(10),
                 volume=VolumeLogger(10),
             ),
         )
@@ -1400,6 +1405,7 @@ end
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
             loggers=(
                 pressure=PressureLogger(10),
+                scalar_pressure=ScalarPressureLogger(10),
                 volume=VolumeLogger(10),
             ),
         )
@@ -1462,7 +1468,9 @@ end
             kinetic_energy=KineticEnergyLogger(n_log_steps),
             potential_energy=PotentialEnergyLogger(n_log_steps),
             virial=VirialLogger(n_log_steps),
+            scalar_virial=ScalarVirialLogger(n_log_steps),
             pressure=PressureLogger(n_log_steps),
+            scalar_pressure=ScalarPressureLogger(n_log_steps),
             volume=VolumeLogger(n_log_steps),
         ),
     )
@@ -1504,7 +1512,9 @@ end
                     kinetic_energy=KineticEnergyLogger(n_log_steps),
                     potential_energy=PotentialEnergyLogger(n_log_steps),
                     virial=VirialLogger(n_log_steps),
+                    scalar_virial=ScalarVirialLogger(n_log_steps),
                     pressure=PressureLogger(n_log_steps),
+                    scalar_pressure=ScalarPressureLogger(n_log_steps),
                     volume=VolumeLogger(n_log_steps),
                 ),
             )
@@ -1556,7 +1566,9 @@ end
             kinetic_energy=KineticEnergyLogger(n_log_steps),
             potential_energy=PotentialEnergyLogger(n_log_steps),
             virial=VirialLogger(n_log_steps),
+            scalar_virial=ScalarVirialLogger(n_log_steps),
             pressure=PressureLogger(n_log_steps),
+            scalar_pressure=ScalarPressureLogger(n_log_steps),
             volume=VolumeLogger(n_log_steps),
         ),
     )
@@ -1600,7 +1612,9 @@ end
                     kinetic_energy=KineticEnergyLogger(n_log_steps),
                     potential_energy=PotentialEnergyLogger(n_log_steps),
                     virial=VirialLogger(n_log_steps),
+                    scalar_virial=ScalarVirialLogger(n_log_steps),
                     pressure=PressureLogger(n_log_steps),
+                    scalar_pressure=ScalarPressureLogger(n_log_steps),
                     volume=VolumeLogger(n_log_steps),
                 ),
             )
@@ -1656,7 +1670,9 @@ end
             kinetic_energy=KineticEnergyLogger(n_log_steps),
             potential_energy=PotentialEnergyLogger(n_log_steps),
             virial=VirialLogger(n_log_steps),
+            scalar_virial=ScalarVirialLogger(n_log_steps),
             pressure=PressureLogger(n_log_steps),
+            scalar_pressure=ScalarPressureLogger(n_log_steps),
             volume=VolumeLogger(n_log_steps),
         ),
     )
@@ -1700,7 +1716,9 @@ end
                     kinetic_energy=KineticEnergyLogger(n_log_steps),
                     potential_energy=PotentialEnergyLogger(n_log_steps),
                     virial=VirialLogger(n_log_steps),
+                    scalar_virial=ScalarVirialLogger(n_log_steps),
                     pressure=PressureLogger(n_log_steps),
+                    scalar_pressure=ScalarPressureLogger(n_log_steps),
                     volume=VolumeLogger(n_log_steps),
                 ),
             )

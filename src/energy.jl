@@ -23,7 +23,7 @@ function total_energy(sys, neighbors; n_threads::Integer=Threads.nthreads())
     return kinetic_energy(sys) + potential_energy(sys, neighbors; n_threads=n_threads)
 end
 
-raw"""
+@doc raw"""
     kinetic_energy_tensor!(system, kin_tensor)
 
 Calculate the kinetic energy of a system in its tensorial form.
@@ -38,7 +38,6 @@ function kinetic_energy_tensor!(sys::System{D, AT, T}, kin_tensor) where {D, AT,
     fill!(kin_tensor, zero(T) * sys.energy_units)
     half = T(0.5)
     for (m, v) in zip(from_device(sys.masses), from_device(sys.velocities))
-        # m: mass per particle, v: velocity with units
         kin_tensor .+= half .* uconvert.(sys.energy_units, m .* (v * transpose(v)))
     end
 end
@@ -69,36 +68,49 @@ function kinetic_energy(sys::System{D, AT, T}; kin_tensor=nothing) where {D, AT,
 end
 
 @doc raw"""
-    virial(system)
+    virial(system, neighbors=find_neighbors(system), step_n=0;
+           n_threads=Threads.nthreads())
 
-Forces a recomputation of the forces acting on the system
-and computes the virial tensor. The virial, in its most general
-form, is defined as:
+Calculate the virial tensor of the system.
 
+The virial, in its most general form, is defined as:
 ```math
 \bf{W} = \sum_i \bf{r_i} \otimes \bf{f_i}
 ```
 where ``\bf{r_i}`` and ``\bf{f_i}`` are the position and force vectors,
-respectively, acting on the i``^{th}`` atom. In Molly.jl, we implement
-the [virial definition used in LAMMPS](https://docs.lammps.org/compute_stress_atom.html),
+respectively, acting on the i``^{th}`` atom.
+In Molly.jl, we implement the
+[virial definition used in LAMMPS](https://docs.lammps.org/compute_stress_atom.html),
 and take into account pairwise and specific interactions, as well as the K-space
 contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods, computed as indicated
-in the [original paper](https://doi.org/10.1063/1.470117).
+in the [Essmann et al. 1995](https://doi.org/10.1063/1.470117).
+
+To calculate the scalar virial, see [`scalar_virial`](@ref).
 """
-function virial(sys)
-    _, virial = forces(sys; needs_virial=true)
-    return virial
+function virial(sys; n_threads::Integer=Threads.nthreads())
+    return virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-@doc """
-    scalar_virial(sys)
+function virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+    _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads)
+    return v
+end
 
-Retrieves the virial of the system as a scalar instead of as a tensor. Needs
-to recompute the forces.
 """
-function scalar_virial(sys)
-    _, virial = forces(sys; needs_virial=true)
-    return tr(virial) 
+    scalar_virial(system, neighbors=find_neighbors(system), step_n=0;
+                  n_threads=Threads.nthreads())
+
+Calculate the virial of the system as a scalar.
+
+This is the trace of the [`virial`](@ref) tensor.
+"""
+function scalar_virial(sys; n_threads::Integer=Threads.nthreads())
+    return scalar_virial(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+end
+
+function scalar_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Threads.nthreads())
+    _, v = forces_virial(sys, neighbors, step_n; n_threads=n_threads)
+    return tr(v)
 end
 
 """

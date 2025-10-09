@@ -68,6 +68,12 @@ function GPUNeighborFinder(;
                             special=zero(eligible),
                             n_steps_reorder=25,
                             initialized=false)
+    if !(eligible isa AbstractGPUArray)
+        throw(ArgumentError("eligible must be on the GPU but has type $(typeof(eligible))"))
+    end
+    if !(special isa AbstractGPUArray)
+        throw(ArgumentError("special must be on the GPU but has type $(typeof(special))"))
+    end
     return GPUNeighborFinder{typeof(eligible), typeof(dist_cutoff)}(
                 eligible, dist_cutoff, special, n_steps_reorder, initialized)
 end
