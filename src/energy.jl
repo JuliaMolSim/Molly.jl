@@ -344,9 +344,10 @@ function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_a
     return pe
 end
 
-function potential_energy(sys::System{D, AT, T}, buffers, pe_vec_nounits, neighbors, step_n::Integer=0;
+function potential_energy(sys::System{D, AT, T}, buffers::BuffersGPU, pe_vec_nounits, neighbors, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
     
+    fill!(pe_vec_nounits, zero(T))
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0

@@ -9,9 +9,20 @@ const LOG_PREVFLOAT0 = log(nextfloat(0.0))      # ≈ log(nextfloat(0.0)) ≈ -7
 const LOG_FLOATMAX   = log(floatmax(Float64))   # ≈ 709
 
 """
-    Represents a given thermodynamic state. It's just an abstraction over the
-    [`System`](@ref) struct that carries the inverse temperatue (1/kBT) and the 
-    pressure at which it was simulated.
+    ThermoState(name::String, β, p, system)
+    ThermoState(system::System, β, p; name::Union{Nothing,String}=nothing)
+
+Thermodynamic state wrapper carrying inverse temperature `β = 1/kBT`, pressure `p`,
+and the Molly [`System`](@ref) used to evaluate energies.
+
+# Fields
+- `name::String`  — label for the state.
+- `β`             — inverse temperature with units compatible with `1/system.energy_units`.
+- `p`             — pressure `Quantity` or `nothing`.
+- `system::System` — simulation system used to compute potential energy.
+
+The second constructor checks unit consistency for `β` and `p` and sets a default
+`name` when not provided.
 """
 struct ThermoState{B,P,S}
     name::String
@@ -49,26 +60,39 @@ end
     end
 end
 
+
+
 """
-    assemble_mbar_inputs(coords_k, boundaries_k, states; target_state = nothing, energy_units = u"kJ/mol")
+    assemble_mbar_inputs(coords_k, boundaries_k, states;
+                         target_state=nothing, energy_units=u"kJ/mol", shift=false)
 
-Assemble N×K reduced potentials u for arbitrary states.
+Assemble the reduced potentials matrix `u` (size `N×K`) for MBAR from per-window
+coordinates and boundaries.
 
-Arguments:
-- coords_k      :: Vector{Vector{<:Any}}      per-window subsampled coordinates
-- boundaries_k  :: Vector{Vector{<:Any}}      per-window subsampled boundaries (same length as coords_k[w])
-- states        :: Vector{ThermoState}        per-window thermodynamic states
-- target_state  :: ThermoState                target thermodynamic states to compute resampling weights for
-- energy_units  :: Unitful energy unit used by Molly (e.g., u"kJ/mol")
+# Arguments
+- `coords_k::Vector{<:Vector}`      — subsampled coordinates for each window `k`.
+- `boundaries_k::Vector{<:Vector}`  — subsampled boundaries for each window `k` (same lengths as `coords_k[k]`).
+- `states::Vector{ThermoState}`     — thermodynamic states for each window.
 
-Returns: 
-- (u=u, u_target=u_target, N = Nk, win_of=win_of, shifts=shifts)
+# Keywords
+- `target_state::Union{Nothing,ThermoState}` — if set, also compute `u_target` for that state.
+- `energy_units::Quantity` — energy unit for reduced potentials, e.g. `u"kJ/mol"`.
+- `shift::Bool=false` — if `true`, subtract per-frame row minima from `u` and return the `shifts`.
+
+# Returns
+NamedTuple with:
+- `u::Matrix{Float64}`         — `N×K` reduced potentials.
+- `u_target::Union{Vector{Float64},Nothing}` — reduced potential at `target_state` or `nothing`.
+- `N::Vector{Int}`             — sample counts per window.
+- `win_of::Vector{Int}`        — window index for each frame.
+- `shifts::Union{Vector{Float64},Nothing}` — per-frame shifts when `shift=true`, else `nothing`.
 """
 function assemble_mbar_inputs(coords_k,
                               boundaries_k,
                               states::Vector{ThermoState};
                               target_state::Union{Nothing, ThermoState{<:Any, <:Any, <:System{D, AT, T}}} = nothing,
-                              energy_units=u"kJ/mol") where {D, AT, T}
+                              energy_units = u"kJ/mol",
+                              shift::Bool  = false) where {D, AT, T}
 
     K = length(states)
 
@@ -149,11 +173,15 @@ function assemble_mbar_inputs(coords_k,
     end
 
     # Row minima (per frame) and shift
-    shifts = Vector{Float64}(undef, N)
-    Threads.@threads for n in 1:N
-        @inbounds shifts[n] = minimum(@view u[n, :])
+    if shift
+        shifts = Vector{Float64}(undef, N)
+        Threads.@threads for n in 1:N
+            @inbounds shifts[n] = minimum(@view u[n, :])
+        end
+        @inbounds u .-= reshape(shifts, :, 1)
+    else
+        shifts = nothing
     end
-    @inbounds u .-= reshape(shifts, :, 1)
 
     u_target = (target_state === nothing) ? nothing :
                assemble_target_u(all_coords, all_boundaries, all_volumes, target_state; energy_units)
@@ -285,22 +313,22 @@ function mbar_iteration(u, f_init, logN)
 end
 
 """
-    iterate_mbar(u, win_of, N_counts; rtol = 1e-8, max_iter = 10_000)
+    iterate_mbar(u, win_of, N_counts; rtol=1e-8, max_iter=10_000)
 
-    Solves the MBAR equations with the self-consistent iteration method described
-    in Eq. C3 [Shirts & Chodera (2008)](https://doi.org/10.1063/1.2978177). 
+Solve the MBAR self-consistent equations [Shirts & Chodera, 2008, Eq. C3](https://doi.org/10.1063/1.2978177).
 
-Arguments:
+# Arguments
+- `u::AbstractMatrix`      — `N×K` reduced potentials (`rows = frames`, `cols = states`).
+- `win_of::AbstractVector` — length-`N` vector giving the generating state index per frame.
+- `N_counts::AbstractVector` — length-`K` sample counts per state.
 
-- u        :: AbstractMatrix   N×K matrix or reduced potentials of the sampled N conformations under K thermodynamic states
-- win_of   :: AbstractVector   vector of size N indexing the k ∈ K thermodynamic state the n ∈ N conformation was generated from
-- N_counts :: AbstractVector   vector of size K enumerating the number of samples generated from each k ∈ K thermodynamic states
+# Keywords
+- `rtol::Float64=1e-8`   — relative convergence tolerance.
+- `max_iter::Int=10_000` — maximum iterations.
 
-Returns:
-
-- f_new :: AbstractVector   vector of size K with the relative free energy of each k ∈ K thermodynamic state  
-- logN  :: AbstractVector   vector of size K with representing log(N_counts), useful to avoid downstream recomputations
-
+# Returns
+- `f::Vector{Float64}` — relative free energies per state (gauge-fixed to `f[1]=0`).
+- `logN::Vector{Float64}` — `log.(N_counts)` for reuse downstream.
 """
 function iterate_mbar(u, win_of, N_counts; rtol::Float64=1e-8, max_iter::Int=10_000)
     logN  = log.(float.(N_counts))
@@ -385,7 +413,7 @@ end
 wₙ ∝ exp( −(u_target[n] − sₙ) ) / Dₙ where `sₙ` are the same per-frame shifts applied to `u`.
 Pass `shifts` you subtracted from `u`; if none were used, leave default.
 """
-function mbar_weights_target(u_target::AbstractVector, logD_n::AbstractVector; shifts::Union{Nothing,AbstractVector}=nothing)
+function mbar_weights_target(u_target::AbstractVector, logD_n::AbstractVector; shifts::Union{Nothing,AbstractVector} = nothing)
     N = length(u_target)
     
     if N != length(logD_n)
@@ -430,32 +458,32 @@ function mbar_weights_target(u_target::AbstractVector, logD_n::AbstractVector; s
 end
 
 """
-    mbar_weights(u, u_target, f, N_counts, logN; shifts = nothing, check = true)
+    mbar_weights(u, u_target, f, N_counts, logN; shifts=nothing, check=true)
 
-    Calculates the weight matrix and target weights given a reduced energy matrix and
-    target reduced potential vector, as per Eq. 13 in [Shirts & Chodera (2008)]](https://doi.org/10.1063/1.2978177).
-    Allows the reweighting of arbitrary quantities to the target state.
+Compute MBAR weights for sampled states and for a target state [Shirts & Chodera, 2008, Eq. 13](https://doi.org/10.1063/1.2978177).
 
-Arguments:
-- u        :: AbstractMatrix                             N×K matrix or reduced potentials of the sampled N conformations under K thermodynamic states
-- u_target :: AbstractVector                             vector of length N with the reduced potential evaluated at each n ∈ N sampled conformation
-- N_counts :: AbstractVector                             vector of lengthn k enumerating the number of samples generated by each k ∈ K thermodynamic state
-- logN     :: AbstractVector                             vector of length K computed as the logarithm of the number of samples generated by each k ∈ K thermodynamic state
-- shifts   :: Union{Nothing, AbstractVector} = nothing   if passed, vector of length N containing the numerical shifts used to prevent overflow in the computation of the free energies
-- check    :: Bool = true                                flag detailing whether to perform sanity checks or not
+# Arguments
+- `u::AbstractMatrix`        — `N×K` reduced potentials for sampled states.
+- `u_target::AbstractVector` — length-`N` reduced potential for the target state.
+- `f::AbstractVector`        — length-`K` relative free energies.
+- `N_counts::AbstractVector` — length-`K` sample counts per state.
+- `logN::AbstractVector`     — `log.(N_counts)`.
 
-Returns:
-- w        :: AbstractMatrix   N×K matrix of the weights of each n ∈ N conformation for each k ∈ K thermodynamic state
-- w_target :: AbstractVector   vector of length N with the weights for each n ∈ N conformation of the target thermodynamic state 
-- logD     :: AbstractVector   vector of length N containing the longarithm of the denominator of Eq. 13, useful to avoid downstream recomputations
+# Keywords
+- `shifts::Union{Nothing,AbstractVector}=nothing` — per-frame shifts previously subtracted from `u`, if any.
+- `check::Bool=true` — perform basic normalization checks.
 
+# Returns
+- `W::Matrix{Float64}`   — `N×K` sampled-state weights.
+- `w_target::Vector{Float64}` — length-`N` target-state weights.
+- `logD::Vector{Float64}` — length-`N` log normalizers used in the weights.
 """
 function mbar_weights(u::AbstractMatrix,
                       u_target::AbstractVector,
                       f::AbstractVector,
                       N_counts::AbstractVector,
                       logN::AbstractVector;
-                      shifts::Union{Nothing,AbstractVector}=nothing,
+                      shifts::Union{Nothing,AbstractVector} = nothing,
                       check::Bool=true)
 
     if !all(isfinite.(u))
@@ -505,49 +533,80 @@ function mbar_weights(u::AbstractMatrix,
 end
 
 """
-    pmf_with_uncertainty(u, u_target, f, shifts, N_counts, logN, R_k;
-                         nbins::Union{Int,Nothing}=nothing, edges=nothing, kBT=nothing,
-                         zero::Symbol=:min, rmin=nothing, rmax=nothing)
+    mbar_weights(mbar_generator::NamedTuple)
 
-Compute PMF along scalar CV r and its asymptotic (large-sample) uncertainty
-using MBAR’s analytic covariance as per Eq. D8 of [Shirts &  Chodera (2008)](https://doi.org/10.1063/1.2978177).
+High-level MBAR wrapper that computes free energies and reweighting weights from a
+preassembled `mbar_generator` tuple.
 
-Arguments:
-- u        :: AbstractMatrix                             N×K matrix or reduced potentials of the sampled N conformations under K thermodynamic states
-- u_target :: AbstractVector                             vector of length N with the reduced potential evaluated at each n ∈ N sampled conformation
-- f        :: AbstractVector                             vector of length K containing the relative free energy of each k ∈ K thermodynamic state
-- shifts   :: Union{Nothing, AbstractVector}             if passed, vector of length N containing the numerical shifts used to prevent overflow in the computation of the free energies
-- N_counts :: AbstractVector                             vector of length K enumerating the number of samples generated by each k ∈ K thermodynamic state
-- logN     :: AbstractVector                             vector of length K computed as the logarithm of the number of samples generated by each k ∈ K thermodynamic state
-- R_k      :: Vector{AbstractVector}                     vector of length K in wich each element is a vector containing the sampled collective variable for each conformation generated by each k ∈ K thermodynamic state
-- nbins    :: Union{Int, Nothing}            = nothing   the number of bins used to get the histogram of the collective variable
-- edges    :: Union{AbstractVector, Nothing} = nothing   the edges of the histogram for the collective variable
-- rmin     :: Union{Quantity, Nothing}       = nothing   minimum value for the histogram of the collective variale
-- rmax     :: Union{Quantity, Nothing}       = nothing   maximum value for the histogram of the collective variale
-- zero     :: Symbol                         = :min      how to gauge the potential of mean force, defaults to zero PMF to minimum value
-- kBT      :: Union{Quantity, Nothing}       = nothing   kBT in appropriate units to get dimensional PMF
+# Arguments
+- `mbar_generator::NamedTuple` — result from [`assemble_mbar_inputs`] containing:
+  - `u::AbstractMatrix` — reduced potentials (`N×K`).
+  - `u_target::Union{AbstractVector,Nothing}` — reduced potentials at the target state.
+  - `N::AbstractVector` — sample counts per state.
+  - `win_of::AbstractVector` — window index for each frame.
+  - `shifts::Union{AbstractVector,Nothing}` — per-frame energy shifts (optional).
 
-If `edges` are not supplied, histogram bounds can be specified with
-`rmin` and `rmax`. When both are omitted, the range defaults to
-the min and max values of the collective variable. When `nbins` is not provided,
-the bin count is estimated by the Freedman–Diaconis rule.
+# Returns
+`(W, w_target, logD)` where:
+- `W::Matrix{Float64}` — `N×K` sampled-state weights.
+- `w_target::Vector{Float64}` — target-state weights.
+- `logD::Vector{Float64}` — per-frame log normalizers.
 
-Returns:
-- NamedTuple: (centers, 
-               F, 
-               F_energy, 
-               p, 
-               widths, 
-               edges, 
-               sigma_F, 
-               var_p)
+# Notes
+This routine runs [`iterate_mbar`](@ref) to obtain relative free energies `F_k` and
+then calls the lower-level [`mbar_weights(u, u_target, f, N_counts, logN)`](@ref)
+using the contents of `mbar_generator`. All internal consistency checks are
+disabled for speed.
+"""
+function mbar_weights(mbar_generator::NamedTuple)
+
+    u        = mbar_generator.u
+    u_target = mbar_generator.u_target
+    N_counts = mbar_generator.N
+    win_of   = mbar_generator.win_of
+    shifts   = mbar_generator.shifts
+
+    F_k, logN = iterate_mbar(u, win_of, N_counts)
+
+    W, w_target, logD = mbar_weights(u, u_target, F_k, N_counts, logN; shifts = shifts, check = false)
+
+    return W, w_target, logD
+
+end
 
 """
+    pmf_with_uncertainty(u, u_target, f, N_counts, logN, R_k;
+                         shifts=nothing, nbins=nothing, edges=nothing, kBT=nothing,
+                         zero=:min, rmin=nothing, rmax=nothing)
+
+Estimate a 1D PMF along a scalar CV and its large-sample uncertainty using MBAR
+[Shirts & Chodera, 2008, Eq. D8](https://doi.org/10.1063/1.2978177).
+
+# Arguments
+- `u::AbstractMatrix`        — `N×K` reduced potentials.
+- `u_target::AbstractVector` — length-`N` reduced potentials at the target state.
+- `f::AbstractVector`        — length-`K` relative free energies.
+- `N_counts::AbstractVector` — length-`K` sample counts.
+- `logN::AbstractVector`     — `log.(N_counts)`.
+- `R_k::Vector{<:AbstractVector}` — CV values per window, concatenating to length `N`.
+
+# Keywords
+- `shifts=nothing` — per-frame shifts used on `u`, if any.
+- `nbins=nothing`, `edges=nothing` — bin count or explicit bin edges.
+- `rmin=nothing`, `rmax=nothing` — bounds when `edges` is omitted.
+- `zero=:min` — PMF gauge: `:min` or `:last`.
+- `kBT=nothing` — if set, also return dimensional `F_energy = F*kBT`.
+
+# Returns
+NamedTuple with:
+`centers, widths, edges, ess_per_bin, F, F_energy, sigma_F, p, var_p`.
+"""
 function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
-                              f::AbstractVector, shifts::AbstractVector,
+                              f::AbstractVector,
                               N_counts::AbstractVector,
                               logN::AbstractVector, R_k::Vector;
-                              nbins::Union{Int,Nothing} = nothing, edges = nothing, kBT = nothing,
+                              shifts::Union{AbstractVector, Nothing} = nothing,
+                              nbins::Union{Int, Nothing} = nothing, edges = nothing, kBT = nothing,
                               zero::Symbol = :min, rmin = nothing, rmax = nothing)
 
     N, K = size(u)
@@ -725,4 +784,54 @@ function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
             ess_per_bin = bin_ess,
             F = F, F_energy = F_energy, sigma_F = sigma_F,
             p = p, var_p = var_p)
+end
+
+"""
+    pmf_with_uncertainty(coords_k, boundaries_k, states, target_state, CV;
+                         energy_units=u"kJ/mol", shift=false)
+
+High-level PMF wrapper. Builds MBAR inputs from trajectories, solves MBAR, and
+computes the PMF along `CV`.
+
+# Arguments
+- `coords_k::AbstractVector`     — coordinates per window.
+- `boundaries_k::AbstractVector` — boundaries per window.
+- `states::Vector{ThermoState}`  — thermodynamic states per window.
+- `target_state::ThermoState`    — state to reweight to.
+- `CV::AbstractVector`           — CV values per window.
+
+# Keywords
+- `energy_units::Quantity=u"kJ/mol"` — energy unit for reduced potentials.
+- `shift::Bool=false`      — subtract per-frame minima from `u` for stability.
+
+# Returns
+Same NamedTuple as the lower-level `pmf_with_uncertainty`.
+"""
+function pmf_with_uncertainty(coords_k::AbstractVector,
+                              boundaries_k::AbstractVector,
+                              states::Vector{ThermoState},
+                              target_state::ThermoState,
+                              CV::AbstractVector;
+                              energy_units = u"kJ/mol",
+                              shift::Bool  = false)
+
+    kBT = Float64(1/target_state.β)
+
+    mbar_gen = assemble_mbar_inputs(coords_k, boundaries_k, states; 
+                                    target_state = target_state,
+                                    energy_units = energy_units,
+                                    shift        = shift)
+
+    u        = mbar_gen.u
+    u_target = mbar_gen.u_target
+    N_counts = mbar_gen.N
+    win_of   = mbar_gen.win_of
+    shifts   = mbar_gen.shifts
+
+    F_k, logN = iterate_mbar(u, win_of, N_counts)
+
+    pmf = pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV; shifts = shifts, kBT = kBT)
+
+    return pmf
+    
 end
