@@ -147,11 +147,20 @@ Calculate the potential energy due to a given interaction type.
 
 Custom interaction types should implement this function.
 """
-function potential_energy(sys; n_threads::Integer=Threads.nthreads())
-    return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+function potential_energy(sys::System{D, AT, T}; n_threads::Integer=Threads.nthreads()) where {D, AT, T}
+
+    if AT <: AbstractGPUArray
+        pe_vec_nounits = KernelAbstractions.zeros(get_backend(sys.coords), T, 1)
+        buffers = init_buffers!(sys, 1, true)
+    else
+        pe_vec_nounits = nothing
+        buffers = nothing
+    end
+
+    return potential_energy(sys, buffers, pe_vec_nounits, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function potential_energy(sys::System, neighbors, step_n::Integer=0;
+function potential_energy(sys::System, buffers, pe_vec_nounits, neighbors, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads())
     # Allow types like those from Measurements.jl, T from System is different
     T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
@@ -323,10 +332,9 @@ function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_a
     return pe
 end
 
-function potential_energy(sys::System{D, AT, T}, neighbors, step_n::Integer=0;
+function potential_energy(sys::System{D, AT, T}, buffers, pe_vec_nounits, neighbors, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
-    pe_vec_nounits = KernelAbstractions.zeros(get_backend(sys.coords), T, 1)
-    buffers = init_buffers!(sys, 1, true)
+    
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
