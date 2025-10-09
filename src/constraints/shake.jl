@@ -1,18 +1,19 @@
 export SHAKE_RATTLE
 
 """
-    SHAKE_RATTLE(n_atoms, dist_tolerance, vel_tolerance; dist_constraints=nothing,
-                 angle_constraints=nothing, gpu_block_size=128, max_iters=25)
+    SHAKE_RATTLE(n_atoms, dist_tolerance=1e-8u"nm", vel_tolerance=1e-8u"nm^2 * ps^-1";
+                 dist_constraints=nothing, angle_constraints=nothing,
+                 gpu_block_size=128, max_iters=25)
 
 Constrain distances during a simulation using the SHAKE and RATTLE algorithms.
-Either or both of `dist_constraints` and `angle_constraints` must be passed.
+Either or both of `dist_constraints` and `angle_constraints` must be given.
 
 Velocity constraints will be imposed for simulators that integrate velocities such as
 [`VelocityVerlet`](@ref).
 See [Ryckaert et al. 1977](https://doi.org/10.1016/0021-9991(77)90098-5) for SHAKE,
 [Andersen 1983](https://doi.org/10.1016/0021-9991(83)90014-1) for RATTLE,
 [Elber et al. 2011](https://doi.org/10.1140/epjst/e2011-01525-9) for a derivation
-of the linear system solved to satisfy the RATTLE algorithm and
+of the linear system solved to satisfy the RATTLE algorithm, and
 [Krautler et al. 2000](https://doi.org/10.1002/1096-987X(20010415)22:5%3C501::AID-JCC1021%3E3.0.CO;2-V)
 for the M-SHAKE algorithm.
 

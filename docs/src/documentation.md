@@ -377,6 +377,7 @@ Residue patches, virtual sites, file includes and any force types other than `Ha
 To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the array type for your GPU backend (for example `CuArray` for NVIDIA or `ROCArray` for AMD).
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
 The options are `"none"` (short range only), `"cutoff"` (reaction field method), `"pme"` (particle mesh Ewald summation) and `"ewald"` (Ewald summation, slow).
+To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
 
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
 The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
@@ -1353,25 +1354,46 @@ Currently, constraints are supported by the following simulators:
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
-
-See [this example](@ref "Constrained dynamics") for how to apply constraints to a system.
 Simulators incompatible with constraints will print a warning and continue when used with systems containing constraints.
 
-Molly supports [DistanceConstraint](@ref) and [AngleConstraint](@ref) on CPU and GPU. To use the GPU no-extra work is required, constraints are automatically moved from CPU to GPU. Distance constraints fix the distance between two atoms. Angle constraints are defined for tri-atomic molecules (e.g. water) and restrict the angle and the two bond lengths. 
+Molly supports [`DistanceConstraint`](@ref) and [`AngleConstraint`](@ref) on CPU and GPU.
+Distance constraints fix the distance between two atoms.
+Angle constraints are defined for sets of three atoms (e.g. water) and restrict the angle and the two bond lengths. 
 
-This diagram demonstrates the four allowed constraint types. 
+Constraints can be added when setting up a system from a file [as described above](@ref "Simulating a protein").
+To add constraints to a system manually, use something like the following:
+```julia
+dist_constraints = [
+    DistanceConstraint(1, 2, 1.0u"nm"),
+    DistanceConstraint(2, 3, 0.11u"nm"),
+]
+angle_constraints = [AngleConstraint(4, 5, 6, deg2rad(104.5), 0.1u"nm", 0.1u"nm")]
+
+shake = SHAKE_RATTLE(
+    6;
+    dist_constraints=dist_constraints,
+    angle_constraints=angle_constraints,
+)
+# SHAKE_RATTLE with 0 2-atom clusters, 1 3-atom clusters, 0 4-atom clusters and 1 angle clusters
+```
+`constraints=(shake,)` can then be given when setting up a [`System`](@ref).
+See [this example](@ref "Constrained dynamics") for more.
+
+This diagram demonstrates the four allowed constraint types:
 ![Valid Constraints](images/constraints_diagram.png)
-- Single bond between two atoms (e.g. hydrogen molecule)
-- 3 atoms, 2 [DistanceConstraint](@ref), angle is free (e.g. the hydrogens on either carbon of ethelene)
-- 3 atoms, 1 [AngleConstraint](@ref), implemented as 3 distance constraints (e.g. a water molecule)
-- 3 atoms around 1 central atom, 3 [DistanceConstraint](@ref) (e.g. ammonia)
+- Single bond between two atoms (e.g. a hydrogen molecule).
+- 3 atoms, 2 [`DistanceConstraint`](@ref)s, angle is free (e.g. the hydrogens on either carbon of ethelene).
+- 3 atoms, 1 [`AngleConstraint`](@ref), implemented as 3 distance constraints (e.g. a water molecule).
+- 3 atoms around 1 central atom, 3 [`DistanceConstraint`](@ref)s (e.g. an ammonia molecule).
 
-> [!NOTE]
-> You cannot constrain a linear chain of four atoms or an angle of 180°. Constraints cannot be clustered beyond the four valid classes. For example, you could not constrain all the hydrogen bonds in ethelene and the double bond simultaneosly. This would create a cluster of 5 constraints which is forbidden.
+!!! note
+    You can't constrain a linear chain of four atoms or an angle of 180°. Constraints beyond the four valid classes can't be used. For example, you can't constrain all the hydrogen bonds and the double bond in ethylene simultaneously. This would create a cluster of 5 constraints which is not supported.
 
-These constraints provide enough flexibility to constrain all hydrogen atoms on an organic molecule as well as water molecules.  
+These constraints provide enough flexibility to constrain all hydrogen atoms in organic molecules as well as water molecules.  
 
-All velocity constraints and diatomic distance constraints are solved analytically while larger constraints are linearized and solved iteratively via matrix inverse. The direct matrix inverse does not scale well beyond clusters with 3 constraints and is not implemented. Other methods can be used to solve larger constraint clusters but Molly does not support them. 
+All velocity constraints and diatomic distance constraints are solved analytically while larger constraints are linearized and solved iteratively via matrix inverse.
+The direct matrix inverse does not scale well beyond clusters with 3 constraints and is not implemented.
+Other methods can be used to solve larger constraint clusters, these are not yet supported by Molly. 
 
 ## Neighbor finders
 
