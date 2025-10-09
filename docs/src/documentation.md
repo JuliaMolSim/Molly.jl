@@ -1110,14 +1110,15 @@ end
 The functions [`random_velocity`](@ref), [`maxwell_boltzmann`](@ref) and [`temperature`](@ref) may be useful here.
 To use your custom coupler, give it as the `coupling` argument to the simulator as above.
 
-Note that as some of the coupling methods need the [`virial`](@ref) to properly work, any newly defined custom coupler
-should be accompanied by a function that tells Molly if it also needs the virial tensor and the amount of simulation
-steps between integrations of the coupler.
+Note that as some coupling methods need the [`virial`](@ref) to work, a custom coupler can be accompanied by a function that tells Molly the interval of simulation steps at which the virial is required.
+This helps save computation.
+For example:
 ```julia
-# In case you need the virial
-Molly.needs_virial(c::MyCoupler) = (truth = true, steps = c.n_steps)
-# In case you do NOT need the virial
-Molly.needs_virial(c::MyCoupler) = (truth = false, steps = Inf)
+# The virial is needed every c.n_steps
+Molly.needs_virial(c::MyCoupler) = c.n_steps
+
+# The virial is not needed, this is the default
+Molly.needs_virial(c::MyCoupler) = Inf
 ```
 The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
 Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods.
