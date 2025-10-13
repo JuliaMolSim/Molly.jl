@@ -8,7 +8,7 @@ export
 const LOG_PREVFLOAT0 = log(nextfloat(0.0))      # ≈ log(nextfloat(0.0)) ≈ -744
 const LOG_FLOATMAX   = log(floatmax(Float64))   # ≈ 709
 
-"""
+@doc """
     ThermoState(name::String, β, p, system)
     ThermoState(system::System, β, p; name::Union{Nothing,String}=nothing)
 
@@ -62,7 +62,7 @@ end
 
 
 
-"""
+@doc """
     assemble_mbar_inputs(coords_k, boundaries_k, states;
                          target_state=nothing, energy_units=u"kJ/mol", shift=false)
 
@@ -188,9 +188,7 @@ function assemble_mbar_inputs(coords_k,
     return (u=u, u_target=u_target, N = Nk, win_of=win_of, shifts=shifts)
 end
 
-"""
-    Assembles the reduced potentials vector for the target thermodynamic state
-"""
+# Assembles the reduced potentials vector for the target thermodynamic state
 function assemble_target_u(all_coords, all_boundaries, all_volumes, target::ThermoState{<:Any, <:Any, <:System{D,AT,T}};
                            energy_units=u"kJ/mol") where {D, AT, T}
     N  = length(all_coords)
@@ -224,10 +222,9 @@ function assemble_target_u(all_coords, all_boundaries, all_volumes, target::Ther
 end
 
 
-"""
-Initializer per Eq. C4 (Shirts & Chodera 2008):
-f_k^(0) = -mean( u[n, k] ) over frames n originating from state k.
-"""
+
+# Initializer per Eq. C4 (Shirts & Chodera 2008):
+# f_k^(0) = -mean( u[n, k] ) over frames n originating from state k.
 function mbar_init(u::AbstractMatrix, win_of::AbstractVector{<:Integer};
                    gauge_ref::Int=1, N_counts::Union{Nothing,AbstractVector{<:Integer}}=nothing)
     N, K = size(u)
@@ -279,10 +276,9 @@ function mbar_init(u::AbstractMatrix, win_of::AbstractVector{<:Integer};
     return f
 end
 
-"""
-Uses the self-consistent iteration method of Eq. C3 (Shirts & Chodera 2008)
-to solve the MBAR equations.
-"""
+
+# Uses the self-consistent iteration method of Eq. C3 (Shirts & Chodera 2008)
+# to solve the MBAR equations.
 function mbar_iteration(u, f_init, logN)
 
     N, K = size(u)
@@ -311,7 +307,7 @@ function mbar_iteration(u, f_init, logN)
     return f_new
 end
 
-"""
+@doc """
     iterate_mbar(u, win_of, N_counts; rtol=1e-8, max_iter=10_000)
 
 Solve the MBAR self-consistent equations [Shirts & Chodera, 2008, Eq. C3](https://doi.org/10.1063/1.2978177).
@@ -350,10 +346,9 @@ function iterate_mbar(u, win_of, N_counts; rtol::Float64=1e-8, max_iter::Int=10_
     return f_new, logN
 end
 
-"""
-Compute log Dₙ = log ∑_k N_k exp(f_k − u[n,k]) for each frame n (log-sum-exp stable).
-`u` is N×K: rows = frames n, cols = states k. `logN = log.(N_counts)`.
-"""
+
+# Compute log Dₙ = log ∑_k N_k exp(f_k − u[n,k]) for each frame n (log-sum-exp stable).
+# `u` is N×K: rows = frames n, cols = states k. `logN = log.(N_counts)`.
 function mbar_logD(u::AbstractMatrix, f::AbstractVector, logN::AbstractVector)
     N, K = size(u)
     if length(f) != K
@@ -378,9 +373,8 @@ function mbar_logD(u::AbstractMatrix, f::AbstractVector, logN::AbstractVector)
     return logD
 end
 
-"""
-W[n,k] = exp( f[k] − u[n,k] − logD[n] ), with `u` as N×K. `logN` only enters Dₙ.
-"""
+
+# W[n,k] = exp( f[k] − u[n,k] − logD[n] ), with `u` as N×K. `logN` only enters Dₙ.
 function mbar_weights_sampled(u::AbstractMatrix, f::AbstractVector, logN::AbstractVector; logD_n=nothing)
     N, K = size(u)
     if length(f) != K
@@ -408,10 +402,9 @@ function mbar_weights_sampled(u::AbstractMatrix, f::AbstractVector, logN::Abstra
     return W, logD
 end
 
-"""
-wₙ ∝ exp( −(u_target[n] − sₙ) ) / Dₙ where `sₙ` are the same per-frame shifts applied to `u`.
-Pass `shifts` you subtracted from `u`; if none were used, leave default.
-"""
+
+# wₙ ∝ exp( −(u_target[n] − sₙ) ) / Dₙ where `sₙ` are the same per-frame shifts applied to `u`.
+# Pass `shifts` you subtracted from `u`; if none were used, leave default.
 function mbar_weights_target(u_target::AbstractVector, logD_n::AbstractVector; shifts::Union{Nothing,AbstractVector} = nothing)
     N = length(u_target)
     
@@ -456,7 +449,7 @@ function mbar_weights_target(u_target::AbstractVector, logD_n::AbstractVector; s
     end
 end
 
-"""
+@doc """
     mbar_weights(u, u_target, f, N_counts, logN; shifts=nothing, check=true)
 
 Compute MBAR weights for sampled states and for a target state [Shirts & Chodera, 2008, Eq. 13](https://doi.org/10.1063/1.2978177).
@@ -531,7 +524,7 @@ function mbar_weights(u::AbstractMatrix,
     return W, w, logD
 end
 
-"""
+@doc """
     mbar_weights(mbar_generator::NamedTuple)
 
 High-level MBAR wrapper that computes free energies and reweighting weights from a
@@ -573,7 +566,7 @@ function mbar_weights(mbar_generator::NamedTuple)
 
 end
 
-"""
+@doc """
     pmf_with_uncertainty(u, u_target, f, N_counts, logN, R_k;
                          shifts=nothing, nbins=nothing, edges=nothing, kBT=nothing,
                          zero=:min, rmin=nothing, rmax=nothing)
@@ -785,7 +778,7 @@ function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
             p = p, var_p = var_p)
 end
 
-"""
+@doc """
     pmf_with_uncertainty(coords_k, boundaries_k, states, target_state, CV;
                          energy_units=u"kJ/mol", shift=false)
 

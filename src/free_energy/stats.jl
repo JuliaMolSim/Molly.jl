@@ -2,7 +2,7 @@ export
     statistical_inefficiency,
     subsample
 
-"""
+@doc """
     statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,Int}=nothing)
 
 Integrated autocorrelation time estimator with IPS truncation and finite-sample taper.
