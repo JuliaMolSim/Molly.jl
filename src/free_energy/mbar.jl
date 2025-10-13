@@ -93,7 +93,6 @@ function assemble_mbar_inputs(coords_k,
                               target_state::Union{Nothing, ThermoState{<:Any, <:Any, <:System{D, AT, T}}} = nothing,
                               energy_units = u"kJ/mol",
                               shift::Bool  = false) where {D, AT, T}
-
     K = length(states)
 
     if length(coords_k) != K != length(boundaries_k)
@@ -815,7 +814,7 @@ function pmf_with_uncertainty(coords_k::AbstractVector,
                               energy_units = u"kJ/mol",
                               shift::Bool  = false)
 
-    kBT = Float64(1/target_state.β)
+    kBT = Float64(1/target_state.β) * target_state.system.energy_units
 
     mbar_gen = assemble_mbar_inputs(coords_k, boundaries_k, states; 
                                     target_state = target_state,
