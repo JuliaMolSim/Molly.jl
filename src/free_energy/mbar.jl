@@ -591,7 +591,15 @@ Estimate a 1D PMF along a scalar CV and its large-sample uncertainty using MBAR
 
 # Returns
 NamedTuple with:
-`centers, widths, edges, ess_per_bin, F, F_energy, sigma_F, p, var_p`.
+ - `centers`  — the center of the histogram bins used to sample the CV
+ - `widths` — the width of the histogram bins used to sample the CV
+ - `edges` — the edges of the histogram bins used to sample the CV 
+ - `F` — PMF in kBT units
+ - `F_energy` — PMF in energy units, if provided 
+ - `sigma_F` — uncertainty of the PMF in kBT units
+ - `sigma_F_energy` — uncertainty of the PMF in energy units, if provided
+ - `p` — probability density along the CV
+ - `var_p` — variance of the probability density along the CV
 """
 function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
                               f::AbstractVector,
@@ -769,12 +777,12 @@ function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
 
     F .-= offset
 
-    bin_ess  = ess_per_bin(edges, R_flat, W_na)
-    F_energy = isnothing(kBT) ? nothing : (F .* kBT)
+    F_energy       = isnothing(kBT) ? nothing : (F .* kBT)
+    sigma_F_energy = isnothing(kBT) ? nothing : (sigma_F .* kBT)
 
     return (centers = centers, widths = widths, edges = edges,
-            ess_per_bin = bin_ess,
-            F = F, F_energy = F_energy, sigma_F = sigma_F,
+            F = F, F_energy = F_energy, 
+            sigma_F = sigma_F, sigma_F_energy = sigma_F_energy,
             p = p, var_p = var_p)
 end
 

@@ -611,10 +611,11 @@ And finally, we can estimate the PMF using the output of the previous step by ca
 
 pmf = pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV; shifts = shifts, kBT = kBT)
 
-centers = pmf.centers   # The collective variable 
-PMF     = pmf.F         # PMF in kBT
-PMF_enr = pmf.F_energy  # PMF in energy units
-sigma   = pmf.sigma_F   # Standard deviation
+centers   = pmf.centers         # The collective variable 
+PMF       = pmf.F               # PMF in kBT
+PMF_enr   = pmf.F_energy        # PMF in energy units
+sigma     = pmf.sigma_F         # Standard deviation in kBT
+sigma_enr = pmf.sigma_F_energy  # Standard deviation in energy units
 ```
 
 But what about the short path? Well, we also provide an overload of the [`pmf_with_uncertainty`](@ref) method that allows to get the PMF in a single call by doing:
@@ -628,6 +629,7 @@ pmf = pmf_with_uncertainty(C,            # Coordinates
                            CV)           # Collective Variable
 ```
 
-Now one can plot this into a graph. The code for that is left as an exercise to the reader, but the results should look like something like this!
+Now one can plot this into a graph. The code for that is left as an exercise to the reader, but the results should look like something similar to this!
 
-![PMF along the dipeptide torsion](images/dihedral_pmf.png)
+![PMF along the dipeptide torsion in kBT units](images/dihedral_pmf_kbt.png)
+![PMF along the dipeptide torsion in energy units](images/dihedral_pmf_enr.png)
