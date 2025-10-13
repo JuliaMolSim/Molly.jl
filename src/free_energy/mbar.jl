@@ -333,14 +333,11 @@ function iterate_mbar(u, win_of, N_counts; rtol::Float64=1e-8, max_iter::Int=10_
     rel  = maximum(abs.(f_new .- f_old) ./ max.(abs.(f_old), 1.0))
     iter = 1
 
-    pbar = ProgressBar(total = max_iter)
-
     while rel > rtol && iter < max_iter
         f_old = f_new
         f_new = mbar_iteration(u, f_old, logN)
         rel   = maximum(abs.(f_new .- f_old) ./ max.(abs.(f_old), 1.0))
         iter += 1
-        update(pbar)
     end
 
     return f_new, logN
