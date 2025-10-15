@@ -315,7 +315,7 @@ use_neighbors(inter::AshbaughHatch) = inter.use_neighbors
 function Base.zero(lj::AshbaughHatch{C, H, S, E, L, W}) where {C, H, S, E, L, W}
     return AshbaughHatch(
         lj.cutoff,
-        lj,use_neighbors,
+        lj.use_neighbors,
         lj.shortcut,
         lj.σ_mixing,
         lj.ϵ_mixing,
