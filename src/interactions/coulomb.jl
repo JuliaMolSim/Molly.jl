@@ -350,7 +350,7 @@ which provide the long-range term.
 `dist_cutoff` is the cutoff distance for short range interactions.
 `approximate_erfc` determines whether to use a fast approximation to the erfc function.
 """
-struct CoulombEwald{T, D, W, C, A}
+struct CoulombEwald{T, D, W, C, A} <: PairwiseInteraction
     dist_cutoff::D
     error_tol::T
     use_neighbors::Bool

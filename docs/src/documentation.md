@@ -563,7 +563,6 @@ In Molly there are three types of interactions:
 - Specific interactions are present between specific atoms, and account for example for bonded terms in molecular mechanics force fields.
 - General interactions are a free-form interaction type that can access the whole system and outputs forces for all atoms. This is useful for neural network potentials, implicit solvent models and other cases that require maximum flexibility. General interactions should be compatible with the [AtomsCalculators.jl](https://github.com/JuliaMolSim/AtomsCalculators.jl) interface.
 
-
 The available pairwise interactions are:
 - [`LennardJones`](@ref)
 - [`LennardJonesSoftCore`](@ref)
@@ -608,7 +607,7 @@ Other mixing functions are available, such as `Molly.waldman_hagler_σ_mixing` a
 Custom mixing functions can be given instead and should take in the two atoms as arguments.
 The `atom_type` field of the atoms is available, allowing features like changing the weight of solute-solvent interactions.
 
-To define your own pairwise interaction, first define the `struct`:
+To define your own pairwise interaction, first define the `struct`, which must be a subtype of [`PairwiseInteraction`](@ref):
 ```julia
 struct MyPairwiseInter{C} <: PairwiseInteraction
     # Any properties, e.g. cutoffs and interaction parameters

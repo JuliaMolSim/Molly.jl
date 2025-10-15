@@ -505,7 +505,6 @@ end
     end
 end
 
-
 @testset "AtomsCalculators" begin
     ab_sys = AtomsBase.AbstractSystem(
         make_test_system().system;
@@ -531,4 +530,3 @@ end
         test_forces(ab_sys, calc)
     end
 end
-

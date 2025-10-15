@@ -1,6 +1,7 @@
 # Types
 
 export
+    PairwiseInteraction,
     InteractionList1Atoms,
     InteractionList2Atoms,
     InteractionList3Atoms,
@@ -21,29 +22,25 @@ export
     masses,
     charges,
     MollyCalculator,
-    ASECalculator,
-    NBodyInteraction,
-    PairwiseInteraction
+    ASECalculator
 
 const DefaultFloat = Float64
 
-"""
-Base type for all interaction types.
-"""
-abstract type Interaction end 
+# Base type for Molly interaction types
+abstract type AbstractInteraction end 
+
+# Base type for n-body interactions, `N` is the body order
+# Only NBodyInteraction{2} is currently supported
+abstract type NBodyInteraction{N} <: AbstractInteraction end
+
+# Base type for all specific interaction lists, `N` is the number of atoms in the interaction
+abstract type SpecificInteractionList{N} <: AbstractInteraction end
 
 """
-Base type for all n-body interactions. `N` denotes the body order
-"""
-abstract type NBodyInteraction{N} <: Interaction end
+Base type for pairwise interactions.
 
-"""
-Base type for all specific interaction lists. `N` denotes number of atoms in the interaction.
-"""
-abstract type SpecificInteractionList{N} <: Interaction end
-
-"""
-Type alias for pairwise interactions
+An alias for NBodyInteraction{2}.
+Custom pairwise interactions should subtype this.
 """
 const PairwiseInteraction = NBodyInteraction{2}
 
@@ -493,15 +490,15 @@ interface described there.
     atoms are in the same molecule.
 - `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
     interactions between all or most atom pairs such as electrostatics.
-    Typically a `Tuple`.
+    Should be a `Tuple` or `NamedTuple` of `PairwiseInteraction`s.
 - `specific_inter_lists::SI=()`: the specific interactions in the system,
-    i.e. interactions between specific atoms such as bonds or angles. Typically
-    a `Tuple`.
+    i.e. interactions between specific atoms such as bonds or angles.
+    Should be a `Tuple` or `NamedTuple`.
 - `general_inters::GI=()`: the general interactions in the system,
     i.e. interactions involving all atoms such as implicit solvent. Each should
-    implement the AtomsCalculators.jl interface. Typically a `Tuple`.
+    implement the AtomsCalculators.jl interface. Should be a `Tuple` or `NamedTuple`.
 - `constraints::CN=()`: the constraints for bonds and angles in the system.
-    Typically a `Tuple`.
+    Should be a `Tuple` or `NamedTuple`.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `loggers::L=()`: the loggers that record properties of interest during a
@@ -594,14 +591,6 @@ function System(;
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
-    if !all(isa.(values(pairwise_inters), PairwiseInteraction))
-        throw(ArgumentError("Not all pairwise_inters have supertype PairwiseInteraction. Got: $(supertype.(typeof.(pairwise_inters)))"))
-    end
-
-    if !all(isa.(values(specific_inter_lists), SpecificInteractionList))
-        throw(ArgumentError("Not all specific_inter_lists have supertype SpecificInteractionList. Got: $(supertype.(typeof.(specific_inter_lists)))"))
-    end
-
     if isa(atoms, AbstractGPUArray) && !isa(coords, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
@@ -626,6 +615,15 @@ function System(;
     if !any(TT -> (general_inters isa TT), (Tuple, NamedTuple))
         throw(ArgumentError("general_inters should be a Tuple or a NamedTuple but has " *
                             "type $(typeof(general_inters))"))
+    end
+
+    if !all(i -> i isa PairwiseInteraction, values(pairwise_inters))
+        throw(ArgumentError("not all pairwise_inters are a subtype of PairwiseInteraction, " *
+                            "found types $(typeof.(pairwise_inters))"))
+    end
+    if !all(i -> i isa SpecificInteractionList, values(specific_inter_lists))
+        throw(ArgumentError("not all specific_inter_lists are a subtype of SpecificInteractionList, " *
+                            "found types $(typeof.(specific_inter_lists))"))
     end
 
     if neighbor_finder isa NoNeighborFinder && any(use_neighbors, values(pairwise_inters))
@@ -669,7 +667,6 @@ function System(;
                     specific_inter_lists, general_inters, constraints, neighbor_finder, loggers,
                     df, force_units, energy_units, k_converted, atom_masses, total_mass, data)
 end
-
 
 """
     System(sys; <keyword arguments>)
@@ -905,25 +902,25 @@ construction where `n` is the number of threads to be used per replica.
     each replica.
 - `pairwise_inters=()`: the pairwise interactions in the system, i.e. interactions
     between all or most atom pairs such as electrostatics (to be used if the same for all replicas).
-    Typically a `Tuple`. This is only used if no value is passed to the argument
-    `replica_pairwise_inters`.
+    Should be a `Tuple` or `NamedTuple` of `PairwiseInteraction`s. This is only used if no
+    value is passed to the argument `replica_pairwise_inters`.
 - `replica_pairwise_inters=[() for _ in 1:n_replicas]`: the pairwise interactions for
     each replica.
 - `specific_inter_lists=()`: the specific interactions in the system, i.e. interactions
     between specific atoms such as bonds or angles (to be used if the same for all replicas).
-    Typically a `Tuple`. This is only used if no value is passed to the argument
+    Should be a `Tuple` or `NamedTuple`. This is only used if no value is passed to the argument
     `replica_specific_inter_lists`.
 - `replica_specific_inter_lists=[() for _ in 1:n_replicas]`: the specific interactions in
     each replica.
 - `general_inters=()`: the general interactions in the system, i.e. interactions involving
     all atoms such as implicit solvent (to be used if the same for all replicas). Each should
-    implement the AtomsCalculators.jl interface. Typically a `Tuple`. This is only used if no
-    value is passed to the argument `replica_general_inters`.
+    implement the AtomsCalculators.jl interface. Should be a `Tuple` or `NamedTuple`. This is
+    only used if no value is passed to the argument `replica_general_inters`.
 - `replica_general_inters=[() for _ in 1:n_replicas]`: the general interactions for
     each replica.
 - `constraints::CN=()`: the constraints for bonds and angles in the system (to be used if the same
-    for all replicas). Typically a `Tuple`. This is only used if no value is passed to the
-    argument `replica_constraints`.
+    for all replicas). Should be a `Tuple` or `NamedTuple`. This is only used if no value is
+    passed to the argument `replica_constraints`.
 - `replica_constraints=[() for _ in 1:n_replicas]`: the constraints for bonds and angles in each
     replica.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
@@ -1424,13 +1421,13 @@ Not currently compatible with using atom properties such as `σ` and `ϵ`.
 # Arguments
 - `pairwise_inters::PI=()`: the pairwise interactions in the system, i.e.
     interactions between all or most atom pairs such as electrostatics.
-    Typically a `Tuple`.
+    Should be a `Tuple` or `NamedTuple` of `PairwiseInteraction`s.
 - `specific_inter_lists::SI=()`: the specific interactions in the system,
-    i.e. interactions between specific atoms such as bonds or angles. Typically
-    a `Tuple`.
+    i.e. interactions between specific atoms such as bonds or angles.
+    Should be a `Tuple` or `NamedTuple`.
 - `general_inters::GI=()`: the general interactions in the system,
     i.e. interactions involving all atoms such as implicit solvent. Each should
-    implement the AtomsCalculators.jl interface. Typically a `Tuple`.
+    implement the AtomsCalculators.jl interface. Should be a `Tuple` or `NamedTuple`.
 - `neighbor_finder::NF=NoNeighborFinder()`: the neighbor finder used to find
     close atoms and save on computation.
 - `force_units::F=u"kJ * mol^-1 * nm^-1"`: the units of force of the system.
