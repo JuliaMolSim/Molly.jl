@@ -926,6 +926,7 @@ function ReplicaSystem(;
                         replica_coords,
                         boundary,
                         n_replicas,
+                        replica_boundaries=nothing,
                         replica_velocities=nothing,
                         atoms_data=[],
                         topology=nothing,
@@ -956,6 +957,14 @@ function ReplicaSystem(;
     C = typeof(replica_coords[1])
     B = typeof(boundary[1])
     NF = typeof(neighbor_finder)
+
+    if isnothing(replica_boundaries)
+        @warn "Using the same boundary for all replicas! Make sure that this is reasonable for your system!"
+        replica_boundaries = [copy(boundary) for _ in 1:n_replicas]
+    elseif length(replica_boundaries) != n_replicas
+        throw(ArgumentError("number of boundaries ($(length(replica_boundaries)))"
+                            *" does not match number of replicas $(length(n_replicas))"))
+    end
 
     if isnothing(replica_velocities)
         if force_units == NoUnits
@@ -1091,7 +1100,7 @@ function ReplicaSystem(;
                         typeof(replica_specific_inter_lists[i]), typeof(replica_general_inters[i]),
                         typeof(replica_constraints[i]), NF, typeof(replica_loggers[i]), F, E, K,
                         M, TM, Nothing}(
-            atoms, replica_coords[i], boundary[i], replica_velocities[i],
+            atoms, replica_coords[i], replica_boundaries[i], replica_velocities[i],
             atoms_data, replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i],
             deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i], force_units,
