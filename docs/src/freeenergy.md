@@ -37,8 +37,8 @@ end
 
 # store angles as plain Float64 radians; enforce k as energy
 @inline function DihedralRestraint(ϕ0::Unitful.AbstractQuantity, Δϕ::Unitful.AbstractQuantity, k)
-    ϕ0r = ustrip(u"rad", uconvert(u"rad", ϕ0))
-    Δϕr = ustrip(u"rad", uconvert(u"rad", Δϕ))
+    ϕ0r = ustrip(u"rad", ϕ0)
+    Δϕr = ustrip(u"rad", Δϕ)
     return DihedralRestraint(ϕ0r, Δϕr, k)  # k should be energy
 end
 ```
@@ -565,11 +565,8 @@ energy_units = TRJ_SYSTEMS[1].system.energy_units
 kBT          = uconvert(energy_units, Unitful.R * temp)
 βi           = Float64(ustrip(1.0 / kBT))
 
-states = ThermoState[
-    let
-        ThermoState("win_$i", βi, pres, TRJ_SYSTEMS[i].system)   # NPT here; otherwise pres = nothing
-    end for i in eachindex(TRJ_SYSTEMS)
-]
+states = ThermoState[ ThermoState("win_$i", βi, pres, TRJ_SYSTEMS[i].system)   # NPT here; otherwise pres = nothing
+                      for i in eachindex(TRJ_SYSTEMS) ]
 
 target_state = ThermoState("target", βi, pres, sys_nobias)
 ```
@@ -629,7 +626,7 @@ pmf = pmf_with_uncertainty(C,            # Coordinates
                            CV)           # Collective Variable
 ```
 
-Now one can plot this into a graph. The code for that is left as an exercise to the reader, but the results should look like something similar to this!
+Now one can put this into a graph, for example using a scatter for the free energy and making use of the calculated sigmas (see the previous code blocks) to shade the plot and give a feel of the uncertainties. The code is left as an exercise to the reader, but the results should look like something similar to this! 
 
 ![PMF along the dipeptide torsion in kBT units](images/dihedral_pmf_kbt.png)
 ![PMF along the dipeptide torsion in energy units](images/dihedral_pmf_enr.png)

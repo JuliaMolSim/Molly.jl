@@ -577,6 +577,18 @@ function mbar_weights(mbar_generator::NamedTuple)
 
 end
 
+struct PMF{C, W, E, F, FE, SF, SFE, P, VP}
+    centers::C
+    widths::W
+    edges::E
+    F::F
+    F_energy::FE
+    sigma_F::SF
+    sigma_F_energy::SFE
+    p::P
+    var_p::VP
+end
+
 @doc """
     pmf_with_uncertainty(u, u_target, f, N_counts, logN, R_k;
                          shifts=nothing, nbins=nothing, edges=nothing, kBT=nothing,
@@ -791,10 +803,10 @@ function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
     F_energy       = isnothing(kBT) ? nothing : (F .* kBT)
     sigma_F_energy = isnothing(kBT) ? nothing : (sigma_F .* kBT)
 
-    return (centers = centers, widths = widths, edges = edges,
-            F = F, F_energy = F_energy, 
-            sigma_F = sigma_F, sigma_F_energy = sigma_F_energy,
-            p = p, var_p = var_p)
+    return PMF(centers, widths, edges,
+               F, F_energy, 
+               sigma_F, sigma_F_energy,
+               p, var_p)
 end
 
 @doc """
