@@ -11,7 +11,7 @@
     end
 
     # Custom pairwise interaction
-    struct SIRInteraction
+    struct SIRInteraction <: PairwiseInteraction
         dist_infection::Float64
         prob_infection::Float64
         prob_recovery::Float64

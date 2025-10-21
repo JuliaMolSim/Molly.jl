@@ -79,7 +79,6 @@ Custom simulators should implement this function.
     hn = sim.step_size
     coords_copy = zero(sys.coords)
     F = zero_forces(sys)
-    
 
     for step_n in 1:sim.max_steps
         forces!(F, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
@@ -166,8 +165,7 @@ end
         if using_constraints
             cons_coord_storage .= sys.coords
         end
-
-        needs_vir = step_n % needs_vir_steps == 0 ? true : false
+        needs_vir = (step_n % needs_vir_steps == 0)
 
         sys.coords .+= sys.velocities .* sim.dt .+ accels_t .* dt_sq_div2
         using_constraints && apply_position_constraints!(sys, cons_coord_storage, cons_vel_storage,
@@ -247,9 +245,7 @@ end
     end
 
     for step_n in 1:n_steps
-
-        needs_vir = step_n % needs_vir_steps == 0 ? true : false
-        
+        needs_vir = (step_n % needs_vir_steps == 0)
         forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
         accels_t .= forces_t ./ masses(sys)
 
@@ -322,9 +318,7 @@ StormerVerlet(; dt, coupling=NoCoupling()) = StormerVerlet(dt, coupling)
     dt_sq = sim.dt^2
 
     for step_n in 1:n_steps
-
-        needs_vir = step_n % needs_vir_steps == 0 ? true : false
-
+        needs_vir = (step_n % needs_vir_steps == 0)
         forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
         accels_t .= forces_t ./ masses(sys)
 
@@ -412,9 +406,7 @@ end
     dt_div2 = sim.dt / 2
 
     for step_n in 1:n_steps
-
-        needs_vir = step_n % needs_vir_steps == 0 ? true : false
-
+        needs_vir = (step_n % needs_vir_steps == 0)
         forces!(forces_t, sys, neighbors, buffers, Val(needs_vir), step_n; n_threads=n_threads)
         accels_t .= forces_t ./ masses(sys)
 
@@ -711,9 +703,7 @@ end
     dt_div2 = sim.dt / 2
 
     for step_n in 1:n_steps
-
-        needs_vir = step_n % needs_vir_steps == 0 ? true : false
-
+        needs_vir = (step_n % needs_vir_steps == 0)
         v_half .= sys.velocities .+ (accels_t .- (sys.velocities .* zeta)) .* dt_div2
 
         sys.coords .+= v_half .* sim.dt

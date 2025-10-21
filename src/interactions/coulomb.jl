@@ -17,7 +17,7 @@ The potential energy is defined as
 V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}}
 ```
 """
-@kwdef struct Coulomb{C, W, T}
+@kwdef struct Coulomb{C, W, T} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
     weight_special::W = 1
@@ -118,7 +118,7 @@ V(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 (r_{ij}^6 + \alpha  \sigma_{ij}^6
 ```
 If ``\alpha`` or ``\lambda`` are zero this gives the standard [`Coulomb`](@ref) potential.
 """
-@kwdef struct CoulombSoftCore{C, A, L, P, S, W, T, R}
+@kwdef struct CoulombSoftCore{C, A, L, P, S, W, T, R} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     α::A = 1
     λ::L = 0
@@ -227,7 +227,7 @@ const crf_solvent_dielectric = 78.3
 The Coulomb electrostatic interaction modified using the reaction field approximation
 between two atoms.
 """
-@kwdef struct CoulombReactionField{D, S, W, T}
+@kwdef struct CoulombReactionField{D, S, W, T} <: PairwiseInteraction
     dist_cutoff::D
     solvent_dielectric::S = crf_solvent_dielectric
     use_neighbors::Bool = false
@@ -350,7 +350,7 @@ which provide the long-range term.
 `dist_cutoff` is the cutoff distance for short range interactions.
 `approximate_erfc` determines whether to use a fast approximation to the erfc function.
 """
-struct CoulombEwald{T, D, W, C, A}
+struct CoulombEwald{T, D, W, C, A} <: PairwiseInteraction
     dist_cutoff::D
     error_tol::T
     use_neighbors::Bool
@@ -487,7 +487,7 @@ and the force on each atom by
 F(r_{ij}) = \frac{q_i q_j}{4 \pi \varepsilon_0 r_{ij}^2} \exp(-\kappa r_{ij})\left(\kappa r_{ij} + 1\right) \vec{r}_{ij}
 ```
 """
-@kwdef struct Yukawa{C, W, T, K}
+@kwdef struct Yukawa{C, W, T, K} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
     weight_special::W = 1

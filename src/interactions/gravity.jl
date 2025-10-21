@@ -10,7 +10,7 @@ The potential energy is defined as
 V(r_{ij}) = -\frac{G m_i m_j}{r_{ij}}
 ```
 """
-@kwdef struct Gravity{T, C}
+@kwdef struct Gravity{T, C} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     G::T = Unitful.G
     use_neighbors::Bool = false

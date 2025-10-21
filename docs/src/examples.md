@@ -158,7 +158,7 @@ mutable struct Person
 end
 
 # Custom pairwise interaction
-struct SIRInteraction
+struct SIRInteraction <: PairwiseInteraction
     dist_infection::Float64
     prob_infection::Float64
     prob_recovery::Float64
@@ -623,7 +623,7 @@ struct BondableAtom
     partners::Set{Int}
 end
 
-struct BondableInteraction
+struct BondableInteraction <: PairwiseInteraction
     prob_formation::Float64
     prob_break::Float64
     dist_formation::Float64

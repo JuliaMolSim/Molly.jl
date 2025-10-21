@@ -2,6 +2,7 @@
 
 export
     total_energy,
+    kinetic_energy_tensor!,
     kinetic_energy,
     kinetic_energy_tensor!,
     virial,
@@ -175,14 +176,10 @@ function potential_energy(sys::System, neighbors, buffers::Nothing = nothing, st
                           n_threads::Integer=Threads.nthreads())
     # Allow types like those from Measurements.jl, T from System is different
     T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
-    pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
-    pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
-    sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
-    sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
-    sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
-    sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
 
     if length(sys.pairwise_inters) > 0
+        pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
+        pairwise_inters_nl   = filter( use_neighbors, values(sys.pairwise_inters))
         pe = pairwise_pe_loop(sys.atoms, sys.coords, sys.velocities, sys.boundary,
                               neighbors, sys.energy_units, length(sys), pairwise_inters_nonl,
                               pairwise_inters_nl, Val(T), Val(n_threads), step_n)
@@ -191,6 +188,10 @@ function potential_energy(sys::System, neighbors, buffers::Nothing = nothing, st
     end
 
     if length(sys.specific_inter_lists) > 0
+        sils_1_atoms = filter(il -> il isa InteractionList1Atoms, values(sys.specific_inter_lists))
+        sils_2_atoms = filter(il -> il isa InteractionList2Atoms, values(sys.specific_inter_lists))
+        sils_3_atoms = filter(il -> il isa InteractionList3Atoms, values(sys.specific_inter_lists))
+        sils_4_atoms = filter(il -> il isa InteractionList4Atoms, values(sys.specific_inter_lists))
         pe += specific_pe(sys.atoms, sys.coords, sys.velocities, sys.boundary, sys.energy_units,
                           sils_1_atoms, sils_2_atoms, sils_3_atoms, sils_4_atoms, Val(T), step_n)
     end

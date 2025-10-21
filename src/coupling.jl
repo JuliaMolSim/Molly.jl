@@ -35,6 +35,9 @@ function apply_coupling!(sys, buffers, couplers::Union{Tuple, NamedTuple}, sim, 
     return recompute_forces
 end
 
+# By default, couplers do not require the virial
+needs_virial(c) = Inf
+
 """
     NoCoupling()
 
@@ -43,8 +46,6 @@ Placeholder coupler that does nothing.
 struct NoCoupling end
 
 apply_coupling!(sys, buffers, ::NoCoupling, sim, neighbors, step_n; kwargs...) = false
-
-needs_virial(c::NoCoupling) = (truth = false, steps = Inf)
 
 @doc raw"""
     ImmediateThermostat(temperature)
@@ -70,8 +71,6 @@ function apply_coupling!(sys, buffers, thermostat::ImmediateThermostat, sim, nei
     sys.velocities .*= sqrt(thermostat.temperature / temp)
     return false
 end
-
-needs_virial(c::ImmediateThermostat) = (truth = false, steps = Inf)
 
 @doc raw"""
     VelocityRescaleThermostat(temperature, coupling_const; n_steps=1)
@@ -151,8 +150,6 @@ function apply_coupling!(sys::System{<:Any, AT}, buffers, thermostat::VelocityRe
     return false
 end
 
-needs_virial(c::VelocityRescaleThermostat) = (truth = false, steps = Inf)
-
 """
     AndersenThermostat(temperature, coupling_const)
 
@@ -193,8 +190,6 @@ function apply_coupling!(sys::System{<:Any, AT, T}, buffers, thermostat::Anderse
     return false
 end
 
-needs_virial(c::AndersenThermostat) = (truth = false, steps = Inf)
-
 @doc raw"""
     BerendsenThermostat(temperature, coupling_const)
 
@@ -220,8 +215,6 @@ function apply_coupling!(sys, buffers, thermostat::BerendsenThermostat, sim, nei
     sys.velocities .*= sqrt(λ2)
     return false
 end
-
-needs_virial(c::BerendsenThermostat) = (truth = false, steps = Inf)
 
 @doc raw"""
     BerendsenBarostat(pressure, coupling_const;
@@ -368,6 +361,8 @@ function BerendsenBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
     end
 end
 
+needs_virial(c::BerendsenBarostat) = c.n_steps
+
 function apply_coupling!(sys::System{D},
                          buffers,
                          barostat::BerendsenBarostat{PT, CT, ST, ICT, FT},
@@ -376,7 +371,9 @@ function apply_coupling!(sys::System{D},
                          step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
                          kwargs...) where {D, PT, CT, ST, ICT, FT}
-    step_n % barostat.n_steps != 0 && return false
+    if step_n % barostat.n_steps != 0
+        return false
+    end
 
     # Pressure in barostat units
     P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads)
@@ -438,8 +435,6 @@ function apply_coupling!(sys::System{D},
     scale_coords!(sys, SMatrix{D,D,FT}(μ))
     return true
 end
-
-needs_virial(c::BerendsenBarostat) = (truth = true, steps = c.n_steps)
 
 @doc raw"""
     CRescaleBarostat(pressure, coupling_const;
@@ -582,6 +577,8 @@ function CRescaleBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
     end
 end
 
+needs_virial(c::CRescaleBarostat) = c.n_steps
+
 function apply_coupling!(sys::System{D, AT},
                          buffers,
                          barostat::CRescaleBarostat{PT, CT, ST, ICT, FT},
@@ -590,7 +587,9 @@ function apply_coupling!(sys::System{D, AT},
                          step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
                          rng=Random.default_rng()) where {D, AT, PT, CT, ST, ICT, FT}
-    step_n % barostat.n_steps != 0 && return false
+    if step_n % barostat.n_steps != 0
+        return false
+    end
 
     # Pressure tensor in barostat units
     P = pressure(sys, neighbors, step_n, buffers; recompute=false, n_threads=n_threads, )
@@ -682,8 +681,6 @@ function apply_coupling!(sys::System{D, AT},
     scale_coords!(sys, SMatrix{3,3,FT}(μ); scale_velocities=true)
     return true
 end
-
-needs_virial(c::CRescaleBarostat) = (truth = true, steps = c.n_steps)
 
 @doc raw"""
     MonteCarloBarostat(pressure, temperature, boundary; coupling_type = :isotropic,
@@ -989,26 +986,28 @@ function apply_coupling!(sys::System{D, AT, T}, buffers, barostat::MonteCarloBar
     return recompute_forces
 end
 
-needs_virial(c::MonteCarloBarostat) = (truth = false, steps = Inf)
-
-# Return whether virial is needed and the step cadence to compute it
+# Whether virial is needed and the step interval to compute it
 function needs_virial_schedule(c)
-    v = needs_virial(c)
-    return v.truth ? (true, v.steps) : (false, Inf)
+    s = needs_virial(c)
+    return (!isinf(s), s)
 end
 
 function needs_virial_schedule(cs::Union{Tuple, NamedTuple})
     steps = Int[]
     for c in cs
-        v = needs_virial(c)
-        v.truth && push!(steps, v.steps)
+        s = needs_virial(c)
+        if !isinf(s)
+            push!(steps, s)
+        end
     end
-    isempty(steps) && return (false, Inf)
+    if isempty(steps)
+        return (false, Inf)
+    end
     smin = minimum(steps)
     for s in steps
         if s % smin != 0
-            throw(ArgumentError("incompatible virial step requirement $steps, all must be " *
-                                "multiples of $smin"))
+            throw(ArgumentError("incompatible virial step interval $steps, all must be " *
+                                "multiples of the minimum interval $smin"))
         end
     end
     return (true, smin)

@@ -45,7 +45,7 @@ C_{ij} &= (C_{ii} C_{jj})^{1/2}
 ```
 so atoms that use this interaction should have fields `A`, `B` and `C` available.
 """
-@kwdef struct Buckingham{C, S, A, B, M, W}
+@kwdef struct Buckingham{C, S, A, B, M, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()
     use_neighbors::Bool = false
     shortcut::S = buckingham_zero_shortcut
