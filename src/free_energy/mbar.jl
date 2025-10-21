@@ -32,12 +32,17 @@ struct ThermoState{B,P,S}
 end
 
 function ThermoState(system::System, beta, press; name::Union{Nothing, String} = nothing)
-    inv_ener = dimension(1/system.energy_units)
-    if dimension(beta) != inv_ener
-        throw(ArgumentError("β was not provided in appropriate dimensions: $(inv_ener)"))
-    end
-    if !isbar(press)
-        throw(ArgumentError("Pressure was not provided in appropriate units"))
+
+    if system.energy_units isa NoUnits
+        @warn "No units provided for System in thermodynamic state. Skipping some sanity checks, you are responsible to provide matching units!"
+    else
+        inv_ener = dimension(1/system.energy_units)
+        if dimension(beta) != inv_ener
+            throw(ArgumentError("β was not provided in appropriate dimensions: $(inv_ener)"))
+        end
+        if !isbar(press)
+            throw(ArgumentError("Pressure was not provided in appropriate units"))
+        end
     end
     if name isa Nothing
         name = "system_$(beta)_$(pressure)"
