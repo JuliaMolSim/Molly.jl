@@ -163,17 +163,15 @@ Custom interaction types should implement this function.
 function potential_energy(sys::System{D, AT, T}; n_threads::Integer=Threads.nthreads()) where {D, AT, T}
 
     if AT <: AbstractGPUArray
-        pe_vec_nounits = KernelAbstractions.zeros(get_backend(sys.coords), T, 1)
         buffers = init_buffers!(sys, 1, true)
     else
-        pe_vec_nounits = nothing
         buffers = nothing
     end
 
-    return potential_energy(sys, buffers, pe_vec_nounits, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
+    return potential_energy(sys, find_neighbors(sys; n_threads=n_threads), buffers; n_threads=n_threads)
 end
 
-function potential_energy(sys::System, buffers, pe_vec_nounits, neighbors, step_n::Integer=0;
+function potential_energy(sys::System, neighbors, buffers::Nothing = nothing, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads())
     # Allow types like those from Measurements.jl, T from System is different
     T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
@@ -345,28 +343,37 @@ function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_a
     return pe
 end
 
-function potential_energy(sys::System{D, AT, T}, buffers::BuffersGPU, pe_vec_nounits, neighbors, step_n::Integer=0;
+function potential_energy(sys::System{D, AT, T}, neighbors, buffers::Nothing = nothing, step_n::Integer=0;
+                          n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
+
+    buffers = init_buffers!(sys, 1, true)
+
+    return potential_energy(sys, neighbors, buffers, step_n; n_threads=n_threads)
+
+end
+
+function potential_energy(sys::System{D, AT, T}, neighbors, buffers::BuffersGPU, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
     
-    fill!(pe_vec_nounits, zero(T))
+    fill!(buffers.pe_vec_nounits, zero(T))
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nonl) > 0
         nbs = NoNeighborList(length(sys))
-        pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters_nonl, nbs, step_n)
+        pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nonl, nbs, step_n)
     end
 
     pairwise_inters_nl = filter(use_neighbors, values(sys.pairwise_inters))
     if length(pairwise_inters_nl) > 0
-        pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys, pairwise_inters_nl, neighbors, step_n)
+        pairwise_pe_loop_gpu!(buffers.pe_vec_nounits, buffers, sys, pairwise_inters_nl, neighbors, step_n)
     end
 
     for inter_list in values(sys.specific_inter_lists)
-        specific_pe_gpu!(pe_vec_nounits, inter_list, sys.coords, sys.velocities, sys.atoms,
+        specific_pe_gpu!(buffers.pe_vec_nounits, inter_list, sys.coords, sys.velocities, sys.atoms,
                          sys.boundary, step_n, sys.energy_units, Val(T))
     end
 
-    pe = only(from_device(pe_vec_nounits)) * sys.energy_units
+    pe = only(from_device(buffers.pe_vec_nounits)) * sys.energy_units
 
     for inter in values(sys.general_inters)
         pe += uconvert(

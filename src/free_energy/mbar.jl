@@ -147,7 +147,7 @@ function assemble_mbar_inputs(coords_k,
 
     # N×K reduced potentials: thread over states (columns)
     u = Matrix{Float64}(undef, N, K)
-    Threads.@threads :static for k in 1:K
+    Threads.@threads for k in 1:K
         sys = states[k].system              # private to this thread when k is unique
         βk  = β[k]
         pk  = p[k]
