@@ -57,15 +57,13 @@ end
     return potential_energy(sys, buffers, pe_vec_nounits, find_neighbors(sys); n_threads = 1)
 end
 
-@inline function _as_energy_units(e, energy_units)
-    try
-        return uconvert(energy_units, e)                # e.g., kJ → kJ
-    catch
-        return uconvert(energy_units, e / 1u"mol")      # e.g., kJ → kJ/mol
-    end
+struct MBARInput{U, UT, N, W, S}
+    u::U
+    u_target::UT
+    N::N
+    win_of::W
+    shifts::S
 end
-
-
 
 @doc """
     assemble_mbar_inputs(coords_k, boundaries_k, states;
@@ -166,10 +164,10 @@ function assemble_mbar_inputs(coords_k,
         end
         @inbounds for n in 1:N
             Uk   = _energy(sys, buffers, pe_vec_nounits, all_coords[n], all_boundaries[n])
-            Uk_u = _as_energy_units(Uk, energy_units)
+            Uk_u = energy_remove_mol(Uk)
             red  = βk * Float64(ustrip(Uk_u))
             if pk !== nothing
-                pV_u = _as_energy_units(pk * all_volumes[n], energy_units)
+                pV_u = energy_remove_mol(pk * all_volumes[n])
                 red += βk * Float64(ustrip(pV_u))
             end
             u[n,k] = red                   # fill full column k
@@ -190,7 +188,7 @@ function assemble_mbar_inputs(coords_k,
     u_target = (target_state === nothing) ? nothing :
                assemble_target_u(all_coords, all_boundaries, all_volumes, target_state; energy_units)
 
-    return (u=u, u_target=u_target, N = Nk, win_of=win_of, shifts=shifts)
+    return MBARInput(u, u_target, Nk, win_of, shifts)
 end
 
 # Assembles the reduced potentials vector for the target thermodynamic state
@@ -215,10 +213,10 @@ function assemble_target_u(all_coords, all_boundaries, all_volumes, target::Ther
 
     @inbounds for n in 1:N
         Ua   = _energy(sys, buffers, pe_vec_nounits, all_coords[n], all_boundaries[n])
-        Ua_u = _as_energy_units(Ua, energy_units)
+        Ua_u = energy_remove_mol(Ua)
         red  = βa * Float64(ustrip(Ua_u))
         if has_p
-            pV_u = _as_energy_units(pa * all_volumes[n], energy_units)
+            pV_u = energy_remove_mol(pa * all_volumes[n])
             red += βa * Float64(ustrip(pV_u))
         end
         u_target[n] = red
@@ -387,12 +385,23 @@ function mbar_weights_sampled(u::AbstractMatrix, f::AbstractVector, logN::Abstra
     end
     logD = isnothing(logD_n) ? mbar_logD(u, f, logN) : logD_n
     W = Matrix{Float64}(undef, N, K)
-    min_x =  Inf; max_x = -Inf
-    min_i = 0; max_i = 0; min_n = 0; max_n = 0
+    min_x , max_x = Inf, -Inf
+    min_i, max_i, min_n, max_n = 0, 0, 0, 0
     @inbounds for k in 1:K, n in 1:N
         x = f[k] - Float64(u[n,k]) - logD[n]
-        if x < min_x; min_x = x; min_i = k; min_n = n; end
-        if x > max_x; max_x = x; max_i = k; max_n = n; end
+        
+        if x < min_x
+            min_x = x
+            min_i = k
+            min_n = n
+        end
+
+        if x > max_x
+            max_x = x
+            max_i = k
+            max_n = n
+        end
+
         W[n,k] = exp(x)
     end
     if min_x < LOG_PREVFLOAT0
@@ -640,7 +649,7 @@ function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
     end
 
     # Bin edges
-    if edges === nothing
+    if isnothing(edges)
         if (rmin === nothing) != (rmax === nothing)
             throw(ArgumentError("rmin and rmax must both be provided or both omitted"))
         end
