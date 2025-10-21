@@ -946,7 +946,7 @@ function ReplicaSystem(;
                         energy_units=u"kJ * mol^-1",
                         k=default_k(energy_units),
                         data=nothing)
-    D = AtomsBase.n_dimensions(boundary[1])
+    D = AtomsBase.n_dimensions(boundary)
     AT = array_type(replica_coords[1])
     T = float_type(boundary[1])
     A = typeof(atoms)

@@ -2,6 +2,14 @@ export
     statistical_inefficiency,
     subsample
 
+struct StatisticalInefficiency{I, S, L, E, LG}
+    inefficiency::I
+    stride::S
+    input_length::L
+    effective_size::E
+    lag::LG
+end
+
 @doc """
     statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,Int}=nothing)
 
@@ -19,7 +27,7 @@ Notes:
 - Includes the (1 - τ/N) taper in the sum.
 """
 function statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,Int}=nothing)
-    x = Float64.(ustrip.(series))              # remove units if present; else no-op if plain floats
+    x = ustrip.(series)              # remove units if present; else no-op if plain floats
     N = length(x)
     if N < 3
         return (g = 1.0, stride = 1, N = N, N_eff = N, L = 0)
@@ -68,7 +76,7 @@ function statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,
     g = max(1.0, 1 + 2 * wsum)
     stride = max(1, ceil(Int, g))
     N_eff = max(1, fld(N, stride))
-    return (g = g, stride = stride, N = N, N_eff = N_eff, L = L)
+    return StatisticalInefficiency(g, stride, N, N_eff, L)
 end
 
 function subsample(series::AbstractVector, stride::Int; first::Int = 1)
@@ -77,7 +85,7 @@ end
 
 # ESS of a mask (no views with Bool indexing)
 @inline function ess_mask(mask::AbstractVector{Bool}, w::AbstractVector)
-    s = 0.0; ssq = 0.0
+    s, ssq = 0.0, 0.0
     @inbounds @simd for i in eachindex(mask, w)
         if mask[i]
             wi = float(w[i]); s += wi; ssq += wi*wi
