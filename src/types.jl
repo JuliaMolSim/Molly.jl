@@ -960,7 +960,7 @@ function ReplicaSystem(;
 
     if isnothing(replica_boundaries)
         @warn "Using the same boundary for all replicas! Make sure that this is reasonable for your system!"
-        replica_boundaries = [copy(boundary) for _ in 1:n_replicas]
+        replica_boundaries = [deepcopy(boundary) for _ in 1:n_replicas]
     elseif length(replica_boundaries) != n_replicas
         throw(ArgumentError("number of boundaries ($(length(replica_boundaries)))"
                             *" does not match number of replicas $(length(n_replicas))"))
