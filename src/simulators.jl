@@ -92,7 +92,7 @@ Custom simulators should implement this function.
         neighbors_copy = neighbors
         neighbors = find_neighbors(sys, sys.neighbor_finder, neighbors, step_n;
                                     n_threads=n_threads)
-        E_trial = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
+        E_trial = potential_energy(sys, neighbors, buffers, step_n; n_threads=n_threads)
         if E_trial < E
             hn = 6 * hn / 5
             E = E_trial
@@ -1048,12 +1048,13 @@ end
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
     E_old = potential_energy(sys, neighbors; n_threads=n_threads)
     coords_old = zero(sys.coords)
+    buffers = init_buffers!(sys, n_threads)
 
     for step_n in 1:n_steps
         coords_old .= sys.coords
         sim.trial_moves(sys; sim.trial_args...) # Changes the coordinates of the system
         neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-        E_new = potential_energy(sys, neighbors, step_n; n_threads=n_threads)
+        E_new = potential_energy(sys, neighbors, buffers, step_n; n_threads=n_threads)
 
         ΔE = E_new - E_old
         δ = ΔE / (sys.k * sim.temperature)

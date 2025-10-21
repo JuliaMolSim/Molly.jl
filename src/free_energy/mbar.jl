@@ -190,8 +190,7 @@ function assemble_mbar_inputs(coords_k,
 end
 
 # Assembles the reduced potentials vector for the target thermodynamic state
-function assemble_target_u(all_coords, all_boundaries, all_volumes, target::ThermoState{<:Any, <:Any, <:System{D,AT,T}};
-                           energy_units=u"kJ/mol") where {D, AT, T}
+function assemble_target_u(all_coords, all_boundaries, all_volumes, target::ThermoState{<:Any, <:Any, <:System{D,AT,T}}) where {D, AT, T}
     N  = length(all_coords)
     βa = target.β
     pa = target.p
@@ -532,7 +531,7 @@ function mbar_weights(u::AbstractMatrix,
 end
 
 @doc """
-    mbar_weights(mbar_generator::NamedTuple)
+    mbar_weights(mbar_generator::MBARInput)
 
 High-level MBAR wrapper that computes free energies and reweighting weights from a
 preassembled `mbar_generator` tuple.
@@ -557,7 +556,7 @@ then calls the lower-level [`mbar_weights(u, u_target, f, N_counts, logN)`](@ref
 using the contents of `mbar_generator`. All internal consistency checks are
 disabled for speed.
 """
-function mbar_weights(mbar_generator::NamedTuple)
+function mbar_weights(mbar_generator::MBARInput)
 
     u        = mbar_generator.u
     u_target = mbar_generator.u_target

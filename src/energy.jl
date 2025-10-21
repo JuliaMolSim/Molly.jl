@@ -172,7 +172,7 @@ function potential_energy(sys::System{D, AT, T}; n_threads::Integer=Threads.nthr
     return potential_energy(sys, find_neighbors(sys; n_threads=n_threads), buffers; n_threads=n_threads)
 end
 
-function potential_energy(sys::System, neighbors, buffers::Nothing = nothing, step_n::Integer=0;
+function potential_energy(sys::System, neighbors, buffers = nothing, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads())
     # Allow types like those from Measurements.jl, T from System is different
     T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
@@ -344,7 +344,7 @@ function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_a
     return pe
 end
 
-function potential_energy(sys::System{D, AT, T}, neighbors, buffers::Nothing = nothing, step_n::Integer=0;
+function potential_energy(sys::System{D, AT, T}, neighbors, buffers = nothing, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
 
     buffers = init_buffers!(sys, 1, true)

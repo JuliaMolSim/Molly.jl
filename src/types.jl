@@ -1525,7 +1525,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         k=calc.k,
     )
     nbs = (isnothing(neighbors) ? find_neighbors(sys) : neighbors)
-    return potential_energy(sys, nbs, step_n; n_threads=n_threads)
+    return potential_energy(sys, nbs, nothing, step_n; n_threads=n_threads)
 end
 
 """
