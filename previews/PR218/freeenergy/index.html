@@ -11,8 +11,8 @@ end
 
 # store angles as plain Float64 radians; enforce k as energy
 @inline function DihedralRestraint(ϕ0::Unitful.AbstractQuantity, Δϕ::Unitful.AbstractQuantity, k)
-    ϕ0r = ustrip(u&quot;rad&quot;, uconvert(u&quot;rad&quot;, ϕ0))
-    Δϕr = ustrip(u&quot;rad&quot;, uconvert(u&quot;rad&quot;, Δϕ))
+    ϕ0r = ustrip(u&quot;rad&quot;, ϕ0)
+    Δϕr = ustrip(u&quot;rad&quot;, Δϕ)
     return DihedralRestraint(ϕ0r, Δϕr, k)  # k should be energy
 end</code></pre><p>Then, we have to define the potential energy and force functions that Molly will call when it encounters such interaction. We will make use of the machinery present in Molly and define the restraint as a Specific Interaction, returning the force as a <a href="../api/#Molly.SpecificForce4Atoms"><code>SpecificForce4Atoms</code></a>. The functional form used as the bias potential is a quadratic flat bottom angle restraint, using:</p><p class="math-container">\[\varphi^{\prime} = (\varphi - \varphi^0)\ \%\ 2\pi \]</p><p class="math-container">\[V\left( \varphi^{\prime} \right) = \begin{cases}
     \frac{1}{2} \cdot k \cdot \left( \varphi^{\prime} - \Delta\varphi \right)^2 &amp; \mathrm{for} \ \lvert \varphi^{\prime} \rvert \ge \Delta\varphi \\
@@ -320,7 +320,7 @@ sys = System(deepcopy(sys); # Everything from the unbiased system
                                                &quot;./umbrella_$(SIM_N).dcd&quot;; 
                                                correction = :pbc), ))
                     
-simulate!(sys, vverlet, N_STEPS)</code></pre><h3 id="Calculating-free-energies-with-MBAR"><a class="docs-heading-anchor" href="#Calculating-free-energies-with-MBAR">Calculating free energies with MBAR</a><a id="Calculating-free-energies-with-MBAR-1"></a><a class="docs-heading-anchor-permalink" href="#Calculating-free-energies-with-MBAR" title="Permalink"></a></h3><p>Once all of the individual umbrella simulations are finished, we are ready to run MBAR on the results and estimate the free energy along our reaction coordinate. Remember from the first section of this tutorial, the MBAR equations are solved by evaluating every generated conformation with every used Hamiltonian. It follows, then, that we will have first to set up an array of <a href="../api/#Molly.System"><code>System</code></a> structs that represent each Hamiltonian. Moreover, we will be reading data from trajectories, so those Systems will actually be wrapped inside <a href="../api/#Molly.TrajSystem"><code>TrajSystem</code></a> structs, which allow IO operations from trajectory files into data structures usable by Molly.</p><p>We start by defining variables that will be shared by all thermodynamic states. Notice how many things are shared with the parameters used to produce the simulations!</p><pre><code class="language-julia hljs"># MBAR.jl
+simulate!(sys, vverlet, N_STEPS)</code></pre><h3 id="Calculating-free-energies-with-MBAR"><a class="docs-heading-anchor" href="#Calculating-free-energies-with-MBAR">Calculating free energies with MBAR</a><a id="Calculating-free-energies-with-MBAR-1"></a><a class="docs-heading-anchor-permalink" href="#Calculating-free-energies-with-MBAR" title="Permalink"></a></h3><p>Once all of the individual umbrella simulations are finished, we are ready to run MBAR on the results and estimate the free energy along our reaction coordinate. Remember from the first section of this tutorial, the MBAR equations are solved by evaluating every generated conformation with every used Hamiltonian. It follows, then, that we will have first to set up an array of <a href="../api/#Molly.System"><code>System</code></a> structs that represent each Hamiltonian. Moreover, we will be reading data from trajectories, so those Systems will actually be wrapped inside <a href="../api/#Molly.EnsembleSystem"><code>EnsembleSystem</code></a> structs, which allow IO operations from trajectory files into data structures usable by Molly.</p><p>We start by defining variables that will be shared by all thermodynamic states. Notice how many things are shared with the parameters used to produce the simulations!</p><pre><code class="language-julia hljs"># MBAR.jl
 
 using Molly
 using CUDA
@@ -367,7 +367,7 @@ l = 7
 eq_θ  = FT(-0.48948112328583804) # We get this from the equilibrium structure
 
 N_TRJ       = 60 # The number of umbrella simulations produced
-TRJ_SYSTEMS = Vector{TrajSystem}(undef, N_TRJ)
+TRJ_SYSTEMS = Vector{EnsembleSystem}(undef, N_TRJ)
 
 Threads.@threads for trj_n in 1:N_TRJ
 
@@ -392,7 +392,7 @@ Threads.@threads for trj_n in 1:N_TRJ
     sys_rest = System(sys_nobias;
                       specific_inter_lists = rest_sils)
         
-    sys_trj = TrajSystem(deepcopy(sys_rest), traj_path) # Store in struct that allows reading trajectories
+    sys_trj = EnsembleSystem(deepcopy(sys_rest), traj_path) # Store in struct that allows reading trajectories
 
     TRJ_SYSTEMS[trj_n] = sys_trj
 end</code></pre><p>We now have a vector of structs that represent each system and its trajectory. The next step is to read the trajectories and sample the relevant magnitudes to solve MBAR and get our PMF. We will need the coordinates, the system boundaries (needed to calculate the volume for the <span>$pV$</span> terms of the Hamiltonian, as we have run the simulations in the NPT ensemble) and, of course, the CV of interest. Note that MBAR assumes statistical independence of samples, so the selected conformations must be subsampled from decorrelated states. Molly does provide the functionality to estimate the statistical inefficiency of a given timeseries and subsequent subsampling.</p><pre><code class="language-julia hljs"># MBAR.jl
@@ -437,12 +437,12 @@ Threads.@threads for nt in 1:N_TRJ
     end
 
     # Estimate the decorrelation time from the timeseries of the potential energy
-    g, stride, N_total, N_eff, L = Molly.statistical_inefficiency(u; maxlag=n_frames-1)
+    ineff = Molly.statistical_inefficiency(u; maxlag=n_frames-1)
 
     # Subsample arrays based on statistical inefficiency
-    sub_coords   = Molly.subsample(c, stride;  first = 1)
-    sub_bounds   = Molly.subsample(b, stride;  first = 1)
-    sub_CV       = Molly.subsample(cv, stride; first = 1)
+    sub_coords   = Molly.subsample(c,  ineff.stride;  first = 1)
+    sub_bounds   = Molly.subsample(b,  ineff.stride;  first = 1)
+    sub_CV       = Molly.subsample(cv, ineff.stride; first = 1)
 
     C[nt]  = sub_coords
     B[nt]  = sub_bounds
@@ -455,11 +455,8 @@ energy_units = TRJ_SYSTEMS[1].system.energy_units
 kBT          = uconvert(energy_units, Unitful.R * temp)
 βi           = Float64(ustrip(1.0 / kBT))
 
-states = ThermoState[
-    let
-        ThermoState(&quot;win_$i&quot;, βi, pres, TRJ_SYSTEMS[i].system)   # NPT here; otherwise pres = nothing
-    end for i in eachindex(TRJ_SYSTEMS)
-]
+states = ThermoState[ ThermoState(&quot;win_$i&quot;, βi, pres, TRJ_SYSTEMS[i].system)   # NPT here; otherwise pres = nothing
+                      for i in eachindex(TRJ_SYSTEMS) ]
 
 target_state = ThermoState(&quot;target&quot;, βi, pres, sys_nobias)</code></pre><p>We are finally in possesion of everything needed to solve the MBAR equations and estimate the PMF along our CV! There are two paths we can take for this, the long path and the short path. For the sake of completeness, we describe first the long path. The first step for solving MBAR is assembling the reduced energy matrix. Molly provides a functionality just for that through the <a href="../api/#Molly.assemble_mbar_inputs-Union{Tuple{T}, Tuple{AT}, Tuple{D}, Tuple{Any, Any, Vector{ThermoState}}} where {D, AT, T}"><code>assemble_mbar_inputs</code></a> method:</p><pre><code class="language-julia hljs"># MBAR.jl
 
@@ -486,4 +483,4 @@ pmf = pmf_with_uncertainty(C,            # Coordinates
                            B,            # Boundaries
                            states,       # Themodynamic states 
                            target_state, # Target state
-                           CV)           # Collective Variable</code></pre><p>Now one can plot this into a graph. The code for that is left as an exercise to the reader, but the results should look like something similar to this!</p><p><img src="../images/dihedral_pmf_kbt.png" alt="PMF along the dipeptide torsion in kBT units"/> <img src="../images/dihedral_pmf_enr.png" alt="PMF along the dipeptide torsion in energy units"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../examples/">Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.14.1 on <span class="colophon-date" title="Monday 13 October 2025 17:30">Monday 13 October 2025</span>. Using Julia version 1.12.0.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+                           CV)           # Collective Variable</code></pre><p>Now one can put this into a graph, for example using a scatter for the free energy and making use of the calculated sigmas (see the previous code blocks) to shade the plot and give a feel of the uncertainties. The code is left as an exercise to the reader, but the results should look like something similar to this! </p><p><img src="../images/dihedral_pmf_kbt.png" alt="PMF along the dipeptide torsion in kBT units"/> <img src="../images/dihedral_pmf_enr.png" alt="PMF along the dipeptide torsion in energy units"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../examples/">Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.14.1 on <span class="colophon-date" title="Tuesday 21 October 2025 10:46">Tuesday 21 October 2025</span>. Using Julia version 1.12.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
