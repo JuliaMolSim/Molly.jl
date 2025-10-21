@@ -1,17 +1,17 @@
 export
-    TrajSystem,
+    EnsembleSystem,
     read_frame!
 
 """
     An abstraction that sits on top of the [`System`](@ref) struct
     that allows to read data from trajectories.
 """
-struct TrajSystem{TR, S <: System}
+struct EnsembleSystem{TR, S <: System}
     trajectory::TR
     system::S
 end
 
-function TrajSystem(structpath::String, trjpath::String, ffpaths::Vector{String};
+function EnsembleSystem(structpath::String, trjpath::String, ffpaths::Vector{String};
                     float = Float64,
                     kwargs...)
 
@@ -20,25 +20,25 @@ function TrajSystem(structpath::String, trjpath::String, ffpaths::Vector{String}
     sys  = System(structpath, ff; kwargs...)
     traj = Chemfiles.Trajectory(trjpath)
     
-    return TrajSystem(traj, sys)
+    return EnsembleSystem(traj, sys)
 end
 
-function TrajSystem(system::System, trjpath::String;
+function EnsembleSystem(system::System, trjpath::String;
                     kwargs...)
     
     sys  = System(deepcopy(system); kwargs...)
     traj = Chemfiles.Trajectory(trjpath)
     
-    return TrajSystem(traj, sys)
+    return EnsembleSystem(traj, sys)
 end
 
 """
-    read_frame(trjsystem::TrajSystem, frame_idx::Int)
+    read_frame(trjsystem::EnsembleSystem, frame_idx::Int)
 
-    Reads a frame from a [`TrajSystem`](@ref) and returns a [`System`](@ref)
+    Reads a frame from a [`EnsembleSystem`](@ref) and returns a [`System`](@ref)
     representation of said frame.
 """
-function read_frame!(trjsystem::TrajSystem{TR,<:System{D,AT,T}}, frame_idx::Int) where {TR,D,AT,T}
+function read_frame!(trjsystem::EnsembleSystem{TR,<:System{D,AT,T}}, frame_idx::Int) where {TR,D,AT,T}
     sys = trjsystem.system
 
     frame = Chemfiles.read_step(trjsystem.trajectory, frame_idx - 1)
