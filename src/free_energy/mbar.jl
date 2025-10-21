@@ -51,10 +51,10 @@ function ThermoState(system::System, beta, press; name::Union{Nothing, String} =
 end
 
 # Evaluate potential energy for a state i on a frame (coords, boundary)
-@inline function _energy(sys::System, buffers, pe_vec_nounits, coords, boundary)
+@inline function _energy(sys::System, buffers, coords, boundary)
     copyto!(sys.coords, coords)
     sys.boundary  = boundary
-    return potential_energy(sys, buffers, pe_vec_nounits, find_neighbors(sys); n_threads = 1)
+    return potential_energy(sys, find_neighbors(sys), buffers; n_threads = 1)
 end
 
 struct MBARInput{U, UT, N, W, S}
@@ -83,7 +83,7 @@ coordinates and boundaries.
 - `shift::Bool=false` — if `true`, subtract per-frame row minima from `u` and return the `shifts`.
 
 # Returns
-NamedTuple with:
+MBARInput with:
 - `u::Matrix{Float64}`         — `N×K` reduced potentials.
 - `u_target::Union{Vector{Float64},Nothing}` — reduced potential at `target_state` or `nothing`.
 - `N::Vector{Int}`             — sample counts per window.
@@ -156,14 +156,12 @@ function assemble_mbar_inputs(coords_k,
         pk  = p[k]
         # We initialize the buffers here to avoid copy overhead in GPU
         if AT <: AbstractGPUArray
-            pe_vec_nounits = KernelAbstractions.zeros(get_backend(sys.coords), T, 1)
             buffers = init_buffers!(sys, 1, true)
         else
-            pe_vec_nounits = nothing
             buffers = nothing
         end
         @inbounds for n in 1:N
-            Uk   = _energy(sys, buffers, pe_vec_nounits, all_coords[n], all_boundaries[n])
+            Uk   = _energy(sys, buffers, all_coords[n], all_boundaries[n])
             Uk_u = energy_remove_mol(Uk)
             red  = βk * Float64(ustrip(Uk_u))
             if pk !== nothing
@@ -204,15 +202,13 @@ function assemble_target_u(all_coords, all_boundaries, all_volumes, target::Ther
     u_target = Vector{Float64}(undef, N)
 
     if AT <: AbstractGPUArray
-        pe_vec_nounits = KernelAbstractions.zeros(get_backend(sys.coords), T, 1)
         buffers = init_buffers!(sys, 1, true)
     else
-        pe_vec_nounits = nothing
         buffers = nothing
     end
 
     @inbounds for n in 1:N
-        Ua   = _energy(sys, buffers, pe_vec_nounits, all_coords[n], all_boundaries[n])
+        Ua   = _energy(sys, buffers, all_coords[n], all_boundaries[n])
         Ua_u = energy_remove_mol(Ua)
         red  = βa * Float64(ustrip(Ua_u))
         if has_p
@@ -613,7 +609,7 @@ Estimate a 1D PMF along a scalar CV and its large-sample uncertainty using MBAR
 - `kBT=nothing` — if set, also return dimensional `F_energy = F*kBT`.
 
 # Returns
-NamedTuple with:
+PMF with:
  - `centers`  — the center of the histogram bins used to sample the CV
  - `widths` — the width of the histogram bins used to sample the CV
  - `edges` — the edges of the histogram bins used to sample the CV 
@@ -828,7 +824,7 @@ computes the PMF along `CV`.
 - `shift::Bool=false`      — subtract per-frame minima from `u` for stability.
 
 # Returns
-Same NamedTuple as the lower-level `pmf_with_uncertainty`.
+Same PMF struct as the lower-level `pmf_with_uncertainty`.
 """
 function pmf_with_uncertainty(coords_k::AbstractVector,
                               boundaries_k::AbstractVector,

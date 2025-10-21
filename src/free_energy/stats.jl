@@ -10,16 +10,16 @@ struct StatisticalInefficiency{I, S, L, E, LG}
     lag::LG
 end
 
-@doc """
+@doc"""
     statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,Int}=nothing)
 
 Integrated autocorrelation time estimator with IPS truncation and finite-sample taper.
-Returns a NamedTuple: (g, stride, N, N_eff, L).
-- g: statistical inefficiency
+Returns a StatisticalInefficiency struct with:
+- inefficiency: statistical inefficiency
 - stride: ceil(Int, g)
-- N: input length
-- N_eff: floor(N / stride)
-- L: truncation lag used
+- input_length: input length
+- effective_size: floor(N / stride)
+- lag: truncation lag used
 
 Notes:
 - Uses initial positive sequence (IPS) on paired lags to choose L.

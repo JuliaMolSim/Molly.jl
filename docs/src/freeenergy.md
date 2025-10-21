@@ -413,7 +413,7 @@ simulate!(sys, vverlet, N_STEPS)
 
 ### Calculating free energies with MBAR
 
-Once all of the individual umbrella simulations are finished, we are ready to run MBAR on the results and estimate the free energy along our reaction coordinate. Remember from the first section of this tutorial, the MBAR equations are solved by evaluating every generated conformation with every used Hamiltonian. It follows, then, that we will have first to set up an array of [`System`](@ref) structs that represent each Hamiltonian. Moreover, we will be reading data from trajectories, so those Systems will actually be wrapped inside [`TrajSystem`](@ref) structs, which allow IO operations from trajectory files into data structures usable by Molly.
+Once all of the individual umbrella simulations are finished, we are ready to run MBAR on the results and estimate the free energy along our reaction coordinate. Remember from the first section of this tutorial, the MBAR equations are solved by evaluating every generated conformation with every used Hamiltonian. It follows, then, that we will have first to set up an array of [`System`](@ref) structs that represent each Hamiltonian. Moreover, we will be reading data from trajectories, so those Systems will actually be wrapped inside [`EnsembleSystem`](@ref) structs, which allow IO operations from trajectory files into data structures usable by Molly.
 
 We start by defining variables that will be shared by all thermodynamic states. Notice how many things are shared with the parameters used to produce the simulations!
 
@@ -465,7 +465,7 @@ l = 7
 eq_θ  = FT(-0.48948112328583804) # We get this from the equilibrium structure
 
 N_TRJ       = 60 # The number of umbrella simulations produced
-TRJ_SYSTEMS = Vector{TrajSystem}(undef, N_TRJ)
+TRJ_SYSTEMS = Vector{EnsembleSystem}(undef, N_TRJ)
 
 Threads.@threads for trj_n in 1:N_TRJ
 
@@ -490,7 +490,7 @@ Threads.@threads for trj_n in 1:N_TRJ
     sys_rest = System(sys_nobias;
                       specific_inter_lists = rest_sils)
         
-    sys_trj = TrajSystem(deepcopy(sys_rest), traj_path) # Store in struct that allows reading trajectories
+    sys_trj = EnsembleSystem(deepcopy(sys_rest), traj_path) # Store in struct that allows reading trajectories
 
     TRJ_SYSTEMS[trj_n] = sys_trj
 end

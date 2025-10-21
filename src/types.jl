@@ -948,14 +948,14 @@ function ReplicaSystem(;
                         data=nothing)
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(replica_coords[1])
-    T = float_type(boundary[1])
+    T = float_type(boundary)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     F = typeof(force_units)
     E = typeof(energy_units)
     DA = typeof(data)
     C = typeof(replica_coords[1])
-    B = typeof(boundary[1])
+    B = typeof(boundary)
     NF = typeof(neighbor_finder)
 
     if isnothing(replica_boundaries)
@@ -1004,7 +1004,7 @@ function ReplicaSystem(;
                             * "does not match number of replicas ($n_replicas)"))
     end
 
-    df = n_dof(D, length(atoms), boundary[1])
+    df = n_dof(D, length(atoms), boundary)
     if isnothing(replica_constraints)
         if length(constraints) > 0
             for ca in constraints
