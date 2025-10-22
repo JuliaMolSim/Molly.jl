@@ -4,7 +4,6 @@ export
     total_energy,
     kinetic_energy_tensor!,
     kinetic_energy,
-    kinetic_energy_tensor!,
     virial,
     scalar_virial,
     temperature,
