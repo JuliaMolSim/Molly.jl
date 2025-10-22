@@ -1149,7 +1149,6 @@ The available loggers are:
 - [`ScalarPressureLogger`](@ref)
 - [`DisplacementsLogger`](@ref)
 - [`TrajectoryWriter`](@ref)
-- [`StructureWriter`](@ref)
 - [`TimeCorrelationLogger`](@ref)
 - [`AutoCorrelationLogger`](@ref)
 - [`AverageObservableLogger`](@ref)
