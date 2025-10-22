@@ -52,6 +52,7 @@ end
 Run a simulation on a system according to the rules of the given simulator.
 
 Custom simulators should implement this function.
+Constraints are applied during minimization, which can lead to issues.
 
 # Arguments
 - `n_threads=Threads.nthreads()`: the number of threads to run the simulation on, only

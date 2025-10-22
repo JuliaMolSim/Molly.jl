@@ -324,7 +324,9 @@ This sets up a system in the same data structures as above and that is simulated
 Here we carry out an energy minimization, simulate with a Langevin integrator in the NPT ensemble and use a [`TrajectoryWriter`](@ref) to write the trajectory as a DCD file (or another file format, by changing the file extension).
 ```julia
 data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+T = Float32 # Float32 is much faster on GPU
 ff = MolecularForceField(
+    T,
     joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
     joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
     joinpath(data_dir, "force_fields", "his.xml"),
@@ -338,23 +340,26 @@ sys = System(
         energy=TotalEnergyLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
     ),
-    array_type=Array,
+    array_type=Array, # CuArray for CUDA GPU
 )
 
 minimizer = SteepestDescentMinimizer()
 simulate!(sys, minimizer)
 
-temp = 298.0u"K"
+temp = T(298.0)u"K"
 random_velocities!(sys, temp)
 simulator = Langevin(
-    dt=0.001u"ps",
+    dt=T(0.001)u"ps",
     temperature=temp,
-    friction=1.0u"ps^-1",
-    coupling=MonteCarloBarostat(1.0u"bar", temp, sys.boundary),
+    friction=T(1.0)u"ps^-1",
+    coupling=MonteCarloBarostat(T(1.0)u"bar", temp, sys.boundary),
 )
 
 simulate!(sys, simulator, 5_000)
 ```
+The above 5 ps simulation looks something like this when you view it in PyMOL:
+![MD simulation](https://github.com/JuliaMolSim/Molly.jl/raw/master/docs/src/images/sim_6mrr.gif)
+
 The OpenMM setup procedure is tested against OpenMM in terms of matching forces and energies.
 However it is not thoroughly tested with respect to ligands or special residues and requires that atom names exactly match residue templates.
 By default, terminal residues are renamed to match the appropriate templates.
