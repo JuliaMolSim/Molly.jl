@@ -825,6 +825,55 @@ System(ab_sys; force_units=u"kJ/Å", energy_units=u"kJ")
 System with 5 atoms, boundary CubicBoundary{Quantity{Float64, 𝐋, Unitful.FreeUnits{(Å,), 𝐋, nothing}}}(Quantity{Float64, 𝐋, Unitful.FreeUnits{(Å,), 𝐋, nothing}}[1.54732 Å, 1.4654985 Å, 1.792895 Å])
 ```
 
+## Testing GPU memory limits
+
+How many atoms can fit on one GPU?
+```julia
+using Molly
+using CUDA
+
+function check_sim(n_atoms)
+    AT = CuArray
+    atoms = AT([Atom(mass=10.0f0u"g/mol", charge=0.0f0, σ=0.001f0u"nm", ϵ=0.1f0u"kJ * mol^-1")
+                for i in 1:n_atoms])
+    V = n_atoms * 0.013f0u"nm^3" # Sensible density
+    box_side = cbrt(V)
+    boundary = CubicBoundary(box_side)
+    coords = AT(rand(SVector{3, Float32}, n_atoms) .* box_side)
+    velocities = zero(coords) * u"ps^-1"
+    neighbor_finder = GPUNeighborFinder(
+        eligible=AT(trues(n_atoms, n_atoms)),
+        dist_cutoff=1.0f0u"nm",
+    )
+    pis = (LennardJones(cutoff=DistanceCutoff(1.0f0u"nm"), use_neighbors=true),)
+    sys = System(
+        atoms=atoms,
+        coords=coords,
+        boundary=boundary,
+        velocities=velocities,
+        pairwise_inters=pis,
+        neighbor_finder=neighbor_finder,
+    )
+    simulator = VelocityVerlet(dt=0.0001f0u"ps", remove_CM_motion=false)
+    return simulate!(sys, simulator, 100)
+end
+
+function test_natoms()
+    n_atoms = 40_000
+    while true
+        fs = check_sim(n_atoms)
+        println(n_atoms, " atoms okay")
+        n_atoms += 20_000
+    end
+end
+
+test_natoms()
+```
+The results before running out of memory on different GPUs are:
+- 60,000 on NVIDIA GeForce RTX 2080 Ti (11 GB).
+- 140,000 on NVIDIA RTX A6000 (48 GB).
+- 120,000 on NVIDIA GeForce RTX 5090 (32 GB).
+
 ## Variations of the Morse potential
 
 The Morse potential for bonds has a parameter *a* that determines the width of the potential.

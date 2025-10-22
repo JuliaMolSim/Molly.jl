@@ -153,6 +153,7 @@ To run simulations on the GPU you will need to have a GPU available and then loa
 | Intel GPU          | oneAPI            | `oneArray` |
 | Apple Silicon      | Metal             | `MtlArray` |
 
+Modern GPUs can run simulations of over 100,000 atoms, [as seen in the examples](@ref "Testing GPU memory limits").
 Metal/Apple Silicon devices can only run with 32 bit precision, so be sure to use `Float32` in this case.
 Non-CUDA backends are less well-tested with Molly than CUDA.
 
