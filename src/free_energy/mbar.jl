@@ -67,7 +67,7 @@ end
 
 @doc """
     assemble_mbar_inputs(coords_k, boundaries_k, states;
-                         target_state=nothing, energy_units=u"kJ/mol", shift=false)
+                         target_state=nothing, shift=false)
 
 Assemble the reduced potentials matrix `u` (size `N×K`) for MBAR from per-window
 coordinates and boundaries.
@@ -79,7 +79,6 @@ coordinates and boundaries.
 
 # Keywords
 - `target_state::Union{Nothing,ThermoState}` — if set, also compute `u_target` for that state.
-- `energy_units::Quantity` — energy unit for reduced potentials, e.g. `u"kJ/mol"`.
 - `shift::Bool=false` — if `true`, subtract per-frame row minima from `u` and return the `shifts`.
 
 # Returns
@@ -94,7 +93,6 @@ function assemble_mbar_inputs(coords_k,
                               boundaries_k,
                               states::Vector{ThermoState};
                               target_state::Union{Nothing, ThermoState{<:Any, <:Any, <:System{D, AT, T}}} = nothing,
-                              energy_units = u"kJ/mol",
                               shift::Bool  = false) where {D, AT, T}
     K = length(states)
 
@@ -184,7 +182,7 @@ function assemble_mbar_inputs(coords_k,
     end
 
     u_target = (target_state === nothing) ? nothing :
-               assemble_target_u(all_coords, all_boundaries, all_volumes, target_state; energy_units)
+               assemble_target_u(all_coords, all_boundaries, all_volumes, target_state)
 
     return MBARInput(u, u_target, Nk, win_of, shifts)
 end
@@ -806,7 +804,7 @@ end
 
 @doc """
     pmf_with_uncertainty(coords_k, boundaries_k, states, target_state, CV;
-                         energy_units=u"kJ/mol", shift=false)
+                         shift=false)
 
 High-level PMF wrapper. Builds MBAR inputs from trajectories, solves MBAR, and
 computes the PMF along `CV`.
@@ -819,7 +817,6 @@ computes the PMF along `CV`.
 - `CV::AbstractVector`           — CV values per window.
 
 # Keywords
-- `energy_units::Quantity=u"kJ/mol"` — energy unit for reduced potentials.
 - `shift::Bool=false`      — subtract per-frame minima from `u` for stability.
 
 # Returns
@@ -830,14 +827,12 @@ function pmf_with_uncertainty(coords_k::AbstractVector,
                               states::Vector{ThermoState},
                               target_state::ThermoState,
                               CV::AbstractVector;
-                              energy_units = u"kJ/mol",
                               shift::Bool  = false)
 
     kBT = Float64(1/target_state.β) * target_state.system.energy_units
 
     mbar_gen = assemble_mbar_inputs(coords_k, boundaries_k, states; 
                                     target_state = target_state,
-                                    energy_units = energy_units,
                                     shift        = shift)
 
     u        = mbar_gen.u
