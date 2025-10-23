@@ -180,7 +180,7 @@ Read one or more OpenMM force field XML files by passing them to the constructor
 """
 struct MolecularForceField{T, M, D, E, K}
     atom_types::Dict{String, AtomType{T, M, D, E}}
-    residue_types::Dict{String, ResidueType{T}}
+    residues::Dict{String, ResidueTemplate{T}}
     bond_types::Dict{Tuple{String, String}, HarmonicBond{K, D}}
     angle_types::Dict{Tuple{String, String, String}, HarmonicAngle{E, T}}
     torsion_types::Dict{Tuple{String, String, String, String}, PeriodicTorsionType{T, E}}
@@ -192,7 +192,6 @@ end
 
 function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=true)
     atom_types = Dict{String, AtomType}()
-    residue_types = Dict{String, ResidueType}()
     bond_types = Dict{Tuple{String, String}, HarmonicBond}()
     angle_types = Dict{Tuple{String, String, String}, HarmonicAngle}()
     torsion_types = Dict{Tuple{String, String, String, String}, PeriodicTorsionType}()
@@ -200,10 +199,13 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     weight_14_coulomb, weight_14_lj = one(T), one(T)
     weight_14_coulomb_set, weight_14_lj_set = false, false
     attributes_from_residue = String[]
+    residues  = Dict{String,ResidueTemplate}()
+    type_info = Dict{String,Tuple{String,String}}()
 
     for ff_file in ff_files
         ff_xml = parsexml(read(ff_file))
         ff = root(ff_xml)
+        
         for entry in eachelement(ff)
             entry_name = entry.name
             if entry_name == "AtomTypes"
@@ -217,31 +219,46 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     ϵ = units ? T(-1u"kJ * mol^-1") : T(-1) # Updated later
                     atom_types[at_type] = AtomType{T, typeof(atom_mass), typeof(σ), typeof(ϵ)}(
                                                 at_type, at_class, element, ch, atom_mass, σ, ϵ)
+                    type_info[at_type] = (element, at_class)
                 end
             elseif entry_name == "Residues"
                 for residue in eachelement(entry)
-                    name = residue["name"]
-                    types = Dict{String, String}()
-                    atom_charges = Dict{String, Union{T, Missing}}()
-                    indices = Dict{String, Int}()
-                    index = 1
-                    for atom_or_bond in eachelement(residue)
-                        # Ignore bonds because they are specified elsewhere
-                        if atom_or_bond.name == "Atom"
-                            atom_name = atom_or_bond["name"]
-                            types[atom_name] = atom_or_bond["type"]
-                            if haskey(atom_or_bond, "charge")
-                                atom_charges[atom_name] = parse(T, atom_or_bond["charge"])
-                            else
-                                atom_charges[atom_name] = missing
-                            end
-                            indices[atom_name] = index
-                            index += 1
-                        elseif atom_or_bond.name == "VirtualSite"
-                            @warn "Virtual sites not currently supported, this entry will be ignored"
+                    rname = residue["name"]
+                    atoms, types = String[], String[]
+                    charges = T[]
+                    elements = Symbol[]
+                    externals = Int[]
+                    extras = BitVector()
+                    bonds_by_name = Tuple{String,String}[]
+
+                    for re in eachelement(residue)
+                        if re.name == "Atom"
+                            an = re["name"]; tp = re["type"]; q = parse(T, re["charge"])
+                            
+                            push!(atoms, an)
+                            push!(types, tp)
+                            push!(charges, q)
+                            push!(externals, 0)
+                            
+                            tel, tclass = type_info[tp]
+                            
+                            push!(extras, (tel == "?") || (tclass == "EP"))
+                            push!(elements, get(ELEMENT_SYMBOLS, tel, :X))
+                        
+                        elseif re.name == "Bond"
+                            push!(bonds_by_name, (re["atomName1"], re["atomName2"]))
                         end
                     end
-                    residue_types[name] = ResidueType(name, types, atom_charges, indices)
+
+                    name_to_idx = Dict(a => i for (i,a) in enumerate(atoms))
+                    bonds = Tuple{Int,Int}[]
+                    for (a1,a2) in bonds_by_name
+                        i = name_to_idx[a1]
+                        j = name_to_idx[a2]
+                        push!(bonds, i < j ? (i,j) : (j,i))
+                    end
+
+                    residues[rname] = ResidueTemplate(rname, atoms, elements, types, bonds, externals, charges, extras)
                 end
             elseif entry_name == "HarmonicBondForce"
                 for bond in eachelement(entry)
@@ -363,7 +380,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     else
         M, D, E, K = T, T, T, T
     end
-    return MolecularForceField{T, M, D, E, K}(atom_types, residue_types, bond_types, angle_types,
+    return MolecularForceField{T, M, D, E, K}(atom_types, residues, bond_types, angle_types,
             torsion_types, torsion_order, weight_14_coulomb, weight_14_lj, attributes_from_residue)
 end
 
@@ -373,7 +390,7 @@ end
 
 function Base.show(io::IO, ff::MolecularForceField)
     print(io, "MolecularForceField with ", length(ff.atom_types), " atom types, ",
-            length(ff.residue_types), " residue types, ", length(ff.bond_types), " bond types, ",
+            length(ff.residues), " residues, ", length(ff.bond_types), " bond types, ",
             length(ff.angle_types), " angle types and ", length(ff.torsion_types), " torsion types")
 end
 
@@ -503,371 +520,216 @@ function System(coord_file::AbstractString,
                 data=nothing,
                 implicit_solvent=nothing,
                 kappa=0.0u"nm^-1",
-                rename_terminal_res::Bool=true,
-                grad_safe::Bool=false) where AT <: AbstractArray
-    if dist_buffer < zero(dist_buffer)
-        throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
-    end
+                rename_terminal_res::Bool=true,   # unused in template path
+                grad_safe::Bool=false) where {AT<:AbstractArray}
+
+    dist_buffer < zero(dist_buffer) && throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     dist_neighbors = dist_cutoff + dist_buffer
     T = typeof(force_field.weight_14_coulomb)
 
-    # Chemfiles uses zero-based indexing, be careful
-    trajectory = Chemfiles.Trajectory(coord_file)
-    frame = Chemfiles.read(trajectory)
-    top = Chemfiles.Topology(frame)
+    # ---- Read structure ----
+    traj  = Chemfiles.Trajectory(coord_file)
+    frame = Chemfiles.read(traj)
+    top   = Chemfiles.Topology(frame)
     n_atoms = size(top)
 
-    if isnothing(boundary)
-        boundary_used = boundary_from_chemfiles(Chemfiles.UnitCell(frame), T,
-                                                (units ? u"nm" : NoUnits))
-    else
-        boundary_used = boundary
-    end
-    min_box_side = minimum(box_sides(boundary_used))
-    if min_box_side < (2 * dist_cutoff)
-        @warn "Minimum box side ($min_box_side) is less than 2 * dist_cutoff " *
-              "($(2 * dist_cutoff)), this can lead to unphysical simulations"
+    # ---- Boundary ----
+    boundary_used = isnothing(boundary) ?
+        boundary_from_chemfiles(Chemfiles.UnitCell(frame), T, (units ? u"nm" : NoUnits)) :
+        boundary
+    minimum(box_sides(boundary_used)) < (2 * dist_cutoff) &&
+        @warn "Minimum box side is less than 2 * dist_cutoff; this can be unphysical"
+
+    # ---- Build residue graphs from Chemfiles ----
+    res_graphs = build_residue_graphs(top)
+
+    # ---- Repair missing intra-residue bonds via templates (no coords, no atom adds) ----
+    for rg in values(res_graphs)
+        repair_intra_residue_bonds_from_templates!(rg, force_field.residues)
     end
 
+    # ---- Match each residue graph to a template and assign atom types/charges ----
+    atom_type_of = Vector{String}(undef, n_atoms)
+    charge_of    = Vector{eltype(force_field.atom_types[first(keys(force_field.atom_types))].charge)}(undef, n_atoms)
+    element_of   = Vector{String}(undef, n_atoms)  # for AtomData
+
+    use_charge_from_residue = "charge" in force_field.attributes_from_residue
+
+    for (rid, rg) in res_graphs
+        # candidate templates by element counts only
+        cands = candidate_templates_by_elements(rg, force_field.residues; allow_superset=false)
+        isempty(cands) && error("No template with matching element multiset for residue $(rg.res_name) id=$(rid)")
+
+        matched = false
+        for tname in cands
+            tmpl = force_field.residues[tname]
+            # strict match first (external bonds off initially since template externals default 0)
+            m = match_residue_to_template(rg, tmpl; ignore_external_bonds=true, ignore_extra_particles=true)
+            if m === nothing
+                # fallback: partial + bond diff + strict
+                res2tpl, _ = partial_match_residue_to_template(rg, tmpl; ignore_external_bonds=true, ignore_extra_particles=true)
+                res2tpl === nothing && continue
+                miss = diff_residue_vs_template(rg, tmpl, res2tpl)
+                !isempty(miss) && apply_missing_bonds!(rg, miss)
+                m = match_residue_to_template(rg, tmpl; ignore_external_bonds=true, ignore_extra_particles=true)
+            end
+            m === nothing && continue
+
+            # assign per-atom types/charges
+            for (li, tj) in m
+                gi = rg.atom_inds[li]
+                atype = tmpl.types[tj]
+                atom_type_of[gi] = atype
+                charge_of[gi] = use_charge_from_residue ? tmpl.charges[tj] : force_field.atom_types[atype].charge
+                element_of[gi] = force_field.atom_types[atype].element
+            end
+            matched = true
+            break
+        end
+        matched || error("Failed to match residue $(rg.res_name) id=$(rid) to any template")
+    end
+    any(x -> x === nothing || x == "", atom_type_of) && error("Unassigned atom types remain after matching")
+
+    # ---- Build bonded topology (union of repaired intra-residue + Chemfiles inter-residue) ----
+    bonds_intra = build_global_bonds(res_graphs)
+    bonds_cf = [let i=b[1]+1; j=b[2]+1; i<j ? (i,j) : (j,i) end for b in eachcol(Int.(Chemfiles.bonds(top)))]
+    bond_set = Set{NTuple{2,Int}}(bonds_intra); union!(bond_set, bonds_cf)
+    top_bonds = collect(bond_set)
+
+    adj = build_adjacency(n_atoms, top_bonds)
+    top_angles    = build_angles(adj)
+    top_torsions  = build_torsions(adj, top_bonds)
+    top_impropers = build_impropers(adj)
+
+    # ---- Allocate interaction lists and particles ----
     atoms_abst = Atom[]
     atoms_data = AtomData[]
-    bonds = InteractionList2Atoms(HarmonicBond)
-    angles = InteractionList3Atoms(HarmonicAngle)
-    torsions = InteractionList4Atoms(PeriodicTorsion)
-    impropers = InteractionList4Atoms(PeriodicTorsion)
+    bonds_il   = InteractionList2Atoms(HarmonicBond)
+    angles_il  = InteractionList3Atoms(HarmonicAngle)
+    tors_il    = InteractionList4Atoms(PeriodicTorsion)
+    imps_il    = InteractionList4Atoms(PeriodicTorsion)
     eligible = trues(n_atoms, n_atoms)
-    special = falses(n_atoms, n_atoms)
+    special  = falses(n_atoms, n_atoms)
     torsion_n_terms = 6
     weight_14_coulomb, weight_14_lj = force_field.weight_14_coulomb, force_field.weight_14_lj
 
-    top_bonds     = Vector{Int}[is for is in eachcol(Int.(Chemfiles.bonds(    top)))]
-    top_angles    = Vector{Int}[is for is in eachcol(Int.(Chemfiles.angles(   top)))]
-    top_torsions  = Vector{Int}[is for is in eachcol(Int.(Chemfiles.dihedrals(top)))]
-    top_impropers = Vector{Int}[is for is in eachcol(Int.(Chemfiles.impropers(top)))]
-
-    res_id_to_standard = Dict{Tuple{Int, String}, Bool}()
-    for ri in 1:Chemfiles.count_residues(top)
-        res = chemfiles_residue(top, ri - 1)
-        res_id = get_res_id(res)
-        res_name = Chemfiles.name(res)
-        standard_res = res_name in standard_res_names
-        res_id_to_standard[res_id] = standard_res
-
-        if standard_res && residue_name(res, res_id_to_standard, rename_terminal_res) == "N" * res_name
-            # Add missing N-terminal amide bonds, angles and torsions
-            # See https://github.com/chemfiles/chemfiles/issues/429
-            atom_inds_zero = Int.(Chemfiles.atoms(res))
-            atom_names = chemfiles_name.((top,), atom_inds_zero)
-            nterm_atom_names = ("N", "H1", "H2", "H3", "CA", "CB", "HA", "HA2", "HA3", "C")
-            ai_N, ai_H1, ai_H2, ai_H3, ai_CA, ai_CB, ai_HA, ai_HA2, ai_HA3, ai_C = [findfirst(isequal(an), atom_names) for an in nterm_atom_names]
-            if !isnothing(ai_H1)
-                push!(top_bonds, [atom_inds_zero[ai_N], atom_inds_zero[ai_H1]])
-                push!(top_angles, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_CA]])
-                push!(top_angles, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_H2]])
-                push!(top_torsions, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_C]])
-                if !isnothing(ai_CB)
-                    push!(top_torsions, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_CB]])
-                    push!(top_torsions, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_HA]])
-                else
-                    push!(top_torsions, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_HA2]])
-                    push!(top_torsions, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_HA3]])
-                end
-            end
-            if !isnothing(ai_H3)
-                push!(top_bonds, [atom_inds_zero[ai_N], atom_inds_zero[ai_H3]])
-                push!(top_angles, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_CA]])
-                push!(top_angles, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_H2]])
-                push!(top_torsions, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_C]])
-                if !isnothing(ai_CB)
-                    push!(top_torsions, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_CB]])
-                    push!(top_torsions, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_HA]])
-                else
-                    push!(top_torsions, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_HA2]])
-                    push!(top_torsions, [atom_inds_zero[ai_H3], atom_inds_zero[ai_N], atom_inds_zero[ai_CA], atom_inds_zero[ai_HA3]])
-                end
-            end
-            if !isnothing(ai_H1) && !isnothing(ai_H3)
-                push!(top_angles, [atom_inds_zero[ai_H1], atom_inds_zero[ai_N], atom_inds_zero[ai_H3]])
-            end
-        elseif res_name == "HOH"
-            # Add missing water bonds and angles
-            atom_inds_zero = Int.(Chemfiles.atoms(res))
-            atom_names = chemfiles_name.((top,), atom_inds_zero)
-            ai_O, ai_H1, ai_H2 = [findfirst(isequal(an), atom_names) for an in ("O", "H1", "H2")]
-            push!(top_bonds, [atom_inds_zero[ai_O], atom_inds_zero[ai_H1]])
-            push!(top_bonds, [atom_inds_zero[ai_O], atom_inds_zero[ai_H2]])
-            push!(top_angles, [atom_inds_zero[ai_H1], atom_inds_zero[ai_O], atom_inds_zero[ai_H2]])
-        end
-    end
-
-    use_charge_from_residue = "charge" in force_field.attributes_from_residue
+    # Particles
     for ai in 1:n_atoms
-        atom_name = chemfiles_name(top, ai - 1)
-        res = chemfiles_residue_for_atom(top, ai - 1)
-        res_id = get_res_id(res)
-        res_name = residue_name(res, res_id_to_standard, rename_terminal_res)
-        if !haskey(force_field.residue_types[res_name].types, atom_name)
-            error("atom name \"$atom_name\" not found in template for residue \"$res_name\", " *
-                  "available atom names are $(keys(force_field.residue_types[res_name].types)). " *
-                  "In future, Molly may match atoms based on topology rather than atom name.")
-        end
-        at_type = force_field.residue_types[res_name].types[atom_name]
-        if "chainname" in Chemfiles.list_properties(res)
-            chain_id = Chemfiles.property(res, "chainname")
-        else
-            chain_id = "A"
-        end
-        if "is_standard_pdb" in Chemfiles.list_properties(res)
-            hetero_atom = !Chemfiles.property(res, "is_standard_pdb")
-        else
-            hetero_atom = false
-        end
-        at = force_field.atom_types[at_type]
-        if use_charge_from_residue
-            ch = force_field.residue_types[res_name].charges[atom_name]
-        else
-            ch = at.charge
-        end
-        if ismissing(ch)
-            error("atom of type ", at.type, " has not had charge set")
-        end
+        atype = atom_type_of[ai]
+        at = force_field.atom_types[atype]
+        ismissing(charge_of[ai]) && error("atom $ai type $atype has missing charge")
         if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
-            error("atom of type ", at.type, " has not had σ or ϵ set")
+            error("atom $ai type $atype has unset σ or ϵ")
         end
-        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=ch, σ=at.σ, ϵ=at.ϵ))
-        push!(atoms_data, AtomData(atom_type=at_type, atom_name=atom_name, res_number=Chemfiles.id(res),
-                                    res_name=Chemfiles.name(res), chain_id=chain_id, element=at.element,
-                                    hetero_atom=hetero_atom))
+        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=charge_of[ai], σ=at.σ, ϵ=at.ϵ))
+
+        # minimal AtomData
+        res = chemfiles_residue_for_atom(top, ai-1)
+        chain_id = ("chainname" in Chemfiles.list_properties(res)) ? Chemfiles.property(res, "chainname") : "A"
+        hetero = ("is_standard_pdb" in Chemfiles.list_properties(res)) ? !Chemfiles.property(res,"is_standard_pdb") : false
+        push!(atoms_data, AtomData(atom_type=atype, atom_name=chemfiles_name(top, ai-1),
+                                   res_number=Chemfiles.id(res), res_name=Chemfiles.name(res),
+                                   chain_id=chain_id, element=element_of[ai], hetero_atom=hetero))
         eligible[ai, ai] = false
     end
     atoms = to_device([atoms_abst...], AT)
 
-    for (a1z, a2z) in top_bonds
-        atom_name_1 = chemfiles_name(top, a1z)
-        atom_name_2 = chemfiles_name(top, a2z)
-        res_name_1 = residue_name(chemfiles_residue_for_atom(top, a1z), res_id_to_standard, rename_terminal_res)
-        res_name_2 = residue_name(chemfiles_residue_for_atom(top, a2z), res_id_to_standard, rename_terminal_res)
-        atom_type_1 = force_field.residue_types[res_name_1].types[atom_name_1]
-        atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
-        push!(bonds.is, a1z + 1)
-        push!(bonds.js, a2z + 1)
-        if haskey(force_field.bond_types, (atom_type_1, atom_type_2))
-            bond_type = force_field.bond_types[(atom_type_1, atom_type_2)]
-            push!(bonds.types, atom_types_to_string(atom_type_1, atom_type_2))
+    # Bonds
+    for (a1, a2) in top_bonds
+        t1, t2 = atom_type_of[a1], atom_type_of[a2]
+        push!(bonds_il.is, a1); push!(bonds_il.js, a2)
+        if haskey(force_field.bond_types, (t1,t2))
+            bt = force_field.bond_types[(t1,t2)]; push!(bonds_il.types, atom_types_to_string(t1,t2))
         else
-            bond_type = force_field.bond_types[(atom_type_2, atom_type_1)]
-            push!(bonds.types, atom_types_to_string(atom_type_2, atom_type_1))
+            bt = force_field.bond_types[(t2,t1)]; push!(bonds_il.types, atom_types_to_string(t2,t1))
         end
-        push!(bonds.inters, HarmonicBond(k=bond_type.k, r0=bond_type.r0))
-        eligible[a1z + 1, a2z + 1] = false
-        eligible[a2z + 1, a1z + 1] = false
+        push!(bonds_il.inters, HarmonicBond(k=bt.k, r0=bt.r0))
+        eligible[a1,a2] = false; eligible[a2,a1] = false
     end
 
-    for (a1z, a2z, a3z) in top_angles
-        atom_name_1 = chemfiles_name(top, a1z)
-        atom_name_2 = chemfiles_name(top, a2z)
-        atom_name_3 = chemfiles_name(top, a3z)
-        res_name_1 = residue_name(chemfiles_residue_for_atom(top, a1z), res_id_to_standard, rename_terminal_res)
-        res_name_2 = residue_name(chemfiles_residue_for_atom(top, a2z), res_id_to_standard, rename_terminal_res)
-        res_name_3 = residue_name(chemfiles_residue_for_atom(top, a3z), res_id_to_standard, rename_terminal_res)
-        atom_type_1 = force_field.residue_types[res_name_1].types[atom_name_1]
-        atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
-        atom_type_3 = force_field.residue_types[res_name_3].types[atom_name_3]
-        push!(angles.is, a1z + 1)
-        push!(angles.js, a2z + 1)
-        push!(angles.ks, a3z + 1)
-        if haskey(force_field.angle_types, (atom_type_1, atom_type_2, atom_type_3))
-            angle_type = force_field.angle_types[(atom_type_1, atom_type_2, atom_type_3)]
-            push!(angles.types, atom_types_to_string(atom_type_1, atom_type_2, atom_type_3))
+    # Angles
+    for (i,j,k) in top_angles
+        t = (atom_type_of[i], atom_type_of[j], atom_type_of[k])
+        push!(angles_il.is, i); push!(angles_il.js, j); push!(angles_il.ks, k)
+        if haskey(force_field.angle_types, t)
+            at = force_field.angle_types[t]; push!(angles_il.types, atom_types_to_string(t...))
         else
-            angle_type = force_field.angle_types[(atom_type_3, atom_type_2, atom_type_1)]
-            push!(angles.types, atom_types_to_string(atom_type_3, atom_type_2, atom_type_1))
+            tr = (t[3], t[2], t[1]); at = force_field.angle_types[tr]; push!(angles_il.types, atom_types_to_string(tr...))
         end
-        push!(angles.inters, HarmonicAngle(k=angle_type.k, θ0=angle_type.θ0))
-        eligible[a1z + 1, a3z + 1] = false
-        eligible[a3z + 1, a1z + 1] = false
+        push!(angles_il.inters, HarmonicAngle(k=at.k, θ0=at.θ0))
+        eligible[i,k] = false; eligible[k,i] = false
     end
 
-    for (a1z, a2z, a3z, a4z) in top_torsions
-        atom_name_1 = chemfiles_name(top, a1z)
-        atom_name_2 = chemfiles_name(top, a2z)
-        atom_name_3 = chemfiles_name(top, a3z)
-        atom_name_4 = chemfiles_name(top, a4z)
-        res_name_1 = residue_name(chemfiles_residue_for_atom(top, a1z), res_id_to_standard, rename_terminal_res)
-        res_name_2 = residue_name(chemfiles_residue_for_atom(top, a2z), res_id_to_standard, rename_terminal_res)
-        res_name_3 = residue_name(chemfiles_residue_for_atom(top, a3z), res_id_to_standard, rename_terminal_res)
-        res_name_4 = residue_name(chemfiles_residue_for_atom(top, a4z), res_id_to_standard, rename_terminal_res)
-        atom_type_1 = force_field.residue_types[res_name_1].types[atom_name_1]
-        atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
-        atom_type_3 = force_field.residue_types[res_name_3].types[atom_name_3]
-        atom_type_4 = force_field.residue_types[res_name_4].types[atom_name_4]
-        atom_types = (atom_type_1, atom_type_2, atom_type_3, atom_type_4)
-        if haskey(force_field.torsion_types, atom_types) && force_field.torsion_types[atom_types].proper
-            torsion_type = force_field.torsion_types[atom_types]
-            best_key = atom_types
-        elseif haskey(force_field.torsion_types, reverse(atom_types)) && force_field.torsion_types[reverse(atom_types)].proper
-            torsion_type = force_field.torsion_types[reverse(atom_types)]
-            best_key = reverse(atom_types)
+    # Proper torsions
+    for (i,j,k,l) in top_torsions
+        t = (atom_type_of[i], atom_type_of[j], atom_type_of[k], atom_type_of[l])
+        best_key = t; tt = nothing
+        if haskey(force_field.torsion_types, t) && force_field.torsion_types[t].proper
+            tt = force_field.torsion_types[t]
+        elseif haskey(force_field.torsion_types, (l,k,j,i)) && force_field.torsion_types[(l,k,j,i)].proper
+            best_key = (l,k,j,i); tt = force_field.torsion_types[best_key]
         else
-            # Search wildcard entries
-            best_score = -1
-            best_key = ("", "", "", "")
-            for k in keys(force_field.torsion_types)
-                if force_field.torsion_types[k].proper
-                    for ke in (k, reverse(k))
-                        valid = true
-                        score = 0
-                        for (i, v) in enumerate(ke)
-                            if v == atom_types[i]
-                                score += 1
-                            elseif v != ""
-                                valid = false
-                                break
-                            end
+            best_score = -1; best_key = ("","","","")
+            for kkey in keys(force_field.torsion_types)
+                force_field.torsion_types[kkey].proper || continue
+                for ke in (kkey, reverse(kkey))
+                    valid = true; score = 0
+                    for (idx, v) in enumerate(ke)
+                        if v == t[idx]; score += 1
+                        elseif v != ""; valid = false; break
                         end
-                        if valid && (score >= best_score)
-                            best_score = score
-                            best_key = k
-                        end
+                    end
+                    if valid && score >= best_score
+                        best_score = score; best_key = kkey
                     end
                 end
             end
-            torsion_type = force_field.torsion_types[best_key]
+            tt = force_field.torsion_types[best_key]
         end
-        n_terms = length(torsion_type.periodicities)
-        for start_i in 1:torsion_n_terms:n_terms
-            push!(torsions.is, a1z + 1)
-            push!(torsions.js, a2z + 1)
-            push!(torsions.ks, a3z + 1)
-            push!(torsions.ls, a4z + 1)
-            push!(torsions.types, atom_types_to_string(best_key...))
-            end_i = min(start_i + torsion_n_terms - 1, n_terms)
-            push!(torsions.inters, PeriodicTorsion(
-                        periodicities=torsion_type.periodicities[start_i:end_i],
-                        phases=torsion_type.phases[start_i:end_i],
-                        ks=torsion_type.ks[start_i:end_i],
-                        proper=true,
-            ))
+        n_terms = length(tt.periodicities)
+        for s in 1:torsion_n_terms:n_terms
+            e = min(s+torsion_n_terms-1, n_terms)
+            push!(tors_il.is, i); push!(tors_il.js, j); push!(tors_il.ks, k); push!(tors_il.ls, l)
+            push!(tors_il.types, atom_types_to_string(best_key...))
+            push!(tors_il.inters, PeriodicTorsion(periodicities=tt.periodicities[s:e],
+                                                  phases=tt.phases[s:e], ks=tt.ks[s:e], proper=true))
         end
-        special[a1z + 1, a4z + 1] = true
-        special[a4z + 1, a1z + 1] = true
+        special[i,l] = true; special[l,i] = true
     end
 
-    # Note the order here - Chemfiles puts the central atom second
-    for (a2z, a1z, a3z, a4z) in top_impropers
-        inds_no1 = (a2z, a3z, a4z)
-        atom_names = [chemfiles_name(top, a) for a in inds_no1]
-        res_names = [residue_name(chemfiles_residue_for_atom(top, a), res_id_to_standard, rename_terminal_res) for a in inds_no1]
-        atom_types = [force_field.residue_types[res_names[i]].types[atom_names[i]] for i in 1:3]
-        # Amber sorts atoms alphabetically with hydrogen last
+    # Impropers (Amber ordering)
+    for (c, j, k, l) in top_impropers           # center second in Chemfiles (c is central)
+        names_no1 = (j,k,l)
+        types_no1 = (atom_type_of[j], atom_type_of[k], atom_type_of[l])
         if force_field.torsion_order == "amber"
-            order = sortperm([t[1] == 'H' ? 'z' * t : t for t in atom_types])
-        else
-            order = [1, 2, 3]
+            order = sortperm([t[1] == 'H' ? 'z'*t : t for t in types_no1])
+            j, k, l = names_no1[order[1]], names_no1[order[2]], names_no1[order[3]]
         end
-        a2z, a3z, a4z = [inds_no1[i] for i in order]
-        atom_name_1 = chemfiles_name(top, a1z)
-        atom_name_2 = atom_names[order[1]]
-        atom_name_3 = atom_names[order[2]]
-        atom_name_4 = atom_names[order[3]]
-        res_name_1 = residue_name(chemfiles_residue_for_atom(top, a1z), res_id_to_standard, rename_terminal_res)
-        res_name_2 = res_names[order[1]]
-        res_name_3 = res_names[order[2]]
-        res_name_4 = res_names[order[3]]
-        atom_type_1 = force_field.residue_types[res_name_1].types[atom_name_1]
-        atom_type_2 = force_field.residue_types[res_name_2].types[atom_name_2]
-        atom_type_3 = force_field.residue_types[res_name_3].types[atom_name_3]
-        atom_type_4 = force_field.residue_types[res_name_4].types[atom_name_4]
-        atom_types_no1 = (atom_type_2, atom_type_3, atom_type_4)
-        best_score = -1
-        best_key = ("", "", "", "")
-        best_key_perm = ("", "", "", "")
-        for k in keys(force_field.torsion_types)
-            if !force_field.torsion_types[k].proper && (k[1] == atom_type_1 || k[1] == "")
-                for ke2 in permutations(k[2:end])
-                    valid = true
-                    score = k[1] == atom_type_1 ? 1 : 0
-                    for (i, v) in enumerate(ke2)
-                        if v == atom_types_no1[i]
-                            score += 1
-                        elseif v != ""
-                            valid = false
-                            break
-                        end
+        t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
+        best_score = -1; best_key = ("","","",""); tt = nothing
+        for kkey in keys(force_field.torsion_types)
+            force_field.torsion_types[kkey].proper && continue
+            (kkey[1] == t1 || kkey[1] == "") || continue
+            for ke2 in permutations(kkey[2:end])
+                valid = true; score = (kkey[1] == t1 ? 1 : 0)
+                for (idx, v) in enumerate(ke2)
+                    if v == (t2,t3,t4)[idx]; score += 1
+                    elseif v != ""; valid = false; break
                     end
-                    if valid && (score == 4 || best_score == -1)
-                        best_score = score
-                        best_key = k
-                        best_key_perm = (k[1], ke2[1], ke2[2], ke2[3])
-                    end
+                end
+                if valid && (score == 4 || best_score == -1)
+                    best_score = score; best_key = kkey; tt = force_field.torsion_types[kkey]
                 end
             end
         end
-        # Not all possible impropers are defined
-        if best_score != -1
-            torsion_type = force_field.torsion_types[best_key]
-            a1, a2, a3, a4 = a1z + 1, a2z + 1, a3z + 1, a4z + 1
-            # Follow Amber assignment rules from OpenMM
-            if force_field.torsion_order == "amber"
-                r2 = Chemfiles.id(chemfiles_residue_for_atom(top, a2z))
-                r3 = Chemfiles.id(chemfiles_residue_for_atom(top, a3z))
-                r4 = Chemfiles.id(chemfiles_residue_for_atom(top, a4z))
-                ta2 = force_field.residue_types[res_name_2].indices[atom_name_2]
-                ta3 = force_field.residue_types[res_name_3].indices[atom_name_3]
-                ta4 = force_field.residue_types[res_name_4].indices[atom_name_4]
-                e2 = force_field.atom_types[atom_type_2].element
-                e3 = force_field.atom_types[atom_type_3].element
-                e4 = force_field.atom_types[atom_type_4].element
-                t2, t3, t4 = atom_type_2, atom_type_3, atom_type_4
-                if !("" in best_key_perm)
-                    if t2 == t4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                        a2, a4 = a4, a2
-                        r2, r4 = r4, r2
-                        ta2, ta4 = ta4, ta2
-                    end
-                    if t3 == t4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                        a3, a4 = a4, a3
-                        r3, r4 = r4, r3
-                        ta3, ta4 = ta4, ta3
-                    end
-                    if t2 == t3 && (r2 > r3 || (r2 == r3 && ta2 > ta3))
-                        a2, a3 = a3, a2
-                    end
-                else
-                    if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
-                        a2, a4 = a4, a2
-                        r2, r4 = r4, r2
-                        ta2, ta4 = ta4, ta2
-                    end
-                    if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
-                        a3, a4 = a4, a3
-                        r3, r4 = r4, r3
-                        ta3, ta4 = ta4, ta3
-                    end
-                    if r2 > r3 || (r2 == r3 && ta2 > ta3)
-                        a2, a3 = a3, a2
-                    end
-                end
-            end
-            push!(impropers.is, a2)
-            push!(impropers.js, a3)
-            push!(impropers.ks, a1)
-            push!(impropers.ls, a4)
-            push!(impropers.types, atom_types_to_string(best_key...))
-            push!(impropers.inters, PeriodicTorsion(periodicities=torsion_type.periodicities,
-                    phases=torsion_type.phases, ks=torsion_type.ks, proper=false))
-        end
+        tt === nothing && continue
+        push!(imps_il.is, j); push!(imps_il.js, k); push!(imps_il.ks, c); push!(imps_il.ls, l)
+        push!(imps_il.types, atom_types_to_string(best_key...))
+        push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
+                                              phases=tt.phases, ks=tt.ks, proper=false))
     end
 
-    if units
-        force_units = u"kJ * mol^-1 * nm^-1"
-        energy_units = u"kJ * mol^-1"
-    else
-        force_units = NoUnits
-        energy_units = NoUnits
-    end
-
-    # Convert from Å
+    # ---- Units and coordinates ----
     if units
         coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(Chemfiles.positions(frame))]
     else
@@ -878,22 +740,16 @@ function System(coord_file::AbstractString,
     end
     coords = wrap_coords.(coords, (boundary_used,))
 
-    # All torsions should have the same number of terms for speed, GPU compatibility
-    #   and for taking gradients
-    # For now always pad to 6 terms
-    torsion_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                            proper=t.proper, n_terms=torsion_n_terms)
-                                            for t in torsions.inters]
-    improper_inters_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
-                                            proper=t.proper, n_terms=torsion_n_terms)
-                                            for t in impropers.inters]
+    tors_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                proper=t.proper, n_terms=torsion_n_terms) for t in tors_il.inters]
+    imps_pad = [PeriodicTorsion(periodicities=t.periodicities, phases=t.phases, ks=t.ks,
+                                proper=t.proper, n_terms=torsion_n_terms) for t in imps_il.inters]
 
-    return System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
-                  loggers, data, bonds, angles, torsions, impropers, torsion_inters_pad,
-                  improper_inters_pad, eligible, special, units, dist_cutoff, constraints,
-                  rigid_water, nonbonded_method, ewald_error_tol, approximate_pme,
-                  neighbor_finder_type, implicit_solvent, kappa, grad_safe, dist_neighbors,
-                  weight_14_lj, weight_14_coulomb)
+    return System(T, AT, to_device([atoms_abst...], AT), coords, boundary_used, velocities, atoms_data,
+                  loggers, data, bonds_il, angles_il, tors_il, imps_il, tors_pad, imps_pad,
+                  eligible, special, units, dist_cutoff, constraints, rigid_water, nonbonded_method,
+                  ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent, kappa,
+                  grad_safe, dist_neighbors, force_field.weight_14_lj, force_field.weight_14_coulomb)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)
