@@ -278,6 +278,32 @@ function inject_atom(at, at_data, params_dic)
 end
 
 """
+    Atom_L(; <keyword arguments>)
+
+Similar to Atom Type, but with λ scaling for alchemical transformations.
+
+# Arguments
+- `index::Int`: the index of the atom in the system.
+- `atom_type::T`: the type of the atom.
+- `mass::M=1.0u"g/mol"`: the mass of the atom.
+- `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
+- `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
+    potential is zero.
+- `ϵ::E=0.0u"kJ * mol^-1"`: the Lennard-Jones depth of the potential well.
+- `λ::L=1.0: the λ scaling factor (if λ is 1.0, all potentials are regular energy potentials)
+"""
+
+@kwdef struct Atom{T, M, C, S, E, L}
+    index::Int = 1
+    atom_type::T = 1
+    mass::M = 1.0u"g/mol"
+    charge::C = 0.0
+    σ::S = 0.0u"nm"
+    ϵ::E = 0.0u"kJ * mol^-1"
+    λ::L = 1.0
+end
+
+"""
     charge(atom)
 
 The partial charge of an [`Atom`](@ref).
