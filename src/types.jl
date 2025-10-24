@@ -554,7 +554,6 @@ function System(;
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
     T = float_type(boundary)
-    CT = typeof(ustrip(oneunit(eltype(eltype(coords))))) # Allows propagation of uncertainties to tensors
     A = typeof(atoms)
     C = typeof(coords)
     B = typeof(boundary)
