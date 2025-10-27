@@ -5,7 +5,8 @@ export
     DistanceCutoff,
     ShiftedPotentialCutoff,
     ShiftedForceCutoff,
-    CubicSplineCutoff
+    CubicSplineCutoff,
+    force_cutoff
 
 abstract type AbstractCutoff{P} end
 
