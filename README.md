@@ -12,17 +12,18 @@ Molecular dynamics (MD) is a computational technique used to explore these pheno
 Molly.jl is a pure Julia package for MD, and for the simulation of physical systems more broadly.
 
 The package is described in [a talk](https://www.youtube.com/watch?v=XTE5HSo-jx8) at JuliaCon 2024, [an earlier talk](https://www.youtube.com/watch?v=6G97jDVPlYc) at Enzyme Conference 2023 and [a tutorial](https://www.youtube.com/watch?v=rVRWIxLyjgE) at the MolSSI JuliaMolSim Workshop 2024.
-[Slides](https://docs.google.com/presentation/d/1SjzRi7jFbgFwP9kupwdtkxmr2x0OWjzzXwnoenCcCQg/edit?usp=sharing) are also available for a tutorial in September 2023.
+[Slides](https://docs.google.com/presentation/d/1CvGwFn0XjiIfAQ562RlIPGjXRKnsNXLYjmPRDFS7SQs/edit?usp=sharing) are also available for a tutorial in 2025.
 
 Implemented features include:
-- Non-bonded interactions - Lennard-Jones Van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential, Buckingham potential, soft core variants.
+- Non-bonded interactions - Lennard-Jones van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential, Buckingham potential, soft core variants.
 - Bonded interactions - harmonic and Morse bonds, bond angles, torsion angles, harmonic position restraints, FENE bonds.
+- Ewald and particle mesh Ewald (PME) electrostatic summation.
 - Interface to allow definition of new interactions, simulators, thermostats, neighbor finders, loggers etc.
 - Read in OpenMM force field files and coordinate files supported by [Chemfiles.jl](https://github.com/chemfiles/Chemfiles.jl). There is also experimental support for Gromacs files.
 - Write out trajectory files in formats supported by Chemfiles.jl, including DCD and XTC.
 - Verlet, velocity Verlet, Störmer-Verlet, flexible Langevin and Nosé-Hoover integrators.
 - Andersen, Berendsen and velocity rescaling thermostats.
-- Monte Carlo barostat and variants.
+- C-rescale, Monte Carlo and Berendsen barostats with flexible virial calculation.
 - Steepest descent energy minimization.
 - Replica exchange molecular dynamics.
 - Monte Carlo simulation.
@@ -45,15 +46,12 @@ Implemented features include:
 - Differentiable molecular simulation. This is a unique feature of the package and the focus of its current development.
 
 Features not yet implemented include:
-- High GPU performance.
-- Ewald or particle mesh Ewald summation.
-- Full support for constrained bonds and angles.
+- Optimal GPU performance - currently we are ~5x slower than OpenMM on CUDA GPUs.
 - Protein preparation - solvent box, add hydrogens etc.
 - Simulators such as metadynamics.
 - Quantum mechanical modelling.
 - Domain decomposition algorithms.
 - Alchemical free energy calculations.
-- High test coverage.
 - API stability.
 
 ## Installation
@@ -62,6 +60,7 @@ Features not yet implemented include:
 It is recommended to run on the current stable Julia release for the best performance.
 Install Molly from the Julia REPL.
 Enter the package mode by pressing `]` and run `add Molly`.
+If you want to run on a GPU you will also need to install the appropriate package, e.g. `add CUDA`.
 
 ## Usage
 
@@ -97,41 +96,57 @@ sys = System(
 simulate!(sys, simulator, 10_000)
 ```
 
-Simulation of a protein:
+Simulation of a protein on GPU:
 ```julia
-using Molly
+using Molly, CUDA
 
-sys = System(
-    joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
-    joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
-    nonbonded_method="pme",
-    loggers=(
-        temp=TemperatureLogger(10),
-        writer=TrajectoryWriter(10, "traj_5XER_1ps.pdb"),
-    ),
+data_dir = joinpath(dirname(pathof(Molly)), "..", "data")
+T = Float32
+ff = MolecularForceField(
+    T,
+    joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
+    joinpath(data_dir, "force_fields", "tip3p_standard.xml"),
+    joinpath(data_dir, "force_fields", "his.xml"),
 )
 
-temp = 298.0u"K"
+sys = System(
+    joinpath(data_dir, "6mrr_equil.pdb"),
+    ff;
+    nonbonded_method="pme",
+    loggers=(
+        energy=TotalEnergyLogger(10),
+        writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
+    ),
+    array_type=CuArray,
+)
+
+minimizer = SteepestDescentMinimizer()
+simulate!(sys, minimizer)
+
+temp = T(298.0)u"K"
 random_velocities!(sys, temp)
-simulator = VelocityVerlet(
-    dt=0.0002u"ps",
-    coupling=AndersenThermostat(temp, 1.0u"ps"),
+simulator = Langevin(
+    dt=T(0.001)u"ps",
+    temperature=temp,
+    friction=T(1.0)u"ps^-1",
+    coupling=MonteCarloBarostat(T(1.0)u"bar", temp, sys.boundary),
 )
 
 simulate!(sys, simulator, 5_000)
 ```
-
-The above 1 ps simulation looks something like this when you view it in [VMD](https://www.ks.uiuc.edu/Research/vmd):
-![MD simulation](https://github.com/JuliaMolSim/Molly.jl/raw/master/data/5XER/sim_1ps.gif)
+The above 5 ps simulation looks something like this when you view it in PyMOL:
+![MD simulation](https://github.com/JuliaMolSim/Molly.jl/raw/master/docs/src/images/sim_6mrr.gif)
 
 ## Contributing
 
 Contributions are very welcome including reporting bugs, fixing bugs, adding new features, improving performance, adding tests and improving documentation.
 Feel free to open an issue or use the channels below to discuss your contribution.
 New features will generally require tests to be added as well.
+As described in the documentation, potentials implementing the [AtomsCalculators](https://github.com/JuliaMolSim/AtomsCalculators.jl) interface can be used with Molly.
+If you have an interesting example of such a potential in your package, do contribute an example to the Molly documentation.
 See the [roadmap issue](https://github.com/JuliaMolSim/Molly.jl/issues/2) for some discussion of recent progress and future plans.
 
-Join the #juliamolsim channel on the [Julia Slack](https://join.slack.com/t/julialang/shared_invite/zt-26arhonkh-WYNI2rI2X85jcbkn6pRAjA), the #molly channel on the [JuliaMolSim Zulip](https://juliamolsim.zulipchat.com/join/j5sqhiajbma5hw55hy6wtzv7) or post on the [Julia Discourse](https://discourse.julialang.org) to discuss the usage and development of Molly.jl.
+Join the #molly channel on the [JuliaMolSim Zulip](https://juliamolsim.zulipchat.com/join/j5sqhiajbma5hw55hy6wtzv7), the #juliamolsim channel on the [Julia Slack](https://join.slack.com/t/julialang/shared_invite/zt-26arhonkh-WYNI2rI2X85jcbkn6pRAjA) or post on the [Julia Discourse](https://discourse.julialang.org) to discuss the usage and development of Molly.jl.
 
 Molly.jl follows the Contributor Covenant [code of conduct](https://github.com/JuliaMolSim/Molly.jl/blob/master/CODE_OF_CONDUCT.md).
 
@@ -142,8 +157,3 @@ If you use Molly, please cite the following paper ([bib entry here](https://gith
 - Greener JG. Differentiable simulation to develop molecular dynamics force fields for disordered proteins, [Chemical Science](https://doi.org/10.1039/D3SC05230C) 15, 4897-4909 (2024)
 
 A paper involving more contributors with further details on the software will be written at some point.
-
-## Interested?
-
-There is the possibility of a postdoc position involving the development and use of Molly.
-Contact Joe Greener with informal enquiries.

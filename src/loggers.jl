@@ -21,7 +21,6 @@ export
     DisplacementsLogger,
     write_structure,
     TrajectoryWriter,
-    StructureWriter,
     TimeCorrelationLogger,
     AutoCorrelationLogger,
     AverageObservableLogger,
@@ -756,31 +755,6 @@ function log_property!(logger::TrajectoryWriter, sys::System, buffers, neighbors
             end
         end
     end
-end
-
-"""
-    StructureWriter(n_steps, filepath, excluded_res=String[]; atom_inds=[])
-
-Write 3D structures to a file in the PDB format throughout a simulation.
-
-The atom indices to be written can be given as a list or range to `atom_inds`,
-with all atoms being written by default.
-Residue names to be excluded can be given as `excluded_res`.
-The [`System`](@ref) should have `atoms_data` defined.
-The file will be appended to, so should be deleted before simulation if it
-already exists.
-
-Not compatible with 2D systems.
-The box size for the CRYST1 record is taken from the first snapshot;
-different box sizes at later snapshots will not be recorded.
-The CRYST1 record is not written for infinite boundaries.
-"""
-function StructureWriter(n_steps::Integer, filepath::AbstractString,
-                         excluded_res=String[]; atom_inds=Int[], correction = :wrap)
-    # This aliasing function will be removed in the next breaking release
-    return TrajectoryWriter(n_steps, filepath, "PDB", correction, atom_inds,
-                    Set(excluded_res), false, true, Chemfiles.Topology(),
-                    false, 0)
 end
 
 @doc raw"""

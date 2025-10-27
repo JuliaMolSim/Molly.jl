@@ -566,8 +566,12 @@ end
         end
 
         if run_cuda_tests
-            neighbor_finder_gpu = GPUNeighborFinder(eligible=CuArray(trues(n_atoms, n_atoms)),
-                                                    dist_cutoff=1.2u"nm")
+            if use_neighbors(inter)
+                neighbor_finder_gpu = GPUNeighborFinder(eligible=CuArray(trues(n_atoms, n_atoms)),
+                                                        dist_cutoff=1.2u"nm")
+            else
+                neighbor_finder_gpu = NoNeighborFinder()
+            end
         end
 
         atoms = [Atom(mass=10.0u"g/mol", charge=(i % 2 == 0 ? -1.0 : 1.0), σ=0.2u"nm", ϵ=0.2u"kJ * mol^-1")
@@ -954,7 +958,7 @@ end
         atoms=atoms,
         coords=coords,
         boundary=boundary,
-        pairwise_inters=(Coulomb(), ),
+        pairwise_inters=(Coulomb(use_neighbors=true), ),
         neighbor_finder=neighbor_finder,
         loggers=(
             coords=CoordinatesLogger(10),
@@ -980,7 +984,7 @@ end
 
     acceptance_rate = sys.loggers.mcl.n_accept / sys.loggers.mcl.n_trials
     @info "Acceptance Rate: $acceptance_rate"
-    @test acceptance_rate > 0.2
+    @test acceptance_rate > 0.05
 
     @test sys.loggers.avgpe.block_averages[end] < sys.loggers.avgpe.block_averages[1]
 

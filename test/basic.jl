@@ -220,6 +220,32 @@
     end
 end
 
+@testset "Trajectory" begin
+    
+
+    trj_path = joinpath(data_dir, "water_frames", "water_trj.dcd")
+    ff  = MolecularForceField(Float64, joinpath(ff_dir, "tip3p_standard.xml"); units = true)
+    sys = System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff; dist_cutoff = 0.5u"nm") # The small dist cutoff is needed so that the neighbor finder does not complain about the small unit cell
+
+    traj_sys = EnsembleSystem(sys, trj_path)
+
+    n_frames = Int(length(traj_sys.trajectory))
+
+    for n in 1:n_frames
+
+        current = read_frame!(traj_sys, n)
+        pdb_sys = System(joinpath(data_dir, "water_frames", "frame_$(n).pdb"), ff; dist_cutoff = 0.5u"nm")
+
+        p1 = current.coords[1]
+        p2 = pdb_sys.coords[1]
+
+        @test isapprox(p1, p2; rtol = 0.001) # Isapprox due to rounding errors when reading PDB file
+
+    end
+
+
+end
+
 @testset "Neighbor lists" begin
     reorder_neighbors(nbs) = map(t -> (min(t[1], t[2]), max(t[1], t[2]), t[3]), nbs)
 

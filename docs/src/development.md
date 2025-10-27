@@ -3,6 +3,7 @@
 ## Running tests
 
 The tests will automatically include multithreading and/or GPU tests if multiple threads and/or a CUDA-enabled GPU are available.
+Errors appearing at the start of the test run due to unavailable backends is expected.
 `test/runtests.jl` does not include all the tests, see the test directory for more, though these extra tests do not need to be run for every change.
 Various environmental variables can be set to modify the tests:
 - `VISTESTS` determines whether to run the [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) plotting tests which will error on remote systems where a display is not available, default `VISTESTS=1`.
