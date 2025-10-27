@@ -124,25 +124,25 @@
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
 
-    c4 = SVector(1.28, 1.0, 1.0)u"nm"
-    dr14 = vector(c1, c4, boundary)
+    c5 = SVector(1.28, 1.0, 1.0)u"nm"
+    dr15 = vector(c1, c4, boundary)
     @test isapprox(
-        potential_energy(inter, dr14, AH_a1, AH_a1),
+        potential_energy(inter, dr15, AH_a1, AH_a1),
         0.7205987916u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
     @test isapprox(
-        force(inter, dr14, AH_a1, AH_a1),
+        force(inter, dr15, AH_a1, AH_a1),
         SVector(52.5306754422, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
     @test isapprox(
-        potential_energy(inter, dr14,  AH_a1, AH_a1, u"kJ * mol^-1 * nm^-1", true),
+        potential_energy(inter, dr15,  AH_a1, AH_a1, u"kJ * mol^-1 * nm^-1", true),
         0.5 * 0.7205987916u"kJ * mol^-1";
         atol=1e-9u"kJ * mol^-1",
     )
     @test isapprox(
-        force(inter, dr14,  AH_a1, AH_a1, u"kJ * mol^-1 * nm^-1", true),
+        force(inter, dr15,  AH_a1, AH_a1, u"kJ * mol^-1 * nm^-1", true),
         SVector(0.5 * 52.5306754422, 0.0, 0.0)u"kJ * mol^-1 * nm^-1";
         atol=1e-9u"kJ * mol^-1 * nm^-1",
     )
@@ -583,7 +583,8 @@
 
     for inter in (
             LennardJones(; shortcut=do_shortcut),
-            LennardJonesSoftCore(α=1, λ=0, p=2; shortcut=do_shortcut),
+            LennardJonesSoftCoreBeutler(α=1, λ=0; shortcut=do_shortcut),
+            LennardJonesSoftCoreGapsys(α=1, λ=0; shortcut=do_shortcut),
             AshbaughHatch(; shortcut=do_shortcut),
             SoftSphere(; shortcut=do_shortcut),
             Mie(m=6, n=12; shortcut=do_shortcut),
