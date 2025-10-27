@@ -125,7 +125,7 @@
     )
 
     c5 = SVector(1.28, 1.0, 1.0)u"nm"
-    dr15 = vector(c1, c4, boundary)
+    dr15 = vector(c1, c5, boundary)
     @test isapprox(
         potential_energy(inter, dr15, AH_a1, AH_a1),
         0.7205987916u"kJ * mol^-1";
