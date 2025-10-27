@@ -9,7 +9,7 @@
             coords=CoordinatesLogger(10),
             energy=TotalEnergyLogger(10),
             dcd_writer=TrajectoryWriter(10, temp_fp_dcd; atom_inds=1001:2000),
-            pdb_writer=StructureWriter(10, temp_fp_pdb),
+            pdb_writer=TrajectoryWriter(10, temp_fp_pdb),
             density=DensityLogger(10),
         ),
         nonbonded_method="cutoff",

@@ -19,6 +19,10 @@ and the force on each atom by
 &= \frac{24\varepsilon_{ij}}{r_{ij}^2} \left[2\left(\frac{\sigma_{ij}^{6}}{r_{ij}^{6}}\right)^2 -\left(\frac{\sigma_{ij}}{r_{ij}}\right)^{6}\right] \vec{r}_{ij}
 \end{aligned}
 ```
+
+The potential energy does not include the long range dispersion correction present
+in some other implementations that approximately represents contributions from
+beyond the cutoff distance.
 """
 @kwdef struct LennardJones{C, H, S, E, W} <: PairwiseInteraction
     cutoff::C = NoCutoff()

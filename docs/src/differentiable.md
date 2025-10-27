@@ -11,7 +11,7 @@ The concept of using automatic differentiation (AD) to obtain exact gradients th
 
 There are some projects that explore differentiable molecular simulations - see [Related software](@ref).
 However Julia provides a strong suite of AD tools, with [Enzyme.jl](https://github.com/EnzymeAD/Enzyme.jl) allowing source-to-source transformations for much of the language.
-With Molly you can use the power of Enzyme to obtain gradients through molecular simulations, even in the presence of complex interactions such as implicit solvation and stochasticity such as Langevin dynamics or the Andersen thermostat.
+With Molly you can use the power of Enzyme to obtain gradients through molecular simulations, even in the presence of complex interactions such as PME or implicit solvation and stochasticity such as Langevin dynamics or the Andersen thermostat.
 Reverse and forward mode AD can be used on the CPU with multithreading and on the GPU; performance is typically within an order of magnitude of the primal run.
 Pairwise, specific and general interactions work, along with neighbor lists, and the same abstractions for running simulations are used as in the main package.
 

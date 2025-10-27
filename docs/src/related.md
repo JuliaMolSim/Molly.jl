@@ -12,6 +12,7 @@ For differentiable simulations there are a number of related packages:
 - [DMFF](https://github.com/deepmodeling/DMFF)
 - [Time Machine](https://github.com/proteneer/timemachine)
 - [DiffTaichi](https://github.com/taichi-dev/difftaichi)
+- [DIMOS](https://github.com/nec-research/DIMOS)
 
 In Julia there are a number of packages related to atomic simulation, some of which are involved with the [JuliaMolSim](https://juliamolsim.github.io) organisation:
 - [AtomsBase.jl](https://github.com/JuliaMolSim/AtomsBase.jl)

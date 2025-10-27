@@ -17,6 +17,7 @@ EnzymeRules.inactive(::typeof(Molly.check_force_units), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.check_energy_units), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.atoms_bonded_to_N), args...) = nothing
 EnzymeRules.inactive(::typeof(Molly.lookup_table), args...) = nothing
+EnzymeRules.inactive(::typeof(Molly.needs_virial_schedule), args...) = nothing
 EnzymeRules.inactive(::typeof(find_neighbors), args...) = nothing
 EnzymeRules.inactive_type(::Type{DistanceNeighborFinder}) = nothing
 EnzymeRules.inactive(::typeof(visualize), args...) = nothing

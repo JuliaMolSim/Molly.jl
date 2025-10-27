@@ -554,7 +554,6 @@ function System(;
     D = AtomsBase.n_dimensions(boundary)
     AT = array_type(coords)
     T = float_type(boundary)
-    CT = typeof(ustrip(oneunit(eltype(eltype(coords))))) # Allows propagation of uncertainties to tensors
     A = typeof(atoms)
     C = typeof(coords)
     B = typeof(boundary)
@@ -954,6 +953,7 @@ function ReplicaSystem(;
                         replica_coords,
                         boundary,
                         n_replicas,
+                        replica_boundaries=nothing,
                         replica_velocities=nothing,
                         atoms_data=[],
                         topology=nothing,
@@ -984,6 +984,14 @@ function ReplicaSystem(;
     C = typeof(replica_coords[1])
     B = typeof(boundary)
     NF = typeof(neighbor_finder)
+
+    if isnothing(replica_boundaries)
+        @warn "Using the same boundary for all replicas! Make sure that this is reasonable for your system!"
+        replica_boundaries = [deepcopy(boundary) for _ in 1:n_replicas]
+    elseif length(replica_boundaries) != n_replicas
+        throw(ArgumentError("number of boundaries ($(length(replica_boundaries)))"
+                            *" does not match number of replicas $(length(n_replicas))"))
+    end
 
     if isnothing(replica_velocities)
         if force_units == NoUnits
@@ -1119,7 +1127,7 @@ function ReplicaSystem(;
                         typeof(replica_specific_inter_lists[i]), typeof(replica_general_inters[i]),
                         typeof(replica_constraints[i]), NF, typeof(replica_loggers[i]), F, E, K,
                         M, TM, Nothing}(
-            atoms, replica_coords[i], boundary, replica_velocities[i],
+            atoms, replica_coords[i], replica_boundaries[i], replica_velocities[i],
             atoms_data, replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i],
             deepcopy(neighbor_finder), replica_loggers[i], replica_dfs[i], force_units,
@@ -1516,7 +1524,7 @@ AtomsCalculators.@generate_interface function AtomsCalculators.potential_energy(
         k=calc.k,
     )
     nbs = (isnothing(neighbors) ? find_neighbors(sys) : neighbors)
-    return potential_energy(sys, nbs, step_n; n_threads=n_threads)
+    return potential_energy(sys, nbs, nothing, step_n; n_threads=n_threads)
 end
 
 """
