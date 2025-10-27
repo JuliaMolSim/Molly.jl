@@ -895,7 +895,7 @@ end
     )
 
     n_replicas = 4
-    λ_vals = [0.0, 0.1, 0.25, 0.4]
+    λ_vals = [1.0, 0.9, 0.75, 0.6]
     replica_pairwise_inters = [(LennardJonesSoftCoreBeutler(α=1, λ=λ_vals[i], use_neighbors=true),)
                                for i in 1:n_replicas]
 
