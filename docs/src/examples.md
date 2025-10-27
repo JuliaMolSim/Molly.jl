@@ -211,7 +211,7 @@ coords = place_atoms(n_people, boundary; min_dist=0.1)
 velocities = [random_velocity(1.0, temp; dims=2) for i in 1:n_people]
 
 lj = LennardJones(cutoff=DistanceCutoff(1.6), use_neighbors=true)
-sir = SIRInteraction(0.5, 0.06, 0.01)
+sir = SIRInteraction(0.5, 0.06, 0.01) # Does not use the neighbor list
 pairwise_inters = (LennardJones=lj, SIR=sir)
 neighbor_finder = DistanceNeighborFinder(
     eligible=trues(n_people, n_people),
