@@ -1018,8 +1018,6 @@ save("softcore_potentials.png", f)
 ```
 ![Lennard-Jones Softcore](images/softcore_potentials.png)
 
-The form of the potential is approximately the same as standard Lennard-Jones for ``r_{ij} > \sigma_{ij}`` if some fractional values are used for ``\lambda`` and ``\alpha``.
-
 ## Crystal structures
 
 Molly can make use of [SimpleCrystals.jl](https://github.com/ejmeitz/SimpleCrystals.jl) to generate crystal structures for simulation.
