@@ -367,7 +367,7 @@ end
 end
 
 function pairwise_force(inter::LennardJonesSoftCoreGapsys, r, (dr, C12, C6))
-    R = sqrt(cbrt(inter.α*((26/7)*(C12/C6)*(1-inter.λ))))
+    R = inter.α*sqrt(cbrt(((26/7)*(C12/C6)*(1-inter.λ))))
     invR = 1/R
     if r >= R
         return (((12*C12)/r^13)-((6*C6)/r^7))
@@ -402,7 +402,7 @@ end
 end
 
 function pairwise_pe(inter::LennardJonesSoftCoreGapsys, r, (C12, C6))
-    R = sqrt(cbrt(inter.α*((26/7)*(C12/C6)*(1-inter.λ))))
+    R = inter.α*sqrt(cbrt(((26/7)*(C12/C6)*(1-inter.λ))))
     invR = 1/R
     if r >= R
         return (C12/(r^12))-(C6/(r^6))
