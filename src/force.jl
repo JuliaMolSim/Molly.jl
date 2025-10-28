@@ -434,7 +434,7 @@ function pairwise_forces_loop!(fs_nounits, fs_chunks, vir_nounits, vir_chunks, a
         @inbounds vir_nounits .= vir_chunks[1]
     end
     @inbounds for chunk_i in 2:n_threads
-        fs_nounits  .+= fs_chunks[chunk_i]
+        fs_nounits .+= fs_chunks[chunk_i]
         if needs_vir
             vir_nounits .+= vir_chunks[chunk_i]
         end

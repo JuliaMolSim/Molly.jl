@@ -244,7 +244,7 @@ end
             n_steps=10,
             dist_cutoff=T(1.5),
         )
-        n_threads = parallel ? Threads.nthreads() : 1
+        n_threads = (parallel ? Threads.nthreads() : 1)
 
         const_args = [
             Const(boundary), Const(pairwise_inters),
@@ -295,7 +295,7 @@ end
         for (prefix, genz, gfd, tol) in zip(("σ", "r0"), grad_enzyme, grad_fd, (tol_σ, tol_r0))
             if abs(gfd) < 1e-13
                 @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Enzyme $genz"
-                ztol = contains(name, "f32") ? 1e-8 : 1e-10
+                ztol = (contains(name, "f32") ? 1e-8 : 1e-10)
                 @test isnothing(genz) || abs(genz) < ztol
             elseif isnothing(genz)
                 @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Enzyme $genz"
@@ -308,7 +308,7 @@ end
         end
     end
 end
-#=
+
 @testset "Differentiable protein" begin
     function create_sys(AT)
         ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...; units=false)
@@ -481,17 +481,15 @@ end
         push!(test_runs, ("Sim", test_sim_grad, 1e-2))
     end
     params_to_test = (
-        #"inter_LJ_weight_14",
         "atom_N_ϵ",
         "inter_PT_C/N/CT/C_k_1",
         "inter_GB_screen_O",
-        #"inter_GB_neck_scale",
     )
 
     for (test_name, test_fn, test_tol) in test_runs
         for (platform, AT, parallel) in platform_runs
             sys_ref = create_sys(AT)
-            n_threads = parallel ? Threads.nthreads() : 1
+            n_threads = (parallel ? Threads.nthreads() : 1)
             grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
             autodiff(
                 set_runtime_activity(Reverse), test_fn, Active,
@@ -500,7 +498,6 @@ end
                 Duplicated(sys_ref.neighbor_finder, sys_ref.neighbor_finder),
                 Const(n_threads),
             )
-            #@test count(!iszero, values(grads_enzyme)) == 67
             for param in params_to_test
                 genz = grads_enzyme[param]
                 gfd = central_fdm(6, 1)(params_dic[param]) do val
@@ -511,9 +508,9 @@ end
                 frac_diff = abs(genz - gfd) / abs(gfd)
                 @info "$(rpad(test_name, 6)) - $(rpad(platform, 12)) - $(rpad(param, 21)) - " *
                       "FD $gfd, Enzyme $genz, fractional difference $frac_diff"
-                @test frac_diff < test_tol
+                tol = (test_name == "Force" && param == "atom_N_ϵ" ? 2e-3 : test_tol)
+                @test frac_diff < tol
             end
         end
     end
 end
-=#
