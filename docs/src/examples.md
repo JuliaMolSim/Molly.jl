@@ -1139,3 +1139,115 @@ simulate!(sys, simulator, 10_000)
 @test check_position_constraints(sys, shake)
 @test check_velocity_constraints(sys, shake)
 ```
+
+## KIM portable models
+
+[`KIM_API.jl`](https://github.com/openkim/KIM_API.jl) connects Molly to the [KIM API](https://github.com/openkim/kim-api), giving direct access to the large model catalog on [OpenKIM](https://openkim.org), including classical, machine-learned, and hybrid potentials that are distributed as portable models. Once configured, any simulator in Molly can evaluate those models via the standard `general_inters` interface.
+
+### Installation
+
+1. Install the KIM API and make the shared library discoverable:
+   ```bash
+   conda create -n kim-api kim-api=2.4 -c conda-forge
+   conda activate kim-api
+   export KIM_API_LIB=${CONDA_PREFIX}/lib/libkim-api.so
+   ```
+
+2. Install the required [OpenKIM model](https://openkim.org/browse/models/alphabetical):
+   ```bash
+   $ kim-api-collections-management install user SW_StillingerWeber_1985_Si__MO_405512056662_006          
+   Downloading.............. SW_StillingerWeber_1985_Si__MO_405512056662_006
+   Found installed driver... SW__MD_335816936951_005
+   [100%] Built target SW_StillingerWeber_1985_Si__MO_405512056662_006
+   Install the project...
+   -- Install configuration: "Debug"
+   -- Installing: /.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so
+   -- Set runtime path of "/.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so" to ""
+   
+   Success!
+   ```
+   
+3. Add the package to your Julia environment:
+   ```julia
+   using Pkg
+   Pkg.add("KIM_API")
+   ```
+
+### Stillinger-Weber silicon supercell
+
+The example below shows how to run a $5 \times 5 \times 5$ silicon supercell in Molly using the portable Stillinger–Weber potential hosted on OpenKIM. Every other portable model, including neural-network and Gaussian-process potentials, can be swapped in by changing the model identifier passed to the calculator.
+
+```julia
+using Molly
+using KIM_API
+using StaticArrays
+using Unitful: Å, ustrip
+using UnitfulAtomic
+
+a0 = 5.431u"Å"
+repeats = (5, 5, 5)
+
+diamond_basis = [
+    SVector(0.0, 0.0, 0.0),
+    SVector(0.5, 0.5, 0.0),
+    SVector(0.5, 0.0, 0.5),
+    SVector(0.0, 0.5, 0.5),
+    SVector(0.25, 0.25, 0.25),
+    SVector(0.75, 0.75, 0.25),
+    SVector(0.75, 0.25, 0.75),
+    SVector(0.25, 0.75, 0.75),
+]
+
+atoms = Atom[]
+coords = SVector{3, typeof(1.0u"Å")}[]
+a0_val = ustrip(Å, a0)
+
+for (ix, iy, iz) in Iterators.product(0:repeats[1]-1, 0:repeats[2]-1, 0:repeats[3]-1)
+    shift = SVector(ix, iy, iz)
+    for basis in diamond_basis
+        push!(atoms, Atom(atom_type="Si", mass=28.0855u"u"))
+        cart = SVector((basis .+ shift) .* a0_val) * Å
+        push!(coords, cart)
+    end
+end
+
+velocities = zero(coords) .* (1.0u"ps"^-1)
+boundary = CubicBoundary(repeats[1] * a0)
+
+# Uses :metal units = Å, eV, e, K, ps
+calc = KIM_API.KIMCalculator(
+    "SW_StillingerWeber_1985_Si__MO_405512056662_006";
+    units=:metal,
+)
+
+loggers = (
+    temp=TemperatureLogger(10),
+    coords=CoordinatesLogger(10),
+)
+
+sys = System(
+    atoms=atoms,
+    coords=coords,
+    boundary=boundary,
+    velocities=velocities,
+    general_inters=(kim=calc,),
+    force_units=u"eV/Å",
+    energy_units=u"eV",
+    loggers=loggers,
+)
+
+temp = 298.0u"K"
+simulator = VelocityVerlet(
+    dt=0.002u"ps",
+    coupling=AndersenThermostat(temp, 1.0u"ps"),
+)
+
+simulate!(sys, simulator, 10_000)
+
+using GLMakie
+visualize(sys.loggers.coords, boundary, "Si_SW_KIM.gif"; markersize=0.4)
+```
+
+![Silicon SW KIM](images/Si_SW_KIM.gif)
+
+Because the calculator builds on the KIM API, you can change the `"SW_StillingerWeber_1985_Si__MO_405512056662_006"` identifier to any other model published on OpenKIM and immediately drive the same Molly simulation pipeline. For more details on `KIM_API`, please consult the [documentation](https://openkim.github.io/KIM_API.jl/dev/).
