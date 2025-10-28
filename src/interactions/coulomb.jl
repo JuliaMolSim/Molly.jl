@@ -188,7 +188,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     σ = inter.σ_mixing(atom_i, atom_j)
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
-    params = (ke, dr, qi, qj, σ, ϵ, inter.σ6_fac)
+    params = (ke, dr, qi, qj, 4*ϵ*(σ^12), 4*ϵ*(σ^6), inter.σ6_fac)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -199,11 +199,8 @@ end
     end
 end
 
-function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, dr, qi, qj, σ, ϵ, σ6_fac))
-    C12 = 4*ϵ*(σ^12)
-    C6 = 4*ϵ*(σ^6)
-    S = (C12/C6)^(1/6)
-    R = ((σ6_fac*(S^6))+r^6)^(7/6)
+function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, dr, qi, qj, C12, C6, σ6_fac))
+    R = ((σ6_fac*(C12/C6))+r^6)*sqrt(cbrt(((σ6_fac*(C12/C6))+r^6)))
     return ke * ((qi*qj)/R) * (r^5)
 end
 
@@ -220,7 +217,7 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     σ = inter.σ_mixing(atom_i, atom_j)
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
-    params = (ke, qi, qj, σ, ϵ, inter.σ6_fac)
+    params = (ke, qi, qj, 4*ϵ*(σ^12), 4*ϵ*(σ^6), inter.σ6_fac)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -230,11 +227,8 @@ end
     end
 end
 
-function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, σ, ϵ, σ6_fac))
-    C12 = 4*ϵ*(σ^12)
-    C6 = 4*ϵ*(σ^6)
-    S = (C12/C6)^(1/6)
-    R = ((σ6_fac*(S^6))+r^6)^(1/6)
+function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac))
+    R = sqrt(cbrt((σ6_fac*(C12/C6))+r^6))
     return ke * ((qi * qj)/R)
 end
 
@@ -273,7 +267,7 @@ If ``\lambda`` is 1.0, this gives the standard [`Coulomb`](@ref) potential and m
     use_neighbors::Bool = false
     weight_special::W = 1
     coulomb_const::T = coulomb_const
-    σ6_fac::R = α * (1-λ)^(1/6)
+    σ6_fac::R = α * sqrt(cbrt(1-λ))
 end
 
 use_neighbors(inter::CoulombSoftCoreGapsys) = inter.use_neighbors
