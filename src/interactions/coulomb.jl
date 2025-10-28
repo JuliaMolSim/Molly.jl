@@ -109,7 +109,7 @@ function pairwise_pe(::Coulomb, r, (ke, qi, qj))
 end
 
 @doc raw"""
-    CoulombSoftCoreBeutler(; cutoff, α, λ, p, use_neighbors, σ_mixing, weight_special, coulomb_const)
+    CoulombSoftCoreBeutler(; cutoff, α, λ, use_neighbors, σ_mixing, weight_special, coulomb_const)
 
 The Coulomb electrostatic interaction between two atoms with a soft core, used for appearing and disappearing of atoms based on the potential described in Beutler et al. 1994 (Chem. Phys. Lett.).
 
@@ -233,7 +233,7 @@ function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac)
 end
 
 @doc raw"""
-    CoulombSoftCoreGapsys; cutoff, α, λ, p, σQ, use_neighbors, σ_mixing, weight_special, coulomb_const)
+    CoulombSoftCoreGapsys; cutoff, α, λ, σQ, use_neighbors, σ_mixing, weight_special, coulomb_const)
 
 The Coulomb electrostatic interaction between two atoms with a soft core, used for appearing and disappearing of atoms.
 

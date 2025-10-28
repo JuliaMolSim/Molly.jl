@@ -140,7 +140,7 @@ function pairwise_pe(::LennardJones, r, (σ2, ϵ))
 end
 
 @doc raw"""
-    LennardJonesSoftCoreBeutler(; cutoff, α, λ, p, use_neighbors, shortcut, σ_mixing, ϵ_mixing,
+    LennardJonesSoftCoreBeutler(; cutoff, α, λ, use_neighbors, shortcut, σ_mixing, ϵ_mixing,
                          weight_special)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core, used for appearing and disappearing of atoms.
@@ -269,7 +269,7 @@ function pairwise_pe(::LennardJonesSoftCoreBeutler, r, (C12, C6, σ6_fac))
 end
 
 @doc raw"""
-    LennardJonesSoftCoreGapsys(; cutoff, α, λ, p, use_neighbors, shortcut, σ_mixing, ϵ_mixing,
+    LennardJonesSoftCoreGapsys(; cutoff, α, λ, use_neighbors, shortcut, σ_mixing, ϵ_mixing,
                          weight_special)
 
 The Lennard-Jones 6-12 interaction between two atoms with a soft core potential based on the Gapsys et al. 2012 (JCTC) paper, used for appearing and disappearing of atoms
