@@ -618,7 +618,7 @@ end
                     array_type=AT,
                     dist_cutoff=T(dist_cutoff),
                     dist_buffer=zero(T(dist_cutoff)),
-                    nonbonded_method="ewald",
+                    nonbonded_method=:ewald,
                     center_coords=false,
                 )
                 sys = System(
@@ -688,7 +688,7 @@ end
                         array_type=AT,
                         dist_cutoff=T(dist_cutoff),
                         dist_buffer=zero(T(dist_cutoff)),
-                        nonbonded_method="pme",
+                        nonbonded_method=:pme,
                         center_coords=false,
                     )
                     sys = System(

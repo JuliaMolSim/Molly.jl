@@ -336,7 +336,7 @@ ff = MolecularForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
-    nonbonded_method="pme",
+    nonbonded_method=:pme,
     loggers=(
         energy=TotalEnergyLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
@@ -382,7 +382,7 @@ Residue patches, virtual sites, file includes and any force types other than `Ha
 
 To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the array type for your GPU backend (for example `CuArray` for NVIDIA or `ROCArray` for AMD).
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
-The options are `"none"` (short range only), `"cutoff"` (reaction field method), `"pme"` (particle mesh Ewald summation) and `"ewald"` (Ewald summation, slow).
+The options are `:none` (short range only), `:cutoff` (reaction field method), `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
 
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
@@ -394,7 +394,7 @@ Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topolog
 sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
-    nonbonded_method="pme",
+    nonbonded_method=:pme,
     loggers=(
         temp=TemperatureLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),

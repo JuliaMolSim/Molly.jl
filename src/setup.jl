@@ -460,13 +460,13 @@ Gromacs files.
 - `rigid_water=false`: whether to constrain the bonds and angle in water
     molecules. Applied on top of `constraints`, so `constraints=:hangles` and
     `rigid_water=false` gives rigid water.
-- `nonbonded_method="none"`: method for long range interaction summation,
-    options are "none" (short range only), "cutoff" (reaction field method),
-    "pme" (particle mesh Ewald summation) and "ewald" (Ewald summation, slow).
+- `nonbonded_method=:none`: method for long range interaction summation,
+    options are `:none` (short range only), `:cutoff` (reaction field method),
+    `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
 - `ewald_error_tol=0.0005`: the error tolerance for Ewald summation, used when
-    `nonbonded_method` is "pme" or "ewald".
+    `nonbonded_method` is `:pme` or `:ewald`.
 - `approximate_pme=true`: whether to use a fast approximation to the erfc
-    function, used when `nonbonded_method` is "pme".
+    function, used when `nonbonded_method` is `:pme`.
 - `center_coords::Bool=true`: whether to center the coordinates in the
     simulation box.
 - `neighbor_finder_type`: which neighbor finder to use, default is
@@ -482,7 +482,7 @@ Gromacs files.
     to match the appropriate atom templates, for example the first (N-terminal)
     residue could be changed from "MET" to "NMET".
 - `grad_safe=false`: should be set to `true` if the system is going to be used
-    with Enzyme.jl and `nonbonded_method` is "pme".
+    with Enzyme.jl and `nonbonded_method` is `:pme`.
 """
 function System(coord_file::AbstractString,
                 force_field::MolecularForceField;
@@ -495,7 +495,7 @@ function System(coord_file::AbstractString,
                 dist_buffer=(units ? 0.2u"nm" : 0.2),
                 constraints=:none,
                 rigid_water=false,
-                nonbonded_method="none",
+                nonbonded_method=:none,
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
                 center_coords::Bool=true,
@@ -920,7 +920,7 @@ function System(T::Type,
                 dist_buffer=(units ? 0.2u"nm" : 0.2),
                 constraints=:none,
                 rigid_water=false,
-                nonbonded_method="none",
+                nonbonded_method=:none,
                 ewald_error_tol=0.0005,
                 approximate_pme=true,
                 center_coords::Bool=true,
@@ -1312,7 +1312,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
         use_neighbors=using_neighbors,
         weight_special=weight_14_lj,
     )
-    if nonbonded_method == "none"
+    if nonbonded_method == :none
         coul = Coulomb(
             cutoff=DistanceCutoff(T(dist_cutoff)),
             use_neighbors=using_neighbors,
@@ -1320,7 +1320,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
         general_inters_ewald = ()
-    elseif nonbonded_method == "cutoff"
+    elseif nonbonded_method == :cutoff
         coul = CoulombReactionField(
             dist_cutoff=T(dist_cutoff),
             solvent_dielectric=T(crf_solvent_dielectric),
@@ -1329,7 +1329,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
         )
         general_inters_ewald = ()
-    elseif nonbonded_method in ("ewald", "pme")
+    elseif nonbonded_method in (:ewald, :pme)
         coul = CoulombEwald(
             dist_cutoff=T(dist_cutoff),
             error_tol=T(ewald_error_tol),
@@ -1338,7 +1338,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
             coulomb_const=(units ? T(coulomb_const) : T(ustrip(coulomb_const))),
             approximate_erfc=approximate_pme,
         )
-        if nonbonded_method == "ewald"
+        if nonbonded_method == :ewald
             ewald = Ewald(
                 T(dist_cutoff);
                 error_tol=T(ewald_error_tol),
@@ -1359,7 +1359,7 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
         general_inters_ewald = (ewald,)
     else
         throw(ArgumentError("unknown non-bonded method \"$nonbonded_method\", options are " *
-                            "\"none\", \"cutoff\", \"pme\" and \"ewald\""))
+                            ":none, :cutoff, :pme and :ewald"))
     end
     pairwise_inters = (lj, coul)
 

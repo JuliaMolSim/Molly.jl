@@ -47,7 +47,7 @@ end
         ff;
         units=false,
         array_type=AT,
-        nonbonded_method="pme",
+        nonbonded_method=:pme,
         grad_safe=true,
     )
 
@@ -317,7 +317,7 @@ end
             ff;
             units=false,
             array_type=AT,
-            nonbonded_method="cutoff",
+            nonbonded_method=:cutoff,
             implicit_solvent="gbn2",
             kappa=0.7,
         )

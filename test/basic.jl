@@ -181,7 +181,7 @@
             joinpath(data_dir, "6mrr_equil.pdb"),
             ff;
             array_type=AT,
-            nonbonded_method="cutoff",
+            nonbonded_method=:cutoff,
             neighbor_finder_type=(Molly.uses_gpu_neighbor_finder(AT) ? GPUNeighborFinder :
                                     DistanceNeighborFinder),
         )

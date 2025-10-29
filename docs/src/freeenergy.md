@@ -248,7 +248,7 @@ sys_0 = System(
     ff;
     array_type          = AT,
     rename_terminal_res = false,
-    nonbonded_method    = "cutoff",
+    nonbonded_method    = :cutoff,
 )
 
 random_velocities!(sys_0, T0) # Initialize velocities from M-B distribution at target temperature
@@ -360,7 +360,7 @@ sys = System(
     ff;
     array_type          = AT,
     rename_terminal_res = false,
-    nonbonded_method    = "cutoff",
+    nonbonded_method    = :cutoff,
 )
 
 random_velocities!(sys, T0)
@@ -453,7 +453,7 @@ sys_nobias = System(
     ff;
     array_type          = AT,
     rename_terminal_res = false,
-    nonbonded_method    = "cutoff",
+    nonbonded_method    = :cutoff,
 )
 
 # Atom indices defining dihedral

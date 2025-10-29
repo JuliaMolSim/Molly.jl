@@ -12,7 +12,7 @@
             pdb_writer=TrajectoryWriter(10, temp_fp_pdb),
             density=DensityLogger(10),
         ),
-        nonbonded_method="cutoff",
+        nonbonded_method=:cutoff,
         data="test_data_peptide",
     )
     simulator = VelocityVerlet(dt=0.0002u"ps", coupling=AndersenThermostat(temp, 10.0u"ps"))
@@ -66,7 +66,7 @@
             energy=TotalEnergyLogger(Float32, 10),
         ),
         units=false,
-        nonbonded_method="cutoff",
+        nonbonded_method=:cutoff,
     )
     thermostat = AndersenThermostat(temp, 10.0f0)
     barostat = MonteCarloBarostat(press, temp, s.boundary; n_steps=20)
@@ -83,11 +83,11 @@ end
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
     show(devnull, ff)
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
-                 nonbonded_method="cutoff", center_coords=false)
+                 nonbonded_method=:cutoff, center_coords=false)
     sys_pme = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
-                     nonbonded_method="pme", center_coords=false)
+                     nonbonded_method=:pme, center_coords=false)
     sys_pme_exact = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
-                           nonbonded_method="pme", approximate_pme=false, center_coords=false)
+                           nonbonded_method=:pme, approximate_pme=false, center_coords=false)
     zero(sys)
     zero(sys_pme)
     neighbors = find_neighbors(sys)
@@ -214,7 +214,7 @@ end
         ff_nounits;
         velocities=copy(ustrip_vec.(velocities_start)),
         units=false,
-        nonbonded_method="pme",
+        nonbonded_method=:pme,
         approximate_pme=false,
         center_coords=false,
     )
@@ -251,7 +251,7 @@ end
             ff;
             velocities=to_device(copy(velocities_start), AT),
             array_type=AT,
-            nonbonded_method="cutoff",
+            nonbonded_method=:cutoff,
             center_coords=false,
         )
         zero(sys)
@@ -270,7 +270,7 @@ end
             ff;
             velocities=to_device(copy(velocities_start), AT),
             array_type=AT,
-            nonbonded_method="pme",
+            nonbonded_method=:pme,
             center_coords=false,
         )
         zero(sys_pme)
@@ -290,7 +290,7 @@ end
             ff;
             velocities=to_device(copy(velocities_start), AT),
             array_type=AT,
-            nonbonded_method="pme",
+            nonbonded_method=:pme,
             approximate_pme=false,
             center_coords=false,
         )
@@ -325,7 +325,7 @@ end
             velocities=to_device(copy(ustrip_vec.(velocities_start)), AT),
             units=false,
             array_type=AT,
-            nonbonded_method="pme",
+            nonbonded_method=:pme,
             approximate_pme=false,
             center_coords=false,
         )
@@ -375,7 +375,7 @@ end
                 boundary=CubicBoundary(100.0u"nm"),
                 array_type=AT,
                 dist_cutoff=5.0u"nm",
-                nonbonded_method="none",
+                nonbonded_method=:none,
                 implicit_solvent=solvent_model,
                 kappa=1.0u"nm^-1",
             )
