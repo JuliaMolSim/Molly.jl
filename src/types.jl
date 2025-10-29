@@ -13,8 +13,6 @@ export
     MolecularTopology,
     NeighborList,
     System,
-    inject_gradients,
-    extract_parameters,
     ReplicaSystem,
     array_type,
     is_on_gpu,
@@ -813,15 +811,7 @@ function Base.zero(sys::System{D, AT, T, A, C, B, V,
     )
 end
 
-"""
-    inject_gradients(sys, params_dic)
-
-Add parameters from a dictionary to a [`System`](@ref).
-
-Allows gradients for individual parameters to be tracked.
-Returns atoms, pairwise interactions, specific interaction lists and general
-interactions.
-"""
+# Add parameters from a dictionary to a system, allowing gradients to be tracked
 function inject_gradients(sys::System{<:Any, AT}, params_dic) where AT
     atoms_grad = to_device(inject_atom.(from_device(sys.atoms), sys.atoms_data, (params_dic,)), AT)
     if length(sys.pairwise_inters) > 0
@@ -842,11 +832,7 @@ function inject_gradients(sys::System{<:Any, AT}, params_dic) where AT
     return atoms_grad, pis_grad, sis_grad, gis_grad
 end
 
-"""
-    extract_parameters(system, force_field)
-
-Form a `Dict` of all parameters in a [`System`](@ref), allowing gradients to be tracked.
-"""
+# Form a dictionary of all parameters in a system, allowing gradients to be tracked
 function extract_parameters(sys, ff)
     params_dic = Dict()
 

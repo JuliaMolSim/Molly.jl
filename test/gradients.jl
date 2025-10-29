@@ -326,7 +326,7 @@ end
     EnzymeRules.inactive(::typeof(create_sys), args...) = nothing
 
     function test_energy_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
-        atoms, pis, sis, gis = inject_gradients(sys_ref, params_dic)
+        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params_dic)
 
         sys = System(
             atoms=atoms,
@@ -344,7 +344,7 @@ end
     end
 
     function test_forces_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
-        atoms, pis, sis, gis = inject_gradients(sys_ref, params_dic)
+        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params_dic)
 
         sys = System(
             atoms=atoms,
@@ -363,7 +363,7 @@ end
     end
 
     function test_sim_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
-        atoms, pis, sis, gis = inject_gradients(sys_ref, params_dic)
+        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params_dic)
 
         sys = System(
             atoms=atoms,

@@ -5,9 +5,6 @@
 export
     place_atoms,
     place_diatomics,
-    AtomType,
-    ResidueType,
-    PeriodicTorsionType,
     MolecularForceField,
     is_any_atom,
     is_heavy_atom,
@@ -128,11 +125,6 @@ function place_diatomics(n_molecules::Integer,
     return wrap_coords.([coords...], (boundary,))
 end
 
-"""
-    AtomType(type, class, element, charge, mass, σ, ϵ)
-
-An atom type.
-"""
 struct AtomType{C, M, S, E}
     type::String
     class::String # Currently this is not used
@@ -143,11 +135,6 @@ struct AtomType{C, M, S, E}
     ϵ::E
 end
 
-"""
-    ResidueType(name, types, charges, indices)
-
-A residue type.
-"""
 struct ResidueType{C}
     name::String
     types::Dict{String, String}
@@ -155,11 +142,6 @@ struct ResidueType{C}
     indices::Dict{String, Int}
 end
 
-"""
-    PeriodicTorsionType(periodicities, phases, ks, proper)
-
-A periodic torsion type.
-"""
 struct PeriodicTorsionType{T, E}
     periodicities::Vector{Int}
     phases::Vector{T}
