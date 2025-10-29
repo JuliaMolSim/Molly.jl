@@ -543,6 +543,8 @@ By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energ
 These arguments should be `NoUnits` if you are not using units.
 If you need to strip units for downstream analysis, use the `ustrip` or [`ustrip_vec`](@ref) functions.
 It should be noted that charges are stored as dimensionless, i.e. 1.0 represents an atomic charge of +1.
+It is possible that you may run into issues when using different but valid units of the same dimension together, e.g. `1.0u"nm"` and `10.0u"Å"`.
+In this case, try using the same units throughout.
 
 ## Atom types
 

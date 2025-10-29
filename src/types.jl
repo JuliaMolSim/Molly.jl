@@ -593,6 +593,10 @@ function System(;
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
+    if isa(atoms, AbstractGPUArray) && !isbitstype(eltype(atoms))
+        throw(ArgumentError("the atoms are on the GPU but are not a bits type, found " *
+                            "atom type $(eltype(atoms))"))
+    end
     if isa(atoms, AbstractGPUArray) && !isa(coords, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
@@ -646,7 +650,8 @@ function System(;
     K = typeof(k_converted)
 
     if !isbitstype(eltype(coords)) || !isbitstype(eltype(vels))
-        @warn "eltype of coords or velocities is not isbits, it is recomended to use a vector of SVector's for performance"
+        @warn "eltype of coords or velocities is not isbits, it is recomended to use a vector " *
+              "of SVectors for performance"
     end
 
     df = n_dof(D, length(atoms), boundary)
