@@ -236,8 +236,11 @@ default values.
 The types used should be bits types if the GPU is going to be used.
 
 # Arguments
-- `index::Int`: the index of the atom in the system.
-- `atom_type::T`: the type of the atom.
+- `index::Int=1`: the index of the atom in the system. This only needs to be set if
+    it is used in the interaction. The order of atoms is determined by their order
+    in the atom vector.
+- `atom_type::T=1`: the type of the atom. This only needs to be set if
+    it is used in the interaction.
 - `mass::M=1.0u"g/mol"`: the mass of the atom.
 - `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
