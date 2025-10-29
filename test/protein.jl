@@ -368,7 +368,7 @@ end
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...)
 
     for AT in array_list
-        for solvent_model in ("obc2", "gbn2")
+        for solvent_model in (:obc2, :gbn2)
             sys = System(
                 joinpath(data_dir, "6mrr_nowater.pdb"),
                 ff;
@@ -393,7 +393,7 @@ end
             E_openmm = readdlm(openmm_E_fp)[1] * u"kJ * mol^-1"
             @test abs(E_molly - E_openmm) < 1e-2u"kJ * mol^-1"
 
-            if solvent_model == "gbn2"
+            if solvent_model == :gbn2
                 sim = SteepestDescentMinimizer(tol=400.0u"kJ * mol^-1 * nm^-1")
                 coords_start = copy(sys.coords)
                 simulate!(sys, sim)

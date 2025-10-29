@@ -474,8 +474,8 @@ Gromacs files.
     on CUDA compatible GPUs and [`DistanceNeighborFinder`](@ref) on non-CUDA
     compatible GPUs.
 - `data=nothing`: arbitrary data associated with the system.
-- `implicit_solvent=nothing`: specify a string to add an implicit solvent
-    model, options are "obc1", "obc2" and "gbn2".
+- `implicit_solvent=:none`: the implicit solvent model to use, options are
+    `:none`, `:obc1`, `:obc2` and `:gbn2`.
 - `kappa=0.0u"nm^-1"`: the kappa value for the implicit solvent model if one
     is used.
 - `rename_terminal_res=true`: whether to rename the first and last residues
@@ -501,7 +501,7 @@ function System(coord_file::AbstractString,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing,
-                implicit_solvent=nothing,
+                implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
                 rename_terminal_res::Bool=true,
                 grad_safe::Bool=false) where AT <: AbstractArray
@@ -926,7 +926,7 @@ function System(T::Type,
                 center_coords::Bool=true,
                 neighbor_finder_type=nothing,
                 data=nothing,
-                implicit_solvent=nothing,
+                implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
                 grad_safe::Bool=false) where AT <: AbstractArray
     if dist_buffer < zero(dist_buffer)
@@ -1457,15 +1457,15 @@ function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
         vels = to_device(velocities, AT)
     end
 
-    if !isnothing(implicit_solvent)
-        if implicit_solvent in ("obc1", "obc2")
+    if implicit_solvent != :none
+        if implicit_solvent in (:obc1, :obc2)
             general_inters_is = (ImplicitSolventOBC(atoms, atoms_data, bonds;
-                                 kappa=kappa, use_OBC2=(implicit_solvent == "obc2")),)
-        elseif implicit_solvent == "gbn2"
+                                 kappa=kappa, use_OBC2=(implicit_solvent == :obc2)),)
+        elseif implicit_solvent == :gbn2
             general_inters_is = (ImplicitSolventGBN2(atoms, atoms_data, bonds; kappa=kappa),)
         else
-            throw(ArgumentError("unknown implicit solvent model \"$implicit_solvent\", " *
-                                "options are nothing, \"obc1\", \"obc2\" and \"gbn2\""))
+            throw(ArgumentError("unknown implicit solvent model $implicit_solvent, " *
+                                "options are :none, :obc1, :obc2 and :gbn2"))
         end
     else
         general_inters_is = ()
