@@ -227,6 +227,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                     atoms, types = String[], String[]
                     charges = T[]
                     elements = Symbol[]
+                    external_bonds_name = String[]
                     externals = Int[]
                     extras = BitVector()
                     bonds_by_name = Tuple{String,String}[]
@@ -247,6 +248,8 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                         
                         elseif re.name == "Bond"
                             push!(bonds_by_name, (re["atomName1"], re["atomName2"]))
+                        elseif re.name == "ExternalBond"
+                            push!(external_bonds_name, re["atomName"])
                         end
                     end
 
@@ -256,6 +259,12 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                         i = name_to_idx[a1]
                         j = name_to_idx[a2]
                         push!(bonds, i < j ? (i,j) : (j,i))
+                    end
+
+                    for nm in external_bonds_name
+                        if haskey(name_to_idx, nm)
+                            externals[name_to_idx[nm]] += 1
+                        end
                     end
 
                     residues[rname] = ResidueTemplate(rname, atoms, elements, types, bonds, externals, charges, extras)
@@ -437,6 +446,48 @@ function chemfiles_name(top, ai)
     return Chemfiles.name(at)
 end
 
+function canonicalize_system(top,
+                             resname_replacements, atomname_replacements)
+
+    canon_system = Dict{String, Dict{Int, ResidueGraph}}()
+
+    for ri in 1:Chemfiles.count_residues(top)
+
+        res      = Molly.chemfiles_residue(top, ri-1)
+        res_id   = Molly.get_res_id(res)
+        res_name = Chemfiles.name(res)
+        res_name = haskey(resname_replacements, res_name) ? resname_replacements[res_name] : res_name
+        atom_inds_zero = Int.(Chemfiles.atoms(res))
+        atom_inds      = atom_inds_zero .+ 1
+        atom_names     = Molly.chemfiles_name.((top,), atom_inds_zero)
+        atom_elements  = Symbol[]
+        for atom_idx in atom_inds_zero
+            atom = Chemfiles.Atom(top, atom_idx)
+            an = Int(Chemfiles.atomic_number(atom))
+            if an == 0 # Extra particle returns 0 from chemfiles
+                push!(atom_elements, :X)
+            else
+                push!(atom_elements, PERIODIC_TABLE[an])    
+            end
+        end
+        lookup         = atomname_replacements[res_name]
+        atom_names     = [haskey(lookup, a) ? (lookup[a], aidx+1) : (a, aidx+1) for (a, aidx) in zip(atom_names, atom_inds_zero)]
+
+        rgraph = ResidueGraph(res_name, atom_inds, [a[1] for a in atom_names], atom_elements,
+                              Tuple{Int,Int}[], fill(0, length(atom_inds)))
+
+        if !haskey(canon_system, res_id[2])
+            canon_system[res_id[2]] = Dict(res_id[1] => rgraph)
+        else
+            canon_system[res_id[2]][res_id[1]] = rgraph
+        end
+
+    end
+
+    return canon_system
+
+end
+
 """
     System(coordinate_file, force_field; <keyword arguments>)
 
@@ -523,9 +574,14 @@ function System(coord_file::AbstractString,
                 rename_terminal_res::Bool=true,   # unused in template path
                 grad_safe::Bool=false) where {AT<:AbstractArray}
 
+    
+
     dist_buffer < zero(dist_buffer) && throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     dist_neighbors = dist_cutoff + dist_buffer
     T = typeof(force_field.weight_14_coulomb)
+
+    resname_replacements, atomname_replacements = load_replacements()
+    standard_bonds = load_bond_definitions()
 
     # ---- Read structure ----
     traj  = Chemfiles.Trajectory(coord_file)
@@ -534,67 +590,82 @@ function System(coord_file::AbstractString,
     n_atoms = size(top)
 
     # ---- Boundary ----
-    boundary_used = isnothing(boundary) ?
-        boundary_from_chemfiles(Chemfiles.UnitCell(frame), T, (units ? u"nm" : NoUnits)) :
-        boundary
-    minimum(box_sides(boundary_used)) < (2 * dist_cutoff) &&
-        @warn "Minimum box side is less than 2 * dist_cutoff; this can be unphysical"
+    boundary_used = isnothing(boundary) ? boundary_from_chemfiles(Chemfiles.UnitCell(frame), T, (units ? u"nm" : NoUnits)) : boundary
+    minimum(box_sides(boundary_used)) < (2 * dist_cutoff) && @warn "Minimum box side is less than 2 * dist_cutoff; this can be unphysical"
 
-    # ---- Build residue graphs from Chemfiles ----
-    res_graphs = build_residue_graphs(top)
-
-    # ---- Repair missing intra-residue bonds via templates (no coords, no atom adds) ----
-    for rg in values(res_graphs)
-        repair_intra_residue_bonds_from_templates!(rg, force_field.residues)
+    # ---- Units and coordinates ----
+    if units
+        coords = [T.(SVector{3}(col)u"nm" / 10.0) for col in eachcol(Chemfiles.positions(frame))]
+    else
+        coords = [T.(SVector{3}(col) / 10.0) for col in eachcol(Chemfiles.positions(frame))]
     end
+    if center_coords
+        coords = coords .- (mean(coords),) .+ (box_center(boundary_used),)
+    end
+    
+    canonical_system = canonicalize_system(top, resname_replacements, atomname_replacements)
 
+    top_bonds = create_bonds(top, canonical_system, standard_bonds, resname_replacements)
+    top_bonds = create_disulfide_bonds(coords, boundary_used, canonical_system, top_bonds)
+    top_bonds = read_connect_bonds(coord_file, top_bonds, canonical_system) 
+    
+    template_names       = keys(force_field.residues)
     # ---- Match each residue graph to a template and assign atom types/charges ----
     atom_type_of = Vector{String}(undef, n_atoms)
     charge_of    = Vector{eltype(force_field.atom_types[first(keys(force_field.atom_types))].charge)}(undef, n_atoms)
     element_of   = Vector{String}(undef, n_atoms)  # for AtomData
 
     use_charge_from_residue = "charge" in force_field.attributes_from_residue
-
-    for (rid, rg) in res_graphs
-        # candidate templates by element counts only
-        cands = candidate_templates_by_elements(rg, force_field.residues; allow_superset=false)
-        isempty(cands) && error("No template with matching element multiset for residue $(rg.res_name) id=$(rid)")
-
+    
+    for (chain, resids) in canonical_system
         matched = false
-        for tname in cands
-            tmpl = force_field.residues[tname]
-            # strict match first (external bonds off initially since template externals default 0)
-            m = match_residue_to_template(rg, tmpl; ignore_external_bonds=true, ignore_extra_particles=true)
-            if m === nothing
-                # fallback: partial + bond diff + strict
-                res2tpl, _ = partial_match_residue_to_template(rg, tmpl; ignore_external_bonds=true, ignore_extra_particles=true)
-                res2tpl === nothing && continue
-                miss = diff_residue_vs_template(rg, tmpl, res2tpl)
-                !isempty(miss) && apply_missing_bonds!(rg, miss)
-                m = match_residue_to_template(rg, tmpl; ignore_external_bonds=true, ignore_extra_particles=true)
+        for (res_id, rgraph) in resids
+            if rgraph.res_name ∈ template_names
+                template = force_field.residues[rgraph.res_name]
+                matches  =  match_residue_to_template(rgraph, template)
+                if isnothing(matches)
+                    for (templ_name, template) in force_field.residues
+                        matches = match_residue_to_template(rgraph, template)
+                        if !(isnothing(matches))
+                            matched = true
+                            for (r_i, m_i) in enumerate(matches)
+                                global_idx = rgraph.atom_inds[r_i]
+                                atom_type_of[global_idx] = template.types[m_i]
+                                charge_of[global_idx]    = template.charges[m_i]
+                                element_of[global_idx]   = force_field.atom_types[template.types[m_i]].element
+                            end
+                            break
+                        end
+                    end
+                else
+                    matched = true
+                    for (r_i, m_i) in enumerate(matches)
+                        global_idx = rgraph.atom_inds[r_i]
+                        atom_type_of[global_idx] = template.types[m_i]
+                        charge_of[global_idx]    = template.charges[m_i]
+                        element_of[global_idx]   = force_field.atom_types[template.types[m_i]].element
+                    end
+                end
+            else
+                for (templ_name, template) in force_field.residues
+                    matches = match_residue_to_template(rgraph, template)
+                    if !(isnothing(matches))
+                        matched = true
+                        for (r_i, m_i) in enumerate(matches)
+                            global_idx = rgraph.atom_inds[r_i]
+                            atom_type_of[global_idx] = template.types[m_i]
+                            charge_of[global_idx]    = template.charges[m_i]
+                            element_of[global_idx]   = force_field.atom_types[template.types[m_i]].element
+                        end
+                        break
+                    end
+                end
+                if !matched
+                    throw(ArgumentError("Could not match residue $(rgraph.res_name) to any of the provided templates."))
+                end
             end
-            m === nothing && continue
-
-            # assign per-atom types/charges
-            for (li, tj) in m
-                gi = rg.atom_inds[li]
-                atype = tmpl.types[tj]
-                atom_type_of[gi] = atype
-                charge_of[gi] = use_charge_from_residue ? tmpl.charges[tj] : force_field.atom_types[atype].charge
-                element_of[gi] = force_field.atom_types[atype].element
-            end
-            matched = true
-            break
         end
-        matched || error("Failed to match residue $(rg.res_name) id=$(rid) to any template")
     end
-    any(x -> x === nothing || x == "", atom_type_of) && error("Unassigned atom types remain after matching")
-
-    # ---- Build bonded topology (union of repaired intra-residue + Chemfiles inter-residue) ----
-    bonds_intra = build_global_bonds(res_graphs)
-    bonds_cf = [let i=b[1]+1; j=b[2]+1; i<j ? (i,j) : (j,i) end for b in eachcol(Int.(Chemfiles.bonds(top)))]
-    bond_set = Set{NTuple{2,Int}}(bonds_intra); union!(bond_set, bonds_cf)
-    top_bonds = collect(bond_set)
 
     adj = build_adjacency(n_atoms, top_bonds)
     top_angles    = build_angles(adj)
@@ -706,7 +777,9 @@ function System(coord_file::AbstractString,
             j, k, l = names_no1[order[1]], names_no1[order[2]], names_no1[order[3]]
         end
         t1, t2, t3, t4 = atom_type_of[c], atom_type_of[j], atom_type_of[k], atom_type_of[l]
-        best_score = -1; best_key = ("","","",""); tt = nothing
+        best_score = -1
+        best_key = ("","","","")
+        tt = nothing
         for kkey in keys(force_field.torsion_types)
             force_field.torsion_types[kkey].proper && continue
             (kkey[1] == t1 || kkey[1] == "") || continue
@@ -749,7 +822,7 @@ function System(coord_file::AbstractString,
                   loggers, data, bonds_il, angles_il, tors_il, imps_il, tors_pad, imps_pad,
                   eligible, special, units, dist_cutoff, constraints, rigid_water, nonbonded_method,
                   ewald_error_tol, approximate_pme, neighbor_finder_type, implicit_solvent, kappa,
-                  grad_safe, dist_neighbors, force_field.weight_14_lj, force_field.weight_14_coulomb)
+                  grad_safe, dist_neighbors, weight_14_lj, weight_14_coulomb)
 end
 
 function element_from_mass(atom_mass, element_names, element_masses)

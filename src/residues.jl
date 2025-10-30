@@ -15,6 +15,21 @@ const ELEMENT_SYMBOLS = Dict{String,Symbol}(
     "?"=>:X
 )
 
+const PERIODIC_TABLE = Symbol[
+    :H,  :He,
+    :Li, :Be, :B,  :C,  :N,  :O,  :F,  :Ne,
+    :Na, :Mg, :Al, :Si, :P,  :S,  :Cl, :Ar,
+    :K,  :Ca, :Sc, :Ti, :V,  :Cr, :Mn, :Fe, :Co, :Ni, :Cu, :Zn,
+    :Ga, :Ge, :As, :Se, :Br, :Kr,
+    :Rb, :Sr, :Y,  :Zr, :Nb, :Mo, :Tc, :Ru, :Rh, :Pd, :Ag, :Cd,
+    :In, :Sn, :Sb, :Te, :I,  :Xe,
+    :Cs, :Ba, :La, :Ce, :Pr, :Nd, :Pm, :Sm, :Eu, :Gd, :Tb, :Dy, :Ho, :Er, :Tm, :Yb, :Lu,
+    :Hf, :Ta, :W,  :Re, :Os, :Ir, :Pt, :Au, :Hg,
+    :Tl, :Pb, :Bi, :Po, :At, :Rn,
+    :Fr, :Ra, :Ac, :Th, :Pa, :U,  :Np, :Pu, :Am, :Cm, :Bk, :Cf, :Es, :Fm, :Md, :No, :Lr,
+    :Rf, :Db, :Sg, :Bh, :Hs, :Mt, :Ds, :Rg, :Cn, :Nh, :Fl, :Mc, :Lv, :Ts, :Og
+]
+
 """
 """
 struct ResidueTemplate{T}
@@ -31,554 +46,553 @@ end
 """
 """
 struct ResidueGraph
-    res_id::Tuple{Int,String}
     res_name::String              # includes N/C prefix if terminal
     atom_inds::Vector{Int}        # global 1-based
     atom_names::Vector{String}
+    elements::Vector{Symbol}      # atom elements
     bonds::Vector{Tuple{Int,Int}} # local intra-res bonds
     external_bonds::Vector{Int}   # per-atom external degree
 end
 
-# Renaming rule (prefix N or C for termini).
-function residue_name_with_term_flag(res, res_id_to_standard::Dict{Tuple{Int,String},Bool})
-    res_id = get_res_id(res)
-    base = Chemfiles.name(res)
-    name = base
-    if get(res_id_to_standard, res_id, false)
-        prev_id = (res_id[1]-1, res_id[2])
-        next_id = (res_id[1]+1, res_id[2])
-        is_prev_std = get(res_id_to_standard, prev_id, false)
-        is_next_std = get(res_id_to_standard, next_id, false)
-        if !is_prev_std
-            name = "N"*base
-        elseif !is_next_std
-            name = "C"*base
+# Fill `map` with every attribute value of each <Atom> mapping to the canonical name
+function parse_atoms(residue::EzXML.Node, map::Dict{String,String})
+    for atom in findall("Atom", residue)
+        canon = atom["name"]
+        for attr in eachattribute(atom)
+            map[attr.content] = canon
         end
     end
-    return name
+    return map
 end
 
-# Build map of (resid,chain) → is_standard
-function compute_res_standard_map(top::Chemfiles.Topology)
-    m = Dict{Tuple{Int,String},Bool}()
-    for ri in 1:Chemfiles.count_residues(top)
-        res   = chemfiles_residue(top, ri-1)
-        rid   = get_res_id(res)
-        rname = Chemfiles.name(res)
-        m[rid] = (rname in standard_res_names)
+function load_replacements(; xmlpath = nothing,
+                             resname_replacements  = nothing,
+                             atomname_replacements = nothing)
+
+    if isnothing(resname_replacements)
+        resname_replacements = Dict{String,String}()
     end
-    return m
-end
-
-"""
-    build_residue_graphs(top::Chemfiles.Topology)
-        -> Dict{Tuple{Int,String},ResidueGraph}
-
-Construct residue-local graphs and external-bond counts from a Chemfiles topology.
-Global atom indices are 1-based. Bond lists use local indices within each residue.
-"""
-function build_residue_graphs(top::Chemfiles.Topology)
-    n_atoms = size(top)
-
-    # Build map for terminal detection (standard vs not).
-    res_id_to_standard = compute_res_standard_map(top)
-
-    res_graphs = Dict{Tuple{Int,String},ResidueGraph}()
-    atom_to_res = fill(((0,""), 0), n_atoms)  # ((res_id,chain), local_idx)
-
-    # First pass: residues, local membership
-    for ri in 1:Chemfiles.count_residues(top)
-        res       = chemfiles_residue(top, ri-1)
-        rid       = get_res_id(res)
-        rname     = residue_name_with_term_flag(res, res_id_to_standard) # N/C prefix if terminal
-        atoms0    = Int.(Chemfiles.atoms(res))           # 0-based
-        atom_inds = atoms0 .+ 1                          # 1-based
-        atom_names = chemfiles_name.((top,), atoms0)
-
-        for (li, ai) in enumerate(atom_inds)
-            atom_to_res[ai] = (rid, li)
-        end
-
-        res_graphs[rid] = ResidueGraph(rid, rname, atom_inds, atom_names,
-                                       Tuple{Int,Int}[], fill(0, length(atom_inds)))
+    
+    if isnothing(atomname_replacements)
+        atomname_replacements = Dict{String,Dict{String,String}}()
     end
 
-    # Second pass: start from Chemfiles bonds
-    bonds_mat = Int.(Chemfiles.bonds(top))  # 2×NB, 0-based
-    for col in eachcol(bonds_mat)
-        i = col[1]+1; j = col[2]+1
-        (rid_i, li) = atom_to_res[i]
-        (rid_j, lj) = atom_to_res[j]
-        if rid_i == ((0,""),0) || rid_j == ((0,""),0)
-            continue
+    if isnothing(xmlpath)
+        xmlpath = normpath(@__DIR__, "..", "data/force_fields/pdbNames.xml")
+    end
+    
+    doc  = readxml(xmlpath)
+    root = doc.root
+
+    allResidues         = Dict{String,String}()
+    proteinResidues     = Dict{String,String}()
+    nucleicAcidResidues = Dict{String,String}()
+
+    # First pass
+    for residue in findall("Residue", root)
+        rname = residue["name"]
+        if rname == "All"
+            parse_atoms(residue, allResidues)
+        elseif rname == "Protein"
+            parse_atoms(residue, proteinResidues)
+        elseif rname == "Nucleic"
+            parse_atoms(residue, nucleicAcidResidues)
+        end
+    end
+
+    # Merge "All" into specific groups
+    for (k, v) in allResidues
+        proteinResidues[k]     = v
+        nucleicAcidResidues[k] = v
+    end
+
+    # Second pass
+    for residue in findall("Residue", root)
+        rname = residue["name"]
+
+        # Map residue aliases (name and any alt*)
+        for attr in eachattribute(residue)
+            aname = attr.name
+            if aname == "name" || startswith(aname, "alt")
+                resname_replacements[attr.content] = rname
+            end
         end
 
-        if rid_i == rid_j
-            rg = res_graphs[rid_i]
-            push!(rg.bonds, li < lj ? (li, lj) : (lj, li))
+        # Select base atom map by type
+        atoms = if haskey(residue, "type")
+            rtype = residue["type"]
+            rtype == "Protein" ? copy(proteinResidues) :
+            rtype == "Nucleic" ? copy(nucleicAcidResidues) :
+                                 copy(allResidues)
         else
-            res_graphs[rid_i].external_bonds[li] += 1
-            res_graphs[rid_j].external_bonds[lj] += 1
+            copy(allResidues)
+        end
+
+        parse_atoms(residue, atoms)
+        atomname_replacements[rname] = atoms
+    end
+
+    return resname_replacements, atomname_replacements
+end
+
+function load_bond_definitions(; xmlpath = nothing, standardBonds = nothing)
+
+    if isnothing(xmlpath)
+        xmlpath = normpath(@__DIR__, "..", "data/force_fields/residues.xml")
+    end
+    if isnothing(standardBonds)
+        standardBonds = Dict{String,Vector{Tuple{String, String}}}()
+    end
+
+    doc  = readxml(xmlpath)
+    root = doc.root
+
+    for residue in findall("Residue", root)
+        bonds = Tuple{String, String}[]
+        standardBonds[residue["name"]] = bonds
+        for bond in findall("Bond", residue) 
+            push!(bonds, (bond["from"], bond["to"]))
+        end
+    end
+    return standardBonds
+end
+
+function create_bonds(top, canon_sys, standard_bonds,
+                      resname_replacements)
+
+    bonds = Tuple{Int, Int}[]
+
+    for (chain, resids) in canon_sys
+        n_resids = length(resids)
+
+        atom_maps = Dict{Int, Dict{String, Int}}()
+        for (resnum, rgraph) in resids
+            atomMap = Dict{String, Int}()
+            atom_names = rgraph.atom_names
+            atom_inds  = rgraph.atom_inds
+            for (name, idx) in zip(atom_names, atom_inds)
+                atomMap[name] = idx
+            end
+            atom_maps[resnum] = atomMap
+        end
+
+
+        for (resnum, rgraph) in resids
+
+            i = resnum
+
+            res_name = rgraph.res_name
+
+            if haskey(standard_bonds, res_name)
+                for bond in standard_bonds[res_name]
+                    external = false
+                    if startswith(bond[1], "-") && i > 1
+                        external = true
+                        fromResidue = i-1
+                        fromAtom = bond[1][2:end]
+                        
+                        ext_ind = findfirst(x->x==fromAtom, resids[fromResidue].atom_names)
+                        resids[fromResidue].external_bonds[ext_ind] += 1
+                        ext_ind = findfirst(x->x==bond[2], rgraph.atom_names)
+                        rgraph.external_bonds[ext_ind] += 1
+
+                    elseif startswith(bond[1], "+") && i < n_resids
+                        external = true
+                        fromResidue = i+1
+                        fromAtom = bond[1][2:end]
+
+                        ext_ind = findfirst(x->x==fromAtom, resids[fromResidue].atom_names)
+                        resids[fromResidue].external_bonds[ext_ind] += 1
+                        ext_ind = findfirst(x->x==bond[2], rgraph.atom_names)
+                        rgraph.external_bonds[ext_ind] += 1
+
+                    else
+                        fromResidue = i
+                        fromAtom = bond[1]
+                    end
+
+                    if startswith(bond[2], "-") && i > 1
+                        external = true
+                        toResidue = i-1
+                        toAtom = bond[2][2:end]
+
+                        ext_ind = findfirst(x->x==toAtom, resids[toResidue].atom_names)
+                        resids[toResidue].external_bonds[ext_ind] += 1
+                        ext_ind = findfirst(x->x==bond[1], rgraph.atom_names)
+                        rgraph.external_bonds[ext_ind] += 1
+
+                    elseif startswith(bond[2], "+") && i < n_resids
+                        external = true
+                        toResidue = i+1
+                        toAtom = bond[2][2:end]
+                        
+                        ext_ind = findfirst(x->x==toAtom, resids[toResidue].atom_names)
+                        resids[toResidue].external_bonds[ext_ind] += 1
+                        ext_ind = findfirst(x->x==bond[1], rgraph.atom_names)
+                        rgraph.external_bonds[ext_ind] += 1
+
+                    else
+                        toResidue = i
+                        toAtom = bond[2]
+                    end
+
+                    if fromAtom ∈ keys(atom_maps[fromResidue]) && toAtom ∈ keys(atom_maps[toResidue])
+                        atom1 = atom_maps[fromResidue][fromAtom]
+                        atom2 = atom_maps[toResidue][toAtom]
+                        pair = atom1 < atom2 ? (atom1, atom2) : (atom2, atom1) 
+                        if !(pair ∈ bonds)
+                            push!(bonds, pair)
+                            if !external
+                                
+                                i_local = findfirst(x -> x == fromAtom, rgraph.atom_names)
+                                j_local = findfirst(x -> x == toAtom,   rgraph.atom_names)
+
+                                pair_local = i_local < j_local ? (i_local, j_local) : (j_local, i_local)
+
+                                push!(rgraph.bonds, pair_local)
+
+                            end
+                        end
+                    end
+                end
+            end
         end
     end
 
-    # Canonicalize bond lists
-    for rg in values(res_graphs)
-        unique!(rg.bonds)
-        sort!(rg.bonds)
-    end
+    return sort(bonds)
 
-    return res_graphs
 end
 
-# Heuristics to detect "extra particle" names and infer element.
-# Adjust to your conventions. If you already tag extras elsewhere, replace these.
-name_startswith_ep(nm::String) = startswith(nm, "EP") || startswith(nm, "VS") || false
+function atom_name_by_index(atom_idx, canon_system)
 
-function infer_element_from_name(nm::String)::Symbol
-    # Try simple OpenMM-like convention: first letter(s) capital, then digits
-    # Fall back to :X
-    i = findfirst(isletter, nm)
-    if i === nothing
-        return :X
-    end
-    c = nm[i]
-    if i < lastindex(nm) && islowercase(nm[nextind(nm,i)])
-        sym = string(c, nm[nextind(nm,i)])
-        return get(ELEMENT_SYMBOLS, sym, get(ELEMENT_SYMBOLS, string(c), :X))
-    else
-        return get(ELEMENT_SYMBOLS, string(c), :X)
-    end
-end
+    for (chain, resids) in canon_system
 
-"""
-    atom_degrees(natoms::Int, bonds::Vector{Tuple{Int,Int}}) -> Vector{Int}
+        for (res_id, rgraph) in resids
 
-Compute per-atom internal degree from intra-residue bonds.
-"""
-function atom_degrees(natoms::Int, bonds::Vector{Tuple{Int,Int}})
-    deg = fill(0, natoms)
-    @inbounds for (i,j) in bonds
-        deg[i] += 1
-        deg[j] += 1
-    end
-    return deg
-end
-
-# Adjacency sets
-function adjacency_sets(n::Int, bonds::Vector{Tuple{Int,Int}})
-    adj = [Int[] for _ in 1:n]
-    @inbounds for (i,j) in bonds
-        push!(adj[i], j); push!(adj[j], i)
-    end
-    # keep unique and sorted
-    for a in adj
-        unique!(a); sort!(a)
-    end
-    return adj
-end
-
-
-"""
-    template_signature(t::ResidueTemplate; include_external::Bool=false) -> String
-
-Canonical, hashed signature:
-- Non-extra atoms: multiset of `(element, degree)` or `(element, degree, external)` if requested.
-- Extra particles: exact atom-name multiset.
-"""
-function template_signature(t::ResidueTemplate; include_external::Bool=false)
-    n = length(t.atoms)
-    deg = atom_degrees(n, t.bonds)
-
-    nonextra_parts = String[]
-    extra_parts    = String[]
-
-    @inbounds for i in 1:n
-        if t.extras[i]
-            # exact-name marker for extra particles
-            push!(extra_parts, "X:" * t.atoms[i])
-        else
-            if include_external
-                push!(nonextra_parts, string(t.elements[i], "/", deg[i], "/", t.external_bonds[i]))
+            if !(atom_idx ∈ rgraph.atom_inds)
+                continue
             else
-                push!(nonextra_parts, string(t.elements[i], "/", deg[i]))
+                local_idx = findfirst(i -> i == atom_idx, rgraph.atom_inds)
+                return rgraph.atom_names[local_idx]
             end
+
         end
     end
 
-    sort!(nonextra_parts)
-    sort!(extra_parts)
-
-    return "NE[" * join(nonextra_parts, ",") * "]|EX[" * join(extra_parts, ",") * "]"
 end
 
-function residue_signature(rg::ResidueGraph)
-    n = length(rg.atom_names)
-    deg = atom_degrees(n, rg.bonds)
-    parts = String[]
-    @inbounds for i in 1:n
-        el = infer_element_from_name(rg.atom_names[i])
-        push!(parts, string(el, "/", deg[i]))
+function create_disulfide_bonds(coords, boundary, canon_system, bonds)
+
+    function is_cysx(rgraph::ResidueGraph)
+        names = rgraph.atom_names
+        return "SG" in names && !("HG" in names)
     end
-    sort!(parts)
-    return "NE[" * join(parts, ",") * "]|EX[]"
-end
-
-"""
-    build_template_index(residues::Dict{String,ResidueTemplate};
-                         include_external::Bool=false)
-        -> Dict{String,Vector{String}}
-
-Map signature => template names sharing that signature.
-"""
-function build_template_index(residues::Dict{String,ResidueTemplate{T}};
-                              include_external::Bool=false) where T
-    idx = Dict{String,Vector{String}}()
-    for (rname, tmpl) in residues
-        sig = template_signature(tmpl; include_external)
-        push!(get!(idx, sig, String[]), rname)
-    end
-    return idx
-end
-
-
-"""
-    element_multiset_residue(rg) -> Dict{Symbol,Int}
-
-Infer element counts from atom names only.
-"""
-function element_multiset_residue(rg::ResidueGraph)
-    counts = Dict{Symbol,Int}()
-    @inbounds for nm in rg.atom_names
-        el = infer_element_from_name(nm)   # your existing helper
-        counts[el] = get(counts, el, 0) + 1
-    end
-    counts
-end
-
-"""
-    element_multiset_template(tmpl) -> Dict{Symbol,Int}
-"""
-function element_multiset_template(tmpl::ResidueTemplate)
-    counts = Dict{Symbol,Int}()
-    @inbounds for el in tmpl.elements
-        counts[el] = get(counts, el, 0) + 1
-    end
-    counts
-end
-
-candidate_templates(rg::ResidueGraph, idx::Dict{String,Vector{String}}) =
-    get(idx, residue_signature(rg), String[])
-
-"""
-    candidate_templates_by_elements(rg, templates; allow_superset=false)
-
-Return template names whose element multiset matches the residue.
-If `allow_superset=true`, also accept templates that have additional H only.
-"""
-function candidate_templates_by_elements(rg::ResidueGraph,
-                                         templates::Dict{String, ResidueTemplate{T}};
-                                         allow_superset::Bool=false) where T
-    rc = element_multiset_residue(rg)
-    names = String[]
-    for (nm, tmpl) in templates
-        tc = element_multiset_template(tmpl)
-        if !allow_superset
-            if rc == tc
-                push!(names, nm)
+    
+    function is_disulfide_bonded(atom_idx)
+        for b in bonds
+            atom_name_i = atom_name_by_index(b[1], canon_system)
+            atom_name_j = atom_name_by_index(b[2], canon_system)
+            if atom_idx in b && atom_name_i == "SG" && atom_name_j == "SG"
+                return true
             end
-        else
-            # require tmpl has at least the residue counts, and any excess are H only
-            ok = true
-            for (el, n) in rc
-                if get(tc, el, -1) != n
-                    ok = false; break
-                end
-            end
-            if ok
-                extra = Dict{Symbol,Int}((el => tc[el] - get(rc, el, 0)) for el in keys(tc))
-                delete!(extra, :H)
-                if all(v -> v == 0, values(extra))
-                    push!(names, nm)
-                end
-            end
-        end
-    end
-    return names
-end
-
-"""
-    partial_match_residue_to_template(rg, tmpl; ignore_external_bonds=true, ignore_extra_particles=true)
-Return (res2tpl::Dict{Int,Int}, unmatched_tpl::Vector{Int}) if residue can embed in template,
-else (nothing, nothing). Allows residue to be a subgraph of the template.
-"""
-function partial_match_residue_to_template(rg::ResidueGraph, tmpl::ResidueTemplate;
-        ignore_external_bonds::Bool=true,
-        ignore_extra_particles::Bool=true)
-
-    res_keep = collect(1:length(rg.atom_names))                    # keep all residue atoms
-    tpl_keep = ignore_extra_particles ? findall(!, tmpl.extras) : collect(1:length(tmpl.atoms))
-
-    n_res, n_tpl = length(res_keep), length(tpl_keep)
-
-    # residue view
-    res_old2new = Dict(i=>k for (k,i) in enumerate(res_keep))
-    res_bonds = Tuple{Int,Int}[]
-    keep = Set(res_keep)
-    for (i,j) in rg.bonds
-        if i in keep && j in keep
-            ii = res_old2new[i]; jj = res_old2new[j]
-            push!(res_bonds, ii<jj ? (ii,jj) : (jj,ii))
-        end
-    end
-    res_deg = atom_degrees(n_res, res_bonds)
-    res_ext = ignore_external_bonds ? fill(0, n_res) : [rg.external_bonds[res_keep[i]] for i in 1:n_res]
-    res_el  = [infer_element_from_name(rg.atom_names[res_keep[i]]) for i in 1:n_res]
-    res_adj = adjacency_sets(n_res, res_bonds)
-
-    # template view
-    tpl_old2new = Dict(i=>k for (k,i) in enumerate(tpl_keep))
-    tpl_bonds = Tuple{Int,Int}[]
-    keepT = Set(tpl_keep)
-    for (i,j) in tmpl.bonds
-        if i in keepT && j in keepT
-            ii = tpl_old2new[i]; jj = tpl_old2new[j]
-            push!(tpl_bonds, ii<jj ? (ii,jj) : (jj,ii))
-        end
-    end
-    tpl_deg = atom_degrees(n_tpl, tpl_bonds)
-    tpl_ext = ignore_external_bonds ? fill(0, n_tpl) : [tmpl.external_bonds[tpl_keep[i]] for i in 1:n_tpl]
-    tpl_el  = [tmpl.elements[tpl_keep[i]] for i in 1:n_tpl]
-    tpl_adj = adjacency_sets(n_tpl, tpl_bonds)
-
-    # candidates: residue atom i can map to template atom j if attributes compatible
-    cand = [Int[] for _ in 1:n_res]
-    for i in 1:n_res
-        for j in 1:n_tpl
-            if res_el[i]==tpl_el[j] && res_deg[i] <= tpl_deg[j] && (ignore_external_bonds || res_ext[i] <= tpl_ext[j])
-                push!(cand[i], j)
-            end
-        end
-        isempty(cand[i]) && return nothing, nothing
-    end
-
-    order = sortperm(1:n_res; by=i->(length(cand[i]), -res_deg[i]))
-    used_tpl = fill(false, n_tpl)
-    map_res2tpl = fill(0, n_res)
-
-    function dfs(k::Int)::Bool
-        k > n_res && return true
-        i = order[k]
-        for j in cand[i]
-            used_tpl[j] && continue
-            ok = true
-            for n in res_adj[i]
-                m = map_res2tpl[n]
-                if m!=0 && !(m in tpl_adj[j]); ok=false; break; end
-            end
-            ok || continue
-            map_res2tpl[i]=j; used_tpl[j]=true
-            dfs(k+1) && return true
-            map_res2tpl[i]=0; used_tpl[j]=false
         end
         return false
     end
 
-    dfs(1) || return nothing, nothing
+    cysx = ResidueGraph[]
+    for (chain, resids) in canon_system
+        for (res_idx, rgraph) in resids
+            if rgraph.res_name == "CYS" && is_cysx(rgraph)
+                push!(cysx, rgraph)
+            end
+        end
+    end
+    #= atom_names = [[name for name in rg.atom_names] for rg in cysx] =#
+    n_cysx = length(cysx)
+    for (cys_idx, cysi) in enumerate(cysx)
+        
+        sg1_idx  = findfirst(x -> x == "SG", cysi.atom_names)
+        atom_idx = cysi.atom_inds[sg1_idx]
+        pos1     = coords[atom_idx]
 
-    res2tpl = Dict(res_keep[i] => tpl_keep[map_res2tpl[i]] for i in 1:n_res)
-    unmatched_tpl = [tpl_keep[j] for j in 1:n_tpl if !used_tpl[j]]
-    return res2tpl, unmatched_tpl
+        candidate_distance =  unit(eltype(coords[1])) == NoUnits ? 0.3 : 0.3u"nm"
+        candidate_atom     = nothing 
+
+        for cys_jdx in cys_idx:n_cysx
+            cysj = cysx[cys_jdx]
+            sg2_idx  = findfirst(x -> x == "SG", cysj.atom_names)
+            atom_jdx = cysj.atom_inds[sg2_idx]
+            pos2     = coords[atom_jdx]
+
+            vec = vector(pos1, pos2, boundary)
+            dst = norm(vec)
+
+            if dst < candidate_distance && !is_disulfide_bonded(atom_idx)
+                candidate_distance = dst
+                candidate_atom = atom_jdx
+            end
+
+            if !isnothing(candidate_atom)
+                pair = atom_idx < atom_jdx ? (atom_idx, atom_jdx) : (atom_jdx, atom_idx)
+                push!(bonds, pair)
+            end
+        end
+    end
+
+    sort!(bonds)
+    return bonds
+
+end
+
+function residue_from_atom_idx(atom_idx, canon_system)
+
+    for (chain, resids) in canon_system
+        for (res_id, rgraph) in resids
+            if atom_idx ∈ rgraph.atom_inds
+                return rgraph
+            end
+        end
+    end
+
+end
+
+function read_connect_bonds(pdbfile, bonds, canon_system)
+    filtered = String[]
+    open(pdbfile) do io
+        for line in eachline(io)
+            if startswith(line, "CONECT")
+                push!(filtered, line)
+                fields = split(line)[2:end]
+                fromAtom = parse(Int, fields[1])
+                atom_name_i = atom_name_by_index(fromAtom, canon_system)
+                res_i       = residue_from_atom_idx(fromAtom, canon_system)
+                for toAtom in fields[2:end]
+                    toAtom = parse(Int, toAtom)
+                    atom_name_j = atom_name_by_index(toAtom, canon_system)
+                    res_j       = residue_from_atom_idx(toAtom, canon_system)
+                    pair = fromAtom < toAtom ? (fromAtom, toAtom) : (toAtom, fromAtom)
+                    if !(pair ∈ bonds)
+                        push!(bonds, pair)
+                    end
+                    if res_i == res_j
+                        local_i = findfirst(n -> n == atom_name_i, res_i.atom_names)
+                        local_j = findfirst(n -> n == atom_name_j, res_i.atom_names)
+                        local_pair = local_i < local_j ? (local_i, local_j) : (local_j, local_i)
+                        if !(local_pair ∈ res_i.bonds)
+                            push!(res_i.bonds, local_pair)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return bonds
 end
 
 """
-    match_residue_to_template(rg::ResidueGraph, tmpl::ResidueTemplate;
-                              ignore_external_bonds::Bool=false,
-                              ignore_extra_particles::Bool=false)
-        -> Union{Dict{Int,Int},Nothing}
+    match_residue_to_template(res::ResidueGraph,
+                              tpl::ResidueTemplate;
+                              ignoreExternalBonds::Bool=false,
+                              ignoreExtraParticles::Bool=false) -> Union{Vector{Int},Nothing}
 
-Backtracking graph match from residue `rg` to template `tmpl`.
+Replicates OpenMM's `matchResidueToTemplate`.
 
-Constraints:
-- Non-extra atoms must match element.
-- Internal degree must match.
-- External-bond count must match unless `ignore_external_bonds`.
-- Extra particles must match by exact atom name unless `ignore_extra_particles`.
-- Bonds in `rg` must map to bonds in `tmpl`.
+- Extras in residue are atoms with `res.elements[i] == :X`.
+- Extras in template are `tpl.extras[j] == true`.
+- If `ignoreExtraParticles`, extras are removed from both sides before matching.
+- If `ignoreExternalBonds`, external bond counts are ignored.
 
-Returns a mapping of local residue indices → template indices, or `nothing` if no match.
+Returns a vector `match` of length equal to the number of residue atoms kept
+(after optional extra filtering). `match[i]` is the **template atom index (1-based, original template indexing)**
+corresponding to the `i`-th kept residue atom. Returns `nothing` if no match exists.
 """
-function match_residue_to_template(rg::ResidueGraph, tmpl::ResidueTemplate;
-                                   ignore_external_bonds::Bool=false,
-                                   ignore_extra_particles::Bool=false)
+function match_residue_to_template(res::ResidueGraph,
+                                   tpl::ResidueTemplate;
+                                   ignoreExternalBonds::Bool=false,
+                                   ignoreExtraParticles::Bool=false)::Union{Vector{Int}, Nothing}
 
-    # --- Prepare residue view (optionally drop extras) ---
-    # Identify extras in residue by element :X (or any policy you use)
-    res_is_extra = [name_startswith_ep(n) || false for n in rg.atom_names]  # fallback false
-    if ignore_extra_particles
-        res_keep = findall(!, res_is_extra)
-        tpl_keep = findall(!, tmpl.extras)
-    else
-        res_keep = collect(1:length(rg.atom_names))
-        tpl_keep = collect(1:length(tmpl.atoms))
-        # quick cardinality check for extras by exact name
-        if count(identity, res_is_extra) != count(identity, tmpl.extras)
-            return nothing
-        end
-    end
+    # --- 0) Define extra-particle predicates ---
+    is_extra_res(i) = res.elements[i] == :X
+    is_extra_tpl(j) = tpl.extras[j]
 
-    # Quick size check
-    if length(res_keep) != length(tpl_keep)
+    # --- 1) Select atoms to consider (apply ignoreExtraParticles) ---
+    res_keep = ignoreExtraParticles ? findall(i -> !is_extra_res(i), eachindex(res.atom_names)) : collect(eachindex(res.atom_names))
+    tpl_keep = ignoreExtraParticles ? findall(j -> !is_extra_tpl(j), eachindex(tpl.atoms)) : collect(eachindex(tpl.atoms))
+
+    numAtoms = length(res_keep)
+    if numAtoms != length(tpl_keep)
         return nothing
     end
-    n_keep = length(res_keep)
-
-    # --- Build local indexing for residue subset ---
-    res_old2new = Dict{Int,Int}(i => k for (k,i) in enumerate(res_keep))
-    res_new2old = res_keep
-
-    # Residue intra-bonds restricted to kept atoms
-    res_bonds_kept = Tuple{Int,Int}[]
-    begin
-        keep_set = Set(res_keep)
-        for (i,j) in rg.bonds
-            if i in keep_set && j in keep_set
-                ii = res_old2new[i]
-                jj = res_old2new[j]
-                push!(res_bonds_kept, ii < jj ? (ii,jj) : (jj,ii))
-            end
-        end
+    if numAtoms == 0
+        return Int[]  # both empty after filtering → vacuous match
     end
 
-    # Residue degrees and external counts
-    res_deg  = atom_degrees(n_keep, res_bonds_kept)
-    res_ext  = ignore_external_bonds ? fill(0, n_keep) :
-               [rg.external_bonds[res_new2old[i]] for i in 1:n_keep]
-    res_elem = Vector{Symbol}(undef, n_keep)
-    res_name = Vector{String}(undef, n_keep)
-    for i in 1:n_keep
-        res_elem[i] = infer_element_from_name(rg.atom_names[res_new2old[i]])
-        res_name[i] = rg.atom_names[res_new2old[i]]
+    # --- 2) Build local index maps (kept-only) ---
+    res_old2new = Dict{Int,Int}(res_keep[k] => k for k in 1:numAtoms)
+    tpl_old2new = Dict{Int,Int}(tpl_keep[k] => k for k in 1:numAtoms)
+    tpl_new2old = copy(tpl_keep)  # inverse map to original template indices
+
+    # --- 3) Build adjacency among kept atoms and external-bond counts ---
+    # Residue: local bonds are given in res.bonds over original local indices.
+    res_adj = [Int[] for _ in 1:numAtoms]
+    for (i,j) in res.bonds
+        (haskey(res_old2new, i) && haskey(res_old2new, j)) || continue
+        ii = res_old2new[i]; jj = res_old2new[j]
+        push!(res_adj[ii], jj); push!(res_adj[jj], ii)
     end
+    res_ext = ignoreExternalBonds ? fill(0, numAtoms) : [res.external_bonds[res_keep[k]] for k in 1:numAtoms]
 
-    # --- Build template view on kept atoms ---
-    tpl_old2new = Dict{Int,Int}(i => k for (k,i) in enumerate(tpl_keep))
-    tpl_new2old = tpl_keep
-    tpl_bonds_kept = Tuple{Int,Int}[]
-    begin
-        keep_set = Set(tpl_keep)
-        for (i,j) in tmpl.bonds
-            if i in keep_set && j in keep_set
-                ii = tpl_old2new[i]; jj = tpl_old2new[j]
-                push!(tpl_bonds_kept, ii < jj ? (ii,jj) : (jj,ii))
-            end
-        end
+    # Template: build adjacency from tpl.bonds, but only within kept atoms.
+    tpl_adj = [Int[] for _ in 1:numAtoms]
+    for (i,j) in tpl.bonds
+        (haskey(tpl_old2new, i) && haskey(tpl_old2new, j)) || continue
+        ii = tpl_old2new[i]; jj = tpl_old2new[j]
+        push!(tpl_adj[ii], jj); push!(tpl_adj[jj], ii)
     end
+    tpl_ext = ignoreExternalBonds ? fill(0, numAtoms) : [tpl.external_bonds[tpl_keep[k]] for k in 1:numAtoms]
 
-    tpl_deg  = atom_degrees(n_keep, tpl_bonds_kept)
-    tpl_ext  = ignore_external_bonds ? fill(0, n_keep) :
-               [tmpl.external_bonds[tpl_new2old[i]] for i in 1:n_keep]
-    tpl_elem = [tmpl.elements[tpl_new2old[i]] for i in 1:n_keep]
-    tpl_name = [tmpl.atoms[tpl_new2old[i]]     for i in 1:n_keep]
-    tpl_is_extra = [tmpl.extras[tpl_new2old[i]] for i in 1:n_keep]
-
-    # --- Quick multiset filters on non-extras ---
-    nonextra_idx = ignore_extra_particles ? collect(1:n_keep) :
-                    [i for i in 1:n_keep if !tpl_is_extra[i]]
-    # Multiset equality on tuples
-    multiset_res = sort!(string.(res_elem[nonextra_idx], "/", res_deg[nonextra_idx], "/", res_ext[nonextra_idx]))
-    multiset_tpl = sort!(string.(tpl_elem[nonextra_idx], "/", tpl_deg[nonextra_idx], "/", tpl_ext[nonextra_idx]))
-    if multiset_res != multiset_tpl
+    # --- 4) Quick type-count screen: (element or :X, degree, ext) multiplicities must match ---
+    # Residue keys
+    res_keys = Tuple{Symbol,Int,Int}[]
+    for i in 1:numAtoms
+        key = (res.elements[res_keep[i]], length(res_adj[i]), res_ext[i])
+        push!(res_keys, key)
+    end
+    # Template keys
+    tpl_keys = Tuple{Symbol,Int,Int}[]
+    for k in 1:numAtoms
+        # Use template element symbol, but treat extras specially in candidate stage
+        key = (tpl.elements[tpl_keep[k]], length(tpl_adj[k]), tpl_ext[k])
+        push!(tpl_keys, key)
+    end
+    # Compare multisets
+    sort!(res_keys); sort!(tpl_keys)
+    if res_keys != tpl_keys
         return nothing
     end
-    # Extra particles must match names 1:1 if not ignoring
-    if !ignore_extra_particles
-        res_extra_names = sort!([res_name[i] for i in 1:n_keep if name_startswith_ep(res_name[i])])
-        tpl_extra_names = sort!([tpl_name[i] for i in 1:n_keep if tpl_is_extra[i]])
-        if res_extra_names != tpl_extra_names
-            return nothing
-        end
-    end
 
-    # --- Adjacency sets for fast bond checks ---
-    res_adj = adjacency_sets(n_keep, res_bonds_kept)
-    tpl_adj = adjacency_sets(n_keep, tpl_bonds_kept)
+    # --- 5) Candidate template atoms for each residue atom ---
+    # OpenMM's exactNameMatch: if residue atom is extra and there exists a template extra
+    # with same name, enforce name equality. Otherwise extra can map to any template extra.
+    # Non-extra must match element exactly and template must be non-extra.
+    candidates = Vector{Vector{Int}}(undef, numAtoms)
+    # Precompute template-extra presence by name
+    tpl_extra_name_set = Set{String}(tpl.atoms[j] for j in tpl_keep if is_extra_tpl(j))
 
-    # --- Candidate template indices per residue atom ---
-    candidates = Vector{Vector{Int}}(undef, n_keep)
-    for i in 1:n_keep
-        if !ignore_extra_particles && name_startswith_ep(res_name[i])
-            # exact-name match against template extras
-            c = Int[]
-            for j in 1:n_keep
-                if tpl_is_extra[j] && tpl_name[j] == res_name[i]
-                    push!(c, j)
+    for i in 1:numAtoms
+        ri_old = res_keep[i]
+        r_el   = res.elements[ri_old]
+        r_name = res.atom_names[ri_old]
+        r_deg  = length(res_adj[i])
+        r_ext  = res_ext[i]
+        r_is_extra = (r_el == :X)
+
+        exactNameMatch = r_is_extra && any(is_extra_tpl(j) && tpl.atoms[j] == r_name for j in tpl_keep)
+
+        cands = Int[]
+        for (k, tj_old) in enumerate(tpl_keep)
+            t_el   = tpl.elements[tj_old]
+            t_name = tpl.atoms[tj_old]
+            t_deg  = length(tpl_adj[k])
+            t_ext  = tpl_ext[k]
+            t_is_extra = is_extra_tpl(tj_old)
+
+            # Element/name gate
+            if r_is_extra
+                # residue extra → template must be extra
+                t_is_extra || continue
+                if exactNameMatch && t_name != r_name
+                    continue
                 end
+            else
+                # residue real element → template must be non-extra and element equal
+                t_is_extra && continue
+                t_el == r_el || continue
             end
-            candidates[i] = c
-            if isempty(c)
-                return nothing
-            end
+
+            # Degree and external-bond checks
+            r_deg == t_deg || continue
+            ignoreExternalBonds || (r_ext == t_ext) || continue
+
+            push!(cands, k)  # store template new-index k
+        end
+        # Early prune: if no candidates for a residue atom, fail
+        isempty(cands) && return nothing
+        candidates[i] = cands
+    end
+
+    # --- 6) Heuristic search order: fewest candidates first, then neighbors of chosen ---
+    atomsToOrder = Set(1:numAtoms)
+    searchOrder = Int[]
+    neighbor_heap = Int[]  # acts as an unordered list of candidate neighbors
+
+    while !isempty(atomsToOrder)
+        if isempty(neighbor_heap)
+            # pick global minimum by candidate count among remaining
+            nextAtom = argmin(i -> length(candidates[i]), collect(atomsToOrder))
         else
-            # Non-extra matching by attributes
-            c = Int[]
-            for j in 1:n_keep
-                if (!tpl_is_extra[j]) && (res_elem[i] == tpl_elem[j]) && (res_deg[i]  == tpl_deg[j])  && (ignore_external_bonds || res_ext[i] == tpl_ext[j])
-                    push!(c, j)
-                end
-            end
-            candidates[i] = c
-            if isempty(c)
-                return nothing
+            # pick the neighbor with fewest candidates
+            sort!(neighbor_heap, by=i -> length(candidates[i]))
+            nextAtom = neighbor_heap[1]
+            filter!(i -> i != nextAtom, neighbor_heap)
+        end
+        push!(searchOrder, nextAtom)
+        delete!(atomsToOrder, nextAtom)
+        # push its neighbors
+        for nb in res_adj[nextAtom]
+            if nb in atomsToOrder && !(nb in neighbor_heap)
+                push!(neighbor_heap, nb)
             end
         end
     end
 
-    # --- Variable ordering: fewest candidates first, then by larger degree ---
-    order = collect(1:n_keep)
-    sort!(order; by = i -> (length(candidates[i]), -res_deg[i]))
+    inverseSearchOrder = zeros(Int, numAtoms)
+    for (pos, i) in enumerate(searchOrder)
+        inverseSearchOrder[i] = pos
+    end
 
-    # --- Backtracking ---
-    mapping_res2tpl = fill(0, n_keep)       # 0 = unassigned
-    used_tpl        = fill(false, n_keep)
+    # Reorder adjacency and candidates by searchOrder, and relabel neighbor indices to search positions
+    res_adj_ord = Vector{Vector{Int}}(undef, numAtoms)
+    cand_ord    = Vector{Vector{Int}}(undef, numAtoms)
+    for pos in 1:numAtoms
+        i = searchOrder[pos]
+        res_adj_ord[pos] = [inverseSearchOrder[j] for j in res_adj[i]]
+        cand_ord[pos]    = candidates[i]
+    end
 
-    function dfs(k::Int)::Bool
-        if k > n_keep
-            return true
-        end
-        i = order[k]
-        # Prefer neighbors of already-matched atoms to propagate constraints
-        cand = candidates[i]
-        # Heuristic: try candidates that are adjacent to already matched neighbors first
-        neigh_matched = [mapping_res2tpl[n] for n in res_adj[i] if mapping_res2tpl[n] != 0]
-        sort!(cand; by = j -> -count(==(true), [n in tpl_adj[j] for n in neigh_matched]))
-        for j in cand
-            if used_tpl[j]
+    # --- 7) Recursive backtracking with bond-consistency ---
+    matches_tpl = fill(0, numAtoms)   # at position pos, matched template new-index
+    used_tpl    = falses(numAtoms)
+
+    function dfs(pos::Int)::Bool
+        pos > numAtoms && return true
+        # Try candidates for this residue position
+        for t_new in cand_ord[pos]
+            if used_tpl[t_new]
                 continue
             end
-            # Check bond consistency with already mapped neighbors
+            # Check bond consistency with already assigned neighbors
             ok = true
-            for n in res_adj[i]
-                m = mapping_res2tpl[n]
-                if m != 0
-                    if !(m in tpl_adj[j])  # residue has bond i-n, template must have j-m
+            for nb_pos in res_adj_ord[pos]
+                if nb_pos < pos  # already assigned
+                    t_nb = matches_tpl[nb_pos]
+                    # must be bonded in template
+                    # t_new is connected to t_nb if each appears in adjacency of the other
+                    # We have tpl_adj in new-index space
+                    if !(t_nb in tpl_adj[t_new])
                         ok = false
                         break
                     end
                 end
             end
-            if !ok
-                continue
-            end
-            # Assign
-            mapping_res2tpl[i] = j
-            used_tpl[j] = true
-            if dfs(k+1) 
+            ok || continue
+            # Assign and recurse
+            matches_tpl[pos] = t_new
+            used_tpl[t_new] = true
+            if dfs(pos+1)
                 return true
             end
-            # Undo
-            mapping_res2tpl[i] = 0
-            used_tpl[j] = false
+            used_tpl[t_new] = false
         end
         return false
     end
@@ -587,92 +601,17 @@ function match_residue_to_template(rg::ResidueGraph, tmpl::ResidueTemplate;
         return nothing
     end
 
-    # Build mapping in original residue local indices
-    res_map = Dict{Int,Int}()
-    for i_new in 1:n_keep
-        j_new = mapping_res2tpl[i_new]
-        i_old = res_new2old[i_new]
-        j_old = tpl_new2old[j_new]
-        res_map[i_old] = j_old
+    # --- 8) Return mapping back to original template indices, in original residue-kept order ---
+    # We need mapping for residue atoms in kept-order, not search-order.
+    # matches_tpl is in search-order; invert back:
+    matches_tpl_in_res_order = similar(matches_tpl)
+    for pos in 1:numAtoms
+        i = searchOrder[pos]
+        matches_tpl_in_res_order[i] = matches_tpl[pos]
     end
-    return res_map
-end
 
-"""
-    diff_residue_vs_template(rg, tmpl, res2tpl)
-Return bonds between already-present residue atoms that are required by the template but missing.
-Atoms are not added.
-"""
-function diff_residue_vs_template(rg::ResidueGraph, tmpl::ResidueTemplate, res2tpl::Dict{Int,Int})
-    tpl2res = Dict{Int,Int}(v=>k for (k,v) in res2tpl)
-    have = Set{Tuple{Int,Int}}( (i<j ? (i,j) : (j,i)) for (i,j) in rg.bonds )
-
-    missing_bonds = Tuple{Int,Int}[]
-    for (ti,tj) in tmpl.bonds
-        ri = get(tpl2res, ti, 0); rj = get(tpl2res, tj, 0)
-        if ri!=0 && rj!=0
-            ij = ri<rj ? (ri,rj) : (rj,ri)
-            if !(ij in have); push!(missing_bonds, ij); end
-        end
-    end
-    return missing_bonds
-end
-
-"""
-    apply_missing_bonds!(rg, missing_bonds)
-Add any missing intra-residue bonds between existing atoms.
-"""
-function apply_missing_bonds!(rg::ResidueGraph, missing_bonds::Vector{Tuple{Int,Int}})
-    have = Set{Tuple{Int,Int}}(rg.bonds)
-    for (i,j) in missing_bonds
-        ij = i<j ? (i,j) : (j,i)
-        (ij in have) && continue
-        push!(rg.bonds, ij); push!(have, ij)
-    end
-    sort!(rg.bonds); unique!(rg.bonds)
-    return rg
-end
-
-"""
-    repair_intra_residue_bonds_from_templates!(rg, templates, tmpl_index)
-Attempt to fix missing intra-residue bonds using residue templates only.
-No atom additions. No coordinates. Returns true if any bonds were added.
-"""
-function repair_intra_residue_bonds_from_templates!(rg::ResidueGraph,
-                                                    templates::Dict{String,ResidueTemplate{T}}) where T
-    # choose candidates by residue signature
-    # Replace signature-based pruning:
-    cands = candidate_templates_by_elements(rg, templates; allow_superset=false)
-
-    # Then do template-guided bond repair:
-    for tname in cands
-        tmpl = templates[tname]
-        res2tpl, _ = partial_match_residue_to_template(rg, tmpl;
-                        ignore_external_bonds=true, ignore_extra_particles=true)
-        res2tpl === nothing && continue
-        miss = diff_residue_vs_template(rg, tmpl, res2tpl)
-        isempty(miss) && continue
-        apply_missing_bonds!(rg, miss)
-        break
-    end
-end
-
-# ---- Bonds from residue graphs -> global set ----
-function build_global_bonds(res_graphs)::Vector{NTuple{2,Int}}
-    est = sum(length(rg.bonds) for rg in values(res_graphs))
-    bonds = Vector{NTuple{2,Int}}(undef, 0); sizehint!(bonds, est)
-    seen = Set{NTuple{2,Int}}()
-    for rg in values(res_graphs)
-        aid = rg.atom_inds
-        for (i,j) in rg.bonds
-            a = aid[i]; b = aid[j]
-            p = a < b ? (a,b) : (b,a)
-            if !(p in seen)
-                push!(bonds, p); push!(seen, p)
-            end
-        end
-    end
-    return bonds
+    # Convert template new-indices to original template indices
+    return [tpl_new2old[t_new] for t_new in matches_tpl_in_res_order]
 end
 
 # ---- Global adjacency from bonds ----
