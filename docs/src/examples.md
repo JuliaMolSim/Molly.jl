@@ -968,9 +968,9 @@ save("mie.png", f)
 
 ## Different soft-core potentials for Lennard-Jones and Coulomb
 
-The soft-core Lennard-Jones and Coulomb potentials are parameterised by ``\alpha`` and ``\lambda``, in addition to the standard potential parameters. The soft-core potential proposed by Gapsys et al. (JCTC, 2012) includes an additional parameter, ``\sigma_Q``. 
+The soft-core Lennard-Jones and Coulomb potentials are parameterised by ``\alpha`` and ``\lambda``, in addition to the standard potential parameters. The soft-core potential proposed by [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p) includes an additional parameter, ``\sigma_Q``. 
 
-These parameters shift the value of ``r_{ij}`` to ``(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6)^{1/6}`` for the Beutler et al. (Chem. Phys. Lett. 1994) soft-core potential, which prevents the potential from diverging as ``r_{ij} \rightarrow 0``. In the case of the Gapsys et al.(JCTC, 2012) soft-core potentials, the transition from a hard-core to a soft-core potential occurs at a specific distance. The forces are linearized at the transition point, and this switching distance depends on the value of ``\lambda``.
+These parameters shift the value of ``r_{ij}`` to ``(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6)^{1/6}`` for the [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1) soft-core potential, which prevents the potential from diverging as ``r_{ij} \rightarrow 0``. In the case of the [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p) soft-core potentials, the transition from a hard-core to a soft-core potential occurs at a specific distance. The forces are linearized at the transition point, and this switching distance depends on the value of ``\lambda``.
 
 ```julia
 using Molly

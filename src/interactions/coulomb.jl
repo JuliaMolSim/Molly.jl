@@ -111,7 +111,8 @@ end
 @doc raw"""
     CoulombSoftCoreBeutler(; cutoff, α, λ, use_neighbors, σ_mixing, weight_special, coulomb_const)
 
-The Coulomb electrostatic interaction between two atoms with a soft core, used for appearing and disappearing of atoms based on the potential described in Beutler et al. 1994 (Chem. Phys. Lett.).
+The Coulomb electrostatic interaction between two atoms with a soft core, used for appearing and disappearing of atoms.
+See [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1).
 
 The potential energy is defined as
 ```math
@@ -186,9 +187,9 @@ end
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    σ = inter.σ_mixing(atom_i, atom_j)
+    σ6 = inter.σ_mixing(atom_i, atom_j)^6
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
-    params = (ke, dr, qi, qj, 4*ϵ*(σ^12), 4*ϵ*(σ^6), inter.σ6_fac)
+    params = (ke, dr, qi, qj, 4*ϵ*(σ6*σ6), 4*ϵ*(σ6), inter.σ6_fac)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -200,8 +201,9 @@ end
 end
 
 function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, dr, qi, qj, C12, C6, σ6_fac))
-    R = ((σ6_fac*(C12/C6))+r^6)*sqrt(cbrt(((σ6_fac*(C12/C6))+r^6)))
-    return ke * ((qi*qj)/R) * (r^5)
+    r3 = r^3
+    R = ((σ6_fac*(C12/C6))+(r3*r3))*sqrt(cbrt(((σ6_fac*(C12/C6))+(r3*r3))))
+    return ke * ((qi*qj)/R) * (r3*r*r)
 end
 
 @inline function potential_energy(inter::CoulombSoftCoreBeutler,
@@ -215,9 +217,9 @@ end
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    σ = inter.σ_mixing(atom_i, atom_j)
+    σ6 = inter.σ_mixing(atom_i, atom_j)^6
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
-    params = (ke, qi, qj, 4*ϵ*(σ^12), 4*ϵ*(σ^6), inter.σ6_fac)
+    params = (ke, qi, qj, 4*ϵ*(σ6*σ6), 4*ϵ*(σ6), inter.σ6_fac)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -236,6 +238,7 @@ end
     CoulombSoftCoreGapsys; cutoff, α, λ, σQ, use_neighbors, σ_mixing, weight_special, coulomb_const)
 
 The Coulomb electrostatic interaction between two atoms with a soft core, used for appearing and disappearing of atoms.
+See [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p).
 
 The potential energy is defined as
 ```math
