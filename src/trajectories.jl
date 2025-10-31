@@ -3,56 +3,55 @@ export
     read_frame!
 
 """
-    An abstraction that sits on top of the [`System`](@ref) struct
-    that allows to read data from trajectories.
+    EnsembleSystem(coordinate_file, trajectory_file, force_field; <keyword arguments>)
+    EnsembleSystem(system, trajectory_file)
+
+An object allowing data to be read from a trajectory or ensemble
+associated with a [`System`](@ref).
+
+The keyword arguments are the same as [`System`](@ref) setup from a file.
+In the case of passing a [`System`](@ref) directly, a copy of the system is made.
 """
-struct EnsembleSystem{TR, S <: System}
+struct EnsembleSystem{S, TR}
+    sys::S
     trajectory::TR
-    system::S
 end
 
-function EnsembleSystem(structpath::String, trjpath::String, ffpaths::Vector{String};
-                    float = Float64,
-                    kwargs...)
-
-    ff = MolecularForceField(float, ffpaths..., units = true)
-
-    sys  = System(structpath, ff; kwargs...)
-    traj = Chemfiles.Trajectory(trjpath)
-    
-    return EnsembleSystem(traj, sys)
+function EnsembleSystem(coord_file::AbstractString, traj_file::AbstractString,
+                        force_field::MolecularForceField; kwargs...)
+    sys = System(coord_file, force_field; kwargs...)
+    traj = Chemfiles.Trajectory(traj_file)
+    return EnsembleSystem(sys, traj)
 end
 
-function EnsembleSystem(system::System, trjpath::String;
-                    kwargs...)
-    
-    sys  = System(deepcopy(system); kwargs...)
-    traj = Chemfiles.Trajectory(trjpath)
-    
-    return EnsembleSystem(traj, sys)
+function EnsembleSystem(sys::System, traj_file::AbstractString; kwargs...)
+    sys_cp = System(deepcopy(sys); kwargs...)
+    traj = Chemfiles.Trajectory(traj_file)
+    return EnsembleSystem(sys_cp, traj)
 end
 
 """
-    read_frame(trjsystem::EnsembleSystem, frame_idx::Int)
+    read_frame!(ens_sys::EnsembleSystem, frame_idx::Integer)
 
-    Reads a frame from a [`EnsembleSystem`](@ref) and returns a [`System`](@ref)
-    representation of said frame.
+Read a frame from an [`EnsembleSystem`](@ref) and return a [`System`](@ref)
+representing the frame.
 """
-function read_frame!(trjsystem::EnsembleSystem{TR,<:System{D,AT,T}}, frame_idx::Int) where {TR,D,AT,T}
-    sys = trjsystem.system
+function read_frame!(ens_sys::EnsembleSystem{<:System{D, AT, T}},
+                     frame_idx::Integer) where {D, AT, T}
+    sys = ens_sys.sys
+    frame = Chemfiles.read_step(ens_sys.trajectory, frame_idx - 1) # Zero-based indexing
+    coord_unit = unit(length_type(sys.boundary))
+    sys.boundary = boundary_from_chemfiles(Chemfiles.UnitCell(frame), T, coord_unit)
 
-    frame = Chemfiles.read_step(trjsystem.trajectory, frame_idx - 1)
-
-    bmat = T.(Chemfiles.matrix(Chemfiles.UnitCell(frame)) ./ T(10) * unit(eltype(Molly.from_device(sys.coords)[1])))
-    sys.boundary = sys.boundary isa CubicBoundary     ? CubicBoundary(SMatrix{D,D}(bmat)) :
-                   sys.boundary isa TriclinicBoundary ? TriclinicBoundary(SMatrix{D,D}(bmat)) : sys.boundary
-
-    coords  = T.(Chemfiles.positions(frame))
-    coords  = SVector{3}.(eachcol(coords)) ./ T(10) * unit(eltype(Molly.from_device(sys.coords)[1]))
+    coords_arr_Å = T.(Chemfiles.positions(frame)) * u"Å"
+    if coord_unit == NoUnits
+        coords_arr = ustrip.(u"nm", coords_arr_Å) # Assume nm
+    else
+        coords_arr = uconvert.(coord_unit, coords_arr_Å)
+    end
+    coords = SVector{3}.(eachcol(coords_arr))
     coords .= wrap_coords.(coords, (sys.boundary,))
 
-    # overwrite device buffer (no new System, no new device alloc)
-    sys.coords .= Molly.to_device(coords, AT)
-
+    sys.coords .= to_device(coords, AT) # Overwrite coordinates
     return sys
 end
