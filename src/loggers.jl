@@ -40,6 +40,9 @@ Ignored for gradient calculation during automatic differentiation.
 """
 function apply_loggers!(sys::System, buffers, neighbors=nothing, step_n::Integer=0, run_loggers=true;
                         n_threads::Integer=Threads.nthreads(), kwargs...)
+    if !(run_loggers in (true, false, :skipzero))
+        throw(ArgumentError("run_loggers must be true, false or :skipzero, found $run_loggers"))
+    end
     if run_loggers == true || (run_loggers == :skipzero && step_n != 0)
         for logger in values(sys.loggers)
             log_property!(logger, sys, buffers, neighbors, step_n; n_threads=n_threads, kwargs...)

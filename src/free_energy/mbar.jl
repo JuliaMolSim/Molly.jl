@@ -829,7 +829,7 @@ function pmf_with_uncertainty(coords_k::AbstractVector,
                               CV::AbstractVector;
                               shift::Bool  = false)
 
-    kBT = Float64(1/target_state.β) * target_state.system.energy_units
+    kBT = Float64(inv(target_state.β)) * target_state.system.energy_units
 
     mbar_gen = assemble_mbar_inputs(coords_k, boundaries_k, states; 
                                     target_state = target_state,

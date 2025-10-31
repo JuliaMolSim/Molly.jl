@@ -3,8 +3,7 @@
 
 export
     ImplicitSolventOBC,
-    ImplicitSolventGBN2,
-    born_radii_and_grad
+    ImplicitSolventGBN2
 
 # Generalized Born (GB) implicit solvent models augmented with the
 #   hydrophobic solvent accessible surface area (SA) term
@@ -653,14 +652,9 @@ function born_radii_sum(or, offset, I, α, β, γ)
     return B, B_grad
 end
 
-"""
-    born_radii_and_grad(inter, coords, boundary)
-
-Calculate Born radii, gradients of Born radii and surface area overlap
-with respect to atomic distance.
-
-Custom GBSA methods should implement this function.
-"""
+# Calculate Born radii, gradients of Born radii and surface area overlap
+#     with respect to atomic distance
+# Custom GBSA methods should implement this function
 function born_radii_and_grad(inter::ImplicitSolventOBC{T}, coords, boundary) where T
     Is = fill(zero(T) / unit(inter.dist_cutoff), length(coords))
     @inbounds for i in eachindex(coords)

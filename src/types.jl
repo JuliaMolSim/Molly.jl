@@ -13,8 +13,6 @@ export
     MolecularTopology,
     NeighborList,
     System,
-    inject_gradients,
-    extract_parameters,
     ReplicaSystem,
     array_type,
     is_on_gpu,
@@ -236,8 +234,11 @@ default values.
 The types used should be bits types if the GPU is going to be used.
 
 # Arguments
-- `index::Int`: the index of the atom in the system.
-- `atom_type::T`: the type of the atom.
+- `index::Int=1`: the index of the atom in the system. This only needs to be set if
+    it is used in the interaction. The order of atoms is determined by their order
+    in the atom vector.
+- `atom_type::T=1`: the type of the atom. This only needs to be set if
+    it is used in the interaction.
 - `mass::M=1.0u"g/mol"`: the mass of the atom.
 - `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle
@@ -590,6 +591,10 @@ function System(;
         throw(ArgumentError("there are $(length(atoms)) atoms but $(length(atoms_data)) atom data entries"))
     end
 
+    if isa(atoms, AbstractGPUArray) && !isbitstype(eltype(atoms))
+        throw(ArgumentError("the atoms are on the GPU but are not a bits type, found " *
+                            "atom type $(eltype(atoms))"))
+    end
     if isa(atoms, AbstractGPUArray) && !isa(coords, AbstractGPUArray)
         throw(ArgumentError("the atoms are on the GPU but the coordinates are not"))
     end
@@ -643,7 +648,8 @@ function System(;
     K = typeof(k_converted)
 
     if !isbitstype(eltype(coords)) || !isbitstype(eltype(vels))
-        @warn "eltype of coords or velocities is not isbits, it is recomended to use a vector of SVector's for performance"
+        @warn "eltype of coords or velocities is not isbits, it is recomended to use a vector " *
+              "of SVectors for performance"
     end
 
     df = n_dof(D, length(atoms), boundary)
@@ -805,15 +811,7 @@ function Base.zero(sys::System{D, AT, T, A, C, B, V,
     )
 end
 
-"""
-    inject_gradients(sys, params_dic)
-
-Add parameters from a dictionary to a [`System`](@ref).
-
-Allows gradients for individual parameters to be tracked.
-Returns atoms, pairwise interactions, specific interaction lists and general
-interactions.
-"""
+# Add parameters from a dictionary to a system, allowing gradients to be tracked
 function inject_gradients(sys::System{<:Any, AT}, params_dic) where AT
     atoms_grad = to_device(inject_atom.(from_device(sys.atoms), sys.atoms_data, (params_dic,)), AT)
     if length(sys.pairwise_inters) > 0
@@ -834,11 +832,7 @@ function inject_gradients(sys::System{<:Any, AT}, params_dic) where AT
     return atoms_grad, pis_grad, sis_grad, gis_grad
 end
 
-"""
-    extract_parameters(system, force_field)
-
-Form a `Dict` of all parameters in a [`System`](@ref), allowing gradients to be tracked.
-"""
+# Form a dictionary of all parameters in a system, allowing gradients to be tracked
 function extract_parameters(sys, ff)
     params_dic = Dict()
 

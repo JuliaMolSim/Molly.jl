@@ -336,7 +336,7 @@ ff = MolecularForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
-    nonbonded_method="pme",
+    nonbonded_method=:pme,
     loggers=(
         energy=TotalEnergyLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
@@ -382,11 +382,11 @@ Residue patches, virtual sites, file includes and any force types other than `Ha
 
 To run on the GPU, set `array_type=GPUArrayType`, where `GPUArrayType` is the array type for your GPU backend (for example `CuArray` for NVIDIA or `ROCArray` for AMD).
 The nonbonded method can be selected using the `nonbonded_method` keyword argument to [`System`](@ref).
-The options are `"none"` (short range only), `"cutoff"` (reaction field method), `"pme"` (particle mesh Ewald summation) and `"ewald"` (Ewald summation, slow).
+The options are `:none` (short range only), `:cutoff` (reaction field method), `:pme` (particle mesh Ewald summation) and `:ewald` (Ewald summation, slow).
 To run with constraints, use the `constraints` (`:none`, `:hbonds`, `:allbonds` or `:hangles`) and `rigid_water` keyword arguments.
 
 You can use an implicit solvent method by giving the `implicit_solvent` keyword argument.
-The options are `"obc1"`, `"obc2"` and `"gbn2"`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
+The options are `:obc1`, `:obc2` and `:gbn2`, corresponding to the Onufriev-Bashford-Case GBSA model with parameter set I or II and the GB-Neck2 model.
 Other options detailed in the docstring for [`System`](@ref) include overriding the boundary dimensions in the file (`boundary`) and modifying the non-bonded interaction and neighbor list cutoff distances (`dist_cutoff` and `dist_buffer`).
 
 Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topology and coordinate files, which should be considered experimental. For example:
@@ -394,7 +394,7 @@ Molly also has a rudimentary parser of [Gromacs](http://www.gromacs.org) topolog
 sys = System(
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_coords.gro"),
     joinpath(dirname(pathof(Molly)), "..", "data", "5XER", "gmx_top_ff.top");
-    nonbonded_method="pme",
+    nonbonded_method=:pme,
     loggers=(
         temp=TemperatureLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),
@@ -543,6 +543,8 @@ By default these are `kJ * mol^-1 * nm^-1` for force and `kJ * mol^-1` for energ
 These arguments should be `NoUnits` if you are not using units.
 If you need to strip units for downstream analysis, use the `ustrip` or [`ustrip_vec`](@ref) functions.
 It should be noted that charges are stored as dimensionless, i.e. 1.0 represents an atomic charge of +1.
+It is possible that you may run into issues when using different but valid units of the same dimension together, e.g. `1.0u"nm"` and `10.0u"Å"`.
+In this case, try using the same units throughout.
 
 ## Atom types
 

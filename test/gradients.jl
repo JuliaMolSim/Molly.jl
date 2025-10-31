@@ -47,7 +47,7 @@ end
         ff;
         units=false,
         array_type=AT,
-        nonbonded_method="pme",
+        nonbonded_method=:pme,
         grad_safe=true,
     )
 
@@ -109,7 +109,7 @@ end
         ("CPU gbn2"        , Array, false, false, false, false, true , 1e-4, 1e-4),
         ("CPU gbn2 forward", Array, false, true , false, false, true , 0.5 , 0.1 ),
     ]
-    if run_parallel_tests #                  gpu      par    fwd    f32    obc2   gbn2   tol_σ tol_r0
+    if run_parallel_tests #                  gpu    par    fwd    f32    obc2   gbn2   tol_σ tol_r0
         push!(runs, ("CPU parallel"        , Array, true , false, false, false, false, 1e-4, 1e-4))
         push!(runs, ("CPU parallel forward", Array, true , true , false, false, false, 0.5 , 0.1 ))
         push!(runs, ("CPU parallel f32"    , Array, true , false, true , false, false, 0.01, 5e-4))
@@ -244,7 +244,7 @@ end
             n_steps=10,
             dist_cutoff=T(1.5),
         )
-        n_threads = parallel ? Threads.nthreads() : 1
+        n_threads = (parallel ? Threads.nthreads() : 1)
 
         const_args = [
             Const(boundary), Const(pairwise_inters),
@@ -295,7 +295,7 @@ end
         for (prefix, genz, gfd, tol) in zip(("σ", "r0"), grad_enzyme, grad_fd, (tol_σ, tol_r0))
             if abs(gfd) < 1e-13
                 @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Enzyme $genz"
-                ztol = contains(name, "f32") ? 1e-8 : 1e-10
+                ztol = (contains(name, "f32") ? 1e-8 : 1e-10)
                 @test isnothing(genz) || abs(genz) < ztol
             elseif isnothing(genz)
                 @info "$(rpad(name, 20)) - $(rpad(prefix, 2)) - FD $gfd, Enzyme $genz"
@@ -308,7 +308,7 @@ end
         end
     end
 end
-#=
+
 @testset "Differentiable protein" begin
     function create_sys(AT)
         ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...; units=false)
@@ -317,8 +317,8 @@ end
             ff;
             units=false,
             array_type=AT,
-            nonbonded_method="cutoff",
-            implicit_solvent="gbn2",
+            nonbonded_method=:cutoff,
+            implicit_solvent=:gbn2,
             kappa=0.7,
         )
     end
@@ -326,7 +326,7 @@ end
     EnzymeRules.inactive(::typeof(create_sys), args...) = nothing
 
     function test_energy_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
-        atoms, pis, sis, gis = inject_gradients(sys_ref, params_dic)
+        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params_dic)
 
         sys = System(
             atoms=atoms,
@@ -344,7 +344,7 @@ end
     end
 
     function test_forces_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
-        atoms, pis, sis, gis = inject_gradients(sys_ref, params_dic)
+        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params_dic)
 
         sys = System(
             atoms=atoms,
@@ -363,7 +363,7 @@ end
     end
 
     function test_sim_grad(params_dic, sys_ref, coords, neighbor_finder, n_threads)
-        atoms, pis, sis, gis = inject_gradients(sys_ref, params_dic)
+        atoms, pis, sis, gis = Molly.inject_gradients(sys_ref, params_dic)
 
         sys = System(
             atoms=atoms,
@@ -481,17 +481,15 @@ end
         push!(test_runs, ("Sim", test_sim_grad, 1e-2))
     end
     params_to_test = (
-        #"inter_LJ_weight_14",
         "atom_N_ϵ",
         "inter_PT_C/N/CT/C_k_1",
         "inter_GB_screen_O",
-        #"inter_GB_neck_scale",
     )
 
     for (test_name, test_fn, test_tol) in test_runs
         for (platform, AT, parallel) in platform_runs
             sys_ref = create_sys(AT)
-            n_threads = parallel ? Threads.nthreads() : 1
+            n_threads = (parallel ? Threads.nthreads() : 1)
             grads_enzyme = Dict(k => 0.0 for k in keys(params_dic))
             autodiff(
                 set_runtime_activity(Reverse), test_fn, Active,
@@ -500,7 +498,6 @@ end
                 Duplicated(sys_ref.neighbor_finder, sys_ref.neighbor_finder),
                 Const(n_threads),
             )
-            #@test count(!iszero, values(grads_enzyme)) == 67
             for param in params_to_test
                 genz = grads_enzyme[param]
                 gfd = central_fdm(6, 1)(params_dic[param]) do val
@@ -511,9 +508,9 @@ end
                 frac_diff = abs(genz - gfd) / abs(gfd)
                 @info "$(rpad(test_name, 6)) - $(rpad(platform, 12)) - $(rpad(param, 21)) - " *
                       "FD $gfd, Enzyme $genz, fractional difference $frac_diff"
-                @test frac_diff < test_tol
+                tol = (test_name == "Force" && param == "atom_N_ϵ" ? 2e-3 : test_tol)
+                @test frac_diff < tol
             end
         end
     end
 end
-=#

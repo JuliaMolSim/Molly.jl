@@ -452,7 +452,7 @@ function force_kernel!(
     maxs::AbstractArray{C},
     coords,
     velocities,
-    atoms,
+    atoms::AbstractArray{A},
     ::Val{N},
     r_cut,
     ::Val{force_units},
@@ -463,7 +463,7 @@ function force_kernel!(
     eligible_compressed,
     ::Val{needs_vir},
     ::Val{T},
-    ::Val{D}) where {N, C, force_units, needs_vir, T, D}
+    ::Val{D}) where {N, C, A, force_units, needs_vir, T, D}
 
     a = Int32(1)
     b = Int32(D)
@@ -534,12 +534,7 @@ function force_kernel!(
             vel_j = velocities[s_idx_j]
             shuffle_idx = laneid()
             atoms_j = atoms[s_idx_j]
-            atype_j = atoms_j.atom_type
-            aindex_j = atoms_j.index
-            amass_j = atoms_j.mass
-            acharge_j = atoms_j.charge
-            aσ_j = atoms_j.σ
-            aϵ_j = atoms_j.ϵ
+            atom_fields = getfield.((atoms_j,), fieldnames(A))
             eligible_bitmask = UInt32(0)
             special_bitmask = UInt32(0)
             eligible_bitmask = eligible_compressed[laneid(), i, j]
@@ -551,15 +546,12 @@ function force_kernel!(
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, laneid() + a, warpsize())
                 vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, laneid() + a, warpsize())
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, laneid() + a, warpsize())
-                atype_j = CUDA.shfl_sync(0xFFFFFFFF, atype_j, laneid() + a, warpsize())
-                aindex_j = CUDA.shfl_sync(0xFFFFFFFF, aindex_j, laneid() + a, warpsize())
-                amass_j = CUDA.shfl_sync(0xFFFFFFFF, amass_j, laneid() + a, warpsize())
-                acharge_j = CUDA.shfl_sync(0xFFFFFFFF, acharge_j, laneid() + a, warpsize())
-                aσ_j = CUDA.shfl_sync(0xFFFFFFFF, aσ_j, laneid() + a, warpsize())
-                aϵ_j = CUDA.shfl_sync(0xFFFFFFFF, aϵ_j, laneid() + a, warpsize())
+                # Fields of atoms have to be shuffled separately
+                # This allows generic atom types to be used
+                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, laneid() + a, warpsize())
+                atoms_j_shuffle = A(atom_fields...)
 
-                atoms_j_shuffle = Atom(atype_j, aindex_j, amass_j, acharge_j, aσ_j, aϵ_j)
-                dr = vector(coords_i, coords_j, boundary) # Sign flip (Giuseppe's kernel uses j, i) needed for virial, does not affect forces as only norm(dr) matters for them
+                dr = vector(coords_i, coords_j, boundary)
                 r2 = sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
@@ -876,7 +868,7 @@ function energy_kernel!(
     maxs::AbstractArray{C},
     coords,
     velocities,
-    atoms,
+    atoms::AbstractArray{A},
     ::Val{N},
     r_cut,
     ::Val{energy_units},
@@ -886,7 +878,7 @@ function energy_kernel!(
     special_compressed,
     eligible_compressed,
     ::Val{T},
-    ::Val{D}) where {N, C, energy_units, T, D}
+    ::Val{D}) where {N, C, A, energy_units, T, D}
 
     a = Int32(1)
     b = Int32(D)
@@ -923,12 +915,7 @@ function energy_kernel!(
             vel_j = velocities[s_idx_j]
             shuffle_idx = laneid()
             atoms_j = atoms[s_idx_j]
-            atype_j = atoms_j.atom_type
-            aindex_j = atoms_j.index
-            amass_j = atoms_j.mass
-            acharge_j = atoms_j.charge
-            aσ_j = atoms_j.σ
-            aϵ_j = atoms_j.ϵ
+            atom_fields = getfield.((atoms_j,), fieldnames(A))
             eligible_bitmask = UInt32(0)
             special_bitmask = UInt32(0)
             eligible_bitmask = eligible_compressed[laneid(), i, j]
@@ -940,15 +927,10 @@ function energy_kernel!(
                 coords_j = CUDA.shfl_sync(0xFFFFFFFF, coords_j, laneid() + a, warpsize())
                 vel_j = CUDA.shfl_sync(0xFFFFFFFF, vel_j, laneid() + a, warpsize())
                 shuffle_idx = CUDA.shfl_sync(0xFFFFFFFF, shuffle_idx, laneid() + a, warpsize())
-                atype_j = CUDA.shfl_sync(0xFFFFFFFF, atype_j, laneid() + a, warpsize())
-                aindex_j = CUDA.shfl_sync(0xFFFFFFFF, aindex_j, laneid() + a, warpsize())
-                amass_j = CUDA.shfl_sync(0xFFFFFFFF, amass_j, laneid() + a, warpsize())
-                acharge_j = CUDA.shfl_sync(0xFFFFFFFF, acharge_j, laneid() + a, warpsize())
-                aσ_j = CUDA.shfl_sync(0xFFFFFFFF, aσ_j, laneid() + a, warpsize())
-                aϵ_j = CUDA.shfl_sync(0xFFFFFFFF, aϵ_j, laneid() + a, warpsize())
+                atom_fields = CUDA.shfl_sync.(0xFFFFFFFF, atom_fields, laneid() + a, warpsize())
+                atoms_j_shuffle = A(atom_fields...)
 
-                atoms_j_shuffle = Atom(atype_j, aindex_j, amass_j, acharge_j, aσ_j, aϵ_j)
-                dr = vector(coords_j, coords_i, boundary)
+                dr = vector(coords_i, coords_j, boundary)
                 r2 = sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - shuffle_idx)) | (eligible_bitmask << shuffle_idx)
                 spec = (special_bitmask >> (warpsize() - shuffle_idx)) | (special_bitmask << shuffle_idx)
@@ -996,7 +978,7 @@ function energy_kernel!(
                 coords_j = coords[s_idx_j]
                 vel_j = velocities[s_idx_j]
                 atoms_j = atoms[s_idx_j]
-                dr = vector(coords_j, coords_i, boundary)
+                dr = vector(coords_i, coords_j, boundary)
                 r2 = sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
@@ -1032,7 +1014,7 @@ function energy_kernel!(
             coords_j = coords[s_idx_j]
             vel_j = velocities[s_idx_j]
             atoms_j = atoms[s_idx_j]
-            dr = vector(coords_j, coords_i, boundary)
+            dr = vector(coords_i, coords_j, boundary)
             r2 = sum(abs2, dr)
             excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
             spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)
@@ -1067,7 +1049,7 @@ function energy_kernel!(
                 coords_j = coords[s_idx_j]
                 vel_j = velocities[s_idx_j]
                 atoms_j = atoms[s_idx_j]
-                dr = vector(coords_j, coords_i, boundary)
+                dr = vector(coords_i, coords_j, boundary)
                 r2 = sum(abs2, dr)
                 excl = (eligible_bitmask >> (warpsize() - m)) | (eligible_bitmask << m)
                 spec = (special_bitmask >> (warpsize() - m)) | (special_bitmask << m)

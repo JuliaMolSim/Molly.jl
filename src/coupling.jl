@@ -860,7 +860,7 @@ function apply_coupling!(sys::System{D, AT, T}, buffers, barostat::MonteCarloBar
             E_trial = potential_energy(sys, neighbors_trial, step_n; n_threads=n_threads)
             dE = energy_remove_mol(E_trial - E)
 
-            dW = dE + uconvert(unit(dE), (1/3)*tr(barostat.pressure) * dV) -
+            dW = dE + uconvert(unit(dE), tr(barostat.pressure) * dV / 3) -
                                                         n_molecules * kT * log(v_scale)
 
             if dW <= zero(dW) || rand(rng, T) < exp(-dW / kT)

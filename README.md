@@ -112,7 +112,7 @@ ff = MolecularForceField(
 sys = System(
     joinpath(data_dir, "6mrr_equil.pdb"),
     ff;
-    nonbonded_method="pme",
+    nonbonded_method=:pme,
     loggers=(
         energy=TotalEnergyLogger(10),
         writer=TrajectoryWriter(10, "traj_6mrr_5ps.dcd"),

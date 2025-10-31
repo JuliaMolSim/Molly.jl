@@ -298,7 +298,7 @@ function CellListMapNeighborFinder(;
     elseif !isnothing(unit_cell)
         D = n_dimensions(unit_cell)
     elseif !isnothing(x0)
-        D = size(eltype(coords))[1]
+        D = size(eltype(x0))[1]
     else
         D = 3
     end

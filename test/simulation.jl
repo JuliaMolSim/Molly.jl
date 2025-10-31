@@ -1183,7 +1183,7 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        P_iso = [(1/3)*tr(P) for P in values(sys.loggers.pressure)[2001:end]]
+        P_iso = [tr(P) / 3 for P in values(sys.loggers.pressure)[2001:end]]
 
         @test 0.75u"bar" < mean(P_iso) < 1.25u"bar" # Corrected for tensorial pressure
         @test std(P_iso) < 0.5u"bar"
@@ -1228,7 +1228,7 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        P_xy = [(1/2)*(P[1,1] + P[2,2]) for P in values(sys.loggers.pressure)[2001:end]]
+        P_xy = [(P[1,1] + P[2,2]) / 2 for P in values(sys.loggers.pressure)[2001:end]]
         P_z  = [P[3,3] for P in values(sys.loggers.pressure)[2001:end]]
 
         @test 0.75u"bar" < mean(P_xy) < 1.25u"bar" # Corrected for tensorial pressure
@@ -1331,7 +1331,7 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        P_iso = [(1/3)*tr(P) for P in values(sys.loggers.pressure)[2001:end]]
+        P_iso = [tr(P) / 3 for P in values(sys.loggers.pressure)[2001:end]]
 
         @test 0.75u"bar" < mean(P_iso) < 1.25u"bar" # Corrected for tensorial pressure
         @test std(P_iso) < 0.5u"bar"
@@ -1376,7 +1376,7 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        P_xy = [(1/2)*(P[1,1] + P[2,2]) for P in values(sys.loggers.pressure)[2001:end]]
+        P_xy = [(P[1,1] + P[2,2]) / 2 for P in values(sys.loggers.pressure)[2001:end]]
         P_z  = [P[3,3] for P in values(sys.loggers.pressure)[2001:end]]
 
         @test 0.75u"bar" < mean(P_xy) < 1.25u"bar" # Corrected for tensorial pressure
@@ -1482,7 +1482,7 @@ end
     simulate!(deepcopy(sys), lang, 1_000; n_threads=1, rng=rng)
     @time simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
 
-    P_iso = [(1/3)*tr(P) for P in values(sys.loggers.pressure)]
+    P_iso = [tr(P) / 3 for P in values(sys.loggers.pressure)]
     Vir   = [tr(V) for V in values(sys.loggers.virial)]
 
     @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
@@ -1526,7 +1526,7 @@ end
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
             @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
-            P_iso = [(1/3)*tr(P) for P in values(sys.loggers.pressure)]
+            P_iso = [tr(P) / 3 for P in values(sys.loggers.pressure)]
             Vir   = [tr(V) for V in values(sys.loggers.virial)]
 
             @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
@@ -1580,7 +1580,7 @@ end
     simulate!(deepcopy(sys), lang, 1_000; n_threads=1, rng=rng)
     @time simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
 
-    P_iso = [(1/3)*tr(P) for P in values(sys.loggers.pressure)]
+    P_iso = [tr(P) / 3 for P in values(sys.loggers.pressure)]
     Vir   = [tr(V) for V in values(sys.loggers.virial)]
 
     @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"
@@ -1626,7 +1626,7 @@ end
             simulate!(deepcopy(sys), sim, 1_000; n_threads=1, rng=rng)
             @time simulate!(sys, sim, n_steps; n_threads=1, rng=rng)
 
-            P_xy = [(1/2)*(P[1,1] + P[2,2]) for P in values(sys.loggers.pressure)]
+            P_xy = [(P[1,1] + P[2,2]) / 2 for P in values(sys.loggers.pressure)]
             P_z  = [P[3,3] for P in values(sys.loggers.pressure)]
 
             Vir   = [tr(V) for V in values(sys.loggers.virial)]
@@ -1684,7 +1684,7 @@ end
     simulate!(deepcopy(sys), lang, 1_000; n_threads=1, rng=rng)
     @time simulate!(sys, lang, n_steps; n_threads=1, rng=rng)
 
-    P_iso = [(1/3)*tr(P) for P in values(sys.loggers.pressure)]
+    P_iso = [tr(P) / 3 for P in values(sys.loggers.pressure)]
     Vir   = [tr(V) for V in values(sys.loggers.virial)]
 
     @test 260.0u"K" < mean(values(sys.loggers.temperature)) < 300.0u"K"

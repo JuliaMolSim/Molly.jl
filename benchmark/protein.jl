@@ -30,7 +30,7 @@ function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
         units=units,
         array_type=AT,
         dist_cutoff=(units ? dist_cutoff * u"nm" : dist_cutoff),
-        nonbonded_method="cutoff",
+        nonbonded_method=:cutoff,
     )
 
     dt = T(0.0005)
