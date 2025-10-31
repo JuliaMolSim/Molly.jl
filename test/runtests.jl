@@ -125,8 +125,10 @@ if GROUP in ("All", "NotGradients")
     include("basic.jl")
     include("interactions.jl")
     include("minimization.jl")
-    include("simulation.jl")
     include("agent.jl")
+    include("simulation.jl")
+    include("coupling.jl")
+    include("constraints.jl")
 end
 
 if GROUP in ("All", "Protein", "NotGradients")

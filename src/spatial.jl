@@ -13,7 +13,6 @@ export
     vector,
     wrap_coord_1D,
     wrap_coords,
-    unwrap_molecules,
     random_velocity,
     maxwell_boltzmann,
     random_velocities,
@@ -23,7 +22,6 @@ export
     remove_CM_motion!,
     pressure,
     scalar_pressure,
-    molecule_centers,
     scale_coords!,
     dipole_moment
 
@@ -53,7 +51,13 @@ CubicBoundary(x, y, z; kwargs...) = CubicBoundary(SVector{3}(x, y, z); kwargs...
 CubicBoundary(x::Number; kwargs...) = CubicBoundary(SVector{3}(x, x, x); kwargs...)
 CubicBoundary(m::SMatrix{3,3}; kwargs...) = CubicBoundary(SVector{3}(m[1,1], m[2,2], m[3,3]); kwargs...)
 
-boxmatrix(b::CubicBoundary) = SMatrix{3,3}(ustrip(b.side_lengths[1]), 0, 0, 0, ustrip(b.side_lengths[2]), 0, 0, 0, ustrip(b.side_lengths[3])) * unit(b.side_lengths[1])
+function boxmatrix(b::CubicBoundary)
+    return SMatrix{3, 3}(
+        ustrip(b.side_lengths[1]), 0, 0,
+        0, ustrip(b.side_lengths[2]), 0,
+        0, 0, ustrip(b.side_lengths[3]),
+    ) * unit(b.side_lengths[1])
+end
 
 Base.getindex(b::CubicBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::CubicBoundary) = 1
@@ -100,7 +104,13 @@ RectangularBoundary(x, y; kwargs...) = RectangularBoundary(SVector{2}(x, y); kwa
 RectangularBoundary(x::Number; kwargs...) = RectangularBoundary(SVector{2}(x, x); kwargs...)
 RectangularBoundary(m::SMatrix{3,3}; kwargs...) = RectangularBoundary(SVector{2}(m[1,1], m[2,2]); kwargs...)
 
-boxmatrix(b::RectangularBoundary) = SMatrix{3,3}(b.side_lengths[1],0,0, 0,b.side_lengths[2],0, 0,0,one(eltype(b.side_lengths)))
+function boxmatrix(b::RectangularBoundary)
+    return SMatrix{3,3}(
+        b.side_lengths[1], 0, 0,
+        0, b.side_lengths[2], 0,
+        0, 0, one(eltype(b.side_lengths)),
+    )
+end
 
 Base.getindex(b::RectangularBoundary, i::Integer) = b.side_lengths[i]
 Base.firstindex(b::RectangularBoundary) = 1
@@ -150,17 +160,15 @@ end
 ispositive(x) = x > zero(x)
 
 function TriclinicBoundary(bv::Union{SVector{3,<:SVector{3}}, SMatrix{3,3}}; approx_images::Bool=true)
-
     # Normalize input, if box matrix is passed turn into SVector{3, SVector{3, T}}
     if bv isa SMatrix
         bv = SVector(bv[:,1], bv[:,2], bv[:,3])
     end
 
-    # numeric and unit types
-    NT  = typeof(ustrip(bv[1][1]))              # underlying floating type
+    NT  = typeof(ustrip(bv[1][1])) # Underlying floating point type
     uL  = (bv[1][1] isa Unitful.Quantity) ? unit(bv[1][1]) : one(NT)
-    tolL = sqrt(eps(NT)) * uL                   # length tolerance (with units)
-    tol0 = sqrt(eps(NT))                        # unitless tolerance
+    tolL = sqrt(eps(NT)) * uL      # Length tolerance (with units)
+    tol0 = sqrt(eps(NT))           # Unitless tolerance
 
     if !ispositive(bv[1][1]) || !iszero_value(bv[1][2]) || !iszero_value(bv[1][3])
         throw(ArgumentError("first basis vector must be along the x-axis (no y or z component) " *
@@ -198,8 +206,8 @@ function TriclinicBoundary(bv::Union{SVector{3,<:SVector{3}}, SMatrix{3,3}}; app
     cx, cxy, cz3 = bv[3][1], bv[3][2], bv[3][3]
     n_cxy = hypot(cx, cxy)
     if n_cxy ≤ tolL
-        tan_c_cprojxy = NT(Inf)          # c ⟂ xy-plane
-        cos_a_cprojxy = one(NT)          # define dir(c_xy) = +x
+        tan_c_cprojxy = NT(Inf) # c ⟂ xy-plane
+        cos_a_cprojxy = one(NT) # define dir(c_xy) = +x
         sin_a_cprojxy = zero(NT)
     else
         tan_c_cprojxy = NT(ustrip(abs(cz3) / n_cxy))
@@ -226,13 +234,12 @@ function TriclinicBoundary(bv_lengths, angles; kwargs...)
         throw(ArgumentError("angles must be in (0, π), got $angles"))
     end
 
-    # underlying numeric type and unit for lengths
     NT  = typeof(ustrip(bv_lengths[1]))
     has_units = bv_lengths[1] isa Unitful.Quantity
     uL  = has_units ? unit(bv_lengths[1]) : one(NT)
     tol0 = sqrt(eps(NT))
 
-    # compute in Float64 for stability
+    # Compute in Float64 for stability
     Tw = Float64
     L1, L2, L3 = Tw.(ustrip.(bv_lengths))
     α,  β,  γ  = Tw.(ustrip.(angles))
@@ -245,7 +252,7 @@ function TriclinicBoundary(bv_lengths, angles; kwargs...)
     v3y = L3*(cα - cβ*cγ)/sγ
     v3z = sqrt(max(0.0, L3^2 - v3x^2 - v3y^2))
 
-    # convert back to input length type, zero-out tiny components
+    # Convert back to input length type, zero-out tiny components
     toL(x::Real) = ((abs(x) < tol0) ? zero(NT) : NT(x)) * uL
     v1 = SVector(toL(v1x), toL(v1y), toL(v1z))
     v2 = SVector(toL(v2x), toL(v2y), toL(v2z))
@@ -257,7 +264,7 @@ end
 TriclinicBoundary(v1, v2, v3; kwargs...) = TriclinicBoundary(SVector{3}(v1, v2, v3); kwargs...)
 TriclinicBoundary(arr; kwargs...)        = TriclinicBoundary(SVector{3}(arr); kwargs...)
 
-boxmatrix(b::TriclinicBoundary)   = SMatrix{3,3}(hcat(b.basis_vectors...) )
+boxmatrix(b::TriclinicBoundary) = SMatrix{3,3}(hcat(b.basis_vectors...))
 
 Base.getindex(b::TriclinicBoundary, i::Integer) = b.basis_vectors[i]
 Base.firstindex(b::TriclinicBoundary) = 1
@@ -673,17 +680,15 @@ function unwrap_global(coords::AbstractVector{<:SVector{D}},
     return out
 end
 
-"""
-    unwrap_molecules(coords, boundary, topology)
+# Unwrap coordinates so that every bonded pair is placed using the minimum-image displacement
+# Molecule connectivity is preserved
+function unwrap_molecules(sys; neighbors=nothing)
+    return unwrap_global(from_device(sys.coords), sys.boundary, sys.topology; neighbors)
+end
 
-Return coordinates unwrapped so that every bonded pair is placed using
-the minimum-image displacement. Molecule connectivity is preserved.
-"""
-unwrap_molecules(coords, boundary, topology) =
-    unwrap_global(from_device(coords), boundary, topology; neighbors = nothing)
-
-unwrap_molecules(sys::System; neighbors = nothing) =
-    unwrap_global(from_device(sys.coords), sys.boundary, sys.topology; neighbors)
+function unwrap_molecules(coords, boundary, topology)
+    return unwrap_global(from_device(coords), boundary, topology; neighbors=nothing)
+end
 
 """
     random_velocity(atom_mass::Union{Unitful.Mass, MolarMass}, temp::Unitful.Temperature;
@@ -950,7 +955,7 @@ function pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers_in=nothi
     end
 
     # Always evaluate K in case velocities were rescaled by a thermostat
-    kinetic_energy_tensor!(sys, buffers.kin_tensor)
+    kinetic_energy_tensor!(buffers.kin_tensor, sys)
     if has_infinite_boundary(sys.boundary)
         error("pressure calculation not compatible with infinite boundaries")
     end
@@ -991,27 +996,14 @@ function scalar_pressure(sys::System{D}, neighbors, step_n::Integer=0, buffers=n
     return tr(P) / D
 end
 
-"""
-    molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topology) where {D,C}
-
-Center-of-geometry per molecule using unwrapped **fractional** coordinates.
-Works for orthorhombic (with `boundary.side_lengths`) and triclinic (with `boundary.basis_vectors`).
-
-Requires:
-- `topology.atom_molecule_inds :: AbstractVector{Int}` (length = n_atoms)
-- `topology.molecule_atom_counts :: AbstractVector{Int}`
-- `topology.bonded_atoms :: AbstractVector{<:Tuple{Int,Int}}` or `AbstractVector{SVector{2,Int}}`
-"""
+# Center of geometry per molecule using unwrapped fractional coordinates
 function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topology) where {D,C}
-    # Fallback
     if isnothing(topology)
         return coords
     end
 
-    # Helpers
     wrap01(v) = v .- floor.(v)
 
-    # Boundary transforms
     is_triclinic = hasproperty(boundary, :basis_vectors)
     if is_triclinic && D != 3
         error("Triclinic boundary only defined for D=3")
@@ -1040,7 +1032,6 @@ function molecule_centers(coords::AbstractArray{SVector{D,C}}, boundary, topolog
         f[i] = wrap01(to_frac(x[i]))
     end
 
-    # Topology
     atom_mol = topology.atom_molecule_inds
     n_mol    = length(topology.molecule_atom_counts)
     bonds    = topology.bonded_atoms
@@ -1126,9 +1117,9 @@ rebuild_boundary(b::TriclinicBoundary,   box) = TriclinicBoundary(box)
 
 """
     scale_coords!(sys::System{<:Any, AT}, μ::SMatrix{D,D};
-                  rotate::Bool = true,
-                  ignore_molecules::Bool = false,
-                  scale_velocities::Bool = false)
+                  rotate::Bool=true,
+                  ignore_molecules::Bool=false,
+                  scale_velocities::Bool=false)
 
 Rigid-molecular barostat update with optional rotation.
 
@@ -1141,7 +1132,6 @@ function scale_coords!(sys::System{<:Any, AT},
                        rotate::Bool           = true,
                        ignore_molecules::Bool = false,
                        scale_velocities::Bool = false) where {AT,D}
-
     if has_infinite_boundary(sys.boundary)
         throw(AssertionError("Infinite boundary not supported"))
     end

@@ -490,7 +490,7 @@ Threads.@threads for trj_n in 1:N_TRJ
     sys_rest = System(sys_nobias;
                       specific_inter_lists = rest_sils)
         
-    sys_trj = EnsembleSystem(deepcopy(sys_rest), traj_path) # Store in struct that allows reading trajectories
+    sys_trj = EnsembleSystem(sys_rest, traj_path) # Store in struct that allows reading trajectories
 
     TRJ_SYSTEMS[trj_n] = sys_trj
 end

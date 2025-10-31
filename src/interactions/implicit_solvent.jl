@@ -924,8 +924,8 @@ function forces_gbsa!(fs, sys, inter, Bs, B_grads, I_grads, born_forces, atom_ch
     return fs
 end
 
-function forces_gbsa!(fs, sys::System{D, AT, T}, inter, Bs, B_grads, I_grads, born_forces,
-                      atom_charges) where {D, AT <: AbstractGPUArray, T}
+function forces_gbsa!(fs, sys::System{D, <:AbstractGPUArray, T}, inter, Bs, B_grads, I_grads,
+                      born_forces, atom_charges) where {D, T}
     fs_mat_1, born_forces_mod_ustrip = gbsa_force_1_gpu(sys.coords, sys.boundary, inter.dist_cutoff,
                         inter.factor_solute, inter.factor_solvent, inter.kappa, Bs, atom_charges,
                         sys.force_units)

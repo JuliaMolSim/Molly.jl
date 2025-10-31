@@ -12,7 +12,7 @@ makedocs(
         "Home"                      => "index.md",
         "Documentation"             => "documentation.md",
         "Differentiable simulation" => "differentiable.md",
-        "Free Energy"               => "freeenergy.md",
+        "Free Energy"               => "free_energy.md",
         "Examples"                  => "examples.md",
         "Exercises"                 => "exercises.md",
         "Publications"              => "publications.md",

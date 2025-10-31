@@ -1,4 +1,4 @@
-# KernelAbstractions.jl kernels, CUDA kernels are in extension
+# KernelAbstractions.jl kernels, CUDA kernels are in an extension
 
 @inline function sum_pairwise_forces(inters, atom_i, atom_j, ::Val{F}, special, coord_i, coord_j,
                                      boundary, vel_i, vel_j, step_n) where F
@@ -42,9 +42,9 @@ function gpu_threads_specific(n_inters)
     return n_threads_gpu
 end
 
-function pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T},
+function pairwise_forces_loop_gpu!(buffers, sys::System{D, <:AbstractGPUArray},
                     pairwise_inters, neighbors, ::Val{needs_vir},
-                    step_n) where {D, AT <: AbstractGPUArray, T, needs_vir}
+                    step_n) where {D, needs_vir}
     if isnothing(neighbors)
         error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
               "should use DistanceNeighborFinder instead")
@@ -77,7 +77,6 @@ end
         dr = vector(coords[i], coords[j], boundary)
         f = sum_pairwise_forces(inters, atoms[i], atoms[j], Val(F), special, coords[i], coords[j],
                                 boundary, velocities[i], velocities[j], step_n)
-        # Displacement from i to j (minimum image)
         dr = vector(coords[i], coords[j], boundary)
         for dim in 1:D
             fval = ustrip(f[dim])
@@ -191,12 +190,11 @@ end
             Atomix.@atomic forces[dim, i] += f1val
             Atomix.@atomic forces[dim, j] += f2val
             if needs_vir
-                r_ji = vector(coords[j], coords[i], boundary)  # second atom is the reference
+                r_ji = vector(coords[j], coords[i], boundary) # Second atom is the reference
                 @inbounds for alpha in 1:D
                     Atomix.@atomic virial[alpha, dim] += ustrip(r_ji[alpha]) * ustrip(fs.f1[dim])
                 end
             end
-
         end
     end
 end
@@ -226,14 +224,13 @@ end
             Atomix.@atomic forces[dim, j] += f2val
             Atomix.@atomic forces[dim, k] += f3val
             if needs_vir
-                r_ji = vector(coords[j], coords[i], boundary)  # r_i - r_j (second atom is the reference, MIC)
-                r_jk = vector(coords[j], coords[k], boundary)  # r_k - r_j (second atom is the reference)
+                r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j (second atom is the reference, MIC)
+                r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j (second atom is the reference)
                 @inbounds for alpha in 1:D
                     Atomix.@atomic virial[alpha, dim] += (ustrip(r_ji[alpha]) * ustrip(fs.f1[dim]) +
                                                           ustrip(r_jk[alpha]) * ustrip(fs.f3[dim]))
                 end
             end
-
         end
     end
 end
@@ -268,23 +265,21 @@ end
             Atomix.@atomic forces[dim, k] += f3val
             Atomix.@atomic forces[dim, l] += f4val
             if needs_vir
-                r_ji = vector(coords[j], coords[i], boundary)  # r_i - r_j
-                r_jk = vector(coords[j], coords[k], boundary)  # r_k - r_j
-                r_jl = vector(coords[j], coords[l], boundary)  # r_l - r_j
+                r_ji = vector(coords[j], coords[i], boundary) # r_i - r_j
+                r_jk = vector(coords[j], coords[k], boundary) # r_k - r_j
+                r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j
                 @inbounds for alpha in 1:D
                     Atomix.@atomic virial[alpha, dim] += (ustrip(r_ji[alpha]) * ustrip(fs.f1[dim]) +
                                                           ustrip(r_jk[alpha]) * ustrip(fs.f3[dim]) +  
                                                           ustrip(r_jl[alpha]) * ustrip(fs.f4[dim]))
                 end
             end
-
         end
     end
 end
 
-function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, AT},
-                               pairwise_inters, neighbors,
-                               step_n) where {D, AT <: AbstractGPUArray}
+function pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{<:Any, <:AbstractGPUArray},
+                               pairwise_inters, neighbors, step_n)
     if isnothing(neighbors)
         error("neighbors is nothing, if you are using GPUNeighborFinder on a non-NVIDIA GPU you " *
               "should use DistanceNeighborFinder instead")

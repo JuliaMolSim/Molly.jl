@@ -166,13 +166,13 @@
               SVector(1.0 , 1.0, 1.0)]
     boundary = CubicBoundary(2.0)
     topology = MolecularTopology([1, 1, 1, 2], [3, 1], [(1, 2), (2, 3)])
-    mcs = molecule_centers(coords, boundary, topology)
+    mcs = Molly.molecule_centers(coords, boundary, topology)
     @test isapprox(mcs, [SVector(0.05, 0.0, 0.0), SVector(1.0, 1.0, 1.0)]; atol=1e-6)
 
     coords = [SVector(1.95, 0.0), SVector(0.05, 0.0), SVector(0.15, 0.0),
               SVector(1.0 , 1.0)]
     boundary = RectangularBoundary(2.0)
-    mcs = molecule_centers(coords, boundary, topology)
+    mcs = Molly.molecule_centers(coords, boundary, topology)
     @test isapprox(mcs, [SVector(0.05, 0.0), SVector(1.0, 1.0)]; atol=1e-6)
 
     ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
@@ -185,7 +185,7 @@
             neighbor_finder_type=(Molly.uses_gpu_neighbor_finder(AT) ? GPUNeighborFinder :
                                     DistanceNeighborFinder),
         )
-        mcs = molecule_centers(sys.coords, sys.boundary, sys.topology)
+        mcs = Molly.molecule_centers(sys.coords, sys.boundary, sys.topology)
         @test isapprox(from_device(mcs)[1], mean(sys.coords[1:1170]); atol=0.08u"nm")
 
         # Mark all pairs as ineligible for pairwise interactions and check that the
@@ -221,29 +221,22 @@
 end
 
 @testset "Trajectory" begin
-    
-
     trj_path = joinpath(data_dir, "water_frames", "water_trj.dcd")
-    ff  = MolecularForceField(Float64, joinpath(ff_dir, "tip3p_standard.xml"); units = true)
-    sys = System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff; dist_cutoff = 0.5u"nm") # The small dist cutoff is needed so that the neighbor finder does not complain about the small unit cell
-
+    ff = MolecularForceField(joinpath(ff_dir, "tip3p_standard.xml"); units=true)
+    # The small distance cutoff is required so that the neighbor finder does not
+    #   complain about the small unit cell
+    sys = System(joinpath(data_dir, "water_3mol_cubic.pdb"), ff; dist_cutoff=0.5u"nm")
     traj_sys = EnsembleSystem(sys, trj_path)
-
     n_frames = Int(length(traj_sys.trajectory))
 
     for n in 1:n_frames
-
-        current = read_frame!(traj_sys, n)
-        pdb_sys = System(joinpath(data_dir, "water_frames", "frame_$(n).pdb"), ff; dist_cutoff = 0.5u"nm")
-
-        p1 = current.coords[1]
+        current_frame = read_frame!(traj_sys, n)
+        pdb_sys = System(joinpath(data_dir, "water_frames", "frame_$(n).pdb"), ff;
+                                  dist_cutoff=0.5u"nm")
+        p1 = current_frame.coords[1]
         p2 = pdb_sys.coords[1]
-
-        @test isapprox(p1, p2; rtol = 0.001) # Isapprox due to rounding errors when reading PDB file
-
+        @test isapprox(p1, p2; rtol=0.001) # isapprox due to rounding errors in PDB file
     end
-
-
 end
 
 @testset "Neighbor lists" begin

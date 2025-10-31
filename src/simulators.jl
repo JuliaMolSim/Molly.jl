@@ -1084,9 +1084,9 @@ Performs a random translation of the coordinates of a randomly selected atom in 
 The translation is generated using a uniformly selected direction and uniformly selected length
 in range [0, 1) scaled by `shift_size` which should have appropriate length units.
 """
-function random_uniform_translation!(sys::System{D, AT, T};
+function random_uniform_translation!(sys::System{D, <:Any, T};
                                      shift_size=oneunit(eltype(eltype(sys.coords))),
-                                     rng=Random.default_rng()) where {D, AT, T}
+                                     rng=Random.default_rng()) where {D, T}
     rand_idx = rand(rng, eachindex(sys))
     direction = random_unit_vector(T, D, rng)
     magnitude = rand(rng, T) * shift_size
@@ -1104,9 +1104,9 @@ The translation is generated using a uniformly chosen direction and length selec
 the standard normal distribution i.e. with mean 0 and standard deviation 1, scaled by `shift_size`
 which should have appropriate length units.
 """
-function random_normal_translation!(sys::System{D, AT, T};
+function random_normal_translation!(sys::System{D, <:Any, T};
                                     shift_size=oneunit(eltype(eltype(sys.coords))),
-                                    rng=Random.default_rng()) where {D, AT, T}
+                                    rng=Random.default_rng()) where {D, T}
     rand_idx = rand(rng, eachindex(sys))
     direction = random_unit_vector(T, D, rng)
     magnitude = randn(rng, T) * shift_size

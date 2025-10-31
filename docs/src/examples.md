@@ -1141,7 +1141,7 @@ simulate!(sys, simulator, 10_000)
 
 ## KIM portable models
 
-[`KIM_API.jl`](https://github.com/openkim/KIM_API.jl) connects Molly to the [KIM API](https://github.com/openkim/kim-api), giving direct access to the large model catalog on [OpenKIM](https://openkim.org), including classical, machine-learned, and hybrid potentials that are distributed as portable models. Once configured, any simulator in Molly can evaluate those models via the standard `general_inters` interface.
+[`KIM_API.jl`](https://github.com/openkim/KIM_API.jl) connects Molly to the [KIM API](https://github.com/openkim/kim-api), giving direct access to the large model catalog on [OpenKIM](https://openkim.org), including classical, machine-learned, and hybrid potentials that are distributed as portable models. Once configured, any simulator in Molly can evaluate those models via the standard general interaction interface.
 
 ### Installation
 

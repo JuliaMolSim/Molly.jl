@@ -2,7 +2,7 @@
 
 export
     total_energy,
-    kinetic_energy_tensor!,
+    kinetic_energy_tensor,
     kinetic_energy,
     virial,
     scalar_virial,
@@ -25,7 +25,7 @@ function total_energy(sys, neighbors; n_threads::Integer=Threads.nthreads())
 end
 
 @doc raw"""
-    kinetic_energy_tensor!(system, kin_tensor)
+    kinetic_energy_tensor(system; kin_tensor=nothing)
 
 Calculate the kinetic energy of a system in its tensorial form.
 
@@ -35,12 +35,24 @@ bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
 ```
 where ``m_i`` is the mass and ``\bf{v_i}`` is the velocity vector of atom ``i``.
 """
-function kinetic_energy_tensor!(sys::System{D, AT, T}, kin_tensor) where {D, AT, T}
-    fill!(kin_tensor, zero(T) * sys.energy_units)
-    half = T(0.5)
-    for (m, v) in zip(from_device(sys.masses), from_device(sys.velocities))
-        kin_tensor .+= half .* uconvert.(sys.energy_units, m .* (v * transpose(v)))
+function kinetic_energy_tensor(sys::System{D}; kin_tensor=nothing) where D
+    if isnothing(kin_tensor)
+        # Allows propagation of uncertainties to tensors
+        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
+        kin_tensor_used = zeros(CT, D, D) * sys.energy_units
+    else
+        kin_tensor_used = kin_tensor
     end
+    kinetic_energy_tensor!(kin_tensor_used, sys)
+    return kin_tensor_used
+end
+
+function kinetic_energy_tensor!(kin_tensor, sys::System{<:Any, <:Any, T}) where T
+    fill!(kin_tensor, zero(T) * sys.energy_units)
+    for (m, v) in zip(from_device(sys.masses), from_device(sys.velocities))
+        kin_tensor .+= uconvert.(sys.energy_units, m .* (v * transpose(v))) ./ 2
+    end
+    return kin_tensor
 end
 
 @doc raw"""
@@ -57,15 +69,9 @@ where ``\bf{K}`` is the kinetic energy tensor:
 \bf{K} = \frac{1}{2} \sum_{i} m_i \bf{v_i} \otimes \bf{v_i}
 ```
 """
-function kinetic_energy(sys::System{D, AT, T}; kin_tensor=nothing) where {D, AT, T}
-    if isnothing(kin_tensor)
-        # Allows propagation of uncertainties to tensors
-        CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
-        kin_tensor = zeros(CT, D, D) * sys.energy_units
-    end
-    kinetic_energy_tensor!(sys, kin_tensor)
-    ke = tr(kin_tensor)
-    return ke
+function kinetic_energy(sys; kin_tensor=nothing)
+    kin_tensor_used = kinetic_energy_tensor(sys; kin_tensor=kin_tensor)
+    return tr(kin_tensor_used)
 end
 
 @doc raw"""
@@ -85,6 +91,7 @@ In Molly.jl, we implement the
 and take into account pairwise and specific interactions, as well as the K-space
 contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods, computed as indicated
 in the [Essmann et al. 1995](https://doi.org/10.1063/1.470117).
+Contributions from constraints are ignored.
 
 To calculate the scalar virial, see [`scalar_virial`](@ref).
 """
@@ -119,7 +126,7 @@ end
 
 Calculate the temperature of a system from the kinetic energy of the atoms.
 """
-function temperature(sys::System{D, AT, T}; kin_tensor=nothing, recompute=true) where {D, AT, T}
+function temperature(sys::System{D}; kin_tensor=nothing, recompute=true) where D
     if isnothing(kin_tensor)
         # Allows propagation of uncertainties to tensors
         CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
@@ -160,18 +167,11 @@ Calculate the potential energy due to a given interaction type.
 
 Custom interaction types should implement this function.
 """
-function potential_energy(sys::System{D, AT, T}; n_threads::Integer=Threads.nthreads()) where {D, AT, T}
-
-    if AT <: AbstractGPUArray
-        buffers = init_buffers!(sys, 1, true)
-    else
-        buffers = nothing
-    end
-
-    return potential_energy(sys, find_neighbors(sys; n_threads=n_threads), buffers; n_threads=n_threads)
+function potential_energy(sys; n_threads::Integer=Threads.nthreads())
+    return potential_energy(sys, find_neighbors(sys; n_threads=n_threads); n_threads=n_threads)
 end
 
-function potential_energy(sys::System, neighbors, buffers = nothing, step_n::Integer=0;
+function potential_energy(sys::System, neighbors, buffers=nothing, step_n::Integer=0;
                           n_threads::Integer=Threads.nthreads())
     # Allow types like those from Measurements.jl, T from System is different
     T = typeof(ustrip(zero(eltype(eltype(sys.coords)))))
@@ -216,8 +216,9 @@ function pairwise_pe_loop(atoms, coords, velocities, boundary, neighbors, energy
         for i in 1:n_atoms
             for j in (i + 1):n_atoms
                 dr = vector(coords[i], coords[j], boundary)
-                pe_sum = potential_energy(pairwise_inters_nonl[1], dr, atoms[i], atoms[j], energy_units, false,
-                            coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
+                pe_sum = potential_energy(pairwise_inters_nonl[1], dr, atoms[i], atoms[j],
+                                energy_units, false, coords[i], coords[j], boundary,
+                                velocities[i], velocities[j], step_n)
                 for inter in pairwise_inters_nonl[2:end]
                     pe_sum += potential_energy(inter, dr, atoms[i], atoms[j], energy_units, false,
                                 coords[i], coords[j], boundary, velocities[i], velocities[j], step_n)
@@ -343,18 +344,16 @@ function specific_pe(atoms, coords, velocities, boundary, energy_units, sils_1_a
     return pe
 end
 
-function potential_energy(sys::System{D, AT, T}, neighbors, buffers = nothing, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
-
+function potential_energy(sys::System{<:Any, <:AbstractGPUArray}, neighbors,
+                          buffers=nothing, step_n::Integer=0;
+                          n_threads::Integer=Threads.nthreads())
     buffers = init_buffers!(sys, 1, true)
-
     return potential_energy(sys, neighbors, buffers, step_n; n_threads=n_threads)
-
 end
 
-function potential_energy(sys::System{D, AT, T}, neighbors, buffers::BuffersGPU, step_n::Integer=0;
-                          n_threads::Integer=Threads.nthreads()) where {D, AT <: AbstractGPUArray, T}
-    
+function potential_energy(sys::System{<:Any, <:AbstractGPUArray, T}, neighbors,
+                          buffers::BuffersGPU, step_n::Integer=0;
+                          n_threads::Integer=Threads.nthreads()) where T
     fill!(buffers.pe_vec_nounits, zero(T))
 
     pairwise_inters_nonl = filter(!use_neighbors, values(sys.pairwise_inters))
