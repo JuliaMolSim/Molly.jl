@@ -66,7 +66,7 @@ include("neighbors.jl")
 include("loggers.jl")
 include("analysis.jl")
 include("setup.jl")
-include("trajectories.jl")
+include("trajectory.jl")
 include("free_energy/stats.jl")
 include("free_energy/mbar.jl")
 
