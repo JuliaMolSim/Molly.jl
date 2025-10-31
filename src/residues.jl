@@ -655,7 +655,6 @@ function build_angles(adj::Vector{Vector{Int}}, bonds)
 end
 
 
-# ---- Proper torsions (i,j,k,l); unique and orientation-consistent ----
 function build_torsions(adj::Vector{Vector{Int}}, angles::Vector{NTuple{3,Int}})
     tors = Vector{NTuple{4,Int}}()
     for angle in angles
@@ -673,7 +672,7 @@ function build_torsions(adj::Vector{Vector{Int}}, angles::Vector{NTuple{3,Int}})
                 if atom > angle[1]
                     push!(tors, (angle[1], angle[2], angle[3], atom))
                 else
-                    push!(tors, (atom, angle[3], angle[2], angle[2]))
+                    push!(tors, (atom, angle[3], angle[2], angle[1]))
                 end
             end
         end
@@ -705,7 +704,7 @@ function combinations_of(vec::Vector, n::Int)
     return result
 end
 
-# ---- Impropers (i, c, j, k) with c as center; i<j<k for uniqueness ----
+# ---- Impropers (c, j, k, l) with c as center; i<j<k for uniqueness ----
 function build_impropers(adj::Vector{Vector{Int}})
     top_impropers = Tuple{Int, Int, Int, Int}[]
     for (i, bonded_to) in enumerate(adj)

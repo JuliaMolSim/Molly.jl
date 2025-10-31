@@ -565,6 +565,8 @@ function System(coord_file::AbstractString,
     resname_replacements, atomname_replacements = load_replacements()
     standard_bonds = load_bond_definitions()
 
+    #return resname_replacements, atomname_replacements
+
     # ---- Read structure ----
     traj  = Chemfiles.Trajectory(coord_file)
     frame = Chemfiles.read(traj)
@@ -763,7 +765,7 @@ function System(coord_file::AbstractString,
     end
 
     # Impropers (Amber ordering)
-    for (c, j, k, l) in top_impropers           # center second in Chemfiles (c is central)
+    for (c, j, k, l) in top_impropers
         names_no1 = (j,k,l)
         types_no1 = (atom_type_of[j], atom_type_of[k], atom_type_of[l])
         if force_field.torsion_order == "amber"
@@ -778,19 +780,28 @@ function System(coord_file::AbstractString,
             force_field.torsion_types[kkey].proper && continue
             (kkey[1] == t1 || kkey[1] == "") || continue
             for ke2 in permutations(kkey[2:end])
-                valid = true; score = (kkey[1] == t1 ? 1 : 0)
+                valid = true
+                score = (kkey[1] == t1 ? 1 : 0)
                 for (idx, v) in enumerate(ke2)
-                    if v == (t2,t3,t4)[idx]; score += 1
-                    elseif v != ""; valid = false; break
+                    if v == (t2,t3,t4)[idx]
+                        score += 1
+                    elseif v != ""
+                        valid = false
+                        break
                     end
                 end
                 if valid && (score == 4 || best_score == -1)
-                    best_score = score; best_key = kkey; tt = force_field.torsion_types[kkey]
+                    best_score = score
+                    best_key   = kkey
+                    tt         = force_field.torsion_types[kkey]
                 end
             end
         end
-        tt === nothing && continue
-        push!(imps_il.is, j); push!(imps_il.js, k); push!(imps_il.ks, c); push!(imps_il.ls, l)
+        isnothing(tt) && continue
+        push!(imps_il.is, j < k ? j : k)
+        push!(imps_il.js, j < k ? k : j)
+        push!(imps_il.ks, c)
+        push!(imps_il.ls, l)
         push!(imps_il.types, atom_types_to_string(best_key...))
         push!(imps_il.inters, PeriodicTorsion(periodicities=tt.periodicities,
                                               phases=tt.phases, ks=tt.ks, proper=false))
