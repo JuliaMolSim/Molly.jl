@@ -65,9 +65,9 @@ include("coupling.jl")
 include("neighbors.jl")
 include("loggers.jl")
 include("analysis.jl")
+include("trajectories.jl")
 include("setup.jl")
 include("free_energy/stats.jl")
 include("free_energy/mbar.jl")
-include("trajectories.jl")
 
 end

@@ -22,6 +22,8 @@ export
     MollyCalculator,
     ASECalculator
 
+# This is not the only place that the default float is set, for example
+#   some function argument defaults are Float64
 const DefaultFloat = Float64
 
 # Base type for Molly interaction types
@@ -235,10 +237,10 @@ The types used should be bits types if the GPU is going to be used.
 
 # Arguments
 - `index::Int=1`: the index of the atom in the system. This only needs to be set if
-    it is used in the interaction. The order of atoms is determined by their order
+    it is used in the interactions. The order of atoms is determined by their order
     in the atom vector.
 - `atom_type::T=1`: the type of the atom. This only needs to be set if
-    it is used in the interaction.
+    it is used in the interactions.
 - `mass::M=1.0u"g/mol"`: the mass of the atom.
 - `charge::C=0.0`: the charge of the atom, used for electrostatic interactions.
 - `σ::S=0.0u"nm"`: the Lennard-Jones finite distance at which the inter-particle

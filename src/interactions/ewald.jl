@@ -934,6 +934,7 @@ end
     end
 end
 
+# Enzyme rules defined in extension
 grad_safe_fft!( charge_grid, fft_plan ) = fft_plan  * charge_grid
 grad_safe_bfft!(charge_grid, bfft_plan) = bfft_plan * charge_grid
 

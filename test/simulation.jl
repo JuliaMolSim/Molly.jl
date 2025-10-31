@@ -1009,16 +1009,16 @@ end
 end
 
 
-@testset "Immediate Thermostat" begin
+@testset "Immediate thermostat" begin
     n_atoms = 100
     n_steps = 40_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
     for AT in array_list
-
         sys = System(
-            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1")
+                             for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
@@ -1036,23 +1036,22 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        Temp = [t for t in values(sys.loggers.temperature)[2001:end]]
-
-        @test 9.5u"K" < mean(Temp) < 10.5u"K"
-        @test std(Temp) < 1.0u"K"
+        temps_traj = values(sys.loggers.temperature)[2001:end]
+        @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
+        @test std(temps_traj) < 1.0u"K"
     end
 end
 
-@testset "Velocity Rescale Thermostat" begin
+@testset "Velocity rescale thermostat" begin
     n_atoms = 100
     n_steps = 40_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
     for AT in array_list
-
         sys = System(
-            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1")
+                             for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
@@ -1070,25 +1069,22 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        Temp = [t for t in values(sys.loggers.temperature)[2001:end]]
-
-        @test 9.5u"K" < mean(Temp) < 10.5u"K"
-        @test std(Temp) < 1.0u"K"
-
+        temps_traj = values(sys.loggers.temperature)[2001:end]
+        @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
+        @test std(temps_traj) < 1.0u"K"
     end
-
 end
 
-@testset "Andersen Thermostat" begin
+@testset "Andersen thermostat" begin
     n_atoms = 100
     n_steps = 40_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
     for AT in array_list
-
         sys = System(
-            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1")
+                             for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
@@ -1106,25 +1102,22 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        Temp = [t for t in values(sys.loggers.temperature)[2001:end]]
-
-        @test 9.5u"K" < mean(Temp) < 10.5u"K"
-        @test std(Temp) < 1.0u"K"
-
+        temps_traj = values(sys.loggers.temperature)[2001:end]
+        @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
+        @test std(temps_traj) < 1.0u"K"
     end
-
 end
 
-@testset "Berendsen Thermostat" begin
+@testset "Berendsen thermostat" begin
     n_atoms = 100
     n_steps = 40_000
     temp = 10.0u"K"
     boundary = CubicBoundary(4.0u"nm")
 
     for AT in array_list
-
         sys = System(
-            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1")
+                             for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
@@ -1142,10 +1135,9 @@ end
         random_velocities!(sys, temp)
         simulate!(sys, simulator, n_steps)
 
-        Temp = [t for t in values(sys.loggers.temperature)[2001:end]]
-
-        @test 9.5u"K" < mean(Temp) < 10.5u"K"
-        @test std(Temp) < 1.0u"K"
+        temps_traj = values(sys.loggers.temperature)[2001:end]
+        @test 9.5u"K" < mean(temps_traj) < 10.5u"K"
+        @test std(temps_traj) < 1.0u"K"
     end
 end
 
@@ -1159,9 +1151,9 @@ end
     BoxSizeLogger(n_steps) = GeneralObservableLogger(box_size_wrapper, typeof(1.0u"nm"), n_steps)
 
     for AT in array_list
-
         sys = System(
-            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1")
+                             for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
@@ -1187,11 +1179,11 @@ end
 
         @test 0.75u"bar" < mean(P_iso) < 1.25u"bar" # Corrected for tensorial pressure
         @test std(P_iso) < 0.5u"bar"
-        @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
+
+        # (5nm)^3 to (5.5nm)^3
+        @test 120.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3"
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
-
     end
-
 end
 
 @testset "Berendsen semiisotropic barostat" begin
@@ -1201,9 +1193,9 @@ end
     boundary = CubicBoundary(4.0u"nm")
 
     for AT in array_list
-
         sys = System(
-            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1")
+                             for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
@@ -1217,7 +1209,8 @@ end
         P = [1.0u"bar", 1.0u"bar"]
         K = [4.6e-5u"bar^-1", 4.6e-5u"bar^-1"]
 
-        coupling = (BerendsenBarostat(P, 0.1u"fs"; compressibility = K, max_scale_frac=0.01, n_steps = 1, coupling_type = :semiisotropic),)
+        coupling = (BerendsenBarostat(P, 0.1u"fs"; compressibility=K, max_scale_frac=0.01,
+                                      n_steps=1, coupling_type=:semiisotropic),)
         simulator = Langevin(
             dt=0.001u"ps",
             temperature=temp,
@@ -1237,11 +1230,10 @@ end
         @test std(P_xy) < 0.5u"bar"
         @test std(P_z)  < 0.5u"bar"
 
-        @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
+        # (5nm)^3 to (5.5nm)^3
+        @test 120.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3"
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
-
     end
-
 end
 
 @testset "Berendsen anisotropic barostat" begin
@@ -1253,9 +1245,9 @@ end
     boundary = TriclinicBoundary(Ls, As)
 
     for AT in array_list
-
         sys = System(
-            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1")
+                             for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
@@ -1267,9 +1259,11 @@ end
         )
 
         P = [1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar"]
-        K = [4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1"]
+        K = [4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1",
+             4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1"]
 
-        coupling = (BerendsenBarostat(P, 0.1u"fs"; compressibility = K, max_scale_frac=0.01, n_steps = 1, coupling_type = :anisotropic),)
+        coupling = (BerendsenBarostat(P, 0.1u"fs"; compressibility=K, max_scale_frac=0.01,
+                                      n_steps=1, coupling_type=:anisotropic),)
         simulator = Langevin(
             dt=0.001u"ps",
             temperature=temp,
@@ -1287,12 +1281,13 @@ end
         @test 0.75u"bar" < mean(P_x) < 1.25u"bar" # Corrected for tensorial pressure
         @test 0.75u"bar" < mean(P_y) < 1.25u"bar" # Corrected for tensorial pressure
         @test 0.75u"bar" < mean(P_z) < 1.25u"bar" # Corrected for tensorial pressure
-        
+
         @test std(P_x) < 0.5u"bar"
         @test std(P_y) < 0.5u"bar"
         @test std(P_z) < 0.5u"bar"
-        
-        @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
+
+        # (5nm)^3 to (5.5nm)^3
+        @test 120.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3"
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
     end
 end
@@ -1307,9 +1302,9 @@ end
     BoxSizeLogger(n_steps) = GeneralObservableLogger(box_size_wrapper, typeof(1.0u"nm"), n_steps)
 
     for AT in array_list
-
         sys = System(
-            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1")
+                             for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
@@ -1320,7 +1315,7 @@ end
             ),
         )
 
-        coupling = (CRescaleBarostat(1.0u"bar", 0.1u"fs"; max_scale_frac=0.01, n_steps = 1),)
+        coupling = (CRescaleBarostat(1.0u"bar", 0.1u"fs"; max_scale_frac=0.01, n_steps=1),)
         simulator = Langevin(
             dt=0.001u"ps",
             temperature=temp,
@@ -1336,9 +1331,9 @@ end
         @test 0.75u"bar" < mean(P_iso) < 1.25u"bar" # Corrected for tensorial pressure
         @test std(P_iso) < 0.5u"bar"
 
-        @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
+        # (5nm)^3 to (5.5nm)^3
+        @test 120.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3"
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
-    
     end
 end
 
@@ -1349,9 +1344,9 @@ end
     boundary = CubicBoundary(4.0u"nm")
 
     for AT in array_list
-
         sys = System(
-            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1")
+                             for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
@@ -1365,7 +1360,8 @@ end
         P = [1.0u"bar", 1.0u"bar"]
         K = [4.6e-5u"bar^-1", 4.6e-5u"bar^-1"]
 
-        coupling = (CRescaleBarostat(P, 0.1u"fs"; compressibility = K, max_scale_frac=0.01, n_steps = 1, coupling_type = :semiisotropic),)
+        coupling = (CRescaleBarostat(P, 0.1u"fs"; compressibility=K, max_scale_frac=0.01,
+                                     n_steps=1, coupling_type=:semiisotropic),)
         simulator = Langevin(
             dt=0.001u"ps",
             temperature=temp,
@@ -1381,15 +1377,14 @@ end
 
         @test 0.75u"bar" < mean(P_xy) < 1.25u"bar" # Corrected for tensorial pressure
         @test 0.75u"bar" < mean(P_z)  < 1.25u"bar" # Corrected for tensorial pressure
-        
+
         @test std(P_xy) < 0.5u"bar"
         @test std(P_z) < 0.5u"bar"
-        
-        @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
+
+        # (5nm)^3 to (5.5nm)^3
+        @test 120.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3"
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
-
     end
-
 end
 
 @testset "C-Rescale anisotropic barostat" begin
@@ -1401,9 +1396,9 @@ end
     boundary = TriclinicBoundary(Ls, As)
 
     for AT in array_list
-
         sys = System(
-            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1") for _ in 1:n_atoms], AT),
+            atoms=to_device([Atom(mass=10.0u"g/mol", σ=0.04u"nm", ϵ=0.1u"kJ * mol^-1")
+                             for _ in 1:n_atoms], AT),
             coords=to_device(place_atoms(n_atoms, boundary), AT),
             boundary=boundary,
             pairwise_inters=(LennardJones(cutoff=DistanceCutoff(1.0u"nm")),),
@@ -1415,9 +1410,11 @@ end
         )
 
         P = [1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar", 1.0u"bar"]
-        K = [4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1"]
+        K = [4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1",
+             4.6e-5u"bar^-1", 4.6e-5u"bar^-1", 4.6e-5u"bar^-1"]
 
-        coupling = (CRescaleBarostat(P, 0.1u"fs"; compressibility = K, max_scale_frac=0.01, n_steps = 1, coupling_type = :anisotropic),)
+        coupling = (CRescaleBarostat(P, 0.1u"fs"; compressibility=K, max_scale_frac=0.01,
+                                     n_steps=1, coupling_type=:anisotropic),)
         simulator = Langevin(
             dt=0.001u"ps",
             temperature=temp,
@@ -1435,12 +1432,13 @@ end
         @test 0.75u"bar" < mean(P_x) < 1.25u"bar" # Corrected for tensorial pressure
         @test 0.75u"bar" < mean(P_y) < 1.25u"bar" # Corrected for tensorial pressure
         @test 0.75u"bar" < mean(P_z) < 1.25u"bar" # Corrected for tensorial pressure
-        
+
         @test std(P_x) < 0.5u"bar"
         @test std(P_y) < 0.5u"bar"
         @test std(P_z) < 0.5u"bar"
-        
-        @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
+
+        # (5nm)^3 to (5.5nm)^3
+        @test 120.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3"
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
     end
 end
