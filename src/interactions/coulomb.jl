@@ -109,11 +109,13 @@ function pairwise_pe(::Coulomb, r, (ke, qi, qj))
 end
 
 @doc raw"""
-    CoulombSoftCoreBeutler(; cutoff, α, λ, use_neighbors, σ_mixing, weight_special, coulomb_const)
+    CoulombSoftCoreBeutler(; cutoff, α, λ, use_neighbors, σ_mixing, ϵ_mixing,
+                           weight_special, coulomb_const)
 
-The Coulomb electrostatic interaction between two atoms with a soft core, used for appearing and disappearing of atoms.
+The Coulomb electrostatic interaction between two atoms with a soft core, used for
+the appearing and disappearing of atoms.
+
 See [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1).
-
 The potential energy is defined as
 ```math
 V(r_{ij}) = \frac{1}{4\pi\epsilon_0} \frac{q_iq_j}{r_Q^{1/6}}
@@ -131,7 +133,9 @@ and
 C^{(12)} = 4\epsilon\sigma^{12}
 C^{(6)} = 4\epsilon\sigma^{6}
 ```
-If ``\lambda`` is 1.0, this gives the standard [`Coulomb`](@ref) potential and means atom is fully turned on. ``\lambda`` is zero the interaction is turned off.
+If ``\lambda`` is 1.0, this gives the standard [`Coulomb`](@ref) potential and means
+the atom is fully turned on.
+If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
 @kwdef struct CoulombSoftCoreBeutler{C, A, L, S, E, W, T, R} <: PairwiseInteraction
@@ -143,7 +147,7 @@ If ``\lambda`` is 1.0, this gives the standard [`Coulomb`](@ref) potential and m
     ϵ_mixing::E = geometric_ϵ_mixing
     weight_special::W = 1
     coulomb_const::T = coulomb_const
-    σ6_fac::R = α * (1-λ)
+    σ6_fac::R = (α * (1-λ))
 end
 
 use_neighbors(inter::CoulombSoftCoreBeutler) = inter.use_neighbors
@@ -189,7 +193,8 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     σ6 = inter.σ_mixing(atom_i, atom_j)^6
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
-    params = (ke, dr, qi, qj, 4*ϵ*(σ6*σ6), 4*ϵ*(σ6), inter.σ6_fac)
+    C6 = 4 * ϵ * σ6
+    params = (ke, qi, qj, C6 * σ6, C6, inter.σ6_fac)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -200,7 +205,7 @@ end
     end
 end
 
-function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, dr, qi, qj, C12, C6, σ6_fac))
+function pairwise_force(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac))
     r3 = r^3
     R = ((σ6_fac*(C12/C6))+(r3*r3))*sqrt(cbrt(((σ6_fac*(C12/C6))+(r3*r3))))
     return ke * ((qi*qj)/R) * (r3*r*r)
@@ -219,7 +224,8 @@ end
     qi, qj = atom_i.charge, atom_j.charge
     σ6 = inter.σ_mixing(atom_i, atom_j)^6
     ϵ = inter.ϵ_mixing(atom_i, atom_j)
-    params = (ke, qi, qj, 4*ϵ*(σ6*σ6), 4*ϵ*(σ6), inter.σ6_fac)
+    C6 = 4 * ϵ * σ6
+    params = (ke, qi, qj, C6 *σ6, C6, inter.σ6_fac)
 
     pe = pe_cutoff(cutoff, inter, r, params)
     if special
@@ -235,11 +241,12 @@ function pairwise_pe(::CoulombSoftCoreBeutler, r, (ke, qi, qj, C12, C6, σ6_fac)
 end
 
 @doc raw"""
-    CoulombSoftCoreGapsys; cutoff, α, λ, σQ, use_neighbors, σ_mixing, weight_special, coulomb_const)
+    CoulombSoftCoreGapsys(; cutoff, α, λ, σQ, use_neighbors, weight_special, coulomb_const)
 
-The Coulomb electrostatic interaction between two atoms with a soft core, used for appearing and disappearing of atoms.
+The Coulomb electrostatic interaction between two atoms with a soft core, used for
+the appearing and disappearing of atoms.
+
 See [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p).
-
 The potential energy is defined as
 ```math
 V(r_{ij}) = \left\{ \begin{array}{cl}
@@ -259,7 +266,9 @@ where
 r_{Q} = \alpha(1-\lambda)^{1/6}(1+σ_Q|qi*qj|)
 ```
 
-If ``\lambda`` is 1.0, this gives the standard [`Coulomb`](@ref) potential and means atom is fully turned on. ``\lambda`` is zero the interaction is turned off.
+If ``\lambda`` is 1.0, this gives the standard [`Coulomb`](@ref) potential and means
+the atom is fully turned on.
+If ``\lambda`` is zero the interaction is turned off.
 ``\alpha`` determines the strength of softening the function.
 """
 @kwdef struct CoulombSoftCoreGapsys{C, A, L, S, W, T, R} <: PairwiseInteraction
@@ -270,7 +279,7 @@ If ``\lambda`` is 1.0, this gives the standard [`Coulomb`](@ref) potential and m
     use_neighbors::Bool = false
     weight_special::W = 1
     coulomb_const::T = coulomb_const
-    σ6_fac::R = α * sqrt(cbrt(1-λ))
+    σ6_fac::R = (α * sqrt(cbrt(1-λ)))
 end
 
 use_neighbors(inter::CoulombSoftCoreGapsys) = inter.use_neighbors
@@ -312,7 +321,7 @@ end
     cutoff = inter.cutoff
     ke = inter.coulomb_const
     qi, qj = atom_i.charge, atom_j.charge
-    params = (ke, dr, qi, qj, inter.σQ, inter.σ6_fac)
+    params = (ke, qi, qj, inter.σQ, inter.σ6_fac)
 
     f = force_cutoff(cutoff, inter, r, params)
     fdr = (f / r) * dr
@@ -323,12 +332,13 @@ end
     end
 end
 
-function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, dr, qi, qj, σQ, σ6_fac))
-    R = σ6_fac*(1u"nm"+(σQ*abs(qi*qj)))
+function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac))
+    qij = qi * qj
+    R = σ6_fac*(oneunit(r)+(σQ*abs(qij)))
     if r >= R
-        return ke * ((qi*qj)/(r^2))
+        return ke * (qij/(r^2))
     elseif r < R
-        return ke * (-(((2*qi*qj)/(R^3)) * r) + ((3*qi*qj)/(R^2))) 
+        return ke * (-(((2*qij)/(R^3)) * r) + ((3*qij)/(R^2))) 
     end
 end
 
@@ -354,11 +364,12 @@ end
 end
 
 function pairwise_pe(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac))
-    R = σ6_fac*(1u"nm"+(σQ*abs(qi*qj)))
+    qij = qi * qj
+    R = σ6_fac*(oneunit(r)+(σQ*abs(qij)))
     if r >= R
-        return ke * ((qi*qj)/r)
+        return ke * (qij/r)
     elseif r < R
-        return ke * ((((qi*qj)/(R^3))*(r^2))-(((3*qi*qj)/(R^2))*r)+((3*qi*qj)/R))
+        return ke * (((qij/(R^3))*(r^2))-(((3*qij)/(R^2))*r)+((3*qij)/R))
     end
 end
 
