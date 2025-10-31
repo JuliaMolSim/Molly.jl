@@ -573,13 +573,15 @@ In Molly there are three types of interactions:
 
 The available pairwise interactions are:
 - [`LennardJones`](@ref)
-- [`LennardJonesSoftCore`](@ref)
+- [`LennardJonesSoftCoreBeutler`](@ref)
+- [`LennardJonesSoftCoreGapsys`](@ref)
 - [`AshbaughHatch`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
 - [`Buckingham`](@ref)
 - [`Coulomb`](@ref)
-- [`CoulombSoftCore`](@ref)
+- [`CoulombSoftCoreBeutler`](@ref)
+- [`CoulombSoftCoreGapsys`](@ref)
 - [`CoulombReactionField`](@ref)
 - [`CoulombEwald`](@ref)
 - [`Yukawa`](@ref)
@@ -860,13 +862,15 @@ The available cutoffs are:
 
 The following built-in interactions can use a cutoff:
 - [`LennardJones`](@ref)
-- [`LennardJonesSoftCore`](@ref)
+- [`LennardJonesSoftCoreBeutler`](@ref)
+- [`LennardJonesSoftCoreGapsys`](@ref)
 - [`AshbaughHatch`](@ref)
 - [`SoftSphere`](@ref)
 - [`Mie`](@ref)
 - [`Buckingham`](@ref)
 - [`Coulomb`](@ref)
-- [`CoulombSoftCore`](@ref)
+- [`CoulombSoftCoreBeutler`](@ref)
+- [`CoulombSoftCoreGapsys`](@ref)
 - [`Yukawa`](@ref)
 - [`Gravity`](@ref)
 In addition, [`CoulombReactionField`](@ref), [`CoulombEwald`](@ref) and the implicit solvent and Ewald general interactions have a `dist_cutoff` argument for a cutoff distance.

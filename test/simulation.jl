@@ -895,8 +895,8 @@ end
     )
 
     n_replicas = 4
-    λ_vals = [0.0, 0.1, 0.25, 0.4]
-    replica_pairwise_inters = [(LennardJonesSoftCore(α=1, λ=λ_vals[i], p=2, use_neighbors=true),)
+    λ_vals = [1.0, 0.9, 0.75, 0.6]
+    replica_pairwise_inters = [(LennardJonesSoftCoreBeutler(α=0.3, λ=λ_vals[i], use_neighbors=true),)
                                for i in 1:n_replicas]
 
     replica_loggers = [(temp=TemperatureLogger(10), ) for i in 1:n_replicas]
