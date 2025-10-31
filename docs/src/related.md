@@ -2,7 +2,7 @@
 
 There are many mature packages for molecular simulation.
 Of particular note here are [OpenMM](https://openmm.org) and [GROMACS](https://www.gromacs.org), both of which influenced the implementation of Molly.
-Molly can be thought of as similar to OpenMM in that it exposes simulation internals in a high-level language, though it is written in one language all the way down rather than using multiple device-specific kernels.
+Molly can be thought of as similar to OpenMM in that it exposes simulation internals in a high-level language, though it is written in one language all the way down.
 It also aims to be differentiable and work just as well with non-molecular physical simulations, though how much this impacts the ability to reach high simulation speeds remains to be seen.
 
 For differentiable simulations there are a number of related packages:
