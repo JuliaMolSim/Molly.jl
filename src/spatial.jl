@@ -25,6 +25,7 @@ export
     scale_coords!,
     dipole_moment
 
+# Parameters are dimension, float type and coordinate type
 abstract type AbstractBoundary{D, T, C} end
 
 """
