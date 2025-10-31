@@ -667,9 +667,9 @@ function System(coord_file::AbstractString,
         end
     end
 
-    adj = build_adjacency(n_atoms, top_bonds)
-    top_angles    = build_angles(adj)
-    top_torsions  = build_torsions(adj, top_bonds)
+    adj           = build_adjacency(n_atoms, top_bonds)
+    top_angles    = build_angles(adj, top_bonds)
+    top_torsions  = build_torsions(adj, top_angles)
     top_impropers = build_impropers(adj)
 
     # ---- Allocate interaction lists and particles ----
@@ -734,24 +734,32 @@ function System(coord_file::AbstractString,
     # Proper torsions
     for (i,j,k,l) in top_torsions
         t = (atom_type_of[i], atom_type_of[j], atom_type_of[k], atom_type_of[l])
-        best_key = t; tt = nothing
+        best_key = t
+        tt = nothing
         if haskey(force_field.torsion_types, t) && force_field.torsion_types[t].proper
             tt = force_field.torsion_types[t]
-        elseif haskey(force_field.torsion_types, (l,k,j,i)) && force_field.torsion_types[(l,k,j,i)].proper
-            best_key = (l,k,j,i); tt = force_field.torsion_types[best_key]
+        elseif haskey(force_field.torsion_types, reverse(t)) && force_field.torsion_types[reverse(t)].proper
+            best_key = reverse(t)
+            tt       = force_field.torsion_types[best_key]
         else
-            best_score = -1; best_key = ("","","","")
+            best_score = -1
+            best_key = ("","","","")
             for kkey in keys(force_field.torsion_types)
                 force_field.torsion_types[kkey].proper || continue
                 for ke in (kkey, reverse(kkey))
-                    valid = true; score = 0
+                    valid = true
+                    score = 0
                     for (idx, v) in enumerate(ke)
-                        if v == t[idx]; score += 1
-                        elseif v != ""; valid = false; break
+                        if v == t[idx]
+                            score += 1
+                        elseif v != ""
+                            valid = false
+                            break
                         end
                     end
                     if valid && score >= best_score
-                        best_score = score; best_key = kkey
+                        best_score = score
+                        best_key = kkey
                     end
                 end
             end
@@ -760,12 +768,16 @@ function System(coord_file::AbstractString,
         n_terms = length(tt.periodicities)
         for s in 1:torsion_n_terms:n_terms
             e = min(s+torsion_n_terms-1, n_terms)
-            push!(tors_il.is, i); push!(tors_il.js, j); push!(tors_il.ks, k); push!(tors_il.ls, l)
+            push!(tors_il.is, i) 
+            push!(tors_il.js, j)
+            push!(tors_il.ks, k)
+            push!(tors_il.ls, l)
             push!(tors_il.types, atom_types_to_string(best_key...))
             push!(tors_il.inters, PeriodicTorsion(periodicities=tt.periodicities[s:e],
                                                   phases=tt.phases[s:e], ks=tt.ks[s:e], proper=true))
         end
-        special[i,l] = true; special[l,i] = true
+        special[i,l] = true
+        special[l,i] = true
     end
 
     # Impropers (Amber ordering)

@@ -617,68 +617,103 @@ end
 # ---- Global adjacency from bonds ----
 function build_adjacency(natoms::Int, bonds::Vector{NTuple{2,Int}})
     adj = [Int[] for _ in 1:natoms]
-    @inbounds for (i,j) in bonds
-        push!(adj[i], j); push!(adj[j], i)
+    @inbounds for (i, j) in bonds
+        push!(adj[i], j)
+        push!(adj[j], i)
     end
     for a in adj
-        unique!(a); sort!(a)
+        unique!(a)
+        sort!(a)
     end
     return adj
 end
 
 # ---- Angles (i,j,k) with j as center; unique by i<k ----
-function build_angles(adj::Vector{Vector{Int}})
+function build_angles(adj::Vector{Vector{Int}}, bonds)
     angles = Vector{NTuple{3,Int}}()
-    for j in 1:length(adj)
-        nbr = adj[j]
-        ln = length(nbr)
-        ln < 2 && continue
-        for u in 1:ln-1, v in u+1:ln
-            i = nbr[u]; k = nbr[v]
-            push!(angles, i < k ? (i,j,k) : (k,j,i))
+    for bond in bonds
+        for atom in adj[bond[1]]
+            if atom != bond[2]
+                if atom < bond[2]
+                    push!(angles, (atom, bond[1], bond[2]))
+                else
+                    push!(angles, (bond[2], bond[1], atom))
+                end
+            end
+        end
+        for atom in adj[bond[2]]
+            if atom != bond[1]
+                if atom > bond[1]
+                    push!(angles, (bond[1], bond[2], atom))
+                else
+                    push!(angles, (atom, bond[2], bond[1]))
+                end
+            end
         end
     end
-    unique!(angles); return angles
+    return sort!(unique!(angles))
 end
 
+
 # ---- Proper torsions (i,j,k,l); unique and orientation-consistent ----
-function build_torsions(adj::Vector{Vector{Int}}, bonds::Vector{NTuple{2,Int}})
+function build_torsions(adj::Vector{Vector{Int}}, angles::Vector{NTuple{3,Int}})
     tors = Vector{NTuple{4,Int}}()
-    # iterate over each bond j-k once
-    for (j,k) in bonds
-        # neighbors excluding the bonded partner
-        nj = (n for n in adj[j] if n != k)
-        nk = (n for n in adj[k] if n != j)
-        for i in nj, l in nk
-            t = (i,j,k,l)
-            # canonicalize: if (j>k) flip and reverse ends
-            if j > k
-                t = (l,k,j,i)
-            elseif j == k
-                continue
+    for angle in angles
+        for atom in adj[angle[1]]
+            if !(atom ∈ angle)
+                if atom < angle[3]
+                    push!(tors, (atom, angle[1], angle[2], angle[3]))
+                else
+                    push!(tors, (angle[3], angle[2], angle[1], atom))
+                end
             end
-            # also dedup mirrored ends by ordering (i,l)
-            if t[1] > t[4]
-                t = (t[4], t[3], t[2], t[1])
+        end
+        for atom in adj[angle[3]]
+            if !(atom ∈ angle)
+                if atom > angle[1]
+                    push!(tors, (angle[1], angle[2], angle[3], atom))
+                else
+                    push!(tors, (atom, angle[3], angle[2], angle[2]))
+                end
             end
-            push!(tors, t)
         end
     end
-    unique!(tors); return tors
+    return sort!(unique!(tors))
+end
+
+function combinations_of(vec::Vector, n::Int)
+    if n < 0 || n > length(vec)
+        throw(ArgumentError("n must be between 0 and length(vec)"))
+    end
+    result = Vector{Vector{eltype(vec)}}()
+    inds = collect(1:n)
+    L = length(vec)
+    while true
+        push!(result, vec[inds])
+        k = n
+        while k ≥ 1 && inds[k] == L - n + k
+            k -= 1
+        end
+        if k == 0
+            break
+        end
+        inds[k] += 1
+        for i in k+1:n
+            inds[i] = inds[i-1] + 1
+        end
+    end
+    return result
 end
 
 # ---- Impropers (i, c, j, k) with c as center; i<j<k for uniqueness ----
 function build_impropers(adj::Vector{Vector{Int}})
-    imps = Vector{NTuple{4,Int}}()
-    for c in 1:length(adj)
-        nbr = adj[c]
-        ln = length(nbr)
-        ln < 3 && continue
-        sort!(nbr)
-        for a in 1:ln-2, b in a+1:ln-1, d in b+1:ln
-            i, j, k = nbr[a], nbr[b], nbr[d]
-            push!(imps, (i, c, j, k))
+    top_impropers = Tuple{Int, Int, Int, Int}[]
+    for (i, bonded_to) in enumerate(adj)
+        if length(bonded_to) > 2
+            for subset in combinations_of(bonded_to, 3)
+                push!(top_impropers, (i, subset[1], subset[2], subset[3]))
+            end
         end
     end
-    unique!(imps); return imps
+    return top_impropers
 end
