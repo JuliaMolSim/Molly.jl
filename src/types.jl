@@ -869,9 +869,10 @@ Properties unused in the simulation or in analysis can be left with their defaul
 The minimal required arguments are `atoms`, `replica_coords`, `boundary` and `n_replicas`.
 `atoms` and the elements in `replica_coords` should have the same length, along with
 `atoms_data` and the elements in `replica_velocities` if these are provided.
-The number of elements in `replica_coords`, `replica_velocities`, `replica_loggers` and
-the interaction arguments `replica_pairwise_inters`, `replica_specific_inter_lists`,
-`replica_general_inters` and `replica_constraints` should be equal to `n_replicas`.
+The number of elements in `replica_coords`, `replica_boundaries`, `replica_velocities`,
+`replica_loggers` and the interaction arguments `replica_pairwise_inters`,
+`replica_specific_inter_lists`, `replica_general_inters` and `replica_constraints` should
+be equal to `n_replicas` if used.
 This is a sub-type of `AbstractSystem` from AtomsBase.jl and implements the
 interface described there.
 
@@ -884,8 +885,10 @@ construction where `n` is the number of threads to be used per replica.
 - `atoms::A`: the atoms, or atom equivalents, in the system. Can be
     of any type but should be a bits type if the GPU is used.
 - `replica_coords`: the coordinates of the atoms in each replica.
-- `boundary::B`: the bounding box in which the simulation takes place.
 - `n_replicas::Integer`: the number of replicas of the system.
+- `boundary=nothing`: the bounding box in which the simulation takes place. This is only
+    used if no value is passed to the argument `replica_pairwise_inters`.
+- `replica_boundaries=nothing`: the bounding box for each replica.
 - `replica_velocities=[zero(replica_coords[1]) * u"ps^-1" for _ in 1:n_replicas]`:
     the velocities of the atoms in each replica.
 - `atoms_data::AD`: other data associated with the atoms, allowing the atoms to
@@ -947,8 +950,8 @@ end
 function ReplicaSystem(;
                         atoms,
                         replica_coords,
-                        boundary,
                         n_replicas,
+                        boundary=nothing,
                         replica_boundaries=nothing,
                         replica_velocities=nothing,
                         atoms_data=[],
@@ -969,25 +972,23 @@ function ReplicaSystem(;
                         energy_units=u"kJ * mol^-1",
                         k=default_k(energy_units),
                         data=nothing)
-    D = AtomsBase.n_dimensions(boundary)
     AT = array_type(replica_coords[1])
-    T = float_type(boundary)
     A = typeof(atoms)
     AD = typeof(atoms_data)
     F = typeof(force_units)
     E = typeof(energy_units)
     DA = typeof(data)
     C = typeof(replica_coords[1])
-    B = typeof(boundary)
     NF = typeof(neighbor_finder)
 
     if isnothing(replica_boundaries)
-        @warn "Using the same boundary for all replicas! Make sure that this is reasonable for your system!"
-        replica_boundaries = [deepcopy(boundary) for _ in 1:n_replicas]
+        replica_boundaries = fill(boundary, n_replicas)
     elseif length(replica_boundaries) != n_replicas
         throw(ArgumentError("number of boundaries ($(length(replica_boundaries)))"
-                            *" does not match number of replicas $(length(n_replicas))"))
+                            * " does not match number of replicas ($n_replicas)"))
     end
+    D = AtomsBase.n_dimensions(replica_boundaries[1])
+    T = float_type(replica_boundaries[1])
 
     if isnothing(replica_velocities)
         if force_units == NoUnits
@@ -1027,7 +1028,7 @@ function ReplicaSystem(;
                             * "does not match number of replicas ($n_replicas)"))
     end
 
-    df = n_dof(D, length(atoms), boundary)
+    df = n_dof(D, length(atoms), replica_boundaries[1])
     if isnothing(replica_constraints)
         if length(constraints) > 0
             for ca in constraints
@@ -1119,10 +1120,10 @@ function ReplicaSystem(;
     k_converted = convert_k_units(T, k, energy_units)
     K = typeof(k_converted)
 
-    replicas = Tuple(System{D, AT, T, A, C, B, V, AD, TO, typeof(replica_pairwise_inters[i]),
-                        typeof(replica_specific_inter_lists[i]), typeof(replica_general_inters[i]),
-                        typeof(replica_constraints[i]), NF, typeof(replica_loggers[i]), F, E, K,
-                        M, TM, Nothing}(
+    replicas = Tuple(System{D, AT, T, A, C, typeof(replica_boundaries[i]), V, AD, TO,
+                        typeof(replica_pairwise_inters[i]), typeof(replica_specific_inter_lists[i]),
+                        typeof(replica_general_inters[i]), typeof(replica_constraints[i]), NF,
+                        typeof(replica_loggers[i]), F, E, K, M, TM, Nothing}(
             atoms, replica_coords[i], replica_boundaries[i], replica_velocities[i],
             atoms_data, replica_topology[i], replica_pairwise_inters[i], replica_specific_inter_lists[i],
             replica_general_inters[i], replica_constraints[i],

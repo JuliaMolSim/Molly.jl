@@ -72,9 +72,10 @@ Constraints are applied during minimization, which can lead to issues.
     needs_vir = false
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    E = potential_energy(sys, neighbors; n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads, current_potential_energy=E)
+    E = potential_energy(sys, neighbors, buffers; n_threads=n_threads)
+    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads,
+                   current_potential_energy=E)
     using_constraints = (length(sys.constraints) > 0)
     println(sim.log_stream, "Step 0 - potential energy ", E, " - max force N/A - N/A")
     hn = sim.step_size
@@ -1047,9 +1048,9 @@ end
                            run_loggers=true,
                            rng=Random.default_rng())
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    E_old = potential_energy(sys, neighbors; n_threads=n_threads)
-    coords_old = zero(sys.coords)
     buffers = init_buffers!(sys, n_threads)
+    E_old = potential_energy(sys, neighbors, buffers; n_threads=n_threads)
+    coords_old = zero(sys.coords)
 
     for step_n in 1:n_steps
         coords_old .= sys.coords
