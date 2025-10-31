@@ -966,58 +966,57 @@ save("mie.png", f)
 ```
 ![Mie](images/mie.png)
 
-## Variations of the soft-core LJ potential
+## Different soft-core potentials for Lennard-Jones and Coulomb
 
-The soft-core Lennard-Jones potential is parameterised by ``\alpha``, ``\lambda`` and ``p`` in addition to the standard Lennard-Jones parameters.
-These parameters shift the value of ``r_{ij}`` to ``\left(r_{ij}^6 + \sigma_{ij} \alpha \lambda^{p} \right)^{\frac{1}{6}}``.
-This gives a soft core, i.e. the potential does not diverge for ``r_{ij} \rightarrow 0``.
+The soft-core Lennard-Jones and Coulomb potentials are parameterised by ``\alpha`` and ``\lambda``, in addition to the standard potential parameters. The soft-core potential proposed by [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p) includes an additional parameter, ``\sigma_Q``. 
+
+These parameters shift the value of ``r_{ij}`` to ``(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6)^{1/6}`` for the [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1) soft-core potential, which prevents the potential from diverging as ``r_{ij} \rightarrow 0``. In the case of the [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p) soft-core potentials, the transition from a hard-core to a soft-core potential occurs at a specific distance. The forces are linearized at the transition point, and this switching distance depends on the value of ``\lambda``.
+
 ```julia
 using Molly
 using GLMakie
 
-boundary = CubicBoundary(5.0)
-a1, a2 = Atom(σ=0.3, ϵ=0.5), Atom(σ=0.3, ϵ=0.5)
-dists = collect(0.05:0.005:0.8)
+boundary = CubicBoundary(5.0u"nm")
+a1 = Atom(charge=0.5, σ=0.3u"nm", ϵ=0.5u"kJ * mol^-1")
+a2 = Atom(charge=-0.5, σ=0.3u"nm", ϵ=0.5u"kJ * mol^-1")
+dists = 0.01:0.005:0.8
 
-function energies(α, λ, p)
-    inter = LennardJonesSoftCore(α=α, λ=λ, p=p)
-    return map(dists) do dist
-        c1 = SVector(1.0, 1.0, 1.0)
-        c2 = SVector(dist + 1.0, 1.0, 1.0)
-        vec = vector(c1, c2, boundary)
-        potential_energy(inter, vec, a1, a2, NoUnits)
+energies(inter) = map(dist -> begin
+    c1 = SVector(1.0, 1.0, 1.0)u"nm"
+    c2 = SVector(dist + 1.0, 1.0, 1.0)u"nm"
+    vec = vector(c1, c2, boundary)
+    potential_energy(inter, vec, a1, a2, NoUnits)
+end, dists)
+
+function plot_interactions(ax, title, xlabel, ylabel, data, ylims_range)
+    ax.title = title
+    ax.xlabel = xlabel
+    ax.ylabel = ylabel
+    for (label, inter) in data
+        lines!(ax, dists, ustrip.(energies(inter)), label=label)
     end
+    ylims!(ax, ylims_range)
+    axislegend(ax, position=:rt)
 end
 
-f = Figure(size=(600, 400))
-ax = Axis(
-    f[1, 1],
-    xlabel="Distance / nm",
-    ylabel="Potential energy / kJ * mol^-1",
-    title="Variations of the soft-core Lennard-Jones potential",
-)
-for λ in [0.8, 0.9]
-    for α in [0.2, 0.4]
-        for p in [2]
-            lines!(
-                ax,
-                dists,
-                energies(α, λ, p),
-                label="α=$α, λ=$λ, p=$p",
-            )
-        end
-    end
-end
+f = Figure(size=(1200, 800))
+ax1, ax2, ax3, ax4 = Axis(f[1, 1]), Axis(f[1, 2]), Axis(f[2, 1]), Axis(f[2, 2])
 
-lines!(ax, dists, energies(0, 1, 2), label="standard LJ potential")
+LJ = Dict("LJ" => LennardJones(), "LJ-Beutler" => LennardJonesSoftCoreBeutler(α=0.3, λ=0.5), "LJ-Gapsys" => LennardJonesSoftCoreGapsys(α=0.85, λ=0.5))
+plot_interactions(ax1, "Soft-core Lennard-Jones potentials \nin comparison to standard LJ for λ=0.5", "Distance / nm", "Potential Energy / kJ * mol^-1", sort(LJ), (-5, 400))
 
-ylims!(-5, 25)
-axislegend(position=:rt)
-save("lennard_jones_sc.png", f)
+Cou = Dict("Coulomb" => Coulomb(), "Coulomb-Beutler" => CoulombSoftCoreBeutler(α=0.3, λ=0.5), "Coulomb-Gapsys" => CoulombSoftCoreGapsys(α=0.3, λ=0.5, σQ=1u"nm"))
+plot_interactions(ax2, "Soft-core Coulomb potentials \nin comparison to standard Coulomb for λ=0.5", "Distance / nm", "Potential Energy / kJ * mol^-1", sort(Cou), (-400, 0))
+
+plot_interactions(ax3, "Effect of λ on soft-core Lennard-Jones potential (Beutler et al.)", "Distance / nm", "Potential Energy / kJ * mol^-1", 
+                  [(string("λ=$λ"), LennardJonesSoftCoreBeutler(α=0.3, λ=λ)) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]], (-5, 400))
+
+plot_interactions(ax4, "Effect of λ on soft-core Coulomb potential (Gapsys et al.)", "Distance / nm", "Potential Energy / kJ * mol^-1", 
+                  [(string("λ=$λ"), LennardJonesSoftCoreGapsys(α=0.85, λ=λ)) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]], (-5, 400))
+
+save("softcore_potentials.png", f)
 ```
-![Lennard-Jones Softcore](images/lennard_jones_sc.png)
-
-The form of the potential is approximately the same as standard Lennard-Jones for ``r_{ij} > \sigma_{ij}`` if some fractional values are used for ``\lambda`` and ``\alpha``.
+![Lennard-Jones Softcore](images/softcore_potentials.png)
 
 ## Crystal structures
 
