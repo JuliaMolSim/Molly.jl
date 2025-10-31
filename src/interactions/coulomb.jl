@@ -338,7 +338,7 @@ function pairwise_force(::CoulombSoftCoreGapsys, r, (ke, qi, qj, σQ, σ6_fac))
     if r >= R
         return ke * (qij/(r^2))
     elseif r < R
-        return ke * (-(((2*qij)/(R^3)) * r) + ((3*qij)/(R^2))) 
+        return ke * (-(((2*qij)/(R^3)) * r) + ((3*qij)/(R^2)))
     end
 end
 

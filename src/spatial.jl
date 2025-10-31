@@ -638,7 +638,7 @@ function unwrap_global(coords::AbstractVector{<:SVector{D}},
         f[i] = wrap01(to_frac(coords[i]))
     end
 
-    # --- global adjacency: bonds ∪ neighbor-list pairs ---    
+    # --- global adjacency: bonds ∪ neighbor-list pairs ---
     adj = [Int[] for _ in 1:N]
     if topology !== nothing
         @inbounds for (i32,j32) in topology.bonded_atoms
@@ -1136,7 +1136,7 @@ function scale_coords!(sys::System{<:Any, AT},
     if has_infinite_boundary(sys.boundary)
         throw(AssertionError("Infinite boundary not supported"))
     end
-    
+
     μinv = inv(μ)
 
     if ignore_molecules || isnothing(sys.topology)
@@ -1199,7 +1199,7 @@ function scale_coords!(sys::System{<:Any, AT},
 
         # new boundary
         b_new_u = rebuild_boundary(b_old_u, B′ .* coord_u)
-        b_new   = ustrip(coord_u, b_new_u) 
+        b_new   = ustrip(coord_u, b_new_u)
 
         # place atoms
         @inbounds for i in eachindex(coords)

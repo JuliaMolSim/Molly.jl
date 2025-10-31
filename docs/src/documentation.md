@@ -506,7 +506,7 @@ sys = System(
 
 trial_args = Dict(:shift_size => 0.1u"nm")
 for t in temperatures
-    sim = MetropolisMonteCarlo(; 
+    sim = MetropolisMonteCarlo(;
         temperature=t,
         trial_moves=random_uniform_translation!,
         trial_args=trial_args,
@@ -1235,7 +1235,7 @@ These keyword arguments are also available in [`log_property!`](@ref).
 Which values are passed depends on the simulator being used, for example [`SteepestDescentMinimizer`](@ref) passes `current_potential_energy` because it uses it for minimization.
 Note that loggers are called after [`apply_coupling!`](@ref), so the coordinates may have changed since the potential energy or forces were computed.
 
-A logger which records the property every `n_steps` can be constructed through 
+A logger which records the property every `n_steps` can be constructed through
 ```julia
 my_logger = GeneralObservableLogger(my_observable, T, n_steps)
 ```
@@ -1371,7 +1371,7 @@ Simulators incompatible with constraints will print a warning and continue witho
 
 Molly supports [`DistanceConstraint`](@ref) and [`AngleConstraint`](@ref) on CPU and GPU.
 Distance constraints fix the distance between two atoms.
-Angle constraints are defined for sets of three atoms (e.g. water) and restrict the angle and the two bond lengths. 
+Angle constraints are defined for sets of three atoms (e.g. water) and restrict the angle and the two bond lengths.
 
 Constraints can be added when setting up a system from a file [as described above](@ref "Simulating a protein").
 To add constraints to a system manually, use something like the following:
@@ -1402,11 +1402,11 @@ This diagram demonstrates the four allowed constraint types:
 !!! note
     You can't constrain a linear chain of four atoms or an angle of 180°. Constraints beyond the four valid classes can't be used. For example, you can't constrain all the hydrogen bonds and the double bond in ethylene simultaneously. This would create a cluster of 5 constraints which is not supported.
 
-These constraints provide enough flexibility to constrain all hydrogen atoms in organic molecules as well as water molecules.  
+These constraints provide enough flexibility to constrain all hydrogen atoms in organic molecules as well as water molecules.
 
 All velocity constraints and diatomic distance constraints are solved analytically while larger constraints are linearized and solved iteratively via matrix inverse.
 The direct matrix inverse does not scale well beyond clusters with 3 constraints and is not implemented.
-Other methods can be used to solve larger constraint clusters, these are not yet supported by Molly. 
+Other methods can be used to solve larger constraint clusters, these are not yet supported by Molly.
 
 ## Neighbor finders
 

@@ -27,7 +27,7 @@ export
 const DefaultFloat = Float64
 
 # Base type for Molly interaction types
-abstract type AbstractInteraction end 
+abstract type AbstractInteraction end
 
 # Base type for n-body interactions, `N` is the body order
 # Only NBodyInteraction{2} is currently supported
@@ -787,9 +787,8 @@ function System(crystal::Crystal{D};
 end
 
 function Base.zero(sys::System{D, AT, T, A, C, B, V,
-                   AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}) where 
-                   {D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}
-
+                   AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}) where {D, AT, T,
+                                A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}
     return System{D, AT, T, A, C, B, V, AD, TO, PI, SI, GI, CN, NF, L, F, E, K, M, TM, DA}(
         zero.(sys.atoms),
         zero(sys.coords),

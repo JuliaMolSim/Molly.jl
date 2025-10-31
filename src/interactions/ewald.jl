@@ -946,7 +946,7 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     V = volume(boundary)
     f = (energy_units == NoUnits ? ustrip(T(Molly.coulomb_const)) : T(Molly.coulomb_const))
 
-    exclusion_E = excluded_interactions!(Fs, vir, inter.excluded_buffer_Fs, inter.virial_buffer, 
+    exclusion_E = excluded_interactions!(Fs, vir, inter.excluded_buffer_Fs, inter.virial_buffer,
                     inter.excluded_buffer_Es, inter.excluded_pairs, atoms, coords, boundary, α, f,
                     force_units, energy_units, calculate_forces, Val(T), Val(needs_vir))
 
@@ -963,8 +963,8 @@ function ewald_pe_forces!(Fs, vir, inter::PME{T}, atoms, coords, boundary, force
     grad_safe_bfft!(inter.charge_grid, inter.bfft_plan)
     if calculate_forces
         interpolate_force!(Fs, inter.charge_grid, inter.grid_indices, inter.bsplines_θ,
-                        inter.bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms, 
-                        n_thr)
+                           inter.bsplines_dθ, recip_box, mesh_dims, order, energy_units, atoms,
+                           n_thr)
     end
 
     if isnothing(inter.pc_sum) || inter.grad_safe

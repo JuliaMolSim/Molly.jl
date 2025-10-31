@@ -738,7 +738,7 @@ end
         @test maximum(dists[1:n_atoms_res]) < 0.1u"nm"
         @test median(dists[(n_atoms_res + 1):end]) > 0.2u"nm"
     end
-end 
+end
 
 @testset "Langevin splitting" begin
     n_atoms = 400

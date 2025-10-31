@@ -46,7 +46,7 @@ end
 Then, we have to define the potential energy and force functions that Molly will call when it encounters such an interaction. We will make use of the machinery present in Molly and define the restraint as a specific interaction, returning the force as a [`SpecificForce4Atoms`](@ref). The functional form used as the bias potential is a quadratic flat bottom angle restraint, using:
 
 ```math
-\varphi^{\prime} = (\varphi - \varphi^0)\ \%\ 2\pi 
+\varphi^{\prime} = (\varphi - \varphi^0)\ \%\ 2\pi
 ```
 
 ```math
@@ -254,7 +254,7 @@ Now, before starting to produce the pulling simulations, we need to know what is
 # pulling.jl
 
 # Indices of the atoms defining the dihedral
-i = 17 
+i = 17
 j = 15
 k = 9
 l = 7
@@ -275,7 +275,7 @@ thermostat = VelocityRescaleThermostat(T0, τ_T, n_steps = 1)
 
 τ_P        = FT(1)u"ps" # Barostat coupling constant
 # Apply barostat 10 times per τ_P, good balance of precision and computational overhead
-frac       = uconvert(tu, 0.1 * τ_P)  
+frac       = uconvert(tu, 0.1 * τ_P)
 n_P        = Int(floor(frac/Δt)) # The number of simulation steps
 barostat   = CRescaleBarostat(P0, τ_P; n_steps = n_P)
 
@@ -306,12 +306,12 @@ for w in 1:N_WIN
         Molly.to_device([k], AT),
         Molly.to_device([l], AT),
         Molly.to_device([dRest], AT),
-    ) 
+    )
 
     rest_inter = (sils..., rest_inter,) # Merge unbiased and biased into single tuple
 
     sys_w = System(
-        deepcopy(old_sys); # Get the same layout as the unbiased system 
+        deepcopy(old_sys); # Get the same layout as the unbiased system
         specific_inter_lists=rest_inter, # Overwrite interaction list with the one containing the bias
         loggers=(TrajectoryWriter(save_steps, "./pull_$(w).dcd"),),
     )
@@ -396,7 +396,7 @@ save_steps = Int(floor(save_t / Δt))   # To number of simulation steps
 rest_θ = FT(eq_θ - (SIM_N-1) * uconvert(u"rad", dR)) # The equilibrium value for the bias
 dRest  = DihedralRestraint(rest_θ*u"rad", uconvert(u"rad", ΔR) , K_bias) # Create interaction
 
-# Pack into interaction list 
+# Pack into interaction list
 rest_inter = InteractionList4Atoms(
     Molly.to_device([i], AT),
     Molly.to_device([j], AT),
@@ -480,7 +480,7 @@ Threads.@threads for trj_n in 1:N_TRJ
     # the same Hamiltonian
     rest_θ = FT(eq_θ - (trj_n-1) * uconvert(u"rad", dR))
     dRest = DihedralRestraint(rest_θ*u"rad", uconvert(u"rad", ΔR) , K_bias)
-    
+
     rest_inter = InteractionList4Atoms(
         Molly.to_device([i], AT),
         Molly.to_device([j], AT),
@@ -523,7 +523,7 @@ Threads.@threads for nt in 1:N_TRJ
     # Iterate over trajectory frames
     for n in FIRST_IDX:n_frames
         current_sys = read_frame!(trjsys, n) # Read the current frame as a System
-        pe = potential_energy(current_sys) 
+        pe = potential_energy(current_sys)
         coords = Molly.from_device(current_sys.coords)
         boundary = current_sys.boundary
 
@@ -609,7 +609,7 @@ And finally, we can estimate the PMF using the output of the previous step by ca
 
 pmf = pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV; shifts=shifts, kBT=kBT)
 
-centers   = pmf.centers        # The collective variable 
+centers   = pmf.centers        # The collective variable
 PMF       = pmf.F              # PMF in kBT
 PMF_enr   = pmf.F_energy       # PMF in energy units
 sigma     = pmf.sigma_F        # Standard deviation in kBT
@@ -623,13 +623,13 @@ But what about the short path? Well, we also provide an overload of the [`pmf_wi
 pmf = pmf_with_uncertainty(
     C,            # Coordinates
     B,            # Boundaries
-    states,       # Themodynamic states 
+    states,       # Themodynamic states
     target_state, # Target state
     CV,           # Collective variable
 )
 ```
 
-Now one can put this into a graph, for example using a scatter for the free energy and making use of the calculated sigmas (see the previous code blocks) to shade the plot and give a feel for the uncertainties. The code is left as an exercise to the reader, but the results should look like something similar to this: 
+Now one can put this into a graph, for example using a scatter for the free energy and making use of the calculated sigmas (see the previous code blocks) to shade the plot and give a feel for the uncertainties. The code is left as an exercise to the reader, but the results should look like something similar to this:
 
 ![PMF along the dipeptide torsion in kBT units](images/dihedral_pmf_kbt.png)
 ![PMF along the dipeptide torsion in energy units](images/dihedral_pmf_enr.png)

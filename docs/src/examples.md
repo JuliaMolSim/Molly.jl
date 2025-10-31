@@ -792,7 +792,7 @@ using AtomsBaseTesting
 using AtomsCalculators
 
 ab_sys = AtomsBase.AbstractSystem(
-    make_test_system().system; 
+    make_test_system().system;
     cell_vectors = [[1.54732, 0.0      , 0.0      ],
                     [0.0    , 1.4654985, 0.0      ],
                     [0.0    , 0.0      , 1.7928950]]u"Å",
@@ -969,7 +969,7 @@ save("mie.png", f)
 ## Different soft-core potentials
 
 The soft-core Lennard-Jones and Coulomb potentials are parameterised by ``\alpha`` and ``\lambda``, in addition to the standard potential parameters.
-The soft-core potential proposed by [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p) includes an additional parameter ``\sigma_Q``. 
+The soft-core potential proposed by [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p) includes an additional parameter ``\sigma_Q``.
 
 These parameters shift the value of ``r_{ij}`` to ``(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6)^{1/6}`` for the [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1) soft-core potential, which prevents the potential from diverging as ``r_{ij} \rightarrow 0``.
 In the case of the [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p) soft-core potentials, the transition from a hard-core to a soft-core potential occurs at a specific distance.
@@ -1037,7 +1037,7 @@ plot_interactions(
     ax3,
     "Effect of λ on soft-core Lennard-Jones potential (Beutler et al.)",
     "Distance / nm",
-    "Potential Energy / kJ * mol^-1", 
+    "Potential Energy / kJ * mol^-1",
     [(string("λ=$λ"), LennardJonesSoftCoreBeutler(α=0.3, λ=λ)) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]],
     (-5, 400),
 )
@@ -1046,7 +1046,7 @@ plot_interactions(
     ax4,
     "Effect of λ on soft-core Coulomb potential (Gapsys et al.)",
     "Distance / nm",
-    "Potential Energy / kJ * mol^-1", 
+    "Potential Energy / kJ * mol^-1",
     [(string("λ=$λ"), LennardJonesSoftCoreGapsys(α=0.85, λ=λ)) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]],
     (-5, 400),
 )
@@ -1183,31 +1183,31 @@ simulate!(sys, simulator, 10_000)
 ### Installation
 
 1. Install the KIM API and make the shared library discoverable:
-   ```bash
-   conda create -n kim-api kim-api=2.4 -c conda-forge
-   conda activate kim-api
-   export KIM_API_LIB=${CONDA_PREFIX}/lib/libkim-api.so
-   ```
+    ```bash
+    conda create -n kim-api kim-api=2.4 -c conda-forge
+    conda activate kim-api
+    export KIM_API_LIB=${CONDA_PREFIX}/lib/libkim-api.so
+    ```
 
 2. Install the required [OpenKIM model](https://openkim.org/browse/models/alphabetical):
-   ```bash
-   $ kim-api-collections-management install user SW_StillingerWeber_1985_Si__MO_405512056662_006          
-   Downloading.............. SW_StillingerWeber_1985_Si__MO_405512056662_006
-   Found installed driver... SW__MD_335816936951_005
-   [100%] Built target SW_StillingerWeber_1985_Si__MO_405512056662_006
-   Install the project...
-   -- Install configuration: "Debug"
-   -- Installing: /.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so
-   -- Set runtime path of "/.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so" to ""
-   
-   Success!
-   ```
-   
+    ```bash
+    $ kim-api-collections-management install user SW_StillingerWeber_1985_Si__MO_405512056662_006
+    Downloading.............. SW_StillingerWeber_1985_Si__MO_405512056662_006
+    Found installed driver... SW__MD_335816936951_005
+    [100%] Built target SW_StillingerWeber_1985_Si__MO_405512056662_006
+    Install the project...
+    -- Install configuration: "Debug"
+    -- Installing: /.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so
+    -- Set runtime path of "/.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so" to ""
+    
+    Success!
+    ```
+
 3. Add the package to your Julia environment:
-   ```julia
-   using Pkg
-   Pkg.add("KIM_API")
-   ```
+    ```julia
+    using Pkg
+    Pkg.add("KIM_API")
+    ```
 
 ### Stillinger-Weber silicon supercell
 

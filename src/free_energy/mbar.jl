@@ -1,4 +1,4 @@
-export 
+export
     ThermoState,
     assemble_mbar_inputs,
     iterate_mbar,
@@ -8,7 +8,7 @@ export
 const LOG_PREVFLOAT0 = log(nextfloat(0.0))      # ≈ log(nextfloat(0.0)) ≈ -744
 const LOG_FLOATMAX   = log(floatmax(Float64))   # ≈ 709
 
-@doc """
+"""
     ThermoState(name::String, β, p, system)
     ThermoState(system::System, β, p; name::Union{Nothing,String}=nothing)
 
@@ -65,7 +65,7 @@ struct MBARInput{U, UT, N, W, S}
     shifts::S
 end
 
-@doc """
+"""
     assemble_mbar_inputs(coords_k, boundaries_k, states;
                          target_state=nothing, shift=false)
 
@@ -92,8 +92,8 @@ MBARInput with:
 function assemble_mbar_inputs(coords_k,
                               boundaries_k,
                               states::Vector{ThermoState};
-                              target_state::Union{Nothing, ThermoState{<:Any, <:Any, <:System{D, AT, T}}} = nothing,
-                              shift::Bool  = false) where {D, AT, T}
+                              target_state::Union{Nothing, ThermoState{<:Any, <:Any, <:System{D, AT, T}}}=nothing,
+                              shift::Bool=false) where {D, AT, T}
     K = length(states)
 
     if length(coords_k) != K != length(boundaries_k)
@@ -188,7 +188,8 @@ function assemble_mbar_inputs(coords_k,
 end
 
 # Assembles the reduced potentials vector for the target thermodynamic state
-function assemble_target_u(all_coords, all_boundaries, all_volumes, target::ThermoState{<:Any, <:Any, <:System{D,AT,T}}) where {D, AT, T}
+function assemble_target_u(all_coords, all_boundaries, all_volumes,
+                           target::ThermoState{<:Any, <:Any, <:System{D, AT, T}}) where {D, AT, T}
     N  = length(all_coords)
     βa = target.β
     pa = target.p
@@ -216,8 +217,6 @@ function assemble_target_u(all_coords, all_boundaries, all_volumes, target::Ther
     end
     return u_target
 end
-
-
 
 # Initializer per Eq. C4 (Shirts & Chodera 2008):
 # f_k^(0) = -mean( u[n, k] ) over frames n originating from state k.
@@ -272,7 +271,6 @@ function mbar_init(u::AbstractMatrix, win_of::AbstractVector{<:Integer};
     return f
 end
 
-
 # Uses the self-consistent iteration method of Eq. C3 (Shirts & Chodera 2008)
 # to solve the MBAR equations.
 function mbar_iteration(u, f_init, logN)
@@ -303,7 +301,7 @@ function mbar_iteration(u, f_init, logN)
     return f_new
 end
 
-@doc """
+"""
     iterate_mbar(u, win_of, N_counts; rtol=1e-8, max_iter=10_000)
 
 Solve the MBAR self-consistent equations [Shirts & Chodera, 2008, Eq. C3](https://doi.org/10.1063/1.2978177).
@@ -339,7 +337,6 @@ function iterate_mbar(u, win_of, N_counts; rtol::Float64=1e-8, max_iter::Int=10_
     return f_new, logN
 end
 
-
 # Compute log Dₙ = log ∑_k N_k exp(f_k − u[n,k]) for each frame n (log-sum-exp stable).
 # `u` is N×K: rows = frames n, cols = states k. `logN = log.(N_counts)`.
 function mbar_logD(u::AbstractMatrix, f::AbstractVector, logN::AbstractVector)
@@ -366,7 +363,6 @@ function mbar_logD(u::AbstractMatrix, f::AbstractVector, logN::AbstractVector)
     return logD
 end
 
-
 # W[n,k] = exp( f[k] − u[n,k] − logD[n] ), with `u` as N×K. `logN` only enters Dₙ.
 function mbar_weights_sampled(u::AbstractMatrix, f::AbstractVector, logN::AbstractVector; logD_n=nothing)
     N, K = size(u)
@@ -382,7 +378,7 @@ function mbar_weights_sampled(u::AbstractMatrix, f::AbstractVector, logN::Abstra
     min_i, max_i, min_n, max_n = 0, 0, 0, 0
     @inbounds for k in 1:K, n in 1:N
         x = f[k] - Float64(u[n,k]) - logD[n]
-        
+
         if x < min_x
             min_x = x
             min_i = k
@@ -406,22 +402,21 @@ function mbar_weights_sampled(u::AbstractMatrix, f::AbstractVector, logN::Abstra
     return W, logD
 end
 
-
 # wₙ ∝ exp( −(u_target[n] − sₙ) ) / Dₙ where `sₙ` are the same per-frame shifts applied to `u`.
 # Pass `shifts` you subtracted from `u`; if none were used, leave default.
 function mbar_weights_target(u_target::AbstractVector, logD_n::AbstractVector; shifts::Union{Nothing,AbstractVector} = nothing)
     N = length(u_target)
-    
+
     if N != length(logD_n)
         throw(ArgumentError("u_target must be of equal length as logD_n"))
     end
-    
+
     if shifts !== nothing
         if length(shifts) != N
             throw(ArgumentError("shifts must be of equal length as u_target"))
         end
     end
-    
+
     # vₙ = −(u_tgt[n] − sₙ) − logDₙ
     @inbounds begin
         m = -Inf
@@ -453,7 +448,7 @@ function mbar_weights_target(u_target::AbstractVector, logD_n::AbstractVector; s
     end
 end
 
-@doc """
+"""
     mbar_weights(u, u_target, f, N_counts, logN; shifts=nothing, check=true)
 
 Compute MBAR weights for sampled states and for a target state [Shirts & Chodera, 2008, Eq. 13](https://doi.org/10.1063/1.2978177).
@@ -528,7 +523,7 @@ function mbar_weights(u::AbstractMatrix,
     return W, w, logD
 end
 
-@doc """
+"""
     mbar_weights(mbar_generator::MBARInput)
 
 High-level MBAR wrapper that computes free energies and reweighting weights from a
@@ -582,7 +577,7 @@ struct PMF{C, W, E, F, FE, SF, SFE, P, VP}
     var_p::VP
 end
 
-@doc """
+"""
     pmf_with_uncertainty(u, u_target, f, N_counts, logN, R_k;
                          shifts=nothing, nbins=nothing, edges=nothing, kBT=nothing,
                          zero=:min, rmin=nothing, rmax=nothing)
@@ -609,9 +604,9 @@ Estimate a 1D PMF along a scalar CV and its large-sample uncertainty using MBAR
 PMF with:
  - `centers`  — the center of the histogram bins used to sample the CV
  - `widths` — the width of the histogram bins used to sample the CV
- - `edges` — the edges of the histogram bins used to sample the CV 
+ - `edges` — the edges of the histogram bins used to sample the CV
  - `F` — PMF in kBT units
- - `F_energy` — PMF in energy units, if provided 
+ - `F_energy` — PMF in energy units, if provided
  - `sigma_F` — uncertainty of the PMF in kBT units
  - `sigma_F_energy` — uncertainty of the PMF in energy units, if provided
  - `p` — probability density along the CV
@@ -796,13 +791,10 @@ function pmf_with_uncertainty(u::AbstractMatrix, u_target::AbstractVector,
     F_energy       = isnothing(kBT) ? nothing : (F .* kBT)
     sigma_F_energy = isnothing(kBT) ? nothing : (sigma_F .* kBT)
 
-    return PMF(centers, widths, edges,
-               F, F_energy, 
-               sigma_F, sigma_F_energy,
-               p, var_p)
+    return PMF(centers, widths, edges, F, F_energy, sigma_F, sigma_F_energy, p, var_p)
 end
 
-@doc """
+"""
     pmf_with_uncertainty(coords_k, boundaries_k, states, target_state, CV;
                          shift=false)
 
@@ -831,9 +823,8 @@ function pmf_with_uncertainty(coords_k::AbstractVector,
 
     kBT = Float64(inv(target_state.β)) * target_state.system.energy_units
 
-    mbar_gen = assemble_mbar_inputs(coords_k, boundaries_k, states; 
-                                    target_state = target_state,
-                                    shift        = shift)
+    mbar_gen = assemble_mbar_inputs(coords_k, boundaries_k, states;
+                                    target_state=target_state, shift=shift)
 
     u        = mbar_gen.u
     u_target = mbar_gen.u_target
@@ -846,5 +837,4 @@ function pmf_with_uncertainty(coords_k::AbstractVector,
     pmf = pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV; shifts = shifts, kBT = kBT)
 
     return pmf
-    
 end

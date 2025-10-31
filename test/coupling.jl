@@ -215,7 +215,7 @@ end
 
         @test 0.75u"bar" < mean(P_xy) < 1.25u"bar" # Corrected for tensorial pressure
         @test 0.75u"bar" < mean(P_z)  < 1.25u"bar" # Corrected for tensorial pressure
-        
+
         @test std(P_xy) < 0.5u"bar"
         @test std(P_z)  < 0.5u"bar"
 

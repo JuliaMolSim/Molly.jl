@@ -270,7 +270,7 @@ end
                 r_jl = vector(coords[j], coords[l], boundary) # r_l - r_j
                 @inbounds for alpha in 1:D
                     Atomix.@atomic virial[alpha, dim] += (ustrip(r_ji[alpha]) * ustrip(fs.f1[dim]) +
-                                                          ustrip(r_jk[alpha]) * ustrip(fs.f3[dim]) +  
+                                                          ustrip(r_jk[alpha]) * ustrip(fs.f3[dim]) +
                                                           ustrip(r_jl[alpha]) * ustrip(fs.f4[dim]))
                 end
             end

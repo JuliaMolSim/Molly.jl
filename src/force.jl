@@ -151,7 +151,7 @@ function init_buffers!(sys::System{D}, n_threads) where D
     # Enzyme errors with nothing when n_threads is 1
     n_copies = (n_threads == 1 ? 0 : n_threads)
     fs_chunks  = [similar(fs_nounits) for _ in 1:n_copies]
-    vir_chunks = [similar(vir_nounits) for _ in 1:n_copies] 
+    vir_chunks = [similar(vir_nounits) for _ in 1:n_copies]
     return BuffersCPU(fs_nounits, fs_chunks, vir, vir_nounits, vir_chunks, kin, pres)
 end
 
@@ -200,12 +200,10 @@ function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
     end
-    return BuffersGPU(fs_mat, pe_vec_noun,
-                      virial, virial_nu, virial_row_1, virial_row_2, virial_row_3, 
-                      kin, pres, 
-                      box_mins, box_maxs, 
-                      morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, 
-                      compressed_eligible, compressed_special)
+    return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, virial_row_1, virial_row_2,
+                      virial_row_3, kin, pres, box_mins, box_maxs, morton_seq,
+                      morton_seq_buffer_1, morton_seq_buffer_2, compressed_eligible,
+                      compressed_special)
 end
 
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
