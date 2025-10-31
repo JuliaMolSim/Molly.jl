@@ -127,6 +127,7 @@ if GROUP in ("All", "NotGradients")
     include("minimization.jl")
     include("agent.jl")
     include("simulation.jl")
+    include("coupling.jl")
     include("constraints.jl")
 end
 
