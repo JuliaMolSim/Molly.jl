@@ -71,9 +71,6 @@ function load_replacements(; xmlpath = nothing,
 
     if isnothing(resname_replacements)
         resname_replacements = Dict{String,String}()
-    end
-    
-    if isnothing(atomname_replacements)
         atomname_replacements = Dict{String,Dict{String,String}}()
     end
 
@@ -263,22 +260,47 @@ function create_bonds(top, canon_sys, standard_bonds,
 
 end
 
-function atom_name_by_index(atom_idx, canon_system)
-
+function atom_name_from_index(atom_idx, canon_system)
     for (chain, resids) in canon_system
-
         for (res_id, rgraph) in resids
-
             if !(atom_idx ∈ rgraph.atom_inds)
                 continue
             else
                 local_idx = findfirst(i -> i == atom_idx, rgraph.atom_inds)
                 return rgraph.atom_names[local_idx]
             end
-
         end
     end
+end
 
+function residue_from_atom_idx(atom_idx, canon_system)
+    for (chain, resids) in canon_system
+        for (res_id, rgraph) in resids
+            if atom_idx ∈ rgraph.atom_inds
+                return rgraph
+            end
+        end
+    end
+end
+
+function resnum_from_atom_idx(atom_idx, canon_system)
+    for (chain, resids) in canon_system
+        for (res_id, rgraph) in resids
+            if atom_idx ∈ rgraph.atom_inds
+                return res_id
+            end
+        end
+    end
+end
+
+function chain_from_atom_idx(atom_idx, canon_system)
+    for (chain, resids) in canon_system
+        for (res_id, rgraph) in resids
+            if atom_idx ∈ rgraph.atom_inds
+                return chain
+            end
+        end
+    end
 end
 
 function create_disulfide_bonds(coords, boundary, canon_system, bonds)
@@ -290,8 +312,8 @@ function create_disulfide_bonds(coords, boundary, canon_system, bonds)
     
     function is_disulfide_bonded(atom_idx)
         for b in bonds
-            atom_name_i = atom_name_by_index(b[1], canon_system)
-            atom_name_j = atom_name_by_index(b[2], canon_system)
+            atom_name_i = atom_name_from_index(b[1], canon_system)
+            atom_name_j = atom_name_from_index(b[2], canon_system)
             if atom_idx in b && atom_name_i == "SG" && atom_name_j == "SG"
                 return true
             end
@@ -344,18 +366,6 @@ function create_disulfide_bonds(coords, boundary, canon_system, bonds)
 
 end
 
-function residue_from_atom_idx(atom_idx, canon_system)
-
-    for (chain, resids) in canon_system
-        for (res_id, rgraph) in resids
-            if atom_idx ∈ rgraph.atom_inds
-                return rgraph
-            end
-        end
-    end
-
-end
-
 function read_connect_bonds(pdbfile, bonds, canon_system)
     filtered = String[]
     open(pdbfile) do io
@@ -364,11 +374,11 @@ function read_connect_bonds(pdbfile, bonds, canon_system)
                 push!(filtered, line)
                 fields = split(line)[2:end]
                 fromAtom = parse(Int, fields[1])
-                atom_name_i = atom_name_by_index(fromAtom, canon_system)
+                atom_name_i = atom_name_from_index(fromAtom, canon_system)
                 res_i       = residue_from_atom_idx(fromAtom, canon_system)
                 for toAtom in fields[2:end]
                     toAtom = parse(Int, toAtom)
-                    atom_name_j = atom_name_by_index(toAtom, canon_system)
+                    atom_name_j = atom_name_from_index(toAtom, canon_system)
                     res_j       = residue_from_atom_idx(toAtom, canon_system)
                     pair = fromAtom < toAtom ? (fromAtom, toAtom) : (toAtom, fromAtom)
                     if !(pair ∈ bonds)

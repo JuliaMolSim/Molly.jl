@@ -170,9 +170,15 @@ struct MolecularForceField{T, M, D, E, K}
     weight_14_coulomb::T
     weight_14_lj::T
     attributes_from_residue::Vector{String}
+    residue_name_replacements::Dict{String,String}
+    atom_name_replacements::Dict{String,Dict{String,String}}
+    standard_bonds::Dict{String,Vector{Tuple{String, String}}}
 end
 
-function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=true)
+function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=true, 
+                             custom_residue_templates = nothing, 
+                             custom_renaming_scheme   = nothing)
+
     atom_types = Dict{String, AtomType}()
     bond_types = Dict{Tuple{String, String}, HarmonicBond}()
     angle_types = Dict{Tuple{String, String, String}, HarmonicAngle}()
@@ -183,6 +189,19 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     attributes_from_residue = String[]
     residues  = Dict{String,ResidueTemplate}()
     type_info = Dict{String,Tuple{String,String}}()
+
+    resname_replacements, atomname_replacements = load_replacements()
+    standard_bonds = load_bond_definitions()
+
+    if !isnothing(custom_renaming_scheme)
+        resname_replacements, atomname_replacements = load_replacements(; xmlpath = custom_residue_templates,
+                                                                          resname_replacements  = resname_replacements,
+                                                                          atomname_replacements = atomname_replacements)
+    end
+    if !isnothing(custom_residue_templates)
+        standard_bonds = load_bond_definitions(; xmlpath = custom_residue_templates,
+                                                 standard_bonds = standard_bonds)
+    end
 
     for ff_file in ff_files
         ff_xml = parsexml(read(ff_file))
@@ -372,7 +391,8 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
         M, D, E, K = T, T, T, T
     end
     return MolecularForceField{T, M, D, E, K}(atom_types, residues, bond_types, angle_types,
-            torsion_types, torsion_order, weight_14_coulomb, weight_14_lj, attributes_from_residue)
+            torsion_types, torsion_order, weight_14_coulomb, weight_14_lj, attributes_from_residue,
+            resname_replacements, atomname_replacements, standard_bonds)
 end
 
 function MolecularForceField(ff_files::AbstractString...; kwargs...)
@@ -562,8 +582,9 @@ function System(coord_file::AbstractString,
     dist_neighbors = dist_cutoff + dist_buffer
     T = typeof(force_field.weight_14_coulomb)
 
-    resname_replacements, atomname_replacements = load_replacements()
-    standard_bonds = load_bond_definitions()
+    resname_replacements  = force_field.residue_name_replacements
+    atomname_replacements = force_field.atom_name_replacements
+    standard_bonds        = force_field.standard_bonds
 
     #return resname_replacements, atomname_replacements
 
@@ -596,7 +617,7 @@ function System(coord_file::AbstractString,
     template_names       = keys(force_field.residues)
     # ---- Match each residue graph to a template and assign atom types/charges ----
     atom_type_of = Vector{String}(undef, n_atoms)
-    charge_of    = Vector{eltype(force_field.atom_types[first(keys(force_field.atom_types))].charge)}(undef, n_atoms)
+    charge_of    = Vector{T}(undef, n_atoms)
     element_of   = Vector{String}(undef, n_atoms)  # for AtomData
 
     use_charge_from_residue = "charge" in force_field.attributes_from_residue
@@ -676,18 +697,22 @@ function System(coord_file::AbstractString,
         if (units && at.σ < zero(T)u"nm") || (!units && at.σ < zero(T))
             error("atom $ai type $atype has unset σ or ϵ")
         end
-        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=charge_of[ai], σ=at.σ, ϵ=at.ϵ))
+        if use_charge_from_residue
+            chrge = charge_of[ai]
+        else
+            chrge = force_field.atom_types[ai]
+        end
+        push!(atoms_abst, Atom(index=ai, mass=at.mass, charge=chrge, σ=at.σ, ϵ=at.ϵ))
 
         # minimal AtomData
-        res = chemfiles_residue_for_atom(top, ai-1)
-        chain_id = ("chainname" in Chemfiles.list_properties(res)) ? Chemfiles.property(res, "chainname") : "A"
-        hetero = ("is_standard_pdb" in Chemfiles.list_properties(res)) ? !Chemfiles.property(res,"is_standard_pdb") : false
-        push!(atoms_data, AtomData(atom_type=atype, atom_name=chemfiles_name(top, ai-1),
-                                   res_number=Chemfiles.id(res), res_name=Chemfiles.name(res),
-                                   chain_id=chain_id, element=element_of[ai], hetero_atom=hetero))
+        res     = residue_from_atom_idx(ai, canonical_system)
+        res_cfl = chemfiles_residue_for_atom(top, ai - 1)
+        hetero = ("is_standard_pdb" in Chemfiles.list_properties(res_cfl)) ? !Chemfiles.property(res_cfl,"is_standard_pdb") : false
+        push!(atoms_data, AtomData(atom_type=atype, atom_name=atom_name_from_index(ai, canonical_system),
+                                   res_number=resnum_from_atom_idx(ai, canonical_system), res_name=res.res_name,
+                                   chain_id=chain_from_atom_idx(ai, canonical_system), element=element_of[ai], hetero_atom=hetero))
         eligible[ai, ai] = false
     end
-    atoms = to_device([atoms_abst...], AT)
 
     # Bonds
     for (a1, a2) in top_bonds
@@ -699,7 +724,8 @@ function System(coord_file::AbstractString,
             bt = force_field.bond_types[(t2,t1)]; push!(bonds_il.types, atom_types_to_string(t2,t1))
         end
         push!(bonds_il.inters, HarmonicBond(k=bt.k, r0=bt.r0))
-        eligible[a1,a2] = false; eligible[a2,a1] = false
+        eligible[a1,a2] = false
+        eligible[a2,a1] = false
     end
 
     # Angles
@@ -712,7 +738,8 @@ function System(coord_file::AbstractString,
             tr = (t[3], t[2], t[1]); at = force_field.angle_types[tr]; push!(angles_il.types, atom_types_to_string(tr...))
         end
         push!(angles_il.inters, HarmonicAngle(k=at.k, θ0=at.θ0))
-        eligible[i,k] = false; eligible[k,i] = false
+        eligible[i,k] = false
+        eligible[k,i] = false
     end
 
     # Proper torsions
