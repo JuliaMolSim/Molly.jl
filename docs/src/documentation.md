@@ -1135,7 +1135,7 @@ Molly.needs_virial(c::MyCoupler) = Inf
 ```
 The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
 Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods.
-Contributions from constraints are ignored.
+Contributions from constraints and implicit solvent methods are ignored.
 As described previously, custom general interactions should implement virial calculation if required.
 
 ## Loggers

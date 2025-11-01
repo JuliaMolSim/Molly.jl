@@ -51,8 +51,6 @@ Features not yet implemented include:
 - Simulators such as metadynamics.
 - Quantum mechanical modelling.
 - Domain decomposition algorithms.
-- Alchemical free energy calculations.
-- API stability.
 
 ## Installation
 

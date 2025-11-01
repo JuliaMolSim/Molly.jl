@@ -681,7 +681,7 @@ function apply_coupling!(sys::System{D},
 end
 
 @doc raw"""
-    MonteCarloBarostat(pressure, temperature, boundary; coupling_type = :isotropic,
+    MonteCarloBarostat(pressure, temperature, boundary; coupling_type=:isotropic,
                        n_steps=30, n_iterations=1,
                        scale_factor=0.01, scale_increment=1.1, max_volume_frac=0.3,
                        trial_find_neighbors=false)
