@@ -23,6 +23,7 @@ EnzymeRules.inactive_type(::Type{DistanceNeighborFinder}) = nothing
 EnzymeRules.inactive(::typeof(visualize), args...) = nothing
 EnzymeRules.inactive(::typeof(place_atoms), args...) = nothing
 EnzymeRules.inactive(::typeof(place_diatomics), args...) = nothing
+EnzymeRules.inactive(::typeof(read_frame!), args...) = nothing
 
 # Differentiable PME
 
