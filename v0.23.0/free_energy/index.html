@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Free energy · Molly.jl</title><meta name="title" content="Free energy · Molly.jl"/><meta property="og:title" content="Free energy · Molly.jl"/><meta property="twitter:title" content="Free energy · Molly.jl"/><meta name="description" content="Documentation for Molly.jl."/><meta property="og:description" content="Documentation for Molly.jl."/><meta property="twitter:description" content="Documentation for Molly.jl."/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><a class="docs-logo" href="../"><img src="../assets/logo.svg" alt="Molly.jl logo"/></a><div class="docs-package-name"><span class="docs-autofit"><a href="../">Molly.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li><a class="tocitem" href="../documentation/">Documentation</a></li><li><a class="tocitem" href="../differentiable/">Differentiable simulation</a></li><li class="is-active"><a class="tocitem" href>Free energy</a><ul class="internal"><li><a class="tocitem" href="#A-brief-introduction"><span>A brief introduction</span></a></li><li><a class="tocitem" href="#How-to-run-MBAR-with-Molly"><span>How to run MBAR with Molly</span></a></li></ul></li><li><a class="tocitem" href="../examples/">Examples</a></li><li><a class="tocitem" href="../exercises/">Exercises</a></li><li><a class="tocitem" href="../publications/">Publications</a></li><li><a class="tocitem" href="../related/">Related software</a></li><li><a class="tocitem" href="../development/">Development</a></li><li><a class="tocitem" href="../api/">API</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Free energy</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Free energy</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/JuliaMolSim/Molly.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/JuliaMolSim/Molly.jl/blob/master/docs/src/free_energy.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="Free-energies-with-MBAR"><a class="docs-heading-anchor" href="#Free-energies-with-MBAR">Free energies with MBAR</a><a id="Free-energies-with-MBAR-1"></a><a class="docs-heading-anchor-permalink" href="#Free-energies-with-MBAR" title="Permalink"></a></h1><h2 id="A-brief-introduction"><a class="docs-heading-anchor" href="#A-brief-introduction">A brief introduction</a><a id="A-brief-introduction-1"></a><a class="docs-heading-anchor-permalink" href="#A-brief-introduction" title="Permalink"></a></h2><p>One of the most relevant uses of molecular dynamics (MD) is the estimation of free energy (FE) changes along a given reaction coordinate. One may be interested in, for example, how favorable the binding of a ligand to a target protein is; or which conformer of a molecule is the most stable. These are the kind of questions that can be addressed with FE techniques.</p><p>Through the years, researchers have developed a collection of techniques to solve these problems. As early as 1954, Robert W Zwanzig introduced the <a href="https://doi.org/10.1063/1.1740409">FE perturbation</a> method, leading to the Zwanzig equation:</p><p class="math-container">\[\Delta F_{A \rightarrow B} = F_B - F_A = k_B T \ln \left \langle \exp\left( - \frac{E_B - E_A}{k_B T} \right) \right \rangle _A\]</p><p>This states that, for a given system, the change of FE in going from state <em>A</em> to state <em>B</em> is equal to the FE difference between the two states and, more importantly, directly related to the total energy difference of states <em>A</em> and <em>B</em> through Botzmann statistics. In this equation, the angle brackets represent the expected value of the Boltzmann-weighted energy difference of the two states, but sampled only from conformations extracted from state <em>A</em>. This implies that, even when sampling only one state, we are able to infer information from the other, given that some niceness criteria is met, i.e. the energy difference between the two states is small enough. This reasoning about unsampled states by re-evaluating sampled states is known as reweighting.</p><p>A little over 20 years after Zwanzig introduced FE perturbation, Charles H Bennett expanded on this and developed the <a href="https://doi.org/10.1016/0021-9991(76)90078-4">Bennett Acceptance Ratio</a> (BAR). Bennett built directly upon the statistical foundation of the Zwanzig equation, and recognized that both forward and reverse energy differences between two states contain complementary information; that is, while Zwanzig’s formulation reweights configurations from a single ensemble to estimate the free energy of another, BAR symmetrizes this process. It combines samples from both states and determines the free energy shift <span>$\Delta F$</span> that makes each ensemble equally probable under some weighting derived from Boltzmann statistics. In this sense, BAR can be viewed as a generalization of Zwanzig’s exponential averaging, reducing to the Zwanzig equation when only one direction of sampling is available. However, it is because of this that BAR still suffers from the same issue as Zwanzig&#39;s reweighting method: the energy difference between states <span>$A$</span> and <span>$B$</span> must be small enough such that there is sufficient overlap between their configurational spaces, otherwise the necessary statistics for FE estimation will be very poor and intermediate steps between <span>$A$</span> and <span>$B$</span> are needed.</p><p>Thus, in 2008 Michael R Shirts and John D Chodera introduced the <a href="https://doi.org/10.1063/1.2978177">Multistate Bennett Acceptance Ratio</a> (MBAR) method. MBAR expands on BAR by instead of just using two states <em>A</em> and <em>B</em>, considering a collection of <em>k</em> <span>$\in$</span> <em>K</em> different thermodynamic states. The only thing that is expected from these states is that they must be sampled from equivalent thermodynamic ensembles, this is, all states should be NVT or NPT, etc.; but other than that, the specific Hamiltonian for each evaluated state can differ in an arbitrary manner. Then, a series of <span>$n_k$</span> samples are drawn from each thermodynamic state, until a total of <span>$N = \sum_{k}^{K} n_k$</span> samples are obtained. By evaluating each sample <span>$n \in N$</span> with each Hamiltonian <span>$\mathcal{H}_{k}; k \in K$</span>, one obtains a matrix of reduced potentials <span>$u_{nk} = \beta_{k} \left[ E_{k}(n)+p_{k}V(n) \right]$</span>. MBAR then solves a set of self-consistent equations that yield the relative free energies <span>$f_k$</span> of all states simultaneously, using every sample across all simulations to estimate each state’s free energy in a statistically optimal way. In this sense, MBAR generalizes BAR to an arbitrary number of thermodynamic states and provides the maximum-likelihood, minimum-variance estimator for free energies and ensemble averages, efficiently combining data from overlapping simulations into a unified framework. MBAR also allows the reweighting of any observable to a completely unsampled thermodynamic state. Because this themodynamic state is compared to a collection of sampled states, instead of just one, the conformational space between states is much more likely to overlap, therefore increasing the probability of the reweighting to be meaningful.</p><h2 id="How-to-run-MBAR-with-Molly"><a class="docs-heading-anchor" href="#How-to-run-MBAR-with-Molly">How to run MBAR with Molly</a><a id="How-to-run-MBAR-with-Molly-1"></a><a class="docs-heading-anchor-permalink" href="#How-to-run-MBAR-with-Molly" title="Permalink"></a></h2><h3 id="Defining-the-restraint-interactions"><a class="docs-heading-anchor" href="#Defining-the-restraint-interactions">Defining the restraint interactions</a><a id="Defining-the-restraint-interactions-1"></a><a class="docs-heading-anchor-permalink" href="#Defining-the-restraint-interactions" title="Permalink"></a></h3><p>In this example, we will use MBAR to calculate the Potential of Mean Force (PMF) along the central torsion of an alanine dipeptide molecule. In order to do that, we will have to run a series of independent biased simulations, where each will apply an umbrella potential to restrain the peptide torsion fixed around a given angle. We will first define the restraint interaction:</p><p><img src="../images/dipeptide.png" alt="Alanine dipeptide and the relevant torsion"/></p><pre><code class="language-julia hljs"># restraints.jl file
+
+using LinearAlgebra
+
+struct DihedralRestraint{A, K}
+    ϕ0::A # Radians, dimensionless number
+    Δϕ::A # Radians, dimensionless number
+    k::K  # Energy (e.g. kJ/mol)
+end
+
+# Store angles as plain Float64 radians, k should be energy
+function DihedralRestraint(ϕ0::Unitful.AbstractQuantity, Δϕ::Unitful.AbstractQuantity, k)
+    ϕ0r = ustrip(u&quot;rad&quot;, ϕ0)
+    Δϕr = ustrip(u&quot;rad&quot;, Δϕ)
+    return DihedralRestraint(ϕ0r, Δϕr, k)
+end</code></pre><p>Then, we have to define the potential energy and force functions that Molly will call when it encounters such an interaction. We will make use of the machinery present in Molly and define the restraint as a specific interaction, returning the force as a <a href="../api/#Molly.SpecificForce4Atoms"><code>SpecificForce4Atoms</code></a>. The functional form used as the bias potential is a quadratic flat bottom angle restraint, using:</p><p class="math-container">\[\varphi^{\prime} = (\varphi - \varphi^0)\ \%\ 2\pi\]</p><p class="math-container">\[V\left( \varphi^{\prime} \right) = \begin{cases}
+    \frac{1}{2} \cdot k \cdot \left( \varphi^{\prime} - \Delta\varphi \right)^2 &amp; \mathrm{for} \ \lvert \varphi^{\prime} \rvert \ge \Delta\varphi \\
+    0 &amp; \mathrm{for} \ \lvert \varphi^{\prime} \rvert \lt \Delta\varphi
+\end{cases}\]</p><p>Where <span>$\varphi$</span> and <span>$\varphi^0$</span> are the current and reference dihedral angles, respectively; <span>$\Delta\varphi$</span> is the width of the flat bottom of the potential, and <span>$k$</span> is the energy constant associated with the interaction. The analytic derivation of the force acting on each atom defining the dihedral, given the previous potential, is quite involved and beyond the scope of this tutorial. We do provide here, however, the Julia code used to define the potential energy and force:</p><pre><code class="language-julia hljs"># restraints.jl file
+
+# Robust geometry with clamped inverses
+function _dihedral_geom(ci, cj, ck, cl, boundary)
+    b1 = vector(cj, ci, boundary)
+    b2 = vector(cj, ck, boundary)
+    b3 = vector(ck, cl, boundary)
+
+    n1 = cross(b1, b2)
+    n2 = cross(b2, b3)
+
+    b2n  = norm(b2)
+    n1n2 = dot(n1, n1)
+    n2n2 = dot(n2, n2)
+
+    # Angle via atan2
+    y = b2n * dot(b1, n2)
+    x = dot(n1, n2)
+    ϕ = atan(y, x)
+
+    return ϕ, b1, b2, b3, n1, n2, b2n, n1n2, n2n2, x, y
+end
+
+_wrap_pi(x::Real) = (x + π) % (2π) - π # Take into account periodicity
+_rad(x::Real) = Float64(x)
+_rad(x) = Float64(ustrip(u&quot;rad&quot;, x))
+
+function Molly.potential_energy(inter::DihedralRestraint{FT, K},
+                                ci, cj, ck, cl, boundary, args...) where {FT, K}
+    b1 = vector(cj, ci, boundary)
+    b2 = vector(cj, ck, boundary)
+    b3 = vector(ck, cl, boundary)
+    n1 = cross(b1, b2)
+    n2 = cross(b2, b3)
+
+    b2n  = norm(b2)
+    n1n2 = dot(n1, n1)
+    n2n2 = dot(n2, n2)
+
+    y = b2n * dot(b1, n2)
+    x = dot(n1, n2)
+    ϕ = atan(y, x)
+
+    # Scale-aware tolerances
+    Ls = max(ustrip(norm(b1) + norm(b2) + norm(b3)), 1.0) * oneunit(norm(b1))
+    tol_b  = 1e-12 * Ls
+    tol_xy = 1e-24 * (Ls^4)
+
+    if !isfinite(ϕ) || b2n ≤ tol_b || abs(x) ≤ tol_xy || abs(y) ≤ tol_xy ||
+                    sqrt(n1n2) ≤ tol_b^2 || sqrt(n2n2) ≤ tol_b^2
+        return zero(inter.k)
+    end
+
+    ϕ0 = _rad(inter.ϕ0)
+    Δ  = _rad(inter.Δϕ)
+    d  = _wrap_pi(ϕ - ϕ0)
+    ad = abs(d)
+
+    if ad ≤ Δ
+        return zero(inter.k)
+    else
+        diff = ad - Δ
+        return FT(inter.k * (diff * diff) / 2)
+    end
+end
+
+function Molly.force(inter::DihedralRestraint{FT, K},
+                     ci, cj, ck, cl, boundary, args...) where {FT, K}
+    b1 = vector(cj, ci, boundary)
+    b2 = vector(cj, ck, boundary)
+    b3 = vector(ck, cl, boundary)
+    n1 = cross(b1, b2)
+    n2 = cross(b2, b3)
+
+    b2n  = norm(b2)
+    n1n2 = dot(n1, n1)
+    n2n2 = dot(n2, n2)
+
+    y = b2n * dot(b1, n2)
+    x = dot(n1, n2)
+    ϕ = atan(y, x)
+
+    # Zero force with correct units (energy/length)
+    F0 = FT(zero(inter.k) / oneunit(norm(b1)))
+    Fz = SVector(F0, F0, F0)
+
+    # Tolerances
+    Ls = max(ustrip(norm(b1) + norm(b2) + norm(b3)), 1.0) * oneunit(norm(b1))
+    tol_b  = 1e-12 * Ls
+    tol_xy = 1e-24 * (Ls^4)
+
+    if !isfinite(ϕ) || b2n ≤ tol_b || abs(x) ≤ tol_xy || abs(y) ≤ tol_xy ||
+                    sqrt(n1n2) ≤ tol_b^2 || sqrt(n2n2) ≤ tol_b^2
+        return SpecificForce4Atoms(Fz, Fz, Fz, Fz)
+    end
+
+    ϕ0 = _rad(inter.ϕ0)
+    Δ  = _rad(inter.Δϕ)
+    d  = _wrap_pi(ϕ - ϕ0)
+    ad = abs(d)
+    if ad ≤ Δ
+        return SpecificForce4Atoms(Fz, Fz, Fz, Fz)
+    end
+
+    # dU/dϕ as energy
+    dU_dϕ = inter.k * (ad - Δ) * (d ≥ 0 ? 1.0 : -1.0)
+
+    # Safe inverses
+    εL4 = 1e-32 * (Ls^4)
+    εL2 = 1e-32 * (Ls^2)
+    inv_n1  = 1 / max(n1n2, εL4)
+    inv_n2  = 1 / max(n2n2, εL4)
+    b22     = dot(b2, b2)
+    inv_b22 = 1 / max(b22,  εL2)
+
+    # Gradients (all ~ 1/L)
+    g1 = (b2n * inv_n1) * n1
+    g4 = (b2n * inv_n2) * n2
+    s1 = dot(b1, b2) * inv_b22
+    s3 = dot(b3, b2) * inv_b22
+    g2 = -g1 + s1*g1 - s3*g4
+    g3 = -g4 + s3*g4 - s1*g1
+
+    F1 = -(dU_dϕ) * g1
+    F2 = -(dU_dϕ) * g2
+    F3 = -(dU_dϕ) * g3
+    F4 = -(dU_dϕ) * g4
+    return SpecificForce4Atoms(FT.(F1), FT.(F2), FT.(F3), FT.(F4))
+end</code></pre><h3 id="Setting-up-simulations"><a class="docs-heading-anchor" href="#Setting-up-simulations">Setting up simulations</a><a id="Setting-up-simulations-1"></a><a class="docs-heading-anchor-permalink" href="#Setting-up-simulations" title="Permalink"></a></h3><p>With this in hand, we are ready to set up the individual biased simulations. We will explore a full torsion around the dihedral, i.e. spanning 360 degrees. We will do so in 60 independent biased simulations, so 360 degrees / 60 simulations = 6 degrees increments per simulation. The system is quite well-behaved, so we can get away with using Float32 precision on GPU. We will use a time step of 1 fs to integrate the equations of motion, and will run the simulations in the NPT ensemble at 310 K and 1 bar of pressure.</p><pre><code class="language-julia hljs"># pulling.jl
+
+using Molly
+using CUDA
+
+include(&quot;restraints.jl&quot;)
+
+FT     = Float32               # Float precision
+AT     = CuArray               # Array type, run simulations on CUDA GPU
+N_WIN  = 60                    # Number of umbrella windows to generate
+dR     = FT(6)u&quot;deg&quot;           # Increment in CV (torsion angle) in each consecutive window
+ΔR     = FT(3)u&quot;deg&quot;           # Width of flat bottom potential
+K_bias = FT(250)u&quot;kJ * mol^-1&quot; # Energy constant for restraint potential
+Δt     = FT(1)u&quot;fs&quot;            # Simulation timestep
+T0     = FT(310)u&quot;K&quot;           # Simulation temperature
+P0     = FT(1)u&quot;bar&quot;           # Simulation pessure</code></pre><p>One must take into account that the simulations will start from an initial (ideally equilibrated) configuration, and therefore an arbitrarirly imposed restraint may be too far away from the equilibrium distribution of the CV to be biased, causing numerical issues. Thus, we will begin our setup by gently pulling the system along the CV in a series of short, sequential simulations. How short? The answer to that question depends on the system to be simulated; the pulling simulations should be long enough so that the system has time to move towards and stabilize around the imposed biased equilibrium, but also sufficiently short as to not waste time in this initial sequential part, as once each umbrella window is equilibrated it can run in parallel with the rest. For this simple study case, equilibrating each window for 0.5 ns is enough. We can define:</p><pre><code class="language-julia hljs"># pulling.jl
+
+tu      = unit(Δt)                   # Time units used for timestep
+max_t   = uconvert(u, FT(0.5)u&quot;ns&quot;)  # Simulation time in appropriate time units
+N_STEPS = Int(floor(max_t / Δt))     # Number of simulation steps</code></pre><p>We can now load the initial configuration into a <a href="../api/#Molly.System"><code>System</code></a>:</p><pre><code class="language-julia hljs"># pulling.jl
+
+data_dir = joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;)
+ff_dir   = joinpath(data_dir, &quot;force_fields&quot;)
+
+ff = MolecularForceField(
+    FT,
+    joinpath.(ff_dir, [&quot;ff99SBildn.xml&quot;, &quot;tip3p_standard.xml&quot;, &quot;his.xml&quot;])...;
+    units=true,
+)
+
+sys_0 = System(
+    joinpath(data_dir, &quot;dipeptide_equil.pdb&quot;),
+    ff;
+    array_type          = AT,
+    rename_terminal_res = false,
+    nonbonded_method    = :cutoff,
+)
+
+random_velocities!(sys_0, T0) # Initialize velocities from M-B distribution at target temperature</code></pre><p>Now, before starting to produce the pulling simulations, we need to know what is the value of the CV (remember, the torsion angle) for an equilibrated system. We can make use of the functions defined in <code>restraints.jl</code>. Remember to take note of this value, it will be important later!</p><pre><code class="language-julia hljs"># pulling.jl
+
+# Indices of the atoms defining the dihedral
+i = 17
+j = 15
+k = 9
+l = 7
+
+coords_cpu = Molly.from_device(sys_0.coords)
+eq_θ,      = _dihedral_geom(coords_cpu[i], coords_cpu[j], coords_cpu[k], coords_cpu[l], sys_0.boundary)
+eq_θ       = _wrap_pi(eq_θ) # = -0.48948112328583804 rad</code></pre><p>We are getting very close to running the pulling simulations. The only remaining things to define are the coupling algorithms to keep a constant temperature and pressure, which integrator to use, and also tell Molly every how many integration steps should we write the coordinates to a trajectory file:</p><pre><code class="language-julia hljs"># pulling.jl
+
+τ_T        = FT(1)u&quot;ps&quot; # Thermostat coupling constant
+# Apply thermostat every simulation step, required for Verlet-type integrators
+thermostat = VelocityRescaleThermostat(T0, τ_T, n_steps = 1)
+
+τ_P        = FT(1)u&quot;ps&quot; # Barostat coupling constant
+# Apply barostat 10 times per τ_P, good balance of precision and computational overhead
+frac       = uconvert(tu, 0.1 * τ_P)
+n_P        = Int(floor(frac/Δt)) # The number of simulation steps
+barostat   = CRescaleBarostat(P0, τ_P; n_steps = n_P)
+
+# Create the integrator, remove COM motion every 100 steps
+vverlet    = VelocityVerlet(Δt, (thermostat, barostat,), 100)
+
+save_t     = uconvert(tu, FT(1)u&quot;ps&quot;) # Save coordinates every picosecond
+save_steps = Int(floor(save_t / Δt))  # The number of simulation steps</code></pre><p>With all of this ready, we only need to sequentially run the pulling simulations. We use the coordinates and velocities at the end of simulation n to seed the beginning of simulation n + 1:</p><pre><code class="language-julia hljs"># pulling.jl
+
+old_sys = deepcopy(sys_0) # Get a copy of the initial system
+sils    = deepcopy(sys_0.specific_inter_lists) # Get the interactions lists of the unbiased system
+for w in 1:N_WIN
+    # Calculate where is the potential well located for a given window
+    rest_θ = FT(eq_θ - (w-1) * uconvert(u&quot;rad&quot;, dR))
+    # Create the Dihedral restraint given our parameters
+    dRest = DihedralRestraint(rest_θ*u&quot;rad&quot;, uconvert(u&quot;rad&quot;, ΔR) , K_bias)
+
+    # Pack restraint into an independent interaction list
+    rest_inter = InteractionList4Atoms(
+        Molly.to_device([i], AT),
+        Molly.to_device([j], AT),
+        Molly.to_device([k], AT),
+        Molly.to_device([l], AT),
+        Molly.to_device([dRest], AT),
+    )
+
+    rest_inter = (sils..., rest_inter,) # Merge unbiased and biased into single tuple
+
+    sys_w = System(
+        deepcopy(old_sys); # Get the same layout as the unbiased system
+        specific_inter_lists=rest_inter, # Overwrite interaction list with the one containing the bias
+        loggers=(TrajectoryWriter(save_steps, &quot;./pull_$(w).dcd&quot;),),
+    )
+
+    simulate!(sys_w, vverlet, N_STEPS)
+
+    # We also write the very last structure to a pdb file
+    write_structure(&quot;./pull_$(w).pdb&quot;, sys_w)
+
+    global old_sys = sys_w # Override old system with the newly simulated one
+end</code></pre><h3 id="Running-umbrella-simulations"><a class="docs-heading-anchor" href="#Running-umbrella-simulations">Running umbrella simulations</a><a id="Running-umbrella-simulations-1"></a><a class="docs-heading-anchor-permalink" href="#Running-umbrella-simulations" title="Permalink"></a></h3><p>Once we have run the pulling, we can write a small standalone script to produce the umbrella sampling simulations. These can be run in parallel as they are independent. The simulation setup must be exactly the same used to produce the pulling, except for the amount of time the simulations will be run for. In our case, each simulation was run for a total of 50 ns:</p><pre><code class="language-julia hljs"># individual_simulation.jl
+
+using Molly
+using CUDA
+
+include(&quot;restraints.jl&quot;)
+
+SIM_N = parse(Int, ARGS[1])      # Take the umbrella index as the first argument
+
+FT     = Float32               # Float precision
+AT     = CuArray               # Array type, run simulations on CUDA GPU
+N_WIN  = 60                    # Number of umbrella windows to generate
+dR     = FT(6)u&quot;deg&quot;           # Increment in CV (torsion angle) in each consecutive window
+ΔR     = FT(3)u&quot;deg&quot;           # Width of flat bottom potential
+K_bias = FT(250)u&quot;kJ * mol^-1&quot; # Energy constant for restraint potential
+Δt     = FT(1)u&quot;fs&quot;            # Simulation timestep
+T0     = FT(310)u&quot;K&quot;           # Simulation temperature
+P0     = FT(1)u&quot;bar&quot;           # Simulation pessure
+
+data_dir = joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;)
+ff_dir = joinpath(data_dir, &quot;force_fields&quot;)
+
+ff = MolecularForceField(
+    FT,
+    joinpath.(ff_dir, [&quot;ff99SBildn.xml&quot;, &quot;tip3p_standard.xml&quot;, &quot;his.xml&quot;])...;
+    units=true,
+)
+
+sys = System(
+    joinpath(&quot;./&quot;, &quot;./pull_$(SIM_N).pdb&quot;), # Now we load the final structure for a given pull simulation
+    ff;
+    array_type          = AT,
+    rename_terminal_res = false,
+    nonbonded_method    = :cutoff,
+)
+
+random_velocities!(sys, T0)
+
+# Indices of atoms defining the dihedral
+i = 17
+j = 15
+k = 9
+l = 7
+
+eq_θ = FT(-0.48948112328583804) # We get this from the equilibrium structure
+
+tu         = unit(Δt)                 # Time units used for timestep
+max_t      = uconvert(u, FT(50)u&quot;ns&quot;) # Simulation time in appropriate time units
+N_STEPS    = Int(floor(max_t / Δt))   # Number of simulation steps
+
+τ_T        = FT(1)u&quot;ps&quot;               # Thermostat coupling constant
+thermostat = VelocityRescaleThermostat(T0, τ_T, n_steps=1) # Apply thermostat every simulation step
+
+τ_P        = FT(1)u&quot;ps&quot;               # Barostat coupling constant
+frac       = uconvert(tu, 0.1 * τ_P)  # Apply barostat 10 times per τ_P, good balance of precision and computational overhead
+n_P        = Int(floor(frac/Δt))      # To number of simulation steps
+barostat   = CRescaleBarostat(P0, τ_P; n_steps=n_P)
+
+vverlet    = VelocityVerlet(Δt, (thermostat, barostat,), 100) # Create the integrator, remove COM motion every 100 steps
+
+save_t     = uconvert(tu, FT(1)u&quot;ps&quot;)  # Save coordinates every picosecond
+save_steps = Int(floor(save_t / Δt))   # To number of simulation steps
+
+rest_θ = FT(eq_θ - (SIM_N-1) * uconvert(u&quot;rad&quot;, dR)) # The equilibrium value for the bias
+dRest  = DihedralRestraint(rest_θ*u&quot;rad&quot;, uconvert(u&quot;rad&quot;, ΔR) , K_bias) # Create interaction
+
+# Pack into interaction list
+rest_inter = InteractionList4Atoms(
+    Molly.to_device([i], AT),
+    Molly.to_device([j], AT),
+    Molly.to_device([k], AT),
+    Molly.to_device([l], AT),
+    Molly.to_device([dRest], AT),
+)
+
+sils       = deepcopy(sys.specific_inter_lists) # Unbiased
+rest_inter = (sils..., rest_inter,)             # Merge biased and unbiased
+
+sys = System(
+    deepcopy(sys); # Everything from the unbiased system
+    specific_inter_lists=rest_inter, # Overwrite specific interactions
+    loggers=(trj=TrajectoryWriter(save_steps, &quot;./umbrella_$(SIM_N).dcd&quot;),),
+)
+
+simulate!(sys, vverlet, N_STEPS)</code></pre><h3 id="Calculating-free-energies-with-MBAR"><a class="docs-heading-anchor" href="#Calculating-free-energies-with-MBAR">Calculating free energies with MBAR</a><a id="Calculating-free-energies-with-MBAR-1"></a><a class="docs-heading-anchor-permalink" href="#Calculating-free-energies-with-MBAR" title="Permalink"></a></h3><p>Once all of the individual umbrella simulations are finished, we are ready to run MBAR on the results and estimate the free energy along our reaction coordinate. Remember from the first section of this tutorial that the MBAR equations are solved by evaluating every generated conformation with every used Hamiltonian. It follows, then, that we will first have to set up an array of <a href="../api/#Molly.System"><code>System</code></a> structs that represent each Hamiltonian. Moreover, we will be reading data from trajectories, so those Systems will actually be wrapped inside <a href="../api/#Molly.EnsembleSystem"><code>EnsembleSystem</code></a> structs, which allow IO operations from trajectory files into data structures usable by Molly.</p><p>We start by defining variables that will be shared by all thermodynamic states. Notice how many things are shared with the parameters used to produce the simulations!</p><pre><code class="language-julia hljs"># MBAR.jl
+
+using Molly
+using CUDA
+
+include(&quot;restraints.jl&quot;)
+
+AT = CuArray
+FT = Float32
+
+# Bias parameters
+dR     = FT(6)u&quot;deg&quot;           # Increment of CV in each umbrella window
+ΔR     = FT(3)u&quot;deg&quot;           # Width for flat bottom potential
+K_bias = FT(250)u&quot;kJ * mol^-1&quot; # Force used in the restraint
+
+temp = FT(310)u&quot;K&quot;
+pres = FT(1)u&quot;bar&quot;
+
+data_dir = joinpath(dirname(pathof(Molly)), &quot;..&quot;, &quot;data&quot;)
+ff_dir = joinpath(data_dir, &quot;force_fields&quot;)
+
+trajs_dir = &quot;./&quot; # Or wherever you have saved the umbrella simulations
+
+ff = MolecularForceField(
+    FT,
+    joinpath.(ff_dir, [&quot;ff99SBildn.xml&quot;, &quot;tip3p_standard.xml&quot;, &quot;his.xml&quot;])...;
+    units=true,
+)
+
+sys_nobias = System(
+    joinpath(data_dir, &quot;./dipeptide_equil.pdb&quot;),
+    ff;
+    array_type          = AT,
+    rename_terminal_res = false,
+    nonbonded_method    = :cutoff,
+)
+
+# Atom indices defining dihedral
+i = 17
+j = 15
+k = 9
+l = 7
+
+eq_θ  = FT(-0.48948112328583804) # We get this from the equilibrium structure
+
+N_TRJ       = 60 # The number of umbrella simulations produced
+TRJ_SYSTEMS = Vector{EnsembleSystem}(undef, N_TRJ)
+
+Threads.@threads for trj_n in 1:N_TRJ
+    traj_path = joinpath(trajs_dir, &quot;umbrella_$(trj_n).dcd&quot;)
+
+    # Note that the restraint and specific interactions list must be created
+    # in exactly the same way as for the umbrella simulations, we need exactly
+    # the same Hamiltonian
+    rest_θ = FT(eq_θ - (trj_n-1) * uconvert(u&quot;rad&quot;, dR))
+    dRest = DihedralRestraint(rest_θ*u&quot;rad&quot;, uconvert(u&quot;rad&quot;, ΔR) , K_bias)
+
+    rest_inter = InteractionList4Atoms(
+        Molly.to_device([i], AT),
+        Molly.to_device([j], AT),
+        Molly.to_device([k], AT),
+        Molly.to_device([l], AT),
+        Molly.to_device([dRest], AT),
+    )
+
+    sils = deepcopy(sys_nobias.specific_inter_lists)
+
+    rest_sils = (sils..., rest_inter,)
+    sys_rest = System(sys_nobias; specific_inter_lists=rest_sils)
+
+    # Store in struct that allows reading trajectories
+    sys_trj = EnsembleSystem(sys_rest, traj_path)
+
+    TRJ_SYSTEMS[trj_n] = sys_trj
+end</code></pre><p>We now have a vector of structs that represent each system and its trajectory. The next step is to read the trajectories and sample the relevant magnitudes to solve MBAR and get our PMF. We will need the coordinates, the system boundaries (needed to calculate the volume for the <span>$pV$</span> terms of the Hamiltonian, as we have run the simulations in the NPT ensemble) and, of course, the CV of interest. Note that MBAR assumes statistical independence of samples, so the selected conformations must be subsampled from decorrelated states. Molly does provide the functionality to estimate the statistical inefficiency of a given timeseries and subsequent subsampling.</p><pre><code class="language-julia hljs"># MBAR.jl
+
+C  = Vector{&lt;:Any}(undef, N_TRJ) # Vector to store coordinates
+B  = Vector{&lt;:Any}(undef, N_TRJ) # Vector to store boundaries
+CV = Vector{&lt;:Any}(undef, N_TRJ) # Vector to store the CV
+
+# We discard the first 12500 frames (12.5 ns), assume system is still equilibrating there
+FIRST_IDX = 12_500
+
+Threads.@threads for nt in 1:N_TRJ
+    trjsys = TRJ_SYSTEMS[nt]
+    n_frames = Int(length(trjsys.trajectory))
+
+    # Temp arrays to store potential energy, coordinates, boundaries and CV
+    u, c, b, cv  = [], [], [], []
+
+    # Iterate over trajectory frames
+    for n in FIRST_IDX:n_frames
+        current_sys = read_frame!(trjsys, n) # Read the current frame as a System
+        pe = potential_energy(current_sys)
+        coords = Molly.from_device(current_sys.coords)
+        boundary = current_sys.boundary
+
+        # Measure the CV at the current frame
+        ϕ = _dihedral_geom(coords[i], coords[j], coords[k], coords[l], boundary)
+
+        push!(u, pe)
+        push!(c, coords)
+        push!(b, boundary)
+        push!(cv, ϕ*u&quot;rad&quot;)
+    end
+
+    # Estimate the decorrelation time from the timeseries of the potential energy
+    ineff = Molly.statistical_inefficiency(u; maxlag=n_frames-1)
+
+    # Subsample arrays based on statistical inefficiency
+    sub_coords = Molly.subsample(c,  ineff.stride; first=1)
+    sub_bounds = Molly.subsample(b,  ineff.stride; first=1)
+    sub_CV     = Molly.subsample(cv, ineff.stride; first=1)
+
+    C[nt]  = sub_coords
+    B[nt]  = sub_bounds
+    CV[nt] = sub_CV
+end</code></pre><p>Next, we define a vector of thermodynamic states to represent each Hamiltonian used to produce the simulations, as well a single state that represents the system in the absence of bias potentials. We will use the <a href="../api/#Molly.ThermoState"><code>ThermoState</code></a> struct provided by Molly:</p><pre><code class="language-julia hljs"># MBAR.jl
+
+# Assemble the thermodynamic systems for each umbrella window
+energy_units = TRJ_SYSTEMS[1].system.energy_units
+kBT          = uconvert(energy_units, Unitful.R * temp)
+βi           = Float64(ustrip(1.0 / kBT))
+
+states = ThermoState[ThermoState(&quot;win_$i&quot;, βi, pres, TRJ_SYSTEMS[i].system)
+                     for i in eachindex(TRJ_SYSTEMS)]
+
+target_state = ThermoState(&quot;target&quot;, βi, pres, sys_nobias)</code></pre><p>We are finally in possession of everything needed to solve the MBAR equations and estimate the PMF along our CV! There are two paths we can take for this, the long path and the short path. For the sake of completeness, we describe the long path first. The first step for solving MBAR is assembling the reduced energy matrix. Molly provides a functionality just for that through the <a href="../api/#Molly.assemble_mbar_inputs-Union{Tuple{T}, Tuple{AT}, Tuple{D}, Tuple{Any, Any, Vector{ThermoState}}} where {D, AT, T}"><code>assemble_mbar_inputs</code></a> method:</p><pre><code class="language-julia hljs"># MBAR.jl
+
+mbar_gen = assemble_mbar_inputs(
+    C, B, states; # Coordinates, boundaries and thermodynamic states
+    target_state=target_state, # The target state, in our case the unbiased system
+    energy_units=energy_units,
+)
+
+u        = mbar_gen.u        # Reduced energy matrix, K states by N sampled conformations
+u_target = mbar_gen.u_target # The reduced energy of the N samples evaluated by the target state hamiltonian
+N_counts = mbar_gen.N        # Number of sampled conformations
+win_of   = mbar_gen.win_of   # Indexing helper that tells which k state was used to generate each n sample
+shifts   = mbar_gen.shifts   # Numerical shifts, if used, for stability reasons when building the reduced energy matrix</code></pre><p>This generates the necessary inputs to use the self-consistent iteration method to solve the MBAR equations. Of course, Molly provides the <a href="../api/#Molly.iterate_mbar-Tuple{Any, Any, Any}"><code>iterate_mbar</code></a> method to do so:</p><pre><code class="language-julia hljs"># MBAR.jl
+
+# Returns the relative free energy of each k state and log.(N_counts), needed for downstream computations
+F_k, logN = iterate_mbar(u, win_of, N_counts)</code></pre><p>With this, we can also produce a weight matrix and a vector of target weights, using the  <a href="../api/#Molly.mbar_weights-Tuple{AbstractMatrix, Vararg{AbstractVector, 4}}"><code>mbar_weights</code></a> method, that will let us reweight any arbitrary quantity from the sampled K thermodynamic states to any target state:</p><pre><code class="language-julia hljs"># MBAR.jl
+
+# Returns the weights matrix and the target weights
+W_s, w_target = mbar_weights(u, u_target, F_k, logN, N_counts; check=true, shifts=shifts)</code></pre><p>And finally, we can estimate the PMF using the output of the previous step by calling the <a href="../api/#Molly.pmf_with_uncertainty-Tuple{AbstractMatrix, AbstractVector, AbstractVector, AbstractVector, AbstractVector, Vector}"><code>pmf_with_uncertainty</code></a> method:</p><pre><code class="language-julia hljs"># MBAR.jl
+
+pmf = pmf_with_uncertainty(u, u_target, F_k, N_counts, logN, CV; shifts=shifts, kBT=kBT)
+
+centers   = pmf.centers        # The collective variable
+PMF       = pmf.F              # PMF in kBT
+PMF_enr   = pmf.F_energy       # PMF in energy units
+sigma     = pmf.sigma_F        # Standard deviation in kBT
+sigma_enr = pmf.sigma_F_energy # Standard deviation in energy units</code></pre><p>But what about the short path? Well, we also provide an overload of the <a href="../api/#Molly.pmf_with_uncertainty-Tuple{AbstractMatrix, AbstractVector, AbstractVector, AbstractVector, AbstractVector, Vector}"><code>pmf_with_uncertainty</code></a> method that allows to get the PMF in a single call by doing:</p><pre><code class="language-julia hljs"># MBAR.jl
+pmf = pmf_with_uncertainty(
+    C,            # Coordinates
+    B,            # Boundaries
+    states,       # Themodynamic states
+    target_state, # Target state
+    CV,           # Collective variable
+)</code></pre><p>Now one can put this into a graph, for example using a scatter for the free energy and making use of the calculated sigmas (see the previous code blocks) to shade the plot and give a feel for the uncertainties. The code is left as an exercise to the reader, but the results should look like something similar to this:</p><p><img src="../images/dihedral_pmf_kbt.png" alt="PMF along the dipeptide torsion in kBT units"/> <img src="../images/dihedral_pmf_enr.png" alt="PMF along the dipeptide torsion in energy units"/></p></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../differentiable/">« Differentiable simulation</a><a class="docs-footer-nextpage" href="../examples/">Examples »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.15.0 on <span class="colophon-date" title="Saturday 1 November 2025 19:49">Saturday 1 November 2025</span>. Using Julia version 1.12.1.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
