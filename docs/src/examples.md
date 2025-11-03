@@ -988,7 +988,7 @@ energies(inter) = map(dists) do dist
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
     c2 = SVector(dist + 1.0, 1.0, 1.0)u"nm"
     vec = vector(c1, c2, boundary)
-    potential_energy(inter, vec, a1, a2, NoUnits)
+    potential_energy(inter, vec, a1, a2)
 end
 
 function plot_interactions(ax, title, xlabel, ylabel, data, ylims_range)

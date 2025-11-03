@@ -177,7 +177,7 @@ end
 function LennardJonesSoftCoreBeutler(;
         λ,
         α,
-        p,
+        p = 1,
         cutoff = NoCutoff(),
         use_neighbors = false,
         inter_state_a = nothing,
@@ -291,7 +291,7 @@ end
         dr,
         atom_i,
         atom_j,
-        energy_units = u"kJ*mol^-1",
+        energy_units = u"kJ * mol^-1",
         special = false,
         args...)
     zero_energy = ustrip(zero(dr[1])) * energy_units
@@ -300,8 +300,7 @@ end
     end
 
     r = norm(dr)
-    params = (
-        sc.λ, sc.α, sc.p, sc.inter_state_a, sc.inter_state_b, atom_i, atom_j, zero_energy)
+    params = (sc.λ, sc.α, sc.p, sc.inter_state_a, sc.inter_state_b, atom_i, atom_j, zero_energy)
 
     pe = pe_cutoff(sc.cutoff, sc, r, params)
     if special
@@ -348,7 +347,7 @@ end
         dr,
         atom_i,
         atom_j,
-        energy_units = u"kJ*mol^-1",
+        energy_units = u"kJ * mol^-1",
         special = false)
     zero_energy = ustrip(zero(dr[1])) * energy_units
     if sc.shortcut(atom_i, atom_j)
