@@ -1,5 +1,48 @@
 # Molly.jl release notes
 
+## v0.23.0 - Nov 2025
+
+### Breaking changes
+- `pressure` and `virial` now return tensor quantities, e.g. 3x3 in 3D. The virial now takes into account all pairwise and specific interaction terms automatically. The virial is also supported for the `Ewald` and `PME` methods, but not constraints or implicit solvent methods. Custom general interactions can define a virial term if required. The scalar values can be calcuated with `scalar_pressure` and `scalar_virial`, with the corresponding loggers `ScalarPressureLogger` and `ScalarVirialLogger`. The new `forces_virial` function allows calculation of both the forces and the virial at the same time, which can save computation. The `kinetic_energy_tensor` function allows the kinetic energy of a system in its tensorial form to be calculated. The `needs_virial` function should be defined for couplers that require virial computation.
+- All pairwise interactions should be a subtype of the abstract type `PairwiseInteraction`. This was previously removed but has been added back to allow dispatch to be used in the future.
+- General interactions should now define `AtomsCalculators.forces!` rather than `AtomsCalculators.forces` and should mutate the input forces, leading to fewer allocations. This means that the order of general interactions can matter and that general interactions can be used to modify forces directly.
+- `LennardJonesSoftCore` and `CoulombSoftCore` are removed and replaced with `LennardJonesSoftCoreBeutler`/`LennardJonesSoftCoreGapsys` and `CoulombSoftCoreBeutler`/`CoulombSoftCoreGapsys`, two popular soft core implementations.
+- `MonteCarloAnisotropicBarostat` and `MonteCarloMembraneBarostat` are removed as their functionality is now available using `MonteCarloBarostat` with the `coupling_type` keyword argument.
+- `TrajectoryWriter` and `write_structure` now keep molecules connected over the periodic boundaries by default. The `correction` keyword argument allows this to be controlled, with `:wrap` providing the previous behaviour.
+- `StructureWriter`, which wrote to the PDB format, is removed. `TrajectoryWriter` should be used to write to all file formats including PDB.
+- `RescaleThermostat` is renamed to `ImmediateThermostat` to better reflect what it does and to avoid confusion with the new `VelocityRescaleThermostat`.
+- The `implicit_solvent` keyword argument when setting up a system from a file now takes symbols rather than strings, e.g. `:gbn2` instead of `"gbn2"`, to increase consistency across the package.
+- The default `nonbonded_method` during setup is now `:none`, i.e. short range interactions, compared to the reaction field approximation used before (now available with `:cutoff`).
+- The `dist_neighbors` keyword argument during setup from a file is replaced with `dist_buffer`, a buffer distance added to `dist_cutoff`. This means that `dist_cutoff` can be changed without having to also update `dist_buffer`.
+- The arguments of `apply_loggers!` and `apply_couplers!` are changed.
+- `AbstractGBSA`, `ResidueType`, `AtomType`, `PeriodicTorsionType`, `born_radii_and_grad`, `extract_parameters`, `inject_gradients` and `molecule_centers` are no longer exported.
+- The type parameters of `CubicBoundary`, `RectangularBoundary` and `TriclinicBoundary` are changed.
+
+### New features
+- Ewald and particle mesh Ewald (PME) electrostatic summation methods are added as the `Ewald` and `PME` general interactions respectively, which should be used alongside the corresponding `CoulombEwald` pairwise interaction. `PME` runs on all backends and is compatible with Enzyme when the `grad_safe` option is given during system setup from a file. The `nonbonded_method` keyword argument during system setup from a file allows the electrostatic summation approach to be selected. The `ewald_error_tol` and `approximate_pme` keyword arguments are also added.
+- Constraints now work on the GPU and the documentation is improved. The `constraints` and `rigid_water` keyword arguments during system setup from a file allow different constraint options to be selected. The `check_constraints` function is added to check both position and velocity constraints.
+- The stochastic velocity rescaling thermostat is added as `VelocityRescaleThermostat`.
+- The stochastic cell rescaling barostat is added as `CRescaleBarostat`.
+- Non-isotropic pressure coupling is now available for the `BerendsenBarostat` with the `coupling_type` keyword argument.
+- The cutoff interface is now available for custom pairwise interactions with the use of `force_cutoff` and `pe_cutoff`. Documentation for custom cutoff methods is added.
+- Functions and documentation for calculating free energies with the Multistate Bennett Acceptance Ratio (MBAR) method are added.
+- The `EnsembleSystem` struct and `read_frame!` function are added to help with loading trajectory data into a `System`.
+- The `DisplacementsLogger`, useful for calculating properties such as mean squared displacements, is added.
+- The `replica_boundaries` keyword argument is added for `ReplicaSystem`.
+- The `cutoff` keyword argument is added for `Gravity`.
+- More informative errors are given during setup for incompatible arguments.
+
+### Performance improvements
+- GPU simulation is made faster.
+
+### Bug fixes
+- A bug when applying cutoffs is fixed.
+- A bug when using a `TriclinicBoundary` with CUDA is fixed.
+- A bug when using custom atom types with CUDA is fixed.
+- A rare bug in force calculation with CUDA is fixed.
+- Bugs when setting up a `TriclinicBoundary` with certain values are fixed.
+- A bug when using `CellListMapNeighborFinder` in 2D is fixed.
+
 ## v0.22.3 - Jul 2025
 
 ### Bug fixes

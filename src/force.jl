@@ -116,12 +116,12 @@ function SpecificForce2Atoms(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple
 end
 
 function SpecificForce3Atoms(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T},
-                            f3::StaticArray{Tuple{D}, T}) where {D, T}
+                             f3::StaticArray{Tuple{D}, T}) where {D, T}
     return SpecificForce3Atoms{D, T}(f1, f2, f3)
 end
 
 function SpecificForce4Atoms(f1::StaticArray{Tuple{D}, T}, f2::StaticArray{Tuple{D}, T},
-                            f3::StaticArray{Tuple{D}, T}, f4::StaticArray{Tuple{D}, T}) where {D, T}
+                             f3::StaticArray{Tuple{D}, T}, f4::StaticArray{Tuple{D}, T}) where {D, T}
     return SpecificForce4Atoms{D, T}(f1, f2, f3, f4)
 end
 
@@ -140,7 +140,7 @@ struct BuffersCPU{F, A, V, VN, VC, KT, PT}
     pres_tensor::PT
 end
 
-function init_buffers!(sys::System{D, AT, T}, n_threads) where {D, AT, T}
+function init_buffers!(sys::System{D}, n_threads) where D
     # Allows propagation of uncertainties to tensors
     CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
     fs_nounits  = ustrip_vec.(zero(sys.coords))
@@ -151,7 +151,7 @@ function init_buffers!(sys::System{D, AT, T}, n_threads) where {D, AT, T}
     # Enzyme errors with nothing when n_threads is 1
     n_copies = (n_threads == 1 ? 0 : n_threads)
     fs_chunks  = [similar(fs_nounits) for _ in 1:n_copies]
-    vir_chunks = [similar(vir_nounits) for _ in 1:n_copies] 
+    vir_chunks = [similar(vir_nounits) for _ in 1:n_copies]
     return BuffersCPU(fs_nounits, fs_chunks, vir, vir_nounits, vir_chunks, kin, pres)
 end
 
@@ -174,8 +174,8 @@ struct BuffersGPU{F, P, V, VN, VR, KT, PT, C, M, R}
     compressed_special::R
 end
 
-function init_buffers!(sys::System{D, AT, T}, n_threads,
-                             for_pe::Bool=false) where {D, AT <: AbstractGPUArray, T}
+function init_buffers!(sys::System{D, <:AbstractGPUArray, T}, n_threads,
+                       for_pe::Bool=false) where {D, T}
     N = length(sys)
     C = eltype(eltype(sys.coords))
     CT = typeof(ustrip(oneunit(eltype(eltype(sys.coords)))))
@@ -200,12 +200,10 @@ function init_buffers!(sys::System{D, AT, T}, n_threads,
     if !for_pe && sys.neighbor_finder isa GPUNeighborFinder
         sys.neighbor_finder.initialized = false
     end
-    return BuffersGPU(fs_mat, pe_vec_noun,
-                      virial, virial_nu, virial_row_1, virial_row_2, virial_row_3, 
-                      kin, pres, 
-                      box_mins, box_maxs, 
-                      morton_seq, morton_seq_buffer_1, morton_seq_buffer_2, 
-                      compressed_eligible, compressed_special)
+    return BuffersGPU(fs_mat, pe_vec_noun, virial, virial_nu, virial_row_1, virial_row_2,
+                      virial_row_3, kin, pres, box_mins, box_maxs, morton_seq,
+                      morton_seq_buffer_1, morton_seq_buffer_2, compressed_eligible,
+                      compressed_special)
 end
 
 zero_forces(sys) = ustrip_vec.(zero(sys.coords)) .* sys.force_units
@@ -249,9 +247,9 @@ function forces_virial(sys, neighbors, step_n::Integer=0; n_threads::Integer=Thr
     return fs, buffers.virial
 end
 
-function forces!(fs, sys::System{D, AT, T}, neighbors, buffers::BuffersCPU,
+function forces!(fs, sys::System{<:Any, <:Any, T}, neighbors, buffers::BuffersCPU,
                  ::Val{needs_vir}, step_n::Integer=0;
-                 n_threads::Integer=Threads.nthreads()) where {D, AT, T, needs_vir}
+                 n_threads::Integer=Threads.nthreads()) where {T, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
     end
@@ -527,9 +525,9 @@ function specific_forces!(fs_nounits, vir_nounits, atoms, coords, velocities, bo
     return fs_nounits
 end
 
-function forces!(fs, sys::System{D, AT, T}, neighbors, buffers::BuffersGPU, ::Val{needs_vir},
-                 step_n::Integer=0; n_threads::Integer=Threads.nthreads()) where {D,
-                                                        AT <: AbstractGPUArray, T, needs_vir}
+function forces!(fs, sys::System{D, <:AbstractGPUArray, T}, neighbors, buffers::BuffersGPU,
+                 ::Val{needs_vir}, step_n::Integer=0;
+                 n_threads::Integer=Threads.nthreads()) where {D, T, needs_vir}
     if needs_vir
         fill!(buffers.virial, zero(T) * sys.energy_units)
         fill!(buffers.virial_row_1, zero(T))

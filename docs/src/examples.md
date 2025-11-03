@@ -792,7 +792,7 @@ using AtomsBaseTesting
 using AtomsCalculators
 
 ab_sys = AtomsBase.AbstractSystem(
-    make_test_system().system; 
+    make_test_system().system;
     cell_vectors = [[1.54732, 0.0      , 0.0      ],
                     [0.0    , 1.4654985, 0.0      ],
                     [0.0    , 0.0      , 1.7928950]]u"Å",
@@ -966,11 +966,14 @@ save("mie.png", f)
 ```
 ![Mie](images/mie.png)
 
-## Different soft-core potentials for Lennard-Jones and Coulomb
+## Different soft-core potentials
 
-The soft-core Lennard-Jones and Coulomb potentials are parameterised by ``\alpha`` and ``\lambda``, in addition to the standard potential parameters. The soft-core potential proposed by [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p) includes an additional parameter, ``\sigma_Q``. 
+The soft-core Lennard-Jones and Coulomb potentials are parameterised by ``\alpha`` and ``\lambda``, in addition to the standard potential parameters.
+The soft-core potential proposed by [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p) includes an additional parameter ``\sigma_Q``.
 
-These parameters shift the value of ``r_{ij}`` to ``(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6)^{1/6}`` for the [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1) soft-core potential, which prevents the potential from diverging as ``r_{ij} \rightarrow 0``. In the case of the [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p) soft-core potentials, the transition from a hard-core to a soft-core potential occurs at a specific distance. The forces are linearized at the transition point, and this switching distance depends on the value of ``\lambda``.
+These parameters shift the value of ``r_{ij}`` to ``(\frac{\alpha(1-\lambda)C^{(12)}}{C^{(6)}}+r^6)^{1/6}`` for the [Beutler et al. 1994](https://doi.org/10.1016/0009-2614(94)00397-1) soft-core potential, which prevents the potential from diverging as ``r_{ij} \rightarrow 0``.
+In the case of the [Gapsys et al. 2012](https://doi.org/10.1021/ct300220p) soft-core potentials, the transition from a hard-core to a soft-core potential occurs at a specific distance.
+The forces are linearized at the transition point, and this switching distance depends on the value of ``\lambda``.
 
 ```julia
 using Molly
@@ -981,12 +984,12 @@ a1 = Atom(charge=0.5, σ=0.3u"nm", ϵ=0.5u"kJ * mol^-1")
 a2 = Atom(charge=-0.5, σ=0.3u"nm", ϵ=0.5u"kJ * mol^-1")
 dists = 0.01:0.005:0.8
 
-energies(inter) = map(dist -> begin
+energies(inter) = map(dists) do dist
     c1 = SVector(1.0, 1.0, 1.0)u"nm"
     c2 = SVector(dist + 1.0, 1.0, 1.0)u"nm"
     vec = vector(c1, c2, boundary)
     potential_energy(inter, vec, a1, a2, NoUnits)
-end, dists)
+end
 
 function plot_interactions(ax, title, xlabel, ylabel, data, ylims_range)
     ax.title = title
@@ -1002,17 +1005,51 @@ end
 f = Figure(size=(1200, 800))
 ax1, ax2, ax3, ax4 = Axis(f[1, 1]), Axis(f[1, 2]), Axis(f[2, 1]), Axis(f[2, 2])
 
-LJ = Dict("LJ" => LennardJones(), "LJ-Beutler" => LennardJonesSoftCoreBeutler(α=0.3, λ=0.5), "LJ-Gapsys" => LennardJonesSoftCoreGapsys(α=0.85, λ=0.5))
-plot_interactions(ax1, "Soft-core Lennard-Jones potentials \nin comparison to standard LJ for λ=0.5", "Distance / nm", "Potential Energy / kJ * mol^-1", sort(LJ), (-5, 400))
+LJ = Dict(
+    "LJ" => LennardJones(),
+    "LJ-Beutler" => LennardJonesSoftCoreBeutler(α=0.3, λ=0.5),
+    "LJ-Gapsys" => LennardJonesSoftCoreGapsys(α=0.85, λ=0.5),
+)
+plot_interactions(
+    ax1,
+    "Soft-core Lennard-Jones potentials \nin comparison to standard LJ for λ=0.5",
+    "Distance / nm",
+    "Potential Energy / kJ * mol^-1",
+    sort(LJ),
+    (-5, 400),
+)
 
-Cou = Dict("Coulomb" => Coulomb(), "Coulomb-Beutler" => CoulombSoftCoreBeutler(α=0.3, λ=0.5), "Coulomb-Gapsys" => CoulombSoftCoreGapsys(α=0.3, λ=0.5, σQ=1u"nm"))
-plot_interactions(ax2, "Soft-core Coulomb potentials \nin comparison to standard Coulomb for λ=0.5", "Distance / nm", "Potential Energy / kJ * mol^-1", sort(Cou), (-400, 0))
+Cou = Dict(
+    "Coulomb" => Coulomb(),
+    "Coulomb-Beutler" => CoulombSoftCoreBeutler(α=0.3, λ=0.5),
+    "Coulomb-Gapsys" => CoulombSoftCoreGapsys(α=0.3, λ=0.5, σQ=1u"nm"),
+)
+plot_interactions(
+    ax2,
+    "Soft-core Coulomb potentials \nin comparison to standard Coulomb for λ=0.5",
+    "Distance / nm",
+    "Potential Energy / kJ * mol^-1",
+    sort(Cou),
+    (-400, 0),
+)
 
-plot_interactions(ax3, "Effect of λ on soft-core Lennard-Jones potential (Beutler et al.)", "Distance / nm", "Potential Energy / kJ * mol^-1", 
-                  [(string("λ=$λ"), LennardJonesSoftCoreBeutler(α=0.3, λ=λ)) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]], (-5, 400))
+plot_interactions(
+    ax3,
+    "Effect of λ on soft-core Lennard-Jones potential (Beutler et al.)",
+    "Distance / nm",
+    "Potential Energy / kJ * mol^-1",
+    [(string("λ=$λ"), LennardJonesSoftCoreBeutler(α=0.3, λ=λ)) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]],
+    (-5, 400),
+)
 
-plot_interactions(ax4, "Effect of λ on soft-core Coulomb potential (Gapsys et al.)", "Distance / nm", "Potential Energy / kJ * mol^-1", 
-                  [(string("λ=$λ"), LennardJonesSoftCoreGapsys(α=0.85, λ=λ)) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]], (-5, 400))
+plot_interactions(
+    ax4,
+    "Effect of λ on soft-core Coulomb potential (Gapsys et al.)",
+    "Distance / nm",
+    "Potential Energy / kJ * mol^-1",
+    [(string("λ=$λ"), LennardJonesSoftCoreGapsys(α=0.85, λ=λ)) for λ in [0.1, 0.3, 0.5, 0.8, 1.0]],
+    (-5, 400),
+)
 
 save("softcore_potentials.png", f)
 ```
@@ -1141,36 +1178,36 @@ simulate!(sys, simulator, 10_000)
 
 ## KIM portable models
 
-[`KIM_API.jl`](https://github.com/openkim/KIM_API.jl) connects Molly to the [KIM API](https://github.com/openkim/kim-api), giving direct access to the large model catalog on [OpenKIM](https://openkim.org), including classical, machine-learned, and hybrid potentials that are distributed as portable models. Once configured, any simulator in Molly can evaluate those models via the standard `general_inters` interface.
+[`KIM_API.jl`](https://github.com/openkim/KIM_API.jl) connects Molly to the [KIM API](https://github.com/openkim/kim-api), giving direct access to the large model catalog on [OpenKIM](https://openkim.org), including classical, machine-learned, and hybrid potentials that are distributed as portable models. Once configured, any simulator in Molly can evaluate those models via the standard general interaction interface.
 
 ### Installation
 
 1. Install the KIM API and make the shared library discoverable:
-   ```bash
-   conda create -n kim-api kim-api=2.4 -c conda-forge
-   conda activate kim-api
-   export KIM_API_LIB=${CONDA_PREFIX}/lib/libkim-api.so
-   ```
+    ```bash
+    conda create -n kim-api kim-api=2.4 -c conda-forge
+    conda activate kim-api
+    export KIM_API_LIB=${CONDA_PREFIX}/lib/libkim-api.so
+    ```
 
 2. Install the required [OpenKIM model](https://openkim.org/browse/models/alphabetical):
-   ```bash
-   $ kim-api-collections-management install user SW_StillingerWeber_1985_Si__MO_405512056662_006          
-   Downloading.............. SW_StillingerWeber_1985_Si__MO_405512056662_006
-   Found installed driver... SW__MD_335816936951_005
-   [100%] Built target SW_StillingerWeber_1985_Si__MO_405512056662_006
-   Install the project...
-   -- Install configuration: "Debug"
-   -- Installing: /.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so
-   -- Set runtime path of "/.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so" to ""
-   
-   Success!
-   ```
-   
+    ```bash
+    $ kim-api-collections-management install user SW_StillingerWeber_1985_Si__MO_405512056662_006
+    Downloading.............. SW_StillingerWeber_1985_Si__MO_405512056662_006
+    Found installed driver... SW__MD_335816936951_005
+    [100%] Built target SW_StillingerWeber_1985_Si__MO_405512056662_006
+    Install the project...
+    -- Install configuration: "Debug"
+    -- Installing: /.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so
+    -- Set runtime path of "/.kim-api/2.4.1+v2.4.1.dirty.GNU.GNU.GNU.2022-07-29-16-25-35/portable-models-dir/SW_StillingerWeber_1985_Si__MO_405512056662_006/libkim-api-portable-model.so" to ""
+    
+    Success!
+    ```
+
 3. Add the package to your Julia environment:
-   ```julia
-   using Pkg
-   Pkg.add("KIM_API")
-   ```
+    ```julia
+    using Pkg
+    Pkg.add("KIM_API")
+    ```
 
 ### Stillinger-Weber silicon supercell
 

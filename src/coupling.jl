@@ -105,8 +105,7 @@ end
 
 function apply_coupling!(sys::System{<:Any, AT}, buffers, thermostat::VelocityRescaleThermostat,
                          sim, neighbors, step_n; n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {AT}
-
+                         rng=Random.default_rng()) where AT
     if step_n % thermostat.n_steps != 0
         return false
     end
@@ -230,8 +229,8 @@ The scaling factor for the box every `n_steps` steps is
 ```
 with the fractional change limited to `max_scale_frac`.
 
-The scaling factor ``\mu`` is a matrix and ``\delta`` represents a Kronecker delta,
-allowing for non-isotropic pressure control.
+The scaling factor ``\mu`` is a matrix and ``\delta`` is a Kronecker delta,
+allowing non-isotropic pressure control.
 Available options are `:isotropic`, `:semiisotropic` and `:anisotropic`.
 
 This barostat should be used with caution as it known not to properly sample
@@ -255,7 +254,6 @@ isibar(x::Number) = (unit(x) == NoUnits || dimension(x) == DIM_INV_P)
 function BerendsenBarostat(press::Union{PT, AbstractArray{PT}}, coupling_const;
                            coupling_type=:isotropic, compressibility=4.6e-5u"bar^-1",
                            max_scale_frac=0.1, n_steps=1) where {PT}
-
     if !(coupling_type in (:isotropic, :semiisotropic, :anisotropic))
         throw(ArgumentError(ArgumentError("coupling_type must be :isotropic, :semiisotropic, or :anisotropic")))
     end
@@ -383,7 +381,7 @@ function apply_coupling!(sys::System{D},
     μ   = Matrix{FT}(I, D, D)
 
     Pavg = tr(P)/FT(D)
-    Pxy  = D == 3 ? (P[1,1] + P[2,2]) / FT(2) : Pavg
+    Pxy  = (D == 3 ? (P[1,1] + P[2,2]) / FT(2) : Pavg)
 
     if barostat.coupling_type == :isotropic
         for d in 1:D
@@ -456,7 +454,7 @@ This allows proper sampling of isobaric ensembles.
 where ``\kappa_T`` is the isothermal compressibility, ``\tau_P`` is the barostat coupling constant
 and ``\rm{dW}`` represents a Wiener process.
 
-The scaling factor ``\mu`` is a matrix, allowing for non-isotropic
+The scaling factor ``\mu`` is a matrix, allowing non-isotropic
 pressure control.
 Available options are `:isotropic`, `:semiisotropic` and `:anisotropic`.
 """
@@ -579,14 +577,14 @@ end
 
 needs_virial(c::CRescaleBarostat) = c.n_steps
 
-function apply_coupling!(sys::System{D, AT},
+function apply_coupling!(sys::System{D},
                          buffers,
                          barostat::CRescaleBarostat{PT, CT, ST, ICT, FT},
                          sim,
                          neighbors=nothing,
                          step_n::Integer=0;
                          n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {D, AT, PT, CT, ST, ICT, FT}
+                         rng=Random.default_rng()) where {D, PT, CT, ST, ICT, FT}
     if step_n % barostat.n_steps != 0
         return false
     end
@@ -683,7 +681,7 @@ function apply_coupling!(sys::System{D, AT},
 end
 
 @doc raw"""
-    MonteCarloBarostat(pressure, temperature, boundary; coupling_type = :isotropic,
+    MonteCarloBarostat(pressure, temperature, boundary; coupling_type=:isotropic,
                        n_steps=30, n_iterations=1,
                        scale_factor=0.01, scale_increment=1.1, max_volume_frac=0.3,
                        trial_find_neighbors=false)
@@ -821,9 +819,9 @@ function MonteCarloBarostat(press::Union{PT, AbstractArray{PT}}, temp,
     end
 end
 
-function apply_coupling!(sys::System{D, AT, T}, buffers, barostat::MonteCarloBarostat, sim,
+function apply_coupling!(sys::System{D, <:Any, T}, buffers, barostat::MonteCarloBarostat, sim,
                          neighbors=nothing, step_n::Integer=0; n_threads::Integer=Threads.nthreads(),
-                         rng=Random.default_rng()) where {D, AT, T}
+                         rng=Random.default_rng()) where {D, T}
     if !iszero(step_n % barostat.n_steps)
         return false
     end

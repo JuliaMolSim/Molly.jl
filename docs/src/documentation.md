@@ -3,7 +3,7 @@
 This documentation will first introduce the main features of the package with some examples, then will give details on each component of a simulation.
 There are further examples in the [Molly examples](@ref) section.
 For more information on specific types or functions, see the [Molly API](@ref) section or call `?function_name` in Julia.
-The [Differentiable simulation with Molly](@ref) section describes taking gradients through simulations.
+The [Differentiable simulation with Molly](@ref) section describes taking gradients through simulations and the [Free energies with MBAR](@ref) section covers an approach to estimate free energies.
 
 The package takes a modular approach to molecular simulation.
 To run a simulation you create a [`System`](@ref) object and call [`simulate!`](@ref) on it.
@@ -127,6 +127,8 @@ System(sys; coords=(sys.coords .* 0.5))
 
 By default the simulation is run in parallel on the [number of threads](https://docs.julialang.org/en/v1/manual/parallel-computing/#man-multithreading-1) available to Julia, but this behaviour can be changed by giving the keyword argument `n_threads` to [`simulate!`](@ref).
 For example, `n_threads=1` uses no parallelization.
+`n_threads=4` will limit the simulation to 4 threads.
+Sometimes setting `n_threads` higher than the number of available threads can improve performance.
 
 The values stored by the loggers can be accessed using `values`, e.g. `values(sys.loggers.coords)`.
 An animation of the stored coordinates can be saved by using [`visualize`](@ref), which is available when [GLMakie.jl](https://github.com/JuliaPlots/Makie.jl) is imported.
@@ -191,8 +193,7 @@ simulate!(sys, simulator, 1_000)
 ```
 To use another GPU package, just swap out `CUDA` for your desired package and `CuArray` for your desired array type.
 The device to run on can be changed with `device!`, e.g. `device!(1)`.
-The GPU code path is currently designed to be compatible with differentiable simulation and runs slower than related software, but this is an active area of development.
-Nonetheless, GPU performance is significantly better than CPU performance and is good enough for many applications.
+There are two GPU code paths currently: a fast path specific to CUDA and a slower path using [KernelAbstractions.jl](https://github.com/JuliaGPU/KernelAbstractions.jl) that is suitable for all backends.
 
 The number of GPU threads used for the GPU kernels can be tuned with the environmental variables `MOLLY_GPUNTHREADS_PAIRWISE`, `MOLLY_GPUNTHREADS_SPECIFIC`, `MOLLY_GPUNTHREADS_DISTANCENF` and `MOLLY_GPUNTHREADS_IMPLICIT`.
 In general these should only be changed if GPU memory errors occur on smaller GPUs.
@@ -276,7 +277,6 @@ visualize(
 ```
 ![Diatomic simulation](images/sim_diatomic.gif)
 The neighbors can be found using `find_neighbors(sys)`, which returns a [`NeighborList`](@ref).
-When using a neighbor finder, functions such as [`forces`](@ref) and [`potential_energy`](@ref) require the neighbors to be passed as a second argument, e.g. `forces(sys, find_neighbors(sys))`.
 
 ## Simulating gravity
 
@@ -506,7 +506,7 @@ sys = System(
 
 trial_args = Dict(:shift_size => 0.1u"nm")
 for t in temperatures
-    sim = MetropolisMonteCarlo(; 
+    sim = MetropolisMonteCarlo(;
         temperature=t,
         trial_moves=random_uniform_translation!,
         trial_args=trial_args,
@@ -607,7 +607,7 @@ The available general interactions are:
 - [`ASECalculator`](@ref)
 
 Some interactions combine instances of the above.
-For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbor finding algorithms.
+For example, particle mesh Ewald summation uses the [`CoulombEwald`](@ref) pairwise interaction and the [`PME`](@ref) general interaction, allowing the short range terms to use the neighbors.
 
 ### Pairwise interactions
 
@@ -820,7 +820,7 @@ function AtomsCalculators.forces!(fs,
     return fs
 end
 ```
-The neighbors calculated from the neighbor list are available in this function, but may or may not be used depending on context.
+The neighbors calculated from the neighbor list are available in this function, but may or may not be used depending on the context.
 You could carry out your own neighbor finding in this function if required.
 Since the forces are available for mutation in the function, general interactions can be used to modify the forces in arbitrary ways, though it is up to you to write an appropriate potential energy function if energies are required.
 In cases where the forces are not simply added to, the order of general interactions can matter.
@@ -876,7 +876,7 @@ The following built-in interactions can use a cutoff:
 In addition, [`CoulombReactionField`](@ref), [`CoulombEwald`](@ref) and the implicit solvent and Ewald general interactions have a `dist_cutoff` argument for a cutoff distance.
 Cutoffs combine well with neighbor finders, provided that the cutoff distance is less than the neighbor distance (see [Neighbor finders](@ref) for more).
 
-To define a custom cutoff, you should first decide whether it has one cutoff point (the force/potential is modified up to the cutoff distance) or two (the force/potential is modified between an activation distance and the cutoff distance).
+To define a custom cutoff, you should first decide whether it has one cutoff point (the force/potential energy is modified up to the cutoff distance) or two (the force/potential energy is modified between an activation distance and the cutoff distance).
 Then, create a struct and cutoff functions:
 ```julia
 struct MyCutoff{P, D} <: Molly.AbstractCutoff{1} # One cutoff point
@@ -968,7 +968,7 @@ The available simulators are:
 - [`MetropolisMonteCarlo`](@ref)
 
 Many of these require a time step `dt` as an argument.
-Many also remove the center of mass motion every time step, which can be tuned with the `remove_CM_motion` argument.
+Many also remove the center of mass motion every time step, which can be tuned with the `remove_CM_motion` argument (`false` or a number of steps).
 
 The [`LangevinSplitting`](@ref) simulator can be used to define a variety of integrators such as velocity Verlet (splitting `"BAB"`), the Langevin implementation in [`Langevin`](@ref) (`"BAOA"`), and symplectic Euler integrators (`"AB"` and `"BA"`).
 
@@ -1020,7 +1020,7 @@ function Molly.simulate!(sys,
     return sys
 end
 ```
-See more in the source code, for example how to apply constraints to coordinates and velocities.
+See more [in the source code](https://github.com/JuliaMolSim/Molly.jl/blob/master/src/simulators.jl), for example how to apply constraints to coordinates and velocities.
 To use your custom simulator, give it as the second argument when calling [`simulate!`](@ref).
 
 To define your own replica exchange simulator, first define a `struct`:
@@ -1099,8 +1099,9 @@ VelocityVerlet(dt=0.001u"ps", coupling=(thermostat, barostat))
 ```
 
 The appropriate coupling to use will depend on the situation.
-For example, the [`MonteCarloBarostat`](@ref) for controlling pressure assumes a constant temperature but does not actively control the temperature.
-It should be used alongside a temperature coupling method such as the [`Langevin`](@ref) simulator or [`AndersenThermostat`](@ref) coupling.
+For example, the [`Langevin`](@ref) simulator controls temperature so does not require a thermostat.
+The [`MonteCarloBarostat`](@ref) for controlling pressure assumes a constant temperature but does not actively control the temperature.
+It should be used alongside a temperature coupling method such as the [`Langevin`](@ref) simulator or the [`AndersenThermostat`](@ref) coupling.
 
 To define your own coupling method, first define the `struct`:
 ```julia
@@ -1134,6 +1135,7 @@ Molly.needs_virial(c::MyCoupler) = Inf
 ```
 The use of the [`virial`](@ref) tensor allows for non-isotropic pressure control.
 Molly follows the [definition in LAMMPS](https://docs.lammps.org/compute_stress_atom.html), taking into account pairwise and specific interactions as well as the contribution of the [`Ewald`](@ref) and [`PME`](@ref) methods.
+Contributions from constraints and implicit solvent methods are ignored.
 As described previously, custom general interactions should implement virial calculation if required.
 
 ## Loggers
@@ -1233,7 +1235,7 @@ These keyword arguments are also available in [`log_property!`](@ref).
 Which values are passed depends on the simulator being used, for example [`SteepestDescentMinimizer`](@ref) passes `current_potential_energy` because it uses it for minimization.
 Note that loggers are called after [`apply_coupling!`](@ref), so the coordinates may have changed since the potential energy or forces were computed.
 
-A logger which records the property every `n_steps` can be constructed through 
+A logger which records the property every `n_steps` can be constructed through
 ```julia
 my_logger = GeneralObservableLogger(my_observable, T, n_steps)
 ```
@@ -1300,7 +1302,6 @@ simulate!(sys, simulator, 10_000)
 ```console
 temperature(sys) = 48.76795299825687 K
 ```
-Good.
 Next we define our correlation logger, add it to the system's loggers and run a longer simulation.
 Note that we need to redeclare the system when adding a logger.
 ```julia
@@ -1366,11 +1367,11 @@ Currently, constraints are supported by the following simulators:
 - [`Verlet`](@ref)
 - [`StormerVerlet`](@ref)
 - [`Langevin`](@ref)
-Simulators incompatible with constraints will print a warning and continue when used with systems containing constraints.
+Simulators incompatible with constraints will print a warning and continue without applying constraints when used with systems containing constraints.
 
 Molly supports [`DistanceConstraint`](@ref) and [`AngleConstraint`](@ref) on CPU and GPU.
 Distance constraints fix the distance between two atoms.
-Angle constraints are defined for sets of three atoms (e.g. water) and restrict the angle and the two bond lengths. 
+Angle constraints are defined for sets of three atoms (e.g. water) and restrict the angle and the two bond lengths.
 
 Constraints can be added when setting up a system from a file [as described above](@ref "Simulating a protein").
 To add constraints to a system manually, use something like the following:
@@ -1401,11 +1402,11 @@ This diagram demonstrates the four allowed constraint types:
 !!! note
     You can't constrain a linear chain of four atoms or an angle of 180°. Constraints beyond the four valid classes can't be used. For example, you can't constrain all the hydrogen bonds and the double bond in ethylene simultaneously. This would create a cluster of 5 constraints which is not supported.
 
-These constraints provide enough flexibility to constrain all hydrogen atoms in organic molecules as well as water molecules.  
+These constraints provide enough flexibility to constrain all hydrogen atoms in organic molecules as well as water molecules.
 
 All velocity constraints and diatomic distance constraints are solved analytically while larger constraints are linearized and solved iteratively via matrix inverse.
 The direct matrix inverse does not scale well beyond clusters with 3 constraints and is not implemented.
-Other methods can be used to solve larger constraint clusters, these are not yet supported by Molly. 
+Other methods can be used to solve larger constraint clusters, these are not yet supported by Molly.
 
 ## Neighbor finders
 

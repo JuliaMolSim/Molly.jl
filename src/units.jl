@@ -67,7 +67,8 @@ function check_other_units(atoms_dev, boundary, sys_units::NamedTuple)
     box_units = unit(length_type(boundary))
 
     if !all(sys_units[:length] .== box_units)
-        throw(ArgumentError("simulation box constructed with $box_units but length unit on coords was $(sys_units[:length])"))
+        throw(ArgumentError("simulation box constructed with $box_units but length unit " *
+                            "on coords was $(sys_units[:length])"))
     end
 
     sigmas   = getproperty.(atoms[hasproperty.(atoms, :σ)], :σ)
@@ -76,14 +77,16 @@ function check_other_units(atoms_dev, boundary, sys_units::NamedTuple)
     if !all(sigmas .== 0.0u"nm")
         σ_units = unit.(sigmas)
         if !all(sys_units[:length] .== σ_units)
-            throw(ArgumentError("Atom σ has $(σ_units[1]) units but length unit on coords was $(sys_units[:length])"))
+            throw(ArgumentError("Atom σ has $(σ_units[1]) units but length unit on coords " *
+                                "was $(sys_units[:length])"))
         end
     end
 
     if !all(epsilons .== 0.0u"kJ * mol^-1")
         ϵ_units = unit.(epsilons)
         if !all(sys_units[:energy] .== ϵ_units)
-            throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but system energy unit was $(sys_units[:energy])"))
+            throw(ArgumentError("Atom ϵ has $(ϵ_units[1]) units but system energy unit " *
+                                "was $(sys_units[:energy])"))
         end
     end
 end
@@ -175,12 +178,14 @@ function convert_k_units(T, k, energy_units)
             # Use user-supplied unitless Boltzmann constant
             k_converted = T(k)
         else
-            @warn "Units will be stripped from Boltzmann constant: energy_units was passed as NoUnits and units were provided on k: $(unit(k))"
+            @warn "Units will be stripped from Boltzmann constant: energy_units was passed as " *
+                  "NoUnits and units were provided on k: $(unit(k))"
             k_converted = T(ustrip(k))
         end
     elseif dimension(energy_units) in (u"𝐋^2 * 𝐌 * 𝐍^-1 * 𝐓^-2", u"𝐋^2 * 𝐌 * 𝐓^-2")
         if dimension(energy_units * u"K^-1") != dimension(k)
-            throw(ArgumentError("energy_units ($energy_units) in System and Boltzmann constant units ($(unit(k))) are incompatible"))
+            throw(ArgumentError("energy_units ($energy_units) in System and Boltzmann constant " *
+                                "units ($(unit(k))) are incompatible"))
         end
         k_converted = T(uconvert(energy_units * u"K^-1", k))
     else

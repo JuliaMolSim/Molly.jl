@@ -12,7 +12,7 @@ const ff_dir = joinpath(data_dir, "force_fields")
 const openmm_dir = joinpath(data_dir, "openmm_6mrr")
 
 function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
-    T = f32 ? Float32 : Float64
+    T = (f32 ? Float32 : Float64)
     ff = MolecularForceField(
         T,
         joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...;
@@ -20,7 +20,7 @@ function setup_system(::Type{AT}, f32::Bool, units::Bool) where AT
     )
 
     velocities_nounits = SVector{3, T}.(eachrow(readdlm(joinpath(openmm_dir, "velocities_300K.txt"))))
-    velocities = units ? velocities_nounits * u"nm * ps^-1" : velocities_nounits
+    velocities = (units ? velocities_nounits * u"nm * ps^-1" : velocities_nounits)
     dist_cutoff = T(1.0)
 
     sys = System(
@@ -53,7 +53,7 @@ runs = [
 ]
 
 for (run_name, AT, parallel, f32, units) in runs
-    n_threads_used = parallel ? n_threads : 1
+    n_threads_used = (parallel ? n_threads : 1)
     sys, sim = setup_system(AT, f32, units)
     simulate!(deepcopy(sys), sim, 20; n_threads=n_threads_used)
     println(run_name)

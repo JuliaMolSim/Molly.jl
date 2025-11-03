@@ -309,8 +309,8 @@ end
     T = Float32
     ff = MolecularForceField(
         T,
-        joinpath(data_dir, "force_fields", "ff99SBildn.xml"),
-        joinpath(data_dir, "force_fields", "his.xml"),
+        joinpath(ff_dir, "ff99SBildn.xml"),
+        joinpath(ff_dir, "his.xml"),
     )
     boundary = CubicBoundary(T(10.0)u"nm")
     temp = T(100.0)u"K"
@@ -325,7 +325,7 @@ end
                 boundary=boundary,
                 array_type=AT,
                 constraints=:hbonds,
-                rigid_water=rigid_water,
+                rigid_water=rigid_water, # No water present
             )
 
             simulate!(sys, minimizer)
@@ -339,8 +339,10 @@ end
             @test check_constraints(sys)
 
             coords_copy = copy(sys.coords)
-            sys.coords     .+= randn(SVector{3, T}, length(sys))u"nm"         ./ 100
-            sys.velocities .+= randn(SVector{3, T}, length(sys))u"nm * ps^-1" ./ 100
+            coords_bump     = randn(SVector{3, T}, length(sys))u"nm"         ./ 100
+            velocities_bump = randn(SVector{3, T}, length(sys))u"nm * ps^-1" ./ 100
+            sys.coords     .+= to_device(coords_bump, AT)
+            sys.velocities .+= to_device(velocities_bump, AT)
             @test !check_position_constraints(sys)
             @test !check_velocity_constraints(sys)
             @test !check_constraints(sys)

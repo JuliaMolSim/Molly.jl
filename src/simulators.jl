@@ -72,9 +72,10 @@ Constraints are applied during minimization, which can lead to issues.
     needs_vir = false
     sys.coords .= wrap_coords.(sys.coords, (sys.boundary,))
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    E = potential_energy(sys, neighbors; n_threads=n_threads)
     buffers = init_buffers!(sys, n_threads)
-    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads, current_potential_energy=E)
+    E = potential_energy(sys, neighbors, buffers; n_threads=n_threads)
+    apply_loggers!(sys, buffers, neighbors, 0, run_loggers; n_threads=n_threads,
+                   current_potential_energy=E)
     using_constraints = (length(sys.constraints) > 0)
     println(sim.log_stream, "Step 0 - potential energy ", E, " - max force N/A - N/A")
     hn = sim.step_size
@@ -1047,9 +1048,9 @@ end
                            run_loggers=true,
                            rng=Random.default_rng())
     neighbors = find_neighbors(sys, sys.neighbor_finder; n_threads=n_threads)
-    E_old = potential_energy(sys, neighbors; n_threads=n_threads)
-    coords_old = zero(sys.coords)
     buffers = init_buffers!(sys, n_threads)
+    E_old = potential_energy(sys, neighbors, buffers; n_threads=n_threads)
+    coords_old = zero(sys.coords)
 
     for step_n in 1:n_steps
         coords_old .= sys.coords
@@ -1084,9 +1085,9 @@ Performs a random translation of the coordinates of a randomly selected atom in 
 The translation is generated using a uniformly selected direction and uniformly selected length
 in range [0, 1) scaled by `shift_size` which should have appropriate length units.
 """
-function random_uniform_translation!(sys::System{D, AT, T};
+function random_uniform_translation!(sys::System{D, <:Any, T};
                                      shift_size=oneunit(eltype(eltype(sys.coords))),
-                                     rng=Random.default_rng()) where {D, AT, T}
+                                     rng=Random.default_rng()) where {D, T}
     rand_idx = rand(rng, eachindex(sys))
     direction = random_unit_vector(T, D, rng)
     magnitude = rand(rng, T) * shift_size
@@ -1104,9 +1105,9 @@ The translation is generated using a uniformly chosen direction and length selec
 the standard normal distribution i.e. with mean 0 and standard deviation 1, scaled by `shift_size`
 which should have appropriate length units.
 """
-function random_normal_translation!(sys::System{D, AT, T};
+function random_normal_translation!(sys::System{D, <:Any, T};
                                     shift_size=oneunit(eltype(eltype(sys.coords))),
-                                    rng=Random.default_rng()) where {D, AT, T}
+                                    rng=Random.default_rng()) where {D, T}
     rand_idx = rand(rng, eachindex(sys))
     direction = random_unit_vector(T, D, rng)
     magnitude = randn(rng, T) * shift_size

@@ -1,4 +1,4 @@
-export 
+export
     statistical_inefficiency,
     subsample
 
@@ -10,11 +10,12 @@ struct StatisticalInefficiency{I, S, L, E, LG}
     lag::LG
 end
 
-@doc"""
-    statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,Int}=nothing)
+"""
+    statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing, Int}=nothing)
 
 Integrated autocorrelation time estimator with IPS truncation and finite-sample taper.
-Returns a StatisticalInefficiency struct with:
+
+Returns a `StatisticalInefficiency` struct with:
 - inefficiency: statistical inefficiency
 - stride: ceil(Int, g)
 - input_length: input length
@@ -27,10 +28,10 @@ Notes:
 - Includes the (1 - τ/N) taper in the sum.
 """
 function statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,Int}=nothing)
-    x = ustrip.(series)              # remove units if present; else no-op if plain floats
+    x = ustrip.(series)
     N = length(x)
     if N < 3
-        return (g = 1.0, stride = 1, N = N, N_eff = N, L = 0)
+        return StatisticalInefficiency(1.0, 1, N, N, 0)
     end
 
     μ = mean(x)
@@ -38,15 +39,15 @@ function statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,
         x[i] -= μ
     end
 
-    s2 = sum(abs2, x) / (N - 1)                # sample variance
-    if !isfinite(s2) || s2 == 0.0
-        return (g = 1.0, stride = 1, N = N, N_eff = N, L = 0)
+    s2 = sum(abs2, x) / (N - 1) # Sample variance
+    if !isfinite(s2) || iszero(s2)
+        return StatisticalInefficiency(1.0, 1, N, N, 0)
     end
 
-    Lmax = isnothing(maxlag) ? min(N - 1, fld(N, 2)) : min(maxlag, N - 1)
+    Lmax = (isnothing(maxlag) ? min(N - 1, fld(N, 2)) : min(maxlag, N - 1))
     C = Vector{Float64}(undef, Lmax)
 
-    # normalized autocorrelation for lags 1..Lmax
+    # Normalized autocorrelation for lags 1..Lmax
     @inbounds @views for lag in 1:Lmax
         num = dot(x[1:N-lag], x[1+lag:N])
         C[lag] = num / ((N - lag) * s2)
@@ -65,7 +66,7 @@ function statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,
     end
     if L == 0
         idx = findfirst(c -> c <= 0.0, C)
-        L = isnothing(idx) ? Lmax : max(idx - 1, 1)
+        L = (isnothing(idx) ? Lmax : max(idx - 1, 1))
     end
 
     # Integrated ACF with finite-sample taper
@@ -79,7 +80,7 @@ function statistical_inefficiency(series::AbstractVector; maxlag::Union{Nothing,
     return StatisticalInefficiency(g, stride, N, N_eff, L)
 end
 
-function subsample(series::AbstractVector, stride::Int; first::Int = 1)
+function subsample(series::AbstractVector, stride::Integer; first::Integer=1)
     return series[first:stride:end]
 end
 
@@ -91,7 +92,7 @@ end
             wi = float(w[i]); s += wi; ssq += wi*wi
         end
     end
-    (s>0 && ssq>0) ? (s*s/ssq) : 0.0
+    return ((s>0 && ssq>0) ? (s*s/ssq) : 0.0)
 end
 
 # Per-partition ESS
@@ -103,5 +104,5 @@ function ess_per_bin(edges::AbstractVector, r::AbstractVector, w::AbstractVector
     @inbounds for i in 1:nb
         e[i] = ess_mask(idx .== i, w)
     end
-    e
+    return e
 end

@@ -9,7 +9,6 @@
     dr12 = vector(c1, c2, boundary)
     dr13 = vector(c1, c3, boundary)
     dr14 = vector(c1, c4, boundary)
-    
 
     @test Molly.lorentz_σ_mixing(a1, a2)        ≈ 0.25u"nm"
     @test Molly.lorentz_ϵ_mixing(a1, a2)        ≈ 0.15u"kJ * mol^-1"

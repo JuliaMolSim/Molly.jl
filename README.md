@@ -15,7 +15,7 @@ The package is described in [a talk](https://www.youtube.com/watch?v=XTE5HSo-jx8
 [Slides](https://docs.google.com/presentation/d/1CvGwFn0XjiIfAQ562RlIPGjXRKnsNXLYjmPRDFS7SQs/edit?usp=sharing) are also available for a tutorial in 2025.
 
 Implemented features include:
-- Non-bonded interactions - Lennard-Jones van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential, Buckingham potential, soft core variants.
+- Non-bonded interactions - Lennard-Jones van der Waals/repulsion force, electrostatic Coulomb potential and reaction field, gravitational potential, soft sphere potential, Mie potential, Buckingham potential, soft core variants for alchemical simulation.
 - Bonded interactions - harmonic and Morse bonds, bond angles, torsion angles, harmonic position restraints, FENE bonds.
 - Ewald and particle mesh Ewald (PME) electrostatic summation.
 - Interface to allow definition of new interactions, simulators, thermostats, neighbor finders, loggers etc.
@@ -51,8 +51,6 @@ Features not yet implemented include:
 - Simulators such as metadynamics.
 - Quantum mechanical modelling.
 - Domain decomposition algorithms.
-- Alchemical free energy calculations.
-- API stability.
 
 ## Installation
 

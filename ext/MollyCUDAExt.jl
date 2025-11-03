@@ -12,7 +12,7 @@ using KernelAbstractions
 
 const WARPSIZE = UInt32(32)
 
-Molly.uses_gpu_neighbor_finder(::Type{AT}) where {AT <: CuArray} = true
+Molly.uses_gpu_neighbor_finder(::Type{<:CuArray}) = true
 
 CUDA.Const(nl::Molly.NoNeighborList) = nl
 
@@ -32,8 +32,8 @@ CUDA.shfl_recurse(op, x::SVector{1, C}) where C = SVector{1, C}(op(x[1]))
 CUDA.shfl_recurse(op, x::SVector{2, C}) where C = SVector{2, C}(op(x[1]), op(x[2]))
 CUDA.shfl_recurse(op, x::SVector{3, C}) where C = SVector{3, C}(op(x[1]), op(x[2]), op(x[3]))
 
-function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters,
-                            nbs::Molly.NoNeighborList, step_n) where {D, AT <: CuArray, T}
+function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray}, pairwise_inters,
+                            nbs::Molly.NoNeighborList, step_n) where D
     kernel = @cuda launch=false pairwise_force_kernel_nonl!(
             buffers.fs_mat, sys.coords, sys.velocities, sys.atoms, sys.boundary, pairwise_inters, step_n,
             Val(D), Val(sys.force_units))
@@ -49,8 +49,8 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, pairwis
     return buffers
 end
 
-function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, pairwise_inters,
-                        nbs::Nothing, ::Val{needs_vir}, step_n) where {D, AT <: CuArray, T, needs_vir}
+function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, <:CuArray, T}, pairwise_inters,
+                        nbs::Nothing, ::Val{needs_vir}, step_n) where {D, T, needs_vir}
     N = length(sys.coords)
     n_blocks = cld(N, WARPSIZE)
     r_cut = sys.neighbor_finder.dist_cutoff
@@ -64,7 +64,7 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, pairwis
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     end
     if sys.boundary isa TriclinicBoundary
-        H = SMatrix{3,3,T}(
+        H = SMatrix{3, 3, T}(
             sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
             sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
             sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
@@ -97,9 +97,9 @@ function Molly.pairwise_forces_loop_gpu!(buffers, sys::System{D, AT, T}, pairwis
     return buffers
 end
 
-function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, AT, T},
+function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, <:CuArray, T},
                                      pairwise_inters, nbs::Nothing,
-                                     step_n) where {D, AT <: CuArray, T}
+                                     step_n) where {D, T}
     # The ordering is always recomputed for potential energy
     # Different buffers are used to the forces case, so sys.neighbor_finder.initialized
     #   is not updated
@@ -113,7 +113,7 @@ function Molly.pairwise_pe_loop_gpu!(pe_vec_nounits, buffers, sys::System{D, AT,
                 buffers.morton_seq, sys.neighbor_finder.eligible, sys.neighbor_finder.special,
                 buffers.compressed_eligible, buffers.compressed_special, Val(N))
     if sys.boundary isa TriclinicBoundary
-        H = SMatrix{3,3,T}(
+        H = SMatrix{3, 3, T}(
             sys.boundary.basis_vectors[1][1].val, sys.boundary.basis_vectors[2][1].val, sys.boundary.basis_vectors[3][1].val,
             sys.boundary.basis_vectors[1][2].val, sys.boundary.basis_vectors[2][2].val, sys.boundary.basis_vectors[3][2].val,
             sys.boundary.basis_vectors[1][3].val, sys.boundary.basis_vectors[2][3].val, sys.boundary.basis_vectors[3][3].val
@@ -322,7 +322,7 @@ function kernel_min_max_triclinic!(
     xyz_min = CuStaticSharedArray(C, b)
     xyz_max = CuStaticSharedArray(C, b)
     for k in a:b
-        xyz_min[k] =  10 * box_sides(boundary, k) # very large (arbitrary) value
+        xyz_min[k] =  10 * box_sides(boundary, k) # Very large (arbitrary) value
         xyz_max[k] = -10 * box_sides(boundary, k)
     end
     if local_i == a

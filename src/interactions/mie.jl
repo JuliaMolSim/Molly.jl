@@ -28,14 +28,14 @@ struct Mie{T, W, C, H, S, E} <: PairwiseInteraction
 end
 
 function Mie(;
-                m,
-                n,
-                cutoff=NoCutoff(),
-                use_neighbors=false,
-                shortcut=lj_zero_shortcut,
-                σ_mixing=lorentz_σ_mixing,
-                ϵ_mixing=geometric_ϵ_mixing,
-                weight_special=1)
+             m,
+             n,
+             cutoff=NoCutoff(),
+             use_neighbors=false,
+             shortcut=lj_zero_shortcut,
+             σ_mixing=lorentz_σ_mixing,
+             ϵ_mixing=geometric_ϵ_mixing,
+             weight_special=1)
     m_p, n_p, mn_fac = promote(m, n, (n / (n - m)) * (n / m) ^ (m / (n - m)))
     return Mie(m_p, n_p, cutoff, use_neighbors, shortcut, σ_mixing, ϵ_mixing,
                weight_special, mn_fac)

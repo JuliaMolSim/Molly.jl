@@ -1325,7 +1325,7 @@ function exchange_constraints(T, bonds_all, angles_all, atoms_data, constraints_
     else
         constraints = ()
     end
-    return constraints, bonds, angles 
+    return constraints, bonds, angles
 end
 
 function System(T, AT, atoms, coords, boundary_used, velocities, atoms_data,
