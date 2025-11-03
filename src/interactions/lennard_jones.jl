@@ -162,8 +162,7 @@ end
     ```
     with $F^A$ and $F^B$ being the regular Lennard-Jones forces in states $A$ and $B$ respectively.
 """
-struct LennardJonesSoftCoreBeutler{L, A, P, C, F, W, SA, SB} <:
-       ThermodynamicIntegrationInteraction
+struct LennardJonesSoftCoreBeutler{L, A, P, C, F, W, SA, SB} <: PairwiseInteraction
     λ::L
     α::A
     p::P
