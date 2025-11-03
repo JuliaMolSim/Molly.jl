@@ -150,15 +150,27 @@ struct PeriodicTorsionType{T, E}
 end
 
 """
-    MolecularForceField(ff_files...; units=true)
+    MolecularForceField(ff_files...; units=true, custom_residue_templates = nothing, custom_renaming_scheme = nothing)
     MolecularForceField(T, ff_files...; units=true)
     MolecularForceField(atom_types, residue_types, bond_types, angle_types,
                         torsion_types, torsion_order, weight_14_coulomb,
-                        weight_14_lj, attributes_from_residue)
+                        weight_14_lj, attributes_from_residue,
+                        residue_name_replacements, atom_name_replacements,
+                        standard_bonds)
 
-A molecular force field.
+A molecular force field. 
 
 Read one or more OpenMM force field XML files by passing them to the constructor.
+
+In order to  assign force field parameters to the atoms in the simulation, the
+residues determined from a structure file are matched to templates provided by
+the force field file, as well as a template dictionary in .xml format, which defines
+the standard topology (bonds) of the residues to be found in the simulation. At the
+moment, Molly provides a dictionary for all standard aminoacids, nucleic acids and
+water for this purpose. If the system to be simulated contains other molecules, their
+template topologies must be defined either through `CONNECT` records in the .pdb file 
+or by prviding an extra custom template file with the `custom_residue_templates` keyword.
+
 """
 struct MolecularForceField{T, M, D, E, K}
     atom_types::Dict{String, AtomType{T, M, D, E}}
@@ -448,6 +460,9 @@ function chemfiles_name(top, ai)
     return Chemfiles.name(at)
 end
 
+# Creates a Dict representation of the system Chains -> Residues -> Graphs
+# Useful as to have all the necessary data in one hashable object. Also ensures
+# that the correct names are used for downstream template matching. 
 function canonicalize_system(top,
                              resname_replacements, atomname_replacements)
 
@@ -506,8 +521,6 @@ Read a Gromacs coordinate file and a Gromacs topology file with all
 includes collapsed into one file.
 
 Gromacs file reading should be considered experimental.
-The `rename_terminal_res` keyword argument is not available when reading
-Gromacs files.
 
 # Arguments
 - `boundary=nothing`: the bounding box used for simulation, read from the
@@ -548,9 +561,6 @@ Gromacs files.
     `:none`, `:obc1`, `:obc2` and `:gbn2`.
 - `kappa=0.0u"nm^-1"`: the kappa value for the implicit solvent model if one
     is used.
-- `rename_terminal_res=true`: whether to rename the first and last residues
-    to match the appropriate atom templates, for example the first (N-terminal)
-    residue could be changed from "MET" to "NMET".
 - `grad_safe=false`: should be set to `true` if the system is going to be used
     with Enzyme.jl and `nonbonded_method` is `:pme`.
 """
@@ -573,7 +583,6 @@ function System(coord_file::AbstractString,
                 data=nothing,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
-                rename_terminal_res::Bool=true,   # unused in template path
                 grad_safe::Bool=false) where {AT<:AbstractArray}
 
     
@@ -610,7 +619,7 @@ function System(coord_file::AbstractString,
     
     canonical_system = canonicalize_system(top, resname_replacements, atomname_replacements)
 
-    top_bonds = create_bonds(top, canonical_system, standard_bonds, resname_replacements)
+    top_bonds = create_bonds(canonical_system, standard_bonds)
     top_bonds = create_disulfide_bonds(coords, boundary_used, canonical_system, top_bonds)
     top_bonds = read_connect_bonds(coord_file, top_bonds, canonical_system) 
     

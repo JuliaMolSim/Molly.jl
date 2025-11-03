@@ -30,8 +30,8 @@ const PERIODIC_TABLE = Symbol[
     :Rf, :Db, :Sg, :Bh, :Hs, :Mt, :Ds, :Rg, :Cn, :Nh, :Fl, :Mc, :Lv, :Ts, :Og
 ]
 
-"""
-"""
+# Struct to carry the information necessary to represent the residue templates 
+# defined in the force field .xml files
 struct ResidueTemplate{T}
     name::String
     atoms::Vector{String}                 # atom names
@@ -43,8 +43,8 @@ struct ResidueTemplate{T}
     extras::BitVector                     # marks extra particles
 end
 
-"""
-"""
+# Equivalent to the struct above, but this represents a residue read from the 
+# provided structure files
 struct ResidueGraph
     res_name::String              # includes N/C prefix if terminal
     atom_inds::Vector{Int}        # global 1-based
@@ -53,6 +53,52 @@ struct ResidueGraph
     bonds::Vector{Tuple{Int,Int}} # local intra-res bonds
     external_bonds::Vector{Int}   # per-atom external degree
 end
+
+# Some helpers for things that are done a lot
+
+function atom_name_from_index(atom_idx, canon_system)
+    for (chain, resids) in canon_system
+        for (res_id, rgraph) in resids
+            if !(atom_idx ∈ rgraph.atom_inds)
+                continue
+            else
+                local_idx = findfirst(i -> i == atom_idx, rgraph.atom_inds)
+                return rgraph.atom_names[local_idx]
+            end
+        end
+    end
+end
+
+function residue_from_atom_idx(atom_idx, canon_system)
+    for (chain, resids) in canon_system
+        for (res_id, rgraph) in resids
+            if atom_idx ∈ rgraph.atom_inds
+                return rgraph
+            end
+        end
+    end
+end
+
+function resnum_from_atom_idx(atom_idx, canon_system)
+    for (chain, resids) in canon_system
+        for (res_id, rgraph) in resids
+            if atom_idx ∈ rgraph.atom_inds
+                return res_id
+            end
+        end
+    end
+end
+
+function chain_from_atom_idx(atom_idx, canon_system)
+    for (chain, resids) in canon_system
+        for (res_id, rgraph) in resids
+            if atom_idx ∈ rgraph.atom_inds
+                return chain
+            end
+        end
+    end
+end
+
 
 # Fill `map` with every attribute value of each <Atom> mapping to the canonical name
 function parse_atoms(residue::EzXML.Node, map::Dict{String,String})
@@ -65,6 +111,8 @@ function parse_atoms(residue::EzXML.Node, map::Dict{String,String})
     return map
 end
 
+# Loads atom and residue name replacements, given a table of commonly
+# used alternative namings in pdb files
 function load_replacements(; xmlpath = nothing,
                              resname_replacements  = nothing,
                              atomname_replacements = nothing)
@@ -132,6 +180,7 @@ function load_replacements(; xmlpath = nothing,
     return resname_replacements, atomname_replacements
 end
 
+# Loads the standard topology for the residues 
 function load_bond_definitions(; xmlpath = nothing, standardBonds = nothing)
 
     if isnothing(xmlpath)
@@ -154,8 +203,9 @@ function load_bond_definitions(; xmlpath = nothing, standardBonds = nothing)
     return standardBonds
 end
 
-function create_bonds(top, canon_sys, standard_bonds,
-                      resname_replacements)
+# Builds the topology of the system read from a structure file given the
+# template bonds
+function create_bonds(canon_sys, standard_bonds)
 
     bonds = Tuple{Int, Int}[]
 
@@ -173,11 +223,8 @@ function create_bonds(top, canon_sys, standard_bonds,
             atom_maps[resnum] = atomMap
         end
 
-
         for (resnum, rgraph) in resids
-
             i = resnum
-
             res_name = rgraph.res_name
 
             if haskey(standard_bonds, res_name)
@@ -240,14 +287,11 @@ function create_bonds(top, canon_sys, standard_bonds,
                         if !(pair ∈ bonds)
                             push!(bonds, pair)
                             if !external
-                                
                                 i_local = findfirst(x -> x == fromAtom, rgraph.atom_names)
                                 j_local = findfirst(x -> x == toAtom,   rgraph.atom_names)
 
                                 pair_local = i_local < j_local ? (i_local, j_local) : (j_local, i_local)
-
                                 push!(rgraph.bonds, pair_local)
-
                             end
                         end
                     end
@@ -260,49 +304,7 @@ function create_bonds(top, canon_sys, standard_bonds,
 
 end
 
-function atom_name_from_index(atom_idx, canon_system)
-    for (chain, resids) in canon_system
-        for (res_id, rgraph) in resids
-            if !(atom_idx ∈ rgraph.atom_inds)
-                continue
-            else
-                local_idx = findfirst(i -> i == atom_idx, rgraph.atom_inds)
-                return rgraph.atom_names[local_idx]
-            end
-        end
-    end
-end
-
-function residue_from_atom_idx(atom_idx, canon_system)
-    for (chain, resids) in canon_system
-        for (res_id, rgraph) in resids
-            if atom_idx ∈ rgraph.atom_inds
-                return rgraph
-            end
-        end
-    end
-end
-
-function resnum_from_atom_idx(atom_idx, canon_system)
-    for (chain, resids) in canon_system
-        for (res_id, rgraph) in resids
-            if atom_idx ∈ rgraph.atom_inds
-                return res_id
-            end
-        end
-    end
-end
-
-function chain_from_atom_idx(atom_idx, canon_system)
-    for (chain, resids) in canon_system
-        for (res_id, rgraph) in resids
-            if atom_idx ∈ rgraph.atom_inds
-                return chain
-            end
-        end
-    end
-end
-
+# Builds disulfide bonds given some geometric criteria
 function create_disulfide_bonds(coords, boundary, canon_system, bonds)
 
     function is_cysx(rgraph::ResidueGraph)
@@ -366,6 +368,8 @@ function create_disulfide_bonds(coords, boundary, canon_system, bonds)
 
 end
 
+# Parses the CONNECT records of the pdb files to catch any potential
+# missing bonds 
 function read_connect_bonds(pdbfile, bonds, canon_system)
     filtered = String[]
     open(pdbfile) do io
@@ -399,33 +403,22 @@ function read_connect_bonds(pdbfile, bonds, canon_system)
     return bonds
 end
 
-"""
-    match_residue_to_template(res::ResidueGraph,
-                              tpl::ResidueTemplate;
-                              ignoreExternalBonds::Bool=false,
-                              ignoreExtraParticles::Bool=false) -> Union{Vector{Int},Nothing}
-
-Replicates OpenMM's `matchResidueToTemplate`.
-
-- Extras in residue are atoms with `res.elements[i] == :X`.
-- Extras in template are `tpl.extras[j] == true`.
-- If `ignoreExtraParticles`, extras are removed from both sides before matching.
-- If `ignoreExternalBonds`, external bond counts are ignored.
-
-Returns a vector `match` of length equal to the number of residue atoms kept
-(after optional extra filtering). `match[i]` is the **template atom index (1-based, original template indexing)**
-corresponding to the `i`-th kept residue atom. Returns `nothing` if no match exists.
-"""
+# Template matching step, follows what OpenMM does.
+# In general, it first checks is the residue to be matched
+# has the same signature (N elements, bonds per atom) than its template. 
+# If not, residues do not match. If residue and template share signature, 
+# the residue graphs are compared through a Depth-First Search 
+# (dfs helper in this method), ensuring that their topologies are the same.
 function match_residue_to_template(res::ResidueGraph,
                                    tpl::ResidueTemplate;
                                    ignoreExternalBonds::Bool=false,
                                    ignoreExtraParticles::Bool=false)::Union{Vector{Int}, Nothing}
 
-    # --- 0) Define extra-particle predicates ---
+    # 0) Define extra-particle predicates
     is_extra_res(i) = res.elements[i] == :X
     is_extra_tpl(j) = tpl.extras[j]
 
-    # --- 1) Select atoms to consider (apply ignoreExtraParticles) ---
+    # 1) Select atoms to consider (apply ignoreExtraParticles) ---
     res_keep = ignoreExtraParticles ? findall(i -> !is_extra_res(i), eachindex(res.atom_names)) : collect(eachindex(res.atom_names))
     tpl_keep = ignoreExtraParticles ? findall(j -> !is_extra_tpl(j), eachindex(tpl.atoms)) : collect(eachindex(tpl.atoms))
 
@@ -437,12 +430,12 @@ function match_residue_to_template(res::ResidueGraph,
         return Int[]  # both empty after filtering → vacuous match
     end
 
-    # --- 2) Build local index maps (kept-only) ---
+    # 2) Build local index maps (kept-only)
     res_old2new = Dict{Int,Int}(res_keep[k] => k for k in 1:numAtoms)
     tpl_old2new = Dict{Int,Int}(tpl_keep[k] => k for k in 1:numAtoms)
     tpl_new2old = copy(tpl_keep)  # inverse map to original template indices
 
-    # --- 3) Build adjacency among kept atoms and external-bond counts ---
+    # 3) Build adjacency among kept atoms and external-bond counts 
     # Residue: local bonds are given in res.bonds over original local indices.
     res_adj = [Int[] for _ in 1:numAtoms]
     for (i,j) in res.bonds
@@ -461,7 +454,7 @@ function match_residue_to_template(res::ResidueGraph,
     end
     tpl_ext = ignoreExternalBonds ? fill(0, numAtoms) : [tpl.external_bonds[tpl_keep[k]] for k in 1:numAtoms]
 
-    # --- 4) Quick type-count screen: (element or :X, degree, ext) multiplicities must match ---
+    # 4) Quick type-count screen: (element or :X, degree, ext) multiplicities must match
     # Residue keys
     res_keys = Tuple{Symbol,Int,Int}[]
     for i in 1:numAtoms
@@ -481,13 +474,11 @@ function match_residue_to_template(res::ResidueGraph,
         return nothing
     end
 
-    # --- 5) Candidate template atoms for each residue atom ---
+    # 5) Candidate template atoms for each residue atom
     # OpenMM's exactNameMatch: if residue atom is extra and there exists a template extra
     # with same name, enforce name equality. Otherwise extra can map to any template extra.
     # Non-extra must match element exactly and template must be non-extra.
     candidates = Vector{Vector{Int}}(undef, numAtoms)
-    # Precompute template-extra presence by name
-    tpl_extra_name_set = Set{String}(tpl.atoms[j] for j in tpl_keep if is_extra_tpl(j))
 
     for i in 1:numAtoms
         ri_old = res_keep[i]
@@ -531,7 +522,7 @@ function match_residue_to_template(res::ResidueGraph,
         candidates[i] = cands
     end
 
-    # --- 6) Heuristic search order: fewest candidates first, then neighbors of chosen ---
+    # 6) Heuristic search order: fewest candidates first, then neighbors of chosen
     atomsToOrder = Set(1:numAtoms)
     searchOrder = Int[]
     neighbor_heap = Int[]  # acts as an unordered list of candidate neighbors
@@ -570,7 +561,7 @@ function match_residue_to_template(res::ResidueGraph,
         cand_ord[pos]    = candidates[i]
     end
 
-    # --- 7) Recursive backtracking with bond-consistency ---
+    # 7) Recursive backtracking with bond-consistency ---
     matches_tpl = fill(0, numAtoms)   # at position pos, matched template new-index
     used_tpl    = falses(numAtoms)
 
@@ -611,9 +602,9 @@ function match_residue_to_template(res::ResidueGraph,
         return nothing
     end
 
-    # --- 8) Return mapping back to original template indices, in original residue-kept order ---
+    # 8) Return mapping back to original template indices, in original residue-kept order
     # We need mapping for residue atoms in kept-order, not search-order.
-    # matches_tpl is in search-order; invert back:
+    # matches_tpl is in search-order -> invert back:
     matches_tpl_in_res_order = similar(matches_tpl)
     for pos in 1:numAtoms
         i = searchOrder[pos]
@@ -638,7 +629,7 @@ function build_adjacency(natoms::Int, bonds::Vector{NTuple{2,Int}})
     return adj
 end
 
-# ---- Angles (i,j,k) with j as center; unique by i<k ----
+# Builds the angles (i,j,k) from the adjacency matrix and bonds
 function build_angles(adj::Vector{Vector{Int}}, bonds)
     angles = Vector{NTuple{3,Int}}()
     for bond in bonds
@@ -664,7 +655,7 @@ function build_angles(adj::Vector{Vector{Int}}, bonds)
     return sort!(unique!(angles))
 end
 
-
+# Builds proper torsion (i,j,k,l) from adjacency and angles
 function build_torsions(adj::Vector{Vector{Int}}, angles::Vector{NTuple{3,Int}})
     tors = Vector{NTuple{4,Int}}()
     for angle in angles
@@ -690,6 +681,7 @@ function build_torsions(adj::Vector{Vector{Int}}, angles::Vector{NTuple{3,Int}})
     return sort!(unique!(tors))
 end
 
+# Helper to make combinations, needed for impropers
 function combinations_of(vec::Vector, n::Int)
     if n < 0 || n > length(vec)
         throw(ArgumentError("n must be between 0 and length(vec)"))
@@ -714,7 +706,7 @@ function combinations_of(vec::Vector, n::Int)
     return result
 end
 
-# ---- Impropers (c, j, k, l) with c as center; i<j<k for uniqueness ----
+# Builds the improper torsion (i,j,k,l) given the adjacency matrix
 function build_impropers(adj::Vector{Vector{Int}})
     top_impropers = Tuple{Int, Int, Int, Int}[]
     for (i, bonded_to) in enumerate(adj)
