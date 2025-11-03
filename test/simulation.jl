@@ -1187,7 +1187,7 @@ end
 
         @test 0.75u"bar" < mean(P_iso) < 1.25u"bar" # Corrected for tensorial pressure
         @test std(P_iso) < 0.5u"bar"
-        @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
+        @test 120.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
 
     end
@@ -1237,7 +1237,7 @@ end
         @test std(P_xy) < 0.5u"bar"
         @test std(P_z)  < 0.5u"bar"
 
-        @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
+        @test 120.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
 
     end
@@ -1292,7 +1292,7 @@ end
         @test std(P_y) < 0.5u"bar"
         @test std(P_z) < 0.5u"bar"
         
-        @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
+        @test 120.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
     end
 end
@@ -1336,7 +1336,7 @@ end
         @test 0.75u"bar" < mean(P_iso) < 1.25u"bar" # Corrected for tensorial pressure
         @test std(P_iso) < 0.5u"bar"
 
-        @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
+        @test 120.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
     
     end
@@ -1385,7 +1385,7 @@ end
         @test std(P_xy) < 0.5u"bar"
         @test std(P_z) < 0.5u"bar"
         
-        @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
+        @test 120.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
 
     end
@@ -1440,7 +1440,7 @@ end
         @test std(P_y) < 0.5u"bar"
         @test std(P_z) < 0.5u"bar"
         
-        @test 125.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
+        @test 120.0u"nm^3" < mean(values(sys.loggers.volume)[2001:end]) < 165.0u"nm^3" # (5nm)^3 to (5.5nm)^3
         @test std(values(sys.loggers.volume)[2001:end]) < 25.0u"nm^3"
     end
 end

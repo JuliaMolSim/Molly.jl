@@ -200,7 +200,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
     end
     if !isnothing(custom_residue_templates)
         standard_bonds = load_bond_definitions(; xmlpath = custom_residue_templates,
-                                                 standard_bonds = standard_bonds)
+                                                 standardBonds = standard_bonds) 
     end
 
     for ff_file in ff_files
@@ -825,8 +825,67 @@ function System(coord_file::AbstractString,
             end
         end
         isnothing(tt) && continue
-        push!(imps_il.is, j < k ? j : k)
-        push!(imps_il.js, j < k ? k : j)
+
+        r2 = resnum_from_atom_idx(j, canonical_system)
+        r3 = resnum_from_atom_idx(k, canonical_system)
+        r4 = resnum_from_atom_idx(l, canonical_system)
+
+        res2 = residue_from_atom_idx(j, canonical_system)
+        res3 = residue_from_atom_idx(k, canonical_system)
+        res4 = residue_from_atom_idx(l, canonical_system)
+
+        ta2 = findfirst(x -> x == j, res2.atom_inds)
+        ta3 = findfirst(x -> x == k, res3.atom_inds)
+        ta4 = findfirst(x -> x == l, res4.atom_inds)
+
+        e2 = ELEMENT_SYMBOLS[element_of[j]]
+        e3 = ELEMENT_SYMBOLS[element_of[k]]
+        e4 = ELEMENT_SYMBOLS[element_of[l]]
+
+        # In OpenMM's own words:
+        # Workaround to be more consistent with AMBER.  It uses wildcards to define most of its
+        # impropers, which leaves the ordering ambiguous.  ** It then follows some bizarre rules
+        # to pick the order. **
+        if  !("" ∈ best_key) # If torsion does not have a wildcard
+
+            if t2 == t4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                (j,   l)   = (l,   j)
+                (r2,  r4)  = (r4,  r2)
+                (ta2, ta4) = (ta4, ta2) 
+            end
+
+            if t3 == t4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                (k,   l)   = (l,   k)
+                (r3,  r4)  = (r4,  r3)
+                (ta3, ta4) = (ta4, ta3)
+            end
+
+            if t2 == t3 && (r2 > r3 || (r2 == r3 && ta2 > ta3))
+                (j,   k)   = (k,   j)
+            end
+
+        else
+
+            if e2 == e4 && (r2 > r4 || (r2 == r4 && ta2 > ta4))
+                (j,   l)   = (l,   j)
+                (r2,  r4)  = (r4,  r2)
+                (ta2, ta4) = (ta4, ta2)
+            end
+
+            if e3 == e4 && (r3 > r4 || (r3 == r4 && ta3 > ta4))
+                (k,   l)   = (l,   k)
+                (r3,  r4)  = (r4,  r3)
+                (ta3, ta4) = (ta4, ta3)
+            end
+
+            if r2 > r3 || (r2 == r3 && ta2 > ta3)
+                (j,   k)   = (k,   j)
+            end
+
+        end
+        
+        push!(imps_il.is, j)
+        push!(imps_il.js, k)
         push!(imps_il.ks, c)
         push!(imps_il.ls, l)
         push!(imps_il.types, atom_types_to_string(best_key...))
