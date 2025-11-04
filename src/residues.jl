@@ -1,35 +1,3 @@
-# --- Elements dictionary ---
-const ELEMENT_SYMBOLS = Dict{String,Symbol}(
-    "H"=>:H,  "He"=>:He,
-    "Li"=>:Li,"Be"=>:Be,"B"=>:B,"C"=>:C,"N"=>:N,"O"=>:O,"F"=>:F,"Ne"=>:Ne,
-    "Na"=>:Na,"Mg"=>:Mg,"Al"=>:Al,"Si"=>:Si,"P"=>:P,"S"=>:S,"Cl"=>:Cl,"Ar"=>:Ar,
-    "K"=>:K,  "Ca"=>:Ca,"Sc"=>:Sc,"Ti"=>:Ti,"V"=>:V,"Cr"=>:Cr,"Mn"=>:Mn,"Fe"=>:Fe,"Co"=>:Co,"Ni"=>:Ni,"Cu"=>:Cu,"Zn"=>:Zn,
-    "Ga"=>:Ga,"Ge"=>:Ge,"As"=>:As,"Se"=>:Se,"Br"=>:Br,"Kr"=>:Kr,
-    "Rb"=>:Rb,"Sr"=>:Sr,"Y"=>:Y,"Zr"=>:Zr,"Nb"=>:Nb,"Mo"=>:Mo,"Tc"=>:Tc,"Ru"=>:Ru,"Rh"=>:Rh,"Pd"=>:Pd,"Ag"=>:Ag,"Cd"=>:Cd,
-    "In"=>:In,"Sn"=>:Sn,"Sb"=>:Sb,"Te"=>:Te,"I"=>:I,"Xe"=>:Xe,
-    "Cs"=>:Cs,"Ba"=>:Ba,"La"=>:La,"Ce"=>:Ce,"Pr"=>:Pr,"Nd"=>:Nd,"Pm"=>:Pm,"Sm"=>:Sm,"Eu"=>:Eu,"Gd"=>:Gd,"Tb"=>:Tb,"Dy"=>:Dy,"Ho"=>:Ho,"Er"=>:Er,"Tm"=>:Tm,"Yb"=>:Yb,"Lu"=>:Lu,
-    "Hf"=>:Hf,"Ta"=>:Ta,"W"=>:W,"Re"=>:Re,"Os"=>:Os,"Ir"=>:Ir,"Pt"=>:Pt,"Au"=>:Au,"Hg"=>:Hg,
-    "Tl"=>:Tl,"Pb"=>:Pb,"Bi"=>:Bi,"Po"=>:Po,"At"=>:At,"Rn"=>:Rn,
-    "Fr"=>:Fr,"Ra"=>:Ra,"Ac"=>:Ac,"Th"=>:Th,"Pa"=>:Pa,"U"=>:U,"Np"=>:Np,"Pu"=>:Pu,"Am"=>:Am,"Cm"=>:Cm,"Bk"=>:Bk,"Cf"=>:Cf,"Es"=>:Es,"Fm"=>:Fm,"Md"=>:Md,"No"=>:No,"Lr"=>:Lr,
-    "Rf"=>:Rf,"Db"=>:Db,"Sg"=>:Sg,"Bh"=>:Bh,"Hs"=>:Hs,"Mt"=>:Mt,"Ds"=>:Ds,"Rg"=>:Rg,"Cn"=>:Cn,"Nh"=>:Nh,"Fl"=>:Fl,"Mc"=>:Mc,"Lv"=>:Lv,"Ts"=>:Ts,"Og"=>:Og,
-    "?"=>:X
-)
-
-const PERIODIC_TABLE = Symbol[
-    :H,  :He,
-    :Li, :Be, :B,  :C,  :N,  :O,  :F,  :Ne,
-    :Na, :Mg, :Al, :Si, :P,  :S,  :Cl, :Ar,
-    :K,  :Ca, :Sc, :Ti, :V,  :Cr, :Mn, :Fe, :Co, :Ni, :Cu, :Zn,
-    :Ga, :Ge, :As, :Se, :Br, :Kr,
-    :Rb, :Sr, :Y,  :Zr, :Nb, :Mo, :Tc, :Ru, :Rh, :Pd, :Ag, :Cd,
-    :In, :Sn, :Sb, :Te, :I,  :Xe,
-    :Cs, :Ba, :La, :Ce, :Pr, :Nd, :Pm, :Sm, :Eu, :Gd, :Tb, :Dy, :Ho, :Er, :Tm, :Yb, :Lu,
-    :Hf, :Ta, :W,  :Re, :Os, :Ir, :Pt, :Au, :Hg,
-    :Tl, :Pb, :Bi, :Po, :At, :Rn,
-    :Fr, :Ra, :Ac, :Th, :Pa, :U,  :Np, :Pu, :Am, :Cm, :Bk, :Cf, :Es, :Fm, :Md, :No, :Lr,
-    :Rf, :Db, :Sg, :Bh, :Hs, :Mt, :Ds, :Rg, :Cn, :Nh, :Fl, :Mc, :Lv, :Ts, :Og
-]
-
 # Struct to carry the information necessary to represent the residue templates 
 # defined in the force field .xml files
 struct ResidueTemplate{T}
@@ -62,7 +30,7 @@ function atom_name_from_index(atom_idx, canon_system)
             if !(atom_idx ∈ rgraph.atom_inds)
                 continue
             else
-                local_idx = findfirst(i -> i == atom_idx, rgraph.atom_inds)
+                local_idx = findfirst(isequal(atom_idx), rgraph.atom_inds)
                 return rgraph.atom_names[local_idx]
             end
         end
@@ -235,9 +203,9 @@ function create_bonds(canon_sys, standard_bonds)
                         fromResidue = i-1
                         fromAtom = bond[1][2:end]
                         
-                        ext_ind = findfirst(x->x==fromAtom, resids[fromResidue].atom_names)
+                        ext_ind = findfirst(isequal(fromAtom), resids[fromResidue].atom_names)
                         resids[fromResidue].external_bonds[ext_ind] += 1
-                        ext_ind = findfirst(x->x==bond[2], rgraph.atom_names)
+                        ext_ind = findfirst(isequal(bond[2]), rgraph.atom_names)
                         rgraph.external_bonds[ext_ind] += 1
 
                     elseif startswith(bond[1], "+") && i < n_resids
@@ -245,9 +213,9 @@ function create_bonds(canon_sys, standard_bonds)
                         fromResidue = i+1
                         fromAtom = bond[1][2:end]
 
-                        ext_ind = findfirst(x->x==fromAtom, resids[fromResidue].atom_names)
+                        ext_ind = findfirst(isequal(fromAtom), resids[fromResidue].atom_names)
                         resids[fromResidue].external_bonds[ext_ind] += 1
-                        ext_ind = findfirst(x->x==bond[2], rgraph.atom_names)
+                        ext_ind = findfirst(isequal(bond[2]), rgraph.atom_names)
                         rgraph.external_bonds[ext_ind] += 1
 
                     else
@@ -260,9 +228,9 @@ function create_bonds(canon_sys, standard_bonds)
                         toResidue = i-1
                         toAtom = bond[2][2:end]
 
-                        ext_ind = findfirst(x->x==toAtom, resids[toResidue].atom_names)
+                        ext_ind = findfirst(isequal(toAtom), resids[toResidue].atom_names)
                         resids[toResidue].external_bonds[ext_ind] += 1
-                        ext_ind = findfirst(x->x==bond[1], rgraph.atom_names)
+                        ext_ind = findfirst(isequal(bond[1]), rgraph.atom_names)
                         rgraph.external_bonds[ext_ind] += 1
 
                     elseif startswith(bond[2], "+") && i < n_resids
@@ -270,9 +238,9 @@ function create_bonds(canon_sys, standard_bonds)
                         toResidue = i+1
                         toAtom = bond[2][2:end]
                         
-                        ext_ind = findfirst(x->x==toAtom, resids[toResidue].atom_names)
+                        ext_ind = findfirst(isequal(toAtom), resids[toResidue].atom_names)
                         resids[toResidue].external_bonds[ext_ind] += 1
-                        ext_ind = findfirst(x->x==bond[1], rgraph.atom_names)
+                        ext_ind = findfirst(isequal(bond[1]), rgraph.atom_names)
                         rgraph.external_bonds[ext_ind] += 1
 
                     else
@@ -287,8 +255,8 @@ function create_bonds(canon_sys, standard_bonds)
                         if !(pair ∈ bonds)
                             push!(bonds, pair)
                             if !external
-                                i_local = findfirst(x -> x == fromAtom, rgraph.atom_names)
-                                j_local = findfirst(x -> x == toAtom,   rgraph.atom_names)
+                                i_local = findfirst(isequal(fromAtom), rgraph.atom_names)
+                                j_local = findfirst(isequal(toAtom),   rgraph.atom_names)
 
                                 pair_local = i_local < j_local ? (i_local, j_local) : (j_local, i_local)
                                 push!(rgraph.bonds, pair_local)
@@ -335,7 +303,7 @@ function create_disulfide_bonds(coords, boundary, canon_system, bonds)
     n_cysx = length(cysx)
     for (cys_idx, cysi) in enumerate(cysx)
         
-        sg1_idx  = findfirst(x -> x == "SG", cysi.atom_names)
+        sg1_idx  = findfirst(isequal("SG"), cysi.atom_names)
         atom_idx = cysi.atom_inds[sg1_idx]
         pos1     = coords[atom_idx]
 
@@ -344,7 +312,7 @@ function create_disulfide_bonds(coords, boundary, canon_system, bonds)
 
         for cys_jdx in cys_idx:n_cysx
             cysj = cysx[cys_jdx]
-            sg2_idx  = findfirst(x -> x == "SG", cysj.atom_names)
+            sg2_idx  = findfirst(isequal("SG"), cysj.atom_names)
             atom_jdx = cysj.atom_inds[sg2_idx]
             pos2     = coords[atom_jdx]
 
@@ -389,8 +357,8 @@ function read_connect_bonds(pdbfile, bonds, canon_system)
                         push!(bonds, pair)
                     end
                     if res_i == res_j
-                        local_i = findfirst(n -> n == atom_name_i, res_i.atom_names)
-                        local_j = findfirst(n -> n == atom_name_j, res_i.atom_names)
+                        local_i = findfirst(isequal(atom_name_i), res_i.atom_names)
+                        local_j = findfirst(isequal(atom_name_j), res_i.atom_names)
                         local_pair = local_i < local_j ? (local_i, local_j) : (local_j, local_i)
                         if !(local_pair ∈ res_i.bonds)
                             push!(res_i.bonds, local_pair)
@@ -403,8 +371,40 @@ function read_connect_bonds(pdbfile, bonds, canon_system)
     return bonds
 end
 
+# In case we are not dealing with PDB files, we will not
+# have CONNECT records. For this case, we use Chemfiles
+# to infer bonds, and add bonds only if they have not 
+# been added by the previous steps
+function read_extra_bonds(top, top_bonds, canonical_system)
+    chfl_bonds = Vector{Int}[is .+ 1 for is in eachcol(Int.(Chemfiles.bonds(top)))]
+    for (i, j) in chfl_bonds
+        res_i = residue_from_atom_idx(i, canonical_system)
+        res_j = residue_from_atom_idx(j, canonical_system)
+        if res_i == res_j
+            pair = i < j ? (i,j) : (j,i)
+            local_idx = findfirst(isequal(i), res_i.atom_inds)
+            local_jdx = findfirst(isequal(j), res_i.atom_inds)
+            local_pair = local_idx < local_jdx ? (local_idx, local_jdx) : (local_jdx, local_idx)
+            if !(pair ∈ top_bonds)
+                push!(top_bonds, pair)
+                if !(local_pair ∈ res_i.bonds)
+                    push!(res_i.bonds, local_pair)
+                end
+            end
+ 
+        else
+            pair = i < j ? (i,j) : (j,i)
+            if !(pair ∈ top_bonds)
+                push!(top_bonds, pair)
+            end
+        end
+    end
+
+    return sort!(unique!(top_bonds))
+end
+
 # Template matching step, follows what OpenMM does.
-# In general, it first checks is the residue to be matched
+# In general, it first checks if the residue to be matched
 # has the same signature (N elements, bonds per atom) than its template. 
 # If not, residues do not match. If residue and template share signature, 
 # the residue graphs are compared through a Depth-First Search 
@@ -469,7 +469,8 @@ function match_residue_to_template(res::ResidueGraph,
         push!(tpl_keys, key)
     end
     # Compare multisets
-    sort!(res_keys); sort!(tpl_keys)
+    sort!(res_keys)
+    sort!(tpl_keys)
     if res_keys != tpl_keys
         return nothing
     end

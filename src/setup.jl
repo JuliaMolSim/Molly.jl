@@ -247,7 +247,9 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
 
                     for re in eachelement(residue)
                         if re.name == "Atom"
-                            an = re["name"]; tp = re["type"]; q = parse(T, re["charge"])
+                            an = re["name"]
+                            tp = re["type"]
+                            q = parse(T, re["charge"])
                             
                             push!(atoms, an)
                             push!(types, tp)
@@ -257,7 +259,7 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                             tel, tclass = type_info[tp]
                             
                             push!(extras, (tel == "?") || (tclass == "EP"))
-                            push!(elements, get(ELEMENT_SYMBOLS, tel, :X))
+                            push!(elements, tel == "?" ? :X : Symbol(tel))
                         
                         elseif re.name == "Bond"
                             push!(bonds_by_name, (re["atomName1"], re["atomName2"]))
@@ -417,7 +419,7 @@ function Base.show(io::IO, ff::MolecularForceField)
             length(ff.angle_types), " angle types and ", length(ff.torsion_types), " torsion types")
 end
 
-get_res_id(res) = (Chemfiles.id(res), Chemfiles.property(res, "chainid"))
+get_res_id(res) = (Chemfiles.id(res), ("chain_id" in Chemfiles.list_properties(res)) ? Chemfiles.property(res, "chainid") : "A")
 
 # Return the residue name with N or C added for terminal residues
 function residue_name(res, res_id_to_standard::Dict, rename_terminal_res::Bool=true)
@@ -470,8 +472,8 @@ function canonicalize_system(top,
 
     for ri in 1:Chemfiles.count_residues(top)
 
-        res      = Molly.chemfiles_residue(top, ri-1)
-        res_id   = Molly.get_res_id(res)
+        res      = chemfiles_residue(top, ri-1)
+        res_id   = get_res_id(res)
         res_name = Chemfiles.name(res)
         res_name = haskey(resname_replacements, res_name) ? resname_replacements[res_name] : res_name
         atom_inds_zero = Int.(Chemfiles.atoms(res))
@@ -484,11 +486,16 @@ function canonicalize_system(top,
             if an == 0 # Extra particle returns 0 from chemfiles
                 push!(atom_elements, :X)
             else
-                push!(atom_elements, PERIODIC_TABLE[an])    
+                elm = PeriodicTable.elements[an].symbol
+                push!(atom_elements, Symbol(elm))
             end
         end
-        lookup         = atomname_replacements[res_name]
-        atom_names     = [haskey(lookup, a) ? (lookup[a], aidx+1) : (a, aidx+1) for (a, aidx) in zip(atom_names, atom_inds_zero)]
+        if haskey(atomname_replacements, res_name)
+            lookup     = atomname_replacements[res_name]
+            atom_names = [haskey(lookup, a) ? (lookup[a], aidx+1) : (a, aidx+1) for (a, aidx) in zip(atom_names, atom_inds_zero)]
+        else
+            atom_names = [(a, aidx+1) for (a, aidx) in zip(atom_names, atom_inds_zero)]
+        end
 
         rgraph = ResidueGraph(res_name, atom_inds, [a[1] for a in atom_names], atom_elements,
                               Tuple{Int,Int}[], fill(0, length(atom_inds)))
@@ -504,6 +511,8 @@ function canonicalize_system(top,
     return canon_system
 
 end
+
+is_pdb(name) = uppercase(split(name, ".")[end]) == "PDB"
 
 """
     System(coordinate_file, force_field; <keyword arguments>)
@@ -561,6 +570,9 @@ Gromacs file reading should be considered experimental.
     `:none`, `:obc1`, `:obc2` and `:gbn2`.
 - `kappa=0.0u"nm^-1"`: the kappa value for the implicit solvent model if one
     is used.
+- `disulfide_bonds=false`: wether or not to look for disulfide bonds between CYS
+    residues in the structure file and add them to the topology. Uses geometric
+    constraints to define them.
 - `grad_safe=false`: should be set to `true` if the system is going to be used
     with Enzyme.jl and `nonbonded_method` is `:pme`.
 """
@@ -583,9 +595,12 @@ function System(coord_file::AbstractString,
                 data=nothing,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
+                disulfide_bonds=false,
                 grad_safe::Bool=false) where {AT<:AbstractArray}
 
-    dist_buffer < zero(dist_buffer) && throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
+    if dist_buffer < zero(dist_buffer)
+        throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
+    end
     dist_neighbors = dist_cutoff + dist_buffer
     T = typeof(force_field.weight_14_coulomb)
 
@@ -602,8 +617,12 @@ function System(coord_file::AbstractString,
     n_atoms = size(top)
 
     # ---- Boundary ----
-    boundary_used = isnothing(boundary) ? boundary_from_chemfiles(Chemfiles.UnitCell(frame), T, (units ? u"nm" : NoUnits)) : boundary
-    minimum(box_sides(boundary_used)) < (2 * dist_cutoff) && @warn "Minimum box side is less than 2 * dist_cutoff; this can be unphysical"
+    boundary_used = isnothing(boundary) ? 
+                    boundary_from_chemfiles(Chemfiles.UnitCell(frame), T, (units ? u"nm" : NoUnits)) :
+                    boundary
+    if minimum(box_sides(boundary_used)) < (2 * dist_cutoff)
+        @warn "Minimum box side is less than 2 * dist_cutoff; this can be unphysical"
+    end
 
     # ---- Units and coordinates ----
     if units
@@ -618,9 +637,17 @@ function System(coord_file::AbstractString,
     canonical_system = canonicalize_system(top, resname_replacements, atomname_replacements)
 
     top_bonds = create_bonds(canonical_system, standard_bonds)
-    top_bonds = create_disulfide_bonds(coords, boundary_used, canonical_system, top_bonds)
-    top_bonds = read_connect_bonds(coord_file, top_bonds, canonical_system) 
-    
+    if disulfide_bonds
+        top_bonds = create_disulfide_bonds(coords, boundary_used, canonical_system, top_bonds)
+    end
+    if is_pdb(coord_file)
+        top_bonds = read_connect_bonds(coord_file, top_bonds, canonical_system)
+    else
+        top_bonds = read_extra_bonds(top, top_bonds, canonical_system)
+    end
+
+    #= return canonical_system =#
+
     template_names       = keys(force_field.residues)
     # ---- Match each residue graph to a template and assign atom types/charges ----
     atom_type_of = Vector{String}(undef, n_atoms)
@@ -630,8 +657,8 @@ function System(coord_file::AbstractString,
     use_charge_from_residue = "charge" in force_field.attributes_from_residue
     
     for (chain, resids) in canonical_system
-        matched = false
         for (res_id, rgraph) in resids
+            matched = false
             if rgraph.res_name ∈ template_names
                 template = force_field.residues[rgraph.res_name]
                 matches  =  match_residue_to_template(rgraph, template)
@@ -672,9 +699,9 @@ function System(coord_file::AbstractString,
                         break
                     end
                 end
-                if !matched
-                    throw(ArgumentError("Could not match residue $(rgraph.res_name) to any of the provided templates."))
-                end
+            end
+            if !matched
+                throw(ArgumentError("Could not match residue $(rgraph.res_name) to any of the provided templates."))
             end
         end
     end
@@ -714,7 +741,9 @@ function System(coord_file::AbstractString,
         # minimal AtomData
         res     = residue_from_atom_idx(ai, canonical_system)
         res_cfl = chemfiles_residue_for_atom(top, ai - 1)
-        hetero = ("is_standard_pdb" in Chemfiles.list_properties(res_cfl)) ? !Chemfiles.property(res_cfl,"is_standard_pdb") : false
+        hetero = ("is_standard_pdb" in Chemfiles.list_properties(res_cfl)) ? 
+                 !Chemfiles.property(res_cfl,"is_standard_pdb") :
+                 false
         push!(atoms_data, AtomData(atom_type=atype, atom_name=atom_name_from_index(ai, canonical_system),
                                    res_number=resnum_from_atom_idx(ai, canonical_system), res_name=res.res_name,
                                    chain_id=chain_from_atom_idx(ai, canonical_system), element=element_of[ai], hetero_atom=hetero))
@@ -724,11 +753,14 @@ function System(coord_file::AbstractString,
     # Bonds
     for (a1, a2) in top_bonds
         t1, t2 = atom_type_of[a1], atom_type_of[a2]
-        push!(bonds_il.is, a1); push!(bonds_il.js, a2)
+        push!(bonds_il.is, a1)
+        push!(bonds_il.js, a2)
         if haskey(force_field.bond_types, (t1,t2))
-            bt = force_field.bond_types[(t1,t2)]; push!(bonds_il.types, atom_types_to_string(t1,t2))
+            bt = force_field.bond_types[(t1,t2)]
+            push!(bonds_il.types, atom_types_to_string(t1,t2))
         else
-            bt = force_field.bond_types[(t2,t1)]; push!(bonds_il.types, atom_types_to_string(t2,t1))
+            bt = force_field.bond_types[(t2,t1)]
+            push!(bonds_il.types, atom_types_to_string(t2,t1))
         end
         push!(bonds_il.inters, HarmonicBond(k=bt.k, r0=bt.r0))
         eligible[a1,a2] = false
@@ -738,11 +770,16 @@ function System(coord_file::AbstractString,
     # Angles
     for (i,j,k) in top_angles
         t = (atom_type_of[i], atom_type_of[j], atom_type_of[k])
-        push!(angles_il.is, i); push!(angles_il.js, j); push!(angles_il.ks, k)
+        push!(angles_il.is, i)
+        push!(angles_il.js, j)
+        push!(angles_il.ks, k)
         if haskey(force_field.angle_types, t)
-            at = force_field.angle_types[t]; push!(angles_il.types, atom_types_to_string(t...))
+            at = force_field.angle_types[t]
+            push!(angles_il.types, atom_types_to_string(t...))
         else
-            tr = (t[3], t[2], t[1]); at = force_field.angle_types[tr]; push!(angles_il.types, atom_types_to_string(tr...))
+            tr = (t[3], t[2], t[1])
+            at = force_field.angle_types[tr]
+            push!(angles_il.types, atom_types_to_string(tr...))
         end
         push!(angles_il.inters, HarmonicAngle(k=at.k, θ0=at.θ0))
         eligible[i,k] = false
@@ -841,13 +878,13 @@ function System(coord_file::AbstractString,
         res3 = residue_from_atom_idx(k, canonical_system)
         res4 = residue_from_atom_idx(l, canonical_system)
 
-        ta2 = findfirst(x -> x == j, res2.atom_inds)
-        ta3 = findfirst(x -> x == k, res3.atom_inds)
-        ta4 = findfirst(x -> x == l, res4.atom_inds)
+        ta2 = findfirst(isequal(j), res2.atom_inds)
+        ta3 = findfirst(isequal(k), res3.atom_inds)
+        ta4 = findfirst(isequal(l), res4.atom_inds)
 
-        e2 = ELEMENT_SYMBOLS[element_of[j]]
-        e3 = ELEMENT_SYMBOLS[element_of[k]]
-        e4 = ELEMENT_SYMBOLS[element_of[l]]
+        e2 = Symbol(element_of[j])
+        e3 = Symbol(element_of[k])
+        e4 = Symbol(element_of[l])
 
         # In OpenMM's own words:
         # Workaround to be more consistent with AMBER.  It uses wildcards to define most of its

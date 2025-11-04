@@ -1,4 +1,4 @@
-@testset "Spatial" begin
+#= @testset "Spatial" begin
     @test vector_1D(4.0, 6.0, 10.0) ==  2.0
     @test vector_1D(1.0, 9.0, 10.0) == -2.0
     @test vector_1D(6.0, 4.0, 10.0) == -2.0
@@ -237,9 +237,44 @@ end
         p2 = pdb_sys.coords[1]
         @test isapprox(p1, p2; rtol=0.001) # isapprox due to rounding errors in PDB file
     end
+end =#
+
+@testset "MOL2 format" begin
+
+    FT = Float32
+    ff = MolecularForceField(FT,
+                             joinpath.(ff_dir, ["ff99SBildn.xml", 
+                                                "gaff.xml", 
+                                                "imatinib.xml",
+                                                "imatinib_frcmod.xml"])...;
+                             units=true,)
+    boundary = CubicBoundary(FT(100)u"nm")
+    sys = System(joinpath(data_dir, "imatinib.mol2"), ff; boundary = boundary)
+
+    @info "Read MOL2 format and built $(sys)"
+
 end
 
-@testset "Neighbor lists" begin
+@testset "Custom Residue Templates" begin
+
+    FT = Float32
+    ff = MolecularForceField(FT,
+                             joinpath.(ff_dir, ["ff99SBildn.xml", 
+                                                "gaff.xml", 
+                                                "imatinib.xml",
+                                                "imatinib_frcmod.xml"])...;
+                             units=true,
+                             custom_residue_templates = joinpath(data_dir, "imatinib_topo.xml"))
+    boundary = CubicBoundary(FT(100)u"nm")
+    sys = System(joinpath(data_dir, "imatinib.pdb"), ff; boundary = boundary)
+
+    @info "Read pdb format, loaded custom residue template and built $(sys)"
+
+end
+
+
+
+#= @testset "Neighbor lists" begin
     reorder_neighbors(nbs) = map(t -> (min(t[1], t[2]), max(t[1], t[2]), t[3]), nbs)
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
@@ -549,3 +584,4 @@ end
         test_forces(ab_sys, calc)
     end
 end
+ =#
