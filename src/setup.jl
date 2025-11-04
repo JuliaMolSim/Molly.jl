@@ -585,8 +585,6 @@ function System(coord_file::AbstractString,
                 kappa=0.0u"nm^-1",
                 grad_safe::Bool=false) where {AT<:AbstractArray}
 
-    
-
     dist_buffer < zero(dist_buffer) && throw(ArgumentError("dist_buffer ($dist_buffer) should not be less than zero"))
     dist_neighbors = dist_cutoff + dist_buffer
     T = typeof(force_field.weight_14_coulomb)
