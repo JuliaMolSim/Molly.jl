@@ -286,41 +286,67 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 end
             elseif entry_name == "HarmonicBondForce"
                 for bond in eachelement(entry)
-                    if haskey(bond, "class1")
-                        @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
-                        continue
-                    end
-                    atom_type_1 = bond["type1"]
-                    atom_type_2 = bond["type2"]
                     k = units ? parse(T, bond["k"])u"kJ * mol^-1 * nm^-2" : parse(T, bond["k"])
                     r0 = units ? parse(T, bond["length"])u"nm" : parse(T, bond["length"])
-                    bond_types[(atom_type_1, atom_type_2)] = HarmonicBond(k, r0)
+                    if haskey(bond, "class1")
+                        class_1 = bond["class1"]
+                        class_2 = bond["class2"]
+
+                        for (type_i, atom_i) in atom_types
+                            if atom_i.class == class_1
+                                for (type_j, atom_j) in atom_types
+                                    if atom_j.class == class_2
+                                        bond_types[(type_i, type_j)] = HarmonicBond(k, r0)
+                                    end
+                                end
+                            end
+                        end
+
+                    else
+                        atom_type_1 = bond["type1"]
+                        atom_type_2 = bond["type2"]
+                        bond_types[(atom_type_1, atom_type_2)] = HarmonicBond(k, r0)
+
+                    end
+                    
                 end
             elseif entry_name == "HarmonicAngleForce"
                 for ang in eachelement(entry)
-                    if haskey(ang, "class1")
-                        @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
-                        continue
-                    end
-                    atom_type_1 = ang["type1"]
-                    atom_type_2 = ang["type2"]
-                    atom_type_3 = ang["type3"]
                     k = units ? parse(T, ang["k"])u"kJ * mol^-1" : parse(T, ang["k"])
                     θ0 = parse(T, ang["angle"])
-                    angle_types[(atom_type_1, atom_type_2, atom_type_3)] = HarmonicAngle(k, θ0)
+                    if haskey(ang, "class1")
+                        class_1 = ang["class1"]
+                        class_2 = ang["class2"]
+                        class_3 = ang["class3"]
+
+                        for (type_i, atom_i) in atom_types
+                            if atom_i.class == class_1 
+                                for (type_j, atom_j) in atom_types
+                                    if atom_j.class == class_2
+                                        for (type_k, atom_k) in atom_types
+                                            if atom_k.class == class_3
+                                                angle_types[(type_i, type_j, type_k)] = HarmonicAngle(k, θ0)
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+
+                        
+                    else
+                        atom_type_1 = ang["type1"]
+                        atom_type_2 = ang["type2"]
+                        atom_type_3 = ang["type3"]
+                        angle_types[(atom_type_1, atom_type_2, atom_type_3)] = HarmonicAngle(k, θ0)
+                    end
+                    
                 end
             elseif entry_name == "PeriodicTorsionForce"
                 torsion_order = haskey(entry, "ordering") ? entry["ordering"] : "default"
                 for torsion in eachelement(entry)
-                    if haskey(torsion, "class1")
-                        @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
-                        continue
-                    end
+                    
                     proper = torsion.name == "Proper"
-                    atom_type_1 = torsion["type1"]
-                    atom_type_2 = torsion["type2"]
-                    atom_type_3 = torsion["type3"]
-                    atom_type_4 = torsion["type4"]
                     periodicities = Int[]
                     phases = T[]
                     ks = units ? typeof(T(1u"kJ * mol^-1"))[] : T[]
@@ -333,8 +359,48 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                         phase_i += 1
                         phase_present = haskey(torsion, "periodicity$phase_i")
                     end
-                    torsion_type = PeriodicTorsionType(periodicities, phases, ks, proper)
-                    torsion_types[(atom_type_1, atom_type_2, atom_type_3, atom_type_4)] = torsion_type
+
+                    if haskey(torsion, "class1")
+                        class_1 = torsion["class1"]
+                        class_2 = torsion["class2"]
+                        class_3 = torsion["class3"]
+                        class_4 = torsion["class4"]
+
+                        for (type_i, atom_i) in atom_types
+                            if atom_i.class == class_1 || class_1 == ""
+                                for (type_j, atom_j) in atom_types
+                                    if atom_j.class == class_2 || class_2 == ""
+                                        for (type_k, atom_k) in atom_types
+                                            if atom_k.class == class_3 || class_3 == ""
+                                                for (type_l, atom_l) in atom_types
+                                                    if atom_l.class == class_4 || class_4 == ""
+                                                        t1 = class_1 == "" ? "" : type_i
+                                                        t2 = class_2 == "" ? "" : type_j
+                                                        t3 = class_3 == "" ? "" : type_k
+                                                        t4 = class_4 == "" ? "" : type_l
+                                                        if !haskey(torsion_types, (t1, t2, t3, t4))
+                                                            torsion_type = PeriodicTorsionType(periodicities, phases, ks, proper)
+                                                            torsion_types[(t1, t2, t3, t4)] = torsion_type
+                                                        end
+                                                    end
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    else
+                        
+                        atom_type_1 = torsion["type1"]
+                        atom_type_2 = torsion["type2"]
+                        atom_type_3 = torsion["type3"]
+                        atom_type_4 = torsion["type4"]
+                        
+                        torsion_type = PeriodicTorsionType(periodicities, phases, ks, proper)
+                        torsion_types[(atom_type_1, atom_type_2, atom_type_3, atom_type_4)] = torsion_type
+                    end
+                    
                 end
             elseif entry_name == "NonbondedForce"
                 if haskey(entry, "coulomb14scale")
@@ -355,24 +421,38 @@ function MolecularForceField(T::Type, ff_files::AbstractString...; units::Bool=t
                 end
                 for atom_or_attr in eachelement(entry)
                     if atom_or_attr.name == "Atom"
-                        if !haskey(atom_or_attr, "type")
-                            @warn "Atom classes not currently supported, this $entry_name entry will be ignored"
-                            continue
-                        end
-                        # Update previous atom types
-                        atom_type = atom_or_attr["type"]
-                        if !haskey(atom_types, atom_type)
-                            # Skip types not defined above
-                            continue
-                        end
-                        partial_type = atom_types[atom_type]
                         ch = haskey(atom_or_attr, "charge") ? parse(T, atom_or_attr["charge"]) : missing
                         σ = units ? parse(T, atom_or_attr["sigma"])u"nm" : parse(T, atom_or_attr["sigma"])
                         ϵ = units ? parse(T, atom_or_attr["epsilon"])u"kJ * mol^-1" : parse(T, atom_or_attr["epsilon"])
-                        complete_type = AtomType{T, typeof(partial_type.mass), typeof(σ), typeof(ϵ)}(
-                                    partial_type.type, partial_type.class, partial_type.element,
-                                    ch, partial_type.mass, σ, ϵ)
-                        atom_types[atom_type] = complete_type
+                        if haskey(atom_or_attr, "class")
+                            class = atom_or_attr["class"] 
+                            for (type, atom) in atom_types
+                                if atom.class == class
+                                    if !haskey(atom_types, type)
+                                        # Skip types not defined above
+                                        continue
+                                    end
+                                    complete_type = AtomType{T, typeof(atom.mass), typeof(σ), typeof(ϵ)}(
+                                                type, atom.class, atom.element,
+                                                ch, atom.mass, σ, ϵ)
+                                    atom_types[type] = complete_type
+                                end
+                            end
+                        else
+                            # Update previous atom types
+                            atom_type = atom_or_attr["type"]
+                            if !haskey(atom_types, atom_type)
+                                # Skip types not defined above
+                                continue
+                            end
+                            partial_type = atom_types[atom_type]
+                            
+                            complete_type = AtomType{T, typeof(partial_type.mass), typeof(σ), typeof(ϵ)}(
+                                        partial_type.type, partial_type.class, partial_type.element,
+                                        ch, partial_type.mass, σ, ϵ)
+                            atom_types[atom_type] = complete_type
+                        end
+                        
                     elseif atom_or_attr.name == "UseAttributeFromResidue"
                         if !(atom_or_attr["name"] in attributes_from_residue)
                             push!(attributes_from_residue, atom_or_attr["name"])
