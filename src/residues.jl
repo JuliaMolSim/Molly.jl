@@ -308,9 +308,12 @@ function create_disulfide_bonds(coords, boundary, canon_system, bonds)
         pos1     = coords[atom_idx]
 
         candidate_distance =  unit(eltype(coords[1])) == NoUnits ? 0.3 : 0.3u"nm"
-        candidate_atom     = nothing 
+        candidate_atom     = nothing
+        cysj_valid         = nothing
+        sg2_idx_valid      = nothing
+        atom_jdx_valid     = nothing
 
-        for cys_jdx in cys_idx:n_cysx
+        for cys_jdx in (cys_idx+1):n_cysx
             cysj = cysx[cys_jdx]
             sg2_idx  = findfirst(isequal("SG"), cysj.atom_names)
             atom_jdx = cysj.atom_inds[sg2_idx]
@@ -320,55 +323,24 @@ function create_disulfide_bonds(coords, boundary, canon_system, bonds)
             dst = norm(vec)
 
             if dst < candidate_distance && !is_disulfide_bonded(atom_idx)
+                cysj_valid = cysj
+                sg2_idx_valid = sg2_idx
+                atom_jdx_valid = atom_jdx
                 candidate_distance = dst
                 candidate_atom = atom_jdx
             end
-
-            if !isnothing(candidate_atom)
-                pair = atom_idx < atom_jdx ? (atom_idx, atom_jdx) : (atom_jdx, atom_idx)
-                push!(bonds, pair)
-            end
+        end
+        if !isnothing(candidate_atom)
+            cysi.external_bonds[sg1_idx]             += 1
+            cysj_valid.external_bonds[sg2_idx_valid] += 1
+            pair = atom_idx < atom_jdx_valid ? (atom_idx, atom_jdx_valid) : (atom_jdx_valid, atom_idx)
+            push!(bonds, pair)
         end
     end
 
     sort!(bonds)
     return bonds
 
-end
-
-# Parses the CONNECT records of the pdb files to catch any potential
-# missing bonds 
-function read_connect_bonds(pdbfile, bonds, canon_system)
-    filtered = String[]
-    open(pdbfile) do io
-        for line in eachline(io)
-            if startswith(line, "CONECT")
-                push!(filtered, line)
-                fields = split(line)[2:end]
-                fromAtom = parse(Int, fields[1])
-                atom_name_i = atom_name_from_index(fromAtom, canon_system)
-                res_i       = residue_from_atom_idx(fromAtom, canon_system)
-                for toAtom in fields[2:end]
-                    toAtom = parse(Int, toAtom)
-                    atom_name_j = atom_name_from_index(toAtom, canon_system)
-                    res_j       = residue_from_atom_idx(toAtom, canon_system)
-                    pair = fromAtom < toAtom ? (fromAtom, toAtom) : (toAtom, fromAtom)
-                    if !(pair ∈ bonds)
-                        push!(bonds, pair)
-                    end
-                    if res_i == res_j
-                        local_i = findfirst(isequal(atom_name_i), res_i.atom_names)
-                        local_j = findfirst(isequal(atom_name_j), res_i.atom_names)
-                        local_pair = local_i < local_j ? (local_i, local_j) : (local_j, local_i)
-                        if !(local_pair ∈ res_i.bonds)
-                            push!(res_i.bonds, local_pair)
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return bonds
 end
 
 # In case we are not dealing with PDB files, we will not
@@ -380,10 +352,10 @@ function read_extra_bonds(top, top_bonds, canonical_system)
     for (i, j) in chfl_bonds
         res_i = residue_from_atom_idx(i, canonical_system)
         res_j = residue_from_atom_idx(j, canonical_system)
+        pair = i < j ? (i,j) : (j,i)
+        local_idx = findfirst(isequal(i), res_i.atom_inds)
+        local_jdx = findfirst(isequal(j), res_j.atom_inds)
         if res_i == res_j
-            pair = i < j ? (i,j) : (j,i)
-            local_idx = findfirst(isequal(i), res_i.atom_inds)
-            local_jdx = findfirst(isequal(j), res_i.atom_inds)
             local_pair = local_idx < local_jdx ? (local_idx, local_jdx) : (local_jdx, local_idx)
             if !(pair ∈ top_bonds)
                 push!(top_bonds, pair)
@@ -393,8 +365,9 @@ function read_extra_bonds(top, top_bonds, canonical_system)
             end
  
         else
-            pair = i < j ? (i,j) : (j,i)
             if !(pair ∈ top_bonds)
+                res_i.external_bonds[local_idx] += 1
+                res_j.external_bonds[local_jdx] += 1
                 push!(top_bonds, pair)
             end
         end

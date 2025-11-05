@@ -499,7 +499,7 @@ function Base.show(io::IO, ff::MolecularForceField)
             length(ff.angle_types), " angle types and ", length(ff.torsion_types), " torsion types")
 end
 
-get_res_id(res) = (Chemfiles.id(res), ("chain_id" in Chemfiles.list_properties(res)) ? Chemfiles.property(res, "chainid") : "A")
+get_res_id(res) = (Chemfiles.id(res), ("chainid" in Chemfiles.list_properties(res)) ? Chemfiles.property(res, "chainid") : "X")
 
 # Return the residue name with N or C added for terminal residues
 function residue_name(res, res_id_to_standard::Dict, rename_terminal_res::Bool=true)
@@ -720,13 +720,8 @@ function System(coord_file::AbstractString,
     if disulfide_bonds
         top_bonds = create_disulfide_bonds(coords, boundary_used, canonical_system, top_bonds)
     end
-    if is_pdb(coord_file)
-        top_bonds = read_connect_bonds(coord_file, top_bonds, canonical_system)
-    else
-        top_bonds = read_extra_bonds(top, top_bonds, canonical_system)
-    end
+    top_bonds = read_extra_bonds(top, top_bonds, canonical_system)
 
-    #= return canonical_system =#
 
     template_names       = keys(force_field.residues)
     # ---- Match each residue graph to a template and assign atom types/charges ----
@@ -744,6 +739,10 @@ function System(coord_file::AbstractString,
                 matches  =  match_residue_to_template(rgraph, template)
                 if isnothing(matches)
                     for (templ_name, template) in force_field.residues
+                        # Dont check it again
+                        if rgraph.res_name == templ_name
+                            continue
+                        end
                         matches = match_residue_to_template(rgraph, template)
                         if !(isnothing(matches))
                             matched = true
