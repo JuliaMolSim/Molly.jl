@@ -80,7 +80,7 @@
 end
 
 @testset "OpenMM protein comparison" begin
-    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...)
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...)
     show(devnull, ff)
     sys = System(joinpath(data_dir, "6mrr_equil.pdb"), ff;
                  nonbonded_method=:cutoff, center_coords=false)
@@ -206,7 +206,7 @@ end
 
     # Test with no units
     ff_nounits = MolecularForceField(
-        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...;
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...;
         units=false,
     )
     sys_nounits = System(
@@ -365,7 +365,7 @@ end
 end
 
 @testset "Implicit solvent" begin
-    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...)
+    ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml"])...)
 
     for AT in array_list
         for solvent_model in (:obc2, :gbn2)

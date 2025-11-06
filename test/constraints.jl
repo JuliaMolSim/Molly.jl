@@ -310,7 +310,6 @@ end
     ff = MolecularForceField(
         T,
         joinpath(ff_dir, "ff99SBildn.xml"),
-        joinpath(ff_dir, "his.xml"),
     )
     boundary = CubicBoundary(T(10.0)u"nm")
     temp = T(100.0)u"K"

@@ -650,7 +650,7 @@ Gromacs file reading should be considered experimental.
     `:none`, `:obc1`, `:obc2` and `:gbn2`.
 - `kappa=0.0u"nm^-1"`: the kappa value for the implicit solvent model if one
     is used.
-- `disulfide_bonds=false`: wether or not to look for disulfide bonds between CYS
+- `disulfide_bonds=true`: wether or not to look for disulfide bonds between CYS
     residues in the structure file and add them to the topology. Uses geometric
     constraints to define them.
 - `grad_safe=false`: should be set to `true` if the system is going to be used
@@ -675,7 +675,7 @@ function System(coord_file::AbstractString,
                 data=nothing,
                 implicit_solvent=:none,
                 kappa=0.0u"nm^-1",
-                disulfide_bonds=false,
+                disulfide_bonds=true,
                 grad_safe::Bool=false) where {AT<:AbstractArray}
 
     if dist_buffer < zero(dist_buffer)
