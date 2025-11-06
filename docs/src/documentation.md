@@ -361,22 +361,31 @@ simulate!(sys, simulator, 5_000)
 The above 5 ps simulation looks something like this when you view it in PyMOL:
 ![MD simulation](https://github.com/JuliaMolSim/Molly.jl/raw/master/docs/src/images/sim_6mrr.gif)
 
-The OpenMM setup procedure is tested against OpenMM in terms of matching forces and energies.
-However it is not thoroughly tested with respect to ligands or special residues and requires that atom names exactly match residue templates.
-By default, terminal residues are renamed to match the appropriate templates.
-For example, the first (N-terminal) residue could be changed from "MET" to "NMET".
-This can be turned off by giving `rename_terminal_res=false` to [`System`](@ref) if the residue names in the input file are appropriate.
-Currently atom classes are not supported, only atom types.
+The system setup procedure is tested against OpenMM, following their template matching procedure
+to assign force field parameters to the structures read from the structure file. Some margin in 
+residue and atom naming is allowed, as the naming present in the structure files is queried against
+a renaming dictionary that contains common alternative names present in pdb files, which you can consult
+in `src/data/force_fields/pdbNames.xml`. You can extend this dictionary yourself, if you really want
+to use your own naming; or you can build a standalone renaming dictionary following the same structure
+as the one mentioned above, and pass it as a keyword argument `custom_renaming_scheme` when you build
+your [`MolecularForceField`](@ref).
+The bonding topology of the system is automatically inferred for standard residues (protein and nucleic
+acids, plus water). If your simulation contains other types of molecules, you must provide the topology 
+for them. You can do this either by using a structure file format with explicit bond definitions,
+such as `mol2` or `mmCIF`, by defining the appropriate `CONNECT` records in a `pdb` file, or by providing
+a custom topology template in a format equivalent to the one found in `/src/data/force_fields/residues.xml`. 
 Residue patches, virtual sites, file includes and any force types other than `HarmonicBondForce`/`HarmonicAngleForce`/`PeriodicTorsionForce`/`NonbondedForce` are currently ignored.
 
 !!! tip "Obtaining compatible structure files"
 
-    Future work will increase the features and robustness when reading in structure files. In the mean time, the following tips may help you to read in a file correctly and without errors:
+    The following tips may help you to read in a file correctly and without errors:
 
     * Make sure there are no missing residues or heavy atoms. Tools such as [MODELLER](https://salilab.org/modeller) and [SCWRL4](http://dunbrack.fccc.edu/lab/scwrl) can fix these issues.
-    * Remove the hydrogen atoms and add them back [using OpenMM](http://docs.openmm.org/latest/userguide/application/03_model_building_editing.html#adding-hydrogens), which will ensure they have atom names compatible with the OpenMM force field files.
-    * Make sure that all residue names match the corresponding residue template name and that all atom names match the appropriate atom in the residue template.
-    * Non-standard residues also require `CONECT` records for Chemfiles to assign bonds correctly, see for example [a compatible alanine dipeptide file](https://github.com/noeblassel/SINEQSummerSchool2023/blob/main/notebooks/dipeptide_nowater.pdb).
+    * Make sure that the naming in your structure file is either supported by your custom renaming convention, or does not use
+    names that deviate widely from the conventional residue namings.
+    * Make sure your structure file provides explicit chemical elements per particle or that at least the chemical element is
+    easily inferrable from the atom names, as a fundamental part of template matching for force field parameters assignement
+    revolves around comparing the molecular formulas of the residues and potential templates.
 
     Some PDB files that read in fine can be found [here](https://github.com/greener-group/GB99dms/tree/main/structures/training/conf_1).
 
