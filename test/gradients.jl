@@ -39,7 +39,7 @@ end
     AT = Array
     ff = MolecularForceField(
         T,
-        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...,
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml"])...,
         units=false,
     )
     sys = System(
@@ -311,7 +311,7 @@ end
 
 @testset "Differentiable protein" begin
     function create_sys(AT)
-        ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml", "his.xml"])...; units=false)
+        ff = MolecularForceField(joinpath.(ff_dir, ["ff99SBildn.xml"])...; units=false)
         return System(
             joinpath(data_dir, "6mrr_nowater.pdb"),
             ff;
