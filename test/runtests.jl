@@ -123,18 +123,18 @@ if GROUP in ("All", "NotGradients")
     )
 
     include("basic.jl")
-    #= include("interactions.jl")
+    include("interactions.jl")
     include("minimization.jl")
     include("agent.jl")
     include("simulation.jl")
     include("coupling.jl")
-    include("constraints.jl") =#
+    include("constraints.jl")
 end
 
-#= if GROUP in ("All", "Protein", "NotGradients")
+if GROUP in ("All", "Protein", "NotGradients")
     include("protein.jl")
 end
 
 if GROUP in ("All", "Gradients")
     include("gradients.jl")
-end =#
+end

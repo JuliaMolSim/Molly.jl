@@ -1,4 +1,4 @@
-#= @testset "Spatial" begin
+@testset "Spatial" begin
     @test vector_1D(4.0, 6.0, 10.0) ==  2.0
     @test vector_1D(1.0, 9.0, 10.0) == -2.0
     @test vector_1D(6.0, 4.0, 10.0) == -2.0
@@ -237,44 +237,85 @@ end
         p2 = pdb_sys.coords[1]
         @test isapprox(p1, p2; rtol=0.001) # isapprox due to rounding errors in PDB file
     end
-end =#
+end
 
-@testset "MOL2 format" begin
+@testset "Different Formats" begin
 
-    FT = Float32
-    ff = MolecularForceField(FT,
-                             joinpath.(ff_dir, ["ff99SBildn.xml", 
-                                                "gaff.xml", 
-                                                "imatinib.xml",
-                                                "imatinib_frcmod.xml"])...;
-                             units=true,)
-    boundary = CubicBoundary(FT(100)u"nm")
-    sys = System(joinpath(data_dir, "imatinib.mol2"), ff; boundary = boundary)
+    ff = MolecularForceField(
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml", "gaff.xml", "imatinib.xml", "imatinib_frcmod.xml"])...;
+        units=true,
+    )
 
-    @info "Read MOL2 format and built $(sys)"
+    ff_custom = MolecularForceField(
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml", "gaff.xml", "imatinib.xml", "imatinib_frcmod.xml"])...;
+        units=true,
+        custom_residue_templates = joinpath(data_dir, "imatinib_topo.xml")
+    )
+
+    boundary = CubicBoundary(Inf*u"nm")
+    sys_mol2 = System(joinpath(data_dir, "imatinib.mol2"), ff; boundary = boundary)
+    sys_pdb  = System(joinpath(data_dir, "imatinib.pdb"),  ff_custom; boundary = boundary)
+
+    @test sys_mol2.topology.bonded_atoms == sys_pdb.topology.bonded_atoms
 
 end
 
-@testset "Custom Residue Templates" begin
+@testset "System Setup" begin
 
-    FT = Float32
-    ff = MolecularForceField(FT,
-                             joinpath.(ff_dir, ["ff99SBildn.xml", 
-                                                "gaff.xml", 
-                                                "imatinib.xml",
-                                                "imatinib_frcmod.xml"])...;
-                             units=true,
-                             custom_residue_templates = joinpath(data_dir, "imatinib_topo.xml"))
-    boundary = CubicBoundary(FT(100)u"nm")
-    sys = System(joinpath(data_dir, "imatinib.pdb"), ff; boundary = boundary)
+    FT = Float64
+    AT = Array
 
-    @info "Read pdb format, loaded custom residue template and built $(sys)"
+    dat_dir = joinpath(data_dir, "OpenMM_Refs/")
 
+    ff = MolecularForceField(
+        FT,
+        joinpath.(ff_dir, ["ff99SBildn.xml", "tip3p_standard.xml", "his.xml"])...;
+        units=true,
+    )
+
+    names = ("a-synuclein_1",
+             "barn_bar",
+             "bpti",
+             "cd2_cd58",
+             "cole7_im7",
+             "drkN_SH3_1",
+             "gb3",
+             "hewl",
+             "NTail_1",
+             "PaaA2_1",
+             "sgpb_omtky3",
+             "ubiquitin")
+
+    for name in names
+
+        dat_file = joinpath(dat_dir, "$(name).dat")
+        pdb_file = joinpath(dat_dir, "$(name).pdb")
+
+        sys = System(pdb_file, ff;
+             array_type = AT,
+             nonbonded_method = :pme,
+             approximate_pme  = false,
+             disulfide_bonds  = true)
+
+        F_opeMM = SVector{3}[]
+        open(dat_file, "r") do f
+            for line in readlines(f)
+                fields = split(line, ",")
+                force = SVector{3}([parse(FT, split(val, " ")[1])*u"kJ * mol^-1 * nm^-1" for val in fields])
+                push!(F_opeMM, force)
+            end
+        end
+
+        F_Molly = forces(sys)
+
+        diff = mean(norm.(F_Molly .- F_opeMM))
+        @test diff < FT(0.15)u"kJ * mol^-1 * nm^-1"
+
+    end
+    
 end
 
-
-
-#= @testset "Neighbor lists" begin
+@testset "Neighbor lists" begin
     reorder_neighbors(nbs) = map(t -> (min(t[1], t[2]), max(t[1], t[2]), t[3]), nbs)
 
     for neighbor_finder in (DistanceNeighborFinder, TreeNeighborFinder, CellListMapNeighborFinder)
@@ -584,4 +625,3 @@ end
         test_forces(ab_sys, calc)
     end
 end
- =#
