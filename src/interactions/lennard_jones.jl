@@ -344,44 +344,54 @@ end
     end
 
     r = norm(dr)
+    params = (sc.λ, sc.α, sc.p, sc.inter_state_a, sc.inter_state_b, atom_i, atom_j, zero_energy)
+
+    dh_dl = pairwise_∂H_∂λ(sc, r, params)
+
+    if special
+        return dh_dl * sc.weight_special
+    else
+        return dh_dl
+    end
+end
+
+@inline function pairwise_∂H_∂λ(::LennardJonesSoftCoreBeutler, r,
+    (λ, α, p, inter_state_a, inter_state_b, atom_i, atom_j, zero_energy))
+
     r6 = r^6
-    pα_6 = sc.p * sc.α / 6
+    pα_6 = p * α / 6
 
     term_state_a, term_state_b = zero_energy, zero_energy
 
     # ∂V/∂λ for system in state A
-    if !isnothing(sc.inter_state_a)
-        σ_a = sc.inter_state_a.σ_mixing(atom_i, atom_j)
-        ϵ_a = sc.inter_state_a.ϵ_mixing(atom_i, atom_j)
+    if !isnothing(inter_state_a)
+        σ_a = inter_state_a.σ_mixing(atom_i, atom_j)
+        ϵ_a = inter_state_a.ϵ_mixing(atom_i, atom_j)
 
         σ_a2 = σ_a^2
         r_a = get_ra(r6, σ_a2, α, λ, p)
 
         term_state_a = pairwise_pe(lennard_jones, r_a, (σ_a2, ϵ_a)) +
-                       pα_6 * (1 - sc.λ) * pairwise_force(lennard_jones, r_a, (σ_a2, ϵ_a)) /
-                       r_a^5 * σ_a2^3 * sc.λ^(p - 1)
+                       pα_6 * (1 - λ) * pairwise_force(lennard_jones, r_a, (σ_a2, ϵ_a)) /
+                       r_a^5 * σ_a2^3 * λ^(p - 1)
     end
 
     # ∂V/∂λ for system in state B
-    if !isnothing(sc.inter_state_b)
-        σ_b = sc.inter_state_b.σ_mixing(atom_i, atom_j)
-        ϵ_b = sc.inter_state_b.ϵ_mixing(atom_i, atom_j)
+    if !isnothing(inter_state_b)
+        σ_b = inter_state_b.σ_mixing(atom_i, atom_j)
+        ϵ_b = inter_state_b.ϵ_mixing(atom_i, atom_j)
 
         σ_b2 = σ_b^2
         r_b = get_rb(r6, σ_b2, α, λ, p)
 
         term_state_b = pairwise_pe(lennard_jones, r_b, (σ_b2, ϵ_b)) +
-                       pα_6 * sc.λ * pairwise_force(lennard_jones, r_b, (σ_b2, ϵ_b)) /
-                       r_b^5 * σ_b2^3 * (1 - sc.λ)^(sc.p - 1)
+                       pα_6 * λ * pairwise_force(lennard_jones, r_b, (σ_b2, ϵ_b)) /
+                       r_b^5 * σ_b2^3 * (1 - λ)^(p - 1)
     end
 
-    if special
-        return (term_state_b - term_state_a) * sc.weight_special
-    else
-        return term_state_b - term_state_a
-    end
+    return term_state_a + term_state_b
+    
 end
-
 
 @doc raw"""
     LennardJonesSoftCoreGapsys(; cutoff, α, λ, use_neighbors, shortcut, σ_mixing,
